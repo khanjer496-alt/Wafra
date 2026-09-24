@@ -5,6 +5,7 @@ private enum WafraLiveCaptureBridgeError: Error {
   case invalidLimit
   case invalidTimestamp
   case invalidEntitlementLease
+  case applePayShortcutUnavailable
   case notificationShortcutUnavailable
   case messageShortcutUnavailable
   case historyShortcutUnavailable
@@ -25,6 +26,11 @@ private struct WafraLiveCaptureStatusRecord: Record {
   @Field var notificationSetupProofAt: Double?
   @Field var firstNotificationReceivedAt: Double?
   @Field var lastNotificationReceivedAt: Double?
+  @Field var applePayPending: Int = 0
+  @Field var lastApplePayIncompleteAt: Double?
+  @Field var applePaySetupProofAt: Double?
+  @Field var firstApplePayReceivedAt: Double?
+  @Field var lastApplePayReceivedAt: Double?
 }
 
 private func bridgeLimit(_ limit: Double) throws -> Int {
@@ -114,6 +120,7 @@ public class WafraLiveCaptureModule: Module {
     Name("WafraLiveCapture")
     Constant("queueChangeEventsSupported") { true }
     Constant("notificationCaptureSupported") { true }
+    Constant("applePayCaptureSupported") { true }
     Events("onQueueChanged")
     OnStartObserving { self.startQueueObservation() }
     OnStopObserving { self.stopQueueObservation() }
@@ -164,6 +171,11 @@ public class WafraLiveCaptureModule: Module {
       return try WafraLiveCaptureStore.shared.listPendingRecords(limit: nativeLimit, includeNotifications: true)
     }
 
+    AsyncFunction("listPendingApplePayRecords") { (limit: Double) -> [String] in
+      let nativeLimit = try bridgeLimit(limit)
+      return try WafraLiveCaptureStore.shared.listPendingApplePayRecords(limit: nativeLimit)
+    }
+
     AsyncFunction("acknowledgeRecords") { (ids: [String]) in
       try WafraLiveCaptureStore.shared.acknowledgeRecords(ids: ids)
     }
@@ -180,6 +192,18 @@ public class WafraLiveCaptureModule: Module {
         forResource: "Wafra Notifications v1", withExtension: "shortcut"
       ), url.isFileURL else {
         throw WafraLiveCaptureBridgeError.notificationShortcutUnavailable
+      }
+      return url.absoluteString
+    }
+
+    AsyncFunction("getApplePayShortcutURL") { () -> String in
+      guard #available(iOS 16.0, *) else {
+        throw WafraLiveCaptureBridgeError.applePayShortcutUnavailable
+      }
+      guard let url = WafraLiveCaptureResources.bundle().url(
+        forResource: "Wafra Apple Pay v1", withExtension: "shortcut"
+      ), url.isFileURL else {
+        throw WafraLiveCaptureBridgeError.applePayShortcutUnavailable
       }
       return url.absoluteString
     }
@@ -225,6 +249,11 @@ public class WafraLiveCaptureModule: Module {
       record.notificationSetupProofAt = try epochMilliseconds(status.notificationSetupProofAt)
       record.firstNotificationReceivedAt = try epochMilliseconds(status.firstNotificationReceivedAt)
       record.lastNotificationReceivedAt = try epochMilliseconds(status.lastNotificationReceivedAt)
+      record.applePayPending = status.applePayPending
+      record.lastApplePayIncompleteAt = try epochMilliseconds(status.lastApplePayIncompleteAt)
+      record.applePaySetupProofAt = try epochMilliseconds(status.applePaySetupProofAt)
+      record.firstApplePayReceivedAt = try epochMilliseconds(status.firstApplePayReceivedAt)
+      record.lastApplePayReceivedAt = try epochMilliseconds(status.lastApplePayReceivedAt)
       return record
     }
 

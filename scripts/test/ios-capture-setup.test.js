@@ -274,9 +274,15 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       notificationSetupProofAt?: number | null;
       firstNotificationReceivedAt?: number | null;
       lastNotificationReceivedAt?: number | null;
+      applePayPending?: number;
+      lastApplePayIncompleteAt?: number | null;
+      applePaySetupProofAt?: number | null;
+      firstApplePayReceivedAt?: number | null;
+      lastApplePayReceivedAt?: number | null;
     }`.replace(/\s+/g, ' ').trim();
     const exactNativeModule = `export interface WafraLiveCaptureNativeModule {
       readonly notificationCaptureSupported?: boolean;
+      readonly applePayCaptureSupported?: boolean;
       readonly queueChangeEventsSupported?: boolean;
       addListener?(
         eventName: 'onQueueChanged',
@@ -291,10 +297,12 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       setCaptureEnabled(enabled: boolean): Promise<void>;
       listPendingRecords(limit: number): Promise<string[]>;
       listPendingRecordsIncludingNotifications?(limit: number): Promise<string[]>;
+      listPendingApplePayRecords?(limit: number): Promise<string[]>;
       acknowledgeRecords(ids: string[]): Promise<void>;
       purgeExpired(): Promise<number>;
       getCaptureStatus(): Promise<WafraLiveCaptureStatus>;
       getNotificationShortcutURL?(): Promise<string>;
+      getApplePayShortcutURL?(): Promise<string>;
       getMessageShortcutURL?(): Promise<string>;
       getHistoryShortcutURL?(): Promise<string>;
       getAutomationInputProbeAt(): Promise<number | null>;
@@ -344,10 +352,12 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'setCaptureEnabled',
       'listPendingRecords',
       'listPendingRecordsIncludingNotifications',
+      'listPendingApplePayRecords',
       'acknowledgeRecords',
       'purgeExpired',
       'getCaptureStatus',
       'getNotificationShortcutURL',
+      'getApplePayShortcutURL',
       'getMessageShortcutURL',
       'getHistoryShortcutURL',
       'getAutomationInputProbeAt',
@@ -370,7 +380,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /milliseconds\s*\/\s*1_000(?:\.0)?/.test(swiftModule) &&
         /seconds\s*\*\s*1_000(?:\.0)?/.test(swiftModule), swiftModule);
     ok('Swift bridge maps every operation directly to the singleton store',
-      nativeMethods.filter((method) => !['getNotificationShortcutURL', 'getMessageShortcutURL', 'getHistoryShortcutURL'].includes(method)).every((method) => {
+      nativeMethods.filter((method) => !['getNotificationShortcutURL', 'getApplePayShortcutURL', 'getMessageShortcutURL', 'getHistoryShortcutURL'].includes(method)).every((method) => {
         const storeMethod = {
           getCaptureStatus: 'status',
           listPendingRecordsIncludingNotifications: 'listPendingRecords',
@@ -437,6 +447,13 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'live.notification.text.parameter',
       'live.notification.invalid',
       'live.notification.error',
+      'live.apple_pay.title',
+      'live.apple_pay.amount.parameter',
+      'live.apple_pay.merchant.parameter',
+      'live.apple_pay.invalid',
+      'live.apple_pay.error',
+      'live.apple_pay.setup.title',
+      'live.apple_pay.setup.error',
     ];
     const localizationKeys = (source) => [...source.matchAll(/^\s*"([^"]+)"\s*=/gm)]
       .map((match) => match[1]).sort();
@@ -460,18 +477,20 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       appPlugins.indexOf(livePlugin) > appPlugins.indexOf('./modules/wafra-message-history/plugin'),
       JSON.stringify(appPlugins));
 
-    eq('generated source declares all six app-discoverable intents once', [
+    eq('generated source declares all eight app-discoverable intents once', [
       generatedIntent.match(/struct RecordWafraCaptureSetupProofIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct RecordWafraCaptureV3SetupProofIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct ProbeWafraAutomationInputIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct StageWafraLiveMessageIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct StageWafraLiveTextIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct CaptureWafraNotificationIntent:\s*AppIntent/g)?.length || 0,
-    ], [1, 1, 1, 1, 1, 1]);
+      generatedIntent.match(/struct CaptureWafraApplePayIntent:\s*AppIntent/g)?.length || 0,
+      generatedIntent.match(/struct RecordWafraApplePaySetupProofIntent:\s*AppIntent/g)?.length || 0,
+    ], [1, 1, 1, 1, 1, 1, 1, 1]);
     eq('all intents are always allowed and do not launch Wafra', [
       generatedIntent.match(/authenticationPolicy:\s*IntentAuthenticationPolicy\s*=\s*\.alwaysAllowed/g)?.length || 0,
       generatedIntent.match(/openAppWhenRun\s*=\s*false/g)?.length || 0,
-    ], [6, 6]);
+    ], [8, 8]);
     ok('setup-proof intent has no parameters and records proof version 1', (() => {
       const match = generatedIntent.match(
         /struct RecordWafraCaptureSetupProofIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}/,
@@ -536,28 +555,28 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
     ok('legacy bridge excludes notifications and the additive reader explicitly opts in',
       /AsyncFunction\("listPendingRecords"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: false\)/.test(swiftModule) &&
         /AsyncFunction\("listPendingRecordsIncludingNotifications"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: true\)/.test(swiftModule), swiftModule);
-    eq('probe plus live paths expose the exact seven parameters',
-      generatedIntent.match(/@Parameter\(/g)?.length || 0, 7);
+    eq('probe plus live paths expose the exact nine parameters',
+      generatedIntent.match(/@Parameter\(/g)?.length || 0, 9);
     eq('Apple-extracted titles and parameters initialize LocalizedStringResource directly', [
       generatedIntent.match(/static let title\s*=\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(/@Parameter\(\s*title:\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(
         /(?:static let title\s*=|@Parameter\(title:)\s*WafraLiveCaptureResources\.localized\(/g,
       )?.length || 0,
-    ], [6, 7, 0]);
+    ], [8, 9, 0]);
     eq('Apple-extracted title and parameter resources use the required main bundle', [
       generatedIntent.match(/bundle:\s*\.main/g)?.length || 0,
       generatedIntent.match(/bundle:\s*\.atURL/g)?.length || 0,
-    ], [13, 0]);
+    ], [17, 0]);
     ok('every intent title, parameter, and source-free error uses the closed localization keys',
       expectedLocalizationKeys.every((key) => generatedIntent.includes(`"${key}"`)) &&
         !/static let title[^\n]*=\s*"|@Parameter\(title:\s*"/.test(generatedIntent), generatedIntent);
     ok('iOS 26 supportedModes references occur only in availability extensions', (() => {
       const modes = generatedIntent.match(/supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}/g) || [];
       const extensions = generatedIntent.match(
-        /@available\(iOS 26\.0, \*\)\s*extension (?:RecordWafraCaptureSetupProofIntent|RecordWafraCaptureV3SetupProofIntent|ProbeWafraAutomationInputIntent|StageWafraLiveMessageIntent|StageWafraLiveTextIntent|CaptureWafraNotificationIntent)\s*\{\s*static var supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}\s*\}/g,
+        /@available\(iOS 26\.0, \*\)\s*extension (?:RecordWafraCaptureSetupProofIntent|RecordWafraCaptureV3SetupProofIntent|ProbeWafraAutomationInputIntent|StageWafraLiveMessageIntent|StageWafraLiveTextIntent|CaptureWafraNotificationIntent|CaptureWafraApplePayIntent|RecordWafraApplePaySetupProofIntent)\s*\{\s*static var supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}\s*\}/g,
       ) || [];
-      return modes.length === 6 && extensions.length === 6;
+      return modes.length === 8 && extensions.length === 8;
     })(), generatedIntent);
     ok('generated intents contain no direct network, file, clipboard, log, notification-center or dialog APIs',
       !/(?:https?:|URLSession|URLRequest|NWConnection|FileManager|FileHandle|NSFile|(?:Data|NSData)\(contentsOf:|\.write\(to:|UIPasteboard|clipboard|\bprint\s*\(|os_log|Logger\s*\(|import\s+UserNotifications|UNUserNotificationCenter|UNNotificationRequest|NotificationCenter\s*\.|ProvidesDialog|dialog:)/i
@@ -2909,6 +2928,18 @@ struct WafraBankSenderRegistryTests {
     });
     const resolveSurface = hookModule.resolveIosCaptureSurfaceState;
     const surfaceCases = [
+      ['Wallet selection cannot reuse a Message proof or financial milestone', {
+        enabled: true, setupProofVersion: 3, firstCapturedAt: 1, pending: 0, dropped: 0,
+        corrupt: false, retirementPending: false, futureAutomationConfirmed: true, captureSource: 'apple-pay',
+      }, 'needs-automation'],
+      ['Wallet setup proof waits for a real tap without claiming posted money', {
+        enabled: true, setupProofVersion: null, firstCapturedAt: null, pending: 0, dropped: 0,
+        corrupt: false, retirementPending: false, futureAutomationConfirmed: true, captureSource: 'apple-pay', sourceSetupProofAt: 1,
+      }, 'waiting-for-alert'],
+      ['bundled Message v3 proof is recognized by the Home capture surface', {
+        enabled: true, setupProofVersion: 3, firstCapturedAt: null, pending: 0, dropped: 0,
+        corrupt: false, retirementPending: false, futureAutomationConfirmed: true,
+      }, 'waiting-for-alert'],
       ['checking outranks every unread fact', {
         hydrated: false, supported: true, proActive: true, captureOptOut: false,
         enabled: true, setupProofVersion: 1, firstCapturedAt: 1, dropped: 1,
@@ -4261,6 +4292,8 @@ struct WafraBankSenderRegistryTests {
       captureHealth: null,
       notificationReadiness: 'not-added',
       notificationSupported: false,
+      applePaySupported: false,
+      applePayReadiness: 'not-added',
     });
     ok('setup controller: unsupported platforms never resolve a native module',
       harness.statusReads() === 0);

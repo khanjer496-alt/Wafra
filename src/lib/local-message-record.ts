@@ -25,6 +25,7 @@ import {
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { ParsedSms } from '@/lib/sms-parser';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
+import { parseIosApplePayRecord } from '@/lib/ios-apple-pay-record';
 
 export const LOCAL_MESSAGE_RECORD_VERSION = 1 as const;
 export const MAX_LOCAL_MESSAGE_TEXT_BYTES = 16 * 1024;
@@ -32,6 +33,7 @@ export const MAX_LOCAL_MESSAGE_SENDER_CHARACTERS = 80;
 export const LOCAL_MESSAGE_FUTURE_SKEW_MS = 5 * 60_000;
 /** Shortcut input cannot attest which app actually delivered a notification. */
 export const LOCAL_NOTIFICATION_SENDER = 'Wafra Notification';
+export const LOCAL_APPLE_PAY_SENDER = 'Wafra Apple Pay';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256_EVENT_ID_RE = /^[0-9a-f]{64}$/;
@@ -48,7 +50,7 @@ interface LocalMessageEnvelope {
   text: string;
   sender: string;
   observedAt: string;
-  source: 'message' | 'notification';
+  source: 'message' | 'notification' | 'apple-pay';
 }
 
 export interface LocalMessageRecordPreflight {
@@ -57,6 +59,8 @@ export interface LocalMessageRecordPreflight {
   attribution: IosBankSenderAttribution | null;
   market: 'AE' | 'SA' | null;
   valid: boolean;
+  /** Kept even for malformed Wallet payloads so they are never invalid-ACKed. */
+  source?: 'apple-pay';
 }
 
 export interface IosBankSenderAttribution {
@@ -70,7 +74,12 @@ export type LocalMessageParseOutcome =
   | { kind: 'declined'; market: 'AE' | 'SA'; row: DeclinedSms; milestone: 'decline-candidate' }
   | { kind: 'review'; market: 'AE' | 'SA' | null; item: ReviewEntry; milestone: 'review-candidate' | 'none' }
   | { kind: 'ignored'; market: 'AE' | 'SA' | null; milestone: 'none' }
+  | { kind: 'held'; market: null; milestone: 'none' }
   | { kind: 'invalid'; milestone: 'none' };
+
+export type LocalApplePayParseOutcome =
+  | { kind: 'review'; market: null; item: ReviewEntry; milestone: 'none' }
+  | { kind: 'held'; market: null; milestone: 'none' };
 
 /** UTF-8 length with an explicit malformed-surrogate failure for Hermes. */
 export function localMessageUtf8Bytes(value: string): number | null {
@@ -126,9 +135,11 @@ function decodeLocalMessageEnvelope(
     !validLocalMessageId(value.id) ||
     typeof value.text !== 'string' ||
     typeof value.sender !== 'string' ||
-    (value.source !== 'message' && value.source !== 'notification') ||
+    (value.source !== 'message' && value.source !== 'notification' && value.source !== 'apple-pay') ||
     (value.source === 'notification' &&
-      (!UUID_RE.test(value.id) || value.sender !== LOCAL_NOTIFICATION_SENDER))) {
+      (!UUID_RE.test(value.id) || value.sender !== LOCAL_NOTIFICATION_SENDER)) ||
+    (value.source === 'apple-pay' &&
+      (!UUID_RE.test(value.id) || value.sender !== LOCAL_APPLE_PAY_SENDER))) {
     return null;
   }
   const textBytes = localMessageUtf8Bytes(value.text);
@@ -195,14 +206,27 @@ export function preflightLocalMessageRecord(
     id: object.id,
     observedAt: decoded?.observedAt ?? null,
     attribution,
-    market: decoded
+    market: decoded && decoded.envelope.source !== 'apple-pay'
       ? attribution?.market ?? detectLaunchMarketFromAlert(
           decoded.envelope.text,
           decoded.envelope.sender,
         )
       : null,
     valid: decoded !== null,
+    ...(object.source === 'apple-pay' ? { source: 'apple-pay' as const } : {}),
   };
+}
+
+/** Wallet observations are structured facts, never SMS text or bank attribution. */
+export function parseLocalApplePayRecord(serialized: string, now: Date): LocalApplePayParseOutcome {
+  const held: LocalApplePayParseOutcome = { kind: 'held', market: null, milestone: 'none' };
+  if (!Number.isFinite(now.getTime())) return held;
+  const decoded = decodeLocalMessageEnvelope(serialized, now.getTime());
+  if (!decoded || decoded.envelope.source !== 'apple-pay') return held;
+  const result = parseIosApplePayRecord(decoded.envelope.text, decoded.envelope.id, decoded.observedAt);
+  return result.kind === 'review'
+    ? { kind: 'review', market: null, item: result.item, milestone: 'none' }
+    : held;
 }
 
 function localReviewIdentity(id: string): { id: string; sourceKey: string } {
@@ -277,6 +301,7 @@ export function parseLocalMessageRecord(
   const decoded = decodeLocalMessageEnvelope(serialized, nowMs);
   if (!decoded) return { kind: 'invalid', milestone: 'none' };
   const { envelope, observedAt } = decoded;
+  if (envelope.source === 'apple-pay') return parseLocalApplePayRecord(serialized, now);
   const isNotification = envelope.source === 'notification';
   const attribution = isNotification ? null : attributeIosBankSender(envelope.sender);
   const routedMarket = attribution?.market ??

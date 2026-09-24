@@ -4,6 +4,7 @@ import { sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
 import type { UniversalMoney, UniversalInstrument } from '@/lib/universal-types';
 import { categorySupportsType } from '@/lib/categories';
 import { ledgerMoneySpec, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { transactionTime } from '@/lib/format';
 import {
   isUniversalReviewAlert,
   prepareUniversalReviewAlert,
@@ -45,7 +46,8 @@ export type ReviewPromotionFailure = UniversalImportRefusal | 'source-changed'
   | 'instrument-mismatch'
   | 'invalid-category'
   | 'invalid-title'
-  | 'invalid-date';
+  | 'invalid-date'
+  | 'possible-duplicate';
 
 export type ReviewPromotionPlan =
   | {
@@ -201,6 +203,25 @@ export const planReviewPromotion = (
     const money = planned.batch.importMoney;
     if (planned.batch.transactions.length !== 1 || !transaction || !money) {
       return { outcome: 'refused', reason: 'invalid-event' };
+    }
+    // Apple Pay's observation UUID cannot identify the bank's SMS for the
+    // same purchase. Check the authoritative ledger after money/account
+    // validation, and retain the review until the user resolves the overlap.
+    // No automatic merge or distinct-purchase override is authorized here.
+    if (item.channel === 'push' && /^apple_pay_review_source_[a-f0-9]{32}$/.test(item.sourceKey) &&
+      transaction.type === 'expense') {
+      const normalizeMerchant = (value: string): string =>
+        value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
+      const merchants = new Set([transaction.title, event.merchant.value ?? '']
+        .map(normalizeMerchant).filter(Boolean));
+      const possibleDuplicate = state.transactions.some((existing) => {
+        if (existing.type !== 'expense' || existing.accountId !== transaction.accountId ||
+          existing.amountFils !== transaction.amountFils || !merchants.has(normalizeMerchant(existing.title))) return false;
+        const timestamp = transactionTime(existing)?.getTime();
+        return timestamp !== undefined && Number.isFinite(timestamp) &&
+          Math.abs(timestamp - item.observedAt) <= 120_000;
+      });
+      if (possibleDuplicate) return { outcome: 'refused', reason: 'possible-duplicate' };
     }
     return {
       outcome: 'added', ledgerMoney: money,

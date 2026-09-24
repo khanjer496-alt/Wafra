@@ -9,8 +9,10 @@ import { isUniversalReviewAlert } from '@/lib/alert-review-tray';
 import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
 import {
   parseLocalMessageRecord,
+  parseLocalApplePayRecord,
   preflightLocalMessageRecord,
   type LocalMessageParseOutcome,
+  type LocalApplePayParseOutcome,
 } from '@/lib/local-message-record';
 import {
   isLocalCaptureQualificationCandidate,
@@ -23,6 +25,7 @@ import {
 
 const PAGE_SIZE = 50;
 const MAX_PAGES = 40;
+const MAX_APPLE_PAY_PAGES = 4;
 
 export interface IosLocalCaptureOutcome {
   scanned: number;
@@ -35,6 +38,8 @@ export interface IosLocalCaptureOutcome {
   retirement: 'not-needed' | 'complete' | 'retry-needed';
   /** Refused reviews remain in the native queue; retry after Review has room. */
   deferredReviews?: number;
+  /** Unsupported payloads and reviews without durable space stay native. */
+  deferredApplePay?: number;
 }
 
 export interface IosLocalCaptureCoordinator {
@@ -376,7 +381,11 @@ export function createIosLocalCaptureCoordinator(
         let serialized = record.serialized;
         let outcome: LocalMessageParseOutcome = { kind: 'invalid', milestone: 'none' };
         try {
-          if (record.preflight.valid) {
+          if (record.preflight.source === 'apple-pay') {
+            // Defensive handling if a native reader ever mixes lanes: an
+            // unknown/refused Wallet payload must never become invalid-ACK.
+            outcome = parseLocalApplePayRecord(serialized, now);
+          } else if (record.preflight.valid) {
             outcome = parseLocalMessageRecord(serialized, now, record.preflight.market, session);
           }
         } finally {
@@ -614,6 +623,7 @@ export function createIosLocalCaptureCoordinator(
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
       const reviewTray = input.ledger.getState().reviewTray;
       const deferredReviewIds = new Set(outcomes.flatMap((outcome, index) => {
+        if (outcome.kind === 'held') return [page[index].preflight.id];
         if (outcome.kind !== 'review' || outcome.item.channel !== 'push') return [];
         const item = outcome.item;
         const retained = reviewTray?.pending?.some(entry => entry.sourceKey === item.sourceKey && entry.observedAt === item.observedAt) ||
@@ -624,11 +634,89 @@ export function createIosLocalCaptureCoordinator(
       if (acknowledgedIds.length > 0) await input.native.acknowledgeRecords(acknowledgedIds);
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
       if (deferredReviewIds.size > 0) {
-        totals.ignored = Math.max(0, totals.ignored - deferredReviewIds.size);
-        return { ...stopped(firstCapturedAt), deferredReviews: deferredReviewIds.size };
+        const deferredReviews = outcomes.filter((outcome, index) =>
+          outcome.kind === 'review' && deferredReviewIds.has(page[index].preflight.id)).length;
+        totals.ignored = Math.max(0, totals.ignored - deferredReviews);
+        totals.deferredReviews = (totals.deferredReviews ?? 0) + deferredReviews;
+        // Give the independently filtered Wallet lane a turn even when the
+        // notification tray is full. Retained Wallet rows cannot block SMS.
+        break;
       }
       if (pageIndex + 1 < MAX_PAGES) await yieldBetweenPages();
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+    }
+
+    if (input.native.applePayCaptureSupported === true && input.native.listPendingApplePayRecords) {
+      const heldIds = new Set<string>();
+      const seenIds = new Set<string>();
+      let unreadableHeld = 0;
+      for (let pageIndex = 0; pageIndex < MAX_APPLE_PAY_PAGES; pageIndex += 1) {
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        const generation = readLedgerGeneration(input.ledger);
+        const serializedPage = await input.native.listPendingApplePayRecords(PAGE_SIZE);
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        requireLedgerGeneration(input.ledger, generation);
+        if (serializedPage.length === 0) break;
+        if (serializedPage.length > PAGE_SIZE) throw sourceFreePageError('Apple Pay page exceeds the native limit');
+        const now = new Date();
+        const page: { id: string | null; outcome: LocalApplePayParseOutcome }[] = [];
+        for (let index = 0; index < serializedPage.length; index += 1) {
+          let serialized = serializedPage[index];
+          try {
+            const preflight = preflightLocalMessageRecord(serialized, now);
+            page.push({ id: preflight?.id ?? null, outcome: parseLocalApplePayRecord(serialized, now) });
+          } finally {
+            serialized = '';
+            serializedPage[index] = '';
+          }
+        }
+        const pageIds = page.flatMap(record => record.id ? [record.id] : []);
+        if (new Set(pageIds).size !== pageIds.length) throw sourceFreePageError('Apple Pay page contains a duplicate record identity');
+        const unreadable = page.filter(record => record.id === null).length;
+        totals.scanned += Math.max(0, unreadable - unreadableHeld);
+        unreadableHeld = unreadable;
+        for (const id of pageIds) {
+          if (!seenIds.has(id)) totals.scanned += 1;
+          seenIds.add(id);
+        }
+        const reviews = page.flatMap(record => record.outcome.kind === 'review' ? [record.outcome.item] : []);
+        if (!input.ledger.getState().hydrated) throw sourceFreePageError('Apple Pay ledger is not hydrated');
+        if (reviews.length > 0) {
+          if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Apple Pay requires review staging');
+          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+          const receipt = input.ledger.stageReviewAlerts(reviews);
+          await receipt.durable;
+          if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+          requireLedgerGeneration(input.ledger, generation);
+          if (!Number.isInteger(receipt.admitted) || receipt.admitted < 0 || receipt.admitted > reviews.length) {
+            throw sourceFreePageError('Apple Pay review receipt was refused');
+          }
+          totals.reviews += receipt.admitted;
+        }
+        // Also protect duplicate/tombstoned receipts with a durable barrier.
+        // No financial planner, market selector or SMS milestone runs here.
+        await input.ledger.ensureDurable();
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        requireLedgerGeneration(input.ledger, generation);
+        const state = input.ledger.getState();
+        const ack: string[] = [];
+        for (const record of page) {
+          if (!record.id) continue;
+          const item = record.outcome.kind === 'review' ? record.outcome.item : null;
+          const retained = item && (
+            state.reviewTray?.pending.some(entry => entry.id === item.id && entry.sourceKey === item.sourceKey && entry.observedAt === item.observedAt) ||
+            state.reviewTray?.tombstones.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime())
+          );
+          if (retained) { ack.push(record.id); heldIds.delete(record.id); }
+          else heldIds.add(record.id);
+        }
+        totals.deferredApplePay = heldIds.size + unreadableHeld;
+        if (ack.length === 0) break;
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        requireLedgerGeneration(input.ledger, generation);
+        await input.native.acknowledgeRecords(ack);
+        if (pageIndex + 1 < MAX_APPLE_PAY_PAGES) await yieldBetweenPages();
+      }
     }
 
     if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);

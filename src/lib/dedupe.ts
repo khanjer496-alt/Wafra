@@ -22,6 +22,20 @@ import type { CaptureInstrument, CaptureSource, Transaction, TransactionType } f
  * third is the same event. Hence three.
  */
 
+/**
+ * A ledger row promoted from an Apple Pay (Wallet) review.
+ *
+ * Wallet's observation UUID is not the bank's message identity, and the row's
+ * title/account/date are explicit user decisions. Such a row may only ever be
+ * matched by its exact receipt identity; import-plan binds it to a later bank
+ * SMS under its own strict one-to-one rule. Generic title, cross-channel,
+ * statement and hydration heuristics must never pair or delete it.
+ */
+export const APPLE_PAY_REVIEW_SOURCE_KEY = /^apple_pay_review_source_[a-f0-9]{32}$/;
+export function isApplePayWalletRow(t: Pick<Transaction, 'source' | 'smsKey'>): boolean {
+  return t.source === 'sms' && typeof t.smsKey === 'string' && APPLE_PAY_REVIEW_SOURCE_KEY.test(t.smsKey);
+}
+
 /** Message text reduced to what two captures of the same SMS must agree on. */
 export function bodyPrint(body: string): string {
   return body.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -325,7 +339,9 @@ export function duplicateGuard(
     else seen.set(key, [occurrence]);
     if (id) seenById.set(id, occurrence);
   };
-  for (const t of existing) {
+  // Wallet rows keep only their exact receipt identity (noteExact below).
+  const heuristicRows = existing.filter((t) => !isApplePayWalletRow(t));
+  for (const t of heuristicRows) {
     // Locally-created and migrated rows may have no SMS fingerprint but still
     // carry a precise event clock. Treating those as timeless made every
     // identical purchase later that day look like the same event.
@@ -409,7 +425,7 @@ export function duplicateGuard(
     if (rows) rows.push({ consumedSides: new Set() });
     else manualPayments.set(key, [{ consumedSides: new Set() }]);
   };
-  for (const t of existing) {
+  for (const t of heuristicRows) {
     if (t.source === 'sms') {
       noteCross(crossChannelKey(t.date, t.amountFils, t.type), {
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
@@ -802,6 +818,9 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       // amount/time heuristics cannot delete a decision or attach it to a
       // different event. Two independently reviewed rows require user review.
       if (row.transferDecision || prior.transferDecision) return false;
+      // Likewise a Wallet review decision: only exact receipt identity (above)
+      // may fold it. Import binds a proven SMS counterpart explicitly.
+      if (isApplePayWalletRow(row) || isApplePayWalletRow(prior)) return false;
       if (
         !pairedCardPayments.has(index) &&
         !row.userEdited &&

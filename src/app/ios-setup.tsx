@@ -17,7 +17,7 @@ import { AutomationGuide } from '@/components/ios-message-setup/automation-guide
 import { DetailsSheet } from '@/components/ios-message-setup/details-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Button, Chip } from '@/components/ui/controls';
+import { Button } from '@/components/ui/controls';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Block } from '@/components/ui/layout';
 import { SetupShell, SetupHeader } from '@/components/onboarding/setup-shell';
@@ -26,7 +26,6 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { IOS_LOCAL_CAPTURE_SHORTCUT_NAME } from '@/lib/ios-local-capture-protocol';
 import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
-import { knownBankOptions } from '@/lib/known-banks';
 import {
   completeIosMessageOnboardingAttempt,
   createIosCaptureSetup,
@@ -113,9 +112,10 @@ export default function IosSetupScreen() {
     fromOnboarding?: string;
     shortcutResult?: string;
     notificationReturn?: string;
+    applePayReturn?: string;
     section?: string;
   }>();
-  const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut, setKnownBanks } = useStore();
+  const { state, ensureDurable, setOnboarded, setOnboardingProfile, setCaptureOptOut } = useStore();
   const language = useLanguage();
   const journeyCopy = iosSetupJourneyCopy(language);
   const shortcutCopy = iosShortcutSetupCopy(language);
@@ -147,6 +147,10 @@ export default function IosSetupScreen() {
   const pagedEnabled = historySupported && pagedHistoryEnabled(rawSetup.bundledHistorySupported === true);
   const [progress, setProgress] = useState(INITIAL_PROGRESS);
   const notificationMode = progress.futureCaptureSource === 'notification';
+  const applePayMode = progress.futureCaptureSource === 'apple-pay';
+  const messageMode = !notificationMode && !applePayMode;
+  const applePayLabel = language === 'ar' ? 'إعداد Apple Pay' : 'Set up Apple Pay';
+  const applePaySummary = language === 'ar' ? 'أرسل عمليات الدفع ببطاقتك عبر Apple Pay إلى المراجعة. لا يلزم اختيار بنك.' : 'Send Apple Pay card taps to Review. No bank selection needed.';
   const setup = { ...rawSetup, readiness: resolveIosSelectedReadiness(progress.futureCaptureSource, rawSetup, progress.futureShortcutVersion) };
   const offersNotifications = Platform.OS === 'ios' && iosSupportsNotificationAutomation(Platform.Version);
   const [progressLoaded, setProgressLoaded] = useState(false);
@@ -166,22 +170,12 @@ export default function IosSetupScreen() {
   const [resetHistoryVisible, setResetHistoryVisible] = useState(false);
   const resetHistoryAttempt = useRef<number | null>(null);
   const [skipHistoryVisible, setSkipHistoryVisible] = useState(false);
-  // "Which banks text you?": asked once before either section can start, because
-  // iOS 26's Find Messages gives Wafra no sender and some banks never name
-  // themselves in an alert, so this answer is what labels those accounts.
-  // Skip hides it for this visit only; the answer itself persists in the ledger.
-  const [banksSkipped, setBanksSkipped] = useState(false);
-  const [bankPicks, setBankPicks] = useState<string[]>([]);
-  const banksStep = !notificationMode && (state.knownBanks ?? []).length === 0 && !banksSkipped;
-  const toggleBankPick = (name: string) => setBankPicks((picks) =>
-    picks.includes(name) ? picks.filter((pick) => pick !== name) : [...picks, name]);
-  const saveKnownBanks = () => { setKnownBanks(bankPicks); };
   const skipHistoryAttempt = useRef<number | null | undefined>(undefined);
   const setupInitialized = useRef(false);
   const futureReadyLabel = setup.readiness === 'first-alert-captured'
     ? t('iosLocalFirstAlertCaptured')
     : t('iosLocalWaitingTitle');
-  const activeMessageCheckFailed = !notificationMode && progress.activeSection === 'future' &&
+  const activeMessageCheckFailed = messageMode && progress.activeSection === 'future' &&
     (setup.failure === 'shortcut-run' || localError === t('iosLocalShortcutRunFailed'));
   const futureConfigured = !activeMessageCheckFailed && futureSetupConfigured(setup.readiness, progress.futureAutomationConfirmed);
   const setupComplete = !activeMessageCheckFailed && progressLoaded && !setup.loading &&
@@ -294,8 +288,8 @@ export default function IosSetupScreen() {
   // A navigation hint only: returning to the existing screen refreshes native
   // proof and saved progress. The URL itself cannot enable or confirm capture.
   useEffect(() => {
-    if (params.notificationReturn) void refreshSetup();
-  }, [params.notificationReturn, refreshSetup]);
+    if (params.notificationReturn || params.applePayReturn) void refreshSetup();
+  }, [params.notificationReturn, params.applePayReturn, refreshSetup]);
 
   // `router.replace` from this pushed screen swaps it for a NEW tabs route
   // while the original tabs route stays at the stack root, so two tab
@@ -484,6 +478,13 @@ export default function IosSetupScreen() {
       await updateProgress({ type: 'future-source-changed', source: 'notification' });
       setShowAutomationGuide(false);
       router.push({ pathname: '/ios-notification-setup', params: { fromOnboarding: fromOnboarding ? '1' : undefined } });
+    });
+  };
+  const openApplePaySetup = () => {
+    void runOperation(async () => {
+      await updateProgress({ type: 'future-source-changed', source: 'apple-pay' });
+      setShowAutomationGuide(false);
+      router.push({ pathname: '/ios-apple-pay-setup', params: { fromOnboarding: fromOnboarding ? '1' : undefined } });
     });
   };
   const chooseMessageCapture = () => {
@@ -833,11 +834,11 @@ export default function IosSetupScreen() {
     });
   }, [busy, exitToRoot, finishRetryRequired, fromOnboarding, router, runOperation, updateProgress]);
 
-  const failedMessageCheck = !notificationMode && (setup.failure === 'shortcut-run' || localError === t('iosLocalShortcutRunFailed'));
+  const failedMessageCheck = messageMode && (setup.failure === 'shortcut-run' || localError === t('iosLocalShortcutRunFailed'));
   const futureStep = failedMessageCheck ? 'prove-shortcut' : setup.failure === 'shortcut-install' &&
     !progress.futureShortcutConfirmed
     ? 'add-shortcut'
-    : resolveIosFutureSetupStep(progress, setup.readiness, notificationMode ? undefined : setup.shortcutVersion);
+    : resolveIosFutureSetupStep(progress, setup.readiness, messageMode ? setup.shortcutVersion : undefined);
   const futureStatus = !setup.loading && !futureConfigured && progress.futureStatus === 'complete'
     ? 'in-progress' : progress.futureStatus;
   const error = localError ?? (setup.failure ? failureCopy(setup.failure) : null);
@@ -874,6 +875,7 @@ export default function IosSetupScreen() {
     if (!setup.supported || setup.failure === 'load') {
       return { label: 'iosMessageLearnMore', onPress: openHelp };
     }
+    if (applePayMode && !futureConfigured) return { label: 'iosMessageLearnMore', onPress: openApplePaySetup };
     if (notificationMode && !futureConfigured) return { label: 'iosNotificationSetupAction', onPress: openNotificationSetup };
     if (futureStep === 'add-shortcut') {
       return { label: 'iosLocalInstallShortcut', onPress: installFutureShortcut, disabled: !setup.shortcutAvailable };
@@ -889,19 +891,21 @@ export default function IosSetupScreen() {
     };
   };
   const action = primaryAction();
-  const showFooterAction = !showAutomationGuide && !banksStep && (
+  const showFooterAction = !showAutomationGuide && (
     setupComplete ||
     (futureConfigured && !historyComplete && !historyDeferred && progress.activeSection === 'future')
   );
   const helpActions: { label: string; onPress(): void }[] = [];
   if (progress.activeSection === 'future') {
-    if (notificationMode) {
+    if (applePayMode) {
+      helpActions.push({ label: applePayLabel, onPress: openApplePaySetup });
+    } else if (notificationMode) {
       helpActions.push({ label: t('iosNotificationSetupAction'), onPress: openNotificationSetup });
     } else if (setup.supported && setup.shortcutAvailable) {
       helpActions.push({ label: t('iosMessageAddAgain'), onPress: installFutureShortcut });
       helpActions.push({ label: t('iosMessageRunPermissionCheck'), onPress: checkFutureShortcut });
     }
-    if (!notificationMode && futureStep === 'ready') {
+    if (messageMode && futureStep === 'ready') {
       helpActions.push({ label: t('iosMessageReviewAutomation'), onPress: () => setShowAutomationGuide(true) });
     }
   } else if (pagedEnabled) {
@@ -939,32 +943,16 @@ export default function IosSetupScreen() {
             back={{ label: t('back'), onPress: leave, disabled: busy || finishRetryRequired }}
             actions={[{ label: t('iosMessageLearnMore'), onPress: openHelp, disabled: busy }]}
           />
+          {setup.applePaySupported && !applePayMode && (
+            <Button label={applePayLabel} variant="outline" onPress={openApplePaySetup}
+              disabled={busy || !progressLoaded || setup.loading} wrapLabel />
+          )}
           {offersNotifications && !notificationMode && (
             <Button label={t('iosNotificationSetupAction')} variant="outline" onPress={openNotificationSetup}
               disabled={busy || !progressLoaded || setup.loading} wrapLabel />
           )}
           {!progressLoaded || setup.loading ? (
             <ThemedText type="meta" themeColor="textSecondary">{t('stillLoading')}</ThemedText>
-          ) : banksStep ? (
-            <View testID="ios-message-setup-banks" style={styles.checklist}>
-              <Block>
-                <ThemedText type="subtitle">{t('iosBanksTitle')}</ThemedText>
-                <ThemedText type="small" themeColor="textSecondary">{t('iosBanksBody')}</ThemedText>
-                <View style={styles.bankChips} accessibilityRole="list">
-                  {knownBankOptions(state.marketId).map((bank) => (
-                    <Chip
-                      key={bank.name}
-                      label={bank.name}
-                      active={bankPicks.includes(bank.name)}
-                      onPress={() => toggleBankPick(bank.name)}
-                    />
-                  ))}
-                </View>
-                <ThemedText type="meta" themeColor="textSecondary">{tf('iosBanksSelected', { n: bankPicks.length })}</ThemedText>
-                <Button label={t('iosBanksNext')} onPress={saveKnownBanks} disabled={busy || bankPicks.length === 0} wrapLabel />
-                <Button label={t('iosBanksSkip')} variant="ghost" onPress={() => setBanksSkipped(true)} disabled={busy} wrapLabel />
-              </Block>
-            </View>
           ) : (
             <View testID="ios-message-setup-checklist" style={styles.checklist}>
               <ChecklistRow
@@ -975,7 +963,13 @@ export default function IosSetupScreen() {
                 status={futureStatus}
                 expanded={progress.activeSection === 'future'}
                 onPress={() => selectSection('future')}>
-                {notificationMode ? (
+                {applePayMode ? (
+                  <>
+                    <ThemedText type="small" themeColor="textSecondary">{applePaySummary}</ThemedText>
+                    <Button label={applePayLabel} onPress={openApplePaySetup} disabled={busy} wrapLabel />
+                    <Button label={t('iosNotificationChooseSms')} variant="ghost" onPress={chooseMessageCapture} disabled={busy} wrapLabel />
+                  </>
+                ) : notificationMode ? (
                   <>
                     <ThemedText type="small" themeColor="textSecondary">{t('iosNotificationSetupSummary')}</ThemedText>
                     <Button label={t('iosNotificationSetupAction')} onPress={openNotificationSetup} disabled={busy} wrapLabel />
@@ -1029,7 +1023,7 @@ export default function IosSetupScreen() {
                       onPress={installFutureShortcut} disabled={busy || !setup.shortcutAvailable} wrapLabel />}
                   </>
                 ) : null}
-                {!notificationMode && showingAutomation && (
+                {messageMode && showingAutomation && (
                   <Button
                     label={t(progress.futureAutomationConfirmed ? 'iosMessageRetryCheck' : 'iosLocalAutomationAdded')}
                     onPress={confirmAutomation}
@@ -1233,7 +1227,8 @@ export default function IosSetupScreen() {
           onConfirm={resetStoppedHistory}
         />
         <DetailsSheet
-          source={notificationMode ? 'notification' : 'message'}
+          language={language}
+          source={applePayMode ? 'apple-pay' : notificationMode ? 'notification' : 'message'}
           visible={detailsVisible}
           onClose={() => setDetailsVisible(false)}
           section={progress.activeSection}
@@ -1257,7 +1252,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: ScreenPadding, paddingBottom: 18, gap: 14,
   },
   checklist: { gap: Spacing.two },
-  bankChips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.one },
   hints: { marginTop: Spacing.one },
   progress: { gap: Spacing.one },
   completionReveal: { gap: Spacing.one },

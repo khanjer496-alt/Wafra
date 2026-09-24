@@ -19,3 +19,10 @@
 "live.notification.invalid" = "لم يصل نص إشعار صالح إلى وفرة. في تطبيق الاختصارات، مرّر رسالة الإشعار كنص إلى نص الإشعار ثم حاول مرة أخرى.";
 "live.notification.error" = "تعذّر على وفرة حفظ هذا الإشعار. افتح وفرة للتحقق من حالة الالتقاط ثم حاول مرة أخرى.";
 "live.setup_v3.title" = "تسجيل إثبات إعداد التقاط وفرة الإصدار 3";
+"live.apple_pay.title" = "التقاط عملية Apple Pay";
+"live.apple_pay.amount.parameter" = "مبلغ المحفظة";
+"live.apple_pay.merchant.parameter" = "التاجر";
+"live.apple_pay.invalid" = "تعذّر على وفرة قراءة مبلغ المحفظة. اربط مبلغ المحفظة والتاجر بهذا الإجراء ثم حاول مرة أخرى.";
+"live.apple_pay.error" = "تعذّر على وفرة حفظ حدث Apple Pay. افتح وفرة وتحقق من حالة الالتقاط.";
+"live.apple_pay.setup.title" = "التحقق من إعداد Apple Pay في وفرة";
+"live.apple_pay.setup.error" = "تعذّر على وفرة التحقق من إعداد Apple Pay. افتح وفرة وتحقق من حالة الالتقاط.";

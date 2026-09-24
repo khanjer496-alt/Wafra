@@ -139,7 +139,9 @@ test('switching from all-time to an empty month retains one pending refresh and 
   const scan = deferred();
   const h = refreshHarness({ scan: scan.promise });
   const running = h.render().refresh.onRefresh();
-  h.setPeriod({ mode: 'month', key: '2026-09' });
+  // Home derives its recent rows from the ledger itself, so the switched-to
+  // month must genuinely hold no records (the fixture ledger spans Apr-Sep).
+  h.setPeriod({ mode: 'month', key: '2026-03' });
   const month = h.render();
   assert.ok(walk(month.tree).some(node => node.type === 'EmptyMonth'));
   assert.equal(month.refresh.refreshing, true, 'a period change does not falsely mark the in-flight scan complete');

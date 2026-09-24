@@ -256,8 +256,8 @@
     {
       "file": "src/app/add-transaction.tsx",
       "name": "save",
-      "sha256": "419342ccc429d3606d2b44f67a25becbdf075f3105acf67f9dd8462c709b57d9",
-      "reviewedChange": "2026-09-10: Save now requires the durable ledger currency for first manual money and preserves exact minor-unit parsing before the transaction write."
+      "sha256": "99eda98e082c2afdbe52c9bb44afdcb18b793206d10fd026daad0e6c4d48b38e",
+      "reviewedChange": "2026-09-10: Save now requires the durable ledger currency for first manual money and preserves exact minor-unit parsing before the transaction write. 2026-09-24: an Apple Pay review refused by the ledger as 'possible-duplicate' (same state generation, same route) opens the explicit already-recorded/keep-in-review choice instead of the generic failure toast; no write occurs on that path and every other refusal keeps the toast."
     },
     {
       "file": "src/app/add-transaction.tsx",

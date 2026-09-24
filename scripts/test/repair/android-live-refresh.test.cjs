@@ -122,8 +122,16 @@ test('transfer reconciliation stays contextual instead of becoming Accounts or S
   const { createHarness, walk } = require('./reference-harness.cjs');
   const h = createHarness();
   const wallet = h.render('wallet');
-  const action = walk(wallet).find(n => n.props?.accessibilityLabel === h.deps['@/lib/i18n'].t('accountTransferHistory') && n.props?.onPress);
-  assert.equal(action, undefined);
+  // Accounts may link to the read-only Transfers history (docs/design/transfers.md),
+  // but never to the ownership-reconciliation queue itself.
+  const actions = walk(wallet).filter(n => n.props?.accessibilityLabel === h.deps['@/lib/i18n'].t('accountTransferHistory') && n.props?.onPress);
+  assert.ok(actions.length <= 1, 'at most one Transfers entry on Accounts');
+  for (const action of actions) {
+    assert.equal(action.props.testID, 'wallet-transfers-link');
+    const before = h.events.length;
+    action.props.onPress();
+    assert.deepEqual(h.events.slice(before), [['route', '/transfers']], 'Accounts opens browsing history, not reconciliation');
+  }
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/(tabs)/wallet.tsx'), 'utf8'), /router\.push\('\/review-transfers'\)/);
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8'), /router\.push\('\/review-transfers'\)/);
 });

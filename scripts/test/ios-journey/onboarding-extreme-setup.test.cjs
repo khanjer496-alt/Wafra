@@ -81,6 +81,7 @@ async function screen(t, options = {}) {
   };
   const native = {
     notificationCaptureSupported: options.notificationCaptureSupported === true,
+    applePayCaptureSupported: options.applePayCaptureSupported === true,
     ...(options.bundled ? { getMessageShortcutURL: async () => 'file:///app/Wafra%20Capture%20v3.shortcut' } : {}),
     ...(options.bundledHistory ? { getHistoryShortcutURL: async () => 'file:///app/Wafra%20History%20v8.shortcut' } : {}),
     async getCaptureStatus() { await controls.beforeStatus?.(); return { ...nativeStatus }; },
@@ -691,4 +692,30 @@ test('a failed check overrides an already-open automation review guide', async t
   assert.equal(s.all().some(n => n.type === 'AutomationGuide'), false);
   assert.ok(s.all().some(n => n.type === 'Button' && n.props.label === 'Add the correct Shortcut'));
   assert.match(s.text(), /did not complete the check/);
+});
+
+
+test('Apple Pay is available before bank selection and switching clears unrelated proof confirmations', async t => {
+  const s = await screen(t, { knownBanks: [], applePayCaptureSupported: true,
+    progress: { futureShortcutConfirmed: true, futureShortcutVersion: 3, futureAutomationConfirmed: true } });
+  const action = s.all().find(n => n.type === 'Button' && n.props.label === 'Set up Apple Pay');
+  assert.ok(action); action.props.onPress(); await s.flush();
+  assert.equal(s.saved().futureCaptureSource, 'apple-pay');
+  assert.equal(s.saved().futureShortcutConfirmed, false);
+  assert.equal(s.saved().futureAutomationConfirmed, false);
+  assert.equal(s.saved().futureShortcutVersion, undefined);
+  assert.equal(s.routes.at(-1)[1].pathname, '/ios-apple-pay-setup');
+  assert.deepEqual(s.store.state.knownBanks, []);
+  assert.equal(s.nativeStatus.enabled, false);
+});
+test('Apple Pay onboarding requires its own proof and manual automation confirmation', async t => {
+  for (const proven of [false, true]) {
+    const s = await screen(t, { knownBanks: [], applePayCaptureSupported: true, bundled: true,
+      nativeStatus: { enabled: true, setupProofVersion: 3, firstCapturedAt: Date.now(),
+        ...(proven ? { applePaySetupProofAt: Date.now() } : {}) },
+      progress: { futureCaptureSource: 'apple-pay', futureAutomationConfirmed: true, historyStatus: 'complete' } });
+    assert.equal(s.all().some(n => n.props?.testID === 'ios-message-setup-banks'), false);
+    if (proven) { await s.press('iosMessageContinue'); assert.equal(s.onboarded, true); }
+    else { assert.equal(s.button('iosMessageContinue'), undefined); assert.equal(s.onboarded, false); }
+  }
 });

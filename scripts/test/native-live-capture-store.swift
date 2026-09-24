@@ -271,6 +271,80 @@ struct NativeLiveCaptureStoreTests {
       && reopened.status().lastNotificationReceivedAt == nil)
   }
 
+  private static func testApplePay() throws {
+    let queueRoot = root("apple-pay")
+    let leaseRoot = root("apple-pay-expired-lease")
+    defer { remove([queueRoot, leaseRoot]) }
+    var now = fixedClock
+    let queue = store(root: queueRoot, now: { now })
+    let precise = Decimal(string: "9007199254740993.01", locale: Locale(identifier: "en_US_POSIX"))!
+    check("disabled Apple Pay admission is refused", try queue.stageApplePay(amount: precise, currency: "AED", merchant: "Shop", eventId: eventId(95_000), observedAt: now) == .disabled)
+    expectsEntitlementRequired("disabled Apple Pay setup cannot establish proof") { try queue.recordApplePaySetupProof(at: now) }
+    try grantLifetimeAndEnable(queue)
+    try queue.recordApplePaySetupProof(at: now)
+    check("Apple Pay setup proof creates no money or SMS proof", try queue.status().applePaySetupProofAt == now.timeIntervalSince1970 && queue.status().pending == 0 && queue.status().firstApplePayReceivedAt == nil && queue.status().setupProofAt == nil && queue.status().firstCapturedAt == nil)
+    check("missing Wallet amount is ignored without any receipt", try queue.stageApplePay(amount: nil, currency: "AED", merchant: nil, eventId: eventId(95_000), observedAt: now) == .ignored && queue.status().firstApplePayReceivedAt == nil)
+    check("incomplete Wallet receipt contains no queued money", try queue.status().lastApplePayIncompleteAt == now.timeIntervalSince1970 && queue.status().applePayPending == 0)
+    for value in [Decimal.zero, Decimal(-1), Decimal.nan, Decimal(string: "1000000000000000000")!, Decimal(string: "0.000000001")!] {
+      check("invalid Wallet amount refuses admission", try queue.stageApplePay(amount: value, currency: "AED", merchant: "Shop", eventId: eventId(95_000), observedAt: now) == .ignored)
+    }
+    for currency in ["", "ZZZ", "aed", "AED ", "123"] {
+      check("invalid Wallet currency refuses admission", try queue.stageApplePay(amount: precise, currency: currency, merchant: "Shop", eventId: eventId(95_000), observedAt: now) == .ignored)
+    }
+    for merchant in [String(repeating: "a", count: 97), String(repeating: "🛒", count: 49), "Shop\u{0000}"] {
+      check("invalid Wallet merchant refuses admission", try queue.stageApplePay(amount: precise, currency: "AED", merchant: merchant, eventId: eventId(95_000), observedAt: now) == .ignored)
+    }
+    check("Wallet accepts merchant names at the 96-character converter boundary", try queue.stageApplePay(amount: Decimal(1), currency: "AED", merchant: String(repeating: "a", count: 96), eventId: eventId(94_999), observedAt: now) == .accepted)
+    try queue.acknowledgeRecords(ids: [eventId(94_999)])
+    check("Wallet rejects message GUID hashes", try queue.stageApplePay(amount: precise, currency: "AED", merchant: "Shop", eventId: String(repeating: "a", count: 64), observedAt: now) == .invalid)
+    check("Wallet exact decimal stages durably", try queue.stageApplePay(amount: precise, currency: "AED", merchant: " Shop ", eventId: eventId(95_000), observedAt: now) == .accepted)
+    let walletRows = try queue.listPendingApplePayRecords(limit: 5)
+    let outer = decoded(walletRows[0])!
+    let payload = decoded(outer["text"] as! String)!
+    check("Wallet roundtrip retains exact decimal and only known Wallet fields", outer["source"] as? String == "apple-pay" && outer["sender"] as? String == "Wafra Apple Pay" && payload["amount"] as? String == "9007199254740993.01" && payload["currency"] as? String == "AED" && payload["merchant"] as? String == "Shop" && Set(payload.keys) == Set(["amount", "currency", "merchant"]))
+    let protected = queueRoot.appendingPathComponent("records/\(eventId(95_000)).json")
+    check("Wallet file retains native data protection", try FileManager.default.attributesOfItem(atPath: protected.path)[.protectionKey] as? FileProtectionType == .completeUntilFirstUserAuthentication)
+    check("Wallet receipt is not SMS ledger proof", try queue.status().firstApplePayReceivedAt == now.timeIntervalSince1970 && queue.status().lastApplePayReceivedAt == now.timeIntervalSince1970 && queue.status().firstCapturedAt == nil && queue.status().firstNotificationReceivedAt == nil)
+    now = now.addingTimeInterval(30)
+    _ = try queue.stageApplePay(amount: precise, currency: "AED", merchant: "Shop", eventId: eventId(95_000), observedAt: fixedClock)
+    check("Wallet replay leaves receipt unchanged", try queue.status().lastApplePayReceivedAt == fixedClock.timeIntervalSince1970)
+    for index in 1...3 { _ = try queue.stageApplePay(amount: Decimal(10), currency: "USD", merchant: nil, eventId: eventId(95_000 + index), observedAt: fixedClock) }
+    _ = try queue.stage(sender: knownSender, body: messageBody, eventId: eventId(95_100), observedAt: now)
+    _ = try queue.stageNotification(text: messageBody, eventId: eventId(95_101), observedAt: now)
+    check("Wallet-only reader excludes SMS and notifications", try queue.listPendingApplePayRecords(limit: 50).count == 4 && queue.status().applePayPending == 4)
+    let legacy = try queue.listPendingRecords(limit: 2, includeNotifications: false)
+    check("legacy SMS reader never exposes Wallet and filters before page limit", legacy.compactMap(rowId) == [eventId(95_100)])
+    let prior = try queue.listPendingRecords(limit: 2)
+    check("notification reader never exposes Wallet and filters before page limit", prior.compactMap(rowId) == [eventId(95_100), eventId(95_101)])
+    try queue.acknowledgeRecords(ids: prior.compactMap(rowId))
+    check("older JS acknowledgement leaves all Wallet records durable", try queue.status().pending == 4 && queue.listPendingRecords(limit: 50).isEmpty)
+    try queue.acknowledgeRecords(ids: [eventId(95_000)])
+    let reopened = store(root: queueRoot, now: { now })
+    check("acknowledged Wallet replay remains durable", try reopened.stageApplePay(amount: precise, currency: "AED", merchant: "Shop", eventId: eventId(95_000), observedAt: fixedClock) == .accepted && reopened.status().pending == 3)
+    try reopened.setCaptureEnabled(false)
+    let incompleteBeforeDisable = try reopened.status().lastApplePayIncompleteAt
+    check("disabled incomplete Wallet input cannot advance diagnostics", try reopened.stageApplePay(amount: nil, currency: "", merchant: nil, eventId: eventId(95_900), observedAt: now) == .disabled && reopened.status().lastApplePayIncompleteAt == incompleteBeforeDisable)
+    try reopened.setCaptureEnabled(true)
+    // A future source is not evidence of corruption. Keep it for a capable reader.
+    let futureId = eventId(95_001)
+    let futureURL = queueRoot.appendingPathComponent("records/\(futureId).json")
+    var futureRecord = try JSONSerialization.jsonObject(with: Data(contentsOf: futureURL)) as! [String: Any]
+    futureRecord["source"] = "future-wallet-source"
+    try JSONSerialization.data(withJSONObject: futureRecord, options: .sortedKeys).write(to: futureURL)
+    _ = try reopened.listPendingApplePayRecords(limit: 50)
+    try reopened.acknowledgeRecords(ids: [futureId])
+    check("unknown future native source stays pending and does not discard other records", try reopened.status().pending == 3 && !reopened.status().corrupt && FileManager.default.fileExists(atPath: futureURL.path))
+    check("Wallet rejects malformed receipt dates without adding money", try reopened.stageApplePay(amount: Decimal(10), currency: "AED", merchant: nil, eventId: eventId(95_950), observedAt: Date(timeIntervalSince1970: .nan)) == .invalid)
+    let leased = store(root: leaseRoot, now: { now })
+    _ = try leased.setLocalEntitlementLease(expiresAt: now.addingTimeInterval(1), lifetime: false)
+    try leased.setCaptureEnabled(true)
+    now = now.addingTimeInterval(2)
+    check("expired lease blocks valid and incomplete Wallet admissions", try leased.stageApplePay(amount: Decimal(10), currency: "AED", merchant: nil, eventId: eventId(95_960), observedAt: now) == .disabled && leased.stageApplePay(amount: nil, currency: "", merchant: nil, eventId: eventId(95_961), observedAt: now) == .disabled && leased.status().pending == 0 && leased.status().lastApplePayIncompleteAt == nil)
+    expectsEntitlementRequired("expired lease blocks Apple Pay setup proof") { try leased.recordApplePaySetupProof(at: now) }
+    try reopened.eraseAll()
+    check("erase clears Wallet receipts and setup proof", try reopened.status().firstApplePayReceivedAt == nil && reopened.status().lastApplePayReceivedAt == nil && reopened.status().applePaySetupProofAt == nil && reopened.status().lastApplePayIncompleteAt == nil && reopened.status().applePayPending == 0)
+  }
+
   static func main() throws {
     if try runChildIfRequested() { return }
 
@@ -1200,6 +1274,7 @@ struct NativeLiveCaptureStoreTests {
         && countCapacity.status().enabled
     )
 
+    check("capacity-refused Wallet event does not establish receipts", try countCapacity.stageApplePay(amount: Decimal(20), currency: "AED", merchant: "Shop", eventId: eventId(96_000), observedAt: fixedClock) == .capacityReached && countCapacity.status().firstApplePayReceivedAt == nil && countCapacity.status().lastApplePayReceivedAt == nil)
     check("capacity-refused notification does not establish receipts", try countCapacity.stageNotification(
       text: "notification", eventId: eventId(90_100), observedAt: fixedClock) == .capacityReached
       && countCapacity.status().firstNotificationReceivedAt == nil && countCapacity.status().lastNotificationReceivedAt == nil)
@@ -1579,6 +1654,7 @@ struct NativeLiveCaptureStoreTests {
       recordProtection == .completeUntilFirstUserAuthentication
     )
 
+    try testApplePay()
     try testNotifications()
 
     print("\nNative live capture store: \(passed) passed, \(failed) failed")

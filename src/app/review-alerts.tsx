@@ -15,7 +15,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { shortDate, toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { t, tf, type StringKey } from '@/lib/i18n';
-import { isIosNotificationReview, isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
+import { isIosApplePayReview, isIosNotificationReview, isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { isOrdinaryUniversalPosting, universalMoneyLabel } from '@/components/universal-review-fields';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
 import type { UniversalField, UniversalMoney } from '@/lib/universal-types';
@@ -95,6 +95,7 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
   return (
     <View testID="review-alert-row" style={[styles.alertRow, { borderColor: theme.cardBorder }]}>
       <View style={styles.alertCopy}>
+        {isIosApplePayReview(item) && <ThemedText type="meta" themeColor="textSecondary">Apple Pay</ThemedText>}
         {isIosNotificationReview(item) && <ThemedText type="meta" themeColor="textSecondary">{t('reviewAlertNotificationSource')}</ThemedText>}
         {item.attentionReason === 'possible-notification-replay' && (
           <ThemedText type="smallBold" themeColor="warning">{t('reviewAlertPossibleNotificationReplay')}</ThemedText>
@@ -158,6 +159,7 @@ function AlertRow({
         <Icon name={family.icon} size={18} color={theme.warning} />
       </View>
       <View style={styles.alertCopy}>
+        {isIosApplePayReview(item) && <ThemedText type="meta" themeColor="textSecondary">Apple Pay</ThemedText>}
         {isIosNotificationReview(item) && <ThemedText type="meta" themeColor="textSecondary">{t('reviewAlertNotificationSource')}</ThemedText>}
         <ThemedText type="smallBold">{t(family.label)}</ThemedText>
         <ThemedText type="title" tabular style={styles.amount}>

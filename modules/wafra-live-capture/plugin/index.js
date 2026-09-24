@@ -78,6 +78,9 @@ private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceCo
   case captureCapacityReached
   case invalidNotification
   case notificationFailed
+  case applePayInvalid
+  case applePayFailed
+  case applePaySetupFailed
 
   var localizedStringResource: LocalizedStringResource {
     switch self {
@@ -97,6 +100,12 @@ private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceCo
       return WafraLiveCaptureResources.localized("live.notification.invalid")
     case .notificationFailed:
       return WafraLiveCaptureResources.localized("live.notification.error")
+    case .applePayInvalid:
+      return WafraLiveCaptureResources.localized("live.apple_pay.invalid")
+    case .applePayFailed:
+      return WafraLiveCaptureResources.localized("live.apple_pay.error")
+    case .applePaySetupFailed:
+      return WafraLiveCaptureResources.localized("live.apple_pay.setup.error")
     }
   }
 }
@@ -360,6 +369,67 @@ struct CaptureWafraNotificationIntent: AppIntent {
 
 @available(iOS 26.0, *)
 extension CaptureWafraNotificationIntent {
+  static var supportedModes: IntentModes { .background }
+}
+
+/// The Wallet Amount value carries a Decimal and currency together; never use Double.
+@available(iOS 16.0, *)
+struct CaptureWafraApplePayIntent: AppIntent {
+  static let title = LocalizedStringResource("live.apple_pay.title", table: "WafraIntents", bundle: .main)
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let openAppWhenRun = false
+
+  @Parameter(title: LocalizedStringResource("live.apple_pay.amount.parameter", table: "WafraIntents", bundle: .main))
+  var amount: IntentCurrencyAmount?
+  @Parameter(title: LocalizedStringResource("live.apple_pay.merchant.parameter", table: "WafraIntents", bundle: .main))
+  var merchant: String?
+
+  func perform() async throws -> some IntentResult & ReturnsValue<Bool> {
+    do {
+      let result = try WafraLiveCaptureStore.shared.stageApplePay(
+        amount: amount?.amount, currency: amount?.currencyCode ?? "", merchant: merchant,
+        eventId: UUID().uuidString, observedAt: Date()
+      )
+      switch result {
+      case .accepted: return .result(value: true)
+      case .ignored: return .result(value: false)
+      case .disabled: throw WafraLiveCaptureIntentError.captureDisabled
+      case .invalid: throw WafraLiveCaptureIntentError.applePayInvalid
+      case .capacityReached: throw WafraLiveCaptureIntentError.captureCapacityReached
+      }
+    } catch let error as WafraLiveCaptureIntentError {
+      throw error
+    } catch {
+      throw WafraLiveCaptureIntentError.applePayFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+extension CaptureWafraApplePayIntent {
+  static var supportedModes: IntentModes { .background }
+}
+
+@available(iOS 16.0, *)
+struct RecordWafraApplePaySetupProofIntent: AppIntent {
+  static let title = LocalizedStringResource("live.apple_pay.setup.title", table: "WafraIntents", bundle: .main)
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let openAppWhenRun = false
+
+  func perform() async throws -> some IntentResult {
+    do {
+      try WafraLiveCaptureStore.shared.recordApplePaySetupProof(at: Date())
+      return .result()
+    } catch WafraLiveCaptureStore.StoreError.entitlementRequired {
+      throw WafraLiveCaptureIntentError.captureDisabled
+    } catch {
+      throw WafraLiveCaptureIntentError.applePaySetupFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+extension RecordWafraApplePaySetupProofIntent {
   static var supportedModes: IntentModes { .background }
 }
 

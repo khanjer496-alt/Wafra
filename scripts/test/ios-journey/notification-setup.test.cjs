@@ -49,3 +49,15 @@ test('selecting notifications is durable, does not confirm the automation and pr
   assert.equal(sms.futureAutomationConfirmed, false);
   assert.equal(sms.historyStatus, 'in-progress');
 });
+
+test('Wallet readiness is independent of message and notification proof and requires entitlement', () => {
+  const status = { enabled: true, entitled: true, setupProofVersion: 3,
+    firstCapturedAt: Date.now(), notificationSetupProofAt: Date.now() };
+  assert.equal(setup.resolveIosApplePayReadiness(status), 'not-added');
+  assert.equal(setup.resolveIosApplePayReadiness({ ...status, applePaySetupProofAt: Date.now() }), 'shortcut-proven');
+  assert.equal(setup.resolveIosApplePayReadiness({ ...status, firstApplePayReceivedAt: Date.now() }), 'shortcut-proven');
+  assert.equal(setup.resolveIosApplePayReadiness({ ...status, applePaySetupProofAt: Date.now(), entitled: false }), 'not-added');
+  assert.equal(setup.resolveIosSelectedReadiness('apple-pay', { readiness: 'first-alert-captured', shortcutVersion: 3 }), 'not-added');
+  for (const version of ['16.6', '27oops', NaN]) assert.equal(setup.iosSupportsApplePayAutomation(version), false);
+  for (const version of [17, '26.6.2', '27.0']) assert.equal(setup.iosSupportsApplePayAutomation(version), true);
+});

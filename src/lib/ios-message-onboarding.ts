@@ -25,7 +25,7 @@ export interface IosMessageSetupProgress {
   futureAutomationConfirmed: boolean;
   futureStatus: IosMessageSetupStatus;
   /** Missing in legacy progress means Message automation. */
-  futureCaptureSource?: 'message' | 'notification';
+  futureCaptureSource?: 'message' | 'notification' | 'apple-pay';
   historyShortcutConfirmed: boolean;
   historyStatus: IosMessageSetupStatus;
   /** Explicit future-only choice. Absent on older progress and declined reviews. */
@@ -35,11 +35,11 @@ export interface IosMessageSetupProgress {
 
 export type IosMessageSetupEvent =
   | { type: 'active-section-changed'; section: IosMessageSetupSection }
-  | { type: 'future-shortcut-install-started'; version: 3 }
+  | { type: 'future-shortcut-install-started'; version?: 3 }
   | { type: 'future-shortcut-confirmed'; version?: 3 }
   | { type: 'future-automation-confirmed' }
   | { type: 'future-status-changed'; status: IosMessageSetupStatus }
-  | { type: 'future-source-changed'; source: 'message' | 'notification' }
+  | { type: 'future-source-changed'; source: 'message' | 'notification' | 'apple-pay' }
   | { type: 'history-shortcut-confirmed' }
   | { type: 'history-status-changed'; status: IosMessageSetupStatus }
   | { type: 'history-skipped-for-now'; readiness: IosSetupReadiness }
@@ -94,7 +94,7 @@ const parseProgress = (raw: string): IosMessageSetupProgress | null => {
       ('futureShortcutVersion' in candidate && candidate.futureShortcutVersion !== 3) ||
       typeof candidate.futureAutomationConfirmed !== 'boolean' ||
       !isStatus(candidate.futureStatus) ||
-      ('futureCaptureSource' in candidate && candidate.futureCaptureSource !== 'message' && candidate.futureCaptureSource !== 'notification') ||
+      ('futureCaptureSource' in candidate && candidate.futureCaptureSource !== 'message' && candidate.futureCaptureSource !== 'notification' && candidate.futureCaptureSource !== 'apple-pay') ||
       typeof candidate.historyShortcutConfirmed !== 'boolean' ||
       !isStatus(candidate.historyStatus) ||
       ('historySkippedForNow' in candidate && typeof candidate.historySkippedForNow !== 'boolean') ||
@@ -107,7 +107,7 @@ const parseProgress = (raw: string): IosMessageSetupProgress | null => {
       ...(candidate.futureShortcutVersion === 3 ? { futureShortcutVersion: 3 as const } : {}),
       futureAutomationConfirmed: candidate.futureAutomationConfirmed,
       futureStatus: candidate.futureStatus,
-      ...(candidate.futureCaptureSource ? { futureCaptureSource: candidate.futureCaptureSource as 'message' | 'notification' } : {}),
+      ...(candidate.futureCaptureSource ? { futureCaptureSource: candidate.futureCaptureSource as 'message' | 'notification' | 'apple-pay' } : {}),
       historyShortcutConfirmed: candidate.historyShortcutConfirmed,
       historyStatus: candidate.historyStatus,
       returnToOnboarding: candidate.returnToOnboarding,
@@ -129,7 +129,7 @@ export function reduceIosMessageSetup(
   switch (event.type) {
     case 'future-source-changed':
       if ((current.futureCaptureSource ?? 'message') === event.source) return current;
-      return { ...current, futureCaptureSource: event.source, futureAutomationConfirmed: false, futureStatus: 'in-progress' };
+      return { ...current, futureCaptureSource: event.source, futureShortcutConfirmed: false, futureShortcutVersion: undefined, futureAutomationConfirmed: false, futureStatus: 'in-progress' };
     case 'active-section-changed':
       return { ...current, activeSection: event.section };
     case 'future-shortcut-install-started':

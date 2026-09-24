@@ -216,6 +216,8 @@ export function resolveIosCaptureSurfaceState({
   captureOptOut = false,
   enabled,
   setupProofVersion,
+  captureSource = 'message',
+  sourceSetupProofAt = null,
   futureAutomationConfirmed = false,
   firstCapturedAt,
   pending,
@@ -230,6 +232,8 @@ export function resolveIosCaptureSurfaceState({
   captureOptOut?: boolean;
   enabled: boolean;
   setupProofVersion: number | null;
+  captureSource?: 'message' | 'notification' | 'apple-pay';
+  sourceSetupProofAt?: number | null;
   futureAutomationConfirmed?: boolean;
   firstCapturedAt: number | null;
   pending: number;
@@ -244,7 +248,11 @@ export function resolveIosCaptureSurfaceState({
   if (!proActive || !entitled) return 'paused';
   if (!enabled) return 'off';
   if (retirementPending) return 'migration-retry';
-  if (setupProofVersion !== 1) return 'needs-automation';
+  if (captureSource !== 'message') {
+    return isCaptureTimestamp(sourceSetupProofAt) && futureAutomationConfirmed
+      ? 'waiting-for-alert' : 'needs-automation';
+  }
+  if (setupProofVersion !== 1 && setupProofVersion !== 3) return 'needs-automation';
   if (isCaptureTimestamp(firstCapturedAt)) return 'first-alert-captured';
   // Native proof checks the local action, not the user's Message automation.
   // Keep an actual captured milestone above this self-confirmation requirement.
@@ -727,6 +735,9 @@ export function useAutoImport(
         captureOptOut: latest.captureOptOut,
         enabled: nativeStatus?.enabled ?? false,
         setupProofVersion: nativeStatus?.setupProofVersion ?? null,
+        captureSource: setupProgress?.futureCaptureSource,
+        sourceSetupProofAt: setupProgress?.futureCaptureSource === 'apple-pay'
+          ? nativeStatus?.applePaySetupProofAt ?? null : nativeStatus?.notificationSetupProofAt ?? null,
         futureAutomationConfirmed: setupProgress?.futureAutomationConfirmed === true,
         firstCapturedAt: nativeStatus?.firstCapturedAt ?? null,
         pending: nativeStatus?.pending ?? 0,

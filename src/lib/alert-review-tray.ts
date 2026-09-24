@@ -67,9 +67,13 @@ export interface UniversalReviewAlert {
 }
 
 export type ReviewEntry = ReviewAlert | UniversalReviewAlert;
-/** New local notification records have an independent, non-evicting quota. */
+/** Distinct native receipt namespaces share the non-evicting iOS quota. */
 export const isIosNotificationReview = (item: Pick<ReviewEntry, 'channel' | 'sourceKey'>): boolean =>
   item.channel === 'push' && /^local_review_source_[a-f0-9]{32}$/.test(item.sourceKey);
+export const isIosApplePayReview = (item: Pick<ReviewEntry, 'channel' | 'sourceKey'>): boolean =>
+  item.channel === 'push' && /^apple_pay_review_source_[a-f0-9]{32}$/.test(item.sourceKey);
+export const isProtectedIosCaptureReview = (item: Pick<ReviewEntry, 'channel' | 'sourceKey'>): boolean =>
+  isIosNotificationReview(item) || isIosApplePayReview(item);
 export const isUniversalReviewAlert = (item: ReviewEntry): item is UniversalReviewAlert =>
   item.kind === 'universal';
 
@@ -189,12 +193,12 @@ export const pruneAlertReviewTray = (
   now: number,
 ): AlertReviewTrayState => {
   const fresh = state.pending.filter(item => item.expiresAt > now).sort((a, b) => a.observedAt - b.observedAt);
-  // Keep up to fifty protected notification reviews alongside the legacy
+  // Keep up to fifty protected notification/Wallet reviews alongside the legacy
   // newest-fifty lane. SMS/relay/history admission must not evict an already
   // acknowledged notification, nor start refusing their own records without
   // a retry path. Canonical writes never exceed fifty notification entries.
-  const notifications = fresh.filter(isIosNotificationReview).slice(0, REVIEW_ALERT_CAP);
-  const legacy = fresh.filter(item => !isIosNotificationReview(item)).slice(-REVIEW_ALERT_CAP);
+  const notifications = fresh.filter(isProtectedIosCaptureReview).slice(0, REVIEW_ALERT_CAP);
+  const legacy = fresh.filter(item => !isProtectedIosCaptureReview(item)).slice(-REVIEW_ALERT_CAP);
   return {
   schemaVersion: 1,
   pending: [...notifications, ...legacy].sort((a, b) => a.observedAt - b.observedAt),
@@ -332,7 +336,7 @@ export const admitPreparedReviewAlert = (
   // This local notification caller withholds ACK on refusal. Other capture
   // callers still use the legacy newest-fifty policy and cannot yet apply
   // backpressure, so do not silently change their admission contract here.
-  if (isIosNotificationReview(item) && state.pending.filter(isIosNotificationReview).length >= REVIEW_ALERT_CAP) {
+  if (isProtectedIosCaptureReview(item) && state.pending.filter(isProtectedIosCaptureReview).length >= REVIEW_ALERT_CAP) {
     return { state, outcome: 'refused', reason: 'review-capacity' };
   }
   return {

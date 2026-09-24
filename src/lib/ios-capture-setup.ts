@@ -70,6 +70,8 @@ export interface IosSetupModel {
   /** Separate proof: an SMS Shortcut check cannot prove notification input. */
   notificationReadiness?: IosSetupReadiness;
   notificationSupported?: boolean;
+  applePayReadiness?: IosSetupReadiness;
+  applePaySupported?: boolean;
   shortcutName?: string;
   shortcutVersion?: 3;
   bundledHistorySupported?: boolean;
@@ -100,7 +102,7 @@ export interface IosSetupDependencies {
   isSupported(): boolean;
   getNativeModule(): Pick<
     WafraLiveCaptureNativeModule,
-    'getCaptureStatus' | 'setCaptureEnabled' | 'notificationCaptureSupported' | 'getMessageShortcutURL' | 'getHistoryShortcutURL'
+    'getCaptureStatus' | 'setCaptureEnabled' | 'notificationCaptureSupported' | 'applePayCaptureSupported' | 'getMessageShortcutURL' | 'getHistoryShortcutURL'
   > | null;
   shortcutUrl: string | null;
   canOpenUrl(url: string): Promise<boolean>;
@@ -126,6 +128,8 @@ export const INITIAL_IOS_SETUP_MODEL: IosSetupModel = {
   captureHealth: null,
   notificationReadiness: 'not-added',
   notificationSupported: false,
+        applePaySupported: false,
+        applePayReadiness: 'not-added',
 };
 
 const iosVersionMajor = (): number => {
@@ -148,8 +152,21 @@ export function resolveIosNotificationReadiness(status: Pick<WafraLiveCaptureSta
     ? 'shortcut-proven' : 'not-added';
 }
 
+export function iosSupportsApplePayAutomation(version: unknown): boolean {
+  const value = String(version);
+  return /^\d+(?:\.\d+)*$/.test(value) && Number(value.split('.')[0]) >= 17;
+}
+
+export function resolveIosApplePayReadiness(status: Pick<WafraLiveCaptureStatus,
+  'enabled' | 'entitled' | 'applePaySetupProofAt' | 'firstApplePayReceivedAt'>): IosSetupReadiness {
+  if (!status.enabled || !status.entitled) return 'not-added';
+  return isCaptureTimestamp(status.applePaySetupProofAt) || isCaptureTimestamp(status.firstApplePayReceivedAt)
+    ? 'shortcut-proven' : 'not-added';
+}
+
 export function resolveIosSelectedReadiness(source: unknown, model: Pick<IosSetupModel,
-  'readiness' | 'notificationReadiness' | 'shortcutVersion'> | null | undefined, installedVersion?: number): IosSetupReadiness {
+  'readiness' | 'notificationReadiness' | 'applePayReadiness' | 'shortcutVersion'> | null | undefined, installedVersion?: number): IosSetupReadiness {
+  if (source === 'apple-pay') return model?.applePayReadiness ?? 'not-added';
   if (source !== 'notification' && model?.shortcutVersion && installedVersion !== model.shortcutVersion) return 'not-added';
   return source === 'notification' ? model?.notificationReadiness ?? 'not-added' : model?.readiness ?? 'not-added';
 }
@@ -290,6 +307,8 @@ export function createIosCaptureSetup({
         captureHealth: null,
         notificationReadiness: 'not-added',
         notificationSupported: false,
+        applePaySupported: false,
+        applePayReadiness: 'not-added',
         stage: 'shortcut',
         opening: false,
         failure: null,
@@ -310,6 +329,8 @@ export function createIosCaptureSetup({
         failure: 'load',
         notificationReadiness: 'not-added',
         notificationSupported: false,
+        applePaySupported: false,
+        applePayReadiness: 'not-added',
       });
       return;
     }
@@ -320,7 +341,11 @@ export function createIosCaptureSetup({
       const readiness = resolveIosSetupReadiness(status, native.getMessageShortcutURL ? 3 : 1);
       const notificationSupported = Platform.OS === 'ios' && iosSupportsNotificationAutomation(Platform.Version) &&
         native.notificationCaptureSupported === true;
+      const applePaySupported = Platform.OS === 'ios' && iosSupportsApplePayAutomation(Platform.Version) &&
+        native.applePayCaptureSupported === true;
       publish({
+        applePaySupported,
+        applePayReadiness: applePaySupported ? resolveIosApplePayReadiness(status) : 'not-added',
         loading: false,
         supported: true,
         shortcutAvailable: shortcutUrl !== null || typeof native.getMessageShortcutURL === 'function',
@@ -346,6 +371,8 @@ export function createIosCaptureSetup({
         failure: 'load',
         notificationReadiness: 'not-added',
         notificationSupported: false,
+        applePaySupported: false,
+        applePayReadiness: 'not-added',
       });
     }
   };

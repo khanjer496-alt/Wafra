@@ -661,32 +661,14 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   eq('iOS setup: privacy disclosure collapses without changing capture consent',
     [hasPrivacy(), privacyHelp.preferenceEvents], [false, []]);
 
-  // The bank question itself, which gates both sections. Untested when it
-  // landed: the harness answered nothing and the screen only crashed on an
-  // undefined knownBankOptions, so none of these behaviours were pinned.
   const banks = await makeScreen({ fresh: true, knownBanks: [] });
-  const chips = () => banks.all().filter((node) => node.type === 'Chip');
-  eq('iOS setup: an unanswered bank question replaces the checklist, not sits beside it',
-    [banks.all().some((node) => node.props?.testID === 'ios-message-setup-banks'),
-      banks.all().some((node) => node.type === 'ChecklistRow'),
-      chips().length > 0],
-    [true, false, true]);
-  eq('iOS setup: no bank is pre-picked and Next stays unavailable until one is',
-    [chips().some((chip) => chip.props.active), banks.button('iosBanksNext').props.disabled], [false, true]);
-  const first = chips()[0].props.label;
-  await banks.pressChip(first);
-  await banks.press('iosBanksNext');
-  eq('iOS setup: answering the bank question saves exactly the picks and reveals the checklist',
-    [banks.bankSaves, banks.all().some((node) => node.type === 'ChecklistRow'),
-      banks.all().some((node) => node.props?.testID === 'ios-message-setup-banks')],
-    [[[first]], true, false]);
-  eq('iOS setup: answering banks starts no import and opens nothing',
-    [banks.urls, banks.routes, banks.historyChunkReads()], [[], [], 0]);
-
-  const skippedBanks = await makeScreen({ fresh: true, knownBanks: [] });
-  await skippedBanks.press('iosBanksSkip');
-  eq('iOS setup: skipping the bank question saves no bank and still reveals the checklist',
-    [skippedBanks.bankSaves, skippedBanks.all().some((node) => node.type === 'ChecklistRow')], [[], true]);
+  eq('iOS setup: new users reach capture setup without choosing a bank',
+    [banks.all().some(node => node.props?.testID === 'ios-message-setup-banks'),
+      banks.all().some(node => node.type === 'ChecklistRow'),
+      banks.all().filter(node => node.type === 'Chip').length], [false, true, 0]);
+  eq('iOS setup: no bank is inferred or saved by entering setup', banks.bankSaves, []);
+  await banks.press('iosLocalInstallShortcut');
+  eq('iOS setup: bank-free setup can install the Shortcut', banks.urls.length, 1);
 
   disposers.forEach((dispose) => dispose());
 
