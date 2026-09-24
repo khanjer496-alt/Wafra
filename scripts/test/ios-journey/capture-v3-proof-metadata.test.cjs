@@ -20,12 +20,32 @@ test('v3 native setup proof is distinct while legacy action remains version one'
 
 test('extracted v3 proof metadata requires the distinct no-input background action', async () => {
   const { verifyCaptureV3IntentMetadata } = await import(pathToFileURL(path.join(root, 'scripts/check-ios-capture-v3-metadata.mjs')));
+  const stageParameter = (name, typeIdentifier, key) => ({ name, isOptional: true, title: { key },
+    valueType: { primitive: { wrapper: { typeIdentifier } } } });
   const fixture = () => ({ actions: { RecordWafraCaptureV3SetupProofIntent: {
     authenticationPolicy: 0, isAuthPolExplicit: true, openAppWhenRun: false,
     supportedModes: 1, outputType: null, outputFlags: 0, parameters: [], title: { key: 'live.setup_v3.title' },
+  }, StageWafraLiveMessageIntent: {
+    authenticationPolicy: 0, openAppWhenRun: false, supportedModes: 1, parameters: [
+      stageParameter('sender', 0, 'live.stage.sender.parameter'),
+      stageParameter('body', 0, 'live.stage.message.parameter'),
+      stageParameter('eventId', 0, 'live.stage.event_id.parameter'),
+      stageParameter('observedAt', 8, 'live.stage.observed_at.parameter'),
+    ],
   } } });
   assert.equal(verifyCaptureV3IntentMetadata(fixture()), true);
   assert.throws(() => verifyCaptureV3IntentMetadata({ actions: { RecordWafraCaptureSetupProofIntent: {} } }));
+  for (const mutate of [
+    a => { delete a.StageWafraLiveMessageIntent; },
+    a => { a.StageWafraLiveMessageIntent.parameters[2].isOptional = false; },
+    a => { a.StageWafraLiveMessageIntent.parameters[3].isOptional = false; },
+    a => { a.StageWafraLiveMessageIntent.parameters[0].isOptional = false; },
+    a => { a.StageWafraLiveMessageIntent.parameters.pop(); },
+    a => { a.StageWafraLiveMessageIntent.supportedModes = 2; },
+  ]) {
+    const metadata = fixture(); mutate(metadata.actions);
+    assert.throws(() => verifyCaptureV3IntentMetadata(metadata));
+  }
   for (const mutate of [
     a => { a.authenticationPolicy = 2; }, a => { a.isAuthPolExplicit = false; },
     a => { a.openAppWhenRun = true; }, a => { a.supportedModes = 2; },

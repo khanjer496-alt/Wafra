@@ -118,7 +118,7 @@ private struct WafraLiveCaptureResourcesBehaviorTests {
     check("bundled notification Shortcut is the signed AEA asset",
       shortcutBytes?.count == 22747 && shortcutBytes?.prefix(4) == Data("AEA1".utf8))
 
-    for (name, byteCount) in [("Wafra Capture v3", 26756), ("Wafra History v8", 46286), ("Wafra Apple Pay v1", 22481)] {
+    for (name, byteCount) in [("Wafra Capture v3", 25515), ("Wafra History v8", 46286), ("Wafra Apple Pay v1", 22481)] {
       let assetURL = WafraLiveCaptureResources.bundle().url(forResource: name, withExtension: "shortcut")
       check("resource bundle resolves the exact \(name) Shortcut file",
         assetURL?.isFileURL == true && assetURL?.lastPathComponent == "\(name).shortcut")

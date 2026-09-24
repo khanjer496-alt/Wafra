@@ -21,7 +21,7 @@
  */
 import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState as RNAppState, Linking, Platform } from 'react-native';
+import { AppState as RNAppState, Platform } from 'react-native';
 
 import { useToast } from '@/components/ui/toast';
 import {
@@ -69,7 +69,6 @@ import {
 import {
   getSharedIosLocalCaptureCoordinator,
 } from '@/lib/ios-local-capture';
-import { iosLocalCaptureCatchupUrl } from '@/lib/ios-local-capture-protocol';
 import { useStore } from '@/lib/store';
 import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
@@ -1188,19 +1187,14 @@ export function useAutoImport(
 
   const runAutoImport = useCallback(
     (interactive: boolean, liveEvent = false): Promise<void> => {
-      // iOS cannot grant Wafra direct Messages-database access. For an explicit
-      // refresh, hand control to the installed Local Capture Shortcut's
-      // no-input recovery branch. It rereads a bounded newest-message overlap
-      // and stages rows using the same SHA-256(Message.GUID) identities as the
-      // live automation. Its x-callback returns to Wafra, where the foreground
-      // listener below drains both the old pending queue and recovered rows.
-      // Silent foreground scans never launch Shortcuts, so resume cannot loop.
-      if (interactive && Platform.OS === 'ios') {
-        return loadIosMessageSetupProgress().then(progress => Linking.openURL(iosLocalCaptureCatchupUrl(
-          !!iosNative?.getMessageShortcutURL && progress.futureShortcutVersion === 3 && progress.futureShortcutConfirmed)))
-          .then(() => undefined)
-          .catch(() => startAutoImport(true).then(() => undefined));
-      }
+      // An explicit iOS refresh no longer hands control to the Capture
+      // Shortcut's no-input branch. Find Messages rows expose Body, GUID and
+      // date but no Sender or Content (docs/test-evidence/
+      // ios-sender-field-2026-09-20.md): v2's recovery read therefore stages
+      // nothing, and v3's no-input run only records its setup proof. Reading
+      // up to 300 Messages from every chat without a sender is not a decided
+      // recovery path; explicit History import is. Refresh drains the
+      // protected live queue in place, exactly like the Shortcut fallback did.
       const existing = importInFlight;
       if (!existing) return startAutoImport(interactive, liveEvent).then(() => undefined);
       // Two silent callers, or an interactive caller joining another

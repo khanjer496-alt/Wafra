@@ -399,7 +399,13 @@ export function parseLocalMessageRecord(
       // Notification UUIDs identify queue observations, not bank events. Keep
       // them as ACK/review/decline receipts only; financial rows use existing push
       // time/merchant/instrument dedupe, including repeated OS notifications.
-      ...(!isNotification ? { sourceEventId: envelope.id } : {}),
+      // Only SHA-256(Message GUID) names a retained Apple Message. A Message
+      // staged under a queue UUID (Apple withheld the GUID or its date, or the
+      // automation passed plain text) is an observation like a notification:
+      // without a history identity it is keyed `s{time}-{amount}` and stays
+      // open to the same-event rule, so the History import copy of the same
+      // Message (its GUID and real date, seconds apart) merges with it.
+      ...(!isNotification && SHA256_EVENT_ID_RE.test(envelope.id) ? { sourceEventId: envelope.id } : {}),
       ...(isNotification ? { notificationObservationId: envelope.id } : {}),
     };
     return {

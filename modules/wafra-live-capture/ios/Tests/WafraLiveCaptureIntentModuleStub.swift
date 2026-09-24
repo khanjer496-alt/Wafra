@@ -41,4 +41,13 @@ public final class WafraLiveCaptureStore {
   ) throws -> WafraLiveStageResult {
     .accepted
   }
+
+  public func stageAutomationMessage(
+    sender: String?,
+    body: String?,
+    eventId: String?,
+    observedAt: Date?
+  ) throws -> WafraLiveStageResult {
+    .accepted
+  }
 }

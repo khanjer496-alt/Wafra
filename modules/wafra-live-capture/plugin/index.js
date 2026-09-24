@@ -212,32 +212,41 @@ struct StageWafraLiveMessageIntent: AppIntent {
     table: "WafraIntents",
     bundle: .main
   ))
-  var sender: String
+  var sender: String?
 
   @Parameter(title: LocalizedStringResource(
     "live.stage.message.parameter",
     table: "WafraIntents",
     bundle: .main
   ))
-  var body: String
+  var body: String?
 
   @Parameter(title: LocalizedStringResource(
     "live.stage.event_id.parameter",
     table: "WafraIntents",
     bundle: .main
   ))
-  var eventId: String
+  var eventId: String?
 
   @Parameter(title: LocalizedStringResource(
     "live.stage.observed_at.parameter",
     table: "WafraIntents",
     bundle: .main
   ))
-  var observedAt: Date
+  var observedAt: Date?
 
+  // Every parameter is optional: on iOS 26.1 the automation's Message input
+  // has Sender and Content but no Date, and GUID is not listed, so Capture v3
+  // omits what Apple withholds. The store keeps SHA-256(GUID) only with the
+  // Message's own date, otherwise stamps a fresh queue UUID (dated by a
+  // supplied date or the receipt time), and ignores blank or expired rows.
+  // Published Capture v2 always binds all four: its complete, current inputs
+  // stage exactly as before; its empty-GUID/absent-date live input now stages
+  // a UUID row instead of failing, and its sender-less no-input rows (blank
+  // Content) are ignored instead of stopping the run.
   func perform() async throws -> some IntentResult & ReturnsValue<String> {
     do {
-      let result = try WafraLiveCaptureStore.shared.stage(
+      let result = try WafraLiveCaptureStore.shared.stageAutomationMessage(
         sender: sender,
         body: body,
         eventId: eventId,

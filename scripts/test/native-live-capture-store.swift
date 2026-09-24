@@ -191,6 +191,150 @@ struct NativeLiveCaptureStoreTests {
     }
   }
 
+  private static func testAutomationMessages() throws {
+    let automationRoot = root("automation-message")
+    defer { remove([automationRoot]) }
+    var now = fixedClock
+    let queue = store(root: automationRoot, now: { now })
+    let guidHash = String(repeating: "e", count: 64)
+    let messageDate = fixedClock.addingTimeInterval(-60)
+    let messageDateText = "2026-08-24T15:59:00"
+    let receiptText = "2026-08-24T16:00:00"
+    let pending = { try queue.listPendingRecords(limit: 50).compactMap(decoded) }
+    let newRows = { (before: Set<String>) in
+      try pending().filter { !before.contains($0["id"] as? String ?? "") }
+    }
+    let ids = { try Set(pending().compactMap { $0["id"] as? String }) }
+
+    check("disabled automation Message stays out of the queue", try queue.stageAutomationMessage(
+      sender: knownSender, body: messageBody, eventId: guidHash, observedAt: messageDate) == .disabled)
+    try grantLifetimeAndEnable(queue)
+
+    check("GUID and date present stage under SHA-256(GUID) with the Message date",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: guidHash, observedAt: messageDate) == .accepted
+      && pending().contains { $0["id"] as? String == guidHash
+        && $0["sender"] as? String == knownSender
+        && ($0["observedAt"] as? String).map { $0.hasPrefix(messageDateText) } == true })
+    check("a GUID replay with the same values is idempotent",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: guidHash, observedAt: messageDate) == .accepted && pending().count == 1)
+    check("a GUID replay under another sender stays an exact-byte conflict",
+      try queue.stageAutomationMessage(sender: nil, body: messageBody,
+        eventId: guidHash, observedAt: messageDate) == .invalid && pending().count == 1)
+    check("a GUID replay with another date stays an exact-byte conflict",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: guidHash, observedAt: messageDate.addingTimeInterval(-1)) == .invalid)
+    try queue.acknowledgeRecords(ids: [guidHash])
+    check("an exact replay of an acknowledged GUID is accepted without requeueing",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: guidHash, observedAt: messageDate) == .accepted && pending().isEmpty)
+    check("a differing replay of an acknowledged GUID is still refused",
+      try queue.stageAutomationMessage(sender: nil, body: messageBody,
+        eventId: guidHash, observedAt: messageDate) == .invalid && pending().isEmpty)
+
+    for (label, eventId, observedAt, expectedDate) in [
+      ("GUID absent, date absent", nil as String?, nil as Date?, receiptText),
+      ("GUID empty, date absent", "", nil, receiptText),
+      ("hash of an empty GUID with a date", WafraLiveCaptureStore.missingMessageIdentifier, messageDate, messageDateText),
+      ("GUID present, date absent", String(repeating: "f", count: 64), nil, receiptText),
+      ("GUID absent, date present", nil, messageDate, messageDateText),
+    ] {
+      let before = try ids()
+      let result = try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: eventId, observedAt: observedAt)
+      let added = try newRows(before)
+      check("\(label): stages once under a fresh UUID with the best available date",
+        result == .accepted && added.count == 1
+          && UUID(uuidString: added[0]["id"] as? String ?? "") != nil
+          && (added[0]["id"] as? String) != eventId
+          && added[0]["sender"] as? String == knownSender
+          && (added[0]["observedAt"] as? String).map { $0.hasPrefix(expectedDate) } == true)
+    }
+    check("a hash without its date never enters the queue under that hash",
+      try !ids().contains(String(repeating: "f", count: 64)))
+    let beforeRepeat = try ids()
+    check("each GUID-less observation is its own queue row",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: nil, observedAt: nil) == .accepted
+      && queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: nil, observedAt: nil) == .accepted
+      && newRows(beforeRepeat).count == 2)
+
+    for sender in [nil, "", "  \n"] as [String?] {
+      let before = try ids()
+      let result = try queue.stageAutomationMessage(sender: sender, body: messageBody,
+        eventId: nil, observedAt: nil)
+      let added = try newRows(before)
+      check("absent sender stages as the automation placeholder",
+        result == .accepted && added.count == 1
+          && added[0]["sender"] as? String == WafraLiveCaptureStore.automationSender)
+    }
+
+    let countBeforeSkips = try pending().count
+    let receiptsBeforeSkips = try queue.status().lastReceivedAt
+    for body in [nil, "", " \n\t"] as [String?] {
+      check("absent or blank body is ignored instead of failing the run",
+        try queue.stageAutomationMessage(sender: knownSender, body: body,
+          eventId: String(repeating: "2", count: 64), observedAt: messageDate) == .ignored)
+    }
+    let staleDate = fixedClock.addingTimeInterval(-WafraLiveCaptureStore.recordTTL - 1)
+    check("a Message dated beyond the queue lifetime is ignored",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: String(repeating: "3", count: 64), observedAt: staleDate) == .ignored
+      && queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: nil, observedAt: staleDate) == .ignored)
+    check("a Message exactly at the queue lifetime is still admitted",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: String(repeating: "4", count: 64),
+        observedAt: fixedClock.addingTimeInterval(-WafraLiveCaptureStore.recordTTL)) == .accepted)
+    check("skipped rows add no queue entry beyond the admitted one",
+      try pending().count == countBeforeSkips + 1)
+    check("ignored rows never advance the receipt clock",
+      try queue.status().lastReceivedAt == receiptsBeforeSkips)
+    check("a future-dated Message is still refused visibly",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: String(repeating: "5", count: 64),
+        observedAt: fixedClock.addingTimeInterval(WafraLiveCaptureStore.maxFutureSkew + 1)) == .invalid
+      && queue.stageAutomationMessage(sender: knownSender, body: messageBody, eventId: nil,
+        observedAt: fixedClock.addingTimeInterval(WafraLiveCaptureStore.maxFutureSkew + 1)) == .invalid)
+    check("a malformed hash is still refused visibly",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: "not-a-hash", observedAt: messageDate) == .invalid)
+    check("an unsafe supplied sender is still refused",
+      try queue.stageAutomationMessage(sender: "BANK\u{202E}", body: messageBody,
+        eventId: nil, observedAt: nil) == .invalid)
+    check("the strict stage entry point still refuses an empty sender",
+      try queue.stage(sender: "", body: messageBody, eventId: eventId(91_000),
+        observedAt: fixedClock) == .invalid)
+    check("the strict stage entry point still refuses the empty-GUID hash",
+      try queue.stage(sender: knownSender, body: messageBody,
+        eventId: WafraLiveCaptureStore.missingMessageIdentifier, observedAt: fixedClock) == .invalid)
+
+    // Published Capture v2 on this binary: its live lane always sends all four
+    // fields. Real values stage exactly as before; the fields Apple withholds
+    // on iOS 26.1 (GUID -> SHA-256(""), no date) now stage instead of failing.
+    let v2Hash = String(repeating: "7", count: 64)
+    check("v2 live lane with GUID and date is unchanged",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: v2Hash, observedAt: messageDate) == .accepted
+      && ids().contains(v2Hash))
+    let beforeV2 = try ids()
+    check("v2 live lane without GUID or date now stages one UUID row",
+      try queue.stageAutomationMessage(sender: knownSender, body: messageBody,
+        eventId: WafraLiveCaptureStore.missingMessageIdentifier, observedAt: nil) == .accepted
+      && newRows(beforeV2).count == 1)
+    let beforeV2Catchup = try pending().count
+    check("v2's manual no-input run (Content/Sender absent on Find Messages rows) is ignored",
+      try queue.stageAutomationMessage(sender: "", body: "", eventId: v2Hash,
+        observedAt: messageDate) == .ignored && pending().count == beforeV2Catchup)
+
+    now = fixedClock.addingTimeInterval(1)
+    let reloaded = store(root: automationRoot, now: { now })
+    check("automation rows survive a reload and remain valid stored records",
+      try !reloaded.status().corrupt && reloaded.listPendingRecords(limit: 50).count == pending().count)
+  }
+
   private static func testNotifications() throws {
     let notificationRoot = root("notifications")
     defer { remove([notificationRoot]) }
@@ -1656,6 +1800,7 @@ struct NativeLiveCaptureStoreTests {
 
     try testApplePay()
     try testNotifications()
+    try testAutomationMessages()
 
     print("\nNative live capture store: \(passed) passed, \(failed) failed")
     if failed > 0 { Foundation.exit(1) }
