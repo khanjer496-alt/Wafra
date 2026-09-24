@@ -1175,10 +1175,9 @@ function wideTextPdf(lines) {
     '08/07/2026 CREDIT CARD PAYMENT LATE FEE 100.00 DR',
   ].join('\n'), 'AED');
   const [toCard, unlabelledSettlement, posPurchase, lateFee] = accountSettlement.rows;
-  ok('an account-statement payment to a named card becomes that card\'s settlement debit leg',
-    toCard?.kind === 'cardPayment' && toCard.type === 'expense' && toCard.transferHint === true &&
-      toCard.card?.last4 === '4821' && toCard.card?.kind === 'credit' &&
-      toCard.cardPaymentSide === 'debit' && toCard.categoryGuess === 'other' && toCard.categoryDeliberate === true,
+  ok('an account-statement payment to a named card is a non-spending transfer on the paying account',
+    toCard?.kind === 'transaction' && toCard.type === 'expense' && toCard.transferHint === true &&
+      toCard.card?.last4 === '1234' && toCard.categoryGuess === 'other' && toCard.categoryDeliberate === true,
     JSON.stringify(toCard));
   ok('an account-statement card payment without card digits stays on the account as a non-spending transfer',
     unlabelledSettlement?.kind === 'transaction' && unlabelledSettlement.type === 'expense' &&
@@ -1223,6 +1222,55 @@ function wideTextPdf(lines) {
   ok('a CSV account-statement card payment is a non-spending transfer too',
     csvSettlement.rows[0]?.transferHint === true && csvSettlement.rows[0].categoryGuess === 'other',
     JSON.stringify(csvSettlement.rows[0]));
+
+  // ── Review follow-ups: one weak marker is not a card statement ──
+  const creditLimitAccount = parseStatementLines([
+    'Statement of Account',
+    'Account Number: XXXXXXXX1234',
+    'Available Credit Limit AED 5,000.00',
+    'Date Description Debit Credit Balance',
+    '01/07/2026 OPENING 100.00 - 9,900.00',
+    '02/07/2026 SALARY PAYMENT JULY - 18,500.00 28,400.00',
+    '03/07/2026 IPP PAYMENT FROM AHMED - 250.00 28,650.00',
+  ].join('\n'), 'AED');
+  ok('an account statement mentioning a credit limit keeps salary and incoming payments as income',
+    creditLimitAccount.rows.length === 3 &&
+      creditLimitAccount.rows.filter((row) => row.type === 'income').every((row) =>
+        row.kind === 'transaction' && row.transferHint === false && row.merchant !== 'Card payment'),
+    JSON.stringify(creditLimitAccount.rows.map((row) => [row.merchant, row.type, row.transferHint])));
+  const creditLimitSigned = parseStatementLines([
+    'Statement of Account',
+    'Account Number: XXXXXXXX1234',
+    'Available Credit Limit AED 5,000.00',
+    '05/07/2026 CARREFOUR -40.00',
+  ].join('\n'), 'AED');
+  ok('an account-labelled statement with one card-ish marker keeps the account sign convention',
+    creditLimitSigned.rows.length === 1 && creditLimitSigned.rows[0].type === 'expense' &&
+      creditLimitSigned.ambiguousCardSignRows === 0, JSON.stringify(creditLimitSigned));
+  const walletRefund = parseStatementLines([
+    ...cardHeader,
+    'Credit Card Number 4111 XXXX XXXX 4821',
+    '05/07/2026 AMAZON PAYMENTS AE 120.00 CR',
+  ].join('\n'), 'AED');
+  ok('a merchant credit from a payments company on a card statement is not a card settlement',
+    walletRefund.rows[0]?.kind === 'transaction' && walletRefund.rows[0].transferHint === false,
+    JSON.stringify(walletRefund.rows[0]));
+  const balanceProse = parseStatementLines([
+    ...cardHeader,
+    'A negative amount indicates a credit balance on your account.',
+    '05/07/2026 NOON -68.93',
+  ].join('\n'), 'AED');
+  ok('legend wording about the BALANCE is not a sign legend for rows',
+    balanceProse.rows.length === 0 && balanceProse.ambiguousCardSignRows === 1, JSON.stringify(balanceProse));
+  const accountLeg = parseStatementLines([
+    'Statement of Account',
+    'Account Number: XXXXXXXX1234',
+    '05/07/2026 CREDIT CARD PAYMENT 4111XXXXXXXX4821 1,500.00 DR',
+  ].join('\n'), 'AED');
+  ok('an account-side card settlement stays on the paying account as a non-spending transfer',
+    accountLeg.rows[0]?.kind === 'transaction' && accountLeg.rows[0].type === 'expense' &&
+      accountLeg.rows[0].transferHint === true && accountLeg.rows[0].card?.last4 === '1234',
+    JSON.stringify(accountLeg.rows[0]));
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

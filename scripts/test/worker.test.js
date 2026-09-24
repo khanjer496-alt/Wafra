@@ -2225,9 +2225,8 @@ const CARD_PAYMENT_DEBIT =
       settlementPlan.batch.transactions.length === 2 &&
         settlementPlan.batch.transactions.every((t) => t.isTransfer === true && !spends(t)),
       JSON.stringify(settlementPlan.batch.transactions.map((t) => [t.title, t.type, t.isTransfer, t.cardPaymentSide])));
-    ok('statement: the settlement naming a card lands on that card as its payment leg',
-      settlementPlan.batch.transactions.some((t) => t.type === 'income' && t.cardPaymentSide === 'debit' &&
-        t.amountFils === 150000),
+    ok('statement: the account-side settlement stays an outflow of the paying account',
+      settlementPlan.batch.transactions.some((t) => t.type === 'expense' && t.amountFils === 150000),
       JSON.stringify(settlementPlan.batch.transactions));
 
     // Same helper, a different route: a forwarded statement EMAIL takes the
@@ -2360,7 +2359,7 @@ const CARD_PAYMENT_DEBIT =
       overlapB.status === 202 && planA.batch.transactions.length === 3 &&
         planB.batch.transactions.length === 1 && planB.batch.transactions[0].title === 'NEW GROCER',
       JSON.stringify(planB.batch.transactions.map((t) => [t.date, t.title])));
-    ok('statement: the second upload has its own id',
+    ok('statement: a different file has its own upload id',
       rowsB.every((row) => row.statementImportId !== rowsA[0].statementImportId));
 
     // A row dated today used to be clamped to the relay's clock at upload, so

@@ -389,8 +389,9 @@ function statementTransferMeaning(
  */
 const CARD_SETTLEMENT_EXCLUSION = /\b(?:fees?|charges?|interest|vat|commission|late|annual|penalty|cash\s*back|refund|reversal|return)\b|رسوم|فائدة|استرداد|عمولة/iu;
 const ACCOUNT_SIDE_CARD_SETTLEMENT = /\b(?:credit\s+card|cc)\s+(?:bill\s+)?(?:payment|repayment|settlement)\b|\bpayment\s+(?:to|towards)\s+(?:your\s+|the\s+)?credit\s+card\b|سداد\s+(?:ال)?بطاقة\s+(?:ال)?ائتمان/iu;
-const CARD_SIDE_SETTLEMENT = /\bpayments?\b|\bpymt\b|\bthank\s+you\b|سداد|دفعة/iu;
-const MASKED_CARD_IN_DESCRIPTION = /(?:[\dXx*•]{4}[\s-]?){2,3}(\d{4})(?!\d)/;
+const CARD_SIDE_SETTLEMENT = /\b(?:payment|pymt)\s+(?:received|recd|thank)|\bthank\s+you\b|^\s*(?:payment|pymt)\b|\b(?:auto\s*pay(?:ment)?|direct\s+debit)\b|سداد|دفعة\s+مستلمة/iu;
+// Payment companies are merchants: their credits are refunds, not settlements.
+const PAYMENT_COMPANY = /\b(?:paypal|amazon\s+payments?|apple\s+pay|google\s+pay|samsung\s+pay|stripe|checkout\.com|payfort|tabby|tamara)\b/i;
 
 type StatementSettlement = Pick<StatementParsedRow,
   'kind' | 'type' | 'merchant' | 'card' | 'transferHint' | 'categoryGuess' | 'categoryDeliberate'
@@ -405,17 +406,14 @@ function statementCardSettlement(
   const text = normalizeDigits(description).normalize('NFKC');
   if (CARD_SETTLEMENT_EXCLUSION.test(text)) return null;
   const transfer = { transferHint: true, categoryGuess: 'other' as const, categoryDeliberate: true };
+  // The account side stays an outflow of the paying account. Turning it into
+  // the card's receipt leg lost the account's debit, and with statement clocks
+  // at midday a one-day posting lag never paired it with the card statement's
+  // own receipt row, so one payment credited the card twice.
   if (!cardEvidence && type === 'expense' && ACCOUNT_SIDE_CARD_SETTLEMENT.test(text)) {
-    const masked = MASKED_CARD_IN_DESCRIPTION.exec(text);
-    const last4 = masked && /[Xx*•]/.test(masked[0]) ? masked[1] : null;
-    return last4
-      ? {
-          kind: 'cardPayment', type: 'expense', merchant: `Card •${last4} payment`,
-          card: { last4, kind: 'credit' }, cardPaymentSide: 'debit', ...transfer,
-        }
-      : { kind: 'transaction', type, merchant: 'Card payment', card: source, ...transfer };
+    return { kind: 'transaction', type, merchant: 'Card payment', card: source, ...transfer };
   }
-  if (cardEvidence && type === 'income' && CARD_SIDE_SETTLEMENT.test(text)) {
+  if (cardEvidence && type === 'income' && CARD_SIDE_SETTLEMENT.test(text) && !PAYMENT_COMPANY.test(text)) {
     // A card statement's own number is a credit card's: debit cards receive
     // no payments. An account-labelled number is not a card at all.
     const last4 = source && (source.kind === 'credit' || source.kind === 'unknown') ? source.last4 : null;
@@ -553,9 +551,12 @@ const CREDIT_WORDS = String.raw`(?:credits?|payments?|refunds?)`;
 const DEBIT_WORDS = String.raw`(?:debits?|charges?|purchases?|spend(?:ing)?)`;
 const SHOWN_AS = String.raw`(?:are\s+)?(?:shown|marked|displayed|printed|indicated|listed)\s+(?:with|by|as|in)\s+(?:a\s+)?(?:minus|negative|\(\s*-\s*\))`;
 function legendPatterns(words: string): RegExp[] {
+  // "A negative amount indicates a credit BALANCE" describes the balance line,
+  // not how transaction rows are signed.
+  const notBalance = String.raw`(?!\s+balances?\b)`;
   return [
-    new RegExp(String.raw`\b${SIGN_MARK}\s*${SIGN_VERB}\s+(?:a\s+|an\s+)?${words}\b`, 'i'),
-    new RegExp(String.raw`\(\s*-\s*\)\s*${SIGN_VERB}\s*(?:a\s+|an\s+)?${words}\b`, 'i'),
+    new RegExp(String.raw`\b${SIGN_MARK}\s*${SIGN_VERB}\s+(?:a\s+|an\s+)?${words}\b${notBalance}`, 'i'),
+    new RegExp(String.raw`\(\s*-\s*\)\s*${SIGN_VERB}\s*(?:a\s+|an\s+)?${words}\b${notBalance}`, 'i'),
     new RegExp(String.raw`\b${words}(?:\s+(?:and|&|\/)\s+(?:${CREDIT_WORDS}|${DEBIT_WORDS}))?\s+${SHOWN_AS}`, 'i'),
   ];
 }
@@ -700,9 +701,9 @@ export function parseStatementCsv(
   // preamble above the table or in a card-number column name. A signed amount
   // column is then only a direction when the preamble says what a minus means.
   const preamble = records.slice(0, headerRow).map((record) => record.join(' ')).join('\n');
-  const cardEvidence = isCardStatement(preamble) || CARD_STATEMENT_MARKER.test(preamble) ||
-    headers.includes(normalizedHeader('credit card number'));
-  const convention = signConvention(cardEvidence, preamble);
+  const cardEvidence = isCardStatement(preamble) || headers.includes(normalizedHeader('credit card number'));
+  const signEvidence = cardEvidence || (sourceAccountIndex < 0 && CARD_STATEMENT_MARKER.test(preamble));
+  const convention = signConvention(signEvidence, preamble);
 
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
@@ -1448,9 +1449,16 @@ export function parseStatementLines(
   // Refusing a bare sign needs less proof than reading every plain figure as
   // a charge does: one strong marker, or a header card explicitly labelled a
   // credit card, is enough to stop the account convention being assumed.
-  const cardEvidence = cardStatement || sourceInstrument?.kind === 'credit' ||
-    CARD_STATEMENT_MARKER.test(rawLines.slice(0, 60).join('\n'));
-  const convention = signConvention(cardEvidence, text);
+  // Two proofs, for two jobs. Reading a row as a card SETTLEMENT or switching
+  // off the balance chain needs the card statement proved (two markers, or a
+  // header number labelled credit card). Refusing a bare sign needs less —
+  // one strong marker — but never on a statement labelled with an ACCOUNT
+  // number: "Available Credit Limit" on an overdrawn current account is not a
+  // card statement.
+  const cardEvidence = cardStatement || sourceInstrument?.kind === 'credit';
+  const signEvidence = cardEvidence || (sourceInstrument?.kind !== 'account' &&
+    CARD_STATEMENT_MARKER.test(rawLines.slice(0, 60).join('\n')));
+  const convention = signConvention(signEvidence, text);
   let ambiguousCardSignRows = 0;
   const cardTotalAmountTable = hasCardTotalAmountTable(text, cardStatement);
   const lines = cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines;

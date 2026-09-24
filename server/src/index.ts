@@ -977,13 +977,20 @@ function withoutRaw(parsed: NonNullable<ReturnType<typeof parseSms>>): Record<st
 const ROW_RECEIPT_SEPARATION_MS = 121_000;
 
 /**
- * One random id per statement upload, stamped on each of its rows. It names
- * the upload, not the file or its content: the phone uses it only to tell
- * "two rows of one statement" (a genuine repeat) from "the same row in two
- * overlapping statements" (a duplicate). 32 lowercase hex characters.
+ * One id per statement FILE, stamped on each of its rows: the phone uses it
+ * only to tell "two rows of one statement" (a genuine repeat) from "the same
+ * row in two overlapping statements" (a duplicate). Derived from the upload's
+ * device-keyed replay fingerprint, so it reveals nothing about the file and is
+ * the same when the same file is sent again — a re-upload that finishes a
+ * partially queued file is then one statement, matched by exact row identity,
+ * not a second statement whose genuine repeats would pair with the first's.
+ * 32 lowercase hex characters.
  */
-function newStatementImportId(): string {
-  return crypto.randomUUID().replace(/-/g, '');
+async function statementImportIdFor(baseKey: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest(
+    'SHA-256', new TextEncoder().encode(`statement-file:${baseKey}`),
+  ));
+  return [...digest.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 const DAY_MS = 86_400_000;
@@ -2075,7 +2082,7 @@ export default {
       const baseKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
-      const statementImportId = newStatementImportId();
+      const statementImportId = await statementImportIdFor(baseKey);
       const targets = await supplementalQueueTargets(env, device);
       if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
         return json({ error: 'rate_limited' }, 429);
@@ -2164,7 +2171,7 @@ export default {
       const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
       const baseKey = await keyedFingerprint(device.requestSecret, `csv:${digest}`);
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
-      const statementImportId = newStatementImportId();
+      const statementImportId = await statementImportIdFor(baseKey);
       const targets = await supplementalQueueTargets(env, device);
       if (!(await reserveSupplementalDeliveries(env, device.id, parsed.rows.length, targets.length))) {
         return json({ error: 'rate_limited' }, 429);
@@ -2681,7 +2688,7 @@ export default {
       );
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
-      const statementImportId = newStatementImportId();
+      const statementImportId = await statementImportIdFor(baseKey);
       for (let rowIndex = 0; rowIndex < extracted.rows.length; rowIndex++) {
         const inserted = await queueStructuredRow(
           env,
@@ -2734,7 +2741,7 @@ export default {
         `mime-csv:${messageId}:${attachmentIndex}:${digest}`,
       );
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
-      const statementImportId = newStatementImportId();
+      const statementImportId = await statementImportIdFor(baseKey);
       for (let rowIndex = 0; rowIndex < parsed.rows.length; rowIndex++) {
         const inserted = await queueStructuredRow(
           env,

@@ -57,6 +57,12 @@ type FileResult = {
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 /** How long to back off after the relay still answers 429 despite pacing. */
 const RATE_LIMIT_RETRY_MS = 61_000;
+/**
+ * Picker copies an upload is still reading. Module-level on purpose: an
+ * import loop outlives the screen that started it, and a remounted screen's
+ * cache cleanup must not delete the copy that loop is still sending.
+ */
+const inFlightPickerUris = new Set<string>();
 
 function interpolate(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ''));
@@ -98,8 +104,6 @@ export function SupplementImports() {
   const [status, setStatus] = useState<string | null>(null);
   const [pendingPdfs, setPendingPdfs] = useState<PendingProtectedPdf[]>([]);
   const [fileResults, setFileResults] = useState<FileResult[]>([]);
-  /** Picker copies an upload is still reading; cache cleanup must skip them. */
-  const inFlightUrisRef = useRef<Set<string>>(new Set());
   const aliveRef = useRef(true);
   const pendingPdfsRef = useRef<PendingProtectedPdf[]>([]);
   const pendingPdf = pendingPdfs[0] ?? null;
@@ -127,7 +131,7 @@ export function SupplementImports() {
     aliveRef.current = true;
     // A statement copy left in the picker cache by an earlier session that
     // ended mid-import (app killed, crash) is cleared when the screen opens.
-    clearStatementPickerCache();
+    clearStatementPickerCache(inFlightPickerUris);
     return () => {
       aliveRef.current = false;
       for (const pending of pendingPdfsRef.current) {
@@ -138,7 +142,7 @@ export function SupplementImports() {
         }
       }
       // And again on the way out, except a copy an upload is still reading.
-      clearStatementPickerCache(inFlightUrisRef.current);
+      clearStatementPickerCache(inFlightPickerUris);
     };
   }, []);
 
@@ -422,7 +426,7 @@ export function SupplementImports() {
           fileResults.push({ name: asset.name, ok: false, detail: copy.fileNotTried });
           continue;
         }
-        inFlightUrisRef.current.add(asset.uri);
+        inFlightPickerUris.add(asset.uri);
         try {
           let accepted: Awaited<ReturnType<typeof uploadPdfStatement | typeof uploadCsvStatement>> | null = null;
           for (let attempt = 0; accepted === null; attempt += 1) {
@@ -465,7 +469,9 @@ export function SupplementImports() {
           // Any other failure is this file's, not the batch's: record why and
           // carry on, so the files that did import still get their coverage
           // and their rows filed below.
-          if (e instanceof CloudImportError && e.code === 'rate_limited') limitReached = true;
+          if (e instanceof CloudImportError && (e.code === 'rate_limited' || e.code === 'queue_full')) {
+            limitReached = true;
+          }
           fileResults.push({
             name: asset.name,
             ok: false,
@@ -475,7 +481,7 @@ export function SupplementImports() {
           });
           continue;
         } finally {
-          inFlightUrisRef.current.delete(asset.uri);
+          inFlightPickerUris.delete(asset.uri);
         }
         if (index + 1 < picked.assets.length) {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));

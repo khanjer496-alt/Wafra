@@ -517,6 +517,23 @@ export function duplicateGuard(
       (row.accountId ? options.accountBankIdentity?.(row.accountId) : undefined);
   const banksCompatible = (a: string | undefined, b: string | undefined) => !a || !b || a === b;
   const sameDescriptor = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  /**
+   * Whether a statement descriptor and an alert title can name one merchant:
+   * one shares a word of four or more letters with the other ("PAYPAL
+   * *ENDURANCEIN" / "Endurancein", "CARREFOUR HYPER 1234" / "Carrefour").
+   * Money and a day alone are not an identity when the statement names no
+   * account: "NOON.COM 50.00" and "Carrefour 50.00" are two purchases.
+   */
+  const descriptorOverlap = (a: string, b: string): boolean => {
+    const words = (value: string) => new Set(value.toLowerCase().normalize('NFKC')
+      .split(/[^\p{L}\p{N}]+/u).filter((word) => word.length >= 4 && /\p{L}/u.test(word)));
+    const left = words(a);
+    const right = words(b);
+    for (const word of left) if (right.has(word)) return true;
+    const flatLeft = [...left].join(' ');
+    const flatRight = [...right].join(' ');
+    return [...left].some((word) => flatRight.includes(word)) || [...right].some((word) => flatLeft.includes(word));
+  };
   const statementPairMatch = (c: DuplicateCandidate): SeenStatementPairEvent | undefined => {
     const incomingStatement = isStatementCaptureSource(c.captureSource);
     const open = statementPairEvents.filter((row) =>
@@ -569,10 +586,9 @@ export function duplicateGuard(
     const matches = relaxed.filter((row) =>
       row.amountFils === c.amountFils &&
       row.date === c.date &&
-      banksCompatible(bankOf(row), bankOf(c)));
-    if (!matches.length) return undefined;
-    // The same merchant wording first, then capture order.
-    return matches.find((row) => sameMerchantCapture(row.title, c.title)) ?? matches[0];
+      banksCompatible(bankOf(row), bankOf(c)) &&
+      (descriptorOverlap(row.title, c.title) || sameDescriptor(row.title, c.title)));
+    return matches[0];
   };
   /** Opposite alerts for one card payment: bank-account debit + card receipt. */
   const cardPayments = new Map<string, SeenCardPayment[]>();

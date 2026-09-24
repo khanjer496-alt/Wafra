@@ -3288,6 +3288,21 @@ const DECLINE_SMS = [{
   ok('statement vs alert: an alert arriving after an unlabelled statement row does not duplicate it',
     reverse.txCount === 0, reverse.batch.transactions);
 
+  // Review follow-up: an unresolved statement row names neither account nor
+  // (usually) bank, so money and day alone must not absorb a different
+  // merchant's alert — in either arrival order.
+  const otherMerchant = buildImportPlan([
+    stmt('NOON.COM DUBAI', 5000, noon, upload('n')),
+  ], ledger([alertAt('10:00', 5000, 'Carrefour', 'om1')]), noon);
+  ok('statement vs alert: an unlabelled row never absorbs another merchant\'s alert of the same money',
+    otherMerchant.txCount === 1, otherMerchant.batch.transactions);
+  const storedNoon = { ...storedStatement, id: 's9', title: 'NOON.COM DUBAI', amountFils: 5000, smsKey: `s${noon}-5000` };
+  const carrefourAlert = { ...historyAlert, amountFils: 5000, merchant: 'Carrefour', categoryGuess: 'groceries' };
+  const reverseOther = buildImportPlan([carrefourAlert], ledger([storedNoon]), noon);
+  ok('statement vs alert: a later alert for another merchant is not folded into an unlabelled statement row',
+    reverseOther.txCount === 1 && !reverseOther.batch.updates.some((u) => u.id === 's9'),
+    { tx: reverseOther.batch.transactions, updates: reverseOther.batch.updates });
+
   // Defect 3: overlapping statements, rows in a different order.
   const onCard = { card: { last4: '3215', kind: 'credit' } };
   const firstUpload = [
