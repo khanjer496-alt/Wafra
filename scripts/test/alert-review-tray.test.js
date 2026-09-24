@@ -298,5 +298,89 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
   }
 }
 
+{
+  const tray = require('./build/alert-review-tray.js');
+  const DAY = 24 * 60 * 60 * 1000;
+  // M1: an unresolved review that ages out is recorded, never silently lost.
+  const aged = pruneAlertReviewTray(admitted.state, stored.expiresAt + 1);
+  const expiredTombstones = aged.tombstones.filter((item) => item.outcome === 'expired');
+  ok('an expired pending review leaves one source-free expired tombstone dated at its expiry',
+    aged.pending.length === 0 && expiredTombstones.length === 1 &&
+      expiredTombstones[0].resolvedAt === stored.expiresAt &&
+      JSON.stringify(Object.keys(expiredTombstones[0]).sort()) ===
+        JSON.stringify(['expiresAt', 'outcome', 'resolvedAt', 'sourceKey']),
+    JSON.stringify(aged.tombstones));
+  ok('expired reviews are counted for the Review surface',
+    tray.recentlyExpiredReviewCount(aged, stored.expiresAt + 1) === 1 &&
+      tray.recentlyExpiredReviewCount(aged, stored.expiresAt + REVIEW_ALERT_TTL_MS + 1) === 0 &&
+      tray.recentlyExpiredReviewCount(emptyAlertReviewTray(), NOW) === 0);
+  const raw = JSON.parse(JSON.stringify(admitted.state));
+  const firstLoad = normalizeAlertReviewTray(raw, stored.expiresAt + 5);
+  const secondLoad = normalizeAlertReviewTray(firstLoad, stored.expiresAt + 10);
+  const reloadUnsaved = normalizeAlertReviewTray(raw, stored.expiresAt + 10);
+  ok('repeated hydration and re-pruning count one expiry exactly once',
+    firstLoad.tombstones.filter((item) => item.outcome === 'expired').length === 1 &&
+      secondLoad.tombstones.filter((item) => item.outcome === 'expired').length === 1 &&
+      JSON.stringify(reloadUnsaved.tombstones) === JSON.stringify(firstLoad.tombstones),
+    JSON.stringify({ firstLoad: firstLoad.tombstones, secondLoad: secondLoad.tombstones }));
+  ok('an expired tombstone survives hydration validation',
+    normalizeAlertReviewTray({ ...emptyAlertReviewTray(), tombstones: expiredTombstones },
+      stored.expiresAt + 1).tombstones.length === 1);
+  ok('an expired review cannot be re-admitted after its tombstone',
+    admitPreparedReviewAlert(aged, stored, stored.expiresAt - 1).outcome !== 'admitted');
+  ok('an item expired longer ago than the tombstone window leaves no tombstone',
+    pruneAlertReviewTray(admitted.state, stored.expiresAt + 91 * DAY).tombstones.length === 0);
+
+  ok('rows show days left only in the final week and never a zero or negative count',
+    tray.reviewExpiresInDays({ expiresAt: NOW + 8 * DAY }, NOW) === null &&
+      tray.reviewExpiresInDays({ expiresAt: NOW + 7 * DAY }, NOW) === 7 &&
+      tray.reviewExpiresInDays({ expiresAt: NOW + 1 }, NOW) === 1 &&
+      tray.reviewExpiresInDays({ expiresAt: NOW }, NOW) === null);
+
+  // M2: iOS local capture can leave its record queued instead of evicting.
+  const legacyFiller = (index) => ({ ...stored,
+    id: `legacy_review_id_${String(index).padStart(8, '0')}`,
+    sourceKey: `legacy_review_source_${String(index).padStart(8, '0')}`,
+    observedAt: NOW + index, expiresAt: NOW + index + REVIEW_ALERT_TTL_MS });
+  const fullLegacy = { ...emptyAlertReviewTray(),
+    pending: Array.from({ length: tray.REVIEW_ALERT_CAP }, (_, index) => legacyFiller(index)) };
+  const incoming = legacyFiller(500);
+  const duplicate = legacyFiller(3);
+  const partition = tray.partitionReviewsByCapacity(fullLegacy, [duplicate, incoming], NOW + 1000);
+  ok('a full legacy lane defers a new review instead of evicting and passes duplicates through',
+    partition.deferred.length === 1 && partition.deferred[0] === incoming &&
+      partition.admit.length === 1 && partition.admit[0] === duplicate,
+    JSON.stringify({ admit: partition.admit.map((item) => item.id), deferred: partition.deferred.map((item) => item.id) }));
+  const roomy = { ...fullLegacy, pending: fullLegacy.pending.slice(1) };
+  const fill = tray.partitionReviewsByCapacity(roomy, [incoming, legacyFiller(501)], NOW + 1000);
+  ok('backpressure admits exactly the remaining room in order',
+    fill.admit.length === 1 && fill.admit[0] === incoming && fill.deferred.length === 1);
+  const protectedItem = { ...stored, channel: 'push',
+    id: 'local_review_id_' + 'a'.repeat(32), sourceKey: 'local_review_source_' + 'a'.repeat(32) };
+  ok('protected iOS reviews bypass legacy backpressure (admission refuses them itself)',
+    tray.partitionReviewsByCapacity(fullLegacy, [protectedItem], NOW + 1000).admit.length === 1);
+  ok('capacity reports each lane independently',
+    tray.reviewTrayCapacity(fullLegacy, NOW + 1000).legacyFull === true &&
+      tray.reviewTrayCapacity(fullLegacy, NOW + 1000).protectedFull === false &&
+      tray.reviewTrayCapacity(roomy, NOW + 1000).legacyFull === false &&
+      tray.reviewTrayCapacity({ pending: [] }, NOW).protectedFull === false);
+
+  // H3(c): source-free presentation facts for the Review banner.
+  tray.reviewCaptureBacklog.reset();
+  let notified = 0;
+  const unsubscribe = tray.reviewCaptureBacklog.subscribe(() => { notified += 1; });
+  tray.reviewCaptureBacklog.publish({ waiting: 12, currencyConflicts: 2 });
+  tray.reviewCaptureBacklog.publish({ waiting: 12 });
+  tray.reviewCaptureBacklog.publish({ waiting: 3, currencyConflicts: 1 });
+  const snapshot = tray.reviewCaptureBacklog.get();
+  unsubscribe();
+  tray.reviewCaptureBacklog.publish({ waiting: 0 });
+  ok('backlog replaces waiting, accumulates currency conflicts, and notifies only on change',
+    snapshot.waiting === 3 && snapshot.currencyConflicts === 3 && notified === 2 &&
+      JSON.stringify(Object.keys(snapshot).sort()) === JSON.stringify(['currencyConflicts', 'waiting']),
+    JSON.stringify({ snapshot, notified }));
+  tray.reviewCaptureBacklog.reset();
+}
+
 console.log(`\nalert-review-tray: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
