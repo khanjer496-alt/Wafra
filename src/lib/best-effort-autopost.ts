@@ -198,12 +198,17 @@ const validMoney = (money: UniversalMoney | null | undefined): money is Universa
 };
 
 /**
- * The principal amount, or a refusal. A shared symbol resolves only through
- * the user's country, and only when that is the sole reason for ambiguity.
+ * The principal amount, or a refusal. A shared symbol ($, ¥, Rs) resolves
+ * only when that is the sole reason for ambiguity: through the bank's own
+ * routed market when there is one (a Chase alert means USD even for a user in
+ * Mexico), otherwise through the user's country. A route whose market has no
+ * shared-symbol currency leaves the symbol unclear. A result in another
+ * currency than the ledger then needs a dated rate like any foreign charge.
  */
 const resolvePrincipalMoney = (
   event: UniversalBankEvent,
   country: string | null,
+  routedMarket: string | null,
 ): UniversalMoney | 'amount-unclear' | 'currency-unclear' => {
   const field = event.amount;
   if (field.evidence === 'explicit') {
@@ -216,7 +221,9 @@ const resolvePrincipalMoney = (
   const symbolOnly = field.issues.length > 0 &&
     field.issues.every((issue) => issue === 'currency-symbol' || issue === 'currency-exponent');
   if (!symbolOnly) return 'amount-unclear';
-  const wanted = sharedSymbolCurrencyForCountry(country);
+  const wanted = routedMarket
+    ? sharedSymbolCurrencyForCountry(routedMarket)
+    : sharedSymbolCurrencyForCountry(country);
   if (!wanted) return 'currency-unclear';
   const options = [...(field.value ? [field.value] : []), ...field.alternatives]
     .filter((money) => money && money.currency === wanted);
@@ -281,7 +288,7 @@ export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDeci
     return review(event.issues.some((issue) => issue.startsWith('direction')) ? 'direction-unclear' : 'not-posted');
   }
 
-  const principal = resolvePrincipalMoney(event, input.country);
+  const principal = resolvePrincipalMoney(event, input.country, input.routedMarket);
   if (typeof principal === 'string') return review(principal);
   if (hasCompetingAmounts(event, principal, input.ledgerCurrency)) return review('competing-amounts');
 

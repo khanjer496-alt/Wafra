@@ -95,16 +95,27 @@ for (const body of [
 ok('completed German wording is not mistaken for a future charge',
   !policy.hasNonCompletedWording('Deutsche Bank: Kartenzahlung EUR 28,40 wurde belastet bei NORD MARKT.'));
 
-/* ── Currency: a shared symbol resolves only through the user's country ── */
+/* ── Currency: a shared symbol resolves through the bank's route, else the user's country ── */
 {
   const dollar = 'Chase: You made a $24.86 purchase at NORTH STAR MARKET with card ending 4421.';
-  ok('$ for a user in Germany stays in Review', unproven('EUR', 'DE', 'CHASE', dollar) === null);
+  ok('$ from a US bank for a user in Germany stays in Review without a rate', unproven('EUR', 'DE', 'CHASE', dollar) === null);
   const event = inspectUniversalBankEvent(dollar, { sender: 'CHASE' });
-  const decision = policy.decideBestEffortAutoPost({
-    source: dollar, event, enabled: true, country: 'DE', routedMarket: 'US',
-    ledgerCurrency: 'EUR', ledgerExponent: 2, observedAt: NOW,
+  const decide = (country, routedMarket, ledgerCurrency, fxLookup) => policy.decideBestEffortAutoPost({
+    source: dollar, event, enabled: true, country, routedMarket,
+    ledgerCurrency, ledgerExponent: 2, observedAt: NOW, ...(fxLookup ? { fxLookup } : {}),
   });
-  ok('…with the reason recorded', decision.outcome === 'review' && decision.reason === 'currency-unclear', decision);
+  const decision = decide('DE', 'US', 'EUR');
+  ok('…read as USD and waiting for a rate', decision.outcome === 'review' && decision.reason === 'fx-rate-unavailable', decision);
+  // The route wins over the user's country: never the user's own dollar.
+  const mx = decide('MX', 'US', 'MXN');
+  ok('$ from a US bank for a user in Mexico is not MXN', mx.outcome === 'review' && mx.reason === 'fx-rate-unavailable', mx);
+  const mxRate = decide('MX', 'US', 'MXN', (base, quote, date) => (base === 'USD' && quote === 'MXN' ? { base, quote, rate: 18, date } : null));
+  ok('…and converts from USD with a dated rate', mxRate.outcome === 'post' && JSON.stringify(mxRate).includes('USD'), mxRate);
+  const us = decide('US', 'CA', 'USD');
+  ok('$ from a Canadian bank for a US user is CAD, not USD', us.outcome === 'review' && us.reason === 'fx-rate-unavailable', us);
+  ok('$ with a route matching the country stays in that currency', decide('US', 'US', 'USD').outcome === 'post');
+  ok('$ with no route resolves through the country', decide('US', null, 'USD').outcome === 'post');
+  ok('$ with a route that has no dollar is unclear', decide('US', 'GB', 'USD').reason === 'currency-unclear');
   ok('$ for a user in the United States resolves to USD', policy.sharedSymbolCurrencyForCountry('US') === 'USD');
   ok('an unshared-symbol country resolves nothing', policy.sharedSymbolCurrencyForCountry('DE') === null);
 }
