@@ -31,7 +31,8 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { localSemanticBackgroundCancellation, setLocalSemanticAppActive } from '@/lib/local-semantic-background-policy';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { hydrateLocalSemanticInboxShadow } from '@/lib/local-semantic-inbox-shadow';
-import { getLocalSemanticEncoder } from '@/lib/local-semantic-runtime';
+import { LOCAL_SEMANTIC_E5_ENABLED } from '@/lib/local-semantic-flags';
+import { getLocalSemanticEncoder, purgeLocalSemanticArtifacts } from '@/lib/local-semantic-runtime';
 import { hydrateLocalSemanticShadow } from '@/lib/local-semantic-shadow';
 import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
 
@@ -63,6 +64,10 @@ function Direction({ children }: { children: React.ReactNode }) {
   const { state } = useStore();
   useEffect(() => {
     if (Platform.OS === 'web') return;
+    if (!LOCAL_SEMANTIC_E5_ENABLED && state.hydrated) {
+      // Reclaim the E5 files earlier builds downloaded; nothing re-downloads them.
+      try { purgeLocalSemanticArtifacts(); } catch { /* optional cleanup */ }
+    }
     let disposed = false;
     let warmStarted = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -70,7 +75,10 @@ function Direction({ children }: { children: React.ReactNode }) {
       const active = next === 'active';
       setLocalSemanticAppActive(active);
       if (timer !== null) { clearTimeout(timer); timer = null; }
-      if (!active || !state.hydrated || warmStarted) return;
+      // E5 is off by default: no model download or session on install or
+      // launch. Only an explicit research build (EXPO_PUBLIC_WAFRA_LOCAL_E5=1)
+      // warms it; Ask Wafra and category suggestions use the platform model.
+      if (!LOCAL_SEMANTIC_E5_ENABLED || !active || !state.hydrated || warmStarted) return;
       const cancelled = localSemanticBackgroundCancellation();
       // Fonts and ledger hydration have completed; give the first screen a
       // quiet turn before parsing the tokenizer or creating the native session.
