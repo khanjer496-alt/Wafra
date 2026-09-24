@@ -494,7 +494,11 @@ export const partitionReviewsByCapacity = <T extends ReviewEntry>(
 export interface ReviewCaptureBacklog {
   /** Native records waiting for Review space (notification, Message, Apple Pay). */
   waiting: number;
-  /** Message/notification records skipped because they use another currency. */
+  /**
+   * Non-money Message/notification records (declines, statements, bill
+   * reminders) skipped because they use another currency. Conflicting money
+   * rows go to Review as durable items and are never counted here.
+   */
   currencyConflicts: number;
 }
 

@@ -1,6 +1,7 @@
 import {
   identifySourceFreeReviewAlert,
   inspectSourceFreeRefusedAlert,
+  parsedFinancialCandidateReview,
   shouldReviewParsedIncome,
 } from '@/lib/auto-import';
 import {
@@ -237,6 +238,31 @@ function localReviewIdentity(id: string): { id: string; sourceKey: string } {
     id: `local_review_id_${opaque}`,
     sourceKey: `local_review_source_${opaque}`,
   };
+}
+
+/**
+ * A parsed row whose own currency this ledger cannot hold. Money-moving rows
+ * (transactions and card payments) become a durable, source-free Universal
+ * Review under the record's own review identity: Review shows the foreign
+ * amount and promotion refuses it as a currency mismatch, so nothing posts and
+ * nothing is lost silently. Informational kinds (statement, bill reminder)
+ * move no money and return null for the caller to acknowledge as ignored.
+ */
+export function currencyConflictReview(
+  outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
+  recordId: string,
+): Extract<LocalMessageParseOutcome, { kind: 'review' }> | null {
+  const { row } = outcome;
+  if (row.kind !== 'transaction' && row.kind !== 'cardPayment') return null;
+  const observedAt = row.smsTs;
+  if (observedAt === undefined || !Number.isSafeInteger(observedAt)) return null;
+  const candidate = parsedFinancialCandidateReview({ ...row, kind: 'transaction' }, observedAt);
+  if (!candidate || !('kind' in candidate) || candidate.kind !== 'universal') return null;
+  const item = identifySourceFreeReviewAlert(
+    { ...candidate, channel: row.channel === 'push' ? 'push' : 'inbox' },
+    localReviewIdentity(recordId),
+  );
+  return item ? { kind: 'review', market: outcome.market, item, milestone: 'none' } : null;
 }
 
 function sanitizedRefusal(
