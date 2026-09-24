@@ -255,12 +255,24 @@ export default function ReviewAlertsScreen() {
   const capacity = reviewTrayCapacity(state.reviewTray, now);
   const waiting = capacity.protectedFull || capacity.legacyFull ? backlog.waiting : 0;
   const expired = recentlyExpiredReviewCount(state.reviewTray, now);
+  // Auto-added rows are already in the ledger; this links to them so the
+  // things to check live in one place without mixing them into this queue.
+  const autoAdded = useMemo(() => state.transactions.reduce((n, tx) => (tx.bestEffort ? n + 1 : n), 0),
+    [state.transactions]);
   // Durable, source-free counts of money reviews a full lane could not keep.
   const evicted = recentlyLostReviewCount(state.reviewTray, now, 'evicted');
   const currencyEvicted = recentlyLostReviewCount(state.reviewTray, now, 'currency-evicted');
   const notices = waiting > 0 || expired > 0 || evicted > 0 || currencyEvicted > 0 ||
-    backlog.currencyConflicts > 0 ? (
+    backlog.currencyConflicts > 0 || autoAdded > 0 ? (
     <View style={styles.notices} testID="review-alerts-notices" accessibilityLiveRegion="polite">
+      {autoAdded > 0 ? <Pressable testID="review-alerts-auto-added" accessibilityRole="button"
+        accessibilityLabel={tf('autoAddedCount', { count: autoAdded })}
+        onPress={() => router.push({ pathname: '/transactions', params: { source: 'auto-added' } })}
+        style={{ minHeight: 44, justifyContent: 'center' }}>
+        <ThemedText type="smallBold" style={{ color: theme.primary }}>
+          {tf('autoAddedCount', { count: autoAdded })}
+        </ThemedText>
+      </Pressable> : null}
       {waiting > 0 ? <ThemedText testID="review-alerts-full" type="smallBold" themeColor="warning">
         {tf('reviewAlertsFullWaiting', { count: waiting })}
       </ThemedText> : null}

@@ -36,6 +36,7 @@ import {
   setLedgerCurrency as setGlobalLedgerCurrency,
 } from '@/lib/markets';
 import { setActiveCountry } from '@/lib/country';
+import { setBestEffortAutoPostEnabled } from '@/lib/best-effort-autopost';
 import { isProActive } from '@/lib/purchases';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import type { AppState, ImportBatchInput, Transaction } from '@/lib/types';
@@ -127,6 +128,9 @@ function applyLedgerContext(state: AppState): boolean {
     setActiveMarket(state.marketId);
     // Country conventions (numeric date order) for the universal parser.
     setActiveCountry(state.country ?? null);
+    // "Auto-add alerts from unverified bank formats": a killed-process wake
+    // must honour OFF exactly as the foreground does, never the module default.
+    setBestEffortAutoPostEnabled(state.bestEffortAutoPost);
     setGlobalLedgerCurrency(state.ledgerMoney!.currency, state.ledgerMoney!.exponent);
     setLanguage(state.language === 'ar' ? 'ar' : 'en');
     return true;

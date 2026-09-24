@@ -50,6 +50,15 @@ const captureInstrument: Check = (value) => record(value) && required(value, {
   last4: (tail) => typeof tail === 'string' && /^\d{4}$/.test(tail),
   kind: oneOf('credit', 'debit', 'account', 'unknown'),
 }) && optional(value, { bankIdentity: id });
+// Code-owned identifiers only (e.g. `universal:purchase:debit`), never text.
+const bestEffortMarker: Check = (value) => record(value) &&
+  Object.keys(value).every((key) => key === 'v' || key === 'format' || key === 'market') &&
+  required(value, {
+    v: oneOf(1),
+    format: (v) => typeof v === 'string' && /^(?:universal|semantic):[a-z-]{1,32}:(?:debit|credit)$/.test(v),
+    market: (v) => typeof v === 'string' && /^[A-Z]{2}$/.test(v),
+  });
+const bestEffortUndoKey: Check = (v) => typeof v === 'string' && v.length > 0 && v.length <= 256;
 const transaction: Check = (value) => {
   if (!record(value) || !required(value, {
     id, type: oneOf('expense', 'income'), amountFils: positive, category,
@@ -63,6 +72,7 @@ const transaction: Check = (value) => {
     messageObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
     viaPush: boolean, walletBound: oneOf(true), captureInstrument, cardPaymentSide: oneOf('debit', 'receipt'),
     statementImportId: (v) => typeof v === 'string' && /^[a-f0-9]{32}$/.test(v),
+    bestEffort: bestEffortMarker,
     transferEvidence: isTransferEvidence, transferDecision: isTransferDecision, transferMatch: isTransferMatch,
     paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text,
     paymentInstrumentSource: oneOf('alert', 'user'), cashOutDate: isoDate,
@@ -150,6 +160,8 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     transferNormalizationVersion: nonnegative, transferInternalIds: arrayOf(id),
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,
+    bestEffortAutoPost: boolean,
+    bestEffortUndone: (v) => Array.isArray(v) && v.length <= 2000 && v.every(bestEffortUndoKey),
     androidCaptureSources: (v) => record(v) && required(v, { sms: boolean, notifications: boolean }),
     monthStartDay: (v) => integer(v) && (v as number) >= 1 && (v as number) <= 28,
     marketId: text, country: (v) => v === '' || (typeof v === 'string' && /^[A-Z]{2}$/.test(v)), language: oneOf('en', 'ar', ''), languagePreference: oneOf('system', 'en', 'ar'),

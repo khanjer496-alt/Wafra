@@ -50,7 +50,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const router = useRouter();
   const theme = useTheme();
   const largeText = useLargeTextLayout();
-  const { state, editTransaction, deleteTransaction, setMerchantOverride, setBillAlias } = useStore();
+  const { state, editTransaction, deleteTransaction, resolveBestEffort, setMerchantOverride, setBillAlias } = useStore();
   const [editing, setEditing] = useState(false);
 
   const [title, setTitle] = useState('');
@@ -61,6 +61,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const [isTransfer, setIsTransfer] = useState(false);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingUndo, setConfirmingUndo] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
   /**
@@ -173,6 +174,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       date: dateText,
       ...(!transferReview ? { isTransfer: isTransfer || undefined } : {}),
       ...(receiptAccountChanged ? { paymentInstrumentSource: 'user' as const } : {}),
+      // Saving a correction is the person checking the row.
+      ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
     });
     const merchant = title.trim();
     const billChanged = transaction.paymentFlowSide === 'receipt' && !!transaction.billIdentity &&
@@ -291,6 +294,22 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           <ThemedText type="small" themeColor="textSecondary">
             {confirmedOwnTransfer ? transferWords.ownBody : transferWords.pendingBody}
           </ThemedText>
+        </View>
+      )}
+
+      {!editing && transaction.bestEffort && (
+        <View
+          testID="best-effort-check"
+          style={[styles.transferMeaning, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+          <ThemedText type="smallBold">{t('autoAddedCheck')}</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">{t('autoAddedExplain')}</ThemedText>
+          <View style={[styles.actions, largeText && styles.actionsLarge]}>
+            <Button inline={!largeText} wrapLabel label={t('autoAddedLooksRight')}
+              onPress={() => resolveBestEffort(transaction.id, 'confirm')} />
+            <Button inline={!largeText} wrapLabel variant="outline" label={t('autoAddedUndo')}
+              onPress={() => setConfirmingUndo(true)} />
+          </View>
+          <ThemedText type="meta" themeColor="textTertiary">{t('autoAddedUndoHint')}</ThemedText>
         </View>
       )}
 
@@ -522,6 +541,17 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           dismissing this sheet and presenting another in the same frame does
           not. Each is mounted only while it has something to ask, so the entry
           animation runs on every open. */}
+      {confirmingUndo && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirmingUndo(false)}
+          question={t('autoAddedUndoConfirm')}
+          body={`${transaction.title} · ${formatAmount(transaction.amountFils)}. ${t('autoAddedUndoHint')}`}
+          confirmLabel={t('autoAddedUndo')}
+          destructive
+          onConfirm={() => { resolveBestEffort(transaction.id, 'undo'); onClose(); }}
+        />
+      )}
       {confirmingDelete && (
         <ConfirmSheet
           visible

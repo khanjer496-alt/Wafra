@@ -102,6 +102,20 @@ export interface CaptureInstrument {
   bankIdentity?: string;
 }
 
+/**
+ * Provenance of a row added automatically from an UNPROVEN bank-alert format
+ * (anything other than the UAE/Saudi launch grammar or a certified template).
+ * Code-owned identifiers only; never message text. Cleared when the person
+ * confirms the row ("Looks right"). See best-effort-autopost.ts.
+ */
+export interface BestEffortMarker {
+  v: 1;
+  /** e.g. `universal:purchase:debit` or `semantic:refund:credit`. */
+  format: string;
+  /** Routed market or the user's country (ISO 3166-1 alpha-2), `ZZ` if unknown. */
+  market: string;
+}
+
 export interface Transaction {
   /** Bounded bank evidence and explicit user choices, persisted with the encrypted row. */
   transferEvidence?: TransferEvidence;
@@ -197,6 +211,8 @@ export interface Transaction {
    */
   statementImportId?: string;
   captureInstrument?: CaptureInstrument;
+  /** Auto-added from an unproven alert format; shown as "Auto-added — check". */
+  bestEffort?: BestEffortMarker;
   /**
    * A card settlement can generate two bank alerts: money leaving the current
    * account and the card acknowledging receipt. Keeping the side lets import
@@ -765,6 +781,17 @@ export interface AppState {
    */
   captureOptOut: boolean;
   /**
+   * "Auto-add alerts from unverified bank formats". Undefined = ON (product
+   * default). OFF restores review-first for every unproven format; the
+   * UAE/Saudi launch grammar and certified templates are unaffected.
+   */
+  bestEffortAutoPost?: boolean;
+  /**
+   * Identities (smsKey / `t{timestamp}`) of auto-added rows the person undid.
+   * Bounded; rescans and history re-reads never re-add these alerts.
+   */
+  bestEffortUndone?: string[];
+  /**
    * Android source selection. Optional for legacy ledgers: absence means the
    * historical behavior (both sources allowed whenever captureOptOut=false).
    */
@@ -823,6 +850,8 @@ export interface TxHealUpdate {
   };
   transferEvidence?: TransferEvidence;
   clearTransferEvidence?: true;
+  /** A proven reading of the same alert replaced the best-effort one. */
+  clearBestEffort?: true;
   id: string;
   title?: string;
   category?: CategoryId;

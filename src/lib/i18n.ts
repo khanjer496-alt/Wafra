@@ -25,6 +25,36 @@ const S = {
     ar: '{count} تحويلات مستبعدة من الصافي',
   },
   transactionDayTotal: { en: 'Day total', ar: 'إجمالي اليوم' },
+  // Rows added automatically from an unverified bank-alert format.
+  autoAddedCheck: { en: 'Auto-added — check', ar: 'أُضيفت تلقائيًا — راجِعها' },
+  autoAddedExplain: {
+    en: 'Wafra added this from a bank alert format it has not verified yet. Check the amount, date and whether money left or arrived.',
+    ar: 'أضاف وفرة هذه العملية من صيغة رسالة بنكية لم يتحقق منها بعد. راجِع المبلغ والتاريخ وهل خرج المال أم دخل.',
+  },
+  autoAddedSettingSaveFailed: {
+    en: 'This setting could not be saved. Try again.',
+    ar: 'تعذر حفظ هذا الإعداد. حاول مجدداً.',
+  },
+  autoAddedLooksRight: { en: 'Looks right', ar: 'صحيحة' },
+  autoAddedUndo: { en: 'Undo — remove', ar: 'تراجع — احذفها' },
+  autoAddedUndoConfirm: { en: 'Remove this auto-added entry?', ar: 'حذف هذه العملية المضافة تلقائيًا؟' },
+  autoAddedUndoHint: {
+    en: 'Removes this entry. This alert will not be added again.',
+    ar: 'يحذف هذه العملية، ولن تُضاف هذه الرسالة مرة أخرى.',
+  },
+  autoAddedFilter: { en: 'Auto-added to check', ar: 'مضافة تلقائيًا للمراجعة' },
+  autoAddedCount: {
+    en: '{count} auto-added to check',
+    ar: 'عمليات مضافة تلقائيًا للمراجعة: {count}',
+  },
+  autoAddedSettingTitle: {
+    en: 'Auto-add alerts from unverified bank formats',
+    ar: 'إضافة رسائل البنوك غير المُتحقَّق منها تلقائيًا',
+  },
+  autoAddedSettingBody: {
+    en: 'On: a clearly completed payment in a bank format Wafra has not verified is added and marked “Auto-added — check”. Off: those alerts wait in Review. Verified UAE and Saudi bank alerts are not affected.',
+    ar: 'عند التشغيل: تُضاف الدفعة المكتملة بوضوح من صيغة بنكية لم يتحقق منها وفرة وتُعلَّم بـ«أُضيفت تلقائيًا — راجِعها». عند الإيقاف: تنتظر هذه الرسائل في المراجعة. لا يتأثر ذلك برسائل بنوك الإمارات والسعودية المُتحقَّق منها.',
+  },
   rememberThisBill: { en: 'Remember this bill?', ar: 'تذكّر هذه الفاتورة؟' },
   billAliasAlso: {
     en: 'Use {title} · {category} for {n} matching past payment{s} and future payments from this biller.',

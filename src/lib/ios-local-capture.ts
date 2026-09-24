@@ -440,6 +440,9 @@ export function createIosLocalCaptureCoordinator(
       const outcomes: LocalMessageParseOutcome[] = [];
       const session = createLaunchAlertSession({
             overrides: input.ledger.getState().merchantOverrides ?? {},
+            // iOS live capture is review-only for unverified formats: nothing
+            // here may be auto-added by the best-effort policy.
+            bestEffort: { enabled: false, country: null },
             ...(pageMarket ? {
               activeMarket: pageMarket,
               pinnedCurrency: pageMarket === 'AE' ? 'AED' : 'SAR',

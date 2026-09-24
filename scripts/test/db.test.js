@@ -538,6 +538,9 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/known-banks': require('./build/known-banks'),
     // The real country model: migration and the parser-pack choice are pure.
     '@/lib/country': require('./build/country'),
+    // The real unproven-format policy: the store mirrors its setting and
+    // writes its undo tombstones on hydrate/undo/delete.
+    '@/lib/best-effort-autopost': require('./build/best-effort-autopost'),
     './balances': {},
     ...realModules,
   };

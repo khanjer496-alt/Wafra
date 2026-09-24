@@ -127,6 +127,14 @@ OTP/3DS, collect requests, pre-debit notices, declines, statements, balances,
 marketing and phishing-like messages are forbidden imports even when they
 contain a valid amount and merchant.
 
+"Pending" anywhere in a message (also `pendente`, `pendiente`, `ausstehend`,
+`en attente`, `in attesa`, `in behandeling`, `em processamento`, `awaiting`,
+`معلق`) makes it non-posting: "Transfer … received from JOHN, pending
+confirmation" stays reviewable but can never post, including through a
+certified template. "Your payment to Jane was received by her/their bank"
+describes the recipient's receipt, so its direction is left unresolved for
+Review instead of being read as money in.
+
 ## Fixture provenance
 
 Every fixture must say whether it is:
@@ -140,6 +148,63 @@ never contribute to an automatic-import score. Every benchmark fixture records
 its institution, channel, template version and authoring/held-out split.
 Evaluation uses only consented, redacted, held-out real alerts, and the gate
 closes if one institution/channel/template version appears in both splits.
+
+## Best-effort automatic posting (unverified formats)
+
+The gates below decide when a pack becomes *verified*. Separately, by product
+decision, an alert in an unverified format may be added before that, through
+one policy only: `decideBestEffortAutoPost` in `src/lib/best-effort-autopost.ts`.
+It never touches the UAE/Saudi launch grammar or a certified template. It never
+runs for an AE/SA sender or an alert routed to AE/SA. When the launch grammar
+declines such an alert on a non-Gulf ledger, the strict, unmarked universal seam
+that shipped before this policy still applies, and the setting does not affect
+it. Every guardrail is required:
+
+- the setting "Auto-add alerts from unverified bank formats" is on (the
+  default; off restores review-first for every unverified format);
+- the universal parser reads `posted`, and an independent wording guard finds
+  no pending/hold/authorisation, request, declined/failed, reversed/cancelled,
+  OTP/verification, promotion, statement/bill/due/reminder or future/scheduled/
+  mandate language (English, French, German, Spanish, Italian, Dutch,
+  Portuguese, Arabic). Temporary authorisations, holds and charges are refused,
+  and so is a bare "authorised/authorisation" unless the text also says
+  completed, posted or settled;
+- a supported family (purchase, cash withdrawal, refund, fee, utility,
+  recurring payment, transfer) whose direction matches it: refunds are
+  credits, transfers must state their direction and post as transfers;
+- exactly one principal amount (a role-separated balance is allowed);
+- an explicit ISO currency or proven symbol. A shared symbol (`$`, `¥`, `Rs`)
+  resolves only to the user's own country's currency, so a `$` alert for a
+  user in Germany stays in Review;
+- a date that is not in the future;
+- foreign money converts only with a dated rate already on the device (or the
+  card's own charged figure checked against one), otherwise Review with
+  `fx-rate-unavailable`;
+- a pinned ledger currency, so a best-effort row can never make a batch
+  mixed-currency (an AED/SAR ledger additionally requires a single non-Gulf route).
+
+Posted rows still pass the import planner's duplicate guard and Wallet
+near-match hold. Each carries `bestEffort: {v, format, market}`, with
+code-owned identifiers only and never message text. A best-effort row never
+stores the message excerpt that low-confidence rows otherwise keep. The row is
+shown as "Auto-added — check", with "Looks right" (clears the marker), edit
+(saving clears it) and "Undo — remove" (after a confirmation). A proven reading
+of the same alert that later merges into the row also clears the marker.
+Undo, deletion, undoing the import batch and deleting the account all remove
+marked rows and record bounded tombstones in the same state write: the exact
+source key, plus the observation time with ledger currency and amount
+(`t{ts}:{currency}{minor}`). Rescans, parser re-reads and History imports then
+skip that reading. A different amount at the same time is a different movement
+and is not suppressed. The setting is mirrored in the foreground store and in the
+killed-process Android capture wake. A failed save reverts the switch. Transactions
+can be filtered to "Auto-added to check", and Review links to that list.
+
+Channels: Android SMS inbox and delivery, Android bank-app notifications
+(including green semantic generalisation, which uses the same policy with the
+`semantic` format prefix) and the iOS Messages History import. iOS live capture
+(`ios-local-capture.ts`) builds its parser sessions with the policy disabled,
+so it stays review-only for unverified formats. None of this is a claim of verified coverage for any bank outside
+AE/SA.
 
 ## Automatic-import gates
 

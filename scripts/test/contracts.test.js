@@ -2354,6 +2354,8 @@ ok('the spoken label agrees with the sign on screen',
     'transfer-reconciliation.ts',
     // Exponent-correct foreign originals and exact FX conversion.
     'fx.ts',
+    // The unproven-format policy validates the principal amount's exponent.
+    'best-effort-autopost.ts',
   ]);
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),
