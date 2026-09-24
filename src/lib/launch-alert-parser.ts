@@ -11,6 +11,7 @@ import {
   ledgerCurrencyExponent,
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
+import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import { parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
@@ -281,6 +282,10 @@ export const createLaunchAlertSession = ({
     forcedMarket?: string,
     observedAt?: number,
   ): ParsedSms | null => {
+    // A BNPL provider's restatement of a bank card charge (see
+    // bnpl-providers.ts). The regional path already refuses it; the
+    // worldwide fallback below must not resurrect it on an unpinned ledger.
+    if (isBnplProviderSource(sender)) return null;
     const local = parseRegionalEvidence(source, sender, inspection, forcedMarket, observedAt)?.parsed ?? null;
     if (local) return local;
     // The worldwide parser is intentionally broader and therefore more
