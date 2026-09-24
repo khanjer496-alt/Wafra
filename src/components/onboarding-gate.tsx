@@ -71,7 +71,7 @@ import {
   onboardingPrefersNotificationCapture,
   onboardingResumeDestination,
 } from '@/lib/onboarding';
-import { normalizeOnboardingCountry, onboardingBankRegion } from '@/lib/onboarding-bank-examples';
+import { normalizeOnboardingCountry, onboardingBankRegion, ONBOARDING_REGION_ELSEWHERE } from '@/lib/onboarding-bank-examples';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
 import { getRelayConfigStrict, unpairDevice } from '@/lib/relay';
 import { openShortcutsApp } from '@/lib/shortcut-cleanup';
@@ -250,6 +250,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     ensureDurable,
     setOnboarded,
     setOnboardingProfile,
+    setCountry: setLedgerCountry,
     setUserName,
     setCaptureOptOut,
     setAndroidCaptureSources,
@@ -588,6 +589,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
    * does not advance or rewind the journey: it saves against whatever stage is
    * already durable. Someone who fixes this on the welcome screen and force
    * quits must come back to the welcome screen, not be pushed forward.
+   *
+   * It is also the ledger's country (the same setting Settings shows), so it
+   * is written there too — except in the Settings preview, which never saves.
    */
   const chooseCountry = (id: string) => {
     const next = normalizeOnboardingCountry(id);
@@ -597,6 +601,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       state.onboardingProfile?.stage ?? 'welcome',
       focus, tracking, intention, alerts, next,
     );
+    if (!previewMode) setLedgerCountry(next);
   };
 
   const chooseAlerts = (id: OnboardingAlertDelivery) => {
@@ -625,7 +630,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const selectedTracking = tracking ?? state.onboardingProfile?.tracking ?? null;
   const selectedIntention = intention ?? state.onboardingProfile?.intention ?? null;
   const selectedAlerts = alerts ?? state.onboardingProfile?.alerts ?? null;
-  const selectedCountry = country ?? normalizeOnboardingCountry(state.onboardingProfile?.country);
+  // The ledger's country (device Region by default) counts as an answer;
+  // an unknown one ('ZZ' that nobody chose) still asks to be set.
+  const ledgerCountry = state.country && state.country !== ONBOARDING_REGION_ELSEWHERE
+    ? normalizeOnboardingCountry(state.country)
+    : null;
+  const selectedCountry = country ?? normalizeOnboardingCountry(state.onboardingProfile?.country) ?? ledgerCountry;
   /**
    * The country onboarding is actually drawing, so the control reports what is
    * on screen rather than what was asked for. Resolving it through the same

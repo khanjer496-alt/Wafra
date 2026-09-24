@@ -133,8 +133,9 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
 
 /* The country a person confirms outranks the phone, and outranks it everywhere
  * — the whole complaint was a UAE resident being shown British banks because
- * his store account was British. It must also stay display-only: no country
- * chosen here may select a parser market or pin a currency. */
+ * his store account was British. It is the ledger's country (date order, and
+ * the parser pack for a ledger without AED/SAR money), but it never widens the
+ * set of launch-tested parser packs and never pins a currency. */
 {
   const region = bankExamples.onboardingBankRegion;
   const gb = region('AE', 'GB');
@@ -154,8 +155,9 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
     bankExamples.ONBOARDING_REGION_IDS
       .filter((id) => markets.canSelectMarket(id))
       .join(',') === 'AE,SA');
-  eq('and somewhere-else selects no market at all',
-    markets.canSelectMarket(bankExamples.ONBOARDING_REGION_ELSEWHERE), false);
+  ok('and somewhere-else selects only the neutral pack, which has no Gulf banks',
+    markets.canSelectMarket(bankExamples.ONBOARDING_REGION_ELSEWHERE) &&
+      markets.MARKETS.map((market) => market.id).join(',') === 'AE,SA');
 
   eq('a stored country is normalized to an ISO region code',
     bankExamples.normalizeOnboardingCountry(' gb '), 'GB');
@@ -174,8 +176,9 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
   ok('every illustrable country can actually be picked',
     ['AE', 'SA', 'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO']
       .every((id) => bankExamples.ONBOARDING_REGION_IDS.includes(id)));
-  ok('the country sheet says it only changes examples, not what Wafra can read',
-    /only picks the example banks/i.test(i18n.t('onboardCountrySheetBody', 'en')) &&
+  ok('the country sheet says what it changes (dates, examples), not a promise about what Wafra can read',
+    /dates/i.test(i18n.t('onboardCountrySheetBody', 'en')) &&
+      /example banks/i.test(i18n.t('onboardCountrySheetBody', 'en')) &&
       /come from your alerts/i.test(i18n.t('onboardCountrySheetBody', 'en')));
 }
 
@@ -549,8 +552,9 @@ ok(
     .every((key) => ['en', 'ar'].every((lang) => i18n.t(key, lang) && i18n.t(key, lang) !== key)),
 );
 ok(
-  'the country stays out of Settings, where it would change nothing after setup',
-  !/onboardCountrySheetTitle|OnboardingCountryConfirm/.test(settingsSource),
+  'Settings has its own country control (it sets date order after setup), not the onboarding one',
+  /settingsCountryTitle/.test(settingsSource) &&
+    !/onboardCountrySheetTitle|OnboardingCountryConfirm/.test(settingsSource),
 );
 ok(
   'the country a person confirms reaches every onboarding scene, not just the first',

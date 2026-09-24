@@ -110,7 +110,7 @@ done
 #   1. every name below must have a file  — catches a deleted suite
 #   2. the count of *.test.js on disk must match  — catches an unwired suite
 #   3. the count must equal EXPECTED_SUITES  — catches a suite dropped from both
-EXPECTED_SUITES=79
+EXPECTED_SUITES=80
 SUITES=(parser bank-corpus invariants unit worker relay import-plan arabic instant-alert \
         charge-alert kotlin-regex routes perf-config contracts onboarding report \
         trusted-devices cloud-import fx db uncategorised bills categories feedback alert-draft)
@@ -168,6 +168,7 @@ SUITES+=(recap)
 SUITES+=(ledger-stress)
 SUITES+=(universal-confidence)
 SUITES+=(universal-template-certification)
+SUITES+=(country)
 
 missing=""
 for t in "${SUITES[@]}"; do

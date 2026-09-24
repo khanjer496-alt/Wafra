@@ -1,5 +1,6 @@
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
+import { activeCountryDateOrder } from '@/lib/country';
 import {
   interpretBankAlert,
   type BankAlertInterpretation,
@@ -70,7 +71,7 @@ export const inspectGenericBankEventForReview = (
   sender = '',
 ): UniversalBankEvent | null => {
   if (!hasGenericBankAlertContext(source, sender)) return null;
-  const event = inspectUniversalBankEvent(source, { sender });
+  const event = inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
   if (event.decision !== 'review') return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||
@@ -95,7 +96,7 @@ const parseUniversalPostedEvent = (
   pinnedCurrency: string | null,
   pinnedExponent: number | null,
 ): ParsedSms | null => {
-  const event = inspectUniversalBankEvent(source, { sender });
+  const event = inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
   if (event.decision !== 'review' || event.status !== 'posted') return null;
   if (event.direction !== 'debit' && event.direction !== 'credit') return null;
   if (!['purchase', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment'].includes(event.family)) {

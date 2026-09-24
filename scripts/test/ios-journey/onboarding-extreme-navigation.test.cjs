@@ -170,6 +170,13 @@ async function gate(options = {}) {
   dependencies['@/components/onboarding/alive-scenes'] = load(path.join(root, 'src/components/onboarding/alive-scenes.tsx'), dependencies);
   // Same for the welcome country control: its sheet chrome is already stubbed
   // above, so the row renders from real source like every other choice here.
+  // The full-country picker renders from real source too; its search field
+  // is a native boundary like every other control here.
+  dependencies['@/lib/country-names'] = load(path.join(root, 'src/lib/country-names.ts'), {});
+  dependencies['@/lib/country'] = load(path.join(root, 'src/lib/country.ts'), dependencies);
+  dependencies['@/components/ui/text-field'] = { TextField: 'TextField' };
+  dependencies['@/components/country-picker-sheet'] =
+    load(path.join(root, 'src/components/country-picker-sheet.tsx'), dependencies);
   dependencies['@/components/onboarding/country-confirm'] =
     load(path.join(root, 'src/components/onboarding/country-confirm.tsx'), dependencies);
   const component = load(options.sourcePath ?? process.env.WAFRA_ONBOARDING_SOURCE ?? path.join(root, 'src/components/onboarding-gate.tsx'), dependencies, {

@@ -40,6 +40,8 @@ function createWorkflowHarness(options={}) {
  // The country control renders for real; only its sheet chrome is a boundary,
  // so the closed state renders exactly the row a first-run user sees.
  d['@/components/ui/bottom-sheet']={BottomSheet:p=>p.visible?jsx('BottomSheet',p):null};
+ h.local('@/lib/country-names','src/lib/country-names.ts');h.local('@/lib/country','src/lib/country.ts');
+ h.local('@/components/country-picker-sheet');
  h.local('@/components/onboarding/country-confirm');
  const copy=h.local('@/components/workflows/workflow-copy','src/components/workflows/workflow-copy.ts');
  d['./workflow-copy']=copy;h.local('@/components/workflows/workflow-surfaces');

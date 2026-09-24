@@ -426,13 +426,13 @@ export interface OnboardingProfile {
   /** Optional for ledgers created before the alert-delivery step existed. */
   alerts?: OnboardingAlertDelivery | null;
   /**
-   * The country the user says they bank in, as an ISO 3166-1 alpha-2 code.
+   * The country the user picked while onboarding, as an ISO 3166-1 alpha-2
+   * code, kept so an interrupted setup resumes showing the same examples.
    *
-   * DISPLAY ONLY. It chooses which example banks and alert wording onboarding
-   * draws, and nothing else — it never selects a parser market pack, never
-   * pins `ledgerCurrency`, and never decides how a message is read. Those
-   * follow evidence from the alerts themselves, which is why a UAE resident
-   * whose phone is set to another country still parses as UAE.
+   * The authoritative setting is `AppState.country`, which the same picker
+   * writes. This copy never pins `ledgerCurrency` and never moves an AED/SAR
+   * ledger off its Gulf pack; alert evidence still decides which launch
+   * grammar reads a message.
    *
    * Absent means nobody has said, and the device locale is still the guess.
    */
@@ -764,8 +764,21 @@ export interface AppState {
   dailySummary: boolean;
   /** Epoch ms when the free Pro trial started (first launch). */
   trialStartTs: number;
-  /** Market pack id (country). Auto-detected on first launch; user-changeable. */
+  /**
+   * Parser market pack: 'AE' or 'SA' (launch-tested grammars with bank
+   * registries) or 'ZZ' (the neutral pack every other country uses). NOT the
+   * user's country — see `country`. Follows the country, except that an
+   * AED/SAR ledger always keeps its Gulf pack, and alert evidence may move it
+   * between AE and SA.
+   */
   marketId: string;
+  /**
+   * The user's country (ISO 3166-1 alpha-2), or 'ZZ' when unknown. Defaults
+   * from the device Region; changeable in onboarding and Settings. Decides
+   * country conventions such as numeric date order. Optional only for ledgers
+   * written before it existed; hydration always fills it.
+   */
+  country?: string;
   /** UI language ('en' | 'ar'). Auto-detected on first launch. */
   language: string;
   /** Whether UI language follows the OS/app locale or is explicitly pinned. */
