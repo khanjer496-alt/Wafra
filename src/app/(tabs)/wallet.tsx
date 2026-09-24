@@ -3,11 +3,11 @@ import React, { useMemo, useState } from 'react';
 import {
   Platform,
   Pressable,
-  RefreshControl,
   StyleSheet,
   View,
 } from 'react-native';
 
+import { CaptureRefreshControl } from '@/components/capture-refresh-control';
 import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { BalanceOverview } from '@/components/wallet/balance-overview';
@@ -29,7 +29,6 @@ import { useTheme } from '@/hooks/use-theme';
 import { useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
-import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
@@ -41,7 +40,7 @@ import {
   shortDate,
   toISODate,
 } from '@/lib/format';
-import { useStore } from '@/lib/store';
+import { useStoreActions, useStoreSelector } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
 import { bankPickerOptions } from '@/lib/known-banks';
 import { accountGroupsCopy } from '@/lib/reference-copy';
@@ -101,8 +100,13 @@ export default function WalletScreen() {
   const language = useLanguage();
   const transferWords = transferActivityCopy(language);
   const router = useRouter();
+  // Only what Accounts reads. lastScanTs is shown here, so a finished scan
+  // still refreshes it; import progress and unrelated settings do not.
+  const state = useStoreSelector(({ state: s }) => ({
+    transactions: s.transactions, accounts: s.accounts, cardDues: s.cardDues, goals: s.goals,
+    knownBanks: s.knownBanks, lastScanTs: s.lastScanTs, ledgerMoney: s.ledgerMoney, marketId: s.marketId,
+  }));
   const {
-    state,
     addAccount,
     editAccount,
     deleteAccount,
@@ -112,9 +116,9 @@ export default function WalletScreen() {
     setLedgerMoney,
     mergeRenewedCard,
     markCardsDistinct,
-  } = useStore();
-  // Every tab that shows money the inbox produces can now go and refresh it.
-  const { refreshing, onRefresh } = usePullToRefresh();
+  } = useStoreActions();
+  // Every tab that shows money the inbox produces can go and refresh it; the
+  // scan runs from CaptureRefreshControl below, which re-renders on its own.
 
   const now = useToday();
 
@@ -349,7 +353,7 @@ export default function WalletScreen() {
         headerMode="inline"
         header={walletHeader}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
+          <CaptureRefreshControl tintColor={theme.primary} />
         }
         contentStyle={styles.content}
         scrollProps={{

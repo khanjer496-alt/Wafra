@@ -1,7 +1,8 @@
 /** Spending owns categories, their limits, transactions and the former Stats insights. */
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { CaptureRefreshControl } from '@/components/capture-refresh-control';
 import { ThemedText } from '@/components/themed-text';
 import { TransactionRow } from '@/components/transaction-row';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
@@ -20,7 +21,6 @@ import { SegmentedControl } from '@/components/ui/segmented-control';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
-import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryMovers, categoryTrend, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
@@ -35,7 +35,8 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import { comparablePreviousPeriod, inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { spendingCategoryRows } from '@/lib/reference-presentation';
-import { useStore } from '@/lib/store';
+import { useStoreSelector } from '@/lib/store';
+import { historyStatusOnly } from '@/lib/store-selection';
 import { t, tf } from '@/lib/i18n';
 import { merchantSpendingHref } from '@/lib/merchant-spending';
 import type { CategoryId, Transaction } from '@/lib/types';
@@ -51,8 +52,16 @@ const shortMonthLabel = (key: string) => monthLabel(key, true).replace(/\s+\d{4}
 export default function FlowScreen() {
   const theme = useTheme(); const language = useLanguage(); const router = useRouter();
   const params = useLocalSearchParams<{ view?: string }>();
-  const { state } = useStore(); const { period, setPeriod } = usePeriod();
-  const { refreshing, onRefresh } = usePullToRefresh();
+  // Only what Spending draws. Import progress changes only the status-only
+  // object, and only when the status itself does.
+  const state = useStoreSelector(({ state: s }) => ({
+    transactions: s.transactions, accounts: s.accounts, budgets: s.budgets,
+    transferInternalIds: s.transferInternalIds, transferNormalizationVersion: s.transferNormalizationVersion,
+    historyImport: historyStatusOnly(s.historyImport),
+    // The foreign-activity summary reads the ledger currency from module state.
+    ledgerMoney: s.ledgerMoney, marketId: s.marketId,
+  }));
+  const { period, setPeriod } = usePeriod();
   const w = spendingCopy[language === 'ar' ? 'ar' : 'en'];
   const transferWords = transferActivityCopy(language);
   const [view, setView] = useState<ViewMode>(validView(params.view) ? params.view : 'categories');
@@ -88,7 +97,7 @@ export default function FlowScreen() {
         ledgerCurrencyCode(),
       )
     : null,
-    [view, state.transactions, period, live, internal]);
+    [view, state.transactions, period, live, internal, state.ledgerMoney, state.marketId]);
   const rows = useMemo(() => spendingCategoryRows(summary, state.budgets, period.mode === 'month'), [summary, state.budgets, period.mode]);
   const accountById = useMemo(() => new Map(state.accounts.map((a) => [a.id, a])), [state.accounts]);
   const key = period.mode === 'month' ? period.key : monthKey(new Date());
@@ -203,7 +212,7 @@ export default function FlowScreen() {
   return <>
     <ScreenScaffold tabbed headerMode="inline" testID="reference-spending-screen"
       header={flowHeader}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}>
+      refreshControl={<CaptureRefreshControl tintColor={theme.primary} />}>
       <SegmentedControl value={view} onChange={setViewMode} label={t('tabFlow')} segments={[
         { value: 'categories', label: w.categories }, { value: 'activity', label: w.activity }, { value: 'trends', label: w.trends },
       ]} />

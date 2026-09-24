@@ -210,8 +210,10 @@ export function internalTransferIds(
  * import completion, but it is the same snapshot the rest of the UI uses.
  */
 export function internalTransferIdsForState(
-  state: Pick<AppState,
-    'transactions' | 'accounts' | 'transferInternalIds' | 'transferNormalizationVersion' | 'historyImport'>,
+  state: Pick<AppState, 'transactions' | 'accounts' | 'transferInternalIds' | 'transferNormalizationVersion'> & {
+    /** Only whether it is unfinished matters, so a status-only selection is enough. */
+    historyImport: Parameters<typeof historyImportIncomplete>[0];
+  },
 ): Set<string> {
   const ids = state.transferInternalIds;
   const receiptUsable = Array.isArray(ids) && (

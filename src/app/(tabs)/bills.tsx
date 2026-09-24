@@ -4,10 +4,10 @@ import {
   InteractionManager,
   Platform,
   Pressable,
-  RefreshControl,
   StyleSheet,
   View,
 } from 'react-native';
+import { CaptureRefreshControl } from '@/components/capture-refresh-control';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
@@ -28,7 +28,6 @@ import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
-import { usePullToRefresh } from '@/hooks/use-auto-import';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { useToday } from '@/hooks/use-today';
@@ -60,7 +59,8 @@ import {
   trueSubscriptions,
   type Subscription,
 } from '@/lib/subscriptions';
-import { useStore } from '@/lib/store';
+import { useStoreActions, useStoreSelector } from '@/lib/store';
+import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, Bill, CategoryId } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
@@ -98,7 +98,15 @@ export default function BillsScreen() {
   const largeText = useLargeTextLayout();
   const enter = useScreenEntering();
   const focused = useIsFocused();
-  const { state, addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue, setLedgerMoney } = useStore();
+  // Only what Bills reads, so scans, progress and unrelated settings do not
+  // re-render the whole payment agenda.
+  const state = useStoreSelector(({ state: s }) => ({
+    transactions: s.transactions, accounts: s.accounts, bills: s.bills, cardDues: s.cardDues,
+    notSubscriptions: s.notSubscriptions, ledgerMoney: s.ledgerMoney,
+    transferInternalIds: s.transferInternalIds, transferNormalizationVersion: s.transferNormalizationVersion,
+    historyImport: historyStatusOnly(s.historyImport),
+  }));
+  const { addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue, setLedgerMoney } = useStoreActions();
   /**
    * The screen that answers "is this card settled?" can now go and find out.
    *
@@ -106,9 +114,9 @@ export default function BillsScreen() {
    * likely reason this tab is open, and until now nothing on it could ask the
    * inbox for the payment SMS — the scan lived on Home. A user who paid
    * AED 5,645 off a FAB card saw the card still listing AED 5,645 owing, with
-   * no gesture on this screen able to change that.
+   * no gesture on this screen able to change that. The scan runs from
+   * CaptureRefreshControl below, which re-renders on its own.
    */
-  const { refreshing, onRefresh } = usePullToRefresh();
 
   const now = useToday();
   const key = monthKey(now);
@@ -657,7 +665,7 @@ export default function BillsScreen() {
         headerMode="inline"
         header={billsHeader}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />
+          <CaptureRefreshControl tintColor={theme.primary} />
         }
         contentStyle={largeText && styles.headerLarge}
         scrollProps={{ showsVerticalScrollIndicator: false }}>

@@ -36,7 +36,8 @@ import { createTransactionFilterIndex, projectTransactionFilter, type Transactio
 import { getTransferActivity } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { reconcileTransfers } from '@/lib/transfer-reconciliation';
-import { useStore } from '@/lib/store';
+import { useStoreSelector } from '@/lib/store';
+import { historyStatusOnly } from '@/lib/store-selection';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
 
@@ -73,7 +74,13 @@ export default function TransactionsScreen() {
     [language],
   );
   const router = useRouter();
-  const { state } = useStore();
+  // Only what the list reads; scan timestamps and import progress no longer
+  // re-render a 20k-row screen.
+  const state = useStoreSelector(({ state: s }) => ({
+    transactions: s.transactions, accounts: s.accounts, monthStartDay: s.monthStartDay,
+    transferInternalIds: s.transferInternalIds, transferNormalizationVersion: s.transferNormalizationVersion,
+    historyImport: historyStatusOnly(s.historyImport),
+  }));
   const { period } = usePeriod();
   const {
     source,
