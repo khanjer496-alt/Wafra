@@ -1938,10 +1938,14 @@ struct WafraBankSenderRegistryTests {
       ]);
       const ledger = ledgerAdapter();
       const outcome = await coordinator(native, ledger).drain();
-      ok('a mixed-market page drains one currency partition at a time without wedging',
-        outcome.scanned === 2 && outcome.imported >= 1 &&
+      // Once the AED row lands, the ledger's money is AED. The Saudi row can
+      // never import into it, so it is acknowledged as a visible currency
+      // conflict instead of switching the market and wedging the queue.
+      ok('a mixed-market page drains without wedging or switching an AED ledger to SAR',
+        outcome.scanned === 2 && outcome.imported === 1 && outcome.currencyConflicts === 1 &&
           native.acknowledged.includes(aeId) && native.acknowledged.includes(saId) &&
-          ledger.calls.includes('market:SA'),
+          !ledger.calls.includes('market:SA') && ledger.getState().marketId === 'AE' &&
+          ledger.getState().transactions.length === 1,
         JSON.stringify({ outcome, ledger: ledger.calls, native: native.calls }));
     }
 
@@ -1955,6 +1959,187 @@ struct WafraBankSenderRegistryTests {
       ok(`${name} setMarket leaves the complete Saudi page queued`,
         native.acknowledged.length === 0 && !ledger.calls.includes('import'),
         JSON.stringify({ ledger: ledger.calls, native: native.calls }));
+    }
+
+    const recentIso = (ageMs) => new Date(Date.now() - ageMs).toISOString();
+    const trayModule = requireBuild('@/lib/alert-review-tray');
+    const AED_MONEY = { schemaVersion: 2, currency: 'AED', exponent: 2 };
+    // Occupancy only: admission never re-validates entries already in the tray.
+    const BASE_REVIEW_FILLER = { kind: 'universal', parserVersion: 1 };
+
+    {
+      // H1: a real stored AED ledgerMoney with a full page of Saudi rows at
+      // the head. The old coordinator set marketId SA, then the planner threw
+      // ImportMoneyError on every drain and nothing behind the page moved.
+      trayModule.reviewCaptureBacklog.reset();
+      const saIds = Array.from({ length: 51 }, () => nextId());
+      const aeId = nextId();
+      const native = nativeQueue([
+        ...saIds.map((id, index) => envelope({
+          id, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(3_600_000 - index * 1000),
+        })),
+        envelope({ id: aeId, observedAt: recentIso(60_000) }),
+      ]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, ledgerMoney: AED_MONEY });
+      const outcome = await coordinator(native, ledger).drain();
+      ok('an AED ledger never switches to SAR and keeps capturing AED behind a Saudi page',
+        !ledger.calls.some((call) => call.startsWith('market:')) &&
+          ledger.getState().marketId === 'AE' && ledger.getState().ledgerMoney === AED_MONEY &&
+          outcome.imported === 1 && ledger.getState().transactions.length === 1 &&
+          native.acknowledged.includes(aeId) && native.pending().length === 0,
+        JSON.stringify({ outcome, calls: ledger.calls, pending: native.pending().length }));
+      ok('conflicting-currency rows are acknowledged as ignored with a visible count',
+        outcome.currencyConflicts === 51 && saIds.every((id) => native.acknowledged.includes(id)) &&
+          trayModule.reviewCaptureBacklog.get().currencyConflicts === 51,
+        JSON.stringify({ outcome, backlog: trayModule.reviewCaptureBacklog.get() }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // A global review-only ledger (INR) cannot hold AED either; the page is
+      // acknowledged instead of throwing ImportMoneyError forever.
+      const aeId = nextId();
+      const native = nativeQueue([envelope({ id: aeId, observedAt: recentIso(60_000) })]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, ledgerMoney: { schemaVersion: 2, currency: 'INR', exponent: 2 } });
+      const outcome = await coordinator(native, ledger).drain();
+      ok('a non-launch ledger currency acknowledges launch-market rows as conflicts without importing',
+        outcome.imported === 0 && outcome.currencyConflicts === 1 &&
+          native.acknowledged.includes(aeId) && ledger.getState().marketId === 'AE' &&
+          !ledger.calls.includes('import') && native.milestones.length === 0,
+        JSON.stringify({ outcome, calls: ledger.calls }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // A market switch is undone when planning throws after it.
+      const native = nativeQueue([envelope({ sender: 'ALRAJHI', text: SA_BODY })]);
+      const ledger = ledgerAdapter();
+      await rejects(() => coordinatorWithPlan(native, ledger, () => {
+        throw new Error('synthetic plan failure');
+      }).drain(), /synthetic plan failure/);
+      ok('a planning failure after alignment restores the previous market and acknowledges nothing',
+        ledger.getState().marketId === 'AE' &&
+          ledger.calls.indexOf('market:SA') >= 0 &&
+          ledger.calls.indexOf('market:AE') > ledger.calls.indexOf('market:SA') &&
+          native.acknowledged.length === 0 && !ledger.calls.includes('import'),
+        JSON.stringify({ calls: ledger.calls, native: native.calls }));
+      markets.setActiveMarket('AE');
+    }
+
+    const withNotificationLane = (native) => Object.assign(native, {
+      notificationCaptureSupported: true,
+      async listPendingRecordsIncludingNotifications(limit) {
+        native.calls.push(`listAll:${limit}`);
+        return native.pending().slice(0, limit);
+      },
+      async listPendingRecords(limit) {
+        native.calls.push(`listMessages:${limit}`);
+        return native.pending().filter((serialized) =>
+          JSON.parse(serialized).source !== 'notification').slice(0, limit);
+      },
+    });
+    const admittingLedger = (pending) => {
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, reviewTray: { ...BASE_STATE.reviewTray, pending } });
+      // Real admission, including the protected-lane capacity refusal.
+      ledger.stageReviewAlerts = (items, reviewQualifications = []) => {
+        ledger.calls.push(`review:${items.length}`);
+        let tray = ledger.getState().reviewTray;
+        const admittedIds = new Set();
+        for (const item of items) {
+          const result = trayModule.admitPreparedReviewAlert(tray, item, Date.now());
+          tray = result.state;
+          if (result.outcome === 'admitted') admittedIds.add(item.id);
+        }
+        const qualifications = reviewQualifications
+          .filter((candidate) => admittedIds.has(candidate.reviewId))
+          .map((candidate) => candidate.qualification);
+        ledger.setState({ ...ledger.getState(), reviewTray: tray,
+          localCaptureQualifications: mergeQualifications(
+            ledger.getState().localCaptureQualifications, qualifications, Date.now()) });
+        return { admitted: admittedIds.size,
+          qualificationIds: qualifications.map((candidate) => candidate.id),
+          durable: Promise.resolve() };
+      };
+      return ledger;
+    };
+    const fillerHex = (prefix, index) => `${prefix}${String(index).padStart(8, '0')}`.padStart(32, 'f');
+    const protectedFiller = (index) => ({
+      ...BASE_REVIEW_FILLER,
+      id: `local_review_id_${fillerHex('a', index)}`,
+      sourceKey: `local_review_source_${fillerHex('a', index)}`,
+      channel: 'push', observedAt: Date.now() - 10_000 + index,
+      expiresAt: Date.now() + 5 * 86_400_000,
+    });
+    const legacyFiller = (index) => ({
+      ...BASE_REVIEW_FILLER,
+      id: `legacy_review_id_${String(index).padStart(8, '0')}`,
+      sourceKey: `legacy_review_source_${String(index).padStart(8, '0')}`,
+      channel: 'inbox', observedAt: Date.now() - 10_000 + index,
+      expiresAt: Date.now() + 5 * 86_400_000,
+    });
+
+    {
+      // H3(a): fifty held notification reviews at the head of the native
+      // queue used to stop every later SMS page forever.
+      trayModule.reviewCaptureBacklog.reset();
+      const notificationIds = Array.from({ length: 50 }, () => nextId());
+      const aeId = nextId();
+      const native = withNotificationLane(nativeQueue([
+        ...notificationIds.map((id, index) => envelope({
+          id, source: 'notification', sender: 'Wafra Notification',
+          text: 'Your available balance is AED 5,000.00.',
+          observedAt: recentIso(3_600_000 - index * 1000),
+        })),
+        envelope({ id: aeId, observedAt: recentIso(60_000) }),
+      ]));
+      const ledger = admittingLedger(Array.from({ length: 50 }, (_, index) => protectedFiller(index)));
+      const outcome = await coordinator(native, ledger).drain();
+      ok('held notification reviews no longer block SMS behind them',
+        outcome.imported === 1 && native.acknowledged.includes(aeId) &&
+          native.calls.indexOf('listMessages:50') > native.calls.indexOf('listAll:50'),
+        JSON.stringify({ outcome, calls: native.calls }));
+      ok('held notification reviews stay native and are reported once as waiting for Review',
+        outcome.deferredReviews === 50 && notificationIds.every((id) => !native.acknowledged.includes(id)) &&
+          native.pending().length === 50 && trayModule.reviewCaptureBacklog.get().waiting === 50,
+        JSON.stringify({ outcome, backlog: trayModule.reviewCaptureBacklog.get() }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // M2: the Message review lane used to evict its oldest entry after the
+      // native record had already been acknowledged.
+      trayModule.reviewCaptureBacklog.reset();
+      const reviewId = nextId();
+      const aeId = nextId();
+      const native = nativeQueue([
+        envelope({ id: reviewId, text: REVIEW_BODY, sender: 'FAB', observedAt: recentIso(120_000) }),
+        envelope({ id: aeId, observedAt: recentIso(60_000) }),
+      ]);
+      const fillers = Array.from({ length: 50 }, (_, index) => legacyFiller(index));
+      const ledger = admittingLedger(fillers);
+      const outcome = await coordinator(native, ledger).drain();
+      ok('a full Message review lane refuses admission and keeps the record queued',
+        outcome.reviews === 0 && outcome.deferredReviews === 1 &&
+          !native.acknowledged.includes(reviewId) && native.pending().length === 1 &&
+          !ledger.calls.some((call) => call.startsWith('review:')) &&
+          fillers.every((item) => ledger.getState().reviewTray.pending.includes(item)),
+        JSON.stringify({ outcome, calls: ledger.calls }));
+      ok('Message backpressure does not stop automatic capture on the same page',
+        outcome.imported === 1 && native.acknowledged.includes(aeId) &&
+          trayModule.reviewCaptureBacklog.get().waiting === 1);
+      ledger.setState({ ...ledger.getState(), reviewTray: {
+        ...ledger.getState().reviewTray, pending: fillers.slice(1),
+      } });
+      const retry = await coordinator(native, ledger).drain();
+      ok('the deferred Message review is admitted and acknowledged once Review has room',
+        retry.reviews === 1 && native.acknowledged.includes(reviewId) && native.pending().length === 0 &&
+          ledger.getState().reviewTray.pending.length === 50 &&
+          trayModule.reviewCaptureBacklog.get().waiting === 0,
+        JSON.stringify({ retry, calls: ledger.calls }));
+      trayModule.reviewCaptureBacklog.reset();
     }
 
     {
@@ -2617,9 +2802,11 @@ struct WafraBankSenderRegistryTests {
     }
 
     {
+      // Non-reviewable rows: the page bound is independent of Review space,
+      // which applies its own backpressure (covered separately below).
       const rows = Array.from({ length: 2050 }, (_, index) => envelope({
         id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
-        text: 'Your available balance is AED 5,000.00.',
+        text: 'Get 20% off at CARREFOUR when you use your card.',
       }));
       const native = nativeQueue(rows);
       const ledger = ledgerAdapter();
