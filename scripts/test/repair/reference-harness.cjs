@@ -37,6 +37,7 @@ function createHarness(options = {}) {
     ledgerNiceMinor:fils=>Math.max(10_000,Math.round(fils/10_000)*10_000),
     ledgerCurrencyLabel:()=>lang==='ar'?'د.إ':'AED',
     getMonthStartDay:()=>1,
+    monthStartISO: (key) => `${key}-01`, monthEndISO:key=>{const [y,m]=key.split('-').map(Number);return `${key}-${String(new Date(Date.UTC(y,m,0)).getUTCDate()).padStart(2,'0')}`;},
     monthKey:d=>String(d instanceof Date?d.toISOString():d).slice(0,7),
     monthLabel:(k,short=false)=>new Date(k+'-01T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:short?'short':'long',year:'numeric'}),
     shiftMonthKey:(k,n)=>{const d=new Date(k+'-01T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+n);return d.toISOString().slice(0,7)},
@@ -118,6 +119,7 @@ function createHarness(options = {}) {
   const local=(name,filename)=>deps[name]=load(path.join(root,filename??name.replace('@/', 'src/')+'.tsx'),deps,{Date:Clock});
   deps['@react-native-async-storage/async-storage']={getItem:async()=>null,setItem:async()=>{}};
   local('@/lib/home-widget-preferences','src/lib/home-widget-preferences.ts');
+  local('@/lib/home-today','src/lib/home-today.ts');
   local('@/lib/home-widgets','src/lib/home-widgets.ts');
   local('@/lib/reference-copy','src/lib/reference-copy.ts');
   local('@/lib/currency-metadata','src/lib/currency-metadata.ts');
@@ -169,7 +171,7 @@ function createHarness(options = {}) {
   local('@/components/money-picture-progress');
   local('@/components/transfer-review-notice');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
-  local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');
+  local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');
   local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');
   deps['react-native-safe-area-context']={useSafeAreaInsets:()=>({top:0,bottom:10,left:0,right:0})};
   deps['@/components/ui/tab-bar-metrics']={useTabBarMetrics:()=>({measuredHeight:78,setMeasuredHeight(){}})};

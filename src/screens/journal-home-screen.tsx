@@ -27,12 +27,14 @@ import type { Insight } from '@/lib/insights';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
-import { formatAmount } from '@/lib/format';
+import { formatAmount, monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
-import { countsInCashflowTotals, liveAccountIds } from '@/lib/ledger';
+import { countsInCashflowTotals, isSpending, liveAccountIds } from '@/lib/ledger';
+import { summarizeHomeToday } from '@/lib/home-today';
+import { allocationsOf } from '@/lib/splits';
 import { moneyPictureProgress } from '@/lib/money-picture-progress';
 import { normalizePreferredName } from '@/lib/onboarding';
 import { syncPaymentReminders } from '@/lib/notifications';
@@ -267,6 +269,27 @@ export default function JournalHomeScreen() {
   const hasPeriodRecords = useMemo(() => state.transactions.some(transaction =>
     liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
   [state.transactions, liveAccounts, period]);
+  // Today and this week use the same spending definition and transfer scope as
+  // the period totals below them. Budget pace applies only to the live month.
+  const homeToday = useMemo(() => {
+    const live = liveAccounts as Set<string>;
+    const internal = dashboard.internalTransactionIds as Set<string>;
+    const budgetMonth = period.mode === 'month' && period.key === monthKey(now) ? period.key : null;
+    return summarizeHomeToday({
+      transactions: state.transactions,
+      budgets: state.budgets,
+      now,
+      isSpending: (transaction) => isSpending(transaction, live, internal),
+      inBudgetPeriod: (dateISO) => budgetMonth !== null && inPeriod(dateISO, period),
+      budgetPeriodEndISO: budgetMonth ? monthEndISO(budgetMonth) : null,
+      allocations: allocationsOf,
+      periodExpenseFils: dashboard.hero.expenseFils,
+      averageWindow: period.mode === 'month' ? { startISO: monthStartISO(period.key), endISO: monthEndISO(period.key) }
+        : period.mode === 'range' ? { startISO: period.from, endISO: period.to } : null,
+    });
+    // Day-keyed like the dashboard: a foreground resume must not re-walk the ledger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, dashboard.hero.expenseFils, period, projectionDay]);
   const recentActivity = useMemo(() => {
     const rows: Transaction[] = [];
     for (const transaction of state.transactions) {
@@ -514,6 +537,8 @@ export default function JournalHomeScreen() {
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
           onSpending={() => router.push('/flow')}
+          today={homeToday}
+          onToday={() => router.push('/transactions')}
           brandMark={openRecap ? <RecapLogoTrigger
             unread={recapEntry?.unread ?? false}
             accessibilityLabel={language === 'ar'

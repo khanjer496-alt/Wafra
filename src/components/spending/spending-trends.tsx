@@ -19,7 +19,7 @@ import {
   type LedgerMoneySpec,
   wholeMajorUnits,
 } from '@/lib/ledger-money';
-import type { CategoryMover, MerchantStat } from '@/lib/analytics';
+import type { CategoryMover, ComparableSpend, MerchantStat } from '@/lib/analytics';
 import type { CategoryId } from '@/lib/types';
 
 /**
@@ -46,6 +46,8 @@ type Props = {
   weekdays: readonly number[];
   periodLabel: string;
   comparisonLabel: string | null;
+  /** Everyday spending in both comparable windows; null when there is nothing to compare. */
+  comparison?: ComparableSpend | null;
   onMonth: (key: string) => void;
   onMerchant: (name: string) => void;
   onCategory: (id: CategoryId) => void;
@@ -205,21 +207,42 @@ export function SpendingTrends(p: Props) {
       </View>
     </View>
 
-    <View style={styles.section}>
+    <View style={styles.section} testID="spending-compare">
       <ThemedText type="heading">{w.change}</ThemedText>
-      <ThemedText type="meta" themeColor="textSecondary">{p.comparisonLabel ? `${w.vs} ${p.comparisonLabel}` : w.missingComparison}</ThemedText>
-      <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
-        {p.movers.map((m) => <Pressable key={m.category} accessibilityRole="button" onPress={() => p.onCategory(m.category)}
-          accessibilityLabel={`${categoryLabel(m.category, lang)}. ${moneyLabel(m.previousFils)}. ${moneyLabel(m.currentFils)}`}
-          style={[styles.row, styles.rule, { borderColor: theme.cardBorder }]}>
-          <CategoryAvatar category={m.category} size={36} />
-          <View style={styles.grow}><ThemedText type="smallBold">{categoryLabel(m.category, lang)}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary" tabular>{moneyLabel(m.previousFils)} → {moneyLabel(m.currentFils)}</ThemedText></View>
-          <View style={styles.change}><ThemedText type="smallBold" tabular themeColor={m.deltaFils > 0 ? 'expense' : 'income'}>{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">{m.deltaFils > 0 ? w.more : w.fewer}</ThemedText></View>
-        </Pressable>)}
-        {p.movers.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noChange}</ThemedText>}
-      </View>
+      {p.comparison && p.comparisonLabel ? (() => {
+        const c = p.comparison;
+        const same = Math.abs(c.deltaFils) < Math.max(1, c.previousFils) * 0.02;
+        const lead = same ? `${w.spentSame} ${p.comparisonLabel}`
+          : `${w.youSpent} ${moneyLabel(Math.abs(c.deltaFils))} ${c.deltaFils < 0 ? w.spentLess : w.spentMore} ${p.comparisonLabel} ${w.byThisDay}.`;
+        return <View accessible accessibilityRole="text" accessibilityLabel={`${lead} ${w.fixedLeftOut}`} style={styles.compareLead}>
+          <ThemedText type="subtitle" themeColor={same ? 'text' : c.deltaFils < 0 ? 'income' : 'expense'}>{lead}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">{w.fixedLeftOut}</ThemedText>
+        </View>;
+      })() : <ThemedText type="meta" themeColor="textSecondary">{p.comparisonLabel ? `${w.vs} ${p.comparisonLabel}` : w.missingComparison}</ThemedText>}
+      {([['more', p.movers.filter((m) => m.deltaFils > 0)], ['less', p.movers.filter((m) => m.deltaFils < 0)]] as const).map(([kind, list]) =>
+        list.length === 0 ? null : <View key={kind} style={styles.compareGroup}>
+          <ThemedText type="smallBold" themeColor={kind === 'more' ? 'expense' : 'income'}>{kind === 'more' ? w.spendingMore : w.spendingLess}</ThemedText>
+          {list.map((m) => {
+            const scale = Math.max(1, m.currentFils, m.previousFils);
+            return <Pressable key={m.category} accessibilityRole="button" onPress={() => p.onCategory(m.category)}
+              accessibilityLabel={`${categoryLabel(m.category, lang)}. ${p.periodLabel} ${moneyLabel(m.currentFils)}. ${p.comparisonLabel ?? ''} ${moneyLabel(m.previousFils)}. ${m.deltaFils > 0 ? w.more : w.fewer} ${moneyLabel(Math.abs(m.deltaFils))}`}
+              style={({ pressed }) => [styles.compareRow, styles.rule, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+              <View style={styles.compareTop}>
+                <CategoryAvatar category={m.category} size={28} />
+                <ThemedText type="smallBold" style={styles.grow}>{categoryLabel(m.category, lang)}</ThemedText>
+                <ThemedText type="smallBold" tabular themeColor={m.deltaFils > 0 ? 'expense' : 'income'}>
+                  {m.deltaFils > 0 ? '+' : '−'}{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
+              </View>
+              {[[p.periodLabel, m.currentFils, theme.text], [p.comparisonLabel ?? '', m.previousFils, theme.track]].map(([label, fils, color]) =>
+                <View key={String(label)} style={styles.compareBarRow}>
+                  <ThemedText type="micro" themeColor="textSecondary" style={styles.compareBarLabel} numberOfLines={1}>{String(label)}</ThemedText>
+                  <View style={styles.compareTrack}><View style={{ height: 8, borderRadius: 4, width: `${Number(fils) / scale * 100}%`, backgroundColor: String(color) }} /></View>
+                  <Money fils={Number(fils)} type="meta" />
+                </View>)}
+            </Pressable>;
+          })}
+        </View>)}
+      {p.movers.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noChange}</ThemedText>}
     </View>
 
     <Pressable accessibilityRole="button" accessibilityState={{ expanded: patterns }} onPress={() => setPatterns(!patterns)} style={styles.disclosure}>
@@ -266,6 +289,13 @@ const styles = StyleSheet.create({
   section: { gap: 8 }, group: { overflow: 'hidden', },
   row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, paddingVertical: 13 }, rule: { borderTopWidth: StyleSheet.hairlineWidth },
   grow: { flex: 1, minWidth: 100, gap: 4 }, change: { alignItems: 'flex-end', gap: 4 },
+  compareLead: { gap: 4, paddingVertical: 6 },
+  compareGroup: { gap: 2, paddingTop: 10 },
+  compareRow: { paddingVertical: 12, gap: 6 },
+  compareTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  compareBarRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  compareBarLabel: { width: 84 },
+  compareTrack: { flex: 1, minWidth: 40 },
   empty: { paddingVertical: 20 }, disclosure: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 48 },
   weekday: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }, weekdayName: { width: 42 }, weekdayTrack: { flex: 1, minWidth: 40, height: 6, borderRadius: 3 },
 });

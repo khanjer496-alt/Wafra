@@ -11,6 +11,7 @@ import { LimitSheet } from '@/components/limit-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { SpendingOverview, spendingCopy, type CategoryFilter } from '@/components/spending/spending-overview';
 import { SpendingTrends } from '@/components/spending/spending-trends';
+import { SpendingCalendar } from '@/components/spending/spending-calendar';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { Button } from '@/components/ui/controls';
@@ -23,7 +24,7 @@ import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import { categoryMovers, categoryTrend, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
+import { categoryMovers, categoryTrend, comparableSpend, dailySpendForMonth, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
 import { assistantCopy } from '@/lib/assistant-copy';
 import { categoryLabel } from '@/lib/categories';
 import { formatAED, formatCompactAED, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
@@ -82,7 +83,8 @@ export default function FlowScreen() {
     setTrendWindowEndKey(null);
     setView(params.view);
   }, [params.view]);
-  useEffect(() => { setFilter('all'); }, [period]);
+  const [calendarDay, setCalendarDay] = useState<string | null>(null);
+  useEffect(() => { setFilter('all'); setCalendarDay(null); }, [period]);
 
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = internalTransferIdsForState(state);
@@ -173,6 +175,7 @@ export default function FlowScreen() {
       }
       seenInPeriod = true;
       if (isTransferCandidate(tx) || !isSpending(tx, live, internal)) continue;
+      if (calendarDay !== null && tx.date !== calendarDay) continue;
       if (needle) {
         const haystack = `${tx.title} ${accountById.get(tx.accountId)?.name ?? ''}`.toLocaleLowerCase();
         if (!haystack.includes(needle)) continue;
@@ -181,8 +184,12 @@ export default function FlowScreen() {
       if (!needle && out.length >= ACTIVITY_PREVIEW_LIMIT) break;
     }
     return out;
-  }, [view, state.transactions, live, internal, period, appliedQuery, accountById]);
+  }, [view, state.transactions, live, internal, period, appliedQuery, accountById, calendarDay]);
   const activity = sortedActivity;
+  const calendarDays = useMemo(() => view === 'activity' && period.mode === 'month'
+    ? dailySpendForMonth(state.transactions, period.key, live, internal) : [],
+  [view, period, state.transactions, live, internal]);
+  const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const analysis = useMemo(() => {
     if (view !== 'trends') return null;
     const keys = Array.from({ length: 6 }, (_, i) => shiftMonthKey(trendWindowAnchorKey, i - 5));
@@ -202,7 +209,8 @@ export default function FlowScreen() {
     const comparable = comparablePreviousPeriod(period, new Date(), state.transactions);
     return { months: [...buckets.values()],
       merchants: topMerchants(state.transactions, period, 8, live, internal),
-      movers: categoryMovers(state.transactions, period, 5, live, internal),
+      movers: categoryMovers(state.transactions, period, 6, live, internal),
+      comparison: comparableSpend(state.transactions, period, live, internal),
       weekdays: dayOfWeekSpend(state.transactions, period, live, internal),
       comparisonLabel: comparable ? periodLabel(comparable) : null };
   }, [view, trendWindowAnchorKey, state.transactions, period, live, internal]);
@@ -250,6 +258,7 @@ export default function FlowScreen() {
         <View style={styles.trendsToolbar}>
           <PeriodPill onPress={() => setPeriodOpen(true)} />
         </View>
+        <SpendingCalendar days={calendarDays} todayISO={todayISO} selected={calendarDay} onSelect={setCalendarDay} />
         <TextField label={w.search} placeholder={w.searchHint} value={query} onChangeText={setQuery} autoCorrect={false} />
         {hasTransferSpending && <View style={styles.transferNote}>
           <ThemedText type="meta" themeColor="textSecondary">{transferWords.activityCountsNote}</ThemedText>
