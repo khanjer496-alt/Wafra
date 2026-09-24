@@ -362,6 +362,20 @@ test('SMS proof cannot finish a selected notification automation', async t => {
   assert.ok(s.button('iosNotificationChooseSms'));
 });
 
+test('installing the SMS Shortcut while viewing it cannot rewrite the recorded notification status', async t => {
+  const s = await screen(t, { version: '27.0', notificationCaptureSupported: true,
+    nativeStatus: { enabled: true, notificationSetupProofAt: Date.now() },
+    progress: { futureCaptureSource: 'notification', futureAutomationConfirmed: true,
+      futureStatus: 'complete', historyStatus: 'complete' } });
+  await s.press('iosNotificationChooseSms');
+  const before = s.urls.length;
+  await s.press('iosLocalInstallShortcut');
+  assert.ok(s.urls.length > before, 'the SMS Shortcut install still opens');
+  assert.equal(s.saved().futureCaptureSource, 'notification');
+  assert.equal(s.saved().futureStatus, 'complete', 'viewing SMS setup must not mark the notification setup in progress');
+  assert.equal(s.saved().futureAutomationConfirmed, true);
+});
+
 test('notification help cannot open an invisible SMS guide or run its permission check', async t => {
   const s = await screen(t, { version: '27.0', notificationCaptureSupported: true,
     nativeStatus: { enabled: true, notificationSetupProofAt: Date.now() },

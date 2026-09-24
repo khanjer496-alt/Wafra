@@ -1940,11 +1940,15 @@ struct WafraBankSenderRegistryTests {
       ]);
       const ledger = ledgerAdapter();
       const outcome = await coordinator(native, ledger).drain();
-      // Once the AED row lands, the ledger's money is AED. The Saudi row can
-      // never import into it, so it is acknowledged as a visible currency
-      // conflict instead of switching the market and wedging the queue.
+      // Once the AED row lands, the ledger's money is AED. The Saudi purchase
+      // can never import into it, so it becomes a durable SAR Review item
+      // (acknowledged only behind it) instead of switching the market,
+      // wedging the queue, or being dropped.
+      const saReview = ledger.getState().reviewTray.pending
+        .find((item) => item.kind === 'universal' && item.event.amount.value?.currency === 'SAR');
       ok('a mixed-market page drains without wedging or switching an AED ledger to SAR',
-        outcome.scanned === 2 && outcome.imported === 1 && outcome.currencyConflicts === 1 &&
+        outcome.scanned === 2 && outcome.imported === 1 && outcome.reviews === 1 &&
+          !outcome.currencyConflicts && !!saReview &&
           native.acknowledged.includes(aeId) && native.acknowledged.includes(saId) &&
           !ledger.calls.includes('market:SA') && ledger.getState().marketId === 'AE' &&
           ledger.getState().transactions.length === 1,
@@ -1990,25 +1994,94 @@ struct WafraBankSenderRegistryTests {
         !ledger.calls.some((call) => call.startsWith('market:')) &&
           ledger.getState().marketId === 'AE' && ledger.getState().ledgerMoney === AED_MONEY &&
           outcome.imported === 1 && ledger.getState().transactions.length === 1 &&
-          native.acknowledged.includes(aeId) && native.pending().length === 0,
+          native.acknowledged.includes(aeId),
         JSON.stringify({ outcome, calls: ledger.calls, pending: native.pending().length }));
-      ok('conflicting-currency rows are acknowledged as ignored with a visible count',
-        outcome.currencyConflicts === 51 && saIds.every((id) => native.acknowledged.includes(id)) &&
-          trayModule.reviewCaptureBacklog.get().currencyConflicts === 51,
-        JSON.stringify({ outcome, backlog: trayModule.reviewCaptureBacklog.get() }));
+      // B1: a conflicting-currency purchase is never acknowledged without a
+      // durable, user-visible record. Fifty fill Review; the fifty-first waits
+      // natively for Review space instead of being dropped.
+      const tray = ledger.getState().reviewTray;
+      const sarReviews = tray.pending.filter((item) => item.kind === 'universal' &&
+        item.event.amount.value?.currency === 'SAR' && item.event.amount.value.exponent === 2);
+      const acknowledgedSa = saIds.filter((id) => native.acknowledged.includes(id));
+      ok('conflicting-currency purchases become durable SAR Review items, never silent acknowledgements',
+        outcome.reviews === 50 && sarReviews.length === 50 && acknowledgedSa.length === 50 &&
+          outcome.deferredReviews === 1 && native.pending().length === 1 &&
+          !outcome.currencyConflicts && trayModule.reviewCaptureBacklog.get().currencyConflicts === 0 &&
+          trayModule.reviewCaptureBacklog.get().waiting === 1,
+        JSON.stringify({ outcome, backlog: trayModule.reviewCaptureBacklog.get(), sar: sarReviews.length }));
+      const hydrated = trayModule.normalizeAlertReviewTray(JSON.parse(JSON.stringify(tray)), Date.now());
+      ok('SAR currency-conflict Review items survive persistence and hydration',
+        hydrated.pending.length === tray.pending.length &&
+          hydrated.pending.every((item) => item.kind === 'universal' &&
+            item.event.amount.value?.currency === 'SAR' && item.channel === 'inbox' &&
+            /^(?:apple_message_review_source_[0-9a-f]{64}|local_review_source_[0-9a-f]{32})$/.test(item.sourceKey)),
+        JSON.stringify(hydrated.pending.slice(0, 1)));
+      const promotion = requireBuild('@/lib/review-promotion');
+      const sampleReview = sarReviews[0];
+      const plan = promotion.planReviewPromotion({
+        ...ledger.getState(),
+        reviewTray: hydrated,
+        accounts: [{ id: 'acct-aed', name: 'Card', kind: 'card', balanceFils: 0 }],
+      }, {
+        reviewId: sampleReview.id, type: 'expense', accountId: 'acct-aed', title: 'Coffee',
+        category: 'food', date: '2026-08-25',
+        universal: {
+          confirmed: true, postingStatus: 'posted',
+          amount: sampleReview.event.amount.value, instrument: null,
+          expectedSourceKey: sampleReview.sourceKey, expectedObservedAt: sampleReview.observedAt,
+        },
+      }, 'tx-promoted', Date.now());
+      ok('an SAR Review item cannot be posted into the AED ledger',
+        plan.outcome === 'refused' && plan.reason === 'currency-mismatch',
+        JSON.stringify(plan));
+      const drainAgain = await coordinator(native, ledger).drain();
+      ok('the waiting SAR row stays queued while Review is full and is never acknowledged silently',
+        native.pending().length === 1 && drainAgain.imported === 0 &&
+          !native.acknowledged.includes(saIds.find((id) => !acknowledgedSa.includes(id))),
+        JSON.stringify({ drainAgain, pending: native.pending().length }));
       trayModule.reviewCaptureBacklog.reset();
     }
 
     {
-      // A global review-only ledger (INR) cannot hold AED either; the page is
-      // acknowledged instead of throwing ImportMoneyError forever.
+      // B1: a record with no market of its own on a conflicting page is never
+      // converted by the currency conflict; only its own market can conflict.
+      trayModule.reviewCaptureBacklog.reset();
+      const saId = nextId();
+      const genericId = nextId();
+      const native = nativeQueue([
+        envelope({ id: saId, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(120_000) }),
+        envelope({ id: genericId, sender: 'UNLISTED-BANK', text: 'Card purchase CAD 24.90 at MAPLE CAFE on 2026-09-05. Available balance CAD 500.00.',
+          observedAt: recentIso(60_000) }),
+      ]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, ledgerMoney: AED_MONEY });
+      const outcome = await coordinator(native, ledger).drain();
+      const pending = ledger.getState().reviewTray.pending;
+      const genericReview = pending.find((item) => item.kind === 'universal' &&
+        item.event.amount.value?.currency === 'CAD');
+      const sarReview = pending.find((item) => item.kind === 'universal' &&
+        item.event.amount.value?.currency === 'SAR');
+      ok('a market-null record on a conflicting page keeps its own outcome and is not converted',
+        !!sarReview && !!genericReview && outcome.imported === 0 && !outcome.currencyConflicts &&
+          !ledger.calls.some((call) => call.startsWith('market:')),
+        JSON.stringify({ outcome, pending: pending.map((item) => item.kind === 'universal'
+          ? item.event.amount.value : item.amount) }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // A global review-only ledger (INR) cannot hold AED either; the row
+      // becomes a durable AED Review item instead of throwing ImportMoneyError
+      // forever or being dropped.
       const aeId = nextId();
       const native = nativeQueue([envelope({ id: aeId, observedAt: recentIso(60_000) })]);
       const ledger = ledgerAdapter();
       ledger.setState({ ...BASE_STATE, ledgerMoney: { schemaVersion: 2, currency: 'INR', exponent: 2 } });
       const outcome = await coordinator(native, ledger).drain();
-      ok('a non-launch ledger currency acknowledges launch-market rows as conflicts without importing',
-        outcome.imported === 0 && outcome.currencyConflicts === 1 &&
+      ok('a non-launch ledger currency stages launch-market rows for Review without importing',
+        outcome.imported === 0 && outcome.reviews === 1 && !outcome.currencyConflicts &&
+          ledger.getState().reviewTray.pending.some((item) => item.kind === 'universal' &&
+            item.event.amount.value?.currency === 'AED') &&
           native.acknowledged.includes(aeId) && ledger.getState().marketId === 'AE' &&
           !ledger.calls.includes('import') && native.milestones.length === 0,
         JSON.stringify({ outcome, calls: ledger.calls }));

@@ -1,6 +1,7 @@
 import {
   identifySourceFreeReviewAlert,
   inspectSourceFreeRefusedAlert,
+  parsedFinancialCandidateReview,
   shouldReviewParsedIncome,
 } from '@/lib/auto-import';
 import {
@@ -239,6 +240,31 @@ function localReviewIdentity(id: string): { id: string; sourceKey: string } {
   };
 }
 
+/**
+ * A parsed row whose own currency this ledger cannot hold. Money-moving rows
+ * (transactions and card payments) become a durable, source-free Universal
+ * Review under the record's own review identity: Review shows the foreign
+ * amount and promotion refuses it as a currency mismatch, so nothing posts and
+ * nothing is lost silently. Informational kinds (statement, bill reminder)
+ * move no money and return null for the caller to acknowledge as ignored.
+ */
+export function currencyConflictReview(
+  outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
+  recordId: string,
+): Extract<LocalMessageParseOutcome, { kind: 'review' }> | null {
+  const { row } = outcome;
+  if (row.kind !== 'transaction' && row.kind !== 'cardPayment') return null;
+  const observedAt = row.smsTs;
+  if (observedAt === undefined || !Number.isSafeInteger(observedAt)) return null;
+  const candidate = parsedFinancialCandidateReview({ ...row, kind: 'transaction' }, observedAt);
+  if (!candidate || !('kind' in candidate) || candidate.kind !== 'universal') return null;
+  const item = identifySourceFreeReviewAlert(
+    { ...candidate, channel: row.channel === 'push' ? 'push' : 'inbox' },
+    localReviewIdentity(recordId),
+  );
+  return item ? { kind: 'review', market: outcome.market, item, milestone: 'none' } : null;
+}
+
 function sanitizedRefusal(
   envelope: LocalMessageEnvelope,
   observedAt: number,
@@ -406,6 +432,10 @@ export function parseLocalMessageRecord(
       // open to the same-event rule, so the History import copy of the same
       // Message (its GUID and real date, seconds apart) merges with it.
       ...(!isNotification && SHA256_EVENT_ID_RE.test(envelope.id) ? { sourceEventId: envelope.id } : {}),
+      // The queue delivers each such Message once. Its UUID is kept only as a
+      // durable "one live observation" marker so dedupe never folds a second
+      // genuine identical purchase into it and binds it one-to-one to History.
+      ...(!isNotification && UUID_RE.test(envelope.id) ? { messageObservationId: envelope.id } : {}),
       ...(isNotification ? { notificationObservationId: envelope.id } : {}),
     };
     return {

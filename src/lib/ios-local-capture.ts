@@ -14,6 +14,7 @@ import {
 import { migrateLegacyLedgerMoney } from '@/lib/ledger-money';
 import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
 import {
+  currencyConflictReview,
   parseLocalMessageRecord,
   parseLocalApplePayRecord,
   preflightLocalMessageRecord,
@@ -49,8 +50,10 @@ export interface IosLocalCaptureOutcome {
   /** Apple Pay reviews among deferredApplePay that wait only for Review space. */
   deferredApplePayReviews?: number;
   /**
-   * Automatic rows acknowledged as ignored because their launch-market
-   * currency conflicts with the stored ledger money. Never imported.
+   * Declines and informational facts (statements, bill reminders) acknowledged
+   * as ignored because their own launch-market currency conflicts with the
+   * stored ledger money. Conflicting money-moving rows are never counted here:
+   * they become durable Review items instead. Never imported.
    */
   currencyConflicts?: number;
 }
@@ -444,14 +447,34 @@ export function createIosLocalCaptureCoordinator(
         outcomes.push(outcome);
       }
 
+      // Records whose OWN market conflicts with the stored ledger currency.
+      // Converted before replay seeding, planning, and milestones: such a row
+      // must not import, reconcile a decline, or prove the Message automation.
+      // A money-moving row becomes a durable Review item (shown with its own
+      // currency, refused at promotion) and is acknowledged only once that
+      // item is retained. A decline or informational fact moves no money and
+      // is acknowledged as ignored with the visible count. A record without
+      // its own market is never converted.
+      const currencyConflictReviewIds = new Set<string>();
       if (pageCurrencyConflict) {
-        // Converted before replay seeding, planning, and milestones: a row
-        // this ledger cannot hold must not import, reconcile a decline, or
-        // prove the Message automation. It is counted and surfaced instead.
         for (let index = 0; index < outcomes.length; index += 1) {
           const outcome = outcomes[index];
           if (outcome.kind !== 'parsed' && outcome.kind !== 'declined') continue;
-          currencyConflictRecords.add(page[index].preflight.id);
+          const ownMarket = page[index].preflight.market;
+          if (ownMarket === null || outcome.market !== ownMarket || !conflictsWithLedger(ownMarket)) continue;
+          const recordId = page[index].preflight.id;
+          const review = outcome.kind === 'parsed' ? currencyConflictReview(outcome, recordId) : null;
+          if (review) {
+            currencyConflictReviewIds.add(recordId);
+            outcomes[index] = review;
+            continue;
+          }
+          if (outcome.kind === 'parsed' && (outcome.row.kind === 'transaction' || outcome.row.kind === 'cardPayment')) {
+            // A money row that cannot be described for Review stays queued.
+            outcomes[index] = { kind: 'held', market: null, milestone: 'none' };
+            continue;
+          }
+          currencyConflictRecords.add(recordId);
           outcomes[index] = { kind: 'ignored', market: outcome.market, milestone: 'none' };
         }
       }
@@ -712,7 +735,11 @@ export function createIosLocalCaptureCoordinator(
       const deferredReviewIds = new Set(outcomes.flatMap((outcome, index) => {
         if (outcome.kind === 'held') return [page[index].preflight.id];
         if (capacityDeferredIds.has(page[index].preflight.id)) return [page[index].preflight.id];
-        if (outcome.kind !== 'review' || outcome.item.channel !== 'push') return [];
+        if (outcome.kind !== 'review') return [];
+        // Notification reviews and currency-conflict money rows are ACKed only
+        // behind their retained Review item (pending or a live tombstone).
+        if (outcome.item.channel !== 'push' &&
+          !currencyConflictReviewIds.has(page[index].preflight.id)) return [];
         const item = outcome.item;
         const retained = reviewTray?.pending?.some(entry => entry.sourceKey === item.sourceKey && entry.observedAt === item.observedAt) ||
           reviewTray?.tombstones?.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime());
