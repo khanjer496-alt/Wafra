@@ -114,6 +114,13 @@ ok('a summary is skipped only beside a visible child, and history is read as the
     notificationListener.includes('NotificationTextSurfaces.summaryHasVisibleChild(') &&
     notificationListener.indexOf('FLAG_GROUP_SUMMARY') <
       notificationListener.indexOf('NotificationCaptureStore.append(') &&
+    // Reading the shade parcels every active notification. Only a summary
+    // that passed the cheap package/source and money gates may pay for it.
+    notificationListener.indexOf('summaryHasVisibleChild(sbn)') >
+      notificationListener.indexOf('recordAdmission("sourceRejected", adcb)') &&
+    notificationListener.indexOf('summaryHasVisibleChild(sbn)') >
+      notificationListener.indexOf('recordAdmission("moneyRejected", adcb)') &&
+    (notificationListener.match(/summaryHasVisibleChild\(sbn\)/g) ?? []).length === 1 &&
     notificationListener.indexOf('addText(extras.getCharSequence(Notification.EXTRA_BIG_TEXT))') <
       notificationListener.indexOf('addText(extras.getCharSequence(Notification.EXTRA_TEXT))') &&
     notificationListener.includes(
@@ -308,6 +315,15 @@ const nativeReaderModule = fs.readFileSync(
       // Queued rows always reach JS so they can be acknowledged or reviewed.
       nativeReaderModule.includes('TrustedBankNotificationPackages.queuedSourceClass('),
     JSON.stringify({ capture: capture.length }));
+  // The build kill switch stops admission for every source, messaging apps
+  // included: with capture disabled nothing may enter the encrypted queue.
+  const queued = nativeTrustedPackages.slice(
+    nativeTrustedPackages.indexOf('fun queuedSourceClass('),
+    nativeTrustedPackages.indexOf('private const val MAX_APPLICATION_LABEL_CHARS'));
+  ok('the build kill switch refuses every source, messaging apps included',
+    /fun sourceClass\([^)]*\): String\? \{\s*(?:\/\/[^\n]*\n\s*)*if \(!CAPTURE_ENABLED\) return null/.test(capture) &&
+      /fun queuedSourceClass\([^)]*\): String\? \{\s*if \(!CAPTURE_ENABLED\) return null/.test(queued),
+    JSON.stringify({ capture: capture.slice(0, 200), queued: queued.slice(0, 200) }));
 }
 
 const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',

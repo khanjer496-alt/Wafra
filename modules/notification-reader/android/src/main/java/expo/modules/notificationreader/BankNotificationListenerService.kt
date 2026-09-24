@@ -68,16 +68,6 @@ class BankNotificationListenerService : NotificationListenerService() {
       if (sbn.packageName == packageName) return
       if (!NotificationCapturePolicy.isEnabled(this)) return
       recordAdmission("active", adcb)
-      // A group summary restates its children, each of which is posted (and
-      // captured) on its own; reading it re-captured whichever older alert it
-      // summarised every time the group was re-posted. Skip it only while a
-      // child is actually visible: an app that posts a summary alone, or
-      // whose child was already dismissed, would otherwise lose the alert.
-      if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0 &&
-          summaryHasVisibleChild(sbn)) {
-        recordAdmission("groupSummary", adcb)
-        return
-      }
       val extras = sbn.notification.extras
       val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
       val trustedPackage = TrustedBankNotificationPackages.isTrusted(this, sbn.packageName)
@@ -275,6 +265,19 @@ class BankNotificationListenerService : NotificationListenerService() {
         recordAdmission("moneyHeuristicBypassed", adcb)
       }
       recordAdmission("moneyPassed", adcb)
+      // A group summary restates its children, each of which is posted (and
+      // captured) on its own; reading it re-captured whichever older alert it
+      // summarised every time the group was re-posted. Skip it only while a
+      // child is actually visible: an app that posts a summary alone, or
+      // whose child was already dismissed, would otherwise lose the alert.
+      // Checked only here, after the package/source and money gates: reading
+      // the shade parcels every active notification, and most summaries
+      // (chat, mail, games) are refused above without it.
+      if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0 &&
+          summaryHasVisibleChild(sbn)) {
+        recordAdmission("groupSummary", adcb)
+        return
+      }
 
       recordAdmission("appendAttempted", adcb)
 
