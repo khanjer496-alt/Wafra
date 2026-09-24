@@ -2779,6 +2779,35 @@ const DECLINE_SMS = [{
       duplicateRepair.batch.updates[0].id === 'duplicate-1405' &&
       duplicateRepair.batch.updates[0].remove === true,
     duplicateRepair.batch.updates);
+
+  // isTransfer is the parser's own transfer hint, not a pairing or a user
+  // decision: a proven second provider copy of a parser-flagged transfer is
+  // retired like any other, or the transfer shows twice. Only a copy another
+  // leg's pairing points at (transferMatch) is kept.
+  const retireWith = (extra) => buildImportPlan(
+    [],
+    { ...duplicateState, transactions: duplicateState.transactions.map((row) =>
+      row.id === 'duplicate-1405' ? { ...row, ...extra } : { ...row, isTransfer: extra.isTransfer }) },
+    1786544431861,
+    new Date('2026-08-14T12:00:00Z'),
+    [{
+      smsTs: 1786544431105,
+      sender: 'FAB',
+      channel: 'inbox',
+      sourceEventId: 'a30849',
+      reason: 'exact-provider-duplicate',
+    }],
+  ).batch.updates;
+  const flaggedTransfer = retireWith({ isTransfer: true });
+  ok('a full reread retires a proven duplicate provider copy the parser flagged as a transfer',
+    flaggedTransfer.length === 1 && flaggedTransfer[0].id === 'duplicate-1405' &&
+      flaggedTransfer[0].remove === true,
+    flaggedTransfer);
+  const pairedTransfer = retireWith({ isTransfer: true,
+    transferMatch: { version: 1, counterpartId: 'other-leg', basis: 'reference',
+      signature: 'this-leg', counterpartSignature: 'other-leg' } });
+  ok('a full reread never retires a provider copy a transfer pairing points at',
+    !pairedTransfer.some((update) => update.remove), pairedTransfer);
 }
 
 // Existing redacted ENBD specimen: currency is an admission fact, not a

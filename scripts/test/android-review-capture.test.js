@@ -1170,8 +1170,10 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
   }
   {
-    // The 1-second provider-duplicate retirement still exists; it must not
-    // remove a row that is part of a transfer, whatever its evidence says.
+    // The 1-second provider-duplicate retirement still exists. It must not
+    // remove a row a transfer pairing points at, whatever its evidence says,
+    // but the parser's own transfer hint is not a pairing: a proven second
+    // copy of a parser-flagged transfer is retired like any other.
     const { buildImportPlan } = require('./build/import-plan.js');
     const row = { ...(await identicalScan([
       { id: 31_960, address: 'FAB', body: noToken, date: NOW + 900_000 },
@@ -1184,12 +1186,17 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     ok('a provider-duplicate retirement still removes an ordinary stored copy',
       planFor({}).batch.updates.some((update) => update.id === 'provider-dup' && update.remove),
       JSON.stringify(planFor({}).batch.updates));
-    ok('a provider-duplicate retirement never removes a transfer or transfer-matched row',
-      !planFor({ isTransfer: true }).batch.updates.some((update) => update.remove) &&
-        !planFor({ transferMatch: { kind: 'own-account', counterpartId: 'other', matchedAt: NOW } })
-          .batch.updates.some((update) => update.remove),
-      JSON.stringify([planFor({ isTransfer: true }).batch.updates,
-        planFor({ transferMatch: { kind: 'own-account' } }).batch.updates]));
+    ok('a provider-duplicate retirement removes a parser-flagged transfer copy',
+      planFor({ isTransfer: true }).batch.updates.some((update) =>
+        update.id === 'provider-dup' && update.remove),
+      JSON.stringify(planFor({ isTransfer: true }).batch.updates));
+    const paired = { transferMatch: { version: 1, counterpartId: 'other', basis: 'reference',
+      signature: 'this-leg', counterpartSignature: 'other-leg' } };
+    ok('a provider-duplicate retirement never removes a transfer-matched row',
+      !planFor(paired).batch.updates.some((update) => update.remove) &&
+        !planFor({ isTransfer: true, ...paired }).batch.updates.some((update) => update.remove),
+      JSON.stringify([planFor(paired).batch.updates,
+        planFor({ isTransfer: true, ...paired }).batch.updates]));
   }
   {
     const { scan, ids } = await identicalScan([
