@@ -210,6 +210,9 @@ CREATE TABLE IF NOT EXISTS feedback_limits (
 -- the older market/push columns remain documented manual upgrades for legacy
 -- databases that predate the migration ledger.
 -- ALTER TABLE devices ADD COLUMN market TEXT NOT NULL DEFAULT 'AE';
+-- The forwarded-statement currency and date order (email_statement_currency,
+-- email_statement_date_order) are owned by the tracked migration
+-- migrations/2026-09-24-email-statement-locale.sql.
 -- ALTER TABLE push_registrations ADD COLUMN push_sent_at INTEGER NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS queue_by_device ON queue (device_id, created_at);
