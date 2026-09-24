@@ -508,10 +508,14 @@ export default function IosSetupScreen() {
         // in setup, while the confirmed automation (and Home) stay as they are.
         await updateProgress({ type: 'future-shortcut-install-started', version: 3, source: 'message', at: Date.now() });
         autoCheck.current = { armedAt: Date.now(), wentBackground: false };
-      } else await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
+      } else if (shownSource === recordedSource) {
+        // The status is global: viewing Message setup must not rewrite
+        // another recorded source's progress (same guard as openAutomation).
+        await updateProgress({ type: 'future-status-changed', status: 'in-progress' });
+      }
       await send({ type: 'install-shortcut' });
     });
-  }, [runOperation, send, updateProgress, setup.shortcutVersion]);
+  }, [recordedSource, runOperation, send, shownSource, updateProgress, setup.shortcutVersion]);
 
   const confirmFutureShortcut = useCallback(() => {
     void runOperation(async () => {

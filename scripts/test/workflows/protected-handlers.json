@@ -128,8 +128,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "installFutureShortcut",
-      "sha256": "824b9ff9f00e09d6e5cc0bf95931f4e9944f840e0849f42c0f9fe1adc882c448",
-      "reviewedChange": "2026-09-24: A bundled v3 install records a source-scoped install attempt with its start time (so setup only accepts proof recorded after it) and keeps the confirmed automation, so Home does not flip until a new check succeeds. It also arms a one-time setup check for the next return from Shortcuts. Legacy iCloud install path unchanged. Covered by onboarding-extreme-setup.test.cjs (reinstall, auto-check, v2 upgrade)."
+      "sha256": "e23d6b367dc4954ab672b0d594406e8dccbb40ec7b1e8d0c4bd699834455b76a",
+      "reviewedChange": "2026-09-24: A bundled v3 install records a source-scoped install attempt with its start time (so setup only accepts proof recorded after it) and keeps the confirmed automation, so Home does not flip until a new check succeeds. It also arms a one-time setup check for the next return from Shortcuts. Legacy iCloud install path unchanged. Covered by onboarding-extreme-setup.test.cjs (reinstall, auto-check, v2 upgrade). 2026-09-24 (review F5): the legacy (v2) path writes the global in-progress status only when the viewed source is the recorded source, the same guard as openAutomation, so installing the SMS Shortcut while viewing it cannot rewrite a recorded notification setup. Covered by onboarding-extreme-setup.test.cjs (installing the SMS Shortcut while viewing it)."
     },
     {
       "file": "src/app/ios-setup.tsx",
