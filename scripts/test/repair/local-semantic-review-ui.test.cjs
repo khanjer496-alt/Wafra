@@ -44,6 +44,7 @@ function harness() {
       isIosNotificationReview: require('../build/alert-review-tray.js').isIosNotificationReview,
       isIosApplePayReview: require('../build/alert-review-tray.js').isIosApplePayReview,
       recentlyExpiredReviewCount: require('../build/alert-review-tray.js').recentlyExpiredReviewCount,
+      recentlyLostReviewCount: require('../build/alert-review-tray.js').recentlyLostReviewCount,
       reviewCaptureBacklog: require('../build/alert-review-tray.js').reviewCaptureBacklog,
       reviewExpiresInDays: require('../build/alert-review-tray.js').reviewExpiresInDays,
       reviewTrayCapacity: require('../build/alert-review-tray.js').reviewTrayCapacity },

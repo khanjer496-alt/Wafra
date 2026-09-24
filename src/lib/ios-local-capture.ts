@@ -466,7 +466,11 @@ export function createIosLocalCaptureCoordinator(
           const review = outcome.kind === 'parsed' ? currencyConflictReview(outcome, recordId) : null;
           if (review) {
             currencyConflictReviewIds.add(recordId);
-            outcomes[index] = review;
+            // Marked for its own bounded Review lane: it can never be posted,
+            // so it must never occupy Message review space or wait natively.
+            outcomes[index] = isUniversalReviewAlert(review.item)
+              ? { ...review, item: { ...review.item, currencyConflict: true as const } }
+              : review;
             continue;
           }
           if (outcome.kind === 'parsed' && (outcome.row.kind === 'transaction' || outcome.row.kind === 'cardPayment')) {

@@ -60,7 +60,7 @@ function createWorkflowHarness(options={}) {
  d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal',
   isIosApplePayReview:require('../build/alert-review-tray.js').isIosApplePayReview,
   isIosNotificationReview:require('../build/alert-review-tray.js').isIosNotificationReview,
-  ...Object.fromEntries(['recentlyExpiredReviewCount','reviewCaptureBacklog','reviewExpiresInDays','reviewTrayCapacity']
+  ...Object.fromEntries(['isCurrencyConflictReview','recentlyExpiredReviewCount','recentlyLostReviewCount','reviewCaptureBacklog','reviewExpiresInDays','reviewTrayCapacity']
    .map(name=>[name,require('../build/alert-review-tray.js')[name]]))};
  d['@/components/universal-review-fields']={universalMoneyLabel:v=>v?`${v.currency} ${v.amountMinor/100}`:''};
  d['@/components/diagnostic-export-control']={DiagnosticExportControl:()=>null};

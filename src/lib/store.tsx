@@ -86,7 +86,7 @@ import {
   resolveReviewAlert as resolveAlertReviewItem,
   type ReviewEntry,
   isUniversalReviewAlert,
-  type ReviewTombstone,
+  type ReviewResolutionOutcome,
 } from '@/lib/alert-review-tray';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
@@ -1555,7 +1555,7 @@ interface StoreValue {
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
   ) => { admitted: number; qualificationIds: string[]; durable: Promise<void> };
-  dismissReviewAlert: (id: string, outcome: ReviewTombstone['outcome']) => Promise<void>;
+  dismissReviewAlert: (id: string, outcome: ReviewResolutionOutcome) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
   /**
    * Flush the current authoritative snapshot to SQLCipher. Relay callers use
@@ -2375,7 +2375,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const dismissReviewAlert = useCallback(async (
     id: string,
-    outcome: ReviewTombstone['outcome'],
+    outcome: ReviewResolutionOutcome,
   ): Promise<void> => {
     const reviewTray = resolveAlertReviewItem(
       authoritativeState.current.reviewTray,

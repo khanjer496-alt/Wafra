@@ -2969,6 +2969,52 @@ asyncSuites.push((async () => {
     saved.at(-1).transactions[0].smsKey === 'ha17t' + now);
 })().catch((error) => ok('generic store integration completes', false, String(error))));
 
+// Gap B: relay, History and Android staging cannot hold their source back, so
+// the Message lane still evicts at fifty. An evicted money review must leave a
+// durable, countable tombstone through the real StoreProvider write path.
+asyncSuites.push((async () => {
+  const saved = [];
+  const runtime = loadHydrationExports({
+    '@/lib/ledger-persistence': {
+      createLedgerPersistence: () => ({ load: async () => null,
+        save: async (snapshot) => { saved.push(JSON.parse(JSON.stringify(snapshot))); return true; },
+        block() {}, reset: async () => {}, destroy: async () => {} }),
+      LedgerResetError: class LedgerResetError extends Error {},
+    },
+  }, true);
+  const ledger = runtime.StoreProvider({ children: null });
+  ledger.restoreBackup(JSON.stringify({ app: 'wafra', version: 1,
+    data: { transactions: [], ledgerMoney: { schemaVersion: 2, currency: 'CAD', exponent: 2 } } }));
+  const { inspectUniversalBankEvent } = require('./build/universal-parser.js');
+  const trayModule = require('./build/alert-review-tray.js');
+  const event = inspectUniversalBankEvent('Card purchase CAD 25.00 at MAPLE SHOP on 2026-09-05.');
+  const start = Date.now() - 60_000;
+  const review = (index) => trayModule.prepareUniversalReviewAlert({
+    id: `history_review_id_${String(index).padStart(8, '0')}`,
+    sourceKey: `history_review_source_${String(index).padStart(8, '0')}`,
+    observedAt: start + index, channel: 'inbox', event });
+  await ledger.stageReviewAlerts(Array.from({ length: 50 }, (_, index) => review(index))).durable;
+  const receipt = ledger.stageReviewAlerts([review(50)]);
+  await receipt.durable;
+  const persisted = saved.at(-1).reviewTray;
+  const evicted = persisted.tombstones.filter((item) => item.outcome === 'evicted');
+  ok('history/relay staging over a full Message lane persists an evicted tombstone for the lost money review',
+    receipt.admitted === 1 && persisted.pending.length === 50 &&
+      !persisted.pending.some((item) => item.id === review(0).id) &&
+      evicted.length === 1 && evicted[0].sourceKey === review(0).sourceKey,
+    JSON.stringify(persisted.tombstones));
+  const reloaded = trayModule.normalizeAlertReviewTray(persisted, Date.now());
+  const reloadedAgain = trayModule.normalizeAlertReviewTray(JSON.parse(JSON.stringify(reloaded)), Date.now());
+  ok('the evicted count survives hydration exactly once',
+    trayModule.recentlyLostReviewCount(reloaded, Date.now(), 'evicted') === 1 &&
+      trayModule.recentlyLostReviewCount(reloadedAgain, Date.now(), 'evicted') === 1);
+  const again = ledger.stageReviewAlerts([review(0)]);
+  await again.durable;
+  ok('a re-read of the evicted alert into a still-full lane is not a second loss',
+    ledger.getStateSnapshot().reviewTray.pending.length === 50 &&
+      trayModule.recentlyLostReviewCount(ledger.getStateSnapshot().reviewTray, Date.now(), 'evicted') === 1);
+})().catch((error) => ok('history staging eviction integration completes', false, String(error))));
+
 // Replacing the ledger invalidates the real session-only AI cache, including
 // work queued before React can rerender the Review screen.
 asyncSuites.push((async () => {
