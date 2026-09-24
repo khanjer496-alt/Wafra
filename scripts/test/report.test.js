@@ -335,4 +335,26 @@ ok('long digit runs are masked', !/\b\d{5,}\b/.test(diag));
       untrustedText.category === "'@SUM(1)");
 }
 
+{
+  // Date and number conventions follow the device Region, not a fixed en-AE.
+  const { formatCoverageMonth, coverageLocale } = require('./build/statement-coverage.js');
+  const { reportLocale } = require('./build/reimbursement-report.js');
+  const build = (language, region) => buildExpenseReportHtml({
+    transactions: rows, accounts, currency: 'EUR', language, region,
+    from: '2026-07-01', to: '2026-07-31', generatedAt: new Date('2026-07-31T12:00:00Z'),
+  });
+  ok('a US Region prints US dates; a UAE Region keeps the launch-tested ones',
+    build('en', 'US').includes('Jul 10, 2026') && build('en', 'AE').includes('10 Jul 2026') &&
+      build('en', 'AE').includes('123.45'));
+  ok('Arabic keeps Latin digits in a Saudi Region', build('ar', 'SA').includes('123.45') && !/[٠-٩]/.test(build('ar', 'SA')));
+  ok('the locale tag pairs the UI language with the device Region',
+    reportLocale('en', 'DE') === 'en-DE' && reportLocale('ar', 'AE') === 'ar-AE-u-nu-latn' &&
+      reportLocale('en', null) === 'en' && reportLocale('en', 'not a region') === 'en' &&
+      coverageLocale('en', 'IN') === 'en-IN');
+  ok('coverage months follow the Region and keep Latin digits in Arabic',
+    formatCoverageMonth('2026-07', 'en', 'US') === 'Jul 2026' &&
+      !/[٠-٩]/.test(formatCoverageMonth('2026-07', 'ar', 'SA')) &&
+      formatCoverageMonth('2026-07', 'ar', 'SA').includes('2026'));
+}
+
 if (!process.exitCode) console.log(`${passed} report tests passed`);

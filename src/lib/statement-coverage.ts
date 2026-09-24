@@ -50,9 +50,40 @@ function nextMonth(key: string): string {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-export function formatCoverageMonth(key: string, language: string): string {
+/**
+ * The UI language in the device's Region: "en-DE", "ar-SA-u-nu-latn".
+ *
+ * Replaces a hard-coded en-AE/ar-AE, which gave every user UAE date and
+ * number conventions. Arabic keeps Latin digits, as everywhere else in the
+ * app. Without a usable Region the bare language is used. `region` overrides
+ * the device's for tests. (Kept local rather than shared so this module stays
+ * import-free; reimbursement-report.ts carries the same rule.)
+ */
+export function coverageLocale(language: string, region: string | null = deviceRegion()): string {
+  const base = language === 'ar' ? 'ar' : 'en';
+  const numbering = base === 'ar' ? '-u-nu-latn' : '';
+  const code = region?.trim().toUpperCase();
+  if (!code || !/^[A-Z]{2}$/.test(code)) return `${base}${numbering}`;
+  const tag = `${base}-${code}${numbering}`;
+  try {
+    return Intl.DateTimeFormat.supportedLocalesOf([tag]).length ? tag : `${base}${numbering}`;
+  } catch {
+    return base;
+  }
+}
+
+function deviceRegion(): string | null {
+  try {
+    const locale = new Intl.DateTimeFormat().resolvedOptions().locale ?? '';
+    return locale.match(/[-_]([A-Za-z]{2})(?:[-_]|$)/)?.[1]?.toUpperCase() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function formatCoverageMonth(key: string, language: string, region?: string | null): string {
   const [year, month] = key.split('-').map(Number);
-  return new Intl.DateTimeFormat(language === 'ar' ? 'ar-AE' : 'en-AE', {
+  return new Intl.DateTimeFormat(coverageLocale(language, region), {
     month: 'short', year: 'numeric', timeZone: 'UTC',
   }).format(new Date(Date.UTC(year, month - 1, 1)));
 }

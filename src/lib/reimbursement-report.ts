@@ -8,6 +8,8 @@ export interface ExpenseReportOptions {
   /** Persisted ISO minor-unit exponent for the ledger's integer amounts. */
   currencyExponent?: 0 | 2 | 3;
   language: 'en' | 'ar';
+  /** ISO region for date/number conventions; defaults to the device's. */
+  region?: string | null;
   from: string;
   to: string;
   generatedAt?: Date;
@@ -101,6 +103,37 @@ export function reportExpenses(
 }
 
 /**
+ * The UI language in the device's Region: "en-DE", "ar-SA-u-nu-latn".
+ *
+ * Replaces a hard-coded en-AE/ar-AE, which gave every user UAE date and
+ * number conventions. Arabic keeps Latin digits, as everywhere else in the
+ * app. Without a usable Region the bare language is used. `region` overrides
+ * the device's for tests. (Kept local rather than shared so this module stays
+ * import-free; statement-coverage.ts carries the same rule.)
+ */
+export function reportLocale(language: string, region: string | null = deviceRegion()): string {
+  const base = language === 'ar' ? 'ar' : 'en';
+  const numbering = base === 'ar' ? '-u-nu-latn' : '';
+  const code = region?.trim().toUpperCase();
+  if (!code || !/^[A-Z]{2}$/.test(code)) return `${base}${numbering}`;
+  const tag = `${base}-${code}${numbering}`;
+  try {
+    return Intl.DateTimeFormat.supportedLocalesOf([tag]).length ? tag : `${base}${numbering}`;
+  } catch {
+    return base;
+  }
+}
+
+function deviceRegion(): string | null {
+  try {
+    const locale = new Intl.DateTimeFormat().resolvedOptions().locale ?? '';
+    return locale.match(/[-_]([A-Za-z]{2})(?:[-_]|$)/)?.[1]?.toUpperCase() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A print-native, self-contained expense report. It deliberately has no
  * network assets: iOS WKWebView cannot print local asset URLs, and a finance
  * export should not fetch a font or logo from the internet while rendering.
@@ -116,7 +149,7 @@ export function buildExpenseReportHtml(options: ExpenseReportOptions): string {
     generatedAt = new Date(),
   } = options;
   const arabic = language === 'ar';
-  const locale = arabic ? 'ar-AE' : 'en-AE';
+  const locale = reportLocale(language, options.region);
   const copy = arabic
     ? {
         title: 'تقرير مصروفات',
