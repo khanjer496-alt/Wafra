@@ -78,9 +78,10 @@ export function iosLocalCaptureTestUrl(fromOnboarding = false, bundled = false):
 }
 
 /**
- * User-initiated recovery run. The Shortcut's no-input branch rereads a
- * bounded recent overlap and stages it through the same GUID-keyed live queue.
- * The callback only returns to Wafra; the foreground listener owns the drain.
+ * No-input run of the capture Shortcut. The app no longer opens it: Capture v3's
+ * no-input run only records setup proof, and v2's Find Messages recovery reads a
+ * Content field those rows never carry. Explicit History import is the recovery
+ * path. Kept for the URL-shape tests of the published v2 contract.
  */
 export function iosLocalCaptureCatchupUrl(bundled = false): string {
   const callback = encodeURIComponent('wafra://');
