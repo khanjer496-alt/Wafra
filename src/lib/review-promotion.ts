@@ -4,7 +4,7 @@ import { sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
 import type { UniversalMoney, UniversalInstrument } from '@/lib/universal-types';
 import { categorySupportsType } from '@/lib/categories';
 import { ledgerMoneySpec, type LedgerMoneySpec } from '@/lib/ledger-money';
-import { transactionTime } from '@/lib/format';
+import { toISODate, transactionTime } from '@/lib/format';
 import { isApplePayWalletRow } from '@/lib/dedupe';
 import {
   isUniversalReviewAlert,
@@ -95,7 +95,9 @@ const normalizeMerchant = (value: string): string =>
  * row, and any bank review against a Wallet row, compares account, amount,
  * expense direction and a ten-minute clock only. Two Wallet observations
  * carry distinct receipts, so they keep the strict merchant and two-minute
- * rule. Rows without an event clock are not comparable.
+ * rule. A row without an event clock (a manual entry) is compared against
+ * a Wallet review by account, amount, expense direction and local date: the
+ * user may have typed the purchase before Wallet captured it.
  */
 const possibleApplePayDuplicate = (
   transactions: readonly Transaction[],
@@ -106,17 +108,25 @@ const possibleApplePayDuplicate = (
     observedAt: number;
     /** Present only when the review being promoted is itself an Apple Pay capture. */
     walletMerchants: readonly string[] | null;
+    /** The date the promotion would record; clockless rows compare by day. */
+    date: string;
   },
 ): boolean => {
   if (candidate.type !== 'expense' || !Number.isFinite(candidate.observedAt)) return false;
   const merchants = candidate.walletMerchants
     ? new Set(candidate.walletMerchants.map(normalizeMerchant).filter(Boolean))
     : null;
+  const walletDays = merchants
+    ? new Set([candidate.date, toISODate(new Date(candidate.observedAt))])
+    : null;
   return transactions.some((existing) => {
     if (existing.type !== 'expense' || existing.accountId !== candidate.accountId ||
       existing.amountFils !== candidate.amountFils) return false;
     const timestamp = transactionTime(existing)?.getTime();
-    if (timestamp === undefined || !Number.isFinite(timestamp)) return false;
+    if (timestamp === undefined || !Number.isFinite(timestamp)) {
+      // Prompt-only: a clockless non-Wallet row on the same local day.
+      return !!walletDays && !isApplePayWalletRow(existing) && walletDays.has(existing.date);
+    }
     const distance = Math.abs(timestamp - candidate.observedAt);
     const existingWallet = isApplePayWalletRow(existing);
     if (!merchants) return existingWallet && distance <= APPLE_PAY_BANK_OVERLAP_MS;
@@ -280,6 +290,7 @@ export const planReviewPromotion = (
       type: transaction.type, accountId: transaction.accountId, amountFils: transaction.amountFils,
       observedAt: item.observedAt,
       walletMerchants: walletReview ? [transaction.title, event.merchant.value ?? ''] : null,
+      date: transaction.date,
     })) return { outcome: 'refused', reason: 'possible-duplicate' };
     return {
       outcome: 'added', ledgerMoney: money,
@@ -338,6 +349,7 @@ export const planReviewPromotion = (
   const amountFils = Number(amount);
   if (!separatePurchaseConfirmed && possibleApplePayDuplicate(state.transactions, {
     type: input.type, accountId: account.id, amountFils, observedAt: item.observedAt, walletMerchants: null,
+    date: input.date,
   })) return { outcome: 'refused', reason: 'possible-duplicate' };
 
   const resolvedTray = resolveReviewAlert(state.reviewTray, item.id, 'added', now);
