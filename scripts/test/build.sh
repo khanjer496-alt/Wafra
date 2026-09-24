@@ -44,6 +44,7 @@ rewrite() {
       -e "s|from '../../modules/sms-reader'|from './sms-reader'|" \
       -e "s|from '../../modules/wafra-stability'|from './wafra-stability'|" \
       -e "s|from '../../modules/wafra-live-capture'|from './wafra-live-capture-types'|" \
+      -e "s|from '../../modules/wafra-on-device-ai'|from './wafra-on-device-ai'|" \
       -e "s|from '../../modules/wafra-message-history/src/WafraMessageHistory.types'|from './wafra-message-history-types'|" \
       -e "s|from 'react-native'|from './stub-react-native'|" \
       -e "s|from 'expo-modules-core'|from './stub-expo-modules-core'|" \
@@ -82,7 +83,8 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          ios-bank-senders.generated ios-bank-senders local-message-record ios-apple-pay-record ios-capture-health ios-local-capture ios-notification-replay \
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
          local-semantic-model local-semantic-runtime local-semantic-scheduler local-semantic-background-policy local-semantic-shadow local-semantic-inbox-shadow \
-         local-semantic-review local-semantic-review-runtime local-assistant-grounding growth-funnel-diagnostics stability-diagnostics; do
+         local-semantic-review local-semantic-review-runtime local-assistant-grounding growth-funnel-diagnostics stability-diagnostics \
+         local-semantic-flags on-device-ai on-device-assistant on-device-category; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
 done
@@ -111,6 +113,7 @@ done
 rewrite ../../modules/sms-reader/index.ts build/sms-reader.ts
 rewrite ../../modules/notification-reader/index.ts build/notification-reader.ts
 rewrite ../../modules/wafra-stability/index.ts build/wafra-stability.ts
+rewrite ../../modules/wafra-on-device-ai/index.ts build/wafra-on-device-ai.ts
 rewrite ../../modules/wafra-live-capture/src/WafraLiveCapture.types.ts \
   build/wafra-live-capture-types.ts
 rewrite ../../modules/wafra-message-history/src/WafraMessageHistory.types.ts \

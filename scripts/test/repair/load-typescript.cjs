@@ -158,6 +158,32 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           localSemanticInboxShadowStatus: () => ({ state: 'idle', checked: 0, eligible: 0, queued: 0, startedAt: null, finishedAt: null }),
         };
       }
+      // E5 is default-off in shipping builds; harnesses see the same flag.
+      if (name === '@/lib/local-semantic-flags') {
+        return { LOCAL_SEMANTIC_E5_ENABLED: false };
+      }
+      // Platform on-device model: absent in Node, exactly as on an older OS.
+      // Suites that exercise the provider load src/lib/on-device-ai.ts itself.
+      if (name === '@/lib/on-device-ai') {
+        const availability = { status: 'unsupported-os', provider: null, languages: null, canPrepare: false };
+        return {
+          onDeviceAI: {
+            peekAvailability: () => null,
+            getAvailability: async () => availability,
+            prepare: async () => availability,
+            respond: async () => ({ kind: 'unavailable' }),
+          },
+          textLanguage: (text, fallback) => (/[\u0600-\u06FF]/u.test(text) ? 'ar' : /[A-Za-z]/u.test(text) ? 'en' : fallback),
+          supportsOnDeviceLanguage: () => false,
+        };
+      }
+      if (name === '@/lib/on-device-assistant') {
+        return { improveAssistantRequestOnDevice: async ({ deterministicRequest }) =>
+          ({ source: 'deterministic', request: deterministicRequest, reason: 'unavailable' }) };
+      }
+      if (name === '@/components/category-suggestion') {
+        return { CategorySuggestion: () => null };
+      }
       if (name === '@/lib/local-semantic-assistant') {
         return { improveAssistantRequestLocally: async ({ deterministicRequest }) => deterministicRequest };
       }
@@ -173,6 +199,7 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           getLocalSemanticEncoder: async () => { throw new Error('local-semantic-runtime:native-only'); },
           createDownloadedSemanticRetriever: async () => { throw new Error('local-semantic-runtime:native-only'); },
           clearLocalSemanticArtifacts() {},
+          purgeLocalSemanticArtifacts() {},
         };
       }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);

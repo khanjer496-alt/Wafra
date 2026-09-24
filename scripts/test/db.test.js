@@ -3029,6 +3029,20 @@ asyncSuites.push((async () => {
 // work queued before React can rerender the Review screen.
 asyncSuites.push((async () => {
   const { localReviewAdvisor } = require('./build/local-semantic-review');
+  // E5 is off by default: the shipped advisor queues nothing and shows no badge.
+  const flags = require('./build/local-semantic-flags');
+  ok('E5 review advice is off by default', flags.LOCAL_SEMANTIC_E5_ENABLED === false);
+  {
+    const offEvent = { decision: 'review', family: 'unknown', status: 'posted', issues: [],
+      amount: { evidence: 'explicit', value: { currency: 'AED', minorUnits: '4500', exponent: 2 }, alternatives: [] } };
+    const offItem = { kind: 'universal', id: 'synthetic-ai-review-off', sourceKey: 'synthetic-ai-source-off',
+      observedAt: Date.now(), expiresAt: Date.now() + 60000, event: offEvent };
+    await localReviewAdvisor.enqueue(offItem, offEvent, 'movement <money>');
+    ok('default-off review advisor leaves no pending or unavailable badge', localReviewAdvisor.get(offItem) === null);
+  }
+  // The reset guarantees below still hold for research builds that opt in
+  // (EXPO_PUBLIC_WAFRA_LOCAL_E5=1); simulate that build for this block.
+  flags.LOCAL_SEMANTIC_E5_ENABLED = true;
   const runtime = loadHydrationExports({}, true);
   const ledger = runtime.StoreProvider({ children: null });
   const event = { decision: 'review', family: 'unknown', status: 'posted', issues: [],
@@ -3056,6 +3070,7 @@ asyncSuites.push((async () => {
   ok('capture opt-out cancels queued AI before persistence finishes', captureCancelled());
   await captureSaved;
   background.setLocalSemanticAppActive(false);
+  flags.LOCAL_SEMANTIC_E5_ENABLED = false;
 })().catch(error => ok('AI review generation reset integration completes', false, String(error))));
 
 // Transfer decisions use the authoritative reducer snapshot and explicit

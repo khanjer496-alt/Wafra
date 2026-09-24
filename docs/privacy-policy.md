@@ -201,16 +201,34 @@ store biometric templates.
   in Review and nothing is posted. When the saved local-only preference is
   active, no rate request is made.
 
-- **On-device language model:** Wafra can download a small multilingual text
-  encoder (about 35 MB, plus its tokenizer) once from Wafra's own GitHub release
-  so that bank-alert families and Ask Wafra questions can be understood on the
-  device. The request carries no bank message, transaction, account/card
-  identifier or question; GitHub receives only the ordinary download request
-  and the device's network address. Every file is checked against a fixed
-  size and SHA-256 hash and is discarded on mismatch. All inference then runs
-  locally: message text, amounts and questions never leave the phone for this
-  feature, and the model never decides an amount, currency or whether a
-  transaction is imported.
+- **On-device AI (platform models):** on iPhones with Apple Intelligence
+  (iOS 26 or later) Wafra can use Apple's Foundation Models, and on supported
+  Android phones it can use Google's Gemini Nano through ML Kit GenAI and
+  Android AICore. Both models are part of the operating system and run on the
+  phone; Wafra itself makes no network request for this feature and downloads
+  no model. Wafra uses them for two advisory jobs only: choosing which built-in
+  question tool answers an Ask Wafra question it could not otherwise
+  interpret (the model receives the question text and the list of tools, never
+  ledger rows, amounts, balances or account/card identifiers), and suggesting a
+  category for an unclassified merchant (the model receives the merchant name,
+  with long digit runs masked). Wafra validates every reply against a fixed
+  list of allowed choices; every amount is still calculated by Wafra, and a
+  suggested category is applied only when you tap it. On iOS, Apple manages
+  the model through Apple Intelligence settings. On Android, Gemini Nano is
+  managed by Google's AICore service; Wafra asks AICore to download it only
+  when you tap "Download on-device model". Separately, Google's ML Kit
+  Android data disclosure
+  (https://developers.google.com/ml-kit/android-data-disclosure) states that ML
+  Kit SDKs collect device information, app information and performance/usage
+  metrics for diagnostics and analytics; that collection is governed by
+  Google's disclosure and terms.
+
+- **Legacy on-device text encoder (off by default):** earlier builds could
+  download a multilingual text encoder (about 35 MB) from Wafra's GitHub
+  release. Current builds do not download or start it; it exists only in
+  explicitly configured research builds. When it is enabled, the download
+  carries no bank message, transaction, identifier or question, every file is
+  checked against a fixed size and SHA-256 hash, and inference runs locally.
 
 - **Purchases and paywalls:** when store billing is configured, Apple or Google
   processes payment and Superwall provides paywall/onboarding presentation,

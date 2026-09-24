@@ -908,6 +908,20 @@ const S = {
     en: 'Choose a category for {merchant}',
     ar: 'اختر تصنيفاً لـ {merchant}',
   },
+  categoriseAiSuggestion: {
+    en: 'On-device AI suggests: {category}',
+    ar: 'يقترح الذكاء الاصطناعي على جهازك: {category}',
+  },
+  categoriseRuleSuggestion: {
+    en: 'Suggested from the merchant name: {category}',
+    ar: 'مقترح من اسم التاجر: {category}',
+  },
+  categoriseSuggestionUse: { en: 'Use {category}', ar: 'استخدم {category}' },
+  categoriseSuggestionNote: {
+    en: 'Suggestion only. Nothing changes until you choose. Choosing applies it to {count} entr{ending}.',
+    ar: 'اقتراح فقط. لن يتغير شيء حتى تختار. عند الاختيار يُطبّق على {count} عملية.',
+  },
+  categoriseSuggestionChecking: { en: 'Checking the name on your device…', ar: 'جارٍ فحص الاسم على جهازك…' },
   categoriseDone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
   categoriseDoneBody: {
     en: 'Confident matches are handled automatically. New unclear merchants or bank-payment nicknames will appear here only when Wafra cannot classify them safely.',

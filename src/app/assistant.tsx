@@ -21,7 +21,9 @@ import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { groundLocalAssistantRequest, isIndependentAssistantQuestion, localAssistantPreviousRequest, normalizeLocalAssistantQuestion } from '@/lib/local-assistant-grounding';
 import { improveAssistantRequestLocally } from '@/lib/local-semantic-assistant';
-import { localSemanticRuntimeStatus } from '@/lib/local-semantic-runtime';
+import { LOCAL_SEMANTIC_E5_ENABLED } from '@/lib/local-semantic-flags';
+import { onDeviceAI, type OnDeviceAIAvailability } from '@/lib/on-device-ai';
+import { improveAssistantRequestOnDevice } from '@/lib/on-device-assistant';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { currentMonthPeriod, periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -49,6 +51,20 @@ interface AssistantTurn {
   request: AssistantToolRequest;
   answeredAt: Date;
   inputs: unknown[];
+  /** The platform model chose the tool; Wafra still computed every figure. */
+  interpretedOnDevice?: boolean;
+}
+
+/** Honest, state-specific status for the platform model. Null hides the line. */
+function onDeviceStatusCopy(availability: OnDeviceAIAvailability | null): string | null {
+  if (!availability) return null;
+  switch (availability.status) {
+    case 'available':
+      return availability.provider === 'gemini-nano' ? copy.onDeviceAiReadyGemini : copy.onDeviceAiReadyApple;
+    case 'not-enabled': return copy.onDeviceAiNotEnabled;
+    case 'model-not-ready': return copy.onDeviceAiPreparing;
+    default: return copy.onDeviceAiUnavailable;
+  }
 }
 
 export default function AssistantScreen() {
@@ -75,13 +91,25 @@ export default function AssistantScreen() {
   const previousPeriod = useRef(periodKey);
   const [question, setQuestion] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [modelState, setModelState] = useState(() => localSemanticRuntimeStatus().state);
+  const [aiAvailability, setAiAvailability] = useState<OnDeviceAIAvailability | null>(() => onDeviceAI.peekAvailability());
+  const [preparingModel, setPreparingModel] = useState(false);
   useFocusEffect(useCallback(() => {
-    const update = () => setModelState(localSemanticRuntimeStatus().state);
+    let active = true;
+    // Availability changes in Settings (Apple Intelligence on/off, model
+    // downloaded) while Wafra is in the background: re-check on focus/return.
+    const update = () => {
+      void onDeviceAI.getAvailability({ refresh: true }).then((value) => { if (active) setAiAvailability(value); });
+    };
     update();
-    const timer = setInterval(update, 2000);
-    return () => clearInterval(timer);
+    const subscription = NativeAppState.addEventListener('change', (status) => { if (status === 'active') update(); });
+    return () => { active = false; subscription.remove(); };
   }, []));
+  const aiStatus = onDeviceStatusCopy(aiAvailability);
+  const prepareModel = () => {
+    if (preparingModel) return;
+    setPreparingModel(true);
+    void onDeviceAI.prepare().then(setAiAvailability).finally(() => setPreparingModel(false));
+  };
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
   const [droppedTurns, setDroppedTurns] = useState(false);
@@ -133,7 +161,8 @@ export default function AssistantScreen() {
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
   }, []);
 
-  const appendAnswer = (clean: string, result: { request: AssistantToolRequest; answer: AssistantAnswer }, snapshot: AppState, answeredAt: Date) => {
+  const appendAnswer = (clean: string, result: { request: AssistantToolRequest; answer: AssistantAnswer; interpretedOnDevice?: boolean },
+    snapshot: AppState, answeredAt: Date) => {
     const id = ++nextId.current;
     const currentGeneration = getStateGeneration();
     needsScroll.current = true;
@@ -284,10 +313,31 @@ export default function AssistantScreen() {
           )
         : runWafraAssistant(snapshot, interpretedQuestion, now, previous, period);
       if (result === null) return;
-      // The native wrapper returns this answer immediately while an unavailable
-      // model warms/retries under its backoff. A failed startup download must
-      // not strand Ask in deterministic-only mode until the next app restart.
+      let interpretedOnDevice = false;
+      // Unrecognised fresh question: the platform model may pick ONE closed
+      // tool. Wafra validates it and the ledger executor computes the answer.
       if (result.request.tool === 'help' && (!previous || isIndependentAssistantQuestion(clean))) {
+        const outcome = await improveAssistantRequestOnDevice({
+          question: clean,
+          deterministicRequest: result.request,
+          previousRequest: null,
+          defaultPeriod: period,
+          now,
+          appLanguage: snapshot.language === 'ar' ? 'ar' : 'en',
+          // Local names only, used to refuse plans that would drop or invent scope.
+          knownMerchants: [...new Set(snapshot.transactions.map((row) => row.title).filter(Boolean))],
+          knownAccountNames: [...new Set(snapshot.accounts.flatMap((row) => [row.name, row.bankName ?? '']).filter(Boolean))],
+          cancelled: () => startGeneration !== getStateGeneration(),
+        });
+        if (startGeneration !== getStateGeneration()) throw new Error(copy.stale);
+        if (outcome.source === 'on-device-ai') {
+          result = { request: outcome.request, answer: executeAssistantTool(snapshot, outcome.request, now) };
+          interpretedOnDevice = true;
+        }
+      }
+      // Research builds only (EXPO_PUBLIC_WAFRA_LOCAL_E5=1): the old E5 path.
+      if (LOCAL_SEMANTIC_E5_ENABLED && !interpretedOnDevice && result.request.tool === 'help' &&
+        (!previous || isIndependentAssistantQuestion(clean))) {
         const improved = await improveAssistantRequestLocally({
           question: clean,
           deterministicRequest: result.request,
@@ -303,7 +353,7 @@ export default function AssistantScreen() {
         }
       }
       if (startGeneration !== getStateGeneration()) throw new Error(copy.stale);
-      appendAnswer(clean, result, snapshot, now);
+      appendAnswer(clean, { ...result, interpretedOnDevice }, snapshot, now);
     } catch {
       // Restore the draft when submission fails; financial records never enter logs.
       setQuestion((current) => current || clean);
@@ -460,9 +510,16 @@ export default function AssistantScreen() {
             {`${ledgerCurrencyCode()} · ${copy.localShort}`}
           </ThemedText>
         </View>
-        {Platform.OS !== 'web' ? <ThemedText testID="assistant-model-status" type="meta" themeColor="textSecondary">
-          {modelState === 'ready' ? copy.localAiReady : modelState === 'downloading' ? copy.localAiPreparing : copy.localAiUnavailable}
-        </ThemedText> : null}
+        {Platform.OS !== 'web' && aiStatus ? <View style={styles.aiStatus}>
+          <ThemedText testID="assistant-model-status" type="meta" themeColor="textSecondary" style={styles.aiStatusText}>
+            {aiStatus}
+          </ThemedText>
+          {aiAvailability?.canPrepare ? <Pressable testID="assistant-model-prepare" accessibilityRole="button"
+            accessibilityLabel={copy.onDeviceAiPrepare} accessibilityState={{ disabled: preparingModel, busy: preparingModel }}
+            disabled={preparingModel} onPress={() => { tapped(); prepareModel(); }} style={styles.aiPrepare}>
+            <ThemedText type="meta" themeColor="primary">{preparingModel ? copy.onDeviceAiDownloading : copy.onDeviceAiPrepare}</ThemedText>
+          </Pressable> : null}
+        </View> : null}
         {error ? <ThemedText type="meta" accessibilityRole="alert" themeColor="expense">{error}</ThemedText> : null}
         <View style={styles.inputRow}>
           <TextInput testID="assistant-input" value={question} onChangeText={(value) => { setQuestion(value); setError(null); }}
@@ -513,6 +570,9 @@ export default function AssistantScreen() {
         <View accessibilityLiveRegion={index === currentTurns.length - 1 ? 'polite' : 'none'}
           style={[styles.answer, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
           <ThemedText type="micro" themeColor="primary">{turn.answer.title}</ThemedText>
+          {turn.interpretedOnDevice ? <ThemedText testID="assistant-interpreted-on-device" type="meta" themeColor="textSecondary">
+            {copy.onDeviceAiInterpreted}
+          </ThemedText> : null}
           {turn.answer.headline ? <>
             <ThemedText type="heading" tabular selectable>{turn.answer.headline}</ThemedText>
             {turn.answer.meta ? <ThemedText type="meta" themeColor="textSecondary" selectable>{turn.answer.meta}</ThemedText> : null}
@@ -578,4 +638,7 @@ const styles = StyleSheet.create({
   input: { flex: 1, minWidth: 0, borderWidth: 1, borderRadius: Radius.control,
     paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, lineHeight: 22, fontFamily: Fonts.sans },
   send: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
+  aiStatus: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  aiStatusText: { flexShrink: 1, minWidth: 0 },
+  aiPrepare: { minHeight: 44, justifyContent: 'center' },
 });
