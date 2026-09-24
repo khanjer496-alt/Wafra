@@ -26,7 +26,7 @@ import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-s
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { useToday } from '@/hooks/use-today';
+import { useResumeClock, useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
 import { usePullToRefresh } from '@/hooks/use-auto-import';
@@ -117,6 +117,8 @@ export default function WalletScreen() {
   const { refreshing, onRefresh } = usePullToRefresh();
 
   const now = useToday();
+  // Minute-level "scanned … ago" text; the ledger memos below key on `now`.
+  const resumeClock = useResumeClock();
 
   const [adderVisible, setAdderVisible] = useState(false);
   const [name, setName] = useState('');
@@ -602,7 +604,7 @@ export default function WalletScreen() {
                     : !isSmsScanningAvailable()
                     ? t('pasteBankMessage')
                     : state.lastScanTs > 0
-                      ? tf('inboxScannedAgo', { time: relativeSince(state.lastScanTs, now) })
+                      ? tf('inboxScannedAgo', { time: relativeSince(state.lastScanTs, resumeClock) })
                       : t('inboxNotRead')}
                 </ThemedText>
                 <ThemedText type="meta" themeColor="textTertiary">

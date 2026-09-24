@@ -24,6 +24,7 @@ import { isValidBackupState } from '@/lib/backup-validation';
 import {
   applyTransferDecision,
   isTransferCandidate,
+  isTransferInertTransaction,
   normalizeTransferLinks,
   reconcileTransfers,
   reconciliationInternalIds,
@@ -296,6 +297,38 @@ function sortTxs(transactions: Transaction[]): Transaction[] {
   return alreadySorted
     ? transactions
     : [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+/**
+ * Insert one row into a newest-first ledger with exactly the result of
+ * `sortTxs([row, ...transactions])`, without re-sorting 10k-20k rows.
+ *
+ * That stable sort keeps the prepended row ahead of every existing row with
+ * the same date, so the row lands before the first existing row whose date is
+ * not newer. The shortcut applies only when the existing ledger is already
+ * ordered; anything else falls back to the full stable sort, whose answer
+ * would also reorder existing rows.
+ */
+function insertSortedTransaction(row: Transaction, transactions: Transaction[]): Transaction[] {
+  // The comparator's answer for a non-string date is not a total order the
+  // binary search can reproduce; restored/legacy data takes the exact sort.
+  if (typeof row.date !== 'string' || transactions.some((transaction) => typeof transaction.date !== 'string')) {
+    return sortTxs([row, ...transactions]);
+  }
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) return sortTxs([row, ...transactions]);
+  }
+  let low = 0;
+  let high = transactions.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (transactions[middle].date > row.date) low = middle + 1;
+    else high = middle;
+  }
+  const next = transactions.slice(0, low);
+  next.push(row);
+  for (let index = low; index < transactions.length; index += 1) next.push(transactions[index]);
+  return next;
 }
 
 function applyTransactionEdit(transaction: Transaction, patch: Partial<Transaction>): Transaction {
@@ -576,6 +609,29 @@ export function migratePersistedState(
     // repair below. On a real 15k-row phone that meant seven full JS passes
     // before Home could render. Keep the exact same ordered semantics, but run
     // all row-local transforms inside one identity-preserving pass.
+    // Titles repeat heavily (one merchant, hundreds of rows), and both lookups
+    // below are pure functions of their string arguments under the market pack
+    // that is live for this whole synchronous pass. Memoising them for this
+    // pass only turns ~150 regex tests per row into one per distinct title;
+    // nothing is retained after the migration returns.
+    const serviceNames = new Map<string, string | null>();
+    const canonicalServiceName = (title: string): string | null => {
+      let canonical = serviceNames.get(title);
+      if (canonical === undefined) {
+        canonical = normalizeServiceName(title);
+        serviceNames.set(title, canonical);
+      }
+      return canonical;
+    };
+    const guessedExpenseCategories = new Map<string, CategoryId>();
+    const guessExpenseCategory = (title: string): CategoryId => {
+      let category = guessedExpenseCategories.get(title);
+      if (category === undefined) {
+        category = guessCategory(title, 'expense', undefined, title);
+        guessedExpenseCategories.set(title, category);
+      }
+      return category;
+    };
     parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (original) => {
       if (original.userEdited || original.source !== 'sms') return original;
       let t = original;
@@ -592,7 +648,7 @@ export function migratePersistedState(
 
       // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc. read
       // clearly and group as one subscription.
-      const canonical = normalizeServiceName(t.title);
+      const canonical = canonicalServiceName(t.title);
       if (canonical && canonical !== t.title) t = { ...t, title: canonical };
 
       // Parser versions before T215 filed anonymous incoming money as
@@ -630,7 +686,7 @@ export function migratePersistedState(
       // needing a rescan. User overrides still win.
       if (!t.isTransfer && t.category === 'other' && t.type === 'expense' &&
           !readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) {
-        const guessed = guessCategory(t.title, t.type, undefined, t.title);
+        const guessed = guessExpenseCategory(t.title);
         if (guessed !== 'other') t = { ...t, category: guessed };
       }
 
@@ -1004,12 +1060,27 @@ function transactionNeedsTransferNormalization(transaction: Transaction | undefi
   );
 }
 
+/** The prior state's transfer receipt is exact for its rows (see reducer). */
+function transferReceiptCurrent(state: AppState): boolean {
+  return state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
+    Array.isArray(state.transferInternalIds);
+}
+
 function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action: Action): boolean {
   switch (action.type) {
     case 'importBatch':
       // applyMaterializedImportBatch already performs canonical normalization.
       return false;
-    case 'addTransaction':
+    case 'addTransaction': {
+      // A hand-entered purchase is the common case, and re-walking the whole
+      // transfer graph for it blocked Hermes for hundreds of milliseconds on a
+      // 20k-row ledger. Skip only when the receipt being carried forward is
+      // exact, the new row is inert, and its id cannot collide with (and so
+      // change the duplicate-id handling of) an existing row.
+      const row = action.transaction;
+      return !(transferReceiptCurrent(state) && isTransferInertTransaction(row) &&
+        !state.transactions.some((transaction) => transaction.id === row.id));
+    }
     case 'markBillPaid':
       return true;
     case 'payCardDue':
@@ -1020,7 +1091,9 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
       return transactionNeedsTransferNormalization(before) || transactionNeedsTransferNormalization(after);
     }
     case 'deleteTransaction':
-      return true;
+      // Every row carrying the id is removed; all of them must be inert.
+      return !(transferReceiptCurrent(state) && state.transactions.every((transaction) =>
+        transaction.id !== action.id || isTransferInertTransaction(transaction)));
     case 'resolveBestEffort':
       return action.outcome === 'undo';
     case 'setBestEffortAutoPost':
@@ -1303,7 +1376,7 @@ function reduceState(state: AppState, action: Action): AppState {
       return {
         ...state,
         ...(requestedMoney && !ledgerStateHasMoney(state) ? { ledgerMoney: requestedMoney } : {}),
-        transactions: sortTxs([action.transaction, ...state.transactions]),
+        transactions: insertSortedTransaction(action.transaction, state.transactions),
       };
     }
     case 'editTransaction': {

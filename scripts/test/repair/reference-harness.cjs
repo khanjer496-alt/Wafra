@@ -87,7 +87,7 @@ function createHarness(options = {}) {
     // only replaces it when the app is foregrounded. Handing back a fresh
     // Date per call would invalidate every memo keyed on `now` on every
     // render — which is what the render-cost tests exist to catch.
-    '@/hooks/use-today':{useToday:()=>harnessToday},
+    '@/hooks/use-today':{useToday:()=>harnessToday,useResumeClock:()=>harnessToday},
     '@/hooks/use-screen-entering':{useScreenEntering:()=>()=>undefined},'@/hooks/use-color-scheme':{useColorScheme:()=>options.theme??'light'},
     '@/hooks/use-reduced-motion':{useReducedMotion:()=>true},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true},
     '@/lib/foreground-history-priority':{prioritizeForegroundNavigation(){}},
