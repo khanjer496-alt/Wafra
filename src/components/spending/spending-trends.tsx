@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Money } from '@/components/ui/money';
+import { GrowBar } from '@/components/ui/grow-bar';
 import { Icon } from '@/components/ui/icon';
 import { useTheme } from '@/hooks/use-theme';
 import { useLanguage } from '@/hooks/use-language';
@@ -245,7 +246,8 @@ export function SpendingTrends(p: Props) {
               {([[p.currentName ?? p.periodLabel, m.currentFils, theme.text], [p.previousName ?? p.comparisonLabel ?? '', m.previousFils, theme.controlBorder]] as const).map(([label, fils, color], index) =>
                 <View key={index} style={styles.compareBarRow}>
                   <ThemedText type="micro" themeColor="textSecondary" style={styles.compareBarLabel} numberOfLines={1}>{label}</ThemedText>
-                  <View style={styles.compareTrack}><View style={{ height: 8, borderRadius: 4, width: `${fils / scale * 100}%`, backgroundColor: color }} /></View>
+                  <View style={styles.compareTrack}><GrowBar axis="width" delay={index * 60} size={fils / scale * 100}
+                    style={{ height: 8, borderRadius: 4, backgroundColor: color }} /></View>
                   <View style={styles.compareAmount}><Money fils={fils} type="meta" prefix={false} /></View>
                 </View>)}
             </Pressable>;

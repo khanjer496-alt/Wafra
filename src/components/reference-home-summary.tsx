@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { WafraMark } from '@/components/wafra-logo';
 import { Money } from '@/components/ui/money';
+import { GrowBar } from '@/components/ui/grow-bar';
 import type { Colors } from '@/constants/theme';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 import type { HomeToday } from '@/lib/home-today';
@@ -77,12 +78,11 @@ function TodayBlock({ p, today }: { p: Props; today: HomeToday }) {
       <Money fils={today.weekFils} moneySpec={p.moneySpec} type="meta" color={p.theme.textSecondary} />
     </View>
     <View style={styles.week} accessible accessibilityRole="image" accessibilityLabel={weekSpoken} testID="home-week">
-      {today.week.map(day => <View key={day.dateISO} style={styles.weekDay}>
+      {today.week.map((day, index) => <View key={day.dateISO} style={styles.weekDay}>
         <View style={styles.barTrack}>
-          <View style={[styles.bar, {
-            height: day.fils > 0 ? Math.max(4, Math.round((day.fils / max) * 72)) : 2,
-            backgroundColor: day.today ? p.theme.primary : p.theme.controlBorder,
-          }]} />
+          <GrowBar axis="height" delay={index * 60}
+            size={day.fils > 0 ? Math.max(4, Math.round((day.fils / max) * 72)) : 2}
+            style={[styles.bar, { backgroundColor: day.today ? p.theme.primary : p.theme.controlBorder }]} />
         </View>
         <ThemedText type="micro" themeColor={day.today ? 'primary' : 'textSecondary'}>{w.weekday(day.weekday)}</ThemedText>
       </View>)}

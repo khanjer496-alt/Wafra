@@ -8,6 +8,7 @@ import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import type { DailySpend } from '@/lib/analytics';
 import { formatAED } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
+import { tapped } from '@/lib/haptics';
 
 const copy = {
   en: { weekdays: ['M', 'T', 'W', 'T', 'F', 'S', 'S'], darker: 'Stronger colour means more everyday spending. Rent and fixed costs are left out.',
@@ -63,7 +64,7 @@ export function SpendingCalendar({ days, todayISO, selected, onSelect }: Props) 
         return <Pressable key={day.dateISO} disabled={future}
           accessibilityRole="button" accessibilityState={{ selected: isSelected, disabled: future }}
           accessibilityLabel={`${label(day.dateISO)}, ${spoken}`}
-          onPress={() => onSelect(isSelected ? null : day.dateISO)}
+          onPress={() => { tapped(); onSelect(isSelected ? null : day.dateISO); }}
           style={[styles.cell, styles.day, {
             backgroundColor: background,
             borderColor: isSelected ? theme.text : day.dateISO === todayISO ? theme.primary : theme.cardBorder,
