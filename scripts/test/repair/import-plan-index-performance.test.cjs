@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, '../../..');
 const dependencyNames = [
   'capture-source-identity', 'cards', 'markets', 'dedupe', 'bill-alias', 'format', 'heal',
   'transfer-evidence', 'transfer-reconciliation', 'ledger', 'ledger-money', 'sms-parser',
+  'alert-review-tray', 'parsed-review-event',
 ];
 
 function planner() {

@@ -47,7 +47,7 @@ async function screen({ version = '27.0', capability = true, enabled = false, pr
     '@/constants/theme': { MaxContentWidth: 640, ScreenPadding: 24, Spacing: { two: 8, three: 12 } },
     '@/hooks/use-language': { useLanguage: () => 'en' }, '@/hooks/use-theme': { useTheme: () => ({ background: '#fff' }) },
     '@/lib/capture': { getIosCaptureNativeModule: () => native, subscribeIosCaptureStatusRefresh: () => () => {} },
-    '@/lib/alert-review-tray': { REVIEW_ALERT_CAP: 50, isIosNotificationReview: () => true },
+    '@/lib/alert-review-tray': { REVIEW_ALERT_CAP: 50, isIosNotificationReview: () => true, isCurrencyConflictReview: () => false },
     '@/lib/ios-capture-health': health, '@/lib/ios-capture-setup': setup, '@/lib/ios-notification-copy': copy,
     '@/lib/ios-message-onboarding': { dispatchIosMessageSetup: async event => events.push(event), loadIosMessageSetupProgress: async () => ({ futureAutomationConfirmed: false }),
       progressForSource: progressApi.progressForSource },

@@ -127,6 +127,16 @@ export interface StatementCsvResult {
   rows: StatementParsedRow[];
   totalRows: number;
   rejectedRows: number;
+  /**
+   * Rejected rows whose only direction evidence was a bare sign on a card
+   * statement that never says what its signs mean. Counted inside rejectedRows.
+   */
+  ambiguousCardSignRows: number;
+  /**
+   * Rejected rows whose numeric date reads as either day/month or month/day,
+   * in a file that never settles which. Counted inside rejectedRows.
+   */
+  ambiguousDateRows: number;
 }
 
 const HEADER_ALIASES = {
@@ -362,6 +372,61 @@ function statementTransferMeaning(
   };
 }
 
+/**
+ * A credit-card settlement on a statement, read the way the SMS parser reads
+ * the same event: a transfer onto the card, never spending and never income.
+ *
+ *   account side  `CREDIT CARD PAYMENT 4111XXXXXXXX4821 1,500.00 DR` — money
+ *                 leaving the current account towards a card. Only the explicit
+ *                 "credit card"/"CC" wording counts: "CARD PAYMENT TO TESCO" is
+ *                 how many banks describe an ordinary POS purchase.
+ *   card side     `PAYMENT RECEIVED - THANK YOU 1,500.00 CR` — a payment credit
+ *                 on a statement already proven to be a card's.
+ *
+ * With card digits the row becomes the same `cardPayment` leg the SMS parser
+ * emits, so import-plan files it into the card and pairs it with its other
+ * leg. Without them it stays an ordinary row flagged as a transfer.
+ */
+const CARD_SETTLEMENT_EXCLUSION = /\b(?:fees?|charges?|interest|vat|commission|late|annual|penalty|cash\s*back|refund|reversal|return)\b|رسوم|فائدة|استرداد|عمولة/iu;
+const ACCOUNT_SIDE_CARD_SETTLEMENT = /\b(?:credit\s+card|cc)\s+(?:bill\s+)?(?:payment|repayment|settlement)\b|\bpayment\s+(?:to|towards)\s+(?:your\s+|the\s+)?credit\s+card\b|سداد\s+(?:ال)?بطاقة\s+(?:ال)?ائتمان/iu;
+const CARD_SIDE_SETTLEMENT = /\b(?:payment|pymt)\s+(?:received|recd|thank)|\bthank\s+you\b|^\s*(?:payment|pymt)\b|\b(?:auto\s*pay(?:ment)?|direct\s+debit)\b|سداد|دفعة\s+مستلمة/iu;
+// Payment companies are merchants: their credits are refunds, not settlements.
+const PAYMENT_COMPANY = /\b(?:paypal|amazon\s+payments?|apple\s+pay|google\s+pay|samsung\s+pay|stripe|checkout\.com|payfort|tabby|tamara)\b/i;
+
+type StatementSettlement = Pick<StatementParsedRow,
+  'kind' | 'type' | 'merchant' | 'card' | 'transferHint' | 'categoryGuess' | 'categoryDeliberate'
+> & { cardPaymentSide?: 'debit' | 'receipt' };
+
+function statementCardSettlement(
+  description: string,
+  type: 'expense' | 'income',
+  cardEvidence: boolean,
+  source: ParsedSms['card'],
+): StatementSettlement | null {
+  const text = normalizeDigits(description).normalize('NFKC');
+  if (CARD_SETTLEMENT_EXCLUSION.test(text)) return null;
+  const transfer = { transferHint: true, categoryGuess: 'other' as const, categoryDeliberate: true };
+  // The account side stays an outflow of the paying account. Turning it into
+  // the card's receipt leg lost the account's debit, and with statement clocks
+  // at midday a one-day posting lag never paired it with the card statement's
+  // own receipt row, so one payment credited the card twice.
+  if (!cardEvidence && type === 'expense' && ACCOUNT_SIDE_CARD_SETTLEMENT.test(text)) {
+    return { kind: 'transaction', type, merchant: 'Card payment', card: source, ...transfer };
+  }
+  if (cardEvidence && type === 'income' && CARD_SIDE_SETTLEMENT.test(text) && !PAYMENT_COMPANY.test(text)) {
+    // A card statement's own number is a credit card's: debit cards receive
+    // no payments. An account-labelled number is not a card at all.
+    const last4 = source && (source.kind === 'credit' || source.kind === 'unknown') ? source.last4 : null;
+    return last4
+      ? {
+          kind: 'cardPayment', type: 'expense', merchant: `Card •${last4} payment`,
+          card: { last4, kind: 'credit' }, cardPaymentSide: 'receipt', ...transfer,
+        }
+      : { kind: 'transaction', type, merchant: 'Card payment', card: source, ...transfer };
+  }
+  return null;
+}
+
 function uniqueColumnInstrument(
   records: string[][],
   index: number,
@@ -467,6 +532,71 @@ function rowDirection(value: string): 'expense' | 'income' | null {
 }
 
 /**
+ * How a statement's bare signs read.
+ *
+ * `account`      minus is money out, plus/unsigned-with-sign is money in — the
+ *                account-statement convention, and the only one assumed.
+ * `minus-credit` the card statement SAYS a minus marks a credit (payment,
+ *                refund, cashback); plain and plus figures are charges.
+ * `minus-debit`  the card statement SAYS charges carry the minus; plain and
+ *                plus figures are credits.
+ * `refuse`       a card statement that says neither. Card issuers use both
+ *                conventions, so a bare sign there is not a direction.
+ */
+type SignConvention = 'account' | 'minus-credit' | 'minus-debit' | 'refuse';
+
+const SIGN_VERB = String.raw`(?:denotes?|indicates?|represents?|means?|shows?|=)`;
+const SIGN_MARK = String.raw`(?:minus|negative)(?:\s+sign)?\s*(?:\(\s*-\s*\)\s*)?(?:amounts?|figures?|values?|entries|transactions)?`;
+const CREDIT_WORDS = String.raw`(?:credits?|payments?|refunds?)`;
+const DEBIT_WORDS = String.raw`(?:debits?|charges?|purchases?|spend(?:ing)?)`;
+const SHOWN_AS = String.raw`(?:are\s+)?(?:shown|marked|displayed|printed|indicated|listed)\s+(?:with|by|as|in)\s+(?:a\s+)?(?:minus|negative|\(\s*-\s*\))`;
+function legendPatterns(words: string): RegExp[] {
+  // "A negative amount indicates a credit BALANCE" describes the balance line,
+  // not how transaction rows are signed.
+  const notBalance = String.raw`(?!\s+balances?\b)`;
+  return [
+    new RegExp(String.raw`\b${SIGN_MARK}\s*${SIGN_VERB}\s+(?:a\s+|an\s+)?${words}\b${notBalance}`, 'i'),
+    new RegExp(String.raw`\(\s*-\s*\)\s*${SIGN_VERB}\s*(?:a\s+|an\s+)?${words}\b${notBalance}`, 'i'),
+    new RegExp(String.raw`\b${words}(?:\s+(?:and|&|\/)\s+(?:${CREDIT_WORDS}|${DEBIT_WORDS}))?\s+${SHOWN_AS}`, 'i'),
+  ];
+}
+const MINUS_CREDIT_LEGEND = legendPatterns(CREDIT_WORDS);
+const MINUS_DEBIT_LEGEND = legendPatterns(DEBIT_WORDS);
+
+/** The sign legend a card statement prints, when it prints exactly one. */
+function cardSignLegend(text: string): 'minus-credit' | 'minus-debit' | null {
+  const flat = text.replace(/\s+/g, ' ');
+  const credit = MINUS_CREDIT_LEGEND.some((pattern) => pattern.test(flat));
+  const debit = MINUS_DEBIT_LEGEND.some((pattern) => pattern.test(flat));
+  if (credit === debit) return null;
+  return credit ? 'minus-credit' : 'minus-debit';
+}
+
+/** Strong single markers that a document is a card statement. */
+const CARD_STATEMENT_MARKER = /\bcredit\s+card\s+statement\b|\bminimum\s+(?:amount|payment)\s+due\b|\b(?:available\s+)?credit\s+limit\b/i;
+
+function signConvention(cardEvidence: boolean, text: string): SignConvention {
+  if (!cardEvidence) return 'account';
+  return cardSignLegend(text) ?? 'refuse';
+}
+
+/**
+ * Direction of one figure under a convention. `sign` is the explicit sign the
+ * cell carried, or null for a plain figure. Null means "not decidable".
+ */
+function directionFromSign(
+  sign: '-' | '+' | null,
+  convention: SignConvention,
+): 'expense' | 'income' | null {
+  switch (convention) {
+    case 'account': return sign === '-' ? 'expense' : sign === '+' ? 'income' : null;
+    case 'minus-credit': return sign === '-' ? 'income' : 'expense';
+    case 'minus-debit': return sign === '-' ? 'expense' : 'income';
+    default: return null;
+  }
+}
+
+/**
  * Decode an exported statement without guessing past what the bytes say.
  * A UTF-16 BOM names its encoding outright (Excel "Unicode text" exports);
  * otherwise the file is UTF-8, or — when it is not valid UTF-8 — the single-byte
@@ -566,10 +696,19 @@ export function parseStatementCsv(
     : sourceAccountIndex >= 0
       ? uniqueColumnInstrument(dataRecords, sourceAccountIndex, 'account')
       : uniqueColumnInstrument(dataRecords, sourceCardIndex, 'unknown');
-  const dateOrder = inferDateOrder(dataRecords.map((record) => record[dateIndex] ?? ''));
+  const dateOrder = inferDateOrder(dataRecords.map((record) => record[dateIndex] ?? ''), defaultCurrency);
+  // Card exports carry their identity, when they carry it at all, in the
+  // preamble above the table or in a card-number column name. A signed amount
+  // column is then only a direction when the preamble says what a minus means.
+  const preamble = records.slice(0, headerRow).map((record) => record.join(' ')).join('\n');
+  const cardEvidence = isCardStatement(preamble) || headers.includes(normalizedHeader('credit card number'));
+  const signEvidence = cardEvidence || (sourceAccountIndex < 0 && CARD_STATEMENT_MARKER.test(preamble));
+  const convention = signConvention(signEvidence, preamble);
 
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
+  let ambiguousCardSignRows = 0;
+  let ambiguousDateRows = 0;
   for (const record of dataRecords) {
     if (record.length !== headers.length) {
       rejectedRows += 1;
@@ -601,7 +740,10 @@ export function parseStatementCsv(
       const signedMinor = unsignedMinor === null
         ? amountMinor(record[amountIndex] ?? '', currency, true)
         : null;
-      const signedType = signedMinor === null ? null : signedMinor < 0 ? 'expense' : 'income';
+      const signedType = signedMinor === null
+        ? null
+        : directionFromSign(signedMinor < 0 ? '-' : '+', convention);
+      if (!labelled && signedMinor !== null && convention === 'refuse') ambiguousCardSignRows += 1;
       if (labelled && signedType && labelled !== signedType) {
         type = null;
       } else {
@@ -610,15 +752,29 @@ export function parseStatementCsv(
       }
     } else if (currency === defaultCurrency && signedAmount) {
       const signedMinor = amountMinor(record[amountIndex] ?? '', currency, true);
+      // A stated card convention also gives a plain figure its meaning; the
+      // account convention and an unstated card one never do.
+      const plainMinor = signedMinor === null && (convention === 'minus-credit' || convention === 'minus-debit')
+        ? amountMinor(record[amountIndex] ?? '', currency, false)
+        : null;
       if (signedMinor !== null) {
-        type = signedMinor < 0 ? 'expense' : 'income';
-        minor = Math.abs(signedMinor);
+        type = directionFromSign(signedMinor < 0 ? '-' : '+', convention);
+        minor = type ? Math.abs(signedMinor) : null;
+        if (convention === 'refuse') ambiguousCardSignRows += 1;
+      } else if (plainMinor !== null) {
+        type = directionFromSign(null, convention);
+        minor = plainMinor;
+      } else if (convention === 'refuse' && amountMinor(record[amountIndex] ?? '', currency, false) !== null) {
+        ambiguousCardSignRows += 1;
       }
     }
     if (
       !date || unsafeDescription || merchant.length < 2 || merchant.length > 180 ||
       !type || !minor
     ) {
+      if (!date && dateOrder === 'unknown' && ambiguousLocalDate(record[dateIndex] ?? '')) {
+        ambiguousDateRows += 1;
+      }
       rejectedRows += 1;
       continue;
     }
@@ -637,6 +793,17 @@ export function parseStatementCsv(
       : rowAccountTail
         ? { last4: rowAccountTail, kind: 'account' }
         : null;
+    const settlement = statementCardSettlement(merchant, type, cardEvidence, rowInstrument ?? sourceInstrument);
+    if (settlement) {
+      rows.push({
+        amountFils: minor, currency: defaultCurrency, date,
+        dueDay: null, minDueFils: null, reference,
+        snapshotFils: null, snapshotKind: null,
+        ...settlement,
+        raw: record.join(delimiter),
+      });
+      continue;
+    }
     const transfer = statementTransferMeaning(
       merchant,
       type,
@@ -656,18 +823,27 @@ export function parseStatementCsv(
       raw: record.join(delimiter),
     });
   }
-  return { rows, totalRows, rejectedRows };
+  return { rows, totalRows, rejectedRows, ambiguousCardSignRows, ambiguousDateRows };
 }
 
-type DateOrder = 'day-first' | 'month-first';
+type DateOrder = 'day-first' | 'month-first' | 'unknown';
+
+/**
+ * Ledgers whose market reads a bare numeric date day-first. Only the two
+ * launch-tested markets: a statement in any other currency whose every
+ * numeric date could be read either way is refused rather than guessed.
+ */
+const DAY_FIRST_LEDGERS = new Set(['AED', 'SAR']);
 
 /**
  * Decide how a file's numeric dates read. A first field above 12 can only be
- * a day; a second field above 12 can only be a month-first export. With no
- * evidence, or with contradictory evidence, keep the launch-tested UAE/KSA
- * DD/MM reading — the ambiguous rows then parse exactly as they did before.
+ * a day; a second field above 12 can only be a month-first export. With
+ * contradictory evidence keep the launch-tested DD/MM reading, exactly as
+ * before. With NO evidence, the ledger's market decides only when it is a
+ * day-first one; otherwise the order is `unknown` and isoDate refuses every
+ * date whose day and month could swap.
  */
-function inferDateOrder(values: Iterable<string>): DateOrder {
+function inferDateOrder(values: Iterable<string>, currency: StatementCurrency): DateOrder {
   let dayFirst = false;
   let monthFirst = false;
   for (const value of values) {
@@ -676,7 +852,18 @@ function inferDateOrder(values: Iterable<string>): DateOrder {
     if (Number(local[1]) > 12) dayFirst = true;
     if (Number(local[2]) > 12) monthFirst = true;
   }
-  return monthFirst && !dayFirst ? 'month-first' : 'day-first';
+  if (monthFirst && !dayFirst) return 'month-first';
+  if (dayFirst || DAY_FIRST_LEDGERS.has(currency)) return 'day-first';
+  return 'unknown';
+}
+
+/** A numeric date whose day and month are both ≤ 12 and differ. */
+function ambiguousLocalDate(value: string): boolean {
+  const local = /^(\d{1,2})[\/-](\d{1,2})[\/-]\d{2,4}$/.exec(normalizeDigits(value).replace(/\s+/g, ' ').trim());
+  if (!local) return false;
+  const first = Number(local[1]);
+  const second = Number(local[2]);
+  return first <= 12 && second <= 12 && first !== second;
 }
 
 const MONTH_INDEX: Record<string, number> = {
@@ -698,7 +885,8 @@ function isoDate(value: string, order: DateOrder = 'day-first'): string | null {
   } else {
     const local = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/.exec(value);
     if (!local) return null;
-    if (order === 'month-first') {
+    if (order === 'unknown' && ambiguousLocalDate(value)) return null;
+    if (order === 'month-first' || (order === 'unknown' && Number(local[2]) > 12)) {
       month = Number(local[1]); day = Number(local[2]);
     } else {
       day = Number(local[1]); month = Number(local[2]);
@@ -1084,7 +1272,8 @@ function parseColumnTail(
   currency: StatementCurrency,
   order: ColumnOrder,
   loneAmountIsCharge = false,
-): { merchant: string; amountFils: number; type: 'expense' | 'income' } | null {
+  convention: SignConvention = 'account',
+): { merchant: string; amountFils: number; type: 'expense' | 'income' } | 'ambiguous-card-sign' | null {
   const words = rest.split(' ');
   const tail: MoneyToken[] = [];
   let cut = words.length;
@@ -1107,13 +1296,25 @@ function parseColumnTail(
   if (merchant.length < 2 || merchant.length > 180 || tail.length === 0 || tail.length > 3) return null;
   const [first, second] = tail;
   if (first.kind === 'signed') {
-    return tail.length <= 2 ? { merchant, amountFils: first.minor, type: first.type } : null;
+    if (tail.length > 2) return null;
+    // classifyMoneyToken reports a minus (or parentheses) as `expense` and a
+    // plus as `income`: that IS the account convention. A card statement
+    // reads the same mark through what it says its signs mean, or not at all.
+    const type = directionFromSign(first.type === 'expense' ? '-' : '+', convention);
+    if (!type) return 'ambiguous-card-sign';
+    return { merchant, amountFils: first.minor, type };
   }
   // `03/08/2026 NOON.COM DUBAI ARE 68.93` — the whole body of a card
   // statement. One figure, no label, no second column, because a charge is
   // what the statement is for; the CR rows are handled by the branch above.
+  // A statement that says its CHARGES carry the minus has told us the
+  // opposite: there a plain figure is the credit.
   if (loneAmountIsCharge && tail.length === 1 && first.kind === 'unsigned') {
-    return { merchant, amountFils: first.minor, type: 'expense' };
+    return {
+      merchant,
+      amountFils: first.minor,
+      type: convention === 'minus-debit' ? 'income' : 'expense',
+    };
   }
   if (tail.length < 2 || second.kind === 'signed') return null;
   const [debit, credit] = order === 'debit-first' ? [first, second] : [second, first];
@@ -1216,6 +1417,13 @@ export interface StatementTextResult {
   rejectedRows: number;
   /** True when every row in totalRows is represented by rows or rejectedRows. */
   completeRowAccounting: boolean;
+  /**
+   * Rejected rows whose only direction evidence was a bare sign on a card
+   * statement that never says what its signs mean. Counted inside rejectedRows.
+   */
+  ambiguousCardSignRows: number;
+  /** Rejected rows whose numeric date the file never settles as day- or month-first. */
+  ambiguousDateRows: number;
 }
 
 /**
@@ -1238,13 +1446,32 @@ export function parseStatementLines(
   const bankHint = identity.bankHint ?? statementBankHint(text);
   const rawLines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
   const cardStatement = isCardStatement(text);
+  // Refusing a bare sign needs less proof than reading every plain figure as
+  // a charge does: one strong marker, or a header card explicitly labelled a
+  // credit card, is enough to stop the account convention being assumed.
+  // Two proofs, for two jobs. Reading a row as a card SETTLEMENT or switching
+  // off the balance chain needs the card statement proved (two markers, or a
+  // header number labelled credit card). Refusing a bare sign needs less —
+  // one strong marker — but never on a statement labelled with an ACCOUNT
+  // number: "Available Credit Limit" on an overdrawn current account is not a
+  // card statement.
+  const cardEvidence = cardStatement || sourceInstrument?.kind === 'credit';
+  const signEvidence = cardEvidence || (sourceInstrument?.kind !== 'account' &&
+    CARD_STATEMENT_MARKER.test(rawLines.slice(0, 60).join('\n')));
+  const convention = signConvention(signEvidence, text);
+  let ambiguousCardSignRows = 0;
   const cardTotalAmountTable = hasCardTotalAmountTable(text, cardStatement);
   const lines = cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines;
-  const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''));
+  const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''), currency);
+  let ambiguousDateRows = 0;
   const columnOrder = statementColumnOrder(text);
   // Proven once for the whole file, then used to resolve rows the branches
   // below would otherwise have to reject as ambiguous.
-  const balanceTrailing = trailingBalanceRuns(lines, currency);
+  // Not on a card statement: its running figure is what is OWED, which rises
+  // with a charge, and whether it prints as positive or negative varies by
+  // issuer. Reading its steps with the account direction filed every charge
+  // as money in.
+  const balanceTrailing = !cardEvidence && trailingBalanceRuns(lines, currency);
   let previousBalance: number | null = null;
   const push = (
     date: string,
@@ -1259,6 +1486,18 @@ export function parseStatementLines(
       currency === 'AED' ? 'AE' : currency === 'SAR' ? 'SA' : null,
     );
     const reference = referenceFromDescription(merchant);
+    const settlement = statementCardSettlement(merchant, type, cardEvidence, sourceInstrument);
+    if (settlement) {
+      rows.push({
+        amountFils, currency, date,
+        dueDay: null, minDueFils: null, reference,
+        ...(bankHint ? { bankHint } : {}),
+        snapshotFils: null, snapshotKind: null,
+        ...settlement,
+        raw: line,
+      });
+      return;
+    }
     const transfer = statementTransferMeaning(merchant, type, currency, sourceInstrument, reference);
     rows.push({
       kind: 'transaction', type, amountFils, currency,
@@ -1359,9 +1598,11 @@ export function parseStatementLines(
       }
     } else {
       const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
-      const column = prefixed && date
-        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement)
+      const tail = prefixed && date
+        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement, convention)
         : null;
+      if (tail === 'ambiguous-card-sign') ambiguousCardSignRows += 1;
+      const column = tail === 'ambiguous-card-sign' ? null : tail;
       if (date && column) push(date, column.merchant, column.amountFils, column.type, line);
       else if (date && figures && priorBalance !== null) {
         // No label and no placeholder to say which column is populated: the
@@ -1373,13 +1614,18 @@ export function parseStatementLines(
         }
       }
     }
-    if (countable && rows.length === accepted) rejectedRows += 1;
+    if (countable && rows.length === accepted) {
+      rejectedRows += 1;
+      if (dateOrder === 'unknown' && prefixed && ambiguousLocalDate(prefixed[1])) ambiguousDateRows += 1;
+    }
   }
   return {
     rows,
     totalRows: rows.length + rejectedRows,
     rejectedRows,
     completeRowAccounting: true,
+    ambiguousCardSignRows,
+    ambiguousDateRows,
   };
 }
 
@@ -1401,6 +1647,8 @@ export async function extractPdfStatementRows(
   totalRows: number;
   rejectedRows: number;
   completeRowAccounting: boolean;
+  ambiguousCardSignRows: number;
+  ambiguousDateRows: number;
 }> {
   const document = await getDocumentProxy(bytes, password ? { password } : undefined);
   try {
@@ -1415,6 +1663,8 @@ export async function extractPdfStatementRows(
       totalRows: parsed.totalRows,
       rejectedRows: parsed.rejectedRows,
       completeRowAccounting: parsed.completeRowAccounting,
+      ambiguousCardSignRows: parsed.ambiguousCardSignRows,
+      ambiguousDateRows: parsed.ambiguousDateRows,
     };
   } finally {
     const disposable = document as unknown as {

@@ -12,6 +12,7 @@ import {
   reviewCaptureBacklog,
 } from '@/lib/alert-review-tray';
 import { migrateLegacyLedgerMoney } from '@/lib/ledger-money';
+import { settleWalletNearMatches, walletNearMatchesRetained } from '@/lib/wallet-near-match';
 import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
 import {
   currencyConflictReview,
@@ -32,6 +33,8 @@ import {
 
 const PAGE_SIZE = 50;
 const MAX_PAGES = 40;
+/** Native bound on held records one drain may page past (MAX_PAGES * PAGE_SIZE). */
+const MAX_EXCLUDED_RECORDS = 2000;
 const MAX_APPLE_PAY_PAGES = 4;
 
 export interface IosLocalCaptureOutcome {
@@ -354,10 +357,19 @@ export function createIosLocalCaptureCoordinator(
     // reader continues behind them so SMS capture is never starved by Review.
     let includeNotifications = input.native.notificationCaptureSupported === true &&
       !!input.native.listPendingRecordsIncludingNotifications;
+    // Newer binaries let the drain name the records it is holding (reviews
+    // waiting for Review space, undescribable money rows) so each later page
+    // reaches newer records instead of re-reading the same held page. Held
+    // records are never acknowledged here; they stay queued natively.
+    const pagePastHeld = includeNotifications &&
+      typeof input.native.listPendingRecordsExcluding === 'function';
+    const heldRecordIds = new Set<string>();
     for (let pageIndex = 0; pageIndex < MAX_PAGES; pageIndex += 1) {
-      const serializedPage = includeNotifications && input.native.listPendingRecordsIncludingNotifications
-        ? await input.native.listPendingRecordsIncludingNotifications(PAGE_SIZE)
-        : await input.native.listPendingRecords(PAGE_SIZE);
+      const serializedPage = pagePastHeld && heldRecordIds.size > 0 && input.native.listPendingRecordsExcluding
+        ? await input.native.listPendingRecordsExcluding(PAGE_SIZE, [...heldRecordIds])
+        : includeNotifications && input.native.listPendingRecordsIncludingNotifications
+          ? await input.native.listPendingRecordsIncludingNotifications(PAGE_SIZE)
+          : await input.native.listPendingRecords(PAGE_SIZE);
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
       if (serializedPage.length === 0) break;
       if (serializedPage.length > PAGE_SIZE) {
@@ -466,7 +478,11 @@ export function createIosLocalCaptureCoordinator(
           const review = outcome.kind === 'parsed' ? currencyConflictReview(outcome, recordId) : null;
           if (review) {
             currencyConflictReviewIds.add(recordId);
-            outcomes[index] = review;
+            // Marked for its own bounded Review lane: it can never be posted,
+            // so it must never occupy Message review space or wait natively.
+            outcomes[index] = isUniversalReviewAlert(review.item)
+              ? { ...review, item: { ...review.item, currencyConflict: true as const } }
+              : review;
             continue;
           }
           if (outcome.kind === 'parsed' && (outcome.row.kind === 'transaction' || outcome.row.kind === 'cardPayment')) {
@@ -663,6 +679,25 @@ export function createIosLocalCaptureCoordinator(
         (mapping) => mapping.qualification,
       );
 
+      // Messages withheld as possible Apple Pay duplicates. Their Review items
+      // are staged in this same synchronous turn as the import below, and each
+      // record is acknowledged only once its item is retained. A Review lane
+      // that cannot hold one without evicting money keeps the record queued.
+      const nearMatchSettlement = settleWalletNearMatches(
+        plan, input.ledger.getState().reviewTray, now.getTime(), 'defer');
+      const nearMatchRecords = (plan.walletNearMatches ?? []).map((match) => {
+        const index = outcomes.findIndex((outcome) => outcome.kind === 'parsed' && outcome.row === match.row);
+        if (index < 0) throw sourceFreePageError('Local capture Apple Pay review lost its record');
+        return { id: page[index].preflight.id, review: match.review,
+          deferred: nearMatchSettlement.deferred.includes(match) };
+      });
+      let nearMatchReceipt: { admitted: number; durable: Promise<void> } | null = null;
+      if (nearMatchSettlement.reviews.length > 0) {
+        if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Local capture requires review staging');
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        nearMatchReceipt = input.ledger.stageReviewAlerts(nearMatchSettlement.reviews);
+      }
+
       let imported = 0;
       let importedDeclineIds: string[] = [];
       if (planHasChanges(plan)) {
@@ -687,13 +722,27 @@ export function createIosLocalCaptureCoordinator(
           if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
           requireLedgerGeneration(input.ledger, pageGeneration);
         }
-      } else {
+      } else if (!outcomes.every((outcome, index) =>
+        outcome.kind === 'held' || capacityDeferredIds.has(page[index].preflight.id))) {
         // This is load-bearing for ignored/invalid pages and semantic-only
         // duplicates: ACK still waits behind a real encrypted-ledger barrier.
+        // A page whose every record stays held changes nothing and ACKs
+        // nothing, so it skips the write while the reader pages past it.
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         await input.ledger.ensureDurable();
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         requireLedgerGeneration(input.ledger, pageGeneration);
+      }
+
+      if (nearMatchReceipt) {
+        await nearMatchReceipt.durable;
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        requireLedgerGeneration(input.ledger, pageGeneration);
+        if (!Number.isInteger(nearMatchReceipt.admitted) || nearMatchReceipt.admitted < 0 ||
+          nearMatchReceipt.admitted > nearMatchSettlement.reviews.length) {
+          throw sourceFreePageError('Local capture review receipt was refused');
+        }
+        totals.reviews += nearMatchReceipt.admitted;
       }
 
       totals.imported += imported;
@@ -745,6 +794,13 @@ export function createIosLocalCaptureCoordinator(
           reviewTray?.tombstones?.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime());
         return retained ? [] : [page[index].preflight.id];
       }));
+      for (const record of nearMatchRecords) {
+        if (record.deferred ||
+          !walletNearMatchesRetained(reviewTray, [record.review], now.getTime())) {
+          deferredReviewIds.add(record.id);
+          deferredReviewRecords.add(record.id);
+        }
+      }
       const acknowledgedIds = page.map(record => record.preflight.id).filter(id => !deferredReviewIds.has(id));
       if (acknowledgedIds.length > 0) await input.native.acknowledgeRecords(acknowledgedIds);
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
@@ -760,10 +816,14 @@ export function createIosLocalCaptureCoordinator(
             deferredReviewRecords.add(page[index].preflight.id);
           }
         });
-        if (acknowledgedIds.length === 0) {
-          // Held records fill this whole page. Continue behind notification
-          // rows with the Message-only reader; if Messages themselves wait for
-          // Review space, stop and give the Wallet lane its turn.
+        for (const id of deferredReviewIds) heldRecordIds.add(id);
+        if (pagePastHeld) {
+          // The next page names every held record and reaches newer ones.
+          if (heldRecordIds.size + PAGE_SIZE > MAX_EXCLUDED_RECORDS) break;
+        } else if (acknowledgedIds.length === 0) {
+          // Older binary: held records fill this whole page. Continue behind
+          // notification rows with the Message-only reader; if Messages
+          // themselves wait for Review space, stop and give Wallet its turn.
           if (!includeNotifications) break;
           includeNotifications = false;
         }

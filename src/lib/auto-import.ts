@@ -42,6 +42,7 @@ import {
 } from '@/lib/trusted-bank-notification-packages';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { parsedTransactionReviewEvent } from '@/lib/parsed-review-event';
 import { detectLaunchMarketFromSender, pinnedLedgerCurrencyCode } from '@/lib/markets';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
@@ -524,68 +525,8 @@ export function parsedFinancialCandidateReview(
   parsed: Omit<ParsedSms, 'raw'>,
   observedAt: number,
 ): SourceFreeReviewCandidate | null {
-  if (parsed.kind !== 'transaction' || !Number.isSafeInteger(parsed.amountFils) || parsed.amountFils <= 0) {
-    return null;
-  }
-  const money = ledgerMoneySpec(parsed.currency);
-  if (!money) return null;
-  const missingField = () => ({
-    value: null,
-    evidence: 'missing' as const,
-    alternatives: [],
-    spans: [],
-    issues: [],
-  });
-  const instrument = parsed.card
-    ? {
-        kind: parsed.card.kind === 'account' ? 'account' as const : 'card' as const,
-        last4: /^\d{4}$/.test(parsed.card.last4) ? parsed.card.last4 : null,
-      }
-    : null;
-  const amount = {
-    currency: money.currency,
-    minorUnits: String(parsed.amountFils),
-    exponent: money.exponent,
-  };
-  const explicitAmount = {
-    value: amount,
-    evidence: 'explicit' as const,
-    alternatives: [],
-    spans: [],
-    issues: [],
-  };
-  const merchant = parsed.merchant.trim();
-  const event: UniversalBankEvent = {
-    version: 1,
-    decision: 'review',
-    family: parsed.transferHint
-      ? 'transfer'
-      : parsed.categoryGuess === 'cash-withdrawal'
-        ? 'cash-withdrawal'
-        : parsed.type === 'income'
-          ? 'unknown'
-          : 'purchase',
-    status: 'posted',
-    direction: parsed.type === 'income' ? 'credit' : 'debit',
-    amount: explicitAmount,
-    statementTotal: missingField(),
-    minimumDue: missingField(),
-    balance: missingField(),
-    creditLimit: missingField(),
-    merchant: merchant
-      ? { value: merchant, evidence: 'explicit', alternatives: [], spans: [], issues: [] }
-      : missingField(),
-    transactionDate: parsed.date
-      ? { value: parsed.date, evidence: 'explicit', alternatives: [], spans: [], issues: [] }
-      : missingField(),
-    dueDate: missingField(),
-    statementDate: missingField(),
-    instrument: instrument
-      ? { value: instrument, evidence: 'explicit', alternatives: [], spans: [], issues: [] }
-      : missingField(),
-    observations: [{ role: 'transaction', field: explicitAmount }],
-    issues: [],
-  };
+  const event = parsedTransactionReviewEvent(parsed);
+  if (!event) return null;
   const prepared = prepareUniversalReviewAlert({
     id: 'capture_probe_id_0001',
     sourceKey: 'capture_probe_key_001',

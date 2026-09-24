@@ -88,7 +88,7 @@ test('different account, money, direction or a clock beyond ten minutes is never
   const observedAt = item().observedAt;
   for (const existing of [sms({ accountId: 'card2' }), sms({ amountFils: 2600 }), sms({ type: 'income' }),
     sms({ ts: observedAt + 10 * 60_000 + 1 }), sms({ ts: observedAt - 10 * 60_000 - 1 }),
-    sms({ ts: undefined, smsKey: undefined, source: 'manual' })]) {
+    sms({ ts: undefined, smsKey: undefined, source: 'manual', date: '2026-09-22' })]) {
     assert.equal(promote(state(item(), [existing])).outcome, 'added', JSON.stringify(existing));
   }
   const foreign = { ...state(), ledgerMoney: { schemaVersion: 2, currency: 'USD', exponent: 2 } };
@@ -189,4 +189,30 @@ test('an explicit separate-purchase confirmation bound to the exact pending sour
   const registeredState = state(registered, [walletRow({ ts: now - 30_000 })]);
   assert.equal(planReviewPromotion(registeredState, input, 'bank-added', now).reason, 'possible-duplicate');
   assert.equal(planReviewPromotion(registeredState, { ...input, ...separateFor(registered) }, 'bank-added', now).outcome, 'added');
+});
+
+test('a Wallet review after a manual entry of the same purchase asks instead of adding a second copy', () => {
+  // Manual rows carry no event clock. Same account, amount and expense on the
+  // same local date is enough to ASK (never merge) before posting the Wallet row.
+  const manual = (patch = {}) => ({ id: 'manual-1', source: 'manual', date: '2026-09-23', amountFils: 2500,
+    type: 'expense', title: 'Lunch', category: 'dining', accountId: 'card1', ...patch });
+  const before = state(item(), [manual()]); const snapshot = JSON.stringify(before);
+  assert.equal(promote(before).reason, 'possible-duplicate');
+  assert.equal(JSON.stringify(before), snapshot, 'the prompt changes nothing');
+  // The date the user is about to record also counts.
+  assert.equal(promote(state(item(), [manual({ date: '2026-09-21' })]), { date: '2026-09-21' }).reason, 'possible-duplicate');
+  for (const other of [manual({ date: '2026-09-22' }), manual({ accountId: 'card2' }), manual({ amountFils: 2600 }),
+    manual({ type: 'income', category: 'salary' })]) {
+    assert.equal(promote(state(item(), [other])).outcome, 'added', JSON.stringify(other));
+  }
+  // The explicit separate-purchase answer posts exactly once.
+  const wallet = item();
+  const separate = { separatePurchase: { confirmed: true, expectedSourceKey: wallet.sourceKey, expectedObservedAt: wallet.observedAt } };
+  const added = promote(state(wallet, [manual()]), separate);
+  assert.equal(added.outcome, 'added');
+  const after = { ...state(wallet, [manual()]), transactions: [manual(), added.transaction], reviewTray: added.reviewTray };
+  assert.equal(planReviewPromotion(after, confirmation(wallet, separate), 'again', now + 20000).reason, 'not-found');
+  // Only an Apple Pay review compares by date; other bank reviews keep their behavior.
+  const generic = { ...item(), id: 'generic_review_id_777777', sourceKey: 'generic_review_source_777777' };
+  assert.equal(promote(state(generic, [manual()])).outcome, 'added');
 });

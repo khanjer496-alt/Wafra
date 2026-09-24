@@ -46,7 +46,7 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     check("bridge advertises notification text intake capability", TestEventRegistry.constants["notificationCaptureSupported"] as? Bool == true)
     check("bridge registers the exact native module name",
       TestAsyncFunctionRegistry.moduleName == "WafraLiveCapture")
-    check("bridge registers exactly the seventeen public functions",
+    check("bridge registers exactly the eighteen public functions",
       TestAsyncFunctionRegistry.functions.keys.sorted() == [
         "acknowledgeCaptureWarning",
         "acknowledgeRecords",
@@ -59,6 +59,7 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
         "getNotificationShortcutURL",
         "listPendingApplePayRecords",
         "listPendingRecords",
+        "listPendingRecordsExcluding",
         "listPendingRecordsIncludingNotifications",
         "purgeExpired",
         "recordFirstCapturedAt",
@@ -262,6 +263,22 @@ private struct WafraLiveCaptureBridgeBehaviorTests {
     check("invalid notification limits never reach the store",
       WafraLiveCaptureStore.shared.listLimits.count == notificationCallsBeforeInvalidInput)
 
+    let excludedHeld = ["00000000-0000-4000-8000-000000000001"]
+    let pagedRows = try invoke("listPendingRecordsExcluding", [7.0, excludedHeld], as: [String].self)
+    check("the paging reader includes notifications and passes held ids to the store",
+      pagedRows == ["pending:7"] && WafraLiveCaptureStore.shared.listIncludesNotifications.last == true
+        && WafraLiveCaptureStore.shared.listExcluded.last == excludedHeld)
+    let pagedCallsBeforeInvalidInput = WafraLiveCaptureStore.shared.listLimits.count
+    for (index, limit) in invalidLimits.enumerated() {
+      check("paging reader rejects invalid limit case \(index + 1) before the store",
+        rejects("listPendingRecordsExcluding", [limit, excludedHeld]))
+    }
+    check("paging reader rejects an oversized exclusion before the store",
+      rejects("listPendingRecordsExcluding", [
+        50.0, Array(repeating: excludedHeld[0], count: WafraLiveCaptureStore.maxExcludedRecords + 1),
+      ]))
+    check("invalid paging input never reaches the store",
+      WafraLiveCaptureStore.shared.listLimits.count == pagedCallsBeforeInvalidInput)
     check("legacy and notification bridge readers never opt into Wallet data", WafraLiveCaptureStore.shared.listIncludesApplePay.allSatisfy { !$0 })
     let walletRows = try invoke("listPendingApplePayRecords", [7.0], as: [String].self)
     check("Wallet-only bridge calls the dedicated reader", walletRows == ["apple-pay:7"] && WafraLiveCaptureStore.shared.calls.last == "listPendingApplePayRecords")

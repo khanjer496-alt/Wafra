@@ -47,6 +47,12 @@ export interface WafraLiveCaptureNativeModule {
   listPendingRecords(limit: number): Promise<string[]>;
   /** Opt in only when notificationCaptureSupported is true and decoder handles both sources. */
   listPendingRecordsIncludingNotifications?(limit: number): Promise<string[]>;
+  /**
+   * Notification-aware reader that skips the named records the drain is
+   * holding (at most 2000), so later pages reach newer records. Absent on
+   * older binaries; the held records stay queued and are never acknowledged.
+   */
+  listPendingRecordsExcluding?(limit: number, excludeIds: string[]): Promise<string[]>;
   /** Reads only structured Apple Pay envelopes; older readers deliberately exclude these. */
   listPendingApplePayRecords?(limit: number): Promise<string[]>;
   acknowledgeRecords(ids: string[]): Promise<void>;

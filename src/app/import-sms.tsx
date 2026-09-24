@@ -113,6 +113,7 @@ import {
 import { BUNDLED_HISTORY_SHORTCUT_NAME, pagedHistoryEnabled } from '@/lib/ios-paged-setup';
 import { isProActive, requiresPro } from '@/lib/purchases';
 import { parsePastedBankAlerts } from '@/lib/launch-alert-parser';
+import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { prepareUniversalReviewAlert, type ReviewEntry } from '@/lib/alert-review-tray';
 import { isDeliberateOtherTitle, PARSER_VERSION } from '@/lib/sms-parser';
@@ -575,7 +576,13 @@ export default function ImportSmsScreen() {
       // it this screen — the one a user reaches BECAUSE something looks wrong —
       // is the one path that cannot clear a refused transaction the ledger
       // recorded as spending.
-      const p = buildImportPlan(parsed, getStateSnapshot(), newestTs, new Date(), declined);
+      // Possible Apple Pay duplicates go to Review now: an up-to-date scan
+      // below commits the source without importing anything.
+      const staged = stageWalletNearMatches(
+        buildImportPlan(parsed, getStateSnapshot(), newestTs, new Date(), declined),
+        () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+      const p = staged.plan;
+      await staged.settle();
       if (!inboxHistoryComplete) throw new Error('sms_history_incomplete');
       p.batch.parserRereadComplete = true;
       const completedInbox: PendingInboxResult = {
@@ -853,6 +860,21 @@ export default function ImportSmsScreen() {
       setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
       return;
     }
+    // Possible Apple Pay duplicates are staged for Review in this same turn as
+    // the import below and settled before the source is committed/discarded.
+    let nearMatchSettle: () => Promise<void>;
+    try {
+      const staged = stageWalletNearMatches(
+        currentPlan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+      currentPlan = staged.plan;
+      nearMatchSettle = staged.settle;
+    } catch {
+      setApplying(false);
+      historyOperationLocked.current = false;
+      setHistoryCommitState(history ? 'source-retained' : 'idle');
+      setNotice({ title: t('historyStorageFailed'), body: t(history ? 'historyStorageFailedBody' : 'importStorageFailedBody') });
+      return;
+    }
     if (pendingInboxResult?.parserRereadComplete) {
       currentPlan.batch.parserRereadComplete = true;
     }
@@ -863,10 +885,12 @@ export default function ImportSmsScreen() {
           setPlan(null);
           if (emptyPlan) {
             await ensureDurable();
+            await nearMatchSettle();
             return;
           }
           const receipt = importBatch(currentPlan.batch);
           await receipt.durable;
+          await nearMatchSettle();
         },
         discard: discardHistorySession,
       });
@@ -905,6 +929,7 @@ export default function ImportSmsScreen() {
           if (pendingInboxResult?.parserRereadComplete) {
             await importBatch(currentPlan.batch).durable;
           }
+          await nearMatchSettle();
           // The preview became a no-op because a concurrent live capture
           // durably filed the same rows. They are now safe to retire from the
           // native encrypted queue even though this confirmation has no new
@@ -922,6 +947,7 @@ export default function ImportSmsScreen() {
         }
       }
       try {
+        await nearMatchSettle();
         await discardHistorySession();
         router.back();
       } catch {
@@ -940,6 +966,7 @@ export default function ImportSmsScreen() {
       // the later source cleanup fails.
       setPlan(null);
       await receipt.durable;
+      await nearMatchSettle();
     } catch (error) {
       historyOperationLocked.current = false;
       setHistoryCommitState(error instanceof ImportMoneyError ? (history ? 'source-retained' : 'idle') : 'storage-failed');
@@ -1092,8 +1119,15 @@ export default function ImportSmsScreen() {
         const shortcutName = result.summary.found === 0 ? await historyShortcutName() : '';
         if (!active) return;
         setHistoryResult(result);
-        const nextPlan = withoutExistingBillReminders(
+        // Possible Apple Pay duplicates go to Review before any finalize below
+        // can discard the protected history session.
+        const stagedHistory = stageWalletNearMatches(
           buildImportPlan(result.parsed, state, 0, new Date(), result.declined),
+          () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+        await stagedHistory.settle();
+        if (!active) return;
+        const nextPlan = withoutExistingBillReminders(
+          stagedHistory.plan,
           state.bills.map((bill) => bill.title),
         );
         const counts = iosHistorySourceCounts(

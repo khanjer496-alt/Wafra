@@ -15,7 +15,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { shortDate, toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { t, tf, type StringKey } from '@/lib/i18n';
-import { isIosApplePayReview, isIosNotificationReview, isUniversalReviewAlert, recentlyExpiredReviewCount, reviewCaptureBacklog, reviewExpiresInDays, reviewTrayCapacity, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
+import { isIosApplePayReview, isIosNotificationReview, isUniversalReviewAlert, recentlyExpiredReviewCount, recentlyLostReviewCount, reviewCaptureBacklog, reviewExpiresInDays, reviewTrayCapacity, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { isOrdinaryUniversalPosting, universalMoneyLabel } from '@/components/universal-review-fields';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
 import type { UniversalField, UniversalMoney } from '@/lib/universal-types';
@@ -106,6 +106,9 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
         {item.attentionReason === 'possible-notification-replay' && (
           <ThemedText type="smallBold" themeColor="warning">{t('reviewAlertPossibleNotificationReplay')}</ThemedText>
         )}
+        {item.attentionReason === 'possible-apple-pay-duplicate' && (
+          <ThemedText testID="review-alert-apple-pay-duplicate" type="smallBold" themeColor="warning">{t('reviewAlertPossibleApplePayDuplicate')}</ThemedText>
+        )}
         <ThemedText type="smallBold">{t(key)}</ThemedText>
         {event.merchant.evidence === 'explicit' ? <ThemedText type="small">{event.merchant.value}</ThemedText> : null}
         {fact ? <ThemedText type="meta" themeColor="textSecondary">{t(fact[0])}</ThemedText> : null}
@@ -168,6 +171,9 @@ function AlertRow({
       <View style={styles.alertCopy}>
         {isIosApplePayReview(item) && <ThemedText type="meta" themeColor="textSecondary">Apple Pay</ThemedText>}
         {isIosNotificationReview(item) && <ThemedText type="meta" themeColor="textSecondary">{t('reviewAlertNotificationSource')}</ThemedText>}
+        {item.attentionReason === 'possible-apple-pay-duplicate' && (
+          <ThemedText testID="review-alert-apple-pay-duplicate" type="smallBold" themeColor="warning">{t('reviewAlertPossibleApplePayDuplicate')}</ThemedText>
+        )}
         <ThemedText type="smallBold">{t(family.label)}</ThemedText>
         <ThemedText type="title" tabular style={styles.amount}>
           {amount}
@@ -249,13 +255,23 @@ export default function ReviewAlertsScreen() {
   const capacity = reviewTrayCapacity(state.reviewTray, now);
   const waiting = capacity.protectedFull || capacity.legacyFull ? backlog.waiting : 0;
   const expired = recentlyExpiredReviewCount(state.reviewTray, now);
-  const notices = waiting > 0 || expired > 0 || backlog.currencyConflicts > 0 ? (
+  // Durable, source-free counts of money reviews a full lane could not keep.
+  const evicted = recentlyLostReviewCount(state.reviewTray, now, 'evicted');
+  const currencyEvicted = recentlyLostReviewCount(state.reviewTray, now, 'currency-evicted');
+  const notices = waiting > 0 || expired > 0 || evicted > 0 || currencyEvicted > 0 ||
+    backlog.currencyConflicts > 0 ? (
     <View style={styles.notices} testID="review-alerts-notices" accessibilityLiveRegion="polite">
       {waiting > 0 ? <ThemedText testID="review-alerts-full" type="smallBold" themeColor="warning">
         {tf('reviewAlertsFullWaiting', { count: waiting })}
       </ThemedText> : null}
       {expired > 0 ? <ThemedText testID="review-alerts-expired" type="small" themeColor="textSecondary">
         {tf('reviewAlertsExpiredCount', { count: expired })}
+      </ThemedText> : null}
+      {evicted > 0 ? <ThemedText testID="review-alerts-evicted" type="small" themeColor="textSecondary">
+        {tf('reviewAlertsEvictedCount', { count: evicted })}
+      </ThemedText> : null}
+      {currencyEvicted > 0 ? <ThemedText testID="review-alerts-currency-evicted" type="small" themeColor="textSecondary">
+        {tf('reviewAlertsCurrencyEvictedCount', { count: currencyEvicted })}
       </ThemedText> : null}
       {backlog.currencyConflicts > 0 ? <ThemedText testID="review-alerts-currency" type="small" themeColor="textSecondary">
         {tf('reviewAlertsCurrencySkipped', { count: backlog.currencyConflicts })}

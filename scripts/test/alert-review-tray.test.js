@@ -390,6 +390,138 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
   ok('a money movement is admitted by evicting an informational review instead of waiting',
     overInfo.deferred.length === 0 && overInfo.admit[0] === incoming);
 
+  // Gap B: callers without backpressure (relay, History, Android) still evict
+  // at the legacy cap. A money movement may never vanish without a trace.
+  const overflow = admitPreparedReviewAlert(fullLegacy, incoming, NOW + 1000);
+  const evictedTombstones = overflow.state.tombstones.filter((item) => item.outcome === 'evicted');
+  ok('evicting a money review from the Message lane records a durable evicted tombstone',
+    overflow.outcome === 'admitted' && overflow.state.pending.length === 50 &&
+      !overflow.state.pending.some((item) => item.id === legacyFiller(0).id) &&
+      evictedTombstones.length === 1 && evictedTombstones[0].sourceKey === legacyFiller(0).sourceKey &&
+      tray.recentlyLostReviewCount(overflow.state, NOW + 1000, 'evicted') === 1,
+    JSON.stringify(overflow.state.tombstones));
+  const reread = admitPreparedReviewAlert(overflow.state, legacyFiller(0), NOW + 2000);
+  ok('re-reading an evicted review into a still-full lane never counts it twice',
+    tray.recentlyLostReviewCount(reread.state, NOW + 2000, 'evicted') === 1 &&
+      tray.recentlyLostReviewCount(pruneAlertReviewTray(overflow.state, NOW + 3000), NOW + 3000, 'evicted') === 1,
+    JSON.stringify(reread.state.tombstones));
+  const roomAgain = resolveReviewAlert(overflow.state, legacyFiller(10).id, 'dismissed', NOW + 2000);
+  const recovered = admitPreparedReviewAlert(roomAgain, legacyFiller(0), NOW + 2500);
+  ok('a re-read evicted review is recovered once Review has room and its loss record is retired',
+    recovered.outcome === 'admitted' && recovered.state.pending.some((item) => item.id === legacyFiller(0).id) &&
+      tray.recentlyLostReviewCount(recovered.state, NOW + 2500, 'evicted') === 0,
+    JSON.stringify(recovered.state.tombstones));
+  ok('callers cannot record a loss outcome as a user decision',
+    JSON.stringify(resolveReviewAlert(fullLegacy, legacyFiller(1).id, 'evicted', NOW + 1000)) ===
+      JSON.stringify(pruneAlertReviewTray(fullLegacy, NOW + 1000)));
+  const decisions = Array.from({ length: tray.REVIEW_TOMBSTONE_CAP }, (_, index) => ({
+    sourceKey: `dismissed_source_${String(index).padStart(8, '0')}`, resolvedAt: NOW,
+    expiresAt: NOW + 86_400_000, outcome: 'dismissed' }));
+  const cappedOverflow = admitPreparedReviewAlert({ ...fullLegacy, tombstones: decisions }, incoming, NOW + 1000).state;
+  ok('eviction loss records never push dismissal dedupe tombstones out of the cap',
+    cappedOverflow.tombstones.length === tray.REVIEW_TOMBSTONE_CAP &&
+      decisions.every((item) => cappedOverflow.tombstones.some((kept) => kept.sourceKey === item.sourceKey)),
+    String(cappedOverflow.tombstones.length));
+  ok('informational-first eviction stays silent',
+    mixed.tombstones.length === 0 && tray.recentlyLostReviewCount(mixed, NOW + 1000, 'evicted') === 0,
+    JSON.stringify(mixed.tombstones));
+  const rawOverCap = JSON.parse(JSON.stringify({ ...emptyAlertReviewTray(),
+    pending: Array.from({ length: 52 }, (_, index) => legacyFiller(index)) }));
+  const loadOnce = normalizeAlertReviewTray(rawOverCap, NOW + 1000);
+  const loadTwice = normalizeAlertReviewTray(rawOverCap, NOW + 1500);
+  const reloadSaved = normalizeAlertReviewTray(JSON.parse(JSON.stringify(loadOnce)), NOW + 2000);
+  ok('hydration eviction is idempotent: unsaved or saved reloads never double count',
+    tray.recentlyLostReviewCount(loadOnce, NOW + 1000, 'evicted') === 2 &&
+      tray.recentlyLostReviewCount(loadTwice, NOW + 1500, 'evicted') === 2 &&
+      tray.recentlyLostReviewCount(reloadSaved, NOW + 2000, 'evicted') === 2 &&
+      reloadSaved.pending.length === 50,
+    JSON.stringify({ once: loadOnce.tombstones, saved: reloadSaved.tombstones }));
+
+  // Batch admission (store staging) keeps the item-by-item rules but prunes once.
+  const sequential = (start, items, at) => {
+    let state = start;
+    const outcomes = items.map((item) => {
+      const result = admitPreparedReviewAlert(state, item, at);
+      state = result.state;
+      return result.outcome;
+    });
+    return { state, outcomes };
+  };
+  const batchInputs = [legacyFiller(0), incoming, legacyFiller(600), informational(601),
+    { ...legacyFiller(602), id: legacyFiller(40).id }, legacyFiller(603), legacyFiller(603)];
+  const bulk = tray.admitPreparedReviewAlerts(overflow.state, batchInputs, NOW + 5000);
+  const oneByOne = sequential(overflow.state, batchInputs, NOW + 5000);
+  ok('batch admission matches item-by-item outcomes, pending entries and loss counts',
+    JSON.stringify(bulk.outcomes) === JSON.stringify(oneByOne.outcomes) &&
+      JSON.stringify(bulk.state.pending.map((item) => item.id).sort()) ===
+        JSON.stringify(oneByOne.state.pending.map((item) => item.id).sort()) &&
+      tray.recentlyLostReviewCount(bulk.state, NOW + 5000, 'evicted') ===
+        tray.recentlyLostReviewCount(oneByOne.state, NOW + 5000, 'evicted'),
+    JSON.stringify({ bulk: bulk.outcomes, seq: oneByOne.outcomes }));
+  const protectedBatch = Array.from({ length: 52 }, (_, index) => ({ ...stored, channel: 'push',
+    id: `local_review_id_${String(index).padStart(32, 'd')}`,
+    sourceKey: `local_review_source_${String(index).padStart(32, 'd')}` }));
+  ok('batch admission refuses notification reviews beyond their lane like single admission',
+    JSON.stringify(tray.admitPreparedReviewAlerts(emptyAlertReviewTray(), protectedBatch, NOW + 1000).outcomes) ===
+      JSON.stringify(sequential(emptyAlertReviewTray(), protectedBatch, NOW + 1000).outcomes));
+  const bigHistory = Array.from({ length: 5000 }, (_, index) => legacyFiller(10_000 + index));
+  const started = Date.now();
+  const staged = tray.admitPreparedReviewAlerts({ ...emptyAlertReviewTray(), tombstones: Array.from(
+    { length: 900 }, (_, index) => ({ sourceKey: `dismissed_source_${String(index).padStart(8, '0')}`,
+      resolvedAt: NOW, expiresAt: NOW + 86_400_000, outcome: 'dismissed' })) }, bigHistory, NOW + 20_000);
+  const elapsed = Date.now() - started;
+  ok('staging five thousand History money reviews is one bounded pass',
+    elapsed < 2000 && staged.state.pending.length === 50 &&
+      staged.outcomes.every((outcome) => outcome === 'admitted') &&
+      staged.state.tombstones.filter((item) => item.outcome === 'dismissed').length === 900,
+    JSON.stringify({ elapsed, pending: staged.state.pending.length }));
+
+  // Gap A: foreign-currency money reviews can never be posted. They live in
+  // their own bounded lane, never occupy the Message lane and never wait.
+  const { inspectUniversalBankEvent } = require('./build/universal-parser.js');
+  const sarEvent = inspectUniversalBankEvent('Card purchase SAR 125.50 at JARIR on 2026-09-05.');
+  const currencyItem = (index) => ({
+    ...tray.prepareUniversalReviewAlert({
+      id: `currency_review_id_${String(index).padStart(8, '0')}`,
+      sourceKey: `currency_review_source_${String(index).padStart(8, '0')}`,
+      observedAt: NOW + index, channel: 'inbox', event: sarEvent,
+    }),
+    currencyConflict: true,
+  });
+  const currencyFull = { ...emptyAlertReviewTray(),
+    pending: Array.from({ length: 50 }, (_, index) => currencyItem(index)) };
+  ok('the currency-conflict marker survives hydration',
+    normalizeAlertReviewTray(JSON.parse(JSON.stringify(currencyFull)), NOW + 100).pending
+      .every((item) => item.currencyConflict === true) &&
+      tray.isCurrencyConflictReview(currencyItem(1)) && !tray.isCurrencyConflictReview(stored));
+  ok('fifty foreign-currency reviews leave the Message lane empty for new money reviews',
+    tray.reviewTrayCapacity(currencyFull, NOW + 100).legacyFull === false &&
+      tray.partitionReviewsByCapacity(currencyFull, [incoming], NOW + 1000).deferred.length === 0);
+  const moreForeign = Array.from({ length: 5 }, (_, index) => currencyItem(100 + index));
+  const foreignPartition = tray.partitionReviewsByCapacity(currencyFull, moreForeign, NOW + 1000);
+  ok('a foreign-currency review never waits for Review space',
+    foreignPartition.deferred.length === 0 && foreignPartition.admit.length === 5);
+  let foreignState = currencyFull;
+  for (const item of moreForeign) foreignState = admitPreparedReviewAlert(foreignState, item, NOW + 1000).state;
+  const currencyTombstones = foreignState.tombstones.filter((item) => item.outcome === 'currency-evicted');
+  ok('the currency lane keeps its newest fifty and tombstones each evicted foreign alert',
+    foreignState.pending.length === 50 && foreignState.pending.every(tray.isCurrencyConflictReview) &&
+      currencyTombstones.length === 5 &&
+      tray.recentlyLostReviewCount(foreignState, NOW + 1000, 'currency-evicted') === 5 &&
+      tray.recentlyLostReviewCount(foreignState, NOW + 1000, 'evicted') === 0,
+    JSON.stringify(foreignState.tombstones));
+  const mixedLanes = pruneAlertReviewTray({ ...emptyAlertReviewTray(),
+    pending: [...fullLegacy.pending, ...currencyFull.pending] }, NOW + 1000);
+  ok('fifty Message reviews and fifty foreign-currency reviews coexist without eviction',
+    mixedLanes.pending.length === 100 && mixedLanes.tombstones.length === 0);
+  const protectedForeign = { ...currencyItem(300), channel: 'push',
+    id: 'local_review_id_' + 'c'.repeat(32), sourceKey: 'local_review_source_' + 'c'.repeat(32) };
+  const protectedFull = { ...emptyAlertReviewTray(), pending: Array.from({ length: 50 }, (_, index) => ({
+    ...stored, channel: 'push', id: `local_review_id_${String(index).padStart(32, 'b')}`,
+    sourceKey: `local_review_source_${String(index).padStart(32, 'b')}` })) };
+  ok('a foreign-currency notification review is not refused by a full notification lane',
+    admitPreparedReviewAlert(protectedFull, protectedForeign, NOW + 1000).outcome === 'admitted');
+
   // H3(c): source-free presentation facts for the Review banner.
   tray.reviewCaptureBacklog.reset();
   let notified = 0;
