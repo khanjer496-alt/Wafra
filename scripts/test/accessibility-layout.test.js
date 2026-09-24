@@ -164,8 +164,10 @@ ok('tabbed footer clearance is not dropped',
   /tabBarClearance \+ footerClearance/.test(scaffold));
 ok('Not Found is the first scaffold adoption', /<ScreenScaffold/.test(notFound));
 
+// The recurring row is its own memoised component (RecurringRow) so Bills
+// re-renders do not redraw every row; check the row it actually renders.
 const recurringAccessibilityBlock = bills.match(
-  /const renderRecurringRow[\s\S]*?\n  \};\n\n  return \(/,
+  /const RecurringRow = React\.memo[\s\S]*?\n\}\);\n/,
 )?.[0] ?? '';
 ok('Bills recurring rows have one labelled primary target',
   recurringAccessibilityBlock.length > 0 &&

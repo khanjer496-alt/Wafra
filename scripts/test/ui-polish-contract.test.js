@@ -45,8 +45,9 @@ for (const seam of ['useWafraBilling(', 'purchasePro(', 'fetchProOffers(', 'rest
 }
 
 const interactionBills = code(read('src/app/(tabs)/bills.tsx'));
+// The recurring row is its own memoised component (RecurringRow).
 const recurringRow = interactionBills.match(
-  /const renderRecurringRow[\s\S]*?\n  \};\n\n  return \(/,
+  /const RecurringRow = React\.memo[\s\S]*?\n\}\);\n/,
 )?.[0] ?? '';
 assert.ok(recurringRow.length > 0, 'recurring row block was not found');
 assert.doesNotMatch(recurringRow, /remindAboutA11y/);
@@ -70,7 +71,9 @@ assert.match(agenda,/section\.items\.map/);
 assert.match(agenda,/accessibilityRole="button"[\s\S]*?accessibilityLabel=/);
 assert.match(agenda,/onPress=\{\(\) => onOpen\(item\)\}/);
 assert.doesNotMatch(agenda,/<Button|onPayDue|payCardDue|onLongPress/);
-assert.match(interactionBills,/<PaymentAgenda[\s\S]*?onOpen=\{\(item\) =>/);
+// A stable handler (the agenda is memoised) that still opens the tapped item.
+assert.match(interactionBills,/<PaymentAgenda[\s\S]*?onOpen=\{onOpenAgendaItem\}/);
+assert.match(interactionBills,/agendaOpenRef\.current = \(item\) =>/);
 assert.match(interactionBills,/openCardDetail\(state\.accounts\.find[\s\S]*?item\.paid \? undefined : id\)/);
 assert.match(interactionBills,/const onPayDue[\s\S]*?setConfirmation\(\{[\s\S]*?onConfirm:[\s\S]*?payCardDue\(/);
 assert.match(interactionBills, /const \[selectedDueId, setSelectedDueId\] = useState<string \| null>\(null\)/);

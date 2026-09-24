@@ -1,5 +1,5 @@
-import React, { startTransition, useEffect, useMemo, useState } from 'react';
-import { useIsFocused } from '@react-navigation/native';
+import React, { startTransition, useCallback, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   InteractionManager,
   Platform,
@@ -61,7 +61,7 @@ import {
   type Subscription,
 } from '@/lib/subscriptions';
 import { useStore } from '@/lib/store';
-import type { Account, Bill, CategoryId } from '@/lib/types';
+import type { Account, Bill, CategoryId, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
 
@@ -92,12 +92,139 @@ export function recurringChargePresentation(sub: Subscription): { amountFils: nu
 }
 
 const UPCOMING_RECURRENCE_IDLE_MS = 4_000;
+// "No fixed schedule" and "Stopped" on All had no cap: a long history drew
+// every recurring row (avatar, texts, pressable) in one commit, the slowest
+// step on the tab. Page them like PaymentAgenda pages its rows.
+const RECURRING_PAGE_SIZE = 12;
+
+function cadenceLabel(cadence: Subscription['cadence']): string {
+  return cadence === 'weekly'
+    ? t('cadenceWeekly')
+    : cadence === 'monthly'
+      ? t('cadenceMonthly')
+      : cadence === 'yearly'
+        ? t('cadenceYearly')
+        : t('cadenceAsNeeded');
+}
+
+function scheduleWhen(days: number): string {
+  if (days === 0) return t('today');
+  if (days === 1) return t('tomorrow');
+  if (days === 2) return t('scheduleInTwoDays');
+  if (days <= 10) return tf('scheduleInFewDays', { days });
+  return tf('scheduleInManyDays', { days });
+}
+
+/**
+ * One recurring row, memoised so a segment tap, sheet or form keystroke on
+ * the Bills screen does not re-render every row. `language` is a prop only so
+ * a language switch still re-renders the copy read through t()/tf().
+ */
+const RecurringRow = React.memo(function RecurringRow({
+  sub, index, now, tracked, largeText, enter, onOpen, onLongPress,
+}: {
+  sub: Subscription;
+  index: number;
+  now: Date;
+  tracked: boolean;
+  largeText: boolean;
+  language: string;
+  enter: ReturnType<typeof useScreenEntering>;
+  onOpen: (sub: Subscription) => void;
+  onLongPress: (sub: Subscription) => void;
+}) {
+  const theme = useTheme();
+  const i = index;
+  const charge = recurringChargePresentation(sub);
+  const chargeLabel = t(charge.estimated ? 'recurringEstimatedCharge' : 'recurringLastCharge');
+  const next = daysUntilNext(sub, now);
+  const paymentObservedThisMonth = monthKey(sub.lastChargedISO) === monthKey(now);
+  const schedule =
+    sub.status === 'stopped'
+      ? tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })
+      : sub.paymentHistory
+        ? tf(
+            paymentObservedThisMonth ? 'recurringPaidObserved' : 'recurringLastPaidObserved',
+            {
+              date: shortDate(sub.lastChargedISO),
+              cadence: cadenceLabel(sub.cadence),
+            },
+          )
+        : sub.cadence === 'as-needed'
+          ? tf('asNeededScheduleList', { date: shortDate(sub.lastChargedISO) })
+          : next >= 0
+            ? tf('cadenceScheduleList', {
+                cadence: cadenceLabel(sub.cadence),
+                date: shortDate(sub.nextExpectedISO),
+                when: scheduleWhen(next),
+              })
+            : tf('cadenceExpectedAgo', {
+                cadence: cadenceLabel(sub.cadence),
+                days: -next,
+              });
+  return (
+    <Animated.View
+      entering={enter(FadeInDown.delay(Math.min(i, 8) * 40).duration(300))}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${sub.title}. ${schedule}. ${chargeLabel}: ${formatAED(charge.amountFils, { decimals: false })}`}
+        onPress={() => onOpen(sub)}
+        onLongPress={() => onLongPress(sub)}
+        style={({ pressed }) => [
+          styles.row,
+          largeText && styles.rowLarge,
+          i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+          pressed && { backgroundColor: theme.backgroundSelected },
+        ]}>
+        <View style={[styles.recurringIdentity, largeText && styles.rowIdentityLarge]}>
+          <MerchantAvatar title={sub.title} category={sub.category} size={32} />
+          <View style={styles.rowInfo}>
+            <View style={styles.rowTitleLine}>
+              <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1} style={styles.rowTitle}>
+                {sub.title}
+              </ThemedText>
+              {sub.priceIncreased && (
+                <View style={[styles.badge, { backgroundColor: `${theme.warning}22` }]}>
+                  <ThemedText type="micro" style={{ color: theme.warning }}>
+                    {t('priceUp')}
+                  </ThemedText>
+                </View>
+              )}
+            </View>
+            {/* The schedule owns the body width and wraps rather than
+                truncating, so the next-charge date survives a long merchant
+                name. The cadence is named here ONCE — it used to be repeated
+                verbatim in a footer under this same line, so every monthly row
+                said "Monthly" twice. */}
+            <ThemedText type="meta" themeColor="textSecondary" numberOfLines={largeText ? undefined : 2}>
+              {schedule}
+            </ThemedText>
+          </View>
+        </View>
+        <View style={[styles.rowRight, largeText && styles.rowFigureLarge]}>
+          <View style={styles.recurringAmount}>
+            <ThemedText type="smallBold" tabular>
+              {formatAED(charge.amountFils, { decimals: false })}
+            </ThemedText>
+            <ThemedText type="nano" themeColor="textTertiary">
+              {chargeLabel}
+            </ThemedText>
+          </View>
+          {tracked ? (
+            <ThemedText type="nano" themeColor="textTertiary" numberOfLines={1}>
+              {t('tracked')}
+            </ThemedText>
+          ) : null}
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+});
 
 export default function BillsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
   const enter = useScreenEntering();
-  const focused = useIsFocused();
   const { state, addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue, setLedgerMoney } = useStore();
   /**
    * The screen that answers "is this card settled?" can now go and find out.
@@ -132,7 +259,16 @@ export default function BillsScreen() {
   const [dueDayText, setDueDayText] = useState('');
   const [category, setCategory] = useState<CategoryId>('utilities');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
-  const [androidRecurring, setAndroidRecurring] = useState<Subscription[] | null>(null);
+  const [androidRecurringResult, setAndroidRecurringResult] = useState<{
+    value: Subscription[];
+    transactions: Transaction[];
+    notSubscriptions: string[];
+    today: Date;
+    liveAccounts: Set<string>;
+    internal: Set<string>;
+  } | null>(null);
+  const [otherLimit, setOtherLimit] = useState(RECURRING_PAGE_SIZE);
+  const [stoppedLimit, setStoppedLimit] = useState(RECURRING_PAGE_SIZE);
 
   const billsHeader: ScreenHeaderProps = {
     title: t('billsTitle'),
@@ -141,23 +277,6 @@ export default function BillsScreen() {
       icon: 'plus',
       onPress: () => setAdderVisible(true),
     }],
-  };
-
-  const cadenceLabel = (cadence: Subscription['cadence']): string =>
-    cadence === 'weekly'
-      ? t('cadenceWeekly')
-      : cadence === 'monthly'
-        ? t('cadenceMonthly')
-        : cadence === 'yearly'
-          ? t('cadenceYearly')
-          : t('cadenceAsNeeded');
-
-  const scheduleWhen = (days: number): string => {
-    if (days === 0) return t('today');
-    if (days === 1) return t('tomorrow');
-    if (days === 2) return t('scheduleInTwoDays');
-    if (days <= 10) return tf('scheduleInFewDays', { days });
-    return tf('scheduleInManyDays', { days });
   };
 
   // Card projections read accounts, transactions and statements, not the
@@ -189,17 +308,36 @@ export default function BillsScreen() {
   // detector in subscriptions.ts means reminders/Bills join one job instead of
   // racing duplicate scans, and leaving the tab no longer throws completed work
   // away and restarts from row zero next time.
-  useEffect(() => {
-    setAndroidRecurring(null);
-  }, [state.transactions, state.notSubscriptions, state.accounts, state.transferInternalIds, todayISO]);
+  // The last result stays on screen while a changed ledger is re-analysed.
+  // Resetting it to null on every capture or pull-to-refresh emptied
+  // Subscriptions/Utilities until the job finished, then refilled them.
+  const recurringFresh = androidRecurringResult !== null &&
+    androidRecurringResult.transactions === state.transactions &&
+    androidRecurringResult.notSubscriptions === state.notSubscriptions &&
+    androidRecurringResult.today === recurrenceToday &&
+    androidRecurringResult.liveAccounts === liveAccounts &&
+    androidRecurringResult.internal === internal;
+  const hasRecurringResult = androidRecurringResult !== null;
+  // A previous result may predate a "Not a subscription" choice; never show a
+  // merchant the user has just dismissed while the refresh runs.
+  const androidRecurring = useMemo(() => {
+    if (!androidRecurringResult) return null;
+    if (androidRecurringResult.notSubscriptions === state.notSubscriptions) return androidRecurringResult.value;
+    const dismissed = new Set(state.notSubscriptions.map((title) => title.trim().toLowerCase()));
+    return androidRecurringResult.value.filter((sub) => !dismissed.has(sub.title.trim().toLowerCase()));
+  }, [androidRecurringResult, state.notSubscriptions]);
 
-  useEffect(() => {
-    if (Platform.OS !== 'android' || !focused || androidRecurring !== null || agendaView === 'cards') return;
+  // useFocusEffect rather than useIsFocused: focus changes no longer re-render
+  // the whole screen just to start or cancel this job.
+  useFocusEffect(useCallback(() => {
+    if (Platform.OS !== 'android' || recurringFresh || agendaView === 'cards') return;
     let cancelled = false;
     let delay: ReturnType<typeof setTimeout> | null = null;
     let firstFrame: number | null = null;
     let secondFrame: number | null = null;
     let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+    const transactions = state.transactions;
+    const notSubscriptions = state.notSubscriptions;
 
     const startProjection = () => {
       if (cancelled) return;
@@ -208,8 +346,8 @@ export default function BillsScreen() {
           secondFrame = requestAnimationFrame(() => {
             const projectionStartedAt = Date.now();
             void detectSubscriptionsCooperatively(
-              state.transactions,
-              state.notSubscriptions,
+              transactions,
+              notSubscriptions,
               recurrenceToday,
               liveAccounts,
               internal,
@@ -217,14 +355,20 @@ export default function BillsScreen() {
             ).then((value) => {
               recordRuntimeOperation('bills-projection', Date.now() - projectionStartedAt);
               if (cancelled || value === null) return;
-              startTransition(() => setAndroidRecurring(value));
+              startTransition(() => setAndroidRecurringResult({
+                value, transactions, notSubscriptions, today: recurrenceToday, liveAccounts, internal,
+              }));
             });
           });
         });
       });
     };
 
-    const needsRecurrenceNow = agendaView === 'subscriptions' || agendaView === 'utilities' || agendaView === 'all';
+    // The first analysis on Upcoming waits for an idle grace period. Refreshing
+    // an existing result runs in the cooperative worker's small slices, so it
+    // starts straight away instead of showing stale rows for seconds.
+    const needsRecurrenceNow = hasRecurringResult ||
+      agendaView === 'subscriptions' || agendaView === 'utilities' || agendaView === 'all';
     if (needsRecurrenceNow) startProjection();
     else delay = setTimeout(startProjection, UPCOMING_RECURRENCE_IDLE_MS);
 
@@ -235,7 +379,8 @@ export default function BillsScreen() {
       if (firstFrame !== null) cancelAnimationFrame(firstFrame);
       if (secondFrame !== null) cancelAnimationFrame(secondFrame);
     };
-  }, [agendaView, androidRecurring, focused, state.transactions, state.notSubscriptions, recurrenceToday, liveAccounts, internal]);
+  }, [agendaView, recurringFresh, hasRecurringResult, state.transactions, state.notSubscriptions,
+    recurrenceToday, liveAccounts, internal]));
   // The same live/internal pair every other screen that adds money up passes.
   // Without it a charge on an archived card reconciles a bill to "Paid" while
   // Flow's Total out never moves.
@@ -356,7 +501,7 @@ export default function BillsScreen() {
     const txs = state.transactions
       .filter(
         (t) =>
-          isSpending(t, liveAccounts, internal) && t.title.trim().toLowerCase() === titleKey,
+          t.title.trim().toLowerCase() === titleKey && isSpending(t, liveAccounts, internal),
       )
       .sort((a, b) => (a.date < b.date ? 1 : -1));
     if (txs.length === 0) return null;
@@ -541,7 +686,9 @@ export default function BillsScreen() {
     });
   };
 
-  const onDismissSub = (sub: Subscription) => {
+  // Stable (the store's setter is a useCallback), so the memoised recurring
+  // rows are not re-rendered by it.
+  const onDismissSub = useCallback((sub: Subscription) => {
     setConfirmation({
       question: t('notASubscriptionQ'),
       body: tf('removeSubscriptionBody', { title: sub.title }),
@@ -549,7 +696,7 @@ export default function BillsScreen() {
       destructive: true,
       onConfirm: () => setNotSubscription(sub.title, true),
     });
-  };
+  }, [setNotSubscription]);
 
   const openCardDetail = (account: Account | null, dueId?: string) => {
     setSelectedDueId(account ? dueId ?? null : null);
@@ -561,94 +708,35 @@ export default function BillsScreen() {
     setSelectedDueId(null);
   };
 
-  const renderRecurringRow = (sub: Subscription, i: number) => {
-    const charge = recurringChargePresentation(sub);
-    const chargeLabel = t(charge.estimated ? 'recurringEstimatedCharge' : 'recurringLastCharge');
-    const next = daysUntilNext(sub, now);
-    const tracked = trackedTitles.has(sub.title.toLowerCase());
-    const paymentObservedThisMonth = monthKey(sub.lastChargedISO) === monthKey(now);
-    const schedule =
-      sub.status === 'stopped'
-        ? tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })
-        : sub.paymentHistory
-          ? tf(
-              paymentObservedThisMonth ? 'recurringPaidObserved' : 'recurringLastPaidObserved',
-              {
-                date: shortDate(sub.lastChargedISO),
-                cadence: cadenceLabel(sub.cadence),
-              },
-            )
-          : sub.cadence === 'as-needed'
-            ? tf('asNeededScheduleList', { date: shortDate(sub.lastChargedISO) })
-            : next >= 0
-              ? tf('cadenceScheduleList', {
-                  cadence: cadenceLabel(sub.cadence),
-                  date: shortDate(sub.nextExpectedISO),
-                  when: scheduleWhen(next),
-                })
-              : tf('cadenceExpectedAgo', {
-                  cadence: cadenceLabel(sub.cadence),
-                  days: -next,
-                });
-    return (
-      <Animated.View
-        key={sub.title}
-        entering={enter(FadeInDown.delay(Math.min(i, 8) * 40).duration(300))}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${sub.title}. ${schedule}. ${chargeLabel}: ${formatAED(charge.amountFils, { decimals: false })}`}
-          onPress={() => setDetail(sub)}
-          onLongPress={() => onDismissSub(sub)}
-          style={({ pressed }) => [
-            styles.row,
-            largeText && styles.rowLarge,
-            i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
-            pressed && { backgroundColor: theme.backgroundSelected },
-          ]}>
-          <View style={[styles.recurringIdentity, largeText && styles.rowIdentityLarge]}>
-            <MerchantAvatar title={sub.title} category={sub.category} size={32} />
-            <View style={styles.rowInfo}>
-              <View style={styles.rowTitleLine}>
-                <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1} style={styles.rowTitle}>
-                  {sub.title}
-                </ThemedText>
-                {sub.priceIncreased && (
-                  <View style={[styles.badge, { backgroundColor: `${theme.warning}22` }]}>
-                    <ThemedText type="micro" style={{ color: theme.warning }}>
-                      {t('priceUp')}
-                    </ThemedText>
-                  </View>
-                )}
-              </View>
-              {/* The schedule owns the body width and wraps rather than
-                  truncating, so the next-charge date survives a long merchant
-                  name. The cadence is named here ONCE — it used to be repeated
-                  verbatim in a footer under this same line, so every monthly row
-                  said "Monthly" twice. */}
-              <ThemedText type="meta" themeColor="textSecondary" numberOfLines={largeText ? undefined : 2}>
-                {schedule}
-              </ThemedText>
-            </View>
-          </View>
-          <View style={[styles.rowRight, largeText && styles.rowFigureLarge]}>
-            <View style={styles.recurringAmount}>
-              <ThemedText type="smallBold" tabular>
-                {formatAED(charge.amountFils, { decimals: false })}
-              </ThemedText>
-              <ThemedText type="nano" themeColor="textTertiary">
-                {chargeLabel}
-              </ThemedText>
-            </View>
-            {tracked ? (
-              <ThemedText type="nano" themeColor="textTertiary" numberOfLines={1}>
-                {t('tracked')}
-              </ThemedText>
-            ) : null}
-          </View>
-        </Pressable>
-      </Animated.View>
-    );
+  // Stable identity for the memoised PaymentAgenda; reads the latest values.
+  const agendaOpenRef = useRef<(item: PaymentAgendaItem) => void>(() => {});
+  agendaOpenRef.current = (item) => {
+    if (item.kind === 'card') {
+      const id = item.id.slice(5);
+      const due = state.cardDues.find((due) => due.id === id);
+      if (due) openCardDetail(state.accounts.find((a) => a.id === due.accountId) ?? null, item.paid ? undefined : id);
+    } else if (item.kind === 'bill') setSelectedReminderId(item.id.slice(5));
+    else {
+      const sub = detected.find((sub) => `sub-${sub.title.trim().toLowerCase()}` === item.id);
+      if (sub) setDetail(sub);
+    }
   };
+  const onOpenAgendaItem = useCallback((item: PaymentAgendaItem) => agendaOpenRef.current(item), []);
+
+  const renderRecurringRow = (sub: Subscription, i: number) => (
+    <RecurringRow
+      key={sub.title}
+      sub={sub}
+      index={i}
+      now={now}
+      tracked={trackedTitles.has(sub.title.toLowerCase())}
+      largeText={largeText}
+      language={state.language}
+      enter={enter}
+      onOpen={setDetail}
+      onLongPress={onDismissSub}
+    />
+  );
 
   return (
     <>
@@ -693,26 +781,24 @@ export default function BillsScreen() {
           accounts={state.accounts}
           includePaid={includePaidAgenda}
           group={selectedAgendaGroup}
-          onOpen={(item) => {
-          if (item.kind === 'card') {
-            const id = item.id.slice(5);
-            const due = state.cardDues.find((due) => due.id === id);
-            if (due) openCardDetail(state.accounts.find((a) => a.id === due.accountId) ?? null, item.paid ? undefined : id);
-          } else if (item.kind === 'bill') setSelectedReminderId(item.id.slice(5));
-          else {
-            const sub = detected.find((sub) => `sub-${sub.title.trim().toLowerCase()}` === item.id);
-            if (sub) setDetail(sub);
-          }
-        }} />
+          onOpen={onOpenAgendaItem} />
         {agendaView === 'all' && otherRepeats.length > 0 && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
           <ThemedText type="heading">{words.unscheduled}</ThemedText>
-          {otherRepeats.map(renderRecurringRow)}
+          {otherRepeats.slice(0, otherLimit).map(renderRecurringRow)}
+          {otherRepeats.length > otherLimit && <Button
+            label={tf('showMoreRecurring', { count: otherRepeats.length - otherLimit })}
+            variant="ghost"
+            onPress={() => setOtherLimit((limit) => limit + RECURRING_PAGE_SIZE)} />}
         </View>}
         {agendaView === 'all' && stopped.length > 0 && <>
           <Button label={showStopped ? words.fewer : words.more} variant="ghost" onPress={() => setShowStopped(!showStopped)} />
           {showStopped && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
             <ThemedText type="heading">{words.stopped}</ThemedText>
-            {stopped.map(renderRecurringRow)}
+            {stopped.slice(0, stoppedLimit).map(renderRecurringRow)}
+            {stopped.length > stoppedLimit && <Button
+              label={tf('showMoreRecurring', { count: stopped.length - stoppedLimit })}
+              variant="ghost"
+              onPress={() => setStoppedLimit((limit) => limit + RECURRING_PAGE_SIZE)} />}
           </View>}
         </>}
       </ScreenScaffold>

@@ -38,6 +38,8 @@ function harness() {
       },
       useState: initial => [initial, () => {}],
       useEffect: () => {},
+      // PaymentAgenda is React.memo-wrapped; render it as the plain component.
+      memo: component => component,
     }, 'react/compiler-runtime': runtime, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { Pressable: 'Pressable', View: 'View', TextInput: 'TextInput', StyleSheet: { create: value => value },
       useWindowDimensions: () => ({ width: 390, fontScale: 1 }) },
