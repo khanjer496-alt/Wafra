@@ -76,6 +76,16 @@ ok('pdf response: accepted + rejected rows must reconcile and incomplete coverag
   } })?.coverage === null &&
   parsePdfImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 9, pages: 2 }) === null &&
   parsePdfImportAccepted({ acceptedRows: 8, rejectedRows: 2, pages: 2 })?.totalRows === 10);
+ok('statement responses: card rows refused for an unexplained sign are a bounded count, zero from an older relay',
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: 2, cardSignRowsSkipped: 2 })?.cardSignRowsSkipped === 2 &&
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2 })?.cardSignRowsSkipped === 0 &&
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: 1, cardSignRowsSkipped: 2 }) === null &&
+  parseCsvImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 10, cardSignRowsSkipped: 1 })?.cardSignRowsSkipped === 1 &&
+  parseCsvImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 10, cardSignRowsSkipped: -1 }) === null);
+ok('statement responses: an unexplained card sign convention is its own refusal',
+  pdfImportError(422, { error: 'ambiguous_card_signs' }).code === 'ambiguous_card_signs');
+ok('statement responses: dates that read either way are their own refusal',
+  pdfImportError(422, { error: 'ambiguous_dates' }).code === 'ambiguous_dates');
 ok('pdf response: an oversized text PDF is its own error, not the scanned-PDF one',
   pdfImportError(413, { error: 'pdf_too_long' }).code === 'pdf_too_long');
 ok('email token: private address response is validated',
@@ -88,6 +98,60 @@ ok('email token: response injection is rejected',
     emailToken: 't'.repeat(43),
     forwardingAddress: 'token@example.com\nBcc: attacker@example.com',
   }) === null);
+
+// ── Statement coverage: never claim "no gaps" for a source it cannot name ──
+{
+  const { summarizeCoverage, isIdentifiedCoverageSource } = require('./build/statement-coverage');
+  const today = new Date(Date.UTC(2026, 8, 24));
+  const entry = (sourceKey, label, startDate, endDate) => ({
+    id: `${sourceKey}:${startDate}`, sourceKey, label, startDate, endDate, importedAt: 1, format: 'pdf',
+  });
+  const summary = summarizeCoverage([
+    entry('card:credit:4821', 'Card •4821', '2025-09-01', '2026-08-31'),
+    entry('bank-statements', 'Bank statements', '2025-09-01', '2026-02-28'),
+    entry('bank-statements', 'Bank statements', '2026-03-01', '2026-08-31'),
+    entry('bank:hsbc', 'HSBC', '2026-01-01', '2026-08-31'),
+    entry('account:account:1234', 'Account •1234', '2026-06-01', '2026-06-30'),
+  ], 'en', today);
+  const byKey = new Map(summary.map((item) => [item.sourceKey, item]));
+  ok('coverage: only a masked account or card is an identified source',
+    isIdentifiedCoverageSource('card:credit:4821') && isIdentifiedCoverageSource('account:account:1234') &&
+      !isIdentifiedCoverageSource('bank-statements') && !isIdentifiedCoverageSource('bank:hsbc'));
+  ok('coverage: an identified card with every month is complete',
+    byKey.get('card:credit:4821')?.identified === true && byKey.get('card:credit:4821')?.missing.length === 0);
+  ok('coverage: an identified account reports its missing months',
+    byKey.get('account:account:1234')?.identified === true && byKey.get('account:account:1234').missing.length > 0);
+  ok('coverage: unidentified statements are never presented as complete or gap-checked',
+    byKey.get('bank-statements')?.identified === false && byKey.get('bank-statements').missing.length === 0 &&
+      byKey.get('bank:hsbc')?.identified === false,
+    JSON.stringify(summary));
+}
+
+// ── Multi-file statement batches: pacing and counted copy ──
+{
+  const { nextUploadDelay, UPLOAD_WINDOW_MS, UPLOADS_PER_WINDOW, countPhrase } = require('./build/statement-batch');
+  const now = 1_000_000;
+  ok('pacing: a fresh batch starts immediately', nextUploadDelay([], now) === 0);
+  const burst = Array.from({ length: UPLOADS_PER_WINDOW }, (_, index) => now - 10_000 + index);
+  ok('pacing: a full window waits until its oldest start has aged out, with margin',
+    nextUploadDelay(burst, now) > 50_000 && nextUploadDelay(burst, now) <= UPLOAD_WINDOW_MS);
+  ok('pacing: starts older than the window no longer count',
+    nextUploadDelay(burst.map((t) => t - UPLOAD_WINDOW_MS), now) === 0);
+  ok('pacing: stays under the relay limit of six uploads a minute per format', UPLOADS_PER_WINDOW <= 5);
+  const en = { one: '{n} statement', other: '{n} statements' };
+  const ar = { zero: 'لا كشوف', one: 'كشف واحد', two: 'كشفان', few: '{n} كشوف', many: '{n} كشفاً', other: '{n} كشف' };
+  ok('plural copy: English says 1 statement and 2 statements',
+    countPhrase('en', en, 1) === '1 statement' && countPhrase('en', en, 2) === '2 statements');
+  ok('plural copy: Arabic uses the dual and the 3–10 / 11–99 forms',
+    countPhrase('ar', ar, 1) === 'كشف واحد' && countPhrase('ar', ar, 2) === 'كشفان' &&
+      countPhrase('ar', ar, 3) === '3 كشوف' && countPhrase('ar', ar, 11) === '11 كشفاً' &&
+      countPhrase('ar', ar, 100) === '100 كشف' && countPhrase('ar', ar, 103) === '103 كشوف');
+}
+ok('statement responses: a re-upload the relay already processed says so, older relays default to false',
+  parsePdfImportAccepted({ acceptedRows: 2, pages: 1, alreadyProcessed: true })?.alreadyProcessed === true &&
+  parsePdfImportAccepted({ acceptedRows: 2, pages: 1 })?.alreadyProcessed === false &&
+  parsePdfImportAccepted({ acceptedRows: 2, pages: 1, alreadyProcessed: 'yes' }) === null &&
+  parseCsvImportAccepted({ acceptedRows: 2, rejectedRows: 0, totalRows: 2, alreadyProcessed: true })?.alreadyProcessed === true);
 
 const root = path.resolve(__dirname, '../..');
 const transport = fs.readFileSync(path.join(root, 'src/lib/cloud-import.ts'), 'utf8');
@@ -196,5 +260,19 @@ ok('both languages define the filing progress line',
   (copySource.match(/acceptedFiling:/g) || []).length === 2,
   'a missing Arabic string would fall through to an undefined status');
 
+ok('one failed file no longer aborts the batch: every file gets its own result and the loop never rethrows',
+  uploadLoop.length > 0 && !/throw e;/.test(uploadLoop) && /fileResults\.push\(/.test(uploadLoop) &&
+    /copy\.fileFailed/.test(surface) && /copy\.fileImported/.test(surface));
+ok('uploads are paced under the relay rate limit, with a visible waiting state, and one rate-limit retry',
+  /nextUploadDelay\(/.test(uploadLoop) && /copy\.waitingForLimit/.test(surface) &&
+    /rate_limited/.test(uploadLoop));
+ok('coverage and the queued-row drain still run for the files that succeeded',
+  /await rememberCoverage\(coverage\);[\s\S]{0,400}finishQueuedImport\(/.test(surface));
+ok('the statement screen says files go to Wafra\'s server, above the Choose button, in both languages',
+  /copy\.uploadDisclosure/.test(surface) &&
+    surface.indexOf('copy.uploadDisclosure') < surface.indexOf('copy.chooseStatements') &&
+    (copySource.match(/uploadDisclosure:/g) || []).length === 2);
+ok('leftover statement picker copies are cleared when the screen opens and closes',
+  /clearStatementPickerCache\(/.test(surface) && /export function clearStatementPickerCache/.test(transport));
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

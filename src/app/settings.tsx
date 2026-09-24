@@ -1670,7 +1670,9 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  settingsPanel: { borderTopWidth: 1, paddingVertical: Spacing.three, gap: Spacing.two },
+  // The rows already carry rules. A second border above every section heading
+  // boxed the label in and made a single preference occupy an entire panel.
+  settingsPanel: { paddingTop: Spacing.two, gap: Spacing.one },
   content: {
     gap: Spacing.three,
   },

@@ -89,6 +89,13 @@ ok('Settings exposes pending reviews without promoting an empty destination',
 ok('review copy is localized in both supported UI languages',
   /reviewAlertsTitle:\s*\{\s*en:[^\n]+ar:/.test(copy) &&
     /reviewAlertDismissQuestion:\s*\{\s*en:[^\n]+ar:/.test(copy));
+ok('capacity, expiry and currency-skip notices are localized and counted, never silent',
+  ['reviewAlertsFullWaiting', 'reviewAlertsExpiredCount', 'reviewAlertsCurrencySkipped', 'reviewAlertExpiresIn']
+    .every((key) => new RegExp(`${key}:\\s*\\{\\s*en: '[^'\\n]*\\{count\\}[^'\\n]*', ar: '[^'\\n]*\\{count\\}[^'\\n]*'`).test(copy)) &&
+    /reviewCaptureBacklog\.subscribe/.test(route) && /reviewTrayCapacity\(state\.reviewTray, now\)/.test(route) &&
+    /recentlyExpiredReviewCount\(state\.reviewTray, now\)/.test(route) &&
+    /reviewExpiresInDays\(item, Date\.now\(\)\)/.test(route) &&
+    /accessibilityLiveRegion="polite"/.test(route));
 
 ok('SMS access is visibly optional and the no-access path is explicit',
   /<StartOption automatic=\{false\}/.test(onboarding) &&

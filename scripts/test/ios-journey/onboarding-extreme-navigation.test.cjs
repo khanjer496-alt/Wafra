@@ -311,7 +311,7 @@ test('setup Back returns to capture and preserves the selected first landing vie
   await h.press('onboardBack'); at(h, 'preview');
 });
 
-for (const pathname of ['/ios-setup', '/import-sms', '/ios-paging-beta', '/ios-notification-setup']) {
+for (const pathname of ['/ios-setup', '/import-sms', '/ios-paging-beta', '/ios-notification-setup', '/ios-apple-pay-setup']) {
   test(`first-run ${pathname} owns its UI while onboarding setup is pending`, async () => {
     const h = await gate({ pathname, profile: profile('capture'), pendingSetup: true });
     assert.deepEqual(h.routes, [], 'The setup child route must not be redirected back to its parent');
@@ -342,7 +342,7 @@ test('history recovery can open statements through an explicit live handoff with
 });
 
 test('Android deep links cannot bypass onboarding via iOS setup routes', async () => {
-  for (const pathname of ['/ios-setup', '/import-sms', '/ios-paging-beta', '/ios-notification-setup']) {
+  for (const pathname of ['/ios-setup', '/import-sms', '/ios-paging-beta', '/ios-notification-setup', '/ios-apple-pay-setup']) {
     const h = await gate({ platform: 'android', pathname }); at(h, 'welcome');
     assert.ok(!h.nodes().some(node => node.type === 'Navigator'));
     assert.equal(calls(h, 'loadSetup').length, 0);

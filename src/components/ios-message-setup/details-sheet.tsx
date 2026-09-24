@@ -9,9 +9,10 @@ import { t, type StringKey } from '@/lib/i18n';
 
 interface DetailsSheetProps {
   visible: boolean;
+  language?: string;
   onClose(): void;
   section: 'future' | 'history';
-  source?: 'message' | 'notification';
+  source?: 'message' | 'notification' | 'apple-pay';
   fromOnboarding?: boolean;
   actions?: { label: string; onPress(): void }[];
   privacyExpanded: boolean;
@@ -19,10 +20,11 @@ interface DetailsSheetProps {
 }
 
 export const DetailsSheet = ({
-  visible, onClose, section, source = 'message', fromOnboarding, actions = [], privacyExpanded, onTogglePrivacy,
+  visible, onClose, section, source = 'message', language = 'en', fromOnboarding, actions = [], privacyExpanded, onTogglePrivacy,
 }: DetailsSheetProps) => {
+  const walletHelp = t('iosApplePayWalletHelp', language === 'ar' ? 'ar' : 'en');
   const lines: StringKey[] = section === 'future'
-    ? source === 'notification' ? ['iosNotificationSetupSummary', 'iosNotificationHelpInput', 'iosNotificationHelpStatus']
+    ? source === 'apple-pay' ? [] : source === 'notification' ? ['iosNotificationSetupSummary', 'iosNotificationHelpInput', 'iosNotificationHelpStatus']
     : ['iosMessageHelpLocal', 'iosMessageGuideSender', 'iosMessageGuideNoFilter',
       'iosMessagePermissionBody', 'iosMessagePermissionLocked',
       'iosMessageHelpProof', 'iosMessageSenderUnavailable']
@@ -38,6 +40,7 @@ export const DetailsSheet = ({
             onPress={() => { onClose(); action.onPress(); }} />
         ))}
         <View style={styles.section}>
+          {section === 'future' && source === 'apple-pay' && <ThemedText type="small" themeColor="textSecondary">{walletHelp}</ThemedText>}
           {lines.map((key) => (
             <View key={key} style={styles.line}>
               <ThemedText type="small" themeColor="textSecondary" accessible={false}>·</ThemedText>
@@ -52,9 +55,9 @@ export const DetailsSheet = ({
         {privacyExpanded && (
           <View style={styles.section}>
             <ThemedText type="small" themeColor="textSecondary">
-              {t(section === 'future' ? source === 'notification' ? 'iosNotificationPrivacyBody' : 'iosLocalPrivacyBody' : 'historyImportPrivacy')}
+              {section === 'future' && source === 'apple-pay' ? (language === 'ar' ? 'تُحفظ بيانات الدفع على هذا الجهاز للمراجعة. لا تُرسل إلى خادم.' : 'Payment details stay on this device for Review. They are not sent to a server.') : t(section === 'future' ? source === 'notification' ? 'iosNotificationPrivacyBody' : 'iosLocalPrivacyBody' : 'historyImportPrivacy')}
             </ThemedText>
-            {section === 'future' && source !== 'notification' && (
+            {section === 'future' && source === 'message' && (
               <ThemedText type="small" themeColor="textSecondary">{t('iosLocalMigrationBody')}</ThemedText>
             )}
           </View>

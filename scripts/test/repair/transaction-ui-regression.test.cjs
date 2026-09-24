@@ -189,7 +189,7 @@ test('narrow screens give search full width without reducing the font size', () 
   assert.equal(style(filter).alignSelf, 'flex-end');
 });
 
-test('an unresolved transfer stays excluded without making transaction Net look unfinished', () => {
+test('an unresolved transfer moves to its own view without contributing to regular transaction totals', () => {
   const rows = [
     fixtureRow('purchase', { amountFils: 12500 }),
     fixtureRow('unclear-transfer', {
@@ -197,11 +197,16 @@ test('an unresolved transfer stays excluded without making transaction Net look 
     }),
   ];
   const h = transactions({ language: 'en', state: { transactions: rows }, period: { mode: 'all' } });
-  const net = netSummary(h);
-  assert.ok(net);
-  assert.ok(text(net).includes(h.deps['@/lib/i18n'].t('transactionNetTotal')));
-  assert.match(text(net), /125|١٢٥/);
-  assert.ok(walk(h.tree).some(n => n.props?.testID === 'transactions-exclusions'));
+  assert.equal(netSummary(h), undefined, 'one remaining ordinary result does not need a duplicate total');
+  assert.deepEqual(Array.from(h.list.props.sections[0].data, row => row.id), ['purchase']);
+  assert.equal(h.list.props.sections[0].totalFils, -12500, 'unknown ownership must not add income');
+  const notice = walk(h.tree).find(n => n.props?.testID === 'transactions-separated-transfers');
+  assert.ok(notice);
+  assert.match(text(notice), /1 transfer record/);
+  assert.match(text(notice), /Needs review/);
+  const link = walk(h.tree).find(n => n.props?.testID === 'transactions-transfers-link');
+  assert.ok(link); link.props.onPress();
+  assert.ok(h.events.some(event => event[0] === 'route' && event[1] === '/transfers'));
   assert.equal(walk(h.tree).find(n => n.props?.testID === 'transactions-unresolved-transfers'), undefined,
     'transfer review belongs under Accounts rather than the transaction summary');
 });

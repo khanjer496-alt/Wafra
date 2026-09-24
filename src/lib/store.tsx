@@ -76,17 +76,18 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerMoneySpec, ledgerStateHasMoney, migrateLegacyLedgerMoney, type LedgerMoneySpec } from '@/lib/ledger-money';
 import {
   planReviewPromotion,
+  walletDuplicateBinding,
   type PromoteReviewAlertInput,
   type ReviewPromotionFailure,
 } from '@/lib/review-promotion';
 import {
-  admitPreparedReviewAlert,
+  admitPreparedReviewAlerts,
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
   resolveReviewAlert as resolveAlertReviewItem,
   type ReviewEntry,
   isUniversalReviewAlert,
-  type ReviewTombstone,
+  type ReviewResolutionOutcome,
 } from '@/lib/alert-review-tray';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
@@ -817,7 +818,11 @@ type Action =
   | {
       type: 'setReviewTray';
       reviewTray: AppState['reviewTray'];
-      sourceKeyUpdates?: { id: string; smsKey: string }[];
+      /**
+       * Identity-only moves. `viaPush`/`walletBound` accompany an "Already
+       * recorded" Wallet binding (see walletDuplicateBinding).
+       */
+      sourceKeyUpdates?: { id: string; smsKey: string; viaPush?: boolean; walletBound?: true }[];
       localCaptureQualifications?: LocalCaptureQualificationReceipt[];
       learnedNotificationPackage?: string;
     }
@@ -1132,7 +1137,7 @@ function reduceState(state: AppState, action: Action): AppState {
       setLanguage(action.language);
       return state.language === action.language ? state : { ...state, language: action.language };
     case 'setReviewTray': {
-      const sourceKeyUpdates = new Map<string, { id: string; smsKey: string }>();
+      const sourceKeyUpdates = new Map<string, { id: string; smsKey: string; viaPush?: boolean; walletBound?: true }>();
       for (const update of action.sourceKeyUpdates ?? []) {
         // Match the former find(): the first update for an ID wins.
         if (!sourceKeyUpdates.has(update.id)) sourceKeyUpdates.set(update.id, update);
@@ -1147,7 +1152,12 @@ function reduceState(state: AppState, action: Action): AppState {
         trustedNotificationPackages: learned,
         ...(action.sourceKeyUpdates?.length ? { transactions: state.transactions.map((transaction) => {
           const update = sourceKeyUpdates.get(transaction.id);
-          return update ? { ...transaction, smsKey: update.smsKey } : transaction;
+          return update ? {
+            ...transaction,
+            smsKey: update.smsKey,
+            ...(update.viaPush !== undefined ? { viaPush: update.viaPush } : {}),
+            ...(update.walletBound === true ? { walletBound: true as const } : {}),
+          } : transaction;
         }) } : {}),
         ...(action.localCaptureQualifications
           ? { localCaptureQualifications: action.localCaptureQualifications }
@@ -1555,7 +1565,7 @@ interface StoreValue {
     qualifications?: readonly LocalCaptureReviewQualificationCandidate[],
     sourceBindings?: readonly ReviewSourceBinding[],
   ) => { admitted: number; qualificationIds: string[]; durable: Promise<void> };
-  dismissReviewAlert: (id: string, outcome: ReviewTombstone['outcome']) => Promise<void>;
+  dismissReviewAlert: (id: string, outcome: ReviewResolutionOutcome) => Promise<void>;
   promoteReviewAlert: (input: PromoteReviewAlertInput) => Promise<'added' | 'duplicate'>;
   /**
    * Flush the current authoritative snapshot to SQLCipher. Relay callers use
@@ -2327,18 +2337,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const qualificationByReviewId = reviewQualificationMap(items, qualifications);
     const now = Date.now();
     const rebound = reconcileReviewSourceBindings(authoritativeState.current, sourceBindings ?? [], now);
-    let reviewTray = rebound.reviewTray;
+    // One prune for the whole batch: History staging can carry thousands.
+    const batch = admitPreparedReviewAlerts(rebound.reviewTray, items, now);
+    const reviewTray = batch.state;
     let admitted = 0;
     const admittedQualifications: LocalCaptureQualificationCandidate[] = [];
-    for (const item of items) {
-      const result = admitPreparedReviewAlert(reviewTray, item, now);
-      reviewTray = result.state;
-      if (result.outcome === 'admitted') {
-        admitted += 1;
-        const qualification = qualificationByReviewId.get(item.id);
-        if (qualification) admittedQualifications.push(qualification);
-      }
-    }
+    items.forEach((item, index) => {
+      if (batch.outcomes[index] !== 'admitted') return;
+      admitted += 1;
+      const qualification = qualificationByReviewId.get(item.id);
+      if (qualification) admittedQualifications.push(qualification);
+    });
     if (admitted === 0 && !rebound.changed) {
       return { admitted, qualificationIds: [], durable: ensureDurable() };
     }
@@ -2375,15 +2384,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const dismissReviewAlert = useCallback(async (
     id: string,
-    outcome: ReviewTombstone['outcome'],
+    outcome: ReviewResolutionOutcome,
   ): Promise<void> => {
+    // "Already recorded" on a possible Apple Pay duplicate also binds the bank
+    // alert's identity to its Wallet row, in the same durable write, so a
+    // rescan after the tray record expires still finds it. Identity only.
+    const binding = outcome === 'duplicate'
+      ? walletDuplicateBinding(authoritativeState.current, id)
+      : null;
     const reviewTray = resolveAlertReviewItem(
       authoritativeState.current.reviewTray,
       id,
       outcome,
       Date.now(),
     );
-    const next = dispatch({ type: 'setReviewTray', reviewTray });
+    const next = dispatch({
+      type: 'setReviewTray',
+      reviewTray,
+      ...(binding ? { sourceKeyUpdates: [binding] } : {}),
+    });
     if (!await persist(next)) throw new Error('Encrypted review dismissal write failed');
   }, [dispatch, persist]);
 

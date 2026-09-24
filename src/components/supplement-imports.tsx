@@ -8,13 +8,14 @@ import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { Block, SectionHeader } from '@/components/ui/layout';
+import { Block } from '@/components/ui/layout';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { createCaptureExecutor } from '@/lib/capture-executor';
 import {
+  clearStatementPickerCache,
   getImportCapabilities,
   uploadCsvStatement,
   uploadPdfStatement,
@@ -34,9 +35,10 @@ import {
 } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
+import { summarizeCoverage } from '@/lib/statement-coverage';
+import { countPhrase, nextUploadDelay } from '@/lib/statement-batch';
 import { t } from '@/lib/i18n';
 import { committed, failed } from '@/lib/haptics';
-import type { StatementCoverageEntry } from '@/lib/types';
 
 type Busy = 'connect' | 'capabilities' | 'statement' | null;
 
@@ -45,91 +47,25 @@ type PendingProtectedPdf = {
   file: File;
 };
 
-type CoverageSummary = {
-  sourceKey: string;
-  label: string;
-  range: string;
-  throughMonth: string;
-  sortDate: string;
-  missing: string[];
+/** One line per picked file, so a batch never fails or succeeds silently. */
+type FileResult = {
+  name: string;
+  ok: boolean;
+  detail: string;
 };
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** How long to back off after the relay still answers 429 despite pacing. */
+const RATE_LIMIT_RETRY_MS = 61_000;
+/**
+ * Picker copies an upload is still reading. Module-level on purpose: an
+ * import loop outlives the screen that started it, and a remounted screen's
+ * cache cleanup must not delete the copy that loop is still sending.
+ */
+const inFlightPickerUris = new Set<string>();
 
 function interpolate(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ''));
-}
-
-function monthKey(date: string): string {
-  return date.slice(0, 7);
-}
-
-function monthIndex(key: string): number {
-  const [year, month] = key.split('-').map(Number);
-  return year * 12 + month - 1;
-}
-
-function monthFromIndex(index: number): string {
-  const year = Math.floor(index / 12);
-  const month = index % 12 + 1;
-  return `${year}-${String(month).padStart(2, '0')}`;
-}
-
-function nextMonth(key: string): string {
-  const [year, month] = key.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month, 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
-function formatMonth(key: string, language: string): string {
-  const [year, month] = key.split('-').map(Number);
-  return new Intl.DateTimeFormat(language === 'ar' ? 'ar-AE' : 'en-AE', {
-    month: 'short', year: 'numeric', timeZone: 'UTC',
-  }).format(new Date(Date.UTC(year, month - 1, 1)));
-}
-
-function summarizeCoverage(entries: readonly StatementCoverageEntry[], language: string): CoverageSummary[] {
-  const groups = new Map<string, StatementCoverageEntry[]>();
-  for (const entry of entries) {
-    const list = groups.get(entry.sourceKey) ?? [];
-    list.push(entry);
-    groups.set(entry.sourceKey, list);
-  }
-  const today = new Date();
-  const lastCompleteDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
-  const lastCompleteMonth = `${lastCompleteDate.getUTCFullYear()}-${String(lastCompleteDate.getUTCMonth() + 1).padStart(2, '0')}`;
-  return [...groups.entries()].map(([sourceKey, rows]) => {
-    const ordered = [...rows].sort((a, b) => a.startDate.localeCompare(b.startDate));
-    const firstMonth = monthKey(ordered[0].startDate);
-    const lastImportedMonth = monthKey(ordered[ordered.length - 1].endDate);
-    const covered = new Set<string>();
-    for (const row of ordered) {
-      let cursor = monthKey(row.startDate);
-      const end = monthKey(row.endDate);
-      for (let guard = 0; guard < 240; guard += 1) {
-        covered.add(cursor);
-        if (cursor === end) break;
-        cursor = nextMonth(cursor);
-      }
-    }
-    const missing: string[] = [];
-    const lastCompleteIndex = monthIndex(lastCompleteMonth);
-    const firstExpected = monthFromIndex(Math.max(monthIndex(firstMonth), lastCompleteIndex - 11));
-    let cursor = firstExpected;
-    for (let guard = 0; guard < 12; guard += 1) {
-      if (!covered.has(cursor)) missing.push(formatMonth(cursor, language));
-      if (cursor === lastCompleteMonth) break;
-      cursor = nextMonth(cursor);
-    }
-    return {
-      sourceKey,
-      label: ordered[ordered.length - 1].label,
-      range: firstMonth === lastImportedMonth
-        ? formatMonth(firstMonth, language)
-        : `${formatMonth(firstMonth, language)} – ${formatMonth(lastImportedMonth, language)}`,
-      throughMonth: formatMonth(lastCompleteMonth, language),
-      sortDate: ordered[ordered.length - 1].endDate,
-      missing,
-    };
-  }).sort((a, b) => b.sortDate.localeCompare(a.sortDate));
 }
 
 export function SupplementImports() {
@@ -167,6 +103,8 @@ export function SupplementImports() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [pendingPdfs, setPendingPdfs] = useState<PendingProtectedPdf[]>([]);
+  const [fileResults, setFileResults] = useState<FileResult[]>([]);
+  const aliveRef = useRef(true);
   const pendingPdfsRef = useRef<PendingProtectedPdf[]>([]);
   const pendingPdf = pendingPdfs[0] ?? null;
   const queuedRetryNeededRef = useRef(false);
@@ -176,6 +114,7 @@ export function SupplementImports() {
     accepted: number;
     rejected: number;
     pages: number;
+    alreadyProcessed: number;
   } | null>(null);
   const [pdfPassword, setPdfPassword] = useState('');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
@@ -188,14 +127,23 @@ export function SupplementImports() {
     pendingPdfsRef.current = pendingPdfs;
   }, [pendingPdfs]);
 
-  useEffect(() => () => {
-    for (const pending of pendingPdfsRef.current) {
-      try {
-        if (pending.file.exists) pending.file.delete();
-      } catch {
-        // Picker cache cleanup is best effort.
+  useEffect(() => {
+    aliveRef.current = true;
+    // A statement copy left in the picker cache by an earlier session that
+    // ended mid-import (app killed, crash) is cleared when the screen opens.
+    clearStatementPickerCache(inFlightPickerUris);
+    return () => {
+      aliveRef.current = false;
+      for (const pending of pendingPdfsRef.current) {
+        try {
+          if (pending.file.exists) pending.file.delete();
+        } catch {
+          // Picker cache cleanup is best effort.
+        }
       }
-    }
+      // And again on the way out, except a copy an upload is still reading.
+      clearStatementPickerCache(inFlightPickerUris);
+    };
   }, []);
 
   const errorText = useCallback((value: unknown): string => {
@@ -211,6 +159,8 @@ export function SupplementImports() {
     if (value.code === 'pdf_too_long') return copy.errPdfTooLong;
     if (value.code === 'pdf_password_incorrect') return copy.passwordWrong;
     if (value.code === 'unsupported_statement_format') return copy.errFormat;
+    if (value.code === 'ambiguous_card_signs') return copy.errCardSigns;
+    if (value.code === 'ambiguous_dates') return copy.errDates;
     if (value.code === 'rate_limited' || value.code === 'queue_full') return copy.errRate;
     if (value.code === 'service') return copy.serviceError;
     return copy.errUnexpected;
@@ -321,11 +271,30 @@ export function SupplementImports() {
     return copy.syncFailedUnknown;
   }, [copy, errorText]);
 
+  /**
+   * The batch summary. "Already in your ledger" is said only about rows the
+   * phone actually received and found there; files the relay recognised as a
+   * recent re-upload queued nothing, and say so instead.
+   */
+  const batchSummary = useCallback((
+    context: { files: number; accepted: number; rejected: number; alreadyProcessed: number },
+    imported: number,
+  ): string => {
+    if (imported === 0 && context.alreadyProcessed === context.files) return copy.statementsAlreadyProcessed;
+    return interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
+      files: countPhrase(language, copy.filesCount, context.files),
+      rows: countPhrase(language, copy.rowsRead, context.accepted),
+      rejected: context.rejected,
+      imported,
+    });
+  }, [copy, language]);
+
   const finishQueuedImport = useCallback(async (
     files: number,
     accepted: number,
     rejected: number,
     pages: number,
+    alreadyProcessed = 0,
   ): Promise<boolean> => {
     setStatus(interpolate(copy.acceptedFiling, { accepted }));
     try {
@@ -334,9 +303,7 @@ export function SupplementImports() {
       const imported = await syncQueued();
       queuedRetryNeededRef.current = false;
       queuedRetryContextRef.current = null;
-      setStatus(interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
-        files, accepted, rejected, pages, imported,
-      }));
+      setStatus(batchSummary({ files, accepted, rejected, alreadyProcessed }, imported));
       committed();
       return true;
     } catch (e) {
@@ -345,11 +312,11 @@ export function SupplementImports() {
       setStatus(interpolate(copy.acceptedPending, { accepted }));
       setError(interpolate(copy.syncFailed, { reason: syncFailureReason(e) }));
       queuedRetryNeededRef.current = true;
-      queuedRetryContextRef.current = { files, accepted, rejected, pages };
+      queuedRetryContextRef.current = { files, accepted, rejected, pages, alreadyProcessed };
       failed();
       return false;
     }
-  }, [copy, syncFailureReason, syncQueued]);
+  }, [batchSummary, copy, syncFailureReason, syncQueued]);
 
   // Successful upload means the normalized rows are already safe in the relay
   // queue. If the immediate phone-side drain loses a network turn, retry once
@@ -368,12 +335,7 @@ export function SupplementImports() {
         const context = queuedRetryContextRef.current;
         queuedRetryContextRef.current = null;
         setError(null);
-        if (context) {
-          setStatus(interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
-            ...context,
-            imported,
-          }));
-        }
+        if (context) setStatus(batchSummary(context, imported));
         committed();
       } catch {
         // Keep the queued rows untouched. A later foreground transition gets
@@ -391,7 +353,22 @@ export function SupplementImports() {
       clearTimeout(timer);
       subscription.remove();
     };
-  }, [cfg, copy.statementsNoNew, copy.statementsSuccess, state.privateMode, syncQueued]);
+  }, [batchSummary, cfg, state.privateMode, syncQueued]);
+
+  /** What one successfully uploaded file contributed, in words. */
+  const fileImportedDetail = (accepted: {
+    acceptedRows: number; rejectedRows: number; cardSignRowsSkipped: number; alreadyProcessed: boolean;
+  }): string => {
+    if (accepted.alreadyProcessed) return copy.fileAlreadyProcessed;
+    const rows = countPhrase(language, copy.rowsRead, accepted.acceptedRows);
+    const parts = [accepted.rejectedRows > 0
+      ? interpolate(copy.fileImportedSkipped, { rows, skipped: accepted.rejectedRows })
+      : interpolate(copy.fileImported, { rows })];
+    if (accepted.cardSignRowsSkipped > 0) {
+      parts.push(interpolate(copy.cardSignSkipped, { count: accepted.cardSignRowsSkipped }));
+    }
+    return parts.join(' ');
+  };
 
   const pickAndUpload = async () => {
     if (!cfg || !capabilities || pendingPdfs.length > 0) return;
@@ -399,8 +376,10 @@ export function SupplementImports() {
       setCurrencySheetVisible(true);
       return;
     }
+    const ledgerMoney = state.ledgerMoney;
     setError(null);
     setStatus(null);
+    setFileResults([]);
     const pickedFiles: File[] = [];
     const retainedUris = new Set<string>();
     // Declared outside the try so a failure later in the batch still hands the
@@ -418,22 +397,62 @@ export function SupplementImports() {
       let rejectedRows = 0;
       let pages = 0;
       let uploadedFiles = 0;
+      let alreadyProcessedFiles = 0;
+      const total = picked.assets.length;
+      const fileResults: FileResult[] = [];
       const coverage: { item: StatementImportCoverage | null; format: 'pdf' | 'csv' }[] = [];
+      // The relay rate-limits each format separately; pace each below it.
+      const starts: Record<'pdf' | 'csv', number[]> = { pdf: [], csv: [] };
+      let limitReached = false;
+      // Wait visibly, and give up the wait if the screen goes away.
+      const waitFor = async (ms: number, position: number) => {
+        const until = Date.now() + ms;
+        while (aliveRef.current && Date.now() < until) {
+          setStatus(interpolate(copy.waitingForLimit, {
+            seconds: Math.ceil((until - Date.now()) / 1000), index: position, total,
+          }));
+          await sleep(Math.min(1_000, until - Date.now()));
+        }
+        return aliveRef.current;
+      };
       for (let index = 0; index < picked.assets.length; index += 1) {
         const asset = picked.assets[index];
         const file = new File(asset.uri);
         pickedFiles.push(file);
         const csv = /\.(?:csv|tsv)$/i.test(asset.name) ||
           capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
+        const format = csv ? 'csv' : 'pdf';
+        if (limitReached || !aliveRef.current) {
+          fileResults.push({ name: asset.name, ok: false, detail: copy.fileNotTried });
+          continue;
+        }
+        inFlightPickerUris.add(asset.uri);
         try {
-          const accepted = csv
-            ? await uploadCsvStatement(cfg, asset, capabilities, state.ledgerMoney)
-            : await uploadPdfStatement(cfg, asset, capabilities, state.ledgerMoney);
+          let accepted: Awaited<ReturnType<typeof uploadPdfStatement | typeof uploadCsvStatement>> | null = null;
+          for (let attempt = 0; accepted === null; attempt += 1) {
+            const delay = nextUploadDelay(starts[format], Date.now());
+            if (delay > 0 && !(await waitFor(delay, index + 1))) throw new CloudImportError('network');
+            setStatus(interpolate(copy.uploadingProgress, { index: index + 1, total }));
+            starts[format].push(Date.now());
+            try {
+              accepted = csv
+                ? await uploadCsvStatement(cfg, asset, capabilities, ledgerMoney)
+                : await uploadPdfStatement(cfg, asset, capabilities, ledgerMoney);
+            } catch (uploadError) {
+              // One patient retry: pacing keeps the minute limit, so a 429 here
+              // is usually the hourly budget, and a second one ends the batch.
+              if (attempt === 0 && uploadError instanceof CloudImportError && uploadError.code === 'rate_limited' &&
+                  await waitFor(RATE_LIMIT_RETRY_MS, index + 1)) continue;
+              throw uploadError;
+            }
+          }
           acceptedRows += accepted.acceptedRows;
           rejectedRows += accepted.rejectedRows;
           uploadedFiles += 1;
+          if (accepted.alreadyProcessed) alreadyProcessedFiles += 1;
           if ('pages' in accepted && typeof accepted.pages === 'number') pages += accepted.pages;
-          coverage.push({ item: accepted.coverage, format: csv ? 'csv' : 'pdf' });
+          coverage.push({ item: accepted.coverage, format });
+          fileResults.push({ name: asset.name, ok: true, detail: fileImportedDetail(accepted) });
         } catch (e) {
           if (!csv && e instanceof CloudImportError &&
               (e.code === 'pdf_password_required' || e.code === 'pdf_password_incorrect')) {
@@ -443,15 +462,32 @@ export function SupplementImports() {
             // of passwords in memory or asking the user to re-pick skipped
             // files.
             retainedUris.add(asset.uri);
+            fileResults.push({ name: asset.name, ok: false, detail: copy.fileLocked });
             protectedPdfs.push({ asset, file });
             continue;
           }
-          throw e;
+          // Any other failure is this file's, not the batch's: record why and
+          // carry on, so the files that did import still get their coverage
+          // and their rows filed below.
+          if (e instanceof CloudImportError && (e.code === 'rate_limited' || e.code === 'queue_full')) {
+            limitReached = true;
+          }
+          fileResults.push({
+            name: asset.name,
+            ok: false,
+            detail: interpolate(copy.fileFailed, {
+              reason: e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e),
+            }),
+          });
+          continue;
+        } finally {
+          inFlightPickerUris.delete(asset.uri);
         }
         if (index + 1 < picked.assets.length) {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       }
+      if (aliveRef.current) setFileResults(fileResults);
       await rememberCoverage(coverage);
       if (protectedPdfs.length > 0) {
         setPendingPdfs(protectedPdfs);
@@ -459,7 +495,10 @@ export function SupplementImports() {
         setError(null);
       }
       if (uploadedFiles > 0) {
-        await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages);
+        await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages, alreadyProcessedFiles);
+      } else {
+        setStatus(null);
+        if (fileResults.some((result) => !result.ok && result.detail !== copy.fileLocked)) failed();
       }
     } catch (e) {
       if (protectedPdfs.length > 0) {
@@ -499,7 +538,14 @@ export function SupplementImports() {
         pdfPassword,
       );
       await rememberCoverage([{ item: accepted.coverage, format: 'pdf' }]);
-      await finishQueuedImport(1, accepted.acceptedRows, accepted.rejectedRows, accepted.pages);
+      const unlockedName = pendingPdf.asset.name;
+      setFileResults((current) => [
+        ...current.filter((result) => result.name !== unlockedName || result.detail !== copy.fileLocked),
+        { name: unlockedName, ok: true, detail: fileImportedDetail(accepted) },
+      ]);
+      await finishQueuedImport(
+        1, accepted.acceptedRows, accepted.rejectedRows, accepted.pages, accepted.alreadyProcessed ? 1 : 0,
+      );
       try { if (pendingPdf.file.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
       setPendingPdfs((current) => current[0]?.file.uri === pendingPdf.file.uri
         ? current.slice(1)
@@ -531,7 +577,6 @@ export function SupplementImports() {
 
   return (
     <View style={styles.root}>
-      <SectionHeader title={copy.header} />
       <View style={styles.hero}>
         <ThemedText type="heading">{copy.title}</ThemedText>
         <ThemedText type="default" themeColor="textSecondary">
@@ -603,12 +648,43 @@ export function SupplementImports() {
                 />
               </View>
             )}
+            <View style={styles.disclosure}>
+              <Icon name="lock" size={15} color={theme.textSecondary} />
+              <ThemedText type="meta" themeColor="textSecondary" style={styles.messageText}>
+                {copy.uploadDisclosure}
+              </ThemedText>
+            </View>
             <Button
               icon="upload"
               label={busy === 'statement' ? copy.uploading : copy.chooseStatements}
               onPress={() => void pickAndUpload()}
               disabled={!capabilities || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney}
             />
+            {fileResults.length > 0 && (
+              <View style={styles.results}>
+                <ThemedText type="smallBold">{copy.resultsTitle}</ThemedText>
+                {fileResults.map((result, index) => (
+                  <View
+                    key={`${index}:${result.name}`}
+                    style={styles.resultRow}
+                    accessible
+                    accessibilityLabel={`${result.ok ? copy.resultOkLabel : copy.resultFailedLabel}: ${result.name}. ${result.detail}`}
+                  >
+                    <Icon
+                      name={result.ok ? 'check' : 'alert'}
+                      size={15}
+                      color={result.ok ? theme.primary : theme.expense}
+                    />
+                    <View style={styles.cardCopy}>
+                      <ThemedText type="meta" numberOfLines={1}>{result.name}</ThemedText>
+                      <ThemedText type="meta" themeColor={result.ok ? 'textTertiary' : 'expense'}>
+                        {result.detail}
+                      </ThemedText>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
           </Block>
 
           {pendingPdf && (
@@ -663,15 +739,20 @@ export function SupplementImports() {
               return (
                 <View key={item.sourceKey} style={[styles.coverageRow, { borderTopColor: theme.cardBorder }]}>
                   <View style={styles.coverageHead}>
-                    <ThemedText type="smallBold" style={styles.coverageLabel}>{item.label}</ThemedText>
+                    <ThemedText type="smallBold" style={styles.coverageLabel}>
+                      {item.sourceKey === 'bank-statements' ? copy.coverageUnidentifiedLabel : item.label}
+                    </ThemedText>
                     <ThemedText type="meta" themeColor="textSecondary" tabular>{item.range}</ThemedText>
                   </View>
-                  <ThemedText type="meta" themeColor={item.missing.length ? 'expense' : 'textTertiary'}>
-                    {item.missing.length
-                      ? interpolate(copy.coverageMissing, {
-                          months: `${shownMissing.join(', ')}${more > 0 ? ` +${more}` : ''}`,
-                        })
-                      : interpolate(copy.coverageComplete, { month: item.throughMonth })}
+                  {/* A statement that names no account cannot prove there are no gaps. */}
+                  <ThemedText type="meta" themeColor={item.identified && item.missing.length ? 'expense' : 'textTertiary'}>
+                    {!item.identified
+                      ? copy.coverageUnknown
+                      : item.missing.length
+                        ? interpolate(copy.coverageMissing, {
+                            months: `${shownMissing.join(', ')}${more > 0 ? ` +${more}` : ''}`,
+                          })
+                        : interpolate(copy.coverageComplete, { month: item.throughMonth })}
                   </ThemedText>
                 </View>
               );
@@ -727,6 +808,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   actions: { flexDirection: 'row', gap: Spacing.two },
+  disclosure: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
+  results: { gap: Spacing.two },
+  resultRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
   coverageRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.two, gap: Spacing.half },
   coverageHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: Spacing.two, flexWrap: 'wrap' },
   coverageLabel: { flexShrink: 1 },

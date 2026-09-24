@@ -52,10 +52,12 @@ test('Home keeps accounts out of its hero and exposes one Add and one Settings a
 });
 test('Home renders at most five recent transactions without losing the full activity route', () => {
   const h = createHarness();
+  // Home derives its preview from the ledger (not the projection's full list),
+  // so seed twenty eligible period rows ahead of the fixture ledger.
+  const fixtures = Array.from({ length: 20 }, (_, i) => ({ ...h.state.transactions[0], id: `fixture-${i}`, title: `Fixture ${i}` }));
+  h.state.transactions.unshift(...fixtures);
   const project = h.deps['@/lib/dashboard-projection'].projectDashboard;
-  h.deps['@/lib/dashboard-projection'].projectDashboard = () => ({ ...project(),
-    activityRows: Array.from({ length: 20 }, (_, i) => ({ ...h.state.transactions[0], id: `fixture-${i}`, title: `Fixture ${i}` })),
-  });
+  h.deps['@/lib/dashboard-projection'].projectDashboard = (...args) => ({ ...project(...args), activityRows: fixtures });
   const activity = nodeById(h.render('home'), 'home-widget-activity');
   assert.ok(activity, 'the recent activity widget is rendered');
   assert.equal(walk(activity).filter(n => n.props?.testID === 'transaction-details-link' && n.props?.onPress && n.props?.accessibilityLabel?.includes('Fixture')).length, 5);

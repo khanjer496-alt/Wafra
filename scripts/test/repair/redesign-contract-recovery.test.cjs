@@ -17,8 +17,10 @@ for(const theme of ['light','dark']) {
   for(const focused of [false,true]) {
    const h=createHarness({theme,states:{0:focused}});
    const tree=h.deps['@/components/ui/text-field'].TextField({label:'Amount',value:'12.50',numeric:true,onChangeText(){}},null);
-   const frames=walk(tree).filter(n=>style(n).borderColor===h.theme.controlBorder);
-   assert.equal(frames.length,1);assert.ok(contrast(style(frames[0]).borderColor,style(frames[0]).backgroundColor)>=3);
+   // Focus is signalled by the primary accent border; both states must stay above the 3:1 non-text floor.
+   const border=focused?h.theme.primary:h.theme.controlBorder;
+   const frames=walk(tree).filter(n=>style(n).borderColor===border&&style(n).backgroundColor);
+   assert.equal(frames.length,1,`${focused?'focused':'unfocused'} frame`);assert.ok(contrast(style(frames[0]).borderColor,style(frames[0]).backgroundColor)>=3,`${focused?'focused':'unfocused'} contrast`);
   }
  });
  test(`${theme}: segment selection, labels and touch targets survive large text`,()=>{
@@ -50,12 +52,16 @@ for(const language of ['en','ar']) {
  test(`${language}: setup checklist exposes status and a usable hit target`,()=>{
   const h=createHarness({language});const C=h.local('@/components/ios-message-setup/checklist-row').ChecklistRow;
   for(const status of ['not-started','in-progress','complete','skipped']) {
-   const tree=C({title:'Fixture',status,expanded:true,step:1,onPress:()=>h.events.push(['open']),children:null});
+   const tree=C({title:'Fixture',status,expanded:true,onPress:()=>h.events.push(['open']),children:null});
    const b=walk(tree).find(n=>n.props.onPress);assert.ok(style(b).minHeight>=44);
-   assert.ok(b.props.accessibilityLabel.includes(b.props.accessibilityValue.text));assert.equal(b.props.accessibilityState.expanded,true);
+   // VoiceOver reads the status once, as the value; the label carries title and detail only.
+   assert.ok(b.props.accessibilityValue.text.length>0);assert.equal(b.props.accessibilityLabel,'Fixture');
+   assert.equal(b.props.accessibilityState.expanded,true);
    b.props.onPress();
   }
   assert.equal(h.events.length,4);
+  const deferred=walk(C({title:'Fixture',status:'skipped',statusLabel:'Skipped',expanded:false,onPress(){}})).find(n=>n.props.onPress);
+  assert.equal(deferred.props.accessibilityValue.text,'Skipped');
  });
  test(`${language}: welcome money scene is display-only and never writes the ledger`,()=>{
   // Name personalization plus focus/tracking/intention now sit ahead of

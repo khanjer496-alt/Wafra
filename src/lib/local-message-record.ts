@@ -1,6 +1,7 @@
 import {
   identifySourceFreeReviewAlert,
   inspectSourceFreeRefusedAlert,
+  parsedFinancialCandidateReview,
   shouldReviewParsedIncome,
 } from '@/lib/auto-import';
 import {
@@ -25,6 +26,7 @@ import {
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { ParsedSms } from '@/lib/sms-parser';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
+import { parseIosApplePayRecord } from '@/lib/ios-apple-pay-record';
 
 export const LOCAL_MESSAGE_RECORD_VERSION = 1 as const;
 export const MAX_LOCAL_MESSAGE_TEXT_BYTES = 16 * 1024;
@@ -32,6 +34,7 @@ export const MAX_LOCAL_MESSAGE_SENDER_CHARACTERS = 80;
 export const LOCAL_MESSAGE_FUTURE_SKEW_MS = 5 * 60_000;
 /** Shortcut input cannot attest which app actually delivered a notification. */
 export const LOCAL_NOTIFICATION_SENDER = 'Wafra Notification';
+export const LOCAL_APPLE_PAY_SENDER = 'Wafra Apple Pay';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256_EVENT_ID_RE = /^[0-9a-f]{64}$/;
@@ -48,7 +51,7 @@ interface LocalMessageEnvelope {
   text: string;
   sender: string;
   observedAt: string;
-  source: 'message' | 'notification';
+  source: 'message' | 'notification' | 'apple-pay';
 }
 
 export interface LocalMessageRecordPreflight {
@@ -57,6 +60,8 @@ export interface LocalMessageRecordPreflight {
   attribution: IosBankSenderAttribution | null;
   market: 'AE' | 'SA' | null;
   valid: boolean;
+  /** Kept even for malformed Wallet payloads so they are never invalid-ACKed. */
+  source?: 'apple-pay';
 }
 
 export interface IosBankSenderAttribution {
@@ -70,7 +75,12 @@ export type LocalMessageParseOutcome =
   | { kind: 'declined'; market: 'AE' | 'SA'; row: DeclinedSms; milestone: 'decline-candidate' }
   | { kind: 'review'; market: 'AE' | 'SA' | null; item: ReviewEntry; milestone: 'review-candidate' | 'none' }
   | { kind: 'ignored'; market: 'AE' | 'SA' | null; milestone: 'none' }
+  | { kind: 'held'; market: null; milestone: 'none' }
   | { kind: 'invalid'; milestone: 'none' };
+
+export type LocalApplePayParseOutcome =
+  | { kind: 'review'; market: null; item: ReviewEntry; milestone: 'none' }
+  | { kind: 'held'; market: null; milestone: 'none' };
 
 /** UTF-8 length with an explicit malformed-surrogate failure for Hermes. */
 export function localMessageUtf8Bytes(value: string): number | null {
@@ -126,9 +136,11 @@ function decodeLocalMessageEnvelope(
     !validLocalMessageId(value.id) ||
     typeof value.text !== 'string' ||
     typeof value.sender !== 'string' ||
-    (value.source !== 'message' && value.source !== 'notification') ||
+    (value.source !== 'message' && value.source !== 'notification' && value.source !== 'apple-pay') ||
     (value.source === 'notification' &&
-      (!UUID_RE.test(value.id) || value.sender !== LOCAL_NOTIFICATION_SENDER))) {
+      (!UUID_RE.test(value.id) || value.sender !== LOCAL_NOTIFICATION_SENDER)) ||
+    (value.source === 'apple-pay' &&
+      (!UUID_RE.test(value.id) || value.sender !== LOCAL_APPLE_PAY_SENDER))) {
     return null;
   }
   const textBytes = localMessageUtf8Bytes(value.text);
@@ -195,14 +207,27 @@ export function preflightLocalMessageRecord(
     id: object.id,
     observedAt: decoded?.observedAt ?? null,
     attribution,
-    market: decoded
+    market: decoded && decoded.envelope.source !== 'apple-pay'
       ? attribution?.market ?? detectLaunchMarketFromAlert(
           decoded.envelope.text,
           decoded.envelope.sender,
         )
       : null,
     valid: decoded !== null,
+    ...(object.source === 'apple-pay' ? { source: 'apple-pay' as const } : {}),
   };
+}
+
+/** Wallet observations are structured facts, never SMS text or bank attribution. */
+export function parseLocalApplePayRecord(serialized: string, now: Date): LocalApplePayParseOutcome {
+  const held: LocalApplePayParseOutcome = { kind: 'held', market: null, milestone: 'none' };
+  if (!Number.isFinite(now.getTime())) return held;
+  const decoded = decodeLocalMessageEnvelope(serialized, now.getTime());
+  if (!decoded || decoded.envelope.source !== 'apple-pay') return held;
+  const result = parseIosApplePayRecord(decoded.envelope.text, decoded.envelope.id, decoded.observedAt);
+  return result.kind === 'review'
+    ? { kind: 'review', market: null, item: result.item, milestone: 'none' }
+    : held;
 }
 
 function localReviewIdentity(id: string): { id: string; sourceKey: string } {
@@ -213,6 +238,31 @@ function localReviewIdentity(id: string): { id: string; sourceKey: string } {
     id: `local_review_id_${opaque}`,
     sourceKey: `local_review_source_${opaque}`,
   };
+}
+
+/**
+ * A parsed row whose own currency this ledger cannot hold. Money-moving rows
+ * (transactions and card payments) become a durable, source-free Universal
+ * Review under the record's own review identity: Review shows the foreign
+ * amount and promotion refuses it as a currency mismatch, so nothing posts and
+ * nothing is lost silently. Informational kinds (statement, bill reminder)
+ * move no money and return null for the caller to acknowledge as ignored.
+ */
+export function currencyConflictReview(
+  outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
+  recordId: string,
+): Extract<LocalMessageParseOutcome, { kind: 'review' }> | null {
+  const { row } = outcome;
+  if (row.kind !== 'transaction' && row.kind !== 'cardPayment') return null;
+  const observedAt = row.smsTs;
+  if (observedAt === undefined || !Number.isSafeInteger(observedAt)) return null;
+  const candidate = parsedFinancialCandidateReview({ ...row, kind: 'transaction' }, observedAt);
+  if (!candidate || !('kind' in candidate) || candidate.kind !== 'universal') return null;
+  const item = identifySourceFreeReviewAlert(
+    { ...candidate, channel: row.channel === 'push' ? 'push' : 'inbox' },
+    localReviewIdentity(recordId),
+  );
+  return item ? { kind: 'review', market: outcome.market, item, milestone: 'none' } : null;
 }
 
 function sanitizedRefusal(
@@ -277,6 +327,7 @@ export function parseLocalMessageRecord(
   const decoded = decodeLocalMessageEnvelope(serialized, nowMs);
   if (!decoded) return { kind: 'invalid', milestone: 'none' };
   const { envelope, observedAt } = decoded;
+  if (envelope.source === 'apple-pay') return parseLocalApplePayRecord(serialized, now);
   const isNotification = envelope.source === 'notification';
   const attribution = isNotification ? null : attributeIosBankSender(envelope.sender);
   const routedMarket = attribution?.market ??
@@ -374,7 +425,17 @@ export function parseLocalMessageRecord(
       // Notification UUIDs identify queue observations, not bank events. Keep
       // them as ACK/review/decline receipts only; financial rows use existing push
       // time/merchant/instrument dedupe, including repeated OS notifications.
-      ...(!isNotification ? { sourceEventId: envelope.id } : {}),
+      // Only SHA-256(Message GUID) names a retained Apple Message. A Message
+      // staged under a queue UUID (Apple withheld the GUID or its date, or the
+      // automation passed plain text) is an observation like a notification:
+      // without a history identity it is keyed `s{time}-{amount}` and stays
+      // open to the same-event rule, so the History import copy of the same
+      // Message (its GUID and real date, seconds apart) merges with it.
+      ...(!isNotification && SHA256_EVENT_ID_RE.test(envelope.id) ? { sourceEventId: envelope.id } : {}),
+      // The queue delivers each such Message once. Its UUID is kept only as a
+      // durable "one live observation" marker so dedupe never folds a second
+      // genuine identical purchase into it and binds it one-to-one to History.
+      ...(!isNotification && UUID_RE.test(envelope.id) ? { messageObservationId: envelope.id } : {}),
       ...(isNotification ? { notificationObservationId: envelope.id } : {}),
     };
     return {

@@ -158,10 +158,31 @@ export interface Transaction {
   /** Local notification queue receipt, never a bank-event/deduplication identity. */
   notificationObservationId?: string;
   /**
+   * An Apple Pay (Wallet) row the user confirmed ("Already recorded") is the
+   * same purchase as a bank Message, whose identity it now carries. It stays
+   * in the ten-minute possible-duplicate net for that purchase's other alerts
+   * and is never folded by amount/time heuristics.
+   */
+  walletBound?: true;
+  /**
+   * iOS live-queue UUID of a Message captured without Apple's GUID. Never a
+   * bank-event identity: it records that this row is one delivered Message,
+   * so dedupe never folds another live Message into it and binds it to at
+   * most one History copy.
+   */
+  messageObservationId?: string;
+  /**
    * Structured ingest provenance. PDF/CSV identify statement rows whose event
    * time and merchant wording are intentionally coarser than a live capture.
    */
   captureSource?: CaptureSource;
+  /**
+   * Opaque relay id of the statement upload a PDF/CSV row came from (32 hex,
+   * random per upload, carries no content). Two rows of one upload are never
+   * duplicates of each other; rows of different uploads are matched
+   * one-to-one by day, amount, direction and account.
+   */
+  statementImportId?: string;
   captureInstrument?: CaptureInstrument;
   /**
    * A card settlement can generate two bank alerts: money leaving the current
@@ -797,6 +818,8 @@ export interface TxHealUpdate {
   ts?: number;
   smsKey?: string;
   viaPush?: boolean;
+  /** Set by the strict Wallet binding: identity-only, like smsKey/ts. */
+  walletBound?: true;
   captureInstrument?: CaptureInstrument;
   cardPaymentSide?: 'debit' | 'receipt';
   paymentFlowSide?: 'funding' | 'receipt';

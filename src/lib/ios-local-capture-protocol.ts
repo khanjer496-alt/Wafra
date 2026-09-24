@@ -52,6 +52,7 @@ export const IOS_LOCAL_CAPTURE_SHORTCUT_NAME = IOS_LOCAL_CAPTURE_SHORTCUT_URL ==
   : 'Wafra Capture v2';
 
 const IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER = 'WAFRA_SETUP_CHECK_V1';
+export const IOS_BUNDLED_CAPTURE_SHORTCUT_NAME = 'Wafra Capture v3';
 // Configure this version only with the verified share containing the control
 // branch. Never send its marker into a legacy graph's plain-text capture path.
 const hasSetupCheckBranch = IOS_LOCAL_CAPTURE_SHORTCUT_URL !== null &&
@@ -59,7 +60,7 @@ const hasSetupCheckBranch = IOS_LOCAL_CAPTURE_SHORTCUT_URL !== null &&
   process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_SETUP_CHECK_VERSION === '1';
 
 /** New graphs check setup without scanning Messages; legacy shares keep their no-input contract. */
-export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
+export function iosLocalCaptureTestUrl(fromOnboarding = false, bundled = false): string {
   const callback = (result: 'success' | 'cancel' | 'error') =>
     encodeURIComponent(
       `wafra://ios-setup?shortcutResult=${result}${
@@ -68,23 +69,24 @@ export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
     );
 
   return `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(
-    IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
+    bundled ? IOS_BUNDLED_CAPTURE_SHORTCUT_NAME : IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
   )}` +
-    (hasSetupCheckBranch ? `&input=text&text=${encodeURIComponent(IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER)}` : '') +
+    (bundled || hasSetupCheckBranch ? `&input=text&text=${encodeURIComponent(IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER)}` : '') +
     `&x-success=${callback('success')}` +
     `&x-cancel=${callback('cancel')}` +
     `&x-error=${callback('error')}`;
 }
 
 /**
- * User-initiated recovery run. The Shortcut's no-input branch rereads a
- * bounded recent overlap and stages it through the same GUID-keyed live queue.
- * The callback only returns to Wafra; the foreground listener owns the drain.
+ * No-input run of the capture Shortcut. The app no longer opens it: Capture v3's
+ * no-input run only records setup proof, and v2's Find Messages recovery reads a
+ * Content field those rows never carry. Explicit History import is the recovery
+ * path. Kept for the URL-shape tests of the published v2 contract.
  */
-export function iosLocalCaptureCatchupUrl(): string {
+export function iosLocalCaptureCatchupUrl(bundled = false): string {
   const callback = encodeURIComponent('wafra://');
   return `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(
-    IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
+    bundled ? IOS_BUNDLED_CAPTURE_SHORTCUT_NAME : IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
   )}` +
     `&x-success=${callback}` +
     `&x-cancel=${callback}` +

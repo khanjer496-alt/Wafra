@@ -20,8 +20,7 @@
  * `requiresPro` in lib/purchases.ts. The full inbox scan is still Pro, on the
  * platform that has one.
  */
-import { WorkflowHero, ImportSteps } from '@/components/workflows/workflow-surfaces';
-import { workflowCopy } from '@/components/workflows/workflow-copy';
+import { ImportSteps } from '@/components/workflows/workflow-surfaces';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import * as Crypto from 'expo-crypto';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -111,9 +110,10 @@ import {
   loadIosMessageSetupProgress,
   type IosMessageSetupStatus,
 } from '@/lib/ios-message-onboarding';
-import { pagedHistoryEnabled } from '@/lib/ios-paged-setup';
+import { BUNDLED_HISTORY_SHORTCUT_NAME, pagedHistoryEnabled } from '@/lib/ios-paged-setup';
 import { isProActive, requiresPro } from '@/lib/purchases';
 import { parsePastedBankAlerts } from '@/lib/launch-alert-parser';
+import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { prepareUniversalReviewAlert, type ReviewEntry } from '@/lib/alert-review-tray';
 import { isDeliberateOtherTitle, PARSER_VERSION } from '@/lib/sms-parser';
@@ -172,6 +172,14 @@ async function historyNativeModule() {
   // Kept out of the module graph on Android at runtime: this Expo module has
   // an Apple implementation only, exactly like Find Message itself.
   return (await import('../../modules/wafra-message-history')).default;
+}
+
+/** The installed History Shortcut name: the bundled v8 file when this build ships it. */
+async function historyShortcutName(): Promise<string> {
+  try {
+    const capture = (await import('../../modules/wafra-live-capture')).default;
+    return typeof capture?.getHistoryShortcutURL === 'function' ? BUNDLED_HISTORY_SHORTCUT_NAME : IOS_HISTORY_SHORTCUT_NAME;
+  } catch { return IOS_HISTORY_SHORTCUT_NAME; }
 }
 
 /**
@@ -568,7 +576,13 @@ export default function ImportSmsScreen() {
       // it this screen — the one a user reaches BECAUSE something looks wrong —
       // is the one path that cannot clear a refused transaction the ledger
       // recorded as spending.
-      const p = buildImportPlan(parsed, getStateSnapshot(), newestTs, new Date(), declined);
+      // Possible Apple Pay duplicates go to Review now: an up-to-date scan
+      // below commits the source without importing anything.
+      const staged = stageWalletNearMatches(
+        buildImportPlan(parsed, getStateSnapshot(), newestTs, new Date(), declined),
+        () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+      const p = staged.plan;
+      await staged.settle();
       if (!inboxHistoryComplete) throw new Error('sms_history_incomplete');
       p.batch.parserRereadComplete = true;
       const completedInbox: PendingInboxResult = {
@@ -846,6 +860,21 @@ export default function ImportSmsScreen() {
       setNotice({ title: t('importMoneyMismatchTitle'), body: t('importMoneyMismatchBody') });
       return;
     }
+    // Possible Apple Pay duplicates are staged for Review in this same turn as
+    // the import below and settled before the source is committed/discarded.
+    let nearMatchSettle: () => Promise<void>;
+    try {
+      const staged = stageWalletNearMatches(
+        currentPlan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+      currentPlan = staged.plan;
+      nearMatchSettle = staged.settle;
+    } catch {
+      setApplying(false);
+      historyOperationLocked.current = false;
+      setHistoryCommitState(history ? 'source-retained' : 'idle');
+      setNotice({ title: t('historyStorageFailed'), body: t(history ? 'historyStorageFailedBody' : 'importStorageFailedBody') });
+      return;
+    }
     if (pendingInboxResult?.parserRereadComplete) {
       currentPlan.batch.parserRereadComplete = true;
     }
@@ -856,10 +885,12 @@ export default function ImportSmsScreen() {
           setPlan(null);
           if (emptyPlan) {
             await ensureDurable();
+            await nearMatchSettle();
             return;
           }
           const receipt = importBatch(currentPlan.batch);
           await receipt.durable;
+          await nearMatchSettle();
         },
         discard: discardHistorySession,
       });
@@ -898,6 +929,7 @@ export default function ImportSmsScreen() {
           if (pendingInboxResult?.parserRereadComplete) {
             await importBatch(currentPlan.batch).durable;
           }
+          await nearMatchSettle();
           // The preview became a no-op because a concurrent live capture
           // durably filed the same rows. They are now safe to retire from the
           // native encrypted queue even though this confirmation has no new
@@ -915,6 +947,7 @@ export default function ImportSmsScreen() {
         }
       }
       try {
+        await nearMatchSettle();
         await discardHistorySession();
         router.back();
       } catch {
@@ -933,6 +966,7 @@ export default function ImportSmsScreen() {
       // the later source cleanup fails.
       setPlan(null);
       await receipt.durable;
+      await nearMatchSettle();
     } catch (error) {
       historyOperationLocked.current = false;
       setHistoryCommitState(error instanceof ImportMoneyError ? (history ? 'source-retained' : 'idle') : 'storage-failed');
@@ -1062,9 +1096,11 @@ export default function ImportSmsScreen() {
       setHistoryCommitState('idle');
       try {
         if (!validIosHistorySessionId(history)) {
+          const shortcut = await historyShortcutName();
+          if (!active) return;
           setNotice({
             title: t('historyImportInvalid'),
-            body: tf('historyImportInvalidBody', { shortcut: IOS_HISTORY_SHORTCUT_NAME }),
+            body: tf('historyImportInvalidBody', { shortcut }),
           });
           return;
         }
@@ -1080,10 +1116,18 @@ export default function ImportSmsScreen() {
         if (!active) return;
         coordinatorLoaded = true;
         await persistIosHistoryReviewCandidates(result.reviewCandidates, stageReviewAlerts);
+        const shortcutName = result.summary.found === 0 ? await historyShortcutName() : '';
         if (!active) return;
         setHistoryResult(result);
-        const nextPlan = withoutExistingBillReminders(
+        // Possible Apple Pay duplicates go to Review before any finalize below
+        // can discard the protected history session.
+        const stagedHistory = stageWalletNearMatches(
           buildImportPlan(result.parsed, state, 0, new Date(), result.declined),
+          () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
+        await stagedHistory.settle();
+        if (!active) return;
+        const nextPlan = withoutExistingBillReminders(
+          stagedHistory.plan,
           state.bills.map((bill) => bill.title),
         );
         const counts = iosHistorySourceCounts(
@@ -1119,7 +1163,7 @@ export default function ImportSmsScreen() {
                   : t('upToDate'),
             body:
               result.summary.found === 0
-                ? tf('historyImportMissingBody', { shortcut: IOS_HISTORY_SHORTCUT_NAME })
+                ? tf('historyImportMissingBody', { shortcut: shortcutName })
                 : result.summary.parsed + result.summary.reviewed + result.summary.declined === 0
                   ? t('historyNoSupportedCompact')
                   : result.summary.reviewed > 0
@@ -1183,8 +1227,6 @@ export default function ImportSmsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, historyAttempt, state.hydrated, state.merchantOverrides]);
 
-  const words = workflowCopy(state.language);
-
   const previewRows = useMemo(
     () => (plan?.batch.transactions ?? []).slice(0, PREVIEW_LIMIT),
     [plan],
@@ -1247,7 +1289,6 @@ export default function ImportSmsScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           {!history && <>
-            {!scanning && <WorkflowHero title={words.importTitle} body={words.importBody} icon="download" />}
             <ImportSteps current={applying ? 'save' : plan !== null && !scanning ? 'review' : 'source'} />
           </>}
           {Platform.OS === 'ios' && (

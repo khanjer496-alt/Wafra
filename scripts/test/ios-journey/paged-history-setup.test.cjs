@@ -18,6 +18,26 @@ test('only authoritative bounded native progress can render; no raw text/capabil
     assert.throws(() => api.parsePagedHistoryProgress(JSON.stringify({ ...progress, ...extra }), now));
   }
 });
+test('status revision, source-changed refusal and expiry are parsed conservatively', () => {
+  const withRevision = api.parsePagedHistoryProgress(JSON.stringify({ ...progress, revision: 4 }), now);
+  assert.equal(withRevision.revision, 4);
+  assert.equal(withRevision.sourceChanged, undefined);
+  assert.equal(api.parsePagedHistoryProgress(JSON.stringify({ ...progress, refusal: 'source-changed' }), now).sourceChanged, true);
+  assert.equal(api.parsePagedHistoryProgress(JSON.stringify({ ...progress, status: 'complete', refusal: 'source-changed' }), now).sourceChanged, undefined);
+  for (const extra of [{ revision: -1 }, { revision: 1.5 }, { revision: '4' }, { refusal: 'unauthorized' }, { refusal: true }]) {
+    assert.throws(() => api.parsePagedHistoryProgress(JSON.stringify({ ...progress, ...extra }), now), JSON.stringify(extra));
+  }
+  // A consistent session past its lifetime is no session, not an error.
+  assert.equal(api.parsePagedHistoryProgress(JSON.stringify(progress), progress.expiresAtMs), null);
+  assert.equal(api.parsePagedHistoryProgress(JSON.stringify(progress), progress.expiresAtMs + 1), null);
+});
+test('the page block key follows the saved revision, not only the checked count', () => {
+  const at = revision => api.parsePagedHistoryProgress(JSON.stringify({ ...progress, revision }), now);
+  assert.notEqual(api.historyPageKey(at(5)), api.historyPageKey(at(6)));
+  assert.equal(api.isHistoryPageBlocked(api.historyPageKey(at(5)), at(6)), false);
+  assert.equal(api.isHistoryPageBlocked(api.historyPageKey(at(5)), at(5)), true);
+  assert.equal(api.historyPageKey(api.parsePagedHistoryProgress(JSON.stringify(progress), now)), `${progress.sessionId}:${progress.checked}`);
+});
 test('run link contains only the matching Shortcut name and local return routes', () => {
   const url = new URL(api.pagedHistoryRunUrl());
   assert.equal(url.protocol, 'shortcuts:');

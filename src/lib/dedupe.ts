@@ -22,6 +22,20 @@ import type { CaptureInstrument, CaptureSource, Transaction, TransactionType } f
  * third is the same event. Hence three.
  */
 
+/**
+ * A ledger row promoted from an Apple Pay (Wallet) review.
+ *
+ * Wallet's observation UUID is not the bank's message identity, and the row's
+ * title/account/date are explicit user decisions. Such a row may only ever be
+ * matched by its exact receipt identity; import-plan binds it to a later bank
+ * SMS under its own strict one-to-one rule. Generic title, cross-channel,
+ * statement and hydration heuristics must never pair or delete it.
+ */
+export const APPLE_PAY_REVIEW_SOURCE_KEY = /^apple_pay_review_source_[a-f0-9]{32}$/;
+export function isApplePayWalletRow(t: Pick<Transaction, 'source' | 'smsKey'>): boolean {
+  return t.source === 'sms' && typeof t.smsKey === 'string' && APPLE_PAY_REVIEW_SOURCE_KEY.test(t.smsKey);
+}
+
 /** Message text reduced to what two captures of the same SMS must agree on. */
 export function bodyPrint(body: string): string {
   return body.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -130,6 +144,14 @@ export interface DuplicateCandidate {
   channel?: CaptureChannel;
   /** Structured ingest provenance; PDF/CSV are statement rows. */
   captureSource?: CaptureSource;
+  /**
+   * Opaque id of the one statement upload a PDF/CSV row came from. Rows of the
+   * same upload are never duplicates of each other (a statement lists a
+   * genuine repeat twice); rows of different uploads are matched one-to-one.
+   */
+  statementImportId?: string;
+  /** Bank identity a statement named for itself, when it named one. */
+  statementBank?: string;
   /** Resolved account/card. Required for high-confidence settlement pairing. */
   accountId?: string;
   captureInstrument?: CaptureInstrument;
@@ -138,6 +160,11 @@ export interface DuplicateCandidate {
   cardPaymentSide?: 'debit' | 'receipt';
   /** Set only for rows already in the ledger, so a later SMS can replace them. */
   id?: string;
+  /**
+   * One GUID-less iOS live Message (queue-UUID observation). Never merged with
+   * another live observation; bound to at most one History copy.
+   */
+  liveObservation?: boolean;
 }
 
 export interface DuplicateGuard {
@@ -218,14 +245,17 @@ interface SeenStatementPairEvent {
   date: string;
   amountFils: number;
   type: TransactionType;
+  title: string;
   accountId?: string;
   captureInstrument?: CaptureInstrument;
   captureSource?: CaptureSource;
+  statementImportId?: string;
+  statementBank?: string;
   id?: string;
   consumed: boolean;
 }
 
-function isStatementCaptureSource(source: CaptureSource | undefined): boolean {
+export function isStatementCaptureSource(source: CaptureSource | undefined): boolean {
   return source === 'pdf' || source === 'csv';
 }
 
@@ -246,10 +276,14 @@ interface SeenOccurrence {
   id?: string;
   /** A retained Apple Message has an exact, opaque GUID-derived identity. */
   historyIdentity: boolean;
+  /** One GUID-less iOS live Message; see DuplicateCandidate.liveObservation. */
+  liveObservation: boolean;
   /** A row with no event clock explains one later capture, not all of them. */
   consumed: boolean;
   captureInstrument?: CaptureInstrument;
   type: TransactionType;
+  /** Statement provenance, so a statement from another upload is left to its own matcher. */
+  statement?: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>;
 }
 
 /** Only facts from the alerts can prove two captures describe different instruments. */
@@ -306,9 +340,60 @@ function sameOrAdjacentDate(a: string, b: string): boolean {
   );
 }
 
+const OBSERVATION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A stored GUID-less iOS live Message that has not yet bound a History identity. */
+function hasMessageObservationId(t: Transaction): boolean {
+  return t.source === 'sms' && t.viaPush !== true &&
+    typeof t.messageObservationId === 'string' && OBSERVATION_UUID_RE.test(t.messageObservationId);
+}
+
+function isLiveMessageObservationRow(t: Transaction): boolean {
+  return hasMessageObservationId(t) && t.smsKey?.startsWith('h') !== true;
+}
+
+export interface DuplicateGuardOptions {
+  /** Issuer identity of a ledger account, for statement/alert compatibility. */
+  accountBankIdentity?: (accountId: string) => string | undefined;
+  /**
+   * An account reference that attributes nothing — the unassigned holdings a
+   * statement with no card/account digits lands on. Only a statement row on
+   * such an account may be matched to an alert on another account.
+   */
+  unresolvedAccount?: (accountId: string) => boolean;
+}
+
+const STATEMENT_IMPORT_ID = /^[a-f0-9]{32}$/;
+
+/** The upload a statement row came from, when the relay named one. */
+export function statementUploadOf(
+  row: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>,
+): string | undefined {
+  return isStatementCaptureSource(row.captureSource) && typeof row.statementImportId === 'string' &&
+    STATEMENT_IMPORT_ID.test(row.statementImportId) ? row.statementImportId : undefined;
+}
+
+/**
+ * Two statement rows from different uploads. Their relay clocks are coarse
+ * and restart at midday for every file, so neither a shared `s{ts}-{amount}`
+ * nor a title within the event window says they are one event; only the
+ * one-to-one statement matcher may pair them. An untagged statement row
+ * predates upload ids and is necessarily from another upload than a tagged one.
+ */
+export function fromDifferentStatementUploads(
+  a: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>,
+  b: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>,
+): boolean {
+  if (!isStatementCaptureSource(a.captureSource) || !isStatementCaptureSource(b.captureSource)) return false;
+  const left = statementUploadOf(a);
+  const right = statementUploadOf(b);
+  return (left !== undefined || right !== undefined) && left !== right;
+}
+
 export function duplicateGuard(
   existing: Transaction[],
   sourceIdentityAlreadyValidated = false,
+  options: DuplicateGuardOptions = {},
 ): DuplicateGuard {
   if (!sourceIdentityAlreadyValidated) {
     existing = existing.filter((row) => isUsableCaptureSourceIdentity(row.smsKey, row.ts));
@@ -318,18 +403,73 @@ export function duplicateGuard(
   const seen = new Map<string, SeenOccurrence[]>();
   /** The same stored row can appear in title and cross-channel indexes. */
   const seenById = new Map<string, SeenOccurrence>();
-  const note = (key: string, ts: number | null, type: TransactionType, smsKey?: string, id?: string, captureInstrument?: CaptureInstrument) => {
+  /** User-renamed, still-unbound live observations, for the title-free bind. */
+  const renamedLiveObservations: { amountFils: number; occurrence: SeenOccurrence }[] = [];
+  const note = (
+    key: string, ts: number | null, type: TransactionType, amountFils: number, smsKey?: string,
+    id?: string, captureInstrument?: CaptureInstrument,
+    flags: {
+      liveObservation?: boolean; renamed?: boolean; boundLiveCopy?: boolean;
+      statement?: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>;
+    } = {},
+  ) => {
     const at = seen.get(key);
-    const occurrence = { ts, id, type, captureInstrument, historyIdentity: smsKey?.startsWith('h') === true, consumed: false };
+    const historyIdentity = smsKey?.startsWith('h') === true;
+    const occurrence: SeenOccurrence = {
+      ts, id, type, captureInstrument, historyIdentity,
+      ...(flags.statement && isStatementCaptureSource(flags.statement.captureSource)
+        ? { statement: { captureSource: flags.statement.captureSource,
+          statementImportId: flags.statement.statementImportId } } : {}),
+      liveObservation: flags.liveObservation === true && !historyIdentity,
+      // A History row promoted from a live observation has already explained
+      // its live copy; it can never absorb another live Message.
+      consumed: historyIdentity && flags.boundLiveCopy === true,
+    };
     if (at) at.push(occurrence);
     else seen.set(key, [occurrence]);
     if (id) seenById.set(id, occurrence);
+    if (occurrence.liveObservation && flags.renamed === true) {
+      renamedLiveObservations.push({ amountFils, occurrence });
+    }
   };
-  for (const t of existing) {
+  /**
+   * Bind one incoming History Message to one GUID-less live Message the user
+   * renamed. An unedited live row parses to the History copy's own title and
+   * pairs through the title rule; a renamed one cannot, and its s-key carries
+   * the receipt time rather than the Message's own. Match by money,
+   * direction, instrument and the same-event window, nearest first; the
+   * occurrence is consumed so it explains exactly one History copy. Never the
+   * reverse direction: a new live Message is not bound to History by money
+   * alone, since a different merchant at the same amount is a real purchase.
+   */
+  const titleFreeObservationMatch = (c: DuplicateCandidate, mine: number | null): SeenOccurrence | undefined => {
+    if (c.smsKey?.startsWith('h') !== true || mine === null) return undefined;
+    let best: SeenOccurrence | undefined;
+    for (const { amountFils, occurrence } of renamedLiveObservations) {
+      if (occurrence.consumed || occurrence.ts === null || amountFils !== c.amountFils ||
+        occurrence.type !== c.type) continue;
+      if (!compatibleCaptureInstrument(occurrence.captureInstrument, c.captureInstrument)) continue;
+      const distance = Math.abs(occurrence.ts - mine);
+      if (distance > SAME_EVENT_MS) continue;
+      if (!best || distance < Math.abs(best.ts! - mine)) best = occurrence;
+    }
+    return best;
+  };
+  // Wallet rows, unbound or bound to one bank alert, keep only their exact
+  // receipt identity (noteExact below). A non-exact alert near a bound row
+  // goes to the planner's possible-duplicate Review, never a silent merge.
+  const heuristicRows = existing.filter((t) => !isApplePayWalletRow(t) && t.walletBound !== true);
+  for (const t of heuristicRows) {
     // Locally-created and migrated rows may have no SMS fingerprint but still
     // carry a precise event clock. Treating those as timeless made every
     // identical purchase later that day look like the same event.
-    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t), t.type, t.smsKey, t.id, t.captureInstrument);
+    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t), t.type, t.amountFils, t.smsKey, t.id,
+      t.captureInstrument, {
+        liveObservation: isLiveMessageObservationRow(t),
+        renamed: t.userEdited === true || t.titleEdited === true,
+        boundLiveCopy: hasMessageObservationId(t),
+        statement: t,
+      });
   }
   // Delivery clocks can collide across cards; retain every candidate per key.
   const exactRows = new Map<string, DuplicateCandidate[]>();
@@ -344,6 +484,7 @@ export function duplicateGuard(
   for (const t of existing) noteExact(t);
   const exactMatch = (key: string, c: DuplicateCandidate) =>
     (exactRows.get(canonicalCaptureSourceKey(key, c.ts)) ?? []).find((row) => key.startsWith('h') || (
+      !fromDifferentStatementUploads(row, c) &&
       (row.type === c.type || c.eventKind === 'cardPayment' ||
         (row.raw !== undefined && c.raw !== undefined && bodyPrint(row.raw) === bodyPrint(c.raw))) &&
       compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument)
@@ -371,27 +512,84 @@ export function duplicateGuard(
     statementPairEvents.push(event);
     if (event.id) statementPairById.set(event.id, event);
   };
+  const unresolvedAccount = (accountId: string | undefined): boolean =>
+    !accountId || options.unresolvedAccount?.(accountId) === true;
+  const bankOf = (row: Pick<SeenStatementPairEvent, 'statementBank' | 'captureInstrument' | 'accountId'>) =>
+    row.statementBank ?? row.captureInstrument?.bankIdentity ??
+      (row.accountId ? options.accountBankIdentity?.(row.accountId) : undefined);
+  const banksCompatible = (a: string | undefined, b: string | undefined) => !a || !b || a === b;
+  const sameDescriptor = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  /**
+   * Whether a statement descriptor and an alert title can name one merchant:
+   * one shares a word of four or more letters with the other ("PAYPAL
+   * *ENDURANCEIN" / "Endurancein", "CARREFOUR HYPER 1234" / "Carrefour").
+   * Money and a day alone are not an identity when the statement names no
+   * account: "NOON.COM 50.00" and "Carrefour 50.00" are two purchases.
+   */
+  const descriptorOverlap = (a: string, b: string): boolean => {
+    const words = (value: string) => new Set(value.toLowerCase().normalize('NFKC')
+      .split(/[^\p{L}\p{N}]+/u).filter((word) => word.length >= 4 && /\p{L}/u.test(word)));
+    const left = words(a);
+    const right = words(b);
+    for (const word of left) if (right.has(word)) return true;
+    const flatLeft = [...left].join(' ');
+    const flatRight = [...right].join(' ');
+    return [...left].some((word) => flatRight.includes(word)) || [...right].some((word) => flatLeft.includes(word));
+  };
   const statementPairMatch = (c: DuplicateCandidate): SeenStatementPairEvent | undefined => {
-    if (!c.accountId) return undefined;
     const incomingStatement = isStatementCaptureSource(c.captureSource);
-    // Provenance is the permission to relax title/time. PDF/CSV on BOTH sides
-    // are two statement rows, and no statement on either side means this fuzzy
-    // matcher has no authority at all.
-    const matches = statementPairEvents.filter((row) =>
-      !row.consumed &&
-      !!row.accountId &&
-      row.accountId === c.accountId &&
-      row.type === c.type &&
-      isStatementCaptureSource(row.captureSource) !== incomingStatement &&
-      Math.abs(row.amountFils - c.amountFils) <= 1 &&
-      sameOrAdjacentDate(row.date, c.date) &&
+    const open = statementPairEvents.filter((row) =>
+      !row.consumed && row.type === c.type &&
       compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument));
-    if (!matches.length) return undefined;
-    matches.sort((a, b) => {
-      const score = (row: SeenStatementPairEvent) =>
-        (row.date === c.date ? 0 : 10) + Math.abs(row.amountFils - c.amountFils);
-      return score(a) - score(b);
-    });
+    // 1. Statement <-> live capture on the SAME resolved account. Provenance
+    // is the permission to relax title/time; a bounded posting drift is allowed.
+    if (c.accountId) {
+      const matches = open.filter((row) =>
+        !!row.accountId &&
+        row.accountId === c.accountId &&
+        isStatementCaptureSource(row.captureSource) !== incomingStatement &&
+        Math.abs(row.amountFils - c.amountFils) <= 1 &&
+        sameOrAdjacentDate(row.date, c.date));
+      if (matches.length) {
+        matches.sort((a, b) => {
+          const score = (row: SeenStatementPairEvent) =>
+            (row.date === c.date ? 0 : 10) + Math.abs(row.amountFils - c.amountFils);
+          return score(a) - score(b);
+        });
+        return matches[0];
+      }
+    }
+    // 2. Statement <-> statement from ANOTHER upload: the same day, amount,
+    // direction and account, whatever each file's row order put on the clock.
+    // Two unlabelled statements share only the unassigned holding, which says
+    // nothing about the account, so they must also print the same descriptor.
+    // Rows of one upload never pair: a statement's repeat is a real repeat.
+    const incomingUpload = incomingStatement ? statementUploadOf(c) : undefined;
+    if (incomingUpload && c.accountId) {
+      const unlabelled = unresolvedAccount(c.accountId);
+      const match = open.find((row) =>
+        isStatementCaptureSource(row.captureSource) &&
+        fromDifferentStatementUploads(row, c) &&
+        row.accountId === c.accountId &&
+        row.amountFils === c.amountFils &&
+        row.date === c.date &&
+        banksCompatible(bankOf(row), bankOf(c)) &&
+        (!unlabelled || sameDescriptor(row.title, c.title)));
+      if (match) return match;
+    }
+    // 3. A statement that could not name its account <-> a live capture on any
+    // account of a compatible bank. Exact day and amount only, one-to-one:
+    // the statement side attributes nothing, so no drift is tolerated.
+    const relaxed = incomingStatement
+      ? unresolvedAccount(c.accountId)
+        ? open.filter((row) => !isStatementCaptureSource(row.captureSource))
+        : []
+      : open.filter((row) => isStatementCaptureSource(row.captureSource) && unresolvedAccount(row.accountId));
+    const matches = relaxed.filter((row) =>
+      row.amountFils === c.amountFils &&
+      row.date === c.date &&
+      banksCompatible(bankOf(row), bankOf(c)) &&
+      (descriptorOverlap(row.title, c.title) || sameDescriptor(row.title, c.title)));
     return matches[0];
   };
   /** Opposite alerts for one card payment: bank-account debit + card receipt. */
@@ -409,7 +607,7 @@ export function duplicateGuard(
     if (rows) rows.push({ consumedSides: new Set() });
     else manualPayments.set(key, [{ consumedSides: new Set() }]);
   };
-  for (const t of existing) {
+  for (const t of heuristicRows) {
     if (t.source === 'sms') {
       noteCross(crossChannelKey(t.date, t.amountFils, t.type), {
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
@@ -428,9 +626,11 @@ export function duplicateGuard(
         date: t.date,
         amountFils: t.amountFils,
         type: t.type,
+        title: t.title,
         accountId: t.accountId,
         captureInstrument: t.captureInstrument,
         captureSource: t.captureSource,
+        statementImportId: t.statementImportId,
         id: t.id,
         consumed: false,
       });
@@ -449,6 +649,24 @@ export function duplicateGuard(
     if (t.source === 'manual' && t.type === 'income' && t.isTransfer === true) {
       noteManualPayment(`${t.date}|${t.amountFils}|${t.accountId}`);
     }
+  }
+  // Bound Wallet rows stay out of the loose indexes above, but a bank
+  // statement row for the same purchase must still pair with them one-to-one;
+  // otherwise the statement would add the purchase a second time.
+  for (const t of existing) {
+    if (t.walletBound !== true || t.source !== 'sms') continue;
+    noteStatementPair({
+      date: t.date,
+      amountFils: t.amountFils,
+      type: t.type,
+      title: t.title,
+      accountId: t.accountId,
+      captureInstrument: t.captureInstrument,
+      captureSource: t.captureSource,
+      statementImportId: t.statementImportId,
+      id: t.id,
+      consumed: false,
+    });
   }
 
   return {
@@ -535,10 +753,17 @@ export function duplicateGuard(
           // second. Exact re-imports were already caught by seenSms above.
           // Continue comparing against Android/live captures so importing
           // history after enabling live capture still removes overlap.
+          // Likewise two GUID-less live observations are two delivered
+          // Messages: the native queue stages each Message once.
+          const incomingLive = c.liveObservation === true && !c.smsKey?.startsWith('h');
           const comparable = at.filter((row) =>
             row.type === c.type &&
+            !(row.statement && fromDifferentStatementUploads(row.statement, c)) &&
             compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
-            !(c.smsKey?.startsWith('h') && row.historyIdentity));
+            !(c.smsKey?.startsWith('h') && row.historyIdentity) &&
+            !(incomingLive && row.liveObservation));
+          const oneToOne = (occurrence: SeenOccurrence) => c.smsKey?.startsWith('h') === true ||
+            incomingLive || occurrence.historyIdentity || occurrence.liveObservation;
           // Same day, same amount, same name. That is one event captured twice
           // UNLESS both sides carry a timestamp and those are far enough apart
           // to be two separate visits. Without this the second identical charge
@@ -547,8 +772,7 @@ export function duplicateGuard(
           if (mine === null && comparable.length > 0) return true;
           const timed = comparable.find(
             (occurrence) =>
-              (!(c.smsKey?.startsWith('h') || occurrence.historyIdentity) ||
-                !occurrence.consumed) &&
+              (!oneToOne(occurrence) || !occurrence.consumed) &&
               occurrence.ts !== null &&
               Math.abs(occurrence.ts - mine!) <= SAME_EVENT_MS,
           );
@@ -556,7 +780,7 @@ export function duplicateGuard(
             // Exact history/live overlap is one-to-one. Without consuming the
             // live occurrence it silences every distinct historical Message
             // the bank happened to timestamp in the same two-minute window.
-            if (c.smsKey?.startsWith('h') || timed.historyIdentity) timed.consumed = true;
+            if (oneToOne(timed)) timed.consumed = true;
             lastMatchedId = timed.id ?? null;
             return true;
           }
@@ -571,6 +795,12 @@ export function duplicateGuard(
             lastMatchedId = timeless.id ?? null;
             return true;
           }
+        }
+        const observation = titleFreeObservationMatch(c, mine);
+        if (observation) {
+          observation.consumed = true;
+          lastMatchedId = observation.id ?? null;
+          return true;
         }
       }
       const statementMatch = statementPairMatch(c);
@@ -660,7 +890,8 @@ export function duplicateGuard(
     add(c) {
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return;
       const ts = candidateTime(c);
-      note(dedupeKey(c.date, c.amountFils, c.title), ts, c.type, c.smsKey, c.id, c.captureInstrument);
+      note(dedupeKey(c.date, c.amountFils, c.title), ts, c.type, c.amountFils, c.smsKey, c.id,
+        c.captureInstrument, { liveObservation: c.liveObservation === true, statement: c });
       noteExact(c);
       noteCross(crossChannelKey(c.date, c.amountFils, c.type), {
         ts,
@@ -673,9 +904,12 @@ export function duplicateGuard(
         date: c.date,
         amountFils: c.amountFils,
         type: c.type,
+        title: c.title,
         accountId: c.accountId,
         captureInstrument: c.captureInstrument,
         captureSource: c.captureSource,
+        statementImportId: c.statementImportId,
+        statementBank: c.statementBank,
         id: c.id,
         consumed: false,
       });
@@ -790,6 +1024,9 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     const duplicateAt = [...candidates].find((index) => {
       const prior = kept[index];
       if (prior.source !== 'sms') return false;
+      // Import already matched statement uploads one-to-one; a shared midday
+      // clock between two uploads is not an event identity.
+      if (fromDifferentStatementUploads(row, prior)) return false;
       const rowPinned = Boolean(row.userEdited || row.transferDecision);
       const priorPinned = Boolean(prior.userEdited || prior.transferDecision);
       const bothEdited = rowPinned && priorPinned;
@@ -802,6 +1039,10 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       // amount/time heuristics cannot delete a decision or attach it to a
       // different event. Two independently reviewed rows require user review.
       if (row.transferDecision || prior.transferDecision) return false;
+      // Likewise a Wallet review decision: only exact receipt identity (above)
+      // may fold it. Import binds a proven SMS counterpart explicitly.
+      if (isApplePayWalletRow(row) || isApplePayWalletRow(prior) ||
+        row.walletBound === true || prior.walletBound === true) return false;
       if (
         !pairedCardPayments.has(index) &&
         !row.userEdited &&
@@ -815,6 +1056,13 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
         row.smsKey?.startsWith('h') &&
         prior.smsKey?.startsWith('h') &&
         rowSource !== priorSource
+      ) return false;
+      // Two GUID-less iOS live Messages are two delivered Messages; the
+      // native queue stages each once, so heuristics must never fold them.
+      if (
+        isLiveMessageObservationRow(row) &&
+        isLiveMessageObservationRow(prior) &&
+        row.messageObservationId!.toLowerCase() !== prior.messageObservationId!.toLowerCase()
       ) return false;
       if (
         row.date !== prior.date ||

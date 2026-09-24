@@ -1,4 +1,3 @@
-import { WorkflowHero } from '@/components/workflows/workflow-surfaces';
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { useLanguage } from '@/hooks/use-language';
 import { useRouter } from 'expo-router';
@@ -323,7 +322,7 @@ export default function ProScreen() {
       contentStyle={styles.content}
       scrollProps={{ showsVerticalScrollIndicator: false }}>
       <Section index={0} style={styles.hero}>
-        <WorkflowHero title={t('wafraPro')} body={words.proBody} icon="diamond" />
+        <ThemedText type="small" themeColor="textSecondary">{words.proBody}</ThemedText>
         <ThemedText type="default" themeColor="textSecondary">
           {entitled
             ? t('proActiveThanks')
@@ -347,8 +346,8 @@ export default function ProScreen() {
 
       <Section
         index={1}
-        style={[styles.featuresCard, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
-        <ThemedText type="meta" themeColor="textTertiary" style={styles.sectionLabel}>
+        style={styles.featuresCard}>
+        <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionLabel}>
           {t('proBenefitsTitle')}
         </ThemedText>
         {features().map((feature, index, rows) => (
@@ -499,7 +498,7 @@ export default function ProScreen() {
 const styles = StyleSheet.create({
   content: { gap: Spacing.four },
   hero: { alignItems: 'flex-start', gap: Spacing.two, paddingTop: Spacing.two },
-  featuresCard: { padding: Spacing.four, borderRadius: 20, borderWidth: 1 },
+  featuresCard: { gap: Spacing.one },
   sectionLabel: { marginBottom: Spacing.two },
   featureIcon: {
     width: 36,

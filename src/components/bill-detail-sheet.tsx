@@ -143,7 +143,7 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
       <View style={styles.head}>
         <CategoryTile category={subscription.category} size={46} />
         <View style={styles.headText}>
-          <ThemedText type="subtitle" numberOfLines={1}>
+          <ThemedText type="subtitle">
             {subscription.title}
           </ThemedText>
           <ThemedText type="meta" themeColor="textTertiary">
@@ -153,8 +153,8 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
               when: daysPhrase(daysLeft),
             })}
           </ThemedText>
+          <Money fils={subscription.lastAmountFils} type="sheetAmount" prefix={false} style={styles.headAmount} />
         </View>
-        <Money fils={subscription.lastAmountFils} type="sheetAmount" prefix={false} style={styles.headAmount} />
       </View>
 
       <View style={styles.history}>
@@ -175,10 +175,10 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
       />
 
       <View style={styles.actions}>
-        <Button inline label={t('remindDayBefore')} onPress={remindMe} />
+        <Button label={t('remindDayBefore')} onPress={remindMe} />
         <Button
-          inline
-          variant="outline"
+          variant="ghost"
+          labelColor={theme.expense}
           label={t('notRecurring')}
           onPress={() => setConfirming(true)}
         />
@@ -218,22 +218,23 @@ export function BillDetailSheet({ subscription, onClose }: BillDetailSheetProps)
 const styles = StyleSheet.create({
   head: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: Spacing.three - 2,
   },
   headText: {
     flex: 1,
-    gap: Spacing.half,
+    minWidth: 0,
+    gap: Spacing.one,
   },
   headAmount: {
-    alignSelf: 'center',
+    alignSelf: 'flex-start',
+    marginTop: Spacing.one,
   },
   history: {
     gap: Spacing.three - 4,
   },
   actions: {
-    flexDirection: 'row',
-    gap: Spacing.two + 2,
+    gap: Spacing.one,
   },
   notice: {
     borderWidth: StyleSheet.hairlineWidth,

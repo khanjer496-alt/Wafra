@@ -122,6 +122,14 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/local-semantic-background-policy') {
         return require('../build/local-semantic-background-policy.js');
       }
+      // Pure capture helpers shared by every collector; harnesses that stub a
+      // planner without Wallet near-matches get the real pass-through module.
+      if (name === '@/lib/wallet-near-match') {
+        return require('../build/wallet-near-match.js');
+      }
+      if (name === '@/lib/parsed-review-event') {
+        return require('../build/parsed-review-event.js');
+      }
       if (name === '@/lib/generic-review-entry') {
         return require('../build/generic-review-entry.js');
       }

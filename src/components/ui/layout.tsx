@@ -192,7 +192,7 @@ export function LabelTable({ rows }: { rows: { label: string; value: React.React
   );
 }
 
-/** Back chevron + caps title, the header on every pushed screen. */
+/** Legacy screen shell, using the same readable title hierarchy as the scaffold. */
 export function ScreenHeader({ title, onBack }: { title: string; onBack: () => void }) {
   const theme = useTheme();
   const language = useLanguage();
@@ -211,7 +211,7 @@ export function ScreenHeader({ title, onBack }: { title: string; onBack: () => v
           color={theme.text}
         />
       </Pressable>
-      <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header">
+      <ThemedText type="heading" accessibilityRole="header" style={styles.screenTitle}>
         {title}
       </ThemedText>
     </View>
@@ -243,6 +243,7 @@ const styles = StyleSheet.create({
   },
   tableValue: {
     flex: 1,
+    minWidth: 0,
     gap: 2,
   },
   screenHeader: {
@@ -251,11 +252,12 @@ const styles = StyleSheet.create({
     gap: Spacing.three - 4,
     paddingVertical: Spacing.two,
   },
+  screenTitle: { flex: 1, minWidth: 0 },
   backButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: -12,
+    marginStart: -12,
   },
 });

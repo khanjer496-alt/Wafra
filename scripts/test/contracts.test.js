@@ -915,7 +915,8 @@ function ktSources(dir) {
   ok('iOS setup shows the exact local Shortcut action with complete Received Message input',
     /<AutomationGuide/.test(setup) &&
       automationGuide.includes("'iosMessageGuideRunShortcut'") &&
-      /tf\(step, \{ shortcut: IOS_LOCAL_CAPTURE_SHORTCUT_NAME \}\)/.test(automationGuide) &&
+      /shortcutName = IOS_LOCAL_CAPTURE_SHORTCUT_NAME/.test(automationGuide) &&
+      /tf\(step, \{ shortcut: shortcutName \}\)/.test(automationGuide) &&
       /iosMessageGuideRunShortcut:\s*\{ en: 'Pick \{shortcut\} from the list \(not New Blank Automation\), then Done'/.test(copy));
   ok('the installed Shortcut uses Message input and a separate no-input setup proof',
     /accepts only Messages/.test(shortcutSpec) &&
@@ -930,7 +931,8 @@ function ktSources(dir) {
     !/(?:captured \|\| captureOn|iosTestLimit|refresh-proof|relay)/.test(
       `${setup}\n${setupWorkflow}`) &&
       /isCaptureTimestamp\(status\.firstCapturedAt\)/.test(setupWorkflow) &&
-      /setupProofVersion === 1/.test(setupWorkflow));
+      /requiredProofVersion = 1/.test(setupWorkflow) &&
+      /status\.setupProofVersion === requiredProofVersion/.test(setupWorkflow));
   const shortcutCallback = code(setupWorkflow.match(
     /case 'shortcut-callback':([\s\S]*?)case 'go-to-stage':/,
   )?.[1] ?? '').replace(/\s+/g, ' ').trim();

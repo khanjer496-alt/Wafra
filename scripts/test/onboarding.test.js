@@ -684,7 +684,7 @@ ok(
 );
 ok(
   'first-run gate exempts iOS setup and only the in-memory-authorized statement route',
-  /const isIosSetupRoute\s*=\s*Platform\.OS === 'ios'[\s\S]{0,180}pathname === '\/ios-setup'[\s\S]{0,100}pathname === '\/import-sms'/.test(gateSource) &&
+  /const isIosSetupRoute\s*=\s*Platform\.OS === 'ios'[\s\S]{0,180}pathname === '\/ios-setup'[\s\S]{0,200}pathname === '\/import-sms'/.test(gateSource) &&
     /const statementImportSession = useRef<string \| null>\(null\)/.test(gateSource) &&
     /const isOnboardingStatementRoute\s*=[\s\S]{0,160}pathname === '\/statement-import'[\s\S]{0,160}params\.statementSession === statementImportSession\.current/.test(gateSource) &&
     /statementImportSession\.current = session[\s\S]{0,180}statementSession=\$\{session\}/.test(gateSource) &&
@@ -1109,8 +1109,11 @@ try {
   const iosSetupSource = fs.readFileSync(path.join(__dirname, '../../src/app/ios-setup.tsx'), 'utf8');
   const cardsSource = fs.readFileSync(path.join(__dirname, '../../src/app/cards.tsx'), 'utf8');
   const walletSource = fs.readFileSync(path.join(__dirname, '../../src/app/(tabs)/wallet.tsx'), 'utf8');
-  ok('the iOS setup screen asks which banks text the user and stores the answer',
-    iosSetupSource.includes("t('iosBanksTitle')") && iosSetupSource.includes("t('iosBanksSkip')") && iosSetupSource.includes('setKnownBanks('));
+  // Setup no longer asks which banks text the user: that question gated the
+  // checklist without improving capture, and bank identity now comes from the
+  // alert itself. The screen must not reintroduce it or save a guessed bank.
+  ok('the iOS setup screen reaches capture without a bank question',
+    !iosSetupSource.includes("t('iosBanksTitle')") && !iosSetupSource.includes('setKnownBanks('));
   ok('the cards and wallet account sheets offer "Set bank"',
     cardsSource.includes("t('accountSetBank')") && walletSource.includes("t('accountSetBank')") &&
     cardsSource.includes("t('accountNoBank')") && walletSource.includes("t('accountNoBank')"));

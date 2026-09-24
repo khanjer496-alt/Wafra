@@ -5,7 +5,7 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
 import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
-import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
@@ -35,6 +35,8 @@ interface EntryDetailSheetProps {
   transaction: Transaction | null;
   onClose: () => void;
   showMerchantLink?: boolean;
+  /** Current ledger assessment for transfer-history presentation, never a saved decision. */
+  transferAssessment?: TransferAssessment;
 }
 
 /**
@@ -44,7 +46,7 @@ interface EntryDetailSheetProps {
  * row — "what actually was this?" — was answered by six input boxes. Reading
  * comes first now; editing is one tap away.
  */
-export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true }: EntryDetailSheetProps) {
+export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment }: EntryDetailSheetProps) {
   const router = useRouter();
   const theme = useTheme();
   const largeText = useLargeTextLayout();
@@ -141,10 +143,12 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   if (!transaction) return null;
 
   const meta = getCategory(transaction.category);
-  const transferReview = isTransferCandidate(transaction);
+  const transferReview = isTransferCandidate(transaction) || transferAssessment !== undefined;
   const transferWords = transferReviewCopy();
-  const ownership = transferOwnership(transaction);
-  const confirmedTransfer = isLedgerTransfer(transaction);
+  const ownership = transferAssessment?.status === 'confirmed-own' ? 'own'
+    : transferAssessment?.status === 'confirmed-external' ? 'external'
+      : transferOwnership(transaction);
+  const confirmedTransfer = ownership === 'own' || isLedgerTransfer(transaction);
   const confirmedOwnTransfer = ownership === 'own';
   const pendingTransfer = !confirmedTransfer && isTransferCandidate(transaction) && ownership === 'unknown';
   const account = state.accounts.find((a) => a.id === transaction.accountId);
@@ -247,31 +251,32 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             <Button
               inline={!largeText}
               wrapLabel
-              variant="danger"
+              variant="ghost"
+              labelColor={theme.expense}
               label={t('delete')}
               onPress={() => setConfirmingDelete(true)}
             />
           </View>
       )}>
-      <View style={[styles.head, { borderColor: theme.cardBorder }]}>
-        <MerchantAvatar title={transaction.title} category={transaction.category} size={52} />
-        <ThemedText type="heading" style={styles.headTitle} numberOfLines={2}>
+      <View style={[styles.head, editing && styles.editHead, { borderColor: theme.cardBorder }]}>
+        {!editing && <MerchantAvatar title={transaction.title} category={transaction.category} size={52} />}
+        <ThemedText type={editing ? "smallBold" : "heading"} style={editing ? styles.editHeadTitle : styles.headTitle}>
           {transaction.title}
         </ThemedText>
-        <ThemedText type="meta" themeColor="textTertiary" style={styles.headDate}>
+        {!editing && <ThemedText type="meta" themeColor="textTertiary" style={styles.headDate}>
           {friendlyDate(transaction.date, toISODate(new Date()))}
-        </ThemedText>
+        </ThemedText>}
         {/* Decimals on. This sheet exists to answer "what exactly was this",
             and it sat above an edit field showing 72.73 while itself reading
             −73. Lists round; the place you go to check does not. */}
         <Money
           fils={transaction.amountFils}
-          type="sheetAmount"
+          type={editing ? "smallBold" : "sheetAmount"}
           sign={income ? 'plus' : 'minus'}
           prefix
           decimals
           color={income && !pendingTransfer && !confirmedTransfer ? theme.income : theme.text}
-          style={styles.headAmount}
+          style={editing ? styles.editHeadAmount : styles.headAmount}
         />
       </View>
 
@@ -662,9 +667,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
     gap: 4,
-    borderWidth: 1,
-    borderRadius: Radius.sheet,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  editHead: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.two, paddingHorizontal: 0, paddingVertical: Spacing.two },
+  editHeadTitle: { flexShrink: 1 },
+  editHeadAmount: { alignSelf: 'center' },
   headTitle: {
     textAlign: 'center',
     marginTop: 8,

@@ -1987,6 +1987,16 @@ const CARD_PAYMENT_DEBIT =
         body: 'Date,Description,Amount\n01/07/2026,Ambiguous,20.00',
       })).status === 422);
 
+    const usdAmbiguous = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: {
+        'content-type': 'text/csv', 'x-wafra-ledger-currency': 'USD', 'x-wafra-ledger-exponent': '2',
+      },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,Shop,20.00,\n02/07/2026,Other,5.00,',
+    });
+    ok('csv: a USD ledger refuses a file whose every date reads either way, by name',
+      usdAmbiguous.status === 422 && (await usdAmbiguous.json()).error === 'ambiguous_dates');
+
     // Email forwarding is off unless the operator configured a domain, and the
     // route says so rather than minting an address that can never receive mail.
     const noDomain = { DB: makeDb() };
@@ -2054,7 +2064,8 @@ const CARD_PAYMENT_DEBIT =
     });
     const accepted = await upload.json();
     ok('statement: both rows of a two-row PDF are accepted',
-      upload.status === 202 && accepted.acceptedRows === 2, JSON.stringify(accepted));
+      upload.status === 202 && accepted.acceptedRows === 2 && accepted.alreadyProcessed === false,
+      JSON.stringify(accepted));
 
     const delivered = { rows: await drainOpened(env, me) };
     ok('statement: and both are delivered to the device', delivered.rows.length === 2);
@@ -2107,8 +2118,11 @@ const CARD_PAYMENT_DEBIT =
     const again = await call(env, 'POST', '/v1/import/pdf', {
       token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: statement,
     });
+    const againBody = await again.json();
     ok('statement: re-uploading the same PDF queues nothing new',
       again.status === 202 && (await drainOpened(env, me)).length === 0);
+    ok('statement: and the relay says the file was already processed, not that the ledger has it',
+      againBody.alreadyProcessed === true, JSON.stringify(againBody));
 
     // The other half of that, and a second silent-loss defect on this route:
     // the replay key is `pdf:${sha256(bytes)}`, and the digest used to be taken
@@ -2169,6 +2183,51 @@ const CARD_PAYMENT_DEBIT =
         cardTableRows.some((row) => row.type === 'expense' && row.amountFils === 1000) &&
         cardTableRows.some((row) => row.type === 'income' && row.amountFils === 725),
       JSON.stringify(cardTableRows.map((row) => [row.date, row.type, row.amountFils, row.merchant])));
+
+    // Its own device: statement uploads are budgeted per device per hour,
+    // and this section already spends most of one device's allowance.
+    const cardDevice = await pairDevice(env);
+    // A card statement whose only direction evidence is a bare minus, and
+    // which never says what that minus means, is refused by name.
+    const cardSigns = await call(env, 'POST', '/v1/import/pdf', {
+      token: cardDevice.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf([
+        'Credit Card Statement',
+        'Minimum Payment Due AED 50.00',
+        '2026-08-05 PAYMENT RECEIVED -500.00',
+        '2026-08-06 CARREFOUR 40.00-',
+      ]),
+    });
+    const cardSignsBody = await cardSigns.json();
+    ok('statement: a card PDF with only unexplained signs is refused as ambiguous, not filed',
+      cardSigns.status === 422 && cardSignsBody.error === 'ambiguous_card_signs' &&
+        (await drainOpened(env, cardDevice)).length === 0,
+      JSON.stringify(cardSignsBody));
+
+    // A card settlement read off a statement is a transfer onto the card, the
+    // same as the SMS about it: neither spending on the account statement nor
+    // income on the card statement.
+    const settlementPdf = await call(env, 'POST', '/v1/import/pdf', {
+      token: cardDevice.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf([
+        'Statement of Account',
+        '2026-08-10 CREDIT CARD PAYMENT 4111XXXXXXXX4821 1,500.00 DR',
+        '2026-08-11 CC PAYMENT 700.00 DR',
+      ]),
+    });
+    ok('statement: account-side card settlements are accepted', settlementPdf.status === 202);
+    const settlementRows = await drainOpened(env, cardDevice);
+    const settlementPlan = importOnPhone(settlementRows);
+    const { isSpending: spends } = require('./build/ledger');
+    ok('statement: a card settlement on an account statement never reaches spending',
+      settlementPlan.batch.transactions.length === 2 &&
+        settlementPlan.batch.transactions.every((t) => t.isTransfer === true && !spends(t)),
+      JSON.stringify(settlementPlan.batch.transactions.map((t) => [t.title, t.type, t.isTransfer, t.cardPaymentSide])));
+    ok('statement: the account-side settlement stays an outflow of the paying account',
+      settlementPlan.batch.transactions.some((t) => t.type === 'expense' && t.amountFils === 150000),
+      JSON.stringify(settlementPlan.batch.transactions));
 
     // Same helper, a different route: a forwarded statement EMAIL takes the
     // queueEmailRows path, which had the identical one-stamp-per-batch defect.
@@ -2258,6 +2317,62 @@ const CARD_PAYMENT_DEBIT =
       JSON.stringify(soonRows.map((row) => [row.date, row.receivedAt])));
     ok('statement: and those two are still distinct rows on the phone',
       importOnPhone(soonRows).batch.transactions.length === 2);
+
+    const overlapDevice = await pairDevice(env);
+    // Two overlapping statements of one card, rows printed in a different
+    // order. Each upload restarts its relay clock at midday, so the same row
+    // lands at different offsets in each; overlap must be matched on the day,
+    // the money and the direction instead.
+    const overlapA = await call(env, 'POST', '/v1/import/pdf', {
+      token: overlapDevice.adminToken, headers: { 'content-type': 'application/pdf' }, body: tinyPdf([
+        'Card Number: XXXX XXXX XXXX 3215',
+        '2026-06-02 SALIK TOLL GATE 4.00 DR',
+        '2026-06-02 CAFE NERO 20.00 DR',
+        '2026-06-03 ENOC 90.00 DR',
+      ]),
+    });
+    const rowsA = await drainOpened(env, overlapDevice);
+    ok('statement: every row of an upload carries the same opaque upload id, and no statement text',
+      overlapA.status === 202 && rowsA.length === 3 &&
+        rowsA.every((row) => /^[a-f0-9]{32}$/.test(row.statementImportId)) &&
+        new Set(rowsA.map((row) => row.statementImportId)).size === 1,
+      JSON.stringify(rowsA.map((row) => row.statementImportId)));
+    const planA = importOnPhone(rowsA);
+    const afterA = {
+      ...LEDGER,
+      transactions: planA.batch.transactions.map((t, index) => ({ id: `ov-${index}`, ...t })),
+      accounts: [...LEDGER.accounts, ...planA.batch.newAccounts.map((a, index) => ({ id: String(index), ...a }))],
+      accountHints: { ...planA.batch.hints },
+    };
+    const overlapB = await call(env, 'POST', '/v1/import/pdf', {
+      token: overlapDevice.adminToken, headers: { 'content-type': 'application/pdf' }, body: tinyPdf([
+        'Card Number: XXXX XXXX XXXX 3215',
+        '2026-06-02 CAFE NERO 20.00 DR',
+        '2026-06-02 SALIK TOLL GATE 4.00 DR',
+        '2026-06-03 ENOC 90.00 DR',
+        '2026-06-04 NEW GROCER 33.00 DR',
+      ]),
+    });
+    const rowsB = await drainOpened(env, overlapDevice);
+    const planB = importOnPhone(rowsB, afterA);
+    ok('statement: an overlapping statement in another order adds only the rows the first did not have',
+      overlapB.status === 202 && planA.batch.transactions.length === 3 &&
+        planB.batch.transactions.length === 1 && planB.batch.transactions[0].title === 'NEW GROCER',
+      JSON.stringify(planB.batch.transactions.map((t) => [t.date, t.title])));
+    ok('statement: a different file has its own upload id',
+      rowsB.every((row) => row.statementImportId !== rowsA[0].statementImportId));
+
+    // A row dated today used to be clamped to the relay's clock at upload, so
+    // the same statement uploaded twice got two different identities for it.
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayOnce = await call(env, 'POST', '/v1/import/pdf', {
+      token: overlapDevice.adminToken, headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf([`${todayIso} LULU TODAY 12.00 DR`]),
+    });
+    const todayRow = (await drainOpened(env, overlapDevice))[0];
+    ok('statement: a row dated today gets a deterministic clock at the start of its day, not now',
+      todayOnce.status === 202 && todayRow.receivedAt === `${todayIso}T00:00:00.000Z`,
+      todayRow?.receivedAt);
 
     // The whole point of a statement import is history, so a row dated last
     // year must keep last year's clock. A row dated in the FUTURE must not:

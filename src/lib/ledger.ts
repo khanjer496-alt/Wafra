@@ -87,8 +87,8 @@ export function countsInTotals(
  */
 export function countsInCashflowTotals(
   transaction: Transaction,
-  live?: Set<string>,
-  internal?: Set<string>,
+  live?: ReadonlySet<string>,
+  internal?: ReadonlySet<string>,
 ): boolean {
   if (transaction.accountId === UNASSIGNED_INCOME_ACCOUNT_ID && transaction.type !== 'income') return false;
   if (internal?.has(transaction.id)) return false;

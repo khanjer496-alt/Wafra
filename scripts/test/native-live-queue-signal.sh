@@ -8,6 +8,7 @@ swiftc -parse-as-library -emit-module -emit-object -module-name ExpoModulesCore 
   modules/wafra-live-capture/ios/Tests/ExpoModulesCoreStub.swift -o "$scratch/ExpoModulesCore.o"
 swiftc -I "$scratch" "$scratch/ExpoModulesCore.o" \
   modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift \
+  modules/wafra-live-capture/ios/WafraLiveCaptureResources.swift \
   modules/wafra-live-capture/ios/WafraLiveCaptureModule.swift \
   scripts/test/native-live-queue-signal.swift -o "$scratch/queue-signal-tests"
 "$scratch/queue-signal-tests"

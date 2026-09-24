@@ -4,6 +4,10 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const load = require('../repair/load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
+const progressApi = load(path.join(root, 'src/lib/ios-message-onboarding.ts'), {
+  '@react-native-async-storage/async-storage': {}, './ios-setup-journey': { futureSetupConfigured: () => false },
+  './ios-history-setup': { isIosHistoryShortcutInstalled: async () => false },
+});
 const walk = n => !n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(walk) : [n, ...walk(n.props?.children)];
 async function screen({ version = '27.0', capability = true, enabled = false, proof = null, received = null, entitled = true, bundled = false } = {}) {
   const slots = [], effects = [], urls = [], clipboard = [], shares = [], events = [], routes = [];
@@ -43,9 +47,10 @@ async function screen({ version = '27.0', capability = true, enabled = false, pr
     '@/constants/theme': { MaxContentWidth: 640, ScreenPadding: 24, Spacing: { two: 8, three: 12 } },
     '@/hooks/use-language': { useLanguage: () => 'en' }, '@/hooks/use-theme': { useTheme: () => ({ background: '#fff' }) },
     '@/lib/capture': { getIosCaptureNativeModule: () => native, subscribeIosCaptureStatusRefresh: () => () => {} },
-    '@/lib/alert-review-tray': { REVIEW_ALERT_CAP: 50, isIosNotificationReview: () => true },
+    '@/lib/alert-review-tray': { REVIEW_ALERT_CAP: 50, isIosNotificationReview: () => true, isCurrencyConflictReview: () => false },
     '@/lib/ios-capture-health': health, '@/lib/ios-capture-setup': setup, '@/lib/ios-notification-copy': copy,
-    '@/lib/ios-message-onboarding': { dispatchIosMessageSetup: async event => events.push(event), loadIosMessageSetupProgress: async () => ({ futureAutomationConfirmed: false }) },
+    '@/lib/ios-message-onboarding': { dispatchIosMessageSetup: async event => events.push(event), loadIosMessageSetupProgress: async () => ({ futureAutomationConfirmed: false }),
+      progressForSource: progressApi.progressForSource },
     '@/lib/store': { useStore: () => ({ state: { hydrated: true, onboarded: false }, getStateGeneration: () => generation,
       setCaptureOptOut: async value => events.push(`opt-out:${value}`) }) },
   }).default;

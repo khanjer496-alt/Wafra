@@ -140,17 +140,20 @@ function SpendScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpe
       </ThemedText>
     </Animated.View>
     <View style={[styles.metricRail, styles.pushBottom]}>
-      <Metric value={`${moneySpec.currency} ${formatMinorUnits(snapshot.totalIncomeFils, moneySpec)}`} label={w.income} delay={100} />
-      <Metric value={`${moneySpec.currency} ${snapshot.netFils < 0 ? '−' : ''}${formatMinorUnits(Math.abs(snapshot.netFils), moneySpec)}`} label={w.net} delay={160} />
+      <Metric currency={moneySpec.currency} value={formatMinorUnits(snapshot.totalIncomeFils, moneySpec)} label={w.income} delay={100} />
+      <Metric currency={moneySpec.currency} value={`${snapshot.netFils < 0 ? '−' : ''}${formatMinorUnits(Math.abs(snapshot.netFils), moneySpec)}`} label={w.net} delay={160} />
     </View>
   </View>;
 }
 
-function Metric({ value, label, delay = 0 }: { value: string; label: string; delay?: number }) {
+function Metric({ value, label, currency, delay = 0 }: { value: string; label: string; currency?: string; delay?: number }) {
   const enter = useRecapEntering();
-  return <Animated.View entering={enter(FadeInUp.delay(delay).duration(360))} style={styles.metric}>
-    <ThemedText style={[styles.metricValue, value.length > 15 && styles.metricValueTight]} tabular
-      numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{value}</ThemedText>
+  const { width, fontScale } = useWindowDimensions();
+  return <Animated.View entering={enter(FadeInUp.delay(delay).duration(360))}
+    accessible accessibilityLabel={`${label}. ${currency ? `${currency} ` : ''}${value}`}
+    style={[styles.metric, { minWidth: Math.min(140 * Math.max(fontScale, 1), width - Spacing.four * 2) }]}>
+    {currency ? <ThemedText type="meta" themeColor="textSecondary">{currency}</ThemedText> : null}
+    <ThemedText style={[styles.metricValue, value.length > 9 && styles.metricValueTight]} tabular>{value}</ThemedText>
     <ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>
   </Animated.View>;
 }
@@ -247,7 +250,7 @@ function AccountScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneyS
     </Animated.View>
     <View style={[styles.metricRail, styles.pushBottom]}>
       <Metric value={String(row.count)} label={`${w.used} · ${w.visits}`} delay={100} />
-      <Metric value={`${moneySpec.currency} ${formatMinorUnits(row.spendFils, moneySpec)}`} label={w.spent.toLowerCase()} delay={160} />
+      <Metric currency={moneySpec.currency} value={formatMinorUnits(row.spendFils, moneySpec)} label={w.spent.toLowerCase()} delay={160} />
     </View>
   </View>;
 }
@@ -354,8 +357,8 @@ function FinaleScene({ snapshot, moneySpec, onDone }: { snapshot: RecapSnapshot;
 }
 
 function FinalFact({ label, value }: { label: string; value: string }) {
-  return <View style={styles.finalFact}><ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText><ThemedText type="smallBold" tabular
-    numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{value}</ThemedText></View>;
+  return <View style={styles.finalFact}><ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>
+    <ThemedText type="smallBold" tabular style={styles.finalValue}>{value}</ThemedText></View>;
 }
 
 export function RecapStory({ snapshot, moneySpec, onClose }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec; onClose: () => void }) {
@@ -476,7 +479,7 @@ const styles = StyleSheet.create({
   heroAmountMedium: { fontSize: 47, lineHeight: 53, letterSpacing: -1.15 },
   heroAmountTight: { fontSize: 41, lineHeight: 47, letterSpacing: -0.9 },
   changeChip: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', minHeight: 34, paddingHorizontal: 10, borderRadius: Radius.chip },
-  metricRail: { flexDirection: 'row', gap: Spacing.four },
+  metricRail: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.four },
   metric: { minWidth: 0, flex: 1, gap: 6 },
   metricValue: { fontFamily: Fonts.monoSemi, fontSize: 27, lineHeight: 33, letterSpacing: -0.5 },
   metricValueTight: { fontSize: 23, lineHeight: 29, letterSpacing: -0.35 },
@@ -512,7 +515,8 @@ const styles = StyleSheet.create({
   yearBarTrack: { height: 154, alignSelf: 'stretch', justifyContent: 'flex-end', alignItems: 'center' },
   yearBar: { width: '68%', maxWidth: 18, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
   finalBoard: { borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: 4 },
-  finalFact: { minHeight: 58, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  finalFact: { minHeight: 58, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 8 },
+  finalValue: { flexShrink: 1, textAlign: 'right' },
   rule: { height: StyleSheet.hairlineWidth, width: '100%' },
   doneButton: { minHeight: 52, borderRadius: Radius.control, alignItems: 'center', justifyContent: 'center', marginTop: Spacing.three },
   ledgerMargin: { position: 'absolute', top: 0, bottom: 0, left: 9, width: StyleSheet.hairlineWidth, opacity: 0.12 },

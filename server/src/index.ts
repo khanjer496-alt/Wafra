@@ -943,8 +943,9 @@ function withoutRaw(parsed: NonNullable<ReturnType<typeof parseSms>>): Record<st
  *    midnight UTC lands on the previous calendar day for any device west of
  *    Greenwich, and there is no reason to leave that edge lying around.
  *
- * 3. A date at or after NOW is clamped to now, for the same reason
- *    resolveReceivedAt bounds the Shortcut's clock: `smsTs` feeds the callers'
+ * 3. A date that is today or later (UTC) is stamped at the START of the
+ *    relay's current UTC day, for the same reason resolveReceivedAt bounds
+ *    the Shortcut's clock: `smsTs` feeds the callers'
  *    `newestTs`, which becomes `lastScanTs`, and capture.ts starts the next SMS
  *    inbox scan at `lastScanTs + 1`. A message is only ever offered once, so
  *    every SMS arriving before that watermark is skipped for good. This is not
@@ -954,7 +955,14 @@ function withoutRaw(parsed: NonNullable<ReturnType<typeof parseSms>>): Record<st
  *    `Math.max(..., state.lastScanTs)`, and a statement import is historical by
  *    definition. Taken together with note 1's direction, the invariant this
  *    function guarantees is simply: no row is ever stamped ahead of the relay's
- *    own clock.
+ *    own clock. It used to be `now` itself, which made the same statement
+ *    uploaded twice give its today-dated rows two different identities; the
+ *    start of the day is just as safe and the same for every upload that day.
+ *
+ * Overlap between two uploads no longer rests on this clock at all: each
+ * upload carries its own opaque `statementImportId`, and src/lib/dedupe.ts
+ * matches rows of different uploads one-to-one by day, amount, direction and
+ * account, whatever offsets each file's row order produced here.
  *
  * A row with no usable date falls back to a monotonic offset from now. Nothing
  * reaches that branch today — parseStatementText refuses a row whose date it
@@ -968,13 +976,33 @@ function withoutRaw(parsed: NonNullable<ReturnType<typeof parseSms>>): Record<st
 /** Must exceed SAME_EVENT_MS in src/lib/dedupe.ts; see note 1 above. */
 const ROW_RECEIPT_SEPARATION_MS = 121_000;
 
+/**
+ * One id per statement FILE, stamped on each of its rows: the phone uses it
+ * only to tell "two rows of one statement" (a genuine repeat) from "the same
+ * row in two overlapping statements" (a duplicate). Derived from the upload's
+ * device-keyed replay fingerprint, so it reveals nothing about the file and is
+ * the same when the same file is sent again — a re-upload that finishes a
+ * partially queued file is then one statement, matched by exact row identity,
+ * not a second statement whose genuine repeats would pair with the first's.
+ * 32 lowercase hex characters.
+ */
+async function statementImportIdFor(baseKey: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest(
+    'SHA-256', new TextEncoder().encode(`statement-file:${baseKey}`),
+  ));
+  return [...digest.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+const DAY_MS = 86_400_000;
+
 function rowReceiptTimes(rows: { date?: string | null }[], nowMs: number): string[] {
   const used = new Set<number>();
+  const todayStart = Math.floor(nowMs / DAY_MS) * DAY_MS;
   return rows.map((row, index) => {
-    const dated = typeof row.date === 'string' ? Date.parse(`${row.date}T12:00:00.000Z`) : NaN;
+    const day = typeof row.date === 'string' ? Date.parse(`${row.date}T00:00:00.000Z`) : NaN;
     // Clamped, not refused: a row dated today is ordinary and must keep its
     // place in the batch, it just may not carry a clock ahead of this relay's.
-    let ms = Number.isFinite(dated) ? Math.min(dated, nowMs) : nowMs - index;
+    let ms = Number.isFinite(day) ? (day < todayStart ? day + DAY_MS / 2 : todayStart) : nowMs - index;
     while (used.has(ms)) ms -= ROW_RECEIPT_SEPARATION_MS;
     used.add(ms);
     return new Date(ms).toISOString();
@@ -2034,6 +2062,17 @@ export default {
       }
       if (extracted.pages > MAX_PDF_PAGES) return json({ error: 'too_many_pages' }, 413);
       if (extracted.rows.length === 0) {
+        // A card statement whose rows carry only a bare minus, and which never
+        // says whether that minus is a payment or a charge. Say so, rather
+        // than the generic "no explicit direction" refusal.
+        if (extracted.ambiguousCardSignRows > 0) {
+          return json({ error: 'ambiguous_card_signs' }, 422);
+        }
+        // Every date could be day/month or month/day and the ledger's market
+        // does not settle it: refused by name rather than guessed.
+        if (extracted.ambiguousDateRows > 0) {
+          return json({ error: 'ambiguous_dates' }, 422);
+        }
         return json({
           error: 'unsupported_statement_format',
           requirement: 'text_pdf_with_explicit_debit_credit_rows',
@@ -2043,6 +2082,7 @@ export default {
       const baseKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
+      const statementImportId = await statementImportIdFor(baseKey);
       const targets = await supplementalQueueTargets(env, device);
       if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
         return json({ error: 'rate_limited' }, 429);
@@ -2050,7 +2090,9 @@ export default {
       const wake = await queueSupplementalRows(
         env, device,
         extracted.rows.map((_, index) => ({
-          row: { ...withoutRaw(extracted.rows[index]), captureSource: 'pdf', receivedAt: receivedAt[index] },
+          row: {
+            ...withoutRaw(extracted.rows[index]), captureSource: 'pdf', receivedAt: receivedAt[index], statementImportId,
+          },
           replayKey: `${baseKey}:${index}`, receiptTtlSeconds: 72 * 60 * 60,
         })),
         targets,
@@ -2059,6 +2101,11 @@ export default {
       if (wake.size === 0 && await queueIsFull(env, device.id)) {
         return json({ error: 'queue_full' }, 429);
       }
+      // Nothing new queued and the queue has room: every row already carried
+      // this upload's replay receipt, i.e. this exact file was processed in
+      // the last 72 hours. Say that, rather than let the phone report
+      // "already in your ledger" about rows it has not looked at.
+      const alreadyProcessed = wake.size === 0;
       // rejectedRows is a count of date-led money lines the parser would not
       // read: without it a statement that half-imported looked, on the phone,
       // like it had imported completely. Counts and coverage only, never rows.
@@ -2067,6 +2114,8 @@ export default {
         rejectedRows: extracted.rejectedRows,
         totalRows: extracted.totalRows,
         pages: extracted.pages,
+        cardSignRowsSkipped: extracted.ambiguousCardSignRows,
+        alreadyProcessed,
         // Coverage means "this range is fully represented locally". Never
         // claim it when the parser explicitly counted rows it refused.
         coverage: extracted.completeRowAccounting && extracted.rejectedRows === 0
@@ -2107,6 +2156,12 @@ export default {
         return json({ error: 'invalid_csv' }, 400);
       }
       if (parsed.rows.length === 0) {
+        if (parsed.ambiguousCardSignRows > 0) {
+          return json({ error: 'ambiguous_card_signs' }, 422);
+        }
+        if (parsed.ambiguousDateRows > 0) {
+          return json({ error: 'ambiguous_dates' }, 422);
+        }
         return json({
           error: 'unsupported_statement_format',
           requirement: 'named_columns_with_explicit_debit_credit_direction',
@@ -2116,6 +2171,7 @@ export default {
       const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
       const baseKey = await keyedFingerprint(device.requestSecret, `csv:${digest}`);
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
+      const statementImportId = await statementImportIdFor(baseKey);
       const targets = await supplementalQueueTargets(env, device);
       if (!(await reserveSupplementalDeliveries(env, device.id, parsed.rows.length, targets.length))) {
         return json({ error: 'rate_limited' }, 429);
@@ -2123,7 +2179,7 @@ export default {
       const wake = await queueSupplementalRows(
         env, device,
         parsed.rows.map((row, index) => ({
-          row: { ...withoutRaw(row), captureSource: 'csv', receivedAt: receivedAt[index] },
+          row: { ...withoutRaw(row), captureSource: 'csv', receivedAt: receivedAt[index], statementImportId },
           replayKey: `${baseKey}:${index}`, receiptTtlSeconds: 72 * 60 * 60,
         })),
         targets,
@@ -2132,10 +2188,17 @@ export default {
       if (wake.size === 0 && await queueIsFull(env, device.id)) {
         return json({ error: 'queue_full' }, 429);
       }
+      // Nothing new queued and the queue has room: every row already carried
+      // this upload's replay receipt, i.e. this exact file was processed in
+      // the last 72 hours. Say that, rather than let the phone report
+      // "already in your ledger" about rows it has not looked at.
+      const alreadyProcessed = wake.size === 0;
       return json({
         acceptedRows: parsed.rows.length,
         rejectedRows: parsed.rejectedRows,
         totalRows: parsed.totalRows,
+        cardSignRowsSkipped: parsed.ambiguousCardSignRows,
+        alreadyProcessed,
         coverage: parsed.rejectedRows === 0 ? statementCoverage(parsed.rows) : null,
       }, 202);
     }
@@ -2625,6 +2688,7 @@ export default {
       );
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
+      const statementImportId = await statementImportIdFor(baseKey);
       for (let rowIndex = 0; rowIndex < extracted.rows.length; rowIndex++) {
         const inserted = await queueStructuredRow(
           env,
@@ -2633,6 +2697,7 @@ export default {
             ...withoutRaw(extracted.rows[rowIndex]),
             captureSource: 'pdf',
             receivedAt: receivedAt[rowIndex],
+            statementImportId,
           },
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,
@@ -2676,6 +2741,7 @@ export default {
         `mime-csv:${messageId}:${attachmentIndex}:${digest}`,
       );
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
+      const statementImportId = await statementImportIdFor(baseKey);
       for (let rowIndex = 0; rowIndex < parsed.rows.length; rowIndex++) {
         const inserted = await queueStructuredRow(
           env,
@@ -2684,6 +2750,7 @@ export default {
             ...withoutRaw(parsed.rows[rowIndex]),
             captureSource: 'csv',
             receivedAt: receivedAt[rowIndex],
+            statementImportId,
           },
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,

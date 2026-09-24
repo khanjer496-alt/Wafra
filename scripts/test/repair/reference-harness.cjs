@@ -122,6 +122,8 @@ function createHarness(options = {}) {
   deps['@noble/hashes/sha2.js'] = require('@noble/hashes/sha2.js');
   deps['@noble/hashes/utils.js'] = require('@noble/hashes/utils.js');
   local('@/lib/transfer-reconciliation','src/lib/transfer-reconciliation.ts');
+  local('@/lib/transfer-activity','src/lib/transfer-activity.ts');
+  local('@/lib/transfer-activity-copy','src/lib/transfer-activity-copy.ts');
   local('@/lib/transfer-review-copy','src/lib/transfer-review-copy.ts');
   local('@/lib/ledger','src/lib/ledger.ts');local('@/lib/splits','src/lib/splits.ts');local('@/lib/balances','src/lib/balances.ts');local('@/lib/categories','src/lib/categories.ts');
   local('@/lib/bill-alias','src/lib/bill-alias.ts');

@@ -15,7 +15,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { shortDate, toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { t, tf, type StringKey } from '@/lib/i18n';
-import { isIosNotificationReview, isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
+import { isIosApplePayReview, isIosNotificationReview, isUniversalReviewAlert, recentlyExpiredReviewCount, recentlyLostReviewCount, reviewCaptureBacklog, reviewExpiresInDays, reviewTrayCapacity, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { isOrdinaryUniversalPosting, universalMoneyLabel } from '@/components/universal-review-fields';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
 import type { UniversalField, UniversalMoney } from '@/lib/universal-types';
@@ -68,6 +68,12 @@ function instrumentLabel(item: ReviewAlert): string | null {
   return tf(key, { last4: instrument.last4 });
 }
 
+function ExpiryNotice({ item }: { item: ReviewEntry }) {
+  const days = reviewExpiresInDays(item, Date.now());
+  if (days === null) return null;
+  return <ThemedText testID="review-alert-expiry" type="meta" themeColor="warning">{tf('reviewAlertExpiresIn', { count: days })}</ThemedText>;
+}
+
 function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
   item: UniversalReviewAlert; busy: boolean; onAdd: () => void; onDismiss: () => void;
 }) {
@@ -95,9 +101,13 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
   return (
     <View testID="review-alert-row" style={[styles.alertRow, { borderColor: theme.cardBorder }]}>
       <View style={styles.alertCopy}>
+        {isIosApplePayReview(item) && <ThemedText type="meta" themeColor="textSecondary">Apple Pay</ThemedText>}
         {isIosNotificationReview(item) && <ThemedText type="meta" themeColor="textSecondary">{t('reviewAlertNotificationSource')}</ThemedText>}
         {item.attentionReason === 'possible-notification-replay' && (
           <ThemedText type="smallBold" themeColor="warning">{t('reviewAlertPossibleNotificationReplay')}</ThemedText>
+        )}
+        {item.attentionReason === 'possible-apple-pay-duplicate' && (
+          <ThemedText testID="review-alert-apple-pay-duplicate" type="smallBold" themeColor="warning">{t('reviewAlertPossibleApplePayDuplicate')}</ThemedText>
         )}
         <ThemedText type="smallBold">{t(key)}</ThemedText>
         {event.merchant.evidence === 'explicit' ? <ThemedText type="small">{event.merchant.value}</ThemedText> : null}
@@ -105,6 +115,7 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
         <ThemedText type="title" tabular>{amount}</ThemedText>
         {informational ? <ThemedText type="meta" themeColor="textSecondary">{words.informationHint}</ThemedText> : null}
         <ThemedText type="meta" themeColor="textSecondary">{t('genericUnverifiedIssuer')} · {shortDate(toISODate(new Date(item.observedAt)))}</ThemedText>
+        <ExpiryNotice item={item} />
         {advisory ? <View testID="review-local-ai-advisory" accessibilityLiveRegion="polite" style={{ gap: Spacing.half }}>
           <ThemedText type="small" themeColor="textSecondary">
             {advisory.kind === 'parser-family-advisory'
@@ -158,7 +169,11 @@ function AlertRow({
         <Icon name={family.icon} size={18} color={theme.warning} />
       </View>
       <View style={styles.alertCopy}>
+        {isIosApplePayReview(item) && <ThemedText type="meta" themeColor="textSecondary">Apple Pay</ThemedText>}
         {isIosNotificationReview(item) && <ThemedText type="meta" themeColor="textSecondary">{t('reviewAlertNotificationSource')}</ThemedText>}
+        {item.attentionReason === 'possible-apple-pay-duplicate' && (
+          <ThemedText testID="review-alert-apple-pay-duplicate" type="smallBold" themeColor="warning">{t('reviewAlertPossibleApplePayDuplicate')}</ThemedText>
+        )}
         <ThemedText type="smallBold">{t(family.label)}</ThemedText>
         <ThemedText type="title" tabular style={styles.amount}>
           {amount}
@@ -169,6 +184,7 @@ function AlertRow({
         <ThemedText type="meta" themeColor="textTertiary">
           {[instrument, date].filter(Boolean).join(' · ')}
         </ThemedText>
+        <ExpiryNotice item={item} />
       </View>
       </View>
       <View style={styles.rowActions}>
@@ -232,6 +248,37 @@ export default function ReviewAlertsScreen() {
     [state.reviewTray.pending, now],
   );
 
+  // Deferred native records stay queued; the banner only explains the wait
+  // while a Review lane is actually full, and clears once there is room.
+  const backlog = useSyncExternalStore(reviewCaptureBacklog.subscribe,
+    reviewCaptureBacklog.get, reviewCaptureBacklog.get);
+  const capacity = reviewTrayCapacity(state.reviewTray, now);
+  const waiting = capacity.protectedFull || capacity.legacyFull ? backlog.waiting : 0;
+  const expired = recentlyExpiredReviewCount(state.reviewTray, now);
+  // Durable, source-free counts of money reviews a full lane could not keep.
+  const evicted = recentlyLostReviewCount(state.reviewTray, now, 'evicted');
+  const currencyEvicted = recentlyLostReviewCount(state.reviewTray, now, 'currency-evicted');
+  const notices = waiting > 0 || expired > 0 || evicted > 0 || currencyEvicted > 0 ||
+    backlog.currencyConflicts > 0 ? (
+    <View style={styles.notices} testID="review-alerts-notices" accessibilityLiveRegion="polite">
+      {waiting > 0 ? <ThemedText testID="review-alerts-full" type="smallBold" themeColor="warning">
+        {tf('reviewAlertsFullWaiting', { count: waiting })}
+      </ThemedText> : null}
+      {expired > 0 ? <ThemedText testID="review-alerts-expired" type="small" themeColor="textSecondary">
+        {tf('reviewAlertsExpiredCount', { count: expired })}
+      </ThemedText> : null}
+      {evicted > 0 ? <ThemedText testID="review-alerts-evicted" type="small" themeColor="textSecondary">
+        {tf('reviewAlertsEvictedCount', { count: evicted })}
+      </ThemedText> : null}
+      {currencyEvicted > 0 ? <ThemedText testID="review-alerts-currency-evicted" type="small" themeColor="textSecondary">
+        {tf('reviewAlertsCurrencyEvictedCount', { count: currencyEvicted })}
+      </ThemedText> : null}
+      {backlog.currencyConflicts > 0 ? <ThemedText testID="review-alerts-currency" type="small" themeColor="textSecondary">
+        {tf('reviewAlertsCurrencySkipped', { count: backlog.currencyConflicts })}
+      </ThemedText> : null}
+    </View>
+  ) : null;
+
   const dismiss = async (item: ReviewEntry) => {
     setBusyId(item.id);
     try {
@@ -264,11 +311,16 @@ export default function ReviewAlertsScreen() {
           contentInset={listInsets.contentInset}
           scrollIndicatorInsets={listInsets.scrollIndicatorInsets}
           contentInsetAdjustmentBehavior="automatic"
-          ListHeaderComponent={pending.length > 0 ? (
-            <View style={styles.intro} testID="review-alerts-intro">
-              <ThemedText type="smallBold" accessibilityLiveRegion="polite">{tf('reviewAlertsSettingsCount', { count: pending.length })}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">{words.reviewBody}</ThemedText>
-            </View>
+          ListHeaderComponent={pending.length > 0 || notices ? (
+            <>
+              {notices}
+              {pending.length > 0 ? (
+                <View style={styles.intro} testID="review-alerts-intro">
+                  <ThemedText type="smallBold" accessibilityLiveRegion="polite">{tf('reviewAlertsSettingsCount', { count: pending.length })}</ThemedText>
+                  <ThemedText type="small" themeColor="textSecondary">{words.reviewBody}</ThemedText>
+                </View>
+              ) : null}
+            </>
           ) : null}
           ListFooterComponent={<ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopy}>{t('reviewAlertsPrivacy')}</ThemedText>}
           ListEmptyComponent={
@@ -311,6 +363,7 @@ export default function ReviewAlertsScreen() {
 const styles = StyleSheet.create({
   emptyContent: { flexGrow: 1 },
   intro: { gap: Spacing.two, paddingBottom: Spacing.three },
+  notices: { gap: Spacing.two, paddingBottom: Spacing.three },
   privacyCopy: { paddingVertical: Spacing.three },
   alertRow: {
     minHeight: 112,

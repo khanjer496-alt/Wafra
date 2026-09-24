@@ -12,10 +12,10 @@ import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { getIosCaptureNativeModule, subscribeIosCaptureStatusRefresh } from '@/lib/capture';
-import { REVIEW_ALERT_CAP, isIosNotificationReview } from '@/lib/alert-review-tray';
+import { REVIEW_ALERT_CAP, isCurrencyConflictReview, isIosNotificationReview } from '@/lib/alert-review-tray';
 import { formatCaptureReceipt, isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { iosSupportsNotificationAutomation, resolveIosNotificationReadiness } from '@/lib/ios-capture-setup';
-import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
+import { dispatchIosMessageSetup, loadIosMessageSetupProgress, progressForSource } from '@/lib/ios-message-onboarding';
 import { IOS_NOTIFICATION_SETUP_TEXT, iosNotificationCopy, iosNotificationCheckUrl } from '@/lib/ios-notification-copy';
 import { useStore } from '@/lib/store';
 
@@ -57,7 +57,7 @@ export default function IosNotificationSetup() {
       if (current()) {
         setAvailable(true); setStatus(next); setError(null);
         setBundled(typeof native.getNotificationShortcutURL === 'function');
-        setConfirmed(progress.futureCaptureSource === 'notification' && progress.futureAutomationConfirmed);
+        setConfirmed(progressForSource(progress, 'notification').futureAutomationConfirmed);
       }
     } catch { if (current()) { setStatus(null); setAvailable(false); setError(w.error); } }
     finally { if (current()) setLoading(false); }
@@ -91,7 +91,6 @@ export default function IosNotificationSetup() {
     if (!current()) return;
     await native.setCaptureEnabled(true);
     if (!current()) return;
-    await dispatchIosMessageSetup({ type: 'future-source-changed', source: 'notification' });
     const next = await native.getCaptureStatus();
     if (current()) { setStatus(next); setAvailable(true); }
   });
@@ -102,9 +101,9 @@ export default function IosNotificationSetup() {
     if (!current()) return;
     setStatus(next);
     if (resolveIosNotificationReadiness(next) === 'not-added') { setError(w.waitingCheck); return; }
-    await dispatchIosMessageSetup({ type: 'future-source-changed', source: 'notification' });
-    if (!current()) return;
-    await dispatchIosMessageSetup({ type: 'future-automation-confirmed' });
+    // Only a confirmed automation switches the recorded source; the previous
+    // source's progress is parked, not erased.
+    await dispatchIosMessageSetup({ type: 'future-automation-confirmed', source: 'notification', at: Date.now() });
     if (current()) { setConfirmed(true); back(); }
   });
   const open = () => void run(async current => {
@@ -145,7 +144,7 @@ export default function IosNotificationSetup() {
         {!supported ? <ThemedText>{w.unsupported}</ThemedText> : !available ? <ThemedText>{loading ? w.checking : error ?? w.update}</ThemedText> : <>
           <ThemedText>{w.intro}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">{w.noBankQuestion}</ThemedText>
-          {(state.reviewTray?.pending.filter(isIosNotificationReview).length ?? 0) >= REVIEW_ALERT_CAP && <>
+          {(state.reviewTray?.pending.filter((item) => isIosNotificationReview(item) && !isCurrencyConflictReview(item)).length ?? 0) >= REVIEW_ALERT_CAP && <>
             <ThemedText accessibilityRole="alert">{onboarding ? w.reviewFullOnboarding : w.reviewFull}</ThemedText>
             {!onboarding && <Button label={w.reviewAction} onPress={() => router.push('/review-alerts')} disabled={busy} wrapLabel />}
           </>}
