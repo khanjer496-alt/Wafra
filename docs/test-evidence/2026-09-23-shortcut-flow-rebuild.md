@@ -31,3 +31,13 @@ Signing evidence is local under `ios-release-evidence/shortcut-rebuild-20260923/
 The phone was paired and visible to CoreDevice, but iPhone Mirroring could not connect. No physical execution of the replacement Shortcuts is claimed. Typed fallback distinguishes column representation problems from a persistent Apple query/date disagreement; it is not a promise that every inbox will complete. Saved pages still have the existing 24-hour lifetime.
 
 Apple Pay/Wallet-specific capture is not implemented by this rebuild. Build 160's general iOS 27 notification receiver remains separate from a dedicated Wallet Transaction-trigger adapter.
+
+## 2026-09-24 update: Capture v3 Message fields
+
+Superseding the Capture v3 notes above. On iOS 26.1 the automation's Message input exposes Content and Sender (no Date, GUID not listed) and Find Messages rows expose Body, GUID and date (no Content or Sender).
+
+- Capture v3 (36 actions, re-signed `anyone`, 25515 bytes, SHA-256 `d812d2d0…6796`) stages the live Message with SHA-256(GUID) and the Message date only when both have a value; otherwise it stages Sender and Content without an identity and the app assigns a queue UUID and the receipt time. Empty Content stops quietly.
+- Capture v3 has no Find Messages lane: a no-input run records the v3 setup proof and stops. Explicit History import is the recovery path, and the app no longer opens either Capture Shortcut's no-input lane on refresh.
+- `StageWafraLiveMessageIntent` now takes four optional parameters. Published v2 remains byte-identical, but on this binary its complete, current inputs stage as before, its empty-GUID/no-date live input stages a UUID row instead of failing, and its no-input rows (blank Content) are ignored instead of stopping the run.
+- Queue-UUID Message rows carry no history identity, so the ledger's same-event rule pairs them with the History import copy of the same Message.
+- Not proven on a physical iPhone: whether Shortcuts passes the omitted/empty optional parameters as nil, and whether "has any value" on the Message input's GUID/date properties evaluates false as the trace assumes.

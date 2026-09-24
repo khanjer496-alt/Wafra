@@ -1389,9 +1389,11 @@ struct WafraBankSenderRegistryTests {
       parsed.kind === 'parsed' && !Object.hasOwn(parsed.row, 'raw') &&
         !Object.hasOwn(parsed.row, 'sender') && !JSON.stringify(parsed).includes(AE_BODY),
       JSON.stringify(parsed));
-    ok('local parser carries the stable native identity into planning',
-      parsed.kind === 'parsed' &&
-        parsed.row.sourceEventId === parsedId,
+    // A queue UUID names one observation, not a retained Apple Message: it
+    // carries no history identity, so the ledger's same-event rule can pair it
+    // with the History import copy (SHA-256(GUID)) of the same Message.
+    ok('local parser gives a queue-UUID Message row no history identity',
+      parsed.kind === 'parsed' && !Object.hasOwn(parsed.row, 'sourceEventId'),
       JSON.stringify(parsed));
     ok('local sender attribution agrees with the exact registry bank identity',
       parsed.kind === 'parsed' && parsed.row.bankHint === 'Emirates NBD', JSON.stringify(parsed));
@@ -2003,16 +2005,18 @@ struct WafraBankSenderRegistryTests {
     {
       const firstId = nextId();
       const secondId = nextId();
-      const first = envelope({ id: firstId });
-      const second = envelope({ id: secondId });
+      const firstAt = '2026-08-25T11:00:00.000Z';
+      const secondAt = '2026-08-25T11:05:00.000Z';
+      const first = envelope({ id: firstId, observedAt: firstAt });
+      const second = envelope({ id: secondId, observedAt: secondAt });
       const native = nativeQueue([first, second]);
       const ledger = ledgerAdapter();
       const outcome = await coordinator(native, ledger).drain();
       const smsKeys = new Set(ledger.getState().transactions.map((row) => row.smsKey));
-      ok('distinct local UUIDs with the same financial semantics remain distinct events',
+      ok('queue-UUID purchases minutes apart remain distinct events under live-row keys',
         ledger.getState().transactions.length === 2 && outcome.scanned === 2 &&
           outcome.imported === 2 && smsKeys.size === 2 &&
-          smsKeys.has(`h${firstId}`) && smsKeys.has(`h${secondId}`),
+          smsKeys.has(`s${Date.parse(firstAt)}-12000`) && smsKeys.has(`s${Date.parse(secondAt)}-12000`),
         JSON.stringify({ state: ledger.getState(), outcome }));
       eq('acknowledgement names the exact page snapshot IDs', native.acknowledged, [firstId, secondId]);
     }

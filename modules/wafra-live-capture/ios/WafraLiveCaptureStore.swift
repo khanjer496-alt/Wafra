@@ -278,7 +278,7 @@ public final class WafraLiveCaptureStore {
       // Do not reject this ID in manifest validation: older queues may contain it.
       // Only new admission must refuse the digest of a missing Message GUID.
       guard
-        eventId != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        eventId != Self.missingMessageIdentifier,
         let id = canonicalEventId(eventId),
         validAdmissionDate(observedAt, now: receiptTime),
         validSender(sender),
@@ -364,6 +364,62 @@ public final class WafraLiveCaptureStore {
     // A missed/coalesced notification is harmless: launch/resume rereads disk.
     if newlyQueued { queueDidChange() }
     return result
+  }
+
+  /// Sender recorded when the automation exposes none. It names no bank, so the
+  /// shared parser falls back to the one bank the body names (the same contract
+  /// the plain-text automation fallback already uses).
+  public static let automationSender = "Wafra Automation"
+  /// SHA-256 of the empty string: what hashing an absent Message GUID produces.
+  public static let missingMessageIdentifier =
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+  /// Message staging for the Capture Shortcuts' Message automation, where Apple
+  /// may withhold fields. On iOS 26.1 the automation's Message input exposes
+  /// Content and Sender but no Date, and GUID is not listed. Nothing Apple
+  /// withholds may turn a real alert into a failed run:
+  /// - an absent or blank body has nothing to parse and is ignored;
+  /// - an absent or blank sender is recorded as `automationSender`;
+  /// - a supplied date older than `recordTTL` is ignored rather than refused;
+  /// - SHA-256(GUID) is kept only together with the Message's own date, so a
+  ///   replay is byte-identical and idempotent (replays stay exact-byte: a
+  ///   differing replay is still `.invalid`). Without a usable GUID hash a
+  ///   fresh UUID identifies this one queue observation, dated by the supplied
+  ///   Message date when there is one, otherwise by the receipt time. The JS
+  ///   parser gives such a UUID row no history identity (`sourceEventId`), so
+  ///   the ledger keys it `s{time}-{amount}` and its same-event rule can merge
+  ///   it with the History import copy of the same Message;
+  /// - a future date beyond `maxFutureSkew` or a malformed hash stays `.invalid`.
+  /// Fully supplied, current values stage exactly as `stage` does, which keeps
+  /// the published Capture v2 graph's successful inputs unchanged.
+  public func stageAutomationMessage(
+    sender: String?,
+    body: String?,
+    eventId: String?,
+    observedAt: Date?
+  ) throws -> WafraLiveStageResult {
+    guard let body, !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      return .ignored
+    }
+    if let observedAt {
+      let age = clock().timeIntervalSince1970 - observedAt.timeIntervalSince1970
+      if age.isFinite, age > Self.recordTTL { return .ignored }
+    }
+    let resolvedSender: String
+    if let sender, !sender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      resolvedSender = sender
+    } else {
+      resolvedSender = Self.automationSender
+    }
+    if let eventId, !eventId.isEmpty, eventId != Self.missingMessageIdentifier, let observedAt {
+      return try stage(sender: resolvedSender, body: body, eventId: eventId, observedAt: observedAt)
+    }
+    return try stage(
+      sender: resolvedSender,
+      body: body,
+      eventId: UUID().uuidString,
+      observedAt: observedAt ?? clock()
+    )
   }
 
   /// Shortcuts supplies notification text explicitly. No notification access is requested here.

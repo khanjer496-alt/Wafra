@@ -9,9 +9,9 @@ const root = path.resolve(__dirname, '../../..');
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const candidates = [
   { name: 'Wafra Capture v3', generator: 'scripts/build-ios-local-capture-shortcut.mjs',
-    build: 'buildLocalCaptureV3Shortcut', verify: 'verifyLocalCaptureV3ShortcutGraph', actions: 37,
-    graphHash: '5f7d5678efe92f44edc0a50e253b79a22df4b0115cf5eefc80e2834edbac730d',
-    bytes: 26756, signedHash: '450496ea555d50b11740ea33c9325c3c1fd597ad7e12a50d7f10100649c9fa9f' },
+    build: 'buildLocalCaptureV3Shortcut', verify: 'verifyLocalCaptureV3ShortcutGraph', actions: 36,
+    graphHash: 'c1dfcbe3ed41c963e9e42e959d2c17ae55de92d1ff2c48ca50394b3ec6433f5b',
+    bytes: 25515, signedHash: 'd812d2d01aa92582646d7062ce1911d5e47d921a8a4cfb2d3e3aefb0e97c6796' },
   { name: 'Wafra History v8', generator: 'scripts/build-ios-paged-history-shortcut.mjs',
     build: 'buildRecoveryHistoryShortcut', verify: 'verifyRecoveryHistoryShortcut', actions: 207,
     graphHash: 'eb959ecfd89e22820647fe81ed584b4d26a16d0df395dc5be4e38dfd0d2cb63e',
