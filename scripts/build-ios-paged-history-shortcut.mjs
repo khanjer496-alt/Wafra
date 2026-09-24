@@ -339,9 +339,22 @@ function buildPagedGraph({ columnar, rows = false, windowed = false, overlapProb
       const typedResult = emit('is.workflow.actions.detect.dictionary', { WFInput: attachment(variable('Request')) });
       const typedStatus = get('status', output(typedResult, 'Dictionary'));
       condition(output(typedStatus), 'blocked', () => {
-        alert('History needs attention', 'This page could not be verified even after retrying its dates. Your saved pages are still safe. Return to Wafra for recovery options.');
-        open('wafra://ios-paging-beta?blocked=1&reason=page-validation');
-        stop();
+        // Only a genuine date/overlap refusal of this page is a page-validation
+        // block. This commit is also reached from framing fallbacks and can
+        // refuse for authorization, a stale request, capacity, corrupt staging
+        // or a device interruption (the phone locked mid-run): those keep the
+        // blocked Request and leave through the loop's ordinary paused route,
+        // so Wafra still offers Resume.
+        const typedReason = get('reason', output(typedResult, 'Dictionary'));
+        set('Page Verdict', literal('paused'));
+        for (const needle of ['wrong-date-range', 'missing-overlap', 'invalid-input-date']) {
+          conditionContains(output(typedReason), needle, () => { set('Page Verdict', literal('dates')); });
+        }
+        condition(variable('Page Verdict'), 'dates', () => {
+          alert('History needs attention', 'This page could not be verified even after retrying its dates. Your saved pages are still safe. Return to Wafra for recovery options.');
+          open('wafra://ios-paging-beta?blocked=1&reason=page-validation');
+          stop();
+        });
       });
     }
     if (columnar) emit('is.workflow.actions.conditional', { GroupingIdentifier: rowsGroup, WFControlFlowMode: 2 });

@@ -107,6 +107,45 @@ test('a persistent typed-page refusal exits once to source-free recovery instead
   assert.deepEqual(result.urls, ['wafra://ios-paging-beta?blocked=1&reason=page-validation']);
 });
 
+test('only a genuine date or overlap refusal of the typed commit opens the page-validation block', () => {
+  const graph = buildRecoveryHistoryShortcut();
+  for (const [columnReason, commitReason] of [
+    ['missing-overlap', 'missing-overlap'],
+    ['wrong-date-range; row 2/51 is out of order', 'wrong-date-range; row 2/51 is out of order after 2024-09-25T13:34:44.113Z'],
+    ['frame-columns', 'invalid-input-rows staged=50 found=51 last-row=invalid-input-date'],
+    ['invalid-input-date bytes=19 scalars=19 spaces=1 nonascii=0', 'wrong-date-range'],
+  ]) {
+    const result = replayColumnRecovery(graph, columnReason, { status: 'blocked', reason: commitReason });
+    assert.equal(result.stopped, true, commitReason);
+    assert.deepEqual(result.urls, ['wafra://ios-paging-beta?blocked=1&reason=page-validation'], commitReason);
+  }
+});
+
+test('a non-date typed commit refusal keeps the blocked Request for the ordinary paused/resume route', () => {
+  const graph = buildRecoveryHistoryShortcut();
+  for (const [label, columnReason, commitReason] of [
+    ['framing fallback then capacity', 'frame-columns', 'staging-full'],
+    ['framing fallback then invalid-input fallback then corrupt staging', 'invalid-input', 'corrupt-staging'],
+    ['date retry then unauthorized', 'missing-overlap', 'unauthorized'],
+    ['date retry then stale request', 'wrong-date-range; row 1/51 is not before the cursor', 'stale-request'],
+    ['date retry then source changed', 'missing-overlap', 'source-changed'],
+    ['phone locked while committing', 'frame-columns', 'storage-or-device-interruption'],
+    ['phone locked while staging rows', 'invalid-input-lines fragments=3', 'invalid-input-rows staged=12 found=51 last-row=storage-or-device-interruption'],
+    ['row buffer refused without a date cause', 'frame-columns', 'invalid-input-rows staged=50 found=51 last-row=unauthorized'],
+  ]) {
+    const result = replayColumnRecovery(graph, columnReason, { status: 'blocked', reason: commitReason });
+    assert.equal(result.calls.length, 52, label);
+    assert.equal(result.stopped, false, label);
+    assert.deepEqual(result.urls, [], label);
+    assert.deepEqual(JSON.parse(result.request), { status: 'blocked', reason: commitReason }, label);
+  }
+  // The loop head then shows the ordinary blocked alert and opens setup.
+  const actions = graph.WFWorkflowActions;
+  const opened = actions.filter(a => a.WFWorkflowActionIdentifier === 'is.workflow.actions.url').map(a => a.WFWorkflowActionParameters.WFURLActionURL);
+  assert.equal(opened.filter(url => url === 'wafra://ios-paging-beta?blocked=1&reason=page-validation').length, 1);
+  assert.ok(opened.includes('wafra://ios-setup?section=history'));
+});
+
 test('v8 never retries authorization, storage, stale-request or capacity failures as date repairs', () => {
   const graph = buildRecoveryHistoryShortcut();
   assert.equal(graph.WFWorkflowName, RECOVERY_SHORTCUT_NAME);
