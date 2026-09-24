@@ -69,10 +69,27 @@ test('merchant normalization and the 120 second boundary do not allow a misleadi
   assert.equal(promote(state(), { title: 'Weekend coffee' }).reason, 'possible-duplicate');
 });
 
-test('different account, merchant, money, direction or later time is never auto-dismissed as the same purchase', () => {
-  for (const existing of [sms({ accountId: 'card2' }), sms({ title: 'Different Merchant' }),
-    sms({ amountFils: 2600 }), sms({ type: 'income' }), sms({ ts: now + 120001 })]) {
-    assert.equal(promote(state(item(), [existing])).outcome, 'added');
+test('bank merchant text and late SMS delivery still ask before a second copy of one purchase is added', () => {
+  // Wallet says "Synthetic Cafe"; the bank descriptor rarely matches it and
+  // SMS delivery can lag by minutes. Neither may post the purchase twice.
+  const observedAt = item().observedAt;
+  for (const existing of [sms({ title: 'SYNTHETIC CAFE MOE DXB' }), sms({ title: 'Card purchase' }),
+    sms({ ts: observedAt + 5 * 60_000 }), sms({ ts: observedAt - 5 * 60_000 }),
+    sms({ ts: observedAt + 10 * 60_000, title: 'SYNTH*CAFE 0042' }), sms({ ts: observedAt - 10 * 60_000 }),
+    sms({ ts: undefined, smsKey: `s${observedAt + 7 * 60_000}-2500`, title: 'POS PURCHASE' })]) {
+    const before = state(item(), [existing]); const snapshot = JSON.stringify(before);
+    const outcome = promote(before);
+    assert.equal(outcome.reason, 'possible-duplicate', JSON.stringify(existing));
+    assert.equal(JSON.stringify(before), snapshot);
+  }
+});
+
+test('different account, money, direction or a clock beyond ten minutes is never auto-dismissed as the same purchase', () => {
+  const observedAt = item().observedAt;
+  for (const existing of [sms({ accountId: 'card2' }), sms({ amountFils: 2600 }), sms({ type: 'income' }),
+    sms({ ts: observedAt + 10 * 60_000 + 1 }), sms({ ts: observedAt - 10 * 60_000 - 1 }),
+    sms({ ts: undefined, smsKey: undefined, source: 'manual' })]) {
+    assert.equal(promote(state(item(), [existing])).outcome, 'added', JSON.stringify(existing));
   }
   const foreign = { ...state(), ledgerMoney: { schemaVersion: 2, currency: 'USD', exponent: 2 } };
   assert.equal(promote(foreign).reason, 'currency-mismatch');
@@ -91,4 +108,85 @@ test('other review sources retain existing behavior and exact same-source replay
   assert.equal(promote(state(generic)).outcome, 'added');
   const own = item();
   assert.equal(promote(state(own, [sms({ smsKey: own.sourceKey })])).outcome, 'duplicate');
+});
+
+const walletRow = (patch = {}) => sms({ id: 'wallet-earlier', smsKey: 'apple_pay_review_source_' + 'b'.repeat(32),
+  viaPush: true, userEdited: true, titleEdited: true, captureInstrument: undefined, ...patch });
+
+test('two separate Apple Pay observations are compared by merchant and a two minute clock only', () => {
+  const observedAt = item().observedAt;
+  for (const existing of [walletRow({ ts: observedAt + 60_000 }), walletRow({ title: ' synthetic  cafe ' })]) {
+    assert.equal(promote(state(item(), [existing])).reason, 'possible-duplicate');
+  }
+  for (const existing of [walletRow({ title: 'Other Shop' }), walletRow({ ts: observedAt + 5 * 60_000 })]) {
+    assert.equal(promote(state(item(), [existing])).outcome, 'added');
+  }
+});
+
+test('any bank review promoted after its Apple Pay row asks instead of posting the purchase twice', () => {
+  const observedAt = now - 60_000;
+  const generic = { ...item(), id: 'generic_review_id_123456', sourceKey: 'generic_review_source_123456', channel: 'push', observedAt };
+  for (const existing of [walletRow({ ts: observedAt + 5 * 60_000, title: 'Synthetic Cafe' }),
+    walletRow({ ts: observedAt - 9 * 60_000, title: 'Something the user typed' })]) {
+    const before = state(generic, [existing]); const snapshot = JSON.stringify(before);
+    const outcome = promote(before, { title: 'SYNTHETIC CAFE MOE DXB' });
+    assert.equal(outcome.reason, 'possible-duplicate', JSON.stringify(existing));
+    assert.equal(JSON.stringify(before), snapshot);
+    assert.equal(before.reviewTray.pending.length, 1);
+  }
+  for (const existing of [walletRow({ accountId: 'card2' }), walletRow({ amountFils: 2600 }),
+    walletRow({ ts: observedAt + 10 * 60_000 + 1 }), walletRow({ type: 'income' })]) {
+    assert.equal(promote(state(generic, [existing])).outcome, 'added', JSON.stringify(existing));
+  }
+  // Registered bank templates (non-universal review) take the same check.
+  const registered = { id: 'opaque_review_id_000001', sourceKey: 'opaque_source_key_00001', observedAt,
+    expiresAt: now + 86_400_000, channel: 'inbox', parserVersion: 1, market: 'AE', institution: 'adib',
+    grammar: { id: 'adib-sms-v1', version: 1, channel: 'bank-alert', status: 'experimental', provenance: 'synthetic-seed' },
+    amount: { currency: 'AED', minorUnits: '2500', exponent: 2 }, direction: 'debit', family: 'purchase', rail: null,
+    instrument: { kind: 'card', last4: '1234' } };
+  const registeredPromote = (transactions, patch = {}) => planReviewPromotion(state(registered, transactions),
+    { reviewId: registered.id, type: 'expense', title: 'Card purchase', category: 'dining', accountId: 'card1',
+      date: '2026-09-23', betweenOwnAccounts: false, ...patch }, 'bank-added', now + 10000);
+  assert.equal(registeredPromote([walletRow({ ts: observedAt + 4 * 60_000 })]).reason, 'possible-duplicate');
+  assert.equal(registeredPromote([walletRow({ ts: observedAt + 11 * 60_000 })]).outcome, 'added');
+  assert.equal(registeredPromote([walletRow({ ts: observedAt + 4 * 60_000 })], { type: 'income', category: 'salary' }).outcome, 'added');
+  assert.equal(registeredPromote([sms({ ts: observedAt + 4 * 60_000 })]).outcome, 'added',
+    'non-Wallet rows keep their existing registered-review behavior');
+  // A Wallet row with no event clock cannot be placed in time; its source key
+  // carries none either, so it is not comparable and the review is added.
+  const clockless = { ...generic, id: 'generic_review_id_654321', sourceKey: 'generic_review_source_654321' };
+  assert.equal(promote(state(clockless, [walletRow({ ts: undefined })])).outcome, 'added');
+});
+
+test('an explicit separate-purchase confirmation bound to the exact pending source adds one row once', () => {
+  const separateFor = review => ({ separatePurchase: { confirmed: true, expectedSourceKey: review.sourceKey,
+    expectedObservedAt: review.observedAt } });
+  const wallet = item();
+  const before = state(wallet, [sms({ title: 'SYNTHETIC CAFE MOE DXB' })]);
+  assert.equal(promote(before).reason, 'possible-duplicate');
+  const added = promote(before, separateFor(wallet));
+  assert.equal(added.outcome, 'added');
+  assert.equal(added.transaction.amountFils, 2500);
+  assert.equal(added.reviewTray.pending.length, 0, 'the review is resolved, so it cannot be added again');
+  const after = { ...before, transactions: [...before.transactions, added.transaction], reviewTray: added.reviewTray };
+  assert.equal(planReviewPromotion(after, confirmation(wallet, separateFor(wallet)), 'again', now + 20000).reason, 'not-found');
+  // Bound to the exact source the user saw; a stale or unconfirmed claim is refused.
+  for (const bad of [{ separatePurchase: { confirmed: true, expectedSourceKey: 'apple_pay_review_source_' + 'f'.repeat(32), expectedObservedAt: wallet.observedAt } },
+    { separatePurchase: { confirmed: true, expectedSourceKey: wallet.sourceKey, expectedObservedAt: wallet.observedAt + 1 } },
+    { separatePurchase: { confirmed: false, expectedSourceKey: wallet.sourceKey, expectedObservedAt: wallet.observedAt } }]) {
+    assert.equal(promote(before, bad).reason, 'source-changed');
+  }
+  // It never overrides exact source identity.
+  assert.equal(promote(state(wallet, [sms({ smsKey: wallet.sourceKey })]), separateFor(wallet)).outcome, 'duplicate');
+  // Registered bank reviews honour the same explicit confirmation.
+  const registered = { id: 'opaque_review_id_000002', sourceKey: 'opaque_source_key_00002', observedAt: now - 60_000,
+    expiresAt: now + 86_400_000, channel: 'inbox', parserVersion: 1, market: 'AE', institution: 'adib',
+    grammar: { id: 'adib-sms-v1', version: 1, channel: 'bank-alert', status: 'experimental', provenance: 'synthetic-seed' },
+    amount: { currency: 'AED', minorUnits: '2500', exponent: 2 }, direction: 'debit', family: 'purchase', rail: null,
+    instrument: { kind: 'card', last4: '1234' } };
+  const input = { reviewId: registered.id, type: 'expense', title: 'Card purchase', category: 'dining', accountId: 'card1',
+    date: '2026-09-23', betweenOwnAccounts: false };
+  const registeredState = state(registered, [walletRow({ ts: now - 30_000 })]);
+  assert.equal(planReviewPromotion(registeredState, input, 'bank-added', now).reason, 'possible-duplicate');
+  assert.equal(planReviewPromotion(registeredState, { ...input, ...separateFor(registered) }, 'bank-added', now).outcome, 'added');
 });

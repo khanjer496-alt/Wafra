@@ -256,8 +256,8 @@
     {
       "file": "src/app/add-transaction.tsx",
       "name": "save",
-      "sha256": "99eda98e082c2afdbe52c9bb44afdcb18b793206d10fd026daad0e6c4d48b38e",
-      "reviewedChange": "2026-09-10: Save now requires the durable ledger currency for first manual money and preserves exact minor-unit parsing before the transaction write. 2026-09-24: an Apple Pay review refused by the ledger as 'possible-duplicate' (same state generation, same route) opens the explicit already-recorded/keep-in-review choice instead of the generic failure toast; no write occurs on that path and every other refusal keeps the toast."
+      "sha256": "dc577d494a98eeb23b21fd237a5c66a43405f49f7eb382cba949d63d78d2eb62",
+      "reviewedChange": "2026-09-10: Save now requires the durable ledger currency for first manual money and preserves exact minor-unit parsing before the transaction write. 2026-09-24: an Apple Pay review refused by the ledger as 'possible-duplicate' (same state generation, same route) opens the explicit already-recorded/keep-in-review choice instead of the generic failure toast; no write occurs on that path and every other refusal keeps the toast. 2026-09-24: the choice now opens for any review refused as 'possible-duplicate' (including a bank alert matching a recorded Apple Pay row) only when the state generation, route and review source binding are unchanged, and records the exact submitted promotion input so the sheet's explicit, confirmed 'Add as a separate purchase' can re-submit it once with a separatePurchase bound to that review's source; a stale refusal keeps the generic failure toast and nothing is written on the refusal path."
     },
     {
       "file": "src/app/add-transaction.tsx",
