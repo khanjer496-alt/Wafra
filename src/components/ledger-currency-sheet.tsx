@@ -37,11 +37,16 @@ export function LedgerCurrencySheet({
   value,
   onClose,
   onSelect,
+  title,
+  body,
 }: {
   visible: boolean;
   value: string | null;
   onClose: () => void;
   onSelect: (currency: string) => void;
+  /** Reused for "currency paid" on a foreign purchase; defaults to the ledger copy. */
+  title?: string;
+  body?: string;
 }) {
   const theme = useTheme();
   const [query, setQuery] = useState('');
@@ -55,9 +60,9 @@ export function LedgerCurrencySheet({
   }, [all, query, suggestion, value]);
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title={t('ledgerCurrencyTitle')}>
+    <BottomSheet visible={visible} onClose={onClose} title={title ?? t('ledgerCurrencyTitle')}>
       <ThemedText type="small" themeColor="textSecondary">
-        {t('ledgerCurrencyBody')}
+        {body ?? t('ledgerCurrencyBody')}
       </ThemedText>
       <TextField
         label={t('searchCurrency')}
@@ -69,7 +74,7 @@ export function LedgerCurrencySheet({
         placeholder={t('currencyCodeExample')}
         leading={<Icon name="search" size={17} color={theme.textSecondary} />}
       />
-      <View style={styles.list} accessibilityRole="radiogroup" accessibilityLabel={t('ledgerCurrencyTitle')}>
+      <View style={styles.list} accessibilityRole="radiogroup" accessibilityLabel={title ?? t('ledgerCurrencyTitle')}>
         {options.map((code) => {
           const selected = code === value;
           const exponent = ledgerMoneySpec(code)?.exponent ?? 2;

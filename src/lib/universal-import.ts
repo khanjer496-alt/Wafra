@@ -5,6 +5,8 @@ import {
   ledgerMoneySpec,
   migrateLegacyLedgerMoney,
 } from '@/lib/ledger-money';
+import type { FxQuote } from '@/lib/fx';
+import { convertForeignConfirmation, quoteFitsDay, type ReferenceConversion } from '@/lib/fx-rates';
 import type { Account, AppState, CaptureInstrument, CategoryId, ImportBatchInput } from '@/lib/types';
 import type { UniversalBankEvent, UniversalField, UniversalInstrument, UniversalMoney } from '@/lib/universal-types';
 
@@ -35,7 +37,9 @@ export type UniversalImportRefusal =
   | 'unsupported-event' | 'not-posted' | 'direction-conflict' | 'invalid-money'
   | 'ungrounded-money' | 'currency-mismatch' | 'invalid-account' | 'instrument-ambiguous'
   | 'instrument-mismatch' | 'invalid-category' | 'invalid-title' | 'invalid-date'
-  | 'invalid-source' | 'invalid-transfer';
+  | 'invalid-source' | 'invalid-transfer'
+  /** Foreign money with no dated reference rate yet: stays in Review, nothing posts. */
+  | 'fx-rate-unavailable';
 
 export type ConfirmedUniversalImportPlan =
   | { outcome: 'ready'; batch: ImportBatchInput }
@@ -112,6 +116,11 @@ export function planConfirmedUniversalImport(
   state: AppState,
   event: UniversalBankEvent,
   confirmation: UniversalImportConfirmation,
+  /**
+   * Dated provider quote from the confirmed currency into the ledger's, used
+   * only when they differ and the alert states no charged ledger amount.
+   */
+  fxQuote?: FxQuote | null,
 ): ConfirmedUniversalImportPlan {
   if (!confirmation || confirmation.confirmed !== true || confirmation.postingStatus !== 'posted') {
     return refuse('confirmation-required');
@@ -135,11 +144,24 @@ export function planConfirmedUniversalImport(
   if (!grounded(event.amount, selected, equalMoney)) return refuse('ungrounded-money');
   const minor = BigInt(selected.minorUnits);
   if (minor > BigInt(Number.MAX_SAFE_INTEGER)) return refuse('invalid-money');
+  let ledgerMoney = money;
+  let conversion: ReferenceConversion | null = null;
   try {
     const current = migrateLegacyLedgerMoney(state);
-    if (current && (!ledgerMoneyMatchesCurrentMetadata(current) ||
-      current.currency !== money.currency || current.exponent !== money.exponent)) {
-      return refuse('currency-mismatch');
+    if (current && !ledgerMoneyMatchesCurrentMetadata(current)) return refuse('currency-mismatch');
+    if (current && (current.currency !== money.currency || current.exponent !== money.exponent)) {
+      // FOREIGN MONEY IS CONVERTED, NOT REFUSED. The original amount and
+      // currency are kept on the row beside the rate and its source.
+      if (current.currency === money.currency) return refuse('currency-mismatch');
+      const converted = convertForeignConfirmation(event, {
+        currency: money.currency, minorUnits: Number(minor), exponent: money.exponent,
+      }, current, quoteFitsDay(fxQuote, confirmation.date)
+        // A quote is for the transaction's own day (or the provider's prior
+        // working day). A later day's rate is not this purchase's rate.
+        ? fxQuote : null);
+      if (converted === 'fx-rate-unavailable' || converted === 'invalid-money') return refuse(converted);
+      conversion = converted;
+      ledgerMoney = current;
     }
   } catch {
     return refuse('invalid-money');
@@ -195,9 +217,10 @@ export function planConfirmedUniversalImport(
   return {
     outcome: 'ready',
     batch: {
-      importMoney: money,
+      importMoney: ledgerMoney,
       transactions: [{
-        amountFils: Number(minor), type, accountId: account.id, title,
+        amountFils: conversion ? conversion.amountFils : Number(minor), type, accountId: account.id, title,
+        ...(conversion ? conversion.fields : {}),
         category: confirmation.category, date: confirmation.date,
         ts: confirmation.observedAt, source: 'sms', smsKey: sourceKey,
         userEdited: true, titleEdited: true,

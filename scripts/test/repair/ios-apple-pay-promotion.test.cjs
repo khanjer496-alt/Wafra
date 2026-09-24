@@ -92,7 +92,8 @@ test('different account, money, direction or a clock beyond ten minutes is never
     assert.equal(promote(state(item(), [existing])).outcome, 'added', JSON.stringify(existing));
   }
   const foreign = { ...state(), ledgerMoney: { schemaVersion: 2, currency: 'USD', exponent: 2 } };
-  assert.equal(promote(foreign).reason, 'currency-mismatch');
+  // Foreign money without a dated rate never posts; the review stays pending.
+  assert.equal(promote(foreign).reason, 'fx-rate-unavailable');
 });
 
 test('explicit Already recorded resolution changes only review state and retains the original transaction', () => {

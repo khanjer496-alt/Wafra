@@ -15,6 +15,8 @@ import { parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import type { FxQuote } from '@/lib/fx';
+import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 
 // Cheap supersets used only to decide whether market routing must run. The
@@ -80,6 +82,16 @@ export const inspectGenericBankEventForReview = (
   return event;
 };
 
+/** Synchronous, network-free rate lookup used while parsing. */
+export type ParseFxLookup = (base: string, quote: string, date: string) => FxQuote | null;
+
+const localIsoDay = (epochMs: number | undefined): string | null => {
+  if (epochMs === undefined || !Number.isFinite(epochMs)) return null;
+  const day = new Date(epochMs);
+  if (!Number.isFinite(day.getTime())) return null;
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+};
+
 /**
  * Promote only a self-proving universal event.
  *
@@ -94,6 +106,8 @@ const parseUniversalPostedEvent = (
   sender: string,
   pinnedCurrency: string | null,
   pinnedExponent: number | null,
+  fxLookup: ParseFxLookup,
+  observedAt?: number,
 ): ParsedSms | null => {
   const event = inspectUniversalBankEvent(source, { sender });
   if (event.decision !== 'review' || event.status !== 'posted') return null;
@@ -103,12 +117,40 @@ const parseUniversalPostedEvent = (
   }
   if (event.amount.evidence !== 'explicit' || !event.amount.value) return null;
   const money = event.amount.value;
-  if (pinnedCurrency && pinnedCurrency !== money.currency) return null;
-  if (pinnedExponent !== null && pinnedExponent !== money.exponent) return null;
   const exponent = currencyMinorUnits(money.currency);
   if (exponent === null || exponent !== money.exponent || !/^\d+$/.test(money.minorUnits)) return null;
-  const amountFils = Number(money.minorUnits);
-  if (!Number.isSafeInteger(amountFils) || amountFils <= 0) return null;
+  const originalMinor = Number(money.minorUnits);
+  if (!Number.isSafeInteger(originalMinor) || originalMinor <= 0) return null;
+  const transactionDay = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;
+  /**
+   * FOREIGN MONEY ON A PINNED LEDGER IS CONVERTED, NEVER RELABELLED.
+   *
+   * A USD ledger receiving "EUR 45.00 spent at ..." posts the ledger-currency
+   * equivalent and keeps EUR 45.00 on the row. The card's own charged ledger
+   * figure wins when the alert states one; otherwise only a dated provider
+   * rate ALREADY KNOWN on this device may convert (parsing never touches the
+   * network). With neither, this returns null exactly as before and the alert
+   * reaches Review, where promotion fetches the rate or keeps it pending.
+   */
+  let amountFils = originalMinor;
+  let currency = money.currency;
+  let fx: Partial<ParsedSms> = {};
+  if (pinnedCurrency && pinnedCurrency !== money.currency) {
+    if (pinnedExponent !== 0 && pinnedExponent !== 2 && pinnedExponent !== 3) return null;
+    const day = transactionDay ?? localIsoDay(observedAt);
+    if (!day) return null;
+    const quote = fxLookup(money.currency, pinnedCurrency, day);
+    const converted = convertForeignConfirmation(event, {
+      currency: money.currency, minorUnits: originalMinor, exponent,
+    }, { currency: pinnedCurrency, exponent: pinnedExponent },
+    quoteFitsDay(quote, day) ? quote : null, { requireQuoteForStated: true });
+    if (converted === 'fx-rate-unavailable' || converted === 'invalid-money') return null;
+    amountFils = converted.amountFils;
+    currency = pinnedCurrency;
+    fx = converted.fields;
+  } else if (pinnedExponent !== null && pinnedExponent !== money.exponent) {
+    return null;
+  }
   const blockedIssues = new Set([
     'amount-role-unresolved',
     'posting-status-unresolved',
@@ -145,9 +187,10 @@ const parseUniversalPostedEvent = (
     kind: 'transaction',
     type: event.direction === 'credit' ? 'income' : 'expense',
     amountFils,
-    currency: money.currency,
+    currency,
+    ...fx,
     merchant,
-    date: event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null,
+    date: transactionDay,
     dueDay: null,
     minDueFils: null,
     card: card && card.last4 ? card : null,
@@ -186,11 +229,14 @@ export const createLaunchAlertSession = ({
   regionHint = null,
   pinnedCurrency = pinnedLedgerCurrencyCode(),
   activeMarket = getActiveMarket().id,
+  fxLookup = (base, quote, date) => cachedReferenceQuote(base, quote, date),
 }: {
   overrides: Record<string, CategoryId>;
   regionHint?: string | null;
   pinnedCurrency?: string | null;
   activeMarket?: string;
+  /** Network-free dated rate lookup; defaults to rates already fetched this session. */
+  fxLookup?: ParseFxLookup;
 }): LaunchAlertSession => {
   const actualPinned = pinnedLedgerCurrencyCode();
   const pinnedExponent = pinnedCurrency
@@ -324,7 +370,7 @@ export const createLaunchAlertSession = ({
     if (sessionMarket && launchSenderMarket && launchSenderMarket !== sessionMarket) return null;
     if (gulfLedger && (launchSenderMarket === 'AE' || launchSenderMarket === 'SA')) return null;
     if (gulfLedger && !universalRouteIsNonGulf) return null;
-    return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent);
+    return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt);
   };
 
   return { inspect, parse, detectedMarket: () => detected };

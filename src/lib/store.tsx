@@ -76,6 +76,7 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerMoneySpec, ledgerStateHasMoney, migrateLegacyLedgerMoney, type LedgerMoneySpec } from '@/lib/ledger-money';
 import {
   planReviewPromotion,
+  reviewPromotionFxNeed,
   walletDuplicateBinding,
   type PromoteReviewAlertInput,
   type ReviewPromotionFailure,
@@ -116,6 +117,7 @@ import {
   type HistoryImportProgress,
 } from '@/lib/history-import';
 import type { FxUpdate } from '@/lib/fx';
+import { cachedReferenceQuote, loadReferenceQuote } from '@/lib/fx-rates';
 import {
   buildDeferredOnboardingPlan,
   mergeDeferredOnboardingPlan,
@@ -2412,11 +2414,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!authoritativeState.current.hydrated) {
       throw new ReviewPromotionError('not-found');
     }
+    // Foreign money needs a dated reference rate. Fetch it BEFORE planning so
+    // the plan runs synchronously on the latest state; only the two currency
+    // codes and the day are sent. No rate: the review stays pending.
+    // Private Mode makes no network request; only an already-known rate
+    // (memory or a rate this ledger recorded) can convert then.
+    const fxNeed = reviewPromotionFxNeed(authoritativeState.current, input);
+    const fxQuote = !fxNeed ? null : authoritativeState.current.privateMode
+      ? cachedReferenceQuote(fxNeed.base, fxNeed.quote, fxNeed.date, authoritativeState.current.transactions)
+      : await loadReferenceQuote(fxNeed.base, fxNeed.quote, fxNeed.date, {
+          transactions: authoritativeState.current.transactions,
+        });
+    if (!authoritativeState.current.hydrated) {
+      throw new ReviewPromotionError('not-found');
+    }
     const plan = planReviewPromotion(
       authoritativeState.current,
       input,
       makeId('tx'),
       Date.now(),
+      fxQuote,
     );
     if (plan.outcome === 'refused') throw new ReviewPromotionError(plan.reason);
     if (saveTimer.current) {

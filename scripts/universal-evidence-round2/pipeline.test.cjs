@@ -48,7 +48,21 @@ test('a French purchase cannot silently enter a USD ledger as dollars', () => {
   const result = plan(base('USD', event.instrument.value), event, { confirmed: true, postingStatus: 'posted',
     amount: event.amount.value, direction: 'debit', accountId: 'account', title: event.merchant.value,
     category: 'dining', date: '2026-08-19', sourceKey: 'round2_currency_mismatch', observedAt: 1788602400000 });
-  assert.equal(result.outcome, 'refused'); assert.equal(result.reason, 'currency-mismatch');
+  // Without a dated EUR->USD rate nothing posts; the review stays pending.
+  assert.equal(result.outcome, 'refused'); assert.equal(result.reason, 'fx-rate-unavailable');
+  // With one, the purchase is converted, never relabelled: the USD amount is
+  // the EUR amount at the recorded rate, and EUR stays on the row.
+  const converted = plan(base('USD', event.instrument.value), event, { confirmed: true, postingStatus: 'posted',
+    amount: event.amount.value, direction: 'debit', accountId: 'account', title: event.merchant.value,
+    category: 'dining', date: '2026-08-19', sourceKey: 'round2_currency_mismatch', observedAt: 1788602400000 },
+  { base: event.amount.value.currency, quote: 'USD', rate: 1.1, date: '2026-08-19' });
+  assert.equal(converted.outcome, 'ready');
+  const row = converted.batch.transactions[0];
+  assert.equal(converted.batch.importMoney.currency, 'USD');
+  assert.equal(row.originalCurrency, event.amount.value.currency);
+  assert.equal(row.originalMinorUnits, Number(event.amount.value.minorUnits));
+  assert.equal(row.amountFils, Math.round(Number(event.amount.value.minorUnits) * 1.1));
+  assert.equal(row.fxSource, 'reference'); assert.equal(row.fxRateDate, '2026-08-19'); assert.equal(row.fxRate, 1.1);
 });
 test('ambiguous three-decimal money cannot be submitted without selecting a source interpretation', () => {
   const event = inspect(corpus.find((item) => item.id === 'ind-ar-kw-three-decimal').body);

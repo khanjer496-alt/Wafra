@@ -15,6 +15,8 @@ import { migrateLegacyLedgerMoney } from '@/lib/ledger-money';
 import { settleWalletNearMatches, walletNearMatchesRetained } from '@/lib/wallet-near-match';
 import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
 import {
+  convertCurrencyConflictRow,
+  currencyConflictFxNeed,
   currencyConflictReview,
   parseLocalMessageRecord,
   parseLocalApplePayRecord,
@@ -70,7 +72,19 @@ interface CoordinatorInput {
   native: WafraLiveCaptureNativeModule;
   ledger: CaptureLedgerAdapter;
   retireShortcutCapture: () => Promise<'not-needed' | 'complete'>;
+  /**
+   * Dated reference rate for a launch-market purchase on a ledger kept in
+   * another currency. Resolves null when no rate is available (offline,
+   * Private Mode); the purchase then stays a Review item as before. Absent:
+   * every such purchase goes to Review.
+   */
+  fxQuote?: (base: string, quote: string, date: string) => Promise<{
+    base: string; quote: string; rate: number; date: string;
+  } | null>;
 }
+
+/** Distinct pair/day rate lookups one page may make; the rest wait in Review. */
+const MAX_FX_LOOKUPS_PER_PAGE = 8;
 
 interface SharedCoordinatorEntry {
   input: CoordinatorInput;
@@ -468,12 +482,66 @@ export function createIosLocalCaptureCoordinator(
       // is acknowledged as ignored with the visible count. A record without
       // its own market is never converted.
       const currencyConflictReviewIds = new Set<string>();
+      let convertedConflicts = 0;
       if (pageCurrencyConflict) {
+        // A purchase with a dated reference rate is CONVERTED into the ledger
+        // currency (original amount, rate, effective date and source kept on
+        // the row) instead of waiting in Review for a promotion that used to
+        // refuse it. Rates are looked up after the source text is gone; only
+        // two currency codes and a day leave the device.
+        let ledgerMoney: ReturnType<typeof migrateLegacyLedgerMoney> = null;
+        try {
+          ledgerMoney = migrateLegacyLedgerMoney(input.ledger.getState());
+        } catch {
+          ledgerMoney = null;
+        }
+        const quotes = new Map<string, Awaited<ReturnType<NonNullable<CoordinatorInput['fxQuote']>>>>();
+        for (let index = 0; index < outcomes.length; index += 1) {
+          const outcome = outcomes[index];
+          if (outcome.kind !== 'parsed' || !ledgerMoney || !input.fxQuote) continue;
+          const ownMarket = page[index].preflight.market;
+          if (ownMarket === null || outcome.market !== ownMarket || !conflictsWithLedger(ownMarket)) continue;
+          const need = currencyConflictFxNeed(outcome, ledgerMoney.currency);
+          if (!need) continue;
+          const key = `${need.base}|${need.quote}|${need.date}`;
+          if (!quotes.has(key)) {
+            if (quotes.size >= MAX_FX_LOOKUPS_PER_PAGE) continue;
+            let quote = null;
+            try {
+              quote = await input.fxQuote(need.base, need.quote, need.date);
+            } catch {
+              quote = null;
+            }
+            quotes.set(key, quote);
+            if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+            // The ledger may have been erased, restored or re-denominated
+            // while the rate was in flight. Nothing on this page may be
+            // converted against a ledger other than the one it was read for.
+            requireLedgerGeneration(input.ledger, pageGeneration);
+            const after = input.ledger.getState();
+            let afterMoney: ReturnType<typeof migrateLegacyLedgerMoney> = null;
+            try {
+              afterMoney = migrateLegacyLedgerMoney(after);
+            } catch {
+              afterMoney = null;
+            }
+            if (!after.hydrated || !afterMoney || afterMoney.currency !== ledgerMoney.currency ||
+              afterMoney.exponent !== ledgerMoney.exponent) {
+              throw sourceFreePageError('Local capture ledger changed while a rate was loading');
+            }
+          }
+          const converted = convertCurrencyConflictRow(outcome, ledgerMoney, quotes.get(key));
+          if (converted) {
+            outcomes[index] = converted;
+            convertedConflicts += 1;
+          }
+        }
         for (let index = 0; index < outcomes.length; index += 1) {
           const outcome = outcomes[index];
           if (outcome.kind !== 'parsed' && outcome.kind !== 'declined') continue;
           const ownMarket = page[index].preflight.market;
           if (ownMarket === null || outcome.market !== ownMarket || !conflictsWithLedger(ownMarket)) continue;
+          if (outcome.kind === 'parsed' && ledgerMoney && outcome.row.currency === ledgerMoney.currency) continue;
           const recordId = page[index].preflight.id;
           const review = outcome.kind === 'parsed' ? currencyConflictReview(outcome, recordId) : null;
           if (review) {
@@ -518,7 +586,10 @@ export function createIosLocalCaptureCoordinator(
       // A reviewable fact is not permission to select a ledger currency.
       // Align only an actual automatic-import page, after source text is gone.
       let restoreMarket: 'AE' | 'SA' | null = null;
-      if (parsed.length > 0 && pageMarket && !pageCurrencyConflict) {
+      // A conflict page reaches here with parsed rows only when they were
+      // converted into the ledger currency above; aligning the parser pack
+      // then changes vocabulary only, never the ledger's money.
+      if (parsed.length > 0 && pageMarket && (!pageCurrencyConflict || convertedConflicts > 0)) {
         const current = input.ledger.getState();
         if (!current.hydrated) throw sourceFreePageError('Local capture ledger is not hydrated');
         if (current.marketId !== pageMarket) {
