@@ -432,6 +432,10 @@ export function parseLocalMessageRecord(
       // open to the same-event rule, so the History import copy of the same
       // Message (its GUID and real date, seconds apart) merges with it.
       ...(!isNotification && SHA256_EVENT_ID_RE.test(envelope.id) ? { sourceEventId: envelope.id } : {}),
+      // The queue delivers each such Message once. Its UUID is kept only as a
+      // durable "one live observation" marker so dedupe never folds a second
+      // genuine identical purchase into it and binds it one-to-one to History.
+      ...(!isNotification && UUID_RE.test(envelope.id) ? { messageObservationId: envelope.id } : {}),
       ...(isNotification ? { notificationObservationId: envelope.id } : {}),
     };
     return {

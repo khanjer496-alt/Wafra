@@ -158,6 +158,13 @@ export interface Transaction {
   /** Local notification queue receipt, never a bank-event/deduplication identity. */
   notificationObservationId?: string;
   /**
+   * iOS live-queue UUID of a Message captured without Apple's GUID. Never a
+   * bank-event identity: it records that this row is one delivered Message,
+   * so dedupe never folds another live Message into it and binds it to at
+   * most one History copy.
+   */
+  messageObservationId?: string;
+  /**
    * Structured ingest provenance. PDF/CSV identify statement rows whose event
    * time and merchant wording are intentionally coarser than a live capture.
    */

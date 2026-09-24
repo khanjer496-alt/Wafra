@@ -89,6 +89,12 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   sourceEventId?: string;
   /** iOS queue observation receipt; independent of exact bank-event identity. */
   notificationObservationId?: string;
+  /**
+   * iOS live-queue UUID of a Message staged without Apple's GUID. Not an
+   * event identity: it marks one delivered Message so dedupe consumes it
+   * one-to-one and never merges two live observations with each other.
+   */
+  messageObservationId?: string;
 };
 
 /**
@@ -160,6 +166,14 @@ export class ImportMoneyError extends Error {
  * messages as read that were never actually compared against anything, and
  * a message is only ever offered once.
  */
+const OBSERVATION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A GUID-less iOS live Message: one delivered Message without history identity. */
+function liveMessageObservation(p: ScannedSms): boolean {
+  return p.channel !== 'push' && p.sourceEventId === undefined && p.captureSource === undefined &&
+    typeof p.messageObservationId === 'string' && OBSERVATION_UUID_RE.test(p.messageObservationId);
+}
+
 function emptyPlan(): ImportPlan {
   return {
     batch: {
@@ -1373,6 +1387,7 @@ function buildImportPlanInMarket(
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
       captureSource: p.captureSource,
+      ...(liveMessageObservation(p) ? { liveObservation: true } : {}),
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
     };
@@ -1586,6 +1601,7 @@ function buildImportPlanInMarket(
         typeof p.notificationObservationId === 'string' &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p.notificationObservationId)
         ? { notificationObservationId: p.notificationObservationId } : {}),
+      ...(liveMessageObservation(p) ? { messageObservationId: p.messageObservationId } : {}),
       captureSource: p.captureSource,
       isTransfer: p.transferHint || undefined,
       transferEvidence: buildTransferEvidence(p, resolution.confident),
