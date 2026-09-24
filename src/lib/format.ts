@@ -1,11 +1,19 @@
 import { normalizeArabicNumerals } from '@/lib/arabic-sms';
 import {
+  CANONICAL_NUMBER_CONVENTIONS,
   checkedMinorSum,
+  currencyDisplayLabel,
+  displayNumberConventions,
   formatMinorUnits,
+  formatMinorUnitsForInput,
+  LEDGER_MONEY_SCHEMA_VERSION,
   type LedgerMoneySpec,
-  parseMajorToMinor,
+  parseLocalizedMajorToMinor,
+  roundToNiceMinor,
   roundToWholeMajorMinor,
   storedLedgerMoneySpec,
+  typicalMinorAmount,
+  wholeMajorUnits,
 } from '@/lib/ledger-money';
 import {
   ledgerCurrencyCode,
@@ -30,26 +38,48 @@ const MONTHS_SHORT_AR = [
 ];
 const DAYS_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
 
-const activeMoneySpec = () => storedLedgerMoneySpec(
-  ledgerCurrencyCode(),
-  ledgerCurrencyExponent(),
-) ?? storedLedgerMoneySpec('AED', 2)!;
+/**
+ * The spec the stored integers are denominated in.
+ *
+ * A pinned code without ISO metadata used to fall back to an AED/2 spec,
+ * which silently printed (and parsed) a JPY-like or KWD-like ledger with two
+ * decimals. The persisted exponent is the accounting fact, so the fallback
+ * keeps it and the ledger's own code: display-only, never an AED guess.
+ */
+const activeMoneySpec = (): LedgerMoneySpec => {
+  const code = ledgerCurrencyCode();
+  const exponent = ledgerCurrencyExponent();
+  return storedLedgerMoneySpec(code, exponent) ?? {
+    schemaVersion: LEDGER_MONEY_SCHEMA_VERSION,
+    currency: code.trim().toUpperCase() as LedgerMoneySpec['currency'],
+    exponent,
+  };
+};
 
 /**
- * Formats the ledger's minor units exactly: "1,234.56" for AED or
- * "1,234.567" for KWD. Whole amounts drop decimals unless explicitly fixed.
+ * Formats the ledger's minor units exactly in the device's number
+ * conventions: "1,234.56" for AED, "1.234,567" for KWD on a German phone.
+ * Whole amounts drop decimals unless explicitly fixed.
  *
  * Compatibility: legacy `decimals: false` now means optional decimals, just
  * like omission; it never hides nonzero minor units. `true` fixes the number
  * of decimal places to the ledger currency's exponent. The lower-level
  * formatMinorUnits API retains its explicit whole-unit rounding option.
  */
-export function formatAmount(fils: number, opts?: { decimals?: boolean }): string {
-  return formatMinorUnits(
-    Math.round(fils),
-    activeMoneySpec(),
-    opts?.decimals === true ? { decimals: true } : undefined,
-  );
+export function formatAmount(fils: number, opts?: { decimals?: boolean; canonical?: boolean }): string {
+  return formatMinorUnits(Math.round(fils), activeMoneySpec(), {
+    decimals: opts?.decimals === true ? true : undefined,
+    conventions: opts?.canonical ? CANONICAL_NUMBER_CONVENTIONS : undefined,
+  });
+}
+
+/**
+ * Text to seed an editable amount field with: no group marks, the device's
+ * decimal mark, exact minor units. parseAmountToFils reads it back unchanged,
+ * which `formatAmount(x).replace(/,/g, '')` did not on a decimal-comma phone.
+ */
+export function formatAmountForInput(fils: number, opts?: { decimals?: boolean }): string {
+  return formatMinorUnitsForInput(Math.round(fils), activeMoneySpec(), undefined, opts);
 }
 
 /**
@@ -71,6 +101,36 @@ export function toWholeDirhamFils(fils: number): number {
 }
 
 /**
+ * Minor units of "about `referenceMajor` AED" in the ledger currency, for
+ * heuristic thresholds only (never conversion): 200 → AED 200.00, ¥20,000,
+ * KWD 20.000. See NOMINAL_SCALE in ledger-money.ts.
+ */
+export function ledgerTypicalMinor(referenceMajor: number): number {
+  return typicalMinorAmount(activeMoneySpec(), referenceMajor);
+}
+
+/** Whole major units of the ledger currency: /100 for AED, /1 for JPY. */
+export function ledgerWholeMajor(fils: number): number {
+  return wholeMajorUnits(fils, activeMoneySpec());
+}
+
+/** A round, budget-sized suggestion in the ledger currency (AED: nearest 100). */
+export function ledgerNiceMinor(fils: number): number {
+  return roundToNiceMinor(fils, activeMoneySpec());
+}
+
+/**
+ * What to print in front of a ledger amount: the currency's unambiguous
+ * symbol in the device locale ("€", "₹", "CA$"), else the ISO code. AED and
+ * SAR always print their code. Accessibility labels should use the code.
+ */
+export function ledgerCurrencyLabel(code?: string): string {
+  const iso = code ?? ledgerCurrencyCode();
+  const label = currencyDisplayLabel(iso);
+  return label === iso.trim().toUpperCase() && code === undefined ? ledgerCurrencyDisplay() : label;
+}
+
+/**
  * "AED 1,234.56" — the code names what the STORED fils actually are.
  *
  * Not the active pack's currency. `fils` is a number out of the ledger and
@@ -78,6 +138,11 @@ export function toWholeDirhamFils(fils: number): number {
  * ledger is denominated in; printing the pack's turned a country change in
  * Settings into a silent relabelling of every figure in the app. See
  * `ledgerCurrency` in markets.ts.
+ *
+ * Always the ISO code, never a symbol: this string also feeds accessibility
+ * labels and notification text, where "CA$" or "$US" read badly aloud. The
+ * visual Money prefix uses the symbol (ledgerCurrencyLabel). Digits follow the
+ * device's number conventions ("EUR 1.234,56" on a German phone).
  */
 export function formatAED(fils: number, opts?: { decimals?: boolean }): string {
   return `${ledgerCurrencyDisplay()} ${formatAmount(fils, opts)}`;
@@ -86,6 +151,7 @@ export function formatAED(fils: number, opts?: { decimals?: boolean }): string {
 /**
  * Magnitude-only chart labels; callers supply any sign. Values below 1,000
  * retain every minor unit. Abbreviations carry ≈ only when they lose precision.
+ * The single abbreviated decimal uses the device decimal mark ("≈1,2k").
  */
 export function formatCompactAED(fils: number): string {
   const magnitude = Math.abs(fils);
@@ -98,13 +164,26 @@ export function formatCompactAED(fils: number): string {
   const step = unit / stepsPerUnit;
   const roundedSteps = Math.round(magnitude / step);
   const approximate = roundedSteps * step !== magnitude;
-  return `${approximate ? '≈' : ''}${roundedSteps / stepsPerUnit}${millions ? 'M' : 'k'}`;
+  const whole = Math.floor(roundedSteps / stepsPerUnit);
+  const tenth = roundedSteps % stepsPerUnit;
+  const value = tenth ? `${whole}${displayNumberConventions().decimal}${tenth}` : String(whole);
+  return `${approximate ? '≈' : ''}${value}${millions ? 'M' : 'k'}`;
 }
 
+/**
+ * Typed money in the device's conventions, exact, or null when it cannot be
+ * read without guessing. Arabic ٫ and ٬ are always the decimal and group
+ * marks; they map onto the device's before digits are normalised, so
+ * "١٢٫٥٠" reads as 12.50 on any phone.
+ */
 export function parseAmountWithMoneySpec(text: string, spec: LedgerMoneySpec): number | null {
-  // Normalize separators before filtering: stripping ٫ would turn 12٫50 into 1250.
-  const cleaned = normalizeArabicNumerals(text).replace(/[^0-9.,]/g, '');
-  return parseMajorToMinor(cleaned, spec);
+  const conventions = displayNumberConventions();
+  // Separators first: stripping ٫ would turn 12٫50 into 1250.
+  const latin = text
+    .replace(/٫/g, conventions.decimal)
+    .replace(/٬/g, /^[.,]$/.test(conventions.group) ? conventions.group : '');
+  const cleaned = normalizeArabicNumerals(latin).replace(/[^0-9.,]/g, '');
+  return parseLocalizedMajorToMinor(cleaned, spec, conventions);
 }
 
 export function parseAmountToFils(text: string): number | null {

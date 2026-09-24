@@ -86,7 +86,9 @@ function maskLongDigits(s: string): string {
   return s.replace(/\d{5,}/g, (m) => `····${m.slice(-4)}`);
 }
 
-const fmt = (fils: number): string => formatAmount(fils, { decimals: true });
+// A support export: canonical 1,234.56 whatever the phone's Region, so the
+// numbers read the same to whoever receives the report.
+const fmt = (fils: number): string => formatAmount(fils, { decimals: true, canonical: true });
 
 /**
  * Everything the ledger believes about this phone's cards, as text to share.

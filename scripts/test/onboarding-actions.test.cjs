@@ -610,9 +610,13 @@ function preview(language) {
     '@/hooks/use-language': { useLanguage: () => language },
     '@/lib/i18n': i18n,
     '@/lib/haptics': { tapped() {} },
+    '@/lib/ledger-money': load(path.join(root, 'src/lib/ledger-money.ts'), {
+      '@/lib/currency-metadata': load(path.join(root, 'src/lib/currency-metadata.ts')),
+    }),
   };
-  const component = load(process.env.WAFRA_ONBOARDING_PREVIEW || path.join(root, 'src/components/onboarding/money-preview.tsx'), deps).MoneyPreview;
-  return { render() { index = 0; return component({ reducedMotion: true }); }, i18n };
+  const module = load(process.env.WAFRA_ONBOARDING_PREVIEW || path.join(root, 'src/components/onboarding/money-preview.tsx'), deps);
+  const component = module.MoneyPreview;
+  return { render(props = {}) { index = 0; return component({ reducedMotion: true, ...props }); }, i18n, sampleAmount: module.sampleAmount };
 }
 function walk(node, out = []) {
   if (Array.isArray(node)) node.forEach(child => walk(child, out));
@@ -640,3 +644,17 @@ for (const language of ['en', 'ar']) {
     }
   });
 }
+
+test('the sample amount follows the chosen ledger currency and never defaults to AED', () => {
+  const h = preview('en');
+  const sample = h.sampleAmount;
+  assert.deepEqual({ ...sample(null) }, { text: '24.50', spoken: '24.50' });
+  assert.equal(sample('AED').text, 'AED 24.50', 'the UAE sample is unchanged');
+  assert.equal(sample('SAR').text, 'SAR 24.50');
+  assert.equal(sample('JPY').text, 'JPY 2,450');
+  assert.equal(sample('KWD').text, 'KWD 2.450');
+  assert.equal(sample('INR').text, 'INR 245');
+  assert.equal(sample('ZZZ').text, '24.50', 'an unknown code is not printed as money');
+  assert.ok(text(h.render({ currency: 'EUR' })).includes('EUR 24.50'));
+  assert.ok(!text(h.render()).includes('AED'));
+});

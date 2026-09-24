@@ -1,6 +1,13 @@
 import { categoryLabel, getCategory, isFixedCommitment } from '@/lib/categories';
 import { isIncome, isSpending } from '@/lib/ledger';
-import { daysInMonth, formatAED, getMonthStartDay, shortDate } from '@/lib/format';
+import {
+  daysInMonth,
+  formatAED,
+  getMonthStartDay,
+  ledgerTypicalMinor,
+  ledgerWholeMajor,
+  shortDate,
+} from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import {
   elapsedDays,
@@ -424,7 +431,9 @@ export function buildInsights(
     if (!isSpending(t, liveAccounts, internalTransfers) || isFixedCommitment(t.category)) continue;
     if (!largest || t.amountFils > largest.amountFils) largest = t;
   }
-  if (largest && largest.amountFils >= 20_000) {
+  // "Large" is about AED 200 in the ledger's currency: 20,000 fils, ¥20,000,
+  // KWD 20.000 — not 20,000 minor units of whatever the ledger holds.
+  if (largest && largest.amountFils >= ledgerTypicalMinor(200)) {
     insights.push({
       id: 'largest',
       tone: 'neutral',
@@ -483,13 +492,14 @@ export function buildInsights(
       });
     }
   }
-  // Rounded to whole dirhams for display, so a rise that survives the test
-  // but not the rounding would print the same figure twice. If the user
-  // cannot see the difference, there is nothing to tell them.
+  // Compared in whole major units of the ledger currency (dirhams for AED,
+  // yen for JPY, dinars for KWD), so a rise too small to matter in that unit
+  // is not announced. If the user cannot see the difference, there is
+  // nothing to tell them.
   const increased = subs.find(
     (s) =>
       s.priceIncreased &&
-      Math.round(s.lastAmountFils / 100) !== Math.round(s.priorTypicalFils / 100),
+      ledgerWholeMajor(s.lastAmountFils) !== ledgerWholeMajor(s.priorTypicalFils),
   );
   if (increased) {
     insights.push({

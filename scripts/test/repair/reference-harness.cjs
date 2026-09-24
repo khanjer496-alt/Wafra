@@ -31,6 +31,11 @@ function createHarness(options = {}) {
     return Number.isSafeInteger(parsed)&&parsed>0?parsed:null;
   };
   const format={ formatAED, formatAmount:amount, formatCompactAED:f=>amount(f,{decimals:false}),
+    // AED-ledger forms of the currency-aware helpers: 100 fils per dirham.
+    formatAmountForInput:(fils,opts={})=>(fils/100).toFixed(opts.decimals||fils%100?2:0),
+    ledgerTypicalMinor:major=>major*100, ledgerWholeMajor:fils=>Math.round(fils/100),
+    ledgerNiceMinor:fils=>Math.max(10_000,Math.round(fils/10_000)*10_000),
+    ledgerCurrencyLabel:()=>lang==='ar'?'د.إ':'AED',
     getMonthStartDay:()=>1,
     monthKey:d=>String(d instanceof Date?d.toISOString():d).slice(0,7),
     monthLabel:(k,short=false)=>new Date(k+'-01T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:short?'short':'long',year:'numeric'}),

@@ -11,18 +11,29 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { categoryLabel } from '@/lib/categories';
-import { formatAED, monthLabel, weekdayShort } from '@/lib/format';
+import { formatAED, ledgerWholeMajor, monthLabel, weekdayShort } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
-import { formatMinorUnits } from '@/lib/ledger-money';
+import {
+  displayNumberConventions,
+  formatMinorUnits,
+  type LedgerMoneySpec,
+  wholeMajorUnits,
+} from '@/lib/ledger-money';
 import type { CategoryMover, MerchantStat } from '@/lib/analytics';
 import type { CategoryId } from '@/lib/types';
 
-/** Compact axis label — 12.4k, 1.2M — for the peak reference on the trends chart. */
-function shortAmount(fils: number): string {
-  const value = Math.round(fils / 100); // fils → currency units
+/**
+ * Compact axis label — 12.4k, 1.2M — for the peak reference on the trends
+ * chart. Whole major units at the ledger's own exponent (AED /100, JPY /1,
+ * KWD /1000), with the device's decimal mark ("1,2k" on a German phone).
+ */
+function shortAmount(fils: number, spec: LedgerMoneySpec | null): string {
+  const value = spec ? wholeMajorUnits(fils, spec) : ledgerWholeMajor(fils);
   const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1)}M`;
-  if (abs >= 1_000) return `${(value / 1_000).toFixed(abs >= 10_000 ? 0 : 1)}k`;
+  const decimal = displayNumberConventions().decimal;
+  const fixed = (n: number, digits: number) => n.toFixed(digits).replace('.', decimal);
+  if (abs >= 1_000_000) return `${fixed(value / 1_000_000, abs >= 10_000_000 ? 0 : 1)}M`;
+  if (abs >= 1_000) return `${fixed(value / 1_000, abs >= 10_000 ? 0 : 1)}k`;
   return `${value}`;
 }
 
@@ -84,8 +95,8 @@ export function SpendingTrends(p: Props) {
       <ThemedText type="meta" themeColor="textSecondary">{w.sixMonths} · {p.months[0] ? monthLabel(p.months[0].key, true) : ''} — {p.months.at(-1) ? monthLabel(p.months.at(-1)!.key, true) : ''}</ThemedText>
       <View style={styles.chartWrap}>
         <View style={styles.axis} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>{shortAmount(max)}</ThemedText>
-          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>{shortAmount(max / 2)}</ThemedText>
+          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>{shortAmount(max, moneySpec)}</ThemedText>
+          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>{shortAmount(max / 2, moneySpec)}</ThemedText>
           <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>0</ThemedText>
         </View>
         <View style={styles.chartBody}>
