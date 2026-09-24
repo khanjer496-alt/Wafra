@@ -427,21 +427,24 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     useCallback: (fn) => fn,
     useContext: () => null,
     useEffect: () => {},
+    useLayoutEffect: () => {},
     useMemo: (fn) => fn(),
+    useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
     useRef: (value) => ({ current: value }),
     useState: (value) => [value, () => {}],
   };
   const identityState = (state) => state;
   const modules = {
     'react/jsx-runtime': {
-      // StoreProvider now wraps StoreContext.Provider in PrivateModeContext.Provider,
-      // whose value is the private-mode boolean; the store value is the inner
-      // element, already captured as this element's child.
+      // StoreContext.Provider is the innermost element; the wrappers around it
+      // (money locale, private mode, the selector handle) pass through the
+      // store value already captured as their child. The harness renders the
+      // provider without children, so the innermost element yields its value.
       jsx: (_type, props) => captureProvider
-        ? (typeof props.value === 'object' && props.value !== null ? props.value : props.children)
+        ? (typeof props.children === 'object' && props.children !== null ? props.children : props.value)
         : {},
       jsxs: (_type, props) => captureProvider
-        ? (typeof props.value === 'object' && props.value !== null ? props.value : props.children)
+        ? (typeof props.children === 'object' && props.children !== null ? props.children : props.value)
         : {},
       Fragment: Symbol('Fragment'),
     },
@@ -541,6 +544,10 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // The real unproven-format policy: the store mirrors its setting and
     // writes its undo tombstones on hydrate/undo/delete.
     '@/lib/best-effort-autopost': require('./build/best-effort-autopost'),
+    // Provider plumbing only: the locale key for memoised money text.
+    '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
+    // The real selector helpers (dependency-free).
+    '@/lib/store-selection': execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); }),
     './balances': {},
     ...realModules,
   };
