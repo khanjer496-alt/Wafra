@@ -1987,6 +1987,16 @@ const CARD_PAYMENT_DEBIT =
         body: 'Date,Description,Amount\n01/07/2026,Ambiguous,20.00',
       })).status === 422);
 
+    const usdAmbiguous = await call(env, 'POST', '/v1/import/csv', {
+      token: me.adminToken,
+      headers: {
+        'content-type': 'text/csv', 'x-wafra-ledger-currency': 'USD', 'x-wafra-ledger-exponent': '2',
+      },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,Shop,20.00,\n02/07/2026,Other,5.00,',
+    });
+    ok('csv: a USD ledger refuses a file whose every date reads either way, by name',
+      usdAmbiguous.status === 422 && (await usdAmbiguous.json()).error === 'ambiguous_dates');
+
     // Email forwarding is off unless the operator configured a domain, and the
     // route says so rather than minting an address that can never receive mail.
     const noDomain = { DB: makeDb() };

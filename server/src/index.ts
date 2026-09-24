@@ -2040,6 +2040,11 @@ export default {
         if (extracted.ambiguousCardSignRows > 0) {
           return json({ error: 'ambiguous_card_signs' }, 422);
         }
+        // Every date could be day/month or month/day and the ledger's market
+        // does not settle it: refused by name rather than guessed.
+        if (extracted.ambiguousDateRows > 0) {
+          return json({ error: 'ambiguous_dates' }, 422);
+        }
         return json({
           error: 'unsupported_statement_format',
           requirement: 'text_pdf_with_explicit_debit_credit_rows',
@@ -2118,6 +2123,9 @@ export default {
       if (parsed.rows.length === 0) {
         if (parsed.ambiguousCardSignRows > 0) {
           return json({ error: 'ambiguous_card_signs' }, 422);
+        }
+        if (parsed.ambiguousDateRows > 0) {
+          return json({ error: 'ambiguous_dates' }, 422);
         }
         return json({
           error: 'unsupported_statement_format',

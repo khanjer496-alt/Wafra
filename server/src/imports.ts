@@ -132,6 +132,11 @@ export interface StatementCsvResult {
    * statement that never says what its signs mean. Counted inside rejectedRows.
    */
   ambiguousCardSignRows: number;
+  /**
+   * Rejected rows whose numeric date reads as either day/month or month/day,
+   * in a file that never settles which. Counted inside rejectedRows.
+   */
+  ambiguousDateRows: number;
 }
 
 const HEADER_ALIASES = {
@@ -633,7 +638,7 @@ export function parseStatementCsv(
     : sourceAccountIndex >= 0
       ? uniqueColumnInstrument(dataRecords, sourceAccountIndex, 'account')
       : uniqueColumnInstrument(dataRecords, sourceCardIndex, 'unknown');
-  const dateOrder = inferDateOrder(dataRecords.map((record) => record[dateIndex] ?? ''));
+  const dateOrder = inferDateOrder(dataRecords.map((record) => record[dateIndex] ?? ''), defaultCurrency);
   // Card exports carry their identity, when they carry it at all, in the
   // preamble above the table or in a card-number column name. A signed amount
   // column is then only a direction when the preamble says what a minus means.
@@ -645,6 +650,7 @@ export function parseStatementCsv(
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
   let ambiguousCardSignRows = 0;
+  let ambiguousDateRows = 0;
   for (const record of dataRecords) {
     if (record.length !== headers.length) {
       rejectedRows += 1;
@@ -708,6 +714,9 @@ export function parseStatementCsv(
       !date || unsafeDescription || merchant.length < 2 || merchant.length > 180 ||
       !type || !minor
     ) {
+      if (!date && dateOrder === 'unknown' && ambiguousLocalDate(record[dateIndex] ?? '')) {
+        ambiguousDateRows += 1;
+      }
       rejectedRows += 1;
       continue;
     }
@@ -745,18 +754,27 @@ export function parseStatementCsv(
       raw: record.join(delimiter),
     });
   }
-  return { rows, totalRows, rejectedRows, ambiguousCardSignRows };
+  return { rows, totalRows, rejectedRows, ambiguousCardSignRows, ambiguousDateRows };
 }
 
-type DateOrder = 'day-first' | 'month-first';
+type DateOrder = 'day-first' | 'month-first' | 'unknown';
+
+/**
+ * Ledgers whose market reads a bare numeric date day-first. Only the two
+ * launch-tested markets: a statement in any other currency whose every
+ * numeric date could be read either way is refused rather than guessed.
+ */
+const DAY_FIRST_LEDGERS = new Set(['AED', 'SAR']);
 
 /**
  * Decide how a file's numeric dates read. A first field above 12 can only be
- * a day; a second field above 12 can only be a month-first export. With no
- * evidence, or with contradictory evidence, keep the launch-tested UAE/KSA
- * DD/MM reading — the ambiguous rows then parse exactly as they did before.
+ * a day; a second field above 12 can only be a month-first export. With
+ * contradictory evidence keep the launch-tested DD/MM reading, exactly as
+ * before. With NO evidence, the ledger's market decides only when it is a
+ * day-first one; otherwise the order is `unknown` and isoDate refuses every
+ * date whose day and month could swap.
  */
-function inferDateOrder(values: Iterable<string>): DateOrder {
+function inferDateOrder(values: Iterable<string>, currency: StatementCurrency): DateOrder {
   let dayFirst = false;
   let monthFirst = false;
   for (const value of values) {
@@ -765,7 +783,18 @@ function inferDateOrder(values: Iterable<string>): DateOrder {
     if (Number(local[1]) > 12) dayFirst = true;
     if (Number(local[2]) > 12) monthFirst = true;
   }
-  return monthFirst && !dayFirst ? 'month-first' : 'day-first';
+  if (monthFirst && !dayFirst) return 'month-first';
+  if (dayFirst || DAY_FIRST_LEDGERS.has(currency)) return 'day-first';
+  return 'unknown';
+}
+
+/** A numeric date whose day and month are both ≤ 12 and differ. */
+function ambiguousLocalDate(value: string): boolean {
+  const local = /^(\d{1,2})[\/-](\d{1,2})[\/-]\d{2,4}$/.exec(normalizeDigits(value).replace(/\s+/g, ' ').trim());
+  if (!local) return false;
+  const first = Number(local[1]);
+  const second = Number(local[2]);
+  return first <= 12 && second <= 12 && first !== second;
 }
 
 const MONTH_INDEX: Record<string, number> = {
@@ -787,7 +816,8 @@ function isoDate(value: string, order: DateOrder = 'day-first'): string | null {
   } else {
     const local = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/.exec(value);
     if (!local) return null;
-    if (order === 'month-first') {
+    if (order === 'unknown' && ambiguousLocalDate(value)) return null;
+    if (order === 'month-first' || (order === 'unknown' && Number(local[2]) > 12)) {
       month = Number(local[1]); day = Number(local[2]);
     } else {
       day = Number(local[1]); month = Number(local[2]);
@@ -1323,6 +1353,8 @@ export interface StatementTextResult {
    * statement that never says what its signs mean. Counted inside rejectedRows.
    */
   ambiguousCardSignRows: number;
+  /** Rejected rows whose numeric date the file never settles as day- or month-first. */
+  ambiguousDateRows: number;
 }
 
 /**
@@ -1354,7 +1386,8 @@ export function parseStatementLines(
   let ambiguousCardSignRows = 0;
   const cardTotalAmountTable = hasCardTotalAmountTable(text, cardStatement);
   const lines = cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines;
-  const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''));
+  const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''), currency);
+  let ambiguousDateRows = 0;
   const columnOrder = statementColumnOrder(text);
   // Proven once for the whole file, then used to resolve rows the branches
   // below would otherwise have to reject as ambiguous.
@@ -1493,7 +1526,10 @@ export function parseStatementLines(
         }
       }
     }
-    if (countable && rows.length === accepted) rejectedRows += 1;
+    if (countable && rows.length === accepted) {
+      rejectedRows += 1;
+      if (dateOrder === 'unknown' && prefixed && ambiguousLocalDate(prefixed[1])) ambiguousDateRows += 1;
+    }
   }
   return {
     rows,
@@ -1501,6 +1537,7 @@ export function parseStatementLines(
     rejectedRows,
     completeRowAccounting: true,
     ambiguousCardSignRows,
+    ambiguousDateRows,
   };
 }
 
@@ -1523,6 +1560,7 @@ export async function extractPdfStatementRows(
   rejectedRows: number;
   completeRowAccounting: boolean;
   ambiguousCardSignRows: number;
+  ambiguousDateRows: number;
 }> {
   const document = await getDocumentProxy(bytes, password ? { password } : undefined);
   try {
@@ -1538,6 +1576,7 @@ export async function extractPdfStatementRows(
       rejectedRows: parsed.rejectedRows,
       completeRowAccounting: parsed.completeRowAccounting,
       ambiguousCardSignRows: parsed.ambiguousCardSignRows,
+      ambiguousDateRows: parsed.ambiguousDateRows,
     };
   } finally {
     const disposable = document as unknown as {

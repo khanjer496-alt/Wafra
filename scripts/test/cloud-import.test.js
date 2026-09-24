@@ -84,6 +84,8 @@ ok('statement responses: card rows refused for an unexplained sign are a bounded
   parseCsvImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 10, cardSignRowsSkipped: -1 }) === null);
 ok('statement responses: an unexplained card sign convention is its own refusal',
   pdfImportError(422, { error: 'ambiguous_card_signs' }).code === 'ambiguous_card_signs');
+ok('statement responses: dates that read either way are their own refusal',
+  pdfImportError(422, { error: 'ambiguous_dates' }).code === 'ambiguous_dates');
 ok('pdf response: an oversized text PDF is its own error, not the scanned-PDF one',
   pdfImportError(413, { error: 'pdf_too_long' }).code === 'pdf_too_long');
 ok('email token: private address response is validated',

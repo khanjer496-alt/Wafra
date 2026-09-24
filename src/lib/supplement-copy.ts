@@ -52,6 +52,7 @@ export const SUPPLEMENT_COPY = {
     errFormat: 'This statement lacks supported date, description, and explicit debit/credit fields, so Wafra will not guess.',
     errCardSigns: 'This card statement marks rows only with a minus sign and does not say whether that means a payment or a charge, so Wafra will not guess. Export it with a Debit/Credit or DR/CR column.',
     cardSignSkipped: '{count} card rows skipped: the statement does not say whether a minus sign is a payment or a charge.',
+    errDates: 'Every date in this statement could be read as day/month or month/day, and your ledger currency does not settle which, so Wafra will not guess. Export it with dates like 2026-07-01 or 01 Jul 2026.',
     errRate: 'Too many imports were requested. Wait a moment and retry.',
     errUnexpected: 'The import service returned an unexpected response. Nothing was filed.',
     // Progress, not failure. The filing step below can take a moment on a
@@ -118,6 +119,7 @@ export const SUPPLEMENT_COPY = {
     errFormat: 'يفتقد الكشف حقول التاريخ والوصف واتجاه مدين/دائن المدعومة، لذلك لن يخمن وفرة.',
     errCardSigns: 'يميّز كشف البطاقة هذا العمليات بعلامة السالب فقط ولا يوضح إن كانت تعني دفعة أم عملية شراء، لذلك لن يخمن وفرة. صدّره بعمود مدين/دائن أو DR/CR.',
     cardSignSkipped: 'تم تجاوز {count} من عمليات البطاقة: لا يوضح الكشف إن كانت علامة السالب دفعة أم عملية شراء.',
+    errDates: 'يمكن قراءة كل تاريخ في هذا الكشف كيوم/شهر أو شهر/يوم، ولا تحسم عملة سجلك ذلك، لذلك لن يخمن وفرة. صدّره بتواريخ مثل 2026-07-01 أو 01 Jul 2026.',
     errRate: 'طُلبت واردات كثيرة. انتظر قليلاً ثم حاول مجدداً.',
     errUnexpected: 'أعادت خدمة الاستيراد استجابة غير متوقعة. لم تُسجّل أي عملية.',
     acceptedFiling: 'تم استلام {accepted} صفاً · جارٍ حفظها على هذا الهاتف…',

@@ -174,7 +174,9 @@ function wideTextPdf(lines) {
   for (const [currency, amount, minor] of globalCsv) {
     const parsedGlobal = parseStatementCsv([
       'Date,Description,Debit,Credit,Currency',
-      `01/07/2026,GLOBAL SHOP,${amount},,${currency}`,
+      // 13/07: these assert minor units, not dates — an ambiguous date is
+      // refused outside day-first ledgers (see the date-order tests below).
+      `13/07/2026,GLOBAL SHOP,${amount},,${currency}`,
     ].join('\n'), currency);
     ok(`global CSV keeps ${currency} in its exact ISO minor units`,
       parsedGlobal.rows.length === 1 && parsedGlobal.rejectedRows === 0 &&
@@ -183,11 +185,11 @@ function wideTextPdf(lines) {
   }
   const badJpyPrecision = parseStatementCsv([
     'Date,Description,Debit,Credit,Currency',
-    '01/07/2026,GLOBAL SHOP,24.50,,JPY',
+    '13/07/2026,GLOBAL SHOP,24.50,,JPY',
   ].join('\n'), 'JPY');
   const badKwdPrecision = parseStatementCsv([
     'Date,Description,Debit,Credit,Currency',
-    '01/07/2026,GLOBAL SHOP,12.3456,,KWD',
+    '13/07/2026,GLOBAL SHOP,12.3456,,KWD',
   ].join('\n'), 'KWD');
   ok('global CSV rejects fractional precision that the ledger currency cannot represent',
     badJpyPrecision.rows.length === 0 && badJpyPrecision.rejectedRows === 1 &&
@@ -413,8 +415,8 @@ function wideTextPdf(lines) {
   ok('Saudi statement rows retain SAR and reject explicit AED rows',
     saRows.length === 1 && saRows[0].currency === 'SAR' && saRows[0].amountFils === 4500 &&
       saRows[0].categoryGuess === 'groceries' && saRows[0].categoryDeliberate === true);
-  const jpyRows = parseStatementText('01/07/2026 TOKYO STORE JPY 2400 DR', 'JPY');
-  const kwdRows = parseStatementText('01/07/2026 KUWAIT STORE KWD 12.345 DR', 'KWD');
+  const jpyRows = parseStatementText('13/07/2026 TOKYO STORE JPY 2400 DR', 'JPY');
+  const kwdRows = parseStatementText('13/07/2026 KUWAIT STORE KWD 12.345 DR', 'KWD');
   ok('global text/PDF rows honor zero- and three-decimal ledger currencies',
     jpyRows.length === 1 && jpyRows[0].currency === 'JPY' && jpyRows[0].amountFils === 2400 &&
       kwdRows.length === 1 && kwdRows[0].currency === 'KWD' && kwdRows[0].amountFils === 12345,
@@ -1115,6 +1117,50 @@ function wideTextPdf(lines) {
   ].join('\n'), 'AED');
   ok('a card CSV with an explicit direction column is unaffected',
     cardCsvDirected.rows.length === 2 && cardCsvDirected.rows[1].type === 'income');
+
+  // ── Numeric dates that could be either day or month ──
+  // 01/07/2026 is 1 July in Dubai and January 7 in New York. With no row in
+  // the file above 12 to settle it, only a ledger whose market reads day-first
+  // (the launch-tested AED and SAR) may assume it; anything else refuses.
+  const usdAmbiguous = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '01/07/2026,GLOBAL SHOP,24.90,',
+    '02/07/2026,OTHER SHOP,10.00,',
+  ].join('\n'), 'USD');
+  ok('a non-day-first ledger refuses a CSV whose every numeric date is ambiguous',
+    usdAmbiguous.rows.length === 0 && usdAmbiguous.rejectedRows === 2 &&
+      usdAmbiguous.ambiguousDateRows === 2, JSON.stringify(usdAmbiguous));
+  const usdSettled = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '01/07/2026,GLOBAL SHOP,24.90,',
+    '01/13/2026,OTHER SHOP,10.00,',
+  ].join('\n'), 'USD');
+  ok('one row above 12 settles the order for the whole file',
+    usdSettled.rows.length === 2 && usdSettled.rows[0].date === '2026-01-07' &&
+      usdSettled.ambiguousDateRows === 0, JSON.stringify(usdSettled.rows.map((row) => row.date)));
+  const aedAmbiguous = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '01/07/2026,CARREFOUR,24.90,',
+  ].join('\n'), 'AED');
+  ok('the launch-tested AED ledger keeps its day-first reading',
+    aedAmbiguous.rows.length === 1 && aedAmbiguous.rows[0].date === '2026-07-01');
+  const usdIso = parseStatementCsv([
+    'Date,Description,Debit,Credit',
+    '2026-07-01,GLOBAL SHOP,24.90,',
+    '05/05/2026,SAME BOTH WAYS,1.00,',
+  ].join('\n'), 'USD');
+  ok('ISO dates and day-equals-month dates are never ambiguous',
+    usdIso.rows.length === 2 && usdIso.ambiguousDateRows === 0);
+  const usdPdfAmbiguous = parseStatementLines([
+    '01/07/2026 GLOBAL SHOP 24.90 DR',
+    '02/07/2026 OTHER SHOP 10.00 DR',
+  ].join('\n'), 'USD');
+  ok('PDF rows with only ambiguous dates are refused and counted, not guessed',
+    usdPdfAmbiguous.rows.length === 0 && usdPdfAmbiguous.rejectedRows === 2 &&
+      usdPdfAmbiguous.ambiguousDateRows === 2, JSON.stringify(usdPdfAmbiguous));
+  const sarPdfAmbiguous = parseStatementLines('01/07/2026 PANDA 24.90 DR', 'SAR');
+  ok('the launch-tested SAR ledger keeps its day-first reading in PDFs',
+    sarPdfAmbiguous.rows.length === 1 && sarPdfAmbiguous.rows[0].date === '2026-07-01');
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

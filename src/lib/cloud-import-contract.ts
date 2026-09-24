@@ -79,6 +79,7 @@ export type CloudImportErrorCode =
   | 'pdf_password_incorrect'
   | 'unsupported_statement_format'
   | 'ambiguous_card_signs'
+  | 'ambiguous_dates'
   | 'rate_limited'
   | 'queue_full'
   | 'email_not_configured'
@@ -268,6 +269,7 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'pdf_password_incorrect',
   'unsupported_statement_format',
   'ambiguous_card_signs',
+  'ambiguous_dates',
   'rate_limited',
   'queue_full',
   'email_not_configured',
