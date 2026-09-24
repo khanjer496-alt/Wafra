@@ -437,6 +437,45 @@ ok('hydration cannot relabel UAE review money as a foreign ledger amount',
       reloadSaved.pending.length === 50,
     JSON.stringify({ once: loadOnce.tombstones, saved: reloadSaved.tombstones }));
 
+  // Batch admission (store staging) keeps the item-by-item rules but prunes once.
+  const sequential = (start, items, at) => {
+    let state = start;
+    const outcomes = items.map((item) => {
+      const result = admitPreparedReviewAlert(state, item, at);
+      state = result.state;
+      return result.outcome;
+    });
+    return { state, outcomes };
+  };
+  const batchInputs = [legacyFiller(0), incoming, legacyFiller(600), informational(601),
+    { ...legacyFiller(602), id: legacyFiller(40).id }, legacyFiller(603), legacyFiller(603)];
+  const bulk = tray.admitPreparedReviewAlerts(overflow.state, batchInputs, NOW + 5000);
+  const oneByOne = sequential(overflow.state, batchInputs, NOW + 5000);
+  ok('batch admission matches item-by-item outcomes, pending entries and loss counts',
+    JSON.stringify(bulk.outcomes) === JSON.stringify(oneByOne.outcomes) &&
+      JSON.stringify(bulk.state.pending.map((item) => item.id).sort()) ===
+        JSON.stringify(oneByOne.state.pending.map((item) => item.id).sort()) &&
+      tray.recentlyLostReviewCount(bulk.state, NOW + 5000, 'evicted') ===
+        tray.recentlyLostReviewCount(oneByOne.state, NOW + 5000, 'evicted'),
+    JSON.stringify({ bulk: bulk.outcomes, seq: oneByOne.outcomes }));
+  const protectedBatch = Array.from({ length: 52 }, (_, index) => ({ ...stored, channel: 'push',
+    id: `local_review_id_${String(index).padStart(32, 'd')}`,
+    sourceKey: `local_review_source_${String(index).padStart(32, 'd')}` }));
+  ok('batch admission refuses notification reviews beyond their lane like single admission',
+    JSON.stringify(tray.admitPreparedReviewAlerts(emptyAlertReviewTray(), protectedBatch, NOW + 1000).outcomes) ===
+      JSON.stringify(sequential(emptyAlertReviewTray(), protectedBatch, NOW + 1000).outcomes));
+  const bigHistory = Array.from({ length: 5000 }, (_, index) => legacyFiller(10_000 + index));
+  const started = Date.now();
+  const staged = tray.admitPreparedReviewAlerts({ ...emptyAlertReviewTray(), tombstones: Array.from(
+    { length: 900 }, (_, index) => ({ sourceKey: `dismissed_source_${String(index).padStart(8, '0')}`,
+      resolvedAt: NOW, expiresAt: NOW + 86_400_000, outcome: 'dismissed' })) }, bigHistory, NOW + 20_000);
+  const elapsed = Date.now() - started;
+  ok('staging five thousand History money reviews is one bounded pass',
+    elapsed < 2000 && staged.state.pending.length === 50 &&
+      staged.outcomes.every((outcome) => outcome === 'admitted') &&
+      staged.state.tombstones.filter((item) => item.outcome === 'dismissed').length === 900,
+    JSON.stringify({ elapsed, pending: staged.state.pending.length }));
+
   // Gap A: foreign-currency money reviews can never be posted. They live in
   // their own bounded lane, never occupy the Message lane and never wait.
   const { inspectUniversalBankEvent } = require('./build/universal-parser.js');

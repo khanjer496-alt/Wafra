@@ -504,6 +504,64 @@ export const admitPreparedReviewAlert = (
   };
 };
 
+/**
+ * Admit a batch under the same dedupe, identity and lane rules as
+ * admitPreparedReviewAlert, but prune once. A History import can stage
+ * thousands of candidates; per-item pruning over a full tombstone list would
+ * block the JS thread. Lane trimming runs once over the whole batch, so it
+ * never evicts more possible money movements than item-by-item admission.
+ */
+export const admitPreparedReviewAlerts = (
+  current: AlertReviewTrayState,
+  inputs: readonly ReviewEntry[],
+  now: number,
+): { state: AlertReviewTrayState; outcomes: ReviewAdmissionResult['outcome'][] } => {
+  const state = pruneAlertReviewTray(current, now);
+  const blocked = new Set<string>();
+  const evictedKeys = new Set<string>();
+  for (const entry of state.tombstones) {
+    const key = canonicalUniversalSourceKey(entry.sourceKey);
+    if (entry.outcome === 'evicted') evictedKeys.add(key);
+    else blocked.add(key);
+  }
+  const pendingKeys = new Set(state.pending.map((entry) =>
+    canonicalUniversalSourceKey(entry.sourceKey, entry.observedAt)));
+  const pendingById = new Map(state.pending.map((entry) => [entry.id, entry]));
+  let protectedCount = state.pending.filter((entry) => reviewLane(entry) === 'protected').length;
+  const added: ReviewEntry[] = [];
+  const recoveredKeys = new Set<string>();
+  const outcomes: ReviewAdmissionResult['outcome'][] = [];
+  for (const input of inputs) {
+    const item = normalizeReviewEntry(input, now);
+    if (!item || item.expiresAt <= now) { outcomes.push('refused'); continue; }
+    const existing = pendingById.get(item.id);
+    if (existing && (existing.sourceKey !== item.sourceKey || existing.observedAt !== item.observedAt)) {
+      outcomes.push('refused');
+      continue;
+    }
+    const key = canonicalUniversalSourceKey(item.sourceKey, item.observedAt);
+    if (blocked.has(key) || pendingKeys.has(key)) { outcomes.push('duplicate'); continue; }
+    const lane = reviewLane(item);
+    if (lane === 'protected' && protectedCount >= REVIEW_ALERT_CAP) { outcomes.push('refused'); continue; }
+    if (lane === 'protected') protectedCount += 1;
+    if (evictedKeys.has(key)) recoveredKeys.add(key);
+    pendingKeys.add(key);
+    pendingById.set(item.id, item);
+    added.push(item);
+    outcomes.push('admitted');
+  }
+  if (added.length === 0) return { state, outcomes };
+  return {
+    outcomes,
+    state: pruneAlertReviewTray({
+      ...state,
+      pending: [...state.pending, ...added],
+      tombstones: state.tombstones.filter((entry) => !(entry.outcome === 'evicted' &&
+        recoveredKeys.has(canonicalUniversalSourceKey(entry.sourceKey)))),
+    }, now),
+  };
+};
+
 /** Whole days left before a pending review expires, only inside its final week. */
 export const reviewExpiresInDays = (
   item: Pick<ReviewEntry, 'expiresAt'>,

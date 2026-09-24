@@ -80,7 +80,7 @@ import {
   type ReviewPromotionFailure,
 } from '@/lib/review-promotion';
 import {
-  admitPreparedReviewAlert,
+  admitPreparedReviewAlerts,
   emptyAlertReviewTray,
   normalizeAlertReviewTray,
   resolveReviewAlert as resolveAlertReviewItem,
@@ -2327,18 +2327,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const qualificationByReviewId = reviewQualificationMap(items, qualifications);
     const now = Date.now();
     const rebound = reconcileReviewSourceBindings(authoritativeState.current, sourceBindings ?? [], now);
-    let reviewTray = rebound.reviewTray;
+    // One prune for the whole batch: History staging can carry thousands.
+    const batch = admitPreparedReviewAlerts(rebound.reviewTray, items, now);
+    const reviewTray = batch.state;
     let admitted = 0;
     const admittedQualifications: LocalCaptureQualificationCandidate[] = [];
-    for (const item of items) {
-      const result = admitPreparedReviewAlert(reviewTray, item, now);
-      reviewTray = result.state;
-      if (result.outcome === 'admitted') {
-        admitted += 1;
-        const qualification = qualificationByReviewId.get(item.id);
-        if (qualification) admittedQualifications.push(qualification);
-      }
-    }
+    items.forEach((item, index) => {
+      if (batch.outcomes[index] !== 'admitted') return;
+      admitted += 1;
+      const qualification = qualificationByReviewId.get(item.id);
+      if (qualification) admittedQualifications.push(qualification);
+    });
     if (admitted === 0 && !rebound.changed) {
       return { admitted, qualificationIds: [], durable: ensureDurable() };
     }
