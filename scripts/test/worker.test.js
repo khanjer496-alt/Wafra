@@ -2259,7 +2259,8 @@ const CARD_PAYMENT_DEBIT =
       token: euroEmail.emailToken,
       body: { text: '01/07/2026 BOULANGERIE PAUL 12,50 DR\n02/07/2026 LOYER JUILLET 1.234,56 DR' },
     });
-    const euroRows = await drainOpened(env, euroDevice);
+    // Rows share one ingest; their delivery order is not a contract.
+    const euroRows = (await drainOpened(env, euroDevice)).sort((a, b) => a.date.localeCompare(b.date));
     ok('email locale: a EUR ledger reads a forwarded decimal-comma statement exactly, day-first',
       euroForward.status === 202 && euroRows.length === 2 &&
         euroRows.every((row) => row.currency === 'EUR') &&
