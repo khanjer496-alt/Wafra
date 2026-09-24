@@ -2106,10 +2106,8 @@ export default {
         acceptedRows: extracted.rows.length,
         rejectedRows: extracted.rejectedRows,
         totalRows: extracted.totalRows,
-        // Of rejectedRows: card rows refused because the statement never says
-        // what its minus sign means. A count, never the rows.
-        cardSignRowsSkipped: extracted.ambiguousCardSignRows,
         pages: extracted.pages,
+        cardSignRowsSkipped: extracted.ambiguousCardSignRows,
         alreadyProcessed,
         // Coverage means "this range is fully represented locally". Never
         // claim it when the parser explicitly counted rows it refused.
