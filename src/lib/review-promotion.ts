@@ -83,6 +83,10 @@ const APPLE_PAY_BANK_OVERLAP_MS = 10 * 60_000;
 /** Two Wallet observations are separate events unless merchant and clock agree. */
 const APPLE_PAY_WALLET_OVERLAP_MS = 120_000;
 
+/** An Apple Pay row, unbound or already bound to one of its bank alerts. */
+const isWalletPurchaseRow = (row: Transaction): boolean =>
+  isApplePayWalletRow(row) || row.walletBound === true;
+
 const normalizeMerchant = (value: string): string =>
   value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
 
@@ -116,6 +120,8 @@ const possibleApplePayDuplicate = (
      * any account, so choosing another account still asks first.
      */
     anyWalletAccount?: boolean;
+    /** The Wallet row the planner flagged: same amount within ten minutes always asks. */
+    walletRowId?: string;
   },
 ): boolean => {
   if (candidate.type !== 'expense' || !Number.isFinite(candidate.observedAt)) return false;
@@ -127,15 +133,16 @@ const possibleApplePayDuplicate = (
     : null;
   return transactions.some((existing) => {
     if (existing.type !== 'expense' || existing.amountFils !== candidate.amountFils) return false;
-    if (existing.accountId !== candidate.accountId &&
-      !(candidate.anyWalletAccount && !merchants && isApplePayWalletRow(existing))) return false;
+    const existingWallet = isWalletPurchaseRow(existing);
+    if (existing.accountId !== candidate.accountId && existing.id !== candidate.walletRowId &&
+      !(candidate.anyWalletAccount && !merchants && existingWallet)) return false;
     const timestamp = transactionTime(existing)?.getTime();
     if (timestamp === undefined || !Number.isFinite(timestamp)) {
       // Prompt-only: a clockless non-Wallet row on the same local day.
-      return !!walletDays && !isApplePayWalletRow(existing) && walletDays.has(existing.date);
+      return !!walletDays && !existingWallet && walletDays.has(existing.date);
     }
     const distance = Math.abs(timestamp - candidate.observedAt);
-    const existingWallet = isApplePayWalletRow(existing);
+    if (existing.id === candidate.walletRowId) return distance <= APPLE_PAY_BANK_OVERLAP_MS;
     if (!merchants) return existingWallet && distance <= APPLE_PAY_BANK_OVERLAP_MS;
     if (!existingWallet) return distance <= APPLE_PAY_BANK_OVERLAP_MS;
     return distance <= APPLE_PAY_WALLET_OVERLAP_MS && merchants.has(normalizeMerchant(existing.title));
@@ -299,6 +306,7 @@ export const planReviewPromotion = (
       walletMerchants: walletReview ? [transaction.title, event.merchant.value ?? ''] : null,
       date: transaction.date,
       anyWalletAccount: item.attentionReason === 'possible-apple-pay-duplicate',
+      walletRowId: item.attentionReason === 'possible-apple-pay-duplicate' ? item.walletTransactionId : undefined,
     })) return { outcome: 'refused', reason: 'possible-duplicate' };
     return {
       outcome: 'added', ledgerMoney: money,
@@ -359,6 +367,7 @@ export const planReviewPromotion = (
     type: input.type, accountId: account.id, amountFils, observedAt: item.observedAt, walletMerchants: null,
     date: input.date,
     anyWalletAccount: item.attentionReason === 'possible-apple-pay-duplicate',
+    walletRowId: item.attentionReason === 'possible-apple-pay-duplicate' ? item.walletTransactionId : undefined,
   })) return { outcome: 'refused', reason: 'possible-duplicate' };
 
   const resolvedTray = resolveReviewAlert(state.reviewTray, item.id, 'added', now);
@@ -387,4 +396,57 @@ export const planReviewPromotion = (
       titleEdited: true,
     },
   };
+};
+
+/**
+ * The identity move "Already recorded" applies to one Wallet row: exactly
+ * `smsKey` (the Message's source identity), `viaPush: false` and the durable
+ * `walletBound` marker. The row's clock, date, title, account, category and
+ * amount are untouched.
+ */
+export interface WalletDuplicateBinding {
+  id: string;
+  smsKey: string;
+  viaPush: false;
+  walletBound: true;
+}
+
+/**
+ * "Already recorded" on a possible Apple Pay duplicate: move the bank alert's
+ * exact source identity onto the Wallet row it was flagged against, the same
+ * identity-only move the strict automatic binding makes. The user's title,
+ * account, category and date are untouched. A later rescan of that alert then
+ * finds the row by exact identity, independent of the Review tray's record.
+ *
+ * Only a bank Message binds: it can be re-read by a later history import or
+ * inbox rescan. A notification is one-shot (never re-read), so binding it
+ * would gain nothing and would hide the Wallet row from the SMS that usually
+ * follows; it keeps the tombstone only. Android provider keys embed their own
+ * clock and are never moved onto a Wallet row.
+ *
+ * Returns null (tombstone only) unless the flagged row is still an unbound
+ * Wallet expense of the same amount within the ten-minute window and no
+ * other row already owns the alert's identity.
+ */
+export const walletDuplicateBinding = (
+  state: Pick<AppState, 'reviewTray' | 'transactions'>,
+  reviewId: string,
+): WalletDuplicateBinding | null => {
+  const item = state.reviewTray.pending.find((candidate) => candidate.id === reviewId);
+  if (!item || !isUniversalReviewAlert(item) || item.attentionReason !== 'possible-apple-pay-duplicate' ||
+    !item.walletTransactionId || item.channel === 'push' ||
+    !captureSourceTimeMatches(item.sourceKey, item.observedAt)) return null;
+  const amount = item.event.amount.value;
+  if (item.event.amount.evidence !== 'explicit' || !amount || !/^[1-9]\d{0,15}$/.test(amount.minorUnits)) return null;
+  const row = state.transactions.find((transaction) => transaction.id === item.walletTransactionId);
+  if (!row || !isApplePayWalletRow(row) || row.type !== 'expense' ||
+    row.amountFils !== Number(amount.minorUnits) || !Number.isFinite(row.ts) ||
+    Math.abs(row.ts! - item.observedAt) > APPLE_PAY_BANK_OVERLAP_MS) return null;
+  const smsKey = canonicalUniversalSourceKey(item.sourceKey, item.observedAt);
+  // Clock-free identities only: Apple's GUID digest or the timestamp s-key.
+  if (!/^h[a-f0-9]{64}$/.test(smsKey) && !/^s\d{10,16}-[1-9]\d{0,15}$/.test(smsKey)) return null;
+  if (state.transactions.some((transaction) => transaction.smsKey &&
+    isUsableCaptureSourceIdentity(transaction.smsKey, transaction.ts) &&
+    canonicalUniversalSourceKey(transaction.smsKey, transaction.ts) === smsKey)) return null;
+  return { id: row.id, smsKey, viaPush: false, walletBound: true };
 };

@@ -181,6 +181,12 @@ export interface WalletNearMatch {
    * recoverable, a dropped charge is not.
    */
   transaction: Omit<Transaction, 'id'>;
+  /**
+   * Account facts this alert's own resolution learned (balance snapshot,
+   * issuer, card type, hints), withheld with it and restored only if the
+   * fallback posting is used.
+   */
+  facts: Pick<ImportBatchInput, 'snapshots' | 'bankNames' | 'cardTypes' | 'newHints'>;
 }
 
 /** Source-free failure: callers must not acknowledge a batch that was refused. */
@@ -325,17 +331,21 @@ function walletNearMatchIdentity(smsKey: string): { id: string; sourceKey: strin
   return null;
 }
 
-function walletNearMatchReview(p: ScannedSms, smsKey: string): UniversalReviewAlert | null {
+function walletNearMatchReview(
+  p: ScannedSms,
+  smsKey: string,
+  walletTransactionId: string,
+): UniversalReviewAlert | null {
   const identity = walletNearMatchIdentity(smsKey);
   const event = parsedTransactionReviewEvent(p);
   if (!identity || !event || !Number.isSafeInteger(p.smsTs)) return null;
   const review = prepareUniversalReviewAlert({
     ...identity,
     observedAt: p.smsTs!,
-    channel: p.captureSource === 'shortcut' ? 'shortcut' : 'inbox',
+    channel: p.channel === 'push' ? 'push' : p.captureSource === 'shortcut' ? 'shortcut' : 'inbox',
     event,
   });
-  return review ? { ...review, attentionReason: 'possible-apple-pay-duplicate' } : null;
+  return review ? { ...review, attentionReason: 'possible-apple-pay-duplicate', walletTransactionId } : null;
 }
 
 /**
@@ -541,10 +551,11 @@ function buildImportPlanInMarket(
    * Wallet's merchant text and SMS delivery can lag by minutes. Prompt-only,
    * so it ignores merchant text, but it still requires the same amount, an
    * outgoing purchase, a ten-minute clock, and either the same resolved
-   * account or a card suffix that nothing explicitly contradicts. Only
-   * Message alerts qualify (native SMS or the relayed Shortcut Message);
-   * notifications and statement files keep their own duplicate rules.
+   * account or a card suffix that nothing explicitly contradicts. Bank
+   * Messages (native SMS or the relayed Shortcut Message) and bank-app
+   * notifications qualify; statement files keep their own duplicate rules.
    */
+  let nearWalletRowsCache: Transaction[] | null = null;
   let reviewDecisionKeysCache: Set<string> | null = null;
   const reviewDecisionKeys = (): Set<string> => {
     reviewDecisionKeysCache ??= new Set((state.reviewTray?.tombstones ?? [])
@@ -552,8 +563,8 @@ function buildImportPlanInMarket(
       .map((entry) => canonicalCaptureSourceKey(entry.sourceKey)));
     return reviewDecisionKeysCache;
   };
-  const walletNearMatchFor = (p: ScannedSms, accountId: string, smsKey: string): Transaction | undefined => {
-    if (p.kind !== 'transaction' || p.channel === 'push' || p.type !== 'expense' || p.transferHint ||
+  const walletNearMatchFor = (p: ScannedSms, accountId: string | null, smsKey: string): Transaction | undefined => {
+    if (p.kind !== 'transaction' || p.type !== 'expense' || p.transferHint ||
       !Number.isFinite(p.smsTs)) return undefined;
     if (p.captureSource !== undefined && p.captureSource !== 'shortcut') return undefined;
     // A review must outlive planning by at least a day. An older alert keeps
@@ -562,8 +573,11 @@ function buildImportPlanInMarket(
     // recorded, dismissed or expired unreviewed): honour it, never re-post.
     if (p.smsTs! <= today.getTime() - REVIEW_ALERT_TTL_MS + 86_400_000 &&
       !reviewDecisionKeys().has(canonicalCaptureSourceKey(smsKey, p.smsTs))) return undefined;
-    walletRowsCache ??= matchableTransactions().filter(isApplePayWalletRow);
-    if (walletRowsCache.length === 0) return undefined;
+    // Unbound Wallet rows plus Wallet rows already confirmed against one of
+    // this purchase's alerts: its other alert must still ask, not post.
+    nearWalletRowsCache ??= matchableTransactions().filter((row) =>
+      isApplePayWalletRow(row) || (row.source === 'sms' && row.walletBound === true));
+    if (nearWalletRowsCache.length === 0) return undefined;
     const instrument = captureInstrumentOf(p);
     const suffixCompatible = (row: Transaction): boolean => {
       if (!instrument) return false;
@@ -574,12 +588,13 @@ function buildImportPlanInMarket(
       return !instrument.bankIdentity || account.bankName === undefined ||
         bankIdentityForName(account.bankName) === instrument.bankIdentity;
     };
-    return walletRowsCache.find((row) =>
+    return nearWalletRowsCache.find((row) =>
       !boundWalletRows.has(row.id) &&
       row.type === 'expense' &&
       row.amountFils === p.amountFils &&
       Number.isFinite(row.ts) && Math.abs(row.ts! - p.smsTs!) <= WALLET_NEAR_MATCH_MS &&
-      (row.accountId === accountId || suffixCompatible(row)) &&
+      // null: any account (a cheap pre-check before account resolution).
+      (accountId === null || row.accountId === accountId || suffixCompatible(row)) &&
       compatibleCaptureInstrument(row.captureInstrument, instrument));
   };
   const walletNearMatches: WalletNearMatch[] = [];
@@ -1170,6 +1185,41 @@ function buildImportPlanInMarket(
     }
   };
 
+  // Everything account resolution and snapshot noting may write for one row.
+  const planCheckpoint = () => ({
+    newAccounts: newAccounts.length,
+    accountCandidates: accountCandidates.length,
+    hints: { ...hints },
+    newHints: { ...newHints },
+    bankNames: { ...bankNames },
+    cardTypes: { ...cardTypes },
+    snapshots: { ...snapshots },
+  });
+  const restoreRecord = <T extends object>(target: T, saved: T) => {
+    for (const key of Object.keys(target)) delete (target as Record<string, unknown>)[key];
+    Object.assign(target, saved);
+  };
+  const learnedSince = (checkpoint: ReturnType<typeof planCheckpoint>): WalletNearMatch['facts'] => {
+    const changed = <T>(now: Record<string, T>, before: Record<string, T>): Record<string, T> =>
+      Object.fromEntries(Object.entries(now).filter(([key, value]) =>
+        JSON.stringify(before[key]) !== JSON.stringify(value)));
+    return {
+      snapshots: changed(snapshots, checkpoint.snapshots),
+      bankNames: changed(bankNames, checkpoint.bankNames),
+      cardTypes: changed(cardTypes, checkpoint.cardTypes),
+      newHints: changed(newHints, checkpoint.newHints),
+    };
+  };
+  const restoreCheckpoint = (checkpoint: ReturnType<typeof planCheckpoint>) => {
+    newAccounts.length = checkpoint.newAccounts;
+    accountCandidates.length = checkpoint.accountCandidates;
+    restoreRecord(hints, checkpoint.hints);
+    restoreRecord(newHints, checkpoint.newHints);
+    restoreRecord(bankNames, checkpoint.bankNames);
+    restoreRecord(cardTypes, checkpoint.cardTypes);
+    restoreRecord(snapshots, checkpoint.snapshots);
+  };
+
   const cardPaymentSideOf = (p: ScannedSms): 'debit' | 'receipt' | undefined => {
     if (p.cardPaymentSide) return p.cardPaymentSide;
     if (p.kind !== 'cardPayment' || !p.raw) return undefined;
@@ -1561,6 +1611,11 @@ function buildImportPlanInMarket(
     const unassignedIncome = !p.card && p.type === 'income' && p.categoryGuess === 'business' &&
       p.categoryDeliberate && !p.transferHint && !prior?.userEdited && !prior?.captureInstrument &&
       (!prior || provenPartialMask || prior.accountId === UNASSIGNED_INCOME_ACCOUNT_ID);
+    // A possible Wallet duplicate may be held back below. Resolution must then
+    // leave no trace (no new account, learned card facts or balance snapshot)
+    // until the alert is actually posted or bound.
+    const resolutionCheckpoint = smsKey && !prior && walletNearMatchFor(p, null, smsKey)
+      ? planCheckpoint() : null;
     const resolution = unassignedIncome
       ? { accountId: UNASSIGNED_INCOME_ACCOUNT_ID, confident: false }
       : resolveAccount(p, prior?.accountId, false, !prior?.userEdited);
@@ -1684,10 +1739,19 @@ function buildImportPlanInMarket(
       boundWalletRows.add(walletPrior.id);
       duplicate.add(candidate);
       promoteMatchedHistory(walletPrior.id, smsKey, p);
+      // The bound row stays a Wallet purchase for this purchase's other alerts.
+      const bindingUpdate = updates[updates.length - 1];
+      if (bindingUpdate?.id === walletPrior.id) bindingUpdate.walletBound = true;
+      else updates.push({ id: walletPrior.id, walletBound: true });
       continue;
     }
-    const nearWallet = smsKey ? walletNearMatchFor(p, accountId, smsKey) : undefined;
-    const nearWalletReview = nearWallet && smsKey ? walletNearMatchReview(p, smsKey) : null;
+    // An alert whose own resolution minted a new account cannot be one of the
+    // Wallet row's existing cards; it posts rather than referencing nothing.
+    const mintedAccount = /^\d+$/.test(accountId) && resolutionCheckpoint !== null &&
+      Number(accountId) >= resolutionCheckpoint.newAccounts;
+    const nearWallet = smsKey && resolutionCheckpoint && !mintedAccount
+      ? walletNearMatchFor(p, accountId, smsKey) : undefined;
+    const nearWalletReview = nearWallet && smsKey ? walletNearMatchReview(p, smsKey, nearWallet.id) : null;
     duplicate.add(candidate);
     // Low-confidence rows keep their source text so the user can report
     // unrecognized bank formats from Settings → Improve accuracy.
@@ -1742,12 +1806,15 @@ function buildImportPlanInMarket(
     // candidate stays in the duplicate guard above, so a same-scan push copy
     // of this alert is not posted either; a distinct alert still is compared
     // on its own identity.
-    if (nearWallet && nearWalletReview) {
+    if (nearWallet && nearWalletReview && resolutionCheckpoint) {
+      const facts = learnedSince(resolutionCheckpoint);
+      restoreCheckpoint(resolutionCheckpoint);
       walletNearMatches.push({
         row: scannedRowOf.get(p) ?? p,
         review: nearWalletReview,
         walletTransactionId: nearWallet.id,
         transaction: posting,
+        facts,
       });
       continue;
     }

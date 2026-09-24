@@ -28,6 +28,34 @@ export interface WalletNearMatchSettlement {
   deferred: WalletNearMatch[];
 }
 
+/** Add the withheld postings back, with the account facts they carried. */
+function withFallbackPostings(plan: ImportPlan, fallback: readonly WalletNearMatch[]): ImportPlan {
+  if (fallback.length === 0) return plan;
+  const batch = { ...plan.batch, transactions: [...plan.batch.transactions] };
+  const snapshots = { ...batch.snapshots };
+  const bankNames = { ...batch.bankNames };
+  const cardTypes = { ...batch.cardTypes };
+  const newHints = { ...batch.newHints };
+  for (const match of fallback) {
+    batch.transactions.push(match.transaction);
+    const facts: Partial<WalletNearMatch['facts']> = match.facts ?? {};
+    for (const [ref, snapshot] of Object.entries(facts.snapshots ?? {})) {
+      const current = snapshots[ref];
+      if (!current || snapshot.ts > current.ts) snapshots[ref] = snapshot;
+    }
+    for (const [ref, name] of Object.entries(facts.bankNames ?? {})) bankNames[ref] ??= name;
+    for (const [ref, type] of Object.entries(facts.cardTypes ?? {})) {
+      if (cardTypes[ref] === undefined || type === 'credit') cardTypes[ref] = type;
+    }
+    for (const [key, ref] of Object.entries(facts.newHints ?? {})) newHints[key] ??= ref;
+  }
+  return {
+    ...plan,
+    batch: { ...batch, snapshots, bankNames, cardTypes, newHints },
+    txCount: plan.txCount + fallback.length,
+  };
+}
+
 export function settleWalletNearMatches(
   plan: ImportPlan,
   tray: AlertReviewTrayState | null | undefined,
@@ -47,18 +75,7 @@ export function settleWalletNearMatches(
   const reviews = staged.map((match) => match.review);
   if (overflowed.length === 0) return { plan, reviews, deferred: [] };
   if (overflow === 'defer') return { plan, reviews, deferred: overflowed };
-  return {
-    plan: {
-      ...plan,
-      batch: {
-        ...plan.batch,
-        transactions: [...plan.batch.transactions, ...overflowed.map((match) => match.transaction)],
-      },
-      txCount: plan.txCount + overflowed.length,
-    },
-    reviews,
-    deferred: [],
-  };
+  return { plan: withFallbackPostings(plan, overflowed), reviews, deferred: [] };
 }
 
 /** Whether each exact review source is pending or already decided (live tombstone). */
@@ -116,14 +133,7 @@ export function stageWalletNearMatches(
   const kept = settled.reviews.filter((review) => walletNearMatchesRetained(getTray(), [review], now));
   const refused = new Set(settled.reviews.filter((review) => !kept.includes(review)));
   const fallback = (plan.walletNearMatches ?? []).filter((match) => refused.has(match.review));
-  const staged = fallback.length === 0 ? settled.plan : {
-    ...settled.plan,
-    batch: {
-      ...settled.plan.batch,
-      transactions: [...settled.plan.batch.transactions, ...fallback.map((match) => match.transaction)],
-    },
-    txCount: settled.plan.txCount + fallback.length,
-  };
+  const staged = withFallbackPostings(settled.plan, fallback);
   return {
     plan: staged,
     admitted: receipt.admitted,

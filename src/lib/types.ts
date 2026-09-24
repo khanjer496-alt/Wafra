@@ -158,6 +158,13 @@ export interface Transaction {
   /** Local notification queue receipt, never a bank-event/deduplication identity. */
   notificationObservationId?: string;
   /**
+   * An Apple Pay (Wallet) row the user confirmed ("Already recorded") is the
+   * same purchase as a bank Message, whose identity it now carries. It stays
+   * in the ten-minute possible-duplicate net for that purchase's other alerts
+   * and is never folded by amount/time heuristics.
+   */
+  walletBound?: true;
+  /**
    * iOS live-queue UUID of a Message captured without Apple's GUID. Never a
    * bank-event identity: it records that this row is one delivered Message,
    * so dedupe never folds another live Message into it and binds it to at
@@ -804,6 +811,8 @@ export interface TxHealUpdate {
   ts?: number;
   smsKey?: string;
   viaPush?: boolean;
+  /** Set by the strict Wallet binding: identity-only, like smsKey/ts. */
+  walletBound?: true;
   captureInstrument?: CaptureInstrument;
   cardPaymentSide?: 'debit' | 'receipt';
   paymentFlowSide?: 'funding' | 'receipt';

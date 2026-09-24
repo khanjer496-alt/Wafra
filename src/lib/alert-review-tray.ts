@@ -36,6 +36,8 @@ export type ReviewAttentionReason = 'possible-notification-replay' | 'possible-a
 
 export interface ReviewAlert {
   attentionReason?: ReviewAttentionReason;
+  /** possible-apple-pay-duplicate only: the Wallet row "Already recorded" binds to. */
+  walletTransactionId?: string;
   kind?: 'registered';
   id: string;
   sourceKey: string;
@@ -60,6 +62,8 @@ export interface ReviewAlert {
 
 export interface UniversalReviewAlert {
   attentionReason?: ReviewAttentionReason;
+  /** possible-apple-pay-duplicate only: the Wallet row "Already recorded" binds to. */
+  walletTransactionId?: string;
   kind: 'universal';
   id: string;
   sourceKey: string;
@@ -571,7 +575,12 @@ const normalizeReviewEntry = (value: unknown, now: number): ReviewEntry | null =
   const attention = common.channel === 'push' && common.attentionReason === 'possible-notification-replay'
     ? { attentionReason: 'possible-notification-replay' as const }
     : common.attentionReason === 'possible-apple-pay-duplicate'
-      ? { attentionReason: 'possible-apple-pay-duplicate' as const } : {};
+      ? {
+          attentionReason: 'possible-apple-pay-duplicate' as const,
+          ...(typeof common.walletTransactionId === 'string' &&
+            /^[A-Za-z0-9_.:-]{1,128}$/.test(common.walletTransactionId)
+            ? { walletTransactionId: common.walletTransactionId } : {}),
+        } : {};
   if (!opaqueKey(common.id) || !reviewSourceKey(common.sourceKey) ||
   !validTimestamp(common.observedAt) || !captureSourceTimeMatches(common.sourceKey, common.observedAt) || !validTimestamp(common.expiresAt) ||
   common.expiresAt <= common.observedAt || common.expiresAt > now + REVIEW_ALERT_TTL_MS) return null;

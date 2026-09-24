@@ -60,7 +60,7 @@ const transaction: Check = (value) => {
     note: text, ts: nonnegative, source: oneOf('sms', 'manual'), smsKey: text,
     notificationObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
     messageObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
-    viaPush: boolean, captureInstrument, cardPaymentSide: oneOf('debit', 'receipt'),
+    viaPush: boolean, walletBound: oneOf(true), captureInstrument, cardPaymentSide: oneOf('debit', 'receipt'),
     transferEvidence: isTransferEvidence, transferDecision: isTransferDecision, transferMatch: isTransferMatch,
     paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text,
     paymentInstrumentSource: oneOf('alert', 'user'), cashOutDate: isoDate,

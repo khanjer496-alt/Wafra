@@ -283,11 +283,13 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
       (patch.smsKey === undefined || patch.smsKey === tx.smsKey) &&
       (patch.captureInstrument === undefined ||
         JSON.stringify(patch.captureInstrument) === JSON.stringify(tx.captureInstrument)) &&
-      nextViaPush === tx.viaPush
+      nextViaPush === tx.viaPush &&
+      (patch.walletBound === undefined || tx.walletBound === true)
     ) {
       return tx;
     }
     const identified: Transaction = { ...tx };
+    if (patch.walletBound === true) identified.walletBound = true;
     if (patch.ts !== undefined) identified.ts = patch.ts;
     if (patch.smsKey !== undefined) identified.smsKey = patch.smsKey;
     if (patch.captureInstrument !== undefined) identified.captureInstrument = patch.captureInstrument;
@@ -304,6 +306,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.smsKey !== undefined) next.smsKey = patch.smsKey;
   if (patch.captureInstrument !== undefined) next.captureInstrument = patch.captureInstrument;
   if (patch.viaPush !== undefined) next.viaPush = patch.viaPush || undefined;
+  if (patch.walletBound === true) next.walletBound = true;
   if (patch.cardPaymentSide !== undefined) next.cardPaymentSide = patch.cardPaymentSide;
   if (patch.paymentFlowSide !== undefined) next.paymentFlowSide = patch.paymentFlowSide;
   if (patch.billIdentity !== undefined) next.billIdentity = patch.billIdentity;

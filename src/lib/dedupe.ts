@@ -397,8 +397,10 @@ export function duplicateGuard(
     }
     return best;
   };
-  // Wallet rows keep only their exact receipt identity (noteExact below).
-  const heuristicRows = existing.filter((t) => !isApplePayWalletRow(t));
+  // Wallet rows, unbound or bound to one bank alert, keep only their exact
+  // receipt identity (noteExact below). A non-exact alert near a bound row
+  // goes to the planner's possible-duplicate Review, never a silent merge.
+  const heuristicRows = existing.filter((t) => !isApplePayWalletRow(t) && t.walletBound !== true);
   for (const t of heuristicRows) {
     // Locally-created and migrated rows may have no SMS fingerprint but still
     // carry a precise event clock. Treating those as timeless made every
@@ -895,7 +897,8 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       if (row.transferDecision || prior.transferDecision) return false;
       // Likewise a Wallet review decision: only exact receipt identity (above)
       // may fold it. Import binds a proven SMS counterpart explicitly.
-      if (isApplePayWalletRow(row) || isApplePayWalletRow(prior)) return false;
+      if (isApplePayWalletRow(row) || isApplePayWalletRow(prior) ||
+        row.walletBound === true || prior.walletBound === true) return false;
       if (
         !pairedCardPayments.has(index) &&
         !row.userEdited &&
