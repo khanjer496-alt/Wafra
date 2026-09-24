@@ -120,7 +120,8 @@ export interface ReviewTombstone {
   sourceKey: string;
   resolvedAt: number;
   expiresAt: number;
-  outcome: 'added' | 'dismissed' | 'duplicate';
+  /** `expired` records an unresolved review that aged out before the user saw it. */
+  outcome: 'added' | 'dismissed' | 'duplicate' | 'expired';
 }
 
 export interface AlertReviewTrayState {
@@ -188,21 +189,87 @@ const reviewableFamily = (family: AlertFamily): family is ReviewableFamily => [
   'purchase', 'transfer', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment',
 ].includes(family);
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Rows show a visible expiry countdown during their final week. */
+export const REVIEW_EXPIRY_WARNING_DAYS = 7;
+
+/**
+ * Expiry is a loss of reviewable money evidence. Record it as a source-free
+ * tombstone (dated at the item's own expiry, so repeated hydration of the same
+ * unsaved tray cannot count it twice) instead of letting it vanish silently.
+ */
+const expiryTombstones = (
+  state: AlertReviewTrayState,
+  now: number,
+): ReviewTombstone[] => {
+  const known = new Set((state.tombstones ?? []).map((item) => canonicalUniversalSourceKey(item.sourceKey)));
+  const added: ReviewTombstone[] = [];
+  for (const item of state.pending) {
+    if (item.expiresAt > now) continue;
+    const sourceKey = canonicalUniversalSourceKey(item.sourceKey, item.observedAt);
+    const expiresAt = item.expiresAt + REVIEW_TOMBSTONE_TTL_MS;
+    if (known.has(sourceKey) || !validTimestamp(item.expiresAt) || !validTimestamp(expiresAt) ||
+      expiresAt <= now) continue;
+    known.add(sourceKey);
+    added.push({ sourceKey, resolvedAt: item.expiresAt, expiresAt, outcome: 'expired' });
+  }
+  return added.sort((a, b) => a.resolvedAt - b.resolvedAt);
+};
+
+const MONEY_MOVEMENT_FAMILIES: readonly string[] = [
+  'purchase', 'transfer', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment', 'unknown',
+];
+
+/**
+ * Whether a review could still become a ledger transaction. Registered
+ * reviews are admitted only for money-moving families. A universal review
+ * uses the same test as the Review screen's "ordinary posting": balance,
+ * statement, bill, card-payment and non-posted events are informational.
+ */
+export const isMoneyMovementReview = (item: ReviewEntry): boolean => {
+  if (!isUniversalReviewAlert(item)) return true;
+  const event = item.event as Partial<UniversalBankEvent> | undefined;
+  return !!event && MONEY_MOVEMENT_FAMILIES.includes(event.family as string) &&
+    (event.status === 'posted' || event.status === 'unknown');
+};
+
+/**
+ * Keep the newest fifty legacy reviews, but when the lane overflows, evict
+ * informational entries (oldest first) before any possible money movement.
+ * Input is sorted oldest first.
+ */
+const trimLegacyLane = (legacy: ReviewEntry[]): ReviewEntry[] => {
+  let overflow = legacy.length - REVIEW_ALERT_CAP;
+  if (overflow <= 0) return legacy;
+  const evicted = new Set<ReviewEntry>();
+  for (const item of legacy) {
+    if (overflow === 0) break;
+    if (!isMoneyMovementReview(item)) { evicted.add(item); overflow -= 1; }
+  }
+  for (const item of legacy) {
+    if (overflow === 0) break;
+    if (!evicted.has(item)) { evicted.add(item); overflow -= 1; }
+  }
+  return legacy.filter((item) => !evicted.has(item));
+};
+
 export const pruneAlertReviewTray = (
   state: AlertReviewTrayState,
   now: number,
 ): AlertReviewTrayState => {
+  const expired = expiryTombstones(state, now);
   const fresh = state.pending.filter(item => item.expiresAt > now).sort((a, b) => a.observedAt - b.observedAt);
   // Keep up to fifty protected notification/Wallet reviews alongside the legacy
   // newest-fifty lane. SMS/relay/history admission must not evict an already
   // acknowledged notification, nor start refusing their own records without
   // a retry path. Canonical writes never exceed fifty notification entries.
   const notifications = fresh.filter(isProtectedIosCaptureReview).slice(0, REVIEW_ALERT_CAP);
-  const legacy = fresh.filter(item => !isProtectedIosCaptureReview(item)).slice(-REVIEW_ALERT_CAP);
+  const legacy = trimLegacyLane(fresh.filter(item => !isProtectedIosCaptureReview(item)));
   return {
   schemaVersion: 1,
   pending: [...notifications, ...legacy].sort((a, b) => a.observedAt - b.observedAt),
-  tombstones: state.tombstones.filter((item) => item.expiresAt > now).slice(-REVIEW_TOMBSTONE_CAP),
+  tombstones: [...(state.tombstones ?? []), ...expired]
+    .filter((item) => item.expiresAt > now).slice(-REVIEW_TOMBSTONE_CAP),
   templateRules: [...state.templateRules]
     .sort((a, b) => a.updatedAt - b.updatedAt)
     .slice(-REVIEW_TEMPLATE_RULE_CAP),
@@ -345,6 +412,117 @@ export const admitPreparedReviewAlert = (
   };
 };
 
+/** Whole days left before a pending review expires, only inside its final week. */
+export const reviewExpiresInDays = (
+  item: Pick<ReviewEntry, 'expiresAt'>,
+  now: number,
+): number | null => {
+  const remaining = item.expiresAt - now;
+  if (!Number.isFinite(remaining) || remaining <= 0) return null;
+  const days = Math.ceil(remaining / DAY_MS);
+  return days <= REVIEW_EXPIRY_WARNING_DAYS ? days : null;
+};
+
+/** Reviews that expired unresolved during the last review window. */
+export const recentlyExpiredReviewCount = (
+  tray: Pick<AlertReviewTrayState, 'tombstones'> | null | undefined,
+  now: number,
+): number => (tray?.tombstones ?? []).filter((item) => item.outcome === 'expired' &&
+  item.resolvedAt <= now && now - item.resolvedAt < REVIEW_ALERT_TTL_MS).length;
+
+export interface ReviewTrayCapacity {
+  /** iOS notification + Apple Pay lane; refusing admission keeps the native record. */
+  protectedFull: boolean;
+  /** Message/relay/history lane. */
+  legacyFull: boolean;
+}
+
+export const reviewTrayCapacity = (
+  tray: Pick<AlertReviewTrayState, 'pending'> | null | undefined,
+  now: number,
+): ReviewTrayCapacity => {
+  const fresh = (tray?.pending ?? []).filter((item) => item.expiresAt > now);
+  return {
+    protectedFull: fresh.filter(isProtectedIosCaptureReview).length >= REVIEW_ALERT_CAP,
+    legacyFull: fresh.filter((item) => !isProtectedIosCaptureReview(item)).length >= REVIEW_ALERT_CAP,
+  };
+};
+
+/**
+ * Backpressure for a caller that can leave its source queued. A full legacy
+ * lane admits by evicting, informational entries first. A possible money
+ * movement whose admission would evict another money movement (or itself) is
+ * returned as `deferred` so its record stays queued. Informational reviews
+ * never wait: they keep the evicting policy and cannot block capture.
+ * Duplicates and refusals pass through with their existing acknowledgement
+ * semantics. Protected iOS reviews refuse at capacity inside admission.
+ */
+export const partitionReviewsByCapacity = <T extends ReviewEntry>(
+  current: AlertReviewTrayState,
+  items: readonly T[],
+  now: number,
+): { admit: T[]; deferred: T[] } => {
+  let state = pruneAlertReviewTray(current, now);
+  const admit: T[] = [];
+  const deferred: T[] = [];
+  for (const item of items) {
+    if (isProtectedIosCaptureReview(item)) {
+      admit.push(item);
+      continue;
+    }
+    const result = admitPreparedReviewAlert(state, item, now);
+    if (result.outcome === 'admitted' && isMoneyMovementReview(item)) {
+      const kept = new Set(result.state.pending.map((entry) => entry.id));
+      const losesMoneyMovement = !kept.has(item.id) || state.pending.some((entry) =>
+        !isProtectedIosCaptureReview(entry) && isMoneyMovementReview(entry) && !kept.has(entry.id));
+      if (losesMoneyMovement) {
+        deferred.push(item);
+        continue;
+      }
+    }
+    state = result.state;
+    admit.push(item);
+  }
+  return { admit, deferred };
+};
+
+/**
+ * Source-free, in-memory drain facts for the Review screen. Deferred records
+ * stay in the native queue; this is presentation state, never acknowledgement
+ * or durability evidence.
+ */
+export interface ReviewCaptureBacklog {
+  /** Native records waiting for Review space (notification, Message, Apple Pay). */
+  waiting: number;
+  /** Message/notification records skipped because they use another currency. */
+  currencyConflicts: number;
+}
+
+const EMPTY_BACKLOG: ReviewCaptureBacklog = { waiting: 0, currencyConflicts: 0 };
+let reviewBacklog: ReviewCaptureBacklog = EMPTY_BACKLOG;
+const reviewBacklogListeners = new Set<() => void>();
+
+export const reviewCaptureBacklog = {
+  get: (): ReviewCaptureBacklog => reviewBacklog,
+  subscribe: (listener: () => void): (() => void) => {
+    reviewBacklogListeners.add(listener);
+    return () => { reviewBacklogListeners.delete(listener); };
+  },
+  publish: (next: { waiting: number; currencyConflicts?: number }): void => {
+    const waiting = Number.isSafeInteger(next.waiting) && next.waiting > 0 ? next.waiting : 0;
+    const added = Number.isSafeInteger(next.currencyConflicts) && next.currencyConflicts! > 0
+      ? next.currencyConflicts! : 0;
+    const currencyConflicts = Math.min(Number.MAX_SAFE_INTEGER, reviewBacklog.currencyConflicts + added);
+    if (waiting === reviewBacklog.waiting && currencyConflicts === reviewBacklog.currencyConflicts) return;
+    reviewBacklog = { waiting, currencyConflicts };
+    for (const listener of [...reviewBacklogListeners]) listener();
+  },
+  reset: (): void => {
+    reviewBacklog = EMPTY_BACKLOG;
+    for (const listener of [...reviewBacklogListeners]) listener();
+  },
+};
+
 export const resolveReviewAlert = (
   current: AlertReviewTrayState,
   id: string,
@@ -464,7 +642,7 @@ export const normalizeAlertReviewTray = (value: unknown, now: number): AlertRevi
   const safeTombstones = candidate.tombstones.filter((item): item is ReviewTombstone =>
     !!item && reviewSourceKey(item.sourceKey) && validTimestamp(item.resolvedAt) &&
     validTimestamp(item.expiresAt) && item.expiresAt > item.resolvedAt &&
-    item.expiresAt <= item.resolvedAt + REVIEW_TOMBSTONE_TTL_MS && ['added', 'dismissed', 'duplicate'].includes(item.outcome))
+    item.expiresAt <= item.resolvedAt + REVIEW_TOMBSTONE_TTL_MS && ['added', 'dismissed', 'duplicate', 'expired'].includes(item.outcome))
     .map((item) => ({ sourceKey: item.sourceKey, resolvedAt: item.resolvedAt,
       expiresAt: item.expiresAt, outcome: item.outcome }));
   const safeTemplateRules = (Array.isArray(candidate.templateRules) ? candidate.templateRules : [])

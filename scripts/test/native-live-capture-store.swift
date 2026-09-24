@@ -1258,9 +1258,28 @@ struct NativeLiveCaptureStoreTests {
     )
     expiryClock = expiryClock.addingTimeInterval(30 * 24 * 60 * 60)
     check("record at the 30-day boundary is retained", try expiry.purgeExpired() == 0)
+    check(
+      "a retained record at the boundary is not counted as dropped",
+      try expiry.status().dropped == 0 && expiry.status().warningId == nil
+    )
     expiryClock = expiryClock.addingTimeInterval(1)
     check("record older than 30 days expires", try expiry.purgeExpired() == 1)
     check("expired record is absent", try expiry.status().pending == 0)
+    let expiryWarning = try expiry.status()
+    check(
+      "an unacknowledged record purged by expiry increments dropped with a warning ID",
+      expiryWarning.dropped == 1 && expiryWarning.warningId != nil
+    )
+    check(
+      "a purge with nothing expired leaves the dropped warning unchanged",
+      try expiry.purgeExpired() == 0 && expiry.status().dropped == 1
+        && expiry.status().warningId == expiryWarning.warningId
+    )
+    check(
+      "the purge warning clears only through the exact warning acknowledgement",
+      try expiry.acknowledgeCaptureWarning(id: expiryWarning.warningId!)
+        && expiry.status().dropped == 0 && expiry.status().warningId == nil
+    )
     _ = try expiry.stage(
       sender: knownSender,
       body: messageBody,

@@ -967,6 +967,14 @@ public final class WafraLiveCaptureStore {
       }
     }
     for id in expired { manifest.records.removeValue(forKey: id) }
+    // An unacknowledged record that ages out was never recorded or reviewed.
+    // Count it as a loss so the existing queue warning surfaces, instead of
+    // letting a Review-blocked record disappear silently.
+    if !expired.isEmpty {
+      let (sum, overflow) = manifest.dropped.addingReportingOverflow(expired.count)
+      manifest.dropped = overflow ? Int.max : sum
+      rotateWarning(in: &manifest)
+    }
     try writeManifest(manifest, in: root)
     return expired.count
   }
