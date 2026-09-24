@@ -19,7 +19,7 @@ locally redacted fixtures prove an exact institution/channel/template grammar.
 
 - Canada, Australia, Brazil, Mexico and Singapore.
 
-These packs are review-only on exactly the same terms as the first wave. They
+These packs are review-only on exactly the same terms as the first wave: "review-only" means no grammar in them is verified against consented real alerts. When the user's "Auto-add alerts from unverified bank formats" setting is on (the default), the best-effort policy can still auto-add a clear completed alert from these banks with the "Auto-added — check" marker. The one certified second-wave rule (ANZ Osko credit) posts without a marker, following the US certified-template precedent; its evidence is standard-derived, not a consented real alert. They
 add domestic rails (Interac e-Transfer; NPP/Osko/PayID/PayTo/BPAY; Pix/TED;
 SPEI/CoDi/DiMo; PayNow/FAST/GIRO), ISO currency routing (CAD, AUD, BRL, MXN,
 SGD), institution identities (RBC, TD Canada Trust, BMO; CommBank, ANZ,

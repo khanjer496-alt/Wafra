@@ -78,7 +78,7 @@ function renderCapabilityMarkdown(rows) {
     '',
     '- Numeric dates: an ambiguous date such as 03/04/2026 is read month-first for the United States, its territories and the Philippines, year-first countries are left undecided, Canada and countries whose banks print local-calendar dates are left undecided, and every other country reads day-first. An unknown country (`ZZ`) refuses ambiguous dates rather than guessing. A file\'s own evidence (a field above 12) always wins over the country.',
     '- Statements (PDF, CSV, forwarded email): amounts are parsed in decimal-comma form (`1.234,56`, `1 234,56` in a CSV cell or with a no-break space in a PDF) only when the file\'s own figures prove that convention and none contradicts it; apostrophe grouping (`1\'234.56`) is read in decimal-point files. Named-month dates are read in English, French, German, Spanish, Portuguese, Italian, Dutch, Turkish, Indonesian and Arabic. Column headers are still recognised in English and Arabic only.',
-    '- Forwarded statement emails are read in the ledger currency recorded when the forwarding address was created; an address created by an older build keeps the launch AED/SAR reading.',
+    '- Forwarded statement emails: the relay can read them in the ledger currency recorded when a forwarding address is created, but the app does not yet offer a way to create one, so this path is not user-reachable today; existing addresses keep the launch AED/SAR reading.',
     '',
     '## How new evidence enters the matrix',
     '',
