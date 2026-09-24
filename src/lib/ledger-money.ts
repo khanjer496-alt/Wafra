@@ -99,12 +99,182 @@ export const migrateLegacyLedgerMoney = (state: LegacyMoneyState): LedgerMoneySp
 
 const scaleFor = (exponent: LedgerExponent): number => 10 ** exponent;
 
-export const parseMajorToMinor = (text: string, spec: LedgerMoneySpec): number | null => {
+/**
+ * How a device writes numbers: its decimal mark, its digit-group mark and
+ * whether groups follow the Indian lakh/crore pattern (12,34,567).
+ *
+ * Only presentation and typed input consult this. Stored money is always an
+ * integer of ledger minor units, and machine formats (exports, backups, the
+ * SMS parser) never pass through it.
+ */
+export interface NumberConventions {
+  decimal: '.' | ',';
+  group: string;
+  grouping: 'thousands' | 'indian';
+}
+
+export const CANONICAL_NUMBER_CONVENTIONS: Readonly<NumberConventions> = Object.freeze({
+  decimal: '.',
+  group: ',',
+  grouping: 'thousands',
+});
+
+/** Group marks a locale can legitimately use. Anything else is refused. */
+const SPACE_GROUPS = new Set([' ', '\u00A0', '\u202F', '\u2009']);
+const APOSTROPHE_GROUPS = new Set(["'", '\u2019']);
+const isAllowedGroup = (value: string): boolean =>
+  value === ',' || value === '.' || SPACE_GROUPS.has(value) || APOSTROPHE_GROUPS.has(value);
+
+/**
+ * The Arabic UI shows Latin digits, so the Arabic decimal and group marks map
+ * onto their Latin equivalents instead of mixing scripts inside one figure.
+ */
+const latinSeparator = (value: string | null | undefined): string | null => {
+  if (typeof value !== 'string' || value.length !== 1) return null;
+  if (value === '\u066B') return '.';
+  if (value === '\u066C') return ',';
+  return value;
+};
+
+/**
+ * Reads the locale's marks from `format` output rather than `formatToParts`:
+ * Hermes' Apple Intl has returned a single literal part from formatToParts,
+ * which would silently drop Indian grouping. 1234567.5 always prints as
+ * digits 1..7, one decimal mark and group marks between digit runs.
+ */
+const intlConventions = (locale: string): NumberConventions | null => {
+  try {
+    const text = new Intl.NumberFormat(locale, { useGrouping: true, minimumFractionDigits: 1 })
+      .format(1234567.5)
+      .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+      .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+    const match = /^(\d+)(?:(\D)(\d+))?(?:\D(\d+))?(?:\D(\d+))?(\D)5$/.exec(text.replace(/[\u200E\u200F\u061C]/g, ''));
+    if (!match) return null;
+    const runs = [match[1], match[3], match[4], match[5]].filter((run): run is string => !!run)
+      .map((run) => run.length);
+    const decimal = latinSeparator(match[6]);
+    const group = latinSeparator(match[2]);
+    const indian = runs.length === 3 && runs[0] === 2 && runs[1] === 2 && runs[2] === 3;
+    if ((decimal !== '.' && decimal !== ',') || !group || group === decimal || !isAllowedGroup(group)) {
+      return null;
+    }
+    return { decimal, group, grouping: indian ? 'indian' : 'thousands' };
+  } catch {
+    return null;
+  }
+};
+
+export interface DeviceMoneyLocale {
+  /** BCP 47 tag for the device's formats, e.g. "de-DE" or "en-IN". */
+  locale?: string | null;
+  /** expo-localization's `decimalSeparator` for the device region. */
+  decimalSeparator?: string | null;
+  /** expo-localization's `digitGroupingSeparator` for the device region. */
+  groupSeparator?: string | null;
+}
+
+/**
+ * Number conventions for a device: the locale supplies the grouping pattern,
+ * and the device's own separator settings (which a user can override in
+ * system settings) win over what the language tag implies. Anything unusable
+ * falls back to canonical `1,234.56` rather than guessing.
+ */
+export const numberConventionsForLocale = (input: DeviceMoneyLocale): NumberConventions => {
+  const fromLocale = input.locale ? intlConventions(input.locale) : null;
+  const base = fromLocale ?? CANONICAL_NUMBER_CONVENTIONS;
+  const decimal = input.decimalSeparator == null ? base.decimal : latinSeparator(input.decimalSeparator);
+  if (decimal !== '.' && decimal !== ',') return { ...CANONICAL_NUMBER_CONVENTIONS };
+  const candidate = input.groupSeparator == null ? base.group : latinSeparator(input.groupSeparator);
+  const group = candidate && candidate !== decimal && isAllowedGroup(candidate)
+    ? candidate
+    : decimal === ',' ? '.' : ',';
+  return { decimal, group, grouping: base.grouping };
+};
+
+let displayConventions: NumberConventions = { ...CANONICAL_NUMBER_CONVENTIONS };
+let displayLocale: string | null = null;
+const labelCache = new Map<string, string>();
+
+const supportedLocale = (locale: string | null | undefined): string | null => {
+  const tag = locale?.trim();
+  if (!tag) return null;
+  try {
+    return Intl.NumberFormat.supportedLocalesOf([tag]).length ? tag : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Adopt the device's number conventions for display and typed input. `null`
+ * restores canonical `1,234.56` with ISO codes, which is also the state
+ * before the app has read the device (and in every test that does not opt in).
+ */
+export const setDisplayMoneyLocale = (input: DeviceMoneyLocale | null): void => {
+  displayConventions = input ? numberConventionsForLocale(input) : { ...CANONICAL_NUMBER_CONVENTIONS };
+  const locale = input ? supportedLocale(input.locale) : null;
+  if (locale !== displayLocale) labelCache.clear();
+  displayLocale = locale;
+};
+
+export const displayNumberConventions = (): NumberConventions => displayConventions;
+
+const ARABIC_SCRIPT = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+const LETTERS_ONLY = /^[A-Za-z]+$/;
+
+/**
+ * The label to print in front of an amount: the currency's symbol when the
+ * device locale gives it an unambiguous one, else the ISO code.
+ *
+ * CLDR's `symbol` form is already disambiguated for the locale — USD is "$"
+ * in en-US but "US$" in en-CA, CAD is "CA$" in en-US — whereas `narrowSymbol`
+ * prints a bare "$" for every dollar, so it is never used. A symbol that is
+ * the code itself, letters only ("CHF"), or Arabic script keeps the code: the
+ * UAE and Saudi UIs, English and Arabic, have always shown "AED"/"SAR". This
+ * is the visual label only; accessibility labels keep speaking the ISO code.
+ */
+export const currencyDisplayLabel = (code: string, locale: string | null = displayLocale): string => {
+  const iso = code.trim().toUpperCase();
+  if (!locale || !/^[A-Z]{3}$/.test(iso)) return iso;
+  const key = `${locale}|${iso}`;
+  const cached = labelCache.get(key);
+  if (cached !== undefined) return cached;
+  let label = iso;
+  try {
+    // `format` minus digits, marks and spacing, not formatToParts, which
+    // Hermes' Apple Intl has not fully implemented.
+    const symbol = new Intl.NumberFormat(locale, {
+      style: 'currency', currency: iso, currencyDisplay: 'symbol',
+      minimumFractionDigits: 0, maximumFractionDigits: 0,
+    }).format(1)
+      .replace(/[\d\u0660-\u0669\u06F0-\u06F9]/g, '')
+      .replace(/[\s\u00A0\u202F\u200E\u200F\u061C]/g, '')
+      .trim();
+    if (symbol && symbol.toUpperCase() !== iso && !LETTERS_ONLY.test(symbol) &&
+      !ARABIC_SCRIPT.test(symbol) && symbol.length <= 4) {
+      label = symbol;
+    }
+  } catch {
+    label = iso;
+  }
+  labelCache.set(key, label);
+  return label;
+};
+
+const THOUSANDS_GROUPS = /^\d{1,3}(?:,\d{3})+$/;
+const INDIAN_GROUPS = /^\d{1,2}(?:,\d{2})*,\d{3}$/;
+
+const parseCanonical = (
+  text: string,
+  spec: LedgerMoneySpec,
+  grouping: NumberConventions['grouping'],
+): number | null => {
   const value = text.trim();
   if (!value || !/^\d[\d,]*(?:\.\d+)?$/.test(value)) return null;
   const [wholeRaw, fractionRaw = ''] = value.split('.');
   if (fractionRaw.length > spec.exponent) return null;
-  if (wholeRaw.includes(',') && !/^\d{1,3}(?:,\d{3})+$/.test(wholeRaw)) return null;
+  if (wholeRaw.includes(',') && !THOUSANDS_GROUPS.test(wholeRaw) &&
+    !(grouping === 'indian' && INDIAN_GROUPS.test(wholeRaw))) return null;
   const whole = wholeRaw.replace(/,/g, '').replace(/^0+(?=\d)/, '') || '0';
   const digits = `${whole}${fractionRaw.padEnd(spec.exponent, '0')}`.replace(/^0+(?=\d)/, '') || '0';
   let minor: bigint;
@@ -113,23 +283,157 @@ export const parseMajorToMinor = (text: string, spec: LedgerMoneySpec): number |
   return Number(minor);
 };
 
-const groupThousands = (value: string): string => value.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+/** Canonical `1,234.56` input — the machine form. Never locale-dependent. */
+export const parseMajorToMinor = (text: string, spec: LedgerMoneySpec): number | null =>
+  parseCanonical(text, spec, 'thousands');
 
+/**
+ * Typed input in the device's conventions, exactly, or null.
+ *
+ * Only the locale's own decimal mark is a decimal; the other of `.`/`,` is
+ * read as a group mark and must then group correctly. So "1.234" is 1,234 in
+ * de-DE, "1,234" is 1.234 there (and refused for a two-decimal currency), and
+ * "12.50" in de-DE — neither a valid group nor this locale's decimal — is
+ * refused rather than guessed. With a space or apostrophe group mark, the
+ * other of `.`/`,` is refused outright. `text` must already be reduced to
+ * digits and separators (see parseAmountWithMoneySpec).
+ */
+export const parseLocalizedMajorToMinor = (
+  text: string,
+  spec: LedgerMoneySpec,
+  conventions: NumberConventions = displayConventions,
+): number | null => {
+  let value = text.trim();
+  if (!value) return null;
+  const { decimal, group } = conventions;
+  const spacing = SPACE_GROUPS.has(group) || APOSTROPHE_GROUPS.has(group);
+  if (spacing) value = value.replace(/[\s\u00A0\u202F\u2009'\u2019]/g, '');
+  if (/[^\d.,]/.test(value)) return null;
+  const other = decimal === '.' ? ',' : '.';
+  const hasDecimal = value.includes(decimal);
+  const otherMarks = value.split(other).length - 1;
+  const afterOther = otherMarks === 1 ? value.length - value.indexOf(other) - 1 : -1;
+  // "1.234" in de-DE (or "1,234" in en-US) for a three-decimal currency is
+  // either 1,234 or 1.234 — a factor of 1,000. A keyboard that lacks the
+  // locale's own decimal mark makes the second reading real, so refuse.
+  if (!hasDecimal && afterOther === 3 && spec.exponent === 3) return null;
+  // Many Android numeric keyboards offer only "." whatever the Region. In a
+  // decimal-comma locale a lone "." that cannot be a digit group (not three
+  // digits after it) and fits the exponent has exactly one reading.
+  if (decimal === ',' && !hasDecimal && afterOther >= 1 && afterOther <= spec.exponent &&
+    afterOther !== 3) {
+    return parseCanonical(value, spec, conventions.grouping);
+  }
+  if (spacing) {
+    // Space/apostrophe grouping is already gone; the other of "." and ","
+    // has no meaning here.
+    if (otherMarks > 0) return null;
+    return parseCanonical(decimal === ',' ? value.replace(',', '.') : value, spec, conventions.grouping);
+  }
+  const canonical = decimal === '.'
+    ? value
+    : value.replace(/[.,]/g, (mark) => (mark === ',' ? '.' : ','));
+  return parseCanonical(canonical, spec, conventions.grouping);
+};
+
+const groupDigits = (digits: string, conventions: NumberConventions): string => {
+  if (conventions.grouping === 'indian' && digits.length > 3) {
+    const head = digits.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, conventions.group);
+    return `${head}${conventions.group}${digits.slice(-3)}`;
+  }
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, conventions.group);
+};
+
+/**
+ * Exact display of stored minor units in the device conventions (canonical
+ * until the app adopts the device's). Whole amounts drop decimals unless
+ * `decimals` is true; `decimals: false` rounds to whole major units.
+ */
 export const formatMinorUnits = (
   minorUnits: number,
   spec: LedgerMoneySpec,
-  options?: { decimals?: boolean },
+  options?: { decimals?: boolean; conventions?: NumberConventions; grouping?: boolean },
 ): string => {
   if (!Number.isSafeInteger(minorUnits)) throw new Error('Money must be a safe integer');
+  const conventions = options?.conventions ?? displayConventions;
   const scale = scaleFor(spec.exponent);
   const absolute = Math.abs(minorUnits);
   const remainder = absolute % scale;
   const showDecimals = options?.decimals ?? remainder !== 0;
   const whole = showDecimals ? Math.floor(absolute / scale) : Math.round(absolute / scale);
   const sign = minorUnits < 0 && (whole > 0 || (showDecimals && remainder > 0)) ? '-' : '';
-  const base = `${sign}${groupThousands(String(whole))}`;
+  const digits = options?.grouping === false ? String(whole) : groupDigits(String(whole), conventions);
+  const base = `${sign}${digits}`;
   if (!showDecimals || spec.exponent === 0) return base;
-  return `${base}.${String(remainder).padStart(spec.exponent, '0')}`;
+  return `${base}${conventions.decimal}${String(remainder).padStart(spec.exponent, '0')}`;
+};
+
+/**
+ * Editable text for an amount field: no group marks, the device decimal mark,
+ * exact minor units — what parseLocalizedMajorToMinor reads back unchanged.
+ */
+export const formatMinorUnitsForInput = (
+  minorUnits: number,
+  spec: LedgerMoneySpec,
+  conventions: NumberConventions = displayConventions,
+  options?: { decimals?: boolean },
+): string => formatMinorUnits(minorUnits, spec, {
+  conventions,
+  grouping: false,
+  decimals: options?.decimals === true ? true : undefined,
+});
+
+/**
+ * Coarse nominal scale of a currency against the launch AED/SAR baseline, as
+ * a power of ten: something costing about 100 AED costs roughly 10^k × 100 of
+ * it (JPY 2: ¥10,000; KWD −1: 10 KWD).
+ *
+ * This is NOT an exchange rate and never converts money. It only sizes
+ * heuristic thresholds — a "large" purchase, a noise floor, preset chips — so
+ * they mean the same in a large-nominal currency as they do in AED. Unlisted
+ * currencies take 0, the AED/SAR/USD/EUR/GBP class.
+ */
+const NOMINAL_SCALE: Readonly<Record<string, -1 | 1 | 2 | 3 | 4>> = Object.freeze({
+  BHD: -1, KWD: -1, OMR: -1, JOD: -1,
+  INR: 1, EGP: 1, PHP: 1, THB: 1, TRY: 1, ZAR: 1, MXN: 1, CZK: 1, TWD: 1, UAH: 1,
+  RUB: 1, RSD: 1, GHS: 1, HNL: 1, BOB: 1, MUR: 1,
+  JPY: 2, PKR: 2, BDT: 2, NPR: 2, LKR: 2, KES: 2, HUF: 2, ISK: 2, CLP: 2, KZT: 2,
+  DZD: 2, YER: 2, ETB: 2, XOF: 2, XAF: 2, AMD: 2, AFN: 2, JMD: 2, DOP: 2, ARS: 2,
+  KRW: 3, NGN: 3, COP: 3, TZS: 3, UGX: 3, PYG: 3, MMK: 3, KHR: 3, MNT: 3, IQD: 3,
+  MGA: 3, RWF: 3, CDF: 3, MWK: 3, SOS: 3,
+  IDR: 4, VND: 4, IRR: 4, LBP: 4, UZS: 4, LAK: 4, SYP: 4, GNF: 4,
+});
+
+export const nominalScaleOf = (currency: string): number =>
+  NOMINAL_SCALE[currency.trim().toUpperCase()] ?? 0;
+
+/**
+ * Exact minor units of "about `referenceMajor` AED" in `spec`'s currency.
+ * `typicalMinorAmount(AED, 200)` is 20,000 fils; JPY gives ¥20,000 and KWD
+ * 20.000 KWD. `referenceMajor` is a whole number of AED-sized units.
+ */
+export const typicalMinorAmount = (spec: LedgerMoneySpec, referenceMajor: number): number => {
+  const power = spec.exponent + nominalScaleOf(spec.currency);
+  const value = power >= 0
+    ? referenceMajor * 10 ** power
+    : Math.round(referenceMajor / 10 ** -power);
+  if (!Number.isSafeInteger(value)) throw new Error('Typical amount exceeds safe integer range');
+  return value;
+};
+
+/** Whole major units at the ledger exponent, rounded to nearest. */
+export const wholeMajorUnits = (minorUnits: number, spec: LedgerMoneySpec): number =>
+  Math.round(minorUnits / scaleFor(spec.exponent));
+
+/**
+ * A round budget-sized figure: the nearest multiple of the currency's
+ * "about 100 AED" step, never below one step. AED rounds to 100 dirhams.
+ */
+export const roundToNiceMinor = (minorUnits: number, spec: LedgerMoneySpec): number => {
+  const step = typicalMinorAmount(spec, 100);
+  const rounded = Math.max(step, Math.round(minorUnits / step) * step);
+  if (!Number.isSafeInteger(rounded)) throw new Error('Rounded money exceeds safe integer range');
+  return rounded;
 };
 
 export const roundToWholeMajorMinor = (minorUnits: number, spec: LedgerMoneySpec): number => {

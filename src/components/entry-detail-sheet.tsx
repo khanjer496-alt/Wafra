@@ -20,7 +20,7 @@ import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
-import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import { formatAmount, formatAmountForInput, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
 import { formatOriginalCurrency } from '@/lib/fx';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
@@ -98,7 +98,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     // was stamped userEdited, so no re-parse could ever heal it. Below a
     // dirham it was worse; 0.49 seeded "0", which fails validation, and the
     // entry could not be saved at all.
-    setAmountText(formatAmount(transaction.amountFils, { decimals: true }).replace(/,/g, ''));
+    setAmountText(formatAmountForInput(transaction.amountFils, { decimals: true }));
     setCategory(transaction.category);
     setAccountId(transaction.accountId);
     setDateText(transaction.date);

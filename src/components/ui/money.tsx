@@ -6,7 +6,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { formatAmount } from '@/lib/format';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
-import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { currencyDisplayLabel, formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 
 type Sign = 'none' | 'auto' | 'minus' | 'plus';
 
@@ -37,11 +37,18 @@ function signGlyph(fils: number, sign: Sign): string {
   }
 }
 
+/**
+ * The visual currency label: an unambiguous symbol in the device locale
+ * ("€", "₹", "CA$"), else the ISO code. AED and SAR always show their code.
+ * Screen readers hear the ISO code, never a bare symbol.
+ */
 function CurrencyPrefix({ label }: { label?: string }) {
   const ledgerMoney = useLedgerMoney();
+  const code = label ?? ledgerMoney?.currency ?? ledgerCurrencyDisplay();
   return (
-    <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}>
-      {label ?? ledgerMoney?.currency ?? ledgerCurrencyDisplay()}
+    <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}
+      accessibilityLabel={code}>
+      {currencyDisplayLabel(code)}
     </ThemedText>
   );
 }
