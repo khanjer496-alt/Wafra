@@ -146,3 +146,45 @@ test('the per-pass title memo matches migrating each row alone', () => {
     clone({ ...persisted, transactions: [row] }), { reuseCompletedReparse: true }).transactions[0]);
   assert.deepEqual(together.transactions, alone);
 });
+
+test('a live capture with an instrument cannot carry a stale transfer receipt forward', () => {
+  // A debit-card purchase is an independent observation of that card, which
+  // proves the explicit transfer to it is an internal move.
+  const accounts = [
+    { id: 'bank-0', name: 'A', kind: 'bank', bankName: 'ENBD', last4: '1100', openingFils: 0 },
+    { id: 'dc', name: 'D', kind: 'card', cardType: 'debit', bankName: 'ENBD', last4: '5555', openingFils: 0 },
+  ];
+  const date = new Date(NOW).toISOString().slice(0, 10);
+  const transfer = { id: 'T', type: 'expense', amountFils: 50000, category: 'other', accountId: 'bank-0',
+    title: 'Outgoing transfer', date, ts: NOW, source: 'sms', smsKey: `s${NOW}-50000`,
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'ENBD',
+      endpointProof: 'explicit-transfer', counterparty: { last4: '5555', kind: 'debit', bankIdentity: 'ENBD' } },
+    captureInstrument: { last4: '1100', kind: 'account', bankIdentity: 'ENBD' } };
+  const ids = (rows) => [...core.reconciliationInternalIds(core.reconcileTransfers(rows, accounts))].sort();
+  const money = { schemaVersion: 2, currency: 'AED', exponent: 2 };
+  const state = { onboarded: true, hydrated: true, ledgerMoney: money, marketId: 'AE', country: 'AE',
+    transactions: [transfer], accounts, cardDues: [], bills: [], budgets: [], goals: [], notSubscriptions: [],
+    merchantOverrides: {}, accountHints: {}, knownBanks: ['ENBD'], monthStartDay: 1, hydrationFinalizeVersion: 1,
+    reviewTray: { pending: [], tombstones: [], templateRules: [] }, lastScanTs: NOW,
+    transferNormalizationVersion: core.TRANSFER_NORMALIZATION_VERSION, transferInternalIds: ids([transfer]) };
+  assert.deepEqual(state.transferInternalIds, []);
+  const imported = reducer(state, { type: 'importBatch', importMoney: money,
+    transactions: [{ type: 'expense', amountFils: 1234, category: 'groceries', accountId: 'dc', title: 'Carrefour',
+      date, ts: NOW + 1000, source: 'sms', smsKey: `s${NOW + 1000}-1234`,
+      captureInstrument: { last4: '5555', kind: 'debit', bankIdentity: 'ENBD' } }],
+    newAccounts: [], newHints: {}, newDues: [], newBills: [], snapshots: {}, bankNames: {}, cardTypes: {},
+    lastScanTs: NOW + 1000, updates: [] });
+  assert.deepEqual([...imported.transferInternalIds].sort(), ['T']);
+  assertExactReceipt(imported);
+  // ...and the inert-row skip then carries that exact answer forward.
+  const added = reducer(imported, { type: 'addTransaction', transaction: manual({ accountId: 'bank-0' }) });
+  assert.deepEqual([...added.transferInternalIds].sort(), ['T']);
+  assertExactReceipt(added);
+});
+
+test('dateless rows fall back to the exact stable sort', () => {
+  const rows = [manual({ date: '2026-09-20' }), manual({ date: undefined }), manual({ date: '2026-09-01' })];
+  const row = manual({ date: '2026-09-10' });
+  const next = reducer({ ...base, transactions: rows }, { type: 'addTransaction', transaction: row });
+  assert.deepEqual(next.transactions.map((t) => t.id), stableSort([row, ...rows]).map((t) => t.id));
+});

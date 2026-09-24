@@ -24,6 +24,7 @@ import { isValidBackupState } from '@/lib/backup-validation';
 import {
   applyTransferDecision,
   isTransferCandidate,
+  isTransferInertTransaction,
   normalizeTransferLinks,
   reconcileTransfers,
   reconciliationInternalIds,
@@ -309,6 +310,11 @@ function sortTxs(transactions: Transaction[]): Transaction[] {
  * would also reorder existing rows.
  */
 function insertSortedTransaction(row: Transaction, transactions: Transaction[]): Transaction[] {
+  // The comparator's answer for a non-string date is not a total order the
+  // binary search can reproduce; restored/legacy data takes the exact sort.
+  if (typeof row.date !== 'string' || transactions.some((transaction) => typeof transaction.date !== 'string')) {
+    return sortTxs([row, ...transactions]);
+  }
   for (let index = 1; index < transactions.length; index += 1) {
     if (transactions[index - 1].date < transactions[index].date) return sortTxs([row, ...transactions]);
   }
@@ -1054,25 +1060,6 @@ function transactionNeedsTransferNormalization(transaction: Transaction | undefi
   );
 }
 
-/**
- * A row that no part of transfer reconciliation reads.
- *
- * `transfer-reconciliation.ts` only looks at a row when it is a transfer
- * candidate, carries a transfer flag/match/decision/evidence, carries a
- * captured instrument (own-account observations and card receipts), or is a
- * payment-flow/card-payment side. A row with none of those contributes to no
- * entry, observation, reference count or absorption bucket, so adding or
- * removing it leaves every other row's links and the internal-id set exactly
- * as they were. Deliberately stricter than the live-import fast path, which
- * admits captured instruments.
- */
-function transactionIsTransferInert(transaction: Transaction): boolean {
-  return !transactionNeedsTransferNormalization(transaction) &&
-    transaction.captureInstrument === undefined &&
-    transaction.paymentFlowSide === undefined &&
-    transaction.cardPaymentSide === undefined;
-}
-
 /** The prior state's transfer receipt is exact for its rows (see reducer). */
 function transferReceiptCurrent(state: AppState): boolean {
   return state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
@@ -1091,7 +1078,7 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
       // exact, the new row is inert, and its id cannot collide with (and so
       // change the duplicate-id handling of) an existing row.
       const row = action.transaction;
-      return !(transferReceiptCurrent(state) && transactionIsTransferInert(row) &&
+      return !(transferReceiptCurrent(state) && isTransferInertTransaction(row) &&
         !state.transactions.some((transaction) => transaction.id === row.id));
     }
     case 'markBillPaid':
@@ -1106,7 +1093,7 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
     case 'deleteTransaction':
       // Every row carrying the id is removed; all of them must be inert.
       return !(transferReceiptCurrent(state) && state.transactions.every((transaction) =>
-        transaction.id !== action.id || transactionIsTransferInert(transaction)));
+        transaction.id !== action.id || isTransferInertTransaction(transaction)));
     case 'resolveBestEffort':
       return action.outcome === 'undo';
     case 'setBestEffortAutoPost':

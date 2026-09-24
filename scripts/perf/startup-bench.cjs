@@ -121,6 +121,16 @@ function run(count) {
       date: '2026-09-20', ts: NOW + 5, source: 'sms', smsKey: `s${NOW + 5}-4321`,
       raw: 'Purchase of AED 43.21 with Credit Card ending 4801 at TALABAT, DUBAI.' }],
     newAccounts: [], newHints: {}, newDues: [], newBills: [], snapshots: {}, bankNames: {}, cardTypes: {}, lastScanTs: NOW + 5, updates: [] })).ms;
+  // Most live card alerts carry the captured card instrument, which is an
+  // ownership observation and so takes the canonical import path.
+  out.liveCaptureInstrumentedMs = timeIt(() => reducer(steadyState, {
+    type: 'importBatch', importMoney: steadyState.ledgerMoney,
+    transactions: [{ type: 'expense', amountFils: 4321, category: 'dining', accountId: 'card-1', title: 'Talabat',
+      date: '2026-09-20', ts: NOW + 5, source: 'sms', smsKey: `s${NOW + 5}-4321`,
+      captureInstrument: { last4: '4801', kind: 'credit', bankIdentity: 'ENBD' },
+      raw: 'Purchase of AED 43.21 with Credit Card ending 4801 at TALABAT, DUBAI.' }],
+    newAccounts: [], newHints: {}, newDues: [], newBills: [], snapshots: {}, bankNames: {}, cardTypes: {},
+    lastScanTs: NOW + 5, updates: [] })).ms;
   out.setMonthStartMs = timeIt(() => reducer(steadyState, { type: 'setMonthStartDay', day: 1 })).ms;
   return out;
 }
