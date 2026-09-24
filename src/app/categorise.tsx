@@ -43,6 +43,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { CategorySuggestion } from '@/components/category-suggestion';
 import { ThemedText } from '@/components/themed-text';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { Button } from '@/components/ui/controls';
@@ -192,6 +193,18 @@ export default function CategoriseScreen() {
                       <ThemedText type="meta" themeColor="textSecondary" style={styles.purposeHint}>
                         {t('categorisePaymentPurposeHint')}
                       </ThemedText>
+                    )}
+                    {/* Merchants only. A bank bill nickname is exactly where a
+                        name-based guess is worst, so payment purposes get none. */}
+                    {item.kind === 'merchant' && (
+                      <CategorySuggestion
+                        merchant={item.merchant}
+                        count={item.count}
+                        language={state.language === 'ar' ? 'ar' : 'en'}
+                        overrides={state.merchantOverrides}
+                        market={state.marketId}
+                        onUse={(id) => assign(item, id)}
+                      />
                     )}
                     <CategoryChips
                       categories={EXPENSE_CATEGORIES}
