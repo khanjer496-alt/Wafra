@@ -2034,6 +2034,12 @@ export default {
       }
       if (extracted.pages > MAX_PDF_PAGES) return json({ error: 'too_many_pages' }, 413);
       if (extracted.rows.length === 0) {
+        // A card statement whose rows carry only a bare minus, and which never
+        // says whether that minus is a payment or a charge. Say so, rather
+        // than the generic "no explicit direction" refusal.
+        if (extracted.ambiguousCardSignRows > 0) {
+          return json({ error: 'ambiguous_card_signs' }, 422);
+        }
         return json({
           error: 'unsupported_statement_format',
           requirement: 'text_pdf_with_explicit_debit_credit_rows',
@@ -2066,6 +2072,9 @@ export default {
         acceptedRows: extracted.rows.length,
         rejectedRows: extracted.rejectedRows,
         totalRows: extracted.totalRows,
+        // Of rejectedRows: card rows refused because the statement never says
+        // what its minus sign means. A count, never the rows.
+        cardSignRowsSkipped: extracted.ambiguousCardSignRows,
         pages: extracted.pages,
         // Coverage means "this range is fully represented locally". Never
         // claim it when the parser explicitly counted rows it refused.
@@ -2107,6 +2116,9 @@ export default {
         return json({ error: 'invalid_csv' }, 400);
       }
       if (parsed.rows.length === 0) {
+        if (parsed.ambiguousCardSignRows > 0) {
+          return json({ error: 'ambiguous_card_signs' }, 422);
+        }
         return json({
           error: 'unsupported_statement_format',
           requirement: 'named_columns_with_explicit_debit_credit_direction',
@@ -2136,6 +2148,7 @@ export default {
         acceptedRows: parsed.rows.length,
         rejectedRows: parsed.rejectedRows,
         totalRows: parsed.totalRows,
+        cardSignRowsSkipped: parsed.ambiguousCardSignRows,
         coverage: parsed.rejectedRows === 0 ? statementCoverage(parsed.rows) : null,
       }, 202);
     }

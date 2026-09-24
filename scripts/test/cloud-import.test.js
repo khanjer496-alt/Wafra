@@ -76,6 +76,14 @@ ok('pdf response: accepted + rejected rows must reconcile and incomplete coverag
   } })?.coverage === null &&
   parsePdfImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 9, pages: 2 }) === null &&
   parsePdfImportAccepted({ acceptedRows: 8, rejectedRows: 2, pages: 2 })?.totalRows === 10);
+ok('statement responses: card rows refused for an unexplained sign are a bounded count, zero from an older relay',
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: 2, cardSignRowsSkipped: 2 })?.cardSignRowsSkipped === 2 &&
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2 })?.cardSignRowsSkipped === 0 &&
+  parsePdfImportAccepted({ acceptedRows: 8, pages: 2, rejectedRows: 1, cardSignRowsSkipped: 2 }) === null &&
+  parseCsvImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 10, cardSignRowsSkipped: 1 })?.cardSignRowsSkipped === 1 &&
+  parseCsvImportAccepted({ acceptedRows: 8, rejectedRows: 2, totalRows: 10, cardSignRowsSkipped: -1 }) === null);
+ok('statement responses: an unexplained card sign convention is its own refusal',
+  pdfImportError(422, { error: 'ambiguous_card_signs' }).code === 'ambiguous_card_signs');
 ok('pdf response: an oversized text PDF is its own error, not the scanned-PDF one',
   pdfImportError(413, { error: 'pdf_too_long' }).code === 'pdf_too_long');
 ok('email token: private address response is validated',

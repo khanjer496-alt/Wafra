@@ -50,6 +50,8 @@ export const SUPPLEMENT_COPY = {
     errUnreadable: 'Wafra could not read this PDF. Scanned/image-only PDFs are not supported yet.',
     errPdfTooLong: 'This PDF holds more text than one import can read. Split it into shorter statements and retry.',
     errFormat: 'This statement lacks supported date, description, and explicit debit/credit fields, so Wafra will not guess.',
+    errCardSigns: 'This card statement marks rows only with a minus sign and does not say whether that means a payment or a charge, so Wafra will not guess. Export it with a Debit/Credit or DR/CR column.',
+    cardSignSkipped: '{count} card rows skipped: the statement does not say whether a minus sign is a payment or a charge.',
     errRate: 'Too many imports were requested. Wait a moment and retry.',
     errUnexpected: 'The import service returned an unexpected response. Nothing was filed.',
     // Progress, not failure. The filing step below can take a moment on a
@@ -114,6 +116,8 @@ export const SUPPLEMENT_COPY = {
     errUnreadable: 'تعذّرت قراءة ملف PDF. ملفات PDF المصورة فقط غير مدعومة حالياً.',
     errPdfTooLong: 'يحتوي ملف PDF على نص أكثر مما يمكن قراءته في استيراد واحد. قسّمه إلى كشوف أقصر وحاول مجدداً.',
     errFormat: 'يفتقد الكشف حقول التاريخ والوصف واتجاه مدين/دائن المدعومة، لذلك لن يخمن وفرة.',
+    errCardSigns: 'يميّز كشف البطاقة هذا العمليات بعلامة السالب فقط ولا يوضح إن كانت تعني دفعة أم عملية شراء، لذلك لن يخمن وفرة. صدّره بعمود مدين/دائن أو DR/CR.',
+    cardSignSkipped: 'تم تجاوز {count} من عمليات البطاقة: لا يوضح الكشف إن كانت علامة السالب دفعة أم عملية شراء.',
     errRate: 'طُلبت واردات كثيرة. انتظر قليلاً ثم حاول مجدداً.',
     errUnexpected: 'أعادت خدمة الاستيراد استجابة غير متوقعة. لم تُسجّل أي عملية.',
     acceptedFiling: 'تم استلام {accepted} صفاً · جارٍ حفظها على هذا الهاتف…',

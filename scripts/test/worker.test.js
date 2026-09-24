@@ -2170,6 +2170,24 @@ const CARD_PAYMENT_DEBIT =
         cardTableRows.some((row) => row.type === 'income' && row.amountFils === 725),
       JSON.stringify(cardTableRows.map((row) => [row.date, row.type, row.amountFils, row.merchant])));
 
+    // A card statement whose only direction evidence is a bare minus, and
+    // which never says what that minus means, is refused by name.
+    const cardSigns = await call(env, 'POST', '/v1/import/pdf', {
+      token: me.adminToken,
+      headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf([
+        'Credit Card Statement',
+        'Minimum Payment Due AED 50.00',
+        '2026-08-05 PAYMENT RECEIVED -500.00',
+        '2026-08-06 CARREFOUR 40.00-',
+      ]),
+    });
+    const cardSignsBody = await cardSigns.json();
+    ok('statement: a card PDF with only unexplained signs is refused as ambiguous, not filed',
+      cardSigns.status === 422 && cardSignsBody.error === 'ambiguous_card_signs' &&
+        (await drainOpened(env, me)).length === 0,
+      JSON.stringify(cardSignsBody));
+
     // Same helper, a different route: a forwarded statement EMAIL takes the
     // queueEmailRows path, which had the identical one-stamp-per-batch defect.
     const email = await (await call(env, 'POST', '/v1/email-token', { token: me.adminToken })).json();

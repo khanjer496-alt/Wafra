@@ -127,6 +127,11 @@ export interface StatementCsvResult {
   rows: StatementParsedRow[];
   totalRows: number;
   rejectedRows: number;
+  /**
+   * Rejected rows whose only direction evidence was a bare sign on a card
+   * statement that never says what its signs mean. Counted inside rejectedRows.
+   */
+  ambiguousCardSignRows: number;
 }
 
 const HEADER_ALIASES = {
@@ -467,6 +472,68 @@ function rowDirection(value: string): 'expense' | 'income' | null {
 }
 
 /**
+ * How a statement's bare signs read.
+ *
+ * `account`      minus is money out, plus/unsigned-with-sign is money in — the
+ *                account-statement convention, and the only one assumed.
+ * `minus-credit` the card statement SAYS a minus marks a credit (payment,
+ *                refund, cashback); plain and plus figures are charges.
+ * `minus-debit`  the card statement SAYS charges carry the minus; plain and
+ *                plus figures are credits.
+ * `refuse`       a card statement that says neither. Card issuers use both
+ *                conventions, so a bare sign there is not a direction.
+ */
+type SignConvention = 'account' | 'minus-credit' | 'minus-debit' | 'refuse';
+
+const SIGN_VERB = String.raw`(?:denotes?|indicates?|represents?|means?|shows?|=)`;
+const SIGN_MARK = String.raw`(?:minus|negative)(?:\s+sign)?\s*(?:\(\s*-\s*\)\s*)?(?:amounts?|figures?|values?|entries|transactions)?`;
+const CREDIT_WORDS = String.raw`(?:credits?|payments?|refunds?)`;
+const DEBIT_WORDS = String.raw`(?:debits?|charges?|purchases?|spend(?:ing)?)`;
+const SHOWN_AS = String.raw`(?:are\s+)?(?:shown|marked|displayed|printed|indicated|listed)\s+(?:with|by|as|in)\s+(?:a\s+)?(?:minus|negative|\(\s*-\s*\))`;
+function legendPatterns(words: string): RegExp[] {
+  return [
+    new RegExp(String.raw`\b${SIGN_MARK}\s*${SIGN_VERB}\s+(?:a\s+|an\s+)?${words}\b`, 'i'),
+    new RegExp(String.raw`\(\s*-\s*\)\s*${SIGN_VERB}\s*(?:a\s+|an\s+)?${words}\b`, 'i'),
+    new RegExp(String.raw`\b${words}(?:\s+(?:and|&|\/)\s+(?:${CREDIT_WORDS}|${DEBIT_WORDS}))?\s+${SHOWN_AS}`, 'i'),
+  ];
+}
+const MINUS_CREDIT_LEGEND = legendPatterns(CREDIT_WORDS);
+const MINUS_DEBIT_LEGEND = legendPatterns(DEBIT_WORDS);
+
+/** The sign legend a card statement prints, when it prints exactly one. */
+function cardSignLegend(text: string): 'minus-credit' | 'minus-debit' | null {
+  const flat = text.replace(/\s+/g, ' ');
+  const credit = MINUS_CREDIT_LEGEND.some((pattern) => pattern.test(flat));
+  const debit = MINUS_DEBIT_LEGEND.some((pattern) => pattern.test(flat));
+  if (credit === debit) return null;
+  return credit ? 'minus-credit' : 'minus-debit';
+}
+
+/** Strong single markers that a document is a card statement. */
+const CARD_STATEMENT_MARKER = /\bcredit\s+card\s+statement\b|\bminimum\s+(?:amount|payment)\s+due\b|\b(?:available\s+)?credit\s+limit\b/i;
+
+function signConvention(cardEvidence: boolean, text: string): SignConvention {
+  if (!cardEvidence) return 'account';
+  return cardSignLegend(text) ?? 'refuse';
+}
+
+/**
+ * Direction of one figure under a convention. `sign` is the explicit sign the
+ * cell carried, or null for a plain figure. Null means "not decidable".
+ */
+function directionFromSign(
+  sign: '-' | '+' | null,
+  convention: SignConvention,
+): 'expense' | 'income' | null {
+  switch (convention) {
+    case 'account': return sign === '-' ? 'expense' : sign === '+' ? 'income' : null;
+    case 'minus-credit': return sign === '-' ? 'income' : 'expense';
+    case 'minus-debit': return sign === '-' ? 'expense' : 'income';
+    default: return null;
+  }
+}
+
+/**
  * Decode an exported statement without guessing past what the bytes say.
  * A UTF-16 BOM names its encoding outright (Excel "Unicode text" exports);
  * otherwise the file is UTF-8, or — when it is not valid UTF-8 — the single-byte
@@ -567,9 +634,17 @@ export function parseStatementCsv(
       ? uniqueColumnInstrument(dataRecords, sourceAccountIndex, 'account')
       : uniqueColumnInstrument(dataRecords, sourceCardIndex, 'unknown');
   const dateOrder = inferDateOrder(dataRecords.map((record) => record[dateIndex] ?? ''));
+  // Card exports carry their identity, when they carry it at all, in the
+  // preamble above the table or in a card-number column name. A signed amount
+  // column is then only a direction when the preamble says what a minus means.
+  const preamble = records.slice(0, headerRow).map((record) => record.join(' ')).join('\n');
+  const cardEvidence = isCardStatement(preamble) || CARD_STATEMENT_MARKER.test(preamble) ||
+    headers.includes(normalizedHeader('credit card number'));
+  const convention = signConvention(cardEvidence, preamble);
 
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
+  let ambiguousCardSignRows = 0;
   for (const record of dataRecords) {
     if (record.length !== headers.length) {
       rejectedRows += 1;
@@ -601,7 +676,10 @@ export function parseStatementCsv(
       const signedMinor = unsignedMinor === null
         ? amountMinor(record[amountIndex] ?? '', currency, true)
         : null;
-      const signedType = signedMinor === null ? null : signedMinor < 0 ? 'expense' : 'income';
+      const signedType = signedMinor === null
+        ? null
+        : directionFromSign(signedMinor < 0 ? '-' : '+', convention);
+      if (!labelled && signedMinor !== null && convention === 'refuse') ambiguousCardSignRows += 1;
       if (labelled && signedType && labelled !== signedType) {
         type = null;
       } else {
@@ -610,9 +688,20 @@ export function parseStatementCsv(
       }
     } else if (currency === defaultCurrency && signedAmount) {
       const signedMinor = amountMinor(record[amountIndex] ?? '', currency, true);
+      // A stated card convention also gives a plain figure its meaning; the
+      // account convention and an unstated card one never do.
+      const plainMinor = signedMinor === null && (convention === 'minus-credit' || convention === 'minus-debit')
+        ? amountMinor(record[amountIndex] ?? '', currency, false)
+        : null;
       if (signedMinor !== null) {
-        type = signedMinor < 0 ? 'expense' : 'income';
-        minor = Math.abs(signedMinor);
+        type = directionFromSign(signedMinor < 0 ? '-' : '+', convention);
+        minor = type ? Math.abs(signedMinor) : null;
+        if (convention === 'refuse') ambiguousCardSignRows += 1;
+      } else if (plainMinor !== null) {
+        type = directionFromSign(null, convention);
+        minor = plainMinor;
+      } else if (convention === 'refuse' && amountMinor(record[amountIndex] ?? '', currency, false) !== null) {
+        ambiguousCardSignRows += 1;
       }
     }
     if (
@@ -656,7 +745,7 @@ export function parseStatementCsv(
       raw: record.join(delimiter),
     });
   }
-  return { rows, totalRows, rejectedRows };
+  return { rows, totalRows, rejectedRows, ambiguousCardSignRows };
 }
 
 type DateOrder = 'day-first' | 'month-first';
@@ -1084,7 +1173,8 @@ function parseColumnTail(
   currency: StatementCurrency,
   order: ColumnOrder,
   loneAmountIsCharge = false,
-): { merchant: string; amountFils: number; type: 'expense' | 'income' } | null {
+  convention: SignConvention = 'account',
+): { merchant: string; amountFils: number; type: 'expense' | 'income' } | 'ambiguous-card-sign' | null {
   const words = rest.split(' ');
   const tail: MoneyToken[] = [];
   let cut = words.length;
@@ -1107,13 +1197,25 @@ function parseColumnTail(
   if (merchant.length < 2 || merchant.length > 180 || tail.length === 0 || tail.length > 3) return null;
   const [first, second] = tail;
   if (first.kind === 'signed') {
-    return tail.length <= 2 ? { merchant, amountFils: first.minor, type: first.type } : null;
+    if (tail.length > 2) return null;
+    // classifyMoneyToken reports a minus (or parentheses) as `expense` and a
+    // plus as `income`: that IS the account convention. A card statement
+    // reads the same mark through what it says its signs mean, or not at all.
+    const type = directionFromSign(first.type === 'expense' ? '-' : '+', convention);
+    if (!type) return 'ambiguous-card-sign';
+    return { merchant, amountFils: first.minor, type };
   }
   // `03/08/2026 NOON.COM DUBAI ARE 68.93` — the whole body of a card
   // statement. One figure, no label, no second column, because a charge is
   // what the statement is for; the CR rows are handled by the branch above.
+  // A statement that says its CHARGES carry the minus has told us the
+  // opposite: there a plain figure is the credit.
   if (loneAmountIsCharge && tail.length === 1 && first.kind === 'unsigned') {
-    return { merchant, amountFils: first.minor, type: 'expense' };
+    return {
+      merchant,
+      amountFils: first.minor,
+      type: convention === 'minus-debit' ? 'income' : 'expense',
+    };
   }
   if (tail.length < 2 || second.kind === 'signed') return null;
   const [debit, credit] = order === 'debit-first' ? [first, second] : [second, first];
@@ -1216,6 +1318,11 @@ export interface StatementTextResult {
   rejectedRows: number;
   /** True when every row in totalRows is represented by rows or rejectedRows. */
   completeRowAccounting: boolean;
+  /**
+   * Rejected rows whose only direction evidence was a bare sign on a card
+   * statement that never says what its signs mean. Counted inside rejectedRows.
+   */
+  ambiguousCardSignRows: number;
 }
 
 /**
@@ -1238,13 +1345,24 @@ export function parseStatementLines(
   const bankHint = identity.bankHint ?? statementBankHint(text);
   const rawLines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
   const cardStatement = isCardStatement(text);
+  // Refusing a bare sign needs less proof than reading every plain figure as
+  // a charge does: one strong marker, or a header card explicitly labelled a
+  // credit card, is enough to stop the account convention being assumed.
+  const cardEvidence = cardStatement || sourceInstrument?.kind === 'credit' ||
+    CARD_STATEMENT_MARKER.test(rawLines.slice(0, 60).join('\n'));
+  const convention = signConvention(cardEvidence, text);
+  let ambiguousCardSignRows = 0;
   const cardTotalAmountTable = hasCardTotalAmountTable(text, cardStatement);
   const lines = cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines;
   const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''));
   const columnOrder = statementColumnOrder(text);
   // Proven once for the whole file, then used to resolve rows the branches
   // below would otherwise have to reject as ambiguous.
-  const balanceTrailing = trailingBalanceRuns(lines, currency);
+  // Not on a card statement: its running figure is what is OWED, which rises
+  // with a charge, and whether it prints as positive or negative varies by
+  // issuer. Reading its steps with the account direction filed every charge
+  // as money in.
+  const balanceTrailing = !cardEvidence && trailingBalanceRuns(lines, currency);
   let previousBalance: number | null = null;
   const push = (
     date: string,
@@ -1359,9 +1477,11 @@ export function parseStatementLines(
       }
     } else {
       const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
-      const column = prefixed && date
-        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement)
+      const tail = prefixed && date
+        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement, convention)
         : null;
+      if (tail === 'ambiguous-card-sign') ambiguousCardSignRows += 1;
+      const column = tail === 'ambiguous-card-sign' ? null : tail;
       if (date && column) push(date, column.merchant, column.amountFils, column.type, line);
       else if (date && figures && priorBalance !== null) {
         // No label and no placeholder to say which column is populated: the
@@ -1380,6 +1500,7 @@ export function parseStatementLines(
     totalRows: rows.length + rejectedRows,
     rejectedRows,
     completeRowAccounting: true,
+    ambiguousCardSignRows,
   };
 }
 
@@ -1401,6 +1522,7 @@ export async function extractPdfStatementRows(
   totalRows: number;
   rejectedRows: number;
   completeRowAccounting: boolean;
+  ambiguousCardSignRows: number;
 }> {
   const document = await getDocumentProxy(bytes, password ? { password } : undefined);
   try {
@@ -1415,6 +1537,7 @@ export async function extractPdfStatementRows(
       totalRows: parsed.totalRows,
       rejectedRows: parsed.rejectedRows,
       completeRowAccounting: parsed.completeRowAccounting,
+      ambiguousCardSignRows: parsed.ambiguousCardSignRows,
     };
   } finally {
     const disposable = document as unknown as {

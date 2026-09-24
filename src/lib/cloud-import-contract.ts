@@ -45,6 +45,8 @@ export interface PdfImportAccepted {
   totalRows: number;
   pages: number;
   coverage: StatementImportCoverage | null;
+  /** Of rejectedRows: card rows with a bare sign the statement never explains. */
+  cardSignRowsSkipped: number;
 }
 
 export interface CsvImportAccepted {
@@ -52,6 +54,8 @@ export interface CsvImportAccepted {
   rejectedRows: number;
   totalRows: number;
   coverage: StatementImportCoverage | null;
+  /** Of rejectedRows: card rows with a bare sign the statement never explains. */
+  cardSignRowsSkipped: number;
 }
 
 export interface EmailForwardingCredential {
@@ -74,6 +78,7 @@ export type CloudImportErrorCode =
   | 'pdf_password_required'
   | 'pdf_password_incorrect'
   | 'unsupported_statement_format'
+  | 'ambiguous_card_signs'
   | 'rate_limited'
   | 'queue_full'
   | 'email_not_configured'
@@ -199,7 +204,17 @@ export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null
   // Defensive compatibility: an older relay may send a min/max range even when
   // it also admits skipped rows. Do not persist that range as complete locally.
   const coverage = rejectedRows === 0 ? parsedCoverage : null;
-  return { acceptedRows: body.acceptedRows, rejectedRows, totalRows, pages: body.pages, coverage };
+  const cardSignRowsSkipped = cardSignSkips(body.cardSignRowsSkipped, rejectedRows);
+  if (cardSignRowsSkipped === null) return null;
+  return {
+    acceptedRows: body.acceptedRows, rejectedRows, totalRows, pages: body.pages, coverage, cardSignRowsSkipped,
+  };
+}
+
+/** Optional (older relays omit it) and never more than the rows skipped. */
+function cardSignSkips(value: unknown, rejectedRows: number): number | null {
+  if (value === undefined) return 0;
+  return nonNegativeInt(value) && value <= rejectedRows ? value : null;
 }
 
 export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null {
@@ -212,11 +227,14 @@ export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null
   ) return null;
   const coverage = parseStatementCoverage(body.coverage);
   if (body.coverage !== null && body.coverage !== undefined && !coverage) return null;
+  const cardSignRowsSkipped = cardSignSkips(body.cardSignRowsSkipped, body.rejectedRows);
+  if (cardSignRowsSkipped === null) return null;
   return {
     acceptedRows: body.acceptedRows,
     rejectedRows: body.rejectedRows,
     totalRows: body.totalRows,
     coverage,
+    cardSignRowsSkipped,
   };
 }
 
@@ -249,6 +267,7 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'pdf_password_required',
   'pdf_password_incorrect',
   'unsupported_statement_format',
+  'ambiguous_card_signs',
   'rate_limited',
   'queue_full',
   'email_not_configured',

@@ -999,6 +999,123 @@ function wideTextPdf(lines) {
   }
   ok('an oversized text PDF is a distinct limit error, not a scanned-PDF error', tooLong === 'pdf_too_long');
 
+  // ── Card statements: bare signs are not a direction on their own ──
+  // An account statement prints money OUT with a minus. Card statements do the
+  // opposite as often as not: charges are plain and a payment or refund is the
+  // one carrying the minus. Reading "PAYMENT RECEIVED -500.00" on a card
+  // statement with the account convention filed the user's card payment as a
+  // 500 charge.
+  const cardHeader = [
+    'Credit Card Statement',
+    'Statement Date 31/07/2026',
+    'Minimum Payment Due AED 50.00',
+    'Credit Limit AED 20,000.00',
+  ];
+  const cardUnlabelled = parseStatementLines([
+    ...cardHeader,
+    '01/07/2026 NOON.COM DUBAI 68.93',
+    '05/07/2026 PAYMENT RECEIVED THANK YOU -500.00',
+    '06/07/2026 AMAZON REFUND (25.00)',
+  ].join('\n'), 'AED');
+  ok('a card statement without a sign legend refuses minus/parenthesised rows instead of filing them as charges',
+    cardUnlabelled.rows.length === 1 && cardUnlabelled.rows[0].type === 'expense' &&
+      cardUnlabelled.rows[0].amountFils === 6893 &&
+      !cardUnlabelled.rows.some((row) => /PAYMENT|REFUND/.test(row.merchant)) &&
+      cardUnlabelled.rejectedRows === 2 && cardUnlabelled.ambiguousCardSignRows === 2,
+    JSON.stringify(cardUnlabelled));
+  const cardMinusCredit = parseStatementLines([
+    ...cardHeader,
+    'A minus sign (-) denotes a credit to your card account.',
+    '01/07/2026 NOON.COM DUBAI 68.93',
+    '05/07/2026 PAYMENT RECEIVED THANK YOU -500.00',
+    '06/07/2026 AMAZON REFUND (25.00)',
+  ].join('\n'), 'AED');
+  ok('a card statement that states minus means credit reads payments and refunds as credits',
+    cardMinusCredit.rows.length === 3 && cardMinusCredit.rejectedRows === 0 &&
+      cardMinusCredit.rows[1].type === 'income' && cardMinusCredit.rows[1].amountFils === 50000 &&
+      cardMinusCredit.rows[2].type === 'income' && cardMinusCredit.rows[2].amountFils === 2500 &&
+      cardMinusCredit.rows[0].type === 'expense',
+    JSON.stringify(cardMinusCredit.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+  const cardExplicitCr = parseStatementLines([
+    ...cardHeader,
+    '05/07/2026 PAYMENT RECEIVED THANK YOU 500.00 CR',
+    '06/07/2026 CARREFOUR 40.00 DR',
+  ].join('\n'), 'AED');
+  ok('explicit CR/DR labels still decide card statement rows',
+    cardExplicitCr.rows.length === 2 && cardExplicitCr.rows[0].type === 'income' &&
+      cardExplicitCr.rows[1].type === 'expense');
+  const cardOnlySigned = parseStatementLines([
+    ...cardHeader,
+    '05/07/2026 PAYMENT RECEIVED -500.00',
+    '06/07/2026 CARREFOUR 40.00-',
+  ].join('\n'), 'AED');
+  ok('a card statement whose every row is a bare signed figure reports the sign refusal',
+    cardOnlySigned.rows.length === 0 && cardOnlySigned.ambiguousCardSignRows === 2);
+  const accountStillSigned = parseStatementLines([
+    'Statement of Account',
+    '05/07/2026 CARREFOUR -40.00',
+    '06/07/2026 SALARY +1,000.00',
+  ].join('\n'), 'AED');
+  ok('account statements keep the minus-is-debit reading',
+    accountStillSigned.rows.length === 2 && accountStillSigned.rows[0].type === 'expense' &&
+      accountStillSigned.rows[1].type === 'income' && accountStillSigned.ambiguousCardSignRows === 0);
+  // A card statement's running figure is what is OWED: it rises on a charge.
+  // The account-statement balance chain reads a rise as money in.
+  const cardBalanceChain = parseStatementLines([
+    ...cardHeader,
+    'Date Description Amount Balance',
+    '01/07/2026 FIRST ROW 100.00 100.00',
+    '02/07/2026 CARREFOUR MARKET 40.00 140.00',
+    '03/07/2026 DEWA BILL 350.00 490.00',
+    '04/07/2026 TALABAT 60.50 550.50',
+    '05/07/2026 NOON 39.50 590.00',
+    '06/07/2026 SPINNEYS 10.00 600.00',
+  ].join('\n'), 'AED');
+  ok('a card statement running balance is never read with the account-statement direction',
+    !cardBalanceChain.rows.some((row) => row.type === 'income'),
+    JSON.stringify(cardBalanceChain.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+
+  const cardCsvSigned = parseStatementCsv([
+    'Credit Card Statement',
+    'Card Number,XXXX-XXXX-XXXX-4821',
+    'Date,Description,Amount',
+    '01/07/2026,NOON.COM,68.93',
+    '05/07/2026,PAYMENT RECEIVED,-500.00',
+  ].join('\n'), 'AED');
+  ok('a card CSV with one signed amount column and no legend is refused, not read as account signs',
+    cardCsvSigned.rows.length === 0 && cardCsvSigned.ambiguousCardSignRows === 2,
+    JSON.stringify(cardCsvSigned));
+  const cardCsvLegend = parseStatementCsv([
+    'Credit Card Statement',
+    'Negative amounts indicate payments and credits',
+    'Date,Description,Amount',
+    '01/07/2026,NOON.COM,68.93',
+    '05/07/2026,PAYMENT RECEIVED,-500.00',
+  ].join('\n'), 'AED');
+  ok('a card CSV that states negative means credit reads charges positive and payments negative',
+    cardCsvLegend.rows.length === 2 && cardCsvLegend.rows[0].type === 'expense' &&
+      cardCsvLegend.rows[1].type === 'income' && cardCsvLegend.rows[1].amountFils === 50000,
+    JSON.stringify(cardCsvLegend.rows.map((row) => [row.merchant, row.type])));
+  const cardCsvChargesNegative = parseStatementCsv([
+    'Credit Card Statement',
+    'Charges are shown as negative amounts',
+    'Date,Description,Amount',
+    '01/07/2026,NOON.COM,-68.93',
+    '05/07/2026,PAYMENT RECEIVED,500.00',
+  ].join('\n'), 'AED');
+  ok('a card CSV that states charges are negative reads the account-style convention',
+    cardCsvChargesNegative.rows.length === 2 && cardCsvChargesNegative.rows[0].type === 'expense' &&
+      cardCsvChargesNegative.rows[1].type === 'income',
+    JSON.stringify(cardCsvChargesNegative));
+  const cardCsvDirected = parseStatementCsv([
+    'Credit Card Statement',
+    'Date,Description,Amount,Dr Cr',
+    '01/07/2026,NOON.COM,68.93,DR',
+    '05/07/2026,PAYMENT RECEIVED,500.00,CR',
+  ].join('\n'), 'AED');
+  ok('a card CSV with an explicit direction column is unaffected',
+    cardCsvDirected.rows.length === 2 && cardCsvDirected.rows[1].type === 'income');
+
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
 })();
