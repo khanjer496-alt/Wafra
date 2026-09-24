@@ -13,8 +13,10 @@ import {
   bodyPrint,
   compatibleCaptureInstrument,
   duplicateGuard,
+  fromDifferentStatementUploads,
   isApplePayWalletRow,
   mergeCaptureInstrument,
+  statementUploadOf,
   type DuplicateCandidate,
 } from '@/lib/dedupe';
 import { readBillAlias } from '@/lib/bill-alias';
@@ -67,6 +69,8 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   cardPaymentSide?: 'debit' | 'receipt';
   /** Relay-only origin. It must never be inferred from the wake itself. */
   captureSource?: CaptureSource;
+  /** Relay-assigned opaque id of the statement upload a PDF/CSV row came from. */
+  statementImportId?: string;
   /**
    * Server-bound proof of the exact Shortcut branch and setup generation.
    * Only a marker for this receiving device's current generation may prove
@@ -375,7 +379,17 @@ function buildImportPlanInMarket(
   let guardCache: ReturnType<typeof duplicateGuard> | null = null;
   const guard = (): ReturnType<typeof duplicateGuard> => {
     if (!guardCache) {
-      guardCache = duplicateGuard(matchableTransactions(), true);
+      guardCache = duplicateGuard(matchableTransactions(), true, {
+        // Statement overlap may cross accounts only when the statement side
+        // names none, and never across two banks either side does name.
+        accountBankIdentity: (accountId) => {
+          const bankName = state.accounts.find((account) => account.id === accountId)?.bankName ??
+            bankNames[accountId];
+          return bankName ? bankIdentityForName(bankName) : undefined;
+        },
+        unresolvedAccount: (accountId) =>
+          accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID || isUnassignedTransferAccount(accountId),
+      });
       for (const id of protectedEditedPushConsumed) guardCache.consume(id);
       for (const candidate of protectedReplacementCandidates) guardCache.add(candidate);
     }
@@ -390,6 +404,24 @@ function buildImportPlanInMarket(
       ...(bank ? { bankIdentity: bankIdentityForName(bank.name) } : {}),
     };
   };
+  /**
+   * Statement-upload provenance for dedupe: the relay's upload id (validated)
+   * and the bank the statement itself named. Empty for every other capture.
+   */
+  const statementFactsOf = (p: ScannedSms): Pick<DuplicateCandidate, 'statementImportId' | 'statementBank'> => {
+    const statementImportId = statementUploadOf(p);
+    if (!statementImportId) return {};
+    const bank = p.bankHint ? bankFromName(p.bankHint) : null;
+    return { statementImportId, ...(bank ? { statementBank: bankIdentityForName(bank.name) } : {}) };
+  };
+  /**
+   * A statement row may take an existing row's identity only when that row is
+   * not a statement row from another upload: two uploads restart their relay
+   * clock at midday, so a shared `s{ts}-{amount}` there is a collision between
+   * different rows, not a re-read of one. The duplicate guard pairs those.
+   */
+  const sameStatementUploadOrNone = (prior: Transaction | undefined, p: ScannedSms): Transaction | undefined =>
+    prior && fromDifferentStatementUploads(prior, p) ? undefined : prior;
   let protectedEditedPushIndex: Map<string, Transaction[]> | null = null;
   const editedPushKey = (date: string, amountFils: number, type: Transaction['type']) =>
     `${date}|${amountFils}|${type}`;
@@ -1267,7 +1299,7 @@ function buildImportPlanInMarket(
     }
     if (p.kind === 'cardPayment') {
       const smsKey = smsKeyOf(p);
-      const exactPrior = smsKey ? compatiblePrior(smsKey, p) : undefined;
+      const exactPrior = smsKey ? sameStatementUploadOrNone(compatiblePrior(smsKey, p), p) : undefined;
       if (exactPrior) {
         // Admit a date-only correction before account discovery or snapshots;
         // new issuer evidence must not create an unused account as a side effect.
@@ -1289,7 +1321,7 @@ function buildImportPlanInMarket(
           continue;
         }
       }
-      const stablePrior = exactPrior ?? stableLocalPrior(p);
+      const stablePrior = exactPrior ?? sameStatementUploadOrNone(stableLocalPrior(p), p);
       const prior = stablePrior;
       const resolution = resolveAccount(p, prior?.accountId);
       const { accountId } = resolution;
@@ -1324,6 +1356,7 @@ function buildImportPlanInMarket(
         date, amountFils: p.amountFils, title: p.merchant,
         type: 'income' as const, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
         captureSource: p.captureSource,
+        ...statementFactsOf(p),
         accountId, eventKind: 'cardPayment' as const, cardPaymentSide,
         captureInstrument: captureInstrumentOf(p),
       };
@@ -1370,6 +1403,7 @@ function buildImportPlanInMarket(
         source: 'sms',
         smsKey,
         captureSource: p.captureSource,
+        ...(statementUploadOf(p) ? { statementImportId: statementUploadOf(p) } : {}),
         cardPaymentSide,
         isTransfer: true,
         captureInstrument: captureInstrumentOf(p),
@@ -1379,14 +1413,15 @@ function buildImportPlanInMarket(
     // Plain transaction. transferHint = the bank-side leg of a card payment /
     // own-account transfer: keep it for balances, exclude it from spending.
     const smsKey = smsKeyOf(p);
-    const exactPrior = smsKey ? compatiblePrior(smsKey, p) : undefined;
+    const exactPrior = smsKey ? sameStatementUploadOrNone(compatiblePrior(smsKey, p), p) : undefined;
     const sourceCorrectionPrior = exactPrior ? undefined : legacyTransferSourcePrior(p);
-    const stablePrior = exactPrior ?? stableLocalPrior(p) ?? sourceCorrectionPrior;
+    const stablePrior = exactPrior ?? sameStatementUploadOrNone(stableLocalPrior(p), p) ?? sourceCorrectionPrior;
     const prior = stablePrior;
     const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
       captureSource: p.captureSource,
+      ...statementFactsOf(p),
       ...(liveMessageObservation(p) ? { liveObservation: true } : {}),
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
@@ -1603,6 +1638,7 @@ function buildImportPlanInMarket(
         ? { notificationObservationId: p.notificationObservationId } : {}),
       ...(liveMessageObservation(p) ? { messageObservationId: p.messageObservationId } : {}),
       captureSource: p.captureSource,
+      ...(statementUploadOf(p) ? { statementImportId: statementUploadOf(p) } : {}),
       isTransfer: p.transferHint || undefined,
       transferEvidence: buildTransferEvidence(p, resolution.confident),
       paymentFlowSide: p.paymentFlowSide,

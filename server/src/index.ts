@@ -943,8 +943,9 @@ function withoutRaw(parsed: NonNullable<ReturnType<typeof parseSms>>): Record<st
  *    midnight UTC lands on the previous calendar day for any device west of
  *    Greenwich, and there is no reason to leave that edge lying around.
  *
- * 3. A date at or after NOW is clamped to now, for the same reason
- *    resolveReceivedAt bounds the Shortcut's clock: `smsTs` feeds the callers'
+ * 3. A date that is today or later (UTC) is stamped at the START of the
+ *    relay's current UTC day, for the same reason resolveReceivedAt bounds
+ *    the Shortcut's clock: `smsTs` feeds the callers'
  *    `newestTs`, which becomes `lastScanTs`, and capture.ts starts the next SMS
  *    inbox scan at `lastScanTs + 1`. A message is only ever offered once, so
  *    every SMS arriving before that watermark is skipped for good. This is not
@@ -954,7 +955,14 @@ function withoutRaw(parsed: NonNullable<ReturnType<typeof parseSms>>): Record<st
  *    `Math.max(..., state.lastScanTs)`, and a statement import is historical by
  *    definition. Taken together with note 1's direction, the invariant this
  *    function guarantees is simply: no row is ever stamped ahead of the relay's
- *    own clock.
+ *    own clock. It used to be `now` itself, which made the same statement
+ *    uploaded twice give its today-dated rows two different identities; the
+ *    start of the day is just as safe and the same for every upload that day.
+ *
+ * Overlap between two uploads no longer rests on this clock at all: each
+ * upload carries its own opaque `statementImportId`, and src/lib/dedupe.ts
+ * matches rows of different uploads one-to-one by day, amount, direction and
+ * account, whatever offsets each file's row order produced here.
  *
  * A row with no usable date falls back to a monotonic offset from now. Nothing
  * reaches that branch today — parseStatementText refuses a row whose date it
@@ -968,13 +976,26 @@ function withoutRaw(parsed: NonNullable<ReturnType<typeof parseSms>>): Record<st
 /** Must exceed SAME_EVENT_MS in src/lib/dedupe.ts; see note 1 above. */
 const ROW_RECEIPT_SEPARATION_MS = 121_000;
 
+/**
+ * One random id per statement upload, stamped on each of its rows. It names
+ * the upload, not the file or its content: the phone uses it only to tell
+ * "two rows of one statement" (a genuine repeat) from "the same row in two
+ * overlapping statements" (a duplicate). 32 lowercase hex characters.
+ */
+function newStatementImportId(): string {
+  return crypto.randomUUID().replace(/-/g, '');
+}
+
+const DAY_MS = 86_400_000;
+
 function rowReceiptTimes(rows: { date?: string | null }[], nowMs: number): string[] {
   const used = new Set<number>();
+  const todayStart = Math.floor(nowMs / DAY_MS) * DAY_MS;
   return rows.map((row, index) => {
-    const dated = typeof row.date === 'string' ? Date.parse(`${row.date}T12:00:00.000Z`) : NaN;
+    const day = typeof row.date === 'string' ? Date.parse(`${row.date}T00:00:00.000Z`) : NaN;
     // Clamped, not refused: a row dated today is ordinary and must keep its
     // place in the batch, it just may not carry a clock ahead of this relay's.
-    let ms = Number.isFinite(dated) ? Math.min(dated, nowMs) : nowMs - index;
+    let ms = Number.isFinite(day) ? (day < todayStart ? day + DAY_MS / 2 : todayStart) : nowMs - index;
     while (used.has(ms)) ms -= ROW_RECEIPT_SEPARATION_MS;
     used.add(ms);
     return new Date(ms).toISOString();
@@ -2054,6 +2075,7 @@ export default {
       const baseKey = await keyedFingerprint(device.requestSecret, `pdf:${digest}`);
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
+      const statementImportId = newStatementImportId();
       const targets = await supplementalQueueTargets(env, device);
       if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
         return json({ error: 'rate_limited' }, 429);
@@ -2061,7 +2083,9 @@ export default {
       const wake = await queueSupplementalRows(
         env, device,
         extracted.rows.map((_, index) => ({
-          row: { ...withoutRaw(extracted.rows[index]), captureSource: 'pdf', receivedAt: receivedAt[index] },
+          row: {
+            ...withoutRaw(extracted.rows[index]), captureSource: 'pdf', receivedAt: receivedAt[index], statementImportId,
+          },
           replayKey: `${baseKey}:${index}`, receiptTtlSeconds: 72 * 60 * 60,
         })),
         targets,
@@ -2136,6 +2160,7 @@ export default {
       const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
       const baseKey = await keyedFingerprint(device.requestSecret, `csv:${digest}`);
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
+      const statementImportId = newStatementImportId();
       const targets = await supplementalQueueTargets(env, device);
       if (!(await reserveSupplementalDeliveries(env, device.id, parsed.rows.length, targets.length))) {
         return json({ error: 'rate_limited' }, 429);
@@ -2143,7 +2168,7 @@ export default {
       const wake = await queueSupplementalRows(
         env, device,
         parsed.rows.map((row, index) => ({
-          row: { ...withoutRaw(row), captureSource: 'csv', receivedAt: receivedAt[index] },
+          row: { ...withoutRaw(row), captureSource: 'csv', receivedAt: receivedAt[index], statementImportId },
           replayKey: `${baseKey}:${index}`, receiptTtlSeconds: 72 * 60 * 60,
         })),
         targets,
@@ -2646,6 +2671,7 @@ export default {
       );
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
+      const statementImportId = newStatementImportId();
       for (let rowIndex = 0; rowIndex < extracted.rows.length; rowIndex++) {
         const inserted = await queueStructuredRow(
           env,
@@ -2654,6 +2680,7 @@ export default {
             ...withoutRaw(extracted.rows[rowIndex]),
             captureSource: 'pdf',
             receivedAt: receivedAt[rowIndex],
+            statementImportId,
           },
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,
@@ -2697,6 +2724,7 @@ export default {
         `mime-csv:${messageId}:${attachmentIndex}:${digest}`,
       );
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
+      const statementImportId = newStatementImportId();
       for (let rowIndex = 0; rowIndex < parsed.rows.length; rowIndex++) {
         const inserted = await queueStructuredRow(
           env,
@@ -2705,6 +2733,7 @@ export default {
             ...withoutRaw(parsed.rows[rowIndex]),
             captureSource: 'csv',
             receivedAt: receivedAt[rowIndex],
+            statementImportId,
           },
           `${baseKey}:${rowIndex}`,
           72 * 60 * 60,

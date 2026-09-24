@@ -2180,10 +2180,13 @@ const CARD_PAYMENT_DEBIT =
         cardTableRows.some((row) => row.type === 'income' && row.amountFils === 725),
       JSON.stringify(cardTableRows.map((row) => [row.date, row.type, row.amountFils, row.merchant])));
 
+    // Its own device: statement uploads are budgeted per device per hour,
+    // and this section already spends most of one device's allowance.
+    const cardDevice = await pairDevice(env);
     // A card statement whose only direction evidence is a bare minus, and
     // which never says what that minus means, is refused by name.
     const cardSigns = await call(env, 'POST', '/v1/import/pdf', {
-      token: me.adminToken,
+      token: cardDevice.adminToken,
       headers: { 'content-type': 'application/pdf' },
       body: tinyPdf([
         'Credit Card Statement',
@@ -2195,14 +2198,14 @@ const CARD_PAYMENT_DEBIT =
     const cardSignsBody = await cardSigns.json();
     ok('statement: a card PDF with only unexplained signs is refused as ambiguous, not filed',
       cardSigns.status === 422 && cardSignsBody.error === 'ambiguous_card_signs' &&
-        (await drainOpened(env, me)).length === 0,
+        (await drainOpened(env, cardDevice)).length === 0,
       JSON.stringify(cardSignsBody));
 
     // A card settlement read off a statement is a transfer onto the card, the
     // same as the SMS about it: neither spending on the account statement nor
     // income on the card statement.
     const settlementPdf = await call(env, 'POST', '/v1/import/pdf', {
-      token: me.adminToken,
+      token: cardDevice.adminToken,
       headers: { 'content-type': 'application/pdf' },
       body: tinyPdf([
         'Statement of Account',
@@ -2211,7 +2214,7 @@ const CARD_PAYMENT_DEBIT =
       ]),
     });
     ok('statement: account-side card settlements are accepted', settlementPdf.status === 202);
-    const settlementRows = await drainOpened(env, me);
+    const settlementRows = await drainOpened(env, cardDevice);
     const settlementPlan = importOnPhone(settlementRows);
     const { isSpending: spends } = require('./build/ledger');
     ok('statement: a card settlement on an account statement never reaches spending',
@@ -2311,6 +2314,62 @@ const CARD_PAYMENT_DEBIT =
       JSON.stringify(soonRows.map((row) => [row.date, row.receivedAt])));
     ok('statement: and those two are still distinct rows on the phone',
       importOnPhone(soonRows).batch.transactions.length === 2);
+
+    const overlapDevice = await pairDevice(env);
+    // Two overlapping statements of one card, rows printed in a different
+    // order. Each upload restarts its relay clock at midday, so the same row
+    // lands at different offsets in each; overlap must be matched on the day,
+    // the money and the direction instead.
+    const overlapA = await call(env, 'POST', '/v1/import/pdf', {
+      token: overlapDevice.adminToken, headers: { 'content-type': 'application/pdf' }, body: tinyPdf([
+        'Card Number: XXXX XXXX XXXX 3215',
+        '2026-06-02 SALIK TOLL GATE 4.00 DR',
+        '2026-06-02 CAFE NERO 20.00 DR',
+        '2026-06-03 ENOC 90.00 DR',
+      ]),
+    });
+    const rowsA = await drainOpened(env, overlapDevice);
+    ok('statement: every row of an upload carries the same opaque upload id, and no statement text',
+      overlapA.status === 202 && rowsA.length === 3 &&
+        rowsA.every((row) => /^[a-f0-9]{32}$/.test(row.statementImportId)) &&
+        new Set(rowsA.map((row) => row.statementImportId)).size === 1,
+      JSON.stringify(rowsA.map((row) => row.statementImportId)));
+    const planA = importOnPhone(rowsA);
+    const afterA = {
+      ...LEDGER,
+      transactions: planA.batch.transactions.map((t, index) => ({ id: `ov-${index}`, ...t })),
+      accounts: [...LEDGER.accounts, ...planA.batch.newAccounts.map((a, index) => ({ id: String(index), ...a }))],
+      accountHints: { ...planA.batch.hints },
+    };
+    const overlapB = await call(env, 'POST', '/v1/import/pdf', {
+      token: overlapDevice.adminToken, headers: { 'content-type': 'application/pdf' }, body: tinyPdf([
+        'Card Number: XXXX XXXX XXXX 3215',
+        '2026-06-02 CAFE NERO 20.00 DR',
+        '2026-06-02 SALIK TOLL GATE 4.00 DR',
+        '2026-06-03 ENOC 90.00 DR',
+        '2026-06-04 NEW GROCER 33.00 DR',
+      ]),
+    });
+    const rowsB = await drainOpened(env, overlapDevice);
+    const planB = importOnPhone(rowsB, afterA);
+    ok('statement: an overlapping statement in another order adds only the rows the first did not have',
+      overlapB.status === 202 && planA.batch.transactions.length === 3 &&
+        planB.batch.transactions.length === 1 && planB.batch.transactions[0].title === 'NEW GROCER',
+      JSON.stringify(planB.batch.transactions.map((t) => [t.date, t.title])));
+    ok('statement: the second upload has its own id',
+      rowsB.every((row) => row.statementImportId !== rowsA[0].statementImportId));
+
+    // A row dated today used to be clamped to the relay's clock at upload, so
+    // the same statement uploaded twice got two different identities for it.
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayOnce = await call(env, 'POST', '/v1/import/pdf', {
+      token: overlapDevice.adminToken, headers: { 'content-type': 'application/pdf' },
+      body: tinyPdf([`${todayIso} LULU TODAY 12.00 DR`]),
+    });
+    const todayRow = (await drainOpened(env, overlapDevice))[0];
+    ok('statement: a row dated today gets a deterministic clock at the start of its day, not now',
+      todayOnce.status === 202 && todayRow.receivedAt === `${todayIso}T00:00:00.000Z`,
+      todayRow?.receivedAt);
 
     // The whole point of a statement import is history, so a row dated last
     // year must keep last year's clock. A row dated in the FUTURE must not:

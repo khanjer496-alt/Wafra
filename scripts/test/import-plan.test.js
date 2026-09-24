@@ -3200,5 +3200,170 @@ const DECLINE_SMS = [{
     sender.batch.newAccounts.length === 1 && sender.batch.newAccounts[0].bankName === 'Emirates NBD', sender.batch.newAccounts);
 }
 
+/* ── statements vs the alerts and statements already in the ledger ──────
+ *
+ * A statement row carries a date and a coarse relay clock (midday UTC,
+ * separated 121s per repeat inside one upload). Three defects followed from
+ * letting that clock and the resolved account decide overlap:
+ *   - an unlabelled statement files every row to the unassigned account, so
+ *     it never met the alerts already captured for the same month, and the
+ *     whole month's spending doubled;
+ *   - two overlapping statements put the same row at different offsets from
+ *     midday, so the 120s window called them two events;
+ *   - two different uploads could share `s{midday}-{amount}` and one row was
+ *     healed into the other.
+ * Statement overlap is now matched one-to-one on day + amount + direction
+ * (+ account), independent of the clock and of file order. */
+{
+  const { duplicateGuard, reconcileCaptureDuplicates } = require('./build/dedupe.js');
+  const card = {
+    id: 'adcb-card', name: 'ADCB Credit •3215', kind: 'card', cardType: 'credit',
+    last4: '3215', bankName: 'ADCB', openingFils: 0, color: '#fff',
+  };
+  const other = {
+    id: 'hsbc-acct', name: 'HSBC Current •1111', kind: 'bank',
+    last4: '1111', bankName: 'HSBC', openingFils: 0, color: '#000',
+  };
+  const D = '2026-08-13';
+  const noon = Date.parse(`${D}T12:00:00Z`);
+  const alertAt = (hh, amount, title, id) => ({
+    id, type: 'expense', amountFils: amount, category: 'shopping', accountId: card.id, title,
+    date: D, source: 'sms', ts: Date.parse(`${D}T${hh}:00Z`), smsKey: `s${Date.parse(`${D}T${hh}:00Z`)}-${amount}`,
+    captureInstrument: { last4: '3215', kind: 'credit', bankIdentity: 'adcb' },
+  });
+  const upload = (n) => n.charCodeAt(0).toString(16).repeat(16);
+  const stmt = (merchant, amount, ts, tag, extra = {}) => ({
+    kind: 'transaction', type: 'expense', amountFils: amount, currency: 'AED', merchant, date: D,
+    dueDay: null, minDueFils: null, card: null, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'shopping', categoryDeliberate: true,
+    captureSource: 'pdf', smsTs: ts, statementImportId: tag, ...extra,
+  });
+  const ledger = (transactions, accounts = [card, other]) => ({
+    ...BASE, accounts, accountHints: { 3215: card.id, 1111: other.id }, transactions,
+  });
+
+  // Defect 2: unlabelled statement over already-captured alerts.
+  const alerts = [alertAt('09:10', 3215, 'Endurancein', 'a1'), alertAt('18:40', 4000, 'Carrefour', 'a2')];
+  const month = buildImportPlan([
+    stmt('PAYPAL *ENDURANCEIN', 3215, noon, upload('a')),
+    stmt('CARREFOUR HYPER 1234', 4000, noon - 121_000, upload('a')),
+  ], ledger(alerts), noon);
+  ok('statement vs alert: an unlabelled statement does not re-add a month already captured by alerts',
+    month.txCount === 0, month.batch.transactions);
+
+  const twoGenuine = [alertAt('09:10', 2500, 'Talabat', 'g1'), alertAt('20:15', 2500, 'Talabat', 'g2')];
+  const threeRows = buildImportPlan([
+    stmt('TALABAT', 2500, noon, upload('b')),
+    stmt('TALABAT', 2500, noon - 121_000, upload('b')),
+    stmt('TALABAT', 2500, noon - 242_000, upload('b')),
+  ], ledger(twoGenuine), noon);
+  ok('statement vs alert: matching is one-to-one — two alerts explain two statement rows, the third is new',
+    threeRows.txCount === 1, threeRows.batch.transactions);
+
+  const otherBank = buildImportPlan([
+    stmt('PAYPAL *ENDURANCEIN', 3215, noon, upload('c'), { bankHint: 'HSBC' }),
+  ], ledger([alertAt('09:10', 3215, 'Endurancein', 'x1')]), noon);
+  ok('statement vs alert: a statement naming another bank never absorbs this card\'s alert',
+    otherBank.txCount === 1, otherBank.batch.transactions);
+
+  const otherDay = buildImportPlan([
+    { ...stmt('PAYPAL *ENDURANCEIN', 3215, noon, upload('d')), date: '2026-08-14' },
+  ], ledger([alertAt('09:10', 3215, 'Endurancein', 'y1')]), noon);
+  ok('statement vs alert: an unresolved statement row matches only the same day',
+    otherDay.txCount === 1, otherDay.batch.transactions);
+
+  // The reverse arrival: an older alert read from history after the statement.
+  const storedStatement = {
+    id: 's1', type: 'expense', amountFils: 3215, category: 'shopping', accountId: '__unassigned-transaction__',
+    title: 'PAYPAL *ENDURANCEIN', date: D, source: 'sms', ts: noon, smsKey: `s${noon}-3215`,
+    captureSource: 'pdf', statementImportId: upload('e'),
+  };
+  const historyAlert = {
+    kind: 'transaction', type: 'expense', amountFils: 3215, currency: 'AED', merchant: 'Endurancein', date: D,
+    dueDay: null, minDueFils: null, card: { last4: '3215', kind: 'credit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'software', categoryDeliberate: true,
+    smsTs: Date.parse(`${D}T09:10:00Z`), sender: 'ADCB', channel: 'inbox',
+  };
+  const reverse = buildImportPlan([historyAlert], ledger([storedStatement]), noon);
+  ok('statement vs alert: an alert arriving after an unlabelled statement row does not duplicate it',
+    reverse.txCount === 0, reverse.batch.transactions);
+
+  // Defect 3: overlapping statements, rows in a different order.
+  const onCard = { card: { last4: '3215', kind: 'credit' } };
+  const firstUpload = [
+    { id: 'u1', type: 'expense', amountFils: 400, category: 'transport', accountId: card.id, title: 'SALIK',
+      date: D, source: 'sms', ts: noon, smsKey: `s${noon}-400`, captureSource: 'pdf', statementImportId: upload('f'),
+      captureInstrument: { last4: '3215', kind: 'credit' } },
+    { id: 'u2', type: 'expense', amountFils: 2000, category: 'dining', accountId: card.id, title: 'CAFE',
+      date: D, source: 'sms', ts: noon - 121_000, smsKey: `s${noon - 121_000}-2000`, captureSource: 'pdf',
+      statementImportId: upload('f'), captureInstrument: { last4: '3215', kind: 'credit' } },
+  ];
+  const overlap = buildImportPlan([
+    stmt('CAFE', 2000, noon, upload('g'), onCard),
+    stmt('SALIK', 400, noon - 121_000, upload('g'), onCard),
+    stmt('NEW SHOP', 900, noon - 242_000, upload('g'), onCard),
+  ], ledger(firstUpload), noon);
+  ok('statement vs statement: an overlapping statement in another order adds only its new row',
+    overlap.txCount === 1 && overlap.batch.transactions[0]?.title === 'NEW SHOP',
+    overlap.batch.transactions.map((t) => t.title));
+  ok('statement vs statement: and never rewrites a row from the other upload',
+    !overlap.batch.updates.some((u) => u.id === 'u1' || u.id === 'u2'), overlap.batch.updates);
+
+  const repeat = buildImportPlan([
+    stmt('SALIK', 400, noon, upload('h'), onCard),
+    stmt('SALIK', 400, noon - 121_000, upload('h'), onCard),
+  ], ledger([firstUpload[0]]), noon);
+  ok('statement vs statement: two genuine repeats against one known row import exactly one',
+    repeat.txCount === 1, repeat.batch.transactions);
+
+  const pageTwo = buildImportPlan([
+    stmt('SALIK', 400, noon - 121_000, upload('f'), onCard),
+  ], ledger([firstUpload[0]]), noon);
+  ok('statement vs statement: the second page of the SAME upload keeps its genuine repeat',
+    pageTwo.txCount === 1, pageTwo.batch.transactions);
+
+  const redelivered = buildImportPlan([
+    stmt('SALIK', 400, noon, upload('f'), onCard),
+  ], ledger([firstUpload[0]]), noon);
+  ok('statement vs statement: a row the relay re-delivers is still recognised exactly',
+    redelivered.txCount === 0, redelivered.batch.transactions);
+
+  const otherAccount = buildImportPlan([
+    stmt('SALIK', 400, noon, upload('i'), { card: { last4: '1111', kind: 'account' } }),
+  ], ledger([firstUpload[0]]), noon);
+  ok('statement vs statement: the same money on another account is never collapsed',
+    otherAccount.txCount === 1, otherAccount.batch.transactions);
+
+  const unlabelledStored = { ...storedStatement, id: 's2', title: 'SALIK', amountFils: 400, smsKey: `s${noon}-400`,
+    statementImportId: upload('j') };
+  const unlabelledDifferent = buildImportPlan([
+    stmt('PARKING RTA', 400, noon, upload('k')),
+  ], ledger([unlabelledStored]), noon);
+  ok('statement vs statement: two unlabelled statements need the same descriptor, not just the same money',
+    unlabelledDifferent.txCount === 1, unlabelledDifferent.batch.transactions);
+  const unlabelledSame = buildImportPlan([
+    stmt('SALIK', 400, noon - 121_000, upload('k')),
+  ], ledger([unlabelledStored]), noon);
+  ok('statement vs statement: an unlabelled re-import of the same row is recognised',
+    unlabelledSame.txCount === 0, unlabelledSame.batch.transactions);
+
+  // Hydration repair must not fold two uploads' rows that share a relay clock.
+  const collided = reconcileCaptureDuplicates([
+    { ...firstUpload[0] },
+    { ...firstUpload[0], id: 'v1', title: 'PARKING RTA', statementImportId: upload('l') },
+  ]);
+  ok('reconciliation: two uploads\' rows that share s{midday}-{amount} are not one event',
+    collided.length === 2, collided.map((t) => t.title));
+  const sameUpload = reconcileCaptureDuplicates([{ ...firstUpload[0] }, { ...firstUpload[0], id: 'v2' }]);
+  ok('reconciliation: the same upload\'s row stored twice still folds by exact identity',
+    sameUpload.length === 1);
+
+  // The guard alone, without an options bag, keeps its old contract.
+  const bare = duplicateGuard([alertAt('09:10', 3215, 'Endurancein', 'z1')]);
+  ok('statement guard: without an unresolved-account rule, an account mismatch is not matched',
+    !bare.has({ date: D, amountFils: 3215, title: 'X', type: 'expense', accountId: 'somewhere',
+      ts: noon, smsKey: `s${noon}-3215`, captureSource: 'pdf', statementImportId: upload('m') }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
