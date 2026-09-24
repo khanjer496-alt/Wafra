@@ -99,6 +99,34 @@ ok('email token: response injection is rejected',
     forwardingAddress: 'token@example.com\nBcc: attacker@example.com',
   }) === null);
 
+// ── Statement coverage: never claim "no gaps" for a source it cannot name ──
+{
+  const { summarizeCoverage, isIdentifiedCoverageSource } = require('./build/statement-coverage');
+  const today = new Date(Date.UTC(2026, 8, 24));
+  const entry = (sourceKey, label, startDate, endDate) => ({
+    id: `${sourceKey}:${startDate}`, sourceKey, label, startDate, endDate, importedAt: 1, format: 'pdf',
+  });
+  const summary = summarizeCoverage([
+    entry('card:credit:4821', 'Card •4821', '2025-09-01', '2026-08-31'),
+    entry('bank-statements', 'Bank statements', '2025-09-01', '2026-02-28'),
+    entry('bank-statements', 'Bank statements', '2026-03-01', '2026-08-31'),
+    entry('bank:hsbc', 'HSBC', '2026-01-01', '2026-08-31'),
+    entry('account:account:1234', 'Account •1234', '2026-06-01', '2026-06-30'),
+  ], 'en', today);
+  const byKey = new Map(summary.map((item) => [item.sourceKey, item]));
+  ok('coverage: only a masked account or card is an identified source',
+    isIdentifiedCoverageSource('card:credit:4821') && isIdentifiedCoverageSource('account:account:1234') &&
+      !isIdentifiedCoverageSource('bank-statements') && !isIdentifiedCoverageSource('bank:hsbc'));
+  ok('coverage: an identified card with every month is complete',
+    byKey.get('card:credit:4821')?.identified === true && byKey.get('card:credit:4821')?.missing.length === 0);
+  ok('coverage: an identified account reports its missing months',
+    byKey.get('account:account:1234')?.identified === true && byKey.get('account:account:1234').missing.length > 0);
+  ok('coverage: unidentified statements are never presented as complete or gap-checked',
+    byKey.get('bank-statements')?.identified === false && byKey.get('bank-statements').missing.length === 0 &&
+      byKey.get('bank:hsbc')?.identified === false,
+    JSON.stringify(summary));
+}
+
 const root = path.resolve(__dirname, '../..');
 const transport = fs.readFileSync(path.join(root, 'src/lib/cloud-import.ts'), 'utf8');
 const surface = fs.readFileSync(path.join(root, 'src/components/supplement-imports.tsx'), 'utf8');

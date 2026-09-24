@@ -34,9 +34,9 @@ import {
 } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
+import { summarizeCoverage } from '@/lib/statement-coverage';
 import { t } from '@/lib/i18n';
 import { committed, failed } from '@/lib/haptics';
-import type { StatementCoverageEntry } from '@/lib/types';
 
 type Busy = 'connect' | 'capabilities' | 'statement' | null;
 
@@ -45,91 +45,8 @@ type PendingProtectedPdf = {
   file: File;
 };
 
-type CoverageSummary = {
-  sourceKey: string;
-  label: string;
-  range: string;
-  throughMonth: string;
-  sortDate: string;
-  missing: string[];
-};
-
 function interpolate(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ''));
-}
-
-function monthKey(date: string): string {
-  return date.slice(0, 7);
-}
-
-function monthIndex(key: string): number {
-  const [year, month] = key.split('-').map(Number);
-  return year * 12 + month - 1;
-}
-
-function monthFromIndex(index: number): string {
-  const year = Math.floor(index / 12);
-  const month = index % 12 + 1;
-  return `${year}-${String(month).padStart(2, '0')}`;
-}
-
-function nextMonth(key: string): string {
-  const [year, month] = key.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month, 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
-function formatMonth(key: string, language: string): string {
-  const [year, month] = key.split('-').map(Number);
-  return new Intl.DateTimeFormat(language === 'ar' ? 'ar-AE' : 'en-AE', {
-    month: 'short', year: 'numeric', timeZone: 'UTC',
-  }).format(new Date(Date.UTC(year, month - 1, 1)));
-}
-
-function summarizeCoverage(entries: readonly StatementCoverageEntry[], language: string): CoverageSummary[] {
-  const groups = new Map<string, StatementCoverageEntry[]>();
-  for (const entry of entries) {
-    const list = groups.get(entry.sourceKey) ?? [];
-    list.push(entry);
-    groups.set(entry.sourceKey, list);
-  }
-  const today = new Date();
-  const lastCompleteDate = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
-  const lastCompleteMonth = `${lastCompleteDate.getUTCFullYear()}-${String(lastCompleteDate.getUTCMonth() + 1).padStart(2, '0')}`;
-  return [...groups.entries()].map(([sourceKey, rows]) => {
-    const ordered = [...rows].sort((a, b) => a.startDate.localeCompare(b.startDate));
-    const firstMonth = monthKey(ordered[0].startDate);
-    const lastImportedMonth = monthKey(ordered[ordered.length - 1].endDate);
-    const covered = new Set<string>();
-    for (const row of ordered) {
-      let cursor = monthKey(row.startDate);
-      const end = monthKey(row.endDate);
-      for (let guard = 0; guard < 240; guard += 1) {
-        covered.add(cursor);
-        if (cursor === end) break;
-        cursor = nextMonth(cursor);
-      }
-    }
-    const missing: string[] = [];
-    const lastCompleteIndex = monthIndex(lastCompleteMonth);
-    const firstExpected = monthFromIndex(Math.max(monthIndex(firstMonth), lastCompleteIndex - 11));
-    let cursor = firstExpected;
-    for (let guard = 0; guard < 12; guard += 1) {
-      if (!covered.has(cursor)) missing.push(formatMonth(cursor, language));
-      if (cursor === lastCompleteMonth) break;
-      cursor = nextMonth(cursor);
-    }
-    return {
-      sourceKey,
-      label: ordered[ordered.length - 1].label,
-      range: firstMonth === lastImportedMonth
-        ? formatMonth(firstMonth, language)
-        : `${formatMonth(firstMonth, language)} – ${formatMonth(lastImportedMonth, language)}`,
-      throughMonth: formatMonth(lastCompleteMonth, language),
-      sortDate: ordered[ordered.length - 1].endDate,
-      missing,
-    };
-  }).sort((a, b) => b.sortDate.localeCompare(a.sortDate));
 }
 
 export function SupplementImports() {
@@ -664,15 +581,20 @@ export function SupplementImports() {
               return (
                 <View key={item.sourceKey} style={[styles.coverageRow, { borderTopColor: theme.cardBorder }]}>
                   <View style={styles.coverageHead}>
-                    <ThemedText type="smallBold" style={styles.coverageLabel}>{item.label}</ThemedText>
+                    <ThemedText type="smallBold" style={styles.coverageLabel}>
+                      {item.sourceKey === 'bank-statements' ? copy.coverageUnidentifiedLabel : item.label}
+                    </ThemedText>
                     <ThemedText type="meta" themeColor="textSecondary" tabular>{item.range}</ThemedText>
                   </View>
-                  <ThemedText type="meta" themeColor={item.missing.length ? 'expense' : 'textTertiary'}>
-                    {item.missing.length
-                      ? interpolate(copy.coverageMissing, {
-                          months: `${shownMissing.join(', ')}${more > 0 ? ` +${more}` : ''}`,
-                        })
-                      : interpolate(copy.coverageComplete, { month: item.throughMonth })}
+                  {/* A statement that names no account cannot prove there are no gaps. */}
+                  <ThemedText type="meta" themeColor={item.identified && item.missing.length ? 'expense' : 'textTertiary'}>
+                    {!item.identified
+                      ? copy.coverageUnknown
+                      : item.missing.length
+                        ? interpolate(copy.coverageMissing, {
+                            months: `${shownMissing.join(', ')}${more > 0 ? ` +${more}` : ''}`,
+                          })
+                        : interpolate(copy.coverageComplete, { month: item.throughMonth })}
                   </ThemedText>
                 </View>
               );
