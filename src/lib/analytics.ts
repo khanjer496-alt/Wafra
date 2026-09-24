@@ -1,5 +1,5 @@
 import { isFixedCommitment } from '@/lib/categories';
-import { monthKey, shiftMonthKey } from '@/lib/format';
+import { ledgerTypicalMinor, monthKey, shiftMonthKey } from '@/lib/format';
 import { countsInTotals, internalTransferIdsForState, isSpending } from '@/lib/ledger';
 import {
   comparablePreviousPeriod,
@@ -79,11 +79,14 @@ export function categoryMovers(
   }
   const cats = new Set<CategoryId>([...cur.keys(), ...prev.keys()]);
   const movers: CategoryMover[] = [];
+  // Ignore moves under about AED 50 in the ledger's currency (5,000 fils,
+  // ¥5,000, KWD 5.000): noise, not a finding.
+  const noiseFloor = ledgerTypicalMinor(50);
   for (const category of cats) {
     const currentFils = cur.get(category) ?? 0;
     const previousFils = prev.get(category) ?? 0;
     const deltaFils = currentFils - previousFils;
-    if (Math.abs(deltaFils) < 5000) continue; // ignore < AED 50 noise
+    if (Math.abs(deltaFils) < noiseFloor) continue;
     movers.push({ category, currentFils, previousFils, deltaFils });
   }
   movers.sort((a, b) => Math.abs(b.deltaFils) - Math.abs(a.deltaFils));
@@ -261,9 +264,10 @@ export function trendShape(points: { fils: number }[]): TrendShape {
   const maxFils = Math.max(...values);
   const latestFils = values[values.length - 1];
   const averageFils = Math.round(values.reduce((s, v) => s + v, 0) / values.length);
-  // Flat within a dirham, or within 1% of the biggest month — a standing order
-  // that drifts by a few fils has still not moved.
-  const flat = maxFils - minFils <= Math.max(100, maxFils * 0.01);
+  // Flat within about a dirham in the ledger currency, or within 1% of the
+  // biggest month — a standing order that drifts by a few fils has still not
+  // moved.
+  const flat = maxFils - minFils <= Math.max(ledgerTypicalMinor(1), maxFils * 0.01);
   return {
     averageFils,
     latestFils,
