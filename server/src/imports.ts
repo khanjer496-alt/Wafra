@@ -11,10 +11,57 @@ const MAX_NORMALIZED_CHARS = 128_000;
 const MAX_CSV_RECORD_CHARS = 8_192;
 /** How many leading CSV records may precede the header row (bank preambles). */
 const MAX_CSV_PREAMBLE_RECORDS = 10;
-const MONTH_NAME = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
-// ISO, numeric day/month (order inferred per file, see inferDateOrder), and the
-// `03-Apr-2026` / `3 Apr 2026` spelling many Gulf bank PDFs print.
-const DATE_TOKEN = String.raw`(?:\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{1,2}[\s-]${MONTH_NAME}[\s-]\d{2,4})`;
+/**
+ * Month names a statement may print, per language, 1-based. English short and
+ * long forms, then French, German, Spanish, Portuguese, Italian, Dutch,
+ * Turkish, Indonesian and Arabic (Egyptian/Gulf and Levantine names).
+ * Accented words are also listed without their accents, as exports often
+ * strip them. Every spelling maps to exactly one month in every language
+ * listed, so the table can be one flat lookup.
+ */
+const MONTH_WORDS: readonly (readonly string[])[] = [
+  ['jan', 'january', 'janv', 'janvier', 'januar', 'jänner', 'jaenner', 'ene', 'enero', 'janeiro', 'gen', 'gennaio', 'januari', 'ocak', 'oca', 'يناير', 'كانون الثاني'],
+  ['feb', 'february', 'févr', 'fevr', 'février', 'fevrier', 'februar', 'febrero', 'fev', 'fevereiro', 'febbraio', 'februari', 'şubat', 'subat', 'şub', 'sub', 'فبراير', 'شباط'],
+  ['mar', 'march', 'mars', 'märz', 'maerz', 'marz', 'mär', 'mrz', 'marzo', 'março', 'marco', 'maart', 'mrt', 'mart', 'maret', 'مارس', 'آذار', 'اذار'],
+  ['apr', 'april', 'avr', 'avril', 'abr', 'abril', 'aprile', 'nisan', 'nis', 'أبريل', 'ابريل', 'نيسان'],
+  ['may', 'mai', 'mayo', 'maio', 'mag', 'maggio', 'mei', 'mayıs', 'mayis', 'مايو', 'أيار', 'ايار'],
+  ['jun', 'june', 'juin', 'juni', 'junio', 'junho', 'giu', 'giugno', 'haziran', 'haz', 'يونيو', 'حزيران'],
+  ['jul', 'july', 'juil', 'juillet', 'juli', 'julio', 'julho', 'lug', 'luglio', 'temmuz', 'tem', 'يوليو', 'تموز'],
+  ['aug', 'august', 'août', 'aout', 'ago', 'agosto', 'augustus', 'ağustos', 'agustos', 'ağu', 'agu', 'agustus', 'agt', 'أغسطس', 'اغسطس', 'آب'],
+  ['sep', 'sept', 'september', 'septembre', 'septiembre', 'setiembre', 'set', 'setembro', 'settembre', 'eylül', 'eylul', 'eyl', 'سبتمبر', 'أيلول', 'ايلول'],
+  ['oct', 'october', 'octobre', 'okt', 'oktober', 'octubre', 'out', 'outubro', 'ott', 'ottobre', 'ekim', 'eki', 'أكتوبر', 'اكتوبر', 'تشرين الأول', 'تشرين الاول'],
+  ['nov', 'november', 'novembre', 'noviembre', 'novembro', 'kasım', 'kasim', 'kas', 'نوفمبر', 'تشرين الثاني'],
+  ['dec', 'december', 'déc', 'décembre', 'decembre', 'dez', 'dezember', 'dic', 'diciembre', 'dezembro', 'dicembre', 'aralık', 'aralik', 'ara', 'des', 'desember', 'ديسمبر', 'كانون الأول', 'كانون الاول'],
+];
+/** Fold a month word for lookup: case, accents and Turkish dotted/dotless i. */
+function foldMonth(word: string): string {
+  return word.normalize('NFD').replace(/\p{M}+/gu, '').replace(/İ/g, 'i').replace(/ı/g, 'i').toLowerCase();
+}
+const MONTH_INDEX = new Map<string, number>(
+  MONTH_WORDS.flatMap((words, index) => words.map((word) => [foldMonth(word), index + 1] as const)),
+);
+/**
+ * Regex alternation for every month word, longest first. Written against NFC
+ * text; `i` without `u` folds Latin case, but not Turkish capital İ, so each
+ * `i` also accepts İ.
+ */
+const escapeMonth = (word: string): string =>
+  word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/i/g, '[iİ]');
+const MONTH_NAME = `(?:${[...new Set(MONTH_WORDS.flat())]
+  .sort((left, right) => right.length - left.length)
+  .map(escapeMonth)
+  .join('|')})`;
+const ENGLISH_MONTH_NAME = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
+// The named forms a statement date cell may take:
+//   `03-Apr-2026`, `3 Apr 2026`, `3. März 2026`, `1er mars 2026`, `3 janv. 2026`
+//   `3 de marzo de 2026`, `3 de março 2026`        (Spanish, Portuguese)
+//   `Apr 3, 2026`, `April 3 2026`                   (English month-first)
+const NAMED_DAY_FIRST = String.raw`\d{1,2}(?:er|\.)?[\s-]${MONTH_NAME}\.?[\s-]\d{2,4}`;
+const NAMED_DE = String.raw`\d{1,2}\s+de\s+${MONTH_NAME}\.?\s+(?:de\s+)?\d{4}`;
+const NAMED_MONTH_FIRST = String.raw`${ENGLISH_MONTH_NAME}\.?\s+\d{1,2},?\s+\d{4}`;
+// ISO, numeric day/month with `/`, `-` or `.` (order inferred per file, see
+// inferDateOrder), and the named forms above.
+const DATE_TOKEN = `(?:\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[\\/.-]\\d{1,2}[\\/.-]\\d{2,4}|${NAMED_DE}|${NAMED_DAY_FIRST}|${NAMED_MONTH_FIRST})`;
 const DATE_LED_LINE = new RegExp(`^${DATE_TOKEN}\\s`, 'i');
 // Statement money follows the ledger's ISO exponent (0, 2 or 3), not a Gulf
 // hard-code. This permissive row lexer is narrowed again by amountMinor(),
@@ -29,13 +76,16 @@ const ROW_MIDDLE_DIRECTION = new RegExp(
   'i',
 );
 const ROW_DATE_PREFIX = new RegExp(`^(${DATE_TOKEN})\\s+(.+)$`, 'i');
+const DOTTED_DATE = /^\d{1,2}\.\d{1,2}\.\d{2,4}$/;
 // The column branch (parseColumnTail) insists on a decimal point: a bare
 // integer at the end of a flattened PDF row is as likely a cheque or reference
 // number as money. One decimal place is still money — real statements print
 // `32.8` and `715.0`, and requiring two rejected every such row.
 // What an empty debit or credit cell becomes once a PDF table is flattened.
 const MONEY_PLACEHOLDER = /^(?:-|--|0|0\.0|0\.00|0\.000)$/;
-const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,3}(?:\\D|$)|\\b(?:DR|CR|DEBIT|CREDIT)\\b|\\b[A-Z]{3}\\s+\\d+`, 'i');
+// `\d,\d{1,2}` is a decimal-comma figure a decimal-point file refused: still
+// money, so still counted rather than silently dropped.
+const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,3}(?:\\D|$)|\\d,\\d{1,2}(?!\\d)|\\b(?:DR|CR|DEBIT|CREDIT)\\b|\\b[A-Z]{3}\\s+\\d+`, 'i');
 // Opening/closing balance, brought/carried forward and total lines carry money
 // but are not transactions. A "Balance B/F 1,000.00 CR" would otherwise file
 // as income and a "Total 40.00 0.00" as a second expense, and counting them as
@@ -465,10 +515,111 @@ function statementCurrency(value: string): StatementCurrency | null {
   return /^[A-Z]{3}$/.test(normalized) && ledgerMoneySpec(normalized) ? normalized : null;
 }
 
-function amountMinor(value: string, currency: StatementCurrency, signed: boolean): number | null {
+/**
+ * Which character separates a file's decimals.
+ *
+ * `point`  1,234.56 · 1'234.56 · 12.50 — the launch-tested reading, and the
+ *          reading of every file that does not prove otherwise.
+ * `comma`  1.234,56 · 1 234,56 · 12,50 — only when the file's own figures say
+ *          so and none of them contradicts it (see inferDecimalConvention).
+ */
+type DecimalConvention = 'point' | 'comma';
+
+/** Thousands separators besides the opposite decimal mark: apostrophes and (no-break) spaces. */
+const GROUP_MARKS = String.raw`'’\u00a0\u202f`;
+
+/**
+ * What one figure proves about the decimal mark, or null when it proves
+ * nothing. `12,345` proves nothing — twelve thousand, or 12.345 of a
+ * three-decimal currency — and neither does `1.234`. `12,50`, `1.234,56` and
+ * `1 234,5` can only be decimal-comma; `12.50` and `1,234.56` only
+ * decimal-point.
+ */
+function decimalEvidence(token: string, exponent: number): DecimalConvention | null {
+  if (exponent === 0) return null;
+  const comma = new RegExp(
+    `^(?:\\d{1,3}([.${GROUP_MARKS} ])\\d{3}(?:\\1\\d{3})*|\\d+),(\\d{1,${exponent}})$`,
+  ).exec(token);
+  if (comma && (comma[1] || comma[2].length !== 3)) return 'comma';
+  const point = new RegExp(
+    `^(?:\\d{1,3}([,'’])\\d{3}(?:\\1\\d{3})*|\\d+)\\.(\\d{1,${exponent}})$`,
+  ).exec(token);
+  if (point && (point[1] || point[2].length !== 3)) return 'point';
+  return null;
+}
+
+/**
+ * A file's decimal mark from its own figures. Decimal-comma needs positive
+ * evidence and no figure contradicting it; anything else — including a file
+ * with both kinds, which is not a file whose convention is known — keeps the
+ * decimal-point reading, under which a decimal-comma figure never parses.
+ * Zero-decimal currencies have no decimal mark to decide.
+ */
+function inferDecimalConvention(tokens: Iterable<string>, currency: StatementCurrency): DecimalConvention {
+  const exponent = ledgerMoneySpec(currency)?.exponent ?? 0;
+  let comma = 0;
+  let point = 0;
+  for (const token of tokens) {
+    const evidence = decimalEvidence(token, exponent);
+    if (evidence === 'comma') comma += 1;
+    else if (evidence === 'point') point += 1;
+  }
+  return comma > 0 && point === 0 ? 'comma' : 'point';
+}
+
+/** Figure-shaped runs in free text: digits joined by separators, never by a space. */
+const TEXT_FIGURE = new RegExp(`\\d[\\d.,${GROUP_MARKS}]*\\d`, 'g');
+
+/**
+ * Rewrite a flattened PDF's figures into the one spelling the row parser
+ * reads (`1234.56`), so the column, balance and card-table logic below stays
+ * the launch-tested code. Only a decimal-comma file changes materially; a
+ * decimal-point file only loses apostrophe grouping (`1'234.56`), which it
+ * could not parse at all before. Dates are untouched: `03.04.2026` is neither
+ * a decimal nor a three-digit group.
+ *
+ * A plain space is never a thousands mark here — in flattened text it is as
+ * likely a column boundary — but a no-break space is.
+ */
+function normalizeStatementFigures(text: string, currency: StatementCurrency): string {
+  // `RUE 12 345,00` is either 12 345,00 or a 12 beside 345,00. No row of a
+  // file that prints such a figure can be read with confidence, so the whole
+  // file keeps the decimal-point reading and its comma figures are refused
+  // (and counted) rather than half-read.
+  const spaceGrouped = /(?<![\d.,])\d{1,3}(?: \d{3})+,\d{1,3}(?!\d)/.test(text);
+  const convention = spaceGrouped ? 'point' : inferDecimalConvention(text.match(TEXT_FIGURE) ?? [], currency);
+  if (convention === 'point') {
+    return text.replace(
+      new RegExp(`(?<![\\d.,'’])\\d{1,3}(?:(['’])\\d{3})(?:\\1\\d{3})*(?=\\.\\d|(?![\\d.,'’]))`, 'g'),
+      (figure) => figure.replace(/['’]/g, ''),
+    );
+  }
+  return text
+    .replace(
+      new RegExp(`(?<![\\d.,${GROUP_MARKS}])(\\d{1,3}(?:([.${GROUP_MARKS}])\\d{3})(?:\\2\\d{3})*|\\d+),(\\d{1,3})(?![\\d]|[.,${GROUP_MARKS}]\\d)`, 'g'),
+      (_figure, whole: string, _group: string, fraction: string) => `${whole.replace(/\D/g, '')}.${fraction}`,
+    )
+    .replace(
+      new RegExp(`(?<![\\d.,${GROUP_MARKS}])\\d{1,3}(?:([.${GROUP_MARKS}])\\d{3})(?:\\1\\d{3})*(?![\\d]|[.,${GROUP_MARKS}]\\d)`, 'g'),
+      (figure) => figure.replace(/\D/g, ''),
+    );
+}
+
+/** The figure inside one CSV money cell, for inferDecimalConvention. */
+function cellFigure(value: string): string {
+  return normalizeDigits(value).normalize('NFKC').replace(/[\s\u00a0\u202f]+/g, ' ')
+    .replace(/[^\d.,'’ ]/g, '').trim();
+}
+
+function amountMinor(
+  value: string,
+  currency: StatementCurrency,
+  signed: boolean,
+  decimal: DecimalConvention = 'point',
+): number | null {
   let normalized = normalizeDigits(value).normalize('NFKC').replace(/[\s\u00a0]+/g, ' ').trim();
   const spec = ledgerMoneySpec(currency);
-  if (!spec || !normalized || /^(?:-|--|N\/?A|0(?:\.0{1,3})?)$/i.test(normalized)) return null;
+  if (!spec || !normalized || /^(?:-|--|N\/?A|0(?:[.,]0{1,3})?)$/i.test(normalized)) return null;
 
   let negative = false;
   let explicitSign = false;
@@ -507,11 +658,17 @@ function amountMinor(value: string, currency: StatementCurrency, signed: boolean
   takeSign();
   if (signed !== explicitSign) return null;
 
-  const fractionPattern = spec.exponent === 0 ? '' : `(?:\\.(\\d{1,${spec.exponent}}))?`;
-  const match = new RegExp(`^((?:\\d{1,3}(?:,\\d{3})+|\\d+))${fractionPattern}$`).exec(normalized);
+  // One grouping mark per figure, three digits per group. Decimal-point files
+  // group with `,` or an apostrophe; decimal-comma files with `.`, an
+  // apostrophe or a space. Zero-decimal currencies read as decimal-point.
+  const comma = decimal === 'comma' && spec.exponent > 0;
+  const group = comma ? `[.'’ ]` : `[,'’]`;
+  const mark = comma ? ',' : '\\.';
+  const fractionPattern = spec.exponent === 0 ? '' : `(?:${mark}(\\d{1,${spec.exponent}}))?`;
+  const match = new RegExp(`^(\\d{1,3}(${group})\\d{3}(?:\\2\\d{3})*|\\d+)${fractionPattern}$`).exec(normalized);
   if (!match) return null;
-  const whole = match[1].replace(/,/g, '');
-  const fraction = spec.exponent === 0 ? '' : (match[2] ?? '');
+  const whole = match[1].replace(/\D/g, '');
+  const fraction = spec.exponent === 0 ? '' : (match[3] ?? '');
   let minor: bigint;
   try {
     minor = BigInt(whole) * BigInt(10 ** spec.exponent) +
@@ -635,6 +792,7 @@ export function parseStatementCsv(
   text: string,
   defaultCurrency: StatementCurrency,
   maxRows = 200,
+  dateHint: StatementDateHint = legacyStatementDateHint(defaultCurrency),
 ): StatementCsvResult {
   if (!ledgerMoneySpec(defaultCurrency)) throw new Error('unsupported_statement_currency');
   const delimiter = csvDelimiter(text);
@@ -696,7 +854,13 @@ export function parseStatementCsv(
     : sourceAccountIndex >= 0
       ? uniqueColumnInstrument(dataRecords, sourceAccountIndex, 'account')
       : uniqueColumnInstrument(dataRecords, sourceCardIndex, 'unknown');
-  const dateOrder = inferDateOrder(dataRecords.map((record) => record[dateIndex] ?? ''), defaultCurrency);
+  const dateOrder = inferDateOrder(dataRecords.map((record) => record[dateIndex] ?? ''), dateHint);
+  const decimal = inferDecimalConvention(
+    dataRecords.flatMap((record) => [debitIndex, creditIndex, amountIndex]
+      .filter((index) => index >= 0)
+      .map((index) => cellFigure(record[index] ?? ''))),
+    defaultCurrency,
+  );
   // Card exports carry their identity, when they carry it at all, in the
   // preamble above the table or in a card-number column name. A signed amount
   // column is then only a direction when the preamble says what a minus means.
@@ -724,8 +888,8 @@ export function parseStatementCsv(
     let type: 'expense' | 'income' | null = null;
     let minor: number | null = null;
     if (currency === defaultCurrency && splitColumns) {
-      const debit = amountMinor(record[debitIndex] ?? '', currency, false);
-      const credit = amountMinor(record[creditIndex] ?? '', currency, false);
+      const debit = amountMinor(record[debitIndex] ?? '', currency, false, decimal);
+      const credit = amountMinor(record[creditIndex] ?? '', currency, false, decimal);
       if ((debit === null) !== (credit === null)) {
         type = debit === null ? 'income' : 'expense';
         minor = debit ?? credit;
@@ -736,9 +900,9 @@ export function parseStatementCsv(
       // amount carries a sign, the sign is the explicit marker; when both
       // speak and disagree, neither is trusted.
       const labelled = rowDirection(record[directionIndex] ?? '');
-      const unsignedMinor = amountMinor(record[amountIndex] ?? '', currency, false);
+      const unsignedMinor = amountMinor(record[amountIndex] ?? '', currency, false, decimal);
       const signedMinor = unsignedMinor === null
-        ? amountMinor(record[amountIndex] ?? '', currency, true)
+        ? amountMinor(record[amountIndex] ?? '', currency, true, decimal)
         : null;
       const signedType = signedMinor === null
         ? null
@@ -751,11 +915,11 @@ export function parseStatementCsv(
         minor = unsignedMinor ?? (signedMinor === null ? null : Math.abs(signedMinor));
       }
     } else if (currency === defaultCurrency && signedAmount) {
-      const signedMinor = amountMinor(record[amountIndex] ?? '', currency, true);
+      const signedMinor = amountMinor(record[amountIndex] ?? '', currency, true, decimal);
       // A stated card convention also gives a plain figure its meaning; the
       // account convention and an unstated card one never do.
       const plainMinor = signedMinor === null && (convention === 'minus-credit' || convention === 'minus-debit')
-        ? amountMinor(record[amountIndex] ?? '', currency, false)
+        ? amountMinor(record[amountIndex] ?? '', currency, false, decimal)
         : null;
       if (signedMinor !== null) {
         type = directionFromSign(signedMinor < 0 ? '-' : '+', convention);
@@ -764,7 +928,7 @@ export function parseStatementCsv(
       } else if (plainMinor !== null) {
         type = directionFromSign(null, convention);
         minor = plainMinor;
-      } else if (convention === 'refuse' && amountMinor(record[amountIndex] ?? '', currency, false) !== null) {
+      } else if (convention === 'refuse' && amountMinor(record[amountIndex] ?? '', currency, false, decimal) !== null) {
         ambiguousCardSignRows += 1;
       }
     }
@@ -829,61 +993,89 @@ export function parseStatementCsv(
 type DateOrder = 'day-first' | 'month-first' | 'unknown';
 
 /**
- * Ledgers whose market reads a bare numeric date day-first. Only the two
- * launch-tested markets: a statement in any other currency whose every
- * numeric date could be read either way is refused rather than guessed.
+ * How the user's country writes a bare numeric date, as the app sends it
+ * (`x-wafra-date-order`, or stored with the email forwarding address). Null
+ * means the country is unknown or does not settle it.
  */
-const DAY_FIRST_LEDGERS = new Set(['AED', 'SAR']);
+export type StatementDateHint = 'day-first' | 'month-first' | null;
+
+/**
+ * The hint for a caller that sent none: a client that predates the header,
+ * or an email address minted before its country was recorded. Those ledgers
+ * could only ever be AED or SAR for a numeric date to be read, and both are
+ * day-first; anything else stays undecided. This is the launch behaviour,
+ * kept byte-for-byte for those callers.
+ */
+export function legacyStatementDateHint(currency: StatementCurrency): StatementDateHint {
+  return currency === 'AED' || currency === 'SAR' ? 'day-first' : null;
+}
+
+/** Parse a hint from a header or stored column; undefined when it is not one. */
+export function statementDateHintFrom(value: unknown): StatementDateHint | undefined {
+  if (value === 'day-first' || value === 'month-first') return value;
+  if (value === 'unknown') return null;
+  return undefined;
+}
+
+const LOCAL_NUMERIC_DATE = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/;
 
 /**
  * Decide how a file's numeric dates read. A first field above 12 can only be
- * a day; a second field above 12 can only be a month-first export. With
- * contradictory evidence keep the launch-tested DD/MM reading, exactly as
- * before. With NO evidence, the ledger's market decides only when it is a
- * day-first one; otherwise the order is `unknown` and isoDate refuses every
- * date whose day and month could swap.
+ * a day; a second field above 12 can only be a month-first export. File
+ * evidence always wins over the country. With contradictory evidence the
+ * country decides, and without a country the launch-tested DD/MM reading is
+ * kept, exactly as before. With NO evidence the country decides; with no
+ * country the order is `unknown` and isoDate refuses every date whose day and
+ * month could swap.
  */
-function inferDateOrder(values: Iterable<string>, currency: StatementCurrency): DateOrder {
+function inferDateOrder(values: Iterable<string>, hint: StatementDateHint): DateOrder {
   let dayFirst = false;
   let monthFirst = false;
   for (const value of values) {
-    const local = /^(\d{1,2})[\/-](\d{1,2})[\/-]\d{2,4}$/.exec(normalizeDigits(value).trim());
+    const local = LOCAL_NUMERIC_DATE.exec(normalizeDigits(value).trim());
     if (!local) continue;
     if (Number(local[1]) > 12) dayFirst = true;
     if (Number(local[2]) > 12) monthFirst = true;
   }
   if (monthFirst && !dayFirst) return 'month-first';
-  if (dayFirst || DAY_FIRST_LEDGERS.has(currency)) return 'day-first';
-  return 'unknown';
+  if (dayFirst && !monthFirst) return 'day-first';
+  if (dayFirst && monthFirst) return hint ?? 'day-first';
+  return hint ?? 'unknown';
 }
 
 /** A numeric date whose day and month are both ≤ 12 and differ. */
 function ambiguousLocalDate(value: string): boolean {
-  const local = /^(\d{1,2})[\/-](\d{1,2})[\/-]\d{2,4}$/.exec(normalizeDigits(value).replace(/\s+/g, ' ').trim());
+  const local = LOCAL_NUMERIC_DATE.exec(normalizeDigits(value).replace(/\s+/g, ' ').trim());
   if (!local) return false;
   const first = Number(local[1]);
   const second = Number(local[2]);
   return first <= 12 && second <= 12 && first !== second;
 }
 
-const MONTH_INDEX: Record<string, number> = {
-  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
-};
+const NAMED_DAY_FIRST_DATE = new RegExp(`^(\\d{1,2})(?:er|\\.)?[\\s-](${MONTH_NAME})\\.?[\\s-](\\d{2,4})$`, 'i');
+const NAMED_DE_DATE = new RegExp(`^(\\d{1,2})\\s+de\\s+(${MONTH_NAME})\\.?\\s+(?:de\\s+)?(\\d{4})$`, 'i');
+const NAMED_MONTH_FIRST_DATE = new RegExp(`^(${ENGLISH_MONTH_NAME})\\.?\\s+(\\d{1,2}),?\\s+(\\d{4})$`, 'i');
 
 function isoDate(value: string, order: DateOrder = 'day-first'): string | null {
-  value = normalizeDigits(value).replace(/\s+/g, ' ').trim();
+  value = normalizeDigits(value).normalize('NFC').replace(/\s+/g, ' ').trim();
   let year: number;
   let month: number;
   let day: number;
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  const named = new RegExp(`^(\\d{1,2})[\\s-](${MONTH_NAME})[\\s-](\\d{2,4})$`, 'i').exec(value);
+  const named = NAMED_DAY_FIRST_DATE.exec(value) ?? NAMED_DE_DATE.exec(value);
+  const monthFirstNamed = named ? null : NAMED_MONTH_FIRST_DATE.exec(value);
   if (iso) {
     year = Number(iso[1]); month = Number(iso[2]); day = Number(iso[3]);
-  } else if (named) {
-    day = Number(named[1]); month = MONTH_INDEX[named[2].slice(0, 3).toLowerCase()]; year = Number(named[3]);
+  } else if (named || monthFirstNamed) {
+    const [dayText, monthText, yearText] = named
+      ? [named[1], named[2], named[3]]
+      : [monthFirstNamed![2], monthFirstNamed![1], monthFirstNamed![3]];
+    const index = MONTH_INDEX.get(foldMonth(monthText));
+    if (!index) return null;
+    day = Number(dayText); month = index; year = Number(yearText);
     if (year < 100) year += 2000;
   } else {
-    const local = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/.exec(value);
+    const local = LOCAL_NUMERIC_DATE.exec(value);
     if (!local) return null;
     if (order === 'unknown' && ambiguousLocalDate(value)) return null;
     if (order === 'month-first' || (order === 'unknown' && Number(local[2]) > 12)) {
@@ -1436,10 +1628,12 @@ export interface StatementTextResult {
  */
 export function parseStatementLines(
   text: string,
-  currency: StatementCurrency = 'AED',
+  currency: StatementCurrency,
   identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
+  dateHint: StatementDateHint = legacyStatementDateHint(currency),
 ): StatementTextResult {
   if (!ledgerMoneySpec(currency)) throw new Error('unsupported_statement_currency');
+  text = normalizeStatementFigures(text.normalize('NFC'), currency);
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
   const sourceInstrument = identity.card ?? statementInstrument(text) ?? statementHeaderInstrument(text);
@@ -1462,7 +1656,7 @@ export function parseStatementLines(
   let ambiguousCardSignRows = 0;
   const cardTotalAmountTable = hasCardTotalAmountTable(text, cardStatement);
   const lines = cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines;
-  const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''), currency);
+  const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''), dateHint);
   let ambiguousDateRows = 0;
   const columnOrder = statementColumnOrder(text);
   // Proven once for the whole file, then used to resolve rows the branches
@@ -1516,7 +1710,11 @@ export function parseStatementLines(
     if (!line || line.length > 400) continue;
     const prefixed = ROW_DATE_PREFIX.exec(line);
     if (prefixed && SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
-    const countable = prefixed !== null && LOOKS_LIKE_MONEY_LINE.test(line);
+    // Tested on the row after its date: `03.04.2026` itself looks like a
+    // decimal. Every other date spelling is tested with its line, as before.
+    const countable = prefixed !== null && (DOTTED_DATE.test(prefixed[1])
+      ? LOOKS_LIKE_MONEY_LINE.test(prefixed[2])
+      : LOOKS_LIKE_MONEY_LINE.test(line));
     const accepted = rows.length;
     // Read before either branch and carried forward whether or not this row is
     // accepted, so one unreadable row cannot break the chain for the next.
@@ -1631,16 +1829,18 @@ export function parseStatementLines(
 
 export function parseStatementText(
   text: string,
-  currency: StatementCurrency = 'AED',
+  currency: StatementCurrency,
   identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
+  dateHint: StatementDateHint = legacyStatementDateHint(currency),
 ): StatementParsedRow[] {
-  return parseStatementLines(text, currency, identity).rows;
+  return parseStatementLines(text, currency, identity, dateHint).rows;
 }
 
 export async function extractPdfStatementRows(
   bytes: Uint8Array,
-  currency: StatementCurrency = 'AED',
+  currency: StatementCurrency,
   password?: string,
+  dateHint: StatementDateHint = legacyStatementDateHint(currency),
 ): Promise<{
   pages: number;
   rows: ParsedSms[];
@@ -1656,7 +1856,7 @@ export async function extractPdfStatementRows(
     // Its own code, not the generic unreadable one: a long text statement is
     // not a scan, and telling the user it is sends them the wrong way.
     if (extracted.text.length > MAX_NORMALIZED_CHARS) throw new Error('pdf_too_long');
-    const parsed = parseStatementLines(extracted.text, currency);
+    const parsed = parseStatementLines(extracted.text, currency, { card: null }, dateHint);
     return {
       pages: extracted.totalPages,
       rows: parsed.rows,

@@ -35,6 +35,7 @@ import {
   setActiveMarket,
   setLedgerCurrency as setGlobalLedgerCurrency,
 } from '@/lib/markets';
+import { setActiveCountry } from '@/lib/country';
 import { isProActive } from '@/lib/purchases';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import type { AppState, ImportBatchInput, Transaction } from '@/lib/types';
@@ -124,6 +125,8 @@ function applyLedgerContext(state: AppState): boolean {
     // Rebuild it from the encrypted ledger rather than trusting process history.
     setGlobalLedgerCurrency(null);
     setActiveMarket(state.marketId);
+    // Country conventions (numeric date order) for the universal parser.
+    setActiveCountry(state.country ?? null);
     setGlobalLedgerCurrency(state.ledgerMoney!.currency, state.ledgerMoney!.exponent);
     setLanguage(state.language === 'ar' ? 'ar' : 'en');
     return true;

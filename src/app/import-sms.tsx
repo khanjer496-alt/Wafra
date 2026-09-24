@@ -115,6 +115,7 @@ import { isProActive, requiresPro } from '@/lib/purchases';
 import { parsePastedBankAlerts } from '@/lib/launch-alert-parser';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { activeCountryDateOrder } from '@/lib/country';
 import { prepareUniversalReviewAlert, type ReviewEntry } from '@/lib/alert-review-tray';
 import { isDeliberateOtherTitle, PARSER_VERSION } from '@/lib/sms-parser';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
@@ -656,7 +657,7 @@ export default function ImportSmsScreen() {
       const reviews: ReviewEntry[] = [];
       const observedAt = Date.now();
       for (const source of refusedBlocks) {
-        const event = inspectUniversalBankEvent(source);
+        const event = inspectUniversalBankEvent(source, { dateOrder: activeCountryDateOrder() });
         if (event.decision !== 'review') continue;
         // Pasted text has no provider GUID. This opaque proposal identity is
         // deliberately not presented as a native Message identity.

@@ -84,6 +84,15 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/known-banks') {
         return require('../build/known-banks.js');
       }
+      // The country model (ISO list, date order, parser-pack choice) is pure
+      // data and functions, imported by markets.ts itself, so every harness
+      // gets the real compiled module.
+      if (name === '@/lib/country') {
+        return require('../build/country.js');
+      }
+      if (name === '@/lib/country-names') {
+        return require('../build/country-names.js');
+      }
       // The on-device semantic model is native-only and advisory. Screen and
       // journey harnesses get the same fail-closed behaviour the web build has:
       // the deterministic plan is returned unchanged and the runtime is never

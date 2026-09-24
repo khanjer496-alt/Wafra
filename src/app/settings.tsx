@@ -43,7 +43,9 @@ import {
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { CountryPickerSheet, countryPickerName } from '@/components/country-picker-sheet';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
+import { COUNTRY_UNKNOWN } from '@/lib/country';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
@@ -160,6 +162,7 @@ export default function SettingsScreen() {
     setAndroidCaptureSources,
     beginHistoryImport,
     setLedgerMoney,
+    setCountry,
     setUiLanguage,
     exportBackup,
     getStateSnapshot,
@@ -220,6 +223,7 @@ export default function SettingsScreen() {
     scrollToRequestedSection();
   }, [section, scrollToRequestedSection]);
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
+  const [countrySheetVisible, setCountrySheetVisible] = useState(false);
   const [personalReviewBusy, setPersonalReviewBusy] = useState(false);
   const [personalReviewCount, setPersonalReviewCount] = useState(0);
   const personalReviewRunning = useRef(false);
@@ -1454,6 +1458,14 @@ export default function SettingsScreen() {
             t('homeCustomizeDetail'),
             () => router.push('/home-customize'),
           )}
+          {linkRow(
+            t('settingsCountryTitle'),
+            // An unknown country asks to be set rather than reading as a choice.
+            `${state.country && state.country !== COUNTRY_UNKNOWN
+              ? countryPickerName(state.country)
+              : t('onboardCountryUnknown')} · ${t('settingsCountryDetail')}`,
+            () => setCountrySheetVisible(true),
+          )}
           {Platform.OS !== 'web' && linkRow(
             t('settingsViewOnboarding'),
             t('settingsViewOnboardingDetail'),
@@ -1638,6 +1650,16 @@ export default function SettingsScreen() {
         options={languageChoices}
         value={languagePreference}
         onSelect={applyLanguage}
+      />
+      <CountryPickerSheet
+        visible={countrySheetVisible}
+        value={state.country || null}
+        suggested={[state.country]}
+        title={t('settingsCountryTitle')}
+        subtitle={t('settingsCountrySheetBody')}
+        onClose={() => setCountrySheetVisible(false)}
+        onSelect={setCountry}
+        testID="settings-country-sheet"
       />
       <LedgerCurrencySheet
         visible={currencySheetVisible}

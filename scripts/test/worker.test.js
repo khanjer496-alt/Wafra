@@ -118,11 +118,11 @@ function makeDb(transformSchema = (sql) => sql, applyMigrations = true) {
   const db = new DatabaseSync(':memory:');
   db.exec(transformSchema(fs.readFileSync(path.join(repoRoot, 'server', 'schema.sql'), 'utf8')));
   if (applyMigrations) {
-    db.exec(fs.readFileSync(
-      path.join(repoRoot, 'server', 'migrations',
-        '2026-08-25-shortcut-ingest-retirement.sql'),
-      'utf8',
-    ));
+    // Every tracked migration, in the order Wrangler applies them.
+    const migrations = path.join(repoRoot, 'server', 'migrations');
+    for (const name of fs.readdirSync(migrations).filter((file) => file.endsWith('.sql')).sort()) {
+      db.exec(fs.readFileSync(path.join(migrations, name), 'utf8'));
+    }
   }
   // Test-only interleaving seam. A race test can stop after a real SQLite
   // SELECT has authenticated a request or selected a queue target, mutate the
@@ -2243,6 +2243,92 @@ const CARD_PAYMENT_DEBIT =
       JSON.stringify(mailed.map((row) => row.receivedAt)));
     ok('statement: and the phone keeps both of those too',
       importOnPhone(mailed).batch.transactions.length === 2);
+
+    // ── A forwarded statement is read in the user's ledger currency ──
+    // The phone records the ledger currency and its country's date order when
+    // it mints the address; the relay used to read every forwarded statement
+    // as AED or SAR from the market pack.
+    const euroDevice = await pairDevice(env);
+    const euroMint = await call(env, 'POST', '/v1/email-token', {
+      token: euroDevice.adminToken,
+      body: { ledgerCurrency: 'EUR', ledgerExponent: 2, dateOrder: 'day-first' },
+    });
+    const euroEmail = await euroMint.json();
+    ok('email locale: a current build records the ledger currency with the address', euroMint.status === 201);
+    const euroForward = await call(env, 'POST', '/v1/email/ingest', {
+      token: euroEmail.emailToken,
+      body: { text: '01/07/2026 BOULANGERIE PAUL 12,50 DR\n02/07/2026 LOYER JUILLET 1.234,56 DR' },
+    });
+    const euroRows = await drainOpened(env, euroDevice);
+    ok('email locale: a EUR ledger reads a forwarded decimal-comma statement exactly, day-first',
+      euroForward.status === 202 && euroRows.length === 2 &&
+        euroRows.every((row) => row.currency === 'EUR') &&
+        euroRows[0].amountFils === 1250 && euroRows[1].amountFils === 123456 &&
+        euroRows[0].date === '2026-07-01',
+      JSON.stringify(euroRows.map((row) => [row.currency, row.amountFils, row.date])));
+    const usDevice = await pairDevice(env);
+    const usEmail = await (await call(env, 'POST', '/v1/email-token', {
+      token: usDevice.adminToken,
+      body: { ledgerCurrency: 'USD', ledgerExponent: 2, dateOrder: 'month-first' },
+    })).json();
+    await call(env, 'POST', '/v1/email/ingest', {
+      token: usEmail.emailToken, body: { text: '01/07/2026 TARGET 24.90 DR' },
+    });
+    const usRows = await drainOpened(env, usDevice);
+    ok('email locale: a month-first country reads an ambiguous forwarded date month-first, in USD',
+      usRows.length === 1 && usRows[0].currency === 'USD' && usRows[0].date === '2026-01-07',
+      JSON.stringify(usRows.map((row) => [row.currency, row.date])));
+    const legacyDevice = await pairDevice(env);
+    const legacyEmail = await (await call(env, 'POST', '/v1/email-token', { token: legacyDevice.adminToken })).json();
+    await call(env, 'POST', '/v1/email/ingest', {
+      token: legacyEmail.emailToken, body: { text: '01/07/2026 CARREFOUR 24.90 DR' },
+    });
+    const legacyRows = await drainOpened(env, legacyDevice);
+    ok('email locale: an address minted without a locale keeps the launch AED day-first reading',
+      legacyRows.length === 1 && legacyRows[0].currency === 'AED' && legacyRows[0].date === '2026-07-01',
+      JSON.stringify(legacyRows.map((row) => [row.currency, row.date])));
+    for (const badLocale of [
+      { ledgerCurrency: 'EUR', ledgerExponent: 3, dateOrder: 'day-first' },
+      { ledgerCurrency: 'XXX', ledgerExponent: 2, dateOrder: 'day-first' },
+      { ledgerCurrency: 'EUR', ledgerExponent: 2, dateOrder: 'sideways' },
+    ]) {
+      ok(`email locale: a malformed locale is refused (${JSON.stringify(badLocale)})`,
+        (await call(env, 'POST', '/v1/email-token', { token: legacyDevice.adminToken, body: badLocale })).status === 400);
+    }
+
+    // The app's own uploads carry the country's date order as a header.
+    const usCsvDevice = await pairDevice(env);
+    const usCsv = await call(env, 'POST', '/v1/import/csv', {
+      token: usCsvDevice.adminToken,
+      headers: {
+        'content-type': 'text/csv', 'x-wafra-ledger-currency': 'USD', 'x-wafra-ledger-exponent': '2',
+        'x-wafra-date-order': 'month-first',
+      },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,TARGET,24.90,\n02/07/2026,COSTCO,10.00,\n',
+    });
+    const usCsvRows = await drainOpened(env, usCsvDevice);
+    ok('statement locale: a month-first header reads an ambiguous USD CSV month-first',
+      usCsv.status === 202 && usCsvRows.length === 2 && usCsvRows.some((row) => row.date === '2026-01-07'),
+      JSON.stringify(usCsvRows.map((row) => row.date)));
+    const unknownCsv = await call(env, 'POST', '/v1/import/csv', {
+      token: usCsvDevice.adminToken,
+      headers: {
+        'content-type': 'text/csv', 'x-wafra-ledger-currency': 'USD', 'x-wafra-ledger-exponent': '2',
+        'x-wafra-date-order': 'unknown',
+      },
+      body: 'Date,Description,Debit,Credit\n03/08/2026,TARGET,24.90,\n',
+    });
+    ok('statement locale: an unknown country still refuses an ambiguous date by name',
+      unknownCsv.status === 422 && (await unknownCsv.json()).error === 'ambiguous_dates');
+    ok('statement locale: a malformed date-order header is refused',
+      (await call(env, 'POST', '/v1/import/csv', {
+        token: usCsvDevice.adminToken,
+        headers: {
+          'content-type': 'text/csv', 'x-wafra-ledger-currency': 'USD', 'x-wafra-ledger-exponent': '2',
+          'x-wafra-date-order': 'DMY',
+        },
+        body: 'Date,Description,Debit,Credit\n03/08/2026,TARGET,24.90,\n',
+      })).status === 400);
 
     // A forwarded bank ALERT parses as ONE row, and must keep the receipt clock
     // rather than the transaction's date — including when it quotes one, which

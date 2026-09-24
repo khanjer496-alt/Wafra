@@ -8,7 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { useLocales } from 'expo-localization';
+import { getLocales, useLocales } from 'expo-localization';
 
 import {
   markCardsDistinct,
@@ -39,8 +39,14 @@ import {
   type LanguagePreference,
 } from '@/lib/system-language';
 import {
+  countryFromDeviceRegions,
+  migrateCountryState,
+  normalizeCountryCode,
+  parserMarketForCountry,
+  setActiveCountry,
+} from '@/lib/country';
+import {
   canSelectMarket,
-  detectMarketId,
   getActiveMarket,
   pinnedLedgerCurrencyCode,
   ledgerCurrencyExponent,
@@ -232,10 +238,20 @@ const EMPTY_STATE: AppState = {
   dailySummary: Platform.OS === 'ios' ? false : true,
   trialStartTs: 0,
   marketId: '',
+  country: '',
   language: '',
   languagePreference: 'system',
   knownBanks: [],
 };
+
+/** The phone's Region, preferring expo-localization (iOS keeps Region apart from language). */
+function deviceCountry(): string {
+  let region: string | null | undefined;
+  let locale: string | undefined;
+  try { region = getLocales()[0]?.regionCode; } catch { region = null; }
+  try { locale = Intl.DateTimeFormat().resolvedOptions().locale; } catch { locale = undefined; }
+  return countryFromDeviceRegions([region, locale]);
+}
 
 let idCounter = 0;
 function makeId(prefix: string): string {
@@ -813,6 +829,7 @@ type Action =
   | { type: 'unlockFounderPro' }
   | { type: 'setLedgerMoney'; ledgerMoney: LedgerMoneySpec }
   | { type: 'setMarket'; id: string }
+  | { type: 'setCountry'; country: string }
   | { type: 'setUiLanguage'; preference: LanguagePreference; language: 'en' | 'ar' }
   | { type: 'syncSystemLanguage'; language: 'en' | 'ar' }
   | {
@@ -1049,8 +1066,21 @@ function reduceState(state: AppState, action: Action): AppState {
       applyThemePreference(next.themePreference);
       // The free Pro trial clock starts the first time the app ever opens.
       if (!next.trialStartTs) next.trialStartTs = Date.now();
-      // Localize automatically: country pack from the device locale, once.
-      if (!next.marketId) next.marketId = detectMarketId();
+      // Country from the device Region, once; the parser pack follows it. A
+      // ledger written before `country` existed is migrated here — see
+      // migrateCountryState for why its stored AE/SA pack alone is not proof.
+      {
+        const migrated = migrateCountryState({
+          country: next.country,
+          marketId: next.marketId,
+          onboardingCountry: next.onboardingProfile?.country,
+          ledgerCurrency: next.ledgerMoney?.currency ?? null,
+          deviceCountry: deviceCountry(),
+        });
+        next.country = migrated.country;
+        next.marketId = migrated.marketId;
+      }
+      setActiveCountry(next.country);
       // The incoming state brings its own accounting currency with it, so any
       // pin held by the state being replaced must not veto its pack. A restore
       // of an SAR backup over an AED ledger is exactly that case.
@@ -1125,6 +1155,27 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'setMarket':
       if (!setActiveMarket(action.id)) return state;
       return { ...state, marketId: action.id };
+    case 'setCountry': {
+      const country = normalizeCountryCode(action.country);
+      if (!country) return state;
+      // An AED/SAR ledger keeps its Gulf pack; see parserMarketForCountry.
+      const marketId = parserMarketForCountry(country, {
+        marketId: state.marketId,
+        ledgerCurrency: state.ledgerMoney?.currency ?? null,
+      });
+      if (!setActiveMarket(marketId)) return state;
+      setActiveCountry(country);
+      return {
+        ...state,
+        country,
+        marketId,
+        // The onboarding copy follows, so a resumed setup draws the same
+        // country the user just chose.
+        ...(state.onboardingProfile
+          ? { onboardingProfile: { ...state.onboardingProfile, country } }
+          : {}),
+      };
+    }
     case 'setUiLanguage':
       setLanguage(action.language);
       return {
@@ -1619,6 +1670,8 @@ interface StoreValue {
   unlockFounderPro: () => Promise<void>;
   setLedgerMoney: (currency: string) => boolean;
   setMarket: (id: string) => boolean;
+  /** Any ISO 3166-1 alpha-2 country, or 'ZZ'. False for anything else. */
+  setCountry: (country: string) => boolean;
   setUiLanguage: (language: string) => void;
   setOnboarded: () => void;
   exportBackup: () => string;
@@ -2730,6 +2783,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, [dispatch]);
 
+  const setCountry = useCallback((country: string) => {
+    if (!normalizeCountryCode(country)) return false;
+    dispatch({ type: 'setCountry', country });
+    return true;
+  }, [dispatch]);
+
   const setUiLanguage = useCallback((preference: string) => {
     const normalized: LanguagePreference = preference === 'en' || preference === 'ar'
       ? preference
@@ -2943,6 +3002,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       unlockFounderPro,
       setLedgerMoney,
       setMarket,
+      setCountry,
       setUiLanguage,
       setOnboarded,
       exportBackup,
@@ -3010,6 +3070,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       unlockFounderPro,
       setLedgerMoney,
       setMarket,
+      setCountry,
       setUiLanguage,
       setOnboarded,
       exportBackup,

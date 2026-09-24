@@ -446,7 +446,12 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
       Fragment: Symbol('Fragment'),
     },
     react,
-    'expo-localization': { useLocales: () => [{ languageCode: 'en' }] },
+    // A UAE phone: these fixtures are launch-market ledgers, and the country
+    // migration reads the device Region when a ledger predates `country`.
+    'expo-localization': {
+      useLocales: () => [{ languageCode: 'en' }],
+      getLocales: () => [{ languageCode: 'en', regionCode: 'AE' }],
+    },
     'react-native': {
       AppState: { addEventListener: () => ({ remove() {} }) },
       I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
@@ -528,6 +533,8 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // let hydration drift from what the app does, which is the one thing this
     // harness exists to pin.
     '@/lib/known-banks': require('./build/known-banks'),
+    // The real country model: migration and the parser-pack choice are pure.
+    '@/lib/country': require('./build/country'),
     './balances': {},
     ...realModules,
   };

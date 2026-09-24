@@ -33,6 +33,7 @@ import {
   RelayError,
   type RelayConfig,
 } from '@/lib/relay';
+import { statementDateOrderForCountry } from '@/lib/country';
 import { useStore } from '@/lib/store';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
 import { summarizeCoverage } from '@/lib/statement-coverage';
@@ -377,6 +378,7 @@ export function SupplementImports() {
       return;
     }
     const ledgerMoney = state.ledgerMoney;
+    const dateOrder = statementDateOrderForCountry(state.country);
     setError(null);
     setStatus(null);
     setFileResults([]);
@@ -436,8 +438,8 @@ export function SupplementImports() {
             starts[format].push(Date.now());
             try {
               accepted = csv
-                ? await uploadCsvStatement(cfg, asset, capabilities, ledgerMoney)
-                : await uploadPdfStatement(cfg, asset, capabilities, ledgerMoney);
+                ? await uploadCsvStatement(cfg, asset, capabilities, ledgerMoney, dateOrder)
+                : await uploadPdfStatement(cfg, asset, capabilities, ledgerMoney, undefined, dateOrder);
             } catch (uploadError) {
               // One patient retry: pacing keeps the minute limit, so a 429 here
               // is usually the hourly budget, and a second one ends the batch.
@@ -536,6 +538,7 @@ export function SupplementImports() {
         capabilities,
         state.ledgerMoney,
         pdfPassword,
+        statementDateOrderForCountry(state.country),
       );
       await rememberCoverage([{ item: accepted.coverage, format: 'pdf' }]);
       const unlockedName = pendingPdf.asset.name;

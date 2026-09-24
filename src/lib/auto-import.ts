@@ -45,6 +45,7 @@ import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { parsedTransactionReviewEvent } from '@/lib/parsed-review-event';
 import { detectLaunchMarketFromSender, pinnedLedgerCurrencyCode } from '@/lib/markets';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { dateOrderForCountry } from '@/lib/country';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
@@ -1275,7 +1276,12 @@ export async function scanInbox(
         // Review candidates still require event.decision === 'review'.
         const universalInspection = !launchParsed && autoAuthorized
           ? globalMarket
-            ? inspectUniversalBankEvent(source, { sender, market: globalMarket })
+            ? inspectUniversalBankEvent(source, {
+              sender,
+              market: globalMarket,
+              // A routed institution prints its own country's dates.
+              dateOrder: dateOrderForCountry(globalMarket) ?? undefined,
+            })
             : inspectGenericBankEventForReview(source, sender)
           : null;
         // Local-AI shadow evaluation is deliberately outside import authority.
