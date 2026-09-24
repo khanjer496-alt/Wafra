@@ -18,6 +18,7 @@ import {
   isStatementCaptureSource,
   mergeCaptureInstrument,
   statementUploadOf,
+  type CaptureChannel,
   type DuplicateCandidate,
 } from '@/lib/dedupe';
 import { readBillAlias } from '@/lib/bill-alias';
@@ -47,7 +48,6 @@ import {
   type NonPostingReason,
   type ParsedSms,
 } from '@/lib/sms-parser';
-import type { CaptureChannel } from '@/lib/dedupe';
 import type { Account, AppState, Bill, CaptureInstrument, CaptureSource, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
 
