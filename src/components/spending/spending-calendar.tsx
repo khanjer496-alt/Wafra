@@ -10,14 +10,7 @@ import { formatAED } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
 import { tapped } from '@/lib/haptics';
 
-const copy = {
-  en: { weekdays: ['M', 'T', 'W', 'T', 'F', 'S', 'S'], darker: 'Stronger colour means more everyday spending. Rent and fixed costs are left out.',
-    noSpend: (n: number) => `${n} no-spend ${n === 1 ? 'day' : 'days'}`, showing: 'Showing', all: 'Show all days', nothing: 'nothing spent',
-    fixedOnly: 'fixed costs only' },
-  ar: { weekdays: ['ن', 'ث', 'ر', 'خ', 'ج', 'س', 'ح'], darker: 'اللون الأقوى يعني إنفاقاً يومياً أكبر. الإيجار والتكاليف الثابتة غير محسوبة.',
-    noSpend: (n: number) => n === 1 ? 'يوم واحد بلا إنفاق' : n === 2 ? 'يومان بلا إنفاق' : n <= 10 ? `${n} أيام بلا إنفاق` : `${n} يوماً بلا إنفاق`,
-    showing: 'عرض', all: 'عرض كل الأيام', nothing: 'لا إنفاق', fixedOnly: 'تكاليف ثابتة فقط' },
-} as const;
+import { spendingTrendsCopy } from '@/lib/reference-copy';
 
 type Props = {
   days: readonly DailySpend[];
@@ -31,7 +24,7 @@ type Props = {
 export function SpendingCalendar({ days, todayISO, selected, onSelect }: Props) {
   const theme = useTheme();
   const lang = useLanguage();
-  const w = copy[lang === 'ar' ? 'ar' : 'en'];
+  const w = spendingTrendsCopy[lang === 'ar' ? 'ar' : 'en'];
   const moneySpec = useLedgerMoney();
   const moneyLabel = (fils: number) => moneySpec ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   if (days.length === 0) return null;
@@ -49,8 +42,8 @@ export function SpendingCalendar({ days, todayISO, selected, onSelect }: Props) 
     .toLocaleDateString(lang === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
   return <View style={styles.root} testID="spending-calendar">
-    <View style={styles.row}>{w.weekdays.map((d, i) =>
-      <ThemedText key={i} type="micro" themeColor="textSecondary" style={styles.head}>{d}</ThemedText>)}</View>
+    <View style={styles.row}>{[0, 1, 2, 3, 4, 5, 6].map((column) =>
+      <ThemedText key={column} type="micro" themeColor="textSecondary" style={styles.head}>{w.calendarWeekday(column)}</ThemedText>)}</View>
     {Array.from({ length: cells.length / 7 }, (_, r) => <View key={r} style={styles.row}>
       {cells.slice(r * 7, r * 7 + 7).map((day, c) => {
         if (!day) return <View key={c} style={styles.cell} />;
@@ -60,7 +53,7 @@ export function SpendingCalendar({ days, todayISO, selected, onSelect }: Props) 
         // Capped tint keeps the day number (theme text) at 4.5:1 or better in both themes.
         const background = future || day.fils === 0 ? 'transparent'
           : `${theme.primary}${Math.round((0.1 + 0.35 * t) * 255).toString(16).padStart(2, '0')}`;
-        const spoken = day.fils > 0 ? moneyLabel(day.fils) : day.fixedFils > 0 ? w.fixedOnly : w.nothing;
+        const spoken = day.fils > 0 ? moneyLabel(day.fils) : day.fixedFils > 0 ? w.calendarFixedOnly : w.calendarNothing;
         return <Pressable key={day.dateISO} disabled={future}
           accessibilityRole="button" accessibilityState={{ selected: isSelected, disabled: future }}
           accessibilityLabel={`${label(day.dateISO)}, ${spoken}`}
@@ -77,11 +70,11 @@ export function SpendingCalendar({ days, todayISO, selected, onSelect }: Props) 
       })}
     </View>)}
     <View style={styles.legend}>
-      <ThemedText type="meta" themeColor="textSecondary" style={styles.grow}>{w.darker}</ThemedText>
-      <ThemedText type="meta" themeColor="textSecondary">{w.noSpend(noSpend)}</ThemedText>
+      <ThemedText type="meta" themeColor="textSecondary" style={styles.grow}>{w.calendarLegend}</ThemedText>
+      <ThemedText type="meta" themeColor="textSecondary">{w.calendarNoSpend(noSpend)}</ThemedText>
     </View>
     {selected && <Pressable accessibilityRole="button" onPress={() => onSelect(null)} style={styles.clear}>
-      <ThemedText type="meta" themeColor="primary">{`${w.showing} ${label(selected)} · ${w.all}`}</ThemedText>
+      <ThemedText type="meta" themeColor="primary">{`${w.calendarShowing} ${label(selected)} · ${w.calendarAll}`}</ThemedText>
     </Pressable>}
   </View>;
 }

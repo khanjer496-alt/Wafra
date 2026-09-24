@@ -69,7 +69,11 @@ export const spendingTrendsCopy = {
     patternsNote: 'Recorded spending, excluding fixed commitments. This is not a forecast.',
     noData: 'No recorded activity', records: 'transactions', partial: 'The selected month may be incomplete.',
     spentLess: 'less than', spentMore: 'more than', spentSame: 'About the same as', byThisDay: 'by this day', youSpent: 'You’ve spent',
-    fixedLeftOut: 'Rent and other fixed costs are left out.', spendingMore: 'Spending more', spendingLess: 'Spending less' },
+    fixedLeftOut: 'Rent and other fixed costs are left out.', spendingMore: 'Spending more', spendingLess: 'Spending less',
+    calendarLegend: 'Stronger colour means more everyday spending. Rent and fixed costs are left out.',
+    calendarNoSpend: (n: number) => `${n} no-spend ${n === 1 ? 'day' : 'days'}`,
+    calendarShowing: 'Showing', calendarAll: 'Show all days', calendarNothing: 'nothing spent', calendarFixedOnly: 'fixed costs only',
+    calendarWeekday: (column: number) => ['M', 'T', 'W', 'T', 'F', 'S', 'S'][column] ?? '' },
   ar: { cashflow: 'الدخل والإنفاق', sixMonths: 'ستة أشهر مالية', income: 'الدخل', spending: 'الإنفاق', net: 'الصافي',
     latest: 'الأحدث', merchants: 'أبرز التجار', change: 'ما الذي تغير', fewer: 'أقل', more: 'أكثر', vs: 'مقارنة مع',
     noMerchants: 'ستظهر اتجاهات التجار بعد إضافة المصروفات.', noChange: 'لا يوجد تغير كبير في الفئات لهذه المقارنة.',
@@ -77,7 +81,11 @@ export const spendingTrendsCopy = {
     patternsNote: 'المصروفات المسجلة باستثناء الالتزامات الثابتة. ليست توقعات مستقبلية.',
     noData: 'لا توجد حركات مسجلة', records: 'حركات', partial: 'قد يكون الشهر المحدد غير مكتمل.',
     spentLess: 'أقل من', spentMore: 'أكثر من', spentSame: 'تقريباً مثل', byThisDay: 'حتى اليوم نفسه', youSpent: 'أنفقت',
-    fixedLeftOut: 'الإيجار والتكاليف الثابتة الأخرى غير محسوبة.', spendingMore: 'إنفاق أكثر', spendingLess: 'إنفاق أقل' },
+    fixedLeftOut: 'الإيجار والتكاليف الثابتة الأخرى غير محسوبة.', spendingMore: 'إنفاق أكثر', spendingLess: 'إنفاق أقل',
+    calendarLegend: 'اللون الأقوى يعني إنفاقاً يومياً أكبر. الإيجار والتكاليف الثابتة غير محسوبة.',
+    calendarNoSpend: (n: number) => n === 1 ? 'يوم واحد بلا إنفاق' : n === 2 ? 'يومان بلا إنفاق' : n <= 10 ? `${n} أيام بلا إنفاق` : `${n} يوماً بلا إنفاق`,
+    calendarShowing: 'عرض', calendarAll: 'عرض كل الأيام', calendarNothing: 'لا إنفاق', calendarFixedOnly: 'تكاليف ثابتة فقط',
+    calendarWeekday: (column: number) => ['ن', 'ث', 'ر', 'خ', 'ج', 'س', 'ح'][column] ?? '' },
 };
 
 export const homeSummaryCopy = {

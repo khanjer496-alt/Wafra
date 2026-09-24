@@ -1635,10 +1635,12 @@ function ktSources(dir) {
   // who should be asked whether their new total counts transfers.
   //
   // 5 since periodComparison, which powers the "vs last month" line on Home.
+  // 7 since comparableSpend (the Compare headline) and dailySpendForMonth (the
+  // Spending calendar); both take live and internal and pass both through.
   const an = read('src/lib/analytics.ts');
   const calls = an.match(/isSpending\([^)]*\)/g) ?? [];
   ok('every analytics rollup applies both exclusions',
-    calls.length === 5 && calls.every((c) => c === 'isSpending(t, live, internal)'),
+    calls.length === 7 && calls.every((c) => c === 'isSpending(t, live, internal)'),
     calls.join(' | '));
 
   // The one insight that names a single row rather than a total. It sits on
