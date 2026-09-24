@@ -17,6 +17,8 @@ type TransactionFilterOptions = {
   query: string;
   merchant: string | null;
   smsOnly: boolean;
+  /** Only rows auto-added from an unverified alert format, still unchecked. */
+  bestEffortOnly?: boolean;
   currentKey: string;
   period: Period;
   live: Set<string>;
@@ -135,6 +137,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
       continue;
     }
     if (options.smsOnly && row.source !== 'sms') continue;
+    if (options.bestEffortOnly && !row.bestEffort) continue;
     if (merchant && merchant !== merchantKey) continue;
     if (filters.type && row.type !== filters.type) continue;
     if (filters.accountId && row.accountId !== filters.accountId) continue;

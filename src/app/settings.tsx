@@ -159,6 +159,7 @@ export default function SettingsScreen() {
     setDailySummary,
     setPrivateMode,
     setCaptureOptOut,
+    setBestEffortAutoPost,
     setAndroidCaptureSources,
     beginHistoryImport,
     setLedgerMoney,
@@ -1405,6 +1406,15 @@ export default function SettingsScreen() {
               gated(onNotificationAccess),
               { pro: true },
             )}
+          {switchRow(
+            t('autoAddedSettingTitle'),
+            t('autoAddedSettingBody'),
+            state.bestEffortAutoPost !== false,
+            (next) => {
+              setBestEffortAutoPost(next).catch(() => Alert.alert(t('autoAddedSettingTitle'), t('autoAddedSettingSaveFailed')));
+            },
+            true,
+          )}
         </Section>
 
         <Section index={2} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>

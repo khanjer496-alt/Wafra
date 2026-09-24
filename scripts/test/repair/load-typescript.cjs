@@ -87,6 +87,10 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // The country model (ISO list, date order, parser-pack choice) is pure
       // data and functions, imported by markets.ts itself, so every harness
       // gets the real compiled module.
+      // The real unproven-format policy (pure; the setting mirror defaults on).
+      if (name === '@/lib/best-effort-autopost') {
+        return require('../build/best-effort-autopost.js');
+      }
       if (name === '@/lib/country') {
         return require('../build/country.js');
       }

@@ -54,6 +54,9 @@ test('headless JS processes only a tiny event window and uses the normal durable
   assert.match(background, /applyMaterializedImportBatch\(base, materialized\)/);
   assert.match(background, /diskPersistence\.save\(next\)/);
   assert.match(background, /createCaptureExecutor/);
+  assert.match(background,
+    /function applyLedgerContext[\s\S]*?setBestEffortAutoPostEnabled\(state\.bestEffortAutoPost\)[\s\S]*?return true;/,
+    'a killed-process wake must honour "Auto-add alerts from unverified bank formats" OFF');
   assert.doesNotMatch(stripComments(background), /sweepVisible|sweepActiveNotifications|setInterval|WorkManager|PeriodicWorkRequest/);
 
   assert.match(autoImport, /maxNotificationRows\?: number/);

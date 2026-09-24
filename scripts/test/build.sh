@@ -84,7 +84,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
          local-semantic-model local-semantic-runtime local-semantic-scheduler local-semantic-background-policy local-semantic-shadow local-semantic-inbox-shadow \
          local-semantic-review local-semantic-review-runtime local-assistant-grounding growth-funnel-diagnostics stability-diagnostics \
-         local-semantic-flags on-device-ai on-device-assistant on-device-category; do
+         local-semantic-flags on-device-ai on-device-assistant on-device-category best-effort-autopost; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
 done

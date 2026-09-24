@@ -114,6 +114,10 @@ import {
 } from '@/lib/ledger-import';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import {
+  setBestEffortAutoPostEnabled,
+  tombstonesForRemoved,
+} from '@/lib/best-effort-autopost';
+import {
   recordStorageFailure,
   storageReadFailureMayRetry,
   type StorageFailure,
@@ -789,6 +793,8 @@ type Action =
   | { type: 'addTransaction'; transaction: Transaction; ledgerMoney?: LedgerMoneySpec }
   | { type: 'editTransaction'; id: string; patch: Partial<Omit<Transaction, 'id'>> }
   | { type: 'deleteTransaction'; id: string }
+  | { type: 'resolveBestEffort'; id: string; outcome: 'confirm' | 'undo' }
+  | { type: 'setBestEffortAutoPost'; enabled: boolean }
   | ({
       type: 'importBatch';
       localCaptureQualifications?: LocalCaptureQualificationReceipt[];
@@ -1015,6 +1021,9 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
     }
     case 'deleteTransaction':
       return true;
+    case 'resolveBestEffort':
+      return action.outcome === 'undo';
+    case 'setBestEffortAutoPost':
     case 'setPrivateMode':
     case 'setMonthStartDay':
       return false;
@@ -1090,6 +1099,7 @@ function reduceState(state: AppState, action: Action): AppState {
         next.marketId = migrated.marketId;
       }
       setActiveCountry(next.country);
+      setBestEffortAutoPostEnabled(next.bestEffortAutoPost);
       // The incoming state brings its own accounting currency with it, so any
       // pin held by the state being replaced must not veto its pack. A restore
       // of an SAR backup over an AED ledger is exactly that case.
@@ -1312,8 +1322,39 @@ function reduceState(state: AppState, action: Action): AppState {
         transactions: edited.date !== previous.date ? sortTxs(transactions) : transactions,
       };
     }
-    case 'deleteTransaction':
-      return { ...state, transactions: state.transactions.filter((t) => t.id !== action.id) };
+    case 'deleteTransaction': {
+      // Deleting an auto-added row is the same as undoing it: a rescan or
+      // history re-read of that alert must not bring it back.
+      const removed = state.transactions.filter((t) => t.id === action.id);
+      const bestEffortUndone = tombstonesForRemoved(state.bestEffortUndone, removed, state.ledgerMoney?.currency);
+      return {
+        ...state,
+        transactions: state.transactions.filter((t) => t.id !== action.id),
+        ...(bestEffortUndone ? { bestEffortUndone } : {}),
+      };
+    }
+    case 'resolveBestEffort': {
+      const row = state.transactions.find((t) => t.id === action.id);
+      if (!row?.bestEffort) return state;
+      if (action.outcome === 'undo') {
+        // Removal and tombstone land in one state write, so no rescan can
+        // observe the row gone without its tombstone.
+        return {
+          ...state,
+          transactions: state.transactions.filter((t) => t.id !== action.id),
+          bestEffortUndone: tombstonesForRemoved(state.bestEffortUndone, [row], state.ledgerMoney?.currency) ??
+            state.bestEffortUndone,
+        };
+      }
+      const { bestEffort: _checked, ...confirmed } = row;
+      return {
+        ...state,
+        transactions: state.transactions.map((t) => (t.id === action.id ? confirmed : t)),
+      };
+    }
+    case 'setBestEffortAutoPost':
+      setBestEffortAutoPostEnabled(action.enabled);
+      return { ...state, bestEffortAutoPost: action.enabled };
     case 'importBatch': {
       const imported = applyMaterializedImportBatch(state, action);
       return action.localCaptureQualifications
@@ -1322,7 +1363,14 @@ function reduceState(state: AppState, action: Action): AppState {
     }
     case 'undoBatch': {
       const ids = new Set(action.ids);
-      return { ...state, transactions: state.transactions.filter((t) => !ids.has(t.id)) };
+      // Undoing an import also undoes its auto-added rows for good.
+      const bestEffortUndone = tombstonesForRemoved(state.bestEffortUndone,
+        state.transactions.filter((t) => ids.has(t.id)), state.ledgerMoney?.currency);
+      return {
+        ...state,
+        transactions: state.transactions.filter((t) => !ids.has(t.id)),
+        ...(bestEffortUndone ? { bestEffortUndone } : {}),
+      };
     }
     case 'upsertBudget': {
       if (action.budget.limitFils !== 0) requireSelectedLedgerMoney(state);
@@ -1358,9 +1406,14 @@ function reduceState(state: AppState, action: Action): AppState {
       return mergeRenewedCard(state, action.oldId, action.newId);
     case 'markCardsDistinct':
       return markCardsDistinct(state, action.id);
-    case 'deleteAccount':
+    case 'deleteAccount': {
+      // Auto-added rows removed with the account must not come back on the
+      // next rescan either.
+      const bestEffortUndone = tombstonesForRemoved(state.bestEffortUndone,
+        state.transactions.filter((t) => t.accountId === action.id), state.ledgerMoney?.currency);
       return {
         ...state,
+        ...(bestEffortUndone ? { bestEffortUndone } : {}),
         accounts: state.accounts.filter((a) => a.id !== action.id),
         transactions: state.transactions.filter((t) => t.accountId !== action.id),
         cardDues: state.cardDues.filter((d) => d.accountId !== action.id),
@@ -1368,6 +1421,7 @@ function reduceState(state: AppState, action: Action): AppState {
           Object.entries(state.accountHints).filter(([, v]) => v !== action.id),
         ),
       };
+    }
     case 'addBill':
       if (action.bill.amountFils !== 0) requireSelectedLedgerMoney(state);
       return { ...state, bills: [...state.bills, action.bill] };
@@ -1551,6 +1605,8 @@ function reduceState(state: AppState, action: Action): AppState {
         // Erasing a ledger must not mint another local trial on the next
         // hydrate or discard the original absolute entitlement deadline.
         trialStartTs: state.trialStartTs,
+        // A capture preference, like the opt-out above; not ledger data.
+        bestEffortAutoPost: state.bestEffortAutoPost,
         accounts: [SEED_ACCOUNTS[2]],
       };
     case 'blockPersistence':
@@ -1612,6 +1668,9 @@ interface StoreValue {
   editTransaction: (id: string, patch: Partial<Omit<Transaction, 'id'>>) => void;
   resolveTransfers: (request: Omit<TransferDecisionRequest, 'now'> & { expectedGeneration?: number }) => Promise<void>;
   deleteTransaction: (id: string) => void;
+  /** "Looks right" clears the Auto-added marker; "undo" removes the row for good. */
+  resolveBestEffort: (id: string, outcome: 'confirm' | 'undo') => void;
+  setBestEffortAutoPost: (enabled: boolean) => Promise<void>;
   /**
    * Bulk import. `durable` resolves only after SQLCipher has committed the
    * rows; relay callers must await it before acknowledging the server queue.
@@ -2337,6 +2396,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteTransaction', id });
   }, [dispatch]);
 
+  const resolveBestEffort = useCallback((id: string, outcome: 'confirm' | 'undo') => {
+    dispatch({ type: 'resolveBestEffort', id, outcome });
+  }, [dispatch]);
+
+  const setBestEffortAutoPost = useCallback(async (enabled: boolean) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const previous = authoritativeState.current.bestEffortAutoPost !== false;
+    const next = dispatch({ type: 'setBestEffortAutoPost', enabled });
+    const written = await persist(next);
+    if (!written) {
+      // The switch and the parser must never disagree with what is stored.
+      dispatch({ type: 'setBestEffortAutoPost', enabled: previous });
+      throw new Error('Auto-add preference could not be saved');
+    }
+  }, [dispatch, persist]);
+
   const importBatch = useCallback((
     input: ImportBatchInput,
     qualifications: readonly LocalCaptureDeclineQualificationMapping[] = [],
@@ -2879,6 +2957,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       trialStartTs: current.trialStartTs,
       reviewTray: current.reviewTray,
       captureOptOut: current.captureOptOut,
+      bestEffortAutoPost: current.bestEffortAutoPost,
       localCaptureQualifications: current.localCaptureQualifications,
       iosCaptureWarning: current.iosCaptureWarning,
     };
@@ -3002,6 +3081,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editTransaction,
       resolveTransfers,
       deleteTransaction,
+      resolveBestEffort,
+      setBestEffortAutoPost,
       importBatch,
       stageReviewAlerts,
       dismissReviewAlert,
@@ -3070,6 +3151,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editTransaction,
       resolveTransfers,
       deleteTransaction,
+      resolveBestEffort,
+      setBestEffortAutoPost,
       importBatch,
       stageReviewAlerts,
       dismissReviewAlert,

@@ -2354,6 +2354,8 @@ ok('the spoken label agrees with the sign on screen',
     'transfer-reconciliation.ts',
     // Exponent-correct foreign originals and exact FX conversion.
     'fx.ts',
+    // The unproven-format policy validates the principal amount's exponent.
+    'best-effort-autopost.ts',
     // Any ISO purchase currency is read at its own exponent; outside the
     // offline table it converts only with a dated rate or waits in Review.
     'sms-parser.ts',

@@ -7,7 +7,7 @@ import {
   keywordsForMarket,
   MARKETS,
 } from '@/lib/markets';
-import type { CategoryId, TransactionType } from '@/lib/types';
+import type { BestEffortMarker, CategoryId, TransactionType } from '@/lib/types';
 import { localMoneyPrefixPattern, malformedLocalMoneyTokens } from '@/lib/bank-amount-tokens';
 import { convertMinorUnits, currencyExponent, originalMoneyFields, type MinorExponent } from '@/lib/fx';
 import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
@@ -413,6 +413,8 @@ export interface ParsedSms {
   amountFils: number;
   /** ISO 4217 currency of `amountFils` (the active market's ledger currency). */
   currency: string;
+  /** Set only by the unproven-format policy (best-effort-autopost.ts). */
+  bestEffort?: BestEffortMarker;
   /**
    * Original foreign amount as legacy two-decimal minor units (major × 100),
    * present only when that representation is exact. See fx.ts originalMoneyOf.
