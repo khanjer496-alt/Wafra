@@ -160,74 +160,6 @@ const FOREGROUND_PARSE_YIELD_MS = 16;
 // Some Android providers insert one SMS twice. Collapse only byte-identical,
 // same-sender, consecutive inbox rows delivered less than one second apart.
 const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
-/**
- * A carrier can also deliver one SMS twice minutes apart — a retry after a
- * missed delivery report — and the provider stores both as ordinary rows with
- * unrelated ids, so the adjacent-row rule above never sees them. Byte-identical
- * text from one sender is NOT enough to call them one message on its own: two
- * genuine charges of the same amount at the same shop read identically too,
- * and so does a double tap or a merchant charging twice in the same minute.
- * They are folded only inside this window AND only when the body carries
- * something two real charges cannot share (hasCarrierDuplicateIdentity). A
- * plain hh:mm is deliberately not enough. Everything else is left as before.
- *
- * The fold only ever declines an incoming copy within one scan. It never
- * emits a retirement, so a row already in the ledger is never removed by it.
- */
-const CARRIER_DUPLICATE_MS = 10 * 60_000;
-/**
- * An explicit transaction date and time at SECOND precision. This is the rule
- * the Android notification re-post guard uses, and it must stay identical:
- * NotificationCaptureStore.TRANSACTION_DATETIME_RE (kotlin-regex.test.js
- * compares the two sources). Seconds are what separate a second delivery of
- * one alert from two real charges inside one minute.
- */
-export const CARRIER_DUPLICATE_DATETIME_RE =
-  new RegExp(String.raw`\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s+\d{1,2}:\d{2}:\d{2}\b`);
-/**
- * A running-balance FIGURE after a balance label. The balance moves with
- * every charge, so two real charges cannot share it. Only an amount-shaped
- * figure counts (currency code or two decimals), and never "balance
- * transfer", so an offer footer that is identical on every alert does not.
- */
-export const CARRIER_DUPLICATE_BALANCE_RE =
-  /\b(?:(?:avl|avail(?:able)?|current|curr|ledger|closing|remaining)\.?\s*)?bal(?:ance)?\b(?!\s*transfer)[^0-9٠-٩\n]{0,20}?(?:(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?\s*(?:AED|SAR|QAR|KWD|BHD|OMR|USD|EUR|GBP|د\.إ|ر\.س|درهم|ريال))|رصيد[^0-9٠-٩\n]{0,20}?(?:(?:AED|SAR|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*\s*(?:AED|SAR|د\.إ|ر\.س|درهم|ريال))/i;
-
-/** Whether an identical copy of [body] can only be the same posting. */
-export const hasCarrierDuplicateIdentity = (body: string): boolean =>
-  CARRIER_DUPLICATE_DATETIME_RE.test(body) || CARRIER_DUPLICATE_BALANCE_RE.test(body);
-
-/**
- * Indexes of [rows] that are later carrier re-deliveries of an earlier row in
- * the same list: same sender, byte-identical identity-bearing body, within
- * CARRIER_DUPLICATE_MS of the copy that is kept. The EARLIEST copy of each
- * cluster is the one kept, whatever order the rows arrive in, because that is
- * the copy an earlier scan is most likely to have stored already; keeping the
- * later one would then import it beside the stored row.
- */
-export const carrierRedeliveryIndexes = (
-  rows: readonly { address: string; body: string; date: number }[],
-): Set<number> => {
-  const skipped = new Set<number>();
-  const byKey = new Map<string, number[]>();
-  rows.forEach((row, index) => {
-    if (typeof row.body !== 'string' || !hasCarrierDuplicateIdentity(row.body)) return;
-    const key = `${row.address}\u0000${row.body}`;
-    const bucket = byKey.get(key);
-    if (bucket) bucket.push(index);
-    else byKey.set(key, [index]);
-  });
-  for (const indexes of byKey.values()) {
-    if (indexes.length < 2) continue;
-    indexes.sort((a, b) => rows[a].date - rows[b].date || a - b);
-    let keptDate = rows[indexes[0]].date;
-    for (const index of indexes.slice(1)) {
-      if (rows[index].date - keptDate <= CARRIER_DUPLICATE_MS) skipped.add(index);
-      else keptDate = rows[index].date;
-    }
-  }
-  return skipped;
-};
 
 interface ParseYieldState {
   startedAt: number;
@@ -1180,7 +1112,6 @@ export async function scanInbox(
     inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
-    const carrierCopies = carrierRedeliveryIndexes(batch);
     const pageStarted = tracing ? Date.now() : 0;
     let traceCheckpoint = pageStarted;
     for (let i = 0; i < batch.length; i++) {
@@ -1209,16 +1140,6 @@ export async function scanInbox(
           reason: 'exact-provider-duplicate',
           sourceEventId,
         });
-        if (parseYieldDue(pageYield, i + 1 < batch.length)) {
-          await yieldToUi();
-          resetParseYieldState(pageYield);
-        }
-        continue;
-      }
-      // A later carrier re-delivery of a copy on this page is declined here
-      // and only here: no `declined` record, because that would ask the plan
-      // to retire a stored row, and this fold must never remove one.
-      if (carrierCopies.has(i)) {
         if (parseYieldDue(pageYield, i + 1 < batch.length)) {
           await yieldToUi();
           resetParseYieldState(pageYield);
@@ -1354,20 +1275,10 @@ export async function scanInbox(
     try {
       const received = await SmsReader.getReceived(sinceMs);
       const deliveryYield = createParseYieldState();
-      const carrierCopies = carrierRedeliveryIndexes(received);
       for (let i = 0; i < received.length; i++) {
         const sms = received[i];
         scannedCount += 1;
         if (sms.date > newestTs) newestTs = sms.date;
-        // The same carrier double delivery, caught by the receiver twice
-        // while the provider kept neither copy.
-        if (carrierCopies.has(i)) {
-          if (parseYieldDue(deliveryYield, i + 1 < received.length)) {
-            await yieldToUi();
-            resetParseYieldState(deliveryYield);
-          }
-          continue;
-        }
         // The inbox pass above almost always found this same message. Its
         // copy carries the provider's timestamp and this one carries the
         // carrier's, which differ by seconds — enough for the fingerprint

@@ -240,8 +240,7 @@ const markets = require('./build/markets.js');
 markets.setLedgerCurrency(null);
 markets.setActiveMarket('AE');
 const { scanInbox, getAndroidNotificationImportDiagnostics,
-  MESSAGING_APP_PACKAGES, SMS_APP_PACKAGES, CHAT_APP_PACKAGES,
-  hasCarrierDuplicateIdentity } = require('./build/auto-import.js');
+  MESSAGING_APP_PACKAGES, SMS_APP_PACKAGES, CHAT_APP_PACKAGES } = require('./build/auto-import.js');
 const nativeTrustedPackages = fs.readFileSync(
   path.join(notificationRoot, 'TrustedBankNotificationPackages.kt'), 'utf8',
 );
@@ -1088,45 +1087,81 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         !Object.prototype.hasOwnProperty.call(item, 'raw')),
     JSON.stringify({ parsed: providerDuplicate.parsed, declined: providerDuplicate.declined }));
 
-  // Carrier double delivery: the provider stores one SMS twice, minutes apart
-  // and with unrelated ids. Fold it only when the body carries something a
-  // second genuine charge could not share word for word — never a bare hh:mm.
-  const tokenCases = require('./fixtures/distinguishing-token-cases');
-  tokenCases.forEach(([body, fold], index) => {
-    ok(`JS carrier-duplicate identity rule says ${fold} for case ${index + 1}`,
-      hasCarrierDuplicateIdentity(body) === fold, body);
-  });
-  const carrierScan = async (rows) => {
+  // The same provider double insert (ids n+1 and n, the newer copy 756 ms
+  // later) of a body that carries a balance figure or a clock with seconds —
+  // common UAE/KSA templates — is still exactly one message. No other rule may
+  // drop the surviving copy, and no stored copy may be removed except the one
+  // the exact-provider rule itself declined (the older id).
+  {
+    const { buildImportPlan } = require('./build/import-plan.js');
+    const doubleInsertBodies = [
+      ['a balance figure', `${duplicatedProviderBody}. Avl Bal AED 2,345.67`],
+      ['a seconds clock',
+        'Credit Card XX7720 was used for AED25.90 on 14/09/2026 23:52:52 at TEST MERCHANT'],
+    ];
+    const pair = (body) => [
+      { id: 30_850, address: 'FAB', body, date: NOW + 10_000 },
+      { id: 30_849, address: 'FAB', body, date: NOW + 9_244 },
+    ];
+    const storedFrom = (parsed) => ({ ...baseLedgerState(),
+      transactions: buildImportPlan(parsed, baseLedgerState(), NOW + 10_000).batch.transactions
+        .map((row, index) => ({ ...row, id: `stored-${index}` })) });
+    const apply = (state, plan) => {
+      const removed = new Set(plan.batch.updates.filter((u) => u.remove).map((u) => u.id));
+      return {
+        removed: state.transactions.filter((row) => removed.has(row.id)),
+        rows: state.transactions.filter((row) => !removed.has(row.id))
+          .concat(plan.batch.transactions),
+      };
+    };
+    for (const [label, body] of doubleInsertBodies) {
+      inboxRows = pair(body);
+      const scan = await scanInbox(0, {}, undefined, 'en-AE');
+      const fresh = apply(baseLedgerState(),
+        buildImportPlan(scan.parsed, baseLedgerState(), NOW + 10_000, undefined, scan.declined));
+      ok(`a provider double insert with ${label} imports exactly one row`,
+        scan.parsed.length === 1 && scan.parsed[0].sourceEventId === 'a30850' &&
+          scan.declined.length === 1 && scan.declined[0].sourceEventId === 'a30849' &&
+          scan.declined[0].reason === 'exact-provider-duplicate' &&
+          fresh.rows.length === 1 && fresh.removed.length === 0,
+        JSON.stringify({ parsed: scan.parsed, declined: scan.declined, fresh }));
+
+      // A scan ran between the two inserts and stored one copy. The rescan
+      // still ends with exactly one row, and the only row it may remove is
+      // the stored OLDER copy the exact-provider rule declined.
+      for (const storedId of [30_849, 30_850]) {
+        inboxRows = pair(body).filter((row) => row.id === storedId);
+        const earlier = await scanInbox(0, {}, undefined, 'en-AE');
+        const stored = storedFrom(earlier.parsed);
+        inboxRows = pair(body);
+        const rescan = await scanInbox(0, {}, undefined, 'en-AE');
+        const after = apply(stored,
+          buildImportPlan(rescan.parsed, stored, NOW + 10_000, undefined, rescan.declined));
+        ok(`a stored a${storedId} copy of a provider double insert with ${label} stays one row on rescan`,
+          stored.transactions.length === 1 && after.rows.length === 1 &&
+            after.removed.every((row) => storedId === 30_849 &&
+              row.smsKey === stored.transactions[0].smsKey),
+          JSON.stringify({ stored: stored.transactions.map((row) => row.smsKey),
+            parsed: rescan.parsed.map((row) => row.sourceEventId),
+            declined: rescan.declined, after }));
+      }
+    }
+  }
+
+  // Two genuine charges can read byte for byte alike: a double tap, or a
+  // merchant charging twice in one minute. Apart from the adjacent-id,
+  // sub-second provider double insert above, the SMS path keeps every copy.
+  const identicalScan = async (rows) => {
     inboxRows = rows;
     const scan = await scanInbox(0, {}, undefined, 'en-AE');
     const ids = new Set(scan.parsed.map((item) => item.sourceEventId));
     return { scan, ids };
   };
-  const withBalance =
-    'Purchase of AED 14.05 at CARRIER CONTROL with Debit Card ending 1234. Avl Bal AED 2,345.67';
   const noToken = 'Purchase of AED 14.05 at CARRIER CONTROL with Debit Card ending 1234';
-  const other = 'Purchase of AED 3.00 at OTHER SHOP with Debit Card ending 1234';
   {
-    const { scan, ids } = await carrierScan([
-      { id: 31_900, address: 'FAB', body: withBalance, date: NOW + 600_000 },
-      { id: 31_880, address: 'FAB', body: other, date: NOW + 400_000 },
-      { id: 31_870, address: 'FAB', body: withBalance, date: NOW + 360_000 },
-    ]);
-    // The EARLIER copy is kept — the one a previous scan may already have
-    // stored — and the fold never emits a retirement for either copy.
-    ok('a carrier re-delivery minutes later with a balance figure is one message',
-      ids.has('a31870') && ids.has('a31880') && !ids.has('a31900') &&
-        scan.parsed.filter((item) => item.sourceEventId === 'a31870')[0]?.amountFils === 1405 &&
-        !scan.declined.some((item) => item.sourceEventId === 'a31900' ||
-          item.sourceEventId === 'a31870'),
-      JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
-  }
-  {
-    // Shipped fixture adib-compact-masked-card: its only clock is hh:mm. A
-    // double tap or a merchant charging twice in one minute reads identically
-    // and both charges are real.
+    // Shipped fixture adib-compact-masked-card: its only clock is hh:mm.
     const adib = 'XXX456789 was used for AED 42.50 on Jan 17 2023 1:04PM at CARREFOUR,AE.';
-    const { scan, ids } = await carrierScan([
+    const { scan, ids } = await identicalScan([
       { id: 31_930, address: 'ADIB', body: adib, date: NOW + 640_000 },
       { id: 31_920, address: 'ADIB', body: adib, date: NOW + 600_000 },
     ]);
@@ -1135,30 +1170,10 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
   }
   {
-    // A ledger that already stored both copies before this fold existed is
-    // left alone: the rescan declines nothing and so retires nothing.
-    const { buildImportPlan } = require('./build/import-plan.js');
-    const both = await carrierScan([
-      { id: 31_910, address: 'FAB', body: withBalance, date: NOW + 700_000 },
-      { id: 31_905, address: 'FAB', body: withBalance, date: NOW + 460_000 },
-    ]);
-    const firstImport = buildImportPlan(
-      both.scan.parsed.map((item) => ({ ...item, sourceEventId: 'a31910', smsTs: NOW + 700_000 }))
-        .concat(both.scan.parsed), baseLedgerState(), NOW + 700_000,
-    );
-    const stored = { ...baseLedgerState(), transactions: firstImport.batch.transactions
-      .map((row, index) => ({ ...row, id: `stored-${index}` })) };
-    const reread = buildImportPlan(both.scan.parsed, stored, NOW + 700_000, undefined, both.scan.declined);
-    ok('the carrier fold never removes a row the ledger already holds',
-      stored.transactions.length === 2 && both.scan.declined.length === 0 &&
-        !reread.batch.updates.some((update) => update.remove),
-      JSON.stringify({ stored: stored.transactions.length, updates: reread.batch.updates }));
-  }
-  {
     // The 1-second provider-duplicate retirement still exists; it must not
     // remove a row that is part of a transfer, whatever its evidence says.
     const { buildImportPlan } = require('./build/import-plan.js');
-    const row = { ...(await carrierScan([
+    const row = { ...(await identicalScan([
       { id: 31_960, address: 'FAB', body: noToken, date: NOW + 900_000 },
     ])).scan.parsed[0] };
     const imported = buildImportPlan([row], baseLedgerState(), NOW + 900_000).batch.transactions[0];
@@ -1177,7 +1192,7 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         planFor({ transferMatch: { kind: 'own-account' } }).batch.updates]));
   }
   {
-    const { scan, ids } = await carrierScan([
+    const { scan, ids } = await identicalScan([
       { id: 31_950, address: 'FAB', body: noToken, date: NOW + 600_000 },
       { id: 31_940, address: 'FAB', body: noToken, date: NOW + 360_000 },
     ]);
@@ -1187,33 +1202,15 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
   }
   {
-    const { ids } = await carrierScan([
-      { id: 31_990, address: 'FAB', body: withBalance, date: NOW + 1_260_000 },
-      { id: 31_980, address: 'FAB', body: withBalance, date: NOW + 600_000 },
-    ]);
-    ok('an identical balance-bearing body eleven minutes later is a separate message',
-      ids.has('a31990') && ids.has('a31980'), JSON.stringify([...ids]));
-  }
-  {
-    const { ids } = await carrierScan([
-      { id: 32_010, address: 'FAB', body: withBalance, date: NOW + 600_000 },
-      { id: 32_000, address: 'ADCB', body: withBalance, date: NOW + 540_000 },
-    ]);
-    ok('an identical body from a different sender is never folded',
-      ids.has('a32010') && ids.has('a32000'), JSON.stringify([...ids]));
-  }
-  {
     inboxRows = [];
     receivedRows = [
-      { address: 'FAB', body: withBalance, date: NOW + 600_000 },
-      { address: 'FAB', body: withBalance, date: NOW + 780_000 },
       { address: 'FAB', body: noToken, date: NOW + 600_000 },
       { address: 'FAB', body: noToken, date: NOW + 780_000 },
     ];
     const scan = await scanInbox(0, {}, undefined, 'en-AE');
     const delivered = scan.parsed.filter((item) => item.channel === 'delivery');
-    ok('the delivery buffer folds the same carrier re-delivery and keeps tokenless repeats',
-      delivered.filter((item) => item.smsTs === NOW + 600_000).length === 2 &&
+    ok('the delivery buffer keeps identical repeats from one sender',
+      delivered.filter((item) => item.smsTs === NOW + 600_000).length === 1 &&
         delivered.filter((item) => item.smsTs === NOW + 780_000).length === 1,
       JSON.stringify(delivered));
     receivedRows = [];

@@ -229,23 +229,11 @@ for (let index = 0; index < CLOCK_CASES.length; index++) {
     out.split('\n').filter((line) => line.startsWith(`CLOCK wrong ${index} `)));
 }
 
-// The SMS carrier-duplicate fold (auto-import.ts) decides whether to DISCARD
-// an identical SMS on the same clock the notification re-post guard uses. If
-// the two drifted, one channel would fold a same-minute double charge the
-// other keeps. Same source, same flags, same verdict on every clock case.
+// The ledger's own event identity (dedupe.ts) reads the same clock as the
+// notification re-post guard, so a notification the native guard treats as
+// clockless never gets a JS identity either, and vice versa.
 {
   const kotlin = PATTERNS.find(([n]) => n === 'CLOCK_RE')[1];
-  const { CARRIER_DUPLICATE_DATETIME_RE } = require('./build/auto-import.js');
-  ok('SMS carrier-duplicate clock is byte-identical to the notification re-post clock',
-    CARRIER_DUPLICATE_DATETIME_RE.source === kotlin && CARRIER_DUPLICATE_DATETIME_RE.flags === '',
-    { kotlin, js: CARRIER_DUPLICATE_DATETIME_RE.source, flags: CARRIER_DUPLICATE_DATETIME_RE.flags });
-  const disagreements = CLOCK_CASES.filter(([body, want]) =>
-    CARRIER_DUPLICATE_DATETIME_RE.test(body) !== want);
-  ok('SMS carrier-duplicate clock gives the JVM verdict on every clock case',
-    disagreements.length === 0, disagreements);
-  // The ledger's own event identity (dedupe.ts) reads the same clock, so a
-  // notification the native guard treats as clockless never gets a JS
-  // identity either, and vice versa.
   const { CAPTURE_EVENT_CLOCK_RE } = require('./build/dedupe.js');
   ok('ledger event-identity clock is byte-identical to the notification re-post clock',
     CAPTURE_EVENT_CLOCK_RE.source === kotlin && CAPTURE_EVENT_CLOCK_RE.flags === '',

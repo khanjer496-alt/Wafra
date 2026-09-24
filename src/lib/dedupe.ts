@@ -43,9 +43,8 @@ export function bodyPrint(body: string): string {
 
 /**
  * An explicit transaction clock at SECOND precision — the same source as the
- * Android re-post guard (NotificationRepostIdentity.TRANSACTION_DATETIME_RE)
- * and auto-import's CARRIER_DUPLICATE_DATETIME_RE; kotlin-regex.test.js pins
- * all three byte-for-byte. Minute precision is refused on purpose: a terminal
+ * Android re-post guard (NotificationRepostIdentity.TRANSACTION_DATETIME_RE);
+ * kotlin-regex.test.js pins both byte-for-byte. Minute precision is refused on purpose: a terminal
  * double-tap inside one minute is two real charges with identical text.
  */
 export const CAPTURE_EVENT_CLOCK_RE = /\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s+\d{1,2}:\d{2}:\d{2}\b/;
