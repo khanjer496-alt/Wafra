@@ -43,6 +43,7 @@ function loadStore({ storePath = 'src/lib/store.tsx', counted = {} } = {}) {
   const stubs = {
     react: {
       createContext: () => ({}), useCallback: (fn) => fn, useContext: () => null, useEffect() {},
+      useLayoutEffect() {}, useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
       useMemo: (fn) => fn(), useRef: (value) => ({ current: value }), useState: (value) => [value, () => {}],
     },
     'react/jsx-runtime': { jsx: () => ({}), jsxs: () => ({}), Fragment: Symbol('Fragment') },
@@ -65,6 +66,11 @@ function loadStore({ storePath = 'src/lib/store.tsx', counted = {} } = {}) {
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
     '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
+    '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
+    // Dependency-free selector helpers, not part of the shared test build.
+    '@/lib/store-selection': execute('src/lib/store-selection.ts', (id) => {
+      throw new Error(`unexpected dependency ${id}`);
+    }),
     './balances': {},
   };
   const calls = {};

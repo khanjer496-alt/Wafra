@@ -79,7 +79,7 @@ function createWorkflowHarness(options={}) {
  d['@/lib/public-links']={configuredPublicUrl:()=>null};
  d['@/lib/relay']={getRelayConfig:async()=>null,getRelayConfigStrict:async()=>null,isLegacyShortcutCaptureActive:()=>false,isRelayPlatform:()=>false,RelayError:class extends Error{},unpairDevice:record('unpairDevice')};
  d['@/lib/capture']={eraseIosCaptureStore:record('eraseIosCaptureStore'),isCaptureAvailable:()=>false,setIosCaptureEnabled:record('setIosCaptureEnabled')};
- d['@/lib/ios-history-setup']={createIosHistoryPostEraseCleanup:()=>()=>{},eraseIosHistorySessions:record('eraseIosHistorySessions')};
+ d['@/lib/ios-history-setup']={createIosHistoryPostEraseCleanup:()=>()=>{},eraseIosHistorySessions:record('eraseIosHistorySessions'),iosSupportsMessageHistory:()=>true};
  d['@/lib/ios-message-onboarding']={clearIosMessageSetupProgress:record('clearIosMessageSetupProgress'),dispatchIosMessageSetup:record('dispatchIosMessageSetup'),loadIosMessageSetupProgress:async()=>null};
  d['@/lib/shortcut-cleanup']={openShortcutsApp:record('openShortcutsApp'),shortcutCleanupApplies:()=>false};
  d['@/lib/growth-funnel']={
