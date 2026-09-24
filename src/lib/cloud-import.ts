@@ -1,6 +1,6 @@
 /** Native transport for forwarded-email and statement-file supplements. */
 import { fetch as expoFetch } from 'expo/fetch';
-import { File } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 
 import {
   CloudImportError,
@@ -109,6 +109,38 @@ export async function revokeEmailForwardingAddress(cfg: RelayConfig): Promise<vo
   });
   if (response.status === 204) return;
   throw pdfImportError(response.status, body);
+}
+
+/**
+ * Delete statement copies expo-document-picker left in its cache folder.
+ *
+ * `copyToCacheDirectory: true` writes each picked file to
+ * `<cache>/DocumentPicker/<uuid>.<ext>` (both platforms, SDK 55). The import
+ * deletes its copies when it finishes, but a session that ends mid-import —
+ * the app killed while a statement uploads — leaves a readable bank statement
+ * in the cache until the OS reclaims it. Only statement extensions are
+ * touched, so a backup file picked from Settings is never removed from under
+ * a restore, and `keep` spares a copy an upload is still reading.
+ */
+export function clearStatementPickerCache(keep: ReadonlySet<string> = new Set()): void {
+  try {
+    const directory = new Directory(Paths.cache, 'DocumentPicker');
+    if (!directory.exists) return;
+    // Compared by file name: the picker names each copy with a fresh UUID, and
+    // the picker's URI and the directory listing's may spell the scheme apart.
+    const baseName = (uri: string) => decodeURIComponent(uri.split('/').pop() ?? '');
+    const kept = new Set([...keep].map(baseName));
+    for (const entry of directory.list()) {
+      if (!(entry instanceof File) || !/\.(?:pdf|csv|tsv)$/i.test(entry.uri) || kept.has(baseName(entry.uri))) continue;
+      try {
+        entry.delete();
+      } catch {
+        // Best effort: the OS may already have reclaimed it.
+      }
+    }
+  } catch {
+    // A missing or unreadable cache folder has nothing to clear.
+  }
 }
 
 /**

@@ -127,6 +127,32 @@ ok('email token: response injection is rejected',
     JSON.stringify(summary));
 }
 
+// ── Multi-file statement batches: pacing and counted copy ──
+{
+  const { nextUploadDelay, UPLOAD_WINDOW_MS, UPLOADS_PER_WINDOW, countPhrase } = require('./build/statement-batch');
+  const now = 1_000_000;
+  ok('pacing: a fresh batch starts immediately', nextUploadDelay([], now) === 0);
+  const burst = Array.from({ length: UPLOADS_PER_WINDOW }, (_, index) => now - 10_000 + index);
+  ok('pacing: a full window waits until its oldest start has aged out, with margin',
+    nextUploadDelay(burst, now) > 50_000 && nextUploadDelay(burst, now) <= UPLOAD_WINDOW_MS);
+  ok('pacing: starts older than the window no longer count',
+    nextUploadDelay(burst.map((t) => t - UPLOAD_WINDOW_MS), now) === 0);
+  ok('pacing: stays under the relay limit of six uploads a minute per format', UPLOADS_PER_WINDOW <= 5);
+  const en = { one: '{n} statement', other: '{n} statements' };
+  const ar = { zero: 'لا كشوف', one: 'كشف واحد', two: 'كشفان', few: '{n} كشوف', many: '{n} كشفاً', other: '{n} كشف' };
+  ok('plural copy: English says 1 statement and 2 statements',
+    countPhrase('en', en, 1) === '1 statement' && countPhrase('en', en, 2) === '2 statements');
+  ok('plural copy: Arabic uses the dual and the 3–10 / 11–99 forms',
+    countPhrase('ar', ar, 1) === 'كشف واحد' && countPhrase('ar', ar, 2) === 'كشفان' &&
+      countPhrase('ar', ar, 3) === '3 كشوف' && countPhrase('ar', ar, 11) === '11 كشفاً' &&
+      countPhrase('ar', ar, 100) === '100 كشف' && countPhrase('ar', ar, 103) === '103 كشوف');
+}
+ok('statement responses: a re-upload the relay already processed says so, older relays default to false',
+  parsePdfImportAccepted({ acceptedRows: 2, pages: 1, alreadyProcessed: true })?.alreadyProcessed === true &&
+  parsePdfImportAccepted({ acceptedRows: 2, pages: 1 })?.alreadyProcessed === false &&
+  parsePdfImportAccepted({ acceptedRows: 2, pages: 1, alreadyProcessed: 'yes' }) === null &&
+  parseCsvImportAccepted({ acceptedRows: 2, rejectedRows: 0, totalRows: 2, alreadyProcessed: true })?.alreadyProcessed === true);
+
 const root = path.resolve(__dirname, '../..');
 const transport = fs.readFileSync(path.join(root, 'src/lib/cloud-import.ts'), 'utf8');
 const surface = fs.readFileSync(path.join(root, 'src/components/supplement-imports.tsx'), 'utf8');
@@ -234,5 +260,19 @@ ok('both languages define the filing progress line',
   (copySource.match(/acceptedFiling:/g) || []).length === 2,
   'a missing Arabic string would fall through to an undefined status');
 
+ok('one failed file no longer aborts the batch: every file gets its own result and the loop never rethrows',
+  uploadLoop.length > 0 && !/throw e;/.test(uploadLoop) && /fileResults\.push\(/.test(uploadLoop) &&
+    /copy\.fileFailed/.test(surface) && /copy\.fileImported/.test(surface));
+ok('uploads are paced under the relay rate limit, with a visible waiting state, and one rate-limit retry',
+  /nextUploadDelay\(/.test(uploadLoop) && /copy\.waitingForLimit/.test(surface) &&
+    /rate_limited/.test(uploadLoop));
+ok('coverage and the queued-row drain still run for the files that succeeded',
+  /await rememberCoverage\(coverage\);[\s\S]{0,400}finishQueuedImport\(/.test(surface));
+ok('the statement screen says files go to Wafra\'s server, above the Choose button, in both languages',
+  /copy\.uploadDisclosure/.test(surface) &&
+    surface.indexOf('copy.uploadDisclosure') < surface.indexOf('copy.chooseStatements') &&
+    (copySource.match(/uploadDisclosure:/g) || []).length === 2);
+ok('leftover statement picker copies are cleared when the screen opens and closes',
+  /clearStatementPickerCache\(/.test(surface) && /export function clearStatementPickerCache/.test(transport));
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

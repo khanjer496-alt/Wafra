@@ -47,6 +47,11 @@ export interface PdfImportAccepted {
   coverage: StatementImportCoverage | null;
   /** Of rejectedRows: card rows with a bare sign the statement never explains. */
   cardSignRowsSkipped: number;
+  /**
+   * The relay had already processed this exact file within its replay window
+   * and queued nothing new. Says nothing about the ledger itself.
+   */
+  alreadyProcessed: boolean;
 }
 
 export interface CsvImportAccepted {
@@ -56,6 +61,11 @@ export interface CsvImportAccepted {
   coverage: StatementImportCoverage | null;
   /** Of rejectedRows: card rows with a bare sign the statement never explains. */
   cardSignRowsSkipped: number;
+  /**
+   * The relay had already processed this exact file within its replay window
+   * and queued nothing new. Says nothing about the ledger itself.
+   */
+  alreadyProcessed: boolean;
 }
 
 export interface EmailForwardingCredential {
@@ -206,10 +216,18 @@ export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null
   // it also admits skipped rows. Do not persist that range as complete locally.
   const coverage = rejectedRows === 0 ? parsedCoverage : null;
   const cardSignRowsSkipped = cardSignSkips(body.cardSignRowsSkipped, rejectedRows);
-  if (cardSignRowsSkipped === null) return null;
+  const alreadyProcessed = optionalFlag(body.alreadyProcessed);
+  if (cardSignRowsSkipped === null || alreadyProcessed === null) return null;
   return {
     acceptedRows: body.acceptedRows, rejectedRows, totalRows, pages: body.pages, coverage, cardSignRowsSkipped,
+    alreadyProcessed,
   };
+}
+
+/** Optional boolean: absent from an older relay reads false; anything else is refused. */
+function optionalFlag(value: unknown): boolean | null {
+  if (value === undefined) return false;
+  return typeof value === 'boolean' ? value : null;
 }
 
 /** Optional (older relays omit it) and never more than the rows skipped. */
@@ -229,13 +247,15 @@ export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null
   const coverage = parseStatementCoverage(body.coverage);
   if (body.coverage !== null && body.coverage !== undefined && !coverage) return null;
   const cardSignRowsSkipped = cardSignSkips(body.cardSignRowsSkipped, body.rejectedRows);
-  if (cardSignRowsSkipped === null) return null;
+  const alreadyProcessed = optionalFlag(body.alreadyProcessed);
+  if (cardSignRowsSkipped === null || alreadyProcessed === null) return null;
   return {
     acceptedRows: body.acceptedRows,
     rejectedRows: body.rejectedRows,
     totalRows: body.totalRows,
     coverage,
     cardSignRowsSkipped,
+    alreadyProcessed,
   };
 }
 

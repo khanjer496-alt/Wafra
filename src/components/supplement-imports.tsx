@@ -15,6 +15,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { createCaptureExecutor } from '@/lib/capture-executor';
 import {
+  clearStatementPickerCache,
   getImportCapabilities,
   uploadCsvStatement,
   uploadPdfStatement,
@@ -35,6 +36,7 @@ import {
 import { useStore } from '@/lib/store';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
 import { summarizeCoverage } from '@/lib/statement-coverage';
+import { countPhrase, nextUploadDelay } from '@/lib/statement-batch';
 import { t } from '@/lib/i18n';
 import { committed, failed } from '@/lib/haptics';
 
@@ -44,6 +46,17 @@ type PendingProtectedPdf = {
   asset: PickedStatement;
   file: File;
 };
+
+/** One line per picked file, so a batch never fails or succeeds silently. */
+type FileResult = {
+  name: string;
+  ok: boolean;
+  detail: string;
+};
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/** How long to back off after the relay still answers 429 despite pacing. */
+const RATE_LIMIT_RETRY_MS = 61_000;
 
 function interpolate(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ''));
@@ -84,6 +97,10 @@ export function SupplementImports() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [pendingPdfs, setPendingPdfs] = useState<PendingProtectedPdf[]>([]);
+  const [fileResults, setFileResults] = useState<FileResult[]>([]);
+  /** Picker copies an upload is still reading; cache cleanup must skip them. */
+  const inFlightUrisRef = useRef<Set<string>>(new Set());
+  const aliveRef = useRef(true);
   const pendingPdfsRef = useRef<PendingProtectedPdf[]>([]);
   const pendingPdf = pendingPdfs[0] ?? null;
   const queuedRetryNeededRef = useRef(false);
@@ -93,6 +110,7 @@ export function SupplementImports() {
     accepted: number;
     rejected: number;
     pages: number;
+    alreadyProcessed: number;
   } | null>(null);
   const [pdfPassword, setPdfPassword] = useState('');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
@@ -105,14 +123,23 @@ export function SupplementImports() {
     pendingPdfsRef.current = pendingPdfs;
   }, [pendingPdfs]);
 
-  useEffect(() => () => {
-    for (const pending of pendingPdfsRef.current) {
-      try {
-        if (pending.file.exists) pending.file.delete();
-      } catch {
-        // Picker cache cleanup is best effort.
+  useEffect(() => {
+    aliveRef.current = true;
+    // A statement copy left in the picker cache by an earlier session that
+    // ended mid-import (app killed, crash) is cleared when the screen opens.
+    clearStatementPickerCache();
+    return () => {
+      aliveRef.current = false;
+      for (const pending of pendingPdfsRef.current) {
+        try {
+          if (pending.file.exists) pending.file.delete();
+        } catch {
+          // Picker cache cleanup is best effort.
+        }
       }
-    }
+      // And again on the way out, except a copy an upload is still reading.
+      clearStatementPickerCache(inFlightUrisRef.current);
+    };
   }, []);
 
   const errorText = useCallback((value: unknown): string => {
@@ -240,11 +267,30 @@ export function SupplementImports() {
     return copy.syncFailedUnknown;
   }, [copy, errorText]);
 
+  /**
+   * The batch summary. "Already in your ledger" is said only about rows the
+   * phone actually received and found there; files the relay recognised as a
+   * recent re-upload queued nothing, and say so instead.
+   */
+  const batchSummary = useCallback((
+    context: { files: number; accepted: number; rejected: number; alreadyProcessed: number },
+    imported: number,
+  ): string => {
+    if (imported === 0 && context.alreadyProcessed === context.files) return copy.statementsAlreadyProcessed;
+    return interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
+      files: countPhrase(language, copy.filesCount, context.files),
+      rows: countPhrase(language, copy.rowsRead, context.accepted),
+      rejected: context.rejected,
+      imported,
+    });
+  }, [copy, language]);
+
   const finishQueuedImport = useCallback(async (
     files: number,
     accepted: number,
     rejected: number,
     pages: number,
+    alreadyProcessed = 0,
   ): Promise<boolean> => {
     setStatus(interpolate(copy.acceptedFiling, { accepted }));
     try {
@@ -253,9 +299,7 @@ export function SupplementImports() {
       const imported = await syncQueued();
       queuedRetryNeededRef.current = false;
       queuedRetryContextRef.current = null;
-      setStatus(interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
-        files, accepted, rejected, pages, imported,
-      }));
+      setStatus(batchSummary({ files, accepted, rejected, alreadyProcessed }, imported));
       committed();
       return true;
     } catch (e) {
@@ -264,11 +308,11 @@ export function SupplementImports() {
       setStatus(interpolate(copy.acceptedPending, { accepted }));
       setError(interpolate(copy.syncFailed, { reason: syncFailureReason(e) }));
       queuedRetryNeededRef.current = true;
-      queuedRetryContextRef.current = { files, accepted, rejected, pages };
+      queuedRetryContextRef.current = { files, accepted, rejected, pages, alreadyProcessed };
       failed();
       return false;
     }
-  }, [copy, syncFailureReason, syncQueued]);
+  }, [batchSummary, copy, syncFailureReason, syncQueued]);
 
   // Successful upload means the normalized rows are already safe in the relay
   // queue. If the immediate phone-side drain loses a network turn, retry once
@@ -287,12 +331,7 @@ export function SupplementImports() {
         const context = queuedRetryContextRef.current;
         queuedRetryContextRef.current = null;
         setError(null);
-        if (context) {
-          setStatus(interpolate(imported > 0 ? copy.statementsSuccess : copy.statementsNoNew, {
-            ...context,
-            imported,
-          }));
-        }
+        if (context) setStatus(batchSummary(context, imported));
         committed();
       } catch {
         // Keep the queued rows untouched. A later foreground transition gets
@@ -310,7 +349,22 @@ export function SupplementImports() {
       clearTimeout(timer);
       subscription.remove();
     };
-  }, [cfg, copy.statementsNoNew, copy.statementsSuccess, state.privateMode, syncQueued]);
+  }, [batchSummary, cfg, state.privateMode, syncQueued]);
+
+  /** What one successfully uploaded file contributed, in words. */
+  const fileImportedDetail = (accepted: {
+    acceptedRows: number; rejectedRows: number; cardSignRowsSkipped: number; alreadyProcessed: boolean;
+  }): string => {
+    if (accepted.alreadyProcessed) return copy.fileAlreadyProcessed;
+    const rows = countPhrase(language, copy.rowsRead, accepted.acceptedRows);
+    const parts = [accepted.rejectedRows > 0
+      ? interpolate(copy.fileImportedSkipped, { rows, skipped: accepted.rejectedRows })
+      : interpolate(copy.fileImported, { rows })];
+    if (accepted.cardSignRowsSkipped > 0) {
+      parts.push(interpolate(copy.cardSignSkipped, { count: accepted.cardSignRowsSkipped }));
+    }
+    return parts.join(' ');
+  };
 
   const pickAndUpload = async () => {
     if (!cfg || !capabilities || pendingPdfs.length > 0) return;
@@ -318,8 +372,10 @@ export function SupplementImports() {
       setCurrencySheetVisible(true);
       return;
     }
+    const ledgerMoney = state.ledgerMoney;
     setError(null);
     setStatus(null);
+    setFileResults([]);
     const pickedFiles: File[] = [];
     const retainedUris = new Set<string>();
     // Declared outside the try so a failure later in the batch still hands the
@@ -337,22 +393,62 @@ export function SupplementImports() {
       let rejectedRows = 0;
       let pages = 0;
       let uploadedFiles = 0;
+      let alreadyProcessedFiles = 0;
+      const total = picked.assets.length;
+      const fileResults: FileResult[] = [];
       const coverage: { item: StatementImportCoverage | null; format: 'pdf' | 'csv' }[] = [];
+      // The relay rate-limits each format separately; pace each below it.
+      const starts: Record<'pdf' | 'csv', number[]> = { pdf: [], csv: [] };
+      let limitReached = false;
+      // Wait visibly, and give up the wait if the screen goes away.
+      const waitFor = async (ms: number, position: number) => {
+        const until = Date.now() + ms;
+        while (aliveRef.current && Date.now() < until) {
+          setStatus(interpolate(copy.waitingForLimit, {
+            seconds: Math.ceil((until - Date.now()) / 1000), index: position, total,
+          }));
+          await sleep(Math.min(1_000, until - Date.now()));
+        }
+        return aliveRef.current;
+      };
       for (let index = 0; index < picked.assets.length; index += 1) {
         const asset = picked.assets[index];
         const file = new File(asset.uri);
         pickedFiles.push(file);
         const csv = /\.(?:csv|tsv)$/i.test(asset.name) ||
           capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
+        const format = csv ? 'csv' : 'pdf';
+        if (limitReached || !aliveRef.current) {
+          fileResults.push({ name: asset.name, ok: false, detail: copy.fileNotTried });
+          continue;
+        }
+        inFlightUrisRef.current.add(asset.uri);
         try {
-          const accepted = csv
-            ? await uploadCsvStatement(cfg, asset, capabilities, state.ledgerMoney)
-            : await uploadPdfStatement(cfg, asset, capabilities, state.ledgerMoney);
+          let accepted: Awaited<ReturnType<typeof uploadPdfStatement | typeof uploadCsvStatement>> | null = null;
+          for (let attempt = 0; accepted === null; attempt += 1) {
+            const delay = nextUploadDelay(starts[format], Date.now());
+            if (delay > 0 && !(await waitFor(delay, index + 1))) throw new CloudImportError('network');
+            setStatus(interpolate(copy.uploadingProgress, { index: index + 1, total }));
+            starts[format].push(Date.now());
+            try {
+              accepted = csv
+                ? await uploadCsvStatement(cfg, asset, capabilities, ledgerMoney)
+                : await uploadPdfStatement(cfg, asset, capabilities, ledgerMoney);
+            } catch (uploadError) {
+              // One patient retry: pacing keeps the minute limit, so a 429 here
+              // is usually the hourly budget, and a second one ends the batch.
+              if (attempt === 0 && uploadError instanceof CloudImportError && uploadError.code === 'rate_limited' &&
+                  await waitFor(RATE_LIMIT_RETRY_MS, index + 1)) continue;
+              throw uploadError;
+            }
+          }
           acceptedRows += accepted.acceptedRows;
           rejectedRows += accepted.rejectedRows;
           uploadedFiles += 1;
+          if (accepted.alreadyProcessed) alreadyProcessedFiles += 1;
           if ('pages' in accepted && typeof accepted.pages === 'number') pages += accepted.pages;
-          coverage.push({ item: accepted.coverage, format: csv ? 'csv' : 'pdf' });
+          coverage.push({ item: accepted.coverage, format });
+          fileResults.push({ name: asset.name, ok: true, detail: fileImportedDetail(accepted) });
         } catch (e) {
           if (!csv && e instanceof CloudImportError &&
               (e.code === 'pdf_password_required' || e.code === 'pdf_password_incorrect')) {
@@ -362,15 +458,30 @@ export function SupplementImports() {
             // of passwords in memory or asking the user to re-pick skipped
             // files.
             retainedUris.add(asset.uri);
+            fileResults.push({ name: asset.name, ok: false, detail: copy.fileLocked });
             protectedPdfs.push({ asset, file });
             continue;
           }
-          throw e;
+          // Any other failure is this file's, not the batch's: record why and
+          // carry on, so the files that did import still get their coverage
+          // and their rows filed below.
+          if (e instanceof CloudImportError && e.code === 'rate_limited') limitReached = true;
+          fileResults.push({
+            name: asset.name,
+            ok: false,
+            detail: interpolate(copy.fileFailed, {
+              reason: e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e),
+            }),
+          });
+          continue;
+        } finally {
+          inFlightUrisRef.current.delete(asset.uri);
         }
         if (index + 1 < picked.assets.length) {
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       }
+      if (aliveRef.current) setFileResults(fileResults);
       await rememberCoverage(coverage);
       if (protectedPdfs.length > 0) {
         setPendingPdfs(protectedPdfs);
@@ -378,7 +489,10 @@ export function SupplementImports() {
         setError(null);
       }
       if (uploadedFiles > 0) {
-        await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages);
+        await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages, alreadyProcessedFiles);
+      } else {
+        setStatus(null);
+        if (fileResults.some((result) => !result.ok && result.detail !== copy.fileLocked)) failed();
       }
     } catch (e) {
       if (protectedPdfs.length > 0) {
@@ -418,7 +532,14 @@ export function SupplementImports() {
         pdfPassword,
       );
       await rememberCoverage([{ item: accepted.coverage, format: 'pdf' }]);
-      await finishQueuedImport(1, accepted.acceptedRows, accepted.rejectedRows, accepted.pages);
+      const unlockedName = pendingPdf.asset.name;
+      setFileResults((current) => [
+        ...current.filter((result) => result.name !== unlockedName || result.detail !== copy.fileLocked),
+        { name: unlockedName, ok: true, detail: fileImportedDetail(accepted) },
+      ]);
+      await finishQueuedImport(
+        1, accepted.acceptedRows, accepted.rejectedRows, accepted.pages, accepted.alreadyProcessed ? 1 : 0,
+      );
       try { if (pendingPdf.file.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
       setPendingPdfs((current) => current[0]?.file.uri === pendingPdf.file.uri
         ? current.slice(1)
@@ -521,12 +642,43 @@ export function SupplementImports() {
                 />
               </View>
             )}
+            <View style={styles.disclosure}>
+              <Icon name="lock" size={15} color={theme.textSecondary} />
+              <ThemedText type="meta" themeColor="textSecondary" style={styles.messageText}>
+                {copy.uploadDisclosure}
+              </ThemedText>
+            </View>
             <Button
               icon="upload"
               label={busy === 'statement' ? copy.uploading : copy.chooseStatements}
               onPress={() => void pickAndUpload()}
               disabled={!capabilities || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney}
             />
+            {fileResults.length > 0 && (
+              <View style={styles.results}>
+                <ThemedText type="smallBold">{copy.resultsTitle}</ThemedText>
+                {fileResults.map((result, index) => (
+                  <View
+                    key={`${index}:${result.name}`}
+                    style={styles.resultRow}
+                    accessible
+                    accessibilityLabel={`${result.ok ? copy.resultOkLabel : copy.resultFailedLabel}: ${result.name}. ${result.detail}`}
+                  >
+                    <Icon
+                      name={result.ok ? 'check' : 'alert'}
+                      size={15}
+                      color={result.ok ? theme.primary : theme.expense}
+                    />
+                    <View style={styles.cardCopy}>
+                      <ThemedText type="meta" numberOfLines={1}>{result.name}</ThemedText>
+                      <ThemedText type="meta" themeColor={result.ok ? 'textTertiary' : 'expense'}>
+                        {result.detail}
+                      </ThemedText>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
           </Block>
 
           {pendingPdf && (
@@ -650,6 +802,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   actions: { flexDirection: 'row', gap: Spacing.two },
+  disclosure: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
+  results: { gap: Spacing.two },
+  resultRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
   coverageRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.two, gap: Spacing.half },
   coverageHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: Spacing.two, flexWrap: 'wrap' },
   coverageLabel: { flexShrink: 1 },

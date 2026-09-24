@@ -2064,7 +2064,8 @@ const CARD_PAYMENT_DEBIT =
     });
     const accepted = await upload.json();
     ok('statement: both rows of a two-row PDF are accepted',
-      upload.status === 202 && accepted.acceptedRows === 2, JSON.stringify(accepted));
+      upload.status === 202 && accepted.acceptedRows === 2 && accepted.alreadyProcessed === false,
+      JSON.stringify(accepted));
 
     const delivered = { rows: await drainOpened(env, me) };
     ok('statement: and both are delivered to the device', delivered.rows.length === 2);
@@ -2117,8 +2118,11 @@ const CARD_PAYMENT_DEBIT =
     const again = await call(env, 'POST', '/v1/import/pdf', {
       token: me.adminToken, headers: { 'content-type': 'application/pdf' }, body: statement,
     });
+    const againBody = await again.json();
     ok('statement: re-uploading the same PDF queues nothing new',
       again.status === 202 && (await drainOpened(env, me)).length === 0);
+    ok('statement: and the relay says the file was already processed, not that the ledger has it',
+      againBody.alreadyProcessed === true, JSON.stringify(againBody));
 
     // The other half of that, and a second silent-loss defect on this route:
     // the replay key is `pdf:${sha256(bytes)}`, and the digest used to be taken

@@ -24,11 +24,13 @@ for (const platform of ['ios', 'android']) {
         deps['@/lib/capture-executor'] = { createCaptureExecutor: () => ({}) };
         deps['@/lib/cloud-import'] = {
           getImportCapabilities: async active => { requests.push(active); return {}; },
+          clearStatementPickerCache: () => {},
         };
         deps['@/lib/cloud-import-contract'] = { CloudImportError: class extends Error {} };
         deps['@/lib/relay'].getRelayConfig = async () => config;
         h.local('@/lib/supplement-copy', 'src/lib/supplement-copy.ts');
         h.local('@/lib/statement-coverage', 'src/lib/statement-coverage.ts');
+        h.local('@/lib/statement-batch', 'src/lib/statement-batch.ts');
 
         const { SupplementImports } = load(path.join(root, 'src/components/supplement-imports.tsx'), deps);
         const tree = SupplementImports();

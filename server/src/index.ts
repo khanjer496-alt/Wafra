@@ -2094,6 +2094,11 @@ export default {
       if (wake.size === 0 && await queueIsFull(env, device.id)) {
         return json({ error: 'queue_full' }, 429);
       }
+      // Nothing new queued and the queue has room: every row already carried
+      // this upload's replay receipt, i.e. this exact file was processed in
+      // the last 72 hours. Say that, rather than let the phone report
+      // "already in your ledger" about rows it has not looked at.
+      const alreadyProcessed = wake.size === 0;
       // rejectedRows is a count of date-led money lines the parser would not
       // read: without it a statement that half-imported looked, on the phone,
       // like it had imported completely. Counts and coverage only, never rows.
@@ -2105,6 +2110,7 @@ export default {
         // what its minus sign means. A count, never the rows.
         cardSignRowsSkipped: extracted.ambiguousCardSignRows,
         pages: extracted.pages,
+        alreadyProcessed,
         // Coverage means "this range is fully represented locally". Never
         // claim it when the parser explicitly counted rows it refused.
         coverage: extracted.completeRowAccounting && extracted.rejectedRows === 0
@@ -2177,11 +2183,17 @@ export default {
       if (wake.size === 0 && await queueIsFull(env, device.id)) {
         return json({ error: 'queue_full' }, 429);
       }
+      // Nothing new queued and the queue has room: every row already carried
+      // this upload's replay receipt, i.e. this exact file was processed in
+      // the last 72 hours. Say that, rather than let the phone report
+      // "already in your ledger" about rows it has not looked at.
+      const alreadyProcessed = wake.size === 0;
       return json({
         acceptedRows: parsed.rows.length,
         rejectedRows: parsed.rejectedRows,
         totalRows: parsed.totalRows,
         cardSignRowsSkipped: parsed.ambiguousCardSignRows,
+        alreadyProcessed,
         coverage: parsed.rejectedRows === 0 ? statementCoverage(parsed.rows) : null,
       }, 202);
     }
