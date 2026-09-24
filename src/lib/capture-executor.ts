@@ -25,6 +25,7 @@ import type {
   LocalCaptureReviewQualificationCandidate,
 } from '@/lib/types';
 import type { ReviewEntry } from '@/lib/alert-review-tray';
+import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { recordRuntimeOperation } from '@/lib/runtime-performance';
@@ -131,6 +132,15 @@ const hasChanges = (plan: ImportPlan): boolean =>
   Object.keys(plan.batch?.snapshots ?? {}).length > 0 ||
   Object.keys(plan.batch?.bankNames ?? {}).length > 0 ||
   Object.keys(plan.batch?.cardTypes ?? {}).length > 0;
+
+const stageNearMatches = (activeLedger: CaptureLedgerAdapter, plan: ImportPlan) =>
+  stageWalletNearMatches(
+    plan,
+    () => activeLedger.getState().reviewTray,
+    activeLedger.stageReviewAlerts
+      ? (items) => activeLedger.stageReviewAlerts!(items)
+      : undefined,
+  );
 
 const yieldForegroundTurn = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 0));
@@ -299,7 +309,7 @@ export const createCaptureExecutor = ({
     // real operation that could be blocking the JS thread.
     const planStarted = Date.now();
     captureTrace('plan:start', collected.parsed.length);
-    const plan = dependencies.planRows(
+    const planned = dependencies.planRows(
       collected.parsed,
       stateAtPlan,
       collected.newestTs,
@@ -307,6 +317,12 @@ export const createCaptureExecutor = ({
       collected.declined,
     );
     recordRuntimeOperation('capture-plan', Date.now() - planStarted);
+    // Possible Apple Pay duplicates were withheld from the batch. Stage them in
+    // this same turn so the importBatch below (and its cursor) persist with
+    // them, and settle before any commit/ACK below.
+    const nearMatches = stageNearMatches(activeLedger, planned);
+    const plan = nearMatches.plan;
+    reviewAlerts += nearMatches.admitted;
     captureTrace('plan:done', plan.txCount + plan.healedCount, tracing ? Date.now() - planStarted : 0);
     // The parser version is a durable migration receipt. Only the collection
     // that actually started at the beginning of the Android inbox may carry
@@ -369,6 +385,10 @@ export const createCaptureExecutor = ({
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
         }
       }
+      await nearMatches.settle();
+      if (captureStopped(activeLedger, collected.source)) {
+        return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+      }
       await collected.commit();
       captureTrace('routine:done', 0, tracing ? Date.now() - traceStarted : 0);
       return {
@@ -393,6 +413,10 @@ export const createCaptureExecutor = ({
       if (captureStopped(activeLedger, collected.source)) {
         return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
       }
+    }
+    await nearMatches.settle();
+    if (captureStopped(activeLedger, collected.source)) {
+      return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
     }
     await collected.commit();
     captureTrace('routine:done', receipt.ids.length, tracing ? Date.now() - traceStarted : 0);
@@ -457,14 +481,20 @@ export const createCaptureExecutor = ({
     const supplementalTracing = captureTraceEnabled();
     const planStarted = supplementalTracing ? Date.now() : 0;
     captureTrace('plan:start', queued.parsed.length);
-    const plan = dependencies.planRows(queued.parsed, state, newestTs);
+    let plan = dependencies.planRows(queued.parsed, state, newestTs);
     captureTrace('plan:done', plan.txCount + plan.healedCount,
       supplementalTracing ? Date.now() - planStarted : 0);
     let transactionIds: string[] = [];
+    let nearMatchSettle: () => Promise<void> = async () => {};
     if (queued.parsed.length > 0 && hasChanges(plan)) {
       if (supplementalStopped()) return stopped();
       await yieldForegroundTurn();
       if (supplementalStopped()) return stopped();
+      // Same synchronous turn as the importBatch below.
+      const nearMatches = stageNearMatches(activeLedger, plan);
+      plan = nearMatches.plan;
+      reviewAlerts += nearMatches.admitted;
+      nearMatchSettle = nearMatches.settle;
       const saveStarted = supplementalTracing ? Date.now() : 0;
       captureTrace('save:start', plan.txCount + plan.healedCount);
       const receipt = activeLedger.importBatch(plan.batch);
@@ -472,6 +502,20 @@ export const createCaptureExecutor = ({
       await receipt.durable;
       captureTrace('save:done', receipt.ids.length,
         supplementalTracing ? Date.now() - saveStarted : 0);
+      if (supplementalStopped()) return stopped();
+    } else if ((plan.walletNearMatches?.length ?? 0) > 0) {
+      // Only possible Apple Pay duplicates: nothing to post, but their review
+      // items must be durable before the relay copies are acknowledged.
+      if (supplementalStopped()) return stopped();
+      const nearMatches = stageNearMatches(activeLedger, plan);
+      plan = nearMatches.plan;
+      reviewAlerts += nearMatches.admitted;
+      nearMatchSettle = nearMatches.settle;
+      if (hasChanges(plan)) {
+        const receipt = activeLedger.importBatch(plan.batch);
+        transactionIds = receipt.ids;
+        await receipt.durable;
+      }
       if (supplementalStopped()) return stopped();
     } else if (reviewCandidates.length === 0) {
       if (supplementalStopped()) return stopped();
@@ -482,6 +526,7 @@ export const createCaptureExecutor = ({
       if (supplementalStopped()) return stopped();
     }
 
+    await nearMatchSettle();
     if (supplementalStopped()) return stopped();
     await recordForegroundAutomationProof(queued.parsed, cfg);
     if (supplementalStopped()) return stopped();
@@ -559,7 +604,9 @@ export const createCaptureExecutor = ({
         (max, row) => Math.max(max, row.smsTs ?? 0),
         state.lastScanTs,
       );
-      const plan = dependencies.planRows(queued.parsed, state, newestTs);
+      const nearMatches = stageNearMatches(
+        activeLedger, dependencies.planRows(queued.parsed, state, newestTs));
+      const plan = nearMatches.plan;
       if (hasChanges(plan)) {
         await activeLedger.importBatch(plan.batch).durable;
       } else {
@@ -567,6 +614,7 @@ export const createCaptureExecutor = ({
         // failed. The relay copy remains the recovery source until this flush.
         await activeLedger.ensureDurable();
       }
+      await nearMatches.settle();
     }
 
     if (!proofObserved) {

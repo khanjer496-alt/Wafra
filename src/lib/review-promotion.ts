@@ -110,6 +110,12 @@ const possibleApplePayDuplicate = (
     walletMerchants: readonly string[] | null;
     /** The date the promotion would record; clockless rows compare by day. */
     date: string;
+    /**
+     * The planner already flagged this bank alert against a Wallet row on a
+     * card it may be (possible-apple-pay-duplicate): compare Wallet rows on
+     * any account, so choosing another account still asks first.
+     */
+    anyWalletAccount?: boolean;
   },
 ): boolean => {
   if (candidate.type !== 'expense' || !Number.isFinite(candidate.observedAt)) return false;
@@ -120,8 +126,9 @@ const possibleApplePayDuplicate = (
     ? new Set([candidate.date, toISODate(new Date(candidate.observedAt))])
     : null;
   return transactions.some((existing) => {
-    if (existing.type !== 'expense' || existing.accountId !== candidate.accountId ||
-      existing.amountFils !== candidate.amountFils) return false;
+    if (existing.type !== 'expense' || existing.amountFils !== candidate.amountFils) return false;
+    if (existing.accountId !== candidate.accountId &&
+      !(candidate.anyWalletAccount && !merchants && isApplePayWalletRow(existing))) return false;
     const timestamp = transactionTime(existing)?.getTime();
     if (timestamp === undefined || !Number.isFinite(timestamp)) {
       // Prompt-only: a clockless non-Wallet row on the same local day.
@@ -291,6 +298,7 @@ export const planReviewPromotion = (
       observedAt: item.observedAt,
       walletMerchants: walletReview ? [transaction.title, event.merchant.value ?? ''] : null,
       date: transaction.date,
+      anyWalletAccount: item.attentionReason === 'possible-apple-pay-duplicate',
     })) return { outcome: 'refused', reason: 'possible-duplicate' };
     return {
       outcome: 'added', ledgerMoney: money,
@@ -350,6 +358,7 @@ export const planReviewPromotion = (
   if (!separatePurchaseConfirmed && possibleApplePayDuplicate(state.transactions, {
     type: input.type, accountId: account.id, amountFils, observedAt: item.observedAt, walletMerchants: null,
     date: input.date,
+    anyWalletAccount: item.attentionReason === 'possible-apple-pay-duplicate',
   })) return { outcome: 'refused', reason: 'possible-duplicate' };
 
   const resolvedTray = resolveReviewAlert(state.reviewTray, item.id, 'added', now);

@@ -27,8 +27,15 @@ export const appleMessageReviewIdentity = (
 type ReviewableFamily = Extract<AlertFamily,
   'purchase' | 'transfer' | 'cash-withdrawal' | 'refund' | 'fee' | 'utility' | 'recurring-payment'>;
 
+/**
+ * Why a review needs a closer look before adding. A notification replay may be
+ * an OS re-delivery; a possible Apple Pay duplicate is a bank alert that
+ * nearly matches an already-recorded Wallet purchase. Both only ask.
+ */
+export type ReviewAttentionReason = 'possible-notification-replay' | 'possible-apple-pay-duplicate';
+
 export interface ReviewAlert {
-  attentionReason?: 'possible-notification-replay';
+  attentionReason?: ReviewAttentionReason;
   kind?: 'registered';
   id: string;
   sourceKey: string;
@@ -52,7 +59,7 @@ export interface ReviewAlert {
 }
 
 export interface UniversalReviewAlert {
-  attentionReason?: 'possible-notification-replay';
+  attentionReason?: ReviewAttentionReason;
   kind: 'universal';
   id: string;
   sourceKey: string;
@@ -562,7 +569,9 @@ const normalizeReviewEntry = (value: unknown, now: number): ReviewEntry | null =
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const common = value as ReviewEntry;
   const attention = common.channel === 'push' && common.attentionReason === 'possible-notification-replay'
-    ? { attentionReason: 'possible-notification-replay' as const } : {};
+    ? { attentionReason: 'possible-notification-replay' as const }
+    : common.attentionReason === 'possible-apple-pay-duplicate'
+      ? { attentionReason: 'possible-apple-pay-duplicate' as const } : {};
   if (!opaqueKey(common.id) || !reviewSourceKey(common.sourceKey) ||
   !validTimestamp(common.observedAt) || !captureSourceTimeMatches(common.sourceKey, common.observedAt) || !validTimestamp(common.expiresAt) ||
   common.expiresAt <= common.observedAt || common.expiresAt > now + REVIEW_ALERT_TTL_MS) return null;

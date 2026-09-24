@@ -54,21 +54,39 @@ test('Wallet reviewed before its SMS binds identity once while preserving the ex
   }
 });
 
-test('different merchant, different account, unknown instrument and late alerts stay separate real purchases', () => {
+test('different merchant, different account, unknown instrument and late alerts never bind automatically', () => {
+  // Same amount on a compatible card within ten minutes: never bound, never
+  // posted silently either. The alert goes to Review as a possible duplicate
+  // (wallet-near-match.test.cjs covers that contract end to end).
   for (const patch of [
-    { merchant: 'COSTA COFFEE' }, { merchant: '' }, { card: { kind: 'credit', last4: '5528' } },
-    { card: undefined }, { card: { kind: 'unknown', last4: '4417' } },
-    { card: { kind: 'credit', last4: '9999' } }, { smsTs: at + 120_001 },
-    { bankHint: undefined, sender: undefined }, { bankHint: 'Emirates NBD' },
+    { merchant: 'COSTA COFFEE' }, { merchant: '' }, { card: { kind: 'unknown', last4: '4417' } },
+    { smsTs: at + 120_001 }, { bankHint: undefined, sender: undefined },
+  ]) {
+    const result = plan(sms(patch));
+    assert.equal(result.txCount, 0, JSON.stringify(patch));
+    assert.equal(result.walletNearMatches.length, 1, JSON.stringify(patch));
+    assert.ok(!result.batch.updates.some(x => x.id === 'wallet-confirmed'), JSON.stringify(patch));
+  }
+  // A different card, an unknown instrument or a contradicting issuer is a
+  // separate real purchase and still posts.
+  for (const patch of [
+    { card: { kind: 'credit', last4: '5528' } }, { card: undefined },
+    { card: { kind: 'credit', last4: '9999' } }, { bankHint: 'Emirates NBD' },
   ]) {
     const result = plan(sms(patch));
     assert.equal(result.txCount, 1, JSON.stringify(patch));
+    assert.equal(result.walletNearMatches.length, 0, JSON.stringify(patch));
     assert.ok(!result.batch.updates.some(x => x.id === 'wallet-confirmed'), JSON.stringify(patch));
   }
-  for (const accounts of [[], [{ ...state().accounts[0], bankName: undefined }],
+  for (const accounts of [[{ ...state().accounts[0], bankName: undefined }],
     [{ ...state().accounts[0], cardType: undefined }], [...state().accounts, { ...state().accounts[0], id: 'same-suffix' }]]) {
-    assert.equal(plan(sms(), state(wallet(), { accounts })).txCount, 1);
+    const result = plan(sms(), state(wallet(), { accounts }));
+    assert.equal(result.txCount, 0);
+    assert.equal(result.walletNearMatches.length, 1);
+    assert.ok(!result.batch.updates.some(x => x.id === 'wallet-confirmed'));
   }
+  // The Wallet row's own card is gone: nothing ties the alert to it.
+  assert.equal(plan(sms(), state(wallet(), { accounts: [] })).txCount, 1);
 });
 
 test('Wallet never joins generic amount, title, statement or push heuristics but retains exact receipt identity', () => {
@@ -95,15 +113,20 @@ test('a bound Wallet row cannot swallow the next equal purchase and ambiguous Wa
   const result = buildImportPlan([first, second], state(), 0, new Date(at + 60_000));
   assert.equal(result.txCount, 1);
   const ambiguous = state(wallet(), { transactions: [wallet(), wallet({ id: 'other-wallet', smsKey: 'apple_pay_review_source_' + '2'.repeat(32), ts: at + 500 })] });
-  assert.equal(plan(first, ambiguous).txCount, 1, 'two possible receipts cannot authorize choosing one');
+  const ambiguousPlan = plan(first, ambiguous);
+  assert.equal(ambiguousPlan.batch.updates.length, 0, 'two possible receipts cannot authorize choosing one');
+  assert.equal(ambiguousPlan.txCount, 0, 'nor may the alert post silently beside them');
+  assert.equal(ambiguousPlan.walletNearMatches.length, 1);
 });
 
 test('realistic bank descriptors and late SMS never merge automatically into a Wallet row', () => {
   // Automatic binding writes without asking, so it stays exact. Wallet-side
   // promotion asks the user about these pairs instead (ios-apple-pay-promotion).
+  // Nor does the planner post them as a silent second row: they go to Review.
   for (const patch of [{ merchant: 'CARREFOUR MOE DXB' }, { smsTs: at + 5 * 60_000 }]) {
     const result = plan(sms(patch));
-    assert.equal(result.txCount, 1, JSON.stringify(patch));
+    assert.equal(result.txCount, 0, JSON.stringify(patch));
+    assert.equal(result.walletNearMatches.length, 1, JSON.stringify(patch));
     assert.ok(!result.batch.updates.some(x => x.id === 'wallet-confirmed'), JSON.stringify(patch));
   }
 });
@@ -137,15 +160,16 @@ test('an SMS the generic duplicate guard already attributes to a stored bank row
   assert.ok(!result.batch.updates.some(x => x.id === 'wallet-confirmed'), 'one SMS must not explain two rows');
 });
 
-test('a non-confident account resolution never binds; the SMS stays a visible separate row', () => {
+test('a non-confident account resolution never binds; the SMS goes to Review, not a silent second row', () => {
   // A sole known-bank default makes a second card match this suffix for the
   // resolver (which then refuses to choose) while the Wallet rule still sees
   // exactly one ADIB card. The resolution gate, not the Wallet rule, decides.
   const defaulted = { id: 'default-card', name: 'ENBD card', kind: 'card', cardType: 'credit', last4: '4417', bankName: 'Emirates NBD' };
   const result = plan(sms(), state(wallet(), { knownBanks: ['Emirates NBD'], accounts: [...state().accounts, defaulted] }));
   assert.ok(!result.batch.updates.some(x => x.id === 'wallet-confirmed'));
-  assert.equal(result.txCount, 1);
-  assert.notEqual(result.batch.transactions[0].accountId, 'chosen-card');
+  assert.equal(result.txCount, 0);
+  assert.equal(result.walletNearMatches.length, 1, 'the ADIB suffix still fits the Wallet card: ask');
+  assert.notEqual(result.walletNearMatches[0].transaction.accountId, 'chosen-card');
 });
 
 test('binding still records the bank-quoted balance snapshot for the confidently resolved card', () => {

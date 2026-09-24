@@ -20,6 +20,7 @@ import { isProActive } from '@/lib/purchases';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { recordRuntimeOperation } from '@/lib/runtime-performance';
+import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import { useStore } from '@/lib/store';
 
 type HistoryScanPage = ScanResult & HistoryImportPage;
@@ -177,8 +178,13 @@ export function useHistoryImport(): void {
       if (!canCommit()) return false;
       const saveStartedAt = Date.now();
       const applyStartedAt = Date.now();
+      // Possible Apple Pay duplicates were withheld from the batch. Stage their
+      // Review items in this same turn so the page write below carries them;
+      // a full Review lane posts the alert instead of dropping it.
+      const nearMatches = stageWalletNearMatches(
+        plan, () => getStateSnapshot().reviewTray, (items) => stageReviewAlerts(items));
       const receipt = importBatch({
-          ...plan.batch,
+          ...nearMatches.plan.batch,
           parserRereadComplete: page.inboxHistoryComplete,
           historyImport: next,
       });
@@ -190,6 +196,7 @@ export function useHistoryImport(): void {
         recordRuntimeOperation('history-persist-page', Date.now() - persistStartedAt);
         recordRuntimeOperation('history-save-page', Date.now() - saveStartedAt);
       }
+      await nearMatches.settle();
       markLaunchPhase('first-history-page');
       // Never acknowledge transient native rows before the ledger write.
       // A pause during persistence leaves them available for safe replay.

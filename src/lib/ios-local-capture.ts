@@ -12,6 +12,7 @@ import {
   reviewCaptureBacklog,
 } from '@/lib/alert-review-tray';
 import { migrateLegacyLedgerMoney } from '@/lib/ledger-money';
+import { settleWalletNearMatches, walletNearMatchesRetained } from '@/lib/wallet-near-match';
 import { createIosNotificationReplayGuard } from '@/lib/ios-notification-replay';
 import {
   currencyConflictReview,
@@ -663,6 +664,25 @@ export function createIosLocalCaptureCoordinator(
         (mapping) => mapping.qualification,
       );
 
+      // Messages withheld as possible Apple Pay duplicates. Their Review items
+      // are staged in this same synchronous turn as the import below, and each
+      // record is acknowledged only once its item is retained. A Review lane
+      // that cannot hold one without evicting money keeps the record queued.
+      const nearMatchSettlement = settleWalletNearMatches(
+        plan, input.ledger.getState().reviewTray, now.getTime(), 'defer');
+      const nearMatchRecords = (plan.walletNearMatches ?? []).map((match) => {
+        const index = outcomes.findIndex((outcome) => outcome.kind === 'parsed' && outcome.row === match.row);
+        if (index < 0) throw sourceFreePageError('Local capture Apple Pay review lost its record');
+        return { id: page[index].preflight.id, review: match.review,
+          deferred: nearMatchSettlement.deferred.includes(match) };
+      });
+      let nearMatchReceipt: { admitted: number; durable: Promise<void> } | null = null;
+      if (nearMatchSettlement.reviews.length > 0) {
+        if (!input.ledger.stageReviewAlerts) throw sourceFreePageError('Local capture requires review staging');
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        nearMatchReceipt = input.ledger.stageReviewAlerts(nearMatchSettlement.reviews);
+      }
+
       let imported = 0;
       let importedDeclineIds: string[] = [];
       if (planHasChanges(plan)) {
@@ -694,6 +714,17 @@ export function createIosLocalCaptureCoordinator(
         await input.ledger.ensureDurable();
         if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
         requireLedgerGeneration(input.ledger, pageGeneration);
+      }
+
+      if (nearMatchReceipt) {
+        await nearMatchReceipt.durable;
+        if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
+        requireLedgerGeneration(input.ledger, pageGeneration);
+        if (!Number.isInteger(nearMatchReceipt.admitted) || nearMatchReceipt.admitted < 0 ||
+          nearMatchReceipt.admitted > nearMatchSettlement.reviews.length) {
+          throw sourceFreePageError('Local capture review receipt was refused');
+        }
+        totals.reviews += nearMatchReceipt.admitted;
       }
 
       totals.imported += imported;
@@ -745,6 +776,13 @@ export function createIosLocalCaptureCoordinator(
           reviewTray?.tombstones?.some(entry => entry.sourceKey === item.sourceKey && entry.expiresAt > now.getTime());
         return retained ? [] : [page[index].preflight.id];
       }));
+      for (const record of nearMatchRecords) {
+        if (record.deferred ||
+          !walletNearMatchesRetained(reviewTray, [record.review], now.getTime())) {
+          deferredReviewIds.add(record.id);
+          deferredReviewRecords.add(record.id);
+        }
+      }
       const acknowledgedIds = page.map(record => record.preflight.id).filter(id => !deferredReviewIds.has(id));
       if (acknowledgedIds.length > 0) await input.native.acknowledgeRecords(acknowledgedIds);
       if (captureOptedOut(input.ledger)) return stopped(firstCapturedAt);
