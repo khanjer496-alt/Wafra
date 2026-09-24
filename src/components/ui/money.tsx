@@ -6,7 +6,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { formatAmount } from '@/lib/format';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
-import { currencyDisplayLabel, formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { currencyDisplayLabel, currencyPlacement, formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 
 type Sign = 'none' | 'auto' | 'minus' | 'plus';
 
@@ -75,14 +75,22 @@ export function Money({
     : formatAmount(Math.abs(fils), { decimals });
   const amount = `${signGlyph(fils, sign)}${value}`;
   const label = `${prefix ? `${currency} ` : ''}${amount}`;
+  // The locale's own pattern: "1.234,56 €" in de-DE, "$1,234.56" in en-US;
+  // AED/SAR and any code-labelled currency stay "AED 1,234.56". The screen
+  // reader label above always speaks the ISO code first.
+  const placement = currencyPlacement(currency);
+  const currencyNode = prefix ? <CurrencyPrefix label={currency} /> : null;
+  const figure = (
+    <ThemedText type={type} tabular style={[styles.value, color ? { color } : undefined]}>
+      {amount}
+    </ThemedText>
+  );
+  const [first, second] = placement.position === 'after' ? [figure, currencyNode] : [currencyNode, figure];
   return (
-    <View accessible accessibilityRole="text" accessibilityLabel={label} style={[styles.inline, style]}>
-      {prefix && (
-        <CurrencyPrefix label={currency} />
-      )}
-      <ThemedText type={type} tabular style={[styles.value, color ? { color } : undefined]}>
-        {amount}
-      </ThemedText>
+    <View accessible accessibilityRole="text" accessibilityLabel={label}
+      style={[styles.inline, !placement.spaced && styles.tight, style]}>
+      {first}
+      {second}
     </View>
   );
 }
@@ -160,6 +168,7 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     gap: Spacing.two - 2,
   },
+  tight: { gap: 1 },
   value: { flexShrink: 1, minWidth: 0 },
   field: {
     gap: Spacing.two,

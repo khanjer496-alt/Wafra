@@ -172,6 +172,48 @@ assert.equal(money.formatMinorUnitsForInput(123400, AED, conv('de-DE')), '1234')
 assert.equal(money.formatMinorUnitsForInput(123400, AED, conv('de-DE'), { decimals: true }), '1234,00');
 assert.equal(money.formatMinorUnitsForInput(1234567, JPY, conv('en-US'), { decimals: true }), '1234567');
 
+/* ── currency placement follows the locale's own currency pattern ───────── */
+const place = (code, locale) => JSON.stringify({ ...money.currencyPlacement(code, locale) });
+const at = (label, position, spaced) => JSON.stringify({ label, position, spaced });
+assert.equal(place('EUR', 'de-DE'), at('€', 'after', true), 'de-DE: 1.234,56 €');
+assert.equal(place('EUR', 'fr-FR'), at('€', 'after', true), 'fr-FR: 1 234,56 €');
+assert.equal(place('USD', 'en-US'), at('$', 'before', false), 'en-US: $1,234.56');
+assert.equal(place('INR', 'en-IN'), at('₹', 'before', false));
+assert.equal(place('JPY', 'ja-JP'), at('￥', 'before', false));
+assert.equal(place('CAD', 'en-US'), at('CA$', 'before', false));
+for (const [code, locale] of [['AED', 'en-AE'], ['AED', 'ar-AE'], ['SAR', 'ar-SA'], ['SAR', 'en-SA'], ['AED', 'de-DE'], ['KWD', 'fr-FR'], ['USD', null]]) {
+  assert.equal(place(code, locale), at(code, 'before', true), `${code} in ${locale} keeps "CODE 1,234"`);
+}
+const text = (minor, s, locale) => money.formatMoneyText(minor, s, { conventions: conv(locale), locale });
+assert.equal(text(123456, EUR, 'de-DE'), '1.234,56\u00A0€');
+assert.equal(text(123456, EUR, 'fr-FR'), `1${conv('fr-FR').group}234,56\u00A0€`);
+assert.equal(text(123456, spec('USD'), 'en-US'), '$1,234.56');
+assert.equal(text(-123456, spec('USD'), 'en-US'), '-$1,234.56');
+assert.equal(text(-123456, EUR, 'de-DE'), '-1.234,56\u00A0€');
+assert.equal(text(1234567, KWD, 'de-DE'), 'KWD 1.234,567');
+assert.equal(text(123456, AED, 'ar-AE'), 'AED 1,234.56');
+assert.equal(text(123456, AED, null), 'AED 1,234.56');
+
+/* ── device Region comes from expo-localization, not the language tag ──── */
+{
+  const uaeInEnglish = money.deviceMoneyLocale({
+    languageTag: 'en-US', languageCode: 'en', languageRegionCode: 'US', regionCode: 'AE',
+    decimalSeparator: '.', digitGroupingSeparator: ',',
+  });
+  assert.equal(uaeInEnglish.locale, 'en-AE');
+  assert.equal(uaeInEnglish.region, 'AE');
+  assert.equal(money.deviceMoneyLocale({ languageTag: 'de-DE', languageCode: 'de', languageRegionCode: 'DE' }).region, 'DE');
+  assert.equal(money.deviceMoneyLocale({ languageTag: 'en', languageCode: 'en' }).region, null);
+  assert.equal(money.deviceMoneyLocale(undefined), null);
+  try {
+    money.setDisplayMoneyLocale(uaeInEnglish);
+    assert.equal(money.displayRegion(), 'AE');
+  } finally {
+    money.setDisplayMoneyLocale(null);
+  }
+  assert.equal(money.displayRegion(), null);
+}
+
 /* ── currency label: symbol only when the locale makes it unambiguous ───── */
 const label = (code, locale) => money.currencyDisplayLabel(code, locale);
 assert.equal(label('AED', 'en-AE'), 'AED', 'AED keeps its ISO code');

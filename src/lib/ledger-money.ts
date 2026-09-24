@@ -171,7 +171,45 @@ export interface DeviceMoneyLocale {
   decimalSeparator?: string | null;
   /** expo-localization's `digitGroupingSeparator` for the device region. */
   groupSeparator?: string | null;
+  /** The device Region (ISO 3166 alpha-2), e.g. "AE" on an en-US phone in the UAE. */
+  region?: string | null;
 }
+
+/** The subset of an expo-localization `Locale` that money display reads. */
+export interface ExpoLocaleLike {
+  languageTag?: string | null;
+  languageCode?: string | null;
+  regionCode?: string | null;
+  languageRegionCode?: string | null;
+  decimalSeparator?: string | null;
+  digitGroupingSeparator?: string | null;
+}
+
+const regionOf = (value: string | null | undefined): string | null => {
+  const code = value?.trim().toUpperCase();
+  return code && /^[A-Z]{2}$/.test(code) ? code : null;
+};
+
+/**
+ * Map expo-localization's first Locale onto the money display settings.
+ *
+ * The Region is `regionCode` — the device's Region setting, which on a UAE
+ * phone whose language is English (United States) is "AE" — and only falls
+ * back to the language's own region when the device reports none. The
+ * language tag never decides it: that is how an en-US phone in Dubai would
+ * get month-first US dates.
+ */
+export const deviceMoneyLocale = (locale: ExpoLocaleLike | null | undefined): DeviceMoneyLocale | null => {
+  if (!locale) return null;
+  const region = regionOf(locale.regionCode) ?? regionOf(locale.languageRegionCode);
+  const language = locale.languageCode?.trim() || locale.languageTag?.split(/[-_]/)[0] || null;
+  return {
+    locale: language && region ? `${language}-${region}` : locale.languageTag ?? language,
+    decimalSeparator: locale.decimalSeparator ?? null,
+    groupSeparator: locale.digitGroupingSeparator ?? null,
+    region,
+  };
+};
 
 /**
  * Number conventions for a device: the locale supplies the grouping pattern,
@@ -193,7 +231,8 @@ export const numberConventionsForLocale = (input: DeviceMoneyLocale): NumberConv
 
 let displayConventions: NumberConventions = { ...CANONICAL_NUMBER_CONVENTIONS };
 let displayLocale: string | null = null;
-const labelCache = new Map<string, string>();
+let deviceRegion: string | null = null;
+const placementCache = new Map<string, CurrencyPlacement>();
 
 const supportedLocale = (locale: string | null | undefined): string | null => {
   const tag = locale?.trim();
@@ -213,53 +252,85 @@ const supportedLocale = (locale: string | null | undefined): string | null => {
 export const setDisplayMoneyLocale = (input: DeviceMoneyLocale | null): void => {
   displayConventions = input ? numberConventionsForLocale(input) : { ...CANONICAL_NUMBER_CONVENTIONS };
   const locale = input ? supportedLocale(input.locale) : null;
-  if (locale !== displayLocale) labelCache.clear();
+  if (locale !== displayLocale) placementCache.clear();
   displayLocale = locale;
+  deviceRegion = regionOf(input?.region);
 };
 
 export const displayNumberConventions = (): NumberConventions => displayConventions;
+
+/** The device Region last adopted, or null when none is known. */
+export const displayRegion = (): string | null => deviceRegion;
 
 const ARABIC_SCRIPT = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
 const LETTERS_ONLY = /^[A-Za-z]+$/;
 
 /**
- * The label to print in front of an amount: the currency's symbol when the
- * device locale gives it an unambiguous one, else the ISO code.
- *
- * CLDR's `symbol` form is already disambiguated for the locale — USD is "$"
- * in en-US but "US$" in en-CA, CAD is "CA$" in en-US — whereas `narrowSymbol`
- * prints a bare "$" for every dollar, so it is never used. A symbol that is
- * the code itself, letters only ("CHF"), or Arabic script keeps the code: the
- * UAE and Saudi UIs, English and Arabic, have always shown "AED"/"SAR". This
- * is the visual label only; accessibility labels keep speaking the ISO code.
+ * Where a currency sits relative to its figure in the device locale.
+ * `spaced` is whether the locale separates them ("1.234,56 €" vs "$1,234.56").
  */
-export const currencyDisplayLabel = (code: string, locale: string | null = displayLocale): string => {
+export interface CurrencyPlacement {
+  label: string;
+  position: 'before' | 'after';
+  spaced: boolean;
+}
+
+const CODE_PLACEMENT = (iso: string): CurrencyPlacement => ({ label: iso, position: 'before', spaced: true });
+const DIGITS = /[\d\u0660-\u0669\u06F0-\u06F9]/;
+const BIDI = /[\u200E\u200F\u061C]/g;
+const SPACE = /[\s\u00A0\u202F]/;
+
+/**
+ * The currency label and its position for `code` in the device locale.
+ *
+ * The label is the currency's symbol when the locale gives it an unambiguous
+ * one, else the ISO code. CLDR's `symbol` form is already disambiguated for
+ * the locale — USD is "$" in en-US but "US$" in en-CA, CAD is "CA$" in en-US —
+ * whereas `narrowSymbol` prints a bare "$" for every dollar, so it is never
+ * used. A symbol that is the code itself, letters only ("CHF"), or Arabic
+ * script keeps the code, placed before the figure with a space exactly as the
+ * UAE and Saudi UIs, English and Arabic, have always shown "AED 1,234.56".
+ *
+ * The position and spacing are read from `Intl.NumberFormat#format` output
+ * (text before the first digit is a prefix), not formatToParts, which Hermes'
+ * Apple Intl has not fully implemented. Visual only: accessibility labels
+ * keep speaking the ISO code.
+ */
+export const currencyPlacement = (code: string, locale: string | null = displayLocale): CurrencyPlacement => {
   const iso = code.trim().toUpperCase();
-  if (!locale || !/^[A-Z]{3}$/.test(iso)) return iso;
+  if (!locale || !/^[A-Z]{3}$/.test(iso)) return CODE_PLACEMENT(iso);
   const key = `${locale}|${iso}`;
-  const cached = labelCache.get(key);
-  if (cached !== undefined) return cached;
-  let label = iso;
+  const cached = placementCache.get(key);
+  if (cached) return cached;
+  let placement = CODE_PLACEMENT(iso);
   try {
-    // `format` minus digits, marks and spacing, not formatToParts, which
-    // Hermes' Apple Intl has not fully implemented.
-    const symbol = new Intl.NumberFormat(locale, {
+    const text = new Intl.NumberFormat(locale, {
       style: 'currency', currency: iso, currencyDisplay: 'symbol',
       minimumFractionDigits: 0, maximumFractionDigits: 0,
-    }).format(1)
-      .replace(/[\d\u0660-\u0669\u06F0-\u06F9]/g, '')
-      .replace(/[\s\u00A0\u202F\u200E\u200F\u061C]/g, '')
-      .trim();
-    if (symbol && symbol.toUpperCase() !== iso && !LETTERS_ONLY.test(symbol) &&
+    }).format(1).replace(BIDI, '');
+    const digit = text.search(DIGITS);
+    const before = digit > 0 ? text.slice(0, digit) : '';
+    const after = digit >= 0 ? text.slice(digit + 1) : '';
+    const symbol = text.replace(new RegExp(DIGITS.source, 'g'), '').replace(/[\s\u00A0\u202F]/g, '').trim();
+    if (digit >= 0 && symbol && symbol.toUpperCase() !== iso && !LETTERS_ONLY.test(symbol) &&
       !ARABIC_SCRIPT.test(symbol) && symbol.length <= 4) {
-      label = symbol;
+      const prefix = before.trim().length > 0;
+      placement = {
+        label: symbol,
+        position: prefix ? 'before' : 'after',
+        spaced: prefix ? SPACE.test(before.slice(-1)) : SPACE.test(after.charAt(0)),
+      };
     }
   } catch {
-    label = iso;
+    placement = CODE_PLACEMENT(iso);
   }
-  labelCache.set(key, label);
-  return label;
+  placementCache.set(key, placement);
+  return placement;
 };
+
+/** The visual currency label alone: symbol or ISO code (see currencyPlacement). */
+export const currencyDisplayLabel = (code: string, locale: string | null = displayLocale): string =>
+  currencyPlacement(code, locale).label;
 
 const THOUSANDS_GROUPS = /^\d{1,3}(?:,\d{3})+$/;
 const INDIAN_GROUPS = /^\d{1,2}(?:,\d{2})*,\d{3}$/;
@@ -382,6 +453,33 @@ export const formatMinorUnitsForInput = (
   grouping: false,
   decimals: options?.decimals === true ? true : undefined,
 });
+
+/**
+ * A whole visual money string in the device's pattern: "1.234,56 €" in
+ * de-DE, "$1,234.56" in en-US, "AED 1,234.56" wherever AED shows its code.
+ * The figure is formatMinorUnits' exact output; a symbol is joined with a
+ * no-break space so it never wraps away from its figure. Not for
+ * accessibility labels, which should speak the ISO code.
+ */
+export const formatMoneyText = (
+  minorUnits: number,
+  spec: LedgerMoneySpec,
+  options?: { decimals?: boolean; conventions?: NumberConventions; locale?: string | null },
+): string => {
+  const placement = currencyPlacement(spec.currency, options?.locale === undefined ? displayLocale : options.locale);
+  const figure = formatMinorUnits(Math.abs(minorUnits), spec, {
+    decimals: options?.decimals,
+    conventions: options?.conventions,
+  });
+  const sign = minorUnits < 0 && /[1-9]/.test(figure) ? '-' : '';
+  if (placement.label === spec.currency && placement.position === 'before') {
+    return `${placement.label} ${sign}${figure}`;
+  }
+  const gap = placement.spaced ? '\u00A0' : '';
+  return placement.position === 'before'
+    ? `${sign}${placement.label}${gap}${figure}`
+    : `${sign}${figure}${gap}${placement.label}`;
+};
 
 /**
  * Coarse nominal scale of a currency against the launch AED/SAR baseline, as

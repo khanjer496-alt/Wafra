@@ -349,8 +349,39 @@ ok('long digit runs are masked', !/\b\d{5,}\b/.test(diag));
   ok('Arabic keeps Latin digits in a Saudi Region', build('ar', 'SA').includes('123.45') && !/[٠-٩]/.test(build('ar', 'SA')));
   ok('the locale tag pairs the UI language with the device Region',
     reportLocale('en', 'DE') === 'en-DE' && reportLocale('ar', 'AE') === 'ar-AE-u-nu-latn' &&
-      reportLocale('en', null) === 'en' && reportLocale('en', 'not a region') === 'en' &&
       coverageLocale('en', 'IN') === 'en-IN');
+  ok('without a device Region the launch-tested en-AE/ar-AE locale is kept',
+    reportLocale('en', null) === 'en-AE' && reportLocale('ar', undefined) === 'ar-AE' &&
+      reportLocale('en', 'not a region') === 'en-AE' && coverageLocale('ar', null) === 'ar-AE' &&
+      build('en', undefined).includes('10 Jul 2026'));
+  // A UAE phone whose language is English (United States): expo-localization
+  // reports regionCode AE, and that — not the en-US language tag — decides.
+  const { setDisplayMoneyLocale, deviceMoneyLocale, displayRegion } = require('./build/ledger-money.js');
+  try {
+    setDisplayMoneyLocale(deviceMoneyLocale({
+      languageTag: 'en-US', languageCode: 'en', languageRegionCode: 'US', regionCode: 'AE',
+      decimalSeparator: '.', digitGroupingSeparator: ',',
+    }));
+    ok('an en-US phone in the UAE Region keeps day-first UAE dates',
+      displayRegion() === 'AE' && build('en', displayRegion()).includes('10 Jul 2026') &&
+        !build('en', displayRegion()).includes('Jul 10, 2026') &&
+        formatCoverageMonth('2026-07', 'en', displayRegion()) === formatCoverageMonth('2026-07', 'en', null));
+    setDisplayMoneyLocale(deviceMoneyLocale({ languageTag: 'en-US', languageCode: 'en', languageRegionCode: 'US' }));
+    ok('the language region is used only when the device reports no Region', displayRegion() === 'US');
+    setDisplayMoneyLocale(deviceMoneyLocale({ languageTag: 'en', languageCode: 'en' }));
+    ok('no Region at all leaves the report on its launch locale',
+      displayRegion() === null && build('en', displayRegion()).includes('10 Jul 2026'));
+  } finally {
+    setDisplayMoneyLocale(null);
+  }
+  const { summarizeCoverage } = require('./build/statement-coverage.js');
+  const entries = [{ id: 'k:1', sourceKey: 'card:credit:4821', label: 'Card', startDate: '2026-01-01',
+    endDate: '2026-05-31', importedAt: 1, format: 'pdf' }];
+  const today = new Date('2026-07-15T12:00:00Z');
+  const summary = (language, region) => JSON.stringify(summarizeCoverage(entries, language, today, region));
+  ok('coverage summaries take the Region through, launch locale without one',
+    summary('en', 'AE') === summary('en', null) && summary('en', 'US').includes('May 2026') &&
+      !/[\u0660-\u0669]/.test(summary('ar', 'SA')) && summary('ar', null) === summary('ar', 'AE'));
   ok('coverage months follow the Region and keep Latin digits in Arabic',
     formatCoverageMonth('2026-07', 'en', 'US') === 'Jul 2026' &&
       !/[٠-٩]/.test(formatCoverageMonth('2026-07', 'ar', 'SA')) &&

@@ -8,7 +8,7 @@ export interface ExpenseReportOptions {
   /** Persisted ISO minor-unit exponent for the ledger's integer amounts. */
   currencyExponent?: 0 | 2 | 3;
   language: 'en' | 'ar';
-  /** ISO region for date/number conventions; defaults to the device's. */
+  /** Device Region (expo-localization) for dates and numbers; en-AE/ar-AE without one. */
   region?: string | null;
   from: string;
   to: string;
@@ -105,31 +105,22 @@ export function reportExpenses(
 /**
  * The UI language in the device's Region: "en-DE", "ar-SA-u-nu-latn".
  *
- * Replaces a hard-coded en-AE/ar-AE, which gave every user UAE date and
- * number conventions. Arabic keeps Latin digits, as everywhere else in the
- * app. Without a usable Region the bare language is used. `region` overrides
- * the device's for tests. (Kept local rather than shared so this module stays
- * import-free; statement-coverage.ts carries the same rule.)
+ * `region` is expo-localization's device Region (ledger-money's
+ * displayRegion()), passed in by the caller — never derived from the
+ * language tag, so an English (US) phone in the UAE keeps day-first UAE
+ * dates. With no usable Region this is the launch-tested en-AE/ar-AE, exactly
+ * as before. Arabic keeps Latin digits, as everywhere else in the app.
+ * (statement-coverage.ts carries the same rule; both stay import-free.)
  */
-export function reportLocale(language: string, region: string | null = deviceRegion()): string {
+export function reportLocale(language: string, region?: string | null): string {
   const base = language === 'ar' ? 'ar' : 'en';
-  const numbering = base === 'ar' ? '-u-nu-latn' : '';
   const code = region?.trim().toUpperCase();
-  if (!code || !/^[A-Z]{2}$/.test(code)) return `${base}${numbering}`;
-  const tag = `${base}-${code}${numbering}`;
+  if (!code || !/^[A-Z]{2}$/.test(code)) return `${base}-AE`;
+  const tag = `${base}-${code}${base === 'ar' ? '-u-nu-latn' : ''}`;
   try {
-    return Intl.DateTimeFormat.supportedLocalesOf([tag]).length ? tag : `${base}${numbering}`;
+    return Intl.DateTimeFormat.supportedLocalesOf([tag]).length ? tag : `${base}-AE`;
   } catch {
-    return base;
-  }
-}
-
-function deviceRegion(): string | null {
-  try {
-    const locale = new Intl.DateTimeFormat().resolvedOptions().locale ?? '';
-    return locale.match(/[-_]([A-Za-z]{2})(?:[-_]|$)/)?.[1]?.toUpperCase() ?? null;
-  } catch {
-    return null;
+    return `${base}-AE`;
   }
 }
 

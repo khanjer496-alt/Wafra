@@ -77,6 +77,7 @@ import {
   ledgerMoneySpec,
   ledgerStateHasMoney,
   migrateLegacyLedgerMoney,
+  deviceMoneyLocale,
   setDisplayMoneyLocale,
   type LedgerMoneySpec,
 } from '@/lib/ledger-money';
@@ -1863,27 +1864,19 @@ function createAppLedgerPersistence(): LedgerPersistence {
  * every screen below already formats with it; the key makes the call
  * idempotent across renders. expo-localization reports the Region's own
  * separators (iOS Locale.current, Android DecimalFormatSymbols), which win
- * over what the language tag implies.
+ * over what the language tag implies, and its Region (`regionCode`), which
+ * reports and coverage months read through displayRegion(). useLocales
+ * re-renders this provider when the OS settings change (Android can change
+ * them without a restart), so the next render adopts them; screens that do
+ * not re-render keep their previous figures until they next do.
  */
 let appliedMoneyLocaleKey: string | null = null;
-function applyDeviceMoneyLocale(locale: {
-  languageTag?: string | null;
-  languageCode?: string | null;
-  regionCode?: string | null;
-  decimalSeparator?: string | null;
-  digitGroupingSeparator?: string | null;
-} | undefined): void {
-  const tag = locale?.languageCode && locale.regionCode
-    ? `${locale.languageCode}-${locale.regionCode}`
-    : locale?.languageTag ?? null;
-  const key = `${tag}|${locale?.decimalSeparator}|${locale?.digitGroupingSeparator}`;
+function applyDeviceMoneyLocale(locale: Parameters<typeof deviceMoneyLocale>[0]): void {
+  const next = deviceMoneyLocale(locale);
+  const key = JSON.stringify(next);
   if (key === appliedMoneyLocaleKey) return;
   appliedMoneyLocaleKey = key;
-  setDisplayMoneyLocale(locale ? {
-    locale: tag,
-    decimalSeparator: locale.decimalSeparator ?? null,
-    groupSeparator: locale.digitGroupingSeparator ?? null,
-  } : null);
+  setDisplayMoneyLocale(next);
 }
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
