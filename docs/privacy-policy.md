@@ -185,6 +185,22 @@ store biometric templates.
   both name searches and image requests. Logo caches are removed by Erase all
   data; image bitmap caching remains managed by the platform image library.
 
+- **Exchange rates for foreign-currency spending:** when a purchase is in a
+  currency other than the ledger's (travel, online shopping) and the bank alert
+  does not state the charged amount in the ledger currency, Wafra requests one
+  dated public reference rate from Frankfurter (api.frankfurter.dev), which
+  republishes official central-bank rates. The request contains only the two
+  ISO currency codes and one date (for example EUR, INR, 2026-09-20) plus the
+  device's network address. It never contains the amount, merchant, account or
+  card identifier, message text, ledger contents or any device or user
+  identifier. Frankfurter states that it does not log request URLs or IP
+  addresses. The rate, its effective date and its source are stored with the
+  converted transaction inside the encrypted ledger; fetched rates are
+  otherwise kept only in memory and are never written to unencrypted storage.
+  No rate is ever invented: without one the purchase keeps its original amount
+  in Review and nothing is posted. When the saved local-only preference is
+  active, no rate request is made.
+
 - **On-device language model:** Wafra can download a small multilingual text
   encoder (about 35 MB, plus its tokenizer) once from Wafra's own GitHub release
   so that bank-alert families and Ask Wafra questions can be understood on the

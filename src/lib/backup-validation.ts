@@ -56,6 +56,7 @@ const transaction: Check = (value) => {
     accountId: id, title: text, date: isoDate,
   }) || !optional(value, {
     originalAmountMinor: positive, originalCurrency: (v) => typeof v === 'string' && /^[A-Z]{3}$/.test(v),
+    originalMinorUnits: positive, originalExponent: oneOf(0, 2, 3),
     fxRate: finitePositive, fxRateDate: isoDate, fxSource: oneOf('bank', 'reference', 'fallback'),
     note: text, ts: nonnegative, source: oneOf('sms', 'manual'), smsKey: text,
     notificationObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
@@ -67,6 +68,12 @@ const transaction: Check = (value) => {
     paymentInstrumentSource: oneOf('alert', 'user'), cashOutDate: isoDate,
     cashOutAccountId: id, isTransfer: boolean, userEdited: boolean, titleEdited: boolean, raw: text,
   })) return false;
+  // Exponent-correct originals travel as a pair and must agree with the
+  // legacy two-decimal figure when both are present.
+  if ((value.originalMinorUnits === undefined) !== (value.originalExponent === undefined)) return false;
+  if (value.originalMinorUnits !== undefined && value.originalAmountMinor !== undefined &&
+    (value.originalMinorUnits as number) * 100 !==
+      (value.originalAmountMinor as number) * 10 ** (value.originalExponent as number)) return false;
   if (value.splits !== undefined) {
     if (!Array.isArray(value.splits) || value.splits.length < 2) return false;
     let sum = 0;

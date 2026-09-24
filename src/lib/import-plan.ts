@@ -1817,7 +1817,10 @@ function buildImportPlanInMarket(
       amountFils: p.amountFils,
       originalAmountMinor: p.originalAmountMinor,
       originalCurrency: p.originalCurrency,
+      ...(p.originalMinorUnits !== undefined && p.originalExponent !== undefined
+        ? { originalMinorUnits: p.originalMinorUnits, originalExponent: p.originalExponent } : {}),
       fxRate: p.fxRate,
+      ...(p.fxRateDate !== undefined ? { fxRateDate: p.fxRateDate } : {}),
       fxSource: p.fxSource,
       category: p.categoryGuess,
       accountId,
