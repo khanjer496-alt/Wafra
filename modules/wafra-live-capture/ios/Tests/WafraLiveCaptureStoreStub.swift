@@ -26,11 +26,13 @@ public final class WafraLiveCaptureStore {
   public static let shared = WafraLiveCaptureStore()
   public static let queueChangedNotificationName = "app.wafra.live-capture.queue-changed.v1"
   public static let maxBridgeRecords = 50
+  public static let maxExcludedRecords = 2000
 
   public private(set) var calls: [String] = []
   public private(set) var listLimits: [Int] = []
   public private(set) var listIncludesNotifications: [Bool] = []
   public private(set) var listIncludesApplePay: [Bool] = []
+  public private(set) var listExcluded: [[String]] = []
   public private(set) var firstCapturedDates: [Date] = []
   public private(set) var localLeaseCalls: [(Date?, Bool)] = []
   public private(set) var storeLeaseCalls: [(Date?, Bool, Date)] = []
@@ -63,6 +65,7 @@ public final class WafraLiveCaptureStore {
     listLimits = []
     listIncludesNotifications = []
     listIncludesApplePay = []
+    listExcluded = []
     firstCapturedDates = []
     localLeaseCalls = []
     storeLeaseCalls = []
@@ -88,9 +91,10 @@ public final class WafraLiveCaptureStore {
     calls.append("setCaptureEnabled:\(enabled)")
   }
 
-  public func listPendingRecords(limit: Int, includeNotifications: Bool = true, includeApplePay: Bool = false) throws -> [String] {
+  public func listPendingRecords(limit: Int, includeNotifications: Bool = true, includeApplePay: Bool = false, excluding: [String] = []) throws -> [String] {
     calls.append("listPendingRecords")
     listLimits.append(limit)
+    listExcluded.append(excluding)
     listIncludesNotifications.append(includeNotifications)
     listIncludesApplePay.append(includeApplePay)
     return ["pending:\(limit)"]

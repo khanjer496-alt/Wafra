@@ -64,6 +64,8 @@ public final class WafraLiveCaptureStore {
   public static let maxRecords = 2_000
   public static let maxRecordBytes = 8 * 1024 * 1024
   public static let maxBridgeRecords = 50
+  /// Held records one drain may page past: 40 pages of 50 (the JS drain bound).
+  public static let maxExcludedRecords = 2000
   public static let maxAcknowledgedIds = 10_000
   public static let recordTTL: TimeInterval = 30 * 24 * 60 * 60
   public static let maxFutureSkew: TimeInterval = 5 * 60
@@ -77,6 +79,7 @@ public final class WafraLiveCaptureStore {
   public enum StoreError: Error {
     case lockUnavailable
     case invalidAcknowledgement
+    case invalidExclusion
     case invalidSetupProof
     case invalidAutomationInputProbe
     case invalidMilestone
@@ -550,8 +553,24 @@ public final class WafraLiveCaptureStore {
     }
   }
 
-  public func listPendingRecords(limit: Int, includeNotifications: Bool = true, includeApplePay: Bool = false, applePayOnly: Bool = false) throws -> [String] {
-    try withExclusiveLock { root in
+  public func listPendingRecords(
+    limit: Int,
+    includeNotifications: Bool = true,
+    includeApplePay: Bool = false,
+    applePayOnly: Bool = false,
+    excluding: [String] = []
+  ) throws -> [String] {
+    // Records the caller is deliberately holding (for example reviews waiting
+    // for Review space) are named so the next page can reach newer records.
+    // Exclusion only narrows a page; it never acknowledges or deletes.
+    guard excluding.count <= Self.maxExcludedRecords else { throw StoreError.invalidExclusion }
+    var excluded = Set<String>()
+    excluded.reserveCapacity(excluding.count)
+    for id in excluding {
+      guard let canonical = canonicalEventId(id) else { throw StoreError.invalidExclusion }
+      excluded.insert(canonical)
+    }
+    return try withExclusiveLock { root in
       var manifest = try loadManifest(in: root)
       _ = try purgeExpiredUnlocked(manifest: &manifest, in: root, now: clock())
       try tombstoneOrphanedRecordFiles(manifest: &manifest, in: root)
@@ -570,6 +589,7 @@ public final class WafraLiveCaptureStore {
 
       for (id, summary) in snapshot {
         guard rows.count < boundedLimit else { break }
+        if excluded.contains(id) { continue }
         let file = recordURL(id: id, in: root)
         if let data = try? Data(contentsOf: file), Self.unsupportedSource(data) { continue }
         guard

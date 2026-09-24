@@ -1124,6 +1124,36 @@ struct NativeLiveCaptureStoreTests {
     )
     check("negative list limit is empty", try ordering.listPendingRecords(limit: -1).isEmpty)
     check("listing is capped at 50", try ordering.listPendingRecords(limit: 500).count == 3)
+    // Held records (for example money reviews waiting for Review space) can
+    // fill a whole page. The drain names them so the reader pages past them.
+    check(
+      "an excluded held record is skipped before the page limit",
+      try ordering.listPendingRecords(limit: 1, excluding: [eventId(100)]).compactMap(rowId) == [eventId(101)]
+    )
+    check(
+      "exclusion ids are canonicalized like acknowledgements",
+      try ordering.listPendingRecords(limit: 50, excluding: [eventId(100).lowercased(), eventId(102)])
+        .compactMap(rowId) == [eventId(101)]
+    )
+    check(
+      "an empty exclusion is identical to the default listing",
+      try ordering.listPendingRecords(limit: 50, excluding: []) == ordering.listPendingRecords(limit: 50)
+    )
+    check(
+      "an invalid exclusion id is refused instead of widening the page",
+      (try? ordering.listPendingRecords(limit: 50, excluding: ["not-a-record-id"])) == nil
+    )
+    check(
+      "an oversized exclusion list is refused",
+      (try? ordering.listPendingRecords(
+        limit: 50,
+        excluding: Array(repeating: eventId(100), count: WafraLiveCaptureStore.maxExcludedRecords + 1)
+      )) == nil
+    )
+    check(
+      "excluded records stay pending and unacknowledged",
+      try ordering.status().pending == 3 && ordering.listPendingRecords(limit: 50).count == 3
+    )
     let snapshot = try ordering.listPendingRecords(limit: 2)
     _ = try ordering.stage(
       sender: knownSender,

@@ -297,6 +297,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       setCaptureEnabled(enabled: boolean): Promise<void>;
       listPendingRecords(limit: number): Promise<string[]>;
       listPendingRecordsIncludingNotifications?(limit: number): Promise<string[]>;
+      listPendingRecordsExcluding?(limit: number, excludeIds: string[]): Promise<string[]>;
       listPendingApplePayRecords?(limit: number): Promise<string[]>;
       acknowledgeRecords(ids: string[]): Promise<void>;
       purgeExpired(): Promise<number>;
@@ -2308,6 +2309,45 @@ struct WafraBankSenderRegistryTests {
       ok('reloading the tray keeps the foreign-currency count exactly once',
         trayModule.recentlyLostReviewCount(reloaded, Date.now(), 'currency-evicted') === 50 &&
           reloaded.pending.length === tray.pending.length);
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // Held rows: sixty same-currency money reviews waiting for Review space
+      // at the head of the queue used to stop the reader, so a newer purchase
+      // behind them was never captured.
+      trayModule.reviewCaptureBacklog.reset();
+      const heldIds = Array.from({ length: 60 }, () => nextId());
+      const purchaseId = nextId();
+      const native = withNotificationLane(nativeQueue([
+        ...heldIds.map((id, index) => envelope({
+          id, text: REVIEW_BODY, sender: 'FAB', observedAt: recentIso(3_600_000 - index * 1000),
+        })),
+        envelope({ id: purchaseId, observedAt: recentIso(60_000) }),
+      ]));
+      native.listPendingRecordsExcluding = async (limit, excludeIds) => {
+        native.calls.push(`listExcluding:${limit}:${excludeIds.length}`);
+        const excluded = new Set(excludeIds);
+        return native.pending().filter((serialized) => !excluded.has(JSON.parse(serialized).id)).slice(0, limit);
+      };
+      const fillers = Array.from({ length: 50 }, (_, index) => legacyFiller(index));
+      const ledger = admittingLedger(fillers);
+      const outcome = await coordinator(native, ledger).drain();
+      ok('sixty held money reviews at the head no longer stop capture of a newer purchase',
+        outcome.imported === 1 && native.acknowledged.includes(purchaseId) && native.acknowledged.length === 1,
+        JSON.stringify({ outcome, calls: native.calls }));
+      ok('held money reviews stay queued, unacknowledged and untouched',
+        heldIds.every((id) => !native.acknowledged.includes(id)) && native.pending().length === 60 &&
+          outcome.deferredReviews === 60 && trayModule.reviewCaptureBacklog.get().waiting === 60 &&
+          ledger.getState().reviewTray.pending.length === 50 &&
+          fillers.every((item) => ledger.getState().reviewTray.pending.includes(item)) &&
+          ledger.getState().reviewTray.tombstones.length === 0,
+        JSON.stringify({ outcome, pending: native.pending().length }));
+      ok('the reader pages past held records by naming them instead of re-reading one page',
+        native.calls.includes('listExcluding:50:50') && native.calls.includes('listExcluding:50:60'),
+        JSON.stringify(native.calls));
+      ok('a page of only held records skips the encrypted write it does not need',
+        !ledger.calls.includes('ensure'), JSON.stringify(ledger.calls));
       trayModule.reviewCaptureBacklog.reset();
     }
 
