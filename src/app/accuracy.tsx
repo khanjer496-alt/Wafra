@@ -2,6 +2,7 @@ import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Share, StyleSheet, View } from 'react-native';
 
+import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
@@ -15,9 +16,11 @@ import { cardDiagnostics, noFormatsReason, parserCoverage, unreadFormats } from 
 import { isCaptureAvailable } from '@/lib/capture';
 import { shareText } from '@/lib/share-text';
 import { categoryLabel } from '@/lib/categories';
+import { detailsWords } from '@/lib/details-copy';
 import { isRelayPlatform } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
+import type { Transaction } from '@/lib/types';
 
 /** Long digit runs could be account numbers — keep only the last 4. */
 function maskDigits(s: string): string {
@@ -41,11 +44,27 @@ export default function AccuracyScreen() {
   const router = useRouter();
   const { state } = useStore();
   const [groupLimits, setGroupLimits] = useState<Record<string, number>>({});
+  const [entry, setEntry] = useState<Transaction | null>(null);
+  const d = detailsWords(state.language);
 
   const rows = useMemo(
     () => unreadFormats(state.transactions, (id) => categoryLabel(id, state.language === 'ar' ? 'ar' : 'en')),
     [state.transactions, state.language],
   );
+
+  // The newest recorded row of each listed format. These rows are already in
+  // the ledger, so the fix is to open that entry — never to add it again.
+  // Same digit-blind format key as unreadFormats().
+  const newestOfFormat = useMemo(() => {
+    const byFormat = new Map<string, Transaction>();
+    for (const tx of state.transactions) {
+      if (!tx.raw || tx.category !== 'other') continue;
+      const key = tx.raw.replace(/\d/g, '#');
+      const seen = byFormat.get(key);
+      if (!seen || tx.date > seen.date) byFormat.set(key, tx);
+    }
+    return byFormat;
+  }, [state.transactions]);
 
   const unread = useMemo(() => rows.filter((r) => r.reason === 'unread'), [rows]);
   const uncategorized = useMemo(() => rows.filter((r) => r.reason === 'uncategorized'), [rows]);
@@ -254,6 +273,13 @@ export default function AccuracyScreen() {
                       <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
                         {maskDigits(r.raw)}
                       </ThemedText>
+                      {newestOfFormat.has(r.raw.replace(/\d/g, '#')) ? (
+                        <View testID="accuracy-open-entry" style={styles.openEntry}>
+                          <Button label={d.accuracy.openEntry} variant="outline" icon="arrow-up-right" wrapLabel
+                            onPress={() => setEntry(newestOfFormat.get(r.raw.replace(/\d/g, '#')) ?? null)} />
+                          <ThemedText type="meta" themeColor="textTertiary">{d.accuracy.openEntryHint}</ThemedText>
+                        </View>
+                      ) : null}
                     </View>
                   </Row>
                 ))}
@@ -283,6 +309,7 @@ export default function AccuracyScreen() {
             </Section>
           )}
       </ScreenScaffold>
+      <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
     </>
   );
 }
@@ -323,6 +350,7 @@ const styles = StyleSheet.create({
   formatTitle: {
     flexShrink: 1,
   },
+  openEntry: { gap: Spacing.one, paddingTop: Spacing.one },
   raw: {
     fontSize: 12.5,
     lineHeight: 18,
