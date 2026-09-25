@@ -119,6 +119,27 @@ test('Set today\'s balance is offered, and the quiet-row shortcut opens it strai
   assert.ok(sheet, 'the quiet-row shortcut opens the sheet straight away');
 });
 
+const goals = [{ id: 'umrah', title: 'Umrah trip', emoji: 'plane', targetFils: 500000, savedFils: 320000 }];
+
+test('a goal row on Accounts opens the goal screen', () => {
+  const h = createHarness({ state: { goals } });
+  press(byId(h.render('wallet'), 'wallet-goal-umrah'));
+  assert.deepEqual(h.events.filter((e) => e[0] === 'route').map((e) => e[1]), ['/goal?id=umrah']);
+});
+
+test('the goal screen shows saved against target, says no money moves, and invents no pace', () => {
+  const h = createHarness({ state: { goals } });
+  h.deps['expo-router'].useLocalSearchParams = () => ({ id: 'umrah' });
+  const tree = load(path.join(root, 'src/app/goal.tsx'), h.deps).default();
+  const hero = text(byId(tree, 'goal-progress'));
+  assert.match(hero, /64%/);
+  assert.match(hero, /AED 3,200.00 of AED 5,000.00/);
+  assert.match(hero, /AED 1,800.00 to go/);
+  assert.match(text(byId(tree, 'goal-no-money-moves')), /No money moves between your accounts/);
+  assert.doesNotMatch(text(tree), /reaches it by|behind|a month|on track|Contributions/i);
+  assert.match(text(tree), /Add money[\s\S]*Edit goal/);
+});
+
 test('Arabic account detail is Arabic', () => {
   const h = createHarness({ language: 'ar' });
   const tree = renderAccount(h, { id: 'enbd' });

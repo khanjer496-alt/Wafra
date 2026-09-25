@@ -13,7 +13,6 @@ import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { BalanceOverview } from '@/components/wallet/balance-overview';
 import { AccountGroups, type AccountDisplayRow } from '@/components/wallet/account-groups';
-import { AmountSheet } from '@/components/ui/amount-sheet';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button } from '@/components/ui/controls';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
@@ -127,7 +126,6 @@ export default function WalletScreen() {
     editAccount,
     deleteAccount,
     addGoal,
-    editGoal,
     deleteGoal,
     setLedgerMoney,
     mergeRenewedCard,
@@ -336,20 +334,8 @@ export default function WalletScreen() {
     setGoalVisible(false);
   };
 
-  /**
-   * Ask, on every platform, instead of guessing on one.
-   *
-   * This was `Alert.prompt?.(…) ?? (+100)`: an iOS prompt, an early return on
-   * web, and on Android — which has no `Alert.prompt` — a silent AED 100
-   * added to the goal on a bare tap. Three behaviours, one of them correct,
-   * and the wrong one moved money without asking. See AmountSheet.
-   */
-  const [goalTopUp, setGoalTopUp] = useState<{ id: string; title: string } | null>(null);
-
-  const addToGoal = (fils: number) => {
-    const goal = state.goals.find((g) => g.id === goalTopUp?.id);
-    if (goal) editGoal(goal.id, { savedFils: goal.savedFils + fils });
-  };
+  // Adding to a goal lives on its own screen (/goal), which asks for the
+  // amount with AmountSheet on every platform and says no money moves.
 
   const confirmDeleteAccount = (id: string, accName: string) => {
     setConfirmation({
@@ -578,7 +564,10 @@ export default function WalletScreen() {
               return (
                 <Pressable
                   key={goal.id}
-                  onPress={() => setGoalTopUp({ id: goal.id, title: goal.title })}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${goal.title}. ${formatAmount(goal.savedFils, { decimals: false })} / ${formatAmount(goal.targetFils, { decimals: false })}`}
+                  testID={`wallet-goal-${goal.id}`}
+                  onPress={() => router.push(`/goal?id=${encodeURIComponent(goal.id)}`)}
                   onLongPress={() =>
                     setConfirmation({
                       question: t('deleteGoalTitle'),
@@ -865,16 +854,6 @@ export default function WalletScreen() {
           confirmLabel={confirmation.confirmLabel}
           destructive={confirmation.destructive}
           onConfirm={confirmation.onConfirm}
-        />
-      )}
-      {goalTopUp && (
-        <AmountSheet
-          visible
-          onClose={() => setGoalTopUp(null)}
-          title={t('goalsHeader')}
-          question={tf('addToGoal', { goal: goalTopUp.title })}
-          placeholder={t('amountInLedgerCurrency')}
-          onSubmit={addToGoal}
         />
       )}
       <LedgerCurrencySheet
