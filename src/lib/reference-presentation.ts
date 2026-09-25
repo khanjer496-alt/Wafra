@@ -2,6 +2,25 @@
 import type { MonthSummary } from '@/lib/insights';
 import type { Budget, CategoryId } from '@/lib/types';
 
+/**
+ * A category's usual month: the average over the complete months the ledger
+ * fully covers, or null when it covers none of them.
+ *
+ * A month before the ledger's first entry — or the month it began part-way
+ * through — has no history, not zero spending. Dividing a single recorded
+ * month by three suggested a third of what the user actually spends.
+ */
+export function usualMonthlyMinor(
+  months: readonly { startISO: string; fils: number }[],
+  ledgerStartISO: string | null,
+): { averageFils: number; fullMonths: number } | null {
+  if (!ledgerStartISO) return null;
+  const covered = months.filter((month) => ledgerStartISO <= month.startISO);
+  if (covered.length === 0) return null;
+  const totalFils = covered.reduce((sum, month) => sum + month.fils, 0);
+  return { averageFils: Math.round(totalFils / covered.length), fullMonths: covered.length };
+}
+
 /** The denominator is the whole selected period, never the filtered category list. */
 export function spendingShare(spentFils: number, totalFils: number): number {
   if (!Number.isFinite(spentFils) || !Number.isFinite(totalFils) || spentFils <= 0 || totalFils <= 0) return 0;
