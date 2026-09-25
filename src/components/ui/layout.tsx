@@ -106,6 +106,9 @@ export function Row({
   accessibilityLabel?: string;
 }) {
   const theme = useTheme();
+  // At the accessibility text sizes a trailing figure may need its own line
+  // rather than squeezing the row's title to a column of single letters.
+  const largeText = useLargeTextLayout();
   const border = {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.cardBorder,
@@ -115,7 +118,7 @@ export function Row({
   };
 
   if (!onPress && !onLongPress) {
-    return <View style={[styles.row, border, style]}>{children}</View>;
+    return <View style={[styles.row, largeText && styles.rowWrap, border, style]}>{children}</View>;
   }
   return (
     <SpringPressable
@@ -125,7 +128,7 @@ export function Row({
       onLongPress={onLongPress}
       opacityTo={1}
       scaleTo={0.985}
-      style={[styles.row, border, style]}>
+      style={[styles.row, largeText && styles.rowWrap, border, style]}>
       {children}
     </SpringPressable>
   );
@@ -226,6 +229,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 11,
   },
+  rowWrap: { flexWrap: 'wrap' },
   block: {
     borderWidth: 1,
     borderRadius: Radius.sheet,

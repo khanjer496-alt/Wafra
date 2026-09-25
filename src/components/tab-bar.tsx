@@ -8,6 +8,7 @@ import { Icon, type IconName } from '@/components/ui/icon';
 import { useTabBarMetrics } from '@/components/ui/tab-bar-metrics';
 import { Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { tapped } from '@/lib/haptics';
 import { t, type StringKey } from '@/lib/i18n';
 import { useTheme } from '@/hooks/use-theme';
@@ -28,18 +29,25 @@ const TAB_LABELS: Record<string, StringKey> = {
   wallet: 'tabWallet',
 };
 
-const LedgerTabButton = ({ focused, icon, label, onPress, testID }: {
-  focused: boolean; icon: IconName; label: string; onPress: () => void; testID: string;
+const LedgerTabButton = ({ focused, icon, label, iconOnly, onPress, onPeek, testID }: {
+  focused: boolean; icon: IconName; label: string; iconOnly: boolean; onPress: () => void;
+  onPeek: (label: string | null) => void; testID: string;
 }) => {
   const theme = useTheme();
   return <Pressable testID={testID} role="tab" aria-selected={focused} accessibilityRole="tab"
     accessibilityLabel={label} accessibilityState={{ selected: focused }}
     onPressIn={() => prioritizeForegroundNavigation()}
     onPress={onPress}
+    // At the accessibility text sizes the bar shows icons only, as the iOS
+    // system bar does; holding a tab shows its name, like the system's Large
+    // Content Viewer. Screen readers always hear the label.
+    onLongPress={iconOnly ? () => onPeek(label) : undefined}
+    onPressOut={iconOnly ? () => onPeek(null) : undefined}
     android_ripple={{ color: theme.backgroundSelected, borderless: false }}
     style={({ pressed }) => [styles.tab, { opacity: pressed ? 0.7 : 1 }]}>
-    <Icon name={icon} size={21} color={focused ? theme.primary : theme.textTertiary} strokeWidth={focused ? 2.1 : 1.8} />
-    <ThemedText type="meta" style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>{label}</ThemedText>
+    <Icon name={icon} size={iconOnly ? 26 : 21} color={focused ? theme.primary : theme.textTertiary} strokeWidth={focused ? 2.1 : 1.8} />
+    {!iconOnly && <ThemedText type="meta"
+      style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>{label}</ThemedText>}
   </Pressable>;
 };
 
@@ -55,6 +63,8 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
   // Language remains reactive and explicit to t(), without subscribing the
   // navigation controls to every transaction and history-progress update.
   const lang = useLanguage();
+  const iconOnly = useLargeTextLayout();
+  const [peek, setPeek] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     // Once React Navigation publishes the new selected index, that transition
@@ -80,6 +90,8 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
         focused={focused}
         icon={TAB_ICONS[route.name]}
         label={t(TAB_LABELS[route.name], lang)}
+        iconOnly={iconOnly}
+        onPeek={setPeek}
         onPress={() => {
           // Count pressure, not destinations. If the process dies during a tap
           // storm the next tester diagnostic can still tell us it happened,
@@ -123,6 +135,9 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
         styles.wrap,
         { backgroundColor: theme.background, borderTopColor: theme.cardBorder },
       ]}>
+      {peek !== null && <View pointerEvents="none" style={[styles.peek, { backgroundColor: theme.inverseSurface }]}>
+        <ThemedText type="heading" style={{ color: theme.inverseText }}>{peek}</ThemedText>
+      </View>}
       <View role="tablist" style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
         {routes.map(renderTab)}
       </View>
@@ -154,6 +169,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 2,
     paddingVertical: 4,
+  },
+  peek: {
+    position: 'absolute',
+    bottom: '100%',
+    marginBottom: Spacing.two,
+    alignSelf: 'center',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+    borderRadius: 12,
+    maxWidth: '90%',
   },
   tabLabel: {
     fontSize: 12,

@@ -4,6 +4,7 @@ import { StyleSheet, Text, type StyleProp, type TextProps, type TextStyle } from
 import { Fonts, ThemeColor } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
+import { E2E_FONT_SCALE, scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
 import { hasArabicScript } from '@/lib/i18n';
 
 export type TextType =
@@ -48,30 +49,63 @@ export function ThemedText({
   const childrenArabic = useMemo(() => holdsArabic(rest.children), [rest.children]);
   const arabic = childrenArabic || (language === 'ar' && !tabular);
 
+  const composed: StyleProp<TextStyle> = [
+    { color: theme[color] },
+    styles[type],
+    arabic && {
+      fontFamily: ARABIC_FOR_WEIGHT[WEIGHT_OF[type]],
+      // Tracking breaks cursive joins; uppercase has no meaning in Arabic.
+      letterSpacing: 0,
+      textTransform: 'none',
+      writingDirection: 'rtl',
+      lineHeight: Math.max(styles[type].lineHeight ?? 0, Math.ceil((styles[type].fontSize ?? 15) * 1.5)),
+    },
+    tabular && styles.tabular,
+    tabular && !arabic && { fontFamily: TABULAR_FOR_WEIGHT[WEIGHT_OF[type]] },
+    style,
+    // LAST, because the caller's `style` is the thing it is answering.
+    arabic && arabicRescue(style, rest.children, type),
+  ];
+
+  // The caller's own cap wins; otherwise the display sizes follow Apple's ramp.
+  const maxFontSizeMultiplier = rest.maxFontSizeMultiplier !== undefined
+    ? rest.maxFontSizeMultiplier : RAMP_CAP[type];
+
   return (
     <Text
       allowFontScaling
-      style={[
-        { color: theme[color] },
-        styles[type],
-        arabic && {
-          fontFamily: ARABIC_FOR_WEIGHT[WEIGHT_OF[type]],
-          // Tracking breaks cursive joins; uppercase has no meaning in Arabic.
-          letterSpacing: 0,
-          textTransform: 'none',
-          writingDirection: 'rtl',
-          lineHeight: Math.max(styles[type].lineHeight ?? 0, Math.ceil((styles[type].fontSize ?? 15) * 1.5)),
-        },
-        tabular && styles.tabular,
-        tabular && !arabic && { fontFamily: TABULAR_FOR_WEIGHT[WEIGHT_OF[type]] },
-        style,
-        // LAST, because the caller's `style` is the thing it is answering.
-        arabic && arabicRescue(style, rest.children, type),
-      ]}
+      style={E2E_FONT_SCALE === null
+        ? composed
+        : scaleTextStyleForE2E(composed, rest.allowFontScaling, maxFontSizeMultiplier)}
       {...rest}
+      maxFontSizeMultiplier={maxFontSizeMultiplier}
     />
   );
 }
+
+/**
+ * How far each display size may grow under Larger Text.
+ *
+ * iOS Dynamic Type does not scale every style by the same factor: at the
+ * largest accessibility size Body grows 17 → 53pt (3.1x) while Large Title
+ * grows only 34 → 60pt (1.76x), Title 1 28 → 58pt (2.07x) and Title 3
+ * 20 → 55pt (2.75x) (Apple HIG,
+ * "Typography", Dynamic Type sizes). A single `fontScale` multiplies every
+ * React Native Text alike, which made the 36pt hero figure 112pt at AX4 —
+ * three digits to a line. These caps restore the system ramp: the large
+ * styles still end up larger than body text at every size, and nothing at or
+ * below Body (all copy, labels, row figures) is capped at all. `heading` is
+ * held a little under Title 3 (2.4x) so a twelve-letter word ("transactions")
+ * still fits one line of a 375pt phone instead of breaking mid-word.
+ */
+const RAMP_CAP: Partial<Record<TextType, number>> = {
+  display: 1.75,
+  sheetAmount: 1.75,
+  amount: 1.8,
+  title: 2,
+  heading: 2.4,
+  subtitle: 2.75,
+};
 
 /**
  * The Arabic face put back over a call site that pinned a Latin one.

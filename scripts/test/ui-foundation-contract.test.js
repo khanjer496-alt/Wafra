@@ -153,7 +153,11 @@ assert.match(finalSheet, /onAccessibilityEscape=\{dismissible \? requestDismiss 
 assert.match(finalSheet, /backgroundColor: theme\.scrim/);
 assert.match(finalSheet, /testID=\{testID\}/);
 assert.match(finalSheet, /\{dismissible \? \([\s\S]*styles\.grabber/);
-assert.match(finalSheet, /\{dismissible \? \([\s\S]*accessibilityLabel=\{t\('close', language\)\}/);
+// The labelled close button renders only on a dismissible sheet: in the header
+// normally, on its own row above the title at the accessibility text sizes.
+assert.match(finalSheet, /const closeButton = \([\s\S]*accessibilityLabel=\{t\('close', language\)\}/);
+assert.match(finalSheet, /\{dismissible && !largeText \? closeButton : null\}/);
+assert.match(finalSheet, /\{dismissible && largeText \? <View style=\{styles\.closeRow\}>\{closeButton\}<\/View> : null\}/);
 assert.match(finalSheet, /close: \{[\s\S]*width: 44,[\s\S]*height: 44/);
 assert.match(finalSheet, /Platform\.OS === 'android' && styles\.androidClose/);
 assert.match(finalSheet, /androidClose: \{ width: 48, height: 48/);
@@ -165,8 +169,11 @@ assert.match(finalSheet, /const hasFooter = footer !== null && footer !== undefi
 assert.match(finalSheet, /paddingBottom: hasFooter \? 0 : bottomClearance/);
 assert.match(finalSheet, /styles\.footer[\s\S]*paddingBottom: bottomClearance/);
 const scrollEnd = finalSheet.indexOf('</ScrollView>');
-const footerStart = finalSheet.indexOf('{hasFooter ? (', scrollEnd);
+const footerStart = finalSheet.indexOf('{pinFooter ? footerNode : null}', scrollEnd);
 assert.ok(scrollEnd >= 0 && footerStart > scrollEnd, 'fixed footer must follow and sit outside the ScrollView');
+// Only at the accessibility text sizes does the footer scroll with the content.
+assert.match(finalSheet, /const pinFooter = hasFooter && !largeText;/);
+assert.match(finalSheet, /\{children\}\n\s+\{pinFooter \? null : footerNode\}\n\s+<\/ScrollView>/);
 assert.doesNotMatch(finalSheet, /footer \?/);
 
 const confirmSheet = read('src/components/ui/confirm-sheet.tsx');

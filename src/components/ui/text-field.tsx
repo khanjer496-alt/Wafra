@@ -9,6 +9,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -118,7 +119,7 @@ export const TextField = React.forwardRef<TextInput, TextFieldProps>((props, ref
           accessibilityHint={resolvedHint}
           placeholderTextColor={placeholderTextColor}
           selectionColor={selectionColor}
-          style={[
+          style={scaleTextStyleForE2E([
             styles.input,
             inputProps.multiline && styles.multilineInput,
             {
@@ -128,7 +129,7 @@ export const TextField = React.forwardRef<TextInput, TextFieldProps>((props, ref
             },
             numeric && styles.numeric,
             style,
-          ]}
+          ], inputProps.allowFontScaling, inputProps.maxFontSizeMultiplier)}
         />
         {trailing}
       </View>
