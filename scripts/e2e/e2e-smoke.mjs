@@ -368,14 +368,14 @@ ok('Spending shows category limits with their spending', !!(await visibleText(pa
     await tapLabel(page,'Back',1200);await tapTab(page,'Spending');
   }
 }
-await tapText(page,'Trends',800);
-ok('Trends owns six-month cashflow',!!(await visibleText(page,/Income & spending/i)));
+await tapText(page,'Compare',800);
+ok('Compare keeps the six-month cashflow',!!(await visibleText(page,/Income & spending/i)));
 const months=await page.locator('[data-testid="spending-trends"] [role="button"][aria-label]').evaluateAll(nodes=>nodes
   .map(n=>({label:n.getAttribute('aria-label'),selected:n.getAttribute('aria-selected'),text:n.textContent}))
   .filter(n=>/Income:.*Spending:|No recorded activity/.test(n.label)));
 ok('All six months expose readable cashflow or no-data',months.length===6);
 ok('Exactly one month is selected',months.filter(m=>m.selected==='true').length===1);
-ok('Trends includes merchant and change analysis',!!(await visibleText(page,'Top merchants'))&&!!(await visibleText(page,'What changed')));
+ok('Compare includes merchant and change analysis',!!(await visibleText(page,'Top merchants'))&&!!(await visibleText(page,'What changed')));
 await tapText(page,'Categories',700);
 await tapLabel(page,/^Transport\. AED /,800);
 await tapText(page,'Edit monthly limit',800);

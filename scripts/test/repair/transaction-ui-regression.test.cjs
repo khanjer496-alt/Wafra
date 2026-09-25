@@ -175,8 +175,10 @@ test('entry edit does not rescan merchant history for every typed character', ()
     'editable title/category must not drive a full-ledger merchant scan');
   assert.match(source, /countMerchantMatches\(merchant, category\)/,
     'the current edited merchant is counted once when Save actually needs the rule prompt');
-  assert.equal((source.match(/horizontal nestedScrollEnabled/g) || []).length, 1,
-    'the category rail must cooperate with the vertical sheet scroll; the account rail is now a picker bottom sheet, not an inline horizontal ScrollView');
+  assert.equal((source.match(/horizontal nestedScrollEnabled/g) || []).length, 0,
+    'categories are a wrapping grid, so no horizontal rail competes with the vertical sheet scroll; the account rail is a picker bottom sheet');
+  assert.equal((source.match(/<CategoryChips categories=\{categories\}[^>]*layout="wrap" \/>/g) || []).length, 2,
+    'both the edit form and the category sheet state use the wrapping category grid');
 });
 
 test('narrow screens give search full width without reducing the font size', () => {

@@ -3,14 +3,22 @@ import { monthKey, shiftMonthKey } from '@/lib/format';
 import { countsInTotals, isMoneyMovementOnly } from '@/lib/ledger';
 import type { Period } from '@/lib/period';
 import { amountInCategories, touchesCategories } from '@/lib/splits';
+import { transactionSource, type TransactionSourceKind } from '@/lib/transaction-source';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 
 export type DatePreset = 'selected' | 'all' | 'month' | 'lastMonth' | '3months' | 'custom';
 export type SortMode = 'newest' | 'oldest' | 'largest';
+/** The Transactions type chips beyond plain direction: transfers, and rows needing a check. */
+export type TransactionKind = 'transfers' | 'review';
 export interface TransactionFilters {
   type: TransactionType | null; accountId: string | null; categories: Set<CategoryId>;
   datePreset: DatePreset; dateFrom: string | null; dateTo: string | null;
   minFils: number | null; sort: SortMode;
+  /** Inclusive upper bound; null or absent = no maximum. */
+  maxFils?: number | null;
+  /** Empty or absent = every source. */
+  sources?: ReadonlySet<TransactionSourceKind>;
+  kind?: TransactionKind | null;
 }
 interface IndexedTransaction { row: Transaction; merchantKey: string; search: string; month: string }
 type TransactionFilterOptions = {
@@ -27,7 +35,47 @@ type TransactionFilterOptions = {
   /** Confirmed transfer records have a separate browsing surface. Their
    * existing financial contribution still belongs in the matching total. */
   separateTransferIds?: ReadonlySet<string>;
+  /** Every row that is or may be a transfer (the Transfers chip). */
+  transferIds?: ReadonlySet<string>;
+  /** Rows waiting for the person: auto-added checks, transfer review, unassigned income (Needs review). */
+  reviewIds?: ReadonlySet<string>;
+  /** Ledger minor-unit exponent, for matching a typed amount. Defaults to 2. */
+  amountExponent?: number;
 };
+
+const ARABIC_DIGITS = /[\u0660-\u0669\u06f0-\u06f9]/g;
+/**
+ * A query that is only a number ("45", "1,200", "٤٥.٥") matches amounts as
+ * well as names. Group marks are dropped; Arabic-Indic digits read as Latin.
+ * Null for anything else.
+ */
+export function numericAmountQuery(query: string): string | null {
+  const normalized = query.trim()
+    .replace(ARABIC_DIGITS, (digit) => String((digit.charCodeAt(0) & 0xf)))
+    .replace(/[\u066b]/g, '.')
+    .replace(/[\s,\u066c]/g, '');
+  return /^\d+(?:\.\d*)?$/.test(normalized) ? normalized : null;
+}
+
+/**
+ * A whole number matches that whole amount ("45" finds 45.00 and 45.62, not
+ * 450); a typed decimal matches as a prefix ("45.6" finds 45.60–45.69).
+ */
+export function amountMatches(amountFils: number, numeric: string, exponent = 2): boolean {
+  const text = amountSearchText(amountFils, exponent);
+  if (!numeric.includes('.')) return text.split('.')[0] === numeric.replace(/^0+(?=\d)/, '');
+  const [whole, fraction = ''] = numeric.split('.');
+  const [amountWhole, amountFraction = ''] = text.split('.');
+  return amountWhole === whole.replace(/^0+(?=\d)/, '') && amountFraction.startsWith(fraction);
+}
+
+/** The amount as typed digits at the ledger exponent: 4562 → "45.62". */
+export function amountSearchText(amountFils: number, exponent = 2): string {
+  const scale = 10 ** exponent;
+  const whole = Math.trunc(amountFils / scale);
+  const fraction = exponent > 0 ? String(Math.abs(amountFils) % scale).padStart(exponent, '0') : '';
+  return fraction ? `${whole}.${fraction}` : String(whole);
+}
 type TransactionFilterProjection = {
   filtered: Transaction[];
   totalShown: number;
@@ -38,7 +86,9 @@ type TransactionFilterProjection = {
 
 /** Owned by one mounted screen. Rebuild when ledger, language or salary day
  * changes; never cache personal strings globally or modify the source rows. */
-export function createTransactionFilterIndex(rows: readonly Transaction[], language: string) {
+export function createTransactionFilterIndex(rows: readonly Transaction[], language: string,
+  /** Account id → searchable name (name, bank, last four). Optional. */
+  accountNames?: ReadonlyMap<string, string>) {
   const labels = new Map<CategoryId, string>();
   const entries: IndexedTransaction[] = rows.map(row => {
     let category = labels.get(row.category);
@@ -48,7 +98,9 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
       labels.set(row.category, category);
     }
     const title = row.title.toLowerCase();
-    return { row, merchantKey: title.trim(), search: title + '\u0000' + category, month: monthKey(row.date) };
+    const account = accountNames?.get(row.accountId);
+    return { row, merchantKey: title.trim(), search: title + '\u0000' + category + (account ? '\u0000' + account.toLowerCase() : ''),
+      month: monthKey(row.date) };
   });
   // Sorting changes no filter result and is needed at most once per ledger.
   // The expensive Date parse is computed once per row, not per comparison.
@@ -98,6 +150,10 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
   const cached = index.cached(filters, options);
   if (cached) return cached;
   const query = options.query.trim().toLowerCase(); const merchant = options.merchant?.trim().toLowerCase();
+  const numeric = numericAmountQuery(query);
+  const sources = filters.sources && filters.sources.size > 0 ? filters.sources : null;
+  const maxFils = filters.maxFils ?? null;
+  const kind = filters.kind ?? null;
   const last = shiftMonthKey(options.currentKey, -1); const three = shiftMonthKey(options.currentKey, -2);
   let dateFrom: string | null = null; let dateTo: string | null = null;
   let monthFrom: string | null = null; let monthTo: string | null = null;
@@ -143,13 +199,18 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     if (filters.accountId && row.accountId !== filters.accountId) continue;
     if (filters.categories.size > 0 && !touchesCategories(row, filters.categories)) continue;
     if (filters.minFils && row.amountFils < filters.minFils) continue;
-    if (query && !search.includes(query)) continue;
+    if (maxFils !== null && row.amountFils > maxFils) continue;
+    if (kind === 'transfers' && !options.transferIds?.has(row.id)) continue;
+    if (kind === 'review' && !options.reviewIds?.has(row.id)) continue;
+    if (sources && !sources.has(transactionSource(row))) continue;
+    if (query && !search.includes(query) && !(numeric !== null && amountMatches(row.amountFils, numeric, options.amountExponent))) continue;
     if (options.corroborating.has(row.id)) continue;
     const counts = countsInTotals(row, options.live, options.internal);
     const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
     const contribution = row.type === 'expense' ? -part : part;
     totalShown += contribution;
-    if (options.separateTransferIds?.has(row.id)) {
+    // The Transfers chip is the one place confirmed transfers are listed here.
+    if (kind !== 'transfers' && options.separateTransferIds?.has(row.id)) {
       separatedTransfers.count++;
       if (row.type === 'income') separatedTransfers.incomeFils += part;
       else separatedTransfers.expenseFils += part;

@@ -27,7 +27,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { categoryMovers, categoryTrend, comparableSpend, dailySpendForMonth, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
 import { assistantCopy } from '@/lib/assistant-copy';
 import { categoryLabel, isFixedCommitment } from '@/lib/categories';
-import { formatAED, formatCompactAED, ledgerTypicalMinor, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
+import { formatAED, formatCompactAED, ledgerTypicalMinor, monthEndISO, monthKey, monthLabel, monthStartISO, shiftMonthKey } from '@/lib/format';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { tapped } from '@/lib/haptics';
 import { summarizeMonth } from '@/lib/insights';
@@ -35,6 +35,7 @@ import { internalTransferIdsForState, isIncome, isSpending, liveAccountIds } fro
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { comparablePreviousPeriod, inPeriod, isCurrentMonth, periodLabel, previousPeriod } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
+import { periodDayProgress } from '@/lib/period-pace';
 import { spendingCategoryRows } from '@/lib/reference-presentation';
 import { useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
@@ -44,8 +45,15 @@ import type { CategoryId, Transaction } from '@/lib/types';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 
-type ViewMode = 'categories' | 'activity' | 'trends';
-const validView = (value: unknown): value is ViewMode => ['categories', 'activity', 'trends'].includes(String(value));
+type ViewMode = 'categories' | 'compare' | 'calendar';
+/**
+ * Calendar replaced Activity (it always held the calendar and the filtered
+ * list) and Compare replaced Trends. Old `view` links keep working.
+ */
+const VIEW_ALIASES: Record<string, ViewMode> = {
+  categories: 'categories', compare: 'compare', calendar: 'calendar', activity: 'calendar', trends: 'compare',
+};
+const viewFromParam = (value: unknown): ViewMode | null => VIEW_ALIASES[String(value)] ?? null;
 // This ScrollView is a preview. The full ledger is virtualized in Transactions.
 const ACTIVITY_PREVIEW_LIMIT = 8;
 const shortMonthLabel = (key: string) => monthLabel(key, true).replace(/\s+\d{4}$/, '');
@@ -65,7 +73,7 @@ export default function FlowScreen() {
   const { period, setPeriod } = usePeriod();
   const w = spendingCopy[language === 'ar' ? 'ar' : 'en'];
   const transferWords = transferActivityCopy(language);
-  const [view, setView] = useState<ViewMode>(validView(params.view) ? params.view : 'categories');
+  const [view, setView] = useState<ViewMode>(viewFromParam(params.view) ?? 'categories');
   const [filter, setFilter] = useState<CategoryFilter>('all');
   const [query, setQuery] = useState('');
   const appliedQuery = useDeferredValue(query);
@@ -79,16 +87,17 @@ export default function FlowScreen() {
   // that month the new end of the window, so the newest month disappears.
   const [trendWindowEndKey, setTrendWindowEndKey] = useState<string | null>(null);
   useEffect(() => {
-    if (!validView(params.view)) return;
+    const next = viewFromParam(params.view);
+    if (!next) return;
     setTrendWindowEndKey(null);
-    setView(params.view);
+    setView(next);
   }, [params.view]);
   const [calendarDay, setCalendarDay] = useState<string | null>(null);
   useEffect(() => { setFilter('all'); setCalendarDay(null); }, [period]);
 
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = internalTransferIdsForState(state);
-  const hasTransferSpending = useMemo(() => view === 'activity' && state.transactions.some(transaction =>
+  const hasTransferSpending = useMemo(() => view === 'calendar' && state.transactions.some(transaction =>
     isTransferCandidate(transaction) && isSpending(transaction, live, internal) && inPeriod(transaction.date, period)),
   [view, state.transactions, live, internal, period]);
   const summary = useMemo(() => summarizeMonth(state.transactions, period, live, internal), [state.transactions, period, live, internal]);
@@ -158,7 +167,7 @@ export default function FlowScreen() {
   // Store order is newest-first: stop after leaving this period rather than
   // copying years of spending just to paint eight preview rows.
   const sortedActivity = useMemo(() => {
-    if (view !== 'activity') return [];
+    if (view !== 'calendar') return [];
     const needle = appliedQuery.trim().toLocaleLowerCase();
     const out: Transaction[] = [];
     const unbounded = period.mode === 'all';
@@ -186,12 +195,12 @@ export default function FlowScreen() {
     return out;
   }, [view, state.transactions, live, internal, period, appliedQuery, accountById, calendarDay]);
   const activity = sortedActivity;
-  const calendarDays = useMemo(() => view === 'activity' && period.mode === 'month'
+  const calendarDays = useMemo(() => view === 'calendar' && period.mode === 'month'
     ? dailySpendForMonth(state.transactions, period.key, live, internal, (transaction) => !isTransferCandidate(transaction)) : [],
   [view, period, state.transactions, live, internal]);
   const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const analysis = useMemo(() => {
-    if (view !== 'trends') return null;
+    if (view !== 'compare') return null;
     const keys = Array.from({ length: 6 }, (_, i) => shiftMonthKey(trendWindowAnchorKey, i - 5));
     const buckets = new Map(keys.map((key) => [key, { key, incomeFils: 0, expenseFils: 0 }]));
     const oldestKey = keys[0]!;
@@ -219,17 +228,22 @@ export default function FlowScreen() {
       comparisonLabel: comparable ? periodLabel(comparable) : null };
   }, [view, trendWindowAnchorKey, state.transactions, period, live, internal]);
 
-  const flowHeader: ScreenHeaderProps = { title: t('tabFlow'), actions: [{ icon: 'search', label: w.search, onPress: () => setView('activity') }] };
+  const flowHeader: ScreenHeaderProps = { title: t('tabFlow'), actions: [{ icon: 'search', label: w.search, onPress: () => setViewMode('calendar') }] };
+  // "day 12 of 30" only while the selected money month is running. The
+  // period's own first/last day (salary-day aware), never the calendar month.
+  const pace = period.mode === 'month' && isCurrentMonth(period, new Date())
+    ? periodDayProgress(monthStartISO(period.key), monthEndISO(period.key), todayISO) : null;
 
   return <>
     <ScreenScaffold tabbed headerMode="inline" testID="reference-spending-screen"
       header={flowHeader}
       refreshControl={<CaptureRefreshControl tintColor={theme.primary} />}>
       <SegmentedControl value={view} onChange={setViewMode} label={t('tabFlow')} segments={[
-        { value: 'categories', label: w.categories }, { value: 'activity', label: w.activity }, { value: 'trends', label: w.trends },
+        { value: 'categories', label: w.categories }, { value: 'compare', label: w.compare }, { value: 'calendar', label: w.calendar },
       ]} />
       {view === 'categories' && <SpendingOverview periodLabel={periodLabel(period)} totalFils={summary.expenseFils}
         rows={rows} monthScoped={period.mode === 'month'} filter={filter} onFilter={setFilter}
+        paceLabel={pace ? w.dayOf(pace.day, pace.of) : null}
         onPeriod={() => setPeriodOpen(true)} onCategory={openCategory} onNewLimit={() => setLimitFor('new')}
         assistantSlot={<View testID="spending-ask-wafra" style={styles.assistantAction}>
           <Button label={w.explain} variant="ghost" icon="spark"
@@ -258,7 +272,7 @@ export default function FlowScreen() {
           <Icon name="chevron-right" size={16} color={theme.textSecondary} />
         </Pressable>
       )}
-      {view === 'activity' && <View style={styles.activity} testID="spending-activity">
+      {view === 'calendar' && <View style={styles.activity} testID="spending-activity">
         <View style={styles.trendsToolbar}>
           <PeriodPill onPress={() => setPeriodOpen(true)} />
         </View>
@@ -275,7 +289,7 @@ export default function FlowScreen() {
         </View>
         <Button label={w.allActivity} variant="outline" onPress={() => router.push(`/transactions?type=expense${query.trim() ? `&q=${encodeURIComponent(query.trim())}` : ''}`)} />
       </View>}
-      {view === 'trends' && analysis && <>
+      {view === 'compare' && analysis && <>
         <View style={styles.trendsToolbar}>
           <PeriodPill onPress={() => setPeriodOpen(true)} />
           <View testID="spending-ask-wafra" style={styles.trendsToolbarAction}>

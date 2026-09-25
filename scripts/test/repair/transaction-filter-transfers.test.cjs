@@ -13,6 +13,7 @@ const { createTransactionFilterIndex, projectTransactionFilter } = load(path.joi
   '@/lib/format': require('../build/format.js'),
   '@/lib/ledger': require('../build/ledger.js'),
   '@/lib/splits': require('../build/splits.js'),
+  '@/lib/transaction-source': load(path.join(root, 'src/lib/transaction-source.ts')),
 });
 const defaults = { type: null, accountId: null, categories: new Set(), datePreset: 'all',
   dateFrom: null, dateTo: null, minFils: null, sort: 'newest' };

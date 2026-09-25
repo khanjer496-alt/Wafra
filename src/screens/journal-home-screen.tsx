@@ -14,6 +14,9 @@ import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { Icon } from '@/components/ui/icon';
 import { ReferenceHomeSummary } from '@/components/reference-home-summary';
+import { HomeAddButton } from '@/components/home-add-button';
+import { LimitSheet } from '@/components/limit-sheet';
+import { TransferReviewNotice } from '@/components/transfer-review-notice';
 import { RecapLogoTrigger } from '@/components/recap/recap-logo-trigger';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
@@ -33,7 +36,11 @@ import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { countsInCashflowTotals, isSpending, liveAccountIds } from '@/lib/ledger';
-import { summarizeHomeToday } from '@/lib/home-today';
+import { hasRecordsBefore, liveCaptureTimes, pendingTransferSummary, summarizeHomeToday, type PendingTransferSummary } from '@/lib/home-today';
+import { detectCapturePause } from '@/lib/capture-pause';
+import { loadCapturePauseSnooze, saveCapturePauseSnooze } from '@/lib/capture-pause-state';
+import { isLiveCapture } from '@/lib/transaction-source';
+import { homeSummaryCopy } from '@/lib/reference-copy';
 import { buildWidgetSnapshot } from '@/lib/widget-snapshot';
 import { clearWidgetSnapshot, setWidgetSnapshot } from '../../modules/wafra-widgets';
 import { allocationsOf } from '@/lib/splits';
@@ -55,7 +62,7 @@ import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
 import { loadViewedRecaps } from '@/lib/recap-view-state';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { isTransferCandidate } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
 
 /** Presentation-only vocabulary; every amount still comes from the shared ledger. */
 const copy = {
@@ -138,6 +145,13 @@ export default function JournalHomeScreen() {
   const [homeAnalysisReady, setHomeAnalysisReady] = useState(false);
   const [homeInsight, setHomeInsight] = useState<Insight | null>(null);
   const [recapEntry, setRecapEntry] = useState<{ descriptor: RecapDescriptor; unread: boolean } | null>(null);
+  // The transfer review queue, computed after interactions (it needs the
+  // full reconciliation graph). Null until known.
+  const [pendingTransfers, setPendingTransfers] = useState<PendingTransferSummary | null>(null);
+  // "I was away" on the capture-stopped notice (epoch ms), or null.
+  const [captureSnoozedAt, setCaptureSnoozedAt] = useState<number | null>(null);
+  const [budgetSheetOpen, setBudgetSheetOpen] = useState(false);
+  const summaryWords = homeSummaryCopy[language === 'ar' ? 'ar' : 'en'];
   // The clock is refreshed on every foreground resume for greeting/review
   // freshness, but Home's money projections are day-based. Keep the derived
   // day key above every effect that depends on it so recap discovery and the
@@ -178,6 +192,15 @@ export default function JournalHomeScreen() {
     void loadHomeWidgetPreferences().then((preferences) => {
       if (!alive) return;
       setHomeWidgets((current) => sameHomeWidgets(current, preferences) ? current : preferences);
+    });
+    return () => { alive = false; };
+  }, [focused]);
+
+  useEffect(() => {
+    if (!focused) return;
+    let alive = true;
+    void loadCapturePauseSnooze().then((snoozedAt) => {
+      if (alive) setCaptureSnoozedAt((current) => current === snoozedAt ? current : snoozedAt);
     });
     return () => { alive = false; };
   }, [focused]);
@@ -374,6 +397,26 @@ export default function JournalHomeScreen() {
   }, [homeAnalysisReady, insightWidgetVisible, historyAnalysisBlocked, state.transactions, state.accounts, state.budgets,
     state.notSubscriptions, state.transferInternalIds, state.transferNormalizationVersion,
     state.historyImport?.status, state.marketId, period, projectionDay]);
+  // Home names the transfer review queue only once it is known: the same
+  // pendingIds the review screen lists, so the count and the list agree. The
+  // graph is built after interactions, never during hydration or a running
+  // history import, and not at all when no row could be a transfer.
+  useEffect(() => {
+    if (historyAnalysisBlocked) { setPendingTransfers(null); return; }
+    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      const next = state.transactions.some(isTransferCandidate)
+        ? pendingTransferSummary(state.transactions, reconcileTransfers(state.transactions, state.accounts).pendingIds)
+        : { count: 0, incomingFils: 0, outgoingFils: 0 };
+      if (!cancelled) setPendingTransfers(next);
+    });
+    return () => {
+      cancelled = true;
+      task.cancel();
+    };
+  }, [focused, privacyGateCleared, state.hydrated, state.onboarded, historyAnalysisBlocked, state.transactions, state.accounts]);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
@@ -493,6 +536,66 @@ export default function JournalHomeScreen() {
           : status === 'migration-retry' ? 'captureIosMigrationRetry'
             : status === 'needs-automation' ? 'captureIosNeedsAutomation' : 'captureIosOff');
   const healthy = status === 'waiting-for-alert' || status === 'first-alert-captured';
+  // Capture is set up and expected to be delivering: healthy on iPhone; on
+  // Android, permission granted, not opted out and not paused.
+  const captureSetUp = Platform.OS === 'android'
+    ? status !== 'off' && status !== 'paused' && status !== 'unsupported' && status !== 'checking'
+    : healthy;
+  const captureTimes = useMemo(() => liveCaptureTimes(state.transactions, isLiveCapture, now, 180),
+    // Day-keyed like the other Home projections.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.transactions, projectionDay]);
+  const capturePause = captureSetUp && !history
+    ? detectCapturePause({ captureTimes, nowMs: now.getTime(), snoozedAtMs: captureSnoozedAt }) : null;
+  const captureStopped = capturePause?.stopped === true;
+  const hasLiveCapture = useMemo(() => state.transactions.some(isLiveCapture), [state.transactions]);
+  const budgetMonthKey = period.mode === 'month' && period.key === monthKey(now) ? period.key : null;
+  const periodStartISO = period.mode === 'month' ? monthStartISO(period.key)
+    : period.mode === 'range' ? period.from : null;
+  // First days: nothing recorded before this period, so offer the past.
+  const offerPast = periodStartISO !== null && state.hydrated && !history && !hasRecordsBefore(state.transactions, periodStartISO);
+  const snoozeCapture = () => {
+    const at = Date.now();
+    // Move Home's clock too: a snooze later than `now` would be ignored.
+    setNow(new Date(at));
+    setCaptureSnoozedAt(at);
+    void saveCapturePauseSnooze(at);
+  };
+  const checkCaptureSetup = () => {
+    if (Platform.OS === 'ios') router.push('/ios-setup');
+    else router.push('/settings?section=imports');
+  };
+  const rhythmLine = capturePause
+    ? capturePause.rhythm === 'several-a-day' ? summaryWords.rhythmSeveral
+      : capturePause.rhythm === 'about-daily' ? summaryWords.rhythmDaily
+        : summaryWords.rhythmEvery(Math.max(2, Math.round(capturePause.typicalGapMs / 86_400_000)))
+    : '';
+  const stoppedTitle = capturePause
+    ? Platform.OS === 'ios' ? summaryWords.stoppedIos(capturePause.silentDays) : summaryWords.stoppedAndroid(capturePause.silentDays)
+    : '';
+  const stoppedCause = Platform.OS === 'ios' ? summaryWords.stoppedCauseIos : summaryWords.stoppedCauseAndroid;
+  const captureStoppedNotice = captureStopped ? <View testID="home-capture-stopped" style={[styles.stoppedNotice, { borderColor: theme.cardBorder }]}>
+    <View accessible accessibilityRole="text" accessibilityLabel={[stoppedTitle, rhythmLine, stoppedCause].join(' ')} style={styles.stoppedCopy}>
+      <View style={styles.stoppedHeading}>
+        <Icon name="alert" size={17} color={theme.warning} />
+        <ThemedText type="smallBold" style={styles.grow}>{stoppedTitle}</ThemedText>
+      </View>
+      <ThemedText type="meta" themeColor="textSecondary">{rhythmLine} {stoppedCause}</ThemedText>
+    </View>
+    <View style={styles.stoppedActions}>
+      <Pressable testID="home-capture-check" accessibilityRole="button" accessibilityLabel={summaryWords.checkSetup}
+        onPress={checkCaptureSetup} style={({ pressed }) => [styles.stoppedAction, { backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement }]}>
+        <ThemedText type="smallBold" themeColor="primary">{summaryWords.checkSetup}</ThemedText>
+      </Pressable>
+      <Pressable testID="home-capture-away" accessibilityRole="button" accessibilityLabel={summaryWords.away}
+        onPress={snoozeCapture} style={({ pressed }) => [styles.stoppedAction, { backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+        <ThemedText type="smallBold">{summaryWords.away}</ThemedText>
+      </Pressable>
+    </View>
+  </View> : null;
+  const transferNotice = pendingTransfers && pendingTransfers.count > 0 ? <TransferReviewNotice
+    pendingCount={pendingTransfers.count} incomingFils={pendingTransfers.incomingFils} outgoingFils={pendingTransfers.outgoingFils}
+    onPress={() => router.push('/review-transfers')} /> : null;
   const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
   const unlockFounder = founderUnlockEnabled && !state.founderPro
     ? () => {
@@ -585,6 +688,12 @@ export default function JournalHomeScreen() {
           onSpending={() => router.push('/flow')}
           today={homeToday}
           onToday={() => router.push('/transactions')}
+          hideHeaderAdd={Platform.OS === 'android'}
+          onAsk={Platform.OS === 'android' ? () => router.push('/assistant') : undefined}
+          onSetBudget={budgetMonthKey ? () => setBudgetSheetOpen(true) : undefined}
+          captureStopped={captureStopped}
+          leadNotice={captureStoppedNotice}
+          todayNotice={transferNotice}
           brandMark={openRecap ? <RecapLogoTrigger
             unread={recapEntry?.unread ?? false}
             accessibilityLabel={language === 'ar'
@@ -599,6 +708,34 @@ export default function JournalHomeScreen() {
         {moneyPicture
           ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
           : history ? <HistoryReadingStatus progress={history} onResume={retryHistory} /> : null}
+
+        {captureSetUp && !hasLiveCapture && !history ? <View testID="home-capture-ready" accessible accessibilityRole="text"
+          accessibilityLabel={`${Platform.OS === 'android' ? summaryWords.readyAndroid : summaryWords.readyIos}. ${summaryWords.readyBody}`}
+          style={[styles.readyCard, { borderColor: theme.cardBorder }]}>
+          <Icon name="mail" size={18} color={theme.primary} />
+          <View style={styles.grow}>
+            <ThemedText type="smallBold">{Platform.OS === 'android' ? summaryWords.readyAndroid : summaryWords.readyIos}</ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary">{summaryWords.readyBody}</ThemedText>
+          </View>
+        </View> : null}
+        {offerPast ? <View style={styles.section} testID="home-fill-past">
+          <ThemedText type="smallBold" style={styles.sectionTitle}>{summaryWords.pastTitle}</ThemedText>
+          <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>
+            {([
+              { id: 'statement', icon: 'upload', title: summaryWords.pastImport, body: summaryWords.pastImportBody, href: '/statement-import' },
+              { id: 'manual', icon: 'plus', title: summaryWords.addByHand, body: summaryWords.addByHandBody, href: '/add-transaction' },
+            ] as const).map((item) => <Pressable key={item.id} testID={`home-fill-past-${item.id}`} accessibilityRole="button"
+              accessibilityLabel={`${item.title}. ${item.body}`} onPress={() => router.push(item.href)}
+              style={({ pressed }) => [styles.pastRow, { borderBottomColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+              <Icon name={item.icon} size={18} color={theme.primary} />
+              <View style={styles.grow}>
+                <ThemedText type="smallBold">{item.title}</ThemedText>
+                <ThemedText type="meta" themeColor="textSecondary">{item.body}</ThemedText>
+              </View>
+              <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+            </Pressable>)}
+          </View>
+        </View> : null}
 
         {homeWidgets.order.map(renderWidget)}
 
@@ -628,6 +765,8 @@ export default function JournalHomeScreen() {
     <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
     <CardPaymentSheet due={cardDue} onClose={() => setCardDue(null)} />
     <BillDetailSheet subscription={recurring} onClose={() => setRecurring(null)} />
+    {budgetMonthKey ? <LimitSheet category={null} open={budgetSheetOpen} monthKey={budgetMonthKey} onClose={() => setBudgetSheetOpen(false)} /> : null}
+    {Platform.OS === 'android' && state.hydrated ? <HomeAddButton label={words.add} onPress={() => router.push('/add-transaction')} /> : null}
   </>;
 }
 
@@ -651,6 +790,14 @@ const styles = StyleSheet.create({
   captureFooter: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 14, marginTop: 16, paddingBottom: 16 },
   captureRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 },
   footerAction: { minHeight: 48, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
+  stoppedNotice: { gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12 },
+  stoppedCopy: { gap: 4 },
+  stoppedHeading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  stoppedActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  stoppedAction: { minHeight: 44, paddingHorizontal: 14, borderRadius: 999, justifyContent: 'center' },
+  readyCard: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12 },
+  pastRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   assistantCard: { minHeight: 52, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth,
     paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 12 },
   widgetCard: { minHeight: 72, borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },

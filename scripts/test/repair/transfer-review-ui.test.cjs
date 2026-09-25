@@ -78,6 +78,7 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
       useScreenContentInsets: () => ({ contentContainerStyle: {}, contentInset: { top: 12, bottom: 20 }, scrollIndicatorInsets: { top: 12, bottom: 20 } }) },
   };
   deps['@/lib/transfer-review-copy'] = load(path.join(root, 'src/lib/transfer-review-copy.ts'), deps);
+  deps['@/lib/reference-copy'] = load(path.join(root, 'src/lib/reference-copy.ts'));
   deps['@/lib/transfer-review-presentation'] = load(path.join(root, 'src/lib/transfer-review-presentation.ts'), deps);
   deps['@/lib/details-copy'] = load(path.join(root, 'src/lib/details-copy.ts'));
   deps['@/lib/transfer-pairs'] = load(path.join(root, 'src/lib/transfer-pairs.ts'), deps);
@@ -115,7 +116,9 @@ for (const language of ['en', 'ar']) {
     assert.equal(h.notice({ pendingCount: 0, incomingFils: 0, outgoingFils: 0, onPress() {} }), null);
     const notice = h.notice({ pendingCount: 2, incomingFils: 12345, outgoingFils: 6789, onPress: () => h.events.push(['open']) });
     assert.ok(notice.props.accessibilityLabel.includes(h.words.noticeBody));
-    assert.ok(text(notice).includes(h.words.noticeCount(2)));
+    const homeWords = load(path.join(root, 'src/lib/reference-copy.ts')).homeSummaryCopy[language];
+    assert.ok(text(notice).includes(homeWords.transfersToConfirm(2)));
+    assert.ok(text(notice).includes(homeWords.transfersNotCounted));
     assert.ok(!text(notice).includes('AED'));
     notice.props.onPress(); assert.deepEqual(h.events, [['open']]);
   });

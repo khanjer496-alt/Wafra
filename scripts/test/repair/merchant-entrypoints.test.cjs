@@ -6,6 +6,7 @@ const load = require('./load-typescript.cjs');
 
 // Execute the real row; only navigation, presentation and OS primitives are
 // substituted. This checks interaction contracts, not native frame timings.
+const source = load(path.resolve(__dirname, '../../../src/lib/transaction-source.ts'));
 function rowFixture({ language = 'en', large = false } = {}) {
   const events = [];
   const jsx = (type, props) => typeof type === 'function' ? type(props) : ({ type, props });
@@ -28,6 +29,8 @@ function rowFixture({ language = 'en', large = false } = {}) {
     '@/lib/i18n': { t: (key, lang) => key === 'incomeAccountReview'
       ? (lang === 'ar' ? 'الحساب بحاجة إلى مراجعة' : 'Account needs review') : key },
     '@/lib/merchant-spending-copy': load(path.resolve(__dirname, '../../../src/lib/merchant-spending-copy.ts')),
+    '@/lib/transaction-source': source,
+    '@/lib/transactions-copy': load(path.resolve(__dirname, '../../../src/lib/transactions-copy.ts'), { '@/lib/transaction-source': source }),
   });
   const transaction = { id: 'fixture', title: 'Talabat', amountFils: 12345, type: 'expense',
     category: 'dining', accountId: 'card', date: '2026-09-07' };

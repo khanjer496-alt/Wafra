@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
@@ -8,15 +8,17 @@ import { accountDisplayName, isTransfer as isLedgerTransfer, isUnassignedIncome 
 import { isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { CategoryChips } from '@/components/ui/category-chips';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Button, Chip, Toggle } from '@/components/ui/controls';
+import { Button, Toggle } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { TextField } from '@/components/ui/text-field';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
@@ -26,9 +28,17 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
 import { overrideAppliesTo } from '@/lib/uncategorised';
+import { entryDetailCopy } from '@/lib/reference-copy';
+import { transactionSource } from '@/lib/transaction-source';
 import { billAliasAppliesTo } from '@/lib/bill-alias';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
+
+/**
+ * Which state the sheet opens in: reading the entry, choosing its category,
+ * or confirming it as a transfer (the row swipe actions open the last two).
+ */
+export type EntryDetailMode = 'read' | 'category' | 'transfer';
 
 interface EntryDetailSheetProps {
   /** The entry to show, or null to keep the sheet closed. */
@@ -37,6 +47,7 @@ interface EntryDetailSheetProps {
   showMerchantLink?: boolean;
   /** Current ledger assessment for transfer-history presentation, never a saved decision. */
   transferAssessment?: TransferAssessment;
+  initialMode?: EntryDetailMode;
 }
 
 /**
@@ -46,9 +57,11 @@ interface EntryDetailSheetProps {
  * row — "what actually was this?" — was answered by six input boxes. Reading
  * comes first now; editing is one tap away.
  */
-export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment }: EntryDetailSheetProps) {
+export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment, initialMode = 'read' }: EntryDetailSheetProps) {
   const router = useRouter();
   const theme = useTheme();
+  const language = useLanguage();
+  const extra = entryDetailCopy[language === 'ar' ? 'ar' : 'en'];
   const largeText = useLargeTextLayout();
   const { state, editTransaction, deleteTransaction, resolveBestEffort, setMerchantOverride, setBillAlias } = useStore();
   const [editing, setEditing] = useState(false);
@@ -85,6 +98,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     category: CategoryId;
     count: number;
   } | null>(null);
+  // The category sheet state (a clear Cancel/Done choice) and the direct
+  // "Mark as transfer" confirmation. Declared after the older states.
+  const [categoryPicking, setCategoryPicking] = useState(false);
+  const [pickedCategory, setPickedCategory] = useState<CategoryId>('other');
+  const [confirmingTransfer, setConfirmingTransfer] = useState(false);
 
   useEffect(() => {
     if (!transaction) return;
@@ -92,6 +110,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     setConfirmingDelete(false);
     setRuleAsk(null);
     setBillRuleAsk(null);
+    setPickedCategory(transaction.category);
+    setCategoryPicking(initialMode === 'category');
+    setConfirmingTransfer(initialMode === 'transfer');
     setTitle(transaction.title);
     // The FULL amount, fils included. Seeding the field from the display
     // string — which hides the fils — meant opening an entry and saving any
@@ -221,15 +242,68 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     onClose();
   };
 
+  // The category sheet commits through the same edit and the same
+  // remember-for-merchant question as Save, with its future-only / update-all
+  // choice and the count of other entries it would move.
+  const cancelCategory = () => {
+    setCategoryPicking(false);
+    setPickedCategory(transaction.category);
+    if (initialMode === 'category') onClose();
+  };
+  const commitCategory = () => {
+    setCategoryPicking(false);
+    const next = pickedCategory;
+    if (next === transaction.category) {
+      if (initialMode === 'category') onClose();
+      return;
+    }
+    editTransaction(transaction.id, {
+      category: next,
+      ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
+    });
+    const merchant = transaction.title.trim();
+    if (transaction.paymentFlowSide === 'receipt' && transaction.billIdentity) {
+      setBillRuleAsk({
+        sourceTitle: transaction.title,
+        billIdentity: transaction.billIdentity,
+        title: merchant,
+        category: next,
+        count: state.transactions.filter((candidate) =>
+          candidate.id !== transaction.id &&
+          billAliasAppliesTo(candidate, transaction.title, transaction.billIdentity!)).length,
+      });
+      return;
+    }
+    if (merchant.length > 2) {
+      setRuleAsk({ merchant, category: next, type: transaction.type, count: countMerchantMatches(merchant, next) });
+      return;
+    }
+    onClose();
+  };
+  // The same flag the edit form's transfer toggle writes, after a confirm.
+  const markAsTransfer = () => {
+    editTransaction(transaction.id, {
+      isTransfer: true,
+      ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
+    });
+    onClose();
+  };
+
   // A notification capture is stored with `source: 'sms'` and `viaPush`, so
   // reading `source` alone called every bank-app alert an SMS. That is not
   // cosmetic: which channel a row came from is the first thing anyone asks
   // when a charge looks wrong, and the wrong answer sends them looking for a
   // message their bank never sent.
-  const sourceLabel =
-    transaction.source === 'sms'
-      ? transaction.viaPush ? t('bankNotificationSource') : t('bankSmsSource')
-      : t('addedByHand');
+  const sourceKind = transactionSource(transaction);
+  const sourceLabel = sourceKind === 'notification' ? t('bankNotificationSource')
+    : sourceKind === 'bank-text' ? t('bankSmsSource')
+      : sourceKind === 'apple-pay' ? extra.applePay
+        : sourceKind === 'statement' ? transaction.captureSource === 'csv' ? extra.statementCsv : extra.statementPdf
+          : sourceKind === 'email' ? extra.bankEmail
+            : t('addedByHand');
+  // Marking a transfer directly is offered only where the edit form's toggle
+  // would be: not for rows the transfer review owns, not for transfers.
+  const canMarkTransfer = !transferReview && !confirmedTransfer && !pendingTransfer;
   const originalMoney = originalMoneyOf(transaction);
   const fxSourceLabel =
     transaction.fxSource === 'bank'
@@ -237,14 +311,29 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       : transaction.fxSource === 'reference' && transaction.fxRateDate
         ? tf('datedReferenceRate', { date: shortDate(transaction.fxRateDate) })
         : t('offlineFxEstimate');
+  // The original amount and the rate under the headline figure, labelled by
+  // where the rate came from (bank-stated, dated reference, or an estimate).
+  const fxLine = originalMoney && transaction.fxRate !== undefined
+    ? `${formatOriginalCurrency(originalMoney.minorUnits, originalMoney.currency, state.language === 'ar' ? 'ar' : 'en', originalMoney.exponent)} · ${tf('fxRateValue', {
+      from: originalMoney.currency,
+      to: ledgerCurrencyCode(),
+      rate: transaction.fxRate >= 0.01 ? transaction.fxRate.toFixed(4) : String(Number(transaction.fxRate.toPrecision(4))),
+      source: fxSourceLabel,
+    })}`
+    : null;
 
   return (
     <BottomSheet
       visible
       testID="entry-detail-sheet"
       onClose={onClose}
-      title={editing ? t('editEntry') : t('entryDetail')}
-      footer={editing ? (
+      title={categoryPicking ? t('category') : editing ? t('editEntry') : t('entryDetail')}
+      footer={categoryPicking ? (
+          <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
+            <Button inline={!largeText} wrapLabel variant="outline" label={t('cancel')} onPress={cancelCategory} />
+            <Button inline={!largeText} wrapLabel label={extra.done} onPress={commitCategory} />
+          </View>
+      ) : editing ? (
           <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
             <Button inline={!largeText} wrapLabel label={t('saveChanges')} onPress={save} disabled={!canSave} />
             <Button inline={!largeText} wrapLabel variant="outline" label={t('cancel')} onPress={() => setEditing(false)} />
@@ -282,7 +371,17 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           color={income && !pendingTransfer && !confirmedTransfer ? theme.income : theme.text}
           style={editing ? styles.editHeadAmount : styles.headAmount}
         />
+        {!editing && fxLine ? <ThemedText type="meta" themeColor="textSecondary" tabular testID="entry-fx-line" style={styles.fxLine}>
+          {fxLine}</ThemedText> : null}
       </View>
+
+      {categoryPicking ? (
+        <View style={styles.field} testID="entry-category-picker">
+          <ThemedText type="meta" themeColor="textTertiary">{extra.chooseCategory}</ThemedText>
+          <CategoryChips categories={categories} selected={pickedCategory} onToggle={setPickedCategory} layout="wrap" />
+        </View>
+      ) : null}
+      {!categoryPicking && <>
 
       {(confirmedOwnTransfer || pendingTransfer) && (
         <View
@@ -320,6 +419,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           router.push({ pathname: '/review-transfers', params: { transactionId: transaction.id } });
         }} />
       </View>}
+      {!editing && canMarkTransfer && <Button variant="outline" wrapLabel icon="repeat" label={extra.markTransfer}
+        onPress={() => setConfirmingTransfer(true)} />}
       {!editing && showMerchantLink && !confirmedTransfer && !pendingTransfer && transaction.title.trim() &&
         <MerchantSpendingLink merchant={transaction.title} type={transaction.type} onClose={onClose} />}
       {isUnassignedIncome(transaction) && <ThemedText type="small" themeColor="textSecondary" testID="income-account-review">
@@ -394,16 +495,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
               <ThemedText type="meta" themeColor="textTertiary">
                 {t('category')}
               </ThemedText>
-              <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                {categories.map((c) => (
-                  <Chip
-                    key={c.id}
-                    label={categoryLabel(c)}
-                    active={category === c.id}
-                    onPress={() => setCategory(c.id)}
-                  />
-                ))}
-              </ScrollView>
+              <CategoryChips categories={categories} selected={category} onToggle={setCategory} layout="wrap" />
             </View>
           )}
 
@@ -466,7 +558,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                   <ThemedText
                     type="small"
                     accessibilityRole="button"
-                    onPress={() => setEditing(true)}
+                    onPress={() => { setPickedCategory(transaction.category); setCategoryPicking(true); }}
                     style={{ color: theme.primary }}>
                     {categoryLabel(meta)}
                   </ThemedText>
@@ -484,37 +576,6 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                 label: t('transactionDateLabel'),
                 value: <ThemedText type="small">{stamp}</ThemedText>,
               },
-              ...(originalMoney &&
-              transaction.fxRate !== undefined
-                ? [
-                    {
-                      label: t('originalAmount'),
-                      value: (
-                        <ThemedText type="small" tabular>
-                          {formatOriginalCurrency(
-                            originalMoney.minorUnits,
-                            originalMoney.currency,
-                            state.language === 'ar' ? 'ar' : 'en',
-                            originalMoney.exponent,
-                          )}
-                        </ThemedText>
-                      ),
-                    },
-                    {
-                      label: t('exchangeRate'),
-                      value: (
-                        <ThemedText type="small" themeColor="textSecondary">
-                          {tf('fxRateValue', {
-                            from: originalMoney.currency,
-                            to: ledgerCurrencyCode(),
-                            rate: transaction.fxRate >= 0.01 ? transaction.fxRate.toFixed(4) : String(Number(transaction.fxRate.toPrecision(4))),
-                            source: fxSourceLabel,
-                          })}
-                        </ThemedText>
-                      ),
-                    },
-                  ]
-                : []),
               ...(transaction.raw
                 ? [
                     {
@@ -536,6 +597,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         </>
       )}
 
+      </>}
+
       {/* Both of these are nested inside this sheet rather than rendered beside
           it: a Modal presented from within the presented one stacks, where
           dismissing this sheet and presenting another in the same frame does
@@ -550,6 +613,16 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           confirmLabel={t('autoAddedUndo')}
           destructive
           onConfirm={() => { resolveBestEffort(transaction.id, 'undo'); onClose(); }}
+        />
+      )}
+      {confirmingTransfer && canMarkTransfer && (
+        <ConfirmSheet
+          visible
+          onClose={() => { setConfirmingTransfer(false); if (initialMode === 'transfer') onClose(); }}
+          question={extra.markTransferQuestion}
+          body={`${transaction.title} · ${formatAmount(transaction.amountFils)}. ${extra.markTransferBody}`}
+          confirmLabel={extra.markTransfer}
+          onConfirm={markAsTransfer}
         />
       )}
       {confirmingDelete && (
@@ -715,6 +788,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginTop: 8,
   },
+  fxLine: { textAlign: 'center' },
   field: {
     gap: Spacing.two,
   },

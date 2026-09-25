@@ -40,10 +40,13 @@ test('cash and investment movements stay visible records without inflating incom
   assert.equal(cash.totalFils, 190000, 'withdrawal, investment and purchase still leave the bank');
 });
 
-test('Home and Accounts do not turn transfer reconciliation into primary navigation', () => {
+test('Home names only the real transfer review queue; Accounts does not turn it into navigation', () => {
   const home = fs.readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8');
   const wallet = fs.readFileSync(path.join(root, 'src/app/(tabs)/wallet.tsx'), 'utf8');
-  assert.doesNotMatch(home, /TransferReviewNotice|\/review-transfers/);
+  // The redesign shows "N transfers to confirm" on Home, counted from the same
+  // pendingIds the review screen lists, and only when that queue is non-empty.
+  assert.match(home, /reconcileTransfers\(state\.transactions, state\.accounts\)\.pendingIds/);
+  assert.match(home, /pendingTransfers && pendingTransfers\.count > 0 \? <TransferReviewNotice/);
   assert.doesNotMatch(wallet, /router\.push\('\/review-transfers'\)/);
 });
 

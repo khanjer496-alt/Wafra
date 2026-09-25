@@ -56,10 +56,10 @@ await check('Four bottom tabs are present and actionable', async () => {
     await exists(id);
   }
 });
-await check('Categories, Activity and Trends stay inside Spending', async () => {
+await check('Categories, Compare and Calendar stay inside Spending', async () => {
   await go('/flow'); await exists('spending-categories');
-  await page.getByRole('tab', { name: 'Activity', exact: true }).click(); await exists('spending-activity');
-  await page.getByRole('tab', { name: 'Trends', exact: true }).click(); await exists('spending-trends');
+  await page.getByRole('tab', { name: 'Calendar', exact: true }).click(); await exists('spending-activity');
+  await page.getByRole('tab', { name: 'Compare', exact: true }).click(); await exists('spending-trends');
   await page.getByRole('tab', { name: 'Categories', exact: true }).click(); await exists('spending-categories');
 });
 await check('Every spending category shows its share of total spending', async () => {

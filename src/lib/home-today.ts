@@ -188,3 +188,62 @@ export function summarizeHomeToday(input: HomeTodayInput): HomeToday {
     budget,
   };
 }
+
+/**
+ * Timestamps (epoch ms) of live captures inside a recent window, for the
+ * capture-stopped check. `isLive` decides what counts (bank text, app alert,
+ * Apple Pay); rows without a clock use noon of their local date. On the
+ * store's newest-first ledger the walk stops at the window's start.
+ */
+export function liveCaptureTimes(
+  transactions: readonly Transaction[],
+  isLive: (transaction: Transaction) => boolean,
+  now: Date,
+  windowDays: number,
+): number[] {
+  const floorISO = localISODate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - windowDays, 12));
+  const newestFirst = isNewestFirst(transactions);
+  const out: number[] = [];
+  for (const transaction of transactions) {
+    if (transaction.date < floorISO) {
+      if (newestFirst) break;
+      continue;
+    }
+    if (!isLive(transaction)) continue;
+    if (typeof transaction.ts === 'number' && Number.isFinite(transaction.ts)) {
+      out.push(transaction.ts);
+      continue;
+    }
+    const [y, m, d] = transaction.date.split('-').map(Number);
+    out.push(new Date(y!, m! - 1, d!, 12).getTime());
+  }
+  return out;
+}
+
+/** Whether anything is recorded before the given local date (YYYY-MM-DD). */
+export function hasRecordsBefore(transactions: readonly Transaction[], startISO: string): boolean {
+  if (isNewestFirst(transactions)) {
+    const oldest = transactions[transactions.length - 1];
+    return oldest !== undefined && oldest.date < startISO;
+  }
+  return transactions.some((transaction) => transaction.date < startISO);
+}
+
+export interface PendingTransferSummary {
+  count: number;
+  incomingFils: number;
+  outgoingFils: number;
+}
+
+/** Count and direction totals of the rows the transfer review queue holds. */
+export function pendingTransferSummary(transactions: readonly Transaction[], pendingIds: ReadonlySet<string>): PendingTransferSummary {
+  const summary: PendingTransferSummary = { count: 0, incomingFils: 0, outgoingFils: 0 };
+  if (pendingIds.size === 0) return summary;
+  for (const transaction of transactions) {
+    if (!pendingIds.has(transaction.id)) continue;
+    summary.count += 1;
+    if (transaction.type === 'income') summary.incomingFils += transaction.amountFils;
+    else summary.outgoingFils += transaction.amountFils;
+  }
+  return summary;
+}

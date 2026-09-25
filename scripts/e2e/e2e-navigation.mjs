@@ -395,8 +395,8 @@ const categoryDetails = async (name) => {
 
 await pressEverything('home', home);
 await pressEverything('spending categories', flow);
-await pressEverything('spending activity', () => spendingView('Activity'));
-await pressEverything('spending trends', () => spendingView('Trends'));
+await pressEverything('spending activity', () => spendingView('Calendar'));
+await pressEverything('spending trends', () => spendingView('Compare'));
 await pressEverything('bills upcoming', bills);
 await pressEverything('bills all obligations', async () => {
   await bills(); await page.getByRole('tab', { name: 'All', exact: true }).click();
@@ -458,12 +458,12 @@ await resetPreferences();
 // Stats now belongs to Spending. The old independent insight cards and pooled
 // composition slice no longer exist; exercise the replacement owners instead.
 {
-  await spendingView('Trends');
+  await spendingView('Compare');
   const merchants = await page.getByTestId('spending-trends').getByRole('button')
     .evaluateAll(nodes => nodes.map(n => n.getAttribute('aria-label')).filter(label => /, AED .* transactions$/.test(label || '')));
   ok(`trends has non-vacuous merchant drill-downs (${merchants.length})`, merchants.length >= 4);
   for (const label of merchants) {
-    await spendingView('Trends');
+    await spendingView('Compare');
     const reached = await tapKey(page, label, 5000);
     await page.waitForTimeout(500);
     const at = new URL(page.url());
