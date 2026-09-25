@@ -83,7 +83,7 @@ for(const language of ['en','ar']) {
 }
 test('centralized reference translations have equal, nonempty EN/AR keys',()=>{
  const h=createHarness();const tables=h.deps['@/lib/reference-copy'];
- assert.equal(Object.keys(tables).length,5);
+ assert.equal(Object.keys(tables).length,7);
  for(const[name,table]of Object.entries(tables)){
   assert.deepEqual(Object.keys(table.en).sort(),Object.keys(table.ar).sort(),name);
   for(const value of Object.values(table.ar))assert.match(typeof value==='function'?value(2):value,/[\u0600-\u06ff]/);

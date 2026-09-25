@@ -1,5 +1,10 @@
 /** Localized presentation vocabulary shared by the approved redesign. */
 
+/** Arabic day counts: يوم واحد، يومان، ٣–١٠ أيام، ١١+ يوماً. */
+function arabicDays(n: number): string {
+  return n === 1 ? 'يوم واحد' : n === 2 ? 'يومين' : n <= 10 ? `${n} أيام` : `${n} يوماً`;
+}
+
 export const paymentAgendaCopy = {
   en: { overdue: 'Past due', 'expected-earlier': 'Expected earlier', soon: 'Next 7 days', later: 'Later', paid: 'Recently paid',
     estimate: 'Estimated', recorded: 'Paid · due', statement: 'Statement due', empty: 'Nothing coming up',
@@ -45,7 +50,11 @@ export const spendingCopy = {
     lastSixMonths: 'Last 6 months', average: 'Avg', latest: 'Latest', vs: 'vs', askWafra: 'Ask Wafra', explain: 'Explain this',
     aboveAverage: (percent: number) => `Current total is ${percent}% above the 6-month average.`,
     belowAverage: (percent: number) => `Current total is ${percent}% below the 6-month average.`,
-    nearAverage: 'Current total is close to the 6-month average.' },
+    nearAverage: 'Current total is close to the 6-month average.',
+    compare: 'Compare', calendar: 'Calendar', shareBar: 'Share of spending by category',
+    dayOf: (day: number, of: number) => `day ${day} of ${of}`,
+    limitOf: (percent: number, limit: string) => `${percent}% of ${limit} limit`,
+    history: 'Six months and top merchants' },
   ar: { categories: 'الفئات', activity: 'الحركات', trends: 'الاتجاهات', spent: 'إجمالي الإنفاق',
     limited: 'الفئات ذات الحدود', of: 'من', all: 'الكل', withLimits: 'بحد إنفاق', noLimits: 'بلا حد',
     noLimit: 'لا يوجد حد محدد', setLimit: 'تحديد حد شهري', manage: 'تعديل الحد الشهري', monthlyOnly: 'حدود الفئات شهرية. اختر شهراً لعرضها.',
@@ -58,7 +67,11 @@ export const spendingCopy = {
     lastSixMonths: 'آخر ٦ أشهر', average: 'المتوسط', latest: 'الأحدث', vs: 'مقابل', askWafra: 'اسأل وفرة', explain: 'اشرح هذا',
     aboveAverage: (percent: number) => `الإجمالي الحالي أعلى من متوسط ٦ أشهر بنسبة ${percent}٪.`,
     belowAverage: (percent: number) => `الإجمالي الحالي أقل من متوسط ٦ أشهر بنسبة ${percent}٪.`,
-    nearAverage: 'الإجمالي الحالي قريب من متوسط ٦ أشهر.' },
+    nearAverage: 'الإجمالي الحالي قريب من متوسط ٦ أشهر.',
+    compare: 'المقارنة', calendar: 'التقويم', shareBar: 'حصة كل فئة من الإنفاق',
+    dayOf: (day: number, of: number) => `اليوم ${day} من ${of}`,
+    limitOf: (percent: number, limit: string) => `${percent}٪ من حد ${limit}`,
+    history: 'ستة أشهر وأبرز التجار' },
 } as const;
 
 export const spendingTrendsCopy = {
@@ -103,7 +116,23 @@ export const homeSummaryCopy = {
     dailyAverage: 'Daily average', excludingFixed: 'excluding rent and fixed costs',
     overDays: (n: number) => `over ${n} ${n === 1 ? 'day' : 'days'}`,
     thisWeek: 'Last 7 days', weekTotal: 'Last 7 days, total', opensActivity: 'Opens all transactions',
-    weekday: (day: number) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day] ?? '' },
+    weekday: (day: number) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day] ?? '',
+    weekdayFull: (day: number) => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][day] ?? '',
+    setBudget: 'Set a budget', setBudgetBody: 'Set a monthly budget to see what’s left this period.',
+    readyIos: 'Ready for your next bank text', readyAndroid: 'Ready for your next bank alert',
+    readyBody: 'When your bank sends an alert for a payment, it appears here.',
+    pastTitle: 'Fill in the past', pastImport: 'Import a bank statement', pastImportBody: 'PDF or CSV · brings in past months',
+    addByHand: 'Add a transaction', addByHandBody: 'Cash, or anything without a bank alert',
+    stoppedIos: (days: number) => `No bank texts for ${days} ${days === 1 ? 'day' : 'days'}`,
+    stoppedAndroid: (days: number) => `No bank alerts for ${days} ${days === 1 ? 'day' : 'days'}`,
+    rhythmSeveral: 'You usually get several a day.', rhythmDaily: 'You usually get about one a day.',
+    rhythmEvery: (days: number) => `You usually get one every ${days} days.`,
+    stoppedCauseIos: 'The Shortcuts automation may be off, or an iOS update may have paused it.',
+    stoppedCauseAndroid: 'SMS or notification access may have been turned off, or battery settings may be stopping Wafra.',
+    checkSetup: 'Check setup', away: 'I was away',
+    mayBeHigh: 'May be too high until capture resumes', ask: 'Ask', askHint: 'Opens Ask Wafra',
+    transfersToConfirm: (n: number) => `${n} ${n === 1 ? 'transfer' : 'transfers'} to confirm`,
+    transfersNotCounted: 'Not counted in spending or income until you confirm.' },
   ar: { balance: 'الأرصدة المسجلة', net: 'الصافي بعد الإنفاق', notBalance: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
     moneyIn: 'الدخل', moneyOut: 'المصروفات', netLabel: 'الصافي',
     cashflowNote: 'الدخل ناقص المصروفات',
@@ -118,5 +147,46 @@ export const homeSummaryCopy = {
     dailyAverage: 'المتوسط اليومي', excludingFixed: 'دون الإيجار والتكاليف الثابتة',
     overDays: (n: number) => n === 1 ? 'خلال يوم واحد' : n === 2 ? 'خلال يومين' : n <= 10 ? `خلال ${n} أيام` : `خلال ${n} يوماً`,
     thisWeek: 'آخر ٧ أيام', weekTotal: 'آخر ٧ أيام، المجموع', opensActivity: 'يفتح كل المعاملات',
-    weekday: (day: number) => ['ح', 'ن', 'ث', 'ر', 'خ', 'ج', 'س'][day] ?? '' },
+    weekday: (day: number) => ['ح', 'ن', 'ث', 'ر', 'خ', 'ج', 'س'][day] ?? '',
+    weekdayFull: (day: number) => ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'][day] ?? '',
+    setBudget: 'حدّد ميزانية', setBudgetBody: 'حدّد ميزانية شهرية لترى المتبقي في هذه الفترة.',
+    readyIos: 'جاهز لرسالة البنك التالية', readyAndroid: 'جاهز لتنبيه البنك التالي',
+    readyBody: 'عندما يرسل بنكك تنبيهاً بدفعة، ستظهر هنا.',
+    pastTitle: 'أكمل ما فات', pastImport: 'استيراد كشف حساب بنكي', pastImportBody: 'PDF أو CSV · يضيف الأشهر السابقة',
+    addByHand: 'إضافة معاملة', addByHandBody: 'النقد أو أي دفعة بلا تنبيه من البنك',
+    stoppedIos: (days: number) => `لا رسائل من البنك منذ ${arabicDays(days)}`,
+    stoppedAndroid: (days: number) => `لا تنبيهات من البنك منذ ${arabicDays(days)}`,
+    rhythmSeveral: 'عادةً تصلك عدة رسائل يومياً.', rhythmDaily: 'عادةً تصلك رسالة واحدة تقريباً كل يوم.',
+    rhythmEvery: (days: number) => `عادةً تصلك رسالة كل ${arabicDays(days)}.`,
+    stoppedCauseIos: 'قد تكون أتمتة الاختصارات متوقفة، أو ربما أوقفها تحديث iOS.',
+    stoppedCauseAndroid: 'قد يكون الوصول إلى الرسائل أو الإشعارات متوقفاً، أو قد تمنع إعدادات البطارية وفرة من العمل.',
+    checkSetup: 'تحقق من الإعداد', away: 'كنت غائباً',
+    mayBeHigh: 'قد يكون أعلى من الحقيقي حتى يُستأنف الالتقاط', ask: 'اسأل', askHint: 'يفتح اسأل وفرة',
+    transfersToConfirm: (n: number) => n === 1 ? 'تحويل واحد بحاجة إلى تأكيد' : n === 2 ? 'تحويلان بحاجة إلى تأكيد'
+      : n <= 10 ? `${n} تحويلات بحاجة إلى تأكيد` : `${n} تحويلاً بحاجة إلى تأكيد`,
+    transfersNotCounted: 'لا تُحتسب في الإنفاق أو الدخل حتى تؤكدها.' },
+};
+
+/** Entry detail additions: statement kind, direct transfer marking and the category sheet state. */
+export const entryDetailCopy = {
+  en: { statementPdf: 'Bank statement (PDF)', statementCsv: 'Bank statement (CSV)', applePay: 'Apple Pay (Wallet)', bankEmail: 'Bank email',
+    markTransfer: 'Mark as transfer', markTransferQuestion: 'Mark as a transfer between your accounts?',
+    markTransferBody: 'It stays in account balances but no longer counts as spending or income. You can undo this from Edit.',
+    chooseCategory: 'Choose a category', done: 'Done' },
+  ar: { statementPdf: 'كشف حساب بنكي (PDF)', statementCsv: 'كشف حساب بنكي (CSV)', applePay: 'Apple Pay (المحفظة)', bankEmail: 'بريد البنك',
+    markTransfer: 'تحديد كتحويل', markTransferQuestion: 'هل هذا تحويل بين حساباتك؟',
+    markTransferBody: 'يبقى في أرصدة الحسابات لكنه لا يُحتسب إنفاقاً أو دخلاً. يمكنك التراجع من «تعديل».',
+    chooseCategory: 'اختر فئة', done: 'تم' },
+};
+
+/** Category limit sheet: steppers and the three-month picture. */
+export const limitSheetCopy = {
+  en: { lastMonths: 'Your last 3 months', limitLine: 'Limit', lower: (amount: string) => `Lower by ${amount}`, raise: (amount: string) => `Raise by ${amount}`,
+    usual: (amount: string) => `Your usual is about ${amount}.`,
+    roomy: 'This limit leaves some room.', tight: 'This limit is close to what you usually spend.', below: 'This limit is below what you usually spend.',
+    thisMonth: 'so far', month: (label: string, amount: string) => `${label}, ${amount}` },
+  ar: { lastMonths: 'آخر ٣ أشهر', limitLine: 'الحد', lower: (amount: string) => `خفض بمقدار ${amount}`, raise: (amount: string) => `زيادة بمقدار ${amount}`,
+    usual: (amount: string) => `إنفاقك المعتاد حوالي ${amount}.`,
+    roomy: 'هذا الحد يترك لك بعض المجال.', tight: 'هذا الحد قريب من إنفاقك المعتاد.', below: 'هذا الحد أقل من إنفاقك المعتاد.',
+    thisMonth: 'حتى الآن', month: (label: string, amount: string) => `${label}، ${amount}` },
 };
