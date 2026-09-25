@@ -29,8 +29,9 @@ test('motion tokens obey the rules: nothing over 500 ms, one 260/24 spring, the 
 });
 
 test('pulse callers keep reading the shared token (so the cap reaches them)', () => {
-  for (const file of ['src/components/lock-gate.tsx', 'src/components/recap/recap-logo-trigger.tsx',
-    'src/components/ui/states.tsx']) {
+  // The lock gate lost its looping pulse in the redesign (one static unlock action), so it is no longer a caller.
+  assert.doesNotMatch(code('src/components/lock-gate.tsx'), /withRepeat|Motion\.pulse/);
+  for (const file of ['src/components/recap/recap-logo-trigger.tsx', 'src/components/ui/states.tsx']) {
     assert.match(code(file), /Motion\.pulse \/ 2/, file);
   }
 });

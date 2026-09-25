@@ -86,6 +86,16 @@ function harness() {
   // Bars render at their final size, as Reduce Motion shows them.
   deps['@/components/ui/grow-bar'] = { GrowBar: (p) => ({ type: 'View', props: { style: [p.style, p.axis === 'width' ? { width: `${p.size}%` } : { height: p.size }] } }) };
   deps['@/components/ui/money'] = compile('src/components/ui/money.tsx');
+  // Today's figure is the real RollingMoney, rendered as Reduce Motion shows it (no roll), so this
+  // test still proves the figure re-formats when the denomination changes.
+  deps['react-native'].Platform = { OS: 'ios' };
+  Object.assign(deps['@/constants/theme'], { EASE: [0.2, 0.8, 0.2, 1], Motion: { digitStagger: 60, change: 240 } });
+  deps['react-native-reanimated'] = { __esModule: true, default: { View: 'Animated.View', Text: 'Animated.Text' },
+    Easing: { bezier: () => (t) => t }, useAnimatedStyle: () => ({}), useSharedValue: (value) => ({ value }),
+    withDelay: (_delay, value) => value, withTiming: (value) => value };
+  deps['@/hooks/use-reduced-motion'] = { useReducedMotion: () => true };
+  deps['@/lib/rolling-digits'] = local('rolling-digits');
+  deps['@/components/ui/rolling-money'] = compile('src/components/ui/rolling-money.tsx', false);
   const { ReferenceHomeSummary } = compile('src/components/reference-home-summary.tsx');
   const renderNode = (node, position) => {
     if (Array.isArray(node)) return node.map((child, index) => renderNode(child, `${position}/${index}`));
