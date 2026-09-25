@@ -7,7 +7,13 @@
  * history, no statement date, no minimum the bank never stated.
  */
 import { daysBetweenISO, monthKey } from '@/lib/format';
+import { isSpending } from '@/lib/ledger';
 import type { Account, CardDue, Goal, Transaction } from '@/lib/types';
+
+/** Wallet opens the account screen for bank and cash accounts; cards keep their statement sheet. */
+export function isAccountDetailTarget(account: Pick<Account, 'kind' | 'cardType'>): boolean {
+  return account.kind !== 'card' && account.cardType === undefined;
+}
 
 /* ── Credit-card usage ──────────────────────────────────────────────── */
 
@@ -38,6 +44,32 @@ export function cardUsage(
   else if (account.snapshotKind === 'limit') usedFils = Math.max(0, limitFils - account.snapshotFils);
   else return null;
   return { usedFils, limitFils, ratio: Math.min(1, usedFils / limitFils) };
+}
+
+/**
+ * Spending Wafra captured on each of the given cards in the current money
+ * month, in one pass over the ledger.
+ *
+ * Labelled on screen as captured spending, never as a bank figure: the parser
+ * captures no statement date (cards.ts), so "since the statement" cannot be
+ * said honestly, and alert history can miss charges. Only cards the caller
+ * asks about are summed — Wallet asks for credit cards with an open statement.
+ */
+export function capturedCardSpendFils(
+  transactions: readonly Transaction[],
+  cardIds: ReadonlySet<string>,
+  now: Date,
+  internal?: Set<string>,
+): Map<string, number> {
+  const totals = new Map<string, number>();
+  if (cardIds.size === 0) return totals;
+  const key = monthKey(now);
+  for (const transaction of transactions) {
+    if (!cardIds.has(transaction.accountId)) continue;
+    if (!isSpending(transaction, undefined, internal) || monthKey(transaction.date) !== key) continue;
+    totals.set(transaction.accountId, (totals.get(transaction.accountId) ?? 0) + transaction.amountFils);
+  }
+  return totals;
 }
 
 /* ── Recording a card payment ───────────────────────────────────────── */

@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 
 import { CaptureRefreshControl } from '@/components/capture-refresh-control';
+import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { BalanceOverview } from '@/components/wallet/balance-overview';
@@ -33,7 +34,16 @@ import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
 import { netWorthBreakdown } from '@/lib/balances';
-import { accountFreshness } from '@/lib/account-freshness';
+import { accountSnapshotFreshness, snapshotOrigin } from '@/lib/account-freshness';
+import { internalTransferIdsForState } from '@/lib/ledger';
+import {
+  capturedCardSpendFils,
+  cardPaymentOptions,
+  cardUsage,
+  isAccountDetailTarget,
+  type CardPaymentChoice,
+} from '@/lib/money-places';
+import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import {
   formatAmount,
@@ -41,7 +51,8 @@ import {
   shortDate,
 } from '@/lib/format';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
-import type { Account, AccountKind } from '@/lib/types';
+import { historyStatusOnly } from '@/lib/store-selection';
+import type { Account, AccountKind, CardDue } from '@/lib/types';
 import { bankPickerOptions } from '@/lib/known-banks';
 import { accountGroupsCopy } from '@/lib/reference-copy';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
@@ -99,12 +110,17 @@ export default function WalletScreen() {
   const largeText = useLargeTextLayout();
   const language = useLanguage();
   const transferWords = transferActivityCopy(language);
+  const placeWords = moneyPlacesWords(language);
   const router = useRouter();
   // Only what Accounts reads. lastScanTs is shown here, so a finished scan
   // still refreshes it; import progress and unrelated settings do not.
   const state = useStoreSelector(({ state: s }) => ({
     transactions: s.transactions, accounts: s.accounts, cardDues: s.cardDues, goals: s.goals,
     knownBanks: s.knownBanks, lastScanTs: s.lastScanTs, ledgerMoney: s.ledgerMoney, marketId: s.marketId,
+    // Transfer scope for the captured-card figure; status only, so import
+    // progress does not re-render Accounts.
+    transferInternalIds: s.transferInternalIds, transferNormalizationVersion: s.transferNormalizationVersion,
+    historyImport: historyStatusOnly(s.historyImport),
   }));
   const {
     addAccount,
@@ -237,7 +253,18 @@ export default function WalletScreen() {
   const inactiveDisclosureLabel = `${t('inactiveHeader')} ${inactiveAccounts.length}. ${
     showInactive ? t('hide') : t('show')
   }`;
-  // This month's spend per account, for the per-card line.
+  // Captured spending this money month, only for credit cards with an open
+  // statement — the one place Accounts shows it, labelled as captured rather
+  // than as a bank figure. One pass over the ledger for all of them.
+  const capturedByCard = useMemo(() => {
+    const cardIds = new Set<string>();
+    for (const account of activeSources) {
+      if (account.cardType === 'credit' && dueByAccountId.has(account.id)) cardIds.add(account.id);
+    }
+    return capturedCardSpendFils(state.transactions, cardIds, now, internalTransferIdsForState(state));
+    // Transfer scope reads accounts and transactions, which this already keys on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSources, dueByAccountId, state.transactions, state.accounts, now]);
 
   const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account) => {
     const due = dueByAccountId.get(account.id);
@@ -256,15 +283,27 @@ export default function WalletScreen() {
             : 0
       : balances.balanceByAccountId[account.id] ?? null;
     const figureKind = account.cardType === 'credit' ? 'owed' : figureFils === null ? 'unknown' : 'balance';
+    // A figure the user set is theirs, never "per bank SMS" (account-freshness.ts).
+    const reported = !due ? accountSnapshotFreshness(account, now, language) : null;
     const caption = figureFils === null ? t('noBalanceYet')
       : figureKind === 'owed' ? t('owed')
-        : account.snapshotKind === 'balance' ? t('perBankSms') : t('trackedManually');
-    const reported = !due && account.snapshotTs ? accountFreshness(account.snapshotTs, now, language) : null;
-    const freshness = due ? `${language === 'ar' ? 'الاستحقاق' : 'Due'} ${shortDate(due.due.dueDate)}`
-      : reported?.label ?? '';
-    return { account, figureFils, caption, freshness, quiet: reported?.quiet ?? false };
+        : account.snapshotKind === 'balance'
+          ? snapshotOrigin(account) === 'manual' && reported ? reported.label : t('perBankSms')
+          : t('trackedManually');
+    const freshness = due ? placeWords.dueOn(shortDate(due.due.dueDate)) : reported?.label ?? '';
+    const statement = due && account.cardType === 'credit' && due.remainingFils > 0 ? {
+      due: due.due,
+      totalFils: due.due.totalDueFils,
+      capturedFils: capturedByCard.get(account.id) ?? 0,
+      minimumStated: cardPaymentOptions({ due: due.due, remainingFils: due.remainingFils }).minimumFils !== null,
+    } : undefined;
+    return {
+      account, figureFils, caption, freshness, quiet: reported?.quiet ?? false,
+      statement, usage: cardUsage(account), balanceEditable: isAccountDetailTarget(account),
+    };
   // Captions also follow language; unrelated store metadata must not rescan rows.
-  }), [activeSources, balances.balanceByAccountId, dueByAccountId, dueAccountIds, language, now]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [activeSources, balances.balanceByAccountId, dueByAccountId, dueAccountIds, capturedByCard, language, now]);
 
   const openingFils = openingText.trim() === ''
     ? 0
@@ -341,13 +380,25 @@ export default function WalletScreen() {
     setBankFor(null);
   };
 
+  // Bank and cash accounts open their own screen; the manage sheet stays one
+  // tap away there (header) and here (the sliders beside each row).
   const openAccount = (account: Account) => {
     if (account.kind === 'card' || account.cardType) {
       router.push(`/cards?card=${account.id}`);
       return;
     }
+    if (isAccountDetailTarget(account)) {
+      router.push(`/account?id=${encodeURIComponent(account.id)}`);
+      return;
+    }
     setOptionsFor(account);
   };
+  const updateBalance = (account: Account) =>
+    router.push(`/account?id=${encodeURIComponent(account.id)}&set=balance`);
+  const hideAccount = (account: Account) => editAccount(account.id, { archived: true });
+  // "Mark paid" on a card row records a payment the user made; it opens the
+  // payment sheet (amount + confirmation) rather than committing from the row.
+  const [paying, setPaying] = useState<{ due: CardDue; choice: CardPaymentChoice } | null>(null);
 
   return (
     <>
@@ -448,7 +499,9 @@ export default function WalletScreen() {
               );
             })}
 
-            <AccountGroups rows={accountRows} onOpen={openAccount} onManage={setOptionsFor} />
+            <AccountGroups rows={accountRows} onOpen={openAccount} onManage={setOptionsFor}
+              onUpdateBalance={updateBalance} onHide={hideAccount}
+              onMarkPaid={(due, choice) => setPaying({ due, choice })} />
             <Pressable accessibilityRole="button" accessibilityLabel={transferWords.title}
               testID="wallet-transfers-link" onPress={() => router.push('/transfers')}
               style={({ pressed }) => [styles.transfersLink, { borderColor: theme.cardBorder,
@@ -591,41 +644,52 @@ export default function WalletScreen() {
               pasting a bank alert by hand works on every platform and this
               is the only route to the screen that accepts one — gating the
               whole block left iOS and web with no way in at all. */}
-          {(
-            <Pressable
-              onPress={() => router.push('/import-sms')}
-              style={({ pressed }) => [
-                styles.scan,
-                {
-                  borderColor: theme.controlBorder,
-                  backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
-                },
-              ]}>
-              <Icon name="mail" size={17} color={theme.textSecondary} />
-              <View style={styles.scanText}>
-                <ThemedText type="small">
-                  {Platform.OS === 'ios'
-                    ? t('importBankActivity')
-                    : !isSmsScanningAvailable()
-                    ? t('pasteBankMessage')
-                    : state.lastScanTs > 0
-                      ? tf('inboxScannedAgo', { time: relativeSince(state.lastScanTs, resumeClock) })
-                      : t('inboxNotRead')}
-                </ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {Platform.OS === 'ios'
-                    ? t('importBankActivityIosDetail')
-                    : !isSmsScanningAvailable()
-                    ? t('inboxNeedsAndroid')
-                    : tf('entriesReadLocally', {
-                        count: smsCount,
-                        ending: smsCount === 1 ? 'y' : 'ies',
-                      })}
-                </ThemedText>
-              </View>
-              <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-            </Pressable>
-          )}
+          {/* Add activity: the three ways money gets into Wafra besides live
+              alerts, each an existing screen. The Android inbox row keeps
+              saying when the inbox was last read, because that is where
+              reading happens there; elsewhere it is the paste route. */}
+          <View style={styles.section} testID="wallet-add-activity">
+            <ThemedText type="micro" themeColor="textSecondary" accessibilityRole="header">
+              {placeWords.addActivity}
+            </ThemedText>
+            {[
+              { key: 'statement', icon: 'upload' as const, route: '/statement-import' as const,
+                title: placeWords.importStatement, detail: placeWords.importStatementDetail },
+              { key: 'manual', icon: 'plus' as const, route: '/add-transaction' as const,
+                title: placeWords.addByHand, detail: placeWords.addByHandDetail },
+              { key: 'paste', icon: 'mail' as const, route: '/import-sms' as const,
+                title: Platform.OS !== 'ios' && isSmsScanningAvailable()
+                  ? state.lastScanTs > 0
+                    ? tf('inboxScannedAgo', { time: relativeSince(state.lastScanTs, resumeClock) })
+                    : t('inboxNotRead')
+                  : placeWords.pasteMessage,
+                detail: Platform.OS !== 'ios' && isSmsScanningAvailable()
+                  ? tf('entriesReadLocally', { count: smsCount, ending: smsCount === 1 ? 'y' : 'ies' })
+                  : placeWords.pasteMessageDetail },
+            ].map((row, index) => (
+              <Pressable
+                key={row.key}
+                accessibilityRole="button"
+                accessibilityLabel={`${row.title}. ${row.detail}`}
+                testID={`wallet-add-${row.key}`}
+                onPress={() => router.push(row.route)}
+                style={({ pressed }) => [
+                  styles.scan,
+                  index === 0 && styles.scanFirst,
+                  {
+                    borderColor: theme.cardBorder,
+                    backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
+                  },
+                ]}>
+                <Icon name={row.icon} size={17} color={theme.textSecondary} />
+                <View style={styles.scanText}>
+                  <ThemedText type="small">{row.title}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">{row.detail}</ThemedText>
+                </View>
+                <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+              </Pressable>
+            ))}
+          </View>
       </ScreenScaffold>
 
       {/* Add account sheet */}
@@ -819,6 +883,7 @@ export default function WalletScreen() {
         onClose={() => setCurrencySheetVisible(false)}
         onSelect={setLedgerMoney}
       />
+      <CardPaymentSheet due={paying?.due ?? null} initialChoice={paying?.choice} onClose={() => setPaying(null)} />
     </>
   );
 }
@@ -852,10 +917,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two + 2,
-    padding: Spacing.three,
-    borderRadius: Radius.sheet,
-    borderWidth: StyleSheet.hairlineWidth,
+    minHeight: 60,
+    paddingVertical: Spacing.two + 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  scanFirst: { borderTopWidth: StyleSheet.hairlineWidth },
   scanText: { flex: 1, gap: 1 },
   section: {
     gap: Spacing.two,

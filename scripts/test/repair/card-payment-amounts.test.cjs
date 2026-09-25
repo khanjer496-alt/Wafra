@@ -11,7 +11,7 @@ const load = require('./load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
 const { reducer, build } = loadStore();
 const cards = build('cards');
-const places = load(path.join(root, 'src/lib/money-places.ts'), { '@/lib/format': build('format') });
+const places = load(path.join(root, 'src/lib/money-places.ts'), { '@/lib/format': build('format'), '@/lib/ledger': build('ledger') });
 
 const AED = { schemaVersion: 2, currency: 'AED', exponent: 2 };
 const card = { id: 'visa', name: 'Visa', kind: 'card', cardType: 'credit', last4: '4821', openingFils: 0, color: '#000' };

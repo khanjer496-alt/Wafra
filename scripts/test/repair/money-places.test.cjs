@@ -8,7 +8,8 @@ const load = require('./load-typescript.cjs');
 
 const root = path.resolve(__dirname, '../../..');
 const format = require('../build/format');
-const places = load(path.join(root, 'src/lib/money-places.ts'), { '@/lib/format': format });
+const ledger = require('../build/ledger');
+const places = load(path.join(root, 'src/lib/money-places.ts'), { '@/lib/format': format, '@/lib/ledger': ledger });
 const { moneyPlacesCopy } = load(path.join(root, 'src/lib/money-places-copy.ts'));
 
 test('the usage bar needs a limit the user entered AND a bank figure', () => {
@@ -38,6 +39,26 @@ test('in / out this month is the account\'s recorded movement, duplicates counte
   assert.deepEqual({ ...flow }, { inFils: 420_000, outFils: 250_000, count: 3 });
   assert.deepEqual({ ...places.accountMonthFlow(rows, 'none', new Date(2026, 8, 25)) }, { inFils: 0, outFils: 0, count: 0 });
   assert.deepEqual([...places.recentAccountTransactions(rows, 'bank', 2).map((r) => r.id)], ['move-out', 'move-out-dup']);
+});
+
+test('captured card spending is this month\'s spending on the asked cards, never payments or own moves', () => {
+  const rows = [
+    { id: 'buy', accountId: 'visa', type: 'expense', amountFils: 4_562, category: 'groceries', title: 'Market', date: '2026-09-20' },
+    { id: 'buy2', accountId: 'visa', type: 'expense', amountFils: 1_549, category: 'entertainment', title: 'Stream', date: '2026-09-02' },
+    { id: 'pay', accountId: 'visa', type: 'income', amountFils: 90_000, category: 'other', title: 'Payment', date: '2026-09-10', isTransfer: true },
+    { id: 'move', accountId: 'visa', type: 'expense', amountFils: 7_000, category: 'other', title: 'Move', date: '2026-09-11', isTransfer: true },
+    { id: 'internal', accountId: 'visa', type: 'expense', amountFils: 3_000, category: 'other', title: 'Sweep', date: '2026-09-12' },
+    { id: 'aug', accountId: 'visa', type: 'expense', amountFils: 999, category: 'dining', title: 'Old', date: '2026-08-31' },
+    { id: 'other-card', accountId: 'amex', type: 'expense', amountFils: 500, category: 'dining', title: 'Cafe', date: '2026-09-20' },
+  ];
+  const totals = places.capturedCardSpendFils(rows, new Set(['visa']), new Date(2026, 8, 25), new Set(['internal']));
+  assert.equal(totals.get('visa'), 4_562 + 1_549);
+  assert.equal(totals.has('amex'), false);
+  assert.equal(places.capturedCardSpendFils(rows, new Set(), new Date(2026, 8, 25)).size, 0);
+  assert.equal(places.isAccountDetailTarget({ kind: 'bank' }), true);
+  assert.equal(places.isAccountDetailTarget({ kind: 'cash' }), true);
+  assert.equal(places.isAccountDetailTarget({ kind: 'card', cardType: 'debit' }), false);
+  assert.equal(places.isAccountDetailTarget({ kind: 'bank', cardType: 'credit' }), false);
 });
 
 test('goal progress is saved against target and nothing else', () => {

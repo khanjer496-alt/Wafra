@@ -76,7 +76,7 @@ function createHarness(options = {}) {
     privateMode:true,notSubscriptions:[],merchantOverrides:{},billAliases:{},marketId:'AE',ledgerMoney:{currency:'AED',exponent:2},reviewTray:{pending:[]},...options.state};
   if(options.empty){state.transactions=[];state.accounts=[];state.budgets=[];state.bills=[];state.cardDues=[];}
   const store={state,getStateSnapshot:()=>state,getStateGeneration:()=>0};
-  for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','deleteBill','markBillPaid','setNotSubscription','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport','setLedgerMoney'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
+  for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','editBill','deleteBill','markBillPaid','setNotSubscription','setSubscriptionCancelled','setAccountBalance','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport','setLedgerMoney'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
   const harnessToday=options.now??new Date('2026-09-15T09:00:00Z');
   const deps={react,'react/jsx-runtime':runtime,'@/lib/assistant-copy':assistantCopy,'react-native':native,'@/constants/theme':themes,'@/global.css':{},
     'expo-router':{useRouter:()=>({push:p=>events.push(['route',p]),back:()=>events.push(['back'])}),useLocalSearchParams:()=>options.params??{},Redirect:p=>jsx('Redirect',p)},
@@ -139,6 +139,8 @@ function createHarness(options = {}) {
   local('@/lib/transfer-activity-copy','src/lib/transfer-activity-copy.ts');
   local('@/lib/transfer-review-copy','src/lib/transfer-review-copy.ts');
   local('@/lib/ledger','src/lib/ledger.ts');local('@/lib/splits','src/lib/splits.ts');local('@/lib/balances','src/lib/balances.ts');local('@/lib/categories','src/lib/categories.ts');
+  // Accounts/Bills redesign: pure figures and their copy, real source.
+  local('@/lib/money-places-copy','src/lib/money-places-copy.ts');local('@/lib/money-places','src/lib/money-places.ts');
   local('@/lib/bill-alias','src/lib/bill-alias.ts');
   local('@/lib/merchant-spending','src/lib/merchant-spending.ts');
   local('@/lib/merchant-spending-copy','src/lib/merchant-spending-copy.ts');
