@@ -56,6 +56,7 @@ import {
   activeSubscriptions,
   billCommitments,
   cancelledByUser,
+  isCancelledByUser,
   detectSubscriptions,
   detectSubscriptionsCooperatively,
   daysUntilNext,
@@ -719,7 +720,8 @@ export default function BillsScreen() {
             </>}
           </View>
         </View>
-        {cancelNotice && (
+        {/* Only while it is still cancelled: Still paying, or a new charge, ends it. */}
+        {cancelNotice && cancelled?.[cancelNotice.trim().toLowerCase()] && (
           <View accessibilityLiveRegion="polite" testID="bills-cancel-notice"
             style={[styles.notice, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
             <ThemedText type="small" style={styles.rowInfo}>{w.markedCancelled(cancelNotice)}</ThemedText>
@@ -817,6 +819,7 @@ export default function BillsScreen() {
             <View style={[styles.detailActions, largeText && styles.detailStack]}>
               {!trackedTitles.has(detail.title.toLowerCase()) &&
                 detail.status !== 'stopped' &&
+                !isCancelledByUser(detail, cancelled) &&
                 remindable(detail) && (
                   <Button
                     inline={!largeText}

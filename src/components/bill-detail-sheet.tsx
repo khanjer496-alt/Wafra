@@ -190,7 +190,10 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
     const cancelledOn = state.cancelledSubscriptions?.[subscription.title.trim().toLowerCase()];
     const cancelled = isCancelledByUser(subscription, state.cancelledSubscriptions);
     const cancellable = subscription.group === 'subscription';
-    const verdict = subscription.priceIncreased
+    // "N months running, nothing to watch" is a claim about a charge still on
+    // a schedule; a stopped, cancelled or on-demand one gets no verdict.
+    const scheduledAndActive = !stopped && !cancelled && subscription.cadence !== 'as-needed';
+    const verdict = !scheduledAndActive ? null : subscription.priceIncreased
       ? tf('recurringPriceUpVerdict', {
           last: formatAmount(subscription.lastAmountFils, { decimals: false }),
           usual: formatAmount(subscription.priorTypicalFils, { decimals: false }),
@@ -250,7 +253,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
           <>
             <View style={styles.history}>
               <HistoryStrip months={data.history} />
-              <ThemedText type="default" themeColor="textSecondary">{verdict}</ThemedText>
+              {verdict && <ThemedText type="default" themeColor="textSecondary">{verdict}</ThemedText>}
             </View>
 
             {data.firstISO && (

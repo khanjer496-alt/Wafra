@@ -262,7 +262,8 @@ export default function WalletScreen() {
     return capturedCardSpendFils(state.transactions, cardIds, now, internalTransferIdsForState(state));
     // Transfer scope reads accounts and transactions, which this already keys on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSources, dueByAccountId, state.transactions, state.accounts, now]);
+  }, [activeSources, dueByAccountId, state.transactions, state.accounts, state.transferInternalIds,
+    state.transferNormalizationVersion, state.historyImport, now]);
 
   const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account) => {
     const due = dueByAccountId.get(account.id);

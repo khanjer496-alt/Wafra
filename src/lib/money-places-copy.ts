@@ -132,7 +132,7 @@ export const moneyPlacesCopy = {
     billDueDay: 'Due day (1–31)',
     saveBill: 'Save bill',
     dayNotInMonth: (date: string) => `That day does not exist in the month this yearly bill falls in (${date}).`,
-    detectedCannotEdit: 'Wafra keeps this reminder in step with your bank alerts, so it cannot be edited here.',
+    detectedCannotEdit: 'Wafra made this reminder from a detected charge and may update it from your bank notices, so it cannot be edited here. Delete it and add your own to change it.',
   },
   ar: {
     updateBalance: 'تحديث الرصيد',
@@ -250,7 +250,7 @@ export const moneyPlacesCopy = {
     billDueDay: 'يوم الاستحقاق (1–31)',
     saveBill: 'حفظ الفاتورة',
     dayNotInMonth: (date: string) => `هذا اليوم غير موجود في شهر هذه الفاتورة السنوية (${date}).`,
-    detectedCannotEdit: 'تحدّث وفرة هذا التذكير من تنبيهات بنكك، لذا لا يمكن تعديله هنا.',
+    detectedCannotEdit: 'أنشأت وفرة هذا التذكير من عملية مكتشفة وقد تحدّثه من إشعارات بنكك، لذا لا يمكن تعديله هنا. احذفه وأضف تذكيرك الخاص لتغييره.',
   },
 } as const;
 

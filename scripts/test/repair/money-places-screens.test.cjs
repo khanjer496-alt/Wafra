@@ -245,6 +245,16 @@ test('a detected reminder cannot be edited; a hand-made one saves through editBi
     [['editBill', 'dewa', { title: 'DEWA home', amountFils: 35000, dueDay: 9 }]]);
 });
 
+test('a stopped or cancelled charge gets no "nothing to watch" verdict, and a cancelled one offers Still paying', () => {
+  const stoppedSheet = renderBillSheet(createHarness(), { subscription: gym });
+  assert.doesNotMatch(text(stoppedSheet), /nothing to watch/);
+  const cancelledSheet = renderBillSheet(createHarness({ state: { cancelledSubscriptions: { netflix: '2026-09-01' } } }),
+    { subscription: netflix });
+  assert.doesNotMatch(text(cancelledSheet), /nothing to watch|reminds you the day before it renews/);
+  assert.match(text(byId(cancelledSheet, 'bill-detail-cancelled')), /Still paying/);
+  assert.match(text(renderBillSheet(createHarness(), { subscription: netflix })), /nothing to watch/);
+});
+
 test('a yearly bill edit to a day its month lacks is refused before Save, not dropped after it', () => {
   const yearly = { id: 'insurance', title: 'Insurance', category: 'other', amountFils: 120000, dueDay: 10, yearlyOnISO: '2026-02-10', paidMonths: [] };
   const h = createHarness({ states: { 1: true, 2: 'Insurance', 3: '1200', 4: '30' } });
