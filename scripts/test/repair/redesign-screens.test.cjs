@@ -47,6 +47,33 @@ test('Pro copy is paired and sells only what Pro gates', () => {
   assert.match(pro, /t\('proOutcomeTitle'\)/);
 });
 
+test('statement date note follows the selected country, and the privacy line stays truthful', () => {
+  const names = load(path.join(root, 'src/lib/country-names.ts'));
+  const country = load(path.join(root, 'src/lib/country.ts'), { '@/lib/country-names': names });
+  const copy = load(path.join(root, 'src/lib/supplement-copy.ts'), { '@/lib/country': country });
+  const { en, ar } = copy.SUPPLEMENT_COPY;
+  assert.deepEqual(Object.keys(ar).sort(), Object.keys(en).sort());
+  const us = copy.statementDateNote('US', 'en');
+  assert.match(us, /04\/09 is April 9\./);
+  const ae = copy.statementDateNote('AE', 'en');
+  assert.match(ae, /04\/09 is 4 September\./);
+  assert.match(copy.statementDateNote('JP', 'en'), /year first/);
+  assert.match(copy.statementDateNote('CA', 'en'), /won’t guess/);
+  assert.equal(copy.statementDateNote(null, 'en'), en.dateNoteUnknown);
+  assert.equal(copy.statementDateNote('ZZ', 'en'), en.dateNoteUnknown);
+  assert.match(copy.statementDateNote('AE', 'ar'), /04\/09/);
+  // Statements are read by Wafra's import service, never "on this phone".
+  for (const lang of [en, ar]) {
+    assert.doesNotMatch(Object.values(lang).join('\n'), /read on this phone|files are read on this phone/i);
+  }
+  assert.match(en.uploadDisclosure, /Wafra’s import service/);
+  const screen = read('src/components/supplement-imports.tsx');
+  assert.match(screen, /testID="statement-date-note"[\s\S]{0,300}statementDateNote\(state\.country, language\)/);
+  assert.match(screen, /testID="statement-file-status"/);
+  // No pre-import confirmation step and no per-file duplicate counts.
+  assert.doesNotMatch(screen, /already captured|not duplicated/);
+});
+
 test('Trusted devices shows the invite countdown as its hero and says what is relayed', () => {
   const screen = read('src/app/trusted-devices.tsx');
   const i18n = read('src/lib/i18n.ts');

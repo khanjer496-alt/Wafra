@@ -35,7 +35,7 @@ import {
 } from '@/lib/relay';
 import { statementDateOrderForCountry } from '@/lib/country';
 import { useStore } from '@/lib/store';
-import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
+import { statementDateNote, SUPPLEMENT_COPY } from '@/lib/supplement-copy';
 import { displayRegion } from '@/lib/ledger-money';
 import { summarizeCoverage } from '@/lib/statement-coverage';
 import { countPhrase, nextUploadDelay } from '@/lib/statement-batch';
@@ -62,6 +62,14 @@ type FileResult = {
   ok: boolean;
   detail: string;
 };
+
+/** A picked file's place in the batch while it is being read. */
+type LiveFile = {
+  name: string;
+  status: 'waiting' | 'reading' | 'done' | 'locked' | 'failed';
+  detail?: string;
+};
+
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 /** How long to back off after the relay still answers 429 despite pacing. */
@@ -128,6 +136,7 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
   const [status, setStatus] = useState<string | null>(preview?.status ?? null);
   const [pendingPdfs, setPendingPdfs] = useState<PendingProtectedPdf[]>([]);
   const [fileResults, setFileResults] = useState<FileResult[]>(preview?.files ?? []);
+  const [liveFiles, setLiveFiles] = useState<LiveFile[]>([]);
   const [progress, setProgress] = useState<{ index: number; total: number } | null>(preview?.progress ?? null);
   const [summary, setSummary] = useState<ImportSummary | null>(preview?.summary ?? null);
   const [filesOpen, setFilesOpen] = useState(false);
@@ -452,6 +461,12 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
       });
       if (picked.canceled || picked.assets.length === 0) return;
       setBusy('statement');
+      setLiveFiles(picked.assets.map((asset) => ({ name: asset.name, status: 'waiting' })));
+      // Each file's row moves waiting → reading → done / locked / failed.
+      const markFile = (position: number, status: LiveFile['status'], detail?: string) => {
+        if (!aliveRef.current) return;
+        setLiveFiles((current) => current.map((item, i) => i === position ? { ...item, status, detail } : item));
+      };
       let acceptedRows = 0;
       let rejectedRows = 0;
       let pages = 0;
@@ -483,6 +498,7 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
         const format = csv ? 'csv' : 'pdf';
         if (limitReached || !aliveRef.current) {
           fileResults.push({ name: asset.name, ok: false, detail: copy.fileNotTried });
+          markFile(index, 'failed', copy.fileNotTried);
           continue;
         }
         inFlightPickerUris.add(asset.uri);
@@ -493,6 +509,7 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
             if (delay > 0 && !(await waitFor(delay, index + 1))) throw new CloudImportError('network');
             setStatus(interpolate(copy.uploadingProgress, { index: index + 1, total }));
             setProgress({ index: index + 1, total });
+            markFile(index, 'reading');
             starts[format].push(Date.now());
             try {
               accepted = csv
@@ -513,6 +530,7 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
           if ('pages' in accepted && typeof accepted.pages === 'number') pages += accepted.pages;
           coverage.push({ item: accepted.coverage, format });
           fileResults.push({ name: asset.name, ok: true, detail: fileImportedDetail(accepted) });
+          markFile(index, 'done', fileImportedDetail(accepted));
         } catch (e) {
           if (!csv && e instanceof CloudImportError &&
               (e.code === 'pdf_password_required' || e.code === 'pdf_password_incorrect')) {
@@ -523,6 +541,7 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
             // files.
             retainedUris.add(asset.uri);
             fileResults.push({ name: asset.name, ok: false, detail: copy.fileLocked });
+            markFile(index, 'locked', copy.fileLocked);
             protectedPdfs.push({ asset, file });
             continue;
           }
@@ -532,13 +551,11 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
           if (e instanceof CloudImportError && (e.code === 'rate_limited' || e.code === 'queue_full')) {
             limitReached = true;
           }
-          fileResults.push({
-            name: asset.name,
-            ok: false,
-            detail: interpolate(copy.fileFailed, {
-              reason: e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e),
-            }),
+          const failedDetail = interpolate(copy.fileFailed, {
+            reason: e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e),
           });
+          fileResults.push({ name: asset.name, ok: false, detail: failedDetail });
+          markFile(index, 'failed', failedDetail);
           continue;
         } finally {
           inFlightPickerUris.delete(asset.uri);
@@ -579,6 +596,7 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
       }
       setBusy(null);
       setProgress(null);
+      if (aliveRef.current) setLiveFiles([]);
     }
   };
 
@@ -718,6 +736,12 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
                 {copy.uploadDisclosure}
               </ThemedText>
             </View>
+            <View style={styles.disclosure} testID="statement-date-note">
+              <Icon name="calendar" size={15} color={theme.textSecondary} />
+              <ThemedText type="meta" themeColor="textSecondary" style={styles.messageText}>
+                {statementDateNote(state.country, language)}
+              </ThemedText>
+            </View>
             <Button
               icon="upload"
               label={busy === 'connect' || busy === 'capabilities' ? copy.connecting
@@ -755,6 +779,46 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
               {/* The bar already says "2 of 3"; the status line adds only waits and filing. */}
               {status && status !== interpolate(copy.uploadingProgress, progress ?? { index: 0, total: 0 })
                 ? <ThemedText type="meta" themeColor="textSecondary">{status}</ThemedText> : null}
+            </View>
+          )}
+
+          {reading && liveFiles.length > 1 && (
+            <View testID="statement-file-status" style={styles.results}>
+              {liveFiles.map((file, index) => {
+                const statusText = file.status === 'waiting'
+                  ? copy.fileStatusWaiting
+                  : file.status === 'reading'
+                    ? copy.fileStatusReading
+                    : file.detail ?? '';
+                return (
+                  <View
+                    key={`${index}:${file.name}`}
+                    style={styles.resultRow}
+                    accessible
+                    accessibilityLabel={interpolate(copy.fileStatusLabel, { name: file.name, status: statusText })}>
+                    {file.status === 'reading' ? (
+                      <ActivityIndicator size="small" color={theme.primary} />
+                    ) : (
+                      <Icon
+                        name={file.status === 'done' ? 'check'
+                          : file.status === 'locked' ? 'lock'
+                            : file.status === 'failed' ? 'alert' : 'receipt'}
+                        size={15}
+                        color={file.status === 'done' ? theme.primary
+                          : file.status === 'failed' ? theme.expense : theme.textTertiary}
+                      />
+                    )}
+                    <View style={styles.cardCopy}>
+                      <ThemedText type="meta" numberOfLines={1}>{file.name}</ThemedText>
+                      <ThemedText
+                        type="meta"
+                        themeColor={file.status === 'failed' ? 'expense' : 'textSecondary'}>
+                        {statusText}
+                      </ThemedText>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
           )}
 

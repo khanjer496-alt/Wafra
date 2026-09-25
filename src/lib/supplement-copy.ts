@@ -1,3 +1,5 @@
+import { countryDisplayName, dateOrderForCountry, isKnownCountry } from '@/lib/country';
+
 export const SUPPLEMENT_COPY = {
   en: {
     later: 'Later',
@@ -99,6 +101,15 @@ export const SUPPLEMENT_COPY = {
     syncFailed: 'The rows are safe in your import queue, but filing them on this phone failed: {reason}',
     syncFailedUnknown: 'the ledger update did not complete',
     syncFailedOffline: 'Wafra could not be reached; they will file on the next sync',
+    // The date-order note follows the country the person chose: the import
+    // service is sent that order, so the example must be the same reading.
+    dateNoteOrdered: 'Dates are read the way {country} writes them, so 04/09 is {example}.',
+    dateNoteYearFirst: 'Dates from {country} statements are read year first, as printed.',
+    dateNoteUndecided: '{country} uses more than one date order, so Wafra won’t guess dates like 04/09. Statements with dates like 04 Sep 2026 work best.',
+    dateNoteUnknown: 'Set your country in Settings so dates like 04/09 are read in the right order.',
+    fileStatusWaiting: 'Waiting',
+    fileStatusReading: 'Reading dates and amounts…',
+    fileStatusLabel: '{name}: {status}',
   },
   ar: {
     later: 'لاحقاً',
@@ -200,5 +211,45 @@ export const SUPPLEMENT_COPY = {
     syncFailed: 'الصفوف محفوظة في قائمة الاستيراد، لكن تسجيلها على هذا الهاتف فشل: {reason}',
     syncFailedUnknown: 'لم يكتمل تحديث السجل',
     syncFailedOffline: 'تعذّر الوصول إلى وفرة؛ ستُسجّل عند المزامنة القادمة',
+    dateNoteOrdered: 'تُقرأ التواريخ كما تُكتب في {country}، لذا فإن 04/09 تعني {example}.',
+    dateNoteYearFirst: 'تُقرأ تواريخ كشوف {country} بالسنة أولاً كما هي مطبوعة.',
+    dateNoteUndecided: 'تُستخدم في {country} أكثر من طريقة لكتابة التاريخ، لذلك لن يخمّن وفرة تواريخ مثل 04/09. تعمل الكشوف ذات التواريخ مثل 04 Sep 2026 بشكل أفضل.',
+    dateNoteUnknown: 'حدّد دولتك في الإعدادات لتُقرأ تواريخ مثل 04/09 بالترتيب الصحيح.',
+    fileStatusWaiting: 'بالانتظار',
+    fileStatusReading: 'جارٍ قراءة التواريخ والمبالغ…',
+    fileStatusLabel: '{name}: {status}',
   },
 } as const;
+
+/**
+ * The date-order sentence under the file chooser, from the selected country.
+ * The example is the same reading the import service is told to apply
+ * (statementDateOrderForCountry), formatted in the UI language.
+ */
+export function statementDateNote(
+  country: string | null | undefined,
+  language: 'en' | 'ar',
+): string {
+  const copy = SUPPLEMENT_COPY[language];
+  const interpolate = (template: string, values: Record<string, string>) =>
+    template.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? '');
+  const order = dateOrderForCountry(country);
+  if (!order || !country) {
+    return isKnownCountry(country)
+      ? interpolate(copy.dateNoteUndecided, { country: countryDisplayName(country!, language) })
+      : copy.dateNoteUnknown;
+  }
+  const name = countryDisplayName(country, language);
+  if (order === 'YMD') return interpolate(copy.dateNoteYearFirst, { country: name });
+  // 04/09: the fourth of September when day-first, the ninth of April when month-first.
+  const example = order === 'DMY' ? new Date(2026, 8, 4) : new Date(2026, 3, 9);
+  let formatted: string;
+  try {
+    formatted = new Intl.DateTimeFormat(language === 'ar' ? 'ar-AE' : order === 'MDY' ? 'en-US' : 'en-GB', {
+      day: 'numeric', month: 'long',
+    }).format(example);
+  } catch {
+    formatted = order === 'DMY' ? '4/9' : '9/4';
+  }
+  return interpolate(copy.dateNoteOrdered, { country: name, example: formatted });
+}
