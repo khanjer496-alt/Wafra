@@ -3,8 +3,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTabBarMetrics } from '@/components/ui/tab-bar-metrics';
 import { Spacing } from '@/constants/theme';
 
-/** Visual height of the four-destination bar above the safe-area inset. */
-export const TAB_BAR_HEIGHT = 58;
+/**
+ * Visual height of the four-destination bar above the safe-area inset: the
+ * 64pt floating pill plus the gap under it. Only a first-frame fallback; the
+ * bar measures itself.
+ */
+export const TAB_BAR_HEIGHT = 72;
 
 /**
  * Floor for the iOS system tab bar plus a home indicator (49pt + 34pt).

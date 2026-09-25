@@ -163,6 +163,7 @@ import {
   mergeLocalCaptureQualifications,
   normalizeIosCaptureWarningState,
   normalizeLocalCaptureQualifications,
+  sanitizeGoalIds,
   type Account,
   type AndroidCaptureSources,
   type AppState,
@@ -172,6 +173,7 @@ import {
   type CardDue,
   type CategoryId,
   type Goal,
+  type GoalId,
   type ImportBatchInput,
   type IosCaptureWarningState,
   type LocalCaptureDeclineQualificationMapping,
@@ -897,6 +899,7 @@ type Action =
   | { type: 'addAccount'; account: Account }
   | { type: 'editAccount'; id: string; patch: Partial<Omit<Account, 'id'>> }
   | { type: 'setKnownBanks'; names: string[] }
+  | { type: 'setGoals'; goals: GoalId[] }
   | { type: 'deleteAccount'; id: string }
   | { type: 'mergeRenewedCard'; oldId: string; newId: string }
   | { type: 'markCardsDistinct'; id: string }
@@ -1223,6 +1226,9 @@ function reduceState(state: AppState, action: Action): AppState {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
       next.historyImport = normalizeHistoryImportProgress(next.historyImport);
+      // Optional and code-owned: an unknown or malformed value is dropped, never guessed.
+      next.wafraGoals = sanitizeGoalIds(next.wafraGoals);
+      if (next.wafraGoals === undefined) delete next.wafraGoals;
       // Parser migrations use the resumable paged history coordinator rather
       // than monopolising the foreground JS thread with a whole-inbox reread.
       if (
@@ -1549,6 +1555,9 @@ function reduceState(state: AppState, action: Action): AppState {
         ...state,
         accounts: state.accounts.map((a) => (a.id === action.id ? { ...a, ...action.patch } : a)),
       };
+    case 'setGoals':
+      // Onboarding's "What should Wafra do?". Code-owned ids only; no money.
+      return { ...state, wafraGoals: sanitizeGoalIds(action.goals) ?? [] };
     case 'setKnownBanks': {
       // The user's own answer to "Which banks text you?". One bank is an
       // unambiguous label for every account nothing else could name; several
@@ -1880,6 +1889,8 @@ interface StoreValue {
   editAccount: (id: string, patch: Partial<Omit<Account, 'id'>>) => void;
   /** Store which banks text the user; one bank also labels every bank-less account. */
   setKnownBanks: (names: string[]) => void;
+  /** Store what the person asked Wafra to do (`wafraGoals`); not savings goals. */
+  setGoals: (goals: GoalId[]) => void;
   deleteAccount: (id: string) => void;
   /** Fold a reissued card's predecessor into it (user-confirmed). */
   mergeRenewedCard: (oldId: string, newId: string) => void;
@@ -2837,6 +2848,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'setKnownBanks', names });
   }, [dispatch]);
 
+  const setGoals = useCallback((goals: GoalId[]) => {
+    dispatch({ type: 'setGoals', goals });
+  }, [dispatch]);
+
   const mergeRenewedCardAction = useCallback((oldId: string, newId: string) => {
     dispatch({ type: 'mergeRenewedCard', oldId, newId });
   }, [dispatch]);
@@ -3164,6 +3179,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       reviewTray: current.reviewTray,
       captureOptOut: current.captureOptOut,
       bestEffortAutoPost: current.bestEffortAutoPost,
+      // A backup written before goals existed keeps this phone's answers.
+      wafraGoals: restored.wafraGoals ?? current.wafraGoals,
       localCaptureQualifications: current.localCaptureQualifications,
       iosCaptureWarning: current.iosCaptureWarning,
     };
@@ -3303,6 +3320,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editAccount,
       deleteAccount,
       setKnownBanks,
+      setGoals,
       mergeRenewedCard: mergeRenewedCardAction,
       markCardsDistinct: markCardsDistinctAction,
       addBill,
@@ -3376,6 +3394,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editAccount,
       deleteAccount,
       setKnownBanks,
+      setGoals,
       mergeRenewedCardAction,
       markCardsDistinctAction,
       addBill,

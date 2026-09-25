@@ -296,7 +296,7 @@ const tabBar = stripComments(read('src/components/tab-bar.tsx'));
 
 {
   ok('src/components/tab-bar.tsx: selection is immediate without shared-value motion',
-    !/useSharedValue|withSpring|withTiming/.test(tabBar) && /focused \? theme\.primary/.test(tabBar),
+    !/useSharedValue|withSpring|withTiming/.test(tabBar) && /focused \? tone\.text/.test(tabBar),
     'selection uses the keyed tab state directly, without a new animation');
 
   /**

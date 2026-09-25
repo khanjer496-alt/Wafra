@@ -411,6 +411,23 @@ export interface OnboardingPlanPreferences {
   budgetId: 'essentials' | 'balanced' | 'flexible';
 }
 
+/**
+ * What the person asked Wafra to do (onboarding E3, "What should Wafra do?").
+ * Not savings goals — those are `Goal`. No money, no provider identity: only
+ * these five code-owned ids. They shape the personal pattern and may order
+ * Home; nothing else reads them.
+ */
+export type GoalId = 'salary' | 'bills' | 'subscriptions' | 'spend-less' | 'cash-cards';
+export const GOAL_IDS: readonly GoalId[] = ['salary', 'bills', 'subscriptions', 'spend-less', 'cash-cards'];
+
+/** Known ids only, once each, in canonical order; anything else is dropped. */
+export function sanitizeGoalIds(value: unknown): GoalId[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const chosen = new Set(value.filter((item): item is GoalId =>
+    typeof item === 'string' && (GOAL_IDS as readonly string[]).includes(item)));
+  return GOAL_IDS.filter((id) => chosen.has(id));
+}
+
 /** What the person wants Wafra to make clearer first. No financial data. */
 export type OnboardingFocus = 'spending' | 'bills' | 'cashflow' | 'overview';
 
@@ -724,6 +741,12 @@ export interface AppState {
   /** Structured statement date ranges already imported; files/passwords are never retained. */
   statementCoverage: StatementCoverageEntry[];
   goals: Goal[];
+  /**
+   * What the person asked Wafra to do (`GoalId`), from onboarding. Named apart
+   * from `goals`, which are savings goals with money in them. Optional: absent
+   * on every ledger written before it existed, and nothing requires it.
+   */
+  wafraGoals?: GoalId[];
   /** First-run plan waiting for a real ledger currency before activation. */
   onboardingPlan: OnboardingPlanPreferences | null;
   /** Source-free first-run choices and resume position. */
