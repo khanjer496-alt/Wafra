@@ -43,6 +43,8 @@ function renderMerchant({ name = 'Cedar & Cafe', type, language = 'en', hydrated
     '@/components/entry-detail-sheet': { EntryDetailSheet: component('EntryDetailSheet') },
     '@/components/period-sheet': { PeriodSheet: component('PeriodSheet') },
     '@/components/transaction-row': { TransactionRow: component('TransactionRow') },
+    '@/components/merchant-month-bars': { MerchantMonthBars: component('MerchantMonthBars') },
+    '@/components/merchant-category-rule': { MerchantCategoryRule: component('MerchantCategoryRule') },
     '@/components/ui/controls': { Button: component('Button') },
     '@/components/ui/merchant-avatar': { MerchantAvatar: component('Avatar') },
     '@/components/ui/money': { Money: component('Money') },

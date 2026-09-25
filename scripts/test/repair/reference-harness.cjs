@@ -142,6 +142,9 @@ function createHarness(options = {}) {
   local('@/lib/bill-alias','src/lib/bill-alias.ts');
   local('@/lib/merchant-spending','src/lib/merchant-spending.ts');
   local('@/lib/merchant-spending-copy','src/lib/merchant-spending-copy.ts');
+  local('@/lib/details-copy','src/lib/details-copy.ts');
+  deps['@/components/merchant-month-bars']={MerchantMonthBars:p=>jsx('MerchantMonthBars',p)};
+  deps['@/components/merchant-category-rule']={MerchantCategoryRule:p=>jsx('MerchantCategoryRule',p)};
   deps['@/lib/subscriptions']={detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
     fixedCommitments:()=>[],billCommitments:()=>[],otherCommitments:()=>[],daysUntilNext:s=>Math.round((Date.parse(s.nextExpectedISO)-Date.parse('2026-09-06'))/86400000),
     recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId)};
