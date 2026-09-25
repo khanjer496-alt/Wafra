@@ -158,7 +158,8 @@ ok('a parsed-only inbox still produces an AI review report',
 const root = path.join(__dirname, '../..');
 const source = fs.readFileSync(path.join(root, 'src/lib/parser-research-source.ts'), 'utf8');
 const transport = fs.readFileSync(path.join(root, 'src/lib/feedback-transport.ts'), 'utf8');
-const settings = fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8');
+// The personal review export moved with the other exports to Data and help.
+const settings = fs.readFileSync(path.join(root, 'src/app/settings-data.tsx'), 'utf8');
 const screen = fs.readFileSync(path.join(root, 'src/app/parser-research.tsx'), 'utf8');
 const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
 const workflow = fs.readFileSync(

@@ -14,7 +14,11 @@ for(const language of ['en','ar'])for(const theme of ['light','dark']){
    assert.ok(scaffold.props.scrollRef,'continuous Settings supports targeted recovery scrolling');
    assert.ok(walk(tree).some(n=>n.props?.testID==='settings-imports'));
    assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===t('settingsNotificationsHeader')));
-   assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===t('privacyHeader')));
+   const copy=h.deps['@/lib/settings-copy'].settingsCopy(language);
+   assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===copy.privacyAndSecurity));
+   // Exports, backup, the clean-ups and Erase moved one tap in, and the way
+   // there is a real row on the main screen.
+   assert.ok(walk(tree).some(n=>n.props?.testID==='settings-data-and-help'));
    assert.deepEqual(h.events,[]);
   }
  });
@@ -40,7 +44,7 @@ test('privacy details open explicitly without changing saved preferences',()=>{
 test('Settings asks how the bank reaches you and says a statement fills the gap',()=>{
  const t=createWorkflowHarness().deps['@/lib/i18n'].t;
  const unset=createWorkflowHarness(),unsetTree=unset.renderScreen('settings');
- const row=walk(unsetTree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===t('settingsAlertDeliveryTitle'));
+ const row=walk(unsetTree).find(n=>n.props?.onPress&&n.props.accessibilityLabel?.startsWith(t('settingsAlertDeliveryTitle')));
  assert.ok(row,'the alert-delivery row is on the Settings screen');
  assert.ok(text(unsetTree).includes(t('settingsAlertDeliveryUnset')),'an unanswered question says so');
  assert.ok(text(unsetTree).includes(t('statementImportSettingsDetail')));
@@ -63,8 +67,32 @@ test('Settings asks how the bank reaches you and says a statement fills the gap'
 test('unknown settings deep-links retain the complete screen without acting on the value',()=>{
  const h=createWorkflowHarness({params:{section:'erase-now'}}),tree=h.renderScreen('settings');
  assert.ok(walk(tree).some(n=>n.props?.testID==='settings-imports'));
- assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===h.deps['@/lib/i18n'].t('settingsDangerHeader')));
+ const entry=walk(tree).find(n=>n.props?.testID==='settings-data-and-help');
+ assert.ok(entry,'the Data and help entry is always rendered');
  assert.deepEqual(h.events,[]);
+ // The danger zone lives on Data and help, and a deep link never reaches it.
+ const data=createWorkflowHarness({params:{section:'erase-now'}}),dataTree=data.renderScreen('settings-data');
+ assert.ok(walk(dataTree).some(n=>n.type==='SectionHeader'&&n.props.title===data.deps['@/lib/i18n'].t('settingsDangerHeader')));
+ assert.deepEqual(data.events,[]);
+});
+for(const language of ['en','ar'])test(`Data and help keeps every data row, with honest counts and backup wording: ${language}`,()=>{
+ const h=createWorkflowHarness({language});
+ const t=h.deps['@/lib/i18n'].t,copy=h.deps['@/lib/settings-copy'].settingsCopy(language);
+ const tree=h.renderScreen('settings-data'),all=text(tree);
+ for(const label of [t('exportExpensePdf'),t('exportCsv'),copy.backupTitle,copy.restoreTitle,t('sortShops'),copy.unreadAlerts,t('sendFeedback'),t('privacyPolicy'),t('termsOfUse'),t('eraseAll')])
+  assert.ok(all.includes(label),label);
+ // The two clean-up counts are full-ledger scans, deferred until after the
+ // first paint; until then each row keeps its plain description.
+ assert.ok(all.includes(t('sortShopsSettingsDetail')));
+ assert.ok(all.includes(t('improveAccuracySettingsDetail')));
+ assert.equal(copy.merchantsToPlace(4),language==='en'?'4 items to place':'4 عناصر بانتظار التصنيف');
+ assert.ok(all.includes(copy.backupDetail));
+ assert.ok(!/encrypt(ed)? backup/i.test(copy.backupDetail),'the plain JSON backup is never called encrypted');
+ assert.ok(all.includes(copy.versionFooter('test')));
+ assert.deepEqual(h.events,[]);
+ // Erase asks first, in a centred dialog whose way out keeps the data.
+ walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===t('eraseAll')).props.onPress();
+ assert.ok(!h.events.some(e=>['unpairDevice','clearAll','setIosCaptureEnabled'].includes(e[0])),'asking to erase erases nothing');
 });
 test('review action preserves source reviewId rather than silently inserting money',()=>{
  const h=createWorkflowHarness({state:{reviewTray:{pending:[pending('source-identity')]}}}),tree=h.renderScreen('review-alerts');

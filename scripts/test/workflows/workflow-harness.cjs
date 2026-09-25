@@ -94,6 +94,13 @@ function createWorkflowHarness(options={}) {
  // The real preference preset module has no native runtime; keep it source-executing.
  h.local('@/lib/onboarding','src/lib/onboarding.ts');
  h.local('@/lib/android-capture-sources','src/lib/android-capture-sources.ts');
+ // Settings and Data and help: the real copy, status helpers and row shapes.
+ // Only the biometric probe is a native boundary; `null` is "not known yet".
+ h.local('@/lib/biometric-kind','src/lib/biometric-kind.ts');
+ h.local('@/lib/settings-copy','src/lib/settings-copy.ts');
+ h.local('@/lib/settings-status','src/lib/settings-status.ts');
+ d['@/components/biometric-glyph']={useBiometricKind:()=>options.biometricKind??null,BiometricGlyph:p=>jsx('BiometricGlyph',p)};
+ h.local('@/components/settings-rows');
  function renderScreen(screen,props={}){
   if(screen==='review-alerts'){
    h.local('@/lib/review-alert-copy','src/lib/review-alert-copy.ts');

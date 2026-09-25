@@ -63,7 +63,8 @@ const execute = (relative, dependencies = {}) => {
 };
 
 const screen = read('src/app/ios-setup.tsx');
-const settingsScreen = read('src/app/settings.tsx');
+// Settings is two screens since the redesign: the main list and Data and help.
+const settingsScreen = read('src/app/settings.tsx') + read('src/app/settings-data.tsx');
 const storageRecovery = read('src/components/storage-recovery.tsx');
 const controller = read('src/lib/ios-capture-setup.ts');
 const protocol = read('src/lib/ios-local-capture-protocol.ts');

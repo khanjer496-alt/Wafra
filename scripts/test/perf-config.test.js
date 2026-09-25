@@ -1066,11 +1066,21 @@ function bodyOf(source, header) {
       !/homeCleanupReady|setHomeCleanupReady/.test(home),
     'uncategorisedMerchants and unreadFormatCount are full-history maintenance; dedicated screens own them, not Home');
 
-  ok('Settings renders cleanup routes without scanning the full ledger for badge counts',
-    !/uncategorisedMerchants|unreadFormatCount|noFormatsReason/.test(settings) &&
-      /sortShopsSettingsDetail/.test(settings) &&
-      /improveAccuracySettingsDetail/.test(settings),
-    'opening Settings to change a toggle or send diagnostics must stay independent of transaction count');
+  ok('Settings renders without scanning the full ledger for badge counts',
+    !/uncategorisedMerchants|unreadFormatCount|noFormatsReason/.test(settings),
+    'opening Settings to change a toggle must stay independent of transaction count');
+
+  // The clean-up rows (and their counts) moved to Data and help. The counts
+  // are full-history scans, so they run only after the screen's interactions
+  // settle, with the static descriptions shown until then.
+  const settingsData = stripComments(read('src/app/settings-data.tsx'));
+  const deferred = settingsData.match(/InteractionManager\.runAfterInteractions\(\(\) => \{[\s\S]*?\n\s*\}\);/)?.[0] ?? '';
+  ok('Data and help defers its clean-up counts until after first paint',
+    /uncategorisedMerchants\(/.test(deferred) && /unreadFormatCount\(/.test(deferred) &&
+      (settingsData.match(/uncategorisedMerchants\(|unreadFormatCount\(/g) ?? []).length === 2 &&
+      /cleanupCounts \? copy\.merchantsToPlace\(cleanupCounts\.place\) : t\('sortShopsSettingsDetail'\)/.test(settingsData) &&
+      /cleanupCounts \? copy\.unreadFormats\(cleanupCounts\.unread\) : t\('improveAccuracySettingsDetail'\)/.test(settingsData),
+    'the two ledger scans may never run in the render path');
 
   ok('Home resume clock does not invalidate full-ledger projections within the same day',
     /const projectionDay\s*=/.test(home) &&

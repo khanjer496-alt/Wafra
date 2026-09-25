@@ -44,29 +44,30 @@
       "sha256": "84d159a502a975ca143a028e2de65c093ae6bad535080b5abafdd7e3125dcce7"
     },
     {
-      "file": "src/app/settings.tsx",
+      "file": "src/app/settings-data.tsx",
       "name": "exportCsv",
       "sha256": "b4876961a2edbe7070f4eac3c1a9a5ae8f9aee5a756d477fb74b64349ed728cf"
     },
     {
-      "file": "src/app/settings.tsx",
+      "file": "src/app/settings-data.tsx",
       "name": "backupJson",
       "sha256": "d3b0a8584e09575fc6b7458035438dbcb2798fff870bb4bae8a68cf59e0b0f37"
     },
     {
-      "file": "src/app/settings.tsx",
+      "file": "src/app/settings-data.tsx",
       "name": "restoreFromFile",
       "sha256": "a3b2472edccb72ea39f1688c81283e0c23c45760ee96cf20d19f1f2cae772886"
     },
     {
-      "file": "src/app/settings.tsx",
+      "file": "src/app/settings-data.tsx",
       "name": "eraseAllData",
       "sha256": "e38709acfd8da916cdc00f40fba6d7ca77b7b4a2bc6cf637e177df34dd11eba1"
     },
     {
-      "file": "src/app/settings.tsx",
+      "file": "src/app/settings-data.tsx",
       "name": "confirmErase",
-      "sha256": "c73f5a749df0fdd159223cbe7016ad3179dffe7144d828ad82ab0339d60f320c"
+      "sha256": "24ded6d99040afa3570b04c5bcfb17d35554cc557d113bdc72211f45f6f652b7",
+      "reviewedChange": "2026-09-25 redesign: Erase moved to Settings → Data and help and confirms in a centred alert-style dialog (cancel reads 'Keep my data') instead of the shared bottom sheet. The body selection (Shortcut / SMS inbox / plain) is unchanged, and eraseAllData — relay unpairing first, then local wipe — is still the only commit path."
     },
     {
       "file": "src/app/import-sms.tsx",

@@ -370,6 +370,13 @@ const settings = async () => {
   await page.waitForURL(/\/settings/);
   await page.waitForTimeout(300);
 };
+// Exports, backup, the clean-ups, feedback and Erase live one tap further in.
+const settingsData = async () => {
+  await settings();
+  if (!(await tapKey(page, 'Data and help'))) throw new Error('Data and help is unreachable');
+  await page.waitForURL(/\/settings-data/);
+  await page.waitForTimeout(300);
+};
 const spendingView = async (name) => {
   await flow();
   await page.getByRole('tab', { name, exact: true }).click();
@@ -403,22 +410,31 @@ await pressEverything('bills all obligations', async () => {
 });
 await pressEverything('wallet', wallet);
 await pressEverything('transactions', async () => { await home(); await tapKey(page, 'All activity'); await page.waitForURL(/\/transactions/); });
-// Settings groups are sections in one continuous screen. Assert that each
-// capability is present, then sweep the complete scroll range; the former
-// 2400 px limit stopped before Data and Support on this longer screen.
+// Settings is two screens: the main list, and Data and help (exports,
+// backup, the clean-ups, feedback, public links and Erase). Assert that each
+// section is present, then sweep the complete scroll range of both.
 await settings();
-for (const section of ['Imports', 'Notifications', 'Preferences', 'Privacy', 'Data', 'Support & feedback', 'Danger zone']) {
+for (const section of ['Capture', 'Notifications', 'Appearance', 'Country and currency', 'Privacy and security']) {
   ok(`settings: ${section} section is reachable`, !!(await locate(page, section)));
 }
-const settingsSweep = await pressEverything('settings', settings,
-  { skip: ['Erase all data'], fullScroll: true });
+const settingsSweep = await pressEverything('settings', settings, { fullScroll: true });
 for (const control of [
-  'Wafra Pro', 'Import bank statements', 'Daily spend summary', 'Appearance',
-  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Improve categories',
-  'Improve accuracy', 'Back up everything (JSON)', 'Restore from backup',
-  'Export transactions (CSV)', 'Expense report (PDF)', 'Send feedback', 'Erase all data',
+  'Wafra Pro', 'Add bank statements', 'Daily spend summary', 'Theme',
+  'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Data and help',
 ]) {
   ok(`settings: complete sweep includes ${control}`, settingsSweep.controls.some(key => key === control || key.startsWith(control)));
+}
+await settingsData();
+for (const section of ['Your data', 'Help Wafra get better', 'About', 'Danger zone']) {
+  ok(`data and help: ${section} section is reachable`, !!(await locate(page, section)));
+}
+const dataSweep = await pressEverything('data and help', settingsData,
+  { skip: ['Erase all data'], fullScroll: true });
+for (const control of [
+  'Improve categories', 'Unread alerts', 'Back up to a file', 'Restore from a backup',
+  'Export transactions (CSV)', 'Expense report (PDF)', 'Send feedback', 'Erase all data',
+]) {
+  ok(`data and help: complete sweep includes ${control}`, dataSweep.controls.some(key => key === control || key.startsWith(control)));
 }
 
 /**
@@ -446,8 +462,8 @@ await pressEverything('pro', async () => {
   await tapKey(page, 'Wafra Pro'); await page.waitForTimeout(1300);
 });
 await pressEverything('accuracy', async () => {
-  await settings();
-  await tapKey(page, 'Improve accuracy'); await page.waitForTimeout(1300);
+  await settingsData();
+  await tapKey(page, 'Unread alerts'); await page.waitForTimeout(1300);
 });
 await pressEverything('import', async () => {
   await wallet(); await tapKey(page, 'Paste a bank message'); await page.waitForTimeout(1400);
@@ -498,8 +514,9 @@ await goesTo('Home settings action', home, 'Settings', /^\/settings/);
 await goesTo('Accounts payment cards', wallet, 'Payment cards', /^\/cards/);
 await goesTo('Accounts manual import', wallet, 'Paste a bank message', /^\/import-sms/);
 await goesTo('Settings Pro', settings, 'Wafra Pro', /^\/pro/);
-await goesTo('Settings accuracy', settings, 'Improve accuracy', /^\/accuracy/);
-await goesTo('Settings feedback', settings, 'Send feedback', /^\/feedback/);
+await goesTo('Settings data and help', settings, 'Data and help', /^\/settings-data/);
+await goesTo('Data and help accuracy', settingsData, 'Unread alerts', /^\/accuracy/);
+await goesTo('Data and help feedback', settingsData, 'Send feedback', /^\/feedback/);
 
 /* ── 3. Search, manual entry, cancellation and filter clearing ────────── */
 {
@@ -526,7 +543,7 @@ for (const [name, enter] of [
   ['settings', async () => { await home(); await tapKey(page, 'Settings'); }],
   ['cards', async () => { await wallet(); await tapKey(page, 'Payment cards'); }],
   ['import-sms', async () => { await wallet(); await tapKey(page, 'Paste a bank message'); }],
-  ['feedback', async () => { await settings(); await tapKey(page, 'Send feedback'); }],
+  ['feedback', async () => { await settingsData(); await tapKey(page, 'Send feedback'); }],
 ]) {
   await enter();
   await page.waitForTimeout(1300);

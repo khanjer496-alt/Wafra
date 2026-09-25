@@ -294,6 +294,8 @@ assert.doesNotMatch(task6CardDetail, /type="subtitle" numberOfLines=\{1\}/);
 assert.match(task6CardDetail, /<BottomSheet[^>]*footer=\{footer\}/);
 
 const task7Settings = code(read('src/app/settings.tsx'));
+// Data and help: exports, backup, the clean-ups, public links and Erase.
+const task7SettingsData = code(read('src/app/settings-data.tsx'));
 const task7Pro = code(read('src/app/pro.tsx'));
 const task7I18n = read('src/lib/i18n.ts');
 const task7PublicLinksPath = path.join(ROOT, 'src/lib/public-links.ts');
@@ -308,23 +310,35 @@ assert.match(task7Pro, /<View style=\{styles\.actions\}>[\s\S]*?<View style=\{\[
 const settingsRenderStart = task7Settings.indexOf('<React.Fragment>');
 assert.ok(settingsRenderStart >= 0, 'Settings route-owned Fragment was not found');
 const settingsRender = task7Settings.slice(settingsRenderStart);
-assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 8, 'Settings renders exactly eight compact groups');
+assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 7, 'Settings renders exactly seven compact groups');
 const settingsGroupMarkers = [
-  '<Block onPress={() => router.push(\'/pro\')}>',
+  'testID="settings-pro-card"',
   "<SectionHeader title={t('settingsImportsHeader')} />",
   "<SectionHeader title={t('settingsNotificationsHeader')} />",
   "<SectionHeader title={t('settingsPreferencesHeader')} />",
-  "<SectionHeader title={t('privacyHeader')} />",
-  '<SectionHeader title={words.needsReview} />',
-  "<SectionHeader title={t('dataHeader')} />",
-  "<SectionHeader title={t('supportHeader')} />",
-  "<SectionHeader title={t('settingsDangerHeader')} />",
+  '<SectionHeader title={copy.countryAndCurrency} />',
+  '<SectionHeader title={copy.privacyAndSecurity} />',
+  "router.push('/settings-data')",
 ];
 let previousSettingsGroup = -1;
 for (const marker of settingsGroupMarkers) {
   const next = settingsRender.indexOf(marker);
   assert.ok(next > previousSettingsGroup, `Settings group order lost ${marker}`);
   previousSettingsGroup = next;
+}
+const settingsDataRender = task7SettingsData.slice(task7SettingsData.indexOf('<React.Fragment>'));
+assert.equal((settingsDataRender.match(/<Section index=\{/g) ?? []).length, 5, 'Data and help renders five groups');
+let previousDataGroup = -1;
+for (const marker of [
+  '<SectionHeader title={copy.yourData} />',
+  '<SectionHeader title={copy.helpImprove} />',
+  '<SectionHeader title={copy.advanced} />',
+  '<SectionHeader title={copy.about} />',
+  "<SectionHeader title={t('settingsDangerHeader')} />",
+]) {
+  const next = settingsDataRender.indexOf(marker);
+  assert.ok(next > previousDataGroup, `Data and help group order lost ${marker}`);
+  previousDataGroup = next;
 }
 assert.doesNotMatch(task7Settings, /StatusFacts|settingsStatusHeader/);
 assert.match(task7Settings, /from '@\/components\/ui\/section-header'/);
@@ -333,9 +347,9 @@ assert.match(task7Settings, /visible=\{preferenceSheet === 'appearance'\}[\s\S]*
 assert.doesNotMatch(task7Settings, /<Segmented\b|SectionHeader.*from '@\/components\/ui\/layout'/);
 
 for (const [key, en, ar] of [
-  ['settingsImportsHeader', 'Imports', 'الاستيراد'],
+  ['settingsImportsHeader', 'Capture', 'الالتقاط'],
   ['settingsNotificationsHeader', 'Notifications', 'الإشعارات'],
-  ['settingsPreferencesHeader', 'Preferences', 'التفضيلات'],
+  ['settingsPreferencesHeader', 'Appearance', 'المظهر'],
   ['settingsDangerHeader', 'Danger zone', 'منطقة الخطر'],
   ['supportWebsite', 'Support', 'الدعم'],
   ['publicLinkUnavailable', 'Unavailable in this build', 'غير متاح في هذا الإصدار'],
@@ -355,14 +369,14 @@ assert.match(task7PublicLinks, /const value = extra\?\.\[key\]/);
 assert.match(task7PublicLinks, /const url = new URL\(value\)/);
 assert.match(task7PublicLinks, /return url\.protocol === 'https:' \? url\.toString\(\) : null/);
 
-for (const screen of [task7Settings, task7Pro]) {
+for (const screen of [task7SettingsData, task7Pro]) {
   assert.match(screen, /import \{ configuredPublicUrl \} from '@\/lib\/public-links'/);
   assert.match(screen, /configuredPublicUrl\('privacyPolicyUrl'\)/);
   assert.match(screen, /configuredPublicUrl\('termsOfUseUrl'\)/);
 }
-assert.match(task7Settings, /configuredPublicUrl\('supportUrl'\)/);
-const settingsPublicRows = task7Settings.match(
-  /const publicLinkRow[\s\S]*?(?=\n  const trial)/,
+assert.match(task7SettingsData, /configuredPublicUrl\('supportUrl'\)/);
+const settingsPublicRows = task7SettingsData.match(
+  /const publicLinkRow[\s\S]*?(?=\n  return \()/,
 )?.[0] ?? '';
 assert.ok(settingsPublicRows.length > 0, 'Settings public-link row helper was not found');
 assert.match(settingsPublicRows, /if \(url\) return linkRow\(title, null, \(\) => void openPublicLink\(url\)/);
@@ -376,8 +390,8 @@ for (const row of [
   "publicLinkRow(t('privacyPolicy'), privacyPolicyUrl)",
   "publicLinkRow(t('termsOfUse'), termsOfUseUrl)",
   "publicLinkRow(t('supportWebsite'), supportUrl, true)",
-]) assert.ok(settingsRender.includes(row), `Settings does not always render ${row}`);
-assert.match(task7Settings, /publicLinkNotice && \([\s\S]*?accessibilityRole="alert"[\s\S]*?accessibilityLiveRegion="polite"[\s\S]*?legalLinkFailed[\s\S]*?legalLinkFailedBody/);
+]) assert.ok(settingsDataRender.includes(row), `Data and help does not always render ${row}`);
+assert.match(task7SettingsData, /publicLinkNotice && \([\s\S]*?accessibilityRole="alert"[\s\S]*?accessibilityLiveRegion="polite"[\s\S]*?legalLinkFailed[\s\S]*?legalLinkFailedBody/);
 
 const proPublicRows = task7Pro.match(
   /const publicLinkRow[\s\S]*?\n  \};/,
