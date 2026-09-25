@@ -3202,6 +3202,19 @@ ok('stale: a stale statement that gets paid leaves openDues',
     accuracy.unreadFormats([{ ...named, title: 'Transfer to Ahmed' }], label).length === 0);
   ok('accuracy: unread formats sort ahead of uncategorized ones',
     accuracy.unreadFormats([named, named, unread], label)[0].reason === 'unread');
+  // "Open entry" opens the newest row of a listed format — never an own
+  // transfer that shares the format, even when it is newer.
+  {
+    const transfer = { ...named, id: 'own-move', title: 'Transfer to Ahmed', date: '2026-07-20' };
+    const newest = accuracy.newestRowOfFormat([named, transfer]);
+    const key = accuracy.formatKey(named.raw);
+    ok('accuracy: Open entry skips a deliberate Other row of the same format',
+      newest.get(key)?.id === named.id && newest.size === 1);
+    ok('accuracy: Open entry has nothing to open when only the deliberate row remains',
+      accuracy.newestRowOfFormat([transfer]).size === 0);
+    ok('accuracy: Open entry picks the newest listed row',
+      accuracy.newestRowOfFormat([named, { ...named, id: 'later', date: '2026-07-15' }]).get(key)?.id === 'later');
+  }
 
   const patch = heal.healPatch(unread, parsed);
   ok('accuracy: the rescan names it', !!patch && patch.title === parsed.merchant);

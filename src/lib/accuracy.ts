@@ -33,6 +33,43 @@ export interface UnreadFormat {
   reason: UnreadReason;
 }
 
+/** Digit-blind key: one format, whatever its amounts and dates. */
+export function formatKey(raw: string): string {
+  return raw.replace(/\d/g, '#');
+}
+
+/** The format key of a row the unread-formats report lists, or null. */
+function listedFormatKey(tx: Transaction): string | null {
+  if (!tx.raw) return null;
+  // `raw` is retained on a user-pinned row so a future parser-version repair
+  // can still reach it. Retention is not evidence that categorisation is
+  // unresolved: the current ledger category is authoritative for this
+  // report. Without this guard, a Fishbasket row already pinned to Utilities
+  // is still exported under "READ, BUT NO CATEGORY".
+  if (tx.category !== 'other') return null;
+  // Some accounting roles deliberately live in Other (own transfers, card
+  // settlements, named bill payments). They need no merchant category and
+  // must not be presented as work for the user or the global parser.
+  if (isDeliberateOtherTitle(tx.title)) return null;
+  return formatKey(tx.raw);
+}
+
+/**
+ * The newest recorded row of each format `unreadFormats` lists, by format key.
+ * Same filter as the list, so "Open entry" can never open an own transfer or a
+ * card settlement that happens to share a format with an unread message.
+ */
+export function newestRowOfFormat(transactions: readonly Transaction[]): Map<string, Transaction> {
+  const byFormat = new Map<string, Transaction>();
+  for (const tx of transactions) {
+    const key = listedFormatKey(tx);
+    if (key === null) continue;
+    const seen = byFormat.get(key);
+    if (!seen || tx.date > seen.date) byFormat.set(key, tx);
+  }
+  return byFormat;
+}
+
 /**
  * Bank message formats the parser could not read confidently, one entry per
  * format rather than per transaction.
@@ -48,18 +85,8 @@ export function unreadFormats(
 ): UnreadFormat[] {
   const byFormat = new Map<string, UnreadFormat>();
   for (const tx of transactions) {
-    if (!tx.raw) continue;
-    // `raw` is retained on a user-pinned row so a future parser-version repair
-    // can still reach it. Retention is not evidence that categorisation is
-    // unresolved: the current ledger category is authoritative for this
-    // report. Without this guard, a Fishbasket row already pinned to Utilities
-    // is still exported under "READ, BUT NO CATEGORY".
-    if (tx.category !== 'other') continue;
-    // Some accounting roles deliberately live in Other (own transfers, card
-    // settlements, named bill payments). They need no merchant category and
-    // must not be presented as work for the user or the global parser.
-    if (isDeliberateOtherTitle(tx.title)) continue;
-    const key = tx.raw.replace(/\d/g, '#');
+    const key = listedFormatKey(tx);
+    if (key === null || !tx.raw) continue;
     const cur = byFormat.get(key);
     if (cur) {
       cur.count += 1;
