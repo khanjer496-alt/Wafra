@@ -35,11 +35,11 @@ interface CueSet { debit: RegExp; credit: RegExp }
 
 const CUES: Readonly<Record<AiCueLanguage, CueSet>> = {
   en: {
-    debit: words(String.raw`debited|debit(?!\s*card)|charged|spent|purchased?|purchase|paid(?!\s+you)|payment\s+(?:to|of|at)|withdrawn|withdrawal|withdraw|sent|deducted|dr(?![\s.]*(?:card|crd|limit|lmt)\b)|used\s+(?:for|at|on)|transferred\s+to|money\s+out|pur|bought`),
-    credit: words(String.raw`credited|cr(?![\s.]*(?:card|crd|limit|lmt)\b)|received|deposit(?:ed)?|refund(?:ed)?|paid\s+you|added\s+to|money\s+in|salary|payroll|transferred\s+from`),
+    debit: words(String.raw`debited|debit(?!\s*card)|charged|spent|purchased?|purchase|paid(?!\s+you)|payment\s+(?:to|of|at)|withdrawn|withdrawal|withdraw|sent(?!\s+(?:you|to\s+you))|deducted|dr(?![\s.]*(?:card|crd|limit|lmt)\b)|used\s+(?:for|at|on)|transferred\s+to|money\s+out|pur|bought`),
+    credit: words(String.raw`credited|cr(?![\s.]*(?:card|crd|limit|lmt)\b)|received|deposit(?:ed)?|refund(?:ed)?|paid\s+you|sent\s+(?:you|to\s+you)|added\s+to|money\s+in|salary|payroll|transferred\s+from`),
   },
   ar: {
-    debit: arabic(String.raw`خصم|خُصم|مخصوم|شراء|سحب|دفع|سداد|تسديد|حوالة\s+صادرة|تحويل\s+صادر|مدين|صرف|تم\s+تحويل`),
+    debit: arabic(String.raw`خصم|خُصم|مخصوم|شراء|سحب|دفع|سداد|تسديد|حوالة\s+صادرة|تحويل\s+صادر|مدين`),
     credit: arabic(String.raw`إيداع|ايداع|أودع|اودع|أضيف|اضيف|استرداد|استرجاع|حوالة\s+واردة|تحويل\s+وارد|دائن|راتب|استلام|مستلم`),
   },
   es: {
@@ -52,10 +52,10 @@ const CUES: Readonly<Record<AiCueLanguage, CueSet>> = {
   },
   fr: {
     debit: words(String.raw`d[ée]bit[ée]e?s?|paiement|achat|retrait|pr[ée]lev[ée]e?s?|pr[ée]l[èe]vement|pay[ée]e?|[ée]mis|envoy[ée]e?`),
-    credit: words(String.raw`cr[ée]dit[ée]e?s?|re[çc]ue?|remboursement|avoir|d[ée]p[ôo]t|salaire`),
+    credit: words(String.raw`cr[ée]dit[ée]e?s?|re[çc]ue?|remboursement|d[ée]p[ôo]t|salaire`),
   },
   de: {
-    debit: words(String.raw`belastet|abgebucht|belastung|bezahlt|kartenzahlung|zahlung|abgehoben|abhebung|bargeldabhebung|gesendet|lastschrift|ausgef[üu]hrt|umsatz`),
+    debit: words(String.raw`belastet|abgebucht|belastung|bezahlt|kartenzahlung|zahlung|abgehoben|abhebung|bargeldabhebung|gesendet|lastschrift`),
     credit: words(String.raw`gutgeschrieben|gutschrift|eingang|eingegangen|erhalten|erstattung|lohneingang|gehalt`),
   },
   it: {
@@ -72,7 +72,7 @@ const CUES: Readonly<Record<AiCueLanguage, CueSet>> = {
   },
   id: {
     debit: words(String.raw`didebet|debet|pembayaran|pembelian|tarik\s+tunai|ditarik|transfer\s+ke|dikirim|terpotong`),
-    credit: words(String.raw`dikreditkan|diterima|masuk|pengembalian|gaji|transfer\s+dari`),
+    credit: words(String.raw`dikreditkan|diterima|dana\s+masuk|uang\s+masuk|pengembalian|gaji|transfer\s+dari`),
   },
   'hi-latn': {
     debit: words(String.raw`debit\s+(?:hue|hua|kiya)|kate|kaate|kat\s+gaye|nikale|nikasi|bhugtan|kharch|bheje|bheja`),

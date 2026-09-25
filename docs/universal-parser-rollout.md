@@ -269,6 +269,46 @@ Channels: Android SMS inbox and delivery, Android bank-app notifications
 so it stays review-only for unverified formats. None of this is a claim of verified coverage for any bank outside
 AE/SA.
 
+## AI reading of unrecognised alerts (optional on-device model)
+
+An optional on-device tagger (pruned multilingual-E5-small, int8 ONNX, ~32.7 MB
+download) can read an alert that **every** rule-based path refused. Contract:
+
+- **Where it runs:** only in `auto-import.ts` `inspectRefused`, after the launch
+  grammar, `parseUnproven`, the universal reader and the refusal pipeline all
+  left the alert `ignored/unrecognized`. Never for a UAE/Saudi sender or route
+  (`ai-alert-reader.ts`, re-checked by the gate).
+- **What it may do:** open a Review item whose universal event carries the
+  model's grounded amount/currency/merchant/direction/date as suggestions the
+  person confirms (`EXPO_PUBLIC_WAFRA_AI_ALERT_PREFILL`, on by default but inert
+  until the model is downloaded). It never adds a ledger row.
+- **The gate** (`gateAiAlert` in `src/lib/ai-alert-extractor.ts`) is
+  deterministic: the model's amount must overlap exactly one money token found
+  by the universal money reader; the currency must resolve to one ISO code
+  (shared symbols and local spellings such as درهم, Dhs, ريال, SR, TL, R, N only
+  through the user's own country); `hasNonCompletedWording` and the universal
+  parser's authentication/pending/promotion/failed/future readings veto.
+- **Automatic posting** from a model reading additionally needs the build flag
+  `EXPO_PUBLIC_WAFRA_AI_ALERT_AUTOPOST=1` (default off), the best-effort
+  setting, calibrated confidences at the manifest operating point, no
+  competing money figure, a direction cue in the text of the same polarity and
+  none of the opposite one (`ai-alert-cues.ts`), and the unchanged
+  `decideBestEffortAutoPost` policy (future dates, FX, launch markets). It is
+  also gated **per language** (`ai-alert-gates.ts`): a language may open only
+  after passing on at least 500 labelled **real** messages with ≤ 0.3 % false
+  posts and ≥ 98 % fully correct posted rows. Every language is off, and
+  capture does not wire the post outcome in this build.
+- **Model delivery:** never bundled. Downloaded only when the person asks,
+  Wi-Fi only unless they explicitly allow mobile data, from the pinned GitHub
+  release `parser-ai-tagger-v1` (overridable base URL, same hashes), verified
+  by exact size and SHA-256 before every first load, ceiling 45 MB, deletable.
+  Model absent → capture behaves exactly as before.
+- **Second opinion (verifier)** on rule-parsed rows (`ai-alert-verifier.ts`,
+  `EXPO_PUBLIC_WAFRA_AI_ALERT_VERIFIER`, off, not wired): measured to catch
+  injected errors but none of the real rule errors, so it stays off.
+
+Evidence: `docs/test-evidence/2026-09-25-parser-ai-phase2.md`.
+
 ## Automatic-import gates
 
 Per market/bank pack, automatic import requires:

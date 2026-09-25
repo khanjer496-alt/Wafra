@@ -2,7 +2,7 @@
 /**
  * Measure the AI second opinion (src/lib/ai-alert-verifier.ts). Metrics only.
  *
- *   node scripts/parser-ai/verifier-eval.cjs <rows.jsonl> <tagger-pred.jsonl> [--inject] [--json out]
+ *   node scripts/parser-ai/verifier-eval.cjs <rows.jsonl> <tagger-pred.jsonl> [--inject] [--th status,amount,direction] [--json out]
  *
  * Default: over rows the CURRENT rules posted — flag rate (flags / posted),
  * flag precision (flags where the rules reading is wrong vs the label), recall
@@ -26,6 +26,7 @@ function main() {
   const [rowsPath, predPath] = args;
   const inject = args.includes('--inject');
   const json = args.includes('--json') ? args[args.indexOf('--json') + 1] : null;
+  const th = args.includes('--th') ? (() => { const [status, amount, direction] = args[args.indexOf('--th') + 1].split(',').map(Number); return { status, amount, direction }; })() : V.DEFAULT_VERIFIER_THRESHOLDS;
   const preds = new Map(read(predPath).map((p) => [p.id, { engine: 'tagger', modelVersion: 't', ...p }]));
   const rows = read(rowsPath).filter((r) => preds.has(r.id));
   const out = {};
@@ -38,17 +39,17 @@ function main() {
       if (L.shouldPost && L.amount) {
         const truth = { minorUnits: L.amount.minor, currency: L.amount.currency, direction: L.direction };
         t.correct++;
-        if (V.verifyRulesReading(row.body, truth, p, row.country).verdict !== 'agree') t.correctFlagged++;
+        if (V.verifyRulesReading(row.body, truth, p, row.country, th).verdict !== 'agree') t.correctFlagged++;
         const kind = ['direction', 'amount', 'currency'][i % 3];
         const bad = kind === 'direction' ? { ...truth, direction: truth.direction === 'debit' ? 'credit' : 'debit' }
           : kind === 'amount' ? { ...truth, minorUnits: String(BigInt(truth.minorUnits) * 10n) }
             : { ...truth, currency: truth.currency === 'USD' ? 'EUR' : 'USD' };
         kinds[kind][1]++;
-        if (V.verifyRulesReading(row.body, bad, p, row.country).verdict !== 'agree') kinds[kind][0]++;
+        if (V.verifyRulesReading(row.body, bad, p, row.country, th).verdict !== 'agree') kinds[kind][0]++;
       } else if (!L.shouldPost && L.amount) {
         kinds.nonPosting[1]++;
         const fake = { minorUnits: L.amount.minor, currency: L.amount.currency, direction: 'debit' };
-        if (V.verifyRulesReading(row.body, fake, p, row.country).verdict === 'review') kinds.nonPosting[0]++;
+        if (V.verifyRulesReading(row.body, fake, p, row.country, th).verdict === 'review') kinds.nonPosting[0]++;
       }
     });
     out.inject = { correctReadings: t.correct, falseFlagRate: r4(t.correctFlagged, t.correct),
@@ -61,7 +62,7 @@ function main() {
       t.posted++;
       const L = row.label;
       const reading = { minorUnits: rules.amount.minor, currency: rules.amount.currency, direction: rules.direction };
-      const v = V.verifyRulesReading(row.body, reading, preds.get(row.id), row.country);
+      const v = V.verifyRulesReading(row.body, reading, preds.get(row.id), row.country, th);
       const wrong = !L.shouldPost || L.direction !== rules.direction ||
         (L.amount && (L.amount.minor !== rules.amount.minor || L.amount.currency !== rules.amount.currency));
       if (wrong) t.wrong++;

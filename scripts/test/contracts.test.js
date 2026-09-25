@@ -2335,6 +2335,12 @@ ok('the spoken label agrees with the sign on screen',
     // them with typed placeholders before anything is embedded; it is a
     // redactor, and its own contract below keeps it away from ledger writers.
     'local-semantic-model.ts',
+    // Type-only: the AI gate's country-scoped currency aliases share the
+    // draft's alias-map type. Neither module writes the ledger.
+    'ai-alert-cues.ts',
+    // Per-user learned formats ground the confirmed amount on a draft money
+    // token; they store slot types and anchors only, never message text.
+    'learned-alert-formats.ts',
   ]);
   ok('drafts reach only the reviewed extraction modules and isolated research redactor',
     alertConsumers.length === reviewDraftModules.size &&
@@ -2364,6 +2370,11 @@ ok('the spoken label agrees with the sign on screen',
     // Any ISO purchase currency is read at its own exponent; outside the
     // offline table it converts only with a dated rate or waits in Review.
     'sms-parser.ts',
+    // The AI-reading gate checks a grounded amount's exponent; the cue module
+    // types its country-scoped aliases; learned formats re-check exponents.
+    'ai-alert-extractor.ts',
+    'ai-alert-cues.ts',
+    'learned-alert-formats.ts',
   ]);
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),

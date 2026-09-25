@@ -114,6 +114,7 @@ function scoreSet(rows, preds, engine, thresholds, keys = ['all']) {
   const V = { rules: {}, aiPost: {}, hybrid: {} };
   const pre = { rows: 0, shouldPost: 0, prefilledPos: 0, prefilledNeg: 0, neg: 0, amountOk: 0, dirOk: 0, merOk: 0, merN: 0, allOk: 0 };
   const reasons = {};
+  const agree = { pos: 0, n: 0, amount: 0, direction: 0 };
   const falsePostIds = [];
   let ms = [];
   for (const row of rows) {
@@ -136,6 +137,15 @@ function scoreSet(rows, preds, engine, thresholds, keys = ['all']) {
       scoreRow(V.aiPost[bucketKey] ??= newBucket(), row, ai, null);
       scoreRow(V.hybrid[bucketKey] ??= newBucket(), row, hybrid, null);
     }
+    // Agreement on every should-post row the gate would read (prefill or post).
+    if (row.label.shouldPost && result.outcome !== 'refuse') {
+      const f = result.fields;
+      const money = { minor: f.money.minorUnits, currency: f.money.currency };
+      agree.n++;
+      if (!row.label.amount || (sameAmount(money, row.label.amount) && sameCurrency(money, row.label.amount))) agree.amount++;
+      if (f.direction === row.label.direction) agree.direction++;
+    }
+    if (row.label.shouldPost) agree.pos++;
     // Prefill: what a Review card would show (rules did not post).
     if (!rules.posted) {
       pre.rows++;
@@ -169,6 +179,7 @@ function scoreSet(rows, preds, engine, thresholds, keys = ['all']) {
     amountAndDirectionCorrect: r(pre.allOk, pre.prefilledPos), merchantExact: r(pre.merOk, pre.merN),
     nonPostingPrefilled: r(pre.prefilledNeg, pre.neg), nonPostingRowsSeen: pre.neg,
   };
+  out.agreement = { readShare: r(agree.n, agree.pos), amountCurrency: r(agree.amount, agree.n), direction: r(agree.direction, agree.n) };
   out.gateOutcomes = reasons;
   out.falsePostIds = falsePostIds.slice(0, 50);
   out.latencyMs = ms.length ? { p50: ms[Math.floor(ms.length / 2)], p95: ms[Math.floor(ms.length * 0.95)] } : null;
@@ -193,7 +204,7 @@ function main() {
   const report = { rows: rows.length, engine, thresholds: base, ...scoreSet(rows, preds, engine, base, keys) };
   if (args.includes('--sweep') && engine === 'tagger') {
     report.sweep = [];
-    for (const t of [0.9, 0.95, 0.98, 0.99, 0.995, 0.999]) {
+    for (const t of [0.8, 0.85, 0.9, 0.93, 0.95, 0.96, 0.97, 0.98, 0.99]) {
       const th = { ...base, postStatus: t, postDirection: t, postFamily: Math.min(t, 0.99), postAmount: Math.min(t, 0.99) };
       const s = scoreSet(rows, preds, engine, th);
       report.sweep.push({ t, aiPost: brief(s.aiPost.all), hybrid: brief(s.hybrid.all) });
@@ -203,6 +214,7 @@ function main() {
   if (json) fs.writeFileSync(json, JSON.stringify(report, null, 1) + '\n');
   for (const v of ['rules', 'aiPost', 'hybrid']) console.log(v.padEnd(7), JSON.stringify(brief(report[v].all)));
   console.log('prefill', JSON.stringify(report.prefill));
+  console.log('agreement', JSON.stringify(report.agreement));
   console.log('gate', JSON.stringify(report.gateOutcomes));
   if (report.sweep) for (const s of report.sweep) console.log('sweep', JSON.stringify(s));
   if (by) for (const [k, s] of Object.entries(report.hybrid)) if (k !== 'all') console.log(' ', k.padEnd(14), 'rules', JSON.stringify(brief(report.rules[k])), 'hybrid', JSON.stringify(brief(s)));

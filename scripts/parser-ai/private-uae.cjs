@@ -134,6 +134,11 @@ function main() {
   };
   if (jsonOut) fs.writeFileSync(jsonOut, JSON.stringify(report, null, 1) + '\n');
   if (dump) {
+    // Message text may only be written OUTSIDE the repository (scratch).
+    const repoRoot = path.resolve(__dirname, '../..');
+    if (path.resolve(dump).startsWith(repoRoot + path.sep) || path.resolve(dump) === repoRoot) {
+      throw new Error('--dump must be outside the repository');
+    }
     fs.mkdirSync(dump, { recursive: true });
     fs.writeFileSync(path.join(dump, 'uae_private.jsonl'), rows.map(({ tx, ...row }) => JSON.stringify(row)).join('\n') + '\n');
   }

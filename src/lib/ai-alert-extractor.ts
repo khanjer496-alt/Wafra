@@ -117,17 +117,18 @@ export interface AiThresholds {
 }
 
 /**
- * Defaults. The post thresholds are placeholders until a calibrated model
- * manifest supplies its own (chosen on the dev split to meet ≤0.3% false
- * posts); they are deliberately strict.
+ * Operating point of tagger v1 (temperature-calibrated): the post thresholds
+ * were chosen on the synthetic DEV split as the loosest grid point with zero
+ * false posts (0.97); on held-out templates that gave 0.07% false posts and
+ * 99.85% fully-correct posted rows (docs/test-evidence/2026-09-25-parser-ai-phase2.md).
  */
 export const DEFAULT_AI_THRESHOLDS: AiThresholds = Object.freeze({
   prefillStatus: 0.6,
   prefillAmount: 0.5,
-  postStatus: 0.98,
-  postDirection: 0.98,
-  postFamily: 0.9,
-  postAmount: 0.95,
+  postStatus: 0.97,
+  postDirection: 0.97,
+  postFamily: 0.97,
+  postAmount: 0.97,
 });
 
 export interface AiAlertFields {
@@ -273,7 +274,7 @@ function groundMoney(
   };
 }
 
-const minP = (spans: AiSpan[]): number => spans.reduce((low, span) => Math.min(low, span.p), 1);
+const minP = (spans: AiSpan[]): number => spans.reduce((low, span) => (Number.isFinite(span.p) ? Math.min(low, span.p) : Number.NaN), 1);
 
 /** Gate one model reading. Pure; see the module comment for the contract. */
 export function gateAiAlert(
@@ -289,7 +290,7 @@ export function gateAiAlert(
     return refuse('launch-market');
   }
   if (prediction.status !== 'completed' || prediction.family === 'non-posting') return refuse('not-completed');
-  if (prediction.statusP < thresholds.prefillStatus) return refuse('low-confidence');
+  if (!(prediction.statusP >= thresholds.prefillStatus)) return refuse('low-confidence');
   if (hasNonCompletedWording(source)) return refuse('non-posting-wording');
   const universal = inspectUniversalBankEvent(source, { sender: ctx.sender, dateOrder: ctx.dateOrder });
   if (universal.issues.some((issue) => NON_POSTING_ISSUES.has(issue)) ||
@@ -298,7 +299,7 @@ export function gateAiAlert(
   }
   const grounded = groundMoney(source, prediction, ctx);
   if (typeof grounded === 'string') return refuse(grounded);
-  if (minP(spansOf(prediction, 'AMT')) < thresholds.prefillAmount) return refuse('low-confidence');
+  if (!(minP(spansOf(prediction, 'AMT')) >= thresholds.prefillAmount)) return refuse('low-confidence');
 
   const cues = directionCueEvidence(source);
   const direction = prediction.direction === 'none' ? null : prediction.direction;
@@ -344,8 +345,9 @@ export function gateAiAlert(
   if (!fields.language || !cues.languages.every((language) => languageAllowed(language))) {
     blockers.push('language-gate');
   }
-  if (prediction.statusP < thresholds.postStatus || prediction.directionP < thresholds.postDirection ||
-    prediction.familyP < thresholds.postFamily || minP(spansOf(prediction, 'AMT')) < thresholds.postAmount) {
+  // Written as !(p >= t) so a NaN probability can never pass.
+  if (!(prediction.statusP >= thresholds.postStatus) || !(prediction.directionP >= thresholds.postDirection) ||
+    !(prediction.familyP >= thresholds.postFamily) || !(minP(spansOf(prediction, 'AMT')) >= thresholds.postAmount)) {
     blockers.push('low-confidence');
   }
   if (grounded.competing) blockers.push('competing-amounts');

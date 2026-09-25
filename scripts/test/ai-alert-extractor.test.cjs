@@ -143,7 +143,7 @@ test('multilingual direction cues', () => {
     ['Pix recebido R$ 50,00', 'credit'], ['12,50 TL harcama', 'debit'], ['iade 12,50 TL', 'credit'],
     ['Rp 50.000 didebet', 'debit'], ['Rp 50.000 dikreditkan', 'credit'], ['Rs 500 jama hue', 'credit'],
     ['Rs 500 kate gaye', 'debit'], ['€ 5 bijgeschreven', 'credit'], ['€ 5 afgeschreven', 'debit'],
-    ['Your credit card statement is ready', null],
+    ['Your credit card statement is ready', null], ['JOHN sent you $50', 'credit'], ['You sent $50 to JOHN', 'debit'],
   ];
   for (const [s, want] of cases) assert.equal(cues.cueSupportedDirection(s), want, s);
 });
@@ -166,6 +166,18 @@ test('word pre-tokenizer matches the Python training side exactly', () => {
   }
   const expected = JSON.parse(out);
   samples.forEach((s, i) => assert.deepEqual(W.alertWords(s).map((w) => [w.start, w.end, w.text]), expected[i], s));
+});
+
+test('capture reader is inert without a downloaded model (web/Node stub) and for AE/SA senders', async () => {
+  const reader = load('@/lib/ai-alert-reader');
+  const model = load('@/lib/ai-alert-model');
+  assert.equal(model.aiAlertModelStatus().state, 'not-downloaded');
+  assert.equal(await reader.aiReviewEventForRefusedAlert(DE, 'N26', Date.now()), null);
+  assert.equal(await reader.aiReviewEventForRefusedAlert('Purchase of AED 5 at X', 'EmiratesNBD', Date.now()), null);
+  const manifest = load('@/lib/ai-alert-model-manifest');
+  const total = manifest.AI_ALERT_MODEL_MANIFEST.artifacts.reduce((s, a) => s + a.bytes, 0);
+  assert.ok(total <= manifest.MAX_TOTAL_BYTES);
+  for (const a of manifest.AI_ALERT_MODEL_MANIFEST.artifacts) assert.match(a.sha256, /^[0-9a-f]{64}$/);
 });
 
 test('word pre-tokenizer keeps numbers whole and offsets exact', () => {
