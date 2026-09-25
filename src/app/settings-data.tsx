@@ -737,6 +737,7 @@ function EraseDialog({
       <View style={[styles.scrim, { backgroundColor: theme.scrim }]}>
         <View
           accessibilityViewIsModal
+          onAccessibilityEscape={onKeep}
           testID="settings-erase-dialog"
           style={[styles.dialog, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
           <ThemedText type="subtitle" accessibilityRole="header" style={styles.dialogText}>

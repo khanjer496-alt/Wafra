@@ -29,9 +29,20 @@ const modalOwners = sourceFiles()
   .filter((file) => fs.readFileSync(file, 'utf8').includes('<Modal'))
   .map((file) => path.relative(ROOT, file));
 assert.ok(modalOwners.includes('src/components/ui/bottom-sheet.tsx'));
+// The Erase confirmation is the one centred alert-style dialog (redesign
+// board iOS-EraseConfirm). It may own a Modal only because it carries the
+// same modal accessibility contract the bottom sheet does.
+const centredDialogs = ['src/app/settings-data.tsx'];
 assert.ok(modalOwners.every((relative) =>
   relative === 'src/components/ui/bottom-sheet.tsx' ||
-  relative === 'src/components/limit-sheet.tsx'));
+  relative === 'src/components/limit-sheet.tsx' ||
+  centredDialogs.includes(relative)), modalOwners.join(', '));
+for (const relative of centredDialogs) {
+  const dialog = read(relative);
+  assert.match(dialog, /accessibilityViewIsModal/, `${relative} dialog is modal to assistive tech`);
+  assert.match(dialog, /onAccessibilityEscape=\{onKeep\}/, `${relative} dialog closes on the escape gesture`);
+  assert.match(dialog, /onRequestClose=\{onKeep\}/, `${relative} dialog closes on Android back`);
+}
 
 for (const token of ['inverseSurface', 'inverseText', 'scrim']) {
   assert.equal(
