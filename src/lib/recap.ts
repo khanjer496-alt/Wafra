@@ -7,6 +7,8 @@ import { allocationsOf, dominantCategory } from '@/lib/splits';
 import type { Account, AppState, CategoryId, Transaction } from '@/lib/types';
 
 export type RecapKind = 'month' | 'year';
+export type RecapTimeBucket = 'morning' | 'afternoon' | 'evening' | 'night';
+export const RECAP_TIME_BUCKETS: readonly RecapTimeBucket[] = ['morning', 'afternoon', 'evening', 'night'];
 
 export type RecapDescriptor =
   | { id: string; kind: 'month'; key: string; period: Period; label: string }
@@ -50,7 +52,13 @@ export interface RecapSnapshot {
   mostUsedAccount: RecapAccount | null;
   largestPurchase: { title: string; category: CategoryId; amountFils: number; date: string } | null;
   busiestWeekday: { day: number; spendFils: number; count: number } | null;
-  favoriteTime: { bucket: 'morning' | 'afternoon' | 'evening' | 'night'; count: number } | null;
+  favoriteTime: { bucket: RecapTimeBucket; count: number } | null;
+  /**
+   * Spending payments per time of day. Only rows with a known clock time are
+   * counted (`timedCount`); a payment without one is never placed in a bucket.
+   */
+  timeOfDay: Record<RecapTimeBucket, number>;
+  timedCount: number;
   previousSpendFils: number | null;
   spendChangeFils: number | null;
   spendChangePercent: number | null;
@@ -134,7 +142,7 @@ function inclusiveDays(from: string, to: string): number {
   return Math.max(0, Math.round((b - a) / 86_400_000) + 1);
 }
 
-function bucketFor(transaction: Transaction): 'morning' | 'afternoon' | 'evening' | 'night' | null {
+function bucketFor(transaction: Transaction): RecapTimeBucket | null {
   const time = transactionTime(transaction);
   if (!time) return null;
   const hour = time.getHours();
@@ -168,7 +176,7 @@ export function projectRecap(state: AppState, descriptor: RecapDescriptor): Reca
   const accounts = new Map<string, AccountAccumulator>();
   const spendDates = new Set<string>();
   const weekdaySpend = Array.from({ length: 7 }, () => ({ spendFils: 0, count: 0 }));
-  const times: Record<'morning' | 'afternoon' | 'evening' | 'night', number> = {
+  const times: Record<RecapTimeBucket, number> = {
     morning: 0,
     afternoon: 0,
     evening: 0,
@@ -315,6 +323,8 @@ export function projectRecap(state: AppState, descriptor: RecapDescriptor): Reca
     } : null,
     busiestWeekday,
     favoriteTime: favorite ? { bucket: favorite[0], count: favorite[1] } : null,
+    timeOfDay: { ...times },
+    timedCount: times.morning + times.afternoon + times.evening + times.night,
     previousSpendFils,
     spendChangeFils,
     spendChangePercent,

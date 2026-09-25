@@ -25,14 +25,16 @@ import { EASE, Fonts, Motion, Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
-import { shortDate, weekdayName } from '@/lib/format';
+import { GrowBar } from '@/components/ui/grow-bar';
+import { monthLabel, shiftMonthKey, shortDate, weekdayName } from '@/lib/format';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { tapped } from '@/lib/haptics';
 import { isRTL } from '@/lib/i18n';
 import { recapCopy as copy } from '@/lib/recap-copy';
-import type { RecapSnapshot } from '@/lib/recap';
+import { RECAP_TIME_BUCKETS, type RecapSnapshot } from '@/lib/recap';
 
 const STORY_MS = 7_000;
+const TIME_BAR_HEIGHT = 72;
 
 /** Match Wafra's app-wide policy: screen readers suppress motion too. */
 function useRecapEntering() {
@@ -125,23 +127,28 @@ function SpendScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpe
   const theme = useTheme();
   const change = snapshot.spendChangePercent;
   const enter = useRecapEntering();
+  const descriptor = snapshot.descriptor;
+  const previousLabel = descriptor.kind === 'month'
+    ? monthLabel(shiftMonthKey(descriptor.key, -1))
+    : String(descriptor.year - 1);
   return <View style={styles.sceneSpread}>
     <Animated.View entering={enter(FadeInDown.duration(380))} style={styles.sceneHeading}>
-      <ThemedText type="micro" themeColor="textTertiary">{w.spent.toUpperCase()}</ThemedText>
+      <ThemedText type="default" themeColor="textSecondary">{w.spent}</ThemedText>
       <HeroMoney fils={snapshot.totalSpendFils} moneySpec={moneySpec} />
-      {change !== null && <View style={[styles.changeChip, { backgroundColor: change <= 0 ? theme.primarySoft : theme.expenseSoftBg }]}>
+      {change !== null && <View testID="recap-spend-change" style={[styles.changeChip, { backgroundColor: change <= 0 ? theme.primarySoft : theme.expenseSoftBg }]}>
         <Icon name={change <= 0 ? 'arrow-down-right' : 'arrow-up-right'} size={15} color={change <= 0 ? theme.income : theme.expense} />
         <ThemedText type="meta" style={{ color: change <= 0 ? theme.income : theme.expense }}>
-          {Math.abs(change)}% {change <= 0 ? w.less : w.more}
+          {Math.abs(change)}% {change <= 0 ? w.lessThan(previousLabel) : w.moreThan(previousLabel)}
         </ThemedText>
       </View>}
-      <ThemedText type="meta" themeColor="textSecondary">
-        {snapshot.spendingCount} {w.transactions} · {snapshot.merchantCount} {w.merchants}
-      </ThemedText>
     </Animated.View>
+    <View style={styles.metricRail} testID="recap-spend-counts">
+      <Metric value={String(snapshot.spendingCount)} label={w.paymentsNoun(snapshot.spendingCount)} delay={80} />
+      <Metric value={String(snapshot.merchantCount)} label={w.merchantsNoun(snapshot.merchantCount)} delay={120} />
+    </View>
     <View style={[styles.metricRail, styles.pushBottom]}>
-      <Metric currency={moneySpec.currency} value={formatMinorUnits(snapshot.totalIncomeFils, moneySpec)} label={w.income} delay={100} />
-      <Metric currency={moneySpec.currency} value={`${snapshot.netFils < 0 ? '−' : ''}${formatMinorUnits(Math.abs(snapshot.netFils), moneySpec)}`} label={w.net} delay={160} />
+      <Metric currency={moneySpec.currency} value={formatMinorUnits(snapshot.totalIncomeFils, moneySpec)} label={w.income} delay={160} />
+      <Metric currency={moneySpec.currency} value={`${snapshot.netFils < 0 ? '−' : ''}${formatMinorUnits(Math.abs(snapshot.netFils), moneySpec)}`} label={w.net} delay={200} />
     </View>
   </View>;
 }
@@ -195,34 +202,67 @@ function CategoryScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; money
   </View>;
 }
 
+/** Four time-of-day bars. Counts, never money; payments without a clock time are left out. */
+function TimeOfDay({ snapshot }: { snapshot: RecapSnapshot }) {
+  const language = useLanguage();
+  const w = copy[language === 'ar' ? 'ar' : 'en'];
+  const theme = useTheme();
+  const max = Math.max(1, ...RECAP_TIME_BUCKETS.map((bucket) => snapshot.timeOfDay[bucket]));
+  const leaders = RECAP_TIME_BUCKETS.filter((bucket) => snapshot.timeOfDay[bucket] === max);
+  // A tie has no single "most"; the caption then states only the base.
+  const top = leaders.length === 1 ? leaders[0] : null;
+  return <View testID="recap-time-of-day" style={styles.timeBlock}>
+    <ThemedText type="smallBold">{w.timeTitle}</ThemedText>
+    <View style={styles.timeBars}>
+      {RECAP_TIME_BUCKETS.map((bucket, index) => {
+        const count = snapshot.timeOfDay[bucket];
+        const lead = count === max && count > 0;
+        return <View key={bucket} style={styles.timeColumn} accessible accessibilityRole="image"
+          accessibilityLabel={w.timeBar(w[bucket], count)}>
+          <ThemedText type="meta" tabular themeColor={lead ? 'text' : 'textSecondary'}>{count}</ThemedText>
+          <View style={styles.timeTrack}>
+            <GrowBar axis="height" size={count > 0 ? Math.max(4, (count / max) * TIME_BAR_HEIGHT) : 0} delay={index * 40}
+              style={[styles.timeBar, { backgroundColor: lead ? theme.primary : theme.track }]} />
+          </View>
+          <ThemedText type="nano" themeColor={lead ? 'text' : 'textTertiary'} numberOfLines={1}>{w[bucket]}</ThemedText>
+        </View>;
+      })}
+    </View>
+    <ThemedText type="meta" themeColor="textSecondary">
+      {w.timeCaption(top ? w[top] : null, top ? snapshot.timeOfDay[top] : 0, snapshot.timedCount)}
+    </ThemedText>
+  </View>;
+}
+
 function MerchantScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec }) {
   const language = useLanguage();
   const w = copy[language === 'ar' ? 'ar' : 'en'];
   const top = snapshot.topMerchants[0];
   const enter = useRecapEntering();
   if (!top) return null;
+  const timed = snapshot.timedCount > 0;
   return <View style={styles.sceneSpread}>
     <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{w.merchant}</ThemedText></View>
-    <Animated.View entering={enter(FadeInUp.duration(430))} style={styles.merchantFeature}>
-      <View style={styles.merchantFeatureTop}>
-        <ThemedText style={styles.featureRank} themeColor="textTertiary">01</ThemedText>
-        <MerchantAvatar title={top.title} category={top.category} size={74} />
+    <Animated.View entering={enter(FadeInUp.duration(430))} style={[styles.merchantFeature, timed && styles.merchantFeatureCompact]}>
+      <View style={styles.merchantIdentity}>
+        <MerchantAvatar title={top.title} category={top.category} size={timed ? 56 : 74} />
+        <ThemedText style={[styles.storyTitle, timed && styles.storyTitleSmall, styles.flex]} numberOfLines={2}>{top.title}</ThemedText>
       </View>
-      <ThemedText style={styles.storyTitle} numberOfLines={2}>{top.title}</ThemedText>
       <View style={styles.merchantFeatureMeta}>
         <MoneyText fils={top.spendFils} moneySpec={moneySpec} />
-        <ThemedText type="meta" themeColor="textSecondary">{top.count} {w.visits}</ThemedText>
+        <ThemedText type="meta" themeColor="textSecondary">{w.paymentsCount(top.count)}</ThemedText>
       </View>
     </Animated.View>
+    {timed && <Animated.View entering={enter(FadeIn.delay(100).duration(420))}><TimeOfDay snapshot={snapshot} /></Animated.View>}
     <View style={[styles.merchantList, styles.pushBottom]}>
       {snapshot.topMerchants.slice(1, 3).map((merchant, index) =>
         <Animated.View key={merchant.key} entering={enter(FadeInUp.delay(120 + index * 70).duration(360))}
-          style={styles.merchantRow}>
+          style={[styles.merchantRow, timed && styles.merchantRowCompact]}>
           <ThemedText style={styles.runnerRank} themeColor="textTertiary">0{index + 2}</ThemedText>
-          <MerchantAvatar title={merchant.title} category={merchant.category} size={42} />
+          <MerchantAvatar title={merchant.title} category={merchant.category} size={timed ? 32 : 42} />
           <View style={styles.flex}>
             <ThemedText type="smallBold" numberOfLines={1}>{merchant.title}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">{merchant.count} {w.visits}</ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary">{w.paymentsCount(merchant.count)}</ThemedText>
           </View>
           <MoneyText fils={merchant.spendFils} moneySpec={moneySpec} />
         </Animated.View>)}
@@ -278,7 +318,7 @@ function RhythmScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySp
     <View style={[styles.metricGrid, styles.pushBottom]}>
       <View style={styles.metricGridItem}><ThemedText style={styles.metricValue} tabular>{snapshot.noSpendDays}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.noSpend}</ThemedText></View>
       <View style={styles.metricGridItem}><MoneyText fils={snapshot.averagePurchaseFils} moneySpec={moneySpec} /><ThemedText type="meta" themeColor="textSecondary">{w.average}</ThemedText></View>
-      {snapshot.favoriteTime && <View style={[styles.metricGridItem, styles.metricWide]}>
+      {snapshot.favoriteTime && !(snapshot.topMerchants.length > 0 && snapshot.timedCount > 0) && <View style={[styles.metricGridItem, styles.metricWide]}>
         <View style={[styles.timeMarker, { backgroundColor: theme.goldSoft }]}><Icon name="sun" size={18} color={theme.warning} /></View>
         <View><ThemedText type="smallBold">{w[snapshot.favoriteTime.bucket]}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.favoriteTime}</ThemedText></View>
       </View>}
@@ -493,11 +533,17 @@ const styles = StyleSheet.create({
   rankDot: { width: 8, height: 8, borderRadius: 4 },
   flex: { flex: 1, minWidth: 0 },
   merchantFeature: { gap: 14, paddingTop: Spacing.two },
-  merchantFeatureTop: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
-  featureRank: { fontFamily: Fonts.monoSemi, fontSize: 46, lineHeight: 50, letterSpacing: -1.6 },
+  merchantFeatureCompact: { gap: 10, paddingTop: 0 },
+  merchantIdentity: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   merchantFeatureMeta: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.three },
   merchantList: { gap: 4 },
   merchantRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  merchantRowCompact: { minHeight: 48 },
+  timeBlock: { gap: 10 },
+  timeBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
+  timeColumn: { flex: 1, alignItems: 'center', gap: 6, minWidth: 0 },
+  timeTrack: { height: TIME_BAR_HEIGHT, alignSelf: 'stretch', justifyContent: 'flex-end', alignItems: 'center' },
+  timeBar: { width: '72%', maxWidth: 44, borderTopLeftRadius: 4, borderTopRightRadius: 4 },
   runnerRank: { width: 26, fontFamily: Fonts.monoMedium, fontSize: 16, lineHeight: 20 },
   accountFeature: { paddingTop: Spacing.two, gap: Spacing.three },
   accountIdentity: { gap: 5 },

@@ -1,3 +1,11 @@
+import { arabicPluralCategory } from '@/lib/details-copy';
+
+/** Arabic noun after a count: 3–10 take the plural, everything else the singular. */
+const arNoun = (n: number, singular: string, dual: string, plural: string) => {
+  const category = arabicPluralCategory(n);
+  return category === 'two' ? dual : category === 'few' ? plural : singular;
+};
+
 /** Localized editorial copy for the monthly/yearly recap story. */
 export const recapCopy = {
   en: {
@@ -33,6 +41,16 @@ export const recapCopy = {
     wrapped: 'That’s the period, in one page.',
     done: 'Done',
     close: 'Close recap',
+    lessThan: (label: string) => `less than ${label}`,
+    moreThan: (label: string) => `more than ${label}`,
+    paymentsNoun: (n: number) => n === 1 ? 'payment' : 'payments',
+    merchantsNoun: (n: number) => n === 1 ? 'merchant' : 'merchants',
+    paymentsCount: (n: number) => `${n} ${n === 1 ? 'payment' : 'payments'}`,
+    timeTitle: 'When you spent',
+    timeCaption: (top: string | null, count: number, timed: number) => top
+      ? `${top} had the most payments: ${count} of ${timed} timed ${timed === 1 ? 'payment' : 'payments'}.`
+      : `Spread across ${timed} timed ${timed === 1 ? 'payment' : 'payments'}.`,
+    timeBar: (bucket: string, n: number) => `${bucket}: ${n} ${n === 1 ? 'payment' : 'payments'}`,
   },
   ar: {
     recap: 'ملخص وفرة',
@@ -67,5 +85,15 @@ export const recapCopy = {
     wrapped: 'الفترة كلها، في صفحة واحدة.',
     done: 'تم',
     close: 'إغلاق الملخص',
+    lessThan: (label: string) => `أقل من ${label}`,
+    moreThan: (label: string) => `أكثر من ${label}`,
+    paymentsNoun: (n: number) => arNoun(n, 'دفعة', 'دفعتان', 'دفعات'),
+    merchantsNoun: (n: number) => arNoun(n, 'متجر', 'متجران', 'متاجر'),
+    paymentsCount: (n: number) => n === 1 ? 'دفعة واحدة' : n === 2 ? 'دفعتان' : `${n} ${arNoun(n, 'دفعة', 'دفعتان', 'دفعات')}`,
+    timeTitle: 'متى أنفقت',
+    timeCaption: (top: string | null, count: number, timed: number) => top
+      ? `${top} شهد أكبر عدد من الدفعات: ${count} من أصل ${timed} ${arNoun(timed, 'دفعة', 'دفعة', 'دفعات')} معروفة الوقت.`
+      : `موزعة على ${timed} ${arNoun(timed, 'دفعة', 'دفعة', 'دفعات')} معروفة الوقت.`,
+    timeBar: (bucket: string, n: number) => `${bucket}: ${n === 1 ? 'دفعة واحدة' : n === 2 ? 'دفعتان' : `${n} ${arNoun(n, 'دفعة', 'دفعتان', 'دفعات')}`}`,
   },
 } as const;

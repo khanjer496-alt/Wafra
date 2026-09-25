@@ -126,6 +126,25 @@ eq('previous-period change is deterministic', {
 }, { previous: 20_000, change: -3_000, percent: -15 });
 eq('no-spend days use the completed month', recap.noSpendDays, 28);
 
+// Time of day: four buckets of spending payments, counted only when the
+// payment has a clock time. The caption's base is that timed count.
+const at = (iso) => new Date(iso).getTime();
+const timed = projectRecap({ ...state, transactions: [
+  tx('morning', { title: 'Bakery', date: '2026-08-03', ts: at('2026-08-03T08:30:00') }),
+  tx('evening-1', { title: 'Diner', date: '2026-08-04', ts: at('2026-08-04T19:00:00') }),
+  tx('evening-2', { title: 'Cinema', date: '2026-08-05', ts: at('2026-08-05T20:15:00') }),
+  tx('night', { title: 'Taxi', date: '2026-08-06', ts: at('2026-08-06T23:40:00') }),
+  tx('untimed', { title: 'Market', date: '2026-08-07' }),
+  tx('transfer-timed', { title: 'Card payment', isTransfer: true, date: '2026-08-08', ts: at('2026-08-08T13:00:00') }),
+  tx('income-timed', { type: 'income', title: 'Salary', category: 'salary', accountId: 'bank', date: '2026-08-09', ts: at('2026-08-09T14:00:00') }),
+] }, recapDescriptor('month', '2026-08'));
+eq('time-of-day counts only timed spending payments', timed.timeOfDay,
+  { morning: 1, afternoon: 0, evening: 2, night: 1 });
+eq('the time-of-day base is timed payments, not every payment', [timed.timedCount, timed.spendingCount], [4, 5]);
+eq('the favourite time agrees with the bars', timed.favoriteTime, { bucket: 'evening', count: 2 });
+eq('a ledger without clock times has no time-of-day base', [recap.timedCount, recap.timeOfDay],
+  [0, { morning: 0, afternoon: 0, evening: 0, night: 0 }]);
+
 setMonthStartDay(25);
 eq('salary-day reporting changes which month just completed',
   primaryRecapDescriptor(new Date('2026-09-17T12:00:00')).id, 'month:2026-07');
