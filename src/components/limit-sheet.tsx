@@ -8,15 +8,17 @@ import { Button } from '@/components/ui/controls';
 import { SectionHeader } from '@/components/ui/period-pill';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { formatAED, formatAmountForInput, ledgerNiceMinor, ledgerTypicalMinor, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
+import { formatAED, formatAmountForInput, ledgerNiceMinor, ledgerTypicalMinor, monthLabel, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 import { alignEnd, t, tf } from '@/lib/i18n';
+import { limitSheetCopy } from '@/lib/reference-copy';
 
 /** How many merchants the sheet names before pooling the rest. */
 const MERCHANT_ROWS = 4;
@@ -40,6 +42,7 @@ interface LimitSheetProps {
  */
 export function LimitSheet({ category, open, monthKey: key, onClose }: LimitSheetProps) {
   const theme = useTheme();
+  const words = limitSheetCopy[useLanguage() === 'ar' ? 'ar' : 'en'];
   const { state, upsertBudget, deleteBudget, setLedgerMoney } = useStore();
 
   const [picked, setPicked] = useState<CategoryId | null>(category);
@@ -89,20 +92,26 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
    * limit of 1,400, and the chip that says "your 3-month average" was offering
    * a number the user had never once spent under.
    */
-  const threeMonthAverage = useMemo(() => {
-    if (!picked || !open) return 0;
-    let total = 0;
-    for (let i = 1; i <= 3; i++) {
-      total += spentInMonthForCategory(
-        state.transactions,
-        shiftMonthKey(key, -i),
-        picked,
-        liveAccounts,
-        internal,
-      );
+  const lastMonths = useMemo(() => {
+    if (!picked || !open) return [];
+    const months: { key: string; fils: number }[] = [];
+    for (let i = 3; i >= 1; i--) {
+      months.push({
+        key: shiftMonthKey(key, -i),
+        fils: spentInMonthForCategory(
+          state.transactions,
+          shiftMonthKey(key, -i),
+          picked,
+          liveAccounts,
+          internal,
+        ),
+      });
     }
-    return Math.round(total / 3);
+    return months;
   }, [state.transactions, key, picked, open, liveAccounts, internal]);
+  const threeMonthAverage = lastMonths.length === 3
+    ? Math.round(lastMonths.reduce((total, month) => total + month.fils, 0) / 3)
+    : 0;
 
   /**
    * Who the money went to, so the number has something behind it.
@@ -198,6 +207,23 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   const available = EXPENSE_CATEGORIES.filter(
     (c) => !state.budgets.some((b) => b.category === c.id) || c.id === picked,
   );
+
+  // Steppers move the limit by a currency-sized step (25 in AED/USD terms,
+  // 2,500 for JPY), never below one step.
+  const step = ledgerTypicalMinor(25);
+  const stepLabel = formatAED(step, { decimals: false });
+  const stepBy = (direction: 1 | -1) => {
+    const base = limitFils ?? 0;
+    const next = direction > 0 ? base + step : Math.max(step, base - step);
+    setText(formatAmountForInput(next));
+  };
+  // The last three full months and this month, against the limit line.
+  const bars = picked ? [...lastMonths.map((month) => ({ ...month, current: false })), { key, fils: spent, current: true }] : [];
+  const barMax = Math.max(1, limitFils ?? 0, ...bars.map((bar) => bar.fils));
+  const usualAdvice = limitFils && threeMonthAverage > 0
+    ? limitFils >= threeMonthAverage * 1.1 ? words.roomy
+      : limitFils >= threeMonthAverage * 0.95 ? words.tight : words.below
+    : null;
 
   const save = () => {
     if (!picked || !limitFils) return;
@@ -328,7 +354,44 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 )}
                 style={styles.amountInput}
               />
+              {state.ledgerMoney ? <View style={styles.steppers}>
+                {([-1, 1] as const).map((direction) => <Pressable key={direction} testID={direction < 0 ? 'limit-step-down' : 'limit-step-up'}
+                  accessibilityRole="button" accessibilityLabel={direction < 0 ? words.lower(stepLabel) : words.raise(stepLabel)}
+                  disabled={direction < 0 && (!limitFils || limitFils <= step)}
+                  onPress={() => stepBy(direction)}
+                  style={({ pressed }) => [styles.stepper, {
+                    borderColor: theme.cardBorder,
+                    backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
+                    opacity: direction < 0 && (!limitFils || limitFils <= step) ? 0.45 : 1,
+                  }]}>
+                  <ThemedText type="smallBold" tabular>{direction < 0 ? '−' : '+'}{stepLabel}</ThemedText>
+                </Pressable>)}
+              </View> : null}
             </View>
+
+            {picked && threeMonthAverage > 0 && (
+              <View style={styles.history} testID="limit-history">
+                <SectionHeader title={words.lastMonths} />
+                <View style={styles.bars}>
+                  {limitFils ? <View pointerEvents="none" testID="limit-line"
+                    style={[styles.limitLine, { bottom: 22 + Math.round((limitFils / barMax) * BAR_HEIGHT), borderColor: theme.textSecondary }]} /> : null}
+                  {bars.map((bar) => <View key={bar.key} style={styles.barColumn} accessible accessibilityRole="text"
+                    accessibilityLabel={words.month(bar.current ? `${monthLabel(bar.key)} ${words.thisMonth}` : monthLabel(bar.key), formatAED(bar.fils, { decimals: false }))}>
+                    <View style={[styles.bar, {
+                      height: Math.max(3, Math.round((bar.fils / barMax) * BAR_HEIGHT)),
+                      backgroundColor: limitFils && bar.fils > limitFils ? theme.expenseGraphic : theme.primary,
+                      opacity: bar.current ? 1 : 0.6,
+                    }]} />
+                    <ThemedText type="micro" themeColor={bar.current ? 'text' : 'textSecondary'} numberOfLines={1}>
+                      {monthLabel(bar.key, true).split(' ')[0]}
+                    </ThemedText>
+                  </View>)}
+                </View>
+                <ThemedText type="meta" themeColor="textSecondary" testID="limit-usual">
+                  {words.usual(formatAED(threeMonthAverage, { decimals: false }))}{usualAdvice ? ` ${usualAdvice}` : ''}
+                </ThemedText>
+              </View>
+            )}
 
             {picked && (
               <View style={styles.suggestions}>
@@ -407,6 +470,9 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   );
 }
 
+/** Plot height of the monthly bars, in points. */
+const BAR_HEIGHT = 72;
+
 /**
  * Suggestions land on a round number — nobody budgets AED 1,247. The step is
  * AED 100 (unchanged), ¥10,000 for JPY, KWD 10 for KWD: see ledgerNiceMinor.
@@ -449,6 +515,13 @@ const styles = StyleSheet.create({
     letterSpacing: -0.7,
   },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.three },
+  steppers: { flexDirection: 'row', gap: Spacing.two },
+  stepper: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
+  history: { marginTop: Spacing.four, gap: Spacing.two },
+  bars: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.three, height: BAR_HEIGHT + 22, position: 'relative' },
+  barColumn: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', gap: 4, height: '100%' },
+  bar: { width: '70%', borderTopLeftRadius: 5, borderTopRightRadius: 5 },
+  limitLine: { position: 'absolute', left: 0, right: 0, borderTopWidth: 1, borderStyle: 'dashed' },
   where: { marginTop: Spacing.five },
   whereRow: {
     flexDirection: 'row',
