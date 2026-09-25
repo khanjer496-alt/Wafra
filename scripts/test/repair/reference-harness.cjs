@@ -184,6 +184,8 @@ function createHarness(options = {}) {
     unreadFormats:{count:0,shouldPrompt:false},uncategorised:{shouldPrompt:false,summary:{merchants:[],paymentPurposes:[],rowCount:0,totalFils:0}},
     upcoming:{items:state.bills.map(b=>({id:b.id,title:b.title,kind:'bill',amountFils:b.amountFils,daysLeft:b.dueDay-6,dateISO:`2026-09-0${b.dueDay}`,billId:b.id}))}})};
   local('@/components/themed-text');local('@/components/ui/icon');local('@/components/ui/money');local('@/components/ui/category-avatar');
+  // Home's Today figure rolls its digits (rolling-money.test.cjs); here it renders as the Money it formats like.
+  deps['@/components/ui/rolling-money']={RollingMoney:p=>deps['@/components/ui/money'].Money(p)};
   local('@/components/merchant-spending-link');
   deps['@/components/ui/bank-avatar']={BankAvatar:p=>jsx('BankAvatar',p)};
   deps['@/components/ui/merchant-avatar']={MerchantAvatar:p=>deps['@/components/ui/category-avatar'].CategoryAvatar(p)};

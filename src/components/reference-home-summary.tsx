@@ -5,6 +5,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { WafraMark } from '@/components/wafra-logo';
 import { Money } from '@/components/ui/money';
+import { RollingMoney } from '@/components/ui/rolling-money';
 import { GrowBar } from '@/components/ui/grow-bar';
 import type { Colors } from '@/constants/theme';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
@@ -88,7 +89,8 @@ function TodayBlock({ p, today }: { p: Props; today: HomeToday }) {
         accessibilityLabel={`${w.today}, ${money(today.todayFils)}. ${countLabel}`} accessibilityHint={w.opensActivity}
         style={[styles.pairCell, p.largeText && styles.metricStacked]}>
         <ThemedText type="small" themeColor="textSecondary">{w.today}</ThemedText>
-        <Money fils={today.todayFils} moneySpec={p.moneySpec} type="heading" />
+        {/* A new capture rolls only the digits that changed; static under Reduce Motion or a screen reader. */}
+        <RollingMoney fils={today.todayFils} moneySpec={p.moneySpec} type="heading" />
         <ThemedText type="meta" themeColor="textSecondary">{countLabel}</ThemedText>
       </Pressable>
       {offerBudget ? <View testID="home-left-to-spend" style={pairCellEnd}>

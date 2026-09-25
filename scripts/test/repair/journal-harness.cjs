@@ -70,6 +70,8 @@ function harness(options = {}) {
     '@/components/ui/merchant-avatar': { MerchantAvatar: (props) => jsx('Avatar', props) },
     '@/components/ui/icon': { Icon: (props) => { if (!icons.has(props.name)) throw new Error(`Unknown icon ${props.name}`); return jsx('Icon', props); } },
     '@/components/ui/money': { Money: (props) => jsx('Money', props) },
+    // Home's Today figure rolls its digits; rolling-money.test.cjs covers the roll, so here it renders as the Money it formats like.
+    '@/components/ui/rolling-money': { RollingMoney: (props) => jsx('Money', props) },
     '@/components/recap/recap-logo-trigger': { RecapLogoTrigger: (props) => jsx('RecapLogoTrigger', props) },
     '@/components/ui/screen-scaffold': { ScreenScaffold: (props) => jsx('Scaffold', props) },
     '@/components/ui/states': { EmptyMonth: (props) => jsx('EmptyMonth', props), SkeletonRows: (props) => jsx('SkeletonRows', props) },
@@ -132,6 +134,7 @@ function harness(options = {}) {
     dependencies['@/components/ui/platform-symbol'] = { PlatformSymbol: (props) => props.fallback };
     dependencies['@/components/themed-text'] = load(path.join(root, 'src/components/themed-text.tsx'), dependencies);
     dependencies['@/components/ui/money'] = load(path.join(root, 'src/components/ui/money.tsx'), dependencies);
+    dependencies['@/components/ui/rolling-money'] = { RollingMoney: (props) => dependencies['@/components/ui/money'].Money(props) };
     dependencies['@/components/ui/icon'] = load(path.join(root, 'src/components/ui/icon.tsx'), dependencies);
     dependencies['@/lib/categories'] = {
       getCategory: (id) => ({ id, type: 'expense', icon: ({dining:'dining', shopping:'bag', entertainment:'play', transport:'car'})[id] ?? 'receipt' }),
