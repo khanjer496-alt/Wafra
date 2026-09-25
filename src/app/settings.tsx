@@ -93,6 +93,7 @@ import {
 } from '@/lib/onboarding';
 import { useStore } from '@/lib/store';
 import { ledgerStateHasMoney } from '@/lib/ledger-money';
+import { detailsWords } from '@/lib/details-copy';
 import { settingsCopy } from '@/lib/settings-copy';
 import { androidSmsAddedThisMonth, captureLastHandledLabel } from '@/lib/settings-status';
 import type { ThemePreference } from '@/lib/theme-preference';
@@ -918,6 +919,9 @@ export default function SettingsScreen() {
                 router.push('/ios-setup');
               },
             )}
+          {Platform.OS === 'ios' && captureAvailable && !state.captureOptOut &&
+            linkRow(detailsWords(state.language).capture.openStatus, null, () => router.push('/capture-health'),
+              { icon: 'mail', testID: 'settings-capture-status' })}
           {Platform.OS === 'ios' && captureAvailable &&
             captureState === 'queue-warning' && (
               <Block style={styles.historyImportSettings}>

@@ -758,6 +758,10 @@ export default function JournalHomeScreen() {
             <ThemedText type="meta">{tf('unreadFormatCount', { count: dashboard.unreadFormats.count,
               s: dashboard.unreadFormats.count === 1 ? '' : 's' })}</ThemedText>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable> : null}
+          <Pressable testID="home-customize-link" onPress={() => router.push('/home-customize')} accessibilityRole="button"
+            accessibilityHint={t('homeCustomizeDetail')} style={styles.footerAction}>
+            <ThemedText type="meta">{t('homeCustomizeTitle')}</ThemedText>
+            <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable>
         </View>
       </>}
     </ScreenScaffold>
