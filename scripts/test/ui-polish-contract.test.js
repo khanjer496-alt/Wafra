@@ -152,15 +152,16 @@ assert.match(task3Home, /function Hero[\s\S]*?<PeriodPill onPress=\{onChangePeri
 assert.match(task3Home, /<Hero[\s\S]*?onChangePeriod=\{\(\) => setPeriodSheetOpen\(true\)\}/);
 
 const task3Transactions = read('src/app/transactions.tsx');
-assert.match(task3Transactions, /useScreenContentInsets\(\{ hasFooter: false \}\)/);
-assert.match(task3Transactions, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/);
-assert.match(task3Transactions, /header=\{\{[\s\S]*?back:[\s\S]*?actions:/);
+// Design language E: an ink band (nav, search, type chips) over a sheet that
+// holds the virtualized list; the sheet clears the home indicator itself.
+assert.match(task3Transactions, /const listBottom = useBandBottomInset\(\)/);
+assert.match(task3Transactions, /<BandScaffold[\s\S]*?band="home"[\s\S]*?scroll=\{false\}/);
+assert.match(task3Transactions, /nav=\{\{[\s\S]*?back: true[\s\S]*?actions:/);
 assert.match(task3Transactions, /<SectionList[\s\S]*?ListHeaderComponent=/);
-assert.match(task3Transactions, /contentContainerStyle=\{\[listInsets\.contentContainerStyle, styles\.listContent\]\}/);
+assert.match(task3Transactions, /contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}\]\}/);
 assert.match(task3Transactions, /listContent: \{ gap: 0 \}/);
-assert.match(task3Transactions, /contentInset=\{listInsets\.contentInset\}/);
-assert.match(task3Transactions, /scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}/);
-assert.match(task3Transactions, /contentInsetAdjustmentBehavior="automatic"/);
+assert.match(task3Transactions, /scrollIndicatorInsets=\{\{ top: 0, bottom: listBottom \}\}/);
+assert.match(task3Transactions, /<BandSearchField[\s\S]*?label=\{tr\('searchMerchants'\)\}[\s\S]*?clearLabel=\{tr\('clearSearch'\)\}/);
 assert.match(task3Transactions, /<TextField[\s\S]*?label=\{tr\('transactionSearchLabel'\)\}[\s\S]*?accessibilityLabel=\{tr\('searchMerchants'\)\}/);
 assert.match(task3Transactions, /<ActionIconButton[\s\S]*?label=\{tr\('clearSearch'\)\}[\s\S]*?variant="plain"/);
 assert.match(task3Transactions, /const clearFilters[\s\S]*?setSmsOnly\(false\)/);

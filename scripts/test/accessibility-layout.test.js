@@ -308,7 +308,8 @@ ok('The font-scale emulation only exists in the seeded web E2E export',
   /Platform\.OS !== 'web' \|\| process\.env\.EXPO_PUBLIC_WAFRA_E2E_DEMO !== '1'\) return null/.test(fontScaleHarness) &&
     /E2E_FONT_SCALE === null\s*\? composed/.test(themedText));
 ok('Transactions scroll the search controls with the list at the accessibility sizes',
-  /\{largeText \? null : searchControls\}/.test(source('src/app/transactions.tsx')) &&
+  /bandContent=\{onBand \? searchControls : undefined\}/.test(source('src/app/transactions.tsx')) &&
+    /const onBand = !largeText;/.test(source('src/app/transactions.tsx')) &&
     /\{scrollingSearchControls\}/.test(source('src/app/transactions.tsx')));
 {
   // Behaviour of the figure fit, from the compiled module when the suite has

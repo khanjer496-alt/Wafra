@@ -30,7 +30,9 @@ for (const language of ['en', 'ar']) {
       assert.equal(input.props.accessibilityLabel, t('searchMerchants'));
       assert.equal(input.props.placeholder, t('transactionSearchPlaceholder'));
       assert.notEqual(input.props.placeholder, t('searchMerchants'));
-      assert.ok(text(h.tree).includes(t('transactionSearchLabel')));
+      // On the band the pill's placeholder names what it matches and the label
+      // is spoken; on the sheet (large text) the field keeps its visible label.
+      if (largeText) assert.ok(text(h.tree).includes(t('transactionSearchLabel')));
       input.props.onChangeText('Noon');
       assert.ok(h.events.some(e => e[0] === 'state' && e[2] === 'Noon'));
       input.props.onSubmitEditing();

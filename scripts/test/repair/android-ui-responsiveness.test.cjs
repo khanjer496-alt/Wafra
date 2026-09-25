@@ -10,7 +10,9 @@ const jsx = (type, props = {}, key) => ({ type, props, key });
 function walk(node) {
   if (Array.isArray(node)) return node.flatMap(walk);
   if (!node || typeof node !== 'object') return [];
-  return [node, ...walk(node.props?.children), ...walk(node.props?.footer), ...walk(node.props?.ListHeaderComponent)];
+  // Band screens (design language E) carry their controls in `bandContent`.
+  return [node, ...walk(node.props?.children), ...walk(node.props?.footer), ...walk(node.props?.ListHeaderComponent),
+    ...walk(node.props?.bandContent)];
 }
 function hooks() {
   let cursor = 0;
@@ -129,7 +131,8 @@ test('typing and opening filters preserve the actual memoized SectionList elemen
   }).default;
   const render = () => { react.begin(); return Screen(); };
   let tree = render(); const original = walk(tree).find(n => n.type === 'SectionList'); assert.ok(original);
-  walk(tree).find(n => n.props?.inputMode === 'search').props.onChangeText('Cafe');
+  // The band's search field (its TextInput is inputMode="search").
+  walk(tree).find(n => n.props?.inputMode === 'search' || n.type?.name === 'BandSearchField').props.onChangeText('Cafe');
   tree = render(); assert.equal(walk(tree).find(n => n.type === 'SectionList'), original);
   walk(tree).find(n => n.props?.accessibilityLabel === h.deps['@/lib/i18n'].t('filtersButton')).props.onPress();
   tree = render(); assert.equal(walk(tree).find(n => n.type === 'SectionList'), original);
