@@ -2,6 +2,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { tapped } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
@@ -16,6 +17,10 @@ type BillsSegmentControlProps = {
 /** Compact Bills filters: horizontally scrollable on native, wrapping safely on narrow web viewports. */
 export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlProps) {
   const theme = useTheme();
+  // At the accessibility text sizes a sideways-scrolling row hides most of
+  // five tall chips off screen; they wrap onto lines instead, as on the web.
+  const largeText = useLargeTextLayout();
+  const wrap = Platform.OS === 'web' || largeText;
   const labels: Record<BillsSegment, string> = {
     upcoming: t('refUpcoming'),
     subscriptions: t('subscriptionsSeg'),
@@ -26,7 +31,7 @@ export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlPr
   const segments: BillsSegment[] = ['upcoming', 'subscriptions', 'utilities', 'cards', 'all'];
 
   const tabs = (
-    <View role="tablist" style={[styles.segment, Platform.OS === 'web' && styles.webSegment]}>
+    <View role="tablist" style={[styles.segment, wrap && styles.webSegment]}>
       {segments.map((value) => {
         const active = segment === value;
         return (
@@ -54,7 +59,7 @@ export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlPr
             ]}>
             <ThemedText
               type={active ? 'smallBold' : 'small'}
-              style={{ color: active ? theme.inverseText : theme.textSecondary }}>
+              style={[styles.segmentLabel, { color: active ? theme.inverseText : theme.textSecondary }]}>
               {labels[value]}
             </ThemedText>
           </Pressable>
@@ -63,7 +68,7 @@ export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlPr
     </View>
   );
 
-  if (Platform.OS === 'web') {
+  if (wrap) {
     return (
       <View style={styles.webContainer} accessibilityLabel={t('billsTitle')}>
         {tabs}
@@ -95,5 +100,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
+    maxWidth: '100%',
   },
+  segmentLabel: { flexShrink: 1, textAlign: 'center' },
 });

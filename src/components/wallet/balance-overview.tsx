@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Button } from '@/components/ui/controls';
+import { useHeroFigureMultiplier } from '@/components/ui/money';
 import { Colors } from '@/constants/theme';
 import { formatAmount } from '@/lib/format';
 import { t } from '@/lib/i18n';
@@ -15,6 +16,8 @@ type BalanceOverviewProps = {
   onAddAccount: () => void;
 };
 export function BalanceOverview(p: BalanceOverviewProps) {
+  const figure = p.knownBalanceCount > 0 ? formatAmount(p.balanceFils) : '—';
+  const figureScale = useHeroFigureMultiplier(figure, 'amount');
   return <View style={styles.root} testID="reference-account-balance">
     <View style={[styles.hero, { borderColor: p.theme.cardBorder }]} >
       <View style={styles.heroTitle}><ThemedText type="small" themeColor="textSecondary">{t('availableBalances')}</ThemedText>
@@ -22,7 +25,7 @@ export function BalanceOverview(p: BalanceOverviewProps) {
       <View style={[styles.money, p.largeText && styles.stack]} accessible
         accessibilityLabel={p.knownBalanceCount > 0 ? `${ledgerCurrencyDisplay()} ${formatAmount(p.balanceFils)}` : p.balanceCoverageText}>
         <ThemedText type="meta" themeColor="textSecondary">{ledgerCurrencyDisplay()}</ThemedText>
-        <ThemedText type="amount" tabular style={{ color: p.theme.text }}>{p.knownBalanceCount > 0 ? formatAmount(p.balanceFils) : '—'}</ThemedText>
+        <ThemedText type="amount" tabular maxFontSizeMultiplier={figureScale} style={{ color: p.theme.text }}>{figure}</ThemedText>
       </View>
       <ThemedText type="meta" style={{ color: p.theme.textSecondary }}>{p.balanceCoverageText}</ThemedText>
     </View>

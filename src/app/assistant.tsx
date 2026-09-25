@@ -13,6 +13,7 @@ import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { Fonts, Radius } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
 import { useTheme } from '@/hooks/use-theme';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
 import { categoryLabel } from '@/lib/categories';
@@ -470,6 +471,34 @@ export default function AssistantScreen() {
     return () => cancelAnimationFrame(frame);
   }, [keyboardHeight, latest, scrollToLatest]);
 
+  // The period, currency and on-device status sit in the pinned composer. At
+  // the accessibility text sizes that composer would fill half the screen, so
+  // there they scroll at the top of the conversation and only the question
+  // field and Send stay pinned.
+  const contextControls = <>
+    <View style={styles.context}>
+      <Pressable accessibilityRole="button" accessibilityLabel={copy.period + ': ' + periodLabel(contextPeriod)}
+        onPress={() => { tapped(); Keyboard.dismiss(); setPeriodOpen(true); }} style={styles.period}>
+        <Icon name="calendar" size={15} color={theme.textSecondary} />
+        <ThemedText type="meta" themeColor="textSecondary">{periodLabel(contextPeriod)}</ThemedText>
+        <Icon name="chevron-down" size={12} color={theme.textSecondary} />
+      </Pressable>
+      <ThemedText type="meta" themeColor="textSecondary">
+        {`${ledgerCurrencyCode()} · ${copy.localShort}`}
+      </ThemedText>
+    </View>
+    {Platform.OS !== 'web' && aiStatus ? <View style={styles.aiStatus}>
+      <ThemedText testID="assistant-model-status" type="meta" themeColor="textSecondary" style={styles.aiStatusText}>
+        {aiStatus}
+      </ThemedText>
+      {aiAvailability?.canPrepare ? <Pressable testID="assistant-model-prepare" accessibilityRole="button"
+        accessibilityLabel={copy.onDeviceAiPrepare} accessibilityState={{ disabled: preparingModel, busy: preparingModel }}
+        disabled={preparingModel} onPress={() => { tapped(); prepareModel(); }} style={styles.aiPrepare}>
+        <ThemedText type="meta" themeColor="primary">{preparingModel ? copy.onDeviceAiDownloading : copy.onDeviceAiPrepare}</ThemedText>
+      </Pressable> : null}
+    </View> : null}
+  </>;
+
   return <>
     <ScreenScaffold testID="assistant-screen"
       keyboardAware={Platform.OS === 'ios'}
@@ -499,27 +528,7 @@ export default function AssistantScreen() {
           ? Math.max(0, keyboardHeight - insets.bottom)
           : 0,
       }]}>
-        <View style={styles.context}>
-          <Pressable accessibilityRole="button" accessibilityLabel={copy.period + ': ' + periodLabel(contextPeriod)}
-            onPress={() => { tapped(); Keyboard.dismiss(); setPeriodOpen(true); }} style={styles.period}>
-            <Icon name="calendar" size={15} color={theme.textSecondary} />
-            <ThemedText type="meta" themeColor="textSecondary">{periodLabel(contextPeriod)}</ThemedText>
-            <Icon name="chevron-down" size={12} color={theme.textSecondary} />
-          </Pressable>
-          <ThemedText type="meta" themeColor="textSecondary">
-            {`${ledgerCurrencyCode()} · ${copy.localShort}`}
-          </ThemedText>
-        </View>
-        {Platform.OS !== 'web' && aiStatus ? <View style={styles.aiStatus}>
-          <ThemedText testID="assistant-model-status" type="meta" themeColor="textSecondary" style={styles.aiStatusText}>
-            {aiStatus}
-          </ThemedText>
-          {aiAvailability?.canPrepare ? <Pressable testID="assistant-model-prepare" accessibilityRole="button"
-            accessibilityLabel={copy.onDeviceAiPrepare} accessibilityState={{ disabled: preparingModel, busy: preparingModel }}
-            disabled={preparingModel} onPress={() => { tapped(); prepareModel(); }} style={styles.aiPrepare}>
-            <ThemedText type="meta" themeColor="primary">{preparingModel ? copy.onDeviceAiDownloading : copy.onDeviceAiPrepare}</ThemedText>
-          </Pressable> : null}
-        </View> : null}
+        {largeText ? null : contextControls}
         {error ? <ThemedText type="meta" accessibilityRole="alert" themeColor="expense">{error}</ThemedText> : null}
         <View style={styles.inputRow}>
           <TextInput testID="assistant-input" value={question} onChangeText={(value) => { setQuestion(value); setError(null); }}
@@ -528,8 +537,8 @@ export default function AssistantScreen() {
             placeholder={copy.placeholder} placeholderTextColor={theme.textTertiary}
             selectionColor={theme.primary} autoComplete="off" textAlignVertical="top"
             onContentSizeChange={(event) => setInputHeight(event.nativeEvent.contentSize.height)}
-            style={[styles.input, { height: Math.max(minInputHeight, Math.min(maxInputHeight, inputHeight)),
-              color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]} />
+            style={scaleTextStyleForE2E([styles.input, { height: Math.max(minInputHeight, Math.min(maxInputHeight, inputHeight)),
+              color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }], undefined, undefined)} />
           <Pressable testID="assistant-send" accessibilityRole="button" accessibilityLabel={copy.send}
             accessibilityState={{ disabled: !question.trim() || !state.hydrated || isSending, busy: isSending }}
             disabled={!question.trim() || !state.hydrated || isSending} onPress={() => { tapped(); void ask(); }}
@@ -538,6 +547,7 @@ export default function AssistantScreen() {
           </Pressable>
         </View>
       </View>}>
+      {largeText ? <View style={styles.contextInline}>{contextControls}</View> : null}
       {currentTurns.length === 0 ? <View style={styles.hero}>
         <ThemedText type="heading">{copy.heading}</ThemedText>
         <ThemedText themeColor="textSecondary">{copy.privacy}</ThemedText>
@@ -638,6 +648,7 @@ const styles = StyleSheet.create({
   input: { flex: 1, minWidth: 0, borderWidth: 1, borderRadius: Radius.control,
     paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, lineHeight: 22, fontFamily: Fonts.sans },
   send: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
+  contextInline: { gap: 6 },
   aiStatus: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   aiStatusText: { flexShrink: 1, minWidth: 0 },
   aiPrepare: { minHeight: 44, justifyContent: 'center' },

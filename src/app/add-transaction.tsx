@@ -20,6 +20,7 @@ import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
 import { useToast } from '@/components/ui/toast';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { categorySupportsType, categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
 import { parseAmountToFils, parseAmountWithMoneySpec, shortDate, toISODate } from '@/lib/format';
@@ -75,6 +76,7 @@ function defaultReviewTitle(item: ReviewAlert): string {
 
 export default function AddTransactionScreen() {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   const router = useRouter();
   const toast = useToast();
   const params = useLocalSearchParams<{ reviewId?: string | string[] }>();
@@ -919,7 +921,7 @@ export default function AddTransactionScreen() {
               ]}>
               {selected ? <>
                 <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
-                <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{accountDisplayName(selected)}</ThemedText>
+                <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={largeText ? undefined : 2}>{accountDisplayName(selected)}</ThemedText>
               </> : <ThemedText type="small" themeColor="textSecondary" style={styles.accountTriggerName}>
                 {tUi('reviewAlertChooseAccount')}
               </ThemedText>}
