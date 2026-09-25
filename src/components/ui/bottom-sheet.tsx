@@ -28,7 +28,7 @@ import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
-import { EASE, Elevation, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { EASE, Elevation, MotionSpring, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLanguage } from '@/hooks/use-language';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
@@ -36,10 +36,13 @@ import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
+// The motion rules' one spring (260/24). Clamped: the overshoot it allows
+// would lift a sheet's bottom edge off the screen for a frame. Android and
+// Reduce Motion never run it — they settle the sheet at rest (see below).
 const OPEN_SPRING = {
-  damping: 27,
-  stiffness: 300,
-  mass: 0.86,
+  damping: MotionSpring.damping,
+  stiffness: MotionSpring.stiffness,
+  mass: MotionSpring.mass,
   overshootClamping: true,
   reduceMotion: ReduceMotion.System,
 } as const;

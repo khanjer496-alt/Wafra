@@ -156,18 +156,45 @@ export const Elevation = {
 } as const;
 
 /** Every scroller pads to this so the floating bar never covers the last row. */
-/** `cubic-bezier(0.16, 1, 0.3, 1)` everywhere — no linear, no bounce. */
-export const EASE = [0.16, 1, 0.3, 1] as const;
+/**
+ * `cubic-bezier(.2, .8, .2, 1)` everywhere — the redesign's motion rules. No
+ * linear, no bounce; the one overshoot the rules allow belongs to springs.
+ */
+export const EASE = [0.2, 0.8, 0.2, 1] as const;
 
-/** Durations in ms. Transform and opacity only. */
+/**
+ * Durations in ms. Transform and opacity only.
+ *
+ * The rules: 150 for taps, 240 for most changes, 420 for first appearances,
+ * and nothing longer than 500. A looping pulse counts per half-cycle, so a
+ * `pulse` of 1000 runs 500 ms out and 500 ms back — it used to be 2800
+ * (1400 ms halves), the one token that broke the ceiling.
+ */
 export const Motion = {
+  tap: 150,
+  change: 240,
+  appear: 420,
+  max: 500,
   rowPress: 220,
   sectionEnter: 320,
   sectionStagger: 40,
   sheet: 420,
-  countUp: 900,
-  pulse: 2800,
+  /** A figure's first appearance; kept at the first-appearance duration. */
+  countUp: 420,
+  pulse: 1000,
+  /** Each changed digit of a rolling figure starts this long after the last. */
+  digitStagger: 60,
+  /** A keypad digit fades in over this long. */
+  keyFade: 90,
 } as const;
+
+/**
+ * The one spring: sheets, pins and the category check. With mass 1 this is
+ * a damping ratio of ~0.74, one small overshoot and settled well inside
+ * `Motion.max`. Callers that must not overshoot (a sheet whose bottom edge
+ * would lift off the screen) clamp it themselves.
+ */
+export const MotionSpring = { stiffness: 260, damping: 24, mass: 1 } as const;
 
 /**
  * Compact phone gutters. 18px keeps Ledger & Light airy without making the
