@@ -207,7 +207,9 @@ test('the 30-day timeline speaks its pins and leaves out anything beyond the win
   // The harness's today is 15 Sep 2026.
   const tree = billsWith([{ ...netflix, nextExpectedISO: '2026-09-20' }, { ...spotifyUp, nextExpectedISO: '2026-11-30' }]).render('bills');
   const label = byId(tree, 'bills-timeline').props.accessibilityLabel;
-  assert.match(label, /^1 payment in the next 30 days: Netflix/);
+  // The harness's monthly bills fell due on 7 and 8 Sep; their next due dates
+  // (7 and 8 Oct) are inside the window, so they are pinned too.
+  assert.match(label, /^3 payments in the next 30 days: Netflix, 20 Sept; Etisalat, 7 Oct; DEWA, 8 Oct$/);
   assert.match(label, /Netflix/);
   assert.doesNotMatch(label, /Spotify/);
 });
