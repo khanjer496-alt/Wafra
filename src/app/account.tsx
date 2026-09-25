@@ -80,13 +80,22 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [account, state.transactions],
   );
-  const flow = useMemo(
-    () => accountMonthFlow(state.transactions, accountId, now, corroboratingTransferIdsForState(state)),
+  // Second alerts for one bank move, left out of both the month's figures and
+  // the recent rows, as Transactions leaves them out.
+  const duplicates = useMemo(
+    () => corroboratingTransferIdsForState(state),
     // Duplicate detection reads accounts and transactions only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, state.accounts, accountId, now],
+    [state.transactions, state.accounts],
   );
-  const recent = useMemo(() => recentAccountTransactions(state.transactions, accountId, 8), [state.transactions, accountId]);
+  const flow = useMemo(
+    () => accountMonthFlow(state.transactions, accountId, now, duplicates),
+    [state.transactions, accountId, now, duplicates],
+  );
+  const recent = useMemo(
+    () => recentAccountTransactions(state.transactions, accountId, 8, duplicates),
+    [state.transactions, accountId, duplicates],
+  );
   const openEntry = useCallback((transaction: Transaction) => setEntry(transaction), []);
 
   const header: ScreenHeaderProps = {

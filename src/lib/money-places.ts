@@ -173,15 +173,20 @@ export function accountMonthFlow(
   return { inFils, outFils, count };
 }
 
-/** The newest rows on one account, newest first — for the detail screen. */
+/**
+ * The newest rows on one account, newest first — for the detail screen.
+ * `duplicates` are left out, as in `accountMonthFlow` and Transactions: a
+ * second alert for one bank move is not a second row.
+ */
 export function recentAccountTransactions(
   transactions: readonly Transaction[],
   accountId: string,
   limit = 8,
+  duplicates?: ReadonlySet<string>,
 ): Transaction[] {
   const rows: Transaction[] = [];
   for (const transaction of transactions) {
-    if (transaction.accountId === accountId) rows.push(transaction);
+    if (transaction.accountId === accountId && !duplicates?.has(transaction.id)) rows.push(transaction);
   }
   rows.sort((a, b) => b.date.localeCompare(a.date) || (b.ts ?? 0) - (a.ts ?? 0));
   return rows.slice(0, limit);
