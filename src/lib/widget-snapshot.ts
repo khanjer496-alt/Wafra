@@ -28,6 +28,10 @@ export interface WidgetSnapshot {
   version: typeof WIDGET_SNAPSHOT_VERSION;
   /** Epoch ms; widgets show "as of" and treat anything older than a day as stale. */
   generatedAt: number;
+  /** App language, so widgets match the app even when the phone is set differently. */
+  language: 'en' | 'ar';
+  /** Local date of the last entry in last7Minor (today when generated), YYYY-MM-DD. */
+  todayISO: string;
   currency: string;
   /** Minor-unit exponent of the currency (2 for AED/USD, 3 for KWD, 0 for JPY). */
   exponent: number;
@@ -52,6 +56,7 @@ export interface WidgetSnapshotInput {
   upcoming: readonly { title: string; amountFils: number; dateISO: string; estimated?: boolean; overdue?: boolean }[];
   /** The user turned widget amounts off entirely. */
   hideAmounts: boolean;
+  language: 'en' | 'ar';
 }
 
 export function buildWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot {
@@ -61,6 +66,8 @@ export function buildWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot 
   return {
     version: WIDGET_SNAPSHOT_VERSION,
     generatedAt: input.now.getTime(),
+    language: input.language,
+    todayISO: input.today.week[input.today.week.length - 1]?.dateISO ?? '',
     currency: input.currency,
     exponent: input.exponent,
     amountsSensitive: true,

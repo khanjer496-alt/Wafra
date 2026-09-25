@@ -19,7 +19,7 @@ const upcoming = [
   { title: 'Visa ••4821', amountFils: 124000, dateISO: '2026-10-13' },
   { title: 'Spotify', amountFils: 1199, dateISO: '2026-10-07' },
 ];
-const base = { today, currency: 'USD', exponent: 2, now: new Date(Date.UTC(2026, 8, 25, 17)), upcoming, hideAmounts: false };
+const base = { today, currency: 'USD', exponent: 2, now: new Date(Date.UTC(2026, 8, 25, 17)), upcoming, hideAmounts: false, language: 'en' };
 
 test('the snapshot carries only summary figures, marked sensitive', () => {
   const s = buildWidgetSnapshot(base);
@@ -31,7 +31,8 @@ test('the snapshot carries only summary figures, marked sensitive', () => {
   assert.equal(s.budgetsOver, 1);
   assert.equal(s.last7Minor.length, 7);
   assert.deepEqual(Object.keys(s).sort(), ['amountsSensitive', 'bills', 'budgetsOver', 'currency', 'exponent', 'generatedAt', 'hidden',
-    'last7Minor', 'leftInBudgetsMinor', 'perDayMinor', 'todayCount', 'todayMinor', 'version'].sort(), 'no extra fields leak out');
+    'language', 'last7Minor', 'leftInBudgetsMinor', 'perDayMinor', 'todayCount', 'todayISO', 'todayMinor', 'version'].sort(), 'no extra fields leak out');
+  assert.equal(s.todayISO, '2026-09-25');
 });
 
 test('bills: overdue items skipped, at most three, in the order Home already shows', () => {

@@ -114,6 +114,8 @@ function harness(options = {}) {
   dependencies['@/lib/home-widget-preferences'] = load(path.join(root, 'src/lib/home-widget-preferences.ts'));
   dependencies['@/lib/home-widgets'] = load(path.join(root, 'src/lib/home-widgets.ts'), dependencies);
   dependencies['@/lib/home-today'] = load(path.join(root, 'src/lib/home-today.ts'), dependencies);
+  dependencies['@/lib/widget-snapshot'] = load(path.join(root, 'src/lib/widget-snapshot.ts'), dependencies);
+  dependencies['../../modules/wafra-widgets'] = { setWidgetSnapshot() {}, clearWidgetSnapshot() {} };
   dependencies['@/components/ui/grow-bar'] = { GrowBar: (p) => ({ type: 'View', props: { style: [p.style, p.axis === 'width' ? { width: `${p.size}%` } : { height: p.size }] } }) };
   dependencies['@/lib/account-freshness'] = load(path.join(root, 'src/lib/account-freshness.ts'), dependencies);
   dependencies['@/lib/splits'] = dependencies['@/lib/splits'] ?? load(path.join(root, 'src/lib/splits.ts'), dependencies);

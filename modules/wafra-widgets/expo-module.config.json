@@ -1,0 +1,9 @@
+{
+  "platforms": ["android", "apple", "web"],
+  "android": {
+    "modules": ["expo.modules.wafrawidgets.WafraWidgetsModule"]
+  },
+  "apple": {
+    "modules": ["WafraWidgetsModule"]
+  }
+}

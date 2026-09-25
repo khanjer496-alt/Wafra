@@ -121,6 +121,8 @@ function createHarness(options = {}) {
   deps['@react-native-async-storage/async-storage']={getItem:async()=>null,setItem:async()=>{}};
   local('@/lib/home-widget-preferences','src/lib/home-widget-preferences.ts');
   local('@/lib/home-today','src/lib/home-today.ts');
+  local('@/lib/widget-snapshot','src/lib/widget-snapshot.ts');
+  deps['../../modules/wafra-widgets']={setWidgetSnapshot(){},clearWidgetSnapshot(){}};
   // The final size, as Reduce Motion shows it.
   deps['@/components/ui/grow-bar']={GrowBar:p=>jsx('View',{style:[p.style,p.axis==='width'?{width:`${p.size}%`}:{height:p.size}]})};
   local('@/lib/account-freshness','src/lib/account-freshness.ts');

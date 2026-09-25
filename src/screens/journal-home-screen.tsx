@@ -34,6 +34,8 @@ import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { countsInCashflowTotals, isSpending, liveAccountIds } from '@/lib/ledger';
 import { summarizeHomeToday } from '@/lib/home-today';
+import { buildWidgetSnapshot } from '@/lib/widget-snapshot';
+import { clearWidgetSnapshot, setWidgetSnapshot } from '../../modules/wafra-widgets';
 import { allocationsOf } from '@/lib/splits';
 import { isFixedCommitment } from '@/lib/categories';
 import { moneyPictureProgress } from '@/lib/money-picture-progress';
@@ -292,6 +294,48 @@ export default function JournalHomeScreen() {
     // Day-keyed like the dashboard: a foreground resume must not re-walk the ledger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
+  // Widgets always describe the live month, whatever period Home is showing.
+  const widgetToday = useMemo(() => {
+    const currentKey = monthKey(now);
+    if (period.mode === 'month' && period.key === currentKey) return homeToday;
+    const live = liveAccounts as Set<string>;
+    const internal = dashboard.internalTransactionIds as Set<string>;
+    const current = { mode: 'month', key: currentKey } as const;
+    return summarizeHomeToday({
+      transactions: state.transactions,
+      budgets: state.budgets,
+      now,
+      isSpending: (transaction) => isSpending(transaction, live, internal),
+      inBudgetPeriod: (dateISO) => inPeriod(dateISO, current),
+      budgetPeriodStartISO: monthStartISO(currentKey),
+      budgetPeriodEndISO: monthEndISO(currentKey),
+      allocations: allocationsOf,
+      isFixedCommitment,
+      averageWindow: null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [homeToday, state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
+  useEffect(() => {
+    if (!state.hydrated || !state.onboarded) return;
+    // A legacy local-only preference keeps figures off every shared surface.
+    if (state.privateMode) { clearWidgetSnapshot(); return; }
+    const task = InteractionManager.runAfterInteractions(() => {
+      setWidgetSnapshot(JSON.stringify(buildWidgetSnapshot({
+        today: widgetToday,
+        currency: moneySpec.currency,
+        exponent: moneySpec.exponent,
+        now: new Date(),
+        // Card statements are exact; bills and subscriptions are projections.
+        upcoming: payments.map((item) => ({ title: item.title, amountFils: item.amountFils, dateISO: item.dateISO,
+          overdue: item.overdue, estimated: item.kind !== 'card' })),
+        hideAmounts: false,
+        language: language === 'ar' ? 'ar' : 'en',
+      })));
+    });
+    return () => task.cancel();
+    // `now` moves on every return to the foreground, so widgets are re-stamped
+    // even when no money changed and never age into their stale state.
+  }, [widgetToday, payments, moneySpec, language, state.hydrated, state.onboarded, state.privateMode, now]);
   const recentActivity = useMemo(() => {
     const rows: Transaction[] = [];
     for (const transaction of state.transactions) {

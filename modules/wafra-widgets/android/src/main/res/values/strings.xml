@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="wafra_widget_today_name">Today</string>
+  <string name="wafra_widget_today_description">What you spent today and over the last 7 days.</string>
+  <string name="wafra_widget_upcoming_name">Coming up</string>
+  <string name="wafra_widget_upcoming_description">Your next three bills and when they are due.</string>
+  <string name="wafra_widget_today">Today</string>
+  <string name="wafra_widget_upcoming">Coming up</string>
+  <string name="wafra_widget_left_in_budgets">Left in budgets %1$s</string>
+  <string name="wafra_widget_last_7_days">Spending over the last 7 days</string>
+  <string name="wafra_widget_amount_hidden">Amount hidden</string>
+  <string name="wafra_widget_no_bills">No upcoming bills</string>
+  <string name="wafra_widget_open_to_update">Open Wafra to update</string>
+  <string name="wafra_widget_no_payments">No payments yet</string>
+  <!-- Widget-picker preview samples (illustrative, never user data). -->
+  <string name="wafra_widget_preview_amount" translatable="false">USD 86.40</string>
+  <string name="wafra_widget_preview_count">3 payments</string>
+  <string name="wafra_widget_preview_bill_1">Rent</string>
+  <string name="wafra_widget_preview_date_1">Mon 28 Sep</string>
+  <string name="wafra_widget_preview_bill_amount_1" translatable="false">USD 1,200.00</string>
+  <string name="wafra_widget_preview_bill_2">Mobile plan</string>
+  <string name="wafra_widget_preview_date_2">Thu 1 Oct</string>
+  <string name="wafra_widget_preview_bill_amount_2" translatable="false">USD 45.00</string>
+  <string name="wafra_widget_preview_bill_3">Electricity</string>
+  <string name="wafra_widget_preview_date_3">Sat 3 Oct</string>
+  <string name="wafra_widget_preview_bill_amount_3" translatable="false">≈ USD 96.50</string>
+  <plurals name="wafra_widget_payments">
+    <item quantity="one">%d payment</item>
+    <item quantity="other">%d payments</item>
+  </plurals>
+</resources>
