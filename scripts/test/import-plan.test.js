@@ -829,6 +829,29 @@ const DECLINE_SMS = [{
     }]), plan);
 }
 
+/* A settled Arabic debit that also mentions something "قيد المعالجة" (a refund
+ * request, a transfer's onward status) is a real posting. The pending idiom is
+ * shared non-posting evidence, so if it fired here the re-read would sweep the
+ * genuine stored row — including one saved without its body. */
+{
+  const ts = DECLINE_TS + 60_000;
+  const body = 'تم خصم 100.00 درهم من بطاقتك 1234 لدى متجر النخلة. طلب الاسترداد الخاص بك قيد المعالجة.';
+  const stored = {
+    id: 'settled-ar-debit', type: 'expense', amountFils: 10000, category: 'shopping',
+    accountId: 'acc-main', title: 'متجر النخلة', date: new Date(ts).toISOString().slice(0, 10),
+    source: 'sms', ts, smsKey: `s${ts}-10000`,
+  };
+  const s = scan([{ body, ts }]);
+  ok('a settled Arabic debit beside a pending refund request is not scanned as non-posting',
+    s.declined.length === 0 && s.parsed.length === 1, s);
+  const plan = buildImportPlan(s.parsed, { ...BASE, transactions: [stored] }, s.newestTs, new Date(2026, 7, 2), s.declined);
+  ok('...and a re-import never removes its stored row (saved without raw)',
+    !plan.batch.updates.some((u) => u.remove), plan.batch.updates);
+  const withRaw = buildImportPlan(s.parsed, { ...BASE, transactions: [{ ...stored, raw: body }] }, s.newestTs, new Date(2026, 7, 2), s.declined);
+  ok('...nor the same row saved with its body',
+    !withRaw.batch.updates.some((u) => u.remove), withRaw.batch.updates);
+}
+
 /* Callers that cannot supply declines get the old behaviour, not a guess.
  * The relay is the real one: the Worker discards Message Content before
  * sealing a row, so no body ever reaches this device to be tested. */

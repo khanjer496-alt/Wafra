@@ -388,9 +388,11 @@ export interface ParsedCard {
  * re-import; retain generic DD/MM and all obligation deadlines. No automatic
  * Android history reread is requested; PARSER_BACKFILL_VERSION remains 49.
  *
- * 52: a card charge whose payee is a BNPL provider (Tabby, Tamara, Postpay,
- * Cashew) is Shopping again, and a BNPL name elsewhere in the body (a BNPL
- * provider's own card footer) no longer files the named merchant as Loan.
+ * 52: any payment whose payee is a BNPL provider (Tabby, Tamara, Postpay,
+ * Cashew, incl. legal entity and domain descriptors) — card charge, direct
+ * debit or bank transfer — is Shopping, and a BNPL name elsewhere in the body
+ * (a BNPL provider's own card footer) no longer files the named merchant as
+ * Loan. Bank loans and finance houses keep Loan.
  * Statement announcements without a deadline, Arabic pending purchases,
  * alerts stating two separate movements and alerts offering two candidate
  * amounts no longer post. Future captures only; heal.ts never re-files a
@@ -808,7 +810,7 @@ const STATEMENT_RE =
   /statement|\blast\s+stmt\b|\bstmt\s+(?:date|bal(?:ance)?)\b|total\s+(?:amount\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+(?:payment|amount\s+due|due)\b|\bmin\s+amt\b|outstanding\s+(?:amount|balance)\s+of|كشف الحساب|كشف حساب|اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق/i;
 /** "Your statement is ready / has been generated" — the announcement itself. */
 const STATEMENT_ANNOUNCEMENT_RE =
-  /\bstatement\b(?:[^.\n]|\.\d){0,60}?\b(?:is\s+(?:now\s+)?(?:ready|available)|has\s+been\s+(?:generated|issued|prepared))\b/i;
+  /\bstatement\b(?:[^.\n]|\.\d){0,60}?\b(?:is\s+(?:now\s+)?(?:ready|available)|has\s+been\s+(?:generated|issued|prepared|sent|emailed|dispatched))\b/i;
 /** Purchase-style verbs that disqualify the statement branch (NOT "paid"). */
 const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent/i;
 
@@ -1584,22 +1586,32 @@ const SETTLED_MOVEMENT_RE =
  * "separate <movement>" stated as ALREADY DONE counts: two figures alone are
  * the ordinary amount-plus-balance alert, and "the fee will be charged as a
  * separate transaction" is a footer about the future, not a second movement.
- * Callers also require two money figures.
+ * The SEPARATE clause must state its own figure, and another figure must
+ * remain outside it: "a separate transfer was made earlier today" beside an
+ * available balance is a note about an earlier alert, not a second movement.
  */
 const SEPARATE_MOVEMENT_RE = new RegExp(
   String.raw`\bseparate\s+(?:outgoing\s+|incoming\s+)?(?:refund|purchase|payment|transfer|debit|credit|transaction|withdrawal|charge|deposit|remittance)\b(?:[^.\n]|\.\d){0,80}?\b(?:was|were|has\s+been|have\s+been)\s+(?:also\s+)?(?:credited|debited|posted|charged|refunded|made|processed|completed|executed|transferred)\b` +
-    // "وتم تنفيذ تحويل صادر منفصل" — (و)تم (done), never سيتم (will be).
-    `|(?<![${AR_LETTER}])و?تم\\s+(?:[${AR_LETTER}]+\\s+){0,2}(?:تحويل|حواله|عمليه|شراء|سحب|دفعه|خصم|ايداع)(?:\\s+[${AR_LETTER}]+){0,2}\\s+منفصله?(?![${AR_LETTER}])`,
+    // "وتم تنفيذ تحويل صادر منفصل بمبلغ AED 250" — (و)تم (done), never
+    // سيتم (will be). The trailing بمبلغ figure belongs to the clause.
+    `|(?<![${AR_LETTER}])و?تم\\s+(?:[${AR_LETTER}]+\\s+){0,2}(?:تحويل|حواله|عمليه|شراء|سحب|دفعه|خصم|ايداع)(?:\\s+[${AR_LETTER}]+){0,2}\\s+منفصله?(?![${AR_LETTER}])` +
+    `(?:\\s+(?:بمبلغ|بقيمه)\\s+(?:[A-Z]{3}\\s*)?\\d[\\d,]*(?:\\.\\d+)?(?:\\s*(?:[A-Z]{3}|درهم|ريال))?)?`,
   'i',
 );
 /**
- * An alert whose AMOUNT field offers two candidates for one movement, or
- * which says its corrected amount is unconfirmed, does not establish what was
- * charged. A bare "AED X or AED Y" elsewhere (a prize, a limit) is not this.
+ * An alert whose AMOUNT field offers two candidates in the SAME currency for
+ * one movement, or which says its corrected/revised amount is unconfirmed or
+ * pending, does not establish what was charged. "USD 27.23 or AED 100.00" is
+ * one charge in two currencies; a prize "AED X or AED Y" has no amount label.
  */
 const AMBIGUOUS_AMOUNT_RE =
-  /\bamount\s*:?\s*(?:AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|Dhs?)\s*\d[\d,]*(?:\.\d+)?\s+or\s+(?:AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|Dhs?)\s*\d|\b(?:corrected|amended|revised)\s+(?:transaction\s+)?amount\b(?:[^.\n]|\.\d){0,40}?\b(?:not\s+(?:yet\s+)?(?:been\s+)?confirmed|unconfirmed|to\s+be\s+confirmed|pending|awaiting)\b/i;
-const MONEY_FIGURE_RE = /\b(?:[A-Z]{3}|Dhs?)\s*\d|\d(?:[\d,]*\.?\d*)\s*(?:[A-Z]{3}|Dhs?)\b/g;
+  /\bamount\s*:?\s*(AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|Dhs?)\s*\d[\d,]*(?:\.\d+)?\s+or\s+\1\s*\d|\b(?:corrected|amended|revised)\s+(?:transaction\s+)?amount\b(?:[^.\n]|\.\d){0,40}?\b(?:not\s+(?:yet\s+)?(?:been\s+)?confirmed|unconfirmed|to\s+be\s+confirmed|pending|awaiting)\b/i;
+/** A money figure. Non-global on purpose: it is only ever `.test()`ed. */
+const MONEY_FIGURE_RE = /\b(?:[A-Z]{3}|Dhs?)\s*\d|\d(?:[\d,]*\.?\d*)\s*(?:[A-Z]{3}\b|Dhs?\b|درهم|ريال)/;
+/** One movement stated as done in Arabic — a posted clause, not a notice. */
+const AR_SETTLED_VERB_RE = new RegExp(
+  `(?<![${AR_LETTER}])و?تم\\s+(?:خصم|الخصم|شراء|سحب|دفع|الدفع|تحويل)`,
+);
 const STRONG_SENDERLESS_POSTING_RE =
   /\b(?:transaction|txn|payment|purchase|withdrawal|transfer|debit|credit)\b(?:[^.\n]|\.\d){0,120}?\b(?:amount\s+(?:of|is)|for|of)?\s*(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is)\s+(?:successfully\s+)?(?:paid|completed|processed|posted|debited|credited|charged|refunded|reversed|successful|succeeded)\b|\b(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,96}?\b(?:has\s+been|was)\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|refunded|reversed|received|withdrawn|transferred)\b/i;
 /**
@@ -1623,10 +1635,18 @@ const PENDING_PROCESSING_RE =
  * idioms قيد الانتظار / قيد المعالجة / قيد التنفيذ (awaiting, being processed,
  * being executed). "لم يتم ... بعد" is "has not yet been" debited/paid, and
  * معلقة only when it qualifies the transaction noun itself.
+ *
+ * Every alternative must QUALIFY THE MOVEMENT inside one clause: the idiom is
+ * also how a refund request, a transfer's onward status, or an app footer
+ * ("الطلبات قيد التنفيذ") is described beside a debit that did happen. And the
+ * caller skips it outright when a settled Arabic verb (AR_SETTLED_VERB_RE) is
+ * present, because this is shared evidence that can delete a stored row.
+ * The clause class admits "180.00" / "1,000" so a figure does not end it.
  */
+const AR_CLAUSE = `(?:[^.\\n,;]|[.,]\\d)`;
 const AR_PENDING_POSTING_RE = new RegExp(
-  `(?<![${AR_LETTER}])قيد\\s+(?:الانتظار|المعالجه|التنفيذ)(?![${AR_LETTER}])` +
-    `|(?<![${AR_LETTER}])لم\\s+يتم\\s+(?:قيد\\s+)?(?:الخصم|خصم[${AR_LETTER}]*|الدفع|دفع[${AR_LETTER}]*|القيد|التحويل)\\s+بعد(?![${AR_LETTER}])` +
+  `(?:عمليه|معامله|حركه|شراء|الخصم)${AR_CLAUSE}{0,60}?(?<![${AR_LETTER}])قيد\\s+(?:الانتظار|المعالجه|التنفيذ)(?![${AR_LETTER}])` +
+    `|(?:عمليه|معامله|حركه|شراء)${AR_CLAUSE}{0,80}?(?<![${AR_LETTER}])و?لم\\s+يتم\\s+(?:قيد\\s+)?(?:الخصم|خصم[${AR_LETTER}]*|الدفع|دفع[${AR_LETTER}]*|القيد)\\s+بعد(?![${AR_LETTER}])` +
     `|(?<![${AR_LETTER}])(?:عمليه|معامله|حركه)(?:\\s+[${AR_LETTER}]+){0,2}\\s+معلقه(?![${AR_LETTER}])`,
 );
 const EXPECTED_FUTURE_MOVEMENT_RE =
@@ -2867,9 +2887,14 @@ const OUTGOING_MOVE_RE =
 const TRANSFER_HINT_RE =
   /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:(?:credit|covered|charge|prepaid)\s+)?card|(?:credit|covered|charge|prepaid)\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|(?:credit|covered|charge)\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
 
-/** A payee that is a BNPL provider and nothing else (legal suffixes allowed). */
+/**
+ * A payee that is a BNPL provider and nothing else: the brand, its domain
+ * descriptor (WWW.TABBY.AI), its legal entity (TAMARA FINANCE COMPANY, TABBY
+ * FZ LLC) and an acquirer's trailing city/country. Any other word — "Tamara
+ * Restaurant", "Cashew Cafe" — makes it a different business.
+ */
 const BNPL_PAYEE_RE =
-  /^(?:tabby|tamara|postpay|cashew)(?:\.(?:ai|com|co))?(?:\s+(?:fz[\s-]*llc|fzco|fze|llc|l\.l\.c\.?|uae|ae|ksa))*$/i;
+  /^(?:www\.)?(?:tabby|tamara|postpay|cashew)(?:\.(?:ai|com|co|ae|sa))?(?:[\s,]+(?:fz[\s-]*llc|fzco|fze|llc|l\.l\.c\.?|finance|financing|company|co\.?|technologies|payments?|uae|ae|are|ksa|sa|sau|dubai|abu\s+dhabi|sharjah|riyadh|jeddah))*$/i;
 
 const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // Exchange houses move money; they do not sell anything. There is no
@@ -3428,12 +3453,14 @@ function categoryOf(
   if (merchant && /^(?:2c2p)$/i.test(merchant.trim())) {
     return { id: 'other', deliberate: true };
   }
-  // A card charge whose PAYEE is a BNPL provider is an instalment of a
-  // purchase. The bank sent no alert for the purchase itself, so this row is
-  // the only ledger record of that spending: Shopping, as it was until a
-  // body-wide BNPL keyword briefly filed it as Loan.
+  // ANY payment whose PAYEE is a BNPL provider — card charge, direct debit or
+  // bank transfer — is an instalment of a purchase. The bank sent no alert for
+  // the purchase itself, so this row is the only ledger record of that
+  // spending: Shopping, as it was until a body-wide BNPL keyword briefly filed
+  // it as Loan. It runs before the DD/loan-instalment keywords on purpose.
   // Read against the payee name only, and only when the name is the provider
-  // and nothing else — "Tamara Restaurant" is a restaurant.
+  // and nothing else — "Tamara Restaurant" is a restaurant. Bank loans and
+  // finance houses are not BNPL providers and keep Loan.
   if (merchant && BNPL_PAYEE_RE.test(merchant.trim())) {
     return { id: 'shopping', deliberate: true };
   }
@@ -4211,7 +4238,8 @@ function nonPostingReasonInBody(
     return 'preauthorisation';
   }
   if (RETURNED_UNPAID_RE.test(body)) return 'returned-unpaid';
-  if (!settledRefund && (PENDING_PROCESSING_RE.test(body) || AR_PENDING_POSTING_RE.test(body) ||
+  if (!settledRefund && (PENDING_PROCESSING_RE.test(body) ||
+    (AR_PENDING_POSTING_RE.test(body) && !AR_SETTLED_VERB_RE.test(body)) ||
     EXPECTED_FUTURE_MOVEMENT_RE.test(body) ||
     REQUEST_RECEIVED_RE.test(body) || MANDATE_LIFECYCLE_RE.test(body) ||
     CONDITIONAL_PAYOUT_RE.test(body) || CONDITIONAL_MOVEMENT_RE.test(body))) {
@@ -4947,8 +4975,13 @@ function parseSmsInner(
   // cannot become one row without dropping or guessing money. Refused here so
   // the alert stays for review; deliberately NOT in nonPostingReason, which is
   // evidence for deleting stored rows and these messages did move money.
+  const separate = SEPARATE_MOVEMENT_RE.exec(suppressible);
   if (
-    (SEPARATE_MOVEMENT_RE.test(suppressible) && (raw.match(MONEY_FIGURE_RE) ?? []).length >= 2) ||
+    (separate &&
+      MONEY_FIGURE_RE.test(separate[0]) &&
+      MONEY_FIGURE_RE.test(
+        suppressible.slice(0, separate.index) + ' ' + suppressible.slice(separate.index + separate[0].length),
+      )) ||
     AMBIGUOUS_AMOUNT_RE.test(suppressible)
   ) {
     return null;

@@ -5813,6 +5813,29 @@ t('a loan instalment debited to a lender stays a loan',
   'Your loan instalment of AED 1,875.00 has been debited from your account XXXX6620.',
   { amountFils: 187500, category: 'loan', type: 'expense' });
 
+// Every payment whose payee IS the BNPL provider is Shopping — a direct
+// debit or a bank transfer to it as much as a card charge — including its
+// legal entity, its domain descriptor and an acquirer's trailing city.
+t('a direct-debit instalment sent to a BNPL provider is shopping, not a loan',
+  'Dear Customer, your DD instalment of AED 350.00 has been debited from your FAB Account and has been sent to Tabby as per your UAE Direct Debit Service Instructions.',
+  { merchant: 'Tabby', amountFils: 35000, category: 'shopping', type: 'expense' });
+t("a bank transfer to a BNPL provider's finance entity is shopping",
+  'AED 350.00 has been transferred from your account XXXX6620 to TAMARA FINANCE COMPANY.',
+  { merchant: 'Tamara Finance Company', amountFils: 35000, category: 'shopping' });
+t('a BNPL legal entity with a trailing city is shopping',
+  'Purchase of AED 75.00 with Debit Card ending 5521 at TAMARA FINANCE COMPANY, RIYADH. Avl Balance is AED 900.00.',
+  { amountFils: 7500, category: 'shopping' });
+t('a BNPL field-list payee with a two-word city is shopping',
+  'Credit Card Purchase\nCard No XXXX4417\nAED 63.20\nTABBY ABU DHABI ARE\n14/08/26 19:05\nAvailable Balance AED 8,120.55',
+  { amountFils: 6320, category: 'shopping' });
+for (const descriptor of ['WWW.TABBY.AI', 'TABBY DUBAI', 'TAMARA FINANCE COMPANY', 'POSTPAY']) {
+  ok(`a BNPL payee descriptor is shopping: ${descriptor}`,
+    classifyMerchantDescription(descriptor, 'expense').categoryGuess === 'shopping',
+    classifyMerchantDescription(descriptor, 'expense'));
+}
+ok('a café that shares a BNPL brand word is not the provider',
+  classifyMerchantDescription('CASHEW CAFE', 'expense').categoryGuess === 'dining');
+
 // ── Synthetic single-message shapes that must never post one movement ──
 t('a credit-card statement announcement with a minimum payment is not spending',
   'Your monthly credit-card statement is ready. Total amount due AED 2,640.00; minimum payment AED 132.00.',
@@ -5834,6 +5857,29 @@ t('an Arabic purchase described as pending never posts',
   null);
 ok('an Arabic pending purchase is affirmative non-posting evidence',
   nonPostingReason('عملية شراء بمبلغ AED ٢٤٥٫٠٠ قيد الانتظار لدى متجر النخلة ولم يتم قيد الخصم بعد.') === 'pending-processing');
+t('an Arabic purchase not yet debited (ولم يتم … بعد) never posts',
+  'عملية شراء بمبلغ AED 245.00 لدى متجر النخلة ولم يتم خصمها بعد.',
+  null);
+// The pending idioms also describe OTHER things beside a debit that did happen.
+// These are shared non-posting evidence, which can delete a stored row, so a
+// settled Arabic verb or an idiom that does not qualify the movement wins.
+for (const [label, body] of [
+  ['a refund request still processing beside a settled debit',
+    'تم خصم 100.00 درهم من بطاقتك 1234 لدى متجر النخلة. طلب الاسترداد الخاص بك قيد المعالجة.'],
+  ["a transfer's onward status beside a settled debit",
+    'تم خصم مبلغ 2,000.00 درهم من حسابك 1234 لحوالة دولية الى SAMPLE PERSON. حالة الحوالة: قيد التنفيذ.'],
+  ['an app footer about pending requests',
+    'تم خصم 100.00 درهم من بطاقتك 1234 لدى متجر النخلة. للاطلاع على الطلبات قيد التنفيذ زوروا التطبيق.'],
+]) {
+  ok(`${label} is not non-posting evidence`, nonPostingReason(body) === null, nonPostingReason(body));
+  const p = parseSms(body);
+  ok(`${label} still posts its debit`, p !== null && p.kind === 'transaction' && p.type === 'expense', p);
+}
+ok('the Saudi transfer-status shape is not non-posting evidence either',
+  nonPostingReason('تم خصم مبلغ 2,000.00 ريال من حسابك 1234 لحوالة دولية الى SAMPLE PERSON. حالة الحوالة: قيد التنفيذ.') === null);
+t('a field-list footer about amounts not yet debited does not refuse the purchase',
+  'Credit Card Purchase\nCard No XXXX4417\nAED 58.10\nFIELD LIST SHOP DUBAI ARE\n14/08/26 19:05\nالمبالغ التي لم يتم خصمها بعد تظهر كمعلقة',
+  { amountFils: 5810, type: 'expense' });
 t('the settled twin of the pending Arabic purchase still posts',
   'عملية شراء بمبلغ AED 245.00 لدى متجر النخلة.',
   { amountFils: 24500, type: 'expense', merchant: 'متجر النخلة' });
@@ -5855,6 +5901,18 @@ t('a footer about a future separate fee transaction does not refuse the purchase
 t('an Arabic future separate movement (سيتم) is not a second posted movement',
   'تم خصم AED ٩٠ لعملية شراء لدى مكتبة الفنار، وسيتم تحويل صادر منفصل بمبلغ AED ٣٠٠.',
   { amountFils: 9000, type: 'expense' });
+t('a note about an earlier separate transfer does not refuse this transfer',
+  'AED 200.00 transferred to Sample Person. Avl bal AED 800.00. Note: a separate transfer was made earlier today.',
+  { amountFils: 20000, type: 'expense' });
+t('an amount stated in two currencies is one charge, not two candidates',
+  'Purchase of AED 100.00 at SAMPLE ELECTRONICS with Credit Card ending 4417. Amount: USD 27.23 or AED 100.00 approx.',
+  { amountFils: 10000, type: 'expense' });
+t('a revised amount pending merchant confirmation is refused (intended)',
+  'Purchase at SAMPLE ELECTRONICS of AED 45.00 on card 1234. The revised amount is pending merchant confirmation.',
+  null);
+t('a statement sent to email with a minimum payment is not spending',
+  'Your credit card statement has been sent to your email. Total amount due AED 2,640.00; min payment AED 132.00.',
+  null);
 t('an alert offering two possible amounts is not posted',
   'Purchase of AED 45.00 at Harbor Lamp Bakery. Amount: AED 45.00 or AED 145.00; corrected amount not confirmed.',
   null);
