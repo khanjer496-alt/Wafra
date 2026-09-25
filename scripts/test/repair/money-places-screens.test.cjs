@@ -251,6 +251,13 @@ test('the 30-day timeline speaks its pins and leaves out anything beyond the win
   assert.match(label, /^3 payments in the next 30 days: Netflix, 20 Sept; Etisalat, 7 Oct; DEWA, 8 Oct$/);
   assert.match(label, /Netflix/);
   assert.doesNotMatch(label, /Spotify/);
+  // DEWA on day 23 of 30 is centred; nothing is anchored past an edge.
+  const anchors = walk(byId(tree, 'bills-timeline')).map((n) => n.props?.testID).filter((id) => /^bills-timeline-pin-/.test(id ?? ''));
+  assert.deepEqual(anchors, ['bills-timeline-pin-center', 'bills-timeline-pin-center', 'bills-timeline-pin-center']);
+  const today = billsWith([{ ...netflix, nextExpectedISO: '2026-09-15' }]).render('bills');
+  const first = walk(byId(today, 'bills-timeline')).find((n) => n.props?.testID === 'bills-timeline-pin-start');
+  assert.ok(first, 'a pin due today hangs its label inward from the start edge');
+  assert.equal(first.props.style.find((part) => part && 'marginStart' in part).marginStart, -5, 'its dot still sits on today');
 });
 
 function renderBillSheet(h, props) {

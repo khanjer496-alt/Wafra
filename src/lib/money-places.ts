@@ -257,6 +257,25 @@ export function timelinePins(
   return pins;
 }
 
+/**
+ * Where a pin's label hangs from its dot, so the first and last labels stay
+ * inside the strip. A label is centred on its dot unless half of it would
+ * cross an edge; then it runs inward from the dot. `stripWidth` is 0 until the
+ * strip has been measured, and the same rule is applied to a typical phone
+ * strip meanwhile.
+ */
+export function timelineLabelAnchor(
+  position: number,
+  stripWidth: number,
+  labelWidth = 88,
+): 'start' | 'center' | 'end' {
+  const width = stripWidth > 0 ? stripWidth : 320;
+  const half = labelWidth / 2;
+  if (position * width < half) return 'start';
+  if ((1 - position) * width < half) return 'end';
+  return 'center';
+}
+
 /* ── Editing a hand-made bill ───────────────────────────────────────── */
 
 /** What "Edit bill" may change on a reminder the user created. */
