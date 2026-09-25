@@ -29,7 +29,9 @@ const U = (name: string, domain: string, color = '#6B6559'): OnboardingBankExamp
  * here; unsupported locales fall back to neutral bank glyphs rather than a
  * famous-but-unverified brand.
  */
-const UNIVERSAL_PREVIEWS: Readonly<Record<UniversalMarket, OnboardingBankRegion>> = Object.freeze({
+// Partial: a review-pack market such as CA or SG gets onboarding previews only
+// once its display identities are chosen; until then it draws neutral glyphs.
+const UNIVERSAL_PREVIEWS: Readonly<Partial<Record<UniversalMarket, OnboardingBankRegion>>> = Object.freeze({
   US: { id: 'US', currency: 'USD', banks: [
     U('Chase', 'chase.com', '#117ACA'), U('Bank of America', 'bankofamerica.com', '#E31837'), U('Wells Fargo', 'wellsfargo.com', '#D71E28'),
   ] },

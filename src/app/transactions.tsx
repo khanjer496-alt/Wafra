@@ -37,7 +37,8 @@ import { createTransactionFilterIndex, projectTransactionFilter, type Transactio
 import { getTransferActivity } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { reconcileTransfers } from '@/lib/transfer-reconciliation';
-import { useStore } from '@/lib/store';
+import { useStoreSelector } from '@/lib/store';
+import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
 
@@ -110,7 +111,13 @@ export default function TransactionsScreen() {
     [language],
   );
   const router = useRouter();
-  const { state } = useStore();
+  // Only what the list reads; scan timestamps and import progress no longer
+  // re-render a 20k-row screen.
+  const state = useStoreSelector(({ state: s }) => ({
+    transactions: s.transactions, accounts: s.accounts, monthStartDay: s.monthStartDay,
+    transferInternalIds: s.transferInternalIds, transferNormalizationVersion: s.transferNormalizationVersion,
+    historyImport: historyStatusOnly(s.historyImport),
+  }));
   const { period } = usePeriod();
   const {
     source,
@@ -191,6 +198,12 @@ export default function TransactionsScreen() {
    * counted, shown as a chip, and clearable like the rest.
    */
   const [smsOnly, setSmsOnly] = useState(source === 'sms');
+  // Rows auto-added from an unverified bank-alert format, still unchecked.
+  // `?source=auto-added` (Review's link) opens the list already scoped.
+  const [autoAddedOnly, setAutoAddedOnly] = useState(source === 'auto-added');
+  const autoAddedCount = useMemo(() => state.transactions.reduce((n, tx) => (tx.bestEffort ? n + 1 : n), 0),
+    [state.transactions]);
+  const autoAddedActive = autoAddedOnly && autoAddedCount > 0;
   const [sheetVisible, setSheetVisible] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
   const pendingFilterFrame = useRef<number | null>(null);
@@ -210,7 +223,8 @@ export default function TransactionsScreen() {
     (filters.datePreset !== 'selected' ? 1 : 0) +
     (filters.minFils ? 1 : 0) +
     (merchantFilter ? 1 : 0) +
-    (smsOnly ? 1 : 0);
+    (smsOnly ? 1 : 0) +
+    (autoAddedActive ? 1 : 0);
 
   const appliedFilters = useDeferredValue(filters);
   const filterIndex = useMemo(() => createTransactionFilterIndex(state.transactions, language),
@@ -252,9 +266,10 @@ export default function TransactionsScreen() {
     [accountById, openEntry, theme.cardBorder, internal],
   );
 
-  const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly, currentKey, period,
+  const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly,
+    bestEffortOnly: autoAddedActive, currentKey, period,
     live: liveAccounts, internal, corroborating, separateTransferIds }),
-  [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal, corroborating, separateTransferIds]);
+  [appliedQuery, merchantFilter, smsOnly, autoAddedActive, currentKey, period, liveAccounts, internal, corroborating, separateTransferIds]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded, separatedTransfers } = projection;
@@ -274,6 +289,7 @@ export default function TransactionsScreen() {
   const clearFilters = useCallback(() => {
     setMerchantFilter(null);
     setSmsOnly(false);
+    setAutoAddedOnly(false);
     setFilters({ ...DEFAULT_FILTERS, categories: new Set() });
   }, []);
 
@@ -286,7 +302,7 @@ export default function TransactionsScreen() {
     setSheetVisible(false);
     const commit = () => {
       pendingFilterFrame.current = null;
-      if (resetScope) { setMerchantFilter(null); setSmsOnly(false); }
+      if (resetScope) { setMerchantFilter(null); setSmsOnly(false); setAutoAddedOnly(false); }
       setFilters(nextFilters);
     };
     if (Platform.OS !== 'android') { commit(); return; }
@@ -310,7 +326,7 @@ export default function TransactionsScreen() {
               {/* The restrictions that came from the link that opened this screen.
               Both are removable here, which is the only thing that explains an
               otherwise inexplicably short list. */}
-              {(merchantFilter || smsOnly) && (
+              {(merchantFilter || smsOnly || autoAddedCount > 0) && (
                 <View style={styles.chipRow}>
                   {merchantFilter && (
                     <Pressable
@@ -336,6 +352,30 @@ export default function TransactionsScreen() {
                       <Icon name="close" size={13} color={theme.primary} />
                     </Pressable>
                   )}
+                  {autoAddedCount > 0 && (autoAddedActive ? (
+                    <Pressable
+                      testID="auto-added-filter-active"
+                      accessibilityRole="button"
+                      accessibilityLabel={`${tr('clearFilter')}: ${tr('autoAddedFilter')}`}
+                      onPress={() => setAutoAddedOnly(false)}
+                      style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
+                      <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
+                        {tr('autoAddedFilter')}
+                      </ThemedText>
+                      <Icon name="close" size={13} color={theme.primary} />
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      testID="auto-added-filter"
+                      accessibilityRole="button"
+                      accessibilityLabel={trf('autoAddedCount', { count: autoAddedCount })}
+                      onPress={() => setAutoAddedOnly(true)}
+                      style={[styles.merchantChip, { borderWidth: 1, borderColor: theme.warning }]}>
+                      <ThemedText type="small" style={{ color: theme.warning, fontFamily: Fonts.sansSemi }}>
+                        {trf('autoAddedCount', { count: autoAddedCount })}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
                 </View>
               )}
 
@@ -461,7 +501,7 @@ export default function TransactionsScreen() {
             </View>
           }
         />
-  ), [sections, listInsets, largeText, merchantFilter, smsOnly, theme, tr, trf, filtered.length,
+  ), [sections, listInsets, largeText, merchantFilter, smsOnly, autoAddedCount, autoAddedActive, theme, tr, trf, filtered.length,
     filters.datePreset, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
     separatedTransfers, transferContributes, transferWords]);
 

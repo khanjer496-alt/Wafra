@@ -48,6 +48,7 @@ import {
   type ParsedSms,
 } from '@/lib/sms-parser';
 import type { CaptureChannel } from '@/lib/dedupe';
+import { bestEffortObservationKey } from '@/lib/best-effort-autopost';
 import type { Account, AppState, Bill, CaptureInstrument, CaptureSource, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
 
@@ -803,9 +804,14 @@ function buildImportPlanInMarket(
     const transferChanged = transferEvidence !== undefined &&
       JSON.stringify(transferEvidence) !== JSON.stringify(prior.transferEvidence);
     const clearTransferEvidence = prior.transferEvidence !== undefined && transferEvidence === undefined;
-    if (patch || accountChanged || instrumentProven || captureChanged || transferChanged || clearTransferEvidence) {
+    // A proven reading of the alert behind an "Auto-added — check" row
+    // settles it: the marker goes, the row stays.
+    const clearBestEffort = !!prior.bestEffort && !p.bestEffort;
+    if (patch || accountChanged || instrumentProven || captureChanged || transferChanged || clearTransferEvidence ||
+      clearBestEffort) {
       updates.push({
         ...(patch ?? { id: prior.id }),
+        ...(clearBestEffort ? { clearBestEffort: true as const } : {}),
         ...(accountChanged ? { accountId: resolvedAccountId } : {}),
         ...(instrumentProven ? { paymentInstrumentSource: 'alert' as const } : {}),
         ...(captureChanged ? { captureInstrument } : {}),
@@ -850,9 +856,12 @@ function buildImportPlanInMarket(
     const transferChanged = transferEvidence !== undefined &&
       JSON.stringify(transferEvidence) !== JSON.stringify(prior.transferEvidence);
     const clearTransferEvidence = !prior.userEdited && prior.transferEvidence !== undefined && transferEvidence === undefined;
-    if (!patch && !accountChanged && !identityChanged && !instrumentProven && !transferChanged && !clearTransferEvidence) return;
+    const clearBestEffort = !!prior.bestEffort && !p.bestEffort;
+    if (!patch && !accountChanged && !identityChanged && !instrumentProven && !transferChanged && !clearTransferEvidence &&
+      !clearBestEffort) return;
     updates.push({
       ...(patch ?? { id: matchedId }),
+      ...(clearBestEffort ? { clearBestEffort: true as const } : {}),
       ...(accountChanged ? { accountId: resolvedAccountId } : {}),
       ...(instrumentProven ? { paymentInstrumentSource: 'alert' as const } : {}),
       ...(transferChanged ? { transferEvidence } : {}),
@@ -1359,7 +1368,18 @@ function buildImportPlanInMarket(
   // as the caller's own object so its queue record can be identified.
   const scannedRowOf = new Map(ordered.map((row, index) => [row, scanOrder[index]] as const));
 
+  // An auto-added row the person undid leaves a durable tombstone. A rescan,
+  // parser re-read or history import of the same alert must not re-add it:
+  // exact source identity always matches; the observation clock matches only
+  // another best-effort reading of the same time, currency and amount.
+  const undoneBestEffort = new Set(state.bestEffortUndone ?? []);
+
   for (const p of ordered) {
+    if (undoneBestEffort.size > 0 && p.kind === 'transaction') {
+      const undoKey = smsKeyOf(p);
+      if ((undoKey && undoneBestEffort.has(undoKey)) ||
+        (p.bestEffort && undoneBestEffort.has(bestEffortObservationKey(p.smsTs, p.currency, p.amountFils) ?? ''))) continue;
+    }
     const date = p.date ?? toISODate(new Date());
     if (p.kind === 'billDue') {
       // Same stale-misread sweep the cardStatement branch does below, and it
@@ -1817,7 +1837,10 @@ function buildImportPlanInMarket(
       amountFils: p.amountFils,
       originalAmountMinor: p.originalAmountMinor,
       originalCurrency: p.originalCurrency,
+      ...(p.originalMinorUnits !== undefined && p.originalExponent !== undefined
+        ? { originalMinorUnits: p.originalMinorUnits, originalExponent: p.originalExponent } : {}),
       fxRate: p.fxRate,
+      ...(p.fxRateDate !== undefined ? { fxRateDate: p.fxRateDate } : {}),
       fxSource: p.fxSource,
       category: p.categoryGuess,
       accountId,
@@ -1826,6 +1849,7 @@ function buildImportPlanInMarket(
       ts: p.smsTs,
       source: 'sms',
       captureInstrument: captureInstrumentOf(p),
+      ...(p.bestEffort ? { bestEffort: p.bestEffort } : {}),
       smsKey,
       viaPush: p.channel === 'push' || undefined,
       ...(p.channel === 'push' && p.captureSource === undefined && p.sourceEventId === undefined &&
@@ -1846,7 +1870,9 @@ function buildImportPlanInMarket(
       // Relay/email/PDF ingestion deliberately discards the source body
       // before this device sees the structured row. Keep a diagnostic excerpt
       // only on Android's local parser path, where one actually exists.
-      raw: lowConfidence ? p.raw?.slice(0, 300) : undefined,
+      // A best-effort row never keeps message text: its marker and the
+      // structured fields are all the person needs to check it.
+      raw: lowConfidence && !p.bestEffort ? p.raw?.slice(0, 300) : undefined,
     };
     // Never post a possible second copy of a Wallet purchase silently. The
     // candidate stays in the duplicate guard above, so a same-scan push copy

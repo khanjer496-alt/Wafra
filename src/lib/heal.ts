@@ -224,7 +224,8 @@ export function healPatch(
     (titleAfter === 'Card purchase' ||
       (catAfter === 'other' && !p.categoryDeliberate && !STRUCTURAL_TITLES.has(titleAfter)));
   if (stillLow) {
-    if (!prior.raw && p.raw) patch.raw = p.raw.slice(0, 300);
+    // A best-effort row (or reading) never keeps message text.
+    if (!prior.raw && p.raw && !p.bestEffort && !prior.bestEffort) patch.raw = p.raw.slice(0, 300);
   } else if (prior.raw && !p.categoryPinned) {
     // The row is readable now — a name, a category, or a direction correction
     // landed above. Drop the source text, or the accuracy report keeps offering
@@ -320,6 +321,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   }
   if (patch.transferEvidence !== undefined) next.transferEvidence = patch.transferEvidence;
   if (patch.clearTransferEvidence) delete next.transferEvidence;
+  if (patch.clearBestEffort) delete next.bestEffort;
   if (patch.raw !== undefined) {
     if (patch.raw === null) delete next.raw;
     else next.raw = patch.raw;

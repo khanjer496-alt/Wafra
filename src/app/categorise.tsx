@@ -43,6 +43,7 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { CategorySuggestion } from '@/components/category-suggestion';
 import { ThemedText } from '@/components/themed-text';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { Button } from '@/components/ui/controls';
@@ -63,6 +64,12 @@ import type { CategoryId } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
 const INITIAL_VISIBLE_ITEMS = 12;
+/**
+ * "Review all" pages rather than mounting every merchant card at once: one
+ * real ledger had 182 names in `other`, each a card of text, a figure and an
+ * icon inside the scroll view.
+ */
+const REVIEW_PAGE = 40;
 
 type CategoriseItem =
   | ({ kind: 'merchant' } & UncategorisedMerchant)
@@ -95,7 +102,12 @@ export default function CategoriseScreen() {
   // is what lets the finished state say what the visit was worth.
   const [sortedRows, setSortedRows] = useState(0);
   const [showAll, setShowAll] = useState(false);
-  const visibleItems = showAll ? items : items.slice(0, INITIAL_VISIBLE_ITEMS);
+  const [reviewLimit, setReviewLimit] = useState(REVIEW_PAGE);
+  // Assigning advances to the next merchant; keep that one mounted even when
+  // it sits just past the current page.
+  const openIndex = openKey === null ? -1 : items.findIndex((item) => item.key === openKey);
+  const visibleLimit = showAll ? Math.max(reviewLimit, openIndex + 1) : INITIAL_VISIBLE_ITEMS;
+  const visibleItems = items.slice(0, visibleLimit);
 
   const assign = useCallback(
     (item: CategoriseItem, category: CategoryId) => {
@@ -193,6 +205,18 @@ export default function CategoriseScreen() {
                         {t('categorisePaymentPurposeHint')}
                       </ThemedText>
                     )}
+                    {/* Merchants only. A bank bill nickname is exactly where a
+                        name-based guess is worst, so payment purposes get none. */}
+                    {item.kind === 'merchant' && (
+                      <CategorySuggestion
+                        merchant={item.merchant}
+                        count={item.count}
+                        language={state.language === 'ar' ? 'ar' : 'en'}
+                        overrides={state.merchantOverrides}
+                        market={state.marketId}
+                        onUse={(id) => assign(item, id)}
+                      />
+                    )}
                     <CategoryChips
                       categories={EXPENSE_CATEGORIES}
                       selected={null}
@@ -212,9 +236,17 @@ export default function CategoriseScreen() {
               onPress={() => setShowAll(true)}
             />
           )}
+          {showAll && items.length > visibleItems.length && (
+            <Button
+              variant="outline"
+              label={tf('showMoreRows', { count: Math.min(REVIEW_PAGE, items.length - visibleItems.length) })}
+              onPress={() => setReviewLimit(visibleItems.length + REVIEW_PAGE)}
+            />
+          )}
           {showAll && items.length > INITIAL_VISIBLE_ITEMS && (
             <Button variant="ghost" label={t('categoriseShowPriority')} onPress={() => {
               setShowAll(false);
+              setReviewLimit(REVIEW_PAGE);
               setOpenKey(null);
             }} />
           )}

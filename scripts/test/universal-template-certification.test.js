@@ -110,8 +110,101 @@ const hdfc = certify('HDFC Bank: INR 1,249.50 debited on card ending 7312 for pu
 ok('existing trusted HDFC purchase path is preserved under explicit certification',
   hdfc.decision === 'automatic' && hdfc.templateId === 'in-hdfc-card-purchase-v1', JSON.stringify(hdfc));
 
+// Second-wave certified grammars (standard-derived public evidence).
+{
+  const anz = certify('ANZ: AUD 320.00 received via Osko into your account.', 'AU', 'anz-australia');
+  ok('AU: the documented ANZ Osko credit uses the same certification mechanism',
+    anz.decision === 'automatic' && anz.templateId === 'au-anz-osko-credit-v1', JSON.stringify(anz));
+}
+// Heading-style templates carry no completion verb, so the semantic layer does
+// not prove them posted and their anchored rules stay inert (never automatic).
+for (const [source, market, institution] of [
+  ['Itaú: compra com cartão BRL 89,90 em MERCADO TESTE.', 'BR', 'itau-brasil'],
+  ['Banorte: 18/09 compra MXN 1,250.00 SUPERMERCADO. Tarjeta terminación 1234.', 'MX', 'banorte-mexico'],
+  ['Banorte: 18/09 cargo recurrente MXN 299.00 VIDEO CASA. Tarjeta terminación 1234.', 'MX', 'banorte-mexico'],
+  ['Banorte: 18/09 devolución MXN 350.00 COMERCIO TESTE. Tarjeta terminación 1234.', 'MX', 'banorte-mexico'],
+  ['DBS Bank: PayNow outgoing SGD 88.00 to SAMPLE PAYEE.', 'SG', 'dbs-singapore'],
+]) {
+  for (const allow of [false, true]) {
+    const result = certify(source, market, institution, allow);
+    ok(`${market}: a heading-only template is not automatic (generalization ${allow}) — ${source}`,
+      result.decision !== 'automatic' && result.decision !== 'semantic-generalized', JSON.stringify(result));
+  }
+}
+
+// Adversarial alerts that reuse the certified headings are never automatic,
+// even for a verified installed app.
+for (const [source, market, institution] of [
+  ['Banorte: Solicitud de compra por MXN 250.00 en OXXO tarjeta 1234', 'MX', 'banorte-mexico'],
+  ['Banorte: ¿Reconoces la compra por MXN 250.00 en OXXO con tarjeta 1234?', 'MX', 'banorte-mexico'],
+  ['Banorte: Promoción: compra a meses sin intereses con tu tarjeta desde MXN 250.00', 'MX', 'banorte-mexico'],
+  ['Banorte: Compra por MXN 250.00 en OXXO con tarjeta terminación 1234 se cargará mañana', 'MX', 'banorte-mexico'],
+  ['Banorte: Devolución por MXN 250.00 será abonada en 5 días', 'MX', 'banorte-mexico'],
+  ['Banorte: Cargo recurrente por MXN 199.00 de NETFLIX se aplicará el 15/10', 'MX', 'banorte-mexico'],
+  ['DBS: PayNow outgoing limit changed to SGD 5,000.00', 'SG', 'dbs-singapore'],
+  ['DBS: PayNow outgoing SGD 50.00 to JOHN on hold for review', 'SG', 'dbs-singapore'],
+  ['DBS: Online card transaction limit set to SGD 500.00', 'SG', 'dbs-singapore'],
+  ['DBS: Online card transaction of SGD 45.00 at AMAZON requires your approval in digibank app', 'SG', 'dbs-singapore'],
+  ['DBS: Did you make this online card transaction of SGD 45.00 at AMAZON? Reply Y/N', 'SG', 'dbs-singapore'],
+  ['DBS: Local card transaction SGD 45.00 at SHELL is being authorised', 'SG', 'dbs-singapore'],
+  ['Itau: Compra com cartão final 1234 de R$ 50,00 em MERCADO foi estornada', 'BR', 'itau-brasil'],
+  ['Itau: Compra com cartão final 1234 de R$ 50,00 em MERCADO será debitada', 'BR', 'itau-brasil'],
+  ['Itau: Compra com cartão final 1234 de R$ 50,00 em MERCADO aguarda aprovação', 'BR', 'itau-brasil'],
+  ['Osko: AUD 50.00 from John has not been received', 'AU', 'anz-australia'],
+]) {
+  for (const allow of [false, true]) {
+    const result = certify(source, market, institution, allow);
+    // A completed reversal may generalize as a refund credit, never as a purchase.
+    const reversal = /estornada/.test(source);
+    const event = inspectUniversalBankEvent(source, { market });
+    ok(`${market}: heading reuse is never automatic (generalization ${allow}) — ${source}`,
+      result.decision !== 'automatic' &&
+        (result.decision !== 'semantic-generalized' ||
+          (reversal && event.family === 'refund' && event.direction === 'credit')),
+      JSON.stringify({ result, family: event.family, direction: event.direction }));
+  }
+}
+
+// Never-post lifecycle in the second-wave languages, even at a certified
+// institution and with the certified wording inside the message.
+for (const [source, market, institution] of [
+  ['TD Canada Trust: Interac e-Transfer request for CAD 50.00 received. Accept the request to pay.', 'CA', 'td-canada-trust'],
+  ['Itaú: compra com cartão BRL 89,90 em MERCADO TESTE pendente.', 'BR', 'itau-brasil'],
+  ['Banorte: compra MXN 1,250.00 SUPERMERCADO pendiente de autorización. Tarjeta terminación 1234.', 'MX', 'banorte-mexico'],
+  ['Banorte: compra MXN 1,250.00 SUPERMERCADO rechazada. Tarjeta terminación 1234.', 'MX', 'banorte-mexico'],
+  ['ANZ: Osko payment AUD 75.00 failed. We may attempt another payment channel.', 'AU', 'anz-australia'],
+  ['DBS Bank: Future-dated funds transfer SGD 150.00 is scheduled for tomorrow.', 'SG', 'dbs-singapore'],
+]) {
+  const result = certify(source, market, institution, true);
+  ok(`${market}: non-posted lifecycle stays never-post — ${source}`,
+    result.decision === 'never-post', JSON.stringify(result));
+}
+
+// A certified rule never crosses markets or institutions.
+{
+  const wrongInstitution = certify('Itaú: compra com cartão BRL 89,90 em MERCADO TESTE.', 'BR', 'bradesco-brasil');
+  const wrongMarket = certify('Banorte: 18/09 compra MXN 1,250.00 SUPERMERCADO. Tarjeta terminación 1234.', 'ES', 'banorte-mexico');
+  ok('a second-wave certified grammar does not transfer to another issuer or market',
+    wrongInstitution.decision !== 'automatic' && wrongMarket.decision !== 'automatic',
+    JSON.stringify({ wrongInstitution, wrongMarket }));
+}
+
+// The anchored ANZ rule refuses outgoing and split-sentence pending Osko
+// wording. (The separate verified-app semantic-generalization path reads the
+// same English shapes as a credit in every market, e.g. US/GB "bank transfer
+// ... received ... Pending until processed"; that pre-existing generic
+// behaviour is outside the market packs and is not changed here.)
+for (const source of [
+  'Your Osko payment of AUD 50.00 to Jane was received by her bank on 12/09/2026',
+  'Osko payment of AUD 50.00 received from John. Pending until processed',
+]) {
+  const result = certify(source, 'AU', 'anz-australia');
+  ok(`AU: the certified Osko template does not match — ${source}`,
+    result.decision !== 'automatic' && result.templateId === null, JSON.stringify(result));
+}
+
 ok('certification registry exposes only stable ids to diagnostics',
-  certifiedUniversalTemplateIds().length >= 16 &&
+  certifiedUniversalTemplateIds().length === 22 &&
     certifiedUniversalTemplateIds().every((id) => /^[a-z0-9-]+-v\d+$/.test(id)));
 
 const unresolvedCertifiedTransfer = {

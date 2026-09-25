@@ -1,5 +1,7 @@
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
+import { activeCountryDateOrder, getActiveCountry } from '@/lib/country';
+import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-effort-autopost';
 import {
   interpretBankAlert,
   type BankAlertInterpretation,
@@ -15,11 +17,13 @@ import { parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import type { FxQuote } from '@/lib/fx';
+import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 
 // Cheap supersets used only to decide whether market routing must run. The
 // parser/reviewer remains the authority; matching one of these never imports.
-export const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]/iu;
+export const REVIEW_MONEY_HINT = /\b(?:USD|GBP|EUR|INR|QAR|KWD|BHD|OMR|EGP|JOD|CAD|AUD|BRL|MXN|SGD|Rs\.?|KD|BD|RO|R\.O\.|LE|L\.E\.|JD)\b|[$€£₹]|ر\.ق|د\.ك|د\.ب|ر\.ع|ج\.م|د\.[أا]/iu;
 const LAUNCH_MONEY_HINT = /\b(?:AED|Dhs?\.?|SAR|SR)\b|د\.?[إا]\.?|دراهم|درهم|ر\.?\s?س\.?|ريال/iu;
 
 export const hasBankAlertMoneyHint = (source: string): boolean =>
@@ -70,7 +74,7 @@ export const inspectGenericBankEventForReview = (
   sender = '',
 ): UniversalBankEvent | null => {
   if (!hasGenericBankAlertContext(source, sender)) return null;
-  const event = inspectUniversalBankEvent(source, { sender });
+  const event = inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
   if (event.decision !== 'review') return null;
   const hasGroundedMoney =
     event.amount.evidence !== 'missing' ||
@@ -80,8 +84,24 @@ export const inspectGenericBankEventForReview = (
   return event;
 };
 
+/** Synchronous, network-free rate lookup used while parsing. */
+export type ParseFxLookup = (base: string, quote: string, date: string) => FxQuote | null;
+
+const localIsoDay = (epochMs: number | undefined): string | null => {
+  if (epochMs === undefined || !Number.isFinite(epochMs)) return null;
+  const day = new Date(epochMs);
+  if (!Number.isFinite(day.getTime())) return null;
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+};
+
 /**
- * Promote only a self-proving universal event.
+ * STRICT, UNMARKED universal posting for UAE/Saudi evidence only.
+ *
+ * Used by parse() when the sender or route is a launch market (AE/SA) but the
+ * launch grammar declined and the ledger is not Gulf. This is the behaviour
+ * that shipped before the best-effort policy existed, kept unchanged so a
+ * UAE/Saudi sender is never treated as an "unverified format": no marker, and
+ * the best-effort setting does not apply.
  *
  * This is the bank-agnostic production seam: no bank/sender registry is
  * required. The universal parser must prove one posted amount, one direction,
@@ -89,13 +109,15 @@ export const inspectGenericBankEventForReview = (
  * card settlement, statements, balances, bills/future events, authentication,
  * promotions, or unresolved fields remains in Review.
  */
-const parseUniversalPostedEvent = (
+const parseUniversalLaunchStrict = (
   source: string,
   sender: string,
   pinnedCurrency: string | null,
   pinnedExponent: number | null,
+  fxLookup: ParseFxLookup,
+  observedAt?: number,
 ): ParsedSms | null => {
-  const event = inspectUniversalBankEvent(source, { sender });
+  const event = inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
   if (event.decision !== 'review' || event.status !== 'posted') return null;
   if (event.direction !== 'debit' && event.direction !== 'credit') return null;
   if (!['purchase', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment'].includes(event.family)) {
@@ -103,12 +125,40 @@ const parseUniversalPostedEvent = (
   }
   if (event.amount.evidence !== 'explicit' || !event.amount.value) return null;
   const money = event.amount.value;
-  if (pinnedCurrency && pinnedCurrency !== money.currency) return null;
-  if (pinnedExponent !== null && pinnedExponent !== money.exponent) return null;
   const exponent = currencyMinorUnits(money.currency);
   if (exponent === null || exponent !== money.exponent || !/^\d+$/.test(money.minorUnits)) return null;
-  const amountFils = Number(money.minorUnits);
-  if (!Number.isSafeInteger(amountFils) || amountFils <= 0) return null;
+  const originalMinor = Number(money.minorUnits);
+  if (!Number.isSafeInteger(originalMinor) || originalMinor <= 0) return null;
+  const transactionDay = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;
+  /**
+   * FOREIGN MONEY ON A PINNED LEDGER IS CONVERTED, NEVER RELABELLED.
+   *
+   * A USD ledger receiving "EUR 45.00 spent at ..." posts the ledger-currency
+   * equivalent and keeps EUR 45.00 on the row. The card's own charged ledger
+   * figure wins when the alert states one; otherwise only a dated provider
+   * rate ALREADY KNOWN on this device may convert (parsing never touches the
+   * network). With neither, this returns null exactly as before and the alert
+   * reaches Review, where promotion fetches the rate or keeps it pending.
+   */
+  let amountFils = originalMinor;
+  let currency = money.currency;
+  let fx: Partial<ParsedSms> = {};
+  if (pinnedCurrency && pinnedCurrency !== money.currency) {
+    if (pinnedExponent !== 0 && pinnedExponent !== 2 && pinnedExponent !== 3) return null;
+    const day = transactionDay ?? localIsoDay(observedAt);
+    if (!day) return null;
+    const quote = fxLookup(money.currency, pinnedCurrency, day);
+    const converted = convertForeignConfirmation(event, {
+      currency: money.currency, minorUnits: originalMinor, exponent,
+    }, { currency: pinnedCurrency, exponent: pinnedExponent },
+    quoteFitsDay(quote, day) ? quote : null, { requireQuoteForStated: true });
+    if (converted === 'fx-rate-unavailable' || converted === 'invalid-money') return null;
+    amountFils = converted.amountFils;
+    currency = pinnedCurrency;
+    fx = converted.fields;
+  } else if (pinnedExponent !== null && pinnedExponent !== money.exponent) {
+    return null;
+  }
   const blockedIssues = new Set([
     'amount-role-unresolved',
     'posting-status-unresolved',
@@ -145,14 +195,115 @@ const parseUniversalPostedEvent = (
     kind: 'transaction',
     type: event.direction === 'credit' ? 'income' : 'expense',
     amountFils,
-    currency: money.currency,
+    currency,
+    ...fx,
     merchant,
-    date: event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null,
+    date: transactionDay,
     dueDay: null,
     minDueFils: null,
     card: card && card.last4 ? card : null,
     reference: null,
     transferHint: false,
+    snapshotFils: null,
+    snapshotKind: null,
+    categoryGuess,
+    categoryDeliberate: event.family === 'cash-withdrawal' || event.family === 'utility',
+    raw: source.trim(),
+  };
+};
+
+interface UnprovenPostingContext {
+  enabled: boolean;
+  country: string | null;
+  routedMarket: string | null;
+  /** Launch (AE/SA) sender evidence; the policy then refuses unconditionally. */
+  launchSenderMarket: string | null;
+}
+
+/**
+ * Promote only a self-proving universal event — an UNPROVEN format.
+ *
+ * This is the bank-agnostic production seam: no bank/sender registry is
+ * required. Whether it may post is decided by exactly one policy,
+ * decideBestEffortAutoPost (best-effort-autopost.ts): one completed amount,
+ * one direction, an explicit (or country-resolved) currency, no non-posting
+ * wording, no competing figure, and a dated rate for foreign money. Anything
+ * else (statements, balances, bills/future events, authentication,
+ * promotions, unresolved fields) stays in Review. Every row produced here
+ * carries the `bestEffort` marker so the person can check it.
+ *
+ * FOREIGN MONEY ON A PINNED LEDGER IS CONVERTED, NEVER RELABELLED. The card's
+ * own charged ledger figure wins when the alert states one; otherwise only a
+ * dated provider rate ALREADY KNOWN on this device may convert (parsing never
+ * touches the network). With neither, this returns null and the alert reaches
+ * Review, where promotion fetches the rate or keeps it pending.
+ */
+const parseUniversalPostedEvent = (
+  source: string,
+  sender: string,
+  pinnedCurrency: string | null,
+  pinnedExponent: number | null,
+  fxLookup: ParseFxLookup,
+  observedAt: number | undefined,
+  context: UnprovenPostingContext,
+): ParsedSms | null => {
+  // The setting is checked before the (comparatively expensive) inspection.
+  if (!context.enabled) return null;
+  // A best-effort row is only ever written in the pinned ledger currency; an
+  // unpinned ledger waits for Review (or a proven alert) to choose it.
+  if (!pinnedCurrency) return null;
+  const event = inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
+  const decision = decideBestEffortAutoPost({
+    source,
+    event,
+    enabled: context.enabled,
+    country: context.country,
+    routedMarket: context.routedMarket,
+    launchSenderMarket: context.launchSenderMarket,
+    ledgerCurrency: pinnedCurrency,
+    ledgerExponent: pinnedExponent,
+    observedAt,
+    fxLookup,
+  });
+  if (decision.outcome !== 'post') return null;
+
+  const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
+  const card = instrument ? {
+    last4: instrument.last4 ?? '',
+    kind: instrument.kind === 'account' ? 'account' as const : 'unknown' as const,
+  } : null;
+  const transfer = event.family === 'transfer';
+  // Transfer ownership is a separate reconciliation question: keep the
+  // structural title so a recipient name cannot turn it into spending.
+  const merchant = transfer
+    ? event.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer'
+    : event.merchant.evidence === 'explicit' && event.merchant.value
+      ? event.merchant.value
+      : event.family === 'cash-withdrawal'
+        ? 'ATM withdrawal'
+        : event.family === 'refund'
+          ? 'Refund'
+          : event.direction === 'credit'
+            ? 'Incoming transfer'
+            : 'Account debit';
+  const categoryGuess: CategoryId =
+    event.family === 'cash-withdrawal' ? 'cash-withdrawal' :
+      event.family === 'utility' ? 'utilities' : 'other';
+
+  return {
+    kind: 'transaction',
+    type: event.direction === 'credit' ? 'income' : 'expense',
+    amountFils: decision.amountFils,
+    currency: decision.currency,
+    ...(decision.conversion ? decision.conversion.fields : {}),
+    bestEffort: decision.marker,
+    merchant,
+    date: decision.date,
+    dueDay: null,
+    minDueFils: null,
+    card: card && card.last4 ? card : null,
+    reference: null,
+    transferHint: transfer,
     snapshotFils: null,
     snapshotKind: null,
     categoryGuess,
@@ -168,6 +319,17 @@ export interface LaunchAlertSession {
     sender: string,
     inspection?: UniversalAlertReview | null,
     forcedMarket?: string,
+    observedAt?: number,
+  ): ParsedSms | null;
+  /**
+   * Unproven-format posting ONLY (never the AE/SA launch grammar). For capture
+   * channels that were review-only for non-launch senders: the result, when
+   * any, carries the `bestEffort` marker; null means Review as before.
+   */
+  parseUnproven(
+    source: string,
+    sender: string,
+    inspection?: UniversalAlertReview | null,
     observedAt?: number,
   ): ParsedSms | null;
   detectedMarket(): 'AE' | 'SA' | null;
@@ -186,11 +348,17 @@ export const createLaunchAlertSession = ({
   regionHint = null,
   pinnedCurrency = pinnedLedgerCurrencyCode(),
   activeMarket = getActiveMarket().id,
+  fxLookup = (base, quote, date) => cachedReferenceQuote(base, quote, date),
+  bestEffort = { enabled: bestEffortAutoPostEnabled(), country: getActiveCountry() },
 }: {
   overrides: Record<string, CategoryId>;
   regionHint?: string | null;
   pinnedCurrency?: string | null;
   activeMarket?: string;
+  /** Network-free dated rate lookup; defaults to rates already fetched this session. */
+  fxLookup?: ParseFxLookup;
+  /** Unproven-format policy inputs; defaults mirror the persisted setting and country. */
+  bestEffort?: { enabled: boolean; country: string | null };
 }): LaunchAlertSession => {
   const actualPinned = pinnedLedgerCurrencyCode();
   const pinnedExponent = pinnedCurrency
@@ -324,10 +492,49 @@ export const createLaunchAlertSession = ({
     if (sessionMarket && launchSenderMarket && launchSenderMarket !== sessionMarket) return null;
     if (gulfLedger && (launchSenderMarket === 'AE' || launchSenderMarket === 'SA')) return null;
     if (gulfLedger && !universalRouteIsNonGulf) return null;
-    return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent);
+    const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;
+    // UAE/Saudi evidence (sender or route) is never an "unverified format":
+    // keep the strict, unmarked seam that shipped before, independent of the
+    // best-effort setting.
+    if (launchSenderMarket === 'AE' || launchSenderMarket === 'SA' ||
+      routedMarket === 'AE' || routedMarket === 'SA') {
+      return parseUniversalLaunchStrict(source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt);
+    }
+    return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt, {
+      enabled: bestEffort.enabled,
+      country: bestEffort.country,
+      routedMarket,
+      launchSenderMarket: null,
+    });
   };
 
-  return { inspect, parse, detectedMarket: () => detected };
+  const parseUnproven = (
+    source: string,
+    sender: string,
+    inspection: UniversalAlertReview | null = null,
+    observedAt?: number,
+  ): ParsedSms | null => {
+    if (!bestEffort.enabled) return null;
+    if (!hasBankAlertMoneyHint(source)) return null;
+    if (!shouldTryUniversalPosting(source, sender)) return null;
+    const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;
+    const launchSenderMarket = detectLaunchMarketFromSender(sender);
+    // AE/SA formats are PROVEN: when the mature grammar refused one, or the
+    // alert is routed there, that refusal is the evidence. Never best-effort.
+    if (launchSenderMarket || routedMarket === 'AE' || routedMarket === 'SA') return null;
+    const gulfLedger = pinnedCurrency === 'AED' || pinnedCurrency === 'SAR';
+    if (gulfLedger && routedMarket === null) return null;
+    // A best-effort row must never make an import batch mixed-currency.
+    if (!pinnedCurrency) return null;
+    return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt, {
+      enabled: bestEffort.enabled,
+      country: bestEffort.country,
+      routedMarket,
+      launchSenderMarket,
+    });
+  };
+
+  return { inspect, parse, parseUnproven, detectedMarket: () => detected };
 };
 
 /**

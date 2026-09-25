@@ -67,8 +67,8 @@ test('main onboarding Back actions follow the integrated journey',()=>{
  ];
   for(const[activeStep,expected,journey]of cases){
    const events=[];
-   onboardingAction('goBack',{activeStep,params:{},previewMode:false,setStep:step=>events.push(['step',step]),
-   saveJourney:stage=>events.push(['journey',stage]),preferredName:'Naser',
+   onboardingAction('goBack',{Platform:{OS:'android'},activeStep,params:{},previewMode:false,setStep:step=>events.push(['step',step]),
+   saveJourney:stage=>events.push(['journey',stage]),saveLiveStep:()=>events.push(['journey','capture']),preferredName:'Naser',
    setNameDraft:value=>events.push(['nameDraft',value]),setNameSaveFailed:value=>events.push(['nameFailed',value]),
    setCollectingName:value=>events.push(['collectName',value]),router:{setParams:()=>assert.fail('no callback should be cleared')}});
   const expectedEvents=[['step',expected],['journey',journey]];
@@ -76,10 +76,20 @@ test('main onboarding Back actions follow the integrated journey',()=>{
   assert.deepEqual(events,expectedEvents,activeStep);
  }
  const events=[];
- onboardingAction('goBack',{activeStep:'complete',params:{onboarding:'complete'},previewMode:false,setStep:step=>events.push(['step',step]),
-  saveJourney:stage=>events.push(['journey',stage]),preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},setCollectingName:()=>{},
+ onboardingAction('goBack',{Platform:{OS:'android'},activeStep:'complete',params:{onboarding:'complete'},previewMode:false,setStep:step=>events.push(['step',step]),
+  saveJourney:stage=>events.push(['journey',stage]),saveLiveStep:()=>events.push(['journey','capture']),preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},setCollectingName:()=>{},
   router:{setParams:params=>events.push(['params',Object.keys(params),params.onboarding])}});
  assert.deepEqual(events,[['step','capture'],['journey','capture'],['params',['onboarding'],undefined]]);
+ // iPhone setup is statements (capture) then new transactions (live); both
+ // persist as the capture stage, and completion steps back to live.
+ for(const[activeStep,expected]of[['complete','live'],['live','capture'],['capture','preview']]){
+  const ios=[];
+  onboardingAction('goBack',{Platform:{OS:'ios'},activeStep,params:{},previewMode:false,setStep:step=>ios.push(['step',step]),
+   saveJourney:stage=>ios.push(['journey',stage]),saveLiveStep:()=>ios.push(['journey','capture','statement-step-done']),preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},setCollectingName:()=>{},
+   router:{setParams:()=>assert.fail('no callback should be cleared')}});
+  // Back to live keeps the statement step behind the user across a relaunch.
+  assert.deepEqual(ios,[['step',expected],expected==='live'?['journey','capture','statement-step-done']:['journey',expected==='preview'?'preview':'capture']],`ios ${activeStep}`);
+ }
 });
 test('obsolete optional goals and budget wizard handlers are absent from the shipping gate',()=>{
  const text=fs.readFileSync(path.join(root,'src/components/onboarding-gate.tsx'),'utf8');
@@ -92,7 +102,7 @@ test('blocked onboarding Back transitions preserve the integrated journey',()=>{
   const events=[];
   onboardingAction('goBack',{activeStep,params:activeStep==='complete'?{onboarding:'complete'}:{},previewMode:false,
    setStep:step=>events.push(['step',step]),saveJourney:stage=>events.push(['journey',stage]),
-   preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},setCollectingName:()=>{},
+   saveLiveStep:()=>events.push(['journey','capture']),preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},setCollectingName:()=>{},
    router:{setParams:params=>events.push(['params',params])}},false);
   assert.deepEqual(events,[],`${activeStep}: a blocked press cannot navigate, persist progress or clear the callback`);
  }

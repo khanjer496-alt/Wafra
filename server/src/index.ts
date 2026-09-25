@@ -63,8 +63,11 @@ import {
   extractPdfStatementRows,
   normalizeEmailContent,
   parseRawEmail,
+  legacyStatementDateHint,
   parseStatementCsv,
   parseStatementText,
+  statementDateHintFrom,
+  type StatementDateHint,
 } from './imports';
 import { relaySender } from './ingest-row';
 import {
@@ -407,8 +410,48 @@ function pdfPasswordFailure(error: unknown): 'pdf_password_required' | 'pdf_pass
   return 'pdf_password_incorrect';
 }
 
-function statementCurrencyForMarket(market: string): 'AED' | 'SAR' {
+/**
+ * The launch-era statement currency of a device that never said otherwise:
+ * AED or SAR from its market pack. Only a request from a build that predates
+ * the ledger-currency header, or an email address minted before its currency
+ * was recorded, reaches this.
+ */
+function legacyStatementCurrencyForMarket(market: string): 'AED' | 'SAR' {
   return market === 'SA' ? 'SAR' : 'AED';
+}
+
+/**
+ * The numeric date order the phone sent (`x-wafra-date-order`), from the
+ * user's country. Absent means an older build: the launch rule applies.
+ */
+function statementDateHintForRequest(
+  req: Request,
+  currency: string,
+): { hint: StatementDateHint } | { error: true } {
+  const raw = req.headers.get('x-wafra-date-order');
+  if (raw === null) return { hint: legacyStatementDateHint(currency) };
+  const hint = statementDateHintFrom(raw);
+  return hint === undefined ? { error: true } : { hint };
+}
+
+/**
+ * What a forwarded statement email is parsed under: the ledger currency and
+ * date order recorded when this device minted its forwarding address, or the
+ * launch behaviour for an address that predates them.
+ */
+async function emailStatementLocale(
+  env: Env,
+  device: Device,
+): Promise<{ currency: string; hint: StatementDateHint }> {
+  const row = await env.DB.prepare(
+    'SELECT email_statement_currency, email_statement_date_order FROM devices WHERE id = ?1',
+  )
+    .bind(device.id)
+    .first<{ email_statement_currency: string | null; email_statement_date_order: string | null }>();
+  const recorded = row?.email_statement_currency ? ledgerMoneySpec(row.email_statement_currency) : null;
+  const currency = recorded?.currency ?? legacyStatementCurrencyForMarket(device.market);
+  const hint = recorded ? statementDateHintFrom(row?.email_statement_date_order) : undefined;
+  return { currency, hint: hint === undefined ? legacyStatementDateHint(currency) : hint };
 }
 
 function statementCurrencyForRequest(
@@ -420,7 +463,7 @@ function statementCurrencyForRequest(
   // Backwards compatibility for already-shipped clients. Current builds always
   // send the ledger's explicit ISO denomination and never infer it from country.
   if (rawCurrency === null && rawExponent === null) {
-    return { currency: statementCurrencyForMarket(legacyMarket) };
+    return { currency: legacyStatementCurrencyForMarket(legacyMarket) };
   }
   if (rawCurrency === null || rawExponent === null) return { error: true };
   const spec = ledgerMoneySpec(rawCurrency);
@@ -1187,9 +1230,10 @@ async function queueEmailRows(
   const alert = alertInterpretation.outcome === 'parsed'
     ? alertInterpretation.parsed
     : null;
+  const statementLocale = alert ? null : await emailStatementLocale(env, device);
   const parsedRows = alert
     ? [alert]
-    : parseStatementText(normalized, statementCurrencyForMarket(device.market));
+    : parseStatementText(normalized, statementLocale!.currency, { card: null }, statementLocale!.hint);
   if (parsedRows.length === 0) return { acceptedRows: 0, wake: new Set() };
   if (parsedRows.length > MAX_IMPORT_ROWS) throw new Error('too_many_rows');
   const baseKey = await keyedFingerprint(device.requestSecret, eventMaterial);
@@ -1934,9 +1978,34 @@ export default {
       if (!device) return json({ error: 'unauthorized' }, 401);
       if (!importsEnabled(env)) return json({ error: 'imports_disabled' }, 503);
       if (!env.EMAIL_DOMAIN) return json({ error: 'email_not_configured' }, 503);
+      // Current builds say which ledger currency and numeric date order the
+      // statements forwarded to this address should be read under; an older
+      // build sends no body and keeps the launch behaviour (both NULL).
+      const incoming = await readBody(req, MAX_PAIR_BYTES);
+      if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
+      const locale = (() => {
+        if (!incoming.text.trim()) return { currency: null, dateOrder: null };
+        let body: { ledgerCurrency?: unknown; ledgerExponent?: unknown; dateOrder?: unknown } | null;
+        try {
+          body = JSON.parse(incoming.text);
+        } catch {
+          return null;
+        }
+        if (!body || typeof body !== 'object') return null;
+        const spec = typeof body.ledgerCurrency === 'string' ? ledgerMoneySpec(body.ledgerCurrency) : null;
+        if (!spec || body.ledgerExponent !== spec.exponent) return null;
+        const hint = statementDateHintFrom(body.dateOrder);
+        if (hint === undefined) return null;
+        return { currency: spec.currency, dateOrder: hint ?? 'unknown' };
+      })();
+      if (!locale) return json({ error: 'bad_statement_locale' }, 400);
       const emailToken = randomToken();
-      await env.DB.prepare('UPDATE devices SET email_token_hash = ?1 WHERE id = ?2')
-        .bind(await hashToken(emailToken), device.id)
+      await env.DB.prepare(
+        `UPDATE devices
+            SET email_token_hash = ?1, email_statement_currency = ?3, email_statement_date_order = ?4
+          WHERE id = ?2`,
+      )
+        .bind(await hashToken(emailToken), device.id, locale.currency, locale.dateOrder)
         .run();
       return json({
         emailToken,
@@ -2025,6 +2094,8 @@ export default {
       }
       const requestedMoney = statementCurrencyForRequest(req, device.market);
       if ('error' in requestedMoney) return json({ error: 'bad_ledger_currency' }, 400);
+      const requestedDates = statementDateHintForRequest(req, requestedMoney.currency);
+      if ('error' in requestedDates) return json({ error: 'bad_date_order' }, 400);
       if (req.headers.get('content-type')?.split(';', 1)[0].trim() !== 'application/pdf') {
         return json({ error: 'pdf_required' }, 415);
       }
@@ -2049,6 +2120,7 @@ export default {
           incoming.bytes,
           requestedMoney.currency,
           pdfPassword(req),
+          requestedDates.hint,
         );
       } catch (error) {
         const passwordError = pdfPasswordFailure(error);
@@ -2136,6 +2208,8 @@ export default {
       }
       const requestedMoney = statementCurrencyForRequest(req, device.market);
       if ('error' in requestedMoney) return json({ error: 'bad_ledger_currency' }, 400);
+      const requestedDates = statementDateHintForRequest(req, requestedMoney.currency);
+      if ('error' in requestedDates) return json({ error: 'bad_date_order' }, 400);
       const contentType = req.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() ?? '';
       if (!CSV_CONTENT_TYPES.has(contentType)) return json({ error: 'csv_required' }, 415);
       const incoming = await readBytes(req, MAX_CSV_BYTES);
@@ -2148,6 +2222,7 @@ export default {
           decodeCsv(incoming.bytes),
           requestedMoney.currency,
           MAX_IMPORT_ROWS,
+          requestedDates.hint,
         );
       } catch (error) {
         const code = error instanceof Error ? error.message : 'invalid_csv';
@@ -2564,6 +2639,9 @@ export default {
       try {
         await env.DB.prepare('SELECT market FROM devices LIMIT 0').all();
         await env.DB.prepare('SELECT shortcut_ingest_enabled FROM devices LIMIT 0').all();
+        await env.DB.prepare(
+          'SELECT email_statement_currency, email_statement_date_order FROM devices LIMIT 0',
+        ).all();
         await env.DB.prepare('SELECT push_sent_at FROM push_registrations LIMIT 0').all();
         await env.DB.prepare(
           'SELECT device_id, generation FROM automation_generations LIMIT 0',
@@ -2621,6 +2699,7 @@ export default {
     // Reuse this target set for the whole MIME message. Previously every row of
     // every attachment rediscovered the vault devices, multiplying D1 reads.
     const targets = await supplementalQueueTargets(env, device);
+    const emailLocale = await emailStatementLocale(env, device);
     if (parsedEmail.text) {
       try {
         const imported = await queueEmailRows(
@@ -2668,7 +2747,7 @@ export default {
       );
       let extracted: Awaited<ReturnType<typeof extractPdfStatementRows>>;
       try {
-        extracted = await extractPdfStatementRows(bytes, statementCurrencyForMarket(device.market));
+        extracted = await extractPdfStatementRows(bytes, emailLocale.currency, undefined, emailLocale.hint);
       } catch {
         continue;
       }
@@ -2719,8 +2798,9 @@ export default {
       try {
         parsed = parseStatementCsv(
           decodeCsv(attachment.bytes),
-          statementCurrencyForMarket(device.market),
+          emailLocale.currency,
           MAX_IMPORT_ROWS,
+          emailLocale.hint,
         );
       } catch {
         continue;

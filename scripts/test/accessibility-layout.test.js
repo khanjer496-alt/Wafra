@@ -96,13 +96,16 @@ const declaredStyleValue = (sourceText, style, property) => {
   if (!match) return NaN;
   return match[1] ? spacingValues[match[1]] : Number(match[2]);
 };
-// Normal onboarding is a fixed one-screen composition. Accessibility text sizes
-// keep the ScrollView escape hatch so content can grow without being clipped.
-ok('onboarding stays on one screen normally and only enables scrolling for accessibility text sizes',
+// Normal onboarding is a one-screen composition (flexGrow + marginTop:auto
+// actions). 2026-09-25: it always scrolls instead of clipping — an iPhone SE
+// at the largest non-accessibility text size overflowed with scrolling off —
+// and only bounces at accessibility sizes, so a fitting screen stays still.
+ok('onboarding keeps a one-screen composition but scrolls instead of clipping at any text size',
   /useLargeTextLayout/.test(onboardingGate) &&
   /<Animated\.ScrollView[\s\S]*?contentContainerStyle=\{styles\.welcomeBody\}/.test(onboardingGate) &&
     /<ScrollView key=\{activeStep\}[\s\S]*?contentContainerStyle=\{styles\.scrollContent\}/.test(onboardingGate) &&
-    (onboardingGate.match(/scrollEnabled=\{largeText\}/g) ?? []).length === 2 &&
+    !/scrollEnabled=/.test(onboardingGate) &&
+    (onboardingGate.match(/bounces=\{largeText\}\s*alwaysBounceVertical=\{false\}/g) ?? []).length === 2 &&
     /welcomeBody: \{[\s\S]*?flexGrow: 1/.test(onboardingGate) &&
     /scrollContent: \{ flexGrow: 1/.test(onboardingGate) &&
     /questionActions: \{ marginTop: 'auto'/.test(onboardingGate) &&

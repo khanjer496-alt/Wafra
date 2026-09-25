@@ -113,6 +113,28 @@ export function isTransferCandidate(tx: Transaction): boolean {
   return evidenceOf(row) !== undefined || decisionOf(row) !== undefined || STRUCTURAL.test(tx.title.trim());
 }
 
+/**
+ * A row that no part of transfer reconciliation reads.
+ *
+ * Reconciliation looks at a row only when it is a transfer candidate, carries
+ * a transfer flag/match/decision/evidence, carries a captured instrument (an
+ * own-account/card observation in `knownTransferCounterparties`, a card
+ * receipt, or an owned-transfer observation), or is a payment-flow or
+ * card-payment side. Adding or removing a row with none of those cannot change
+ * any other row's links or the internal-id set, so an exact receipt may be
+ * carried across it. One rule for every caller that carries a receipt forward.
+ */
+export function isTransferInertTransaction(tx: Transaction): boolean {
+  return !isTransferCandidate(tx) &&
+    !tx.isTransfer &&
+    tx.transferMatch === undefined &&
+    tx.transferDecision === undefined &&
+    tx.transferEvidence === undefined &&
+    tx.captureInstrument === undefined &&
+    tx.paymentFlowSide === undefined &&
+    tx.cardPaymentSide === undefined;
+}
+
 /** Row-local ownership only. Persisted links require the ledger-aware reconciler. */
 export function transferOwnership(tx: Transaction): Ownership {
   if (!isTransferCandidate(tx)) return null;

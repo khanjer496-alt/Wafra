@@ -66,6 +66,9 @@ function harness({ state = 'ready', vectors = {}, encodeThrows = false } = {}) {
     '@/lib/local-semantic-bundle': { LOCAL_ASSISTANT_PROTOTYPE_INDEX: index },
     '@/lib/local-semantic-model': semantic,
     '@/lib/local-semantic-runtime': runtime,
+    // These cases cover the research-build path (EXPO_PUBLIC_WAFRA_LOCAL_E5=1).
+    // Default-off behaviour lives in local-semantic-e5-default-off.test.cjs.
+    '@/lib/local-semantic-flags': { LOCAL_SEMANTIC_E5_ENABLED: true },
   });
   return { improve: module.improveAssistantRequestLocally, calls };
 }

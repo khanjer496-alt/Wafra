@@ -173,7 +173,10 @@ ok('statement uploads send the authoritative ledger currency and exponent, never
 ok('statement import requires an explicit ledger currency before picking files',
   /LedgerCurrencySheet/.test(surface) &&
     /!state\.ledgerMoney/.test(surface) &&
-    /disabled=\{!capabilities \|\| busy !== null \|\| pendingPdfs\.length > 0 \|\| !state\.ledgerMoney\}/.test(surface));
+    // "Choose file" connects on first use, so capabilities are loaded by the
+    // tap itself; the ledger currency is still required before the picker.
+    /disabled=\{loadingConfig \|\| busy !== null \|\| pendingPdfs\.length > 0 \|\| !state\.ledgerMoney\}/.test(surface) &&
+    /const chooseFile = async \(\) => \{[\s\S]{0,160}if \(!state\.ledgerMoney\) \{\s*setCurrencySheetVisible\(true\);\s*return;/.test(surface));
 ok('picker cache copy is immediately readable and deleted after the attempt',
   /copyToCacheDirectory: true/.test(surface) &&
   /file\.delete\(\)/.test(surface));
@@ -245,7 +248,7 @@ ok('email forwarding has separate create and revoke actions',
 const copySource = fs.readFileSync(path.join(root, 'src/lib/supplement-copy.ts'), 'utf8');
 const filingStatus = surface.slice(
   surface.indexOf('const finishQueuedImport'),
-  surface.indexOf('const imported = await syncQueued()'),
+  surface.indexOf('await syncQueued()', surface.indexOf('const finishQueuedImport')),
 );
 ok('the in-flight filing status does not reuse the failure copy',
   /copy\.acceptedFiling/.test(filingStatus) && !/copy\.acceptedPending/.test(filingStatus),

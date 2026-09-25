@@ -304,6 +304,54 @@ export const resolveIosFutureSetupStep = (
   return 'prove-shortcut';
 };
 
+/** The numbered step the guided setup shows: Add → Test → Automate, then done. */
+export type IosCaptureGuideStage = 1 | 2 | 3 | 'done';
+
+/**
+ * Presentation only. The order and gates stay those of
+ * `resolveIosFutureSetupStep`: the local test still precedes the automation
+ * because it resolves Apple's permission prompt while Shortcuts is in front.
+ */
+export const iosCaptureGuideStage = (step: IosFutureSetupStep): IosCaptureGuideStage => {
+  switch (step) {
+    case 'add-shortcut':
+    case 'confirm-shortcut':
+      return 1;
+    case 'prove-shortcut':
+      return 2;
+    case 'create-automation':
+      return 3;
+    default:
+      return 'done';
+  }
+};
+
+/** Screens in the Message automation walkthrough (one Apple screen each). */
+export const IOS_AUTOMATION_GUIDE_SCREENS = 5;
+
+/**
+ * iOS 27 one-toggle capture: a bundled Shortcut that carries its own
+ * automation, so setup becomes "Add Wafra Capture (iOS 27) → turn on its
+ * automation toggle". That Shortcut has to be authored and verified on a
+ * physical iOS 27 iPhone, and it is not in this build. The branch stays off
+ * until the file ships; flipping this flag without the file would send people
+ * to a Shortcut that does not exist.
+ */
+export const IOS_ONE_TOGGLE_CAPTURE_SHORTCUT_BUNDLED = false;
+
+export const iosMajorVersion = (version: unknown): number => {
+  const value = String(version);
+  return /^\d+(?:\.\d+)*$/.test(value) ? Number(value.split('.')[0]) : 0;
+};
+
+/** Capability check plus the feature flag; false on every current build. */
+export function iosOneToggleCaptureAvailable(
+  version: unknown,
+  shortcutBundled: boolean = IOS_ONE_TOGGLE_CAPTURE_SHORTCUT_BUNDLED,
+): boolean {
+  return shortcutBundled && iosMajorVersion(version) >= 27;
+}
+
 export const completeIosMessageOnboardingAttempt = async (
   input: IosMessageOnboardingCompletionInput,
 ): Promise<IosMessageOnboardingCompletionResult> => {

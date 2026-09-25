@@ -20,7 +20,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useToday } from '@/hooks/use-today';
 import { internalTransferIdsForState, isSpending } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
-import { formatAmount, monthKey, parseAmountWithMoneySpec, shortDate } from '@/lib/format';
+import { formatAmount, formatAmountForInput, monthKey, parseAmountWithMoneySpec, shortDate } from '@/lib/format';
 import { reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
 import { bankPickerOptions } from '@/lib/known-banks';
@@ -147,7 +147,7 @@ export default function CardsScreen() {
   }, [state.transactions, now, internal]);
 
   const askCreditLimit = (card: Account) => {
-    setLimitText(card.creditLimitFils ? formatAmount(card.creditLimitFils).replace(/,/g, '') : '');
+    setLimitText(card.creditLimitFils ? formatAmountForInput(card.creditLimitFils) : '');
     setLimitFor(card);
   };
 

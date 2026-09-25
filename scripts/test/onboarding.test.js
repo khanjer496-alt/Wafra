@@ -106,6 +106,13 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
   // step existed restores without it, and must keep restoring without it.
   eq('backup validation still accepts a profile with no alert-delivery answer',
     backupValidation.isValidBackupState(profileState), true);
+  // iPhone statement-step marker: optional boolean, so a relaunch resumes at live capture.
+  eq('backup validation accepts the iPhone statement-step marker',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, stage: 'capture', statementStepDone: true } }), true);
+  eq('backup validation rejects a malformed statement-step marker',
+    backupValidation.isValidBackupState({ ...profileState,
+      onboardingProfile: { ...profileState.onboardingProfile, statementStepDone: 'yes' } }), false);
   for (const alerts of ['sms', 'notifications', 'neither', 'unsure', null]) {
     eq(`backup validation accepts the alert-delivery answer (${alerts})`,
       backupValidation.isValidBackupState({ ...profileState,
@@ -133,8 +140,9 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
 
 /* The country a person confirms outranks the phone, and outranks it everywhere
  * — the whole complaint was a UAE resident being shown British banks because
- * his store account was British. It must also stay display-only: no country
- * chosen here may select a parser market or pin a currency. */
+ * his store account was British. It is the ledger's country (date order, and
+ * the parser pack for a ledger without AED/SAR money), but it never widens the
+ * set of launch-tested parser packs and never pins a currency. */
 {
   const region = bankExamples.onboardingBankRegion;
   const gb = region('AE', 'GB');
@@ -154,8 +162,9 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
     bankExamples.ONBOARDING_REGION_IDS
       .filter((id) => markets.canSelectMarket(id))
       .join(',') === 'AE,SA');
-  eq('and somewhere-else selects no market at all',
-    markets.canSelectMarket(bankExamples.ONBOARDING_REGION_ELSEWHERE), false);
+  ok('and somewhere-else selects only the neutral pack, which has no Gulf banks',
+    markets.canSelectMarket(bankExamples.ONBOARDING_REGION_ELSEWHERE) &&
+      markets.MARKETS.map((market) => market.id).join(',') === 'AE,SA');
 
   eq('a stored country is normalized to an ISO region code',
     bankExamples.normalizeOnboardingCountry(' gb '), 'GB');
@@ -174,8 +183,9 @@ eq('Adapty-ready placement IDs are stable without initializing Adapty', growth.G
   ok('every illustrable country can actually be picked',
     ['AE', 'SA', 'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO']
       .every((id) => bankExamples.ONBOARDING_REGION_IDS.includes(id)));
-  ok('the country sheet says it only changes examples, not what Wafra can read',
-    /only picks the example banks/i.test(i18n.t('onboardCountrySheetBody', 'en')) &&
+  ok('the country sheet says what it changes (dates, examples), not a promise about what Wafra can read',
+    /dates/i.test(i18n.t('onboardCountrySheetBody', 'en')) &&
+      /example banks/i.test(i18n.t('onboardCountrySheetBody', 'en')) &&
       /come from your alerts/i.test(i18n.t('onboardCountrySheetBody', 'en')));
 }
 
@@ -519,12 +529,15 @@ ok(
   /onboardingProfileAtStage\(state\.onboardingProfile, 'complete', Date\.now\(\)\)/.test(iosSource) &&
     !/stage: 'complete',\s*\n\s*focus: onboardingFocus/.test(iosSource),
 );
+// 2026-09-25: iPhone setup offers statements BEFORE live capture, so finishing
+// setup exits into the chosen view instead of repeating the statement offer.
 ok(
-  'and exits into the statement import when the bank leaves no history to read',
-  /const finishDestination = useCallback\([\s\S]{0,260}onboardingHistoryGap\(state\.onboardingProfile\?\.alerts\)/
+  'and exits into the chosen view, because statements were already offered first',
+  /const finishDestination = useCallback\(\s*\(\) => onboardingLandingPath\(state\.onboardingProfile\?\.focus \?\? null\)/
     .test(iosSource) &&
-    /\/statement-import' as const/.test(iosSource) &&
-    /exitToRoot\(finishDestination\(\)\)/.test(iosSource),
+    !/\/statement-import' as const/.test(iosSource) &&
+    /exitToRoot\(finishDestination\(\)\)/.test(iosSource) &&
+    /activeStep === 'capture' && Platform\.OS === 'ios'[\s\S]{0,700}onPress: openStatementImport/.test(gateSource),
 );
 
 /* Settings is where an already-onboarded user finds this, so the question and
@@ -549,8 +562,9 @@ ok(
     .every((key) => ['en', 'ar'].every((lang) => i18n.t(key, lang) && i18n.t(key, lang) !== key)),
 );
 ok(
-  'the country stays out of Settings, where it would change nothing after setup',
-  !/onboardCountrySheetTitle|OnboardingCountryConfirm/.test(settingsSource),
+  'Settings has its own country control (it sets date order after setup), not the onboarding one',
+  /settingsCountryTitle/.test(settingsSource) &&
+    !/onboardCountrySheetTitle|OnboardingCountryConfirm/.test(settingsSource),
 );
 ok(
   'the country a person confirms reaches every onboarding scene, not just the first',
@@ -671,7 +685,7 @@ ok(
 ok(
   'web preview offers manual tracking without a nonfunctional automatic choice',
   /Platform\.OS === 'android' \?/.test(gateSource) &&
-    /\) : Platform\.OS === 'ios' \? \(/.test(gateSource) &&
+    /activeStep === 'capture' && Platform\.OS !== 'ios'/.test(gateSource) &&
     /<StartOption automatic=\{false\} disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
     /Platform\.OS === 'web' \? 'onboardManualChoiceWebBody'/.test(gateSource),
 );
@@ -712,16 +726,15 @@ eq(
 const universalSenderLabel = ['Any', 'Sender'].join(' ');
 const universalSenderLabelArabic = ['أي', 'مرسل'].join(' ');
 const iosVisibleCopyKeys = [
-  'onboardCaptureTitleIos',
-  'onboardCaptureBodyIos',
-  'onboardAutomaticChoiceIos',
-  'onboardAutomaticChoiceIosBody',
-  'onboardStatementChoice',
-  'onboardStatementChoiceBody',
-  'onboardCaptureLocalAutomaticTitle',
-  'onboardCaptureLocalAutomaticBody',
-  'onboardManualChoiceIos',
-  'onboardManualChoiceIosBody',
+  'onboardPastTitle',
+  'onboardPastBody',
+  'onboardPastAction',
+  'onboardLater',
+  'onboardHowItWorks',
+  'onboardLiveTitle',
+  'onboardLiveBody',
+  'onboardLiveAction',
+  'onboardNotNow',
   'onboardCapturePrivacyIos',
   'iosLocalPrivacyBody',
   'iosMessageGuideSender',
@@ -738,21 +751,38 @@ ok(
       i18n.t('onboardManualChoiceIosBody', language).length <= 92 &&
       i18n.t('onboardCapturePrivacyIos', language).length <= 64),
 );
+// 2026-09-25: iPhone setup is two short steps. Past: a bank statement. New:
+// Messages capture. One sentence and one primary action each; Later / Not now
+// and a "How it works" disclosure carry everything else.
+const introStepSource = fs.readFileSync(path.join(__dirname, '../../src/components/onboarding/setup-intro-step.tsx'), 'utf8');
 ok(
-  'iOS onboarding keeps automatic, statement, and manual choices with full details behind Learn more',
-  /label=\{t\('onboardAutomaticChoiceIos'\)\}/.test(gateSource) &&
-    /label=\{t\('onboardStatementChoice'\)\}/.test(gateSource) &&
-    /onboardManualChoiceIos/.test(gateSource) &&
-    /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
-    /label=\{t\('onboardCaptureLearnMoreAction'\)\}/.test(gateSource) &&
+  'iOS setup offers statements, then live capture, each with one primary action and details behind How it works',
+  /label: t\('onboardPastAction'\),[\s\S]{0,80}onPress: openStatementImport/.test(gateSource) &&
+    /label: t\('onboardLater'\),[\s\S]{0,200}setStep\('live'\)/.test(gateSource) &&
+    /label: t\('onboardLiveAction'\),[\s\S]{0,160}runSetupAction\(beginCapture\)/.test(gateSource) &&
+    /label: t\('onboardNotNow'\),[\s\S]{0,80}runSetupAction\(continueManually\)/.test(gateSource) &&
+    /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardPastHowTitle[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
+    (gateSource.match(/howLabel=\{t\('onboardHowItWorks'\)\}/g) ?? []).length === 2 &&
+    // One filled primary, one ghost way past, one disclosure: nothing else.
+    (introStepSource.match(/<Button\b/g) ?? []).length === 2 &&
+    /variant="ghost"/.test(introStepSource) &&
+    /accessibilityLabel=\{howLabel\}/.test(introStepSource) &&
     !iosVisibleCopy.includes(universalSenderLabel) &&
     !iosVisibleCopy.includes(universalSenderLabelArabic),
 );
 ok(
-  'forced-dark onboarding gives Learn more an explicit visible label and border',
-  /label=\{t\('onboardCaptureLearnMoreAction'\)\}[\s\S]{0,180}labelColor=\{night\.text\}[\s\S]{0,120}style=\{\[styles\.learnMoreButton, styles\.ghost\]\}/.test(
-    gateSource,
-  ),
+  'forced-dark onboarding gives How it works and Later/Not now explicit visible colours',
+  /howText: \{ color: night\.textSecondary/.test(introStepSource) &&
+    /label=\{secondary\.label\}[\s\S]{0,160}labelColor=\{night\.text\}/.test(introStepSource) &&
+    /label=\{primary\.label\}[\s\S]{0,160}labelColor=\{night\.onPrimary\}/.test(introStepSource) &&
+    /const night = Colors\.dark;/.test(introStepSource),
+);
+ok(
+  'iOS setup copy stays one short sentence per step in both languages',
+  ['en', 'ar'].every((language) =>
+    ['onboardPastBody', 'onboardLiveBody'].every((key) => i18n.t(key, language).length <= 64 &&
+      (i18n.t(key, language).match(/[.!؟?]/g) ?? []).length <= 1) &&
+    ['onboardPastTitle', 'onboardLiveTitle'].every((key) => i18n.t(key, language).length <= 32)),
 );
 {
   const automaticBodies = ['onboardAutomaticChoiceAndroidBody'];
@@ -857,9 +887,10 @@ ok(
   'Android resumes the configured automatic reveal after a restart instead of sending the user backward',
   /pendingAutomaticReveal[\s\S]*?state\.onboardingProfile\?\.stage === 'complete'[\s\S]*?state\.historyImport !== null[\s\S]*?state\.captureOptOut === false[\s\S]*?setCompletionOutcome\('automatic'\)[\s\S]*?setStep\('complete'\)/.test(gateSource),
 );
+// 2026-09-25: the done card replaces the three-line completion reveal.
 ok(
-  'iPhone onboarding shows a personalized completion reveal before leaving setup',
-  /fromOnboarding && setupComplete[\s\S]*?onboardCompleteAutomaticTitle[\s\S]*?onboardingInsight\.title[\s\S]*?onboardingInsight\.body/.test(iosSource),
+  'iPhone setup ends on a done card with a pass result before leaving setup',
+  /futureStep === 'ready' \? \([\s\S]{0,120}testID="ios-capture-ready"[\s\S]{0,120}shortcutCopy\.doneTitle[\s\S]{0,400}tone: 'pass'/.test(iosSource),
 );
 ok(
   'denied SMS onboarding can retry or open the exact app settings',

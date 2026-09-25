@@ -126,8 +126,21 @@ function sessionHarness(options = {}) {
   };
   h.deps['@/lib/local-assistant-grounding'] = load(path.join(root, 'src/lib/local-assistant-grounding.ts'), { '@/lib/wafra-assistant': engine });
   if (options.improve) {
-    h.deps['@/lib/local-semantic-assistant'] = { improveAssistantRequestLocally: options.improve };
-    h.deps['@/lib/local-semantic-runtime'] = { localSemanticRuntimeStatus: () => ({ state: options.modelState ?? 'ready' }) };
+    // The platform-model boundary: the stub returns a request, and the outcome
+    // is on-device only when it differs from the deterministic plan.
+    h.deps['@/lib/on-device-assistant'] = { improveAssistantRequestOnDevice: async input => {
+      const request = await options.improve(input);
+      return request === input.deterministicRequest
+        ? { source: 'deterministic', request, reason: 'stub' } : { source: 'on-device-ai', request };
+    } };
+  }
+  if (options.availability) {
+    const availability = { languages: null, canPrepare: false, ...options.availability };
+    h.deps['@/lib/on-device-ai'] = { onDeviceAI: {
+      peekAvailability: () => null,
+      getAvailability: async () => availability,
+      prepare: async () => { options.prepared?.(); return availability; },
+    } };
   }
   const globals = {
     Date: Clock,
@@ -492,17 +505,60 @@ test('period picker cancel preserves context; explicit current-month apply reset
 }));
 
 
-test('an unavailable encoder can warm or retry when a new question needs interpretation', async () => {
+test('an unavailable on-device model keeps the deterministic answer', async () => {
   const requests = [];
-  await usingAsync({ state: fixture, modelState: 'failed', improve: async input => {
+  await usingAsync({ state: fixture, improve: async input => {
     requests.push(input); return input.deterministicRequest;
   } }, async h => {
     h.render();
     await h.submitAsync('Give me a fiscal digest');
-    assert.equal(requests.length, 1, 'the native wrapper owns non-blocking warmup and retry backoff');
-    assert.equal(h.turns().length, 1, 'the deterministic answer remains available during warmup');
+    assert.equal(requests.length, 1, 'an unrecognised fresh question is offered to the platform model once');
+    assert.equal(h.turns().length, 1, 'the deterministic answer remains available');
+    assert.equal(h.find(node => node.props?.testID === 'assistant-interpreted-on-device'), undefined);
   });
 });
+
+test('a validated on-device plan is executed by the ledger engine and labelled honestly', async () => {
+  await usingAsync({ state: fixture, improve: async input => ({ tool: 'spending-total', period: input.defaultPeriod }) }, async h => {
+    h.render();
+    await h.submitAsync('Give me a fiscal digest');
+    await new Promise(resolve => setImmediate(resolve));
+    h.render();
+    assert.equal(h.turns().length, 1);
+    const executed = h.calls.filter(call => call.kind === 'refresh').at(-1);
+    assert.equal(executed.request.tool, 'spending-total', 'the executor, not the model, produced the answer');
+    assert.match(text(h.find(node => node.props?.testID === 'assistant-interpreted-on-device')),
+      /interpreted by on-device AI/);
+  });
+});
+
+for (const [availability, pattern] of [
+  [{ status: 'available', provider: 'apple-foundation-models' }, /Apple Intelligence can help interpret/],
+  [{ status: 'available', provider: 'gemini-nano' }, /Gemini Nano can help interpret/],
+  [{ status: 'not-enabled', provider: 'apple-foundation-models' }, /Turn on Apple Intelligence/],
+  [{ status: 'model-not-ready', provider: 'gemini-nano', canPrepare: true }, /not ready yet/],
+  [{ status: 'device-not-eligible', provider: null }, /not available on this device/],
+  [{ status: 'unsupported-os', provider: null }, /not available on this device/],
+]) {
+  test(`Ask shows an honest on-device status for ${availability.status}/${availability.provider}`, async () => {
+    let prepared = 0;
+    await usingAsync({ state: fixture, availability, prepared: () => { prepared++; } }, async h => {
+      h.render();
+      await new Promise(resolve => setImmediate(resolve));
+      h.render();
+      assert.match(text(h.find(node => node.props?.testID === 'assistant-model-status')), pattern);
+      const prepare = h.find(node => node.props?.testID === 'assistant-model-prepare');
+      assert.equal(Boolean(prepare), availability.canPrepare === true,
+        'the model download is offered only when the platform says it can be prepared');
+      assert.equal(prepared, 0, 'nothing downloads without the explicit tap');
+      if (prepare) {
+        prepare.props.onPress();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(prepared, 1);
+      }
+    });
+  });
+}
 
 test('new independent question reaches local AI after an earlier answer', async () => {
   const requests = [];
@@ -514,7 +570,8 @@ test('new independent question reaches local AI after an earlier answer', async 
     h.render();
     assert.equal(requests.length, 1);
     assert.equal(requests[0].previousRequest, null);
-    assert.equal(typeof requests[0].groundRequest, 'function');
+    assert.equal(requests[0].appLanguage, 'en');
+    assert.equal(requests[0].question, 'Give me a fiscal digest');
   });
 });
 

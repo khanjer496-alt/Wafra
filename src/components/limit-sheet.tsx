@@ -11,7 +11,7 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { formatAED, formatAmount, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
+import { formatAED, formatAmountForInput, ledgerNiceMinor, ledgerTypicalMinor, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
@@ -54,7 +54,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     if (!open) return;
     setPicked(category);
     const current = category ? state.budgets.find((b) => b.category === category) : undefined;
-    setText(current ? formatAmount(current.limitFils).replace(/,/g, '') : '');
+    setText(current ? formatAmountForInput(current.limitFils) : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, category]);
 
@@ -188,9 +188,12 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
       if (!out.some((s) => s.fils === fils)) out.push({ fils, note, highlight });
     };
     if (spent > 0) add(roundToHundred(spent * 0.9), t('tenPercentUnderMonth'));
-    for (const fils of [50_000, 100_000, 200_000]) add(fils, '');
+    // AED 500 / 1,000 / 2,000, sized to the ledger currency (¥50,000 for JPY,
+    // KWD 50 for KWD) rather than read as fils of whatever the ledger holds.
+    for (const major of [500, 1000, 2000]) add(ledgerTypicalMinor(major), '');
     return out.slice(0, 4);
-  }, [threeMonthAverage, spent]);
+    // The ledger currency changes the preset scale and rounding step.
+  }, [threeMonthAverage, spent, state.ledgerMoney]);
 
   const available = EXPENSE_CATEGORIES.filter(
     (c) => !state.budgets.some((b) => b.category === c.id) || c.id === picked,
@@ -332,7 +335,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 {suggestions.map((s) => (
                   <Pressable
                     key={`${s.fils}-${s.note}`}
-                    onPress={() => setText(formatAmount(s.fils).replace(/,/g, ''))}
+                    onPress={() => setText(formatAmountForInput(s.fils))}
                     style={[
                       styles.chip,
                       {
@@ -404,9 +407,12 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   );
 }
 
-/** Suggestions land on a round number — nobody budgets AED 1,247. */
+/**
+ * Suggestions land on a round number — nobody budgets AED 1,247. The step is
+ * AED 100 (unchanged), ¥10,000 for JPY, KWD 10 for KWD: see ledgerNiceMinor.
+ */
 function roundToHundred(fils: number): number {
-  return Math.max(10_000, Math.round(fils / 10_000) * 10_000);
+  return ledgerNiceMinor(fils);
 }
 
 const styles = StyleSheet.create({

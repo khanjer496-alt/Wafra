@@ -427,26 +427,34 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     useCallback: (fn) => fn,
     useContext: () => null,
     useEffect: () => {},
+    useLayoutEffect: () => {},
     useMemo: (fn) => fn(),
+    useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
     useRef: (value) => ({ current: value }),
     useState: (value) => [value, () => {}],
   };
   const identityState = (state) => state;
   const modules = {
     'react/jsx-runtime': {
-      // StoreProvider now wraps StoreContext.Provider in PrivateModeContext.Provider,
-      // whose value is the private-mode boolean; the store value is the inner
-      // element, already captured as this element's child.
+      // StoreContext.Provider is the innermost element; the wrappers around it
+      // (money locale, private mode, the selector handle) pass through the
+      // store value already captured as their child. The harness renders the
+      // provider without children, so the innermost element yields its value.
       jsx: (_type, props) => captureProvider
-        ? (typeof props.value === 'object' && props.value !== null ? props.value : props.children)
+        ? (typeof props.children === 'object' && props.children !== null ? props.children : props.value)
         : {},
       jsxs: (_type, props) => captureProvider
-        ? (typeof props.value === 'object' && props.value !== null ? props.value : props.children)
+        ? (typeof props.children === 'object' && props.children !== null ? props.children : props.value)
         : {},
       Fragment: Symbol('Fragment'),
     },
     react,
-    'expo-localization': { useLocales: () => [{ languageCode: 'en' }] },
+    // A UAE phone: these fixtures are launch-market ledgers, and the country
+    // migration reads the device Region when a ledger predates `country`.
+    'expo-localization': {
+      useLocales: () => [{ languageCode: 'en' }],
+      getLocales: () => [{ languageCode: 'en', regionCode: 'AE' }],
+    },
     'react-native': {
       AppState: { addEventListener: () => ({ remove() {} }) },
       I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
@@ -511,6 +519,9 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/alert-review-tray': require('./build/alert-review-tray'),
     '@/lib/types': require('./build/types'),
     '@/lib/review-promotion': require('./build/review-promotion'),
+    // Real quote cache; the store only reaches its network loader when a
+    // foreign review is promoted, which this harness does not do.
+    '@/lib/fx-rates': require('./build/fx-rates'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
     '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
@@ -528,6 +539,15 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // let hydration drift from what the app does, which is the one thing this
     // harness exists to pin.
     '@/lib/known-banks': require('./build/known-banks'),
+    // The real country model: migration and the parser-pack choice are pure.
+    '@/lib/country': require('./build/country'),
+    // The real unproven-format policy: the store mirrors its setting and
+    // writes its undo tombstones on hydrate/undo/delete.
+    '@/lib/best-effort-autopost': require('./build/best-effort-autopost'),
+    // Provider plumbing only: the locale key for memoised money text.
+    '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
+    // The real selector helpers (dependency-free).
+    '@/lib/store-selection': execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); }),
     './balances': {},
     ...realModules,
   };
@@ -3019,6 +3039,20 @@ asyncSuites.push((async () => {
 // work queued before React can rerender the Review screen.
 asyncSuites.push((async () => {
   const { localReviewAdvisor } = require('./build/local-semantic-review');
+  // E5 is off by default: the shipped advisor queues nothing and shows no badge.
+  const flags = require('./build/local-semantic-flags');
+  ok('E5 review advice is off by default', flags.LOCAL_SEMANTIC_E5_ENABLED === false);
+  {
+    const offEvent = { decision: 'review', family: 'unknown', status: 'posted', issues: [],
+      amount: { evidence: 'explicit', value: { currency: 'AED', minorUnits: '4500', exponent: 2 }, alternatives: [] } };
+    const offItem = { kind: 'universal', id: 'synthetic-ai-review-off', sourceKey: 'synthetic-ai-source-off',
+      observedAt: Date.now(), expiresAt: Date.now() + 60000, event: offEvent };
+    await localReviewAdvisor.enqueue(offItem, offEvent, 'movement <money>');
+    ok('default-off review advisor leaves no pending or unavailable badge', localReviewAdvisor.get(offItem) === null);
+  }
+  // The reset guarantees below still hold for research builds that opt in
+  // (EXPO_PUBLIC_WAFRA_LOCAL_E5=1); simulate that build for this block.
+  flags.LOCAL_SEMANTIC_E5_ENABLED = true;
   const runtime = loadHydrationExports({}, true);
   const ledger = runtime.StoreProvider({ children: null });
   const event = { decision: 'review', family: 'unknown', status: 'posted', issues: [],
@@ -3046,6 +3080,7 @@ asyncSuites.push((async () => {
   ok('capture opt-out cancels queued AI before persistence finishes', captureCancelled());
   await captureSaved;
   background.setLocalSemanticAppActive(false);
+  flags.LOCAL_SEMANTIC_E5_ENABLED = false;
 })().catch(error => ok('AI review generation reset integration completes', false, String(error))));
 
 // Transfer decisions use the authoritative reducer snapshot and explicit

@@ -4,6 +4,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 
 import { Icon } from '@/components/ui/icon';
 import { Radius } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { resolveBankLogo, type ResolvedBankLogo } from '@/lib/bank-logo-resolver';
 import type { Account } from '@/lib/types';
@@ -11,6 +12,7 @@ import { usePrivateMode } from '@/lib/store';
 
 function BankAvatarInner({ account, size = 36 }: { account: Account; size?: number }) {
   const theme = useTheme();
+  const dark = useColorScheme() === 'dark';
   const privateMode = usePrivateMode();
   const allowRemote = !privateMode; // Narrow context: unrelated ledger changes do not rerender every visible row.
   const [logo, setLogo] = useState<ResolvedBankLogo | null>(null);
@@ -60,15 +62,22 @@ function BankAvatarInner({ account, size = 36 }: { account: Account; size?: numb
 
   const logoIdentity = `${account.bankName}:${logo.id}:${logo.logoUrl}`;
   const imageReady = loadedLogo === logoIdentity;
+  const radius = size >= 40 ? Radius.control : Radius.tile;
   return <View
     pointerEvents="none"
     accessibilityElementsHidden
     importantForAccessibility="no-hide-descendants"
     testID={`bank-logo-${logo.domain.replace(/[^a-z0-9.-]/gi, '-')}`}
-    style={[styles.tile, { width: size, height: size, borderRadius: size >= 40 ? Radius.control : Radius.tile,
-      backgroundColor: imageReady ? '#FFFFFF' : fallbackColor }]}>
+    // Loaded artwork sits on the surface itself: no white or brand tile behind
+    // it. Artwork that carries its own square ground is clipped to the same
+    // radius as every avatar. Only in dark mode does a hairline edge keep a
+    // dark mark readable; light mode shows the artwork alone.
+    style={[styles.tile, { width: size, height: size, borderRadius: radius, overflow: 'hidden' },
+      imageReady
+        ? dark ? { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.cardBorder } : null
+        : { backgroundColor: fallbackColor }]}>
     {/* Resolution supplies a URL, not decoded artwork. Keep identity visible
-        while artwork loads instead of showing an empty white tile. */}
+        while artwork loads instead of showing an empty tile. */}
     {!imageReady && fallback}
     <Image
       key={logoIdentity}
@@ -80,8 +89,7 @@ function BankAvatarInner({ account, size = 36 }: { account: Account; size?: numb
       accessible={false}
       onLoad={() => setLoadedLogo(logoIdentity)}
       onError={() => setFailed(true)}
-      style={{ position: 'absolute', top: 4, left: 4,
-        width: Math.max(1, size - 8), height: Math.max(1, size - 8), opacity: imageReady ? 1 : 0 }}
+      style={{ position: 'absolute', top: 0, start: 0, width: size, height: size, opacity: imageReady ? 1 : 0 }}
     />
   </View>;
 }
@@ -92,6 +100,5 @@ const styles = StyleSheet.create({
   tile: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
   },
 });

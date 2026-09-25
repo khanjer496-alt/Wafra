@@ -28,7 +28,35 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
   vm.runInNewContext(result.outputText, {
     exports, module,
     require: (name) => {
+      // Screens subscribe through narrow selectors now. A harness store stub
+      // that models only `useStore()` still drives them: each selector reads
+      // the same (possibly per-render replaced) store the stub returns.
+      if (name === '@/lib/store' && Object.hasOwn(dependencies, name) &&
+          typeof dependencies[name].useStore === 'function' &&
+          typeof dependencies[name].useStoreSelector !== 'function') {
+        const stub = dependencies[name];
+        return {
+          ...stub,
+          useStoreSelector: (selector) => selector(stub.useStore()),
+          useStoreActions: () => stub.useStore(),
+        };
+      }
+      // Money reads the device-locale key beside the ledger denomination.
+      // Stubs of that hook module predate it; outside a provider it is ''.
+      if (name === '@/hooks/use-ledger-money' && Object.hasOwn(dependencies, name) &&
+          typeof dependencies[name].useMoneyLocaleKey !== 'function') {
+        return { ...dependencies[name], useMoneyLocaleKey: () => '' };
+      }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      // Pure selection helpers used by screens; always the real source.
+      if (name === '@/lib/store-selection') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/store-selection.ts'));
+      }
+      // The pull-to-refresh scan control is an opaque child boundary for
+      // screen harnesses, like the other capture surfaces.
+      if (name === '@/components/capture-refresh-control') {
+        return { CaptureRefreshControl: (props) => ({ type: 'RefreshControl', props, key: undefined }) };
+      }
       // UI/parser repair harnesses isolate their own subject and intentionally
       // do not execute foreground scheduling. The scheduling suite supplies an
       // explicit counted stub; unrelated harnesses get an inert boundary so a
@@ -84,6 +112,19 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/known-banks') {
         return require('../build/known-banks.js');
       }
+      // The country model (ISO list, date order, parser-pack choice) is pure
+      // data and functions, imported by markets.ts itself, so every harness
+      // gets the real compiled module.
+      // The real unproven-format policy (pure; the setting mirror defaults on).
+      if (name === '@/lib/best-effort-autopost') {
+        return require('../build/best-effort-autopost.js');
+      }
+      if (name === '@/lib/country') {
+        return require('../build/country.js');
+      }
+      if (name === '@/lib/country-names') {
+        return require('../build/country-names.js');
+      }
       // The on-device semantic model is native-only and advisory. Screen and
       // journey harnesses get the same fail-closed behaviour the web build has:
       // the deterministic plan is returned unchanged and the runtime is never
@@ -92,6 +133,15 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // the capture path get the real compiled module, never a stub that could
       // drift from what ships. Shadow evaluation is observational only and
       // native-only, so it is inert here unless a harness supplies its own.
+      // Reference-rate conversion is pure money arithmetic plus an in-memory
+      // quote cache; its network loader only runs when a caller invokes it.
+      // Harnesses get the real compiled modules so conversion cannot drift.
+      if (name === '@/lib/fx') {
+        return require('../build/fx.js');
+      }
+      if (name === '@/lib/fx-rates') {
+        return require('../build/fx-rates.js');
+      }
       if (name === '@/lib/universal-parser') {
         return require('../build/universal-parser.js');
       }
@@ -140,6 +190,32 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           localSemanticInboxShadowStatus: () => ({ state: 'idle', checked: 0, eligible: 0, queued: 0, startedAt: null, finishedAt: null }),
         };
       }
+      // E5 is default-off in shipping builds; harnesses see the same flag.
+      if (name === '@/lib/local-semantic-flags') {
+        return { LOCAL_SEMANTIC_E5_ENABLED: false };
+      }
+      // Platform on-device model: absent in Node, exactly as on an older OS.
+      // Suites that exercise the provider load src/lib/on-device-ai.ts itself.
+      if (name === '@/lib/on-device-ai') {
+        const availability = { status: 'unsupported-os', provider: null, languages: null, canPrepare: false };
+        return {
+          onDeviceAI: {
+            peekAvailability: () => null,
+            getAvailability: async () => availability,
+            prepare: async () => availability,
+            respond: async () => ({ kind: 'unavailable' }),
+          },
+          textLanguage: (text, fallback) => (/[\u0600-\u06FF]/u.test(text) ? 'ar' : /[A-Za-z]/u.test(text) ? 'en' : fallback),
+          supportsOnDeviceLanguage: () => false,
+        };
+      }
+      if (name === '@/lib/on-device-assistant') {
+        return { improveAssistantRequestOnDevice: async ({ deterministicRequest }) =>
+          ({ source: 'deterministic', request: deterministicRequest, reason: 'unavailable' }) };
+      }
+      if (name === '@/components/category-suggestion') {
+        return { CategorySuggestion: () => null };
+      }
       if (name === '@/lib/local-semantic-assistant') {
         return { improveAssistantRequestLocally: async ({ deterministicRequest }) => deterministicRequest };
       }
@@ -155,6 +231,7 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           getLocalSemanticEncoder: async () => { throw new Error('local-semantic-runtime:native-only'); },
           createDownloadedSemanticRetriever: async () => { throw new Error('local-semantic-runtime:native-only'); },
           clearLocalSemanticArtifacts() {},
+          purgeLocalSemanticArtifacts() {},
         };
       }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);

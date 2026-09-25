@@ -102,6 +102,20 @@ export interface CaptureInstrument {
   bankIdentity?: string;
 }
 
+/**
+ * Provenance of a row added automatically from an UNPROVEN bank-alert format
+ * (anything other than the UAE/Saudi launch grammar or a certified template).
+ * Code-owned identifiers only; never message text. Cleared when the person
+ * confirms the row ("Looks right"). See best-effort-autopost.ts.
+ */
+export interface BestEffortMarker {
+  v: 1;
+  /** e.g. `universal:purchase:debit` or `semantic:refund:credit`. */
+  format: string;
+  /** Routed market or the user's country (ISO 3166-1 alpha-2), `ZZ` if unknown. */
+  market: string;
+}
+
 export interface Transaction {
   /** Bounded bank evidence and explicit user choices, persisted with the encrypted row. */
   transferEvidence?: TransferEvidence;
@@ -111,17 +125,30 @@ export interface Transaction {
   type: TransactionType;
   /** Amount in fils, always positive. */
   amountFils: number;
-  /** Original bank-alert amount when the charge was denominated outside AED. */
+  /**
+   * Original amount when the charge was denominated outside the ledger
+   * currency, ALWAYS as two-decimal minor units (major × 100) whatever the
+   * currency — the legacy representation. Omitted on new rows whose exact
+   * amount it cannot hold (KWD 12.345). Read through fx.ts originalMoneyOf.
+   */
   originalAmountMinor?: number;
-  /** ISO 4217 code for `originalAmountMinor` (for example USD or EUR). */
+  /** ISO 4217 code of the original amount (for example USD or EUR). */
   originalCurrency?: string;
-  /** AED units per one unit of the original currency. */
+  /** Exact original amount in `originalExponent` minor units (JPY 1500 = 1500). */
+  originalMinorUnits?: number;
+  /**
+   * ISO exponent of `originalMinorUnits`. Its absence marks a legacy row whose
+   * only original figure is the two-decimal `originalAmountMinor`.
+   */
+  originalExponent?: 0 | 2 | 3;
+  /** Ledger-currency units per one unit of the original currency. */
   fxRate?: number;
   /** Effective date of a fetched reference rate. */
   fxRateDate?: string;
   /**
-   * `bank`: the alert included its own AED equivalent; `reference`: a dated
-   * public rate was fetched; `fallback`: parser used its offline approximation.
+   * `bank`: the alert stated the charged ledger-currency amount itself;
+   * `reference`: a dated public rate was fetched; `fallback`: parser used its
+   * offline approximation (AED/SAR parser only, revalued later).
    */
   fxSource?: 'bank' | 'reference' | 'fallback';
   category: CategoryId;
@@ -184,6 +211,8 @@ export interface Transaction {
    */
   statementImportId?: string;
   captureInstrument?: CaptureInstrument;
+  /** Auto-added from an unproven alert format; shown as "Auto-added — check". */
+  bestEffort?: BestEffortMarker;
   /**
    * A card settlement can generate two bank alerts: money leaving the current
    * account and the card acknowledging receipt. Keeping the side lets import
@@ -426,17 +455,24 @@ export interface OnboardingProfile {
   /** Optional for ledgers created before the alert-delivery step existed. */
   alerts?: OnboardingAlertDelivery | null;
   /**
-   * The country the user says they bank in, as an ISO 3166-1 alpha-2 code.
+   * The country the user picked while onboarding, as an ISO 3166-1 alpha-2
+   * code, kept so an interrupted setup resumes showing the same examples.
    *
-   * DISPLAY ONLY. It chooses which example banks and alert wording onboarding
-   * draws, and nothing else — it never selects a parser market pack, never
-   * pins `ledgerCurrency`, and never decides how a message is read. Those
-   * follow evidence from the alerts themselves, which is why a UAE resident
-   * whose phone is set to another country still parses as UAE.
+   * The authoritative setting is `AppState.country`, which the same picker
+   * writes. This copy never pins `ledgerCurrency` and never moves an AED/SAR
+   * ledger off its Gulf pack; alert evidence still decides which launch
+   * grammar reads a message.
    *
    * Absent means nobody has said, and the device locale is still the guess.
    */
   country?: string | null;
+  /**
+   * iPhone only: the statement step ("Bring in your past spending") is behind
+   * the user — they chose Later or opened the importer. That step and live
+   * capture share the `capture` stage, so without this a relaunch replayed
+   * the statement offer. Absent on older ledgers and on every other platform.
+   */
+  statementStepDone?: boolean;
   startedAt: number;
 }
 
@@ -752,6 +788,17 @@ export interface AppState {
    */
   captureOptOut: boolean;
   /**
+   * "Auto-add alerts from unverified bank formats". Undefined = ON (product
+   * default). OFF restores review-first for every unproven format; the
+   * UAE/Saudi launch grammar and certified templates are unaffected.
+   */
+  bestEffortAutoPost?: boolean;
+  /**
+   * Identities (smsKey / `t{timestamp}`) of auto-added rows the person undid.
+   * Bounded; rescans and history re-reads never re-add these alerts.
+   */
+  bestEffortUndone?: string[];
+  /**
    * Android source selection. Optional for legacy ledgers: absence means the
    * historical behavior (both sources allowed whenever captureOptOut=false).
    */
@@ -764,8 +811,21 @@ export interface AppState {
   dailySummary: boolean;
   /** Epoch ms when the free Pro trial started (first launch). */
   trialStartTs: number;
-  /** Market pack id (country). Auto-detected on first launch; user-changeable. */
+  /**
+   * Parser market pack: 'AE' or 'SA' (launch-tested grammars with bank
+   * registries) or 'ZZ' (the neutral pack every other country uses). NOT the
+   * user's country — see `country`. Follows the country, except that an
+   * AED/SAR ledger always keeps its Gulf pack, and alert evidence may move it
+   * between AE and SA.
+   */
   marketId: string;
+  /**
+   * The user's country (ISO 3166-1 alpha-2), or 'ZZ' when unknown. Defaults
+   * from the device Region; changeable in onboarding and Settings. Decides
+   * country conventions such as numeric date order. Optional only for ledgers
+   * written before it existed; hydration always fills it.
+   */
+  country?: string;
   /** UI language ('en' | 'ar'). Auto-detected on first launch. */
   language: string;
   /** Whether UI language follows the OS/app locale or is explicitly pinned. */
@@ -797,6 +857,8 @@ export interface TxHealUpdate {
   };
   transferEvidence?: TransferEvidence;
   clearTransferEvidence?: true;
+  /** A proven reading of the same alert replaced the best-effort one. */
+  clearBestEffort?: true;
   id: string;
   title?: string;
   category?: CategoryId;

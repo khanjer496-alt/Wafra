@@ -196,7 +196,7 @@ ok('forwarded attachments share aggregate attachment and row ceilings',
     /importedRows \+ parsed\.rows\.length > MAX_IMPORT_ROWS/.test(worker));
 ok('email forwarding tokens are opt-in, rotatable and revocable',
   /url\.pathname === '\/v1\/email-token'/.test(worker) &&
-    /UPDATE devices SET email_token_hash = \?1 WHERE id = \?2/.test(worker) &&
+    /SET email_token_hash = \?1, email_statement_currency = \?3, email_statement_date_order = \?4\s+WHERE id = \?2/.test(worker) &&
     /UPDATE devices SET email_token_hash = NULL WHERE id = \?1/.test(worker) &&
     !/await hashToken\(emailToken\)[\s\S]{0,120}adminToken/.test(worker.slice(0, worker.indexOf("url.pathname === '/v1/email-token'"))));
 ok('vault devices can be listed, named and revoked without exposing credentials',

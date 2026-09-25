@@ -4,11 +4,22 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
-import { useLocales } from 'expo-localization';
+import { getLocales, useLocales } from 'expo-localization';
+
+import { MoneyLocaleProvider } from '@/hooks/use-ledger-money';
+import {
+  createSelection,
+  createStoreHandle,
+  shallowEqual,
+  type PublishingStoreHandle,
+  type StoreHandle,
+} from '@/lib/store-selection';
 
 import {
   markCardsDistinct,
@@ -24,6 +35,7 @@ import { isValidBackupState } from '@/lib/backup-validation';
 import {
   applyTransferDecision,
   isTransferCandidate,
+  isTransferInertTransaction,
   normalizeTransferLinks,
   reconcileTransfers,
   reconciliationInternalIds,
@@ -39,8 +51,14 @@ import {
   type LanguagePreference,
 } from '@/lib/system-language';
 import {
+  countryFromDeviceRegions,
+  migrateCountryState,
+  normalizeCountryCode,
+  parserMarketForCountry,
+  setActiveCountry,
+} from '@/lib/country';
+import {
   canSelectMarket,
-  detectMarketId,
   getActiveMarket,
   pinnedLedgerCurrencyCode,
   ledgerCurrencyExponent,
@@ -73,9 +91,17 @@ import {
   type LedgerPersistence,
 } from '@/lib/ledger-persistence';
 import { markLaunchPhase } from '@/lib/launch-performance';
-import { ledgerMoneySpec, ledgerStateHasMoney, migrateLegacyLedgerMoney, type LedgerMoneySpec } from '@/lib/ledger-money';
+import {
+  ledgerMoneySpec,
+  ledgerStateHasMoney,
+  migrateLegacyLedgerMoney,
+  deviceMoneyLocale,
+  setDisplayMoneyLocale,
+  type LedgerMoneySpec,
+} from '@/lib/ledger-money';
 import {
   planReviewPromotion,
+  reviewPromotionFxNeed,
   walletDuplicateBinding,
   type PromoteReviewAlertInput,
   type ReviewPromotionFailure,
@@ -100,6 +126,10 @@ import {
 } from '@/lib/ledger-import';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import {
+  setBestEffortAutoPostEnabled,
+  tombstonesForRemoved,
+} from '@/lib/best-effort-autopost';
+import {
   recordStorageFailure,
   storageReadFailureMayRetry,
   type StorageFailure,
@@ -116,6 +146,7 @@ import {
   type HistoryImportProgress,
 } from '@/lib/history-import';
 import type { FxUpdate } from '@/lib/fx';
+import { cachedReferenceQuote, loadReferenceQuote } from '@/lib/fx-rates';
 import {
   buildDeferredOnboardingPlan,
   mergeDeferredOnboardingPlan,
@@ -232,10 +263,20 @@ const EMPTY_STATE: AppState = {
   dailySummary: Platform.OS === 'ios' ? false : true,
   trialStartTs: 0,
   marketId: '',
+  country: '',
   language: '',
   languagePreference: 'system',
   knownBanks: [],
 };
+
+/** The phone's Region, preferring expo-localization (iOS keeps Region apart from language). */
+function deviceCountry(): string {
+  let region: string | null | undefined;
+  let locale: string | undefined;
+  try { region = getLocales()[0]?.regionCode; } catch { region = null; }
+  try { locale = Intl.DateTimeFormat().resolvedOptions().locale; } catch { locale = undefined; }
+  return countryFromDeviceRegions([region, locale]);
+}
 
 let idCounter = 0;
 function makeId(prefix: string): string {
@@ -267,6 +308,38 @@ function sortTxs(transactions: Transaction[]): Transaction[] {
   return alreadySorted
     ? transactions
     : [...transactions].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+/**
+ * Insert one row into a newest-first ledger with exactly the result of
+ * `sortTxs([row, ...transactions])`, without re-sorting 10k-20k rows.
+ *
+ * That stable sort keeps the prepended row ahead of every existing row with
+ * the same date, so the row lands before the first existing row whose date is
+ * not newer. The shortcut applies only when the existing ledger is already
+ * ordered; anything else falls back to the full stable sort, whose answer
+ * would also reorder existing rows.
+ */
+function insertSortedTransaction(row: Transaction, transactions: Transaction[]): Transaction[] {
+  // The comparator's answer for a non-string date is not a total order the
+  // binary search can reproduce; restored/legacy data takes the exact sort.
+  if (typeof row.date !== 'string' || transactions.some((transaction) => typeof transaction.date !== 'string')) {
+    return sortTxs([row, ...transactions]);
+  }
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1].date < transactions[index].date) return sortTxs([row, ...transactions]);
+  }
+  let low = 0;
+  let high = transactions.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (transactions[middle].date > row.date) low = middle + 1;
+    else high = middle;
+  }
+  const next = transactions.slice(0, low);
+  next.push(row);
+  for (let index = low; index < transactions.length; index += 1) next.push(transactions[index]);
+  return next;
 }
 
 function applyTransactionEdit(transaction: Transaction, patch: Partial<Transaction>): Transaction {
@@ -547,6 +620,29 @@ export function migratePersistedState(
     // repair below. On a real 15k-row phone that meant seven full JS passes
     // before Home could render. Keep the exact same ordered semantics, but run
     // all row-local transforms inside one identity-preserving pass.
+    // Titles repeat heavily (one merchant, hundreds of rows), and both lookups
+    // below are pure functions of their string arguments under the market pack
+    // that is live for this whole synchronous pass. Memoising them for this
+    // pass only turns ~150 regex tests per row into one per distinct title;
+    // nothing is retained after the migration returns.
+    const serviceNames = new Map<string, string | null>();
+    const canonicalServiceName = (title: string): string | null => {
+      let canonical = serviceNames.get(title);
+      if (canonical === undefined) {
+        canonical = normalizeServiceName(title);
+        serviceNames.set(title, canonical);
+      }
+      return canonical;
+    };
+    const guessedExpenseCategories = new Map<string, CategoryId>();
+    const guessExpenseCategory = (title: string): CategoryId => {
+      let category = guessedExpenseCategories.get(title);
+      if (category === undefined) {
+        category = guessCategory(title, 'expense', undefined, title);
+        guessedExpenseCategories.set(title, category);
+      }
+      return category;
+    };
     parsed.transactions = mapTransactionsPreservingIdentity(parsed.transactions, (original) => {
       if (original.userEdited || original.source !== 'sms') return original;
       let t = original;
@@ -563,7 +659,7 @@ export function migratePersistedState(
 
       // Unify service descriptors so ChatGPT/Claude/Real-Debrid etc. read
       // clearly and group as one subscription.
-      const canonical = normalizeServiceName(t.title);
+      const canonical = canonicalServiceName(t.title);
       if (canonical && canonical !== t.title) t = { ...t, title: canonical };
 
       // Parser versions before T215 filed anonymous incoming money as
@@ -601,7 +697,7 @@ export function migratePersistedState(
       // needing a rescan. User overrides still win.
       if (!t.isTransfer && t.category === 'other' && t.type === 'expense' &&
           !readMerchantCategoryOverride(parsed.merchantOverrides, t.title, t.type)) {
-        const guessed = guessCategory(t.title, t.type, undefined, t.title);
+        const guessed = guessExpenseCategory(t.title);
         if (guessed !== 'other') t = { ...t, category: guessed };
       }
 
@@ -764,6 +860,8 @@ type Action =
   | { type: 'addTransaction'; transaction: Transaction; ledgerMoney?: LedgerMoneySpec }
   | { type: 'editTransaction'; id: string; patch: Partial<Omit<Transaction, 'id'>> }
   | { type: 'deleteTransaction'; id: string }
+  | { type: 'resolveBestEffort'; id: string; outcome: 'confirm' | 'undo' }
+  | { type: 'setBestEffortAutoPost'; enabled: boolean }
   | ({
       type: 'importBatch';
       localCaptureQualifications?: LocalCaptureQualificationReceipt[];
@@ -813,6 +911,7 @@ type Action =
   | { type: 'unlockFounderPro' }
   | { type: 'setLedgerMoney'; ledgerMoney: LedgerMoneySpec }
   | { type: 'setMarket'; id: string }
+  | { type: 'setCountry'; country: string }
   | { type: 'setUiLanguage'; preference: LanguagePreference; language: 'en' | 'ar' }
   | { type: 'syncSystemLanguage'; language: 'en' | 'ar' }
   | {
@@ -972,12 +1071,27 @@ function transactionNeedsTransferNormalization(transaction: Transaction | undefi
   );
 }
 
+/** The prior state's transfer receipt is exact for its rows (see reducer). */
+function transferReceiptCurrent(state: AppState): boolean {
+  return state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION &&
+    Array.isArray(state.transferInternalIds);
+}
+
 function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action: Action): boolean {
   switch (action.type) {
     case 'importBatch':
       // applyMaterializedImportBatch already performs canonical normalization.
       return false;
-    case 'addTransaction':
+    case 'addTransaction': {
+      // A hand-entered purchase is the common case, and re-walking the whole
+      // transfer graph for it blocked Hermes for hundreds of milliseconds on a
+      // 20k-row ledger. Skip only when the receipt being carried forward is
+      // exact, the new row is inert, and its id cannot collide with (and so
+      // change the duplicate-id handling of) an existing row.
+      const row = action.transaction;
+      return !(transferReceiptCurrent(state) && isTransferInertTransaction(row) &&
+        !state.transactions.some((transaction) => transaction.id === row.id));
+    }
     case 'markBillPaid':
       return true;
     case 'payCardDue':
@@ -988,7 +1102,12 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
       return transactionNeedsTransferNormalization(before) || transactionNeedsTransferNormalization(after);
     }
     case 'deleteTransaction':
-      return true;
+      // Every row carrying the id is removed; all of them must be inert.
+      return !(transferReceiptCurrent(state) && state.transactions.every((transaction) =>
+        transaction.id !== action.id || isTransferInertTransaction(transaction)));
+    case 'resolveBestEffort':
+      return action.outcome === 'undo';
+    case 'setBestEffortAutoPost':
     case 'setPrivateMode':
     case 'setMonthStartDay':
       return false;
@@ -1049,8 +1168,22 @@ function reduceState(state: AppState, action: Action): AppState {
       applyThemePreference(next.themePreference);
       // The free Pro trial clock starts the first time the app ever opens.
       if (!next.trialStartTs) next.trialStartTs = Date.now();
-      // Localize automatically: country pack from the device locale, once.
-      if (!next.marketId) next.marketId = detectMarketId();
+      // Country from the device Region, once; the parser pack follows it. A
+      // ledger written before `country` existed is migrated here — see
+      // migrateCountryState for why its stored AE/SA pack alone is not proof.
+      {
+        const migrated = migrateCountryState({
+          country: next.country,
+          marketId: next.marketId,
+          onboardingCountry: next.onboardingProfile?.country,
+          ledgerCurrency: next.ledgerMoney?.currency ?? null,
+          deviceCountry: deviceCountry(),
+        });
+        next.country = migrated.country;
+        next.marketId = migrated.marketId;
+      }
+      setActiveCountry(next.country);
+      setBestEffortAutoPostEnabled(next.bestEffortAutoPost);
       // The incoming state brings its own accounting currency with it, so any
       // pin held by the state being replaced must not veto its pack. A restore
       // of an SAR backup over an AED ledger is exactly that case.
@@ -1125,6 +1258,27 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'setMarket':
       if (!setActiveMarket(action.id)) return state;
       return { ...state, marketId: action.id };
+    case 'setCountry': {
+      const country = normalizeCountryCode(action.country);
+      if (!country) return state;
+      // An AED/SAR ledger keeps its Gulf pack; see parserMarketForCountry.
+      const marketId = parserMarketForCountry(country, {
+        marketId: state.marketId,
+        ledgerCurrency: state.ledgerMoney?.currency ?? null,
+      });
+      if (!setActiveMarket(marketId)) return state;
+      setActiveCountry(country);
+      return {
+        ...state,
+        country,
+        marketId,
+        // The onboarding copy follows, so a resumed setup draws the same
+        // country the user just chose.
+        ...(state.onboardingProfile
+          ? { onboardingProfile: { ...state.onboardingProfile, country } }
+          : {}),
+      };
+    }
     case 'setUiLanguage':
       setLanguage(action.language);
       return {
@@ -1233,7 +1387,7 @@ function reduceState(state: AppState, action: Action): AppState {
       return {
         ...state,
         ...(requestedMoney && !ledgerStateHasMoney(state) ? { ledgerMoney: requestedMoney } : {}),
-        transactions: sortTxs([action.transaction, ...state.transactions]),
+        transactions: insertSortedTransaction(action.transaction, state.transactions),
       };
     }
     case 'editTransaction': {
@@ -1252,8 +1406,39 @@ function reduceState(state: AppState, action: Action): AppState {
         transactions: edited.date !== previous.date ? sortTxs(transactions) : transactions,
       };
     }
-    case 'deleteTransaction':
-      return { ...state, transactions: state.transactions.filter((t) => t.id !== action.id) };
+    case 'deleteTransaction': {
+      // Deleting an auto-added row is the same as undoing it: a rescan or
+      // history re-read of that alert must not bring it back.
+      const removed = state.transactions.filter((t) => t.id === action.id);
+      const bestEffortUndone = tombstonesForRemoved(state.bestEffortUndone, removed, state.ledgerMoney?.currency);
+      return {
+        ...state,
+        transactions: state.transactions.filter((t) => t.id !== action.id),
+        ...(bestEffortUndone ? { bestEffortUndone } : {}),
+      };
+    }
+    case 'resolveBestEffort': {
+      const row = state.transactions.find((t) => t.id === action.id);
+      if (!row?.bestEffort) return state;
+      if (action.outcome === 'undo') {
+        // Removal and tombstone land in one state write, so no rescan can
+        // observe the row gone without its tombstone.
+        return {
+          ...state,
+          transactions: state.transactions.filter((t) => t.id !== action.id),
+          bestEffortUndone: tombstonesForRemoved(state.bestEffortUndone, [row], state.ledgerMoney?.currency) ??
+            state.bestEffortUndone,
+        };
+      }
+      const { bestEffort: _checked, ...confirmed } = row;
+      return {
+        ...state,
+        transactions: state.transactions.map((t) => (t.id === action.id ? confirmed : t)),
+      };
+    }
+    case 'setBestEffortAutoPost':
+      setBestEffortAutoPostEnabled(action.enabled);
+      return { ...state, bestEffortAutoPost: action.enabled };
     case 'importBatch': {
       const imported = applyMaterializedImportBatch(state, action);
       return action.localCaptureQualifications
@@ -1262,7 +1447,14 @@ function reduceState(state: AppState, action: Action): AppState {
     }
     case 'undoBatch': {
       const ids = new Set(action.ids);
-      return { ...state, transactions: state.transactions.filter((t) => !ids.has(t.id)) };
+      // Undoing an import also undoes its auto-added rows for good.
+      const bestEffortUndone = tombstonesForRemoved(state.bestEffortUndone,
+        state.transactions.filter((t) => ids.has(t.id)), state.ledgerMoney?.currency);
+      return {
+        ...state,
+        transactions: state.transactions.filter((t) => !ids.has(t.id)),
+        ...(bestEffortUndone ? { bestEffortUndone } : {}),
+      };
     }
     case 'upsertBudget': {
       if (action.budget.limitFils !== 0) requireSelectedLedgerMoney(state);
@@ -1298,9 +1490,14 @@ function reduceState(state: AppState, action: Action): AppState {
       return mergeRenewedCard(state, action.oldId, action.newId);
     case 'markCardsDistinct':
       return markCardsDistinct(state, action.id);
-    case 'deleteAccount':
+    case 'deleteAccount': {
+      // Auto-added rows removed with the account must not come back on the
+      // next rescan either.
+      const bestEffortUndone = tombstonesForRemoved(state.bestEffortUndone,
+        state.transactions.filter((t) => t.accountId === action.id), state.ledgerMoney?.currency);
       return {
         ...state,
+        ...(bestEffortUndone ? { bestEffortUndone } : {}),
         accounts: state.accounts.filter((a) => a.id !== action.id),
         transactions: state.transactions.filter((t) => t.accountId !== action.id),
         cardDues: state.cardDues.filter((d) => d.accountId !== action.id),
@@ -1308,6 +1505,7 @@ function reduceState(state: AppState, action: Action): AppState {
           Object.entries(state.accountHints).filter(([, v]) => v !== action.id),
         ),
       };
+    }
     case 'addBill':
       if (action.bill.amountFils !== 0) requireSelectedLedgerMoney(state);
       return { ...state, bills: [...state.bills, action.bill] };
@@ -1491,6 +1689,8 @@ function reduceState(state: AppState, action: Action): AppState {
         // Erasing a ledger must not mint another local trial on the next
         // hydrate or discard the original absolute entitlement deadline.
         trialStartTs: state.trialStartTs,
+        // A capture preference, like the opt-out above; not ledger data.
+        bestEffortAutoPost: state.bestEffortAutoPost,
         accounts: [SEED_ACCOUNTS[2]],
       };
     case 'blockPersistence':
@@ -1552,6 +1752,9 @@ interface StoreValue {
   editTransaction: (id: string, patch: Partial<Omit<Transaction, 'id'>>) => void;
   resolveTransfers: (request: Omit<TransferDecisionRequest, 'now'> & { expectedGeneration?: number }) => Promise<void>;
   deleteTransaction: (id: string) => void;
+  /** "Looks right" clears the Auto-added marker; "undo" removes the row for good. */
+  resolveBestEffort: (id: string, outcome: 'confirm' | 'undo') => void;
+  setBestEffortAutoPost: (enabled: boolean) => Promise<void>;
   /**
    * Bulk import. `durable` resolves only after SQLCipher has committed the
    * rows; relay callers must await it before acknowledging the server queue.
@@ -1619,6 +1822,8 @@ interface StoreValue {
   unlockFounderPro: () => Promise<void>;
   setLedgerMoney: (currency: string) => boolean;
   setMarket: (id: string) => boolean;
+  /** Any ISO 3166-1 alpha-2 country, or 'ZZ'. False for anything else. */
+  setCountry: (country: string) => boolean;
   setUiLanguage: (language: string) => void;
   setOnboarded: () => void;
   exportBackup: () => string;
@@ -1629,6 +1834,8 @@ interface StoreValue {
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
+/** Stable for the provider's lifetime: consumers subscribe instead of re-rendering on every value. */
+const StoreHandleContext = createContext<StoreHandle<StoreValue> | null>(null);
 const PrivateModeContext = createContext(false);
 
 export interface ImportReceipt {
@@ -1850,8 +2057,34 @@ function createAppLedgerPersistence(): LedgerPersistence {
   });
 }
 
+/**
+ * Money display and typed input follow the device Region's number format
+ * (decimal and group marks, Indian grouping, unambiguous currency symbol).
+ * Applied synchronously during the provider's render so the first frame of
+ * every screen below already formats with it; the key makes the call
+ * idempotent across renders. expo-localization reports the Region's own
+ * separators (iOS Locale.current, Android DecimalFormatSymbols), which win
+ * over what the language tag implies, and its Region (`regionCode`), which
+ * reports and coverage months read through displayRegion(). useLocales
+ * re-renders this provider when the OS settings change (Android can change
+ * them without a restart), so the next render adopts them; screens that do
+ * not re-render keep their previous figures until they next do.
+ */
+let appliedMoneyLocaleKey: string | null = null;
+function applyDeviceMoneyLocale(locale: Parameters<typeof deviceMoneyLocale>[0]): string {
+  const next = deviceMoneyLocale(locale);
+  const key = JSON.stringify(next);
+  if (key === appliedMoneyLocaleKey) return key;
+  appliedMoneyLocaleKey = key;
+  setDisplayMoneyLocale(next);
+  return key;
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const locales = useLocales();
+  // Published through MoneyLocaleProvider so compiled Money figures, which
+  // are memoized on their props, re-format when the device settings change.
+  const moneyLocaleKey = applyDeviceMoneyLocale(locales[0]);
   const systemLanguage = resolveUiLanguage('system', locales);
   const persistenceRef = useRef<LedgerPersistence | null>(null);
   if (!persistenceRef.current) persistenceRef.current = createAppLedgerPersistence();
@@ -2252,6 +2485,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'deleteTransaction', id });
   }, [dispatch]);
 
+  const resolveBestEffort = useCallback((id: string, outcome: 'confirm' | 'undo') => {
+    dispatch({ type: 'resolveBestEffort', id, outcome });
+  }, [dispatch]);
+
+  const setBestEffortAutoPost = useCallback(async (enabled: boolean) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const previous = authoritativeState.current.bestEffortAutoPost !== false;
+    const next = dispatch({ type: 'setBestEffortAutoPost', enabled });
+    const written = await persist(next);
+    if (!written) {
+      // The switch and the parser must never disagree with what is stored.
+      dispatch({ type: 'setBestEffortAutoPost', enabled: previous });
+      throw new Error('Auto-add preference could not be saved');
+    }
+  }, [dispatch, persist]);
+
   const importBatch = useCallback((
     input: ImportBatchInput,
     qualifications: readonly LocalCaptureDeclineQualificationMapping[] = [],
@@ -2412,11 +2664,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!authoritativeState.current.hydrated) {
       throw new ReviewPromotionError('not-found');
     }
+    // Foreign money needs a dated reference rate. Fetch it BEFORE planning so
+    // the plan runs synchronously on the latest state; only the two currency
+    // codes and the day are sent. No rate: the review stays pending.
+    // Private Mode makes no network request; only an already-known rate
+    // (memory or a rate this ledger recorded) can convert then.
+    const fxNeed = reviewPromotionFxNeed(authoritativeState.current, input);
+    const fxQuote = !fxNeed ? null : authoritativeState.current.privateMode
+      ? cachedReferenceQuote(fxNeed.base, fxNeed.quote, fxNeed.date, authoritativeState.current.transactions)
+      : await loadReferenceQuote(fxNeed.base, fxNeed.quote, fxNeed.date, {
+          transactions: authoritativeState.current.transactions,
+        });
+    if (!authoritativeState.current.hydrated) {
+      throw new ReviewPromotionError('not-found');
+    }
     const plan = planReviewPromotion(
       authoritativeState.current,
       input,
       makeId('tx'),
       Date.now(),
+      fxQuote,
     );
     if (plan.outcome === 'refused') throw new ReviewPromotionError(plan.reason);
     if (saveTimer.current) {
@@ -2730,6 +2997,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return true;
   }, [dispatch]);
 
+  const setCountry = useCallback((country: string) => {
+    if (!normalizeCountryCode(country)) return false;
+    dispatch({ type: 'setCountry', country });
+    return true;
+  }, [dispatch]);
+
   const setUiLanguage = useCallback((preference: string) => {
     const normalized: LanguagePreference = preference === 'en' || preference === 'ar'
       ? preference
@@ -2773,6 +3046,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       trialStartTs: current.trialStartTs,
       reviewTray: current.reviewTray,
       captureOptOut: current.captureOptOut,
+      bestEffortAutoPost: current.bestEffortAutoPost,
       localCaptureQualifications: current.localCaptureQualifications,
       iosCaptureWarning: current.iosCaptureWarning,
     };
@@ -2896,6 +3170,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editTransaction,
       resolveTransfers,
       deleteTransaction,
+      resolveBestEffort,
+      setBestEffortAutoPost,
       importBatch,
       stageReviewAlerts,
       dismissReviewAlert,
@@ -2943,6 +3219,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       unlockFounderPro,
       setLedgerMoney,
       setMarket,
+      setCountry,
       setUiLanguage,
       setOnboarded,
       exportBackup,
@@ -2963,6 +3240,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       editTransaction,
       resolveTransfers,
       deleteTransaction,
+      resolveBestEffort,
+      setBestEffortAutoPost,
       importBatch,
       stageReviewAlerts,
       dismissReviewAlert,
@@ -3010,6 +3289,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       unlockFounderPro,
       setLedgerMoney,
       setMarket,
+      setCountry,
       setUiLanguage,
       setOnboarded,
       exportBackup,
@@ -3019,17 +3299,91 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ],
   );
 
+  const handleRef = useRef<PublishingStoreHandle<StoreValue> | null>(null);
+  if (!handleRef.current) handleRef.current = createStoreHandle(value);
+  const handle = handleRef.current;
+  // Recorded during render so a selector rendering in this same pass reads
+  // the value its useStore() siblings see; subscribers that did not render
+  // are told after commit, before paint. This assumes a provider render is
+  // committed, which holds while store dispatches stay out of startTransition.
+  handle.set(value);
+  useLayoutEffect(() => {
+    handle.notify();
+  }, [handle, value]);
+
   return (
-    <PrivateModeContext.Provider value={state.privateMode}>
-      <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
-    </PrivateModeContext.Provider>
+    <MoneyLocaleProvider localeKey={moneyLocaleKey}>
+      <PrivateModeContext.Provider value={state.privateMode}>
+        <StoreHandleContext.Provider value={handle}>
+          <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
+        </StoreHandleContext.Provider>
+      </PrivateModeContext.Provider>
+    </MoneyLocaleProvider>
   );
 }
 
+/**
+ * The whole store. Re-renders on EVERY change, including import progress and
+ * scan timestamps. Screens should prefer useStoreSelector/useStoreActions.
+ */
 export function useStore(): StoreValue {
   const ctx = useContext(StoreContext);
   if (!ctx) throw new Error('useStore must be used within StoreProvider');
   return ctx;
+}
+
+function useStoreHandle(): StoreHandle<StoreValue> {
+  const handle = useContext(StoreHandleContext);
+  if (!handle) throw new Error('useStore must be used within StoreProvider');
+  return handle;
+}
+
+/**
+ * Subscribe to part of the store. The component re-renders only when the
+ * selection changes; by default one level deep, so
+ * `s => ({ transactions: s.state.transactions, accounts: s.state.accounts })`
+ * ignores progress, timestamps and every other field.
+ */
+export function useStoreSelector<T>(
+  selector: (store: StoreValue) => T,
+  equal: (a: T, b: T) => boolean = shallowEqual,
+): T {
+  const handle = useStoreHandle();
+  const selectRef = useRef<ReturnType<typeof createSelection<StoreValue, T>> | null>(null);
+  if (!selectRef.current) selectRef.current = createSelection<StoreValue, T>(equal);
+  const select = selectRef.current;
+  const snapshot = () => select(handle.get(), selector);
+  return useSyncExternalStore(handle.subscribe, snapshot, snapshot);
+}
+
+type StoreFunctionKeys = {
+  [K in keyof StoreValue]: StoreValue[K] extends (...args: never[]) => unknown ? K : never;
+}[keyof StoreValue];
+export type StoreActions = Pick<StoreValue, StoreFunctionKeys>;
+
+const storeActions = new WeakMap<StoreHandle<StoreValue>, StoreActions>();
+
+/**
+ * Every store action (and getStateSnapshot/getStateGeneration) with an
+ * identity that never changes. Each call forwards to the provider's current
+ * implementation, so it behaves exactly as the useStore() member would, and
+ * holding it subscribes to nothing.
+ */
+export function useStoreActions(): StoreActions {
+  const handle = useStoreHandle();
+  let actions = storeActions.get(handle);
+  if (!actions) {
+    const forwarded: Record<string, unknown> = {};
+    const current = handle.get() as unknown as Record<string, unknown>;
+    for (const key of Object.keys(current)) {
+      if (typeof current[key] !== 'function') continue;
+      forwarded[key] = (...args: unknown[]) =>
+        (handle.get() as unknown as Record<string, (...a: unknown[]) => unknown>)[key](...args);
+    }
+    actions = forwarded as unknown as StoreActions;
+    storeActions.set(handle, actions);
+  }
+  return actions;
 }
 
 /** Narrow subscription for list-row artwork; unrelated ledger updates do not rerender every avatar. */

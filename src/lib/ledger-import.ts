@@ -24,7 +24,7 @@ import {
 } from '@/lib/ledger-money';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
 import {
-  isTransferCandidate,
+  isTransferInertTransaction,
   normalizeTransferLinks,
   reconcileTransfers,
   reconciliationInternalIds,
@@ -172,15 +172,10 @@ const canUseIncrementalCaptureFastPath = (
   batch.newAccounts.length === 0 &&
   Object.keys(batch.bankNames).length === 0 &&
   Object.keys(batch.cardTypes).length === 0 &&
-  batch.transactions.every((transaction) =>
-    !isTransferCandidate(transaction) &&
-    transaction.isTransfer !== true &&
-    transaction.transferMatch === undefined &&
-    transaction.transferDecision === undefined &&
-    transaction.transferEvidence === undefined &&
-    transaction.paymentFlowSide === undefined &&
-    transaction.cardPaymentSide === undefined
-  );
+  // A captured instrument is an ownership observation (a card purchase can
+  // prove the endpoint of an existing transfer), so such rows take the
+  // canonical path; see isTransferInertTransaction.
+  batch.transactions.every(isTransferInertTransaction);
 
 type MoneyBearingImport = Pick<ImportBatchInput,
   'importMoney' | 'transactions' | 'newAccounts' | 'newDues' | 'newBills' | 'snapshots' | 'updates'>;

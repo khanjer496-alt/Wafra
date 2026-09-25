@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Share, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -29,10 +29,18 @@ function maskDigits(s: string): string {
  * the list is how new bank formats get fixed: every message here is one the
  * grammar couldn't fully read.
  */
+/**
+ * Rows mounted per group before "Show more". Each row carries the masked raw
+ * message, so a new market's first import (hundreds of unread formats) would
+ * otherwise lay out every one of them inside the scroll view at once.
+ */
+const FORMAT_PAGE = 30;
+
 export default function AccuracyScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { state } = useStore();
+  const [groupLimits, setGroupLimits] = useState<Record<string, number>>({});
 
   const rows = useMemo(
     () => unreadFormats(state.transactions, (id) => categoryLabel(id, state.language === 'ar' ? 'ar' : 'en')),
@@ -222,13 +230,17 @@ export default function AccuracyScreen() {
             [t('couldNotRead'), unread] as const,
             [t('noCategoryYet'), uncategorized] as const,
           ]).map(([heading, list]) =>
-            list.length === 0 ? null : (
+            list.length === 0 ? null : (() => {
+              const limit = groupLimits[heading] ?? FORMAT_PAGE;
+              const shown = list.slice(0, limit);
+              const hidden = list.length - shown.length;
+              return (
               <View key={heading}>
                 <ThemedText type="meta" themeColor="textTertiary" style={styles.groupHeading}>
                   {heading} · {list.length}
                 </ThemedText>
-                {list.map((r, i) => (
-                  <Row key={`${heading}-${i}`} last={i === list.length - 1} style={styles.formatRow}>
+                {shown.map((r, i) => (
+                  <Row key={`${heading}-${i}`} last={i === shown.length - 1} style={styles.formatRow}>
                     <View style={styles.formatInner}>
                       <View style={styles.formatTop}>
                         <ThemedText type="small" numberOfLines={1} style={styles.formatTitle}>
@@ -245,8 +257,16 @@ export default function AccuracyScreen() {
                     </View>
                   </Row>
                 ))}
+                {hidden > 0 && (
+                  <Button
+                    variant="ghost"
+                    label={tf('showMoreRows', { count: Math.min(FORMAT_PAGE, hidden) })}
+                    onPress={() => setGroupLimits((current) => ({ ...current, [heading]: limit + FORMAT_PAGE }))}
+                  />
+                )}
               </View>
-            ),
+              );
+            })(),
           )}
 
           {/* The green tick is a VERDICT — "the parser read everything you

@@ -271,6 +271,12 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     status = 'unknown';
     family = 'unknown';
   }
+  // "Pending" ANYWHERE in the message means the money has not settled yet
+  // ("… received from JOHN, pending confirmation", "… recebido de JOAO,
+  // pendente"). It is never a posting; the alert stays reviewable.
+  const pendingAnywhere = /(?<!\p{L})(?:pending|pendente|pendiente|ausstehend|en\s+attente|in\s+attesa|in\s+behandeling|em\s+processamento|awaiting)(?!\p{L})|معلق/iu
+    .test(source);
+  if (pendingAnywhere && (status === 'posted' || status === 'unknown')) status = 'informational';
   const hasStatement = money.statementTotal.evidence !== 'missing' || money.minimumDue.evidence !== 'missing';
   const hasBalance = money.balance.evidence !== 'missing' || money.creditLimit.evidence !== 'missing';
   const hasAmount = money.amount.evidence !== 'missing';
@@ -324,8 +330,14 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const directionConflict = (explicitDebit && (explicitCredit || completion?.direction === 'credit')) ||
     (explicitCredit && completion?.direction === 'debit') ||
     new Set(readings.map((reading) => reading.direction).filter((value) => value === 'debit' || value === 'credit')).size > 1;
-  const direction = status === 'posted' || status === 'unknown'
+  // "Your payment to Jane was received by her bank" is the RECIPIENT's
+  // receipt: never money arriving here. Without an explicit outgoing verb the
+  // direction is left for the person to decide.
+  const counterpartyReceipt = /\b(?:received|credited|accepted)\s+(?:by|to|at|in(?:to)?)\s+(?:her|his|their|the\s+(?:recipient|payee|beneficiary|receiver)(?:['’]s)?)\s+(?:bank|account)\b/iu
+    .test(source);
+  const readDirection = status === 'posted' || status === 'unknown'
     ? roleUnresolved || directionConflict ? 'unknown' : knownDirection === 'unknown' && completion ? completion.direction : knownDirection : 'none';
+  const direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown' : readDirection;
   const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
   const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
   const reviewable = hasAmount || hasStatement || hasBalance;
@@ -343,7 +355,7 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     ...(family === 'statement' && money.statementTotal.evidence === 'missing' ? ['statement-total-unresolved'] : []),
     ...(family === 'statement' && fields.dueDate.evidence === 'missing' ? ['due-date-unresolved'] : []),
     ...(authentication ? ['authentication-not-posting'] : []),
-    ...(pending ? ['pending-not-posting'] : []),
+    ...(pending || pendingAnywhere ? ['pending-not-posting'] : []),
     ...(cardSettlement ? ['settlement-adapter-required'] : []),
     ...(status === 'failed' ? ['failed-not-posting'] : []),
     ...(promotion ? ['promotion-not-posting'] : []),

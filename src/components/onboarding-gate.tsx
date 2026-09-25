@@ -36,6 +36,8 @@ import {
   WelcomeMoneyScene,
 } from '@/components/onboarding/alive-scenes';
 import { OnboardingCountryConfirm } from '@/components/onboarding/country-confirm';
+import { SetupIntroStep } from '@/components/onboarding/setup-intro-step';
+import { StatementScene } from '@/components/onboarding/statement-scene';
 import { WafraMark } from '@/components/wafra-logo';
 import { Colors, Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -71,9 +73,9 @@ import {
   onboardingPrefersNotificationCapture,
   onboardingResumeDestination,
 } from '@/lib/onboarding';
-import { normalizeOnboardingCountry, onboardingBankRegion } from '@/lib/onboarding-bank-examples';
+import { normalizeOnboardingCountry, onboardingBankRegion, ONBOARDING_REGION_ELSEWHERE } from '@/lib/onboarding-bank-examples';
 import { bankNotificationAdmissionExpiresAt } from '@/lib/trusted-bank-notification-packages';
-import { getRelayConfigStrict, unpairDevice } from '@/lib/relay';
+import { getRelayConfigStrict, isLegacyShortcutCaptureActive, unpairDevice } from '@/lib/relay';
 import { openShortcutsApp } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
 import type {
@@ -93,8 +95,15 @@ type Step =
   | 'intention'
   | 'preview'
   | 'capture'
+  | 'live'
   | 'complete';
 const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'alerts', 'intention', 'preview'];
+/**
+ * iPhone setup after the questionnaire: the past from a bank statement, then
+ * new transactions from Messages. Both persist as the `capture` stage, so an
+ * older build reading this profile still lands on a screen it knows.
+ */
+const IOS_SETUP_STEPS: readonly Step[] = ['capture', 'live'];
 /** Routes the gate may hand to expo-router once onboarding commits. */
 type OnboardingExit = '/pro' | '/statement-import';
 const STEP_TRANSITION_MS = 350;
@@ -250,6 +259,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     ensureDurable,
     setOnboarded,
     setOnboardingProfile,
+    setCountry: setLedgerCountry,
     setUserName,
     setCaptureOptOut,
     setAndroidCaptureSources,
@@ -278,6 +288,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [completionOutcome, setCompletionOutcome] = useState<CompletionOutcome>('manual');
   const [shortcutCleanup, setShortcutCleanup] = useState<ShortcutCleanupState>(null);
   const [learnMoreVisible, setLearnMoreVisible] = useState(false);
+  /**
+   * Set while an iPhone setup child route (statements, Messages setup) owns
+   * the screen. Coming back from either lands on new-transaction capture, the
+   * step after statements, instead of replaying the statement offer.
+   */
+  const resumeAtLive = useRef(false);
   const [setupBusy, setSetupBusy] = useState(false);
   const setupBusyRef = useRef(false);
   const [transitioning, setTransitioning] = useState(false);
@@ -391,6 +407,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     nextIntention: OnboardingIntention | null = intention,
     nextAlerts: OnboardingAlertDelivery | null = alerts,
     nextCountry: string | null = country,
+    // iPhone: the statement step is behind the user, so a relaunch at the
+    // `capture` stage resumes at live capture. Every other write clears it.
+    statementStepDone = false,
   ) => {
     if (previewMode) return;
     setOnboardingProfile({
@@ -401,9 +420,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       intention: nextIntention,
       alerts: nextAlerts,
       country: nextCountry,
+      ...(statementStepDone ? { statementStepDone: true } : {}),
       startedAt: state.onboardingProfile?.startedAt ?? Date.now(),
     });
   };
+  const saveLiveStep = () =>
+    saveJourney('capture', focus, tracking, intention, alerts, country, Platform.OS === 'ios');
 
   useEffect(() => {
     if (!state.hydrated || state.onboarded || hydrationFailed || startedEventSent.current) return;
@@ -445,6 +467,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         (pathname === '/ios-setup' || pathname === '/ios-paging-beta' || pathname === '/ios-notification-setup' || pathname === '/ios-apple-pay-setup' || pathname === '/import-sms'))
     )) {
       resumeHandled.current = false;
+      if (Platform.OS === 'ios') resumeAtLive.current = true;
       setResumeReady(true);
       return;
     }
@@ -499,7 +522,18 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           setNameSaveFailed(false);
           setCollectingName(true);
           setStep('welcome');
-        } else setStep(destination === 'privacy' ? 'preview' : destination);
+        } else {
+          const resumed: Step = destination === 'privacy' ? 'preview' : destination;
+          // iPhone: statements and live capture share the `capture` stage. Land
+          // on live when coming back from a setup route, when the statement
+          // step was passed before a relaunch, or when a saved completion (its
+          // outcome is not durable) is resumed: live is the choice that led to it.
+          const liveNext = Platform.OS === 'ios' && (resumeAtLive.current ||
+            state.onboardingProfile?.statementStepDone === true ||
+            state.onboardingProfile?.stage === 'complete');
+          setStep(resumed === 'capture' && liveNext ? 'live' : resumed);
+        }
+        resumeAtLive.current = false;
         setResumeReady(true);
         setResumeFailed(false);
       } catch {
@@ -588,6 +622,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
    * does not advance or rewind the journey: it saves against whatever stage is
    * already durable. Someone who fixes this on the welcome screen and force
    * quits must come back to the welcome screen, not be pushed forward.
+   *
+   * It is also the ledger's country (the same setting Settings shows), so it
+   * is written there too — except in the Settings preview, which never saves.
    */
   const chooseCountry = (id: string) => {
     const next = normalizeOnboardingCountry(id);
@@ -597,6 +634,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       state.onboardingProfile?.stage ?? 'welcome',
       focus, tracking, intention, alerts, next,
     );
+    if (!previewMode) setLedgerCountry(next);
   };
 
   const chooseAlerts = (id: OnboardingAlertDelivery) => {
@@ -625,7 +663,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const selectedTracking = tracking ?? state.onboardingProfile?.tracking ?? null;
   const selectedIntention = intention ?? state.onboardingProfile?.intention ?? null;
   const selectedAlerts = alerts ?? state.onboardingProfile?.alerts ?? null;
-  const selectedCountry = country ?? normalizeOnboardingCountry(state.onboardingProfile?.country);
+  // The ledger's country (device Region by default) counts as an answer;
+  // an unknown one ('ZZ' that nobody chose) still asks to be set.
+  const ledgerCountry = state.country && state.country !== ONBOARDING_REGION_ELSEWHERE
+    ? normalizeOnboardingCountry(state.country)
+    : null;
+  const selectedCountry = country ?? normalizeOnboardingCountry(state.onboardingProfile?.country) ?? ledgerCountry;
   /**
    * The country onboarding is actually drawing, so the control reports what is
    * on screen rather than what was asked for. Resolving it through the same
@@ -883,7 +926,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
   const openStatementImport = () => {
     if (Platform.OS === 'web' || !beginStepTransition()) return;
-    saveJourney('capture');
+    // Opening the importer moves past the statement step: after a relaunch the
+    // next step is live capture (Back from there still reaches statements).
+    saveLiveStep();
     const session = Crypto.randomUUID();
     statementImportSession.current = session;
     router.push(`/statement-import?fromOnboarding=1&statementSession=${session}`);
@@ -950,9 +995,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         // app-only flag is not enough: that Shortcut would still send bank
         // alerts and the background task could still collect them. Revoke the
         // actual relay identity before calling this choice complete.
+        //
+        // Only a relay that a Shortcut carries can do that. The statement step
+        // now comes first on iPhone and pairs a relay for the upload alone;
+        // revoking that one would strand rows still queued for this phone and
+        // warn about a Shortcut that was never installed.
         try {
           const relay = await getRelayConfigStrict();
-          if (relay) {
+          if (relay && isLegacyShortcutCaptureActive(relay)) {
             // Revoke the server-side ingest token first. Removing only the
             // local wake registration would still leave the installed
             // Shortcut able to forward bank alerts over the network.
@@ -993,9 +1043,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const goBack = () => {
     if (!beginStepTransition()) return;
     if (activeStep === 'complete') {
+      setStep(Platform.OS === 'ios' ? 'live' : 'capture');
+      saveLiveStep();
+      if (params.onboarding && !previewMode) router.setParams({ onboarding: undefined });
+    } else if (activeStep === 'live') {
       setStep('capture');
       saveJourney('capture');
-      if (params.onboarding && !previewMode) router.setParams({ onboarding: undefined });
     } else if (activeStep === 'capture') {
       setStep('preview');
       saveJourney('preview');
@@ -1160,7 +1213,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
    * Web has no capture to fall short of, so it has no gap to fill either.
    */
   const showHistoryGapOffer = activeStep === 'complete' &&
-    Platform.OS !== 'web' &&
+    Platform.OS === 'android' &&
     onboardingHistoryGap(selectedAlerts) &&
     !failedCompletion &&
     !finishSaveFailed &&
@@ -1185,8 +1238,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           {activeStep === 'welcome' ? (
             <Animated.ScrollView
               entering={reducedMotion || Platform.OS === 'android' ? undefined : FadeIn.duration(180)}
-              scrollEnabled={largeText}
               bounces={largeText}
+              alwaysBounceVertical={false}
               showsVerticalScrollIndicator={false}
               testID="onboarding-welcome"
               contentContainerStyle={styles.welcomeBody}>
@@ -1337,11 +1390,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
               <BackHeader step={activeStep} onBack={goBack}
                 onClose={previewMode ? closePreview : undefined}
                 disabled={setupBusy || finishing || transitioning}
-                progressSteps={JOURNEY_STEPS.includes(activeStep) ? JOURNEY_STEPS : null} />
+                progressSteps={JOURNEY_STEPS.includes(activeStep) ? JOURNEY_STEPS
+                  : Platform.OS === 'ios' && IOS_SETUP_STEPS.includes(activeStep) ? IOS_SETUP_STEPS : null} />
               <ScrollView key={activeStep}
                 keyboardShouldPersistTaps="handled"
-                scrollEnabled={largeText}
                 bounces={largeText}
+                alwaysBounceVertical={false}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.scrollContent}>
                 <Animated.View key={activeStep} entering={entering} style={styles.questionBody}>
@@ -1469,7 +1523,57 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                     </>
                   )}
 
-                  {activeStep === 'capture' && (
+                  {activeStep === 'capture' && Platform.OS === 'ios' && (
+                    <SetupIntroStep
+                      testID="onboarding-ios-past"
+                      actionsTestID="onboarding-start-options"
+                      title={t('onboardPastTitle')}
+                      body={t('onboardPastBody')}
+                      scene={<StatementScene reducedMotion={reducedMotion} />}
+                      primary={{
+                        label: t('onboardPastAction'),
+                        icon: 'upload',
+                        onPress: openStatementImport,
+                        disabled: setupBusy || transitioning,
+                      }}
+                      secondary={{
+                        label: t('onboardLater'),
+                        onPress: () => {
+                          if (!beginStepTransition()) return;
+                          saveLiveStep();
+                          setStep('live');
+                        },
+                        disabled: setupBusy || transitioning,
+                      }}
+                      howLabel={t('onboardHowItWorks')}
+                      onHow={() => setLearnMoreVisible(true)}
+                    />
+                  )}
+
+                  {activeStep === 'live' && Platform.OS === 'ios' && (
+                    <SetupIntroStep
+                      testID="onboarding-ios-live"
+                      title={t('onboardLiveTitle')}
+                      body={t('onboardLiveBody')}
+                      scene={<CaptureMarketScene marketId={state.marketId} country={selectedCountry} />}
+                      primary={{
+                        label: t('onboardLiveAction'),
+                        icon: 'bolt',
+                        onPress: () => void runSetupAction(beginCapture),
+                        disabled: setupBusy || transitioning,
+                      }}
+                      secondary={{
+                        label: t('onboardNotNow'),
+                        onPress: () => void runSetupAction(continueManually),
+                        disabled: setupBusy || transitioning,
+                      }}
+                      howLabel={t('onboardHowItWorks')}
+                      onHow={() => setLearnMoreVisible(true)}
+                      note={setupBusy ? t('onboardSetupWorking') : null}
+                    />
+                  )}
+
+                  {activeStep === 'capture' && Platform.OS !== 'ios' && (
                     <>
                       <View style={styles.captureHero}>
                         <ThemedText style={styles.questionTitle} accessibilityRole="header">
@@ -1566,34 +1670,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             <ThemedText style={styles.skipCaptureText}>{t('onboardManualChoice')}</ThemedText>
                           </Pressable>
                         </View>
-                      ) : Platform.OS === 'ios' ? (
-                        <View style={styles.captureActions} testID="onboarding-start-options">
-                          <Button
-                            wrapLabel
-                            label={t('onboardAutomaticChoiceIos')}
-                            onPress={() => void runSetupAction(beginCapture)}
-                            disabled={setupBusy || transitioning}
-                            labelColor={night.onPrimary}
-                            style={styles.primaryButton}
-                          />
-                          <Button
-                            wrapLabel
-                            variant="outline"
-                            label={t('onboardStatementChoice')}
-                            onPress={openStatementImport}
-                            disabled={setupBusy || transitioning}
-                            labelColor={night.text}
-                            style={styles.ghost}
-                          />
-                          <Pressable
-                            accessibilityRole="button"
-                            disabled={setupBusy || transitioning}
-                            accessibilityState={{ disabled: setupBusy || transitioning }}
-                            onPress={() => void runSetupAction(continueManually)}
-                            style={({ pressed }) => [styles.skipCaptureButton, { opacity: pressed ? 0.6 : 1 }]}>
-                            <ThemedText style={styles.skipCaptureText}>{t('onboardManualChoiceIos')}</ThemedText>
-                          </Pressable>
-                        </View>
                       ) : (
                         <View style={styles.startOptions} testID="onboarding-start-options">
                           <StartOption automatic={false} disabled={setupBusy || transitioning} onPress={() => void runSetupAction(continueManually)} />
@@ -1602,17 +1678,6 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                       {setupBusy && <ThemedText style={styles.inlineNote} accessibilityLiveRegion="polite">
                         {t('onboardSetupWorking')}
                       </ThemedText>}
-                      {Platform.OS === 'ios' && (
-                        <Button
-                          wrapLabel
-                          variant="outline"
-                          label={t('onboardCaptureLearnMoreAction')}
-                          onPress={() => setLearnMoreVisible(true)}
-                          disabled={setupBusy}
-                          labelColor={night.text}
-                          style={[styles.learnMoreButton, styles.ghost]}
-                        />
-                      )}
                     </>
                   )}
 
@@ -1828,13 +1893,21 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           <BottomSheet
             visible={learnMoreVisible}
             onClose={() => setLearnMoreVisible(false)}
-            title={t('onboardCaptureLearnMoreTitle')}>
-            <View style={styles.learnMoreContent}>
-              <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMorePrivacy')}</ThemedText>
-              <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMoreRetention')}</ThemedText>
-              <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMoreLegacy')}</ThemedText>
-              <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMoreLimits')}</ThemedText>
-            </View>
+            title={t(activeStep === 'capture' ? 'onboardPastHowTitle' : 'onboardCaptureLearnMoreTitle')}>
+            {activeStep === 'capture' ? (
+              <View style={styles.learnMoreContent}>
+                <ThemedText style={styles.learnMoreText}>{t('onboardPastHowDownload')}</ThemedText>
+                <ThemedText style={styles.learnMoreText}>{t('onboardPastHowPrivacy')}</ThemedText>
+                <ThemedText style={styles.learnMoreText}>{t('onboardPastHowPassword')}</ThemedText>
+              </View>
+            ) : (
+              <View style={styles.learnMoreContent}>
+                <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMorePrivacy')}</ThemedText>
+                <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMoreRetention')}</ThemedText>
+                <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMoreLegacy')}</ThemedText>
+                <ThemedText style={styles.learnMoreText}>{t('onboardCaptureLearnMoreLimits')}</ThemedText>
+              </View>
+            )}
           </BottomSheet>
         </SafeAreaView>
       </View>
@@ -1884,7 +1957,7 @@ const styles = StyleSheet.create({
   nameBack: { alignSelf: 'flex-start', minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4 },
   brandLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   brandName: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 17, letterSpacing: -0.3 },
-  previewClose: { marginLeft: 'auto', minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.two },
+  previewClose: { marginStart: 'auto', minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.two },
   previewCloseText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 13 },
   eyebrow: {
     paddingTop: 12,
@@ -2133,7 +2206,7 @@ const styles = StyleSheet.create({
   valueConnector: {
     width: 1,
     height: 12,
-    marginLeft: 19,
+    marginStart: 19,
     backgroundColor: night.cardBorderStrong,
   },
   privacyList: { gap: Spacing.two },

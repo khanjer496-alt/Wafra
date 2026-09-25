@@ -19,7 +19,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, getCategory } from '@/lib/categories';
 import { formatAED, shortDate } from '@/lib/format';
-import { formatOriginalCurrency } from '@/lib/fx';
+import { formatOriginalCurrency, originalMoneyOf } from '@/lib/fx';
 import { summarizeForeignActivity, type CurrencyActivity } from '@/lib/fx-summary';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { ledgerCurrencyCode } from '@/lib/markets';
@@ -124,7 +124,7 @@ export default function CurrencyScreen() {
       ? Math.round((group.localFils / summary.totalLocalFils) * 100)
       : 0;
     const fillWidth = `${Math.max(2, Math.min(100, percent))}%` as `${number}%`;
-    const original = formatOriginalCurrency(group.originalMinor, group.currency, language);
+    const original = formatOriginalCurrency(group.originalMinor, group.currency, language, group.originalExponent);
     const meta = tf(
       'foreignCurrencyOriginalSummary',
       { amount: original, count: group.count, s: group.count === 1 ? '' : 's' },
@@ -178,11 +178,10 @@ export default function CurrencyScreen() {
       ? `${bank}${account?.last4 && !bank.includes(account.last4) ? ` ·${account.last4}` : ''}`
       : undefined;
     const category = categoryLabel(getCategory(item.category), language);
-    const original = formatOriginalCurrency(
-      item.originalAmountMinor!,
-      item.originalCurrency!,
-      language,
-    );
+    const originalMoney = originalMoneyOf(item);
+    const original = originalMoney
+      ? formatOriginalCurrency(originalMoney.minorUnits, originalMoney.currency, language, originalMoney.exponent)
+      : '';
     const local = formatAED(item.amountFils, { decimals: true });
     return (
       <Pressable

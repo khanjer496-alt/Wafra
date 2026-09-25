@@ -10,7 +10,7 @@ import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { EXPENSE_CATEGORIES } from '@/lib/categories';
-import { shortDate, toISODate } from '@/lib/format';
+import { formatAmount, ledgerTypicalMinor, shortDate, toISODate } from '@/lib/format';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
 import { periodLabel } from '@/lib/period';
@@ -272,12 +272,14 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
           />
 </FilterSection>
 
-<FilterSection title={tr('minimumAmountFilter')} summary={filters.minFils ? `${filters.minFils / 100}+` : tr('anyLabel')}>
+<FilterSection title={tr('minimumAmountFilter')} summary={filters.minFils ? `${formatAmount(filters.minFils)}+` : tr('anyLabel')}>
           <View style={styles.chipRow}>
-            {[null, 10000, 50000, 100000].map((value) => (
+            {/* AED 100 / 500 / 1,000, sized to the ledger currency (¥10,000 /
+                ¥50,000 / ¥100,000 for JPY) and printed at its exponent. */}
+            {[null, ledgerTypicalMinor(100), ledgerTypicalMinor(500), ledgerTypicalMinor(1000)].map((value) => (
               <Chip
                 key={String(value)}
-                label={value === null ? tr('anyLabel') : `${value / 100}+`}
+                label={value === null ? tr('anyLabel') : `${formatAmount(value)}+`}
                 active={filters.minFils === value}
                 onPress={() =>
                   setFilters((current) => ({ ...current, minFils: value }))

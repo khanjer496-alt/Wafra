@@ -29,10 +29,14 @@ function bankByName(name: string): KnownBank | null {
   return null;
 }
 
-/** The banks a market pack knows, in pack order, for a picker. */
+/**
+ * The banks a market pack knows, in pack order, for a picker. A country with
+ * no launch pack has none to offer: falling back to the UAE list showed a
+ * user in Germany Emirates NBD and FAB as "your bank".
+ */
 export function knownBankOptions(marketId: string | undefined): KnownBank[] {
-  const market = MARKETS.find((candidate) => candidate.id === marketId) ?? MARKETS[0];
-  return market.banks.map((bank) => ({ name: bank.name, color: bank.color, domain: bank.domain }));
+  const market = MARKETS.find((candidate) => candidate.id === marketId);
+  return market ? market.banks.map((bank) => ({ name: bank.name, color: bank.color, domain: bank.domain })) : [];
 }
 
 /** Only real bank names, each once, in the order given; anything else is dropped. */

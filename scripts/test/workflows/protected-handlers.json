@@ -77,7 +77,7 @@
     {
       "file": "src/app/import-sms.tsx",
       "name": "runParse",
-      "sha256": "9c56d293937622031e88cf5d15d33f5c4cf3a44e9650d415430b55258fdc7d7a"
+      "sha256": "a72e92128319de49051516ecb03a2c6b0c0143d073d0f0cbb3e372c5ea0b1f8a"
     },
     {
       "file": "src/app/import-sms.tsx",
@@ -262,8 +262,8 @@
     {
       "file": "src/app/add-transaction.tsx",
       "name": "save",
-      "sha256": "dc577d494a98eeb23b21fd237a5c66a43405f49f7eb382cba949d63d78d2eb62",
-      "reviewedChange": "2026-09-10: Save now requires the durable ledger currency for first manual money and preserves exact minor-unit parsing before the transaction write. 2026-09-24: an Apple Pay review refused by the ledger as 'possible-duplicate' (same state generation, same route) opens the explicit already-recorded/keep-in-review choice instead of the generic failure toast; no write occurs on that path and every other refusal keeps the toast. 2026-09-24: the choice now opens for any review refused as 'possible-duplicate' (including a bank alert matching a recorded Apple Pay row) only when the state generation, route and review source binding are unchanged, and records the exact submitted promotion input so the sheet's explicit, confirmed 'Add as a separate purchase' can re-submit it once with a separatePurchase bound to that review's source; a stale refusal keeps the generic failure toast and nothing is written on the refusal path."
+      "sha256": "0afbdceea9dd0c1991e1ea298bbd36dac13801eb88071aee4de36f7188f20160",
+      "reviewedChange": "2026-09-10: Save now requires the durable ledger currency for first manual money and preserves exact minor-unit parsing before the transaction write. 2026-09-24: an Apple Pay review refused by the ledger as 'possible-duplicate' (same state generation, same route) opens the explicit already-recorded/keep-in-review choice instead of the generic failure toast; no write occurs on that path and every other refusal keeps the toast. 2026-09-24: the choice now opens for any review refused as 'possible-duplicate' (including a bank alert matching a recorded Apple Pay row) only when the state generation, route and review source binding are unchanged, and records the exact submitted promotion input so the sheet's explicit, confirmed 'Add as a separate purchase' can re-submit it once with a separatePurchase bound to that review's source; a stale refusal keeps the generic failure toast and nothing is written on the refusal path. 2026-09-24 (global FX): a manual entry in a currency other than the ledger's fetches one dated reference rate (Private Mode: an already-known rate only), converts with exact integer arithmetic and writes one row carrying the original amount, rate, effective date and 'reference' source; with no rate nothing is written and an explicit 'no exchange rate' toast is shown. A review refused with 'fx-rate-unavailable' shows that toast instead of the generic failure; nothing is written on that path."
     },
     {
       "file": "src/app/add-transaction.tsx",
@@ -302,14 +302,14 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "continueManually",
-      "sha256": "d68aba11ab8331681c322450419aa59ed796645b6da1e30167bac5c70b07743a",
-      "reviewedChange": "2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; existing iOS relay revocation and durable manual completion behavior are unchanged."
+      "sha256": "8f95198864cac7091c23e8c9510cd16ec0cbd52622bff7f80637d61f30877cc4",
+      "reviewedChange": "2026-09-25: iOS manual onboarding revokes the relay only when a Shortcut carries it (isLegacyShortcutCaptureActive). The statement step now precedes live capture and pairs a relay for uploads alone; revoking that relay stranded queued statement rows and warned about a Shortcut that was never installed. Strict read failure still reports uncertain cleanup. 2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; durable manual completion behavior is unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
-      "sha256": "63a06ae42c18c5d622ec15a89afb5c108eb348ae351b0d7d23cb9b64887f366f",
-      "reviewedChange": "2026-09-19: Back follows the integrated welcome → name → focus → tracking → alerts → intention → preview → capture journey. The alert-delivery question is inserted between Tracking and Intention and steps back through both; returning from Focus still reopens the in-Welcome name personalization without adding a progress step, and completion callback cleanup is unchanged."
+      "sha256": "c3930dcb352e657715a8b9858a7a5ea0ccd2a0c37cf6a2cab071a7c8d39dbd4f",
+      "reviewedChange": "2026-09-25 (b): Back from completion to live capture on iPhone records that the statement step is behind the user (saveLiveStep, a no-op flag on Android), so a relaunch resumes at live capture. 2026-09-25: iPhone setup after the questionnaire is statements (capture) then new transactions (live). Back from live returns to the statement step and completion steps back to live on iOS; both persist the capture stage. Android and web Back are unchanged (complete → capture). 2026-09-19: Back follows the integrated welcome → name → focus → tracking → alerts → intention → preview → capture journey; returning from Focus reopens the in-Welcome name personalization, and completion callback cleanup is unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",

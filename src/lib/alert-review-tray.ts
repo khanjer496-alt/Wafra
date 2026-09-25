@@ -722,6 +722,7 @@ export const resolveReviewAlert = (
 
 const markets: readonly ReviewAlert['market'][] = [
   'AE', 'SA', 'US', 'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'IN', 'QA', 'KW', 'BH', 'OM', 'EG', 'JO',
+  'CA', 'AU', 'BR', 'MX', 'SG',
 ];
 const channels: readonly ReviewAlert['channel'][] = [
   'inbox', 'delivery', 'push', 'shortcut', 'email', 'pdf',

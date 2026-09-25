@@ -3,10 +3,10 @@ import { StyleSheet, TextInput, View, type StyleProp, type ViewStyle } from 'rea
 import { ThemedText, type TextType } from '@/components/themed-text';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { useLedgerMoney } from '@/hooks/use-ledger-money';
+import { useLedgerMoney, useMoneyLocaleKey } from '@/hooks/use-ledger-money';
 import { formatAmount } from '@/lib/format';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
-import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { currencyDisplayLabel, currencyPlacement, formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 
 type Sign = 'none' | 'auto' | 'minus' | 'plus';
 
@@ -37,11 +37,38 @@ function signGlyph(fils: number, sign: Sign): string {
   }
 }
 
+/*
+ * The device number conventions are module state that React cannot see, and
+ * React Compiler memoizes each call below on its arguments. The locale key is
+ * an argument only so a device settings change invalidates those memos; the
+ * formatting itself reads the conventions ledger-money.ts has applied.
+ */
+function figureText(
+  fils: number,
+  denomination: LedgerMoneySpec | null,
+  decimals: boolean | undefined,
+  _localeKey: string,
+): string {
+  return denomination
+    ? formatMinorUnits(Math.round(Math.abs(fils)), denomination, decimals === true ? { decimals: true } : undefined)
+    : formatAmount(Math.abs(fils), { decimals });
+}
+const placementFor = (currency: string, _localeKey: string) => currencyPlacement(currency);
+const labelFor = (code: string, _localeKey: string) => currencyDisplayLabel(code);
+
+/**
+ * The visual currency label: an unambiguous symbol in the device locale
+ * ("€", "₹", "CA$"), else the ISO code. AED and SAR always show their code.
+ * Screen readers hear the ISO code, never a bare symbol.
+ */
 function CurrencyPrefix({ label }: { label?: string }) {
   const ledgerMoney = useLedgerMoney();
+  const localeKey = useMoneyLocaleKey();
+  const code = label ?? ledgerMoney?.currency ?? ledgerCurrencyDisplay();
   return (
-    <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}>
-      {label ?? ledgerMoney?.currency ?? ledgerCurrencyDisplay()}
+    <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}
+      accessibilityLabel={code}>
+      {labelFor(code, localeKey)}
     </ThemedText>
   );
 }
@@ -61,21 +88,28 @@ export function Money({
   style,
 }: MoneyProps) {
   const contextMoney = useLedgerMoney();
+  const localeKey = useMoneyLocaleKey();
   const denomination = moneySpec ?? contextMoney;
   const currency = denomination?.currency ?? ledgerCurrencyDisplay();
-  const value = denomination
-    ? formatMinorUnits(Math.round(Math.abs(fils)), denomination, decimals === true ? { decimals: true } : undefined)
-    : formatAmount(Math.abs(fils), { decimals });
+  const value = figureText(fils, denomination, decimals, localeKey);
   const amount = `${signGlyph(fils, sign)}${value}`;
   const label = `${prefix ? `${currency} ` : ''}${amount}`;
+  // The locale's own pattern: "1.234,56 €" in de-DE, "$1,234.56" in en-US;
+  // AED/SAR and any code-labelled currency stay "AED 1,234.56". The screen
+  // reader label above always speaks the ISO code first.
+  const placement = placementFor(currency, localeKey);
+  const currencyNode = prefix ? <CurrencyPrefix label={currency} /> : null;
+  const figure = (
+    <ThemedText type={type} tabular style={[styles.value, color ? { color } : undefined]}>
+      {amount}
+    </ThemedText>
+  );
+  const [first, second] = placement.position === 'after' ? [figure, currencyNode] : [currencyNode, figure];
   return (
-    <View accessible accessibilityRole="text" accessibilityLabel={label} style={[styles.inline, style]}>
-      {prefix && (
-        <CurrencyPrefix label={currency} />
-      )}
-      <ThemedText type={type} tabular style={[styles.value, color ? { color } : undefined]}>
-        {amount}
-      </ThemedText>
+    <View accessible accessibilityRole="text" accessibilityLabel={label}
+      style={[styles.inline, !placement.spaced && styles.tight, style]}>
+      {first}
+      {second}
     </View>
   );
 }
@@ -153,6 +187,7 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     gap: Spacing.two - 2,
   },
+  tight: { gap: 1 },
   value: { flexShrink: 1, minWidth: 0 },
   field: {
     gap: Spacing.two,

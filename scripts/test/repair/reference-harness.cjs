@@ -31,6 +31,11 @@ function createHarness(options = {}) {
     return Number.isSafeInteger(parsed)&&parsed>0?parsed:null;
   };
   const format={ formatAED, formatAmount:amount, formatCompactAED:f=>amount(f,{decimals:false}),
+    // AED-ledger forms of the currency-aware helpers: 100 fils per dirham.
+    formatAmountForInput:(fils,opts={})=>(fils/100).toFixed(opts.decimals||fils%100?2:0),
+    ledgerTypicalMinor:major=>major*100, ledgerWholeMajor:fils=>Math.round(fils/100),
+    ledgerNiceMinor:fils=>Math.max(10_000,Math.round(fils/10_000)*10_000),
+    ledgerCurrencyLabel:()=>lang==='ar'?'د.إ':'AED',
     getMonthStartDay:()=>1,
     monthKey:d=>String(d instanceof Date?d.toISOString():d).slice(0,7),
     monthLabel:(k,short=false)=>new Date(k+'-01T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:short?'short':'long',year:'numeric'}),
@@ -82,7 +87,7 @@ function createHarness(options = {}) {
     // only replaces it when the app is foregrounded. Handing back a fresh
     // Date per call would invalidate every memo keyed on `now` on every
     // render — which is what the render-cost tests exist to catch.
-    '@/hooks/use-today':{useToday:()=>harnessToday},
+    '@/hooks/use-today':{useToday:()=>harnessToday,useResumeClock:()=>harnessToday},
     '@/hooks/use-screen-entering':{useScreenEntering:()=>()=>undefined},'@/hooks/use-color-scheme':{useColorScheme:()=>options.theme??'light'},
     '@/hooks/use-reduced-motion':{useReducedMotion:()=>true},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true,useFocusEffect:()=>{}},
     '@/lib/foreground-history-priority':{prioritizeForegroundNavigation(){}},
@@ -171,6 +176,8 @@ function createHarness(options = {}) {
   local('@/components/tab-bar');
   function loadDetail() {
     deps['@/lib/fx'].formatOriginalCurrency=(f,c)=>c+' '+amount(f);
+    // Reading a stored original is pure; use the shipping reader.
+    deps['@/lib/fx'].originalMoneyOf=require('../build/fx.js').originalMoneyOf;
     deps['@/lib/sms-parser']={overrideFitsDirection:()=>false};
     deps['@/lib/uncategorised']={overrideAppliesTo:()=>false};
     deps['@/components/ui/section-header']={SectionHeader:p=>jsx('SectionHeader',p)};

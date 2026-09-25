@@ -2037,13 +2037,55 @@ struct WafraBankSenderRegistryTests {
           expectedSourceKey: sampleReview.sourceKey, expectedObservedAt: sampleReview.observedAt,
         },
       }, 'tx-promoted', Date.now());
-      ok('an SAR Review item cannot be posted into the AED ledger',
-        plan.outcome === 'refused' && plan.reason === 'currency-mismatch',
+      // Without a dated SAR→AED rate nothing is posted or relabelled; the
+      // item stays in Review until the host obtains one.
+      ok('an SAR Review item cannot be posted into the AED ledger without a rate',
+        plan.outcome === 'refused' && plan.reason === 'fx-rate-unavailable',
         JSON.stringify(plan));
       const drainAgain = await coordinator(native, ledger).drain();
       ok('a second drain finds nothing waiting behind foreign-currency reviews',
         native.pending().length === 0 && drainAgain.imported === 0 && drainAgain.scanned === 0,
         JSON.stringify({ drainAgain, pending: native.pending().length }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // Convert instead of review: with a dated SAR→AED reference rate the
+      // same Saudi purchase is imported into the AED ledger, keeping SAR
+      // 125.50 as its original with the rate, its date and its source. Its
+      // SAR balance is not relabelled as an AED balance.
+      trayModule.reviewCaptureBacklog.reset();
+      const saId = nextId();
+      const native = nativeQueue([envelope({ id: saId, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(60_000) })]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, ledgerMoney: AED_MONEY });
+      const asked = [];
+      const outcome = await localCapture.createIosLocalCaptureCoordinator({
+        native, ledger, retireShortcutCapture: async () => 'not-needed',
+        fxQuote: async (base, quote, date) => {
+          asked.push(`${base}|${quote}|${date}`);
+          return { base, quote, rate: 0.9793, date };
+        },
+      }).drain();
+      const row = ledger.getState().transactions[0];
+      ok('a Saudi purchase on an AED ledger converts with the dated rate instead of waiting in Review',
+        outcome.imported === 1 && outcome.reviews === 0 && native.acknowledged.includes(saId) &&
+          row?.amountFils === 12290 && row.originalCurrency === 'SAR' && row.originalMinorUnits === 12550 &&
+          row.fxSource === 'reference' && row.fxRate === 0.9793 && typeof row.fxRateDate === 'string' &&
+          ledger.getState().ledgerMoney === AED_MONEY && asked.length === 1 && /^SAR\|AED\|\d{4}-\d{2}-\d{2}$/.test(asked[0]),
+        JSON.stringify({ outcome, row, asked, calls: ledger.calls }));
+      const offlineNative = nativeQueue([envelope({ id: nextId(), sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(30_000) })]);
+      const offlineLedger = ledgerAdapter();
+      offlineLedger.setState({ ...BASE_STATE, ledgerMoney: AED_MONEY });
+      const offlineOutcome = await localCapture.createIosLocalCaptureCoordinator({
+        native: offlineNative, ledger: offlineLedger, retireShortcutCapture: async () => 'not-needed',
+        fxQuote: async () => null,
+      }).drain();
+      ok('offline, the same purchase keeps its original in Review and posts nothing',
+        offlineOutcome.imported === 0 && offlineOutcome.reviews === 1 &&
+          offlineLedger.getState().transactions.length === 0 &&
+          offlineLedger.getState().reviewTray.pending[0]?.currencyConflict === true,
+        JSON.stringify(offlineOutcome));
       trayModule.reviewCaptureBacklog.reset();
     }
 
@@ -4076,8 +4118,10 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/lib/store') {
-          return { useStore: () => ({ state: storeState, ...storeMethods }) };
+          const store = () => ({ state: storeState, ...storeMethods });
+          return { useStore: store, useStoreSelector: (select) => select(store()), useStoreActions: store };
         }
+        if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => ({}));
         return {};
       });
       const render = () => runtime.render(() => mountedHookModule.useAutoImport(false, true));
@@ -4298,8 +4342,10 @@ struct WafraBankSenderRegistryTests {
           return { getSharedIosLocalCaptureCoordinator: () => null };
         }
         if (id === '@/lib/store') {
-          return { useStore: () => ({ state: storeState, ...storeMethods }) };
+          const store = () => ({ state: storeState, ...storeMethods });
+          return { useStore: store, useStoreSelector: (select) => select(store()), useStoreActions: store };
         }
+        if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => ({}));
         return {};
       });
       const render = () => runtime.render(() => ({
@@ -4608,6 +4654,24 @@ struct WafraBankSenderRegistryTests {
       futureAutomationConfirmed: true,
       futureStatus: 'in-progress',
     }, 'shortcut-proven'), 'ready');
+
+  // 2026-09-25 guided setup: numbered steps are presentation over the same
+  // step resolution; the local test still comes before the automation.
+  eq('guided setup: each resolved step maps to Add → Test → Automate → done',
+    ['add-shortcut', 'confirm-shortcut', 'prove-shortcut', 'create-automation', 'ready']
+      .map((step) => setupModule.iosCaptureGuideStage(step)),
+    [1, 1, 2, 3, 'done']);
+  eq('guided setup: the automation walkthrough is one Apple screen per step',
+    setupModule.IOS_AUTOMATION_GUIDE_SCREENS, 5);
+  eq('iOS 27 one-toggle hook: off in this build on every iOS version (no bundled Shortcut yet)',
+    ['26.4', '27', '27.1', 28].map((version) => setupModule.iosOneToggleCaptureAvailable(version)),
+    [false, false, false, false]);
+  eq('iOS 27 one-toggle hook: once the Shortcut ships, only iOS 27 or later qualifies',
+    ['16.7', '26.9', '27', '27.0.1', 28, 'x', ''].map((version) =>
+      setupModule.iosOneToggleCaptureAvailable(version, true)),
+    [false, false, true, true, true, false, false]);
+  eq('iOS 27 one-toggle hook: the shipping flag stays off until the Shortcut file exists',
+    setupModule.IOS_ONE_TOGGLE_CAPTURE_SHORTCUT_BUNDLED, false);
 
   eq('setup trigger guard: the guided empty-Sender trigger is supported (bank SMS IDs are not Contacts)',
     setupModule.isSupportedIosMessageAutomationTrigger({

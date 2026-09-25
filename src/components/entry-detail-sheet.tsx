@@ -20,8 +20,8 @@ import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
-import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
-import { formatOriginalCurrency } from '@/lib/fx';
+import { formatAmount, formatAmountForInput, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import { formatOriginalCurrency, originalMoneyOf } from '@/lib/fx';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
@@ -50,7 +50,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const router = useRouter();
   const theme = useTheme();
   const largeText = useLargeTextLayout();
-  const { state, editTransaction, deleteTransaction, setMerchantOverride, setBillAlias } = useStore();
+  const { state, editTransaction, deleteTransaction, resolveBestEffort, setMerchantOverride, setBillAlias } = useStore();
   const [editing, setEditing] = useState(false);
 
   const [title, setTitle] = useState('');
@@ -61,6 +61,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const [isTransfer, setIsTransfer] = useState(false);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingUndo, setConfirmingUndo] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
   /**
@@ -98,7 +99,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     // was stamped userEdited, so no re-parse could ever heal it. Below a
     // dirham it was worse; 0.49 seeded "0", which fails validation, and the
     // entry could not be saved at all.
-    setAmountText(formatAmount(transaction.amountFils, { decimals: true }).replace(/,/g, ''));
+    setAmountText(formatAmountForInput(transaction.amountFils, { decimals: true }));
     setCategory(transaction.category);
     setAccountId(transaction.accountId);
     setDateText(transaction.date);
@@ -173,6 +174,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       date: dateText,
       ...(!transferReview ? { isTransfer: isTransfer || undefined } : {}),
       ...(receiptAccountChanged ? { paymentInstrumentSource: 'user' as const } : {}),
+      // Saving a correction is the person checking the row.
+      ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
     });
     const merchant = title.trim();
     const billChanged = transaction.paymentFlowSide === 'receipt' && !!transaction.billIdentity &&
@@ -227,6 +230,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     transaction.source === 'sms'
       ? transaction.viaPush ? t('bankNotificationSource') : t('bankSmsSource')
       : t('addedByHand');
+  const originalMoney = originalMoneyOf(transaction);
   const fxSourceLabel =
     transaction.fxSource === 'bank'
       ? tf('bankQuotedRate', { currency: ledgerCurrencyCode() })
@@ -290,6 +294,22 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           <ThemedText type="small" themeColor="textSecondary">
             {confirmedOwnTransfer ? transferWords.ownBody : transferWords.pendingBody}
           </ThemedText>
+        </View>
+      )}
+
+      {!editing && transaction.bestEffort && (
+        <View
+          testID="best-effort-check"
+          style={[styles.transferMeaning, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+          <ThemedText type="smallBold">{t('autoAddedCheck')}</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">{t('autoAddedExplain')}</ThemedText>
+          <View style={[styles.actions, largeText && styles.actionsLarge]}>
+            <Button inline={!largeText} wrapLabel label={t('autoAddedLooksRight')}
+              onPress={() => resolveBestEffort(transaction.id, 'confirm')} />
+            <Button inline={!largeText} wrapLabel variant="outline" label={t('autoAddedUndo')}
+              onPress={() => setConfirmingUndo(true)} />
+          </View>
+          <ThemedText type="meta" themeColor="textTertiary">{t('autoAddedUndoHint')}</ThemedText>
         </View>
       )}
 
@@ -464,8 +484,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                 label: t('transactionDateLabel'),
                 value: <ThemedText type="small">{stamp}</ThemedText>,
               },
-              ...(transaction.originalCurrency &&
-              transaction.originalAmountMinor !== undefined &&
+              ...(originalMoney &&
               transaction.fxRate !== undefined
                 ? [
                     {
@@ -473,9 +492,10 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                       value: (
                         <ThemedText type="small" tabular>
                           {formatOriginalCurrency(
-                            transaction.originalAmountMinor,
-                            transaction.originalCurrency,
+                            originalMoney.minorUnits,
+                            originalMoney.currency,
                             state.language === 'ar' ? 'ar' : 'en',
+                            originalMoney.exponent,
                           )}
                         </ThemedText>
                       ),
@@ -485,9 +505,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                       value: (
                         <ThemedText type="small" themeColor="textSecondary">
                           {tf('fxRateValue', {
-                            from: transaction.originalCurrency,
+                            from: originalMoney.currency,
                             to: ledgerCurrencyCode(),
-                            rate: transaction.fxRate.toFixed(4),
+                            rate: transaction.fxRate >= 0.01 ? transaction.fxRate.toFixed(4) : String(Number(transaction.fxRate.toPrecision(4))),
                             source: fxSourceLabel,
                           })}
                         </ThemedText>
@@ -521,6 +541,17 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           dismissing this sheet and presenting another in the same frame does
           not. Each is mounted only while it has something to ask, so the entry
           animation runs on every open. */}
+      {confirmingUndo && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirmingUndo(false)}
+          question={t('autoAddedUndoConfirm')}
+          body={`${transaction.title} · ${formatAmount(transaction.amountFils)}. ${t('autoAddedUndoHint')}`}
+          confirmLabel={t('autoAddedUndo')}
+          destructive
+          onConfirm={() => { resolveBestEffort(transaction.id, 'undo'); onClose(); }}
+        />
+      )}
       {confirmingDelete && (
         <ConfirmSheet
           visible
