@@ -214,7 +214,8 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           ({ source: 'deterministic', request: deterministicRequest, reason: 'unavailable' }) };
       }
       if (name === '@/components/category-suggestion') {
-        return { CategorySuggestion: () => null };
+        // No suggestion has arrived yet: the row still offers the full picker.
+        return { useCategorySuggestions: () => new Map() };
       }
       if (name === '@/lib/local-semantic-assistant') {
         return { improveAssistantRequestLocally: async ({ deterministicRequest }) => deterministicRequest };

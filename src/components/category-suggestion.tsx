@@ -1,68 +1,50 @@
-import React, { useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { useEffect, useState } from 'react';
 
-import { ThemedText } from '@/components/themed-text';
-import { Button } from '@/components/ui/controls';
-import { Spacing } from '@/constants/theme';
-import { categoryLabel } from '@/lib/categories';
-import { tf, t } from '@/lib/i18n';
 import { onDeviceAI } from '@/lib/on-device-ai';
 import { categoryAdvisor, type CategoryAdvice } from '@/lib/on-device-category';
 import type { CategoryId } from '@/lib/types';
 import type { DirectionalCategoryRule } from '@/lib/universal-categorization';
 
+export type CategorySuggestionState = CategoryAdvice | 'pending';
+
 /**
- * One suggested category above the full picker for an unresolved merchant.
- * Rules answer first; the platform model is asked only when they cannot.
- * Nothing is written until the user taps the suggestion (which goes through
- * the screen's normal assign path), and nothing shows when there is no
- * confident suggestion or no on-device model.
+ * One suggested category per unresolved merchant, for a list where every row
+ * is open at once.
+ *
+ * Rules answer first; the platform model is asked only when they cannot, and
+ * it is asked ONE MERCHANT AT A TIME: the on-device model refuses concurrent
+ * requests ("busy"), so mounting a dozen independent requests would leave
+ * most rows with nothing. Each merchant gets a single suggestion — never a
+ * ranked list — and nothing is written until the user picks it. A row shows
+ * "checking" only while a model that can actually answer is working on it.
  */
-export function CategorySuggestion({ merchant, count, language, overrides, rules, market, onUse }: {
-  merchant: string;
-  count: number;
+export function useCategorySuggestions({ merchants, language, overrides, rules, market }: {
+  merchants: readonly string[];
   language: 'en' | 'ar';
   overrides?: Readonly<Record<string, CategoryId>>;
   rules?: readonly DirectionalCategoryRule[];
   market?: string;
-  onUse: (category: CategoryId) => void;
-}) {
-  const [advice, setAdvice] = useState<CategoryAdvice | 'pending' | null>(null);
+}): ReadonlyMap<string, CategorySuggestionState> {
+  const [advice, setAdvice] = useState<ReadonlyMap<string, CategorySuggestionState>>(() => new Map());
+  const signature = merchants.join('\u0000');
   useEffect(() => {
     let current = true;
-    setAdvice(null);
+    const list = signature ? signature.split('\u0000') : [];
+    setAdvice(new Map());
     void (async () => {
-      const availability = await onDeviceAI.getAvailability();
-      // Show "checking" only when a model can actually answer.
-      if (current && availability.status === 'available') setAdvice('pending');
-      const next = await categoryAdvisor.suggest({
-        merchant, appLanguage: language, overrides, rules, market, cancelled: () => !current,
-      });
-      if (current) setAdvice(next);
-    })().catch(() => { if (current) setAdvice(null); });
+      const availability = await onDeviceAI.getAvailability().catch(() => null);
+      const modelReady = availability?.status === 'available';
+      for (const merchant of list) {
+        if (!current) return;
+        if (modelReady) setAdvice((map) => new Map(map).set(merchant, 'pending'));
+        const next = await categoryAdvisor.suggest({
+          merchant, appLanguage: language, overrides, rules, market, cancelled: () => !current,
+        }).catch((): CategoryAdvice => ({ kind: 'none', reason: 'error' }));
+        if (!current) return;
+        setAdvice((map) => new Map(map).set(merchant, next));
+      }
+    })();
     return () => { current = false; };
-  }, [merchant, language, overrides, rules, market]);
-
-  if (advice === null || (advice !== 'pending' && advice.kind === 'none')) return null;
-  if (advice === 'pending') {
-    return <ThemedText testID="category-suggestion-pending" type="meta" themeColor="textSecondary"
-      accessibilityLiveRegion="polite">{t('categoriseSuggestionChecking')}</ThemedText>;
-  }
-  const label = categoryLabel(advice.category, language);
-  return (
-    <View testID="category-suggestion" accessibilityLiveRegion="polite" style={styles.box}>
-      <ThemedText type="small">
-        {tf(advice.kind === 'on-device-ai' ? 'categoriseAiSuggestion' : 'categoriseRuleSuggestion', { category: label })}
-      </ThemedText>
-      <Button variant="outline" label={tf('categoriseSuggestionUse', { category: label })}
-        onPress={() => onUse(advice.category)} />
-      <ThemedText type="meta" themeColor="textSecondary">
-        {tf('categoriseSuggestionNote', { count, ending: count === 1 ? 'y' : 'ies' })}
-      </ThemedText>
-    </View>
-  );
+  }, [signature, language, overrides, rules, market]);
+  return advice;
 }
-
-const styles = StyleSheet.create({
-  box: { gap: Spacing.two, paddingHorizontal: Spacing.one },
-});
