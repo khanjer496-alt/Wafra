@@ -75,7 +75,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          background-relay-storage uncategorised currency-metadata alert-draft bank-alert-semantic-types \
          bank-alert-semantic-rules bank-alert-semantic-output bank-alert-interpreter \
          alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray generic-review-entry review-source-bindings unparsed-launch-alert \
-         universal-types universal-dates universal-fields universal-money universal-parser universal-confidence universal-template-certification universal-import universal-categorization \
+         universal-types universal-dates universal-fields universal-money universal-parser universal-confidence universal-template-certification universal-import brand-categories universal-categorization ai-alert-words ai-alert-cues ai-alert-gates ai-alert-flags ai-alert-model-manifest ai-alert-model ai-alert-extractor ai-alert-reader \
          ledger-money paste-sample backup-validation ledger-export parsed-review-event wallet-near-match review-promotion launch-review-rollout trusted-bank-notification-packages \
          sms-corpus parser-research-contract parser-research founder-pro \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me alert-market-packs.world \

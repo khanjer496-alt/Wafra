@@ -1,5 +1,6 @@
 import type { CategoryId, TransactionType } from '@/lib/types';
 import type { UniversalBankEvent } from '@/lib/universal-types';
+import { matchBrandCategory } from '@/lib/brand-categories';
 import { categorySupportsType, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
 import { classifyMerchantDescription, normalizeArabic, normalizeServiceName, stripInvisible } from '@/lib/sms-parser';
 
@@ -160,7 +161,16 @@ export function categorizeMerchant(input: CategorizationInput): CategorySuggesti
     return suggestion(merchant, 'other', 'unresolved', 'merchant-activity-unresolved');
   }
   const result = classifyMerchantDescription(merchant, 'expense', market);
-  if (result.categoryGuess === 'other') return suggestion(result.merchant, 'other', 'unresolved', 'merchant-activity-unresolved');
+  if (result.categoryGuess === 'other') {
+    // Last resort only: every rule above declined. It needs an explicit
+    // non-AE/SA market: AE/SA keep their launch-tested vocabulary untouched,
+    // and an absent market could still be an AE/SA user.
+    const brandMarket = typeof input.market === 'string' ? input.market.trim().toUpperCase() : '';
+    const brand = /^[A-Z]{2}$/.test(brandMarket) && brandMarket !== 'AE' && brandMarket !== 'SA'
+      ? matchBrandCategory(merchant, brandMarket) : null;
+    if (brand) return suggestion(result.merchant, brand.category, 'merchant-vocabulary', 'curated-brand-table');
+    return suggestion(result.merchant, 'other', 'unresolved', 'merchant-activity-unresolved');
+  }
   if (result.categoryGuess === 'telecom' && market !== 'AE' && /\bdu\b/iu.test(merchant) &&
     !/\b(?:telecom|mobile|postpaid|prepaid|internet|telephone)\b/iu.test(merchant)) {
     return suggestion(merchant, 'other', 'unresolved', 'ambiguous-regional-merchant');
