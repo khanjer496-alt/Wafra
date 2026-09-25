@@ -18,8 +18,9 @@ export interface CaptureToastContent {
  * line rather than a half-filled one.
  *
  * Only what the stored row says is shown: its title, its category and its
- * ledger amount. Nothing is inferred and nothing raw from the message is
- * read (rows never carry the SMS/notification text).
+ * ledger amount. Nothing is inferred, and the message text is never read: a
+ * row may still carry it in `raw` (kept when the parser was unsure, for the accuracy
+ * report), but the `Pick` below leaves that field out on purpose.
  */
 export function captureToastContent(
   row: Pick<Transaction, 'title' | 'category' | 'amountFils' | 'type'> | null | undefined,
