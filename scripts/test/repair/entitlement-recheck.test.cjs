@@ -106,6 +106,8 @@ function harness(overrides = {}, options = {}) {
       useFocusEffect: effect => runtime.react.useEffect(effect, [effect]),
     },
     '@/components/ui/toast': { useToast: () => toast },
+    // The capture toast names nothing while App Lock is up; these runs have no lock.
+    '@/components/lock-gate': { usePrivacyGateCleared: () => true },
     '@/lib/trusted-bank-notification-packages': {
       bankNotificationAdmissionExpiresAt: current =>
         (current.pro || current.founderPro || current.trialStartTs > 0) ? Clock.now() + 86_400_000 : 0,

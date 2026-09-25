@@ -83,6 +83,8 @@ function harness(options = {}) {
     react, 'expo-router': { useRouter: () => ({}), useFocusEffect: () => {} },
     'react-native': { AppState: appState, Platform: { OS: 'ios' } },
     '@/components/ui/toast': { useToast: () => ({ show: () => {} }) },
+    // The capture toast names nothing while App Lock is up; these runs have no lock.
+    '@/components/lock-gate': { usePrivacyGateCleared: () => true },
     '@/lib/auto-import': {},
     '@/lib/android-capture-sources': {
       androidSmsCaptureEnabled: current => !current.captureOptOut && (current.androidCaptureSources?.sms ?? true),
