@@ -32,6 +32,13 @@ const isoDate: Check = (value) => {
   const date = new Date(`${value}T00:00:00.000Z`);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
 };
+// `payCardDue` records the moment a statement was marked paid
+// (`new Date().toISOString()`); readers use only its date part. Older builds and
+// the seed write the bare date, so both shapes restore.
+const isoTimestamp: Check = (value) => typeof value === 'string' &&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
+  isoDate(value.slice(0, 10)) && Number.isFinite(new Date(value).getTime());
+const isoDateOrTimestamp: Check = (value) => isoDate(value) || isoTimestamp(value);
 const month: Check = (value) => typeof value === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
 const arrayOf = (check: Check): Check => (value) => Array.isArray(value) && value.every(check);
 const uniqueRows = (value: unknown, check: Check): boolean => {
@@ -110,7 +117,7 @@ const billAlias: Check = (value) => record(value) &&
 const due: Check = (value) => record(value) && required(value, {
   id, accountId: id, totalDueFils: nonnegative, minDueFils: nonnegative,
   paidFils: nonnegative, dueDate: isoDate,
-}) && optional(value, { minDueEstimated: boolean, settledAt: isoDate });
+}) && optional(value, { minDueEstimated: boolean, settledAt: isoDateOrTimestamp });
 const statementCoverageEntry: Check = (value) => record(value) && required(value, {
   id, sourceKey: id, label: text, startDate: isoDate, endDate: isoDate, importedAt: nonnegative,
   format: oneOf('pdf', 'csv'),
