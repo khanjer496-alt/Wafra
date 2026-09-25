@@ -1718,7 +1718,6 @@ const S = {
   notAWafraBackup: { en: 'That does not look like a Wafra backup.', ar: 'لا يبدو هذا ملف نسخ احتياطي لوفرة.' },
   noServerTitle: { en: 'Processed on this phone', ar: 'تُعالَج على هذا الهاتف' },
   restoreReplacesAll: { en: 'This replaces everything currently in the app.', ar: 'سيستبدل هذا كل ما في التطبيق حالياً.' },
-  trySensorAgain: { en: 'Try the sensor again', ar: 'جرّب المستشعر مرة أخرى' },
   upToDate: { en: 'Up to date', ar: 'كل شيء محدّث' },
   notifsForCardDue: { en: 'Wafra needs notification permission to remind you before a payment is due.', ar: 'يحتاج وفرة إذن الإشعارات لتذكيرك قبل موعد السداد.' },
   notifsForBill: { en: 'Wafra needs notification permission to warn you before a charge lands.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك قبل خصم أي مبلغ.' },
@@ -3439,23 +3438,11 @@ const S = {
   applyRange: { en: 'Apply range', ar: 'تطبيق النطاق' },
 
   unlockWafra: { en: 'Unlock Wafra', ar: 'فتح وفرة' },
-  locked: { en: 'Locked', ar: 'مقفل' },
-  lockedPrivacyBody: {
-    en: 'Your balances are hidden until the phone says it is you. Nothing left the phone while it was closed.',
-    ar: 'أرصدتك مخفية حتى يتحقق الهاتف من هويتك. لم تغادر أي بيانات الهاتف أثناء إغلاق التطبيق.',
-  },
   phoneHasNoLock: { en: 'This phone has no screen lock', ar: 'لا يوجد قفل شاشة لهذا الهاتف' },
   setPhoneLockBody: {
     en: 'Set up a fingerprint, face unlock, or a PIN and Wafra can use it.',
     ar: 'أعدّ بصمة أو تعرّفاً على الوجه أو رمز PIN ليتمكن وفرة من استخدامه.',
   },
-  unlockFingerprintA11y: { en: 'Unlock with your fingerprint', ar: 'افتح باستخدام بصمتك' },
-  touchSensor: { en: 'Touch the sensor to unlock', ar: 'المس المستشعر للفتح' },
-  biometricOrPin: {
-    en: 'Fingerprint, face unlock, or your phone PIN',
-    ar: 'البصمة أو التعرّف على الوجه أو رمز هاتفك',
-  },
-  usePinInstead: { en: 'Use PIN instead', ar: 'استخدم رمز PIN بدلاً من ذلك' },
 
   newLimitTitle: { en: 'New limit', ar: 'حد جديد' },
   categoryLimit: { en: '{category} limit', ar: 'حد {category}' },
