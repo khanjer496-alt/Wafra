@@ -74,6 +74,74 @@ test('statement date note follows the selected country, and the privacy line sta
   assert.doesNotMatch(screen, /already captured|not duplicated/);
 });
 
+test('first-run copy is paired and the SMS explainer is truthful', () => {
+  const kind = load(path.join(root, 'src/lib/biometric-kind.ts'));
+  const settings = load(path.join(root, 'src/lib/settings-copy.ts'), { '@/lib/biometric-kind': kind });
+  const { ONBOARDING_COPY } = load(path.join(root, 'src/lib/onboarding-copy.ts'), { '@/lib/settings-copy': settings });
+  assertParity(ONBOARDING_COPY.en, ONBOARDING_COPY.ar);
+  const en = ONBOARDING_COPY.en;
+  assert.match(en.smsExplainerSystemName, /send and view/);
+  assert.match(en.smsExplainerNever, /never sends/);
+  assert.equal(en.foundRecurring(4, 2), 'Repeating payments found: 4 subscriptions and 2 bills. They are in Bills.');
+  assert.equal(en.foundRecurring(1, 0), 'Repeating payments found: 1 subscription. They are in Bills.');
+  assert.equal(en.foundRecurring(0, 1), 'Repeating payments found: 1 bill. They are in Bills.');
+  assert.equal(ONBOARDING_COPY.ar.readyMonths(2), 'شهران');
+  assert.equal(ONBOARDING_COPY.ar.readyMonths(3), '3 أشهر');
+  // The gate asks before Android's prompt and never restores without a confirmation.
+  const gate = read('src/components/onboarding-gate.tsx');
+  assert.match(gate, /else setSmsExplainerVisible\(true\)/);
+  assert.match(gate, /onContinue=\{\(\) => \{\s*setSmsExplainerVisible\(false\);\s*void runSetupAction\(startScan\);/);
+  assert.match(gate, /visible=\{pendingRestore !== null\}[\s\S]{0,900}setRestoreFailed\(!restoreBackup\(content\)\)/);
+  // Country and ledger currency stay separate: no "Continue with <currency>".
+  assert.doesNotMatch(gate, /Continue with/);
+});
+
+test('ready summary counts real spending only and splits by allocation', () => {
+  const splits = load(path.join(root, 'src/lib/splits.ts'));
+  const { onboardingReadySummary } = load(path.join(root, 'src/lib/onboarding-ready.ts'), { '@/lib/splits': splits });
+  const tx = (overrides) => ({ id: Math.random().toString(36), type: 'expense', amountFils: 1000, category: 'dining',
+    accountId: 'a', title: 'Cafe', date: '2026-07-03', ...overrides });
+  const rows = [
+    tx({}),
+    tx({ title: 'Grocer', category: 'groceries', amountFils: 5000, date: '2026-08-10' }),
+    tx({ title: 'Split shop', amountFils: 3000, category: 'groceries', date: '2026-09-01',
+      splits: [{ category: 'groceries', amountFils: 2000 }, { category: 'dining', amountFils: 1000 }] }),
+    tx({ title: 'Own transfer', amountFils: 90000, category: 'transfers', internal: true }),
+    tx({ title: 'Salary', type: 'income', amountFils: 500000, category: 'income' }),
+  ];
+  const summary = onboardingReadySummary({
+    transactions: rows,
+    isSpending: (t) => t.type === 'expense' && !t.internal,
+    subscriptions: [
+      { group: 'subscription', status: 'active' }, { group: 'subscription', status: 'stopped' },
+      { group: 'utility', status: 'active' }, { group: 'housing', status: 'active' },
+    ],
+    limit: 1,
+  });
+  assert.equal(summary.months, 3);
+  assert.equal(summary.transactions, 5);
+  assert.equal(summary.merchants, 3);
+  assert.deepEqual(JSON.parse(JSON.stringify(summary.categories)), [{ category: 'groceries', amountMinor: 7000 }]);
+  assert.equal(summary.otherMinor, 2000, 'the transfer never counts as spending');
+  assert.equal(summary.subscriptions, 1);
+  assert.equal(summary.bills, 2);
+  assert.equal(summary.firstMonth, '2026-07');
+  assert.equal(summary.lastMonth, '2026-09');
+});
+
+test('iPhone checklist marks a step done only from recorded evidence', () => {
+  const { iosCaptureChecklist } = load(path.join(root, 'src/lib/ios-capture-checklist.ts'));
+  const done = (evidence) => JSON.parse(JSON.stringify(iosCaptureChecklist(evidence).map((row) => row.done)));
+  assert.deepEqual(done(null), [false, false, false, false]);
+  const base = { shortcutConfirmed: false, automationConfirmed: false, setupProofVersion: null, requiredProofVersion: 3, firstCapturedAt: null };
+  assert.deepEqual(done(base), [false, false, false, false]);
+  assert.deepEqual(done({ ...base, shortcutConfirmed: true }), [true, false, false, false]);
+  assert.deepEqual(done({ ...base, setupProofVersion: 1 }), [false, false, false, false], 'an older proof is not this shortcut');
+  assert.deepEqual(done({ ...base, setupProofVersion: 3 }), [true, true, false, false]);
+  assert.deepEqual(done({ ...base, setupProofVersion: 3, automationConfirmed: true }), [true, true, true, false]);
+  assert.deepEqual(done({ ...base, firstCapturedAt: Date.UTC(2026, 8, 25) }), [true, true, true, true]);
+});
+
 test('Trusted devices shows the invite countdown as its hero and says what is relayed', () => {
   const screen = read('src/app/trusted-devices.tsx');
   const i18n = read('src/lib/i18n.ts');

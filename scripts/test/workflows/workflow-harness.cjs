@@ -146,7 +146,21 @@ function createWorkflowHarness(options={}) {
    for(const name of ['checklist-row','automation-guide','details-sheet','setup-step'])h.local('@/components/ios-message-setup/'+name);
   }
 
-  if(screen==='onboarding')h.local('@/lib/ios-statement-handoff','src/lib/ios-statement-handoff.ts');
+  if(screen==='onboarding'){
+   h.local('@/lib/ios-statement-handoff','src/lib/ios-statement-handoff.ts');
+   // Redesign additions run from source; the native capture status, the
+   // backup picker and the ledger analytics are explicit boundaries.
+   d['@/lib/capture']={...d['@/lib/capture'],getIosCaptureNativeModule:()=>null};
+   d['@/lib/subscriptions']={detectSubscriptions:()=>[]};
+   d['@/lib/ledger']={...(d['@/lib/ledger']??{}),liveAccountIds:()=>new Set(),internalTransferIdsForState:()=>new Set(),isSpending:tx=>tx.type==='expense'};
+   h.local('@/lib/splits','src/lib/splits.ts');
+   h.local('@/lib/onboarding-ready','src/lib/onboarding-ready.ts');
+   h.local('@/lib/ios-capture-checklist','src/lib/ios-capture-checklist.ts');
+   h.local('@/lib/ios-shortcut-setup-copy','src/lib/ios-shortcut-setup-copy.ts');
+   h.local('@/lib/onboarding-copy','src/lib/onboarding-copy.ts');
+   d['@/components/ui/grow-bar']={GrowBar:p=>jsx('GrowBar',p)};
+   for(const name of ['capture-checklist','ready-summary','sms-explainer'])h.local('@/components/onboarding/'+name);
+  }
   const file=screen==='onboarding'?'src/components/onboarding-gate.tsx':`src/app/${screen}.tsx`;
   const module=load(path.join(root,file),d,{process:{env:{EXPO_PUBLIC_WAFRA_E2E_DEMO:'1'}},__DEV__:false});
   return screen==='onboarding'?module.OnboardingGate({children:null,...props}):module.default(props);

@@ -185,6 +185,28 @@ async function gate(options = {}) {
     load(path.join(root, 'src/components/onboarding/statement-scene.tsx'), dependencies);
   dependencies['@/components/onboarding/setup-intro-step'] =
     load(path.join(root, 'src/components/onboarding/setup-intro-step.tsx'), dependencies);
+  // Redesign additions: the Welcome restore picker and the native capture
+  // status are boundaries (neither is touched by these journeys); the
+  // checklist, ready summary, SMS explainer and their copy run from source.
+  dependencies['expo-document-picker'] = { getDocumentAsync: () => call('pickBackup', undefined, { canceled: true, assets: [] }) };
+  dependencies['@/lib/share-text'] = { readBackupPickerCopy: () => call('readBackup', undefined, '') };
+  dependencies['@/lib/capture'] = { getIosCaptureNativeModule: () => null };
+  dependencies['@/lib/subscriptions'] = { detectSubscriptions: () => [] };
+  dependencies['@/lib/ledger'] = { liveAccountIds: () => new Set(), internalTransferIdsForState: () => new Set(),
+    isSpending: transaction => transaction.type === 'expense' };
+  dependencies['@/lib/splits'] = load(path.join(root, 'src/lib/splits.ts'), {});
+  dependencies['@/lib/onboarding-ready'] = load(path.join(root, 'src/lib/onboarding-ready.ts'), dependencies);
+  dependencies['@/lib/ios-capture-checklist'] = load(path.join(root, 'src/lib/ios-capture-checklist.ts'), {});
+  dependencies['@/lib/ios-shortcut-setup-copy'] = load(path.join(root, 'src/lib/ios-shortcut-setup-copy.ts'), {});
+  dependencies['@/lib/biometric-kind'] = load(path.join(root, 'src/lib/biometric-kind.ts'), {});
+  dependencies['@/lib/settings-copy'] = load(path.join(root, 'src/lib/settings-copy.ts'), dependencies);
+  dependencies['@/lib/onboarding-copy'] = load(path.join(root, 'src/lib/onboarding-copy.ts'), dependencies);
+  dependencies['@/lib/categories'] = { categoryLabel: category => category };
+  dependencies['@/lib/ledger-money'] = { formatMoneyText: minor => String(minor) };
+  dependencies['@/components/ui/grow-bar'] = { GrowBar: 'GrowBar' };
+  for (const name of ['capture-checklist', 'ready-summary', 'sms-explainer']) {
+    dependencies[`@/components/onboarding/${name}`] = load(path.join(root, `src/components/onboarding/${name}.tsx`), dependencies);
+  }
   const component = load(options.sourcePath ?? process.env.WAFRA_ONBOARDING_SOURCE ?? path.join(root, 'src/components/onboarding-gate.tsx'), dependencies, {
     process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } },
     setTimeout: setTimer, clearTimeout: clearTimer, Date: ClockDate,
