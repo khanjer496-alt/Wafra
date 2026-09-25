@@ -34,7 +34,10 @@ const PROCESSOR_PREFIX = /^(?:paypal|stripe|sq|square|tap|2c2p|opn|ziina|mamo)\s
 const PROCESSOR_ONLY = /^(?:paypal|stripe|sq|square|tap|2c2p|opn|ziina|mamo)$/iu;
 // A freelance marketplace or payment plan does not identify what was bought.
 // Qualified local businesses (FIVERR GENERAL TRADING) still reach activity rules.
-const OPAQUE_PLATFORM = /^(?:fiverr(?:\.com)?(?:\s+pro)?|klarna(?:\.com)?|tabby(?:\.ai)?|tamara(?:\.com|\.co)?)$/iu;
+// Tabby/Tamara/Postpay/Cashew are NOT here: a payment whose payee is one of
+// them is the instalment of a purchase, filed Shopping by the SMS vocabulary
+// (BNPL_PAYEE_RE in sms-parser.ts), and this layer must agree with it.
+const OPAQUE_PLATFORM = /^(?:fiverr(?:\.com)?(?:\s+pro)?|klarna(?:\.com)?)$/iu;
 const MONEY_SERVICE = /^(?:(?:al\s*ansari|al\s*fardan|lulu|uae|sharaf|index|orient|wall\s*street|al\s*rostamani|gcc|joyalukkas)\s+exchange|western\s+union|moneygram|stc\s*pay|urpay)\b/iu;
 const words = (...terms: string[]): RegExp => new RegExp(
   `(?<![\\p{L}\\p{N}])(?:${terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\p{L}\\p{N}])`, 'iu');
