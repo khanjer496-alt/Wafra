@@ -328,7 +328,8 @@ eq(
     !/onLongPress|t\('markPaid'\)|<Button/.test(manualRows));
   ok(
     'manual reminder detail owns visible payment and delete footer actions',
-    /\{selectedReminder && \([\s\S]*?<BottomSheet[\s\S]*?footer=\{\([\s\S]*?t\('markPaid'\)[\s\S]*?t\('delete'\)/.test(src),
+    // One detail sheet for every bill (bill-detail-sheet.tsx); Bills hands it the footer.
+    /\{selectedReminder && \([\s\S]*?<BillDetailSheet[\s\S]*?footer=\{\([\s\S]*?t\('markPaid'\)[\s\S]*?t\('delete'\)/.test(src),
   );
   // Save was enabled for "45", "0" and "12.5" — values saveBill rejects — so
   // the tap silently did nothing with the sheet still open.
@@ -344,7 +345,8 @@ eq(
   );
   ok(
     'subscription history E2E is scoped to the sheet instead of a mounted page scroller',
-    /testID="subscription-history-scroll"/.test(src) &&
+    // The history now lives in the one shared bill detail sheet.
+    /testID="subscription-history-scroll"/.test(fs.readFileSync(path.join(__dirname, '../../src/components/bill-detail-sheet.tsx'), 'utf8')) &&
       /\[data-testid="subscription-history-scroll"\]/.test(e2e) &&
       !/while \(block\)/.test(e2e),
   );

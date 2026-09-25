@@ -31,12 +31,16 @@ const groupIcons: Record<PaymentGroup, IconName> = {
 };
 
 /** Bills filters choose the payment family; due timing remains the visual hierarchy inside the list. */
-export function PaymentAgenda({ items, accounts = [], includePaid, group: selectedGroup, onOpen }: {
+export function PaymentAgenda({ items, accounts = [], includePaid, group: selectedGroup, onOpen, renderMeta, showNote = true }: {
   items: readonly PaymentAgendaItem[];
   accounts?: readonly Account[];
   includePaid: boolean;
   group?: PaymentGroup;
   onOpen: (item: PaymentAgendaItem) => void;
+  /** An extra line under a row, e.g. "was AED 10.99 · Price went up". */
+  renderMeta?: (item: PaymentAgendaItem) => React.ReactNode;
+  /** The "only updates Wafra" footnote; one per screen is enough. */
+  showNote?: boolean;
 }) {
   const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
@@ -144,6 +148,7 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
               {item.paid && <Icon name="check" size={15} color={theme.income} />}
             </View>
             {item.accountName && <ThemedText type="meta" themeColor="textTertiary">{item.accountName}</ThemedText>}
+            {renderMeta?.(item)}
           </View>
         </Pressable>;
       })}
@@ -159,7 +164,7 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
       <ThemedText type="smallBold">{w.showMore(hiddenCount)}</ThemedText>
       <Icon name="chevron-down" size={16} color={theme.textSecondary} />
     </Pressable>}
-    {visibleCount > 0 && <ThemedText type="meta" themeColor="textTertiary" style={styles.notice}>{w.noteBody}</ThemedText>}
+    {showNote && visibleCount > 0 && <ThemedText type="meta" themeColor="textTertiary" style={styles.notice}>{w.noteBody}</ThemedText>}
   </View>;
 }
 const styles = StyleSheet.create({

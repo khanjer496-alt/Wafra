@@ -386,7 +386,7 @@ await tapLabel(page,'Close',500);
 
 // ── Bills ─────────────────────────────────────────────────────────────
 await tapTab(page, 'Bills');
-ok('Bills has Upcoming and All views',!!(await visibleText(page,'Upcoming'))&&!!(await visibleText(page,'All')));
+ok('Bills has Next 30 days and All views',!!(await visibleText(page,'Next 30 days'))&&!!(await visibleText(page,'All')));
 const agenda=page.locator('[data-testid="payment-agenda"]');
 await agenda.waitFor({state:'visible'});
 ok('Agenda states that marking paid only updates Wafra and sends no payment',/Marking something paid only updates Wafra\. No payment is sent\./.test(await agenda.innerText()));

@@ -10,10 +10,16 @@ import {
 import { CaptureRefreshControl } from '@/components/capture-refresh-control';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
-import { MerchantSpendingLink } from '@/components/merchant-spending-link';
+import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { CardDetailSheet } from '@/components/card-detail-sheet';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
-import { BillsSegmentControl, type BillsSegment } from '@/components/bills/bills-segment-control';
+import {
+  BillsGroupFilter,
+  BillsSegmentControl,
+  type BillsGroupFilterValue,
+  type BillsSegment,
+} from '@/components/bills/bills-segment-control';
+import { BillsTimeline } from '@/components/bills/bills-timeline';
 import { PaymentAgenda } from '@/components/bills/payment-agenda';
 import { Money } from '@/components/ui/money';
 import { paymentGroupFor, type PaymentAgendaItem, type PaymentGroup } from '@/lib/reference-presentation';
@@ -28,35 +34,37 @@ import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { billsForMonth, type BillStatus } from '@/lib/bills';
+import { billsForMonth } from '@/lib/bills';
 import { openDues, recentlySettledDues } from '@/lib/cards';
 import { EXPENSE_CATEGORIES } from '@/lib/categories';
 import {
   formatAED,
-  fullDateTime,
   monthKey,
   parseAmountWithMoneySpec,
   shortDate,
   toISODate,
-  totalAsShown,
 } from '@/lib/format';
-import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
+import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { measureRuntimeOperation, recordRuntimeOperation } from '@/lib/runtime-performance';
 import {
   activeSubscriptions,
   billCommitments,
+  cancelledByUser,
   detectSubscriptions,
   detectSubscriptionsCooperatively,
   daysUntilNext,
   fixedCommitments,
   otherCommitments,
-  recurringPaymentAccount,
   stoppedSubscriptions,
+  subscriptionsMonthlyEquivalent,
   trueSubscriptions,
+  withoutCancelled,
   type Subscription,
 } from '@/lib/subscriptions';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
@@ -68,12 +76,12 @@ import { t, tf } from '@/lib/i18n';
 /**
  * A confirmation waiting on the user, or null.
  *
- * Every committing action on this screen — marking a bill paid, settling a
- * card statement, deleting a reminder, dropping a subscription — used to be
- * gated by `Alert.alert` with the store call inside a button's `onPress`. On
+ * Every committing action on this screen — marking a bill paid, deleting a
+ * reminder, dropping a subscription, marking one cancelled — used to be gated
+ * by `Alert.alert` with the store call inside a button's `onPress`. On
  * react-native-web that method is empty, so the alert never drew and the store
- * call was unreachable: four buttons that did nothing at all, in silence. The
- * work lives in `onConfirm` and is handed to a sheet that is actually drawn.
+ * call was unreachable: buttons that did nothing at all, in silence. The work
+ * lives in `onConfirm` and is handed to a sheet that is actually drawn.
  */
 type Confirmation = {
   question: string;
@@ -92,21 +100,27 @@ export function recurringChargePresentation(sub: Subscription): { amountFils: nu
 }
 
 const UPCOMING_RECURRENCE_IDLE_MS = 4_000;
+/** "Next 30 days" is a window, and its label is a promise about it. */
+const UPCOMING_WINDOW_DAYS = 30;
 
 export default function BillsScreen() {
   const theme = useTheme();
   const largeText = useLargeTextLayout();
+  const language = useLanguage();
+  const w = moneyPlacesWords(language);
   const enter = useScreenEntering();
   const focused = useIsFocused();
   // Only what Bills reads, so scans, progress and unrelated settings do not
   // re-render the whole payment agenda.
   const state = useStoreSelector(({ state: s }) => ({
     transactions: s.transactions, accounts: s.accounts, bills: s.bills, cardDues: s.cardDues,
-    notSubscriptions: s.notSubscriptions, ledgerMoney: s.ledgerMoney,
+    notSubscriptions: s.notSubscriptions, cancelledSubscriptions: s.cancelledSubscriptions, ledgerMoney: s.ledgerMoney,
     transferInternalIds: s.transferInternalIds, transferNormalizationVersion: s.transferNormalizationVersion,
     historyImport: historyStatusOnly(s.historyImport),
   }));
-  const { addBill, deleteBill, markBillPaid, setNotSubscription, payCardDue, setLedgerMoney } = useStoreActions();
+  const {
+    addBill, deleteBill, markBillPaid, setNotSubscription, setSubscriptionCancelled, setLedgerMoney,
+  } = useStoreActions();
   /**
    * The screen that answers "is this card settled?" can now go and find out.
    *
@@ -126,11 +140,13 @@ export default function BillsScreen() {
   const recurrenceToday = useMemo(() => new Date(`${todayISO}T12:00:00`), [todayISO]);
 
   const [agendaView, setAgendaView] = useState<BillsSegment>('upcoming');
-  const words = { upcoming: t('refUpcoming'), all: t('refAll'), unscheduled: t('refUnscheduled'), stopped: t('refStopped'), fewer: t('refHideStopped'), more: t('refShowStopped') };
+  const words = { unscheduled: t('refUnscheduled'), stopped: t('refStopped'), fewer: t('refHideStopped'), more: t('refShowStopped') };
   const [detail, setDetail] = useState<Subscription | null>(null);
   // A due is a question about one card, not a reason to leave the Bills tab.
+  // The card sheet itself records payments (Record a payment).
   const [cardDetail, setCardDetail] = useState<Account | null>(null);
-  const [selectedDueId, setSelectedDueId] = useState<string | null>(null);
+  // Inside All: the payment types that used to be their own tabs.
+  const [groupFilter, setGroupFilter] = useState<BillsGroupFilterValue>('everything');
   const [selectedReminderId, setSelectedReminderId] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [showStopped, setShowStopped] = useState(false);
@@ -141,6 +157,8 @@ export default function BillsScreen() {
   const [category, setCategory] = useState<CategoryId>('utilities');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   const [androidRecurring, setAndroidRecurring] = useState<Subscription[] | null>(null);
+  // The subscription just marked cancelled, until undone or replaced.
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
   const billsHeader: ScreenHeaderProps = {
     title: t('billsTitle'),
@@ -173,15 +191,11 @@ export default function BillsScreen() {
   const dues = useMemo(() => measureRuntimeOperation('bills-open-dues', () => openDues(state, now)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.accounts, state.transactions, state.cardDues, now]);
-  const selectedDue = useMemo(
-    () => dues.find(({ due }) => due.id === selectedDueId) ?? null,
-    [dues, selectedDueId],
-  );
-  // Recently-paid history is invisible in the default Upcoming view (and in
-  // the subscription/utility filters). Do not make the first Bills tap replay
+  // Recently-paid history is invisible in Next 30 days (and in the
+  // subscription/utility filters). Do not make the first Bills tap replay
   // historical card settlement just to immediately filter those rows away.
-  // Cards/All compute it when the user actually asks for that history.
-  const needsPaidCards = agendaView === 'cards' || agendaView === 'all';
+  // All computes it when the user actually asks for that history.
+  const needsPaidCards = agendaView === 'all' && (groupFilter === 'everything' || groupFilter === 'cards');
   const paidCards = useMemo(() => needsPaidCards
     ? measureRuntimeOperation('bills-paid-cards', () => recentlySettledDues(state, now))
     : [],
@@ -189,20 +203,21 @@ export default function BillsScreen() {
     [needsPaidCards, state.accounts, state.transactions, state.cardDues, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = measureRuntimeOperation('bills-transfer-scope', () => internalTransferIdsForState(state));
-  // Recurrence detection walks the complete ledger. It is useful on Upcoming,
-  // but it is not required to make Bills usable. Never start that historical
-  // job in the same interaction window as the first tab paint. Explicit
-  // Subscriptions/Utilities/All requests start it immediately after paint; the
-  // default Upcoming view only warms it after an idle grace period. A shared
-  // detector in subscriptions.ts means reminders/Bills join one job instead of
-  // racing duplicate scans, and leaving the tab no longer throws completed work
-  // away and restarts from row zero next time.
+  // Recurrence detection walks the complete ledger. It is useful on Next 30
+  // days, but it is not required to make Bills usable. Never start that
+  // historical job in the same interaction window as the first tab paint.
+  // All starts it immediately after paint; the default view only warms it
+  // after an idle grace period. A shared detector in subscriptions.ts means
+  // reminders/Bills join one job instead of racing duplicate scans, and
+  // leaving the tab no longer throws completed work away and restarts from
+  // row zero next time.
   useEffect(() => {
     setAndroidRecurring(null);
   }, [state.transactions, state.notSubscriptions, state.accounts, state.transferInternalIds, todayISO]);
 
   useEffect(() => {
-    if (Platform.OS !== 'android' || !focused || androidRecurring !== null || agendaView === 'cards') return;
+    if (Platform.OS !== 'android' || !focused || androidRecurring !== null ||
+      (agendaView === 'all' && groupFilter === 'cards')) return;
     let cancelled = false;
     let delay: ReturnType<typeof setTimeout> | null = null;
     let firstFrame: number | null = null;
@@ -232,7 +247,7 @@ export default function BillsScreen() {
       });
     };
 
-    const needsRecurrenceNow = agendaView === 'subscriptions' || agendaView === 'utilities' || agendaView === 'all';
+    const needsRecurrenceNow = agendaView === 'all';
     if (needsRecurrenceNow) startProjection();
     else delay = setTimeout(startProjection, UPCOMING_RECURRENCE_IDLE_MS);
 
@@ -243,7 +258,7 @@ export default function BillsScreen() {
       if (firstFrame !== null) cancelAnimationFrame(firstFrame);
       if (secondFrame !== null) cancelAnimationFrame(secondFrame);
     };
-  }, [agendaView, androidRecurring, focused, state.transactions, state.notSubscriptions, recurrenceToday, liveAccounts, internal]);
+  }, [agendaView, groupFilter, androidRecurring, focused, state.transactions, state.notSubscriptions, recurrenceToday, liveAccounts, internal]);
   // The same live/internal pair every other screen that adds money up passes.
   // Without it a charge on an archived card reconciles a bill to "Paid" while
   // Flow's Total out never moves.
@@ -264,8 +279,22 @@ export default function BillsScreen() {
       : detectSubscriptions(state.transactions, state.notSubscriptions, now, liveAccounts, internal),
     [androidRecurring, state.transactions, state.notSubscriptions, now, liveAccounts, internal],
   );
-  const subs = useMemo(() => activeSubscriptions(trueSubscriptions(detected)), [detected]);
-  const stopped = useMemo(() => stoppedSubscriptions(trueSubscriptions(detected)), [detected]);
+  // A subscription the user said they cancelled leaves upcoming renewals and
+  // every total here — until a later charge says it is still being paid.
+  const cancelled = state.cancelledSubscriptions;
+  const subs = useMemo(
+    () => withoutCancelled(activeSubscriptions(trueSubscriptions(detected)), cancelled),
+    [detected, cancelled],
+  );
+  const stopped = useMemo(
+    () => withoutCancelled(stoppedSubscriptions(trueSubscriptions(detected)), cancelled),
+    [detected, cancelled],
+  );
+  const cancelledList = useMemo(() => cancelledByUser(trueSubscriptions(detected), cancelled), [detected, cancelled]);
+  const monthlySubscriptionsFils = useMemo(
+    () => subscriptionsMonthlyEquivalent(detected, cancelled),
+    [detected, cancelled],
+  );
   const allCommitments = useMemo(
     () => activeSubscriptions(fixedCommitments(detected)),
     [detected],
@@ -287,6 +316,12 @@ export default function BillsScreen() {
   const trackedTitles = useMemo(
     () => new Set(state.bills.map((b) => b.title.toLowerCase())),
     [state.bills],
+  );
+  const subByAgendaId = useMemo(
+    () => new Map<string, Subscription>(
+      [...subs, ...loans, ...commitments].map((sub) => [`sub-${sub.title.trim().toLowerCase()}`, sub]),
+    ),
+    [subs, loans, commitments],
   );
 
   const agendaItems = useMemo<PaymentAgendaItem[]>(() => measureRuntimeOperation('bills-agenda-items', () => {
@@ -319,92 +354,55 @@ export default function BillsScreen() {
     return items;
   }), [dues, paidCards, rows, subs, loans, commitments, state.accounts, state.bills, now]);
 
+  // Next 30 days: everything unpaid that falls due inside the window,
+  // including what is already late. Later items stay in All.
+  const windowed = useMemo(
+    () => agendaItems.filter((item) => !item.paid && item.daysLeft <= UPCOMING_WINDOW_DAYS),
+    [agendaItems],
+  );
   const selectedAgendaGroup = useMemo<PaymentGroup | undefined>(() => {
-    if (agendaView === 'subscriptions') return 'subscriptions';
-    if (agendaView === 'utilities') return 'utilities';
-    if (agendaView === 'cards') return 'cards';
-    return undefined;
-  }, [agendaView]);
+    if (agendaView !== 'all' || groupFilter === 'everything') return undefined;
+    return groupFilter;
+  }, [agendaView, groupFilter]);
   const visibleAgendaItems = useMemo(
-    () => selectedAgendaGroup
-      ? agendaItems.filter((item) => paymentGroupFor(item) === selectedAgendaGroup)
-      : agendaItems,
-    [agendaItems, selectedAgendaGroup],
+    () => agendaView === 'upcoming'
+      ? windowed
+      : selectedAgendaGroup
+        ? agendaItems.filter((item) => paymentGroupFor(item) === selectedAgendaGroup)
+        : agendaItems,
+    [agendaView, windowed, agendaItems, selectedAgendaGroup],
   );
   const includePaidAgenda = agendaView !== 'upcoming';
   const summary = useMemo(() => {
     const openItems = visibleAgendaItems.filter((item) => !item.paid);
-    const label = agendaView === 'subscriptions'
-      ? t('billsSubscriptionsTotal')
-      : agendaView === 'utilities'
-        ? t('billsUtilitiesTotal')
-        : agendaView === 'cards'
-          ? t('billsCardsTotal')
-          : agendaView === 'all'
-            ? t('billsAllTotal')
-            : t('billsUpcomingTotal');
+    const label = agendaView === 'upcoming'
+      ? w.next30Total
+      : groupFilter === 'subscriptions'
+        ? t('billsSubscriptionsTotal')
+        : groupFilter === 'utilities'
+          ? t('billsUtilitiesTotal')
+          : groupFilter === 'cards'
+            ? t('billsCardsTotal')
+            : t('billsAllTotal');
     return {
       label,
       totalFils: openItems.reduce((sum, item) => sum + item.amountFils, 0),
       count: openItems.length,
       estimated: openItems.filter((item) => item.estimated).length,
     };
-  }, [agendaView, visibleAgendaItems]);
-
-  // Everything the detail sheet needs about the tapped subscription: its raw
-  // charges (newest first), which cards paid it, first charge, lifetime total.
-  const detailData = useMemo(() => {
-    if (!detail) return null;
-    const titleKey = detail.title.trim().toLowerCase();
-    // The SAME predicate `detectSubscriptions` grouped these rows with. A
-    // looser one here (type + isTransfer, with no live/internal sets) counted
-    // charges the detection had already excluded: a Netflix charge on an
-    // archived card inflated this sheet's "Charges" and "Total paid" above the
-    // figure the row that opened the sheet was derived from.
-    const txs = state.transactions
-      .filter(
-        (t) =>
-          isSpending(t, liveAccounts, internal) && t.title.trim().toLowerCase() === titleKey,
-      )
-      .sort((a, b) => (a.date < b.date ? 1 : -1));
-    if (txs.length === 0) return null;
-    const firstISO = txs[txs.length - 1].date;
-    const paymentAccounts = txs.map((transaction) =>
-      recurringPaymentAccount(transaction, state.accounts));
-    const accounts = [...new Set(
-      paymentAccounts.map((account) => account?.id)
-        .filter((id): id is string => Boolean(id)),
-    )]
-      .map((id) => state.accounts.find((a) => a.id === id))
-      .filter((a): a is NonNullable<typeof a> => a != null);
-    // Totalled as the history rows below are shown. Rounding the raw sum once
-    // put "AED 222" over four rows of 56 — the same defect the Flow heading
-    // had, in the same sheet as the rows that disprove it.
-    const totalFils = totalAsShown(txs.map((t) => t.amountFils));
-    const sortedAmounts = txs.map((t) => t.amountFils).sort((a, b) => a - b);
-    const medianFils = sortedAmounts[Math.floor(sortedAmounts.length / 2)];
-    return {
-      txs,
-      firstISO,
-      accounts,
-      unknownInstrumentCount: paymentAccounts.filter((account) => account === undefined).length,
-      totalFils,
-      medianFils,
-    };
-  }, [detail, state.transactions, state.accounts, liveAccounts, internal]);
-
-  const subscribedFor = (firstISO: string): string => {
-    const d = new Date(`${firstISO}T12:00:00`);
-    const months =
-      (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
-    if (months < 1) return t('subscriptionUnderMonth');
-    if (months < 12) return tf('subscriptionMonths', { count: months, s: months === 1 ? '' : 's' });
-    const y = Math.floor(months / 12);
-    const m = months % 12;
-    return m > 0
-      ? tf('subscriptionYearsMonths', { years: y, months: m })
-      : tf('subscriptionYears', { count: y, s: y === 1 ? '' : 's' });
-  };
+  }, [agendaView, groupFilter, visibleAgendaItems, w.next30Total]);
+  const timelineItems = useMemo(
+    () => windowed.filter((item) => item.daysLeft >= 0).map(({ id, title, dateISO }) => ({ id, title, dateISO })),
+    [windowed],
+  );
+  const subscriptionItems = useMemo(
+    () => windowed.filter((item) => paymentGroupFor(item) === 'subscriptions'),
+    [windowed],
+  );
+  const billAndCardItems = useMemo(
+    () => windowed.filter((item) => paymentGroupFor(item) !== 'subscriptions'),
+    [windowed],
+  );
 
   /**
    * Whether "Remind me" can honestly be offered for this subscription.
@@ -436,22 +434,6 @@ export default function BillsScreen() {
     yearlyOnISO: sub.cadence === 'yearly' ? sub.nextExpectedISO : undefined,
     autoDetected: true,
   });
-
-  const statusMeta = (status: BillStatus, daysLeft: number) => {
-    switch (status) {
-      case 'paid':
-        return { label: t('paid'), color: theme.income };
-      case 'overdue':
-        return { label: tf('overdueDays', { days: -daysLeft }), color: theme.expense };
-      case 'due-soon':
-        return {
-          label: daysLeft === 0 ? t('dueToday') : tf('dueInDays', { days: daysLeft }),
-          color: theme.warning,
-        };
-      default:
-        return { label: tf('dueInDays', { days: daysLeft }), color: theme.textSecondary };
-    }
-  };
 
   /**
    * Exactly what `saveBill` will accept — asked once so the button cannot
@@ -513,32 +495,6 @@ export default function BillsScreen() {
     });
   };
 
-  const onPayDue = (dueId: string, remainingFils: number, accountId: string, accName: string) => {
-    // Keep the paid statement's result visible after the last open due settles.
-    setAgendaView('cards');
-    setConfirmation({
-      question: tf('payAccountTitle', { name: accName }),
-      body: tf('payAccountBody', { amount: formatAED(remainingFils, { decimals: false }) }),
-      confirmLabel: t('markPaid'),
-      onConfirm: () =>
-        payCardDue(
-          dueId,
-          remainingFils,
-          {
-            type: 'income',
-            amountFils: remainingFils,
-            category: 'other',
-            accountId,
-            title: tf('accountPaymentTitle', { name: accName }),
-            date: todayISO,
-            source: 'manual',
-            isTransfer: true,
-          },
-          true,
-        ),
-    });
-  };
-
   const onLongPressBill = (billId: string, billTitle: string) => {
     setConfirmation({
       question: t('deleteReminderTitle'),
@@ -559,15 +515,83 @@ export default function BillsScreen() {
     });
   };
 
-  const openCardDetail = (account: Account | null, dueId?: string) => {
-    setSelectedDueId(account ? dueId ?? null : null);
+  // "I cancelled it" — reversible, dated, and different from "never a
+  // subscription": its history stays, and a later charge brings it back.
+  const onMarkCancelled = (sub: Subscription) => {
+    setConfirmation({
+      question: w.markCancelledQuestion(sub.title),
+      body: w.markCancelledBody,
+      confirmLabel: w.markCancelled,
+      onConfirm: () => {
+        setSubscriptionCancelled(sub.title, todayISO);
+        setCancelNotice(sub.title);
+      },
+    });
+  };
+  const undoCancelled = (subTitle: string) => {
+    setSubscriptionCancelled(subTitle, null);
+    setCancelNotice(null);
+  };
+
+  const openCardDetail = (account: Account | null) => {
     setCardDetail(account);
   };
 
   const closeCardDetail = () => {
     setCardDetail(null);
-    setSelectedDueId(null);
   };
+
+  const openAgendaItem = (item: PaymentAgendaItem) => {
+    if (item.kind === 'card') {
+      const id = item.id.slice(5);
+      const due = state.cardDues.find((due) => due.id === id);
+      if (due) openCardDetail(state.accounts.find((a) => a.id === due.accountId) ?? null);
+    } else if (item.kind === 'bill') setSelectedReminderId(item.id.slice(5));
+    else {
+      const sub = detected.find((sub) => `sub-${sub.title.trim().toLowerCase()}` === item.id);
+      if (sub) setDetail(sub);
+    }
+  };
+
+  // "was AED 10.99 · Price went up" under a subscription whose price rose,
+  // against the price it was before (priorTypicalFils), never its average.
+  const renderAgendaMeta = (item: PaymentAgendaItem) => {
+    const sub = item.kind === 'recurring' ? subByAgendaId.get(item.id) : undefined;
+    if (!sub?.priceIncreased) return null;
+    return (
+      <ThemedText type="meta" style={{ color: theme.warning }} testID={`bills-price-up-${item.id}`}>
+        {`${w.wasPrice(formatAED(sub.priorTypicalFils))} · ${w.priceWentUp}`}
+      </ThemedText>
+    );
+  };
+
+  // A known service that has gone quiet: "Likely stopped", and the one
+  // action that says so for certain.
+  const renderStoppedRow = (sub: Subscription, i: number) => (
+    <View key={sub.title} testID={`bills-stopped-${sub.title.trim().toLowerCase()}`}
+      style={[styles.row, largeText && styles.rowLarge,
+        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }]}>
+      <Pressable accessibilityRole="button"
+        accessibilityLabel={`${sub.title}. ${w.likelyStopped}. ${tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })}`}
+        onPress={() => setDetail(sub)}
+        style={[styles.recurringIdentity, largeText && styles.rowIdentityLarge]}>
+        <MerchantAvatar title={sub.title} category={sub.category} size={32} />
+        <View style={styles.rowInfo}>
+          <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1}>{sub.title}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">
+            {`${w.likelyStopped} · ${tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })}`}
+          </ThemedText>
+        </View>
+      </Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${w.markCancelled}: ${sub.title}`}
+        testID={`bills-mark-cancelled-${sub.title.trim().toLowerCase()}`}
+        onPress={() => onMarkCancelled(sub)}
+        style={({ pressed }) => [styles.pill, { borderColor: theme.controlBorder,
+          backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+        <ThemedText type="smallBold">{w.markCancelled}</ThemedText>
+      </Pressable>
+    </View>
+  );
 
   const renderRecurringRow = (sub: Subscription, i: number) => {
     const charge = recurringChargePresentation(sub);
@@ -621,20 +645,18 @@ export default function BillsScreen() {
                   {sub.title}
                 </ThemedText>
                 {sub.priceIncreased && (
-                  <View style={[styles.badge, { backgroundColor: `${theme.warning}22` }]}>
+                  <View style={[styles.badge, { backgroundColor: theme.goldSoft }]}>
                     <ThemedText type="micro" style={{ color: theme.warning }}>
-                      {t('priceUp')}
+                      {w.priceWentUp}
                     </ThemedText>
                   </View>
                 )}
               </View>
               {/* The schedule owns the body width and wraps rather than
                   truncating, so the next-charge date survives a long merchant
-                  name. The cadence is named here ONCE — it used to be repeated
-                  verbatim in a footer under this same line, so every monthly row
-                  said "Monthly" twice. */}
+                  name. The cadence is named here ONCE. */}
               <ThemedText type="meta" themeColor="textSecondary" numberOfLines={largeText ? undefined : 2}>
-                {schedule}
+                {sub.priceIncreased ? `${schedule} · ${w.wasPrice(formatAED(sub.priorTypicalFils, { decimals: false }))}` : schedule}
               </ThemedText>
             </View>
           </View>
@@ -670,6 +692,7 @@ export default function BillsScreen() {
         contentStyle={largeText && styles.headerLarge}
         scrollProps={{ showsVerticalScrollIndicator: false }}>
         <BillsSegmentControl segment={agendaView} onChange={setAgendaView} />
+        {agendaView === 'all' && <BillsGroupFilter value={groupFilter} onChange={setGroupFilter} />}
         <View
           accessible
           accessibilityLabel={`${summary.label}. ${tf('billsSummaryPayments', {
@@ -696,41 +719,100 @@ export default function BillsScreen() {
             </>}
           </View>
         </View>
-        <PaymentAgenda
-          items={visibleAgendaItems}
-          accounts={state.accounts}
-          includePaid={includePaidAgenda}
-          group={selectedAgendaGroup}
-          onOpen={(item) => {
-          if (item.kind === 'card') {
-            const id = item.id.slice(5);
-            const due = state.cardDues.find((due) => due.id === id);
-            if (due) openCardDetail(state.accounts.find((a) => a.id === due.accountId) ?? null, item.paid ? undefined : id);
-          } else if (item.kind === 'bill') setSelectedReminderId(item.id.slice(5));
-          else {
-            const sub = detected.find((sub) => `sub-${sub.title.trim().toLowerCase()}` === item.id);
-            if (sub) setDetail(sub);
-          }
-        }} />
-        {agendaView === 'all' && otherRepeats.length > 0 && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
-          <ThemedText type="heading">{words.unscheduled}</ThemedText>
-          {otherRepeats.map(renderRecurringRow)}
-        </View>}
-        {agendaView === 'all' && stopped.length > 0 && <>
-          <Button label={showStopped ? words.fewer : words.more} variant="ghost" onPress={() => setShowStopped(!showStopped)} />
-          {showStopped && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
-            <ThemedText type="heading">{words.stopped}</ThemedText>
-            {stopped.map(renderRecurringRow)}
+        {cancelNotice && (
+          <View accessibilityLiveRegion="polite" testID="bills-cancel-notice"
+            style={[styles.notice, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+            <ThemedText type="small" style={styles.rowInfo}>{w.markedCancelled(cancelNotice)}</ThemedText>
+            <Pressable accessibilityRole="button" accessibilityLabel={`${w.undo}: ${cancelNotice}`}
+              onPress={() => undoCancelled(cancelNotice)} style={styles.noticeAction}>
+              <ThemedText type="linkPrimary">{w.undo}</ThemedText>
+            </Pressable>
+          </View>
+        )}
+        {agendaView === 'upcoming' ? <>
+          <BillsTimeline items={timelineItems} todayISO={todayISO} />
+          {(subscriptionItems.length > 0 || stopped.length > 0) && <View style={styles.block} testID="bills-subscriptions">
+            <View style={styles.blockHeader} accessible accessibilityRole="header"
+              accessibilityLabel={w.subscriptionsTotalA11y(formatAED(monthlySubscriptionsFils))}>
+              <ThemedText type="heading" style={styles.rowInfo}>{w.subscriptions}</ThemedText>
+              <ThemedText type="smallBold" themeColor="textSecondary" tabular>
+                {w.perMonth(formatAED(monthlySubscriptionsFils))}
+              </ThemedText>
+            </View>
+            {subscriptionItems.length > 0 && <PaymentAgenda
+              items={subscriptionItems}
+              accounts={state.accounts}
+              includePaid={false}
+              showNote={false}
+              renderMeta={renderAgendaMeta}
+              onOpen={openAgendaItem} />}
+            {stopped.map(renderStoppedRow)}
           </View>}
+          <View style={styles.block} testID="bills-and-cards">
+            <ThemedText type="heading" accessibilityRole="header">{w.billsAndCards}</ThemedText>
+            <PaymentAgenda
+              items={billAndCardItems}
+              accounts={state.accounts}
+              includePaid={false}
+              renderMeta={renderAgendaMeta}
+              onOpen={(item) => openAgendaItem(item)} />
+          </View>
+        </> : <>
+          <PaymentAgenda
+            items={visibleAgendaItems}
+            accounts={state.accounts}
+            includePaid={includePaidAgenda}
+            group={selectedAgendaGroup}
+            renderMeta={renderAgendaMeta}
+            onOpen={(item) => openAgendaItem(item)} />
+          {groupFilter === 'everything' && otherRepeats.length > 0 && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+            <ThemedText type="heading">{words.unscheduled}</ThemedText>
+            {otherRepeats.map(renderRecurringRow)}
+          </View>}
+          {(groupFilter === 'everything' || groupFilter === 'subscriptions') && stopped.length > 0 && <>
+            <Button label={showStopped ? words.fewer : words.more} variant="ghost" onPress={() => setShowStopped(!showStopped)} />
+            {showStopped && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+              <ThemedText type="heading">{words.stopped}</ThemedText>
+              {stopped.map(renderRecurringRow)}
+            </View>}
+          </>}
+          {(groupFilter === 'everything' || groupFilter === 'subscriptions') && cancelledList.length > 0 &&
+            <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]} testID="bills-cancelled">
+              <ThemedText type="heading">{w.cancelledByYou}</ThemedText>
+              {cancelledList.map((sub, i) => {
+                const on = cancelled?.[sub.title.trim().toLowerCase()];
+                return (
+                  <View key={sub.title} style={[styles.row, largeText && styles.rowLarge,
+                    i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }]}>
+                    <Pressable accessibilityRole="button" accessibilityLabel={`${sub.title}. ${w.cancelledByYou}`}
+                      onPress={() => setDetail(sub)} style={[styles.recurringIdentity, largeText && styles.rowIdentityLarge]}>
+                      <MerchantAvatar title={sub.title} category={sub.category} size={32} />
+                      <View style={styles.rowInfo}>
+                        <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1}>{sub.title}</ThemedText>
+                        {on && <ThemedText type="meta" themeColor="textSecondary">{w.cancelledOn(shortDate(on))}</ThemedText>}
+                      </View>
+                    </Pressable>
+                    <Pressable accessibilityRole="button" accessibilityLabel={w.stillPayingA11y(sub.title)}
+                      testID={`bills-still-paying-${sub.title.trim().toLowerCase()}`}
+                      onPress={() => undoCancelled(sub.title)}
+                      style={({ pressed }) => [styles.pill, { borderColor: theme.controlBorder,
+                        backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+                      <ThemedText type="smallBold">{w.stillPaying}</ThemedText>
+                    </Pressable>
+                  </View>
+                );
+              })}
+            </View>}
         </>}
       </ScreenScaffold>
 
-      {/* Subscription detail sheet */}
+      {/* One detail sheet for recurring charges and reminders alike (also
+          Home's). Bills hands it the actions that commit through the
+          confirmations this screen draws. */}
       {detail && (
-        <BottomSheet
-          visible
+        <BillDetailSheet
+          subscription={detail}
           onClose={() => setDetail(null)}
-          title={detail.title}
           footer={(
             <View style={[styles.detailActions, largeText && styles.detailStack]}>
               {!trackedTitles.has(detail.title.toLowerCase()) &&
@@ -757,136 +839,15 @@ export default function BillsScreen() {
                 }}
               />
             </View>
-          )}>
-            {detailData && (
-              <>
-                <View style={styles.sheetHeader}>
-                  <View style={styles.detailTitleRow}>
-                    <MerchantAvatar title={detail.title} category={detail.category} size={42} />
-                    <View style={styles.detailIdentity}>
-                      <ThemedText type="heading">
-                        {detail.title}
-                      </ThemedText>
-                      <ThemedText type="small" themeColor="textSecondary">
-                        {detail.status === 'stopped'
-                          ? tf('stoppedLastCharged', { date: shortDate(detail.lastChargedISO) })
-                          : tf('detailCadenceMonthly', {
-                              cadence: cadenceLabel(detail.cadence),
-                              amount: formatAED(detail.monthlyEquivalentFils, { decimals: false }),
-                            })}
-                      </ThemedText>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Lifetime facts */}
-                <View style={[styles.factRow, largeText && styles.detailStack]}>
-                  <View style={styles.fact}>
-                    <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
-                      {detail.category === 'loan'
-                        ? t('payingFor')
-                        : detail.group === 'subscription'
-                          ? t('subscribedFor')
-                          : t('trackingSince')}
-                    </ThemedText>
-                    <ThemedText type="smallBold">{subscribedFor(detailData.firstISO)}</ThemedText>
-                    <ThemedText type="micro" themeColor="textSecondary">
-                      {tf('walletSince', { date: shortDate(detailData.firstISO) })}
-                    </ThemedText>
-                  </View>
-                  <View style={styles.fact}>
-                    <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
-                      {detail.group === 'subscription' ? t('charges') : t('payments')}
-                    </ThemedText>
-                    <ThemedText type="smallBold" tabular>
-                      {detailData.txs.length}
-                    </ThemedText>
-                  </View>
-                  <View style={styles.fact}>
-                    <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
-                      {t('totalPaid')}
-                    </ThemedText>
-                    <ThemedText type="smallBold" tabular>
-                      {formatAED(detailData.totalFils, { decimals: false })}
-                    </ThemedText>
-                  </View>
-                </View>
-
-                {/* Which card pays it */}
-                <View style={styles.paidWith}>
-                  <ThemedText type="micro" themeColor="textSecondary">
-                    {t('paidWith')}
-                  </ThemedText>
-                  <ThemedText type="small">
-                    {[
-                      detailData.accounts.map((account) => account.name).join(', '),
-                      detailData.unknownInstrumentCount > 0
-                        ? tf('paymentInstrumentMissingCount', {
-                            count: detailData.unknownInstrumentCount,
-                            s: detailData.unknownInstrumentCount === 1 ? '' : 's',
-                          })
-                        : '',
-                    ].filter(Boolean).join(' · ')}
-                  </ThemedText>
-                </View>
-
-                {/* Charge history */}
-                <View style={styles.historyBlock}>
-                  <ThemedText type="micro" themeColor="textSecondary">
-                    {detail.group === 'subscription' ? t('history') : t('paymentHistory')}
-                  </ThemedText>
-                  <View testID="subscription-history-scroll">
-                    {detailData.txs.slice(0, 36).map((transaction, i) => {
-                      const acc = recurringPaymentAccount(transaction, state.accounts);
-                      const offMedian =
-                        detailData.medianFils > 0 &&
-                        transaction.amountFils > detailData.medianFils * 1.1;
-                      return (
-                        <View
-                          key={transaction.id}
-                          style={[
-                            styles.historyRow,
-                            largeText && styles.detailStack,
-                            i > 0 && {
-                              borderTopWidth: StyleSheet.hairlineWidth,
-                              borderTopColor: theme.cardBorder,
-                            },
-                          ]}>
-                          <View style={styles.historyIdentity}>
-                            <ThemedText type="small">{fullDateTime(transaction)}</ThemedText>
-                            <ThemedText type="micro" themeColor="textSecondary" numberOfLines={2}>
-                              {acc?.name ?? t('paymentInstrumentNotStated')}
-                            </ThemedText>
-                          </View>
-                          <ThemedText
-                            type="smallBold"
-                            tabular
-                            style={offMedian ? { color: theme.warning } : undefined}>
-                            {formatAED(transaction.amountFils, { decimals: false })}
-                          </ThemedText>
-                        </View>
-                      );
-                    })}
-                    {detailData.txs.length > 36 && (
-                      <ThemedText type="micro" themeColor="textSecondary" style={styles.historyMore}>
-                        {tf('olderCharges', { count: detailData.txs.length - 36 })}
-                      </ThemedText>
-                    )}
-                  </View>
-                  <MerchantSpendingLink merchant={detail.title} onClose={() => setDetail(null)} />
-                </View>
-
-              </>
-            )}
-        </BottomSheet>
+          )}
+        />
       )}
 
-      {/* Manual reminder detail sheet */}
+      {/* Manual reminder detail */}
       {selectedReminder && (
-        <BottomSheet
-          visible
+        <BillDetailSheet
+          bill={selectedReminder}
           onClose={() => setSelectedReminderId(null)}
-          title={selectedReminder.bill.title}
           footer={(
             <View style={[styles.detailActions, largeText && styles.detailStack]}>
               {selectedReminder.status !== 'paid' && (
@@ -912,19 +873,8 @@ export default function BillsScreen() {
                 }}
               />
             </View>
-          )}>
-          <View style={styles.reminderDetail}>
-            <ThemedText type="small" style={{ color: statusMeta(selectedReminder.status, selectedReminder.daysLeft).color }}>
-              {statusMeta(selectedReminder.status, selectedReminder.daysLeft).label} ·{' '}
-              {selectedReminder.bill.yearlyOnISO
-                ? shortDate(selectedReminder.dueISO)
-                : `${t('day')} ${selectedReminder.bill.dueDay}`}
-            </ThemedText>
-            <ThemedText type="heading" tabular>
-              {formatAED(selectedReminder.bill.amountFils, { decimals: false })}
-            </ThemedText>
-          </View>
-        </BottomSheet>
+          )}
+        />
       )}
 
       {/* Add reminder sheet */}
@@ -993,25 +943,11 @@ export default function BillsScreen() {
           onToggle={setCategory}
         />
       </BottomSheet>
+      {/* The card's own sheet records payments (Record a payment); Bills does
+          not file one from here. */}
       <CardDetailSheet
         account={cardDetail}
         onClose={closeCardDetail}
-        footer={selectedDue ? (
-          <Button
-            label={t('markPaid')}
-            onPress={() => {
-              const due = selectedDue;
-              const accountName = cardDetail?.name ?? t('card');
-              closeCardDetail();
-              onPayDue(
-                due.due.id,
-                due.remainingFils,
-                due.due.accountId,
-                accountName,
-              );
-            }}
-          />
-        ) : undefined}
       />
       <LedgerCurrencySheet
         visible={currencySheetVisible}
@@ -1048,77 +984,16 @@ const styles = StyleSheet.create({
   summaryMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
   referenceGroup: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 6 },
   headerLarge: { alignItems: 'stretch' },
-  duesBlock: {
-    gap: Spacing.one,
-    paddingBottom: Spacing.three,
+  block: { gap: Spacing.one },
+  blockHeader: { minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
+  notice: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingStart: Spacing.three,
+    borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet,
   },
-  dueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-  },
-  dueRowIdentity: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, minWidth: 0 },
-  dueRowFigure: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, maxWidth: '44%' },
-  agendaDate: { width: 76, flexShrink: 0, borderEndWidth: StyleSheet.hairlineWidth, paddingEnd: Spacing.two, paddingVertical: Spacing.two },
-  paidCardsBlock: {
-    marginTop: 18,
-    gap: Spacing.one,
-  },
-  paidCardAmount: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    flexWrap: 'wrap',
-    maxWidth: '42%',
-  },
-  cardSummary: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 12,
-    marginBottom: 6,
-    gap: Spacing.two,
-  },
-  dueFocal: { borderBottomWidth: StyleSheet.hairlineWidth, paddingBottom: 18, paddingTop: 12 },
-  deadlineHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
-  deadlineDate: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  statementHero: { paddingVertical: 12, minHeight: 48 },
-  statementBody: { gap: 12 },
-  statementAmount: { flexWrap: 'wrap' },
-  statementMinimum: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: Spacing.two },
-  statementProgress: { gap: Spacing.two },
-  statementAction: { alignSelf: 'flex-end', minWidth: 104 },
-  obligationRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 12 },
-  obligationRowLarge: { flexDirection: 'column', alignItems: 'stretch' },
-  obligationAmountLarge: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', width: '100%' },
-  dueFocalTop: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  dueFocalTitle: { flex: 1, minWidth: 0, gap: Spacing.one },
-  dueFocalOutstanding: { flex: 1, minWidth: 160, gap: Spacing.one },
-  totalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.two,
-    gap: Spacing.two,
-  },
-  totalCaption: {
-    flex: 1,
-  },
-  utilitiesBlock: {
-    gap: Spacing.one,
-  },
-  commitBlock: {
-    marginTop: 18,
-    gap: Spacing.one,
-  },
-  collapseHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.one,
+  noticeAction: { minHeight: 44, minWidth: 64, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.two },
+  pill: {
+    minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.three,
+    borderRadius: Radius.full, borderWidth: 1,
   },
   row: {
     flexDirection: 'row',
@@ -1160,50 +1035,6 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     borderRadius: Radius.full,
   },
-  hint: {
-    paddingBottom: Spacing.one,
-  },
-  empty: {
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingVertical: Spacing.six,
-  },
-  emptyIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: Radius.sheet,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyText: {
-    textAlign: 'center',
-    maxWidth: 280,
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(7, 15, 12, 0.6)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    borderTopLeftRadius: Radius.xl,
-    borderTopRightRadius: Radius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: Spacing.four,
-    paddingBottom: Spacing.five,
-    gap: Spacing.three,
-  },
-  grabber: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    marginTop: -Spacing.two,
-  },
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
   inputRow: {
     flexDirection: 'row',
     gap: Spacing.two,
@@ -1222,64 +1053,9 @@ const styles = StyleSheet.create({
   inputRowLarge: { flexDirection: 'column' },
   fieldColumn: { flex: 1 },
   dayField: { flex: 0.6 },
-  catPicker: {
-    gap: Spacing.two,
-  },
-  catChip: {
-    paddingHorizontal: Spacing.two + 4,
-    paddingVertical: Spacing.two,
-    borderRadius: Radius.full,
-    borderWidth: 1.5,
-  },
-  detailTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.two + 2,
-    flexShrink: 1,
-    paddingEnd: Spacing.two,
-  },
-  detailIdentity: { flex: 1, minWidth: 0, gap: Spacing.one },
   detailStack: { flexDirection: 'column', alignItems: 'stretch' },
-  factRow: {
-    flexDirection: 'row',
-    gap: Spacing.three,
-    // Top-aligned, so a two-line caption ("Subscribed for") does not push its
-    // own value a line below the other two and break the shared baseline.
-    alignItems: 'flex-start',
-  },
-  fact: {
-    flex: 1,
-    gap: 2,
-  },
-  // The caption sits above the figure and must reserve the taller of the
-  // three, or the column that wraps drops out of line with its neighbours.
-  factLabel: {
-    minHeight: 28,
-  },
-  paidWith: {
-    gap: 2,
-  },
-  historyBlock: {
-    gap: Spacing.one,
-  },
-  historyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.two,
-  },
-  historyIdentity: {
-    flex: 1,
-    paddingEnd: Spacing.two,
-  },
-  historyMore: {
-    paddingVertical: Spacing.two,
-  },
   detailActions: {
     flexDirection: 'row',
-    gap: Spacing.two,
-  },
-  reminderDetail: {
     gap: Spacing.two,
   },
 });

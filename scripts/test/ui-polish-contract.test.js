@@ -27,7 +27,9 @@ assert.match(add, /addTransaction/);
 const bills = code(read('src/app/(tabs)/bills.tsx'));
 const billsFilter = code(read('src/components/bills/bills-segment-control.tsx'));
 assert.match(bills, /useState<BillsSegment>\('upcoming'\)/);
-assert.match(billsFilter, /'upcoming' \| 'subscriptions' \| 'utilities' \| 'cards' \| 'all'/);
+// Two views; the payment types that were tabs are filters inside All.
+assert.match(billsFilter, /export type BillsSegment = 'upcoming' \| 'all'/);
+assert.match(billsFilter, /export type BillsGroupFilterValue = 'everything' \| 'subscriptions' \| 'utilities' \| 'cards'/);
 for (const seam of ['openDues(', 'recentlySettledDues(', 'billsForMonth(', 'billFromSubscription(']) {
   assert.ok(bills.includes(seam), `Bills lost ${seam}`);
 }
@@ -71,20 +73,20 @@ assert.match(agenda,/accessibilityRole="button"[\s\S]*?accessibilityLabel=/);
 assert.match(agenda,/onPress=\{\(\) => onOpen\(item\)\}/);
 assert.doesNotMatch(agenda,/<Button|onPayDue|payCardDue|onLongPress/);
 assert.match(interactionBills,/<PaymentAgenda[\s\S]*?onOpen=\{\(item\) =>/);
-assert.match(interactionBills,/openCardDetail\(state\.accounts\.find[\s\S]*?item\.paid \? undefined : id\)/);
-assert.match(interactionBills,/const onPayDue[\s\S]*?setConfirmation\(\{[\s\S]*?onConfirm:[\s\S]*?payCardDue\(/);
-assert.match(interactionBills, /const \[selectedDueId, setSelectedDueId\] = useState<string \| null>\(null\)/);
-assert.match(interactionBills, /const selectedDue = useMemo\([\s\S]*?dues\.find\([\s\S]*?due\.id === selectedDueId/);
-assert.match(interactionBills, /setSelectedDueId\(account \? dueId \?\? null : null\)/);
-assert.match(interactionBills, /const closeCardDetail[\s\S]*?setCardDetail\(null\)[\s\S]*?setSelectedDueId\(null\)/);
-assert.match(interactionBills, /<CardDetailSheet[\s\S]{0,900}footer=\{selectedDue \?/);
-assert.match(interactionBills, /const due = selectedDue;[\s\S]*?closeCardDetail\(\);[\s\S]*?onPayDue\(/);
+// A due opens its card's sheet; recording a payment happens there (Record a
+// payment -> the card payment sheet and its own confirmation), never from Bills.
+assert.match(interactionBills,/openCardDetail\(state\.accounts\.find\(\(a\) => a\.id === due\.accountId\) \?\? null\)/);
+assert.match(interactionBills, /<CardDetailSheet[\s\S]{0,200}account=\{cardDetail\}/);
+assert.doesNotMatch(interactionBills, /payCardDue\(/);
+const cardSheetForBills = code(read('src/components/card-detail-sheet.tsx'));
+assert.match(cardSheetForBills, /w\.recordPayment[\s\S]*?setPaying\(statement\)/);
+assert.match(cardSheetForBills, /<CardPaymentSheet due=\{paying\}/);
 
 const subscriptionDetail = interactionBills.match(
   /\{detail && \([\s\S]*?(?=\n\s*\{selectedReminder && \()/,
 )?.[0] ?? '';
 assert.ok(subscriptionDetail.length > 0, 'subscription detail was not found');
-assert.match(subscriptionDetail, /<BottomSheet[\s\S]*?footer=/);
+assert.match(subscriptionDetail, /<BillDetailSheet[\s\S]*?footer=/);
 assert.match(subscriptionDetail, /remindable\(detail\)[\s\S]*?addBill\(billFromSubscription\(detail\)\)/);
 assert.match(subscriptionDetail, /const sub = detail;[\s\S]*?setDetail\(null\);[\s\S]*?onDismissSub\(sub\)/);
 
@@ -99,7 +101,7 @@ const manualDetail = interactionBills.match(
   /\{selectedReminder && \([\s\S]*?(?=\n\s*<BottomSheet[\s\n]*visible=\{adderVisible\})/,
 )?.[0] ?? '';
 assert.ok(manualDetail.length > 0, 'manual reminder detail was not found');
-assert.match(manualDetail, /<BottomSheet[\s\S]*?footer=\{\([\s\S]*?t\('markPaid'\)[\s\S]*?t\('delete'\)/);
+assert.match(manualDetail, /<BillDetailSheet[\s\S]*?footer=\{\([\s\S]*?t\('markPaid'\)[\s\S]*?t\('delete'\)/);
 assert.match(manualDetail, /const reminder = selectedReminder;[\s\S]*?setSelectedReminderId\(null\);[\s\S]*?onPay\(reminder\.bill\.id\)/);
 assert.match(manualDetail, /const reminder = selectedReminder;[\s\S]*?setSelectedReminderId\(null\);[\s\S]*?onLongPressBill\(reminder\.bill\.id/);
 
@@ -227,15 +229,19 @@ assert.match(task5Bills, /const billsHeader: ScreenHeaderProps = \{/);
 assert.match(task5Bills, /title: t\('billsTitle'\)[\s\S]*?label: t\('newReminder'\)[\s\S]*?icon: 'plus'/);
 assert.match(task5Bills, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/);
 assert.equal((task5Bills.match(/<ScrollView/g) ?? []).length, 0, 'Bills history shares the BottomSheet scroller');
-assert.match(task5Bills, /detailData\.txs\.slice\(0, 36\)/);
-assert.match(task5Bills, /<MerchantSpendingLink merchant=\{detail\.title\}/);
-assert.match(task5Bills, /testID="subscription-history-scroll"/);
+// Charge history lives in the one shared bill detail sheet now.
+const task5BillSheet = read('src/components/bill-detail-sheet.tsx');
+assert.equal((task5BillSheet.match(/<ScrollView/g) ?? []).length, 0, 'bill history shares the BottomSheet scroller');
+assert.match(task5BillSheet, /data\.txs\.slice\(0, 36\)/);
+assert.match(task5BillSheet, /<MerchantSpendingLink merchant=\{subscription\.title\}/);
+assert.match(task5BillSheet, /testID="subscription-history-scroll"/);
 assert.match(task5Bills,/<BillsSegmentControl[\s\S]*?segment=\{agendaView\}[\s\S]*?onChange=\{setAgendaView\}/);
 assert.match(task5Segments,/role="tablist"/);
 assert.match(task5Segments,/accessibilityState=\{\{ selected:/);
 assert.ok(Number(task5Segments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
 assert.doesNotMatch(task5Segments,/numberOfLines/);
-for (const label of ['refUpcoming','subscriptionsSeg','utilitiesSeg','cardsSeg','refAll']) assert.ok(task5Segments.includes(`t('${label}')`));
+// Next 30 days / All, and the payment types as filters inside All.
+for (const label of ['w.next30Days', 'w.allBills', 'w.everything', 'agenda.subscriptions', 'agenda.utilities', 'agenda.cards']) assert.ok(task5Segments.includes(label), label);
 assert.equal((task5Bills.match(/<TextField/g) ?? []).length, 3, 'Bills reminder adder has exactly three shared fields');
 assert.doesNotMatch(task5Bills, /<TextInput/);
 assert.match(task5Bills, /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/);
@@ -244,7 +250,7 @@ const task6Wallet = read('src/app/(tabs)/wallet.tsx');
 assert.match(task6Wallet, /const walletHeader: ScreenHeaderProps = \{/);
 assert.match(task6Wallet, /title: t\('walletTitle'\)[\s\S]*?label: t\('settingsTitle'\)[\s\S]*?icon: 'sliders'[\s\S]*?label: t\('newAccount'\)[\s\S]*?icon: 'plus'/);
 assert.match(task6Wallet, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{walletHeader\}/);
-assert.match(task6Wallet, /const openAccount = \(account: Account\)[\s\S]*?router\.push\(`\/cards\?card=\$\{account\.id\}`\)[\s\S]*?setOptionsFor\(account\)/);
+assert.match(task6Wallet, /const openAccount = \(account: Account\)[\s\S]*?router\.push\(`\/cards\?card=\$\{account\.id\}`\)[\s\S]*?router\.push\(`\/account\?id=\$\{encodeURIComponent\(account\.id\)\}`\)[\s\S]*?setOptionsFor\(account\)/);
 assert.match(task6Wallet, /<AccountGroups[\s\S]*?onManage=\{setOptionsFor\}/);
 assert.match(task6Wallet, /accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/);
 

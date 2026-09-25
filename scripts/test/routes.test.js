@@ -397,12 +397,14 @@ function sources(dir = SRC) {
     'payCardDue',
     'deleteBill',
     'setNotSubscription',
+    'setSubscriptionCancelled',
     'addBill',
     'setPro',
   ];
 
   const screens = {
-    'app/(tabs)/bills.tsx': ['markBillPaid', 'payCardDue', 'deleteBill', 'setNotSubscription'],
+    // Card payments are recorded from the card's own payment sheet (below).
+    'app/(tabs)/bills.tsx': ['markBillPaid', 'deleteBill', 'setNotSubscription', 'setSubscriptionCancelled'],
     'components/card-payment-sheet.tsx': ['payCardDue'],
   };
 
@@ -461,9 +463,9 @@ function sources(dir = SRC) {
     // one sheet that renders them is handed that same callback.
     const wired = [
       /onConfirm: \(\) =>\s*markBillPaid\(/,
-      /onConfirm: \(\) =>\s*payCardDue\(/,
       /onConfirm: \(\) =>\s*deleteBill\(/,
       /onConfirm: \(\) =>\s*setNotSubscription\(/,
+      /onConfirm: \(\) => \{\s*setSubscriptionCancelled\(/,
     ].filter((re) => re.test(bills));
     ok(`every Bills commit hangs off a confirmation (${wired.length} of 4)`, wired.length === 4);
     ok('Bills draws the confirmation it gates on',
@@ -472,7 +474,7 @@ function sources(dir = SRC) {
     // The wording is the part of this that was never broken. Pin the keys so a
     // later rewrite of the mechanism cannot quietly take the copy with it.
     const keys = [
-      'markBillPaidTitle', 'billRecordsExpense', 'payAccountTitle', 'payAccountBody',
+      'markBillPaidTitle', 'billRecordsExpense',
       'deleteReminderTitle', 'deleteReminderBody', 'notASubscriptionQ', 'removeSubscriptionBody',
     ];
     const lost = keys.filter((k) => !bills.includes(`'${k}'`));

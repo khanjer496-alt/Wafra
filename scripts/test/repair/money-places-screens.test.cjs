@@ -145,3 +145,108 @@ test('Arabic account detail is Arabic', () => {
   const tree = renderAccount(h, { id: 'enbd' });
   assert.match(text(byId(tree, 'account-detail-flow')), /المسجّل وارداً هذا الشهر/);
 });
+
+/* ── Bills ─────────────────────────────────────────────────────────── */
+
+const gym = { title: 'City Gym', category: 'entertainment', lastAmountFils: 3900, avgAmountFils: 3900, monthlyEquivalentFils: 3900,
+  priorTypicalFils: 3900, cadence: 'monthly', status: 'stopped', group: 'subscription', nextExpectedISO: '2026-07-20',
+  lastChargedISO: '2026-06-20', chargeCount: 5, paymentHistory: false, priceIncreased: false };
+const spotifyUp = { title: 'Spotify', category: 'entertainment', lastAmountFils: 1199, avgAmountFils: 1199, monthlyEquivalentFils: 1199,
+  priorTypicalFils: 1099, cadence: 'monthly', status: 'active', group: 'subscription', nextExpectedISO: '2026-09-18',
+  lastChargedISO: '2026-08-18', chargeCount: 6, paymentHistory: false, priceIncreased: true };
+const netflix = { title: 'Netflix', category: 'entertainment', lastAmountFils: 1549, avgAmountFils: 1549, monthlyEquivalentFils: 1549,
+  priorTypicalFils: 1549, cadence: 'monthly', status: 'active', group: 'subscription', nextExpectedISO: '2026-09-12',
+  lastChargedISO: '2026-08-12', chargeCount: 6, paymentHistory: false, priceIncreased: false };
+
+function billsWith(detected, options = {}) {
+  const h = createHarness({ platform: 'ios', ...options });
+  const real = h.deps['@/lib/subscriptions'];
+  h.deps['@/lib/subscriptions'] = { ...real, detectSubscriptions: () => detected,
+    activeSubscriptions: (s) => s.filter((x) => x.status === 'active'),
+    stoppedSubscriptions: (s) => s.filter((x) => x.status === 'stopped'),
+    trueSubscriptions: (s) => s.filter((x) => x.group === 'subscription') };
+  return h;
+}
+
+test('a price rise says what it was, from the prior price, never the average', () => {
+  const tree = billsWith([netflix, spotifyUp]).render('bills');
+  assert.match(text(byId(tree, 'bills-price-up-sub-spotify')), /was AED 10.99 · Price went up/);
+  assert.equal(byId(tree, 'bills-price-up-sub-netflix'), undefined);
+});
+
+test('the subscriptions heading carries the monthly-equivalent total, without cancelled ones', () => {
+  const tree = billsWith([netflix, spotifyUp, gym]).render('bills');
+  assert.match(text(byId(tree, 'bills-subscriptions')), /AED 27.48 \/ month/);
+  const cancelled = billsWith([netflix, spotifyUp], { state: { cancelledSubscriptions: { spotify: '2026-09-01' } } }).render('bills');
+  assert.match(text(byId(cancelled, 'bills-subscriptions')), /AED 15.49 \/ month/);
+  assert.doesNotMatch(text(byId(cancelled, 'bills-subscriptions')), /Spotify/);
+});
+
+test('a likely-stopped subscription offers Mark as cancelled behind a confirmation', () => {
+  const h = billsWith([netflix, gym]);
+  const tree = h.render('bills');
+  assert.match(text(byId(tree, 'bills-stopped-city gym')), /Likely stopped/);
+  press(byId(tree, 'bills-mark-cancelled-city gym'));
+  assert.equal(h.events.some((e) => e[0] === 'setSubscriptionCancelled'), false, 'nothing commits before confirming');
+  const confirmation = h.events.find((e) => e[0] === 'state' && typeof e[2]?.onConfirm === 'function')[2];
+  assert.match(confirmation.question, /Mark City Gym as cancelled\?/);
+  confirmation.onConfirm();
+  assert.deepEqual(h.events.filter((e) => e[0] === 'setSubscriptionCancelled').map((e) => e.slice(1)), [['City Gym', '2026-09-15']]);
+  assert.equal(h.events.some((e) => e[0] === 'setNotSubscription'), false, 'cancelled is not Not-a-subscription');
+});
+
+test('All lists what the user cancelled, with a Still paying undo', () => {
+  const h = billsWith([netflix, gym], { states: { 0: 'all' }, state: { cancelledSubscriptions: { 'city gym': '2026-09-01' } } });
+  const tree = h.render('bills');
+  assert.match(text(byId(tree, 'bills-cancelled')), /Cancelled by you[\s\S]*City Gym/);
+  press(byId(tree, 'bills-still-paying-city gym'));
+  assert.deepEqual(h.events.filter((e) => e[0] === 'setSubscriptionCancelled').map((e) => e.slice(1)), [['City Gym', null]]);
+});
+
+test('the 30-day timeline speaks its pins and leaves out anything beyond the window', () => {
+  // The harness's today is 15 Sep 2026.
+  const tree = billsWith([{ ...netflix, nextExpectedISO: '2026-09-20' }, { ...spotifyUp, nextExpectedISO: '2026-11-30' }]).render('bills');
+  const label = byId(tree, 'bills-timeline').props.accessibilityLabel;
+  assert.match(label, /^1 payment in the next 30 days: Netflix/);
+  assert.match(label, /Netflix/);
+  assert.doesNotMatch(label, /Spotify/);
+});
+
+function renderBillSheet(h, props) {
+  if (!h.deps['@/components/ui/layout']) {
+    h.deps['@/components/ui/section-header'] = { SectionHeader: (p) => h.jsx('SectionHeader', p) };
+    h.local('@/components/ui/layout');
+  }
+  return load(path.join(root, 'src/components/bill-detail-sheet.tsx'), h.deps).BillDetailSheet({ onClose() {}, ...props });
+}
+
+test('the bill sheet says an estimate is an estimate, and its reminder copy matches the scheduler', () => {
+  const h = createHarness();
+  const sheet = renderBillSheet(h, { subscription: spotifyUp });
+  const amount = text(byId(sheet, 'bill-detail-amount'));
+  assert.match(amount, /≈[\s\S]*Estimate from your last 3 charges/);
+  assert.match(amount, /was AED 10.99 · Price went up/);
+  assert.match(text(sheet), /reminds you the day before it renews/);
+  assert.doesNotMatch(text(sheet), /3 days before|three days/i);
+  const bill = renderBillSheet(h, { bill: { bill: h.state.bills[0], status: 'upcoming', daysLeft: 2, dueISO: '2026-09-08' } });
+  assert.match(text(bill), /the day before and on the day/);
+  assert.doesNotMatch(text(bill), /Mark paid|Record as paid/, 'the screen owns mark-paid, through its confirmation');
+});
+
+test('a detected reminder cannot be edited; a hand-made one saves through editBill', () => {
+  const h = createHarness();
+  const detected = renderBillSheet(h, { bill: { bill: { ...h.state.bills[0], autoDetected: true }, status: 'upcoming', daysLeft: 2, dueISO: '2026-09-08' } });
+  assert.match(text(detected), /cannot be edited here/);
+  const editing = createHarness({ states: { 1: true, 2: 'DEWA home', 3: '350', 4: '9' } });
+  const form = renderBillSheet(editing, { bill: { bill: editing.state.bills[0], status: 'upcoming', daysLeft: 2, dueISO: '2026-09-08' } });
+  assert.ok(byId(form, 'bill-detail-edit'));
+  walk(form).find((n) => n.props?.accessibilityLabel === 'Save bill').props.onPress();
+  assert.deepEqual(JSON.parse(JSON.stringify(editing.events.filter((e) => e[0] === 'editBill'))),
+    [['editBill', 'dewa', { title: 'DEWA home', amountFils: 35000, dueDay: 9 }]]);
+});
+
+test('Arabic Bills speaks Arabic in the new sections', () => {
+  const tree = billsWith([netflix, spotifyUp], { language: 'ar' }).render('bills');
+  assert.match(text(byId(tree, 'bills-subscriptions')), /الاشتراكات/);
+  assert.match(text(byId(tree, 'bills-price-up-sub-spotify')), /ارتفع السعر/);
+});

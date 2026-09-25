@@ -1165,7 +1165,8 @@ function bodyOf(source, header) {
   ok('Bills never restarts recurrence from row zero on tab churn',
     /UPCOMING_RECURRENCE_IDLE_MS\s*=\s*4_000/.test(bills) &&
       /needsRecurrenceNow/.test(bills) &&
-      /agendaView === 'cards'/.test(bills) &&
+      // All with only the cards filter never needs recurrence.
+      /groupFilter === 'cards'/.test(bills) &&
       /subscriptionDetectionInFlight/.test(subscriptions) &&
       /if \(existing\) return existing\.promise/.test(subscriptions) &&
       /callers simply ignore the eventual value/.test(read('src/lib/subscriptions.ts')),
@@ -1173,11 +1174,11 @@ function bodyOf(source, header) {
 
   ok('default Upcoming does not start recurrence in the navigation-critical window',
     /else delay = setTimeout\(startProjection, UPCOMING_RECURRENCE_IDLE_MS\)/.test(bills) &&
-      /agendaView === 'subscriptions' \|\| agendaView === 'utilities' \|\| agendaView === 'all'/.test(bills),
+      /const needsRecurrenceNow = agendaView === 'all'/.test(bills),
     'cards/manual bills must paint immediately; only an explicit recurrence view may bypass the idle grace');
 
   ok('Bills does not compute recently-paid card history for the default Upcoming view',
-    /const needsPaidCards = agendaView === 'cards' \|\| agendaView === 'all'/.test(bills) &&
+    /const needsPaidCards = agendaView === 'all' && \(groupFilter === 'everything' \|\| groupFilter === 'cards'\)/.test(bills) &&
       /needsPaidCards[\s\S]*?bills-paid-cards[\s\S]*?recentlySettledDues\(state, now\)[\s\S]*?: \[\]/.test(bills),
     'recent settled statements are invisible on Upcoming and must not block the first Bills tap');
 
