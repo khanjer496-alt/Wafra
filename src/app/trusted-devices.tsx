@@ -605,24 +605,35 @@ export default function TrustedDevicesScreen() {
                 />
               ) : (
                 <Block style={styles.inviteCard}>
-                  <View style={styles.inviteTop}>
-                    <View>
-                      <ThemedText type="smallBold">{t('trustedInviteReady', language)}</ThemedText>
-                      <ThemedText type="meta" themeColor="textTertiary">
-                        {secondsLeft > 0
-                          ? tf('trustedInviteCountdown', {
-                              minutes: Math.floor(secondsLeft / 60),
-                              seconds: String(secondsLeft % 60).padStart(2, '0'),
-                            }, language)
-                          : t('trustedInviteExpired', language)}
-                      </ThemedText>
-                    </View>
-                    <View style={[styles.timer, { borderColor: secondsLeft > 0 ? theme.primaryBorder : theme.cardBorder }]}>
-                      <ThemedText type="nano" tabular style={{ color: secondsLeft > 0 ? theme.primary : theme.textTertiary }}>
-                        {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}
-                      </ThemedText>
-                    </View>
+                  {/* The countdown is the hero: how long the one-use invite
+                      stays valid. It is announced once as a sentence, not
+                      re-read every second. */}
+                  <View
+                    testID="trusted-invite-countdown"
+                    accessible
+                    accessibilityLabel={secondsLeft > 0
+                      ? tf('trustedInviteCountdown', {
+                          minutes: Math.floor(secondsLeft / 60),
+                          seconds: String(secondsLeft % 60).padStart(2, '0'),
+                        }, language)
+                      : t('trustedInviteExpired', language)}
+                    style={styles.inviteHero}>
+                    <ThemedText type="smallBold">{t('trustedInviteReady', language)}</ThemedText>
+                    <ThemedText
+                      type="display"
+                      tabular
+                      style={{ color: secondsLeft > 0 ? theme.text : theme.textTertiary }}>
+                      {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}
+                    </ThemedText>
+                    <ThemedText type="meta" themeColor="textSecondary">
+                      {secondsLeft > 0
+                        ? t('trustedInviteUntilExpiry', language)
+                        : t('trustedInviteExpired', language)}
+                    </ThemedText>
                   </View>
+                  <ThemedText type="meta" themeColor="textSecondary">
+                    {t('trustedRelayOnly', language)}
+                  </ThemedText>
                   <ThemedText type="meta" themeColor="textSecondary">
                     {t('trustedInvitePrivacy', language)}
                   </ThemedText>
@@ -822,8 +833,7 @@ const styles = StyleSheet.create({
   deviceTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   badge: { borderRadius: Radius.chip, paddingHorizontal: 6, paddingVertical: 3 },
   inviteCard: { gap: Spacing.three },
-  inviteTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
-  timer: { borderWidth: 1, borderRadius: Radius.chip, paddingHorizontal: Spacing.two, paddingVertical: 6 },
+  inviteHero: { alignItems: 'center', gap: Spacing.one, paddingVertical: Spacing.two },
   dangerSection: { gap: Spacing.two },
   field: { gap: Spacing.two },
   codeInput: {

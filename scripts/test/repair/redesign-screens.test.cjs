@@ -46,3 +46,13 @@ test('Pro copy is paired and sells only what Pro gates', () => {
   assert.match(pro, /accessibilityRole="radio"/);
   assert.match(pro, /t\('proOutcomeTitle'\)/);
 });
+
+test('Trusted devices shows the invite countdown as its hero and says what is relayed', () => {
+  const screen = read('src/app/trusted-devices.tsx');
+  const i18n = read('src/lib/i18n.ts');
+  assert.match(screen, /testID="trusted-invite-countdown"[\s\S]{0,900}type="display"[\s\S]{0,200}secondsLeft \/ 60/);
+  assert.match(screen, /t\('trustedRelayOnly', language\)/);
+  assert.match(i18n, /trustedRelayOnly: \{\s*en: 'The phone that joins receives only new items relayed after it joins\. Older transactions are not copied\.'/);
+  // The board's "Share one ledger" promise is not made anywhere.
+  assert.doesNotMatch(i18n, /Share one ledger/);
+});

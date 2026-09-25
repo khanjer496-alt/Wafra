@@ -1069,6 +1069,13 @@ const S = {
   trustedInviteReady: { en: 'One-use invite ready', ar: 'الدعوة صالحة لاستخدام واحد' },
   trustedInviteCountdown: { en: 'Expires in {minutes}:{seconds}', ar: 'تنتهي خلال {minutes}:{seconds}' },
   trustedInviteExpired: { en: 'This invite has expired', ar: 'انتهت صلاحية هذه الدعوة' },
+  trustedInviteUntilExpiry: { en: 'until it expires', ar: 'حتى تنتهي صلاحيتها' },
+  // Relay-only: a phone that joins receives items relayed AFTER it joins.
+  // Nothing already in the ledger is copied to it.
+  trustedRelayOnly: {
+    en: 'The phone that joins receives only new items relayed after it joins. Older transactions are not copied.',
+    ar: 'يستقبل الهاتف المنضم فقط العناصر الجديدة المرسلة عبر المرحّل بعد انضمامه. لا تُنسخ العمليات السابقة.',
+  },
   trustedInvitePrivacy: {
     en: 'The invite contains a short-lived enrollment token and relay address only—no balances, transactions, bank details, or device secrets.',
     ar: 'تحتوي الدعوة فقط على رمز انضمام قصير الصلاحية وعنوان المرحّل — بلا أرصدة أو عمليات أو بيانات بنكية أو أسرار الجهاز.',
