@@ -6,7 +6,9 @@
  *
  * Truth rules:
  * - Android names READ_SMS "send and view"; Wafra never sends or replies, and
- *   one-time codes are skipped. SMS stay on the phone (they are not uploaded).
+ *   one-time codes are skipped. SMS stay on the phone: they are not uploaded
+ *   unless the user chooses to send a report (the accuracy or feedback report
+ *   can carry masked message text).
  * - The ready summary only reports what the ledger holds, and says so while
  *   imports are still being read.
  */
@@ -29,7 +31,7 @@ const en = {
   smsExplainerTitle: 'Read bank alerts',
   smsExplainerBody: 'Wafra reads bank SMS on this phone and ignores everything else.',
   smsExplainerSystemName: 'Android calls this permission “send and view SMS messages”.',
-  smsExplainerNever: 'Wafra never sends or replies to messages, and it skips one-time codes. Your SMS are not uploaded.',
+  smsExplainerNever: 'Wafra never sends or replies to messages, and it skips one-time codes. Your SMS are not uploaded unless you choose to send a report.',
   smsExplainerContinue: 'Continue',
   smsExplainerNotNow: 'Not now',
   // Ready summary
@@ -60,7 +62,7 @@ const ar: OnboardingCopy = {
   smsExplainerTitle: 'قراءة تنبيهات البنك',
   smsExplainerBody: 'يقرأ وفرة رسائل البنك على هذا الهاتف ويتجاهل كل ما عداها.',
   smsExplainerSystemName: 'يسمّي أندرويد هذا الإذن «إرسال رسائل SMS وعرضها».',
-  smsExplainerNever: 'لا يرسل وفرة أي رسالة ولا يرد عليها، ويتجاوز رموز التحقق. لا تُرفع رسائلك.',
+  smsExplainerNever: 'لا يرسل وفرة أي رسالة ولا يرد عليها، ويتجاوز رموز التحقق. لا تُرفع رسائلك إلا إذا اخترت إرسال تقرير.',
   smsExplainerContinue: 'متابعة',
   smsExplainerNotNow: 'ليس الآن',
   readyMonths: (months: number) => arabicCount(months, {

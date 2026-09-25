@@ -83,6 +83,9 @@ test('first-run copy is paired and the SMS explainer is truthful', () => {
   const en = ONBOARDING_COPY.en;
   assert.match(en.smsExplainerSystemName, /send and view/);
   assert.match(en.smsExplainerNever, /never sends/);
+  // A report the user chooses to send can carry message text, so "not uploaded" is qualified.
+  assert.match(en.smsExplainerNever, /not uploaded unless you choose to send a report\.$/);
+  assert.match(ONBOARDING_COPY.ar.smsExplainerNever, /لا تُرفع رسائلك إلا إذا اخترت إرسال تقرير\.$/);
   // "Regular payments", never "bills": the result card above already counts
   // recognised bills, and the two numbers describe different things.
   assert.equal(en.foundRecurring(4, 2), 'Repeating charges found: 4 subscriptions and 2 other regular payments. They are in Bills.');
