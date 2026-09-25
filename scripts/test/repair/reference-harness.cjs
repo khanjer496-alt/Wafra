@@ -118,6 +118,12 @@ function createHarness(options = {}) {
     useAnimatedStyle:f=>f(),useSharedValue:v=>({value:v}),withSpring:v=>v,withTiming:v=>v,withDelay:(_d,v)=>v,Easing:{bezier:()=>null},interpolate:(v,a,b)=>b[0]+(v-a[0])/(a[1]-a[0])*(b[1]-b[0])};
   deps['react-native-svg']={__esModule:true,default:'svg',Circle:'circle',Line:'line',Path:'path',Rect:'rect',Defs:'defs',LinearGradient:'linearGradient',Stop:'stop'};
   const local=(name,filename)=>deps[name]=load(path.join(root,filename??name.replace('@/', 'src/')+'.tsx'),deps,{Date:Clock});
+  // Ask Wafra redesign: its copy runs from source; the answer extras are a
+  // presentational boundary with their own tests.
+  deps['@/lib/biometric-kind']=load(path.join(root,'src/lib/biometric-kind.ts'));
+  deps['@/lib/settings-copy']=load(path.join(root,'src/lib/settings-copy.ts'),deps);
+  deps['@/lib/assistant-screen-copy']=load(path.join(root,'src/lib/assistant-screen-copy.ts'),deps);
+  deps['@/components/assistant-answer-extras']={AssistantPaymentRows:p=>jsx('PaymentRows',p),AssistantMonthChart:p=>jsx('MonthChart',p)};
   deps['@react-native-async-storage/async-storage']={getItem:async()=>null,setItem:async()=>{}};
   local('@/lib/home-widget-preferences','src/lib/home-widget-preferences.ts');
   local('@/lib/home-today','src/lib/home-today.ts');

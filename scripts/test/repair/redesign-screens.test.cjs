@@ -142,6 +142,23 @@ test('iPhone checklist marks a step done only from recorded evidence', () => {
   assert.deepEqual(done({ ...base, firstCapturedAt: Date.UTC(2026, 8, 25) }), [true, true, true, true]);
 });
 
+test('Ask Wafra copy is paired; the evidence count counts distinct transactions', () => {
+  const kind = load(path.join(root, 'src/lib/biometric-kind.ts'));
+  const settings = load(path.join(root, 'src/lib/settings-copy.ts'), { '@/lib/biometric-kind': kind });
+  const copy = load(path.join(root, 'src/lib/assistant-screen-copy.ts'), { '@/lib/settings-copy': settings });
+  assertParity(copy.ASSISTANT_SCREEN_COPY.en, copy.ASSISTANT_SCREEN_COPY.ar);
+  assert.equal(copy.ASSISTANT_SCREEN_COPY.en.seeTransactions(1), 'See 1 transaction');
+  assert.equal(copy.ASSISTANT_SCREEN_COPY.en.seeTransactions(23), 'See 23 transactions');
+  assert.equal(copy.evidenceTransactionCount([{ transactionIds: ['a', 'b'] }, { transactionIds: ['b', 'c'] }]), 3);
+  assert.equal(copy.evidenceTransactionCount(undefined), 0);
+  const screen = read('src/app/assistant.tsx');
+  // The chart and the rows draw only what the executor computed.
+  assert.match(screen, /turn\.answer\.monthlySeries\?\.length && ledgerMoney \? <AssistantMonthChart/);
+  assert.match(screen, /turn\.answer\.payments\?\.length && ledgerMoney \? <AssistantPaymentRows/);
+  // The affordability chip from the board is not added.
+  assert.doesNotMatch(screen, /afford/i);
+});
+
 test('Trusted devices shows the invite countdown as its hero and says what is relayed', () => {
   const screen = read('src/app/trusted-devices.tsx');
   const i18n = read('src/lib/i18n.ts');

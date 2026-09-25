@@ -119,7 +119,7 @@ async function proof(page, expectedTotal, expectedCount, expectedContributions, 
   return { total: expectedTotal, count: expectedCount, values, text: await sheet.innerText() };
 }
 async function answerProof(page, answer, expectedTotal, expectedCount, expectedContributions) {
-  await click(answer.getByRole('button', { name: 'View transactions', exact: true }));
+  await click(answer.getByRole('button', { name: /^See \d+ transactions?$/ }));
   const value = await proof(page, expectedTotal, expectedCount, expectedContributions);
   await close(evidence(page));
   return value;
@@ -211,7 +211,7 @@ try {
         const exclude = await ask(page, 'Exclude Main Market');
         const cafeOnly = await answerProof(page, exclude, 6000, 2, [2000, 4000]);
         const comparison = await ask(page, 'Compare last month');
-        await click(comparison.getByRole('button', { name: 'View transactions', exact: true }));
+        await click(comparison.getByRole('button', { name: /^See \d+ transactions?$/ }));
         const current = await proof(page, 6000, 2, [2000, 4000], 'First period');
         const previous = await proof(page, 4000, 2, [1000, 3000], 'Comparison period');
         await close(evidence(page));
@@ -222,7 +222,7 @@ try {
         await ask(page, 'How much did I spend this month?');
         await answerProof(page, await ask(page, 'Exclude rent'), 32000, 6);
         const comparison = await ask(page, 'Compare last month');
-        await click(comparison.getByRole('button', { name: 'View transactions', exact: true }));
+        await click(comparison.getByRole('button', { name: /^See \d+ transactions?$/ }));
         const current = await proof(page, 32000, 6, undefined, 'First period');
         const previous = await proof(page, 25000, 6, undefined, 'Comparison period');
         assert.match(current.text, /2026-09-01/); assert.match(previous.text, /2026-08-01/);
@@ -254,7 +254,7 @@ try {
         const before = await turns(page).count();
         await click(mixed.getByRole('button', { name: 'Explore this', exact: true }));
         const explored = turns(page).nth(before); await explored.waitFor({ state: 'visible' });
-        await click(explored.getByRole('button', { name: 'View transactions', exact: true }));
+        await click(explored.getByRole('button', { name: /^See \d+ transactions?$/ }));
         const exploredCurrent = await proof(page, 9000, 1, [9000], 'First period');
         const exploredPrevious = await proof(page, 7000, 1, [7000], 'Comparison period');
         assert.ok(exploredCurrent.text.includes('Everyday account') && !exploredCurrent.text.includes('Reserve account'));
