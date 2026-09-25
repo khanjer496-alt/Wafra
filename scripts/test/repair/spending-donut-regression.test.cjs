@@ -4,51 +4,72 @@ const assert = require('node:assert/strict');
 const { createHarness, walk, text } = require('./reference-harness.cjs');
 
 const noop = () => {};
+const rows = [
+  ['utilities', 57_037_283],
+  ['dining', 32_591_910],
+  ['loan', 20_951_942],
+  ['shopping', 19_981_345],
+  ['other', 14_161_961],
+  ['transport', 49_275_024],
+].map(([category, spentFils]) => ({ category, spentFils, limitFils: null, ratio: null, remainingFils: null }));
 const renderOverview = (h, overrides = {}) => h.deps['@/components/spending/spending-overview'].SpendingOverview({
-  periodLabel: 'All time',
   totalFils: 193_999_465,
-  rows: [
-    ['utilities', 57_037_283],
-    ['dining', 32_591_910],
-    ['loan', 20_951_942],
-    ['shopping', 19_981_345],
-    ['other', 14_161_961],
-    ['transport', 49_275_024],
-  ].map(([category, spentFils]) => ({ category, spentFils, limitFils: null, ratio: null, remainingFils: null })),
+  rows,
   monthScoped: false,
   filter: 'all',
   onFilter: noop,
-  onPeriod: noop,
   onCategory: noop,
   onNewLimit: noop,
   ...overrides,
 });
+renderOverview.rows = rows;
 
-test('Spending share bar keeps large totals exact and distinguishes the aggregate tail from real Other', () => {
+// Design language E: the total and the share bar sit on Spending's clay band
+// (SpendingCategoriesBand); the rows that add up to it stay on the sheet.
+const renderBand = (h, overrides = {}) => h.deps['@/components/spending/spending-band'].SpendingCategoriesBand({
+  palette: h.deps['@/hooks/use-band'].useBand('spending'),
+  label: 'Spent in All time',
+  totalFils: 193_999_465,
+  paceLabel: null,
+  rows: renderOverview.rows,
+  ...overrides,
+});
+
+test('Spending share bar keeps large totals exact, one tone, the top three named and the rest counted', () => {
   const h = createHarness({ width: 390 });
-  const tree = renderOverview(h);
+  const tree = renderBand(h);
   const bar = walk(tree).find((node) => node.props?.testID === 'spending-share-bar');
   assert.ok(bar, 'one stacked share bar replaces the donut');
   assert.equal(walk(tree).some((node) => node.type === 'CategoryDonut'), false);
-  const segments = walk(bar).filter((node) => String(node.props?.testID ?? '').startsWith('spending-share-segment-'));
-  assert.deepEqual(segments.map((node) => node.props.testID.replace('spending-share-segment-', '')),
-    ['utilities', 'dining', 'loan', 'shopping', 'other', '__tail']);
-  // Segment widths are the exact minor-unit values, not rounded percentages.
-  assert.equal(segments[0].props.style[1].flexGrow, 57_037_283);
-  assert.equal(segments.at(-1).props.style[1].flexGrow, 49_275_024);
-  // The picture is one accessible image whose label lists every share; the
-  // real "Other" category and the pooled tail keep different names.
-  assert.equal(bar.props.accessibilityRole, 'image');
-  assert.match(bar.props.accessibilityLabel, /Other \d/);
-  assert.match(bar.props.accessibilityLabel, /Other categories \d/);
-  assert.match(text(tree), /1,939,994\.65/, 'The exact total, including cents, remains visible');
+  const image = walk(bar).find((node) => node.props?.accessibilityRole === 'image');
+  const segments = image.props.children;
+  // Biggest first; widths are the exact minor-unit values, not rounded percentages.
+  assert.deepEqual(segments.map((node) => node.props.style[1].flexGrow),
+    [57_037_283, 49_275_024, 32_591_910, 20_951_942, 19_981_345, 14_161_961]);
+  // One tone: every segment is the band's own text colour, never a category hue.
+  const band = h.deps['@/hooks/use-band'].useBand('spending');
+  assert.ok(segments.every((node) => node.props.style[1].backgroundColor === band.onBand));
+  // One accessible image naming the three biggest and counting the rest; the
+  // real "Other" category and the pooled rest keep different names.
+  assert.match(image.props.accessibilityLabel, /Utilities 30%, Transport 25%, Dining 17%, 3 other categories 28%/);
+  const withOther = renderBand(h, { rows: [
+    { category: 'other', spentFils: 50_000, limitFils: null, ratio: null, remainingFils: null },
+    { category: 'dining', spentFils: 30_000, limitFils: null, ratio: null, remainingFils: null },
+    { category: 'transport', spentFils: 10_000, limitFils: null, ratio: null, remainingFils: null },
+    { category: 'shopping', spentFils: 10_000, limitFils: null, ratio: null, remainingFils: null },
+  ], totalFils: 100_000 });
+  const otherLabel = walk(withOther).find((node) => node.props?.accessibilityRole === 'image').props.accessibilityLabel;
+  assert.match(otherLabel, /Other 50%/);
+  assert.match(otherLabel, /1 other category 10%/);
+  assert.match(text(walk(tree).find((node) => node.props?.testID === 'spending-total')), /1,939,994\.65/,
+    'The exact total, including cents, remains visible');
 });
 
 test('Spending pace shows only when the caller supplies the running period', () => {
   const h = createHarness();
-  const withPace = renderOverview(h, { paceLabel: 'day 6 of 30' });
-  assert.equal(text(walk(withPace).find((node) => node.props?.testID === 'spending-pace')), 'day 6 of 30');
-  const without = renderOverview(h, { paceLabel: null });
+  const withPace = renderBand(h, { paceLabel: 'Day 6 of 30' });
+  assert.equal(text(walk(withPace).find((node) => node.props?.testID === 'spending-pace')), 'Day 6 of 30');
+  const without = renderBand(h, { paceLabel: null });
   assert.equal(walk(without).some((node) => node.props?.testID === 'spending-pace'), false);
 });
 

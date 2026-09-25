@@ -2,12 +2,13 @@ import { spendingTrendsCopy as copy } from '@/lib/reference-copy';
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
-import { CategoryAvatar } from '@/components/ui/category-avatar';
+import { GlyphTile } from '@/components/ui/band/glyph-tile';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Money } from '@/components/ui/money';
 import { GrowBar } from '@/components/ui/grow-bar';
 import { Icon } from '@/components/ui/icon';
 import { useTheme } from '@/hooks/use-theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -20,7 +21,7 @@ import {
   type LedgerMoneySpec,
   wholeMajorUnits,
 } from '@/lib/ledger-money';
-import type { CategoryMover, ComparableSpend, MerchantStat } from '@/lib/analytics';
+import type { CategoryMover, MerchantStat } from '@/lib/analytics';
 import type { CategoryId } from '@/lib/types';
 
 /**
@@ -47,15 +48,9 @@ type Props = {
   weekdays: readonly number[];
   periodLabel: string;
   comparisonLabel: string | null;
-  /** Everyday spending in both comparable windows; null when there is nothing to compare. */
-  comparison?: ComparableSpend | null;
   /** Short names for the two sides, e.g. "Sep 2026" and "Aug 2026". */
   currentName?: string;
   previousName?: string | null;
-  /** The current period is still running, so the comparison stops at the same day. */
-  partial?: boolean;
-  /** Changes smaller than this are "about the same", matching the rows' noise floor. */
-  noiseFloorFils?: number;
   onMonth: (key: string) => void;
   onMerchant: (name: string) => void;
   onCategory: (id: CategoryId) => void;
@@ -63,12 +58,13 @@ type Props = {
 
 
 /**
- * Spending → Compare. The comparison with the previous period leads; the
- * six-month income/spending history, top merchants and weekday pattern (the
- * former Trends and Stats content) stay reachable below it.
+ * Spending → Compare, on the sheet. The band above states the comparison in
+ * one sentence; here the categories that moved it lead as paired bars, then
+ * the six-month income/spending history, top merchants and weekday pattern
+ * (the former Trends and Stats content) stay reachable below them.
  */
 export function SpendingTrends(p: Props) {
-  const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
+  const theme = useTheme(); const band = useBand('spending'); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
@@ -105,45 +101,37 @@ export function SpendingTrends(p: Props) {
     ? Math.round((deltaFils / previousExpense) * 100) : null;
   return <View style={styles.root} testID="spending-trends">
     <View style={styles.section} testID="spending-compare">
-      <ThemedText type="heading">{w.change}</ThemedText>
-      {p.comparison && p.comparisonLabel ? (() => {
-        const c = p.comparison;
-        const other = p.previousName ?? p.comparisonLabel;
-        const same = Math.abs(c.deltaFils) < Math.max(p.noiseFloorFils ?? 1, c.previousFils * 0.02);
-        const when = p.partial ? ` ${w.byThisDay}` : '';
-        const lead = same ? `${w.spentSame} ${other}${when}.`
-          : `${w.youSpent} ${moneyLabel(Math.abs(c.deltaFils))} ${c.deltaFils < 0 ? w.spentLess : w.spentMore} ${other}${when}.`;
-        return <View accessible accessibilityRole="text" accessibilityLabel={`${lead} ${w.fixedLeftOut}`} style={styles.compareLead}>
-          <ThemedText type="subtitle" themeColor={same ? 'text' : c.deltaFils < 0 ? 'income' : 'expense'}>{lead}</ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary">{w.fixedLeftOut}</ThemedText>
-        </View>;
-      })() : <ThemedText type="meta" themeColor="textSecondary">{p.comparisonLabel ? `${w.vs} ${p.comparisonLabel}` : w.missingComparison}</ThemedText>}
+      {/* The sentence that answers "more or less than last time" sits on the
+          band above; the categories that moved it are listed here, each with
+          this period's bar in the band tint over the earlier one in the rule
+          tone. Colour carries "now" and "then", never a category. */}
       {([['more', p.movers.filter((m) => m.deltaFils > 0)], ['less', p.movers.filter((m) => m.deltaFils < 0)]] as const).map(([kind, list]) =>
         list.length === 0 ? null : <View key={kind} style={styles.compareGroup}>
-          <ThemedText type="smallBold" themeColor={kind === 'more' ? 'expense' : 'income'}>{kind === 'more' ? w.spendingMore : w.spendingLess}</ThemedText>
+          <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionTitle}>{kind === 'more' ? w.spendingMore : w.spendingLess}</ThemedText>
           {list.map((m) => {
             const scale = Math.max(1, m.currentFils, m.previousFils);
             return <Pressable key={m.category} accessibilityRole="button" onPress={() => p.onCategory(m.category)}
+              testID={`spending-mover-${m.category}`}
               accessibilityLabel={`${categoryLabel(m.category, lang)}. ${p.periodLabel} ${moneyLabel(m.currentFils)}. ${p.comparisonLabel ?? ''} ${moneyLabel(m.previousFils)}. ${m.deltaFils > 0 ? w.more : w.fewer} ${moneyLabel(Math.abs(m.deltaFils))}`}
-              style={({ pressed }) => [styles.compareRow, styles.rule, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+              style={({ pressed }) => [styles.compareRow, styles.rule, { borderColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
               <View style={[styles.compareTop, large && styles.compareTopLarge]}>
-                <CategoryAvatar category={m.category} size={28} />
+                <GlyphTile category={m.category} palette={band} size={34} />
                 <ThemedText type="smallBold" style={[styles.grow, large && styles.compareNameLarge]}>{categoryLabel(m.category, lang)}</ThemedText>
-                <ThemedText type="smallBold" tabular themeColor={m.deltaFils > 0 ? 'expense' : 'income'}>
+                <ThemedText type="smallBold" tabular>
                   {m.deltaFils > 0 ? '+' : '−'}{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
               </View>
-              {([[p.currentName ?? p.periodLabel, m.currentFils, theme.text], [p.previousName ?? p.comparisonLabel ?? '', m.previousFils, theme.controlBorder]] as const).map(([label, fils, color], index) =>
+              {([[p.currentName ?? p.periodLabel, m.currentFils, band.tint], [p.previousName ?? p.comparisonLabel ?? '', m.previousFils, band.rule]] as const).map(([label, fils, color], index) =>
                 large ? <View key={index} style={styles.compareBarStack}>
                   <View style={styles.compareBarHead}>
-                    <ThemedText type="micro" themeColor="textSecondary">{label}</ThemedText>
+                    <ThemedText type="micro" style={{ color: band.textSecondary }}>{label}</ThemedText>
                     <Money fils={fils} type="meta" prefix={false} />
                   </View>
-                  <GrowBar axis="width" delay={index * 60} size={fils / scale * 100}
-                    style={{ height: 8, borderRadius: 4, backgroundColor: color }} />
+                  <GrowBar axis="width" delay={index * 50} size={fils / scale * 100}
+                    style={{ height: 10, borderRadius: 5, backgroundColor: color }} />
                 </View> : <View key={index} style={styles.compareBarRow}>
-                  <ThemedText type="micro" themeColor="textSecondary" style={styles.compareBarLabel} numberOfLines={1}>{label}</ThemedText>
-                  <View style={styles.compareTrack}><GrowBar axis="width" delay={index * 60} size={fils / scale * 100}
-                    style={{ height: 8, borderRadius: 4, backgroundColor: color }} /></View>
+                  <ThemedText type="meta" style={[styles.compareBarLabel, { color: band.textSecondary }]} numberOfLines={1}>{label}</ThemedText>
+                  <View style={styles.compareTrack}><GrowBar axis="width" delay={index * 50} size={fils / scale * 100}
+                    style={{ height: 10, borderRadius: 5, backgroundColor: color }} /></View>
                   <View style={styles.compareAmount}><Money fils={fils} type="meta" prefix={false} /></View>
                 </View>)}
             </Pressable>;
@@ -322,7 +310,7 @@ const styles = StyleSheet.create({
   rowStacked: { flexDirection: 'column', flexWrap: 'nowrap', alignItems: 'flex-start' },
   growStacked: { flex: 0, flexBasis: 'auto', alignSelf: 'stretch' }, change: { alignItems: 'flex-end', gap: 4 },
   changeStacked: { alignItems: 'flex-start' },
-  compareLead: { gap: 4, paddingVertical: 6 },
+  sectionTitle: { fontSize: 17, lineHeight: 24 },
   compareGroup: { gap: 2, paddingTop: 10 },
   compareRow: { paddingVertical: 12, gap: 6 },
   compareTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },

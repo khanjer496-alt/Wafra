@@ -28,7 +28,7 @@ import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
-import { EASE, Elevation, MotionSpring, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { BandLayout, EASE, Elevation, MotionSpring, Radius, ScreenPadding, Spacing, type BandPalette } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -63,6 +63,12 @@ type BottomSheetCommonProps = {
   closeVariant?: 'outline' | 'plain';
   children: React.ReactNode;
   testID?: string;
+  /**
+   * Design language E: the sheet takes this band's sheet surface, rule and
+   * 28pt radius (a sheet over a band screen is that screen's sheet, lifted).
+   * Omitted, it keeps the page palette.
+   */
+  palette?: BandPalette;
 };
 
 export type BottomSheetProps = BottomSheetCommonProps & (
@@ -87,6 +93,7 @@ export function BottomSheet({
   dismissible = true,
   footer,
   testID,
+  palette,
 }: BottomSheetProps) {
   const theme = useTheme();
   const language = useLanguage();
@@ -238,7 +245,7 @@ export function BottomSheet({
   const pinFooter = hasFooter && !largeText;
   const footerNode = hasFooter ? (
     <View testID={testID ? `${testID}-footer` : undefined}
-      style={[styles.footer, !pinFooter && styles.footerInline, { paddingBottom: bottomClearance, borderTopColor: theme.cardBorder }]}>
+      style={[styles.footer, !pinFooter && styles.footerInline, { paddingBottom: bottomClearance, borderTopColor: palette?.rule ?? theme.cardBorder }]}>
       {footer}
     </View>
   ) : null;
@@ -300,8 +307,8 @@ export function BottomSheet({
             style={[
               styles.sheet,
               {
-                backgroundColor: theme.background,
-                borderColor: theme.cardBorder,
+                backgroundColor: palette?.sheet ?? theme.background,
+                borderColor: palette?.rule ?? theme.cardBorder,
                 // Lift clear of the keyboard. A Modal is its own window and
                 // never resizes for it on Android, so a sheet with inputs at
                 // the bottom — the period picker's custom range — had its
@@ -311,6 +318,7 @@ export function BottomSheet({
                 maxHeight: Math.max(0, Math.min(screenHeight * (largeText ? 0.96 : 0.88), screenHeight - keyboardHeight - insets.top)),
               },
               Elevation,
+              palette && styles.bandSheet,
               sheetStyle,
             ]}>
             {/*
@@ -379,6 +387,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: Radius.bottomSheet,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
+  bandSheet: { borderTopLeftRadius: BandLayout.sheetRadius, borderTopRightRadius: BandLayout.sheetRadius },
   sheetBody: { flexShrink: 1, minHeight: 0 },
   headerCopy: { flex: 1, minWidth: 0, gap: Spacing.one },
   title: { minWidth: 0 },

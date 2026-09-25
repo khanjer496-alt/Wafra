@@ -188,8 +188,9 @@ assert.match(task3Scaffold, /keyboardAware && Platform\.OS !== 'ios'[\s\S]*?keyb
 assert.match(task3Scaffold, /scrollIndicatorInsets:[\s\S]*?bottom:[\s\S]*?keyboardHeight/);
 
 const task4Flow = read('src/app/(tabs)/flow.tsx');
-assert.match(task4Flow, /const flowHeader: ScreenHeaderProps = \{/);
-assert.match(task4Flow, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{flowHeader\}/);
+// Design language E: Spending is a clay band (the one figure) over a sheet.
+assert.match(task4Flow, /<BandScaffold band="spending" tabbed[\s\S]*?nav=\{\{ title: t\('tabFlow'\)/);
+assert.match(task4Flow, /bandContent=\{bandContent\}/);
 assert.match(task4Flow, /summarizeMonth\(/);
 assert.match(task4Flow, /spendingCategoryRows\(/);
 assert.match(task4Flow, /router\.push\(`\/transactions\?type=expense&category=\$\{id\}`\)/);
@@ -211,14 +212,15 @@ assert.doesNotMatch(read('src/lib/categories.ts'), /CATEGORY_RAMP|rampColor|onRa
 const overview=read('src/components/spending/spending-overview.tsx');
 const trends=read('src/components/spending/spending-trends.tsx');
 assert.match(overview,/accessibilityLabel=\{`\$\{categoryLabel[\s\S]*?row\.spentFils[\s\S]*?row\.limitFils/);
-assert.match(overview,/function categoryPaletteIndex\(/,
-  'Spending list gives tail categories a stable visible accent instead of the donut neutral');
-assert.match(overview,/segmentColors\.get\(row\.category\) \?\?[\s\S]*?palette\[categoryPaletteIndex\(row\.category, palette\.length\)\]/,
-  'categories collapsed into the share bar\'s Other segment still use readable categorical ink in the list');
-assert.doesNotMatch(overview,/const sliceColor = (?:segmentColors|donutColors)\.get\(row\.category\) \?\? neutral/,
-  'dark-mode tail rows must never reuse the near-background donut neutral');
-assert.match(overview,/trackColor=\{scheme === 'dark' \? theme\.cardBorderStrong : theme\.track\}/,
-  'thin category progress tracks keep enough dark-mode contrast');
+// Design language E: colour in the list means limit status only. Every
+// category glyph sits on the one glyph ground in the text colour, and the
+// only bar on a row is its limit bar.
+assert.match(overview,/<GlyphTile category=\{row\.category\} palette=\{band\}/,
+  'category rows use the one-tone glyph tile, never a category hue');
+assert.doesNotMatch(overview,/useCategoricalPalette|categoryPaletteIndex|sliceColor/,
+  'no categorical palette on Spending rows');
+assert.match(overview,/<LimitStatusBar spentMinor=\{row\.spentFils\} limitMinor=\{row\.limitFils\}/,
+  'a row with a limit carries the status-coloured limit bar');
 assert.match(trends,/accessibilityLabel=\{monthDescription\(month\)\}/);
 assert.match(trends,/accessibilityState=\{\{ selected: month\.key === p\.selectedKey \}\}/);
 assert.match(trends,/accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)/);

@@ -230,7 +230,7 @@ ok('Flow trend months expose cashflow descriptions and selected state',
 ok('Flow retains selected month context and large-text list',
  /accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)[\s\S]*?monthFigures\(selected\)/.test(spendingTrends) && /!showAllTrendLabels &&[\s\S]*?p\.months\.map/.test(spendingTrends));
 ok('Flow uses shared shell and Stats redirects into Trends',
- /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"/.test(flow) && /<Redirect href="\/flow\?view=trends"/.test(stats));
+ /<BandScaffold band="spending" tabbed/.test(flow) && /<Redirect href="\/flow\?view=trends"/.test(stats));
 ok('shared charts consume the semantic data-visualization palette',
   /import \{[^}]*\bDataViz\b[^}]*\} from '@\/constants\/theme'/.test(charts) &&
     /from '@\/components\/ui\/data-viz'/.test(charts));

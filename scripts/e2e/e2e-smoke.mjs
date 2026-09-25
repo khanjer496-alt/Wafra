@@ -325,7 +325,7 @@ ok('spending titles the screen', !!(await visibleText(page, /^Spending$/)));
 // The amount itself is an accessible Money group rather than one leaf text
 // node, so resolve it inside the same summary cell as the label instead of
 // depending on how React Native Web happens to split currency and digits.
-const flowTotalHeading = (await page.getByTestId('spending-categories').innerText())
+const flowTotalHeading = (await page.getByTestId('spending-total').innerText())
   .match(/\bAED\s*[\d,]+(?:\.\d+)?/)?.[0] ?? '';
 ok('Spending presents a readable total before category rows', Number.isFinite(money(flowTotalHeading)));
 // Categories own budgets now. Keep exact money and drill-down checks.
