@@ -1,7 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Linking, Platform, ScrollView, View } from 'react-native';
+import { AppState, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { WafraLiveCaptureStatus } from '../../modules/wafra-live-capture';
 import { SetupHeader, SetupShell } from '@/components/onboarding/setup-shell';
@@ -11,6 +11,7 @@ import { MaxContentWidth, ScreenPadding, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { getIosCaptureNativeModule, subscribeIosCaptureStatusRefresh } from '@/lib/capture';
+import { detailsWords } from '@/lib/details-copy';
 import { formatCaptureReceipt } from '@/lib/ios-capture-health';
 import { dispatchIosMessageSetup, loadIosMessageSetupProgress, progressForSource, type IosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import {
@@ -19,9 +20,28 @@ import {
 } from '@/lib/ios-apple-pay-setup';
 import { useStore } from '@/lib/store';
 
+/** A numbered step. The number is the order, not a completion claim; `done` comes from the real gates. */
+function Step({ index, title, body, done, theme, children }: {
+  index: number; title: string; body: string; done: boolean; theme: ReturnType<typeof useTheme>; children: React.ReactNode;
+}) {
+  return <View style={[styles.step, { borderColor: theme.cardBorder }]}>
+    <View style={styles.stepHead}>
+      <View style={[styles.stepBadge, { backgroundColor: done ? theme.primary : theme.backgroundSelected }]}>
+        <ThemedText type="smallBold" style={{ color: done ? theme.onPrimary : theme.text }}>{done ? '✓' : String(index)}</ThemedText>
+      </View>
+      <View style={styles.stepCopy}>
+        <ThemedText type="subtitle">{title}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">{body}</ThemedText>
+      </View>
+    </View>
+    {children}
+  </View>;
+}
+
 export default function IosApplePaySetup() {
   const language = useLanguage();
   const w = iosApplePayCopy(language);
+  const d = detailsWords(language).applePay;
   const router = useRouter();
   const params = useLocalSearchParams<{ fromOnboarding?: string; shortcutResult?: string }>();
   const { state, setCaptureOptOut, getStateGeneration } = useStore();
@@ -156,31 +176,46 @@ export default function IosApplePaySetup() {
           <ThemedText type="small" themeColor="textSecondary">{w.scope}</ThemedText>
           {!status?.enabled && <Button label={w.enable} onPress={enable} disabled={busy} wrapLabel />}
           {status?.enabled && !status.entitled && <ThemedText accessibilityRole="alert">{w.inactive}</ThemedText>}
+          {/* Marked as an example: no card identity is captured, and a real
+              purchase goes to Review for the person to add. */}
+          <View testID="apple-pay-example" accessible accessibilityLabel={d.exampleA11y}
+            style={[styles.example, { borderColor: theme.cardBorder }]}>
+            <ThemedText type="meta" themeColor="textSecondary">{d.example}</ThemedText>
+            <View style={styles.exampleRow}>
+              <View style={[styles.exampleTile, { backgroundColor: theme.backgroundSelected }]}>
+                <ThemedText type="smallBold">{d.exampleMerchant.slice(0, 1)}</ThemedText>
+              </View>
+              <ThemedText type="smallBold" style={styles.stepCopy}>{d.exampleMerchant}</ThemedText>
+              <ThemedText type="meta" themeColor="textSecondary">{d.exampleDestination}</ThemedText>
+            </View>
+          </View>
           {flow.active && <>
-            <View style={{ gap: Spacing.two }}>
-              <ThemedText type="subtitle">{w.addTitle}</ThemedText>
-              {bundled && !manual ? <>
-                <ThemedText type="small">{w.addHelp}</ThemedText>
-                <Button label={w.add} onPress={install} disabled={busy} wrapLabel />
-                <Button label={w.manual} variant="ghost" onPress={() => setManual(true)} disabled={busy} wrapLabel />
-              </> : w.manualHelp.map(step => <ThemedText key={step} type="small">{step}</ThemedText>)}
-              <ThemedText type="small" accessibilityLiveRegion="polite">{flow.installed ? w.installed : w.notInstalled}</ThemedText>
-              <Button label={w.installedButton} variant="outline" onPress={confirmInstalled} disabled={busy || flow.installed} wrapLabel />
-            </View>
-            <View style={{ gap: Spacing.two }}>
-              <ThemedText type="subtitle">{w.checkTitle}</ThemedText>
-              <ThemedText type="small">{w.checkHelp}</ThemedText>
-              {bundled && !manual && <Button label={w.runCheck} onPress={runCheck} disabled={busy || !flow.installed} wrapLabel />}
-              <ThemedText type="small" accessibilityLiveRegion="polite">{flow.checked ? w.checked : w.waitingCheck}</ThemedText>
-              {params.shortcutResult === 'error' && <ThemedText accessibilityRole="alert">{w.failed}</ThemedText>}
-            </View>
-            <View style={{ gap: Spacing.two }}>
-              <ThemedText type="subtitle">{w.automationTitle}</ThemedText>
-              {(!manual && bundled) && w.automationSteps.map(step => <ThemedText key={step} type="small">{step}</ThemedText>)}
-              <Button label={w.open} variant="outline" onPress={open} disabled={busy} wrapLabel />
-              {flow.confirmed && <ThemedText type="small">{w.confirmed}</ThemedText>}
-              <Button label={w.confirm} onPress={confirmAutomation} disabled={busy || !flow.canConfirm} wrapLabel />
-            </View>
+            <Step index={1} title={d.step1} body={d.step1Body} done={flow.installed && flow.checked} theme={theme}>
+              <View testID="apple-pay-step-install" style={{ gap: Spacing.two }}>
+                {bundled && !manual ? <>
+                  <ThemedText type="small">{w.addHelp}</ThemedText>
+                  <Button label={w.add} onPress={install} disabled={busy} wrapLabel />
+                  <Button label={w.manual} variant="ghost" onPress={() => setManual(true)} disabled={busy} wrapLabel />
+                </> : w.manualHelp.map(step => <ThemedText key={step} type="small">{step}</ThemedText>)}
+                <ThemedText type="small" accessibilityLiveRegion="polite">{flow.installed ? w.installed : w.notInstalled}</ThemedText>
+                <Button label={w.installedButton} variant="outline" onPress={confirmInstalled} disabled={busy || flow.installed} wrapLabel />
+              </View>
+              <View testID="apple-pay-step-check" style={{ gap: Spacing.two }}>
+                <ThemedText type="small">{w.checkHelp}</ThemedText>
+                {bundled && !manual && <Button label={w.runCheck} onPress={runCheck} disabled={busy || !flow.installed} wrapLabel />}
+                <ThemedText type="small" accessibilityLiveRegion="polite">{flow.checked ? w.checked : w.waitingCheck}</ThemedText>
+                {params.shortcutResult === 'error' && <ThemedText accessibilityRole="alert">{w.failed}</ThemedText>}
+              </View>
+            </Step>
+            <Step index={2} title={d.step2} body={d.step2Body} done={flow.confirmed} theme={theme}>
+              <View testID="apple-pay-step-automation" style={{ gap: Spacing.two }}>
+                {(!manual && bundled) && w.automationSteps.map(step => <ThemedText key={step} type="small">{step}</ThemedText>)}
+                <Button label={w.open} variant="outline" onPress={open} disabled={busy} wrapLabel />
+                {flow.confirmed && <ThemedText type="small">{w.confirmed}</ThemedText>}
+                <Button label={w.confirm} onPress={confirmAutomation} disabled={busy || !flow.canConfirm} wrapLabel />
+              </View>
+            </Step>
+            <ThemedText type="meta" themeColor="textSecondary">{d.duplicate}</ThemedText>
           </>}
           <View accessibilityLiveRegion="polite" style={{ gap: Spacing.two }}>
             <ThemedText type="subtitle">{w.actualTitle}</ThemedText>
@@ -199,3 +234,13 @@ export default function IosApplePaySetup() {
     </SafeAreaView>
   </SetupShell>;
 }
+
+const styles = StyleSheet.create({
+  example: { gap: 8, padding: 12, borderWidth: 1, borderRadius: 12, borderStyle: 'dashed' },
+  exampleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  exampleTile: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  step: { gap: 12, padding: 14, borderWidth: 1, borderRadius: 14 },
+  stepHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  stepBadge: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  stepCopy: { flex: 1, minWidth: 0, gap: 2 },
+});

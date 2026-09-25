@@ -1,6 +1,8 @@
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
+import { detailsWords } from '@/lib/details-copy';
 import {
   formatCaptureReceipt,
   iosCaptureHealthCopy,
@@ -14,7 +16,9 @@ export function IosCaptureHealthPanel({ health, language }: {
   language: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const router = useRouter();
   const copy = iosCaptureHealthCopy(language);
+  const openStatus = detailsWords(language).capture.openStatus;
   const summary = copy[iosCaptureHealthMode(health)];
   const detailLabel = expanded ? copy.hide : copy.show;
   return <View testID="ios-capture-health" style={styles.root}>
@@ -43,6 +47,10 @@ export function IosCaptureHealthPanel({ health, language }: {
       </>}
       <ThemedText type="meta" themeColor="textSecondary">{copy.explanation}</ThemedText>
     </View>}
+    <Pressable testID="ios-capture-health-open" accessibilityRole="button" accessibilityLabel={openStatus}
+      onPress={() => router.push('/capture-health')} style={styles.open}>
+      <ThemedText type="linkPrimary" themeColor="primary">{openStatus}</ThemedText>
+    </Pressable>
   </View>;
 }
 const styles = StyleSheet.create({
@@ -51,4 +59,5 @@ const styles = StyleSheet.create({
   grow: { flex: 1, minWidth: 150, gap: 4 },
   details: { gap: 12, paddingBottom: 12 },
   date: { gap: 2 },
+  open: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
 });

@@ -97,23 +97,35 @@ test('date copy handles unknowns and both languages without asserting all purcha
 });
 function panel(expanded, language = 'en') {
   let toggled;
+  const routes = [];
   const jsx = (type, props) => typeof type === 'function' ? type(props) : { type, props };
   const { IosCaptureHealthPanel } = load(path.join(root, 'src/components/ios-message-setup/capture-health.tsx'), {
     react: { useState: () => [expanded, fn => { toggled = fn(expanded); }] },
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { Pressable: 'Pressable', View: 'View', StyleSheet: { create: s => s } },
     '@/components/themed-text': { ThemedText: 'Text' }, '@/lib/ios-capture-health': health,
+    'expo-router': { useRouter: () => ({ push: route => routes.push(route) }) },
+    '@/lib/details-copy': load(path.join(root, 'src/lib/details-copy.ts')),
   });
   const tree = IosCaptureHealthPanel({ health: health.readIosCaptureHealth(valid()), language });
   const nodes = [];
   function walk(n) { if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === 'object') { nodes.push(n); walk(n.props?.children); } }
-  walk(tree); return { nodes, toggled: () => toggled };
+  walk(tree); return { nodes, routes, toggled: () => toggled };
 }
 test('actual diagnostic component is collapsed and accessible until explicitly opened', () => {
   const h = panel(false); const toggle = h.nodes.find(n => n.type === 'Pressable');
   assert.equal(toggle.props.accessibilityRole, 'button'); assert.equal(toggle.props.accessibilityState.expanded, false);
   assert.equal(h.nodes.some(n => n.props.testID === 'ios-capture-health-details'), false);
   toggle.props.onPress(); assert.equal(h.toggled(), true);
+});
+test('the setup panel links to the standalone capture status page', () => {
+  for (const expanded of [false, true]) {
+    const h = panel(expanded);
+    const link = h.nodes.find(n => n.props?.testID === 'ios-capture-health-open');
+    assert.equal(link.props.accessibilityRole, 'button');
+    link.props.onPress();
+    assert.deepEqual(h.routes, ['/capture-health']);
+  }
 });
 test('expanded details render in Arabic and can be closed without losing capture state', () => {
   const h = panel(true, 'ar'); assert.ok(h.nodes.some(n => n.props.testID === 'ios-capture-health-details'));

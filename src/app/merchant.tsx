@@ -3,6 +3,8 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, Platform, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
+import { MerchantCategoryRule } from '@/components/merchant-category-rule';
+import { MerchantMonthBars } from '@/components/merchant-month-bars';
 import { PeriodSheet } from '@/components/period-sheet';
 import { TransactionRow } from '@/components/transaction-row';
 import { Button } from '@/components/ui/controls';
@@ -100,6 +102,9 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
               <Money fils={average} type="subtitle" />
             </View>}
           </View>
+          {merchant ? <MerchantMonthBars transactions={state.transactions} merchant={merchant} period={period}
+            live={live} internal={internal} kind={income ? 'income' : 'expense'} monthStartDay={state.monthStartDay} /> : null}
+          {merchant ? <MerchantCategoryRule merchant={merchant} kind={income ? 'income' : 'expense'} /> : null}
           {merchant && view !== 'all' && <View testID="merchant-ask-wafra" style={styles.assistantAction}>
             <Button label={income ? assistantCopy.askIncome : assistantCopy.askMerchant} variant="ghost" icon="spark"
               onPress={() => router.push({ pathname: '/assistant', params: { question: income

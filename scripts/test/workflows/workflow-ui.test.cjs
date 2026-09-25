@@ -91,21 +91,34 @@ test('review renders currency minor-unit exponents without truncating cents',()=
   assert.ok(text(h.renderScreen('review-alerts')).includes('TEST '+expected));
  }
 });
-test('categorisation displays affected count and applies merchant rule only after selection',()=>{
+// Answers are staged per row and written together by "Save N answers". State
+// slots: 0 = staged answers, 1 = the row whose full picker is open.
+const stagedSave=tree=>walk(walk(tree).find(n=>n.props?.testID==='categorise-save')??{}).find(n=>n.props?.onPress);
+test('categorisation displays affected count and applies merchant rule only after the staged answer is saved',()=>{
  const merchant={merchant:'Fixture Market',key:'fixture-market',count:7,totalFils:23456,lastDate:'2026-09-05'};
- const h=createWorkflowHarness({merchantSummary:{merchants:[merchant],paymentPurposes:[],rowCount:7,totalFils:23456},states:{0:merchant.key}}),tree=h.renderScreen('categorise');
- assert.ok(text(tree).includes('7'));assert.ok(text(tree).includes(merchant.merchant));assert.deepEqual(h.events,[]);
- const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===h.deps['@/lib/categories'].getCategory('dining').label);
+ const opened=createWorkflowHarness({merchantSummary:{merchants:[merchant],paymentPurposes:[],rowCount:7,totalFils:23456},states:{1:'merchant:'+merchant.key}});
+ const tree=opened.renderScreen('categorise');
+ assert.ok(text(tree).includes('7'));assert.ok(text(tree).includes(merchant.merchant));assert.deepEqual(opened.events,[]);
+ const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===opened.deps['@/lib/categories'].getCategory('dining').label);
  assert.ok(picker,'category choice exists');picker.props.onPress();
+ assert.ok(!opened.events.some(e=>e[0]==='setMerchantOverride'),'choosing only stages the answer');
+ const h=createWorkflowHarness({merchantSummary:{merchants:[merchant],paymentPurposes:[],rowCount:7,totalFils:23456},states:{0:{['merchant:'+merchant.key]:'dining'}}});
+ const staged=h.renderScreen('categorise');
+ assert.ok(text(walk(staged).find(n=>n.props?.testID==='categorise-save')).includes(h.deps['@/lib/details-copy'].detailsCopy.en.categorise.save(1)));
+ stagedSave(staged).props.onPress();
  assert.ok(h.events.some(e=>e[0]==='setMerchantOverride'&&e[1]===merchant.merchant&&e[2]==='dining'&&e[3]===true));
 });
 test('bank-payment nicknames learn by bill identity and never write a merchant-wide rule',()=>{
  const purpose={sourceTitle:'Fishbasket',billIdentity:'consumer:4036',key:'consumer:4036|fishbasket',count:5,totalFils:5350000,lastDate:'2026-09-05'};
- const h=createWorkflowHarness({merchantSummary:{merchants:[],paymentPurposes:[purpose],rowCount:5,totalFils:5350000},states:{0:purpose.key}}),tree=h.renderScreen('categorise');
+ const opened=createWorkflowHarness({merchantSummary:{merchants:[],paymentPurposes:[purpose],rowCount:5,totalFils:5350000},states:{1:'payment-purpose:'+purpose.key}});
+ const tree=opened.renderScreen('categorise');
  assert.ok(text(tree).includes('Fishbasket'));
- assert.ok(text(tree).includes(h.deps['@/lib/i18n'].t('categorisePaymentPurpose')));
- const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===h.deps['@/lib/categories'].getCategory('utilities').label);
- assert.ok(picker,'purpose category choice exists');picker.props.onPress();
+ assert.ok(text(tree).includes(opened.deps['@/lib/i18n'].t('categorisePaymentPurpose')));
+ const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===opened.deps['@/lib/categories'].getCategory('utilities').label);
+ assert.ok(picker,'purpose category choice exists');
+ assert.equal(walk(tree).some(n=>n.props?.testID==='category-suggestion'),false,'a bank nickname gets no name-based suggestion');
+ const h=createWorkflowHarness({merchantSummary:{merchants:[],paymentPurposes:[purpose],rowCount:5,totalFils:5350000},states:{0:{['payment-purpose:'+purpose.key]:'utilities'}}});
+ stagedSave(h.renderScreen('categorise')).props.onPress();
  assert.ok(h.events.some(e=>e[0]==='setBillAlias'&&e[1]==='Fishbasket'&&e[2]==='consumer:4036'&&e[3]==='Fishbasket'&&e[4]==='utilities'&&e[5]===true));
  assert.ok(!h.events.some(e=>e[0]==='setMerchantOverride'));
 });

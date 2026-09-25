@@ -97,6 +97,7 @@ function createWorkflowHarness(options={}) {
  function renderScreen(screen,props={}){
   if(screen==='review-alerts'){
    h.local('@/lib/review-alert-copy','src/lib/review-alert-copy.ts');
+   h.local('@/lib/review-reasons','src/lib/review-reasons.ts');
    h.local('@/components/universal-review-fields');
   }
   if(screen==='feedback'){

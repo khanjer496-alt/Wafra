@@ -260,3 +260,51 @@ test('failed informational dismissal cannot reuse consent for a replacement or e
     assert.ok(!h.events.some(event => event[0] === 'back' || event[0].startsWith('unexpected')), change);
   }
 });
+
+// Redesign: every card says why it is waiting, a named merchant gets its logo
+// tile, and an optional one-at-a-time mode answers with the list's own actions.
+// Review state slots: 0 target, 1 busy id, 2 one-at-a-time, 3 step index.
+for (const language of ['en', 'ar']) {
+  test(`${language}: every Review card carries one reason sentence from structured fields`, () => {
+    const named = pending('purchase', { amount: field(money()) });
+    const unnamed = pending('purchase', { amount: field(money()), merchant: field('Maybe shop', 'ambiguous') });
+    unnamed.id = 'synthetic-unnamed'; unnamed.sourceKey = 'synthetic-source-unnamed';
+    const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [named, unnamed] } } });
+    const words = h.deps['@/lib/details-copy'].detailsCopy[language].review.why;
+    const rows = walk(h.renderScreen('review-alerts')).filter(node => node.props?.testID === 'review-alert-row');
+    assert.equal(rows.length, 2);
+    assert.ok(text(rows[0]).includes(words.confirm));
+    assert.ok(text(rows[1]).includes(words['merchant-unsure']));
+    // The alert-stated merchant heads the card; an unsure one is never shown as a name.
+    assert.ok(text(rows[0]).includes('Synthetic shop'));
+    assert.ok(!text(rows[1]).includes('Maybe shop'));
+  });
+  test(`${language}: one at a time shows "1 of N" and answers through the existing Add and Dismiss paths`, () => {
+    const purchase = pending('purchase', { amount: field(money()) });
+    const balance = pending('balance', { balance: field(money('99900')) });
+    const list = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } } });
+    const words = list.deps['@/lib/details-copy'].detailsCopy[language].review;
+    const listTree = list.renderScreen('review-alerts');
+    assert.ok(byId(listTree, 'review-mode-toggle'), 'the mode is offered when more than one item waits');
+    assert.equal(byId(listTree, 'review-stepper'), undefined, 'the list stays the default');
+    const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } }, states: { 2: true } });
+    const tree = h.renderScreen('review-alerts');
+    assert.ok(text(byId(tree, 'review-step-position')).includes(words.position(1, 2)));
+    assert.equal(walk(tree).filter(node => node.props?.testID === 'review-step-card').length, 1);
+    assert.equal(walk(tree).filter(node => node.props?.testID === 'review-alert-row').length, 0);
+    const card = byId(tree, 'review-step-card');
+    assert.ok(text(card).includes('AED 123.45'), 'the amount is the alert\'s own, not converted');
+    assert.ok(text(card).includes(words.notPurchase));
+    byId(card, 'review-step-dismiss').props.onPress();
+    byId(card, 'review-alert-open').props.onPress();
+    const events = JSON.parse(JSON.stringify(h.events));
+    assert.deepEqual(events.filter(event => event[0] !== 'state'), [['route', { pathname: '/add-transaction', params: { reviewId: purchase.id } }]],
+      'nothing is added or dismissed from the card itself');
+    assert.ok(events.some(event => event[0] === 'state' && event[1] === 0 && event[2]?.id === purchase.id),
+      '"Not a purchase" opens the same dismissal confirmation as the list');
+    const second = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } }, states: { 2: true, 3: 1 } });
+    const secondCard = byId(second.renderScreen('review-alerts'), 'review-step-card');
+    assert.ok(!text(secondCard).includes(words.notPurchase), 'a balance update is dismissed, not called "not a purchase"');
+    assert.ok(text(secondCard).includes(h.deps['@/lib/details-copy'].detailsCopy[language].review.why['not-a-payment']));
+  });
+}

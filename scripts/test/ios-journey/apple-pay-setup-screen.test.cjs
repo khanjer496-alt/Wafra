@@ -35,7 +35,7 @@ async function screen({ version = '17.0', nativePresent = true, capability = tru
   };
   const component = load(path.join(root, 'src/app/ios-apple-pay-setup.tsx'), {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
-    'react-native': { Platform: { OS: 'ios', Version: version }, View: 'View', ScrollView: 'ScrollView',
+    'react-native': { Platform: { OS: 'ios', Version: version }, View: 'View', ScrollView: 'ScrollView', StyleSheet: { create: styles => styles },
       Linking: { openURL: async url => urls.push(url) }, AppState: { addEventListener: (_, fn) => { listeners.push(fn); return { remove() {} }; } } },
     'expo-router': { Stack: { Screen: 'Screen' }, useRouter: () => ({ dismissTo: route => routes.push(route), push: route => routes.push(route), setParams() {} }), useLocalSearchParams: () => ({ fromOnboarding: '1', shortcutResult: 'success' }) },
     'expo-sharing': { isAvailableAsync: async () => true, shareAsync: async (uri, options) => shares.push({ uri, options }) },
@@ -46,6 +46,7 @@ async function screen({ version = '17.0', nativePresent = true, capability = tru
     '@/hooks/use-language': { useLanguage: () => 'en' }, '@/hooks/use-theme': { useTheme: () => ({ background: '#fff' }) },
     '@/lib/capture': { getIosCaptureNativeModule: () => nativePresent ? native : null, subscribeIosCaptureStatusRefresh: () => () => {} },
     '@/lib/ios-capture-health': health, '@/lib/ios-apple-pay-setup': helper,
+    '@/lib/details-copy': load(path.join(root, 'src/lib/details-copy.ts')),
     '@/lib/ios-message-onboarding': { dispatchIosMessageSetup: async event => { events.push(event); progress = progressApi.reduceIosMessageSetup(progress, event); }, loadIosMessageSetupProgress: async () => progress, progressForSource: progressApi.progressForSource },
     '@/lib/store': { useStore: () => ({ state: { hydrated: true, onboarded: false }, getStateGeneration: generationFn,
       setCaptureOptOut: async value => events.push(`opt-out:${value}`) }) },

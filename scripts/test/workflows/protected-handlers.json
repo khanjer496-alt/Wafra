@@ -324,8 +324,9 @@
     },
     {
       "file": "src/app/categorise.tsx",
-      "name": "assign",
-      "sha256": "e5905a46fcd6c68a95343efc8aa1eb8f7334db2a9a898a618435c0e84819410e"
+      "name": "save",
+      "sha256": "dfd0c652c51fb9c2a153c97b8a09084a81065945e163bc701125260e34788be5",
+      "reviewedChange": "2026-09-25: Improve categories stages one answer per row and writes them together (\"Save N answers\") instead of on the first tap. Each staged answer still goes through the unchanged write: setMerchantOverride(merchant, category, true) for a merchant and setBillAlias(sourceTitle, billIdentity, sourceTitle, category, true) for a bank-payment nickname; the moved-entry tally sums the same item.count shown on each row. Covered by workflow-ui.test.cjs (no write before Save; merchant and bill-alias writes after)."
     }
   ]
 }

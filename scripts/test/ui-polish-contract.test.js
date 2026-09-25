@@ -423,9 +423,13 @@ for (const seam of [
 assert.doesNotMatch(task8Accuracy, /accuracyShareUncategorized/);
 
 const task8Categorise = read('src/app/categorise.tsx');
-assert.match(task8Categorise, /const \[openKey, setOpenKey\] = useState<string \| null>\(null\)/);
+// Every row is open with one suggestion; answers are staged and written
+// together by "Save N answers" (redesign), never on the first tap.
+assert.match(task8Categorise, /const \[answers, setAnswers\] = useState<Record<string, CategoryId>>\(\{\}\)/);
+assert.match(task8Categorise, /const \[pickerId, setPickerId\] = useState<string \| null>\(null\)/);
 assert.match(task8Categorise, /const \[sortedRows, setSortedRows\] = useState\(0\)/);
-assert.match(task8Categorise, /const at = items\.findIndex\([\s\S]*?const next = at >= 0 \? items\[at \+ 1\] : undefined/);
+assert.match(task8Categorise, /const save = \(\) => \{[\s\S]*?for \(const item of staged\)[\s\S]*?moved \+= item\.count/);
+assert.match(task8Categorise, /useCategorySuggestions\(\{/);
 assert.match(task8Categorise, /setMerchantOverride\(item\.merchant, category, true\)/);
 assert.match(task8Categorise, /setBillAlias\(item\.sourceTitle, item\.billIdentity, item\.sourceTitle, category, true\)/);
 assert.match(task8Categorise, /INITIAL_VISIBLE_ITEMS = 12/);
