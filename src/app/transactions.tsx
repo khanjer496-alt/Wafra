@@ -4,15 +4,20 @@ import {
   Keyboard,
   Platform,
   Pressable,
+  ScrollView,
   SectionList,
   StyleSheet,
   View,
   useWindowDimensions,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { ThemedText } from '@/components/themed-text';
-import { EntryDetailSheet } from '@/components/entry-detail-sheet';
+import { EntryDetailSheet, type EntryDetailMode } from '@/components/entry-detail-sheet';
+import { SwipeRow, type SwipeAction } from '@/components/swipe-row';
 import { TransactionRow } from '@/components/transaction-row';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
+import { Chip } from '@/components/ui/controls';
 import { ActionIconButton } from '@/components/ui/action-icon-button';
 import { TransactionFilterSheet } from '@/components/transaction-filter-sheet';
 import { Icon } from '@/components/ui/icon';
@@ -23,20 +28,26 @@ import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { CATEGORIES } from '@/lib/categories';
-import { formatAED, friendlyDate, monthKey, toISODate } from '@/lib/format';
+import { formatAED, formatAmount, friendlyDate, monthKey, toISODate } from '@/lib/format';
 import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import {
+  accountDisplayName,
   corroboratingTransferIdsForState,
   internalTransferIdsForState,
+  isTransfer as isLedgerTransfer,
+  isUnassignedIncome,
   liveAccountIds,
   UNASSIGNED_INCOME_ACCOUNT_ID,
+  UNASSIGNED_TRANSACTION_ACCOUNT_ID,
 } from '@/lib/ledger';
 import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
+import { TRANSACTION_SOURCE_KINDS, transactionSource, type TransactionSourceKind } from '@/lib/transaction-source';
+import { transactionsWords } from '@/lib/transactions-copy';
 import { getTransferActivity } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { reconcileTransfers } from '@/lib/transfer-reconciliation';
-import { useStoreSelector } from '@/lib/store';
+import { isTransferCandidate, reconcileTransfers, transferOwnership } from '@/lib/transfer-reconciliation';
+import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
@@ -50,7 +61,22 @@ const DEFAULT_FILTERS: Filters = {
   dateTo: null,
   minFils: null,
   sort: 'newest',
+  maxFils: null,
+  sources: new Set<TransactionSourceKind>(),
+  kind: null,
 };
+
+type TypeChip = 'all' | 'spending' | 'income' | 'transfers' | 'review';
+const TYPE_CHIPS: readonly TypeChip[] = ['all', 'spending', 'income', 'transfers', 'review'];
+const chipOf = (filters: Filters): TypeChip => filters.kind === 'transfers' ? 'transfers'
+  : filters.kind === 'review' ? 'review'
+    : filters.type === 'expense' ? 'spending' : filters.type === 'income' ? 'income' : 'all';
+/** One chip is one filter: direction chips set `type`, the others set `kind`. */
+const withChip = (filters: Filters, chip: TypeChip): Filters => ({
+  ...filters,
+  type: chip === 'spending' ? 'expense' : chip === 'income' ? 'income' : null,
+  kind: chip === 'transfers' ? 'transfers' : chip === 'review' ? 'review' : null,
+});
 
 interface DaySection {
   title: string;
@@ -68,6 +94,7 @@ export default function TransactionsScreen() {
   const narrowSearch = width / Math.max(fontScale, 1) < 360;
   const language = useLanguage();
   const transferWords = transferActivityCopy(language);
+  const words = transactionsWords(language);
   const tr = useCallback((key: StringKey) => t(key, language), [language]);
   const trf = useCallback(
     (key: StringKey, vars: Record<string, string | number>) => tf(key, vars, language),
@@ -79,8 +106,9 @@ export default function TransactionsScreen() {
   const state = useStoreSelector(({ state: s }) => ({
     transactions: s.transactions, accounts: s.accounts, monthStartDay: s.monthStartDay,
     transferInternalIds: s.transferInternalIds, transferNormalizationVersion: s.transferNormalizationVersion,
-    historyImport: historyStatusOnly(s.historyImport),
+    historyImport: historyStatusOnly(s.historyImport), ledgerMoney: s.ledgerMoney,
   }));
+  const { deleteTransaction } = useStoreActions();
   const { period } = usePeriod();
   const {
     source,
@@ -88,13 +116,17 @@ export default function TransactionsScreen() {
     category: categoryParam,
     merchant: merchantParam,
     q: queryParam,
+    account: accountParam,
   } = useLocalSearchParams<{
     source?: string;
     type?: string;
     category?: string;
     merchant?: string;
     q?: string;
+    /** `/transactions?account=<id>` from an account: that account, all time. */
+    account?: string;
   }>();
+  const accountFromLink = typeof accountParam === 'string' && accountParam.trim() ? accountParam.trim() : null;
   // One category, or several — Flow's pooled "N more" slice hands over every
   // category behind it, so the drill-down covers exactly what the row totalled.
   const deepCategories = (categoryParam ?? '')
@@ -135,7 +167,8 @@ export default function TransactionsScreen() {
     // The category path was corrected first; the merchant path was left
     // all-time and disagreed exactly the same way, by a factor of five on a
     // busy merchant.
-    datePreset: source === 'sms' ? 'all' : 'selected',
+    datePreset: source === 'sms' || accountFromLink ? 'all' : 'selected',
+    accountId: accountFromLink,
     // Home's In/Out figures deep-link here pre-filtered by type.
     //
     // A category or merchant drill-down carries no type, and both of the rows
@@ -169,6 +202,14 @@ export default function TransactionsScreen() {
   const autoAddedActive = autoAddedOnly && autoAddedCount > 0;
   const [sheetVisible, setSheetVisible] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
+  const [entryMode, setEntryMode] = useState<EntryDetailMode>('read');
+  const [deleting, setDeleting] = useState<Transaction | null>(null);
+  // A later account link (same screen, new param) scopes to that account.
+  useEffect(() => {
+    if (!accountFromLink) return;
+    setFilters((current) => current.accountId === accountFromLink ? current
+      : { ...current, accountId: accountFromLink, datePreset: 'all' });
+  }, [accountFromLink]);
   const pendingFilterFrame = useRef<number | null>(null);
   const listInsets = useScreenContentInsets({ hasFooter: false });
 
@@ -180,7 +221,9 @@ export default function TransactionsScreen() {
   const currentKey = monthKey(new Date());
 
   const activeFilterCount =
-    (filters.type ? 1 : 0) +
+    (filters.type || filters.kind ? 1 : 0) +
+    (filters.maxFils ? 1 : 0) +
+    (filters.sources && filters.sources.size > 0 ? 1 : 0) +
     (filters.accountId ? 1 : 0) +
     (filters.categories.size > 0 ? 1 : 0) +
     (filters.datePreset !== 'selected' ? 1 : 0) +
@@ -190,49 +233,135 @@ export default function TransactionsScreen() {
     (autoAddedActive ? 1 : 0);
 
   const appliedFilters = useDeferredValue(filters);
-  const filterIndex = useMemo(() => createTransactionFilterIndex(state.transactions, language),
+  // Search also matches the account a row belongs to.
+  const accountNames = useMemo(() => new Map(state.accounts.map((account) => [account.id,
+    [account.name, account.bankName].filter(Boolean).join(' ')] as const)), [state.accounts]);
+  const filterIndex = useMemo(() => createTransactionFilterIndex(state.transactions, language, accountNames),
     // monthKey follows the current stored salary-day boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, language, state.monthStartDay]);
+    [state.transactions, language, state.monthStartDay, accountNames]);
   const hasUnassignedIncome = useMemo(() => state.transactions.some(tx => tx.accountId === UNASSIGNED_INCOME_ACCOUNT_ID), [state.transactions]);
+  // Only the sources this ledger actually has, in display order.
+  const sourceKinds = useMemo(() => {
+    const present = new Set<TransactionSourceKind>();
+    for (const tx of state.transactions) present.add(transactionSource(tx));
+    return TRANSACTION_SOURCE_KINDS.filter((kind) => present.has(kind));
+  }, [state.transactions]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   // Both legs of a move between the user's own accounts, so the arriving one
   // is not painted as income it never was.
   const internal = internalTransferIdsForState(state);
   const corroborating = corroboratingTransferIdsForState(state);
+  const reconciliation = useMemo(() => reconcileTransfers(state.transactions, state.accounts), [state.transactions, state.accounts]);
   const separateTransferIds = useMemo(() => new Set(getTransferActivity(state.transactions, state.accounts,
-    reconcileTransfers(state.transactions, state.accounts)).map(item => item.transaction.id)), [state.transactions, state.accounts]);
+    reconciliation).map(item => item.transaction.id)), [state.transactions, state.accounts, reconciliation]);
+  // The Transfers and Needs review chips, from the predicates the rows and
+  // the review screens already use: one pass over the ledger.
+  const { transferIds, reviewIds } = useMemo(() => {
+    const transfers = new Set<string>();
+    const review = new Set<string>();
+    for (const row of state.transactions) {
+      if (isLedgerTransfer(row) || internal.has(row.id) || separateTransferIds.has(row.id) || isTransferCandidate(row)) transfers.add(row.id);
+      if (row.bestEffort || reconciliation.pendingIds.has(row.id) ||
+        isUnassignedIncome(row) || row.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) review.add(row.id);
+    }
+    return { transferIds: transfers, reviewIds: review };
+  }, [state.transactions, internal, separateTransferIds, reconciliation]);
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
     [state.accounts],
   );
+  // Rows keep one stable action builder; the router object itself may not be stable.
+  const routerRef = useRef(router);
+  routerRef.current = router;
+  const accountLabelFor = (id: string) => {
+    const account = accountById.get(id);
+    return account ? accountDisplayName(account) : tr('incomeAccountReview');
+  };
   // One stable handler for the whole list. An inline `() => setEditing(item)`
   // is a new function per row per render, which defeats TransactionRow's memo
   // and re-renders every visible row on each keystroke in the search field.
   const openEntry = useCallback((tx: Transaction) => {
     Keyboard.dismiss();
+    setEntryMode('read');
     setEditing(tx);
   }, []);
+  /**
+   * Row actions, by swipe or by the screen reader's actions menu. None acts
+   * silently: Category and Transfer open the entry sheet in that state (a
+   * transfer still unresolved opens its review), Delete asks first.
+   */
+  const rowActions = useCallback((tx: Transaction) => {
+    const confirmedTransfer = isLedgerTransfer(tx) || internal.has(tx.id) || transferOwnership(tx) === 'own';
+    const candidate = isTransferCandidate(tx);
+    const actions: SwipeAction[] = [];
+    if (!confirmedTransfer && !candidate) {
+      actions.push({ name: 'category', label: words.category, icon: 'receipt',
+        onPress: () => { Keyboard.dismiss(); setEntryMode('category'); setEditing(tx); } });
+    }
+    if (!confirmedTransfer) {
+      actions.push({ name: 'transfer', label: words.transfer, icon: 'repeat',
+        onPress: () => {
+          Keyboard.dismiss();
+          if (candidate) routerRef.current.push({ pathname: '/review-transfers', params: { transactionId: tx.id } });
+          else { setEntryMode('transfer'); setEditing(tx); }
+        } });
+    }
+    actions.push({ name: 'delete', label: words.delete, icon: 'trash', destructive: true,
+      onPress: () => { Keyboard.dismiss(); setDeleting(tx); } });
+    return actions;
+  }, [internal, words]);
+  // One stable action set per row object, so a search keystroke does not hand
+  // every visible TransactionRow new props and defeat its memo.
+  const rowActionCache = useMemo(() => new WeakMap<Transaction, {
+    actions: SwipeAction[];
+    spoken: { name: string; label: string }[];
+    onAction: (name: string) => void;
+  }>(),
+  // A new action builder (new transfer scope or language) starts a new cache.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [rowActions]);
+  const actionsFor = useCallback((tx: Transaction) => {
+    let entry = rowActionCache.get(tx);
+    if (!entry) {
+      const actions = rowActions(tx);
+      entry = { actions, spoken: actions.map(({ name, label }) => ({ name, label })),
+        onAction: (name) => actions.find((action) => action.name === name)?.onPress() };
+      rowActionCache.set(tx, entry);
+    }
+    return entry;
+  }, [rowActionCache, rowActions]);
   const renderRow = useCallback(
-    ({ item, index }: { item: Transaction; index: number }) => (
-      <View
-        style={index > 0 ? [styles.rowDivider, { borderTopColor: theme.cardBorder }] : undefined}>
-        <TransactionRow
-          transaction={item}
-          account={accountById.get(item.accountId)}
-          onPress={openEntry}
-          internal={internal.has(item.id)}
-        />
-      </View>
-    ),
-    [accountById, openEntry, theme.cardBorder, internal],
+    ({ item, index }: { item: Transaction; index: number }) => {
+      const { actions, spoken, onAction } = actionsFor(item);
+      return (
+        <View
+          style={index > 0 ? [styles.rowDivider, { borderTopColor: theme.cardBorder }] : undefined}>
+          <SwipeRow actions={actions} testID={`transaction-swipe-${item.id}`}>
+            <View style={{ backgroundColor: theme.background }}>
+              <TransactionRow
+                transaction={item}
+                account={accountById.get(item.accountId)}
+                onPress={openEntry}
+                internal={internal.has(item.id)}
+                accessibilityActions={spoken}
+                onAccessibilityAction={onAction}
+              />
+            </View>
+          </SwipeRow>
+        </View>
+      );
+    },
+    [accountById, openEntry, theme.cardBorder, theme.background, internal, actionsFor],
   );
 
   const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly,
     bestEffortOnly: autoAddedActive, currentKey, period,
-    live: liveAccounts, internal, corroborating, separateTransferIds }),
-  [appliedQuery, merchantFilter, smsOnly, autoAddedActive, currentKey, period, liveAccounts, internal, corroborating, separateTransferIds]);
+    live: liveAccounts, internal, corroborating, separateTransferIds, transferIds, reviewIds,
+    amountExponent: state.ledgerMoney?.exponent ?? 2 }),
+  [appliedQuery, merchantFilter, smsOnly, autoAddedActive, currentKey, period, liveAccounts, internal, corroborating,
+    separateTransferIds, transferIds, reviewIds, state.ledgerMoney?.exponent]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded, separatedTransfers } = projection;
@@ -274,6 +403,7 @@ export default function TransactionsScreen() {
   }, []);
 
   const transactionResults = useMemo(() => (
+        <GestureHandlerRootView style={styles.gestureRoot}>
         <SectionList
           sections={sections}
           keyExtractor={transactionKey}
@@ -464,6 +594,7 @@ export default function TransactionsScreen() {
             </View>
           }
         />
+        </GestureHandlerRootView>
   ), [sections, listInsets, largeText, merchantFilter, smsOnly, autoAddedCount, autoAddedActive, theme, tr, trf, filtered.length,
     filters.datePreset, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
     separatedTransfers, transferContributes, transferWords]);
@@ -529,6 +660,24 @@ export default function TransactionsScreen() {
                   />
                 </Pressable>
               </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeChips}
+            accessibilityLabel={words.types} testID="transactions-type-chips">
+            {TYPE_CHIPS.map((chip) => <View key={chip} testID={`transactions-chip-${chip}`}>
+              <Chip label={words[chip]} active={chipOf(filters) === chip}
+                onPress={() => setFilters((current) => withChip(current, chip))} />
+            </View>)}
+          </ScrollView>
+          {filters.accountId ? <View style={styles.chipRow}>
+            <Pressable testID="transactions-account-filter" accessibilityRole="button"
+              accessibilityLabel={`${tr('clearFilter')}: ${words.accountFilter(accountLabelFor(filters.accountId))}`}
+              onPress={() => setFilters((current) => ({ ...current, accountId: null }))}
+              style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
+              <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
+                {words.accountFilter(accountLabelFor(filters.accountId))}
+              </ThemedText>
+              <Icon name="close" size={13} color={theme.primary} />
+            </Pressable>
+          </View> : null}
           <Pressable accessibilityRole="button" onPress={() => router.push('/transfers')}
             style={styles.transferLink} testID="transactions-transfers-link">
             <Icon name="repeat" size={17} color={theme.primary} />
@@ -542,9 +691,19 @@ export default function TransactionsScreen() {
 
       {sheetVisible && <TransactionFilterSheet initialFilters={filters} resetFilters={DEFAULT_FILTERS}
         accounts={state.accounts} hasUnassignedIncome={hasUnassignedIncome} index={filterIndex} options={filterOptions}
+        sourceKinds={sourceKinds}
         onClose={() => setSheetVisible(false)} onApply={applyFilters} />}
 
-      <EntryDetailSheet transaction={editing} onClose={() => setEditing(null)} />
+      <EntryDetailSheet transaction={editing} initialMode={entryMode} onClose={() => { setEditing(null); setEntryMode('read'); }} />
+      {deleting ? <ConfirmSheet
+        visible
+        onClose={() => setDeleting(null)}
+        question={tr('deleteThisEntry')}
+        body={`${deleting.title} · ${formatAmount(deleting.amountFils)}`}
+        confirmLabel={tr('delete')}
+        destructive
+        onConfirm={() => deleteTransaction(deleting.id)}
+      /> : null}
     </>
   );
 }
@@ -628,5 +787,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two,
-  }
+  },
+  typeChips: { gap: Spacing.two, paddingVertical: Spacing.one },
+  gestureRoot: { flex: 1 },
 });

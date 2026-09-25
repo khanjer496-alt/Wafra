@@ -1901,7 +1901,7 @@ ok('the spoken label agrees with the sign on screen',
     'a bill dated next month was listed and totalled under it');
 
   ok('a merchant drill-down opens in the period the figure was read in',
-    /datePreset: source === 'sms' \? 'all' : 'selected'/.test(tx),
+    /datePreset: source === 'sms' \|\| accountFromLink \? 'all' : 'selected'/.test(tx) && !/merchantParam[^\n]*\? 'all'/.test(tx),
     'topMerchants is period-scoped; the drill-down was all-time');
 
   ok('a category or merchant drill-down is scoped to spending',

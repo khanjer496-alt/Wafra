@@ -15,6 +15,8 @@ import { t, tf, type StringKey } from '@/lib/i18n';
 import { UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
 import { periodLabel } from '@/lib/period';
 import { projectTransactionFilter, type TransactionFilters as Filters, type DatePreset, type SortMode } from '@/lib/transaction-filter';
+import type { TransactionSourceKind } from '@/lib/transaction-source';
+import { transactionsWords } from '@/lib/transactions-copy';
 import type { Account, CategoryId, TransactionType } from '@/lib/types';
 
 type FilterIndex = Parameters<typeof projectTransactionFilter>[0];
@@ -26,6 +28,8 @@ export interface TransactionFilterSheetProps {
   hasUnassignedIncome: boolean;
   index: FilterIndex;
   options: FilterOptions;
+  /** Sources present in the ledger, in display order. Omitted: no Source section. */
+  sourceKinds?: readonly TransactionSourceKind[];
   onClose: () => void;
   onApply: (filters: Filters, resetScope: boolean) => void;
 }
@@ -49,12 +53,14 @@ function FilterSection({ title, summary, children }: { title: string; summary: s
 
 /** Draft controls own their state. Editing a chip cannot rebuild the ledger behind
  * the modal. Close discards the draft; Show results applies it once. */
-export function TransactionFilterSheet({ initialFilters, resetFilters, accounts, hasUnassignedIncome, index, options, onClose, onApply }: TransactionFilterSheetProps) {
+export function TransactionFilterSheet({ initialFilters, resetFilters, accounts, hasUnassignedIncome, index, options, sourceKinds, onClose, onApply }: TransactionFilterSheetProps) {
   const theme = useTheme();
   const language = useLanguage();
+  const words = transactionsWords(language);
   const tr = useCallback((key: StringKey) => t(key, language), [language]);
   const trf = useCallback((key: StringKey, vars: Record<string, string | number>) => tf(key, vars, language), [language]);
-  const [filters, setFilters] = useState<Filters>(() => ({ ...initialFilters, categories: new Set(initialFilters.categories) }));
+  const [filters, setFilters] = useState<Filters>(() => ({ ...initialFilters, categories: new Set(initialFilters.categories),
+    sources: new Set(initialFilters.sources ?? []) }));
   const [resetScope, setResetScope] = useState(false);
   const [picking, setPicking] = useState<'dateFrom' | 'dateTo' | null>(null);
   const [rangeDraft, setRangeDraft] = useState({ dateFrom: initialFilters.dateFrom ?? '', dateTo: initialFilters.dateTo ?? '' });
@@ -74,8 +80,14 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
     if (categories.has(id)) categories.delete(id); else categories.add(id);
     return { ...current, categories };
   });
+  const toggleSource = (kind: TransactionSourceKind) => setFilters(current => {
+    const sources = new Set(current.sources ?? []);
+    if (sources.has(kind)) sources.delete(kind); else sources.add(kind);
+    return { ...current, sources };
+  });
+  const selectedSources = filters.sources ?? new Set<TransactionSourceKind>();
   const clearFilters = () => {
-    setFilters({ ...resetFilters, categories: new Set(resetFilters.categories) });
+    setFilters({ ...resetFilters, categories: new Set(resetFilters.categories), sources: new Set(resetFilters.sources ?? []) });
     setRangeDraft({ dateFrom: '', dateTo: '' });
     setPicking(null);
     setResetScope(true);
@@ -107,8 +119,8 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
                 <Chip
                   key={String(type)}
                   label={label}
-                  active={filters.type === type}
-                  onPress={() => setFilters((current) => ({ ...current, type }))}
+                  active={filters.type === type && !(type === null && filters.kind)}
+                  onPress={() => setFilters((current) => ({ ...current, type, kind: null }))}
                 />
               );
             })}
@@ -288,6 +300,30 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
             ))}
           </View>
 </FilterSection>
+
+<FilterSection title={words.maxAmount} summary={filters.maxFils ? words.upTo(formatAmount(filters.maxFils)) : words.noMax}>
+          <View style={styles.chipRow} testID="transaction-filter-max">
+            {[null, ledgerTypicalMinor(50), ledgerTypicalMinor(100), ledgerTypicalMinor(500), ledgerTypicalMinor(1000)].map((value) => (
+              <Chip
+                key={String(value)}
+                label={value === null ? words.noMax : words.upTo(formatAmount(value))}
+                active={(filters.maxFils ?? null) === value}
+                onPress={() => setFilters((current) => ({ ...current, maxFils: value }))}
+              />
+            ))}
+          </View>
+</FilterSection>
+
+{sourceKinds && sourceKinds.length > 1 ? <FilterSection title={words.sourceFilter}
+  summary={selectedSources.size > 0 ? [...selectedSources].map((kind) => words.sourceTitle[kind]).join(', ') : tr('allWord')}>
+          <View style={styles.chipRow} testID="transaction-filter-source">
+            <Chip label={tr('allWord')} active={selectedSources.size === 0}
+              onPress={() => setFilters((current) => ({ ...current, sources: new Set() }))} />
+            {sourceKinds.map((kind) => (
+              <Chip key={kind} label={words.sourceTitle[kind]} active={selectedSources.has(kind)} onPress={() => toggleSource(kind)} />
+            ))}
+          </View>
+</FilterSection> : null}
 
 <FilterSection title={tr('sortFilter')} summary={tr(filters.sort === 'newest' ? 'newest' : filters.sort === 'oldest' ? 'oldest' : 'largest')}>
           <View style={styles.chipRow}>

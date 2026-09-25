@@ -123,6 +123,10 @@ function createHarness(options = {}) {
   local('@/lib/home-today','src/lib/home-today.ts');
   local('@/lib/period-pace','src/lib/period-pace.ts');
   local('@/lib/transaction-source','src/lib/transaction-source.ts');
+  local('@/lib/transactions-copy','src/lib/transactions-copy.ts');
+  // Swipe gestures are native; the row inside is the real component.
+  deps['react-native-gesture-handler']={GestureHandlerRootView:p=>jsx('View',p)};
+  deps['@/components/swipe-row']={SwipeRow:p=>jsx('SwipeRow',{...p,children:p.children})};
   local('@/lib/capture-pause','src/lib/capture-pause.ts');
   deps['@/components/home-add-button']={HomeAddButton:p=>jsx('HomeAddButton',p)};
   deps['@/lib/capture-pause-state']={loadCapturePauseSnooze:async()=>options.snoozedAtMs??null,saveCapturePauseSnooze:async at=>{events.push(['snooze',at]);}};

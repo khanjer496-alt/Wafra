@@ -46,6 +46,8 @@ function filterProbe(language = 'en', options = {}) {
     '@/hooks/use-language': { useLanguage: () => language }, '@/hooks/use-theme': { useTheme: () => ({}) },
     '@/constants/theme': { Fonts: { sansMedium: 'Geist-Medium' }, Radius: { sm: 4 }, Spacing: { one: 4, two: 8, three: 12 } },
   });
+  deps['@/lib/transaction-source'] = load(path.join(root, 'src/lib/transaction-source.ts'));
+  deps['@/lib/transactions-copy'] = load(path.join(root, 'src/lib/transactions-copy.ts'), deps);
   const filters = load(path.join(root, 'src/lib/transaction-filter.ts'), deps);
   deps['@/lib/transaction-filter'] = filters;
   const rows = [

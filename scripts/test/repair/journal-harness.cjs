@@ -116,6 +116,7 @@ function harness(options = {}) {
   dependencies['@/lib/home-widgets'] = load(path.join(root, 'src/lib/home-widgets.ts'), dependencies);
   dependencies['@/lib/home-today'] = load(path.join(root, 'src/lib/home-today.ts'), dependencies);
   dependencies['@/lib/transaction-source'] = load(path.join(root, 'src/lib/transaction-source.ts'), dependencies);
+  dependencies['@/lib/transactions-copy'] = load(path.join(root, 'src/lib/transactions-copy.ts'), dependencies);
   dependencies['@/lib/capture-pause'] = load(path.join(root, 'src/lib/capture-pause.ts'), dependencies);
   dependencies['@/lib/capture-pause-state'] = { loadCapturePauseSnooze: async () => null, saveCapturePauseSnooze: async (at) => { events.push(['snooze', at]); } };
   dependencies['@/components/home-add-button'] = { HomeAddButton: (props) => jsx('HomeAddButton', props) };
