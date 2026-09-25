@@ -19,11 +19,17 @@ test('Home puts one spending summary and recent activity before capture controls
   assert.match(text(nodes.find((node) => node.props.testID === 'home-widget-activity')), /Recent transactions/);
 });
 test('settings and explicit manual entry remain working visible quick actions', () => {
-  const h = harness();
-  const nodes = walk(h.tree);
+  const ios = harness({ platform: 'ios' });
+  const nodes = walk(ios.tree);
   nodes.find((n) => n.type === 'Pressable' && n.props.accessibilityLabel === 'Add').props.onPress();
   nodes.find((n) => n.type === 'Pressable' && n.props.accessibilityLabel === 'Settings').props.onPress();
-  assert.deepEqual(h.events.filter((e) => e[0] === 'route'), [['route', '/add-transaction'], ['route', '/settings']]);
+  assert.deepEqual(ios.events.filter((e) => e[0] === 'route'), [['route', '/add-transaction'], ['route', '/settings']]);
+  // Android keeps manual entry as the floating Add above the tab bar.
+  const android = harness({ platform: 'android' });
+  const fab = walk(android.tree).find((n) => n.type === 'HomeAddButton');
+  assert.equal(walk(android.tree).some((n) => n.type === 'Pressable' && n.props.accessibilityLabel === 'Add'), false);
+  fab.props.onPress();
+  assert.deepEqual(android.events.filter((e) => e[0] === 'route'), [['route', '/add-transaction']]);
 });
 test('Founder logo unlock exists only in founder-enabled internal builds', async () => {
   const production = harness();

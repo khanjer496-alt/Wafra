@@ -41,13 +41,23 @@ test('zero-spend budget categories render 0% rather than NaN or an invented expe
   assert.doesNotMatch(text(tree), /NaN|Infinity/);
 });
 test('Home keeps accounts out of its hero and exposes one Add and one Settings action', () => {
-  const h = createHarness(); const tree = h.render('home');
-  assert.ok(nodeById(tree, 'home-spending-total'));
-  assert.ok(nodeById(tree, 'home-income-summary'));
-  assert.equal(nodeById(tree, 'reference-quick-actions'), undefined);
-  assert.doesNotMatch(text(tree), /Recorded balances|Net after spending/);
-  for (const label of ['Add', 'Settings']) {
-    assert.equal(walk(tree).filter(n => n.props?.accessibilityLabel === label && n.props.onPress).length, 1);
+  for (const platform of ['ios', 'android']) {
+    const h = createHarness({ platform }); const tree = h.render('home');
+    assert.ok(nodeById(tree, 'home-spending-total'));
+    assert.ok(nodeById(tree, 'home-income-summary'));
+    assert.equal(nodeById(tree, 'reference-quick-actions'), undefined);
+    assert.doesNotMatch(text(tree), /Recorded balances|Net after spending/);
+    assert.equal(walk(tree).filter(n => n.props?.accessibilityLabel === 'Settings' && n.props.onPress).length, 1);
+    const headerAdd = walk(tree).filter(n => n.props?.accessibilityLabel === 'Add' && n.props.onPress);
+    const fab = walk(tree).filter(n => n.type === 'HomeAddButton');
+    // iPhone keeps its header "+"; Android moves Add to one floating button.
+    assert.equal(headerAdd.length + fab.length, 1, platform);
+    assert.equal(fab.length, platform === 'android' ? 1 : 0, platform);
+    const ask = nodeById(tree, 'home-ask-chip');
+    assert.equal(!!ask, platform === 'android', `${platform}: Ask chip only on Android`);
+    if (ask) { ask.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/assistant']); }
+    (headerAdd[0] ?? fab[0]).props.onPress();
+    assert.deepEqual(h.events.at(-1), ['route', '/add-transaction']);
   }
 });
 test('Home renders at most five recent transactions without losing the full activity route', () => {
