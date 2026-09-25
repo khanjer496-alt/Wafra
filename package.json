@@ -57,6 +57,7 @@
     "check": "npm run doctor && npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:store-pricing && npm run check:server"
   },
   "dependencies": {
+    "@bacons/apple-targets": "^5.0.0",
     "@huggingface/tokenizers": "^0.2.0",
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.2.0",
