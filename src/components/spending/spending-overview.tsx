@@ -155,10 +155,10 @@ export function SpendingOverview(p: Props) {
         const limitState = limitHealth(row.ratio);
         const limitCaption = row.limitFils !== null && row.ratio !== null
           ? w.limitOf(Math.round(row.ratio * 100), moneyLabel(row.limitFils)) : null;
-        const limitSpoken = row.limitFils === null || row.remainingFils === null ? w.noLimit
-          : `${limitCaption}. ${moneyLabel(Math.abs(row.remainingFils))} ${row.remainingFils < 0 ? w.over : w.left}`;
+        const remainingSpoken = row.remainingFils === null ? ''
+          : ` ${moneyLabel(Math.abs(row.remainingFils))} ${row.remainingFils < 0 ? w.over : w.left}`;
         return <Pressable key={row.category} accessibilityRole="button" testID={`spending-category-${row.category}`}
-          accessibilityLabel={`${categoryLabel(row.category, language)}. ${moneyLabel(row.spentFils)}. ${shareLabel} ${w.share}. ${limitSpoken}`}
+          accessibilityLabel={`${categoryLabel(row.category, language)}. ${moneyLabel(row.spentFils)}. ${shareLabel} ${w.share}. ${row.limitFils === null ? w.noLimit : `${limitCaption}.${remainingSpoken}`}`}
           onPress={() => p.onCategory(row.category)}
           style={({ pressed }) => [styles.category, { borderTopColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
           <CategoryAvatar category={row.category} size={36} color={sliceColor} />
