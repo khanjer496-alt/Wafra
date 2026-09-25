@@ -116,6 +116,7 @@ function createWorkflowHarness(options={}) {
   }
   if(screen==='pro'){
    h.local('@/lib/purchases','src/lib/purchases.ts');
+   h.local('@/lib/pro-copy','src/lib/pro-copy.ts');
    d['@/lib/billing']={isBillingAvailable:()=>false,loadStorePrices:async()=>null,purchasePro:record('purchasePro'),restorePro:record('restorePro'),subscriptionManagementUrl:async()=>null};
    d['@/components/superwall-billing-context']={useWafraBilling:()=>({
     available:false,configured:false,configurationError:null,paywallStatus:'idle',
