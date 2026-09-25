@@ -3803,7 +3803,6 @@ const S = {
   homeCustomizeTitle: { en: 'Customize Home', ar: 'تخصيص الرئيسية' },
   homeCustomizeBody: { en: 'Choose what appears below your money overview and put the most useful sections first.', ar: 'اختر ما يظهر أسفل ملخص أموالك ورتّب الأقسام الأكثر فائدة أولاً.' },
   homeCustomizeDetail: { en: 'Choose and reorder Home sections', ar: 'اختر أقسام الرئيسية ورتّبها' },
-  homeCustomizeFixed: { en: 'Money overview and automatic capture stay fixed at the top.', ar: 'يبقى ملخص الأموال والالتقاط التلقائي ثابتين في الأعلى.' },
   moveUp: { en: 'Move up', ar: 'نقل للأعلى' },
   moveDown: { en: 'Move down', ar: 'نقل للأسفل' },
   assistantTitle: { en: 'Wafra Assistant', ar: 'مساعد وفرة' },

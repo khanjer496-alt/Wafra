@@ -106,3 +106,22 @@ test('capture time label is today’s clock, an earlier date, or nothing', () =>
   assert.equal(status.captureLastHandledLabel(-5, now, 'en'), null);
   assert.equal(status.captureLastHandledLabel(Number.NaN, now, 'en'), null);
 });
+
+test('Customize Home copy has matching keys and a title for every Home section', () => {
+  const customize = load(path.join(root, 'src/lib/customize-copy.ts'));
+  const { en, ar } = customize.CUSTOMIZE_COPY;
+  assert.deepEqual(shape(ar), shape(en));
+  assert.deepEqual(Object.keys(en.widgetTitle).sort(), ['activity', 'assistant', 'due', 'insight', 'upcoming']);
+  assert.equal(en.widgetTitle.due, 'Due soon');
+  assert.equal(en.widgetTitle.activity, 'Latest activity');
+  for (const value of Object.values(ar.widgetTitle)) assert.match(value, /[؀-ۿ]/);
+});
+
+test('Customize Home keeps accessible reorder buttons, fixed rows and a Done action', () => {
+  const source = require('node:fs').readFileSync(path.join(root, 'src/app/home-customize.tsx'), 'utf8');
+  assert.match(source, /accessibilityLabel=\{`\$\{t\('moveUp'\)\} \$\{title\}`\}/);
+  assert.match(source, /accessibilityLabel=\{`\$\{t\('moveDown'\)\} \$\{title\}`\}/);
+  assert.match(source, /actions: \[\{ label: copy\.done, onPress: router\.back \}\]/);
+  assert.match(source, /testID="home-customize-fixed"[\s\S]*copy\.moneyOverviewTitle[\s\S]*copy\.captureTitle/);
+  assert.doesNotMatch(source, /homeCustomizeFixed/);
+});
