@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <color name="wafra_widget_background">#FBF9F4</color>
+  <color name="wafra_widget_text">#16130F</color>
+  <color name="wafra_widget_secondary">#57524A</color>
+  <color name="wafra_widget_accent">#1F6B52</color>
+  <color name="wafra_widget_track">#81796B</color>
+</resources>

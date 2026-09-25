@@ -5,8 +5,10 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { WafraMark } from '@/components/wafra-logo';
 import { Money } from '@/components/ui/money';
+import { GrowBar } from '@/components/ui/grow-bar';
 import type { Colors } from '@/constants/theme';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
+import type { HomeToday } from '@/lib/home-today';
 
 type Props = {
   theme: typeof Colors.light;
@@ -28,7 +30,65 @@ type Props = {
   brandMark?: React.ReactNode;
   /** Internal builds only: tapping the Wafra wordmark grants durable Founder Pro. */
   onFounderUnlock?: () => void;
+  /** Today, this week and budget pace. Omitted: the period figures lead, as before. */
+  today?: HomeToday;
+  onToday?: () => void;
 };
+
+/** Today | Left in budgets, then seven days of spending. Amounts are the shared ledger figures. */
+function TodayBlock({ p, today }: { p: Props; today: HomeToday }) {
+  const w = copy[p.language === 'ar' ? 'ar' : 'en'];
+  const currency = p.moneySpec.currency;
+  const money = (fils: number) => `${currency} ${formatMinorUnits(Math.round(Math.abs(fils)), p.moneySpec)}`;
+  const countLabel = today.todayCount === 0 ? w.noPaymentsToday
+    : `${today.todayCount} ${today.todayCount === 1 ? w.payment : w.payments}`;
+  const budget = today.budget;
+  // Never a second copy of the period total shown just below.
+  const average = today.average;
+  const showRight = budget !== null || average !== null;
+  const rightLabel = budget ? w.leftToSpend : w.dailyAverage;
+  const rightFils = budget ? budget.leftFils : average?.fils ?? 0;
+  const rightMeta = budget
+    ? [`${money(budget.perDayFils)} ${w.perDay}`, budget.overCount > 0 ? w.budgetsOver(budget.overCount) : w.daysLeft(budget.daysLeft)].join(' · ')
+    : `${w.overDays(average?.days ?? 0)}, ${w.excludingFixed}`;
+  const rightWarning = budget !== null && budget.overCount > 0;
+  const max = Math.max(1, ...today.week.map(day => day.fils));
+  const weekSpoken = `${w.weekTotal} ${money(today.weekFils)}. ` +
+    today.week.map(day => `${w.weekday(day.weekday)} ${money(day.fils)}`).join(', ');
+  return <View style={styles.todayBlock} testID="home-today">
+    <View style={[styles.pair, { borderColor: p.theme.cardBorder }, p.largeText && styles.stack]}>
+      <Pressable accessibilityRole="button" onPress={p.onToday} testID="home-today-total"
+        accessibilityLabel={`${w.today}, ${money(today.todayFils)}. ${countLabel}`} accessibilityHint={w.opensActivity}
+        style={[styles.pairCell, p.largeText && styles.metricStacked]}>
+        <ThemedText type="small" themeColor="textSecondary">{w.today}</ThemedText>
+        <Money fils={today.todayFils} moneySpec={p.moneySpec} type="heading" />
+        <ThemedText type="meta" themeColor="textSecondary">{countLabel}</ThemedText>
+      </Pressable>
+      {showRight ? <View accessible accessibilityRole="text" testID="home-left-to-spend"
+        accessibilityLabel={`${rightLabel}, ${money(rightFils)}. ${rightMeta}`}
+        style={[styles.pairCell, !p.largeText && { borderStartWidth: StyleSheet.hairlineWidth, borderColor: p.theme.cardBorder, paddingStart: 16 },
+          p.largeText && styles.metricStacked]}>
+        <ThemedText type="small" themeColor="textSecondary">{rightLabel}</ThemedText>
+        <Money fils={rightFils} moneySpec={p.moneySpec} type="heading" />
+        <ThemedText type="meta" themeColor={rightWarning ? 'warning' : 'textSecondary'}>{rightMeta}</ThemedText>
+      </View> : null}
+    </View>
+    <View style={styles.weekHead}>
+      <ThemedText type="smallBold" style={styles.weekTitle}>{w.thisWeek}</ThemedText>
+      <Money fils={today.weekFils} moneySpec={p.moneySpec} type="meta" color={p.theme.textSecondary} />
+    </View>
+    <View style={styles.week} accessible accessibilityRole="image" accessibilityLabel={weekSpoken} testID="home-week">
+      {today.week.map((day, index) => <View key={day.dateISO} style={styles.weekDay}>
+        <View style={styles.barTrack}>
+          <GrowBar axis="height" delay={index * 60}
+            size={day.fils > 0 ? Math.max(4, Math.round((day.fils / max) * 72)) : 2}
+            style={[styles.bar, { backgroundColor: day.today ? p.theme.primary : p.theme.controlBorder }]} />
+        </View>
+        <ThemedText type="micro" themeColor={day.today ? 'primary' : 'textSecondary'}>{w.weekday(day.weekday)}</ThemedText>
+      </View>)}
+    </View>
+  </View>;
+}
 
 /** One period, three reconciled figures. Account balances belong in Accounts. */
 export function ReferenceHomeSummary(p: Props) {
@@ -69,6 +129,7 @@ export function ReferenceHomeSummary(p: Props) {
       <ThemedText type="meta" themeColor="textSecondary">{p.greeting}</ThemedText>
       <ThemedText type="meta" themeColor="textTertiary">{p.dateLabel}</ThemedText>
     </View>
+    {p.today ? <TodayBlock p={p} today={p.today} /> : null}
     <View style={styles.summary} testID="journal-summary">
       <View style={styles.summaryTop}>
         <ThemedText type="small" themeColor="textSecondary">{w.moneyOut}</ThemedText>
@@ -81,7 +142,7 @@ export function ReferenceHomeSummary(p: Props) {
       <Pressable accessibilityRole="button" onPress={p.onSpending} testID="home-spending-total"
         accessibilityLabel={`${w.moneyOut}, ${currency} ${formatMinorUnits(Math.round(p.expenseFils), p.moneySpec)}. ${w.viewSpending}`}
         style={styles.spending}>
-        <Money fils={p.expenseFils} moneySpec={p.moneySpec} type="display" />
+        <Money fils={p.expenseFils} moneySpec={p.moneySpec} type={p.today ? 'title' : 'display'} />
         <View style={styles.link}><ThemedText type="meta" style={{ color: p.theme.primary }}>{w.viewSpending}</ThemedText>
           <Icon name="arrow-up-right" size={16} color={p.theme.primary} /></View>
       </Pressable>
@@ -116,6 +177,15 @@ const styles = StyleSheet.create({
   summaryTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   period: { minHeight: 44, paddingHorizontal: 12, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 6 },
   spending: { minHeight: 76, justifyContent: 'center', alignItems: 'flex-start', gap: 6, paddingBottom: 8 },
+  todayBlock: { gap: 10, paddingBottom: 10 },
+  pair: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12, gap: 16 },
+  pairCell: { flex: 1, minWidth: 0, minHeight: 48, gap: 4 },
+  weekHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: 6 },
+  weekTitle: { fontSize: 17, lineHeight: 24 },
+  week: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
+  weekDay: { flex: 1, alignItems: 'center', gap: 6 },
+  barTrack: { height: 72, width: '100%', justifyContent: 'flex-end' },
+  bar: { width: '100%', borderRadius: 6 },
   link: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metrics: { flexDirection: 'row', flexWrap: 'wrap', borderTopWidth: StyleSheet.hairlineWidth, gap: 16, paddingVertical: 8 },
   metric: { flexGrow: 1, flexShrink: 1, flexBasis: '42%', minWidth: 120, minHeight: 48, gap: 6 },

@@ -57,6 +57,7 @@ function loadStore({ storePath = 'src/lib/store.tsx', counted = {} } = {}) {
       Platform: { OS: 'android' },
     },
     '@/lib/share-text': { cleanupGeneratedExports: async () => {} },
+    '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {} },
     '@/lib/theme-preference': { getThemePreference: () => 'system', setThemePreference() {} },
     '@/lib/ledger-persistence': {
       createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),

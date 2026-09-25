@@ -27,12 +27,17 @@ import type { Insight } from '@/lib/insights';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
-import { formatAmount } from '@/lib/format';
+import { formatAmount, monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
-import { countsInCashflowTotals, liveAccountIds } from '@/lib/ledger';
+import { countsInCashflowTotals, isSpending, liveAccountIds } from '@/lib/ledger';
+import { summarizeHomeToday } from '@/lib/home-today';
+import { buildWidgetSnapshot } from '@/lib/widget-snapshot';
+import { clearWidgetSnapshot, setWidgetSnapshot } from '../../modules/wafra-widgets';
+import { allocationsOf } from '@/lib/splits';
+import { isFixedCommitment } from '@/lib/categories';
 import { moneyPictureProgress } from '@/lib/money-picture-progress';
 import { normalizePreferredName } from '@/lib/onboarding';
 import { syncPaymentReminders } from '@/lib/notifications';
@@ -267,6 +272,70 @@ export default function JournalHomeScreen() {
   const hasPeriodRecords = useMemo(() => state.transactions.some(transaction =>
     liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
   [state.transactions, liveAccounts, period]);
+  // Today and this week use the same spending definition and transfer scope as
+  // the period totals below them. Budget pace applies only to the live month.
+  const homeToday = useMemo(() => {
+    const live = liveAccounts as Set<string>;
+    const internal = dashboard.internalTransactionIds as Set<string>;
+    const budgetMonth = period.mode === 'month' && period.key === monthKey(now) ? period.key : null;
+    return summarizeHomeToday({
+      transactions: state.transactions,
+      budgets: state.budgets,
+      now,
+      isSpending: (transaction) => isSpending(transaction, live, internal),
+      inBudgetPeriod: (dateISO) => budgetMonth !== null && inPeriod(dateISO, period),
+      budgetPeriodStartISO: budgetMonth ? monthStartISO(budgetMonth) : null,
+      budgetPeriodEndISO: budgetMonth ? monthEndISO(budgetMonth) : null,
+      allocations: allocationsOf,
+      isFixedCommitment,
+      averageWindow: period.mode === 'month' ? { startISO: monthStartISO(period.key), endISO: monthEndISO(period.key) }
+        : period.mode === 'range' ? { startISO: period.from, endISO: period.to } : null,
+    });
+    // Day-keyed like the dashboard: a foreground resume must not re-walk the ledger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
+  // Widgets always describe the live month, whatever period Home is showing.
+  const widgetToday = useMemo(() => {
+    const currentKey = monthKey(now);
+    if (period.mode === 'month' && period.key === currentKey) return homeToday;
+    const live = liveAccounts as Set<string>;
+    const internal = dashboard.internalTransactionIds as Set<string>;
+    const current = { mode: 'month', key: currentKey } as const;
+    return summarizeHomeToday({
+      transactions: state.transactions,
+      budgets: state.budgets,
+      now,
+      isSpending: (transaction) => isSpending(transaction, live, internal),
+      inBudgetPeriod: (dateISO) => inPeriod(dateISO, current),
+      budgetPeriodStartISO: monthStartISO(currentKey),
+      budgetPeriodEndISO: monthEndISO(currentKey),
+      allocations: allocationsOf,
+      isFixedCommitment,
+      averageWindow: null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [homeToday, state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
+  useEffect(() => {
+    if (!state.hydrated || !state.onboarded) return;
+    // A legacy local-only preference keeps figures off every shared surface.
+    if (state.privateMode) { clearWidgetSnapshot(); return; }
+    const task = InteractionManager.runAfterInteractions(() => {
+      setWidgetSnapshot(JSON.stringify(buildWidgetSnapshot({
+        today: widgetToday,
+        currency: moneySpec.currency,
+        exponent: moneySpec.exponent,
+        now: new Date(),
+        // Card statements are exact; bills and subscriptions are projections.
+        upcoming: payments.map((item) => ({ title: item.title, amountFils: item.amountFils, dateISO: item.dateISO,
+          overdue: item.overdue, estimated: item.kind !== 'card' })),
+        hideAmounts: false,
+        language: language === 'ar' ? 'ar' : 'en',
+      })));
+    });
+    return () => task.cancel();
+    // `now` moves on every return to the foreground, so widgets are re-stamped
+    // even when no money changed and never age into their stale state.
+  }, [widgetToday, payments, moneySpec, language, state.hydrated, state.onboarded, state.privateMode, now]);
   const recentActivity = useMemo(() => {
     const rows: Transaction[] = [];
     for (const transaction of state.transactions) {
@@ -514,6 +583,8 @@ export default function JournalHomeScreen() {
           onSettings={() => router.push('/settings')}
           onIncome={() => router.push('/transactions?type=income')}
           onSpending={() => router.push('/flow')}
+          today={homeToday}
+          onToday={() => router.push('/transactions')}
           brandMark={openRecap ? <RecapLogoTrigger
             unread={recapEntry?.unread ?? false}
             accessibilityLabel={language === 'ar'

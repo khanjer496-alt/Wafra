@@ -546,6 +546,8 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/best-effort-autopost': require('./build/best-effort-autopost'),
     // Provider plumbing only: the locale key for memoised money text.
     '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
+    // Native widget bridge: clearAll only asks it to drop the widget summary.
+    '../../modules/wafra-widgets': { clearWidgetSnapshot: () => {}, setWidgetSnapshot: () => {} },
     // The real selector helpers (dependency-free).
     '@/lib/store-selection': execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); }),
     './balances': {},
