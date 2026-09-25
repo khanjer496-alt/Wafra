@@ -28,6 +28,12 @@ interface SmsReaderModule {
     beforeId: number,
     max: number,
   ): Promise<InboxSms[]>;
+  /**
+   * Read-only count of inbox rows dated at or after max(sinceMs, atOrAfterMs).
+   * Reads row ids only (no bodies, no senders); -1 when the provider cannot
+   * answer. Optional on older binaries, so callers must guard on it.
+   */
+  getInboxCount?(sinceMs: number, atOrAfterMs: number): Promise<number>;
   /** Present in every binary but returns true only in the temporary corpus build. */
   isCorpusExportEnabled?(): boolean;
   /** Unfiltered received SMS page. Throws unless the native corpus flag is enabled. */
