@@ -26,7 +26,7 @@ import { openDues } from '@/lib/cards';
 import { formatAED, shiftISO } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
-import { daysUntilNext, detectSubscriptions, type Subscription } from '@/lib/subscriptions';
+import { daysUntilNext, detectSubscriptions, isCancelledByUser, type Subscription } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
 export type ReminderKind = 'bill' | 'card' | 'subscription';
@@ -59,6 +59,7 @@ export function reminderScheduleInputsChanged(before: AppState, after: AppState)
     before.cardDues !== after.cardDues ||
     before.budgets !== after.budgets ||
     before.notSubscriptions !== after.notSubscriptions ||
+    before.cancelledSubscriptions !== after.cancelledSubscriptions ||
     before.dailySummary !== after.dailySummary ||
     before.monthStartDay !== after.monthStartDay ||
     before.language !== after.language ||
@@ -176,6 +177,8 @@ export function buildPaymentReminders(
       );
   for (const sub of subscriptions) {
     if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
+    // Nor do ones the user told us they cancelled — until a later charge says otherwise.
+    if (isCancelledByUser(sub, state.cancelledSubscriptions)) continue;
     // An on-demand top-up has no due date. It belongs in Fixed so the user can
     // see the recurring cash requirement, but predicting a day would create a
     // false reminder.

@@ -755,3 +755,52 @@ export function otherCommitments(subs: Subscription[]): Subscription[] {
 export function daysUntilNext(sub: Subscription, today: Date): number {
   return daysBetween(toISODate(today), sub.nextExpectedISO);
 }
+
+/**
+ * Whether the user has said this subscription is cancelled, and no charge
+ * since has contradicted them.
+ *
+ * `cancelled` maps a lowercased merchant to the ISO date the user said so. A
+ * charge dated AFTER that day is the bank saying it is still being paid, so
+ * the subscription counts again rather than hiding money that is still going
+ * out. A charge on the same day is the one the user just cancelled after.
+ */
+export function isCancelledByUser(
+  sub: Pick<Subscription, 'title' | 'lastChargedISO'>,
+  cancelled: Readonly<Record<string, string>> | undefined,
+): boolean {
+  if (!cancelled) return false;
+  const key = sub.title.trim().toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(cancelled, key)) return false;
+  const on = cancelled[key];
+  return typeof on === 'string' && sub.lastChargedISO <= on;
+}
+
+/** Subscriptions still in play: the user has not marked them cancelled. */
+export function withoutCancelled<T extends Pick<Subscription, 'title' | 'lastChargedISO'>>(
+  subs: T[],
+  cancelled: Readonly<Record<string, string>> | undefined,
+): T[] {
+  if (!cancelled || Object.keys(cancelled).length === 0) return subs;
+  return subs.filter((sub) => !isCancelledByUser(sub, cancelled));
+}
+
+/** The ones the user marked cancelled, for the reversible "Cancelled by you" list. */
+export function cancelledByUser<T extends Pick<Subscription, 'title' | 'lastChargedISO'>>(
+  subs: T[],
+  cancelled: Readonly<Record<string, string>> | undefined,
+): T[] {
+  if (!cancelled || Object.keys(cancelled).length === 0) return [];
+  return subs.filter((sub) => isCancelledByUser(sub, cancelled));
+}
+
+/**
+ * Monthly-equivalent total of the true subscriptions still charging: active,
+ * not marked cancelled. The figure behind "Subscriptions · X / month".
+ */
+export function subscriptionsMonthlyEquivalent(
+  subs: Subscription[],
+  cancelled?: Readonly<Record<string, string>>,
+): number {
+  return subscriptionsMonthlyTotal(withoutCancelled(activeSubscriptions(trueSubscriptions(subs)), cancelled));
+}

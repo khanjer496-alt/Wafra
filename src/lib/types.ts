@@ -81,6 +81,18 @@ export interface Account {
   creditLimitFils?: number;
   /** Timestamp (ms) of the SMS the snapshot came from — newest wins. */
   snapshotTs?: number;
+  /**
+   * The `snapshotTs` of a balance the user typed in themselves ("Set today's
+   * balance"), so the figure is labelled as theirs and never as a bank alert.
+   *
+   * Stored as a timestamp rather than an origin flag on purpose: the snapshot
+   * is the user's own only while `snapshotTs` still equals this value. A newer
+   * bank alert replaces `snapshotTs` through the import path, which knows
+   * nothing about this field, and the figure then reads as the bank's again
+   * without any writer having to remember to clear a flag. Absent on every
+   * account written before this existed, which is exactly "bank-reported".
+   */
+  manualSnapshotTs?: number;
   /** Hidden from lists (expired/unused card). Data stays; a new charge keeps it hidden until unhidden. */
   archived?: boolean;
   /**
@@ -733,6 +745,16 @@ export interface AppState {
   trustedNotificationPackages: string[];
   /** Merchants (lowercased) the user marked as NOT a subscription. */
   notSubscriptions: string[];
+  /**
+   * Subscriptions the user told Wafra they cancelled: lowercased merchant →
+   * the ISO date they said so. Different from `notSubscriptions` (which says
+   * the pattern was never a subscription): a cancelled one IS a subscription
+   * that stopped, so it leaves upcoming renewals and monthly totals but keeps
+   * its history. A charge dated after the cancellation brings it back, since
+   * the bank then says it is still being paid. Optional so ledgers written
+   * before it existed need no migration.
+   */
+  cancelledSubscriptions?: Record<string, string>;
   /** Epoch ms of the newest SMS already scanned. */
   lastScanTs: number;
   /** Body-free, resumable progress for Android's first full history import. */
