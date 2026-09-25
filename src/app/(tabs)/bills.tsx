@@ -69,6 +69,7 @@ import {
   type Subscription,
 } from '@/lib/subscriptions';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
+import { upcomingWindowItems, type AgendaRecurrence } from '@/lib/upcoming-window';
 import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, Bill, CategoryId } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
@@ -356,11 +357,26 @@ export default function BillsScreen() {
   }), [dues, paidCards, rows, subs, loans, commitments, state.accounts, state.bills, now]);
 
   // Next 30 days: everything unpaid that falls due inside the window,
-  // including what is already late. Later items stay in All.
-  const windowed = useMemo(
-    () => agendaItems.filter((item) => !item.paid && item.daysLeft <= UPCOMING_WINDOW_DAYS),
-    [agendaItems],
-  );
+  // including what is already late, and each time a repeating payment falls
+  // due inside it (a weekly charge four or five times; a bill paid this month
+  // again when next month's due date is near). Later items stay in All.
+  const windowed = useMemo(() => {
+    const billById = new Map(state.bills.map((bill) => [bill.id, bill]));
+    const paidIn = (bill: Bill) => (iso: string) => bill.paidMonths.includes(monthKey(iso));
+    const recurrenceOf = (item: PaymentAgendaItem): AgendaRecurrence | null => {
+      if (item.kind === 'bill') {
+        const bill = billById.get(item.id.slice(5));
+        if (!bill) return null;
+        return bill.yearlyOnISO
+          ? { cadence: 'yearly', anchorDay: Number(bill.yearlyOnISO.slice(8, 10)), isPaid: paidIn(bill) }
+          : { cadence: 'monthly', anchorDay: bill.dueDay, isPaid: paidIn(bill) };
+      }
+      if (item.kind !== 'recurring') return null;
+      const cadence = subByAgendaId.get(item.id)?.cadence;
+      return cadence === 'weekly' || cadence === 'monthly' || cadence === 'yearly' ? { cadence } : null;
+    };
+    return upcomingWindowItems(agendaItems, recurrenceOf, todayISO, UPCOMING_WINDOW_DAYS);
+  }, [agendaItems, state.bills, subByAgendaId, todayISO]);
   const selectedAgendaGroup = useMemo<PaymentGroup | undefined>(() => {
     if (agendaView !== 'all' || groupFilter === 'everything') return undefined;
     return groupFilter;
@@ -547,9 +563,10 @@ export default function BillsScreen() {
       const id = item.id.slice(5);
       const due = state.cardDues.find((due) => due.id === id);
       if (due) openCardDetail(state.accounts.find((a) => a.id === due.accountId) ?? null);
-    } else if (item.kind === 'bill') setSelectedReminderId(item.id.slice(5));
+    } else if (item.kind === 'bill') setSelectedReminderId((item.repeatOf ?? item.id).slice(5));
     else {
-      const sub = detected.find((sub) => `sub-${sub.title.trim().toLowerCase()}` === item.id);
+      const id = item.repeatOf ?? item.id;
+      const sub = detected.find((sub) => `sub-${sub.title.trim().toLowerCase()}` === id);
       if (sub) setDetail(sub);
     }
   };
@@ -557,7 +574,7 @@ export default function BillsScreen() {
   // "was AED 10.99 · Price went up" under a subscription whose price rose,
   // against the price it was before (priorTypicalFils), never its average.
   const renderAgendaMeta = (item: PaymentAgendaItem) => {
-    const sub = item.kind === 'recurring' ? subByAgendaId.get(item.id) : undefined;
+    const sub = item.kind === 'recurring' ? subByAgendaId.get(item.repeatOf ?? item.id) : undefined;
     if (!sub?.priceIncreased) return null;
     return (
       <ThemedText type="meta" style={{ color: theme.warning }} testID={`bills-price-up-${item.id}`}>

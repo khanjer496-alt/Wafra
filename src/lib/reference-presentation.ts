@@ -82,6 +82,8 @@ export interface PaymentAgendaItem {
   paid: boolean;
   /** Exact account supplied by the source; omit rather than guess. */
   accountName?: string;
+  /** A later time a repeating payment falls due inside a window: the id of the row it repeats. */
+  repeatOf?: string;
 }
 
 export function paymentGroupFor(item: Pick<PaymentAgendaItem, 'kind' | 'category' | 'group'>): PaymentGroup {

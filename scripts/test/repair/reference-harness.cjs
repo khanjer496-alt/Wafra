@@ -173,7 +173,7 @@ function createHarness(options = {}) {
     cancelledByUser:(subs,c)=>subs.filter(sub=>deps['@/lib/subscriptions'].isCancelledByUser(sub,c)),
     subscriptionsMonthlyEquivalent:(subs,c)=>subs.filter(sub=>sub.group==='subscription'&&sub.status==='active'&&!deps['@/lib/subscriptions'].isCancelledByUser(sub,c)).reduce((sum,sub)=>sum+sub.monthlyEquivalentFils,0)};
   local('@/lib/transaction-filter','src/lib/transaction-filter.ts');
-  local('@/lib/insights','src/lib/insights.ts');local('@/lib/analytics','src/lib/analytics.ts');local('@/lib/reference-presentation','src/lib/reference-presentation.ts');
+  local('@/lib/insights','src/lib/insights.ts');local('@/lib/analytics','src/lib/analytics.ts');local('@/lib/reference-presentation','src/lib/reference-presentation.ts');local('@/lib/upcoming-window','src/lib/upcoming-window.ts');
   const summary=deps['@/lib/insights'].summarizeMonth(state.transactions,period,new Set(state.accounts.map(a=>a.id)),new Set());
   deps['@/lib/cards']={openDues:()=>state.cardDues.map(due=>({due,daysLeft:4,remainingFils:due.totalDueFils,status:'upcoming',minimumKnown:true})),recentlySettledDues:()=>[],
     reissueSuggestions:()=>[],isInactiveAccount:(_s,a)=>!!a.archived,cardFigure:(_s,a)=>({kind:a.cardType==='credit'?'owed':a.snapshotFils===undefined&&a.kind!=='cash'?'unknown':'balance',fils:a.snapshotFils??(a.kind==='cash'?a.openingFils:null)})};
