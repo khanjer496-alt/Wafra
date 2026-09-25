@@ -2,28 +2,38 @@ import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { tapped } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
+import { moneyPlacesWords } from '@/lib/money-places-copy';
+import { paymentAgendaCopy } from '@/lib/reference-copy';
 
-export type BillsSegment = 'upcoming' | 'subscriptions' | 'utilities' | 'cards' | 'all';
+/**
+ * Two views: what falls due in the next 30 days, and everything.
+ *
+ * The three payment-type views that used to sit beside them (subscriptions,
+ * utilities, cards) are still one tap away as filters inside All, with the
+ * same per-type totals and empty states — see {@link BillsGroupFilter}.
+ */
+export type BillsSegment = 'upcoming' | 'all';
+/** Payment-type filter inside All. */
+export type BillsGroupFilterValue = 'everything' | 'subscriptions' | 'utilities' | 'cards';
 
 type BillsSegmentControlProps = {
   segment: BillsSegment;
   onChange: (segment: BillsSegment) => void;
 };
 
-/** Compact Bills filters: horizontally scrollable on native, wrapping safely on narrow web viewports. */
+/** Compact Bills views: horizontally scrollable on native, wrapping safely on narrow web viewports. */
 export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlProps) {
   const theme = useTheme();
+  const w = moneyPlacesWords(useLanguage());
   const labels: Record<BillsSegment, string> = {
-    upcoming: t('refUpcoming'),
-    subscriptions: t('subscriptionsSeg'),
-    utilities: t('utilitiesSeg'),
-    cards: t('cardsSeg'),
-    all: t('refAll'),
+    upcoming: w.next30Days,
+    all: w.allBills,
   };
-  const segments: BillsSegment[] = ['upcoming', 'subscriptions', 'utilities', 'cards', 'all'];
+  const segments: BillsSegment[] = ['upcoming', 'all'];
 
   const tabs = (
     <View role="tablist" style={[styles.segment, Platform.OS === 'web' && styles.webSegment]}>
@@ -36,6 +46,7 @@ export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlPr
             accessibilityLabel={labels[value]}
             accessibilityState={{ selected: active }}
             aria-selected={active}
+            testID={`bills-segment-${value}`}
             onPress={() => {
               if (active) return;
               tapped();
@@ -82,6 +93,58 @@ export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlPr
   );
 }
 
+/** Inside All: the payment types that used to be their own tabs, as quieter filter chips. */
+export function BillsGroupFilter({ value, onChange }: {
+  value: BillsGroupFilterValue;
+  onChange: (value: BillsGroupFilterValue) => void;
+}) {
+  const theme = useTheme();
+  const language = useLanguage();
+  const w = moneyPlacesWords(language);
+  const agenda = paymentAgendaCopy[language === 'ar' ? 'ar' : 'en'];
+  const labels: Record<BillsGroupFilterValue, string> = {
+    everything: w.everything,
+    subscriptions: agenda.subscriptions,
+    utilities: agenda.utilities,
+    cards: agenda.cards,
+  };
+  const values: BillsGroupFilterValue[] = ['everything', 'subscriptions', 'utilities', 'cards'];
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scrollContent}
+      testID="bills-group-filter">
+      <View style={[styles.segment, Platform.OS === 'web' && styles.webSegment]}>
+        {values.map((option) => {
+          const active = value === option;
+          return (
+            <Pressable
+              key={option}
+              accessibilityRole="button"
+              accessibilityLabel={labels[option]}
+              accessibilityState={{ selected: active }}
+              testID={`bills-filter-${option}`}
+              onPress={() => {
+                if (active) return;
+                tapped();
+                onChange(option);
+              }}
+              style={({ pressed }) => [
+                styles.filterItem,
+                {
+                  backgroundColor: active ? theme.primarySoft : pressed ? theme.backgroundSelected : 'transparent',
+                  borderColor: active ? theme.primary : theme.cardBorder,
+                },
+              ]}>
+              <ThemedText type={active ? 'smallBold' : 'small'} style={{ color: active ? theme.text : theme.textSecondary }}>
+                {labels[option]}
+              </ThemedText>
+            </Pressable>
+          );
+        })}
+      </View>
+    </ScrollView>
+  );
+}
+
 const styles = StyleSheet.create({
   scrollContent: { paddingEnd: Spacing.one },
   webContainer: { width: '100%' },
@@ -95,5 +158,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
+  },
+  filterItem: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.three,
   },
 });

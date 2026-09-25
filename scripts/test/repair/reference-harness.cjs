@@ -45,6 +45,8 @@ function createHarness(options = {}) {
     weekdayShort:d=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d], weekdayName:d=>['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d],
     toISODate:d=>d.toISOString().slice(0,10),clockTime:()=>'',parseAmountToFils:s=>isFinite(Number(s))?Math.round(Number(s)*100):null,parseAmountWithMoneySpec,
     totalAsShown:a=>a.reduce((s,v)=>s+v,0),fullDateTime:tx=>tx.date,friendlyDate:d=>format.shortDate(d),
+    daysBetweenISO:(a,b)=>Math.round((Date.parse(b+'T12:00:00Z')-Date.parse(a+'T12:00:00Z'))/86400000),
+    shiftISO:(iso,days)=>new Date(Date.parse(iso+'T12:00:00Z')+days*86400000).toISOString().slice(0,10),
   };
   const platform=options.platform??'android';
   const native={View:'View',ActivityIndicator:'ActivityIndicator',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',ScrollView:p=>jsx('ScrollView',p),RefreshControl:'RefreshControl',StyleSheet:nativeStyles,
@@ -76,7 +78,7 @@ function createHarness(options = {}) {
     privateMode:true,notSubscriptions:[],merchantOverrides:{},billAliases:{},marketId:'AE',ledgerMoney:{currency:'AED',exponent:2},reviewTray:{pending:[]},...options.state};
   if(options.empty){state.transactions=[];state.accounts=[];state.budgets=[];state.bills=[];state.cardDues=[];}
   const store={state,getStateSnapshot:()=>state,getStateGeneration:()=>0};
-  for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','deleteBill','markBillPaid','setNotSubscription','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport','setLedgerMoney'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
+  for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','editBill','deleteBill','markBillPaid','setNotSubscription','setSubscriptionCancelled','setAccountBalance','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport','setLedgerMoney'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
   const harnessToday=options.now??new Date('2026-09-15T09:00:00Z');
   const deps={react,'react/jsx-runtime':runtime,'@/lib/assistant-copy':assistantCopy,'react-native':native,'@/constants/theme':themes,'@/global.css':{},
     'expo-router':{useRouter:()=>({push:p=>events.push(['route',p]),back:()=>events.push(['back'])}),useLocalSearchParams:()=>options.params??{},Redirect:p=>jsx('Redirect',p)},
@@ -113,8 +115,8 @@ function createHarness(options = {}) {
     '@/components/ui/states':{EmptyMonth:p=>jsx('EmptyMonth',p),SkeletonRows:p=>jsx('SkeletonRows',p)},
     '@/components/recap/recap-logo-trigger':{RecapLogoTrigger:p=>jsx('RecapLogoTrigger',p)},
   };
-  const animated={View:'View'};const fade={delay(){return this},duration(){return this}};
-  deps['react-native-reanimated']={__esModule:true,default:animated,FadeInDown:fade,ReduceMotion:{System:'system'},
+  const animated={View:'View'};const fade={delay(){return this},duration(){return this},springify(){return this},damping(){return this},stiffness(){return this}};
+  deps['react-native-reanimated']={__esModule:true,default:animated,FadeInDown:fade,FadeInUp:fade,ReduceMotion:{System:'system'},
     useAnimatedStyle:f=>f(),useSharedValue:v=>({value:v}),withSpring:v=>v,withTiming:v=>v,withDelay:(_d,v)=>v,Easing:{bezier:()=>null},interpolate:(v,a,b)=>b[0]+(v-a[0])/(a[1]-a[0])*(b[1]-b[0])};
   deps['react-native-svg']={__esModule:true,default:'svg',Circle:'circle',Line:'line',Path:'path',Rect:'rect',Defs:'defs',LinearGradient:'linearGradient',Stop:'stop'};
   const local=(name,filename)=>deps[name]=load(path.join(root,filename??name.replace('@/', 'src/')+'.tsx'),deps,{Date:Clock});
@@ -148,6 +150,8 @@ function createHarness(options = {}) {
   local('@/lib/transfer-activity-copy','src/lib/transfer-activity-copy.ts');
   local('@/lib/transfer-review-copy','src/lib/transfer-review-copy.ts');
   local('@/lib/ledger','src/lib/ledger.ts');local('@/lib/splits','src/lib/splits.ts');local('@/lib/balances','src/lib/balances.ts');local('@/lib/categories','src/lib/categories.ts');
+  // Accounts/Bills redesign: pure figures and their copy, real source.
+  local('@/lib/money-places-copy','src/lib/money-places-copy.ts');local('@/lib/money-places','src/lib/money-places.ts');
   local('@/lib/bill-alias','src/lib/bill-alias.ts');
   local('@/lib/merchant-spending','src/lib/merchant-spending.ts');
   local('@/lib/merchant-spending-copy','src/lib/merchant-spending-copy.ts');
@@ -156,7 +160,12 @@ function createHarness(options = {}) {
   deps['@/components/merchant-category-rule']={MerchantCategoryRule:p=>jsx('MerchantCategoryRule',p)};
   deps['@/lib/subscriptions']={detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
     fixedCommitments:()=>[],billCommitments:()=>[],otherCommitments:()=>[],daysUntilNext:s=>Math.round((Date.parse(s.nextExpectedISO)-Date.parse('2026-09-06'))/86400000),
-    recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId)};
+    recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId),
+    // The user-cancelled state is pure and small; the harness uses the real rule.
+    isCancelledByUser:(sub,c)=>!!c&&Object.prototype.hasOwnProperty.call(c,sub.title.trim().toLowerCase())&&sub.lastChargedISO<=c[sub.title.trim().toLowerCase()],
+    withoutCancelled:(subs,c)=>subs.filter(sub=>!deps['@/lib/subscriptions'].isCancelledByUser(sub,c)),
+    cancelledByUser:(subs,c)=>subs.filter(sub=>deps['@/lib/subscriptions'].isCancelledByUser(sub,c)),
+    subscriptionsMonthlyEquivalent:(subs,c)=>subs.filter(sub=>sub.group==='subscription'&&sub.status==='active'&&!deps['@/lib/subscriptions'].isCancelledByUser(sub,c)).reduce((sum,sub)=>sum+sub.monthlyEquivalentFils,0)};
   local('@/lib/transaction-filter','src/lib/transaction-filter.ts');
   local('@/lib/insights','src/lib/insights.ts');local('@/lib/analytics','src/lib/analytics.ts');local('@/lib/reference-presentation','src/lib/reference-presentation.ts');
   const summary=deps['@/lib/insights'].summarizeMonth(state.transactions,period,new Set(state.accounts.map(a=>a.id)),new Set());
@@ -197,7 +206,7 @@ function createHarness(options = {}) {
   local('@/components/transfer-review-notice');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
   local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');
-  local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');
+  local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/bills/bills-timeline');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');
   deps['react-native-safe-area-context']={useSafeAreaInsets:()=>({top:0,bottom:10,left:0,right:0})};
   deps['@/components/ui/tab-bar-metrics']={useTabBarMetrics:()=>({measuredHeight:78,setMeasuredHeight(){}})};
   local('@/components/tab-bar');

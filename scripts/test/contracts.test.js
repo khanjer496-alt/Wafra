@@ -1596,7 +1596,10 @@ function ktSources(dir) {
   // code would force that explanation to be deleted to stay green.
   const billsCode = bills.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   ok('Bills agenda and detail use allocated remainder, never manual-only paid values',
-    /amountFils: remainingFils/.test(billsCode) && /due\.remainingFils/.test(billsCode) &&
+    // Recording a payment moved into the card's own payment sheet, which
+    // offers amounts from the same allocated remainder.
+    /amountFils: remainingFils/.test(billsCode) &&
+    /remainingFils: status\.remainingFils/.test(read('src/components/card-payment-sheet.tsx')) &&
     /<CardDetailSheet/.test(billsCode) && !/\bdue\.paidFils\b/.test(billsCode), billsCode.match(/\bdue\.paidFils\b/g));
 }
 

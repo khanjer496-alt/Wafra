@@ -44,7 +44,7 @@ const account: Check = (value) => record(value) && required(value, {
 }) && optional(value, {
   last4: text, bankName: text, cardType: oneOf('credit', 'debit'), snapshotFils: integer,
   snapshotKind: oneOf('balance', 'limit', 'outstanding'), creditLimitFils: nonnegative,
-  snapshotTs: nonnegative, archived: boolean, renewedFrom: id,
+  snapshotTs: nonnegative, manualSnapshotTs: nonnegative, archived: boolean, renewedFrom: id,
 });
 const captureInstrument: Check = (value) => record(value) && required(value, {
   last4: (tail) => typeof tail === 'string' && /^\d{4}$/.test(tail),
@@ -156,7 +156,8 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     statementCoverage: arrayOf(statementCoverageEntry),
     trustedNotificationPackages: arrayOf((v) => typeof v === 'string' && v.length <= 255 &&
       /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(v)),
-    notSubscriptions: arrayOf(text), lastScanTs: nonnegative, parserVersion: nonnegative,
+    notSubscriptions: arrayOf(text), cancelledSubscriptions: dictionary(isoDate),
+    lastScanTs: nonnegative, parserVersion: nonnegative,
     hydrationFinalizeVersion: nonnegative,
     transferNormalizationVersion: nonnegative, transferInternalIds: arrayOf(id),
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,

@@ -175,8 +175,9 @@ ok('Bills recurring rows have one labelled primary target',
     !/remindAboutA11y/.test(recurringAccessibilityBlock) &&
     /accessibilityRole="button"/.test(recurringAccessibilityBlock) &&
     /accessibilityLabel=/.test(recurringAccessibilityBlock));
-ok('Bills card actions move to the labelled detail footer',
-  /<CardDetailSheet[\s\S]{0,900}footer=/.test(bills) &&
+ok('Bills card actions live in the card sheet as one labelled button',
+  /<CardDetailSheet[\s\S]{0,200}account=\{cardDetail\}/.test(bills) &&
+    /<Button label=\{w\.recordPayment\}/.test(cardDetail) &&
     /<Button[\s\S]{0,120}label=\{t\('markPaid'\)\}/.test(bills));
 ok('Bills manual reminder rows open one labelled detail target',
   /setSelectedReminderId\(item\.id\.slice\(5\)\)/.test(bills) && /onPress=\{\(\) => onOpen\(item\)\}/.test(paymentAgenda) &&
@@ -236,7 +237,7 @@ ok('Bills uses one scaffold scroller with an inline typed header',
   /const billsHeader: ScreenHeaderProps = \{/.test(bills) &&
     /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/.test(bills) &&
     (bills.match(/<ScrollView/g) ?? []).length === 0 &&
-    /testID="subscription-history-scroll"/.test(bills));
+    /testID="subscription-history-scroll"/.test(source('src/components/bill-detail-sheet.tsx')));
 ok('Bills uses canonical labelled control and selection semantics',
  /<BillsSegmentControl/.test(bills) && /accessibilityLabel=\{t\('billsTitle'\)\}/.test(billsSegments) && /role="tablist"/.test(billsSegments) && /accessibilityState=\{\{ selected:/.test(billsSegments));
 ok('Bills agenda tabs retain 48 point targets',Number(billsSegments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);

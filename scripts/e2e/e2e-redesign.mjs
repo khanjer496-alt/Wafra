@@ -86,25 +86,30 @@ await check('Bills filters subscriptions and utilities while preserving due-date
     assert.ok(labels.length > 0 && labels.every(label => /AED [\d,]+/.test(label)), 'Payments expose their amounts');
     return labels;
   };
+  // Bills has two views (Next 30 days / All); the payment families are
+  // filters inside All.
+  const allTab = page.getByRole('tab', { name: 'All', exact: true });
+  await allTab.click();
+  assert.equal(await allTab.getAttribute('aria-selected'), 'true');
   const selectFamily = async (name) => {
-    const tab = page.getByRole('tab', { name, exact: true });
-    await tab.click();
-    assert.equal(await tab.getAttribute('aria-selected'), 'true');
+    const filter = page.getByTestId(`bills-filter-${name}`);
+    await filter.click();
+    assert.equal(await filter.getAttribute('aria-selected'), 'true');
     return visiblePayments();
   };
-  const subscriptions = await selectFamily('Subscriptions');
+  const subscriptions = await selectFamily('subscriptions');
   for (const title of ['Netflix', 'Amazon Prime']) {
     assert.ok(subscriptions.some(label => label.startsWith(`${title}. `)), `${title} must appear in Subscriptions`);
   }
   assert.ok(subscriptions.every(label => !/^(?:DEWA|E&|du|Etisalat)/.test(label)), 'Utilities must not leak into Subscriptions');
-  const utilities = await selectFamily('Utilities');
+  const utilities = await selectFamily('utilities');
   for (const title of ['DEWA Bill', 'Etisalat Postpaid', 'du Home Internet']) {
     assert.ok(utilities.some(label => label.startsWith(`${title}. `)), `${title} must appear in Utilities`);
   }
   assert.ok(utilities.every(label => !subscriptions.includes(label)), 'The payment families must be disjoint');
   assert.ok(utilities.every(label => !/^(?:Netflix|Spotify(?: Premium)?|YouTube Premium|Amazon Prime|Fitness First)\. /.test(label)),
     'Subscriptions must not leak into Utilities');
-  const all = await selectFamily('All');
+  const all = await selectFamily('everything');
   assert.ok([...subscriptions, ...utilities].every(label => all.includes(label)), 'All restores both complete payment families');
 });
 await check('Spending search responds to input and recovers', async () => {

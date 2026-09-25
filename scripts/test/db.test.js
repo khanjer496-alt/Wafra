@@ -499,6 +499,10 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/local-semantic-review': require('./build/local-semantic-review'),
     '@/lib/local-semantic-background-policy': require('./build/local-semantic-background-policy'),
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
+    // "Set today's balance" on a hand-kept account reads the real running figure.
+    '@/lib/balances': require('./build/balances'),
+    // Pure helpers for the Accounts/Bills redesign (applyBillEdit), real source.
+    '@/lib/money-places': execute('src/lib/money-places.ts', (id) => require(id.replace('@/lib/', './build/'))),
     '@/lib/bills': require('./build/bills'),
     '@/lib/bill-alias': require('./build/bill-alias'),
     '@/lib/dedupe': dedupe,

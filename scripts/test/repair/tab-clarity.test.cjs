@@ -74,11 +74,11 @@ test('Home renders at most five recent transactions without losing the full acti
   const all = walk(activity).find(n => n.props?.onPress && text(n).includes(h.deps['@/lib/i18n'].t('allActivity')));
   assert.ok(all); all.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/transactions']);
 });
-test('Bills keeps every obligation in one due-date timeline instead of type silos', () => {
+test('Bills All keeps every obligation in one due-date timeline instead of type silos', () => {
   // iOS keeps the synchronous recurrence projection used by this presentation
   // contract. Android deliberately defers that historical scan until after the
   // first Bills frame; its behavior is covered by the performance suites.
-  const tree = createHarness({ platform: 'ios' }).render('bills');
+  const tree = createHarness({ platform: 'ios', states: { 0: 'all' } }).render('bills');
   const agenda = text(nodeById(tree, 'payment-agenda'));
   for (const label of ['Netflix', 'Spotify', 'DEWA', 'Etisalat', 'NBD credit card']) {
     assert.match(agenda, new RegExp(label));
@@ -87,6 +87,17 @@ test('Bills keeps every obligation in one due-date timeline instead of type silo
   assert.equal(nodeById(tree, 'bills-utilities'), undefined);
   assert.equal(nodeById(tree, 'bills-cards'), undefined);
   assert.ok(agenda.indexOf('Next 7 days') < agenda.indexOf('Later'));
+});
+test('Bills Next 30 days groups subscriptions under their monthly total, then bills and cards', () => {
+  const tree = createHarness({ platform: 'ios' }).render('bills');
+  const subscriptions = text(nodeById(tree, 'bills-subscriptions'));
+  assert.match(subscriptions, /Subscriptions[\s\S]*AED 62.00 \/ month/);
+  assert.match(subscriptions, /Netflix/);
+  assert.match(subscriptions, /Spotify/);
+  const rest = text(nodeById(tree, 'bills-and-cards'));
+  for (const label of ['DEWA', 'Etisalat', 'NBD credit card']) assert.match(rest, new RegExp(label));
+  assert.doesNotMatch(rest, /Netflix/);
+  assert.ok(nodeById(tree, 'bills-timeline'));
 });
 test('a manually tracked detected subscription is shown once in the due timeline', () => {
   const h = createHarness({ platform: 'ios' });

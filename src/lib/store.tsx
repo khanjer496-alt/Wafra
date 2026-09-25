@@ -115,6 +115,8 @@ import {
   isUniversalReviewAlert,
   type ReviewResolutionOutcome,
 } from '@/lib/alert-review-tray';
+import { accountBalanceFils } from '@/lib/balances';
+import { applyBillEdit, type BillEdit } from '@/lib/money-places';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
@@ -246,6 +248,7 @@ const EMPTY_STATE: AppState = {
   accountHints: {},
   trustedNotificationPackages: [],
   notSubscriptions: [],
+  cancelledSubscriptions: {},
   lastScanTs: 0,
   historyImport: null,
   onboarded: false,
@@ -877,7 +880,10 @@ type Action =
   | { type: 'mergeRenewedCard'; oldId: string; newId: string }
   | { type: 'markCardsDistinct'; id: string }
   | { type: 'addBill'; bill: Bill }
+  | { type: 'editBill'; id: string; patch: BillEdit }
   | { type: 'deleteBill'; id: string }
+  | { type: 'setAccountBalance'; id: string; fils: number; ts: number }
+  | { type: 'setSubscriptionCancelled'; merchant: string; cancelledOn: string | null }
   | { type: 'markBillPaid'; id: string; month: string; transaction: Transaction }
   | { type: 'upsertCardDue'; due: CardDue }
   | { type: 'payCardDue'; id: string; amountFils: number; transaction: Transaction | null; settledAt: string | null }
@@ -977,6 +983,53 @@ function requireSelectedLedgerMoney(state: AppState): void {
   if (state.ledgerMoney || ledgerStateHasMoney(state)) return;
   throw new Error('Choose a ledger currency before recording money');
 }
+
+/**
+ * "Set today's balance" for a bank or cash account.
+ *
+ * Two different accounts, two different honest answers, and neither touches a
+ * transaction:
+ *
+ *  - An account Wafra hears about from the bank (any captured row, or any
+ *    balance snapshot) shows the latest quoted figure, never a running sum —
+ *    alert history is partial (balances.ts). The user's figure becomes that
+ *    snapshot, stamped `manualSnapshotTs` so it is labelled "Set by you" and
+ *    the next newer bank alert replaces it.
+ *  - A purely hand-kept account shows opening balance plus its own entries.
+ *    A snapshot would freeze it and stop later entries from moving it, so
+ *    the opening balance is adjusted instead: every entry stays as it is and
+ *    the running figure lands on what the user said.
+ *
+ * Credit and debit cards are refused: a card owes rather than holds, and its
+ * figure comes from statements (cards.ts).
+ */
+export function reduceSetAccountBalance(state: AppState, id: string, fils: number, ts: number): AppState {
+  const account = state.accounts.find((candidate) => candidate.id === id);
+  if (!account || account.kind === 'card' || account.cardType !== undefined) return state;
+  if (!Number.isSafeInteger(fils) || fils < 0 || !Number.isSafeInteger(ts) || ts <= 0) return state;
+  const captured = account.snapshotFils !== undefined || state.transactions.some(
+    (transaction) => transaction.accountId === id && (transaction.source === 'sms' || Boolean(transaction.smsKey)),
+  );
+  let patch: Partial<Account>;
+  if (captured) {
+    patch = { snapshotFils: fils, snapshotKind: 'balance', snapshotTs: ts, manualSnapshotTs: ts };
+  } else {
+    // The same running figure Accounts shows (balances.ts), less the opening
+    // balance it started from: what the user's own entries add up to.
+    const recorded = accountBalanceFils(state, id) - account.openingFils;
+    patch = { openingFils: fils - recorded };
+  }
+  if (fils !== 0 || (patch.openingFils ?? 0) !== 0) requireSelectedLedgerMoney(state);
+  return {
+    ...state,
+    accounts: state.accounts.map((candidate) => (candidate.id === id ? { ...candidate, ...patch } : candidate)),
+  };
+}
+
+export { applyBillEdit, type BillEdit };
+
+/** Keys an object literal must never be given from user-typed merchant names. */
+const UNSAFE_RECORD_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
 function reducer(state: AppState, action: Action): AppState {
   const restoreMarket = captureMarketContext();
@@ -1510,8 +1563,31 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'addBill':
       if (action.bill.amountFils !== 0) requireSelectedLedgerMoney(state);
       return { ...state, bills: [...state.bills, action.bill] };
+    case 'editBill': {
+      const index = state.bills.findIndex((b) => b.id === action.id);
+      if (index < 0) return state;
+      const edited = applyBillEdit(state.bills[index], action.patch);
+      if (!edited || edited === state.bills[index]) return state;
+      if (action.patch.amountFils !== undefined) requireSelectedLedgerMoney(state);
+      const bills = state.bills.slice();
+      bills[index] = edited;
+      return { ...state, bills };
+    }
     case 'deleteBill':
       return { ...state, bills: state.bills.filter((b) => b.id !== action.id) };
+    case 'setAccountBalance':
+      return reduceSetAccountBalance(state, action.id, action.fils, action.ts);
+    case 'setSubscriptionCancelled': {
+      const key = action.merchant.trim().toLowerCase();
+      if (!key || UNSAFE_RECORD_KEYS.has(key)) return state;
+      const rest: Record<string, string> = {};
+      for (const [merchant, on] of Object.entries(state.cancelledSubscriptions ?? {})) {
+        if (merchant !== key) rest[merchant] = on;
+      }
+      if (action.cancelledOn === null) return { ...state, cancelledSubscriptions: rest };
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(action.cancelledOn)) return state;
+      return { ...state, cancelledSubscriptions: { ...rest, [key]: action.cancelledOn } };
+    }
     case 'markBillPaid': {
       requireSelectedLedgerMoney(state);
       const bills = state.bills.map((b) =>
@@ -1789,7 +1865,13 @@ interface StoreValue {
   /** Remember that a suggested reissue link was declined. */
   markCardsDistinct: (id: string) => void;
   addBill: (b: Omit<Bill, 'id' | 'paidMonths'>) => void;
+  /** Rename, re-price or move a reminder the user created. Ignored for detected ones. */
+  editBill: (id: string, patch: BillEdit) => void;
   deleteBill: (id: string) => void;
+  /** "Set today's balance" on a bank or cash account; see `reduceSetAccountBalance`. */
+  setAccountBalance: (id: string, fils: number) => void;
+  /** Mark a subscription cancelled on an ISO date, or undo that with null. */
+  setSubscriptionCancelled: (merchant: string, cancelledOn: string | null) => void;
   markBillPaid: (id: string, month: string, transaction: Omit<Transaction, 'id'>) => void;
   upsertCardDue: (due: Omit<CardDue, 'id'>) => void;
   payCardDue: (id: string, amountFils: number, transaction: Omit<Transaction, 'id'> | null, settled: boolean) => void;
@@ -2746,8 +2828,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'addBill', bill: { ...b, id: makeId('bill'), paidMonths: [] } });
   }, [dispatch]);
 
+  const editBill = useCallback((id: string, patch: BillEdit) => {
+    dispatch({ type: 'editBill', id, patch });
+  }, [dispatch]);
+
   const deleteBill = useCallback((id: string) => {
     dispatch({ type: 'deleteBill', id });
+  }, [dispatch]);
+
+  const setAccountBalance = useCallback((id: string, fils: number) => {
+    dispatch({ type: 'setAccountBalance', id, fils, ts: Date.now() });
+  }, [dispatch]);
+
+  const setSubscriptionCancelled = useCallback((merchant: string, cancelledOn: string | null) => {
+    dispatch({ type: 'setSubscriptionCancelled', merchant, cancelledOn });
   }, [dispatch]);
 
   const markBillPaid = useCallback(
@@ -3190,7 +3284,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       mergeRenewedCard: mergeRenewedCardAction,
       markCardsDistinct: markCardsDistinctAction,
       addBill,
+      editBill,
       deleteBill,
+      setAccountBalance,
+      setSubscriptionCancelled,
       markBillPaid,
       upsertCardDue,
       payCardDue,
@@ -3260,7 +3357,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       mergeRenewedCardAction,
       markCardsDistinctAction,
       addBill,
+      editBill,
       deleteBill,
+      setAccountBalance,
+      setSubscriptionCancelled,
       markBillPaid,
       upsertCardDue,
       payCardDue,
