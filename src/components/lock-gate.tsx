@@ -44,7 +44,8 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   const insets = useSafeAreaInsets();
   const { state } = useStore();
   const copy = settingsCopy(state.language);
-  const biometricKind = useBiometricKind();
+  // Asked only while App Lock is on; the lock screen is the only reader here.
+  const biometricKind = useBiometricKind(state.appLock);
   const [unlocked, setUnlocked] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [biometric, setBiometric] = useState<BiometricState>('prompting');

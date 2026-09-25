@@ -24,6 +24,7 @@ const en = {
   openShortcuts: 'Open Shortcuts',
   checklistDone: 'Done',
   checklistToDo: 'Not done yet',
+  restoreReadFailed: 'Couldn’t read that file. Choose the backup file again.',
   // Android SMS explainer, shown before the system prompt
   smsExplainerTitle: 'Read bank alerts',
   smsExplainerBody: 'Wafra reads bank SMS on this phone and ignores everything else.',
@@ -33,15 +34,14 @@ const en = {
   smsExplainerNotNow: 'Not now',
   // Ready summary
   readyMonths: (months: number) => `${months} ${months === 1 ? 'month' : 'months'}`,
-  readyTransactions: (count: number) => `${count} ${count === 1 ? 'transaction' : 'transactions'}`,
   readyMerchants: (count: number) => `${count} ${count === 1 ? 'merchant' : 'merchants'}`,
   whereItWent: 'Where it went',
   otherCategory: 'Everything else',
   foundRecurring: (subscriptions: number, bills: number) => {
     const parts: string[] = [];
     if (subscriptions > 0) parts.push(`${subscriptions} ${subscriptions === 1 ? 'subscription' : 'subscriptions'}`);
-    if (bills > 0) parts.push(`${bills} ${bills === 1 ? 'bill' : 'bills'}`);
-    return `Repeating payments found: ${parts.join(' and ')}. They are in Bills.`;
+    if (bills > 0) parts.push(`${bills} other regular ${bills === 1 ? 'payment' : 'payments'}`);
+    return `Repeating charges found: ${parts.join(' and ')}. They are in Bills.`;
   },
   readyPending: 'Still reading your imports. These figures will grow as they finish.',
 };
@@ -56,6 +56,7 @@ const ar: OnboardingCopy = {
   openShortcuts: 'افتح الاختصارات',
   checklistDone: 'تم',
   checklistToDo: 'لم يكتمل بعد',
+  restoreReadFailed: 'تعذّرت قراءة هذا الملف. اختر ملف النسخة الاحتياطية مجددًا.',
   smsExplainerTitle: 'قراءة تنبيهات البنك',
   smsExplainerBody: 'يقرأ وفرة رسائل البنك على هذا الهاتف ويتجاهل كل ما عداها.',
   smsExplainerSystemName: 'يسمّي أندرويد هذا الإذن «إرسال رسائل SMS وعرضها».',
@@ -63,25 +64,26 @@ const ar: OnboardingCopy = {
   smsExplainerContinue: 'متابعة',
   smsExplainerNotNow: 'ليس الآن',
   readyMonths: (months: number) => arabicCount(months, {
-    one: 'شهر واحد', two: 'شهران', few: 'أشهر', many: 'شهرًا',
-  }),
-  readyTransactions: (count: number) => arabicCount(count, {
-    one: 'عملية واحدة', two: 'عمليتان', few: 'عمليات', many: 'عملية',
+    one: 'شهر واحد', two: 'شهران', few: 'أشهر', many: 'شهرًا', hundreds: 'شهر',
   }),
   readyMerchants: (count: number) => arabicCount(count, {
-    one: 'تاجر واحد', two: 'تاجران', few: 'تجار', many: 'تاجرًا',
+    one: 'تاجر واحد', two: 'تاجران', few: 'تجار', many: 'تاجرًا', hundreds: 'تاجر',
   }),
   whereItWent: 'أين ذهب المال',
   otherCategory: 'كل ما عدا ذلك',
   foundRecurring: (subscriptions: number, bills: number) => {
     const parts: string[] = [];
     if (subscriptions > 0) {
-      parts.push(arabicCount(subscriptions, { one: 'اشتراكًا واحدًا', two: 'اشتراكين', few: 'اشتراكات', many: 'اشتراكًا' }));
+      parts.push(arabicCount(subscriptions, {
+        one: 'اشتراك واحد', two: 'اشتراكان', few: 'اشتراكات', many: 'اشتراكًا', hundreds: 'اشتراك',
+      }));
     }
     if (bills > 0) {
-      parts.push(arabicCount(bills, { one: 'فاتورة واحدة', two: 'فاتورتين', few: 'فواتير', many: 'فاتورة' }));
+      parts.push(arabicCount(bills, {
+        one: 'دفعة منتظمة أخرى', two: 'دفعتان منتظمتان أخريان', few: 'دفعات منتظمة أخرى', many: 'دفعة منتظمة أخرى', hundreds: 'دفعة منتظمة أخرى',
+      }));
     }
-    return `دفعات متكررة وُجدت: ${parts.join(' و')}. ستجدها في الفواتير.`;
+    return `رسوم متكررة وُجدت: ${parts.join(' و')}. ستجدها في الفواتير.`;
   },
   readyPending: 'لا يزال وفرة يقرأ ما استوردته. ستزيد هذه الأرقام عند اكتمال القراءة.',
 };

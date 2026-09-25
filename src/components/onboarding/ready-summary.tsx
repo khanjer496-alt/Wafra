@@ -26,9 +26,10 @@ export function ReadySummary({ summary, money, language, pending }: {
   pending: boolean;
 }) {
   const copy = onboardingCopy(language);
+  // The transaction count is the result card's; this line adds only what the
+  // card does not say, so the two never show different numbers for one thing.
   const line = [
     summary.months > 0 ? copy.readyMonths(summary.months) : null,
-    copy.readyTransactions(summary.transactions),
     summary.merchants > 0 ? copy.readyMerchants(summary.merchants) : null,
   ].filter(Boolean).join(' · ');
   const bars = money
@@ -44,7 +45,7 @@ export function ReadySummary({ summary, money, language, pending }: {
   const largest = bars.reduce((max, bar) => Math.max(max, bar.amount), 0);
   return (
     <View style={styles.root} testID="onboarding-ready-summary">
-      <ThemedText style={styles.line}>{line}</ThemedText>
+      {line ? <ThemedText style={styles.line}>{line}</ThemedText> : null}
       {pending ? (
         <ThemedText style={styles.pending} accessibilityLiveRegion="polite" testID="onboarding-ready-pending">
           {copy.readyPending}

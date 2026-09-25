@@ -23,11 +23,11 @@ const ar: AssistantScreenCopy = {
   onThisPhone: 'على هذا الهاتف',
   onThisPhoneA11y: 'تُحسب الإجابات على هذا الهاتف من عملياتك المسجّلة.',
   seeTransactions: (count: number) => `عرض ${arabicCount(count, {
-    one: 'عملية واحدة', two: 'عمليتين', few: 'عمليات', many: 'عملية',
+    one: 'عملية واحدة', two: 'عمليتين', few: 'عمليات', many: 'عملية', hundreds: 'عملية',
   })}`,
   dueToday: 'اليوم',
-  dueIn: (days: number) => `خلال ${arabicCount(days, { one: 'يوم واحد', two: 'يومين', few: 'أيام', many: 'يومًا' })}`,
-  dueLate: (days: number) => `متأخر ${arabicCount(days, { one: 'يومًا واحدًا', two: 'يومين', few: 'أيام', many: 'يومًا' })}`,
+  dueIn: (days: number) => `خلال ${arabicCount(days, { one: 'يوم واحد', two: 'يومين', few: 'أيام', many: 'يومًا', hundreds: 'يوم' })}`,
+  dueLate: (days: number) => `متأخر ${arabicCount(days, { one: 'يومًا واحدًا', two: 'يومين', few: 'أيام', many: 'يومًا', hundreds: 'يوم' })}`,
   monthlyChartLabel: 'الإنفاق المسجّل حسب الشهر',
 };
 

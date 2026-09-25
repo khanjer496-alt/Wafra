@@ -104,7 +104,7 @@ export const SUPPLEMENT_COPY = {
     // The date-order note follows the country the person chose: the import
     // service is sent that order, so the example must be the same reading.
     dateNoteOrdered: 'Dates are read the way {country} writes them, so 04/09 is {example}.',
-    dateNoteYearFirst: 'Dates from {country} statements are read year first, as printed.',
+    dateNoteYearFirst: 'Statements from {country} usually print the year first. Dates like 04/09 without a year are not guessed.',
     dateNoteUndecided: '{country} uses more than one date order, so Wafra won’t guess dates like 04/09. Statements with dates like 04 Sep 2026 work best.',
     dateNoteUnknown: 'Set your country in Settings so dates like 04/09 are read in the right order.',
     fileStatusWaiting: 'Waiting',
@@ -212,7 +212,7 @@ export const SUPPLEMENT_COPY = {
     syncFailedUnknown: 'لم يكتمل تحديث السجل',
     syncFailedOffline: 'تعذّر الوصول إلى وفرة؛ ستُسجّل عند المزامنة القادمة',
     dateNoteOrdered: 'تُقرأ التواريخ كما تُكتب في {country}، لذا فإن 04/09 تعني {example}.',
-    dateNoteYearFirst: 'تُقرأ تواريخ كشوف {country} بالسنة أولاً كما هي مطبوعة.',
+    dateNoteYearFirst: 'تطبع كشوف {country} عادةً السنة أولاً. لا تُخمَّن تواريخ مثل 04/09 التي لا تتضمن سنة.',
     dateNoteUndecided: 'تُستخدم في {country} أكثر من طريقة لكتابة التاريخ، لذلك لن يخمّن وفرة تواريخ مثل 04/09. تعمل الكشوف ذات التواريخ مثل 04 Sep 2026 بشكل أفضل.',
     dateNoteUnknown: 'حدّد دولتك في الإعدادات لتُقرأ تواريخ مثل 04/09 بالترتيب الصحيح.',
     fileStatusWaiting: 'بالانتظار',

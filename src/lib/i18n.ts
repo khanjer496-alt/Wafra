@@ -1033,9 +1033,11 @@ const S = {
   },
   trustedPreview: { en: 'SAMPLE HOUSEHOLD', ar: 'عائلة تجريبية' },
   trustedDisabled: { en: 'DEMO', ar: 'تجريبي' },
+  // Relay-only: trusted phones receive new relayed items after they join;
+  // nothing already in a ledger is copied, so there is no "one shared ledger".
   trustedPreviewBody: {
-    en: 'See how a family shares one encrypted ledger. Invitations are disabled in this demo.',
-    ar: 'شاهد كيف تشارك العائلة سجلاً واحداً مشفّراً. الدعوات معطلة في هذا العرض التجريبي.',
+    en: 'See how a family’s trusted phones receive new relayed items. Older transactions are not copied. Invitations are disabled in this demo.',
+    ar: 'شاهد كيف تستقبل هواتف العائلة الموثوقة العناصر الجديدة المرسلة عبر المرحّل. لا تُنسخ العمليات السابقة. الدعوات معطلة في هذا العرض التجريبي.',
   },
   trustedPreviewA11y: { en: 'Sample device, controls disabled', ar: 'جهاز تجريبي، عناصر التحكم معطلة' },
   trustedStartHeader: { en: 'START A TRUSTED VAULT', ar: 'ابدأ خزنة موثوقة' },

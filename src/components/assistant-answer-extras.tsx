@@ -77,8 +77,10 @@ export function AssistantPaymentRows({ payments, money, language }: {
   );
 }
 
-export function AssistantMonthChart({ series, money, language }: {
+export function AssistantMonthChart({ series, highlight, money, language }: {
   series: AssistantMonthTotal[];
+  /** The month the answer names. No bar is emphasised when it is absent. */
+  highlight?: string;
   money: LedgerMoneySpec;
   language: 'en' | 'ar';
 }) {
@@ -91,7 +93,7 @@ export function AssistantMonthChart({ series, money, language }: {
       {series.map((month, index) => {
         const amount = formatMoneyText(month.totalFils, money, { decimals: false });
         const label = monthLabel(month.month, language);
-        const latest = index === series.length - 1;
+        const named = highlight !== undefined && month.month === highlight;
         return (
           <View key={month.month} style={styles.column} accessible accessibilityLabel={`${label} ${month.month.slice(0, 4)}, ${amount}`}>
             <View style={styles.barTrack}>
@@ -99,7 +101,7 @@ export function AssistantMonthChart({ series, money, language }: {
                 axis="height"
                 size={Math.max(3, Math.round((month.totalFils / largest) * CHART_HEIGHT))}
                 delay={index * 40}
-                style={[styles.bar, { backgroundColor: latest ? theme.primary : theme.primaryBorder }]}
+                style={[styles.bar, { backgroundColor: named ? theme.primary : theme.primaryBorder }]}
               />
             </View>
             <ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>

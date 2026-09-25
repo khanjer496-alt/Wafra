@@ -45,10 +45,10 @@ import { SectionHeader } from '@/components/ui/section-header';
 import { WafraMark } from '@/components/wafra-logo';
 import { Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { unreadFormatCount } from '@/lib/accuracy';
+import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
 import { clearBackgroundRelayRows } from '@/lib/background-relay';
 import { hasSmsPermission, isSmsScanningAvailable, requestSmsPermission } from '@/lib/auto-import';
-import { eraseIosCaptureStore, setIosCaptureEnabled } from '@/lib/capture';
+import { eraseIosCaptureStore, isCaptureAvailable, setIosCaptureEnabled } from '@/lib/capture';
 import {
   EMPTY_FOUNDER_TAP_SEQUENCE,
   isFounderUnlockBuild,
@@ -119,6 +119,7 @@ export default function SettingsDataScreen() {
   const [publicLinkNotice, setPublicLinkNotice] = useState(false);
   const [eraseDialogVisible, setEraseDialogVisible] = useState(false);
   const [eraseDialogBody, setEraseDialogBody] = useState('');
+  const eraseAfterDismiss = useRef(false);
   const [reportScopeSheet, setReportScopeSheet] = useState(false);
   const [confirmation, setConfirmation] = useState<{
     question: string;
@@ -134,21 +135,35 @@ export default function SettingsDataScreen() {
   // paint: the rows show their plain description until the scan has run once
   // interactions settle, and a store update refreshes the counts the same way.
   const [cleanupCounts, setCleanupCounts] = useState<{ place: number; unread: number } | null>(null);
+  // A zero "formats Wafra couldn't read" is only a finding where the message
+  // text is kept (Android, outside Private Mode). On an iPhone or in Private
+  // Mode there is nothing to count, so the row keeps its plain description.
+  const formatsCountable = noFormatsReason({
+    relayPlatform: isRelayPlatform(),
+    localCaptureAvailable: isCaptureAvailable(),
+    privateMode: state.privateMode,
+  }) === 'none-found';
+  // Re-run only when an input of the two scans changes, not on every store
+  // update (a toggle elsewhere must not re-walk the ledger).
+  const { transactions, accounts, merchantOverrides, billAliases } = state;
   useFocusEffect(useCallback(() => {
     let active = true;
     const task = InteractionManager.runAfterInteractions(() => {
       if (!active) return;
-      const summary = uncategorisedMerchants(state);
+      const snapshot = getStateSnapshot();
+      const summary = uncategorisedMerchants(snapshot);
       setCleanupCounts({
         place: summary.merchants.length + summary.paymentPurposes.length,
-        unread: unreadFormatCount(state),
+        unread: unreadFormatCount(snapshot),
       });
     });
     return () => {
       active = false;
       task.cancel();
     };
-  }, [state]));
+  // The listed fields are exactly what the two scans read.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getStateSnapshot, transactions, accounts, merchantOverrides, billAliases]));
 
   /* ── Relay status, for the erase wording ─────────────────────────────── */
 
@@ -588,7 +603,7 @@ export default function SettingsDataScreen() {
           )}
           {linkRow(
             copy.unreadAlerts,
-            cleanupCounts ? copy.unreadFormats(cleanupCounts.unread) : t('improveAccuracySettingsDetail'),
+            cleanupCounts && formatsCountable ? copy.unreadFormats(cleanupCounts.unread) : t('improveAccuracySettingsDetail'),
             () => router.push('/accuracy'),
             { icon: 'mail' },
           )}
@@ -683,7 +698,16 @@ export default function SettingsDataScreen() {
         keepLabel={copy.eraseKeep}
         onKeep={() => setEraseDialogVisible(false)}
         onErase={() => {
+          // iOS drops an alert raised while a Modal is still dismissing, and
+          // eraseAllData reports failures through Alert. So on iOS the erase
+          // starts from the Modal's onDismiss, after it has fully closed.
+          if (Platform.OS === 'ios') eraseAfterDismiss.current = true;
           setEraseDialogVisible(false);
+          if (Platform.OS !== 'ios') void eraseAllData();
+        }}
+        onDismiss={() => {
+          if (!eraseAfterDismiss.current) return;
+          eraseAfterDismiss.current = false;
           void eraseAllData();
         }}
       />
@@ -717,6 +741,7 @@ function EraseDialog({
   keepLabel,
   onKeep,
   onErase,
+  onDismiss,
 }: {
   visible: boolean;
   title: string;
@@ -725,6 +750,8 @@ function EraseDialog({
   keepLabel: string;
   onKeep: () => void;
   onErase: () => void;
+  /** iOS only: called once the Modal has fully closed. */
+  onDismiss: () => void;
 }) {
   const theme = useTheme();
   return (
@@ -733,6 +760,7 @@ function EraseDialog({
       transparent
       animationType="fade"
       statusBarTranslucent
+      onDismiss={onDismiss}
       onRequestClose={onKeep}>
       <View style={[styles.scrim, { backgroundColor: theme.scrim }]}>
         <View

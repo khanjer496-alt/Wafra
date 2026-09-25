@@ -182,6 +182,8 @@ export interface AssistantAnswer {
    * month; months with no recorded spending are absent, never zero-filled.
    */
   monthlySeries?: AssistantMonthTotal[];
+  /** The month in `monthlySeries` the answer names (highest month); absent when none is. */
+  monthlySeriesHighlight?: string;
 }
 
 export interface AssistantPaymentRow {
@@ -201,8 +203,22 @@ export interface AssistantMonthTotal {
 
 /** At most this many recorded months are drawn beside a baseline answer. */
 const MONTHLY_SERIES_LIMIT = 6;
-const monthlySeriesOf = (months: readonly { key: string; totalFils: number }[]): AssistantMonthTotal[] =>
-  months.slice(-MONTHLY_SERIES_LIMIT).map((month) => ({ month: month.key, totalFils: month.totalFils }));
+/**
+ * The most recent recorded months, oldest first. A month the answer names is
+ * always kept, even when it is older than that window, so the bar the answer
+ * points at is on the chart.
+ */
+const monthlySeriesOf = (
+  months: readonly { key: string; totalFils: number }[],
+  mustInclude?: string,
+): AssistantMonthTotal[] => {
+  let shown = months.slice(-MONTHLY_SERIES_LIMIT);
+  if (mustInclude && !shown.some((month) => month.key === mustInclude)) {
+    const named = months.find((month) => month.key === mustInclude);
+    if (named) shown = [named, ...shown.slice(-(MONTHLY_SERIES_LIMIT - 1))];
+  }
+  return shown.map((month) => ({ month: month.key, totalFils: month.totalFils }));
+};
 
 export type AssistantCorrectionPlan =
   | { kind: 'merchant-category'; merchant: string; category: CategoryId; direction: 'income' | 'expense' }
@@ -2013,7 +2029,8 @@ function executeAssistantToolResult(
             { label: 'Current selection', value: formatLedgerMoney(currentTotal) }],
           data: { monthsAnalyzed: months.length, baselineFils: highest.totalFils, currentFils: currentTotal, monthKey: highest.key,
             selectedIsHighest },
-          monthlySeries: monthlySeriesOf(months),
+          monthlySeries: monthlySeriesOf(months, highest.key),
+          monthlySeriesHighlight: highest.key,
         };
       }
       if (request.baseline === 'typical-month') {

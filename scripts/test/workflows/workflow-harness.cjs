@@ -152,6 +152,7 @@ function createWorkflowHarness(options={}) {
    // Redesign additions run from source; the native capture status, the
    // backup picker and the ledger analytics are explicit boundaries.
    d['@/lib/capture']={...d['@/lib/capture'],getIosCaptureNativeModule:()=>null};
+   d['@/lib/ios-capture-setup']=d['@/lib/ios-capture-setup']??{resolveIosSetupReadiness:()=>'not-added'};
    d['@/lib/subscriptions']={detectSubscriptions:()=>[]};
    d['@/lib/ledger']={...(d['@/lib/ledger']??{}),liveAccountIds:()=>new Set(),internalTransferIdsForState:()=>new Set(),isSpending:tx=>tx.type==='expense'};
    h.local('@/lib/splits','src/lib/splits.ts');

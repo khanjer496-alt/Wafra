@@ -1079,7 +1079,7 @@ function bodyOf(source, header) {
     /uncategorisedMerchants\(/.test(deferred) && /unreadFormatCount\(/.test(deferred) &&
       (settingsData.match(/uncategorisedMerchants\(|unreadFormatCount\(/g) ?? []).length === 2 &&
       /cleanupCounts \? copy\.merchantsToPlace\(cleanupCounts\.place\) : t\('sortShopsSettingsDetail'\)/.test(settingsData) &&
-      /cleanupCounts \? copy\.unreadFormats\(cleanupCounts\.unread\) : t\('improveAccuracySettingsDetail'\)/.test(settingsData),
+      /cleanupCounts && formatsCountable \? copy\.unreadFormats\(cleanupCounts\.unread\) : t\('improveAccuracySettingsDetail'\)/.test(settingsData),
     'the two ledger scans may never run in the render path');
 
   ok('Home resume clock does not invalidate full-ledger projections within the same day',

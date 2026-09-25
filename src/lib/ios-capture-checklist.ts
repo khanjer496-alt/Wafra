@@ -3,10 +3,13 @@
  *
  * Each row is "done" only from recorded evidence: the owner's own
  * confirmation that the shortcut and the automation were added (setup
- * progress), the shortcut's native test proof, and the native first-capture
- * timestamp. Unknown evidence is simply not done — the checklist never
- * assumes a step happened.
+ * progress), and the native capture status read through the SAME rule the
+ * setup screen uses, `resolveIosSetupReadiness` (capture enabled, and this
+ * build's shortcut proof version — v3 when the bundled shortcut exists).
+ * Unknown evidence is simply not done — the checklist never assumes a step.
  */
+import type { IosSetupReadiness } from '@/lib/ios-capture-setup';
+
 export type IosChecklistRowId = 'add' | 'test' | 'automate' | 'first-alert';
 
 export interface IosChecklistRow {
@@ -17,23 +20,18 @@ export interface IosChecklistRow {
 export interface IosChecklistEvidence {
   shortcutConfirmed: boolean;
   automationConfirmed: boolean;
-  /** Native setup proof version recorded by the shortcut's test run. */
-  setupProofVersion: number | null;
-  /** The proof version this build's shortcut records (3 for Capture v3, else 1). */
-  requiredProofVersion: number;
-  firstCapturedAt: number | null;
+  /** resolveIosSetupReadiness over the native status; 'not-added' when unknown. */
+  readiness: IosSetupReadiness;
 }
 
-const isTimestamp = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= 8_640_000_000_000_000;
-
 export function iosCaptureChecklist(evidence: IosChecklistEvidence | null): IosChecklistRow[] {
-  const tested = evidence !== null && evidence.setupProofVersion === evidence.requiredProofVersion;
-  const firstAlert = evidence !== null && isTimestamp(evidence.firstCapturedAt);
+  const tested = evidence !== null && evidence.readiness !== 'not-added';
+  const firstAlert = evidence !== null && evidence.readiness === 'first-alert-captured';
   return [
-    // A captured alert proves the earlier steps even if a confirmation tap was skipped.
-    { id: 'add', done: evidence !== null && (evidence.shortcutConfirmed || tested || firstAlert) },
-    { id: 'test', done: tested || firstAlert },
+    // A proven shortcut or a captured alert proves the earlier steps even if a
+    // confirmation tap was skipped.
+    { id: 'add', done: evidence !== null && (evidence.shortcutConfirmed || tested) },
+    { id: 'test', done: tested },
     { id: 'automate', done: evidence !== null && (evidence.automationConfirmed || firstAlert) },
     { id: 'first-alert', done: firstAlert },
   ];

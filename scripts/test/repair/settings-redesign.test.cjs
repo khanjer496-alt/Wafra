@@ -53,6 +53,13 @@ test('Arabic counts use singular, dual and plural forms', () => {
   assert.equal(ar.merchantsToPlace(2), 'عنصران بانتظار التصنيف');
   assert.equal(ar.merchantsToPlace(5), '5 عناصر بانتظار التصنيف');
   assert.equal(ar.merchantsToPlace(12), '12 عنصرًا بانتظار التصنيف');
+  // After a round hundred, or 100+1 / 100+2, the noun is genitive singular.
+  assert.equal(ar.merchantsToPlace(100), '100 عنصر بانتظار التصنيف');
+  assert.equal(ar.merchantsToPlace(101), '101 عنصر بانتظار التصنيف');
+  assert.equal(ar.merchantsToPlace(102), '102 عنصر بانتظار التصنيف');
+  assert.equal(ar.merchantsToPlace(103), '103 عناصر بانتظار التصنيف');
+  assert.equal(ar.merchantsToPlace(111), '111 عنصرًا بانتظار التصنيف');
+  assert.equal(ar.merchantsToPlace(200), '200 عنصر بانتظار التصنيف');
   assert.equal(ar.proTrialBody(1), 'الالتقاط التلقائي متاح ليوم واحد إضافي.');
   assert.equal(ar.proTrialBody(2), 'الالتقاط التلقائي متاح ليومين إضافيين.');
   assert.equal(ar.proTrialBody(9), 'الالتقاط التلقائي متاح لمدة 9 أيام إضافية.');
@@ -60,8 +67,9 @@ test('Arabic counts use singular, dual and plural forms', () => {
   const en = copyModule.settingsCopy('en');
   assert.equal(en.proTrialBody(1), 'Automatic capture is included for 1 more day.');
   assert.equal(en.unreadFormats(3), '3 formats Wafra couldn’t read');
-  assert.equal(en.smsAllowed(0), 'Allowed · nothing added this month yet');
-  assert.equal(en.smsAllowed(41), 'Allowed · 41 added this month');
+  assert.equal(en.smsAllowed(0), 'Allowed · no SMS entries this month yet');
+  assert.equal(en.smsAllowed(1), 'Allowed · 1 SMS entry this month');
+  assert.equal(en.smsAllowed(41), 'Allowed · 41 SMS entries this month');
 });
 
 test('the lock is named for the hardware the phone reports', () => {

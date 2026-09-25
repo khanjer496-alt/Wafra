@@ -589,7 +589,7 @@ export default function AssistantScreen() {
             {turn.answer.meta ? <ThemedText type="meta" themeColor="textSecondary" selectable>{turn.answer.meta}</ThemedText> : null}
           </> : <ThemedText selectable>{turn.answer.body}</ThemedText>}
           {turn.answer.monthlySeries?.length && ledgerMoney ? <AssistantMonthChart series={turn.answer.monthlySeries}
-            money={ledgerMoney} language={screenLanguage} /> : null}
+            highlight={turn.answer.monthlySeriesHighlight} money={ledgerMoney} language={screenLanguage} /> : null}
           {turn.answer.payments?.length && ledgerMoney ? <AssistantPaymentRows payments={turn.answer.payments}
             money={ledgerMoney} language={screenLanguage} />
           : turn.answer.facts?.length ? <View style={styles.facts}>

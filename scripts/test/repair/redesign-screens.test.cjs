@@ -57,7 +57,8 @@ test('statement date note follows the selected country, and the privacy line sta
   assert.match(us, /04\/09 is April 9\./);
   const ae = copy.statementDateNote('AE', 'en');
   assert.match(ae, /04\/09 is 4 September\./);
-  assert.match(copy.statementDateNote('JP', 'en'), /year first/);
+  assert.match(copy.statementDateNote('JP', 'en'), /year first\. Dates like 04\/09 without a year are not guessed/);
+  assert.doesNotMatch(copy.statementDateNote('JP', 'en'), /are read year first/);
   assert.match(copy.statementDateNote('CA', 'en'), /won’t guess/);
   assert.equal(copy.statementDateNote(null, 'en'), en.dateNoteUnknown);
   assert.equal(copy.statementDateNote('ZZ', 'en'), en.dateNoteUnknown);
@@ -82,16 +83,34 @@ test('first-run copy is paired and the SMS explainer is truthful', () => {
   const en = ONBOARDING_COPY.en;
   assert.match(en.smsExplainerSystemName, /send and view/);
   assert.match(en.smsExplainerNever, /never sends/);
-  assert.equal(en.foundRecurring(4, 2), 'Repeating payments found: 4 subscriptions and 2 bills. They are in Bills.');
-  assert.equal(en.foundRecurring(1, 0), 'Repeating payments found: 1 subscription. They are in Bills.');
-  assert.equal(en.foundRecurring(0, 1), 'Repeating payments found: 1 bill. They are in Bills.');
+  // "Regular payments", never "bills": the result card above already counts
+  // recognised bills, and the two numbers describe different things.
+  assert.equal(en.foundRecurring(4, 2), 'Repeating charges found: 4 subscriptions and 2 other regular payments. They are in Bills.');
+  assert.equal(en.foundRecurring(1, 0), 'Repeating charges found: 1 subscription. They are in Bills.');
+  assert.equal(en.foundRecurring(0, 1), 'Repeating charges found: 1 other regular payment. They are in Bills.');
+  const ar = ONBOARDING_COPY.ar;
+  // Nominative after the colon: اشتراك واحد / اشتراكان.
+  assert.equal(ar.foundRecurring(1, 0), 'رسوم متكررة وُجدت: اشتراك واحد. ستجدها في الفواتير.');
+  assert.equal(ar.foundRecurring(2, 2), 'رسوم متكررة وُجدت: اشتراكان ودفعتان منتظمتان أخريان. ستجدها في الفواتير.');
+  assert.equal(ar.readyMonths(100), '100 شهر');
+  assert.match(en.restoreReadFailed, /Couldn’t read that file/);
   assert.equal(ONBOARDING_COPY.ar.readyMonths(2), 'شهران');
   assert.equal(ONBOARDING_COPY.ar.readyMonths(3), '3 أشهر');
   // The gate asks before Android's prompt and never restores without a confirmation.
   const gate = read('src/components/onboarding-gate.tsx');
   assert.match(gate, /else setSmsExplainerVisible\(true\)/);
   assert.match(gate, /onContinue=\{\(\) => \{\s*setSmsExplainerVisible\(false\);\s*void runSetupAction\(startScan\);/);
-  assert.match(gate, /visible=\{pendingRestore !== null\}[\s\S]{0,900}setRestoreFailed\(!restoreBackup\(content\)\)/);
+  assert.match(gate, /visible=\{pendingRestore !== null\}[\s\S]{0,900}setRestoreFailed\(restoreBackup\(content\) \? null : 'invalid'\)/);
+  // A file that could not be read is not called "not a Wafra backup".
+  assert.match(gate, /restoreFailed === 'read' \? firstRunCopy\.restoreReadFailed : t\('notAWafraBackup'\)/);
+  // Back from the explainer closes it rather than leaving it set behind.
+  assert.match(gate, /onBack=\{smsExplainerVisible \? \(\) => setSmsExplainerVisible\(false\) : goBack\}/);
+  // The checklist reads the setup screen's readiness rule, latest refresh only.
+  assert.match(gate, /resolveIosSetupReadiness\(status, native\.getMessageShortcutURL \? 3 : 1\)/);
+  assert.match(gate, /if \(cancelled \|\| request !== latest\) return;/);
+  // The summary is memoised and is the card's count source.
+  assert.match(gate, /const readySummary = useMemo\(/);
+  assert.match(gate, /tx: readySummary\?\.transactions \?\? state\.transactions\.length/);
   // Country and ledger currency stay separate: no "Continue with <currency>".
   assert.doesNotMatch(gate, /Continue with/);
 });
@@ -133,13 +152,14 @@ test('iPhone checklist marks a step done only from recorded evidence', () => {
   const { iosCaptureChecklist } = load(path.join(root, 'src/lib/ios-capture-checklist.ts'));
   const done = (evidence) => JSON.parse(JSON.stringify(iosCaptureChecklist(evidence).map((row) => row.done)));
   assert.deepEqual(done(null), [false, false, false, false]);
-  const base = { shortcutConfirmed: false, automationConfirmed: false, setupProofVersion: null, requiredProofVersion: 3, firstCapturedAt: null };
+  // Readiness is resolveIosSetupReadiness's answer (enabled + this build's proof).
+  const base = { shortcutConfirmed: false, automationConfirmed: false, readiness: 'not-added' };
   assert.deepEqual(done(base), [false, false, false, false]);
   assert.deepEqual(done({ ...base, shortcutConfirmed: true }), [true, false, false, false]);
-  assert.deepEqual(done({ ...base, setupProofVersion: 1 }), [false, false, false, false], 'an older proof is not this shortcut');
-  assert.deepEqual(done({ ...base, setupProofVersion: 3 }), [true, true, false, false]);
-  assert.deepEqual(done({ ...base, setupProofVersion: 3, automationConfirmed: true }), [true, true, true, false]);
-  assert.deepEqual(done({ ...base, firstCapturedAt: Date.UTC(2026, 8, 25) }), [true, true, true, true]);
+  assert.deepEqual(done({ ...base, automationConfirmed: true }), [false, false, true, false]);
+  assert.deepEqual(done({ ...base, readiness: 'shortcut-proven' }), [true, true, false, false]);
+  assert.deepEqual(done({ ...base, readiness: 'shortcut-proven', automationConfirmed: true }), [true, true, true, false]);
+  assert.deepEqual(done({ ...base, readiness: 'first-alert-captured' }), [true, true, true, true]);
 });
 
 test('Ask Wafra copy is paired; the evidence count counts distinct transactions', () => {

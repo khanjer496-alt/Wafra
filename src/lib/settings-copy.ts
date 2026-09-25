@@ -13,16 +13,22 @@ import type { BiometricKind } from '@/lib/biometric-kind';
 
 type Lang = 'en' | 'ar';
 
-/** Arabic count phrase: 1 singular, 2 dual, 3–10 plural, 11+ singular accusative. */
+/**
+ * Arabic count phrase, by the last two digits as the grammar counts them:
+ * 1 and 2 alone take the singular and dual words; a last pair of 3–10 takes
+ * the plural (5 أيام, 103 أيام); 11–99 the accusative singular (11 يومًا);
+ * and a round hundred or 100+1/100+2 the genitive singular (100 يوم, 101 يوم).
+ */
 export function arabicCount(
   n: number,
-  forms: { one: string; two: string; few: string; many: string },
+  forms: { one: string; two: string; few: string; many: string; hundreds: string },
 ): string {
   if (n === 1) return forms.one;
   if (n === 2) return forms.two;
   const mod100 = n % 100;
   if (mod100 >= 3 && mod100 <= 10) return `${n} ${forms.few}`;
-  return `${n} ${forms.many}`;
+  if (mod100 >= 11) return `${n} ${forms.many}`;
+  return `${n} ${forms.hundreds}`;
 }
 
 const en = {
@@ -38,10 +44,12 @@ const en = {
   proTrialBody: (days: number) =>
     `Automatic capture is included for ${days} more ${days === 1 ? 'day' : 'days'}.`,
   captureWorking: (time: string) => `Working · last message ${time}`,
+  // "SMS entries", not "added by the reader": a bank message pasted into
+  // Import is stored the same way and cannot be told apart.
   smsAllowed: (count: number) =>
     count === 0
-      ? 'Allowed · nothing added this month yet'
-      : `Allowed · ${count} added this month`,
+      ? 'Allowed · no SMS entries this month yet'
+      : `Allowed · ${count} SMS ${count === 1 ? 'entry' : 'entries'} this month`,
   optionalOff: 'Optional · catches alerts some banks only send in their app',
   trustedRow: 'Trusted devices & family',
   trustedDetail: 'Share new relayed items with phones you trust',
@@ -113,16 +121,18 @@ const ar: SettingsCopy = {
       two: 'ليومين إضافيين',
       few: 'أيام إضافية',
       many: 'يومًا إضافيًا',
+      hundreds: 'يوم إضافي',
     }).replace(/^(\d+)/, 'لمدة $1')}.`,
   captureWorking: (time: string) => `يعمل · آخر رسالة ${time}`,
   smsAllowed: (count: number) =>
     count === 0
-      ? 'مسموح · لم يُضف شيء هذا الشهر بعد'
+      ? 'مسموح · لا عمليات من الرسائل هذا الشهر بعد'
       : `مسموح · ${arabicCount(count, {
-        one: 'أُضيفت عملية واحدة',
-        two: 'أُضيفت عمليتان',
-        few: 'عمليات أُضيفت',
-        many: 'عملية أُضيفت',
+        one: 'عملية واحدة من الرسائل',
+        two: 'عمليتان من الرسائل',
+        few: 'عمليات من الرسائل',
+        many: 'عملية من الرسائل',
+        hundreds: 'عملية من الرسائل',
       })} هذا الشهر`,
   optionalOff: 'اختياري · يلتقط تنبيهات ترسلها بعض البنوك داخل تطبيقها فقط',
   trustedRow: 'الأجهزة الموثوقة والعائلة',
@@ -148,6 +158,7 @@ const ar: SettingsCopy = {
         two: 'عنصران بانتظار التصنيف',
         few: 'عناصر بانتظار التصنيف',
         many: 'عنصرًا بانتظار التصنيف',
+        hundreds: 'عنصر بانتظار التصنيف',
       }),
   unreadAlerts: 'تنبيهات غير مقروءة',
   unreadFormats: (count: number) =>
@@ -158,6 +169,7 @@ const ar: SettingsCopy = {
         two: 'صيغتان تعذّرت قراءتهما',
         few: 'صيغ تعذّرت قراءتها',
         many: 'صيغة تعذّرت قراءتها',
+        hundreds: 'صيغة تعذّرت قراءتها',
       }),
   versionFooter: (version: string) => `وفرة ${version} · بلا حساب · بلا إعلانات`,
   eraseTitle: 'حذف كل شيء؟',

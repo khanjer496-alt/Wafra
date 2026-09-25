@@ -69,6 +69,7 @@ import { t, tf, type StringKey } from '@/lib/i18n';
 import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { getIosCaptureNativeModule } from '@/lib/capture';
 import { iosCaptureChecklist, type IosChecklistEvidence } from '@/lib/ios-capture-checklist';
+import { resolveIosSetupReadiness } from '@/lib/ios-capture-setup';
 import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { onboardingCopy } from '@/lib/onboarding-copy';
@@ -330,7 +331,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // positions the source-executing harnesses address stay where they were.
   /** A picked backup's text, waiting for the replace-everything confirmation. */
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
-  const [restoreFailed, setRestoreFailed] = useState(false);
+  /** Why the Welcome restore stopped: the file could not be read, or it was not a backup. */
+  const [restoreFailed, setRestoreFailed] = useState<'read' | 'invalid' | null>(null);
   /** Android: the explainer shown before the system SMS permission prompt. */
   const [smsExplainerVisible, setSmsExplainerVisible] = useState(false);
   /** iPhone: recorded evidence behind the four-row capture checklist. */
@@ -574,6 +576,23 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     params.onboarding, router, resumeAttempt]);
 
   const activeStep: Step = !previewMode && params.onboarding === 'complete' ? 'complete' : step;
+  // The ready summary is read from the ledger as it stands, once per ledger
+  // change (memoised here, above every early return, so hook order is fixed).
+  const readySummary = useMemo(() => activeStep === 'complete' && state.transactions.length > 0
+    ? (() => {
+        const live = liveAccountIds(state.accounts);
+        const internal = internalTransferIdsForState(state);
+        return onboardingReadySummary({
+          transactions: state.transactions,
+          isSpending: (tx) => isSpending(tx, live, internal),
+          subscriptions: detectSubscriptions(state.transactions, state.notSubscriptions, new Date(), live, internal),
+        });
+      })()
+    : null,
+  // The summary reads only these ledger fields.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [activeStep, state.transactions, state.accounts, state.notSubscriptions, state.transferInternalIds,
+    state.transferNormalizationVersion, state.historyImport]);
   const capture = captureCopy();
   const firstRunCopy = onboardingCopy(language);
   const shortcutWords = iosShortcutSetupCopy(language);
@@ -596,7 +615,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
    * and capture choices. A backup of an onboarded ledger closes first run.
    */
   const pickBackupToRestore = async () => {
-    setRestoreFailed(false);
+    setRestoreFailed(null);
     try {
       const picked = await DocumentPicker.getDocumentAsync({
         type: ['application/json', 'text/plain', '*/*'],
@@ -605,7 +624,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       if (picked.canceled || !picked.assets?.[0]) return;
       setPendingRestore(await readBackupPickerCopy(picked.assets[0].uri));
     } catch {
-      setRestoreFailed(true);
+      setRestoreFailed('read');
     }
   };
 
@@ -1014,19 +1033,24 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (previewMode || Platform.OS !== 'ios' || activeStep !== 'live') return;
     let cancelled = false;
+    // Refreshes can overlap (mount, then an immediate foreground). Only the
+    // latest one may publish, so a slow earlier read never overwrites it.
+    let latest = 0;
     const refresh = async () => {
+      const request = ++latest;
       const progress = await loadIosMessageSetupProgress().catch(() => null);
       const native = getIosCaptureNativeModule();
       const status = native ? await native.getCaptureStatus().catch(() => null) : null;
-      if (cancelled) return;
+      if (cancelled || request !== latest) return;
       const recordedMessage = (progress?.futureCaptureSource ?? 'message') === 'message';
       const parked = progress?.parkedSources?.message;
       setChecklistEvidence({
         shortcutConfirmed: recordedMessage ? progress?.futureShortcutConfirmed === true : parked?.shortcutConfirmed === true,
         automationConfirmed: recordedMessage ? progress?.futureAutomationConfirmed === true : parked?.automationConfirmed === true,
-        setupProofVersion: typeof status?.setupProofVersion === 'number' ? status.setupProofVersion : null,
-        requiredProofVersion: native?.getMessageShortcutURL ? 3 : 1,
-        firstCapturedAt: typeof status?.firstCapturedAt === 'number' ? status.firstCapturedAt : null,
+        // The setup screen's own rule: enabled, and this build's proof version.
+        readiness: status && native
+          ? resolveIosSetupReadiness(status, native.getMessageShortcutURL ? 3 : 1)
+          : 'not-added',
       });
     };
     void refresh();
@@ -1327,21 +1351,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // that is still running means the figures are not final, and says so.
   const importsStillReading = state.historyImport?.status === 'running' ||
     state.historyImport?.status === 'paused';
-  const readySummary = activeStep === 'complete' && state.transactions.length > 0
-    ? (() => {
-        const live = liveAccountIds(state.accounts);
-        const internal = internalTransferIdsForState(state);
-        return onboardingReadySummary({
-          transactions: state.transactions,
-          isSpending: (tx) => isSpending(tx, live, internal),
-          subscriptions: detectSubscriptions(state.transactions, state.notSubscriptions, new Date(), live, internal),
-        });
-      })()
-    : null;
   const discoveredResult = result ?? (
     state.transactions.length > 0 || state.accounts.length > 0 || state.bills.length > 0 || state.cardDues.length > 0
       ? {
-          tx: state.transactions.length,
+          // One source for the count the card and the summary both describe.
+          tx: readySummary?.transactions ?? state.transactions.length,
           accounts: state.accounts.filter((account) => !account.archived).length,
           bills: state.bills.length + state.cardDues.length,
         }
@@ -1437,7 +1451,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   {restoreFailed && (
                     <ThemedText accessibilityLiveRegion="polite"
                       style={[styles.inlineNote, styles.restoreNote, { color: night.warning }]}>
-                      {t('notAWafraBackup')}
+                      {restoreFailed === 'read' ? firstRunCopy.restoreReadFailed : t('notAWafraBackup')}
                     </ThemedText>
                   )}
                   <View style={styles.setupTime}>
@@ -1537,7 +1551,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             </Animated.ScrollView>
           ) : (
             <>
-              <BackHeader step={activeStep} onBack={goBack}
+              {/* Back from the SMS explainer returns to the source list on the
+                  same step; it never leaves the explainer flag set behind. */}
+              <BackHeader step={activeStep}
+                onBack={smsExplainerVisible ? () => setSmsExplainerVisible(false) : goBack}
                 onClose={previewMode ? closePreview : undefined}
                 disabled={setupBusy || finishing || transitioning}
                 progressSteps={JOURNEY_STEPS.includes(activeStep) ? JOURNEY_STEPS
@@ -2111,7 +2128,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           if (content === null) return;
           // The store's own restore: pro, trial clock and capture choices on
           // this phone always win over what the file says.
-          setRestoreFailed(!restoreBackup(content));
+          setRestoreFailed(restoreBackup(content) ? null : 'invalid');
         }}
       />
       <ConfirmSheet

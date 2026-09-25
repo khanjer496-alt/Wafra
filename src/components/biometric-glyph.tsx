@@ -2,8 +2,10 @@
  * The glyph and the kind of biometric this phone actually uses.
  *
  * `useBiometricKind` asks expo-local-authentication once per mount which
- * hardware classes are enrolled; `null` means "not known yet" and callers show
- * the neutral App Lock wording until the answer arrives.
+ * hardware classes exist and whether anything is enrolled. Hardware with
+ * nothing enrolled cannot unlock, so it reads as the passcode. `null` means
+ * "not known yet" (or not asked, when `enabled` is false) and callers show the
+ * neutral App Lock wording.
  */
 import * as LocalAuthentication from 'expo-local-authentication';
 import React, { useEffect, useState } from 'react';
@@ -14,20 +16,23 @@ import { Icon } from '@/components/ui/icon';
 import { PlatformSymbol } from '@/components/ui/platform-symbol';
 import { biometricKindFrom, type BiometricKind } from '@/lib/biometric-kind';
 
-export function useBiometricKind(): BiometricKind | null {
+export function useBiometricKind(enabled = true): BiometricKind | null {
   const [kind, setKind] = useState<BiometricKind | null>(null);
   useEffect(() => {
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web' || !enabled) return;
     let active = true;
-    LocalAuthentication.supportedAuthenticationTypesAsync()
-      .then((types) => {
-        if (active) setKind(biometricKindFrom(types, Platform.OS));
+    Promise.all([
+      LocalAuthentication.supportedAuthenticationTypesAsync(),
+      LocalAuthentication.isEnrolledAsync(),
+    ])
+      .then(([types, enrolled]) => {
+        if (active) setKind(enrolled ? biometricKindFrom(types, Platform.OS) : 'passcode');
       })
       .catch(() => {
         if (active) setKind('passcode');
       });
     return () => { active = false; };
-  }, []);
+  }, [enabled]);
   return kind;
 }
 

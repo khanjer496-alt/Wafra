@@ -191,6 +191,8 @@ async function gate(options = {}) {
   dependencies['expo-document-picker'] = { getDocumentAsync: () => call('pickBackup', undefined, { canceled: true, assets: [] }) };
   dependencies['@/lib/share-text'] = { readBackupPickerCopy: () => call('readBackup', undefined, '') };
   dependencies['@/lib/capture'] = { getIosCaptureNativeModule: () => null };
+  // Only reached with a native module, which these journeys never have.
+  dependencies['@/lib/ios-capture-setup'] = { resolveIosSetupReadiness: () => 'not-added' };
   dependencies['@/lib/subscriptions'] = { detectSubscriptions: () => [] };
   dependencies['@/lib/ledger'] = { liveAccountIds: () => new Set(), internalTransferIdsForState: () => new Set(),
     isSpending: transaction => transaction.type === 'expense' };

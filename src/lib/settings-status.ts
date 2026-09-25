@@ -18,10 +18,11 @@ function localMonthKey(now: Date): string {
 }
 
 /**
- * Entries the Android SMS reader added whose bank date falls in the current
- * local calendar month. Bank-app notifications (`viaPush`) and statement rows
- * (PDF/CSV/email uploads) share `source: 'sms'`, so they are excluded here:
- * the row this feeds is the SMS permission row.
+ * SMS-sourced entries whose bank date falls in the current local calendar
+ * month. Bank-app notifications (`viaPush`) and statement rows (PDF/CSV/email
+ * uploads) share `source: 'sms'` and are excluded. A bank message pasted into
+ * Import is stored exactly like one the reader found, so it is counted too —
+ * which is why the row says "SMS entries", not "added by the reader".
  */
 export function androidSmsAddedThisMonth(
   transactions: readonly Pick<Transaction, 'source' | 'viaPush' | 'captureSource' | 'statementImportId' | 'date'>[],
