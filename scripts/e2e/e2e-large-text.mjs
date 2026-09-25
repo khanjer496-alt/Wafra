@@ -357,6 +357,8 @@ try {
           for (const f of hard.slice(0, 6)) console.log(`    ${f.kind}: ${f.text}${f.detail ? ` (${f.detail})` : ''}`);
         }
         await context.close();
+        // Written after every context, so an interrupted run keeps what it measured.
+        writeFileSync(path.join(OUT, 'large-text-audit.json'), JSON.stringify(results, null, 1));
       }
     }
   }
