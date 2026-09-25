@@ -306,6 +306,14 @@ test('capture counters: alerts added this month exclude manual entries and state
     tx({ source: 'sms', date: '2026-09-12', statementImportId: 'a'.repeat(32) }),
   ];
   assert.equal(capture.capturedThisMonth(ledger, today), 2);
+  // "This month" is the calendar month, even when budgets start on a salary day.
+  format.setMonthStartDay(25);
+  try {
+    assert.equal(capture.capturedThisMonth(ledger, today), 2, '1 and 24 Sep, not 25 Aug–24 Sep');
+    assert.equal(capture.capturedThisMonth([...ledger, tx({ source: 'sms', date: '2026-09-25' })], today), 3);
+  } finally {
+    format.setMonthStartDay(1);
+  }
 });
 
 test('capture banks: only banks with alert-recorded entries, never archived or statement-only', () => {

@@ -14,7 +14,7 @@ import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { Icon } from '@/components/ui/icon';
 import { ReferenceHomeSummary } from '@/components/reference-home-summary';
-import { HomeAddButton } from '@/components/home-add-button';
+import { HOME_ADD_BUTTON_CLEARANCE, HomeAddButton } from '@/components/home-add-button';
 import { LimitSheet } from '@/components/limit-sheet';
 import { TransferReviewNotice } from '@/components/transfer-review-notice';
 import { RecapLogoTrigger } from '@/components/recap/recap-logo-trigger';
@@ -673,6 +673,7 @@ export default function JournalHomeScreen() {
 
   return <>
     <ScreenScaffold tabbed headerMode="inline" contentStyle={styles.screen}
+      floatingClearance={Platform.OS === 'android' ? HOME_ADD_BUTTON_CLEARANCE : 0}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}>
       {!state.hydrated ? <View accessibilityRole="progressbar" accessibilityLabel={t('loadingLedger')} style={styles.loading}>
         <SkeletonRows count={1} height={160} /><SkeletonRows count={4} height={66} />

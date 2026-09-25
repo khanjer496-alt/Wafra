@@ -130,3 +130,12 @@ test('capture timings ride the export only in a trace build, and carry phases, c
     else process.env.EXPO_PUBLIC_WAFRA_CAPTURE_TRACE = previous;
   }
 });
+
+test('an account balance the user set keeps its timestamp in the export, like the bank one', async () => {
+  const input = state();
+  input.accounts[0] = { ...input.accounts[0], snapshotFils: 50_000, snapshotKind: 'balance', snapshotTs: epoch, manualSnapshotTs: epoch };
+  const result = JSON.parse(await serializeDiagnosticExport(await buildDiagnosticExport(input, build, options, epoch)));
+  assert.equal(result.accounts[0].snapshotTs, epoch);
+  assert.equal(result.accounts[0].manualSnapshotTs, epoch, 'says the figure was typed, not quoted by the bank');
+  assert.ok(!JSON.stringify(result).includes('NEVER_EXPORT'));
+});

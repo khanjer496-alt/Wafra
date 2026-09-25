@@ -12,7 +12,7 @@ import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { cardDiagnostics, noFormatsReason, parserCoverage, unreadFormats } from '@/lib/accuracy';
+import { cardDiagnostics, formatKey, newestRowOfFormat, noFormatsReason, parserCoverage, unreadFormats } from '@/lib/accuracy';
 import { isCaptureAvailable } from '@/lib/capture';
 import { shareText } from '@/lib/share-text';
 import { categoryLabel } from '@/lib/categories';
@@ -54,17 +54,8 @@ export default function AccuracyScreen() {
 
   // The newest recorded row of each listed format. These rows are already in
   // the ledger, so the fix is to open that entry — never to add it again.
-  // Same digit-blind format key as unreadFormats().
-  const newestOfFormat = useMemo(() => {
-    const byFormat = new Map<string, Transaction>();
-    for (const tx of state.transactions) {
-      if (!tx.raw || tx.category !== 'other') continue;
-      const key = tx.raw.replace(/\d/g, '#');
-      const seen = byFormat.get(key);
-      if (!seen || tx.date > seen.date) byFormat.set(key, tx);
-    }
-    return byFormat;
-  }, [state.transactions]);
+  // Same rows and format key as unreadFormats().
+  const newestOfFormat = useMemo(() => newestRowOfFormat(state.transactions), [state.transactions]);
 
   const unread = useMemo(() => rows.filter((r) => r.reason === 'unread'), [rows]);
   const uncategorized = useMemo(() => rows.filter((r) => r.reason === 'uncategorized'), [rows]);
@@ -273,10 +264,10 @@ export default function AccuracyScreen() {
                       <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
                         {maskDigits(r.raw)}
                       </ThemedText>
-                      {newestOfFormat.has(r.raw.replace(/\d/g, '#')) ? (
+                      {newestOfFormat.has(formatKey(r.raw)) ? (
                         <View testID="accuracy-open-entry" style={styles.openEntry}>
                           <Button label={d.accuracy.openEntry} variant="outline" icon="arrow-up-right" wrapLabel
-                            onPress={() => setEntry(newestOfFormat.get(r.raw.replace(/\d/g, '#')) ?? null)} />
+                            onPress={() => setEntry(newestOfFormat.get(formatKey(r.raw)) ?? null)} />
                           <ThemedText type="meta" themeColor="textTertiary">{d.accuracy.openEntryHint}</ThemedText>
                         </View>
                       ) : null}

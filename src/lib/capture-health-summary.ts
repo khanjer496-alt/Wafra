@@ -1,4 +1,4 @@
-import { monthKey, toISODate } from '@/lib/format';
+import { toISODate } from '@/lib/format';
 import { iosCaptureHealthMode, isCaptureTimestamp, type IosCaptureHealth } from '@/lib/ios-capture-health';
 import type { Account, Transaction } from '@/lib/types';
 
@@ -34,15 +34,17 @@ const isStatementRow = (tx: Transaction): boolean =>
   tx.captureSource === 'pdf' || tx.captureSource === 'csv' || tx.statementImportId !== undefined;
 
 /**
- * Entries recorded from bank alerts in the current reporting month. Manual
- * entries and statement imports are not captures and are not counted.
+ * Entries recorded from bank alerts in the current CALENDAR month — the
+ * screen says "this month" about capture, not about a salary-day budget
+ * period. Manual entries and statement imports are not captures and are not
+ * counted.
  */
 export function capturedThisMonth(transactions: readonly Transaction[], today: Date = new Date()): number {
-  const month = monthKey(toISODate(today));
+  const month = toISODate(today).slice(0, 7);
   let count = 0;
   for (const tx of transactions) {
     if (tx.source !== 'sms' || isStatementRow(tx)) continue;
-    if (monthKey(tx.date) === month) count += 1;
+    if (tx.date.slice(0, 7) === month) count += 1;
   }
   return count;
 }

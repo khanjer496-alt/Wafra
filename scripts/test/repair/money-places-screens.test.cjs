@@ -119,6 +119,45 @@ test('Set today\'s balance is offered, and the quiet-row shortcut opens it strai
   assert.ok(sheet, 'the quiet-row shortcut opens the sheet straight away');
 });
 
+test('a cold Set balance link opens the sheet once the account loads, and only once', () => {
+  const h = createHarness();
+  // Hooks that persist across renders, like a mounted component's.
+  const slots = [];
+  let slot = 0;
+  let effects = [];
+  Object.assign(h.deps.react, {
+    useState: (initial) => {
+      const at = slot++;
+      if (!(at in slots)) slots[at] = typeof initial === 'function' ? initial() : initial;
+      return [slots[at], (value) => { slots[at] = value; }];
+    },
+    useRef: (value) => {
+      const at = slot++;
+      if (!(at in slots)) slots[at] = { current: value };
+      return slots[at];
+    },
+    useEffect: (effect) => { effects.push(effect); },
+  });
+  const accounts = h.state.accounts;
+  const render = () => {
+    slot = 0;
+    effects = [];
+    const tree = renderAccount(h, { id: 'cash', set: 'balance' });
+    for (const effect of effects) effect();
+    return tree;
+  };
+  const sheetOpen = (tree) => walk(tree).some((n) => n.type === 'Sheet' && n.props?.title === 'Set today’s balance');
+  h.state.accounts = [];
+  assert.equal(sheetOpen(render()), false, 'no account yet');
+  h.state.accounts = accounts;
+  render();
+  assert.equal(sheetOpen(render()), true, 'opens when the account arrives');
+  const open = walk(render()).find((n) => n.type === 'Sheet' && n.props?.title === 'Set today’s balance');
+  open.props.onClose();
+  assert.equal(sheetOpen(render()), false, 'closed by the user');
+  assert.equal(sheetOpen(render()), false, 'and it stays closed');
+});
+
 const goals = [{ id: 'umrah', title: 'Umrah trip', emoji: 'plane', targetFils: 500000, savedFils: 320000 }];
 
 test('a goal row on Accounts opens the goal screen', () => {
@@ -207,9 +246,18 @@ test('the 30-day timeline speaks its pins and leaves out anything beyond the win
   // The harness's today is 15 Sep 2026.
   const tree = billsWith([{ ...netflix, nextExpectedISO: '2026-09-20' }, { ...spotifyUp, nextExpectedISO: '2026-11-30' }]).render('bills');
   const label = byId(tree, 'bills-timeline').props.accessibilityLabel;
-  assert.match(label, /^1 payment in the next 30 days: Netflix/);
+  // The harness's monthly bills fell due on 7 and 8 Sep; their next due dates
+  // (7 and 8 Oct) are inside the window, so they are pinned too.
+  assert.match(label, /^3 payments in the next 30 days: Netflix, 20 Sept; Etisalat, 7 Oct; DEWA, 8 Oct$/);
   assert.match(label, /Netflix/);
   assert.doesNotMatch(label, /Spotify/);
+  // DEWA on day 23 of 30 is centred; nothing is anchored past an edge.
+  const anchors = walk(byId(tree, 'bills-timeline')).map((n) => n.props?.testID).filter((id) => /^bills-timeline-pin-/.test(id ?? ''));
+  assert.deepEqual(anchors, ['bills-timeline-pin-center', 'bills-timeline-pin-center', 'bills-timeline-pin-center']);
+  const today = billsWith([{ ...netflix, nextExpectedISO: '2026-09-15' }]).render('bills');
+  const first = walk(byId(today, 'bills-timeline')).find((n) => n.props?.testID === 'bills-timeline-pin-start');
+  assert.ok(first, 'a pin due today hangs its label inward from the start edge');
+  assert.equal(first.props.style.find((part) => part && 'marginStart' in part).marginStart, -5, 'its dot still sits on today');
 });
 
 function renderBillSheet(h, props) {

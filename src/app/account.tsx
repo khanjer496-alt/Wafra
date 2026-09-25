@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
@@ -70,7 +70,17 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
   const [managing, setManaging] = useState(false);
   const [choosingBank, setChoosingBank] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [balanceOpen, setBalanceOpen] = useState(() => askBalance && account !== null && isAccountDetailTarget(account));
+  // Asked for once. A cold deep link can land before the ledger has loaded the
+  // account, so the sheet opens when it arrives — and never again after the
+  // user has closed it.
+  const balanceReady = askBalance && account !== null && isAccountDetailTarget(account);
+  const balanceAsked = useRef(balanceReady);
+  const [balanceOpen, setBalanceOpen] = useState(balanceReady);
+  useEffect(() => {
+    if (!balanceReady || balanceAsked.current) return;
+    balanceAsked.current = true;
+    setBalanceOpen(true);
+  }, [balanceReady]);
   const [balanceText, setBalanceText] = useState('');
   const [currencyOpen, setCurrencyOpen] = useState(false);
 
@@ -80,13 +90,22 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [account, state.transactions],
   );
-  const flow = useMemo(
-    () => accountMonthFlow(state.transactions, accountId, now, corroboratingTransferIdsForState(state)),
+  // Second alerts for one bank move, left out of both the month's figures and
+  // the recent rows, as Transactions leaves them out.
+  const duplicates = useMemo(
+    () => corroboratingTransferIdsForState(state),
     // Duplicate detection reads accounts and transactions only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, state.accounts, accountId, now],
+    [state.transactions, state.accounts],
   );
-  const recent = useMemo(() => recentAccountTransactions(state.transactions, accountId, 8), [state.transactions, accountId]);
+  const flow = useMemo(
+    () => accountMonthFlow(state.transactions, accountId, now, duplicates),
+    [state.transactions, accountId, now, duplicates],
+  );
+  const recent = useMemo(
+    () => recentAccountTransactions(state.transactions, accountId, 8, duplicates),
+    [state.transactions, accountId, duplicates],
+  );
   const openEntry = useCallback((transaction: Transaction) => setEntry(transaction), []);
 
   const header: ScreenHeaderProps = {

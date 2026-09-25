@@ -180,7 +180,7 @@ ok('Bills card actions live in the card sheet as one labelled button',
     /<Button label=\{w\.recordPayment\}/.test(cardDetail) &&
     /<Button[\s\S]{0,120}label=\{t\('markPaid'\)\}/.test(bills));
 ok('Bills manual reminder rows open one labelled detail target',
-  /setSelectedReminderId\(item\.id\.slice\(5\)\)/.test(bills) && /onPress=\{\(\) => onOpen\(item\)\}/.test(paymentAgenda) &&
+  /setSelectedReminderId\(\(item\.repeatOf \?\? item\.id\)\.slice\(5\)\)/.test(bills) && /onPress=\{\(\) => onOpen\(item\)\}/.test(paymentAgenda) &&
     /accessibilityRole="button"/.test(bills) &&
     /accessibilityLabel=/.test(bills) &&
     !/onLongPress=\{\(\) => onLongPressBill/.test(bills));

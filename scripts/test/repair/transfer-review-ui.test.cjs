@@ -357,6 +357,11 @@ for (const language of ['en', 'ar']) {
     assert.equal(walk(tree).filter(n => n.props?.testID === 'transfer-pair-card').length, 1);
     assert.ok(text(byId(tree, 'transfer-pair-card')).includes(words.transfers.out));
     assert.ok(text(byId(tree, 'transfer-pair-card')).includes(words.transfers.in));
+    // The legs are one labelled, focusable element; Match stays outside it.
+    const legs = byId(tree, 'transfer-pair-legs');
+    assert.equal(legs.props.accessible, true);
+    assert.match(legs.props.accessibilityLabel, /\S/);
+    assert.equal(byId(legs, 'transfer-pair-match'), undefined);
     byLabel(tree, words.transfers.match).props.onPress();
     await flush();
     const resolved = h.events.filter(event => event[0] === 'resolve');

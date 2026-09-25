@@ -324,7 +324,7 @@ eq(
   const manualRows = fs.readFileSync(path.join(__dirname, '../../src/components/bills/payment-agenda.tsx'), 'utf8');
   ok('manual reminders keep one detail target without a nested payment/deletion action',
     /onPress=\{\(\) => onOpen\(item\)\}/.test(manualRows) &&
-    /setSelectedReminderId\(item\.id\.slice\(5\)\)/.test(src) &&
+    /setSelectedReminderId\(\(item\.repeatOf \?\? item\.id\)\.slice\(5\)\)/.test(src) &&
     !/onLongPress|t\('markPaid'\)|<Button/.test(manualRows));
   ok(
     'manual reminder detail owns visible payment and delete footer actions',

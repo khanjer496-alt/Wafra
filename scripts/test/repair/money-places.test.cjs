@@ -39,6 +39,9 @@ test('in / out this month is the account\'s recorded movement, duplicates counte
   assert.deepEqual({ ...flow }, { inFils: 420_000, outFils: 250_000, count: 3 });
   assert.deepEqual({ ...places.accountMonthFlow(rows, 'none', new Date(2026, 8, 25)) }, { inFils: 0, outFils: 0, count: 0 });
   assert.deepEqual([...places.recentAccountTransactions(rows, 'bank', 2).map((r) => r.id)], ['move-out', 'move-out-dup']);
+  // The recent rows leave the second alert out, like the month's figures and Transactions.
+  assert.deepEqual([...places.recentAccountTransactions(rows, 'bank', 3, new Set(['move-out-dup'])).map((r) => r.id)],
+    ['move-out', 'rent', 'salary']);
 });
 
 test('captured card spending is this month\'s spending on the asked cards, never payments or own moves', () => {
@@ -84,6 +87,18 @@ test('the timeline shows only the window it names, soonest first, stacking same-
   ]);
   assert.equal(pins[0].position, 0);
   assert.equal(pins[pins.length - 1].position, 1);
+});
+
+test('the first and last pin labels run inward instead of past the strip', () => {
+  // A 330pt strip, 88pt labels: centred only where half a label (44pt) fits on each side.
+  assert.equal(places.timelineLabelAnchor(0, 330), 'start');
+  assert.equal(places.timelineLabelAnchor(3 / 30, 330), 'start', '33pt from the edge');
+  assert.equal(places.timelineLabelAnchor(0.5, 330), 'center');
+  assert.equal(places.timelineLabelAnchor(28 / 30, 330), 'end');
+  assert.equal(places.timelineLabelAnchor(1, 330), 'end');
+  // Before the strip is measured, a typical phone strip is assumed rather than centring everything.
+  assert.equal(places.timelineLabelAnchor(0, 0), 'start');
+  assert.equal(places.timelineLabelAnchor(1, 0), 'end');
 });
 
 test('the copy module has the same keys in English and Arabic, and Arabic is Arabic', () => {

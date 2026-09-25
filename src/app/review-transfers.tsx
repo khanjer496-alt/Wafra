@@ -121,11 +121,15 @@ function PairCard({ pair, outAccount, inAccount, busy, onMatch, onSeparate }: {
   const d = detailsWords(language);
   const amount = formatAED(pair.out.amountFils, { decimals: true });
   const incoming = formatAED(pair.in.amountFils, { decimals: true });
-  return <View testID="transfer-pair-card" style={[styles.pairCard, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}
-    accessibilityLabel={d.transfers.pairA11y(outAccount, inAccount, amount)}>
-    <PairLeg label={d.transfers.out} account={outAccount} when={fullDateTime(pair.out)} amount={amount} direction="out" />
-    <View style={[styles.legRule, { backgroundColor: theme.cardBorder }]} />
-    <PairLeg label={d.transfers.in} account={inAccount} when={fullDateTime(pair.in)} amount={incoming} direction="in" />
+  // The two legs are read as one sentence; the buttons stay their own stops
+  // (an `accessible` card would swallow them).
+  return <View testID="transfer-pair-card" style={[styles.pairCard, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+    <View testID="transfer-pair-legs" style={styles.pairLegs} accessible accessibilityRole="text"
+      accessibilityLabel={d.transfers.pairA11y(outAccount, inAccount, amount)}>
+      <PairLeg label={d.transfers.out} account={outAccount} when={fullDateTime(pair.out)} amount={amount} direction="out" />
+      <View style={[styles.legRule, { backgroundColor: theme.cardBorder }]} />
+      <PairLeg label={d.transfers.in} account={inAccount} when={fullDateTime(pair.in)} amount={incoming} direction="in" />
+    </View>
     <View style={styles.pairActions}>
       <View testID="transfer-pair-match"><Button wrapLabel label={d.transfers.match} disabled={busy} onPress={onMatch} /></View>
       <View testID="transfer-pair-separate"><Button variant="ghost" wrapLabel label={d.transfers.notPair} disabled={busy} onPress={onSeparate} /></View>
@@ -494,6 +498,7 @@ const styles = StyleSheet.create({
   pairs: { gap: Spacing.two },
   pairCard: { borderWidth: 1, borderRadius: 14, padding: Spacing.three, gap: Spacing.two },
   leg: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  pairLegs: { gap: Spacing.two },
   legRule: { height: StyleSheet.hairlineWidth },
   pairActions: { gap: Spacing.one, paddingTop: Spacing.one },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },

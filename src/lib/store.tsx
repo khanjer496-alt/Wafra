@@ -115,7 +115,7 @@ import {
   isUniversalReviewAlert,
   type ReviewResolutionOutcome,
 } from '@/lib/alert-review-tray';
-import { accountBalanceFils } from '@/lib/balances';
+import { accountBalanceFils, isCapturedRow } from '@/lib/balances';
 import { applyBillEdit, type BillEdit } from '@/lib/money-places';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
@@ -1008,7 +1008,7 @@ export function reduceSetAccountBalance(state: AppState, id: string, fils: numbe
   if (!account || account.kind === 'card' || account.cardType !== undefined) return state;
   if (!Number.isSafeInteger(fils) || fils < 0 || !Number.isSafeInteger(ts) || ts <= 0) return state;
   const captured = account.snapshotFils !== undefined || state.transactions.some(
-    (transaction) => transaction.accountId === id && (transaction.source === 'sms' || Boolean(transaction.smsKey)),
+    (transaction) => transaction.accountId === id && isCapturedRow(transaction),
   );
   let patch: Partial<Account>;
   if (captured) {

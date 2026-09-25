@@ -23,6 +23,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState as RNAppState, Platform } from 'react-native';
 
+import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { useToast } from '@/components/ui/toast';
 import {
   hasBankNotificationAccess,
@@ -51,7 +52,7 @@ import {
   androidSmsCaptureEnabled,
 } from '@/lib/android-capture-sources';
 import { captured, committed } from '@/lib/haptics';
-import { captureToastContent } from '@/lib/capture-toast';
+import { liveCaptureToastContent } from '@/lib/capture-toast';
 import { t, tf } from '@/lib/i18n';
 import {
   notificationDeliveryAllowed,
@@ -664,6 +665,9 @@ export function useAutoImport(
     };
   }, [getStateSnapshot, iosCoordinator, iosNative, recordIosCaptureWarning]);
   const toast = useToast();
+  // Read when a capture lands, which can be long after this render.
+  const privacyGateCleared = useRef(true);
+  privacyGateCleared.current = usePrivacyGateCleared();
   const router = useRouter();
   const [needsPermission, setNeedsPermission] = useState(false);
   const [captureState, setCaptureState] = useState<CaptureSurfaceState>('checking');
@@ -984,12 +988,13 @@ export function useAutoImport(
     // did nothing, a transaction simply arrived.
     captured();
     // Name the row only when exactly one is known by id; otherwise (a burst,
-    // or a caller that could only count) keep the generic line.
-    let content: ReturnType<typeof captureToastContent> = null;
+    // or a caller that could only count) keep the generic line. Behind App
+    // Lock nothing is named: the announcement is spoken even while hidden.
+    let content: ReturnType<typeof liveCaptureToastContent> = null;
     if (count === 1 && transactionIds.length === 1) {
       const current = getStateSnapshot();
       const row = current.transactions.find((transaction) => transaction.id === transactionIds[0]);
-      content = captureToastContent(row, current.ledgerMoney ?? null, current.language);
+      content = liveCaptureToastContent(row, current.ledgerMoney ?? null, current.language, privacyGateCleared.current);
     }
     toast.show(
       content?.message ?? (count === 1 ? t('liveTransactionAdded') : tf('liveTransactionsAdded', { count })),

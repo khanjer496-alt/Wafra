@@ -91,7 +91,7 @@ assert.match(subscriptionDetail, /remindable\(detail\)[\s\S]*?addBill\(billFromS
 assert.match(subscriptionDetail, /const sub = detail;[\s\S]*?setDetail\(null\);[\s\S]*?onDismissSub\(sub\)/);
 
 const manualRows=agenda;
-assert.match(interactionBills,/setSelectedReminderId\(item\.id\.slice\(5\)\)/);
+assert.match(interactionBills,/setSelectedReminderId\(\(item\.repeatOf \?\? item\.id\)\.slice\(5\)\)/);
 assert.match(manualRows,/accessibilityRole="button"/);
 assert.match(manualRows,/accessibilityLabel=/);
 assert.doesNotMatch(manualRows,/onLongPress|t\('markPaid'\)/);

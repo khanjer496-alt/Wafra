@@ -12,13 +12,14 @@ import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { formatAED, formatAmountForInput, ledgerNiceMinor, ledgerTypicalMinor, monthLabel, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
+import { formatAED, formatAmountForInput, ledgerNiceMinor, ledgerTypicalMinor, monthLabel, monthStartISO, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 import { alignEnd, t, tf } from '@/lib/i18n';
 import { limitSheetCopy } from '@/lib/reference-copy';
+import { usualMonthlyMinor } from '@/lib/reference-presentation';
 
 /** How many merchants the sheet names before pooling the rest. */
 const MERCHANT_ROWS = 4;
@@ -109,9 +110,22 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     }
     return months;
   }, [state.transactions, key, picked, open, liveAccounts, internal]);
-  const threeMonthAverage = lastMonths.length === 3
-    ? Math.round(lastMonths.reduce((total, month) => total + month.fils, 0) / 3)
-    : 0;
+  // Only months the ledger fully covers count: a ledger that began last month
+  // has one month of history, and averaging it with two empty months
+  // suggested a third of the real figure.
+  const ledgerStartISO = useMemo(() => {
+    if (!picked || !open) return null;
+    let earliest: string | null = null;
+    for (const transaction of state.transactions) {
+      if (earliest === null || transaction.date < earliest) earliest = transaction.date;
+    }
+    return earliest;
+  }, [state.transactions, picked, open]);
+  const usual = usualMonthlyMinor(
+    lastMonths.map((month) => ({ startISO: monthStartISO(month.key), fils: month.fils })),
+    ledgerStartISO,
+  );
+  const threeMonthAverage = usual?.averageFils ?? 0;
 
   /**
    * Who the money went to, so the number has something behind it.
@@ -181,7 +195,8 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
 
   const suggestions = useMemo(() => {
     const out: { fils: number; note: string; highlight: boolean }[] = [];
-    if (threeMonthAverage > 0) {
+    // The chip says "3-month average", so it needs three covered months.
+    if (threeMonthAverage > 0 && usual?.fullMonths === 3) {
       out.push({
         fils: roundToHundred(threeMonthAverage),
         note: t('threeMonthAverageNote'),
@@ -202,7 +217,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     for (const major of [500, 1000, 2000]) add(ledgerTypicalMinor(major), '');
     return out.slice(0, 4);
     // The ledger currency changes the preset scale and rounding step.
-  }, [threeMonthAverage, spent, state.ledgerMoney]);
+  }, [threeMonthAverage, usual?.fullMonths, spent, state.ledgerMoney]);
 
   const available = EXPENSE_CATEGORIES.filter(
     (c) => !state.budgets.some((b) => b.category === c.id) || c.id === picked,
