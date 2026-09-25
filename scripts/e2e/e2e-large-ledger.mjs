@@ -78,7 +78,7 @@ try {
     });
   }
   const spending = page.getByTestId('reference-spending-screen').filter({ visible: true });
-  for (const view of ['Trends', 'Activity', 'Categories']) {
+  for (const view of ['Compare', 'Calendar', 'Categories']) {
     await check(`spending-${view.toLowerCase()}`, () => spending.getByText(view, { exact: true }).click());
   }
   await check('transactions-15000', async () => {

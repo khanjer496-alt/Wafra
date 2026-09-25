@@ -121,6 +121,10 @@ function createHarness(options = {}) {
   deps['@react-native-async-storage/async-storage']={getItem:async()=>null,setItem:async()=>{}};
   local('@/lib/home-widget-preferences','src/lib/home-widget-preferences.ts');
   local('@/lib/home-today','src/lib/home-today.ts');
+  local('@/lib/period-pace','src/lib/period-pace.ts');
+  local('@/lib/transaction-source','src/lib/transaction-source.ts');
+  local('@/lib/capture-pause','src/lib/capture-pause.ts');
+  deps['@/lib/capture-pause-state']={loadCapturePauseSnooze:async()=>options.snoozedAtMs??null,saveCapturePauseSnooze:async at=>{events.push(['snooze',at]);}};
   local('@/lib/widget-snapshot','src/lib/widget-snapshot.ts');
   deps['../../modules/wafra-widgets']={setWidgetSnapshot(){},clearWidgetSnapshot(){}};
   // The final size, as Reduce Motion shows it.

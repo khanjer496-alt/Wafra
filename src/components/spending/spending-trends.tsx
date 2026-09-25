@@ -62,7 +62,11 @@ type Props = {
 };
 
 
-/** The useful Stats content now belongs inside Spending, not another destination. */
+/**
+ * Spending → Compare. The comparison with the previous period leads; the
+ * six-month income/spending history, top merchants and weekday pattern (the
+ * former Trends and Stats content) stay reachable below it.
+ */
 export function SpendingTrends(p: Props) {
   const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
@@ -100,6 +104,47 @@ export function SpendingTrends(p: Props) {
   const deltaPct = selected && previous && previousExpense > 0
     ? Math.round((deltaFils / previousExpense) * 100) : null;
   return <View style={styles.root} testID="spending-trends">
+    <View style={styles.section} testID="spending-compare">
+      <ThemedText type="heading">{w.change}</ThemedText>
+      {p.comparison && p.comparisonLabel ? (() => {
+        const c = p.comparison;
+        const other = p.previousName ?? p.comparisonLabel;
+        const same = Math.abs(c.deltaFils) < Math.max(p.noiseFloorFils ?? 1, c.previousFils * 0.02);
+        const when = p.partial ? ` ${w.byThisDay}` : '';
+        const lead = same ? `${w.spentSame} ${other}${when}.`
+          : `${w.youSpent} ${moneyLabel(Math.abs(c.deltaFils))} ${c.deltaFils < 0 ? w.spentLess : w.spentMore} ${other}${when}.`;
+        return <View accessible accessibilityRole="text" accessibilityLabel={`${lead} ${w.fixedLeftOut}`} style={styles.compareLead}>
+          <ThemedText type="subtitle" themeColor={same ? 'text' : c.deltaFils < 0 ? 'income' : 'expense'}>{lead}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">{w.fixedLeftOut}</ThemedText>
+        </View>;
+      })() : <ThemedText type="meta" themeColor="textSecondary">{p.comparisonLabel ? `${w.vs} ${p.comparisonLabel}` : w.missingComparison}</ThemedText>}
+      {([['more', p.movers.filter((m) => m.deltaFils > 0)], ['less', p.movers.filter((m) => m.deltaFils < 0)]] as const).map(([kind, list]) =>
+        list.length === 0 ? null : <View key={kind} style={styles.compareGroup}>
+          <ThemedText type="smallBold" themeColor={kind === 'more' ? 'expense' : 'income'}>{kind === 'more' ? w.spendingMore : w.spendingLess}</ThemedText>
+          {list.map((m) => {
+            const scale = Math.max(1, m.currentFils, m.previousFils);
+            return <Pressable key={m.category} accessibilityRole="button" onPress={() => p.onCategory(m.category)}
+              accessibilityLabel={`${categoryLabel(m.category, lang)}. ${p.periodLabel} ${moneyLabel(m.currentFils)}. ${p.comparisonLabel ?? ''} ${moneyLabel(m.previousFils)}. ${m.deltaFils > 0 ? w.more : w.fewer} ${moneyLabel(Math.abs(m.deltaFils))}`}
+              style={({ pressed }) => [styles.compareRow, styles.rule, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+              <View style={styles.compareTop}>
+                <CategoryAvatar category={m.category} size={28} />
+                <ThemedText type="smallBold" style={styles.grow}>{categoryLabel(m.category, lang)}</ThemedText>
+                <ThemedText type="smallBold" tabular themeColor={m.deltaFils > 0 ? 'expense' : 'income'}>
+                  {m.deltaFils > 0 ? '+' : '−'}{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
+              </View>
+              {([[p.currentName ?? p.periodLabel, m.currentFils, theme.text], [p.previousName ?? p.comparisonLabel ?? '', m.previousFils, theme.controlBorder]] as const).map(([label, fils, color], index) =>
+                <View key={index} style={styles.compareBarRow}>
+                  <ThemedText type="micro" themeColor="textSecondary" style={styles.compareBarLabel} numberOfLines={1}>{label}</ThemedText>
+                  <View style={styles.compareTrack}><GrowBar axis="width" delay={index * 60} size={fils / scale * 100}
+                    style={{ height: 8, borderRadius: 4, backgroundColor: color }} /></View>
+                  <View style={styles.compareAmount}><Money fils={fils} type="meta" prefix={false} /></View>
+                </View>)}
+            </Pressable>;
+          })}
+        </View>)}
+      {p.movers.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noChange}</ThemedText>}
+    </View>
+
     <View style={[styles.panel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
       <ThemedText type="heading">{w.cashflow}</ThemedText>
       <ThemedText type="meta" themeColor="textSecondary">{w.sixMonths} · {p.months[0] ? monthLabel(p.months[0].key, true) : ''} — {p.months.at(-1) ? monthLabel(p.months.at(-1)!.key, true) : ''}</ThemedText>
@@ -213,47 +258,6 @@ export function SpendingTrends(p: Props) {
         </Pressable>)}
         {p.merchants.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noMerchants}</ThemedText>}
       </View>
-    </View>
-
-    <View style={styles.section} testID="spending-compare">
-      <ThemedText type="heading">{w.change}</ThemedText>
-      {p.comparison && p.comparisonLabel ? (() => {
-        const c = p.comparison;
-        const other = p.previousName ?? p.comparisonLabel;
-        const same = Math.abs(c.deltaFils) < Math.max(p.noiseFloorFils ?? 1, c.previousFils * 0.02);
-        const when = p.partial ? ` ${w.byThisDay}` : '';
-        const lead = same ? `${w.spentSame} ${other}${when}.`
-          : `${w.youSpent} ${moneyLabel(Math.abs(c.deltaFils))} ${c.deltaFils < 0 ? w.spentLess : w.spentMore} ${other}${when}.`;
-        return <View accessible accessibilityRole="text" accessibilityLabel={`${lead} ${w.fixedLeftOut}`} style={styles.compareLead}>
-          <ThemedText type="subtitle" themeColor={same ? 'text' : c.deltaFils < 0 ? 'income' : 'expense'}>{lead}</ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary">{w.fixedLeftOut}</ThemedText>
-        </View>;
-      })() : <ThemedText type="meta" themeColor="textSecondary">{p.comparisonLabel ? `${w.vs} ${p.comparisonLabel}` : w.missingComparison}</ThemedText>}
-      {([['more', p.movers.filter((m) => m.deltaFils > 0)], ['less', p.movers.filter((m) => m.deltaFils < 0)]] as const).map(([kind, list]) =>
-        list.length === 0 ? null : <View key={kind} style={styles.compareGroup}>
-          <ThemedText type="smallBold" themeColor={kind === 'more' ? 'expense' : 'income'}>{kind === 'more' ? w.spendingMore : w.spendingLess}</ThemedText>
-          {list.map((m) => {
-            const scale = Math.max(1, m.currentFils, m.previousFils);
-            return <Pressable key={m.category} accessibilityRole="button" onPress={() => p.onCategory(m.category)}
-              accessibilityLabel={`${categoryLabel(m.category, lang)}. ${p.periodLabel} ${moneyLabel(m.currentFils)}. ${p.comparisonLabel ?? ''} ${moneyLabel(m.previousFils)}. ${m.deltaFils > 0 ? w.more : w.fewer} ${moneyLabel(Math.abs(m.deltaFils))}`}
-              style={({ pressed }) => [styles.compareRow, styles.rule, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-              <View style={styles.compareTop}>
-                <CategoryAvatar category={m.category} size={28} />
-                <ThemedText type="smallBold" style={styles.grow}>{categoryLabel(m.category, lang)}</ThemedText>
-                <ThemedText type="smallBold" tabular themeColor={m.deltaFils > 0 ? 'expense' : 'income'}>
-                  {m.deltaFils > 0 ? '+' : '−'}{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
-              </View>
-              {([[p.currentName ?? p.periodLabel, m.currentFils, theme.text], [p.previousName ?? p.comparisonLabel ?? '', m.previousFils, theme.controlBorder]] as const).map(([label, fils, color], index) =>
-                <View key={index} style={styles.compareBarRow}>
-                  <ThemedText type="micro" themeColor="textSecondary" style={styles.compareBarLabel} numberOfLines={1}>{label}</ThemedText>
-                  <View style={styles.compareTrack}><GrowBar axis="width" delay={index * 60} size={fils / scale * 100}
-                    style={{ height: 8, borderRadius: 4, backgroundColor: color }} /></View>
-                  <View style={styles.compareAmount}><Money fils={fils} type="meta" prefix={false} /></View>
-                </View>)}
-            </Pressable>;
-          })}
-        </View>)}
-      {p.movers.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noChange}</ThemedText>}
     </View>
 
     <Pressable accessibilityRole="button" accessibilityState={{ expanded: patterns }} onPress={() => setPatterns(!patterns)} style={styles.disclosure}>

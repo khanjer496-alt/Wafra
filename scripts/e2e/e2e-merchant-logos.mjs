@@ -78,7 +78,7 @@ try {
     await page.screenshot({ path: path.join(out, `home-${mode}.png`) });
 
     await page.getByRole('tab', { name: 'Spending', exact: true }).click();
-    await page.getByRole('tab', { name: 'Activity', exact: true }).click();
+    await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
     const activity = page.getByTestId('spending-activity');
     await activity.waitFor({ state: 'visible' });
     await check(`Activity ${mode}: real logos replace category icons`, () => decoded(activity));
@@ -104,7 +104,7 @@ try {
     await dialog.waitFor({ state: 'hidden' });
     await search.fill('');
 
-    await page.getByRole('tab', { name: 'Trends', exact: true }).click();
+    await page.getByRole('tab', { name: 'Compare', exact: true }).click();
     const trends = page.getByTestId('spending-trends');
     await trends.waitFor({ state: 'visible' });
     await check(`Trends ${mode}: top merchants have logos`, () => decoded(trends));
@@ -127,7 +127,7 @@ try {
     await page.screenshot({ path: path.join(out, `bills-${mode}.png`) });
     await context.setOffline(true);
     await page.getByRole('tab', { name: 'Spending', exact: true }).click();
-    await page.getByRole('tab', { name: 'Activity', exact: true }).click();
+    await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
     await check(`Offline ${mode}: previously displayed logos remain available`, () => decoded(activity));
     await context.close();
   }

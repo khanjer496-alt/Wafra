@@ -27,7 +27,7 @@ test('every visible category has an explicit spending share, including categorie
   const tree = createHarness().render('flow');
   assert.match(text(nodeById(tree, 'spending-share-dining')), /11.6%\s+of spending/);
   assert.match(text(nodeById(tree, 'spending-share-other')), /27.8%\s+of spending/);
-  assert.match(text(nodeById(tree, 'spending-category-dining')), /41\s*%\s+of limit used/);
+  assert.match(text(nodeById(tree, 'spending-limit-dining')), /41%\s+of AED 1,500\.00 limit/);
 });
 test('filtering budgets does not relabel the remaining category as 100% of spending', () => {
   const tree = createHarness({ states: { 1: 'unlimited' } }).render('flow');
