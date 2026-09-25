@@ -976,6 +976,9 @@ export default function AddTransactionScreen() {
         />
       ) : (
         <KeypadAmountDisplay
+          // The same ref the typed field uses, so the protected
+          // focusFirstInvalid() reaches the amount in either mode.
+          ref={amountRef}
           testID="amount-display"
           currency={foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '—'}
           text={amountShown}

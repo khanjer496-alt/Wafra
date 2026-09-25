@@ -14,11 +14,14 @@ const NOW = Date.UTC(2026, 7, 11, 12, 0, 0);
 const purchase = 'Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234';
 const promo = 'ADCB: Get 10% cashback on your next purchase at partner stores. T&Cs apply.';
 const personal = 'See you at 8 for dinner';
+// Offer wording from a person's phone number is not a bank promotion.
+const personalOffer = 'Get 20% off at the new cafe, they have a cashback offer too';
 
 const inboxRows = [
   { id: 1, address: 'ADCB', body: promo, date: NOW + 1_000 },
   { id: 2, address: 'ADCB', body: purchase, date: NOW + 2_000 },
   { id: 3, address: '+971500000000', body: personal, date: NOW + 3_000 },
+  { id: 4, address: '+971500000001', body: personalOffer, date: NOW + 500 },
 ];
 let countAnswer = (sinceMs, atOrAfterMs) => inboxRows.filter((row) => row.date >= Math.max(sinceMs, atOrAfterMs)).length;
 const countCalls = [];
@@ -58,9 +61,9 @@ test('a watched scan reports promotions skipped, the oldest page date and the ro
   const result = await scanInbox(0, {}, (scanned, found, detail) => progress.push({ scanned, found, detail }), 'en-AE');
   const last = progress[progress.length - 1];
   assert.ok(last && last.detail, 'detail arrives as an optional third argument');
-  assert.equal(last.detail.promotionsSkipped, 1, 'the cashback offer is counted');
+  assert.equal(last.detail.promotionsSkipped, 1, 'the bank cashback offer is counted; the personal one is not');
   assert.equal(result.promotionsSkipped, 1);
-  assert.equal(last.detail.oldestInboxDateMs, NOW + 1_000);
+  assert.equal(last.detail.oldestInboxDateMs, NOW + 500);
   assert.equal(last.detail.recentFound.length, 1);
   const [found] = last.detail.recentFound;
   assert.deepEqual(Object.keys(found).sort(), ['amountMinor', 'category', 'currency', 'merchant', 'type']);
@@ -80,10 +83,10 @@ test('counting promotions changes nothing that is imported or reviewed', async (
 });
 
 test('the native inbox count is used only when it is a real answer', async () => {
-  countAnswer = () => 3;
-  assert.equal(await countInboxMessages(0), 3);
+  countAnswer = () => 4;
+  assert.equal(await countInboxMessages(0), 4);
   assert.deepEqual(countCalls.at(-1), [0, 0]);
-  assert.equal(await countInboxMessages(0, NOW + 2_000), 3);
+  assert.equal(await countInboxMessages(0, NOW + 2_000), 4);
   assert.deepEqual(countCalls.at(-1), [0, NOW + 2_000]);
   for (const answer of [-1, 1.5, Number.NaN, undefined]) {
     countAnswer = () => answer;

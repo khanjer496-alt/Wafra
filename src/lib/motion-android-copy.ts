@@ -45,7 +45,6 @@ const en = {
   keypadUseKeypad: 'Use the keypad',
   amountEmptySpoken: 'Amount, empty',
   amountSpoken: (currency: string, amount: string) => `Amount, ${currency} ${amount}`,
-  currencyChange: (currency: string) => `Currency ${currency}. Change the currency of this entry`,
   suggestedCategories: 'Suggested categories',
   suggestedCategorySpoken: (label: string) => `Suggested category, ${label}`,
   categoryChipSpoken: (label: string) => `Category, ${label}. Change category`,
@@ -60,6 +59,7 @@ const en = {
     `${enCount(count)} promotional message${count === 1 ? '' : 's'} skipped`,
   importJustFound: 'Just found',
   importFoundHeading: 'Found so far',
+  importPercent: (percent: number) => `${percent}%`,
   importPercentOf: (total: number) => `of ${enCount(total)} message${total === 1 ? '' : 's'}`,
   importPercentSpoken: (percent: number, total: number) =>
     `${percent}% of ${enCount(total)} message${total === 1 ? '' : 's'} read`,
@@ -77,7 +77,6 @@ const ar: typeof en = {
   keypadUseKeypad: 'استخدم لوحة الأرقام',
   amountEmptySpoken: 'المبلغ، فارغ',
   amountSpoken: (currency, amount) => `المبلغ، ${currency} ${amount}`,
-  currencyChange: (currency) => `العملة ${currency}. تغيير عملة هذا الإدخال`,
   suggestedCategories: 'فئات مقترحة',
   suggestedCategorySpoken: (label) => `فئة مقترحة، ${label}`,
   categoryChipSpoken: (label) => `الفئة، ${label}. تغيير الفئة`,
@@ -91,6 +90,7 @@ const ar: typeof en = {
   importPromosSpoken: (count) => count === 0 ? 'لم يتم تخطي أي عرض ترويجي' : `تم تخطي ${arPromos(count)}`,
   importJustFound: 'عُثر عليها الآن',
   importFoundHeading: 'ما عُثر عليه حتى الآن',
+  importPercent: (percent) => `${arCount(percent)}٪`,
   importPercentOf: (total) => `من أصل ${arMessages(total)}`,
   importPercentSpoken: (percent, total) => `تمت قراءة ${arCount(percent)}٪ من أصل ${arMessages(total)}`,
 };

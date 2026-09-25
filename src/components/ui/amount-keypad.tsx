@@ -1,5 +1,5 @@
-import React from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import React, { forwardRef, useImperativeHandle, useRef } from 'react';
+import { AccessibilityInfo, findNodeHandle, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
@@ -112,12 +112,21 @@ interface KeypadAmountDisplayProps {
   testID?: string;
 }
 
+/** What a form can do with the display: move assistive focus to it. */
+export interface KeypadAmountDisplayHandle {
+  focus: () => void;
+}
+
 /**
  * The amount as the keypad builds it. The character just added fades in over
  * 90 ms (never a movement, and nothing at all under Reduce Motion); the rest
  * of the figure is plain text. Figures read left to right in every language.
+ *
+ * Its ref answers `focus()` by moving screen-reader focus here, so a form's
+ * "focus the first invalid field" lands on the amount even though no text
+ * input is mounted while the keypad is in use.
  */
-export function KeypadAmountDisplay({
+export const KeypadAmountDisplay = forwardRef<KeypadAmountDisplayHandle, KeypadAmountDisplayProps>(function KeypadAmountDisplay({
   currency,
   text,
   empty,
@@ -127,8 +136,15 @@ export function KeypadAmountDisplay({
   spokenLabel,
   errorText,
   testID = 'amount-display',
-}: KeypadAmountDisplayProps) {
+}, ref) {
   const theme = useTheme();
+  const figureRef = useRef<View>(null);
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      const node = findNodeHandle(figureRef.current);
+      if (node !== null) AccessibilityInfo.setAccessibilityFocus(node);
+    },
+  }), []);
   const color = empty ? theme.textTertiary : theme.text;
   // Step the size down as the figure grows so twelve digits and their group
   // marks still fit one line on a 360pt phone.
@@ -138,7 +154,7 @@ export function KeypadAmountDisplay({
   const tail = empty ? '' : text.slice(-1);
   return (
     <View style={styles.displayWrap}>
-      <View testID={testID} accessible accessibilityRole="text" accessibilityLabel={spokenLabel}
+      <View ref={figureRef} testID={testID} accessible accessibilityRole="text" accessibilityLabel={spokenLabel}
         accessibilityLiveRegion="polite"
         style={[styles.display, { borderBottomColor: invalid ? theme.expense : 'transparent' }]}>
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.displayCurrency}>{currency}</ThemedText>
@@ -159,7 +175,7 @@ export function KeypadAmountDisplay({
       ) : null}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   grid: { gap: Spacing.two, direction: 'ltr' },

@@ -33,6 +33,9 @@ test('every Arabic string is Arabic and every English string is not', () => {
 test('counted nouns agree with the count in both languages', () => {
   assert.equal(en.importPromosSpoken(1), '1 promotional message skipped');
   assert.equal(en.importPromosSpoken(64), '64 promotional messages skipped');
+  assert.equal(en.importPercent(72), '72%');
+  assert.equal(ar.importPercent(72), `${(72).toLocaleString('ar-AE')}٪`,
+    'the ring uses the same digit policy as the Arabic counts beside it');
   assert.equal(en.importPercentOf(1284), 'of 1,284 messages');
   assert.equal(en.importPercentOf(1), 'of 1 message');
   assert.equal(ar.importPercentOf(1), 'من أصل رسالة واحدة');

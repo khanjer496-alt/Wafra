@@ -34,7 +34,7 @@ test('amounts use the ledger exponent exactly', () => {
 
 test('income is marked as money in, never as spending', () => {
   const content = captureToastContent(row({ title: 'ACME Payroll', category: 'salary', amountFils: 500000, type: 'income' }), USD, 'en');
-  assert.match(content.amount, /^\+/);
+  assert.match(content.amount, /^\u2066\+.*\u2069$/, 'signed and isolated left-to-right for RTL toasts');
   assert.match(content.spoken, /\+USD 5,000/);
 });
 

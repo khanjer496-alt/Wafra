@@ -78,6 +78,8 @@ test('an empty keypad does not save and marks the amount invalid', () => {
   const display = byType(h.render(), 'KeypadAmountDisplay');
   assert.equal(display.props.invalid, true);
   assert.ok(display.props.errorText);
+  assert.ok(display.props.ref && 'current' in display.props.ref,
+    'the display takes the amount ref, so focusing the first invalid field reaches it');
 });
 
 test('the system keyboard stays one tap away and keeps the typed value', () => {

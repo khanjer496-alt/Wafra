@@ -943,9 +943,12 @@ export async function scanInbox(
       decision = { kind: 'review', candidate: parsedFallback };
     }
     // Counted, not classified: a text already set aside that reads as an
-    // offer (the same wording test the bank-app path uses to skip them).
-    if (decision.kind === 'ignored' &&
-      (decision.reason === 'promotion' || isPromotionalBankPush(body))) {
+    // offer (the same wording test the bank-app path uses to skip them) and
+    // came from a business sender ID. Letters in the sender mark an
+    // alphanumeric business ID; a person texting "20% off" from a phone
+    // number is not a bank promotion.
+    if (decision.kind === 'ignored' && (decision.reason === 'promotion' ||
+      (isPromotionalBankPush(body) && /[A-Za-z]/.test(sender)))) {
       promotionsSkipped += 1;
     }
     if (decision.kind === 'declined') {

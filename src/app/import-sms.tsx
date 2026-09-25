@@ -265,13 +265,13 @@ type ScanProgress = { scanned: number; found: number; detail?: ScanProgressDetai
  * native count of the messages it will read — only ever drawn when that count
  * exists. Updated per page without animation: the figure is the information.
  */
-function ScanRing({ percent, caption }: { percent: number; caption: string }) {
+function ScanRing({ percent, fraction, caption }: { percent: string; fraction: number; caption: string }) {
   const theme = useTheme();
   const size = 132;
   const stroke = 8;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
-  const offset = circumference * (1 - Math.max(0, Math.min(100, percent)) / 100);
+  const offset = circumference * (1 - Math.max(0, Math.min(1, fraction)));
   return (
     <View testID="import-scan-ring" style={styles.ring} importantForAccessibility="no-hide-descendants"
       accessibilityElementsHidden>
@@ -282,7 +282,7 @@ function ScanRing({ percent, caption }: { percent: number; caption: string }) {
           transform={`rotate(-90 ${size / 2} ${size / 2})`} />
       </Svg>
       <View style={styles.ringCopy}>
-        <ThemedText type="title" tabular>{`${percent}%`}</ThemedText>
+        <ThemedText type="title" tabular>{percent}</ThemedText>
         <ThemedText type="meta" themeColor="textTertiary" style={styles.ringCaption}>{caption}</ThemedText>
       </View>
     </View>
@@ -353,10 +353,15 @@ export default function ImportSmsScreen() {
     counting: boolean;
   }>({ last: 0, timer: null, pending: null, totalRequested: false, counting: false });
   useEffect(() => {
-    if (!scanning) return;
+    // Every start and every end retires the previous reporter, so a throttled
+    // flush or a late native count can never write into another run. A paste
+    // (which sets `scanning` too) therefore never shows an earlier inbox
+    // read's figures or rows.
     const gate = progressGate.current;
     if (gate.timer) clearTimeout(gate.timer);
     progressGate.current = { last: 0, timer: null, pending: null, totalRequested: false, counting: false };
+    if (!scanning) return;
+    setProgress(null);
     setInboxTotal(null);
     setInboxPassed(null);
   }, [scanning]);
@@ -1533,7 +1538,8 @@ export default function ImportSmsScreen() {
                 })}
               accessibilityValue={scanPercent !== null ? { min: 0, max: 100, now: scanPercent } : undefined}>
               {scanPercent !== null && inboxTotal !== null
-                ? <ScanRing percent={scanPercent} caption={scanCopy.importPercentOf(inboxTotal)} />
+                ? <ScanRing percent={scanCopy.importPercent(scanPercent)} fraction={scanPercent / 100}
+                  caption={scanCopy.importPercentOf(inboxTotal)} />
                 : <ScanPanel reducedMotion={reducedMotion} />}
               <View style={styles.progressHead}>
                 <View style={styles.progressLabel}>

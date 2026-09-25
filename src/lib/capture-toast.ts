@@ -37,7 +37,9 @@ export function captureToastContent(
   const spokenAmount = `${sign}${money.currency} ${formatMinorUnits(row.amountFils, money)}`;
   return {
     message: copy.captureAdded(merchant, category),
-    amount: `${sign}${visible}`,
+    // Isolated left-to-right so an Arabic (RTL) toast cannot reorder the
+    // sign, the currency and the digits.
+    amount: `\u2066${sign}${visible}\u2069`,
     spoken: copy.captureAddedSpoken(merchant, category, spokenAmount),
   };
 }
