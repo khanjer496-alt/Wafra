@@ -73,6 +73,10 @@ on:
         description: 'ENTERPRISE PLANS ONLY — leave empty on any other plan. The "What to Test" note testers see in TestFlight. EAS maps it to the submission `changelog`, and a non-Enterprise account is refused with "Changelog submission is currently available for Enterprise plan only" — which happens AFTER the build has been created and paid for, killing only the submission. Set the note by hand in App Store Connect instead.'
         type: string
         default: ''
+      repair_credentials:
+        description: 'GitHub macOS only: let EAS replace an Apple provisioning profile that Apple marked invalid (for example after an App ID capability change), using the App Store Connect key. Leave off for normal builds, which keep credentials frozen.'
+        type: boolean
+        default: false
       submit_build_id:
         description: 'Submit a build that ALREADY EXISTS instead of making a new one. Paste an EAS build id. Use this when a build succeeded but its submission did not — rebuilding to retry a submission wastes 20-40 minutes for a binary that is already sitting on EAS. Every other input is ignored.'
         type: string
@@ -941,8 +945,10 @@ jobs:
 
       - name: Build signed iOS archive on this macOS runner
         run: |
+          FREEZE=--freeze-credentials
+          if [ "${{ inputs.repair_credentials }}" = "true" ]; then FREEZE=; fi
           eas build --platform ios --profile "${{ inputs.profile }}" --local --non-interactive \
-            --freeze-credentials --output "$RUNNER_TEMP/Wafra-local.ipa"
+            $FREEZE --output "$RUNNER_TEMP/Wafra-local.ipa"
 
       - name: Verify the actual signed IPA and App Intent resources
         id: ipa
