@@ -71,8 +71,8 @@
     {
       "file": "src/app/import-sms.tsx",
       "name": "runScan",
-      "sha256": "95dc9c47ba9017409d4aecfe440f75fe4d7fbc58dd523715076ace380493a17f",
-      "reviewedChange": "2026-09-24: bank Messages that nearly match an already-recorded Apple Pay (Wallet) purchase are withheld by the planner and staged as source-bound possible-duplicate Review items (stageWalletNearMatches) before the scan commits, the history session is discarded, or the source is acknowledged; a full Review lane posts them instead of dropping them. Covered by repair/wallet-near-match*.test.cjs."
+      "sha256": "b8e78f2839d73eed19753436619fdac4234ec1c468f698de3edf265d8126be07",
+      "reviewedChange": "2026-09-24: bank Messages that nearly match an already-recorded Apple Pay (Wallet) purchase are withheld by the planner and staged as source-bound possible-duplicate Review items (stageWalletNearMatches) before the scan commits, the history session is discarded, or the source is acknowledged; a full Review lane posts them instead of dropping them. Covered by repair/wallet-near-match*.test.cjs. 2026-09-25 (redesign W5): only the scan's progress callback changed. It forwards scanInbox's optional third argument (promotions counted, oldest page date, up to three just-parsed display facts; no message text) to a throttled screen reporter that also asks the native read-only inbox count; what is scanned, planned, staged, imported or committed is unchanged. Covered by repair/import-scan-progress.test.cjs."
     },
     {
       "file": "src/app/import-sms.tsx",

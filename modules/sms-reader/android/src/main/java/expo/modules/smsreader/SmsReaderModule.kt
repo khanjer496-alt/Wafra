@@ -13,6 +13,7 @@ import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.exception.CodedException
+import kotlin.math.max
 import kotlin.math.min
 
 private class SmsInboxAccessException(
@@ -241,6 +242,34 @@ class SmsReaderModule : Module() {
         // even after the runtime permission reports granted. Preserve that
         // distinction so the UI can send the user back to App settings.
         throw SmsInboxAccessException("SMS inbox access is restricted", error)
+      }
+    }
+
+    /**
+     * How many inbox rows are dated at or after max(sinceMs, atOrAfterMs), so
+     * a watched full read can show a real percentage instead of a guess.
+     *
+     * Read-only and body-free: the projection is the row id alone, nothing is
+     * written, and only the number leaves native code. Answers -1 without the
+     * runtime permission or when the provider (or an OEM restriction layer)
+     * refuses; the UI then keeps its indeterminate indicator.
+     */
+    AsyncFunction("getInboxCount") { sinceMs: Double, atOrAfterMs: Double ->
+      val context = appContext.reactContext ?: return@AsyncFunction -1
+      if (context.checkSelfPermission(Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+        return@AsyncFunction -1
+      }
+      val floor = max(sinceMs.toLong(), atOrAfterMs.toLong())
+      try {
+        context.contentResolver.query(
+          Telephony.Sms.Inbox.CONTENT_URI,
+          arrayOf(Telephony.Sms._ID),
+          "${Telephony.Sms.DATE} >= ?",
+          arrayOf(floor.toString()),
+          null
+        )?.use { it.count } ?: -1
+      } catch (_: Exception) {
+        -1
       }
     }
 

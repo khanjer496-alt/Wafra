@@ -153,7 +153,8 @@ function harness(overrides = {}, options = {}) {
         bills: 0, healed: 0, newAccounts: 0, transactionIds: [], reviewAlerts: 0 };
     } }) },
     '@/lib/android-live-background': { installAndroidLiveCaptureLedger: () => () => {} },
-    '@/lib/haptics': { committed: () => {} },
+    '@/lib/haptics': { committed: () => {}, captured: () => {} },
+    '@/lib/capture-toast': { captureToastContent: () => null },
     '@/lib/i18n': { t: key => key, tf: key => key },
     '@/lib/notifications': {
       notificationDeliveryAllowed: async () => true,

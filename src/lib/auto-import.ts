@@ -364,9 +364,56 @@ export interface ScanResult {
   commit: () => Promise<void>;
   /** Queue ACK requires a flush even when every candidate deduplicated. */
   requiresDurableCommit?: boolean;
+  /**
+   * Messages this scan read and set aside as promotions (bank-app offers,
+   * cashback/discount texts with no completed-payment wording). Counted only:
+   * the classification that skips them is unchanged. Absent on scans that
+   * never ran (non-Android).
+   */
+  promotionsSkipped?: number;
+}
+
+/** One transaction a running scan has just parsed, as display facts only. */
+export interface ScanFoundPreview {
+  merchant: string;
+  category: import('@/lib/types').CategoryId;
+  type: import('@/lib/types').TransactionType;
+  /** Minor units of `currency`, exactly as parsed. */
+  amountMinor: number;
+  currency: string;
+}
+
+/**
+ * Optional third argument to scanInbox's onProgress. Additive: callers that
+ * take (scanned, found) are unaffected. Nothing here carries message text,
+ * senders or provider ids.
+ */
+export interface ScanProgressDetail {
+  promotionsSkipped: number;
+  /** Date of the oldest inbox message read so far; null before the first page. */
+  oldestInboxDateMs: number | null;
+  /** Up to three most recently parsed transactions, newest parse first. */
+  recentFound: readonly ScanFoundPreview[];
 }
 
 const NOOP_SCAN_COMMIT = async () => {};
+
+/**
+ * How many messages the Android SMS inbox holds dated at or after
+ * max(sinceMs, atOrAfterMs), from a read-only COUNT-style provider query that
+ * reads no message bodies or senders. Null when unknown: another platform, an
+ * older native build without the query, no permission, or a provider error.
+ * Callers must then show an indeterminate indicator, never a guessed total.
+ */
+export async function countInboxMessages(sinceMs: number, atOrAfterMs = 0): Promise<number | null> {
+  if (Platform.OS !== 'android' || typeof SmsReader?.getInboxCount !== 'function') return null;
+  try {
+    const count = await SmsReader.getInboxCount(sinceMs, atOrAfterMs);
+    return Number.isSafeInteger(count) && count >= 0 ? count : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Best-effort locale region. Routing treats it only as supporting evidence. */
 function deviceRegionHint(): string | null {
@@ -783,7 +830,7 @@ export const shouldReviewParsedIncome = (parsedAlert: ParsedSms): boolean =>
 export async function scanInbox(
   sinceMs: number,
   overrides: Record<string, import('@/lib/types').CategoryId>,
-  onProgress?: (scanned: number, found: number) => void,
+  onProgress?: (scanned: number, found: number, detail?: ScanProgressDetail) => void,
   regionHint: string | null = deviceRegionHint(),
   options: ScanInboxOptions = {},
 ): Promise<ScanResult> {
@@ -843,6 +890,21 @@ export async function scanInbox(
     return identitySession(source, sender, observedAt, channel);
   };
   const declined: DeclinedSms[] = [];
+  // Display counters for a watched scan. They never change what is imported.
+  let promotionsSkipped = 0;
+  let oldestInboxDateMs: number | null = null;
+  const progressDetail = (): ScanProgressDetail => {
+    const recentFound: ScanFoundPreview[] = [];
+    for (let i = parsed.length - 1; i >= 0 && recentFound.length < 3; i--) {
+      const row = parsed[i];
+      if (row.kind !== 'transaction') continue;
+      recentFound.push({
+        merchant: row.merchant, category: row.categoryGuess, type: row.type,
+        amountMinor: row.amountFils, currency: row.currency,
+      });
+    }
+    return { promotionsSkipped, oldestInboxDateMs, recentFound };
+  };
   const notificationIds = new Set<string>();
   let notificationImportStats: AndroidNotificationImportDiagnostics | null = null;
   const launchSession = createLaunchAlertSession({ overrides, regionHint });
@@ -879,6 +941,15 @@ export async function scanInbox(
     });
     if (decision.kind === 'ignored' && decision.reason === 'unrecognized' && parsedFallback) {
       decision = { kind: 'review', candidate: parsedFallback };
+    }
+    // Counted, not classified: a text already set aside that reads as an
+    // offer (the same wording test the bank-app path uses to skip them) and
+    // came from a business sender ID. Letters in the sender mark an
+    // alphanumeric business ID; a person texting "20% off" from a phone
+    // number is not a bank promotion.
+    if (decision.kind === 'ignored' && (decision.reason === 'promotion' ||
+      (isPromotionalBankPush(body) && /[A-Za-z]/.test(sender)))) {
+      promotionsSkipped += 1;
     }
     if (decision.kind === 'declined') {
       declined.push({
@@ -1102,7 +1173,8 @@ export async function scanInbox(
       }
     }
     captureTrace('page:done', batch.length, tracing ? Date.now() - pageStarted : 0, pagesRead);
-    onProgress?.(scannedCount, parsed.length);
+    oldestInboxDateMs = batch[batch.length - 1].date;
+    onProgress?.(scannedCount, parsed.length, progressDetail());
     const nextBeforeDateMs = batch[batch.length - 1].date;
     const nextBeforeId = batch[batch.length - 1].id;
     if (nextBeforeDateMs === beforeDateMs && nextBeforeId === beforeId) {
@@ -1176,7 +1248,7 @@ export async function scanInbox(
           resetParseYieldState(deliveryYield);
         }
       }
-      onProgress?.(scannedCount, parsed.length);
+      onProgress?.(scannedCount, parsed.length, progressDetail());
     } catch (error) {
       if (error instanceof ReviewIdentityError) throw error;
       // Capture buffer is best-effort; the inbox results stand on their own.
@@ -1272,6 +1344,7 @@ export async function scanInbox(
           (learned ? `${n.pkg} ${n.title}` : '');
         if (isPromotionalBankPush(source)) {
           if (notificationImportStats) notificationImportStats.ignored += 1;
+          promotionsSkipped += 1;
           notificationIds.add(n.id);
           if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
             await yieldToUi();
@@ -1468,7 +1541,7 @@ export async function scanInbox(
         notificationImportStats.acknowledgementPlanned = notificationIds.size;
         latestAndroidNotificationImportDiagnostics = { ...notificationImportStats };
       }
-      onProgress?.(scannedCount, parsed.length);
+      onProgress?.(scannedCount, parsed.length, progressDetail());
     } catch (error) {
       if (error instanceof ReviewIdentityError) throw error;
       // Listener data is best-effort; SMS results stand on their own.
@@ -1491,6 +1564,7 @@ export async function scanInbox(
     scannedCount,
     detectedLaunchMarket: launchSession.detectedMarket(),
     requiresDurableCommit: notificationIds.size > 0,
+    promotionsSkipped,
     commit: notificationIds.size > 0 && notificationReader
       ? async () => {
           const acknowledged = await notificationReader.ackCaptured([...notificationIds]);

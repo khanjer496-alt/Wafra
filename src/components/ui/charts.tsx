@@ -266,6 +266,9 @@ export function CompositionBar({
   const dark = useColorScheme() === 'dark';
   const dataViz = DataViz[dark ? 'dark' : 'light'];
   const ramp = useRamp();
+  // The app-wide policy (Reduce Motion OR a running screen reader), not
+  // Reanimated's default, which only reads the OS setting.
+  const reducedMotion = useReducedMotion();
   const total = segments.reduce((s, x) => s + x.value, 0);
   if (total <= 0) {
     return (
@@ -297,7 +300,7 @@ export function CompositionBar({
         <Animated.View
           key={s.key}
           accessible={false}
-          entering={FadeIn.delay(i * 60).duration(Motion.sectionEnter)}
+          entering={reducedMotion ? undefined : FadeIn.delay(i * Motion.digitStagger).duration(Motion.change)}
           style={{
             flexGrow: s.value,
             flexBasis: 0,

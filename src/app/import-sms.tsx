@@ -42,6 +42,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Circle } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -52,21 +53,24 @@ import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Icon } from '@/components/ui/icon';
 import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
+import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { PulseDot } from '@/components/ui/states';
 import { CategoryTile } from '@/components/ui/tile';
-import { Fonts, EASE, MaxContentWidth, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Fonts, EASE, MaxContentWidth, Motion, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { SetupShell, SetupHeader } from '@/components/onboarding/setup-shell';
 import {
   buildImportPlan,
+  countInboxMessages,
   isSmsScanningAvailable,
   requestSmsPermission,
   scanInbox,
   type DeclinedSms,
   type ImportPlan,
   type ScannedSms,
+  type ScanProgressDetail,
 } from '@/lib/auto-import';
 import { categoryLabel } from '@/lib/categories';
 import { shortDate } from '@/lib/format';
@@ -125,6 +129,7 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import { pasteSampleForLedger } from '@/lib/paste-sample';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
+import { motionAndroidCopy } from '@/lib/motion-android-copy';
 
 interface PendingInboxResult {
   parsed: ScannedSms[];
@@ -250,6 +255,40 @@ function ScanPanel({ reducedMotion }: { reducedMotion: boolean }) {
   );
 }
 
+/** Live scan figures reach the screen at most this often, however fast pages land. */
+const PROGRESS_THROTTLE_MS = 250;
+
+type ScanProgress = { scanned: number; found: number; detail?: ScanProgressDetail };
+
+/**
+ * How far through the inbox a watched Android read is, as a real share of a
+ * native count of the messages it will read — only ever drawn when that count
+ * exists. Updated per page without animation: the figure is the information.
+ */
+function ScanRing({ percent, fraction, caption }: { percent: string; fraction: number; caption: string }) {
+  const theme = useTheme();
+  const size = 132;
+  const stroke = 8;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference * (1 - Math.max(0, Math.min(1, fraction)));
+  return (
+    <View testID="import-scan-ring" style={styles.ring} importantForAccessibility="no-hide-descendants"
+      accessibilityElementsHidden>
+      <Svg width={size} height={size} style={styles.ringSvg}>
+        <Circle cx={size / 2} cy={size / 2} r={radius} stroke={theme.track} strokeWidth={stroke} fill="none" />
+        <Circle cx={size / 2} cy={size / 2} r={radius} stroke={theme.primary} strokeWidth={stroke} fill="none"
+          strokeLinecap="round" strokeDasharray={`${circumference} ${circumference}`} strokeDashoffset={offset}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+      </Svg>
+      <View style={styles.ringCopy}>
+        <ThemedText type="title" tabular>{percent}</ThemedText>
+        <ThemedText type="meta" themeColor="textTertiary" style={styles.ringCaption}>{caption}</ThemedText>
+      </View>
+    </View>
+  );
+}
+
 /** History-card states that finish an import already under way. */
 const IOS_HISTORY_CARD_FINISHING: ReadonlySet<IosHistoryCardState> = new Set<IosHistoryCardState>(['review', 'running']);
 
@@ -301,7 +340,80 @@ export default function ImportSmsScreen() {
     // request reveals the form without starting or altering a history import.
     if (manual === '1' && !history) setShowManual(true);
   }, [manual, history]);
-  const [progress, setProgress] = useState<{ scanned: number; found: number } | null>(null);
+  const [progress, setProgress] = useState<ScanProgress | null>(null);
+  // A native count of the inbox and how much of it the read has passed. Both
+  // stay null (and the indicator indeterminate) unless the device answers.
+  const [inboxTotal, setInboxTotal] = useState<number | null>(null);
+  const [inboxPassed, setInboxPassed] = useState<number | null>(null);
+  const progressGate = useRef<{
+    last: number;
+    timer: ReturnType<typeof setTimeout> | null;
+    pending: ScanProgress | null;
+    totalRequested: boolean;
+    counting: boolean;
+  }>({ last: 0, timer: null, pending: null, totalRequested: false, counting: false });
+  useEffect(() => {
+    // Every start and every end retires the previous reporter, so a throttled
+    // flush or a late native count can never write into another run. A paste
+    // (which sets `scanning` too) therefore never shows an earlier inbox
+    // read's figures or rows.
+    const gate = progressGate.current;
+    if (gate.timer) clearTimeout(gate.timer);
+    progressGate.current = { last: 0, timer: null, pending: null, totalRequested: false, counting: false };
+    if (!scanning) return;
+    setProgress(null);
+    setInboxTotal(null);
+    setInboxPassed(null);
+  }, [scanning]);
+  useEffect(() => () => {
+    const gate = progressGate.current;
+    if (gate.timer) clearTimeout(gate.timer);
+  }, []);
+  /**
+   * The inbox scan's progress callback. Throttled so a fast run of pages
+   * re-renders a few times a second at most; the latest figures always land.
+   * The first call (permission is granted by then) asks for the native total;
+   * each page asks how many messages are at or after the oldest one read.
+   */
+  const reportScanProgress = (scanned: number, found: number, detail?: ScanProgressDetail) => {
+    const gate = progressGate.current;
+    if (!gate.totalRequested) {
+      gate.totalRequested = true;
+      void countInboxMessages(0).then((total) => {
+        if (progressGate.current === gate && total !== null && total > 0) setInboxTotal(total);
+      });
+    }
+    const oldest = detail?.oldestInboxDateMs ?? null;
+    if (oldest !== null && !gate.counting) {
+      gate.counting = true;
+      void countInboxMessages(0, oldest).then((passed) => {
+        gate.counting = false;
+        if (progressGate.current === gate && passed !== null) {
+          setInboxPassed((current) => Math.max(current ?? 0, passed));
+        }
+      });
+    }
+    gate.pending = { scanned, found, detail };
+    const flush = () => {
+      gate.timer = null;
+      gate.last = Date.now();
+      if (gate.pending && progressGate.current === gate) setProgress(gate.pending);
+      gate.pending = null;
+    };
+    const wait = PROGRESS_THROTTLE_MS - (Date.now() - gate.last);
+    if (wait <= 0) flush();
+    else if (!gate.timer) gate.timer = setTimeout(flush, wait);
+  };
+  const scanCopy = motionAndroidCopy(state.language);
+  // Only the Android inbox read reports detail; a paste or an iPhone history
+  // review keeps the plain counts it always had.
+  const scanDetail = !history ? progress?.detail ?? null : null;
+  // A real share of a native total, capped below 100 until the read ends
+  // (bank-app notifications are still read after the last inbox page).
+  const scanPercent = scanDetail && inboxTotal !== null
+    ? Math.min(99, Math.floor((Math.min(inboxPassed ?? 0, inboxTotal) / inboxTotal) * 100))
+    : null;
+  const formatCount = (value: number) => value.toLocaleString(state.language === 'ar' ? 'ar-AE' : 'en-US');
   const [trackedBills, setTrackedBills] = useState<Set<number>>(new Set());
   const [skippedCount, setSkippedCount] = useState(0);
   const [pasteVerdict, setPasteVerdict] = useState<PasteVerdict | null>(null);
@@ -575,8 +687,8 @@ export default function ImportSmsScreen() {
         declined,
         inboxHistoryComplete,
         commit,
-      } = await scanInbox(0, state.merchantOverrides, (scanned, found) =>
-        setProgress({ scanned, found }), undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()) });
+      } = await scanInbox(0, state.merchantOverrides, (scanned, found, detail) =>
+        reportScanProgress(scanned, found, detail), undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(getStateSnapshot()) });
       const reviewReceipt = stageReviewAlerts(reviewCandidates, undefined, reviewSourceBindings);
       await reviewReceipt.durable;
       // `declined` carried through, exactly as the automatic path does. Without
@@ -1418,11 +1530,17 @@ export default function ImportSmsScreen() {
               style={styles.scanning}
               accessibilityRole="progressbar"
               accessibilityState={{ busy: true }}
-              accessibilityLabel={tf('importProgressCounts', {
-                read: progress?.scanned ?? 0,
-                matched: progress?.found ?? 0,
-              })}>
-              <ScanPanel reducedMotion={reducedMotion} />
+              accessibilityLabel={scanPercent !== null && inboxTotal !== null
+                ? scanCopy.importPercentSpoken(scanPercent, inboxTotal)
+                : tf('importProgressCounts', {
+                  read: progress?.scanned ?? 0,
+                  matched: progress?.found ?? 0,
+                })}
+              accessibilityValue={scanPercent !== null ? { min: 0, max: 100, now: scanPercent } : undefined}>
+              {scanPercent !== null && inboxTotal !== null
+                ? <ScanRing percent={scanCopy.importPercent(scanPercent)} fraction={scanPercent / 100}
+                  caption={scanCopy.importPercentOf(inboxTotal)} />
+                : <ScanPanel reducedMotion={reducedMotion} />}
               <View style={styles.progressHead}>
                 <View style={styles.progressLabel}>
                   <PulseDot color={theme.primary} />
@@ -1430,15 +1548,59 @@ export default function ImportSmsScreen() {
                     {t('importProgress')}
                   </ThemedText>
                 </View>
-                <ThemedText type="small" tabular>
+                {scanDetail ? null : <ThemedText type="small" tabular>
                   {history && progress === null
                     ? t('historyPreparingReview')
                     : tf('importProgressCounts', {
                         read: progress?.scanned ?? 0,
                         matched: progress?.found ?? 0,
                       })}
-                </ThemedText>
+                </ThemedText>}
               </View>
+              {scanDetail && progress ? (
+                <View testID="import-scan-stats" style={styles.scanStats}>
+                  {[
+                    { key: 'checked', value: progress.scanned, label: scanCopy.importChecked },
+                    { key: 'found', value: progress.found, label: scanCopy.importFound },
+                    { key: 'promos', value: scanDetail.promotionsSkipped, label: scanCopy.importPromosSkipped,
+                      spoken: scanCopy.importPromosSpoken(scanDetail.promotionsSkipped) },
+                  ].map((stat) => (
+                    <View key={stat.key} testID={`import-scan-${stat.key}`} style={styles.scanStat} accessible
+                      accessibilityLabel={stat.spoken ?? `${formatCount(stat.value)} ${stat.label}`}>
+                      <ThemedText type="heading" tabular>{formatCount(stat.value)}</ThemedText>
+                      <ThemedText type="meta" themeColor="textTertiary">{stat.label}</ThemedText>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              {scanDetail && scanDetail.recentFound.length > 0 ? (
+                <View testID="import-live-found" style={styles.liveFound}>
+                  <ThemedText type="micro" themeColor="textTertiary">{scanCopy.importFoundHeading}</ThemedText>
+                  {scanDetail.recentFound.map((row, i) => {
+                    const spec = ledgerMoneySpec(row.currency);
+                    return (
+                      <Animated.View
+                        key={`${row.merchant}-${row.amountMinor}-${row.type}-${i}`}
+                        entering={reducedMotion ? undefined : FadeInDown.duration(Motion.change)}>
+                        <Row last={i === scanDetail.recentFound.length - 1}>
+                          <MerchantAvatar title={row.merchant} category={row.category} size={36} />
+                          <View style={styles.rowText}>
+                            <ThemedText type="small" numberOfLines={1}>{row.merchant}</ThemedText>
+                            <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
+                              {`${categoryLabel(row.category)} · ${scanCopy.importJustFound}`}
+                            </ThemedText>
+                          </View>
+                          {spec ? (
+                            <Money fils={row.amountMinor} moneySpec={spec} prefix={false} decimals
+                              sign={row.type === 'income' ? 'plus' : 'minus'}
+                              color={row.type === 'income' ? theme.income : theme.text} />
+                          ) : null}
+                        </Row>
+                      </Animated.View>
+                    );
+                  })}
+                </View>
+              ) : null}
               <ThemedText type="meta" themeColor="textTertiary">
                 {history ? t('historyRunningCompact') : t('importProgressPrivacy')}
               </ThemedText>
@@ -1968,6 +2130,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.two,
   },
+  ring: {
+    alignSelf: 'center',
+    width: 132,
+    height: 132,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ringSvg: { position: 'absolute', top: 0, left: 0 },
+  ringCopy: { alignItems: 'center', maxWidth: 104 },
+  ringCaption: { textAlign: 'center' },
+  scanStats: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  scanStat: { flex: 1, gap: Spacing.half },
+  liveFound: { gap: Spacing.one },
   textarea: {
     minHeight: 160,
     borderWidth: 1,

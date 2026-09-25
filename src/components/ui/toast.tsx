@@ -1,6 +1,15 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Pressable, StyleSheet, View } from 'react-native';
-import Animated, { Easing, FadeOutDown, SlideInDown } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeInUp,
+  FadeOut,
+  FadeOutDown,
+  FadeOutUp,
+  ReduceMotion,
+  SlideInDown,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -18,16 +27,35 @@ export interface ToastAction {
 
 export type ToastTone = 'success' | 'info' | 'warning' | 'error';
 
+export type ToastPlacement = 'top' | 'bottom';
+
 export interface ToastOptions {
   actions?: ToastAction[];
   durationMs?: number;
   tone?: ToastTone;
+  /**
+   * Where the toast lands. Bottom (the default) keeps an action near the
+   * thumb; a live capture arrives from the top, where news arrives, and has
+   * no action to reach for.
+   */
+  placement?: ToastPlacement;
+  /** A figure set apart at the trailing edge, e.g. a captured amount. */
+  trailing?: string;
+  /**
+   * What a screen reader announces instead of `message`. The visible line can
+   * split a fact across `message` and `trailing`; the announcement has to
+   * carry all of it in one sentence.
+   */
+  announcement?: string;
 }
 
 interface ToastState {
   message: string;
   actions: ToastAction[];
   tone: ToastTone;
+  placement: ToastPlacement;
+  trailing?: string;
+  announcement?: string;
 }
 
 interface ToastShow {
@@ -64,6 +92,25 @@ const TONE_COLOR: Record<ToastTone, string> = {
   error: Colors.dark.expense,
 };
 
+/**
+ * How a toast arrives. With motion: a bottom toast slides up as it always
+ * has; a top toast drops 25pt into place over the change duration. Reduce
+ * Motion (or a running screen reader) gets a cross-fade either way: no
+ * movement, but still a visible arrival rather than a pop. `Never` because
+ * Reanimated's default would otherwise skip the fade under Reduce Motion.
+ */
+function toastEntering(placement: ToastPlacement, reducedMotion: boolean) {
+  if (reducedMotion) return FadeIn.duration(Motion.change).reduceMotion(ReduceMotion.Never);
+  return placement === 'top'
+    ? FadeInUp.duration(Motion.change).easing(EASING)
+    : SlideInDown.duration(Motion.sheet).easing(EASING);
+}
+
+function toastExiting(placement: ToastPlacement, reducedMotion: boolean) {
+  if (reducedMotion) return FadeOut.duration(Motion.tap).reduceMotion(ReduceMotion.Never);
+  return placement === 'top' ? FadeOutUp.duration(200) : FadeOutDown.duration(200);
+}
+
 /** A compact status surface with an optional, time-sensitive action. */
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
@@ -84,9 +131,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const actions = options.actions ?? [];
     const durationMs = options.durationMs ?? 6000;
     const tone = options.tone ?? 'info';
+    const placement = options.placement ?? 'bottom';
+    const trailing = options.trailing?.trim() || undefined;
+    const announcement = options.announcement?.trim() || undefined;
 
     if (timer.current) clearTimeout(timer.current);
-    setToast({ message, actions, tone });
+    setToast({ message, actions, tone, placement, trailing, announcement });
     timer.current = setTimeout(() => setToast(null), durationMs);
 
     // A toast carrying Undo is a deadline. Six seconds is comfortable when you
@@ -96,7 +146,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     // replaced rather than waited for.
     AccessibilityInfo.isScreenReaderEnabled()
       .then((on) => {
-        AccessibilityInfo.announceForAccessibility(message);
+        AccessibilityInfo.announceForAccessibility(announcement ?? message);
         if (!on) return;
         if (timer.current) clearTimeout(timer.current);
         timer.current = setTimeout(() => setToast(null), durationMs * 3);
@@ -125,10 +175,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       {children}
       {toast && (
         <Animated.View
-          entering={reducedMotion ? undefined : SlideInDown.duration(Motion.sheet).easing(EASING)}
-          exiting={reducedMotion ? undefined : FadeOutDown.duration(200)}
-          // Clears the floating tab bar rather than sitting under it.
-          style={[styles.wrap, { bottom: Math.max(insets.bottom, Spacing.two) + 84 }]}
+          // Keyed by placement so a top toast replacing a bottom one enters
+          // from its own edge instead of jumping across the screen.
+          key={toast.placement}
+          entering={toastEntering(toast.placement, reducedMotion)}
+          exiting={toastExiting(toast.placement, reducedMotion)}
+          style={[styles.wrap, toast.placement === 'top'
+            // Below the status bar / Dynamic Island, over the screen header.
+            ? { top: insets.top + Spacing.two }
+            // Clears the floating tab bar rather than sitting under it.
+            : { bottom: Math.max(insets.bottom, Spacing.two) + 84 }]}
           accessibilityLiveRegion={toast.tone === 'error' ? 'assertive' : 'polite'}
           pointerEvents="box-none">
           {/* The fill is a near-black by design, which in the dark theme is
@@ -147,9 +203,18 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               color={TONE_COLOR[toast.tone]}
               strokeWidth={2.1}
             />
-            <ThemedText type="small" style={styles.message} numberOfLines={2}>
+            <ThemedText type="small" style={styles.message} numberOfLines={2}
+              accessibilityLabel={toast.announcement}>
               {toast.message}
             </ThemedText>
+            {toast.trailing ? (
+              // Spoken inside the announcement above; hidden here so a
+              // screen reader does not read the amount twice.
+              <ThemedText type="smallBold" tabular style={styles.trailing}
+                accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                {toast.trailing}
+              </ThemedText>
+            ) : null}
             {toast.actions.map((a) => (
               <Pressable
                 key={a.label}
@@ -198,6 +263,10 @@ const styles = StyleSheet.create({
   message: {
     flexShrink: 1,
     color: '#F2EFE8',
+  },
+  trailing: {
+    color: '#F2EFE8',
+    flexShrink: 0,
   },
   action: {
     minWidth: 44,

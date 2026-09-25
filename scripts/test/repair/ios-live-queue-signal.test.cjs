@@ -95,7 +95,7 @@ function harness(options = {}) {
     '@/lib/android-live-background': { installAndroidLiveCaptureLedger: () => () => {} },
     '../../modules/notification-reader': { __esModule: true, default: {} },
     '../../modules/sms-reader': { __esModule: true, default: {} },
-    '@/lib/haptics': {}, '@/lib/i18n': {},
+    '@/lib/haptics': {}, '@/lib/i18n': {}, '@/lib/capture-toast': { captureToastContent: () => null },
     '@/lib/notifications': { syncPaymentReminders: async () => {} },
     '@/lib/purchases': { isProActive: value => value.pro },
     '@/lib/trusted-bank-notification-packages': { bankNotificationAdmissionExpiresAt: () => 0 },
