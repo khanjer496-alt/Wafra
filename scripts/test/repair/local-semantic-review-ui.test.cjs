@@ -48,7 +48,12 @@ function harness() {
       reviewCaptureBacklog: require('../build/alert-review-tray.js').reviewCaptureBacklog,
       reviewExpiresInDays: require('../build/alert-review-tray.js').reviewExpiresInDays,
       reviewTrayCapacity: require('../build/alert-review-tray.js').reviewTrayCapacity },
-    '@/components/universal-review-fields': { isOrdinaryUniversalPosting: () => true, universalMoneyLabel: money => `${money.currency} ${money.minorUnits}` },
+    '@/components/universal-review-fields': { isOrdinaryUniversalPosting: () => true, reviewMoneyChoices: event => event.amount.value ? [event.amount.value] : [],
+      universalMoneyLabel: money => `${money.currency} ${money.minorUnits}` },
+    '@/components/ui/merchant-avatar': { MerchantAvatar: wrap('Avatar') },
+    '@/lib/details-copy': load(path.join(root, 'src/lib/details-copy.ts')),
+    '@/lib/review-reasons': load(path.join(root, 'src/lib/review-reasons.ts'), {
+      '@/lib/alert-review-tray': { isUniversalReviewAlert: item => item.kind === 'universal' } }),
     '@/lib/review-alert-copy': load(path.join(root, 'src/lib/review-alert-copy.ts')),
     '@/lib/local-semantic-review': { localReviewAdvisor: advisor },
     '@/lib/store': { useStore: () => ({ state, dismissReviewAlert: async () => {} }) },

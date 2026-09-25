@@ -6,18 +6,21 @@ import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Icon, type IconName } from '@/components/ui/icon';
+import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { useToast } from '@/components/ui/toast';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useLanguage } from '@/hooks/use-language';
+import { detailsWords } from '@/lib/details-copy';
 import { shortDate, toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { isIosApplePayReview, isIosNotificationReview, isUniversalReviewAlert, recentlyExpiredReviewCount, recentlyLostReviewCount, reviewCaptureBacklog, reviewExpiresInDays, reviewTrayCapacity, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
-import { isOrdinaryUniversalPosting, universalMoneyLabel } from '@/components/universal-review-fields';
+import { isOrdinaryUniversalPosting, reviewMoneyChoices, universalMoneyLabel } from '@/components/universal-review-fields';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
+import { reviewIsPurchase, reviewMerchant, reviewReason, type ReviewReason } from '@/lib/review-reasons';
 import type { UniversalField, UniversalMoney } from '@/lib/universal-types';
 import { useStore } from '@/lib/store';
 import { localReviewAdvisor } from '@/lib/local-semantic-review';
@@ -57,8 +60,7 @@ function amountLabel(item: ReviewAlert): string {
   return `${currency} ${padded.slice(0, split)}.${padded.slice(split)}`;
 }
 
-function instrumentLabel(item: ReviewAlert): string | null {
-  const instrument = item.instrument;
+function instrumentLabel(instrument: { kind: 'card' | 'account' | 'wallet'; last4: string | null } | null | undefined): string | null {
   if (!instrument?.last4) return null;
   const key: StringKey = instrument.kind === 'card'
     ? 'reviewAlertCardEnding'
@@ -66,6 +68,45 @@ function instrumentLabel(item: ReviewAlert): string | null {
       ? 'reviewAlertAccountEnding'
       : 'reviewAlertWalletEnding';
   return tf(key, { last4: instrument.last4 });
+}
+
+/** The one sentence that says why this item is waiting. Two reasons already have their own warning line. */
+function reasonSentence(reason: ReviewReason, language: string): string {
+  if (reason === 'apple-pay-duplicate') return t('reviewAlertPossibleApplePayDuplicate');
+  if (reason === 'notification-replay') return t('reviewAlertPossibleNotificationReplay');
+  return detailsWords(language).review.why[reason];
+}
+
+function reasonFor(item: ReviewEntry): ReviewReason {
+  return reviewReason(item, isUniversalReviewAlert(item)
+    ? { ordinaryPosting: isOrdinaryUniversalPosting(item.event), amountChoices: reviewMoneyChoices(item.event).length }
+    : { ordinaryPosting: true, amountChoices: 1 });
+}
+
+/** What the card shows first: the stated amount, in the alert's own currency (never converted). */
+function headlineAmount(item: ReviewEntry): { amount: string; fact: StringKey | null } {
+  if (!isUniversalReviewAlert(item)) return { amount: amountLabel(item), fact: null };
+  const event = item.event;
+  const facts: [StringKey, UniversalField<UniversalMoney>][] = [
+    ['genericAmount', event.amount], ['genericStatementTotal', event.statementTotal],
+    ['genericBalance', event.balance], ['genericCreditLimit', event.creditLimit],
+    ['genericMinimumDue', event.minimumDue],
+  ];
+  const fact = facts.find(([, field]) => field.evidence === 'explicit' && field.value !== null);
+  return {
+    amount: fact?.[1].value ? universalMoneyLabel(fact[1].value) : t('genericAmountNeedsReview'),
+    fact: fact?.[0] ?? null,
+  };
+}
+
+/** Logo tile only for a merchant the alert named; otherwise the family glyph. */
+function ReviewTile({ item, merchant }: { item: ReviewEntry; merchant: string | null }) {
+  const theme = useTheme();
+  if (merchant) return <MerchantAvatar title={merchant} category="other" size={40} />;
+  const icon = isUniversalReviewAlert(item) ? 'receipt' : FAMILY_COPY[item.family].icon;
+  return <View style={[styles.alertIcon, { backgroundColor: theme.backgroundSelected }]}>
+    <Icon name={icon} size={18} color={theme.warning} />
+  </View>;
 }
 
 function ExpiryNotice({ item }: { item: ReviewEntry }) {
@@ -89,54 +130,57 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
     : event.family === 'balance' ? 'genericBalanceUpdate'
     : event.family === 'card-payment' ? 'genericCardPayment'
     : event.family === 'bill' ? 'genericBill' : 'genericReviewTitle';
-  const facts: [StringKey, UniversalField<UniversalMoney>][] = [
-    ['genericAmount', event.amount], ['genericStatementTotal', event.statementTotal],
-    ['genericBalance', event.balance], ['genericCreditLimit', event.creditLimit],
-    ['genericMinimumDue', event.minimumDue],
-  ];
-  const fact = facts.find(([, field]) => field.evidence === 'explicit' && field.value !== null);
-  const amount = fact?.[1].value ? universalMoneyLabel(fact[1].value) : t('genericAmountNeedsReview');
-  const identity = [t(key), event.merchant.evidence === 'explicit' ? event.merchant.value : null,
-    fact ? `${t(fact[0])}: ${amount}` : amount].filter(Boolean).join('. ');
+  const { amount, fact } = headlineAmount(item);
+  const merchant = reviewMerchant(item);
+  const reason = reasonFor(item);
+  const identity = [t(key), merchant, fact ? `${t(fact)}: ${amount}` : amount].filter(Boolean).join('. ');
   return (
     <View testID="review-alert-row" style={[styles.alertRow, { borderColor: theme.cardBorder }]}>
-      <View style={styles.alertCopy}>
-        {isIosApplePayReview(item) && <ThemedText type="meta" themeColor="textSecondary">Apple Pay</ThemedText>}
-        {isIosNotificationReview(item) && <ThemedText type="meta" themeColor="textSecondary">{t('reviewAlertNotificationSource')}</ThemedText>}
-        {item.attentionReason === 'possible-notification-replay' && (
-          <ThemedText type="smallBold" themeColor="warning">{t('reviewAlertPossibleNotificationReplay')}</ThemedText>
-        )}
-        {item.attentionReason === 'possible-apple-pay-duplicate' && (
-          <ThemedText testID="review-alert-apple-pay-duplicate" type="smallBold" themeColor="warning">{t('reviewAlertPossibleApplePayDuplicate')}</ThemedText>
-        )}
-        <ThemedText type="smallBold">{t(key)}</ThemedText>
-        {event.merchant.evidence === 'explicit' ? <ThemedText type="small">{event.merchant.value}</ThemedText> : null}
-        {fact ? <ThemedText type="meta" themeColor="textSecondary">{t(fact[0])}</ThemedText> : null}
-        <ThemedText type="title" tabular>{amount}</ThemedText>
-        {informational ? <ThemedText type="meta" themeColor="textSecondary">{words.informationHint}</ThemedText> : null}
-        <ThemedText type="meta" themeColor="textSecondary">{t('genericUnverifiedIssuer')} · {shortDate(toISODate(new Date(item.observedAt)))}</ThemedText>
-        <ExpiryNotice item={item} />
-        {advisory ? <View testID="review-local-ai-advisory" accessibilityLiveRegion="polite" style={{ gap: Spacing.half }}>
-          <ThemedText type="small" themeColor="textSecondary">
-            {advisory.kind === 'parser-family-advisory'
-              ? `${aiCopy.suggestion}: ${t(FAMILY_COPY[advisory.family as ReviewAlert['family']]?.label ?? 'genericReviewTitle')}`
-              : advisory.kind === 'pending' ? aiCopy.pending : aiCopy.unavailable}
-          </ThemedText>
-          {advisory.kind === 'parser-family-advisory' ?
-            <ThemedText type="meta" themeColor="textSecondary">{aiCopy.confirm}</ThemedText> : null}
-        </View> : null}
-        <View style={styles.rowActions}>
-          <Pressable testID="review-alert-open" accessibilityRole="button" accessibilityLabel={`${t(informational ? 'genericReviewDetails' : 'reviewAlertReview')}. ${identity}`}
-            accessibilityState={{ disabled: busy }} disabled={busy} onPress={onAdd} style={styles.addButton}>
-            <ThemedText type="smallBold" style={{ color: theme.primary }}>{t(informational ? 'genericReviewDetails' : 'reviewAlertReview')}</ThemedText>
-            <Icon name="chevron-right" size={15} color={theme.primary} />
-          </Pressable>
-          <Pressable accessibilityRole="button" accessibilityLabel={`${t('dismiss')}. ${identity}`}
-            accessibilityHint={t('reviewAlertDismissBody')} accessibilityState={{ disabled: busy }}
-            disabled={busy} onPress={onDismiss} style={styles.dismissButton}>
-            <ThemedText type="small" themeColor="textSecondary">{t('dismiss')}</ThemedText>
-          </Pressable>
+      <View style={styles.alertMain}>
+        <ReviewTile item={item} merchant={merchant} />
+        <View style={styles.alertCopy}>
+          {isIosApplePayReview(item) && <ThemedText type="meta" themeColor="textSecondary">Apple Pay</ThemedText>}
+          {isIosNotificationReview(item) && <ThemedText type="meta" themeColor="textSecondary">{t('reviewAlertNotificationSource')}</ThemedText>}
+          {item.attentionReason === 'possible-notification-replay' && (
+            <ThemedText type="smallBold" themeColor="warning">{t('reviewAlertPossibleNotificationReplay')}</ThemedText>
+          )}
+          {item.attentionReason === 'possible-apple-pay-duplicate' && (
+            <ThemedText testID="review-alert-apple-pay-duplicate" type="smallBold" themeColor="warning">{t('reviewAlertPossibleApplePayDuplicate')}</ThemedText>
+          )}
+          <View style={styles.headline}>
+            <ThemedText type="smallBold" style={styles.headlineTitle} numberOfLines={2}>{merchant ?? t(key)}</ThemedText>
+            <ThemedText type="smallBold" tabular>{amount}</ThemedText>
+          </View>
+          {merchant ? <ThemedText type="meta" themeColor="textSecondary">{t(key)}</ThemedText> : null}
+          {fact ? <ThemedText type="meta" themeColor="textSecondary">{t(fact)}</ThemedText> : null}
+          {reason !== 'apple-pay-duplicate' && reason !== 'notification-replay' ? (
+            <ThemedText testID="review-alert-reason" type="small" themeColor="textSecondary">{reasonSentence(reason, language)}</ThemedText>
+          ) : null}
+          {informational ? <ThemedText type="meta" themeColor="textSecondary">{words.informationHint}</ThemedText> : null}
+          <ThemedText type="meta" themeColor="textSecondary">{t('genericUnverifiedIssuer')} · {shortDate(toISODate(new Date(item.observedAt)))}</ThemedText>
+          <ExpiryNotice item={item} />
+          {advisory ? <View testID="review-local-ai-advisory" accessibilityLiveRegion="polite" style={{ gap: Spacing.half }}>
+            <ThemedText type="small" themeColor="textSecondary">
+              {advisory.kind === 'parser-family-advisory'
+                ? `${aiCopy.suggestion}: ${t(FAMILY_COPY[advisory.family as ReviewAlert['family']]?.label ?? 'genericReviewTitle')}`
+                : advisory.kind === 'pending' ? aiCopy.pending : aiCopy.unavailable}
+            </ThemedText>
+            {advisory.kind === 'parser-family-advisory' ?
+              <ThemedText type="meta" themeColor="textSecondary">{aiCopy.confirm}</ThemedText> : null}
+          </View> : null}
         </View>
+      </View>
+      <View style={styles.rowActions}>
+        <Pressable testID="review-alert-open" accessibilityRole="button" accessibilityLabel={`${t(informational ? 'genericReviewDetails' : 'reviewAlertReview')}. ${identity}`}
+          accessibilityState={{ disabled: busy }} disabled={busy} onPress={onAdd} style={styles.addButton}>
+          <ThemedText type="smallBold" style={{ color: theme.primary }}>{t(informational ? 'genericReviewDetails' : 'reviewAlertReview')}</ThemedText>
+          <Icon name="chevron-right" size={15} color={theme.primary} />
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${t('dismiss')}. ${identity}`}
+          accessibilityHint={t('reviewAlertDismissBody')} accessibilityState={{ disabled: busy }}
+          disabled={busy} onPress={onDismiss} style={styles.dismissButton}>
+          <ThemedText type="small" themeColor="textSecondary">{t('dismiss')}</ThemedText>
+        </Pressable>
       </View>
     </View>
   );
@@ -154,30 +198,36 @@ function AlertRow({
   onDismiss: () => void;
 }) {
   const theme = useTheme();
+  const language = useLanguage();
   if (isUniversalReviewAlert(item)) return <UniversalAlertRow item={item} busy={busy} onAdd={onAdd} onDismiss={onDismiss} />;
   const family = FAMILY_COPY[item.family];
   const amount = amountLabel(item);
   const direction = t(item.direction === 'debit' ? 'reviewAlertMoneyOut' : 'reviewAlertMoneyIn');
-  const instrument = instrumentLabel(item);
+  const instrument = instrumentLabel(item.instrument);
   const date = shortDate(toISODate(new Date(item.observedAt)));
   const bank = institutionLabel(item.institution);
+  const reason = reasonFor(item);
 
   return (
     <View testID="review-alert-row" style={[styles.alertRow, { borderColor: theme.cardBorder }]}>
       <View style={styles.alertMain}>
-      <View style={[styles.alertIcon, { backgroundColor: theme.backgroundSelected }]}>
-        <Icon name={family.icon} size={18} color={theme.warning} />
-      </View>
+      <ReviewTile item={item} merchant={null} />
       <View style={styles.alertCopy}>
         {isIosApplePayReview(item) && <ThemedText type="meta" themeColor="textSecondary">Apple Pay</ThemedText>}
         {isIosNotificationReview(item) && <ThemedText type="meta" themeColor="textSecondary">{t('reviewAlertNotificationSource')}</ThemedText>}
         {item.attentionReason === 'possible-apple-pay-duplicate' && (
           <ThemedText testID="review-alert-apple-pay-duplicate" type="smallBold" themeColor="warning">{t('reviewAlertPossibleApplePayDuplicate')}</ThemedText>
         )}
+        {item.attentionReason === 'possible-notification-replay' && (
+          <ThemedText type="smallBold" themeColor="warning">{t('reviewAlertPossibleNotificationReplay')}</ThemedText>
+        )}
         <ThemedText type="smallBold">{t(family.label)}</ThemedText>
         <ThemedText type="title" tabular style={styles.amount}>
           {amount}
         </ThemedText>
+        {reason !== 'apple-pay-duplicate' && reason !== 'notification-replay' ? (
+          <ThemedText testID="review-alert-reason" type="small" themeColor="textSecondary">{reasonSentence(reason, language)}</ThemedText>
+        ) : null}
         <ThemedText type="meta" themeColor="textSecondary">
           {[bank, item.market, direction].join(' · ')}
         </ThemedText>
@@ -231,14 +281,81 @@ function AlertRow({
   );
 }
 
+function Fact({ label, value }: { label: string; value: string }) {
+  const theme = useTheme();
+  return <View style={[styles.fact, { borderColor: theme.cardBorder }]}>
+    <ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>
+    <ThemedText type="smallBold" tabular style={styles.factValue}>{value}</ThemedText>
+  </View>;
+}
+
+/**
+ * One item at a time, as drawn for Android and offered on both platforms.
+ * The two answers are the list's own actions: "Looks right" opens the same
+ * Add flow (the account is still chosen there), and "Not a purchase" is the
+ * same confirmed dismissal. Nothing is added or removed from this card itself.
+ */
+function StepCard({ item, busy, onAdd, onDismiss }: {
+  item: ReviewEntry; busy: boolean; onAdd: () => void; onDismiss: () => void;
+}) {
+  const theme = useTheme();
+  const language = useLanguage();
+  const d = detailsWords(language);
+  const merchant = reviewMerchant(item);
+  const { amount } = headlineAmount(item);
+  const reason = reasonFor(item);
+  const universal = isUniversalReviewAlert(item);
+  const informational = universal && !isOrdinaryUniversalPosting(item.event);
+  const instrument = instrumentLabel(universal ? item.event.instrument.value : item.instrument);
+  const title = merchant ?? (universal ? t('genericReviewTitle') : t(FAMILY_COPY[item.family].label));
+  const primary = informational ? t('genericReviewDetails') : d.review.looksRight;
+  const secondary = reviewIsPurchase(item) ? d.review.notPurchase : t('dismiss');
+  return <View testID="review-step-card" style={[styles.stepCard, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+    <View style={styles.alertMain}>
+      <ReviewTile item={item} merchant={merchant} />
+      <View style={styles.alertCopy}>
+        <ThemedText type="smallBold" numberOfLines={2}>{title}</ThemedText>
+        <ThemedText testID="review-step-reason" type="small" themeColor={reason === 'apple-pay-duplicate' || reason === 'notification-replay' ? 'warning' : 'textSecondary'}>
+          {reasonSentence(reason, language)}
+        </ThemedText>
+      </View>
+    </View>
+    <View>
+      <Fact label={d.review.amount} value={amount} />
+      <Fact label={d.review.date} value={shortDate(toISODate(new Date(item.observedAt)))} />
+      <Fact label={d.review.merchant} value={merchant ?? d.review.merchantMissing} />
+      {instrument ? <Fact label={d.review.instrument} value={instrument} /> : null}
+    </View>
+    <ThemedText type="meta" themeColor="textTertiary">{d.review.original}</ThemedText>
+    <View style={styles.stepActions}>
+      <Pressable testID="review-step-dismiss" accessibilityRole="button" accessibilityLabel={`${secondary}. ${title}. ${amount}`}
+        accessibilityHint={t('reviewAlertDismissBody')} accessibilityState={{ disabled: busy }} disabled={busy}
+        onPress={() => { tapped(); onDismiss(); }}
+        style={({ pressed }) => [styles.stepButton, { borderColor: theme.cardBorderStrong, opacity: busy ? 0.45 : pressed ? 0.72 : 1 }]}>
+        <ThemedText type="smallBold">{secondary}</ThemedText>
+      </Pressable>
+      <Pressable testID="review-alert-open" accessibilityRole="button" accessibilityLabel={`${primary}. ${title}. ${amount}`}
+        accessibilityHint={informational ? undefined : d.review.looksRightHint} accessibilityState={{ disabled: busy }} disabled={busy}
+        onPress={() => { tapped(); onAdd(); }}
+        style={({ pressed }) => [styles.stepButton, { backgroundColor: theme.primary, borderColor: theme.primary, opacity: busy ? 0.45 : pressed ? 0.82 : 1 }]}>
+        <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{primary}</ThemedText>
+      </Pressable>
+    </View>
+  </View>;
+}
+
 export default function ReviewAlertsScreen() {
   const router = useRouter();
   const theme = useTheme();
   const toast = useToast();
+  const language = useLanguage();
+  const d = detailsWords(language);
   const { state, dismissReviewAlert } = useStore();
   const words = workflowCopy(state.language);
   const [target, setTarget] = useState<ReviewEntry | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [stepping, setStepping] = useState(false);
+  const [stepIndex, setStepIndex] = useState(0);
   const listInsets = useScreenContentInsets({ hasFooter: false });
   const now = Date.now();
   const pending = useMemo(
@@ -247,6 +364,9 @@ export default function ReviewAlertsScreen() {
       .sort((a, b) => b.observedAt - a.observedAt),
     [state.reviewTray.pending, now],
   );
+  // An answered item leaves the queue; the index then already points at the next one.
+  const step = pending.length > 0 ? Math.min(stepIndex, pending.length - 1) : 0;
+  const stepMode = stepping && pending.length > 0;
 
   // Deferred native records stay queued; the banner only explains the wait
   // while a Review lane is actually full, and clears once there is room.
@@ -302,11 +422,35 @@ export default function ReviewAlertsScreen() {
       setBusyId(null);
     }
   };
+  const openAdd = (item: ReviewEntry) => router.push({ pathname: '/add-transaction', params: { reviewId: item.id } });
 
   const reviewAlertsHeader: ScreenHeaderProps = {
     title: words.reviewTitle,
     back: { label: t('back'), onPress: () => router.back() },
   };
+
+  const stepper = stepMode ? (
+    <View testID="review-stepper" style={styles.stepper}>
+      <View style={styles.stepHeader}>
+        <View style={styles.alertCopy}>
+          <ThemedText type="smallBold">{d.review.stepTitle}</ThemedText>
+          <ThemedText testID="review-step-position" type="meta" themeColor="textSecondary" accessibilityLiveRegion="polite">
+            {d.review.position(step + 1, pending.length)}
+          </ThemedText>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel={d.review.previous} disabled={step === 0}
+          accessibilityState={{ disabled: step === 0 }} onPress={() => setStepIndex(Math.max(0, step - 1))}
+          style={[styles.stepNav, { opacity: step === 0 ? 0.35 : 1 }]}>
+          <Icon name={language === 'ar' ? 'chevron-right' : 'chevron-left'} size={18} color={theme.text} />
+        </Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={d.review.next} disabled={step >= pending.length - 1}
+          accessibilityState={{ disabled: step >= pending.length - 1 }} onPress={() => setStepIndex(Math.min(pending.length - 1, step + 1))}
+          style={[styles.stepNav, { opacity: step >= pending.length - 1 ? 0.35 : 1 }]}>
+          <Icon name={language === 'ar' ? 'chevron-left' : 'chevron-right'} size={18} color={theme.text} />
+        </Pressable>
+      </View>
+    </View>
+  ) : null;
 
   return (
     <>
@@ -316,7 +460,7 @@ export default function ReviewAlertsScreen() {
         headerMode="native"
         header={reviewAlertsHeader}>
         <FlatList
-          data={pending}
+          data={stepMode ? [pending[step]] : pending}
           keyExtractor={(item) => item.id}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[listInsets.contentContainerStyle, pending.length === 0 && styles.emptyContent]}
@@ -330,8 +474,17 @@ export default function ReviewAlertsScreen() {
                 <View style={styles.intro} testID="review-alerts-intro">
                   <ThemedText type="smallBold" accessibilityLiveRegion="polite">{tf('reviewAlertsSettingsCount', { count: pending.length })}</ThemedText>
                   <ThemedText type="small" themeColor="textSecondary">{words.reviewBody}</ThemedText>
+                  {pending.length > 1 ? (
+                    <Pressable testID="review-mode-toggle" accessibilityRole="button"
+                      accessibilityLabel={stepMode ? d.review.showList : d.review.oneByOne}
+                      onPress={() => { setStepIndex(0); setStepping(!stepMode); }} style={styles.modeToggle}>
+                      <Icon name={stepMode ? 'filter' : 'sliders'} size={16} color={theme.primary} />
+                      <ThemedText type="smallBold" style={{ color: theme.primary }}>{stepMode ? d.review.showList : d.review.oneByOne}</ThemedText>
+                    </Pressable>
+                  ) : null}
                 </View>
               ) : null}
+              {stepper}
             </>
           ) : null}
           ListFooterComponent={<ThemedText type="meta" themeColor="textSecondary" style={styles.privacyCopy}>{t('reviewAlertsPrivacy')}</ThemedText>}
@@ -346,11 +499,18 @@ export default function ReviewAlertsScreen() {
               </ThemedText>
             </View>
           }
-          renderItem={({ item }) => (
+          renderItem={({ item }) => stepMode ? (
+            <StepCard
+              item={item}
+              busy={busyId === item.id}
+              onAdd={() => openAdd(item)}
+              onDismiss={() => setTarget(item)}
+            />
+          ) : (
             <AlertRow
               item={item}
               busy={busyId === item.id}
-              onAdd={() => router.push({ pathname: '/add-transaction', params: { reviewId: item.id } })}
+              onAdd={() => openAdd(item)}
               onDismiss={() => setTarget(item)}
             />
           )}
@@ -384,8 +544,8 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.three,
   },
   alertIcon: {
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
     borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
@@ -393,6 +553,8 @@ const styles = StyleSheet.create({
   alertCopy: { flex: 1, minWidth: 0, gap: Spacing.half },
   amount: { marginVertical: Spacing.half },
   alertMain: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.three },
+  headline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: Spacing.two },
+  headlineTitle: { flexShrink: 1 },
   rowActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   addButton: {
     flexGrow: 1,
@@ -408,6 +570,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Spacing.two,
+  },
+  modeToggle: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, alignSelf: 'flex-start' },
+  stepper: { paddingBottom: Spacing.three },
+  stepHeader: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  stepNav: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  stepCard: { borderWidth: 1, borderRadius: Radius.sheet, padding: Spacing.three, gap: Spacing.three },
+  fact: {
+    minHeight: 44,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingVertical: Spacing.two,
+  },
+  factValue: { flexShrink: 1, textAlign: 'right' },
+  stepActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  stepButton: {
+    flexGrow: 1,
+    flexBasis: 140,
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: Radius.control,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
   },
   empty: {
     flex: 1,
