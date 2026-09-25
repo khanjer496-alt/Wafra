@@ -17,7 +17,8 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useTheme } from '@/hooks/use-theme';
-import { formatAED, friendlyDate, toISODate } from '@/lib/format';
+import { detailsWords } from '@/lib/details-copy';
+import { formatAED, friendlyDate, shortDate, toISODate } from '@/lib/format';
 import { t } from '@/lib/i18n';
 import { accountDisplayName } from '@/lib/ledger';
 import { formatMinorUnits } from '@/lib/ledger-money';
@@ -27,15 +28,18 @@ import { useStore } from '@/lib/store';
 import { getTransferActivity } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { reconcileTransfers } from '@/lib/transfer-reconciliation';
+import { matchedTransferPairs, suggestedTransferPairs } from '@/lib/transfer-pairs';
 
 type Activity = ReturnType<typeof getTransferActivity>[number];
 type Scope = 'all' | 'confirmed' | 'pending';
+const MATCHED_PREVIEW = 5;
 
 export default function TransfersScreen() {
   const router = useRouter();
   const theme = useTheme();
   const language = useLanguage();
   const words = transferActivityCopy(language);
+  const d = detailsWords(language);
   const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
   const { state } = useStore();
@@ -51,6 +55,21 @@ export default function TransfersScreen() {
     [state.transactions, state.accounts, reconciliation]);
   const accounts = useMemo(() => new Map(state.accounts.map(account => [account.id, account])), [state.accounts]);
   const selected = selectedId ? activity.find(item => item.transaction.id === selectedId) : undefined;
+  const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
+  // Pairs the reconciler has confirmed, both legs naming each other, in the selected period.
+  const matched = useMemo(() => matchedTransferPairs(reconciliation, rowsById, pair => inPeriod(pair.out.date, period)),
+    // monthKey reads the StoreProvider's active salary-day setting.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reconciliation, rowsById, period, state.monthStartDay]);
+  const suggestedPairs = useMemo(() => suggestedTransferPairs(reconciliation, rowsById).length, [reconciliation, rowsById]);
+  const [showAllMatched, setShowAllMatched] = useState(false);
+  const accountName = (id: string) => {
+    const account = accounts.get(id);
+    return account ? accountDisplayName(account) : words.accountUnknown;
+  };
+  const moneyLabel = (fils: number) => moneySpec
+    ? `${moneySpec.currency} ${formatMinorUnits(fils, moneySpec, { decimals: true })}`
+    : formatAED(fils, { decimals: true });
   const today = toISODate(new Date());
   const sections = useMemo(() => {
     const days = new Map<string, Activity[]>();
@@ -109,6 +128,33 @@ export default function TransfersScreen() {
           <SegmentedControl<Scope> label={words.title} value={scope} onChange={setScope}
             segments={[{ value: 'all', label: words.all }, { value: 'confirmed', label: words.confirmed }, { value: 'pending', label: words.pending }]} />
           <ThemedText type="meta" themeColor="textSecondary">{words.recordsNote}</ThemedText>
+          {suggestedPairs > 0 ? <Pressable testID="transfer-pairs-link" accessibilityRole="button"
+            accessibilityLabel={d.transfers.pairsLink(suggestedPairs)}
+            onPress={() => router.push('/review-transfers')} style={styles.reviewAction}>
+            <ThemedText type="linkPrimary" themeColor="primary">{d.transfers.pairsLink(suggestedPairs)}</ThemedText>
+            <Icon name="arrow-up-right" size={16} color={theme.primary} />
+          </Pressable> : null}
+          {matched.length > 0 ? <View testID="transfer-matched-pairs" style={styles.matched}>
+            <ThemedText type="smallBold" accessibilityRole="header">{d.transfers.matchedTitle}</ThemedText>
+            {(showAllMatched ? matched : matched.slice(0, MATCHED_PREVIEW)).map(pair => {
+              const label = `${accountName(pair.out.accountId)} → ${accountName(pair.in.accountId)}`;
+              return <Pressable key={pair.key} testID="transfer-matched-pair" accessibilityRole="button"
+                accessibilityLabel={`${words.viewDetails}: ${d.transfers.pairA11y(accountName(pair.out.accountId), accountName(pair.in.accountId), moneyLabel(pair.out.amountFils))}. ${shortDate(pair.out.date)}`}
+                onPress={() => { Keyboard.dismiss(); setSelectedId(pair.out.id); }}
+                style={({ pressed }) => [styles.matchedRow, { borderTopColor: theme.cardBorder, opacity: pressed ? 0.7 : 1 }]}>
+                <Icon name="repeat" size={18} color={theme.textSecondary} />
+                <View style={styles.grow}>
+                  <ThemedText type="smallBold" numberOfLines={2}>{label}</ThemedText>
+                  <ThemedText type="meta" themeColor="textSecondary">{shortDate(pair.out.date)}</ThemedText>
+                </View>
+                <Money fils={pair.out.amountFils} type="smallBold" decimals />
+              </Pressable>;
+            })}
+            {matched.length > MATCHED_PREVIEW ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: showAllMatched }}
+              onPress={() => setShowAllMatched(value => !value)} style={styles.reviewAction}>
+              <ThemedText type="linkPrimary" themeColor="primary">{showAllMatched ? d.transfers.showFewer : d.transfers.showAll(matched.length)}</ThemedText>
+            </Pressable> : null}
+          </View> : null}
         </View>}
         renderSectionHeader={({ section }) => <ThemedText type="smallBold" style={styles.day}>{section.title}</ThemedText>}
         renderItem={({ item }) => {
@@ -162,6 +208,8 @@ const styles = StyleSheet.create({
   grow: { flex: 1, minWidth: 0, gap: 4 },
   headline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
   stack: { flexDirection: 'column', alignItems: 'flex-start' },
+  matched: { gap: 0, paddingTop: Spacing.two },
+  matchedRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
   reviewAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, alignSelf: 'flex-start', marginStart: 28 },
   empty: { alignItems: 'center', paddingVertical: Spacing.five, gap: Spacing.three },
   emptyCopy: { textAlign: 'center' },

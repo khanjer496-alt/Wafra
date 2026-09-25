@@ -16,6 +16,8 @@ import { formatAED, fullDateTime, shortDate, toISODate } from '@/lib/format';
 import { bankBrandForName } from '@/lib/markets';
 import { formatMinorUnits } from '@/lib/ledger-money';
 import { useStore } from '@/lib/store';
+import { detailsWords } from '@/lib/details-copy';
+import { suggestedTransferPairs, type TransferPair } from '@/lib/transfer-pairs';
 import { isTransferCandidate, reconcileTransfers, transferFingerprint } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import { indexTransferHistory, projectTransferHistory, transferAccountLabel, transferHistoryItems, TRANSFER_HISTORY_PAGE_SIZE,
@@ -93,6 +95,44 @@ function SummaryFacts({ summary, words }: { summary: Summary; words: Words }) {
   </View>;
 }
 
+function PairLeg({ label, account, when, amount, direction }: {
+  label: string; account: string; when: string; amount: string; direction: 'out' | 'in';
+}) {
+  const theme = useTheme();
+  return <View style={styles.leg}>
+    <Icon name={direction === 'out' ? 'arrow-up-right' : 'arrow-down-right'} size={18}
+      color={direction === 'out' ? theme.textSecondary : theme.income} />
+    <View style={styles.flexText}>
+      <ThemedText type="meta" themeColor="textSecondary">{label} · {when}</ThemedText>
+      <ThemedText type="smallBold" numberOfLines={2}>{account}</ThemedText>
+    </View>
+    <ThemedText type="smallBold" tabular style={direction === 'in' ? { color: theme.income } : undefined}>
+      {direction === 'out' ? '−' : '+'} {amount}
+    </ThemedText>
+  </View>;
+}
+
+/** Both legs of one suggested own-account transfer, answered with one tap. */
+function PairCard({ pair, outAccount, inAccount, busy, onMatch, onSeparate }: {
+  pair: TransferPair; outAccount: string; inAccount: string; busy: boolean;
+  onMatch: () => void; onSeparate: () => void;
+}) {
+  const theme = useTheme(); const language = useLanguage();
+  const d = detailsWords(language);
+  const amount = formatAED(pair.out.amountFils, { decimals: true });
+  const incoming = formatAED(pair.in.amountFils, { decimals: true });
+  return <View testID="transfer-pair-card" style={[styles.pairCard, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}
+    accessibilityLabel={d.transfers.pairA11y(outAccount, inAccount, amount)}>
+    <PairLeg label={d.transfers.out} account={outAccount} when={fullDateTime(pair.out)} amount={amount} direction="out" />
+    <View style={[styles.legRule, { backgroundColor: theme.cardBorder }]} />
+    <PairLeg label={d.transfers.in} account={inAccount} when={fullDateTime(pair.in)} amount={incoming} direction="in" />
+    <View style={styles.pairActions}>
+      <View testID="transfer-pair-match"><Button wrapLabel label={d.transfers.match} disabled={busy} onPress={onMatch} /></View>
+      <View testID="transfer-pair-separate"><Button variant="ghost" wrapLabel label={d.transfers.notPair} disabled={busy} onPress={onSeparate} /></View>
+    </View>
+  </View>;
+}
+
 export default function ReviewTransfersScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ transactionId?: string | string[] }>();
@@ -100,6 +140,11 @@ export default function ReviewTransfersScreen() {
   const theme = useTheme();
   const language = useLanguage();
   const words = transferReviewCopy(language);
+  const d = detailsWords(language);
+  // "Not a pair" hides the suggestion for this visit only; both entries stay
+  // in the ordinary queue below. Persisting a rejected pairing needs a store
+  // decision this screen does not have.
+  const [separated, setSeparated] = useState<Set<string>>(() => new Set());
   const toast = useToast();
   const { state, resolveTransfers, getStateGeneration, getStateSnapshot, ensureDurable } = useStore();
   const [filter, setFilter] = useState<'pending' | 'reviewed'>(() => {
@@ -135,6 +180,10 @@ export default function ReviewTransfersScreen() {
   }, [state.accounts, state.transactions, words]);
   const focusedId = showAll ? undefined : transactionId;
   const todayISO = toISODate(new Date());
+  const pairs = useMemo<TransferPair[]>(() => filter === 'pending' && !focusedId
+    ? suggestedTransferPairs(reconciliation, transactionsById).filter(pair => !separated.has(pair.key))
+    : [], [filter, focusedId, reconciliation, transactionsById, separated]);
+  const pairedIds = useMemo(() => new Set(pairs.flatMap(pair => [pair.out.id, pair.in.id])), [pairs]);
   // A person can explicitly review an uncertain transfer even when it has too
   // little evidence to warrant a mandatory task. This local display group does
   // not add it to the queue or classify it; opening the entry uses the existing
@@ -150,7 +199,8 @@ export default function ReviewTransfersScreen() {
   }, [focusedId, reconciliation, transactionsById]);
   const candidates = useMemo<Group[]>(() => filter === 'pending'
     ? [...reconciliation.groups.flatMap((group) => {
-        const transactionIds = group.transactionIds.filter((id) => reconciliation.pendingIds.has(id));
+        // A leg shown on a pair card above is not listed a second time.
+        const transactionIds = group.transactionIds.filter((id) => reconciliation.pendingIds.has(id) && !pairedIds.has(id));
         return transactionIds.length > 0 ? [{ ...group, transactionIds }] : [];
       }), ...(focusedPendingGroup ? [focusedPendingGroup] : [])]
     : state.transactions
@@ -167,7 +217,7 @@ export default function ReviewTransfersScreen() {
         status: reconciliation.byId.get(row.id)?.status ?? (row.transferDecision?.ownership === 'own' ? 'confirmed-own' : 'confirmed-external'),
         counterparty: row.transferEvidence?.counterparty, bulkEligible: false,
         counterpartyName: row.transferEvidence?.counterpartyName,
-      })), [filter, reconciliation, state.transactions, focusedPendingGroup]);
+      })), [filter, reconciliation, state.transactions, focusedPendingGroup, pairedIds]);
   const candidateTransactionCount = useMemo(
     () => candidates.reduce((count, group) => count + group.transactionIds.length, 0),
     [candidates],
@@ -234,6 +284,34 @@ export default function ReviewTransfersScreen() {
     setNeedsDurability(false);
   };
 
+  const pairSelection = (pair: TransferPair): Selection => {
+    const anchor = pair.anchorId === pair.out.id ? pair.out : pair.in;
+    const other = anchor.id === pair.out.id ? pair.in : pair.out;
+    return {
+      ids: [anchor.id],
+      expectedFingerprints: { [anchor.id]: transferFingerprint(anchor), [other.id]: transferFingerprint(other) },
+      expectedGeneration: getStateGeneration(),
+      summary: summarize([anchor], accountLabels.get(anchor.accountId) ?? words.accountUnknown,
+        anchor.transferEvidence?.counterpartyName ?? counterpartLabel(anchor.transferEvidence?.counterparty, words)),
+      ownership: 'own', undo: false, status: 'likely-own',
+      counterpart: { id: other.id, title: other.title, account: accountLabels.get(other.accountId) ?? words.accountUnknown,
+        date: fullDateTime(other), amount: other.amountFils, linkable: true },
+      record: { title: anchor.title, reference: anchor.transferEvidence?.reference,
+        source: anchor.source === 'sms' || anchor.smsKey ? words.bankRecord : words.manualRecord },
+    };
+  };
+  // One tap, the same request and the same change checks as the sheet's
+  // "link" path. A failure opens the sheet on this pair with the error.
+  const matchPair = (pair: TransferPair) => {
+    if (saving.current) return;
+    Keyboard.dismiss();
+    void save(pairSelection(pair), true);
+  };
+  const separatePair = (pair: TransferPair) => {
+    setSeparated(current => new Set(current).add(pair.key));
+    toast.show(d.transfers.notPairDone, { tone: 'info' });
+  };
+
   const closeReview = () => {
     if (saving.current || (needsDurability && !stale)) return;
     setSelection(null);
@@ -241,8 +319,9 @@ export default function ReviewTransfersScreen() {
     setNeedsDurability(false);
   };
 
-  const save = async () => {
-    if (!selection || selection.ownership === undefined || saving.current || stale) return;
+  const save = async (target: Selection | null = selection, oneTap = false) => {
+    const selection = target;
+    if (!selection || selection.ownership === undefined || saving.current || (!oneTap && stale)) return;
     // A retry does not enter the resolver again. Check its post-decision
     // fingerprints against authoritative state, even before React re-renders.
     const latest = new Map(getStateSnapshot().transactions.map((row) => [row.id, row]));
@@ -251,7 +330,8 @@ export default function ReviewTransfersScreen() {
         const current = latest.get(id);
         return !current || transferFingerprint(current) !== expected;
       })) {
-      setError(words.changed);
+      if (oneTap) toast.show(words.changed, { tone: 'error' });
+      else setError(words.changed);
       return;
     }
     saving.current = true;
@@ -262,7 +342,7 @@ export default function ReviewTransfersScreen() {
       else await resolveTransfers({ ids: selection.ids, ownership: selection.ownership,
         ...(selection.ownership === 'own' && selection.counterpart?.linkable ? { counterpartId: selection.counterpart.id } : {}),
         expectedFingerprints: selection.expectedFingerprints, expectedGeneration: selection.expectedGeneration });
-      toast.show(selection.undo ? words.undone : words.saved, { tone: 'success' });
+      toast.show(oneTap ? d.transfers.matched : selection.undo ? words.undone : words.saved, { tone: 'success' });
       setSelection(null);
       setNeedsDurability(false);
       // Keep the current browsing position; classifying one row is not a
@@ -280,6 +360,9 @@ export default function ReviewTransfersScreen() {
         }
         setNeedsDurability(true);
       }
+      // A one-tap match that failed continues in the sheet, where retry and
+      // cancel already exist.
+      if (oneTap && code !== 'transfer-durability') setSelection(selection);
       setError(code === 'transfer-durability' || needsDurability ? words.durabilityFailed : words.saveFailed);
     } finally {
       saving.current = false;
@@ -299,6 +382,14 @@ export default function ReviewTransfersScreen() {
           {!focusedId && candidates.length > 0 ? (
             <ThemedText type="small" themeColor="textSecondary">{words.intro}</ThemedText>
           ) : null}
+          {pairs.length > 0 ? <View testID="transfer-pairs" style={styles.pairs}>
+            <ThemedText type="smallBold" accessibilityRole="header">{d.transfers.pairsTitle(pairs.length)}</ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary">{d.transfers.pairsBody}</ThemedText>
+            {pairs.map(pair => <PairCard key={pair.key} pair={pair} busy={busy}
+              outAccount={accountLabels.get(pair.out.accountId) ?? words.accountUnknown}
+              inAccount={accountLabels.get(pair.in.accountId) ?? words.accountUnknown}
+              onMatch={() => matchPair(pair)} onSeparate={() => separatePair(pair)} />)}
+          </View> : null}
           {focusedId ? (
             <Button variant="ghost" label={words.showAll} onPress={() => { setShowAll(true); browse('all'); }} />
           ) : candidateTransactionCount > 8 ? (
@@ -400,6 +491,11 @@ export default function ReviewTransfersScreen() {
 
 const styles = StyleSheet.create({
   intro: { gap: Spacing.three, paddingBottom: Spacing.three },
+  pairs: { gap: Spacing.two },
+  pairCard: { borderWidth: 1, borderRadius: 14, padding: Spacing.three, gap: Spacing.two },
+  leg: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  legRule: { height: StyleSheet.hairlineWidth },
+  pairActions: { gap: Spacing.one, paddingTop: Spacing.one },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   filter: { minHeight: 48, justifyContent: 'center', paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, borderBottomWidth: 2 },
   facts: { gap: Spacing.one },
