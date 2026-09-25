@@ -909,7 +909,7 @@ function bodyOf(source, header) {
   const autoImport = stripComments(read('src/hooks/use-auto-import.ts'));
   ok('real Android arrival edges acknowledge a durable import while source-free maintenance stays quiet',
     /liveEvent && !interactive/.test(autoImport) &&
-      /showLiveCaptureFeedback\(outcome\.transactions\)/.test(autoImport) &&
+      /showLiveCaptureFeedback\(outcome\.transactions, outcome\.transactionIds\)/.test(autoImport) &&
       /latestScan\.current\(false, true\)/.test(autoImport) &&
       /runAndroidNotificationDrain\(true\)/.test(autoImport) &&
       /latestScan\.current\(false\)/.test(autoImport),

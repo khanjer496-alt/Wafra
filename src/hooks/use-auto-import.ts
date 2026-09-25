@@ -50,7 +50,8 @@ import {
   androidNotificationCaptureEnabled,
   androidSmsCaptureEnabled,
 } from '@/lib/android-capture-sources';
-import { committed } from '@/lib/haptics';
+import { captured, committed } from '@/lib/haptics';
+import { captureToastContent } from '@/lib/capture-toast';
 import { t, tf } from '@/lib/i18n';
 import {
   notificationDeliveryAllowed,
@@ -974,14 +975,32 @@ export function useAutoImport(
     }
   }, [getStateSnapshot]);
 
-  const showLiveCaptureFeedback = useCallback((count: number): void => {
+  const showLiveCaptureFeedback = useCallback((
+    count: number,
+    transactionIds: readonly string[] = [],
+  ): void => {
     if (count <= 0) return;
-    committed();
+    // A light tick, not the firmer "you committed something" tap: the user
+    // did nothing, a transaction simply arrived.
+    captured();
+    // Name the row only when exactly one is known by id; otherwise (a burst,
+    // or a caller that could only count) keep the generic line.
+    let content: ReturnType<typeof captureToastContent> = null;
+    if (count === 1 && transactionIds.length === 1) {
+      const current = getStateSnapshot();
+      const row = current.transactions.find((transaction) => transaction.id === transactionIds[0]);
+      content = captureToastContent(row, current.ledgerMoney ?? null, current.language);
+    }
     toast.show(
-      count === 1 ? t('liveTransactionAdded') : tf('liveTransactionsAdded', { count }),
-      { tone: 'success', durationMs: 3200 },
+      content?.message ?? (count === 1 ? t('liveTransactionAdded') : tf('liveTransactionsAdded', { count })),
+      {
+        tone: 'success',
+        durationMs: 3200,
+        placement: 'top',
+        ...(content ? { trailing: content.amount, announcement: content.spoken } : {}),
+      },
     );
-  }, [toast]);
+  }, [getStateSnapshot, toast]);
 
   const performAutoImport = useCallback(
     async (interactive: boolean, liveEvent = false): Promise<AutoImportOutcome> => {
@@ -1154,7 +1173,7 @@ export function useAutoImport(
       // Source-free launch/resume maintenance stays quiet, but an actual live
       // Android provider edge should feel immediate once the durable row lands.
       if (liveEvent && !interactive) {
-        showLiveCaptureFeedback(outcome.transactions);
+        showLiveCaptureFeedback(outcome.transactions, outcome.transactionIds);
       } else if (interactive) {
         committed();
         toast.show(
@@ -1296,7 +1315,7 @@ export function useAutoImport(
         androidNotificationLastCheckedAt = Date.now();
         if (outcome.kind === 'imported') {
           postAndroidImportNotice(outcome.transactionIds);
-          if (liveEvent) showLiveCaptureFeedback(outcome.transactions);
+          if (liveEvent) showLiveCaptureFeedback(outcome.transactions, outcome.transactionIds);
           return 'imported';
         }
         if (liveEvent && pushRowsImportedByExisting > 0) {
