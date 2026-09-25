@@ -37,7 +37,7 @@ function fields(value: object, names: string): JsonRow {
 }
 const dictionary = (input: Record<string, string>) => Object.fromEntries(Object.entries(input ?? {})
   .filter(([key, value]) => !['__proto__', 'constructor', 'prototype'].includes(key) && typeof value === 'string'));
-const ACCOUNT_FIELDS = 'id name kind openingFils color last4 bankName cardType snapshotFils snapshotKind snapshotTs creditLimitFils archived renewedFrom';
+const ACCOUNT_FIELDS = 'id name kind openingFils color last4 bankName cardType snapshotFils snapshotKind snapshotTs manualSnapshotTs creditLimitFils archived renewedFrom';
 const TX_FIELDS = 'id type amountFils originalAmountMinor originalMinorUnits originalExponent originalCurrency fxRate fxRateDate fxSource category accountId title note date ts source smsKey viaPush cardPaymentSide paymentFlowSide billIdentity paymentInstrumentSource cashOutDate cashOutAccountId isTransfer userEdited titleEdited';
 
 export const assertDiagnosticContinues = (shouldContinue: () => boolean): void => {
