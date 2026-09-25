@@ -919,7 +919,7 @@ export default function AddTransactionScreen() {
               ]}>
               {selected ? <>
                 <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
-                <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{accountDisplayName(selected)}</ThemedText>
+                <ThemedText type="small" style={styles.accountTriggerName}>{accountDisplayName(selected)}</ThemedText>
               </> : <ThemedText type="small" themeColor="textSecondary" style={styles.accountTriggerName}>
                 {tUi('reviewAlertChooseAccount')}
               </ThemedText>}

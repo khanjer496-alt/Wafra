@@ -76,5 +76,8 @@ const styles = StyleSheet.create({
   rowWrapper: { flexDirection: 'row', alignItems: 'center' }, row: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 64, paddingVertical: 10 },
   content: { flex: 1, minWidth: 0, gap: 4 }, line: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   grow: { flex: 1, minWidth: 0, gap: 4 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
-  manage: { minWidth: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginEnd: -8 },
+  // No negative end margin: it pulled the row's own hit area 8pt under this
+  // control, and on the web the logical margin resolves to the physical right
+  // even in Arabic.
+  manage: { minWidth: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
 });

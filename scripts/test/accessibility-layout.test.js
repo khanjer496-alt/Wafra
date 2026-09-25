@@ -277,5 +277,51 @@ ok('Limit editor delegates keyboard scrolling to the shared labelled sheet and f
   /<BottomSheet/.test(limitSheet) && /<TextField[\s\S]*?label=\{t\('monthlyLimit'\)\}/.test(limitSheet) &&
     !/<Modal/.test(limitSheet) && !/<ScrollView/.test(limitSheet) && !/useKeyboardHeight/.test(limitSheet));
 
+/* ── Larger Text (docs/design/2026-09-25-large-text-audit.md) ─────────── */
+const money = source('src/components/ui/money.tsx');
+const bottomSheet = source('src/components/ui/bottom-sheet.tsx');
+const fontScaleHarness = source('src/lib/e2e-font-scale.ts');
+const rampCaps = Object.fromEntries([...(themedText.match(/const RAMP_CAP[\s\S]*?\};/)?.[0] ?? '')
+  .matchAll(/^\s+(\w+): ([\d.]+),$/gm)].map((m) => [m[1], Number(m[2])]));
+ok('Only display sizes carry a Larger Text cap, and each still grows at least 1.75x',
+  Object.keys(rampCaps).sort().join() === 'amount,display,heading,sheetAmount,subtitle,title' &&
+    Object.values(rampCaps).every((cap) => cap >= 1.75));
+ok('A caller-supplied maxFontSizeMultiplier wins over the ramp cap',
+  /rest\.maxFontSizeMultiplier !== undefined\s*\? rest\.maxFontSizeMultiplier : RAMP_CAP\[type\]/.test(themedText) &&
+    /\{\.\.\.rest\}\s*maxFontSizeMultiplier=\{maxFontSizeMultiplier\}/.test(themedText));
+ok('Money keeps hero figures whole: fitted from the width, never truncated, full amount labelled',
+  /useHeroFigureMultiplier\(amount, type, fitInset\)/.test(money) &&
+    /large && styles\.valueWhole/.test(money) && /valueWhole: \{ flexShrink: 0, maxWidth: '100%' \}/.test(money) &&
+    /accessibilityLabel=\{label\}/.test(money) && !/numberOfLines/.test(money));
+ok('Tab bar goes icon-only at the accessibility sizes and keeps every label for assistive tech',
+  /const iconOnly = useLargeTextLayout\(\)/.test(tabBar) && /accessibilityLabel=\{label\}/.test(tabBar) &&
+    /\{!iconOnly && <ThemedText/.test(tabBar) && /onLongPress=\{iconOnly \?/.test(tabBar));
+ok('Sheets scroll their footer with the content at the accessibility sizes',
+  /const pinFooter = hasFooter && !largeText;/.test(bottomSheet) &&
+    /\{pinFooter \? null : footerNode\}\s*<\/ScrollView>/.test(bottomSheet));
+ok('The font-scale emulation only exists in the seeded web E2E export',
+  /Platform\.OS !== 'web' \|\| process\.env\.EXPO_PUBLIC_WAFRA_E2E_DEMO !== '1'\) return null/.test(fontScaleHarness) &&
+    /E2E_FONT_SCALE === null\s*\? composed/.test(themedText));
+ok('Transactions scroll the search controls with the list at the accessibility sizes',
+  /\{largeText \? null : searchControls\}/.test(source('src/app/transactions.tsx')) &&
+    /\{scrollingSearchControls\}/.test(source('src/app/transactions.tsx')));
+{
+  // Behaviour of the figure fit, from the compiled module when the suite has
+  // built it (npm test); skipped when this file is run on its own.
+  const built = path.join(__dirname, 'build/large-text-figure.js');
+  if (fs.existsSync(built)) {
+    const { figureFontMultiplier } = require(built);
+    ok('Figure fit is inert at the default text size', figureFontMultiplier(9, 36, 1.75, 327, 1) === undefined);
+    ok('Figure fit keeps the requested size when the figure fits', figureFontMultiplier(6, 36, 1.75, 327, 1.35) === 1.35);
+    ok('Figure fit never exceeds its ramp cap', figureFontMultiplier(4, 36, 1.75, 1000, 3.1) === 1.75);
+    const tight = figureFontMultiplier(9, 36, 1.75, 327, 3.1);
+    ok(`Figure fit shrinks a wide figure to its width (${tight?.toFixed(3)})`,
+      tight !== undefined && tight < 1.75 && 9 * 36 * 0.62 * tight <= 327.01);
+    ok('Figure fit never goes under 60% of the requested size',
+      Math.abs(figureFontMultiplier(16, 36, 1.75, 200, 3.1) - 1.75 * 0.6) < 1e-9 &&
+        figureFontMultiplier(16, 36, 1.75, 50, 1.2) === 1);
+  }
+}
+
 console.log(`\naccessibility-layout: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

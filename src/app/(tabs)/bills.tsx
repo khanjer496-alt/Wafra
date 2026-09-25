@@ -770,7 +770,7 @@ export default function BillsScreen() {
           <ThemedText type="micro" themeColor="textSecondary" style={styles.summaryLabel}>
             {summary.label}
           </ThemedText>
-          <Money fils={summary.totalFils} type="display" decimals />
+          <Money fils={summary.totalFils} type="display" decimals fitInset={Spacing.three * 2 + 2} />
           <View style={styles.summaryMeta}>
             <ThemedText type="meta" themeColor="textSecondary">
               {tf('billsSummaryPayments', {

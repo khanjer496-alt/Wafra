@@ -310,6 +310,68 @@ export default function TransactionsScreen() {
     pendingFilterFrame.current = requestAnimationFrame(commit);
   }, []);
 
+  // At the accessibility text sizes the search field, filter button and
+  // transfers link fill most of a phone screen on their own. Pinned above the
+  // list they left the results a 44pt strip to scroll in, so there they
+  // scroll away with the list as its first cell.
+  const searchControls = (
+    <View style={[styles.searchContainer, largeText && styles.searchContainerInList]} accessibilityState={{ busy: resultsPending }}>
+          <View testID="transaction-search-toolbar" style={[styles.searchToolbar, largeText && styles.searchToolbarLarge, narrowSearch && styles.searchToolbarLarge]}>
+            <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
+              <TextField
+                label={tr('transactionSearchLabel')}
+                accessibilityLabel={tr('searchMerchants')}
+                value={query}
+                onChangeText={setQuery}
+                inputMode="search"
+                returnKeyType="search"
+                placeholder={tr('transactionSearchPlaceholder')}
+                onSubmitEditing={() => Keyboard.dismiss()}
+                leading={<Icon name="search" size={17} color={theme.textSecondary} />}
+                trailing={query.length > 0 ? (
+                  <ActionIconButton
+                    icon="close"
+                    label={tr('clearSearch')}
+                    variant="plain"
+                    onPress={() => setQuery('')}
+                  />
+                ) : undefined}
+              />
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={tr('filtersButton')}
+              accessibilityState={{ selected: activeFilterCount > 0 }}
+              hitSlop={6}
+              onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
+              style={({ pressed }) => [
+                styles.filterBtn,
+                (largeText || narrowSearch) && styles.filterBtnStacked,
+                {
+                  backgroundColor: activeFilterCount > 0
+                    ? theme.primary
+                    : theme.backgroundSelected,
+                  opacity: pressed ? 0.72 : 1,
+                },
+              ]}>
+              <Icon
+                name="filter"
+                size={17}
+                color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
+              />
+            </Pressable>
+          </View>
+      <Pressable accessibilityRole="button" onPress={() => router.push('/transfers')}
+        style={styles.transferLink} testID="transactions-transfers-link">
+        <Icon name="repeat" size={17} color={theme.primary} />
+        <ThemedText type="linkPrimary" themeColor="primary">{transferWords.viewAll}</ThemedText>
+        <Icon name="chevron-right" size={16} color={theme.primary} />
+      </Pressable>
+      {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite">{tr('filterUpdating')}</ThemedText>}
+    </View>
+  );
+  const scrollingSearchControls = largeText ? searchControls : null;
+
   const transactionResults = useMemo(() => (
         <SectionList
           sections={sections}
@@ -321,6 +383,7 @@ export default function TransactionsScreen() {
           contentInsetAdjustmentBehavior="automatic"
           ListHeaderComponent={(
             <View style={styles.controls}>
+              {scrollingSearchControls}
 
 
               {/* The restrictions that came from the link that opened this screen.
@@ -503,7 +566,7 @@ export default function TransactionsScreen() {
         />
   ), [sections, listInsets, largeText, merchantFilter, smsOnly, autoAddedCount, autoAddedActive, theme, tr, trf, filtered.length,
     filters.datePreset, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
-    separatedTransfers, transferContributes, transferWords]);
+    separatedTransfers, transferContributes, transferWords, scrollingSearchControls]);
 
   return (
     <>
@@ -520,60 +583,7 @@ export default function TransactionsScreen() {
             onPress: () => router.push('/add-transaction'),
           }],
         }}>
-        <View style={styles.searchContainer} accessibilityState={{ busy: resultsPending }}>
-              <View testID="transaction-search-toolbar" style={[styles.searchToolbar, largeText && styles.searchToolbarLarge, narrowSearch && styles.searchToolbarLarge]}>
-                <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
-                  <TextField
-                    label={tr('transactionSearchLabel')}
-                    accessibilityLabel={tr('searchMerchants')}
-                    value={query}
-                    onChangeText={setQuery}
-                    inputMode="search"
-                    returnKeyType="search"
-                    placeholder={tr('transactionSearchPlaceholder')}
-                    onSubmitEditing={() => Keyboard.dismiss()}
-                    leading={<Icon name="search" size={17} color={theme.textSecondary} />}
-                    trailing={query.length > 0 ? (
-                      <ActionIconButton
-                        icon="close"
-                        label={tr('clearSearch')}
-                        variant="plain"
-                        onPress={() => setQuery('')}
-                      />
-                    ) : undefined}
-                  />
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={tr('filtersButton')}
-                  accessibilityState={{ selected: activeFilterCount > 0 }}
-                  hitSlop={6}
-                  onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
-                  style={({ pressed }) => [
-                    styles.filterBtn,
-                    (largeText || narrowSearch) && styles.filterBtnStacked,
-                    {
-                      backgroundColor: activeFilterCount > 0
-                        ? theme.primary
-                        : theme.backgroundSelected,
-                      opacity: pressed ? 0.72 : 1,
-                    },
-                  ]}>
-                  <Icon
-                    name="filter"
-                    size={17}
-                    color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
-                  />
-                </Pressable>
-              </View>
-          <Pressable accessibilityRole="button" onPress={() => router.push('/transfers')}
-            style={styles.transferLink} testID="transactions-transfers-link">
-            <Icon name="repeat" size={17} color={theme.primary} />
-            <ThemedText type="linkPrimary" themeColor="primary">{transferWords.viewAll}</ThemedText>
-            <Icon name="chevron-right" size={16} color={theme.primary} />
-          </Pressable>
-          {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite">{tr('filterUpdating')}</ThemedText>}
-        </View>
+        {largeText ? null : searchControls}
         {transactionResults}
       </ScreenScaffold>
 
@@ -592,6 +602,8 @@ const styles = StyleSheet.create({
   // Screen sections have a gap; virtualized header/row/footer cells must not.
   listContent: { gap: 0 },
   searchContainer: { paddingHorizontal: ScreenPadding, paddingVertical: Spacing.two, gap: Spacing.one },
+  // The list content already carries the screen padding.
+  searchContainerInList: { paddingHorizontal: 0 },
   filterBtnStacked: { alignSelf: 'flex-end' },
   filterBtn: {
     width: 48,
