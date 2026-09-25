@@ -170,6 +170,13 @@ function createHarness(options = {}) {
     deps['@/components/'+module]={[name]:p=>jsx('Boundary',{...p,name})};
   }
   local('@/components/ui/category-chips');
+  // Manual Add: the keypad text model and its copy are pure and run for real;
+  // the keypad itself is a boundary, and the category advisor (rules, then an
+  // optional on-device model) answers "no suggestion" as it does off-device.
+  local('@/lib/amount-keypad','src/lib/amount-keypad.ts');
+  local('@/lib/motion-android-copy','src/lib/motion-android-copy.ts');
+  deps['@/components/ui/amount-keypad']={AmountKeypad:p=>jsx('AmountKeypad',p),KeypadAmountDisplay:p=>jsx('KeypadAmountDisplay',p)};
+  deps['@/lib/on-device-category']={categoryAdvisor:{suggest:async()=>({kind:'none',reason:'harness'}),clear(){}}};
   local('@/components/wafra-logo');
   local('@/lib/ledger-light-copy','src/lib/ledger-light-copy.ts');
   local('@/components/history-reading-status');
