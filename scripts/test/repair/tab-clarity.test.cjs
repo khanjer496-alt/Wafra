@@ -104,9 +104,14 @@ test('a manually tracked detected subscription is shown once in the due timeline
   h.state.bills.push({ id: 'netflix', title: 'Netflix', category: 'entertainment', amountFils: 4900, dueDay: 9, paidMonths: [] });
   const tree = h.render('bills');
   const rows = walk(nodeById(tree, 'payment-agenda')).filter(n => n.props?.accessibilityLabel?.startsWith('Netflix.') && n.props.onPress);
-  assert.equal(rows.length, 1);
-  assert.match(rows[0].props.accessibilityLabel, /49.00/);
-  assert.doesNotMatch(rows[0].props.accessibilityLabel, /Estimated/);
+  // Next 30 days lists each time the tracked bill falls due (the unpaid 9 Sept
+  // and the 9 Oct inside the window). What must never appear is the detected
+  // subscription as a second, estimated Netflix beside the bill.
+  assert.deepEqual(rows.map(r => r.props.accessibilityLabel.split('. ')[1]), ['9 Sept', '9 Oct']);
+  for (const row of rows) {
+    assert.match(row.props.accessibilityLabel, /49.00/);
+    assert.doesNotMatch(row.props.accessibilityLabel, /Estimated/);
+  }
 });
 test('entertainment/software expenses are not automatically presented as subscriptions', () => {
   for (const category of ['entertainment', 'software', 'rent']) {

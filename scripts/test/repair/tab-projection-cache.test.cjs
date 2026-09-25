@@ -31,7 +31,8 @@ test('Wallet balance projection does not reconcile the full transfer graph on fi
   const breakdown = balances.match(/export function netWorthBreakdown[\s\S]*?\n\}/)?.[0] ?? '';
   assert.doesNotMatch(breakdown, /=\s*reconcileTransfers\s*\(/,
     'recorded-balance projection must not synchronously rebuild the transfer graph');
-  assert.match(breakdown, /transaction\.source === 'sms'/,
+  // The captured-row rule lives in one predicate (isCapturedRow) shared with Set balance.
+  assert.match(breakdown, /transaction\.source === 'sms'|isCapturedRow\(transaction\)/,
     'SMS-fed accounts must still remain excluded from derived running balances');
 });
 
@@ -39,7 +40,8 @@ test('manual account balance skips transfer reconciliation when bank-capture evi
   const balances = read('src/lib/balances.ts');
   const account = balances.match(/export function accountBalanceFils[\s\S]*?\n\}/)?.[0] ?? '';
   assert.match(account, /hasCapturedRows/);
-  assert.match(account, /t\.source === 'sms' \|\| Boolean\(t\.smsKey\)/);
+  assert.match(account, /t\.source === 'sms' \|\| Boolean\(t\.smsKey\)|isCapturedRow\(t\)/);
+  assert.match(balances, /export function isCapturedRow[\s\S]*?source === 'sms' \|\| Boolean\(t\.smsKey\)/);
   assert.match(account, /hasCapturedRows\s*\?\s*reconcileTransfers/);
 });
 
