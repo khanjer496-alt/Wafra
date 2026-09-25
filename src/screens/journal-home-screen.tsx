@@ -262,7 +262,7 @@ export default function JournalHomeScreen() {
   // Row-local presentation checks must not force a full reconciliation graph
   // during hydration or an intermediate import page.
   const hasPeriodTransfers = useMemo(() => state.transactions.some(transaction =>
-    isTransferCandidate(transaction) && liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
+    inPeriod(transaction.date, period) && liveAccounts.has(transaction.accountId) && isTransferCandidate(transaction)),
   [state.transactions, liveAccounts, period]);
   const hasPeriodRecords = useMemo(() => state.transactions.some(transaction =>
     liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
@@ -270,9 +270,9 @@ export default function JournalHomeScreen() {
   const recentActivity = useMemo(() => {
     const rows: Transaction[] = [];
     for (const transaction of state.transactions) {
-      if (isTransferCandidate(transaction) ||
-        !countsInCashflowTotals(transaction, liveAccounts, dashboard.internalTransactionIds) ||
-        !inPeriod(transaction.date, period)) continue;
+      // Cheap period check first: isTransferCandidate runs several regexes.
+      if (!inPeriod(transaction.date, period) || isTransferCandidate(transaction) ||
+        !countsInCashflowTotals(transaction, liveAccounts, dashboard.internalTransactionIds)) continue;
       rows.push(transaction);
       if (rows.length === 5) break;
     }
