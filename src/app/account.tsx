@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
@@ -70,7 +70,17 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
   const [managing, setManaging] = useState(false);
   const [choosingBank, setChoosingBank] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [balanceOpen, setBalanceOpen] = useState(() => askBalance && account !== null && isAccountDetailTarget(account));
+  // Asked for once. A cold deep link can land before the ledger has loaded the
+  // account, so the sheet opens when it arrives — and never again after the
+  // user has closed it.
+  const balanceReady = askBalance && account !== null && isAccountDetailTarget(account);
+  const balanceAsked = useRef(balanceReady);
+  const [balanceOpen, setBalanceOpen] = useState(balanceReady);
+  useEffect(() => {
+    if (!balanceReady || balanceAsked.current) return;
+    balanceAsked.current = true;
+    setBalanceOpen(true);
+  }, [balanceReady]);
   const [balanceText, setBalanceText] = useState('');
   const [currencyOpen, setCurrencyOpen] = useState(false);
 

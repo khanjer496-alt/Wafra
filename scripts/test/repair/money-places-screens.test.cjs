@@ -119,6 +119,45 @@ test('Set today\'s balance is offered, and the quiet-row shortcut opens it strai
   assert.ok(sheet, 'the quiet-row shortcut opens the sheet straight away');
 });
 
+test('a cold Set balance link opens the sheet once the account loads, and only once', () => {
+  const h = createHarness();
+  // Hooks that persist across renders, like a mounted component's.
+  const slots = [];
+  let slot = 0;
+  let effects = [];
+  Object.assign(h.deps.react, {
+    useState: (initial) => {
+      const at = slot++;
+      if (!(at in slots)) slots[at] = typeof initial === 'function' ? initial() : initial;
+      return [slots[at], (value) => { slots[at] = value; }];
+    },
+    useRef: (value) => {
+      const at = slot++;
+      if (!(at in slots)) slots[at] = { current: value };
+      return slots[at];
+    },
+    useEffect: (effect) => { effects.push(effect); },
+  });
+  const accounts = h.state.accounts;
+  const render = () => {
+    slot = 0;
+    effects = [];
+    const tree = renderAccount(h, { id: 'cash', set: 'balance' });
+    for (const effect of effects) effect();
+    return tree;
+  };
+  const sheetOpen = (tree) => walk(tree).some((n) => n.type === 'Sheet' && n.props?.title === 'Set today’s balance');
+  h.state.accounts = [];
+  assert.equal(sheetOpen(render()), false, 'no account yet');
+  h.state.accounts = accounts;
+  render();
+  assert.equal(sheetOpen(render()), true, 'opens when the account arrives');
+  const open = walk(render()).find((n) => n.type === 'Sheet' && n.props?.title === 'Set today’s balance');
+  open.props.onClose();
+  assert.equal(sheetOpen(render()), false, 'closed by the user');
+  assert.equal(sheetOpen(render()), false, 'and it stays closed');
+});
+
 const goals = [{ id: 'umrah', title: 'Umrah trip', emoji: 'plane', targetFils: 500000, savedFils: 320000 }];
 
 test('a goal row on Accounts opens the goal screen', () => {
