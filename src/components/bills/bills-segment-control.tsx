@@ -3,6 +3,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { tapped } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
@@ -29,6 +30,10 @@ type BillsSegmentControlProps = {
 export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlProps) {
   const theme = useTheme();
   const w = moneyPlacesWords(useLanguage());
+  // At the accessibility text sizes a sideways-scrolling row hides tall chips
+  // off screen; they wrap onto lines instead, as on the web.
+  const largeText = useLargeTextLayout();
+  const wrap = Platform.OS === 'web' || largeText;
   const labels: Record<BillsSegment, string> = {
     upcoming: w.next30Days,
     all: w.allBills,
@@ -36,7 +41,7 @@ export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlPr
   const segments: BillsSegment[] = ['upcoming', 'all'];
 
   const tabs = (
-    <View role="tablist" style={[styles.segment, Platform.OS === 'web' && styles.webSegment]}>
+    <View role="tablist" style={[styles.segment, wrap && styles.webSegment]}>
       {segments.map((value) => {
         const active = segment === value;
         return (
@@ -65,7 +70,7 @@ export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlPr
             ]}>
             <ThemedText
               type={active ? 'smallBold' : 'small'}
-              style={{ color: active ? theme.inverseText : theme.textSecondary }}>
+              style={[styles.segmentLabel, { color: active ? theme.inverseText : theme.textSecondary }]}>
               {labels[value]}
             </ThemedText>
           </Pressable>
@@ -74,7 +79,7 @@ export function BillsSegmentControl({ segment, onChange }: BillsSegmentControlPr
     </View>
   );
 
-  if (Platform.OS === 'web') {
+  if (wrap) {
     return (
       <View style={styles.webContainer} accessibilityLabel={t('billsTitle')}>
         {tabs}
@@ -102,6 +107,10 @@ export function BillsGroupFilter({ value, onChange }: {
   const language = useLanguage();
   const w = moneyPlacesWords(language);
   const agenda = paymentAgendaCopy[language === 'ar' ? 'ar' : 'en'];
+  // Same rule as the views above: wrap rather than scroll sideways at the
+  // accessibility text sizes.
+  const largeText = useLargeTextLayout();
+  const wrap = Platform.OS === 'web' || largeText;
   const labels: Record<BillsGroupFilterValue, string> = {
     everything: w.everything,
     subscriptions: agenda.subscriptions,
@@ -109,10 +118,8 @@ export function BillsGroupFilter({ value, onChange }: {
     cards: agenda.cards,
   };
   const values: BillsGroupFilterValue[] = ['everything', 'subscriptions', 'utilities', 'cards'];
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scrollContent}
-      testID="bills-group-filter">
-      <View style={[styles.segment, Platform.OS === 'web' && styles.webSegment]}>
+  const chips = (
+      <View style={[styles.segment, wrap && styles.webSegment]}>
         {values.map((option) => {
           const active = value === option;
           return (
@@ -134,13 +141,20 @@ export function BillsGroupFilter({ value, onChange }: {
                   borderColor: active ? theme.primary : theme.cardBorder,
                 },
               ]}>
-              <ThemedText type={active ? 'smallBold' : 'small'} style={{ color: active ? theme.text : theme.textSecondary }}>
+              <ThemedText type={active ? 'smallBold' : 'small'}
+                style={[styles.segmentLabel, { color: active ? theme.text : theme.textSecondary }]}>
                 {labels[option]}
               </ThemedText>
             </Pressable>
           );
         })}
       </View>
+  );
+  if (wrap) return <View style={styles.webContainer} testID="bills-group-filter">{chips}</View>;
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scrollContent}
+      testID="bills-group-filter">
+      {chips}
     </ScrollView>
   );
 }
@@ -158,6 +172,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
+    maxWidth: '100%',
   },
   filterItem: {
     minHeight: 44,
@@ -166,5 +181,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     borderWidth: 1,
     paddingHorizontal: Spacing.three,
+    maxWidth: '100%',
   },
+  segmentLabel: { flexShrink: 1, textAlign: 'center' },
 });

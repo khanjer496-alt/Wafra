@@ -67,7 +67,7 @@ rewrite() {
 for f in types routes format categories ledger bill-alias capture-source-identity dedupe arabic-sms bank-amount-tokens sms-parser import-plan bills \
          transfer-reconciliation-types transfer-reconciliation transfer-evidence transfer-review-copy \
          insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics growth-funnel period purchases country-names country markets known-banks i18n system-language balances \
-         brand-marks leaving-soon accounts heal accuracy onboarding onboarding-bank-examples reminders auto-import android-capture-sources \
+         brand-marks leaving-soon accounts heal bnpl-category-repair accuracy onboarding onboarding-bank-examples reminders auto-import android-capture-sources \
          history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-source transaction-filter capture-trace \
          launch-performance launch-benchmark runtime-performance \
          relay-protocol trusted-device-contract cloud-import-contract statement-coverage statement-batch reimbursement-report fx fx-rates \
@@ -77,7 +77,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray generic-review-entry review-source-bindings unparsed-launch-alert \
          universal-types universal-dates universal-fields universal-money universal-parser universal-confidence universal-template-certification universal-import universal-categorization \
          ledger-money paste-sample backup-validation ledger-export parsed-review-event wallet-near-match review-promotion launch-review-rollout trusted-bank-notification-packages \
-         sms-corpus parser-research-contract parser-research founder-pro \
+         sms-corpus parser-research-contract parser-research founder-pro large-text-figure \
          alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me alert-market-packs.world \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-apple-pay-record ios-capture-health ios-local-capture ios-notification-replay \

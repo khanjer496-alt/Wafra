@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  InteractionManager,
   Keyboard,
   Platform,
   Pressable,
@@ -49,7 +50,7 @@ import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { isTransferCandidate, reconcileTransfers, transferOwnership } from '@/lib/transfer-reconciliation';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
-import type { CategoryId, Transaction } from '@/lib/types';
+import type { Account, CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
 
 const DEFAULT_FILTERS: Filters = {
@@ -85,6 +86,48 @@ interface DaySection {
 }
 
 const transactionKey = (transaction: Transaction) => transaction.id;
+
+/**
+ * Rows the Transfers screen owns, and transfer legs still waiting for their
+ * other side, found by a full transfer reconciliation (100–300 ms on a phone
+ * at 15k rows). Remembered per ledger so reopening the screen is instant; once
+ * the screen is showing, a ledger change recomputes after interactions settle
+ * and keeps the previous answer meanwhile, instead of freezing the list on
+ * every edit, capture or history-import page.
+ */
+type TransferScope = { separateTransferIds: ReadonlySet<string>; pendingTransferIds: ReadonlySet<string> };
+let transferScopeCache: { transactions: Transaction[]; accounts: Account[]; scope: TransferScope } | null = null;
+
+function computeTransferScope(transactions: Transaction[], accounts: Account[]): TransferScope {
+  if (transferScopeCache?.transactions === transactions && transferScopeCache.accounts === accounts) {
+    return transferScopeCache.scope;
+  }
+  const reconciliation = reconcileTransfers(transactions, accounts);
+  const scope: TransferScope = {
+    separateTransferIds: new Set(getTransferActivity(transactions, accounts, reconciliation)
+      .map(item => item.transaction.id)),
+    pendingTransferIds: reconciliation.pendingIds,
+  };
+  transferScopeCache = { transactions, accounts, scope };
+  return scope;
+}
+
+function useTransferScope(
+  transactions: Transaction[], accounts: Account[], importing: boolean,
+): TransferScope {
+  const [scope, setScope] = useState(() => computeTransferScope(transactions, accounts));
+  useEffect(() => {
+    // A running history import replaces its page within moments; the page
+    // that ends the run (complete, paused or failed) triggers the recompute.
+    if (importing) return;
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!cancelled) setScope(computeTransferScope(transactions, accounts));
+    });
+    return () => { cancelled = true; task.cancel(); };
+  }, [transactions, accounts, importing]);
+  return scope;
+}
 
 export default function TransactionsScreen() {
   const theme = useTheme();
@@ -252,9 +295,10 @@ export default function TransactionsScreen() {
   // is not painted as income it never was.
   const internal = internalTransferIdsForState(state);
   const corroborating = corroboratingTransferIdsForState(state);
-  const reconciliation = useMemo(() => reconcileTransfers(state.transactions, state.accounts), [state.transactions, state.accounts]);
-  const separateTransferIds = useMemo(() => new Set(getTransferActivity(state.transactions, state.accounts,
-    reconciliation).map(item => item.transaction.id)), [state.transactions, state.accounts, reconciliation]);
+  // Rows the Transfers screen owns and pending transfer legs, from one full
+  // reconciliation that is cached per ledger and refreshed after interactions.
+  const { separateTransferIds, pendingTransferIds } = useTransferScope(state.transactions, state.accounts,
+    state.historyImport?.status === 'running');
   // The Transfers and Needs review chips, from the predicates the rows and
   // the review screens already use: one pass over the ledger.
   const { transferIds, reviewIds } = useMemo(() => {
@@ -262,11 +306,11 @@ export default function TransactionsScreen() {
     const review = new Set<string>();
     for (const row of state.transactions) {
       if (isLedgerTransfer(row) || internal.has(row.id) || separateTransferIds.has(row.id) || isTransferCandidate(row)) transfers.add(row.id);
-      if (row.bestEffort || reconciliation.pendingIds.has(row.id) ||
+      if (row.bestEffort || pendingTransferIds.has(row.id) ||
         isUnassignedIncome(row) || row.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) review.add(row.id);
     }
     return { transferIds: transfers, reviewIds: review };
-  }, [state.transactions, internal, separateTransferIds, reconciliation]);
+  }, [state.transactions, internal, separateTransferIds, pendingTransferIds]);
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
@@ -402,6 +446,94 @@ export default function TransactionsScreen() {
     pendingFilterFrame.current = requestAnimationFrame(commit);
   }, []);
 
+  // At the accessibility text sizes the search field, filter button and
+  // transfers link fill most of a phone screen on their own. Pinned above the
+  // list they left the results a 44pt strip to scroll in, so there they
+  // scroll away with the list as its first cell.
+  const searchControls = (
+    <View style={[styles.searchContainer, largeText && styles.searchContainerInList]} accessibilityState={{ busy: resultsPending }}>
+              <View testID="transaction-search-toolbar" style={[styles.searchToolbar, largeText && styles.searchToolbarLarge, narrowSearch && styles.searchToolbarLarge]}>
+                <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
+                  <TextField
+                    label={tr('transactionSearchLabel')}
+                    accessibilityLabel={tr('searchMerchants')}
+                    value={query}
+                    onChangeText={setQuery}
+                    inputMode="search"
+                    returnKeyType="search"
+                    placeholder={tr('transactionSearchPlaceholder')}
+                    onSubmitEditing={() => Keyboard.dismiss()}
+                    leading={<Icon name="search" size={17} color={theme.textSecondary} />}
+                    trailing={query.length > 0 ? (
+                      <ActionIconButton
+                        icon="close"
+                        label={tr('clearSearch')}
+                        variant="plain"
+                        onPress={() => setQuery('')}
+                      />
+                    ) : undefined}
+                  />
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={tr('filtersButton')}
+                  accessibilityState={{ selected: activeFilterCount > 0 }}
+                  hitSlop={6}
+                  onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
+                  style={({ pressed }) => [
+                    styles.filterBtn,
+                    (largeText || narrowSearch) && styles.filterBtnStacked,
+                    {
+                      backgroundColor: activeFilterCount > 0
+                        ? theme.primary
+                        : theme.backgroundSelected,
+                      opacity: pressed ? 0.72 : 1,
+                    },
+                  ]}>
+                  <Icon
+                    name="filter"
+                    size={17}
+                    color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
+                  />
+                </Pressable>
+              </View>
+          {/* At the accessibility text sizes the chips wrap onto lines rather
+              than scrolling most of them off screen sideways. */}
+          {largeText ? <View style={[styles.typeChips, styles.typeChipsWrap]}
+            accessibilityLabel={words.types} testID="transactions-type-chips">
+            {TYPE_CHIPS.map((chip) => <View key={chip} testID={`transactions-chip-${chip}`}>
+              <Chip label={words[chip]} active={chipOf(filters) === chip}
+                onPress={() => setFilters((current) => withChip(current, chip))} />
+            </View>)}
+          </View> : <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeChips}
+            accessibilityLabel={words.types} testID="transactions-type-chips">
+            {TYPE_CHIPS.map((chip) => <View key={chip} testID={`transactions-chip-${chip}`}>
+              <Chip label={words[chip]} active={chipOf(filters) === chip}
+                onPress={() => setFilters((current) => withChip(current, chip))} />
+            </View>)}
+          </ScrollView>}
+          {filters.accountId ? <View style={styles.chipRow}>
+            <Pressable testID="transactions-account-filter" accessibilityRole="button"
+              accessibilityLabel={`${tr('clearFilter')}: ${words.accountFilter(accountLabelFor(filters.accountId))}`}
+              onPress={() => setFilters((current) => ({ ...current, accountId: null }))}
+              style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
+              <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
+                {words.accountFilter(accountLabelFor(filters.accountId))}
+              </ThemedText>
+              <Icon name="close" size={13} color={theme.primary} />
+            </Pressable>
+          </View> : null}
+          <Pressable accessibilityRole="button" onPress={() => router.push('/transfers')}
+            style={styles.transferLink} testID="transactions-transfers-link">
+            <Icon name="repeat" size={17} color={theme.primary} />
+            <ThemedText type="linkPrimary" themeColor="primary">{transferWords.viewAll}</ThemedText>
+            <Icon name="chevron-right" size={16} color={theme.primary} />
+          </Pressable>
+          {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite">{tr('filterUpdating')}</ThemedText>}
+        </View>
+  );
+  const scrollingSearchControls = largeText ? searchControls : null;
+
   const transactionResults = useMemo(() => (
         <GestureHandlerRootView style={styles.gestureRoot}>
         <SectionList
@@ -414,6 +546,7 @@ export default function TransactionsScreen() {
           contentInsetAdjustmentBehavior="automatic"
           ListHeaderComponent={(
             <View style={styles.controls}>
+              {scrollingSearchControls}
 
 
               {/* The restrictions that came from the link that opened this screen.
@@ -597,7 +730,7 @@ export default function TransactionsScreen() {
         </GestureHandlerRootView>
   ), [sections, listInsets, largeText, merchantFilter, smsOnly, autoAddedCount, autoAddedActive, theme, tr, trf, filtered.length,
     filters.datePreset, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
-    separatedTransfers, transferContributes, transferWords]);
+    separatedTransfers, transferContributes, transferWords, scrollingSearchControls]);
 
   return (
     <>
@@ -614,78 +747,7 @@ export default function TransactionsScreen() {
             onPress: () => router.push('/add-transaction'),
           }],
         }}>
-        <View style={styles.searchContainer} accessibilityState={{ busy: resultsPending }}>
-              <View testID="transaction-search-toolbar" style={[styles.searchToolbar, largeText && styles.searchToolbarLarge, narrowSearch && styles.searchToolbarLarge]}>
-                <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
-                  <TextField
-                    label={tr('transactionSearchLabel')}
-                    accessibilityLabel={tr('searchMerchants')}
-                    value={query}
-                    onChangeText={setQuery}
-                    inputMode="search"
-                    returnKeyType="search"
-                    placeholder={tr('transactionSearchPlaceholder')}
-                    onSubmitEditing={() => Keyboard.dismiss()}
-                    leading={<Icon name="search" size={17} color={theme.textSecondary} />}
-                    trailing={query.length > 0 ? (
-                      <ActionIconButton
-                        icon="close"
-                        label={tr('clearSearch')}
-                        variant="plain"
-                        onPress={() => setQuery('')}
-                      />
-                    ) : undefined}
-                  />
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={tr('filtersButton')}
-                  accessibilityState={{ selected: activeFilterCount > 0 }}
-                  hitSlop={6}
-                  onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
-                  style={({ pressed }) => [
-                    styles.filterBtn,
-                    (largeText || narrowSearch) && styles.filterBtnStacked,
-                    {
-                      backgroundColor: activeFilterCount > 0
-                        ? theme.primary
-                        : theme.backgroundSelected,
-                      opacity: pressed ? 0.72 : 1,
-                    },
-                  ]}>
-                  <Icon
-                    name="filter"
-                    size={17}
-                    color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
-                  />
-                </Pressable>
-              </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeChips}
-            accessibilityLabel={words.types} testID="transactions-type-chips">
-            {TYPE_CHIPS.map((chip) => <View key={chip} testID={`transactions-chip-${chip}`}>
-              <Chip label={words[chip]} active={chipOf(filters) === chip}
-                onPress={() => setFilters((current) => withChip(current, chip))} />
-            </View>)}
-          </ScrollView>
-          {filters.accountId ? <View style={styles.chipRow}>
-            <Pressable testID="transactions-account-filter" accessibilityRole="button"
-              accessibilityLabel={`${tr('clearFilter')}: ${words.accountFilter(accountLabelFor(filters.accountId))}`}
-              onPress={() => setFilters((current) => ({ ...current, accountId: null }))}
-              style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-              <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
-                {words.accountFilter(accountLabelFor(filters.accountId))}
-              </ThemedText>
-              <Icon name="close" size={13} color={theme.primary} />
-            </Pressable>
-          </View> : null}
-          <Pressable accessibilityRole="button" onPress={() => router.push('/transfers')}
-            style={styles.transferLink} testID="transactions-transfers-link">
-            <Icon name="repeat" size={17} color={theme.primary} />
-            <ThemedText type="linkPrimary" themeColor="primary">{transferWords.viewAll}</ThemedText>
-            <Icon name="chevron-right" size={16} color={theme.primary} />
-          </Pressable>
-          {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite">{tr('filterUpdating')}</ThemedText>}
-        </View>
+        {largeText ? null : searchControls}
         {transactionResults}
       </ScreenScaffold>
 
@@ -714,6 +776,8 @@ const styles = StyleSheet.create({
   // Screen sections have a gap; virtualized header/row/footer cells must not.
   listContent: { gap: 0 },
   searchContainer: { paddingHorizontal: ScreenPadding, paddingVertical: Spacing.two, gap: Spacing.one },
+  // The list content already carries the screen padding.
+  searchContainerInList: { paddingHorizontal: 0 },
   filterBtnStacked: { alignSelf: 'flex-end' },
   filterBtn: {
     width: 48,
@@ -789,5 +853,6 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   typeChips: { gap: Spacing.two, paddingVertical: Spacing.one },
+  typeChipsWrap: { flexDirection: 'row', flexWrap: 'wrap' },
   gestureRoot: { flex: 1 },
 });

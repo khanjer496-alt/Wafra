@@ -9,6 +9,7 @@ import { Icon } from '@/components/ui/icon';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Money } from '@/components/ui/money';
 import { SegmentedControl } from '@/components/ui/segmented-control';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { SkeletonRows } from '@/components/ui/states';
 import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
@@ -34,17 +35,21 @@ const MerchantRow = React.memo(function MerchantRow({ item, meta, rankLabel, onO
   item: RankedMerchant; meta: string; rankLabel: string; onOpen: (title: string) => void;
 }) {
   const theme = useTheme();
+  // At the accessibility sizes the logo sits above the name (as iOS Settings
+  // stacks its icons), so a long name gets the full width.
+  const largeText = useLargeTextLayout();
   return <Pressable accessibilityRole="button" accessibilityLabel={`${rankLabel}. ${item.title}. ${formatAED(item.totalFils)}. ${meta}`}
     testID="merchant-spending-row" onPress={() => onOpen(item.title)}
-    style={({ pressed }) => [styles.row, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+    style={({ pressed }) => [styles.row, largeText && styles.rowStacked, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
     <ThemedText type="meta" tabular themeColor="textTertiary" style={styles.rank} testID="merchant-rank">
       {String(item.rank).padStart(2, '0')}
     </ThemedText>
     <MerchantAvatar title={item.title} category={item.category} size={40} />
-    <View style={styles.words}><ThemedText type="smallBold" numberOfLines={2}>{item.title}</ThemedText>
+    <View style={[styles.words, largeText && styles.wordsStacked]}>
+      <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 2}>{item.title}</ThemedText>
       <ThemedText type="meta" themeColor="textSecondary">{meta}</ThemedText></View>
     <Money fils={item.totalFils} type="smallBold" />
-    <Icon name="chevron-right" size={17} color={theme.textTertiary} />
+    {largeText ? null : <Icon name="chevron-right" size={17} color={theme.textTertiary} />}
   </Pressable>;
 });
 
@@ -127,6 +132,8 @@ const styles = StyleSheet.create({
   header: { gap: 14, paddingBottom: 20 },
   row: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth },
   rank: { minWidth: 22 },
-  words: { flex: 1, minWidth: 0, gap: 4 }, empty: { gap: 16, paddingVertical: 24 },
+  words: { flex: 1, minWidth: 0, gap: 4 },
+  rowStacked: { flexDirection: 'column', alignItems: 'flex-start' },
+  wordsStacked: { flex: 0, flexBasis: 'auto', alignSelf: 'stretch' }, empty: { gap: 16, paddingVertical: 24 },
   footer: { paddingVertical: 24 },
 });

@@ -65,7 +65,7 @@ function harness(options = {}) {
     }),
     '@/constants/theme': themeModule,
     'expo-router': { useRouter: () => ({ push: (route) => events.push(['route', route]) }) },
-    '@react-navigation/native': { useIsFocused: () => true },
+    '@react-navigation/native': { useIsFocused: () => true, useFocusEffect: () => {} },
     '@/components/themed-text': { ThemedText: (props) => jsx('Text', props) },
     '@/components/ui/merchant-avatar': { MerchantAvatar: (props) => jsx('Avatar', props) },
     '@/components/ui/icon': { Icon: (props) => { if (!icons.has(props.name)) throw new Error(`Unknown icon ${props.name}`); return jsx('Icon', props); } },

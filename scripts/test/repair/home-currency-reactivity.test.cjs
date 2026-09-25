@@ -17,10 +17,14 @@ function harness() {
     '@/lib/ledger-money': money, '@/lib/markets': markets });
   const caches = new Map();
   let currentFiber = null;
+  // Like React, each compiled function (the component and every compiled
+  // custom hook it calls) gets its own cache slot, in call order per render.
+  let cacheCall = 0;
   const runtime = { c(size) {
     assert.ok(currentFiber, 'compiled memo cache must belong to the rendered component');
-    let value = caches.get(currentFiber);
-    if (!value) { value = Array(size).fill(Symbol.for('react.memo_cache_sentinel')); caches.set(currentFiber, value); }
+    const key = `${currentFiber}#${cacheCall++}`;
+    let value = caches.get(key);
+    if (!value) { value = Array(size).fill(Symbol.for('react.memo_cache_sentinel')); caches.set(key, value); }
     assert.equal(value.length, size);
     return value;
   } };
@@ -38,6 +42,8 @@ function harness() {
       },
       useState: initial => [initial, () => {}],
       useEffect: () => {},
+      // PaymentAgenda is React.memo-wrapped; render it as the plain component.
+      memo: component => component,
     }, 'react/compiler-runtime': runtime, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { Pressable: 'Pressable', View: 'View', TextInput: 'TextInput', StyleSheet: { create: value => value },
       useWindowDimensions: () => ({ width: 390, fontScale: 1 }) },
@@ -85,6 +91,10 @@ function harness() {
   };
   // Bars render at their final size, as Reduce Motion shows them.
   deps['@/components/ui/grow-bar'] = { GrowBar: (p) => ({ type: 'View', props: { style: [p.style, p.axis === 'width' ? { width: `${p.size}%` } : { height: p.size }] } }) };
+  // Large-text helpers used by Money: the E2E font scale is inert here; the
+  // figure-fitting rule is pure and compiled for real.
+  deps['@/lib/e2e-font-scale'] = { E2E_FONT_SCALE: null, scaleTextStyleForE2E: style => style };
+  deps['@/lib/large-text-figure'] = compile('src/lib/large-text-figure.ts', false);
   deps['@/components/ui/money'] = compile('src/components/ui/money.tsx');
   // Today's figure is the real RollingMoney, rendered as Reduce Motion shows it (no roll), so this
   // test still proves the figure re-formats when the denomination changes.
@@ -101,8 +111,9 @@ function harness() {
     if (Array.isArray(node)) return node.map((child, index) => renderNode(child, `${position}/${index}`));
     if (!node || typeof node !== 'object') return node;
     if (typeof node.type === 'function') {
-      const previous = currentFiber; currentFiber = `${position}:${node.type.name}`;
-      const output = node.type(node.props); currentFiber = previous;
+      const previous = currentFiber; const previousCall = cacheCall;
+      currentFiber = `${position}:${node.type.name}`; cacheCall = 0;
+      const output = node.type(node.props); currentFiber = previous; cacheCall = previousCall;
       return renderNode(output, `${position}/child`);
     }
     return { ...node, props: { ...node.props, children: renderNode(node.props.children, `${position}/children`) } };

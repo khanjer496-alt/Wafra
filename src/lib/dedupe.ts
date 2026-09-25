@@ -506,11 +506,35 @@ export function duplicateGuard(
    * Match only when exactly one side is proven PDF/CSV and the resolved money
    * facts agree. Every row is consumable once, preserving repeated equal charges.
    */
-  const statementPairEvents: SeenStatementPairEvent[] = [];
+  //
+  // Every rule below needs the same or an adjacent day, so rows are bucketed
+  // by day and a candidate reads only the nearby buckets instead of every SMS
+  // row in the ledger. `seq` restores insertion order across buckets, so the
+  // first/best match is the one a full scan would have picked.
+  const statementPairByDay = new Map<string | number, SeenStatementPairEvent[]>();
+  const statementPairSeq = new Map<SeenStatementPairEvent, number>();
   const statementPairById = new Map<string, SeenStatementPairEvent>();
+  const statementPairDay = (date: string): string | number => {
+    const time = Date.parse(`${date}T12:00:00Z`);
+    return Number.isFinite(time) ? Math.floor(time / 86_400_000) : `raw:${date}`;
+  };
   const noteStatementPair = (event: SeenStatementPairEvent) => {
-    statementPairEvents.push(event);
+    const day = statementPairDay(event.date);
+    const rows = statementPairByDay.get(day);
+    if (rows) rows.push(event);
+    else statementPairByDay.set(day, [event]);
+    statementPairSeq.set(event, statementPairSeq.size);
     if (event.id) statementPairById.set(event.id, event);
+  };
+  const statementPairNear = (date: string): SeenStatementPairEvent[] => {
+    const day = statementPairDay(date);
+    if (typeof day !== 'number') return statementPairByDay.get(day) ?? [];
+    const near: SeenStatementPairEvent[] = [];
+    for (let d = day - 2; d <= day + 2; d++) {
+      const rows = statementPairByDay.get(d);
+      if (rows) near.push(...rows);
+    }
+    return near.sort((a, b) => statementPairSeq.get(a)! - statementPairSeq.get(b)!);
   };
   const unresolvedAccount = (accountId: string | undefined): boolean =>
     !accountId || options.unresolvedAccount?.(accountId) === true;
@@ -538,7 +562,7 @@ export function duplicateGuard(
   };
   const statementPairMatch = (c: DuplicateCandidate): SeenStatementPairEvent | undefined => {
     const incomingStatement = isStatementCaptureSource(c.captureSource);
-    const open = statementPairEvents.filter((row) =>
+    const open = statementPairNear(c.date).filter((row) =>
       !row.consumed && row.type === c.type &&
       compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument));
     // 1. Statement <-> live capture on the SAME resolved account. Provenance

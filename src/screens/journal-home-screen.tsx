@@ -290,7 +290,7 @@ export default function JournalHomeScreen() {
   // Row-local presentation checks must not force a full reconciliation graph
   // during hydration or an intermediate import page.
   const hasPeriodTransfers = useMemo(() => state.transactions.some(transaction =>
-    isTransferCandidate(transaction) && liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
+    inPeriod(transaction.date, period) && liveAccounts.has(transaction.accountId) && isTransferCandidate(transaction)),
   [state.transactions, liveAccounts, period]);
   const hasPeriodRecords = useMemo(() => state.transactions.some(transaction =>
     liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
@@ -362,9 +362,9 @@ export default function JournalHomeScreen() {
   const recentActivity = useMemo(() => {
     const rows: Transaction[] = [];
     for (const transaction of state.transactions) {
-      if (isTransferCandidate(transaction) ||
-        !countsInCashflowTotals(transaction, liveAccounts, dashboard.internalTransactionIds) ||
-        !inPeriod(transaction.date, period)) continue;
+      // Cheap period check first: isTransferCandidate runs several regexes.
+      if (!inPeriod(transaction.date, period) || isTransferCandidate(transaction) ||
+        !countsInCashflowTotals(transaction, liveAccounts, dashboard.internalTransactionIds)) continue;
       rows.push(transaction);
       if (rows.length === 5) break;
     }
@@ -651,7 +651,7 @@ export default function JournalHomeScreen() {
           <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" accessibilityLabel={words.more} style={styles.smallAction}><Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
         <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{due.slice(0, 2).map(item => <Pressable key={item.id} accessibilityRole="button" onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
           <View style={styles.grow}><ThemedText type="smallBold">{item.title}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{daysPhrase(item.daysLeft)}</ThemedText></View>
-          <ThemedText type="smallBold" tabular>{formatAmount(item.amountFils)}</ThemedText></Pressable>)}</View>
+          <ThemedText type="smallBold" tabular style={largeText && styles.paymentAmountStacked}>{formatAmount(item.amountFils)}</ThemedText></Pressable>)}</View>
       </View>;
     }
     return <View key={id} style={styles.section} testID="home-widget-activity">
@@ -779,6 +779,9 @@ const styles = StyleSheet.create({
   screen: { gap: 24 },
   loading: { gap: 20, paddingTop: 20 },
   grow: { flex: 1, minWidth: 0 },
+  // Its own line under the payee at the accessibility sizes, so the name is
+  // not squeezed into breaking mid-word beside the figure.
+  paymentAmountStacked: { flexBasis: '100%' },
   section: { paddingTop: 2, paddingBottom: 0 },
   sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 2 },
   sectionTitle: { fontSize: 17, lineHeight: 24 },

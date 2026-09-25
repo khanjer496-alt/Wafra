@@ -16,6 +16,7 @@ import { Row, Section } from '@/components/ui/layout';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { Radius, Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { t, tf } from '@/lib/i18n';
 import { autoCaptureMethod, billingStore, trialDaysLeft, type ProPlan } from '@/lib/purchases';
@@ -72,6 +73,9 @@ export default function ProScreen() {
   const words = workflowCopy(language);
   const copy = proCopy(language);
   const theme = useTheme();
+  // At the accessibility sizes each row's icon sits above its text, so a long
+  // word ("subscriptions") has the full width instead of breaking beside it.
+  const largeText = useLargeTextLayout();
   const router = useRouter();
   const { state } = useStore();
   const billing = useWafraBilling();
@@ -254,7 +258,7 @@ export default function ProScreen() {
     );
     return (
       <Row last={last}>
-        <View style={styles.featureText}>
+        <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
           <ThemedText type="small">{title}</ThemedText>
           <ThemedText type="meta" themeColor="textTertiary">
             {t('publicLinkUnavailable')}
@@ -279,6 +283,7 @@ export default function ProScreen() {
         onPress={() => setSelectedPlan(offer.plan)}
         style={[
           styles.planRow,
+          largeText && styles.planRowWrap,
           {
             borderColor: selected ? theme.primary : theme.controlBorder,
             borderWidth: selected ? 2 : 1,
@@ -293,7 +298,7 @@ export default function ProScreen() {
           {selected && <View style={[styles.planDot, { backgroundColor: theme.primary }]} />}
         </View>
         <ThemedText type="smallBold" style={styles.featureText}>{label}</ThemedText>
-        <View style={styles.planPrice}>
+        <View style={[styles.planPrice, largeText && styles.planPriceStacked]}>
           <ThemedText type="smallBold" tabular>{offer.priceString}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary">{period}</ThemedText>
         </View>
@@ -313,9 +318,10 @@ export default function ProScreen() {
       accessibilityRole="summary"
       style={[
         styles.planRow,
+        largeText && styles.planRowWrap,
         { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
       ]}>
-      <View style={styles.featureText}>
+      <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
         <ThemedText type="smallBold">{plan === 'yearly' ? t('yearly') : t('monthly')}</ThemedText>
         <ThemedText type="meta" themeColor="textTertiary">{t('priceUnavailable')}</ThemedText>
       </View>
@@ -370,7 +376,7 @@ export default function ProScreen() {
             <View style={[styles.featureIcon, { backgroundColor: theme.primarySoft }]}>
               <Icon name={feature.icon} size={18} color={theme.primary} />
             </View>
-            <View style={styles.featureText}>
+            <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
               <ThemedText type="small">{feature.title}</ThemedText>
               <ThemedText type="meta" themeColor="textSecondary">{feature.text}</ThemedText>
             </View>
@@ -390,7 +396,7 @@ export default function ProScreen() {
                 return offer ? planRow(offer) : unavailablePlanRow(plan);
               })}
               {missingPlans.length > 0 && (
-                <View style={styles.featureText}>
+                <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
                   <ThemedText type="meta" themeColor="textTertiary">
                     {t('priceUnavailableBody')}
                   </ThemedText>
@@ -417,12 +423,13 @@ export default function ProScreen() {
             <View
               style={[
                 styles.freeNote,
+                largeText && styles.freeNoteLarge,
                 { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
               ]}>
               <View style={styles.featureIcon}>
                 <Icon name="alert" size={19} color={theme.warning} />
               </View>
-              <View style={styles.featureText}>
+              <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
                 <ThemedText type="small">
                   {checkoutReady ? t('priceUnavailable') : t('playOnlyTitle')}
                 </ThemedText>
@@ -440,12 +447,13 @@ export default function ProScreen() {
         <View
           style={[
             styles.freeNote,
+            largeText && styles.freeNoteLarge,
             { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
           ]}>
           <View style={styles.featureIcon}>
             <Icon name="check" size={19} color={theme.income} />
           </View>
-          <View style={styles.featureText}>
+          <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
             <ThemedText type="small">{copy.freeTitle}</ThemedText>
             <ThemedText type="meta" themeColor="textSecondary">{copy.freeText}</ThemedText>
             <Pressable accessibilityRole="button" onPress={() => router.push('/import-sms')} hitSlop={8}>
@@ -523,6 +531,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   featureText: { flex: 1, gap: 3 },
+  featureTextStacked: { flexBasis: '100%' },
   plans: { gap: Spacing.two },
   planMark: {
     width: 22,
@@ -534,6 +543,9 @@ const styles = StyleSheet.create({
   },
   planDot: { width: 10, height: 10, borderRadius: Radius.full },
   planPrice: { alignItems: 'flex-end', gap: 2 },
+  // The price drops under the plan name at the accessibility sizes.
+  planRowWrap: { flexWrap: 'wrap' },
+  planPriceStacked: { flexBasis: '100%', alignItems: 'flex-start', paddingStart: 22 + Spacing.three },
   planRow: {
     minHeight: 64,
     flexDirection: 'row',
@@ -553,6 +565,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
   },
   statusDot: { width: 7, height: 7, borderRadius: Radius.full },
+  // Icon above the text and a tighter inset at the accessibility sizes, so a
+  // long word has the card's full width.
+  freeNoteLarge: { flexWrap: 'wrap', padding: Spacing.three },
   freeNote: {
     flexDirection: 'row',
     gap: Spacing.three,

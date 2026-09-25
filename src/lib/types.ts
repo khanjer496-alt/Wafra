@@ -777,6 +777,12 @@ export interface AppState {
    */
   hydrationFinalizeVersion?: number;
   /**
+   * Receipt for the one-time repair of stored rows a body-wide BNPL keyword
+   * filed as Loan (bnpl-category-repair.ts). Hydration trusts it; a backup
+   * restore always re-runs the idempotent repair instead.
+   */
+  bnplCategoryRepairVersion?: number;
+  /**
    * Receipt proving the persisted transaction/account graph was normalized by
    * the current transfer matcher before it was saved. Missing/older values
    * fail safe by rebuilding once on hydration.

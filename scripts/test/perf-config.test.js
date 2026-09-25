@@ -1184,7 +1184,9 @@ function bodyOf(source, header) {
 
   ok('default Upcoming does not start recurrence in the navigation-critical window',
     /else delay = setTimeout\(startProjection, UPCOMING_RECURRENCE_IDLE_MS\)/.test(bills) &&
-      /const needsRecurrenceNow = agendaView === 'all'/.test(bills),
+      // A refresh of an existing result may start at once (it keeps the last
+      // result on screen and runs in the cooperative worker's slices).
+      /const needsRecurrenceNow = hasRecurringResult \|\| agendaView === 'all'/.test(bills),
     'cards/manual bills must paint immediately; only an explicit recurrence view may bypass the idle grace');
 
   ok('Bills does not compute recently-paid card history for the default Upcoming view',

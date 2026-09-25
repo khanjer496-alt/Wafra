@@ -56,6 +56,7 @@ import { bankPickerOptions } from '@/lib/known-banks';
 import { accountGroupsCopy } from '@/lib/reference-copy';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { t, tf, type StringKey } from '@/lib/i18n';
+import { ledgerCurrencyDisplay } from '@/lib/markets';
 
 
 const KIND_META: Record<AccountKind, { labelKey: StringKey; icon: import('@/components/ui/icon').IconName }> = {
@@ -565,8 +566,6 @@ export default function WalletScreen() {
               return (
                 <Pressable
                   key={goal.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${goal.title}. ${formatAmount(goal.savedFils, { decimals: false })} / ${formatAmount(goal.targetFils, { decimals: false })}`}
                   testID={`wallet-goal-${goal.id}`}
                   onPress={() => router.push(`/goal?id=${encodeURIComponent(goal.id)}`)}
                   onLongPress={() =>
@@ -578,15 +577,17 @@ export default function WalletScreen() {
                       onConfirm: () => deleteGoal(goal.id),
                     })
                   }
+                  accessibilityRole="button"
+                  accessibilityLabel={`${goal.title}. ${ledgerCurrencyDisplay()} ${formatAmount(goal.savedFils, { decimals: false })} / ${formatAmount(goal.targetFils, { decimals: false })}`}
                   style={styles.goalRow}>
-                  <View style={styles.goalTop}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                  <View style={[styles.goalTop, largeText && styles.goalTopStacked]}>
+                    <View style={styles.goalTitle}>
                       <Icon
                         name={isIconName(goal.emoji) ? goal.emoji : 'target'}
                         size={14}
                         color={theme.textSecondary}
                       />
-                      <ThemedText type="small">{goal.title}</ThemedText>
+                      <ThemedText type="small" style={styles.goalTitleText}>{goal.title}</ThemedText>
                     </View>
                     <ThemedText type="small" tabular>
                       {formatAmount(goal.savedFils, { decimals: false })}
@@ -1033,6 +1034,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
+  goalTopStacked: { flexDirection: 'column', alignItems: 'flex-start', gap: Spacing.one },
+  goalTitle: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 1, minWidth: 0 },
+  goalTitleText: { flexShrink: 1 },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',

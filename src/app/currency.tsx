@@ -162,7 +162,7 @@ export default function CurrencyScreen() {
             <View style={[styles.currencyFill, { backgroundColor: theme.primary, width: fillWidth }]} />
           </View>
         </View>
-        <ThemedText type="smallBold" tabular style={styles.currencyLocalAmount}>
+        <ThemedText type="smallBold" tabular style={[styles.currencyLocalAmount, largeText && styles.currencyLocalAmountLarge]}>
           {formatAED(group.localFils, { decimals: true })}
         </ThemedText>
       </Pressable>
@@ -384,6 +384,8 @@ const styles = StyleSheet.create({
     marginHorizontal: -Spacing.one,
   },
   currencyRowLarge: { flexWrap: 'wrap', alignItems: 'flex-start' },
+  // Its own line under the currency at the accessibility sizes.
+  currencyLocalAmountLarge: { flexBasis: '100%', textAlign: 'auto' },
   flagWrap: { width: 28, alignItems: 'center', justifyContent: 'center' },
   flag: { fontSize: 18, lineHeight: 24 },
   currencyContent: { flex: 1, minWidth: 120, gap: 4 },

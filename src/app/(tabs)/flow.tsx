@@ -23,6 +23,7 @@ import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
 import { useLanguage } from '@/hooks/use-language';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryMovers, categoryTrend, comparableSpend, dailySpendForMonth, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
 import { assistantCopy } from '@/lib/assistant-copy';
@@ -60,6 +61,7 @@ const shortMonthLabel = (key: string) => monthLabel(key, true).replace(/\s+\d{4}
 
 export default function FlowScreen() {
   const theme = useTheme(); const language = useLanguage(); const router = useRouter();
+  const largeText = useLargeTextLayout();
   const params = useLocalSearchParams<{ view?: string }>();
   // Only what Spending draws. Import progress changes only the status-only
   // object, and only when the status itself does.
@@ -256,7 +258,7 @@ export default function FlowScreen() {
           accessibilityRole="button"
           accessibilityLabel={`${t('foreignSpending')}. ${formatAED(foreign.totalLocalFils)}`}
           onPress={() => router.push('/currency')}
-          style={[styles.foreignEntry, { borderColor: theme.cardBorder }]}>
+          style={[styles.foreignEntry, largeText && styles.foreignEntryStacked, { borderColor: theme.cardBorder }]}>
           <View style={styles.foreignCopy}>
             <ThemedText type="smallBold">{t('foreignSpending')}</ThemedText>
             <ThemedText type="meta" themeColor="textSecondary">
@@ -268,8 +270,8 @@ export default function FlowScreen() {
               })}
             </ThemedText>
           </View>
-          <ThemedText type="smallBold" tabular>{formatAED(foreign.totalLocalFils)}</ThemedText>
-          <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+          <ThemedText type="smallBold" tabular style={largeText && styles.foreignAmountStacked}>{formatAED(foreign.totalLocalFils)}</ThemedText>
+          {largeText ? null : <Icon name="chevron-right" size={16} color={theme.textSecondary} />}
         </Pressable>
       )}
       {view === 'calendar' && <View style={styles.activity} testID="spending-activity">
@@ -344,9 +346,9 @@ export default function FlowScreen() {
           </View>
         </View>
         <View style={styles.categoryHistory} testID="category-history">
-          <View style={styles.categoryHistoryHeader}>
+          <View style={[styles.categoryHistoryHeader, largeText && styles.categoryHistoryHeaderStacked]}>
             <ThemedText type="smallBold">{w.lastSixMonths}</ThemedText>
-            <View style={styles.categoryHistoryHeaderRight}>
+            <View style={[styles.categoryHistoryHeaderRight, largeText && styles.categoryHistoryHeaderStacked]}>
               {categoryCanReturnToLatest ? <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={w.latest}
@@ -358,12 +360,33 @@ export default function FlowScreen() {
                 }]}>
                 <ThemedText type="meta" style={{ color: theme.primary }}>{w.latest}</ThemedText>
               </Pressable> : null}
-              <ThemedText type="meta" themeColor="textSecondary">
+              <ThemedText type="meta" themeColor="textSecondary" style={styles.shrinkText}>
                 {w.average} {formatAED(categoryHistoryAverage)}
               </ThemedText>
             </View>
           </View>
-          <View style={styles.categoryBars}>
+          {/* At the accessibility sizes six columns cannot hold a month name
+              each, so the same six months become a list: name and exact
+              amount, with the bar drawn horizontally underneath. */}
+          {largeText ? <View style={styles.categoryHistoryList}>
+            {categoryHistory.map((month) => {
+              const selected = month.key === key;
+              return <Pressable key={month.key} accessibilityRole="button" testID={`category-history-month-${month.key}`}
+                accessibilityLabel={`${monthLabel(month.key)}. ${formatAED(month.fils)}`}
+                accessibilityState={{ selected }}
+                onPress={() => { tapped(); setPeriod({ mode: 'month', key: month.key }); }}
+                style={({ pressed }) => [styles.categoryHistoryItem, {
+                  backgroundColor: selected ? theme.backgroundSelected : pressed ? theme.card : 'transparent',
+                }]}>
+                <ThemedText type={selected ? 'smallBold' : 'small'}>{monthLabel(month.key)}</ThemedText>
+                <Money fils={month.fils} type={selected ? 'smallBold' : 'small'} />
+                <View style={[styles.categoryHistoryTrack, { backgroundColor: theme.track }]}>
+                  <View style={{ height: '100%', borderRadius: 3, backgroundColor: theme.primary, opacity: selected ? 1 : 0.5,
+                    width: `${month.fils <= 0 ? 0 : Math.max(2, month.fils / categoryHistoryMax * 100)}%` }} />
+                </View>
+              </Pressable>;
+            })}
+          </View> : <View style={styles.categoryBars}>
             {categoryHistory.map((month) => {
               const selected = month.key === key;
               const barHeight = month.fils <= 0 ? 3 : Math.max(8, Math.round(month.fils / categoryHistoryMax * 72));
@@ -392,7 +415,7 @@ export default function FlowScreen() {
                 </ThemedText>
               </Pressable>;
             })}
-          </View>
+          </View>}
         </View>
         <View testID="category-ask-wafra" style={[styles.categoryInsight, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
           <View style={styles.categoryInsightCopy}>
@@ -422,6 +445,10 @@ const styles = StyleSheet.create({
   foreignEntry: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 12,
     borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 10 },
   foreignCopy: { flex: 1, minWidth: 0, gap: 2 },
+  // At the accessibility sizes the total drops under the caption and the
+  // disclosure chevron goes, so the caption has the row's full width.
+  foreignEntryStacked: { flexWrap: 'wrap' },
+  foreignAmountStacked: { flexBasis: '100%' },
   activity: { gap: 16 }, group: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 0 },
   transferNote: { gap: 4 },
   empty: { paddingVertical: 24 },
@@ -432,9 +459,14 @@ const styles = StyleSheet.create({
   categoryLimitPill: { alignSelf: 'flex-start', minHeight: 30, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth, justifyContent: 'center', paddingHorizontal: 10 },
   categoryHistory: { gap: 8, paddingTop: 2 },
   categoryHistoryHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 },
-  categoryHistoryHeaderRight: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
+  categoryHistoryHeaderRight: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexShrink: 1, minWidth: 0 },
+  categoryHistoryHeaderStacked: { flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-start' },
+  shrinkText: { flexShrink: 1 },
   categoryLatestButton: { minHeight: 32, minWidth: 52, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   categoryBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+  categoryHistoryList: { gap: 4 },
+  categoryHistoryItem: { minHeight: 48, gap: 4, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 8 },
+  categoryHistoryTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
   categoryBarColumn: { flex: 1, minWidth: 44, minHeight: 128, borderRadius: 10, alignItems: 'center', justifyContent: 'flex-end', gap: 5, paddingHorizontal: 2, paddingVertical: 3 },
   categoryBarPlot: { height: 98, alignItems: 'center', justifyContent: 'flex-end' },
   categoryBarValueSlot: { height: 20, alignItems: 'center', justifyContent: 'center' },

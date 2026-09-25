@@ -160,9 +160,9 @@ export function SpendingOverview(p: Props) {
         return <Pressable key={row.category} accessibilityRole="button" testID={`spending-category-${row.category}`}
           accessibilityLabel={`${categoryLabel(row.category, language)}. ${moneyLabel(row.spentFils)}. ${shareLabel} ${w.share}. ${row.limitFils === null ? w.noLimit : `${limitCaption}.${remainingSpoken}`}`}
           onPress={() => p.onCategory(row.category)}
-          style={({ pressed }) => [styles.category, { borderTopColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+          style={({ pressed }) => [styles.category, large && styles.categoryStacked, { borderTopColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
           <CategoryAvatar category={row.category} size={36} color={sliceColor} />
-          <View style={styles.categoryContent}>
+          <View style={[styles.categoryContent, large && styles.categoryContentStacked]}>
             <View style={[styles.categoryTop, large && styles.stack]}>
               <ThemedText type="smallBold" style={styles.grow}>{categoryLabel(row.category, language)}</ThemedText>
               <Money fils={row.spentFils} type="smallBold" />
@@ -213,7 +213,12 @@ const styles = StyleSheet.create({
   budgetSummary: { gap: 10, paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1 }, summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, filter: { paddingHorizontal: 16, paddingVertical: 10, minHeight: 44, borderRadius: 4, justifyContent: 'center' },
   categories: { gap: 0 }, category: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 0, borderTopWidth: 1 },
-  categoryContent: { flex: 1, minWidth: 0, gap: 5 }, categoryTop: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  // At the accessibility sizes the avatar sits above the name, so a long
+  // single word ("Entertainment") gets the row's full width instead of
+  // breaking mid-word beside it.
+  categoryStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  categoryContent: { flex: 1, minWidth: 0, gap: 5 },
+  categoryContentStacked: { flex: 0, flexBasis: 'auto', alignSelf: 'stretch' }, categoryTop: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   categoryBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   grow: { flex: 1, minWidth: 0 }, caption: { fontSize: 12, lineHeight: 18 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
   empty: { paddingVertical: 24, gap: 12 },

@@ -213,6 +213,14 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return { improveAssistantRequestOnDevice: async ({ deterministicRequest }) =>
           ({ source: 'deterministic', request: deterministicRequest, reason: 'unavailable' }) };
       }
+      if (name === '@/lib/large-text-figure') {
+        // Pure fitting rule for money at large text sizes: the real module.
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/large-text-figure.ts'), {});
+      }
+      if (name === '@/lib/e2e-font-scale') {
+        // E2E-only web font-scale emulation: inert in native and test builds.
+        return { E2E_FONT_SCALE: null, scaleTextStyleForE2E: style => style };
+      }
       if (name === '@/components/category-suggestion') {
         // No suggestion has arrived yet: the row still offers the full picker.
         return { useCategorySuggestions: () => new Map() };

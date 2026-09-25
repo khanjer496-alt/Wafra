@@ -406,7 +406,9 @@ export default function AddTransactionScreen() {
             ]}>
             {selected ? <>
               <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
-              <ThemedText type="small" style={chip ? styles.chipText : styles.accountTriggerName} numberOfLines={1}>
+              {/* The review field lets a long account name wrap (Larger Text);
+                  the compact chip keeps one line. */}
+              <ThemedText type="small" style={chip ? styles.chipText : styles.accountTriggerName} numberOfLines={chip ? 1 : undefined}>
                 {accountDisplayName(selected)}
               </ThemedText>
             </> : <ThemedText type="small" themeColor="textSecondary" style={chip ? styles.chipText : styles.accountTriggerName}>

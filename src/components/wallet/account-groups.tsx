@@ -139,7 +139,10 @@ const styles = StyleSheet.create({
   content: { flex: 1, minWidth: 0, gap: 4 }, line: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   grow: { flex: 1, minWidth: 0, gap: 4 }, stack: { flexDirection: 'column', alignItems: 'flex-start' },
   usage: { gap: 3, paddingTop: 2 },
-  manage: { minWidth: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center', marginEnd: -8 },
+  // No negative end margin: it pulled the row's own hit area 8pt under this
+  // control, and on the web the logical margin resolves to the physical right
+  // even in Arabic.
+  manage: { minWidth: 44, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingStart: 42, paddingBottom: 10 },
   action: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 999, borderWidth: 1 },
 });

@@ -720,6 +720,7 @@ const S = {
   refStopped: { en: 'Stopped recurring payments', ar: 'الدفعات المتكررة المتوقفة' },
   refHideStopped: { en: 'Hide stopped payments', ar: 'إخفاء الدفعات المتوقفة' },
   refShowStopped: { en: 'Show stopped payments', ar: 'عرض الدفعات المتوقفة' },
+  showMoreRecurring: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
   balanceCoverage: {
     en: 'Balances recorded for {known} of {total} active accounts',
     ar: 'أرصدة مسجلة لـ {known} من أصل {total} حسابات نشطة',

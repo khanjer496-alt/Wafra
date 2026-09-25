@@ -31,6 +31,7 @@ import { Icon } from '@/components/ui/icon';
 import { EASE, Elevation, MotionSpring, Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLanguage } from '@/hooks/use-language';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { t } from '@/lib/i18n';
@@ -229,6 +230,35 @@ export function BottomSheet({
     : insets.bottom;
   const bottomClearance = Spacing.five - 2 + (keyboardHeight > 0 ? 0 : windowBottomInset);
   const hasFooter = footer !== null && footer !== undefined && typeof footer !== 'boolean';
+  // At the accessibility text sizes a pinned footer (two full-width wrapped
+  // buttons) can take most of a phone screen and leave the content a sliver
+  // to scroll in. There the actions scroll at the end of the content instead,
+  // and the sheet may use the full height below the status bar.
+  const largeText = useLargeTextLayout();
+  const pinFooter = hasFooter && !largeText;
+  const footerNode = hasFooter ? (
+    <View testID={testID ? `${testID}-footer` : undefined}
+      style={[styles.footer, !pinFooter && styles.footerInline, { paddingBottom: bottomClearance, borderTopColor: theme.cardBorder }]}>
+      {footer}
+    </View>
+  ) : null;
+  const closeButton = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={t('close', language)}
+      hitSlop={8}
+      onPress={requestDismiss}
+      style={({ pressed }) => [
+        styles.close,
+        Platform.OS === 'android' && styles.androidClose,
+        closeVariant === 'plain' && styles.closePlain,
+        { borderColor: theme.controlBorder,
+          backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
+          opacity: pressed ? 0.7 : 1 },
+      ]}>
+      <Icon name="close" size={20} color={theme.textSecondary} />
+    </Pressable>
+  );
 
   // Keep the dismissal lifecycle, but do not build hidden native sheet trees.
   // All hooks stay above this guard so every open/close follows the same order.
@@ -278,7 +308,7 @@ export function BottomSheet({
                 // fields buried under the keys with no way to scroll to them.
                 paddingBottom: hasFooter ? 0 : bottomClearance,
                 marginBottom: keyboardHeight,
-                maxHeight: Math.max(0, Math.min(screenHeight * 0.88, screenHeight - keyboardHeight - insets.top)),
+                maxHeight: Math.max(0, Math.min(screenHeight * (largeText ? 0.96 : 0.88), screenHeight - keyboardHeight - insets.top)),
               },
               Elevation,
               sheetStyle,
@@ -298,6 +328,9 @@ export function BottomSheet({
                       style={[styles.grabber, { backgroundColor: theme.cardBorderStrong }]}
                     />
                   ) : null}
+                  {/* At the accessibility sizes the close button gets its own
+                      row, so the title has the full width to wrap in. */}
+                  {dismissible && largeText ? <View style={styles.closeRow}>{closeButton}</View> : null}
                   <View style={styles.header}>
                     {headerLeading}
                     <View style={styles.headerCopy}>
@@ -310,23 +343,7 @@ export function BottomSheet({
                         </ThemedText>
                       ) : null}
                     </View>
-                    {dismissible ? (
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={t('close', language)}
-                        hitSlop={8}
-                        onPress={requestDismiss}
-                        style={({ pressed }) => [
-                          styles.close,
-                          Platform.OS === 'android' && styles.androidClose,
-                          closeVariant === 'plain' && styles.closePlain,
-                          { borderColor: theme.controlBorder,
-                            backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
-                            opacity: pressed ? 0.7 : 1 },
-                        ]}>
-                        <Icon name="close" size={20} color={theme.textSecondary} />
-                      </Pressable>
-                    ) : null}
+                    {dismissible && !largeText ? closeButton : null}
                   </View>
                 </Animated.View>
               </GestureDetector>
@@ -337,12 +354,11 @@ export function BottomSheet({
                 nestedScrollEnabled
                 // Or a tap on a chip while the keyboard is up only dismisses it.
                 keyboardShouldPersistTaps="handled"
-                contentContainerStyle={styles.content}>
+                contentContainerStyle={[styles.content, hasFooter && !pinFooter && styles.contentWithInlineFooter]}>
                 {children}
+                {pinFooter ? null : footerNode}
               </ScrollView>
-              {hasFooter ? (
-                <View testID={testID ? `${testID}-footer` : undefined} style={[styles.footer, { paddingBottom: bottomClearance, borderTopColor: theme.cardBorder }]}>{footer}</View>
-              ) : null}
+              {pinFooter ? footerNode : null}
             </View>
           </Animated.View>
         </View>
@@ -396,6 +412,7 @@ const styles = StyleSheet.create({
   },
   androidClose: { width: 48, height: 48 },
   closePlain: { borderWidth: 0 },
+  closeRow: { flexDirection: 'row', justifyContent: 'flex-end' },
   scroll: { flexShrink: 1, minHeight: 0 },
   content: {
     gap: Spacing.three,
@@ -408,4 +425,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     paddingHorizontal: ScreenPadding,
   },
+  // Inside the scroll content, which already carries the side padding.
+  footerInline: { paddingHorizontal: 0, marginTop: Spacing.two },
+  contentWithInlineFooter: { paddingBottom: 0 },
 });

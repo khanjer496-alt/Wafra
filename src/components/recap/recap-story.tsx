@@ -28,6 +28,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { GrowBar } from '@/components/ui/grow-bar';
 import { monthLabel, shiftMonthKey, shortDate, weekdayName } from '@/lib/format';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { figureFontMultiplier } from '@/lib/large-text-figure';
 import { tapped } from '@/lib/haptics';
 import { isRTL } from '@/lib/i18n';
 import { recapCopy as copy } from '@/lib/recap-copy';
@@ -43,6 +44,15 @@ function useRecapEntering() {
 }
 
 
+/**
+ * Larger Text caps for the story's display type, following the iOS ramp
+ * (Large Title grows 1.76x at the largest size while Body grows 3.1x). Body
+ * copy and labels in the story are not capped.
+ */
+const STORY_TITLE_MAX = 1.75;
+const STORY_TITLE_SMALL_MAX = 2;
+const STORY_NUMERAL_MAX = 1.5;
+
 function HeroMoney({ fils, moneySpec, color }: { fils: number; moneySpec: LedgerMoneySpec; color?: string }) {
   const amount = formatMinorUnits(Math.abs(fils), moneySpec);
   const amountSize = amount.length >= 11
@@ -50,9 +60,14 @@ function HeroMoney({ fils, moneySpec, color }: { fils: number; moneySpec: Ledger
     : amount.length >= 8
       ? styles.heroAmountMedium
       : undefined;
+  const { width, fontScale } = useWindowDimensions();
+  const size = (amountSize ?? styles.heroAmount).fontSize ?? 52;
+  // Never truncated: shrinks toward the story width, never under 60% of the
+  // size Larger Text asked for, and wraps past that.
+  const fit = figureFontMultiplier(amount.length + (fils < 0 ? 1 : 0), size, STORY_TITLE_MAX, width - 48, fontScale);
   return <View style={styles.heroMoney} accessible accessibilityLabel={`${moneySpec.currency} ${formatMinorUnits(Math.abs(fils), moneySpec)}`}>
     <ThemedText type="meta" themeColor="textSecondary" style={styles.heroCurrency}>{moneySpec.currency}</ThemedText>
-    <ThemedText tabular style={[styles.heroAmount, amountSize, color ? { color } : undefined]}>
+    <ThemedText tabular maxFontSizeMultiplier={fit ?? STORY_TITLE_MAX} style={[styles.heroAmount, amountSize, color ? { color } : undefined]}>
       {fils < 0 ? '−' : ''}{amount}
     </ThemedText>
   </View>;
@@ -95,7 +110,8 @@ function LedgerBackdrop({ variant = 0 }: { variant?: number }) {
     {Array.from({ length: 6 }, (_, i) => (
       <View key={i} style={[styles.ledgerRule, { top: `${18 + i * 13}%` as `${number}%`, backgroundColor: theme.cardBorder }]} />
     ))}
-    <ThemedText accessible={false} style={[styles.pageIndex, { color: theme.text }]}>
+    {/* A 3.5%-opacity watermark numeral: decoration, so it does not grow. */}
+    <ThemedText accessible={false} allowFontScaling={false} style={[styles.pageIndex, { color: theme.text }]}>
       {String(variant + 1).padStart(2, '0')}
     </ThemedText>
   </View>;
@@ -111,7 +127,7 @@ function IntroScene({ snapshot }: { snapshot: RecapSnapshot }) {
     </Animated.View>
     <Animated.View entering={enter(FadeInUp.delay(80).duration(420))} style={styles.introCopy}>
       <ThemedText type="micro" themeColor="textTertiary">{w.recap} · {snapshot.descriptor.label}</ThemedText>
-      <ThemedText style={styles.storyTitle}>{snapshot.descriptor.kind === 'year' ? w.yearIntro : w.monthIntro}</ThemedText>
+      <ThemedText maxFontSizeMultiplier={STORY_TITLE_MAX} style={styles.storyTitle}>{snapshot.descriptor.kind === 'year' ? w.yearIntro : w.monthIntro}</ThemedText>
       <ThemedText type="default" themeColor="textSecondary">{w.introBody}</ThemedText>
     </Animated.View>
     <Animated.View entering={enter(FadeInUp.delay(180).duration(360))} style={styles.introFooter}>
@@ -160,7 +176,7 @@ function Metric({ value, label, currency, delay = 0 }: { value: string; label: s
     accessible accessibilityLabel={`${label}. ${currency ? `${currency} ` : ''}${value}`}
     style={[styles.metric, { minWidth: Math.min(140 * Math.max(fontScale, 1), width - Spacing.four * 2) }]}>
     {currency ? <ThemedText type="meta" themeColor="textSecondary">{currency}</ThemedText> : null}
-    <ThemedText style={[styles.metricValue, value.length > 9 && styles.metricValueTight]} tabular>{value}</ThemedText>
+    <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={[styles.metricValue, value.length > 9 && styles.metricValueTight]} tabular>{value}</ThemedText>
     <ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>
   </Animated.View>;
 }
@@ -175,9 +191,9 @@ function CategoryScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; money
     <View style={styles.sceneHeading}>
       <ThemedText type="micro" themeColor="textTertiary">{w.categories}</ThemedText>
       {top && <View style={styles.categoryHeadline}>
-        <ThemedText style={styles.categoryPercent} tabular>{top.percent}%</ThemedText>
+        <ThemedText maxFontSizeMultiplier={STORY_NUMERAL_MAX} style={styles.categoryPercent} tabular>{top.percent}%</ThemedText>
         <View style={styles.categoryHeadlineCopy}>
-          <ThemedText style={styles.storyTitleSmall}>{top.label}</ThemedText>
+          <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={styles.storyTitleSmall}>{top.label}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary">{w.topCategory}</ThemedText>
         </View>
       </View>}
@@ -246,7 +262,8 @@ function MerchantScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; money
     <Animated.View entering={enter(FadeInUp.duration(430))} style={[styles.merchantFeature, timed && styles.merchantFeatureCompact]}>
       <View style={styles.merchantIdentity}>
         <MerchantAvatar title={top.title} category={top.category} size={timed ? 56 : 74} />
-        <ThemedText style={[styles.storyTitle, timed && styles.storyTitleSmall, styles.flex]} numberOfLines={2}>{top.title}</ThemedText>
+        <ThemedText maxFontSizeMultiplier={timed ? STORY_TITLE_SMALL_MAX : STORY_TITLE_MAX}
+          style={[styles.storyTitle, timed && styles.storyTitleSmall, styles.flex]} numberOfLines={2}>{top.title}</ThemedText>
       </View>
       <View style={styles.merchantFeatureMeta}>
         <MoneyText fils={top.spendFils} moneySpec={moneySpec} />
@@ -283,7 +300,7 @@ function AccountScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneyS
     <Animated.View entering={enter(FadeInUp.duration(460))} style={styles.accountFeature}>
       <BankAvatar account={row.account} size={68} />
       <View style={styles.accountIdentity}>
-        <ThemedText style={styles.storyTitleSmall} numberOfLines={2}>{row.label}</ThemedText>
+        <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={styles.storyTitleSmall} numberOfLines={2}>{row.label}</ThemedText>
         {row.account.last4 && <ThemedText type="meta" themeColor="textTertiary" tabular>•••• {row.account.last4}</ThemedText>}
       </View>
       <View style={[styles.accountRule, { backgroundColor: theme.cardBorderStrong }]} />
@@ -302,7 +319,7 @@ function RhythmScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySp
   const enter = useRecapEntering();
   return <View style={styles.sceneSpread}>
     <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{w.rhythm}</ThemedText>
-      {snapshot.busiestWeekday && <ThemedText style={styles.storyTitleSmall}>{weekdayName(snapshot.busiestWeekday.day)} <ThemedText themeColor="textSecondary">{w.busiest}</ThemedText></ThemedText>}
+      {snapshot.busiestWeekday && <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={styles.storyTitleSmall}>{weekdayName(snapshot.busiestWeekday.day)} <ThemedText themeColor="textSecondary">{w.busiest}</ThemedText></ThemedText>}
     </View>
     <View style={styles.dayTape}>
         {Array.from({ length: 7 }, (_, i) => {
@@ -316,7 +333,7 @@ function RhythmScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySp
         })}
     </View>
     <View style={[styles.metricGrid, styles.pushBottom]}>
-      <View style={styles.metricGridItem}><ThemedText style={styles.metricValue} tabular>{snapshot.noSpendDays}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.noSpend}</ThemedText></View>
+      <View style={styles.metricGridItem}><ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={styles.metricValue} tabular>{snapshot.noSpendDays}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.noSpend}</ThemedText></View>
       <View style={styles.metricGridItem}><MoneyText fils={snapshot.averagePurchaseFils} moneySpec={moneySpec} /><ThemedText type="meta" themeColor="textSecondary">{w.average}</ThemedText></View>
       {snapshot.favoriteTime && !(snapshot.topMerchants.length > 0 && snapshot.timedCount > 0) && <View style={[styles.metricGridItem, styles.metricWide]}>
         <View style={[styles.timeMarker, { backgroundColor: theme.goldSoft }]}><Icon name="sun" size={18} color={theme.warning} /></View>
@@ -338,7 +355,7 @@ function HighlightScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; mone
     const low = nonZero.length ? nonZero.reduce((a, b) => b.spendFils < a.spendFils ? b : a) : null;
     return <View style={styles.sceneSpread}>
       <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{w.monthly}</ThemedText>
-        <ThemedText style={styles.storyTitleSmall}>{snapshot.descriptor.label}</ThemedText></View>
+        <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={styles.storyTitleSmall}>{snapshot.descriptor.label}</ThemedText></View>
       <View style={styles.yearBars}>
         {snapshot.monthlySeries.map((month, index) => <View key={month.key} style={styles.yearColumn}>
           <View style={styles.yearBarTrack}>
@@ -363,7 +380,7 @@ function HighlightScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; mone
         <MerchantAvatar title={purchase.title} category={purchase.category} size={72} />
         <ThemedText type="meta" themeColor="textTertiary">{shortDate(purchase.date)}</ThemedText>
       </View>
-      <ThemedText style={styles.storyTitle} numberOfLines={2}>{purchase.title}</ThemedText>
+      <ThemedText maxFontSizeMultiplier={STORY_TITLE_MAX} style={styles.storyTitle} numberOfLines={2}>{purchase.title}</ThemedText>
       <HeroMoney fils={purchase.amountFils} moneySpec={moneySpec} />
     </Animated.View>
   </View>;
@@ -377,7 +394,7 @@ function FinaleScene({ snapshot, moneySpec, onDone }: { snapshot: RecapSnapshot;
   return <View style={styles.sceneSpread}>
     <View style={styles.sceneHeading}>
       <ThemedText type="micro" themeColor="textTertiary">{w.finale}</ThemedText>
-      <ThemedText style={styles.storyTitle}>{snapshot.descriptor.label}</ThemedText>
+      <ThemedText maxFontSizeMultiplier={STORY_TITLE_MAX} style={styles.storyTitle}>{snapshot.descriptor.label}</ThemedText>
       <ThemedText type="default" themeColor="textSecondary">{w.wrapped}</ThemedText>
     </View>
     <Animated.View entering={enter(FadeInUp.delay(80).duration(420))} style={[styles.finalBoard, styles.pushBottom, { borderColor: theme.cardBorderStrong }]}>

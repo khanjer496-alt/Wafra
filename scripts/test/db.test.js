@@ -554,6 +554,8 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '../../modules/wafra-widgets': { clearWidgetSnapshot: () => {}, setWidgetSnapshot: () => {} },
     // The real selector helpers (dependency-free).
     '@/lib/store-selection': execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); }),
+    // The real one-time BNPL category repair (it reads the real parser).
+    '@/lib/bnpl-category-repair': require('./build/bnpl-category-repair'),
     './balances': {},
     ...realModules,
   };
@@ -3269,6 +3271,100 @@ asyncSuites.push((async () => {
     transactions: [tx('android-backup-repair', { raw: 'retained source in restored backup' })],
   });
   ok('backup-style migration still repairs retained SMS immediately on Android', calls === 2);
+}
+
+// ---------------------------------------------------------------------------
+// One-time BNPL category repair. A body-wide BNPL keyword stored every payment
+// to Tabby/Tamara/Postpay/Cashew, and every purchase on a BNPL card at a named
+// merchant, as Loan; heal only re-files Other, so hydration repairs them once.
+// ---------------------------------------------------------------------------
+{
+  const real = loadHydrationExports({
+    '@/lib/sms-parser': require('./build/sms-parser'),
+    '@/lib/heal': require('./build/heal'),
+    '@/lib/ledger': require('./build/ledger'),
+    '@/lib/markets': { ...require('./build/markets'), detectMarketId: () => 'AE' },
+  });
+  const BNPL_CARD_SMS =
+    'You spent AED 96.50 at SAMPLE PIZZA RESTAURANT. Your Tabby Card limit is now AED 1,846.50.';
+  const rows = [
+    tx('bnpl-payee', { title: 'Tabby', category: 'loan', amountFils: 21450 }),
+    tx('bnpl-entity', { title: 'Tamara Finance Company', category: 'loan', amountFils: 35000 }),
+    tx('bnpl-card', { title: 'Sample Pizza Restaurant', category: 'loan', amountFils: 9650, raw: BNPL_CARD_SMS }),
+    tx('bnpl-card-no-raw', { title: 'Sample Pizza Restaurant', category: 'loan', amountFils: 9650 }),
+    tx('bnpl-edited', { title: 'Tabby', category: 'loan', userEdited: true }),
+    tx('bnpl-ruled', { title: 'Postpay', category: 'loan' }),
+    tx('bnpl-transfer', { title: 'Tabby', category: 'loan', isTransfer: true }),
+    tx('bnpl-manual', { title: 'Tabby', category: 'loan', source: 'manual' }),
+    tx('bank-loan', { title: 'Sample Islamic Finance', category: 'loan', amountFils: 334600 }),
+    tx('bank-dd', { title: 'Sample Bank', category: 'loan', amountFils: 247000 }),
+    tx('brand-word-business', { title: 'Tamara Restaurant', category: 'loan' }),
+  ];
+  const before = new Map(rows.map((row) => [row.id, JSON.stringify(row)]));
+  const migrated = real.migratePersistedState({
+    marketId: 'AE',
+    transactions: rows.map((row) => ({ ...row })),
+    merchantOverrides: { 'expense:postpay': 'loan' },
+  });
+  const byId = new Map(migrated.transactions.map((row) => [row.id, row]));
+  ok('BNPL repair: a stored payment to a BNPL provider moves from Loan to Shopping',
+    byId.get('bnpl-payee')?.category === 'shopping' && byId.get('bnpl-entity')?.category === 'shopping');
+  ok("BNPL repair: a stored BNPL-card purchase gets the merchant's category from its retained SMS",
+    byId.get('bnpl-card')?.category === 'dining', byId.get('bnpl-card'));
+  ok('BNPL repair: without a retained SMS a BNPL-card purchase is left alone',
+    byId.get('bnpl-card-no-raw')?.category === 'loan');
+  ok('BNPL repair: only the category changes on a repaired row',
+    JSON.stringify({ ...byId.get('bnpl-payee'), category: 'loan' }) === before.get('bnpl-payee'));
+  ok('BNPL repair: user-edited, user-ruled, transfer and manual rows are untouched byte-for-byte',
+    ['bnpl-edited', 'bnpl-ruled', 'bnpl-transfer', 'bnpl-manual']
+      .every((id) => JSON.stringify(byId.get(id)) === before.get(id)));
+  ok('BNPL repair: genuine bank loans, finance houses and brand-word businesses keep Loan',
+    ['bank-loan', 'bank-dd', 'brand-word-business'].every((id) => byId.get(id)?.category === 'loan'));
+  ok('BNPL repair: the receipt is stamped', migrated.bnplCategoryRepairVersion === 1);
+
+  const again = real.migratePersistedState({ ...migrated, transactions: migrated.transactions.map((row) => ({ ...row })) });
+  ok('BNPL repair: running it again changes nothing (idempotent)',
+    JSON.stringify(again.transactions) === JSON.stringify(migrated.transactions));
+
+  // Launch trusts its own receipt; without one it repairs once.
+  const reparseKey = JSON.stringify([2, 999, 'AE']);
+  const launchState = (extra) => ({
+    onboarded: true, marketId: 'AE', parserVersion: 999, hydrationReparseKey: reparseKey,
+    transactions: [tx('launch-bnpl', { title: 'Tabby', category: 'loan' })], ...extra,
+  });
+  const trusted = hydration.migratePersistedState(launchState({ bnplCategoryRepairVersion: 1 }),
+    { reuseCompletedReparse: true });
+  ok('BNPL repair: a launch with a current receipt does not walk the ledger again',
+    trusted.transactions[0].category === 'loan');
+  const first = hydration.migratePersistedState(launchState({}), { reuseCompletedReparse: true });
+  ok('BNPL repair: a launch without the receipt repairs once and stamps it',
+    first.transactions[0].category === 'shopping' && first.bnplCategoryRepairVersion === 1);
+
+  // A retained SMS is re-read under the LEDGER's pack even on the launch path,
+  // where the raw reparse is skipped and whatever pack was live stays live.
+  {
+    const realMarkets = require('./build/markets');
+    realMarkets.setActiveMarket('AE');
+    const saudi = real.migratePersistedState({
+      onboarded: true, marketId: 'SA', parserVersion: 999,
+      hydrationReparseKey: JSON.stringify([2, require('./build/sms-parser').PARSER_BACKFILL_VERSION, 'SA']),
+      transactions: [tx('saudi-bnpl-card', {
+        title: 'Sample Pizza Restaurant', category: 'loan', amountFils: 30000,
+        raw: 'You spent SAR 300.00 at SAMPLE PIZZA RESTAURANT. Your Tabby Card limit is now SAR 1,846.50.',
+      })],
+    }, { reuseCompletedReparse: true });
+    ok('BNPL repair: a Saudi BNPL-card purchase is re-read under the Saudi pack and repaired',
+      saudi.transactions[0].category === 'dining', saudi.transactions[0]);
+    realMarkets.setActiveMarket('AE');
+  }
+
+  // A backup is normalised by the receiving build, whatever receipt it carries.
+  const restored = hydration.parseBackupForRestore(JSON.stringify({
+    app: 'wafra', version: 1,
+    data: { bnplCategoryRepairVersion: 1, transactions: [tx('restored-bnpl', { title: 'Tabby', category: 'loan' })] },
+  }));
+  ok('BNPL repair: a restored backup is repaired even if it carries a receipt',
+    restored?.transactions?.[0]?.category === 'shopping' && restored?.bnplCategoryRepairVersion === 1);
 }
 
 // The erase-race contract in 2c is behavioural, so it settles after this file

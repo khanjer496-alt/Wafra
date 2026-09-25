@@ -165,7 +165,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
       /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(v)),
     notSubscriptions: arrayOf(text), cancelledSubscriptions: dictionary(isoDate),
     lastScanTs: nonnegative, parserVersion: nonnegative,
-    hydrationFinalizeVersion: nonnegative,
+    hydrationFinalizeVersion: nonnegative, bnplCategoryRepairVersion: nonnegative,
     transferNormalizationVersion: nonnegative, transferInternalIds: arrayOf(id),
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,

@@ -240,7 +240,9 @@ export default function CardsScreen() {
                 : ''}
           </ThemedText>
         </View>
-        <View style={[styles.rowFigure, { alignItems: state.language === 'ar' ? 'flex-start' : 'flex-end' }]}>
+        <View style={[styles.rowFigure, largeText
+          ? styles.rowFigureStacked
+          : { alignItems: state.language === 'ar' ? 'flex-start' : 'flex-end' }]}>
           <Money
             fils={outstanding ?? spent}
             prefix={false}
@@ -407,11 +409,18 @@ const styles = StyleSheet.create({
   },
   rowText: {
     flex: 1,
+    minWidth: 0,
     gap: Spacing.half,
   },
+  // Its own line under the name at the accessibility sizes, starting where
+  // the text starts (the leading edge, mirrored in Arabic).
+  rowFigureStacked: { flexBasis: '100%', maxWidth: '100%', alignItems: 'flex-start' },
   rowFigure: {
     alignItems: 'flex-end',
     gap: Spacing.half,
+    // The caption under the figure wraps rather than squeezing the card name.
+    flexShrink: 1,
+    maxWidth: '55%',
   },
   inactiveRow: {
     opacity: 0.6,
