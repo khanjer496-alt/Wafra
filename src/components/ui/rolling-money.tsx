@@ -44,6 +44,8 @@ interface RollingMoneyProps {
   figureStyle?: StyleProp<TextStyle>;
   /** Extra style for the currency label (its colour on a band). */
   prefixStyle?: StyleProp<TextStyle>;
+  /** Larger Text ceiling for the figure (a width-fitted multiplier). */
+  maxFontSizeMultiplier?: number;
 }
 
 function signGlyph(fils: number, sign: Sign): string {
@@ -75,12 +77,13 @@ const placementFor = (currency: string, _localeKey: string) => currencyPlacement
 const labelFor = (code: string, _localeKey: string) => currencyDisplayLabel(code);
 
 /** One rolling position: the old digit leaves upward as the new one arrives. */
-function RollingGlyphView({ glyph, height, type, color, figureStyle }: {
+function RollingGlyphView({ glyph, height, type, color, figureStyle, maxFontSizeMultiplier }: {
   glyph: RollingGlyph;
   height: number;
   type: TextType;
   color?: string;
   figureStyle?: StyleProp<TextStyle>;
+  maxFontSizeMultiplier?: number;
 }) {
   const progress = useSharedValue(glyph.changed ? 0 : 1);
   useEffect(() => {
@@ -102,16 +105,16 @@ function RollingGlyphView({ glyph, height, type, color, figureStyle }: {
   const textStyle = [styles.glyph, figureStyle, color ? { color } : undefined];
 
   if (!glyph.changed) {
-    return <ThemedText type={type} tabular style={textStyle}>{glyph.char}</ThemedText>;
+    return <ThemedText type={type} tabular style={textStyle} maxFontSizeMultiplier={maxFontSizeMultiplier}>{glyph.char}</ThemedText>;
   }
   return (
     <View style={styles.clip}>
       <Animated.View style={incoming}>
-        <ThemedText type={type} tabular style={textStyle}>{glyph.char}</ThemedText>
+        <ThemedText type={type} tabular style={textStyle} maxFontSizeMultiplier={maxFontSizeMultiplier}>{glyph.char}</ThemedText>
       </Animated.View>
       {glyph.previous ? (
         <Animated.View style={[StyleSheet.absoluteFill, outgoing]}>
-          <ThemedText type={type} tabular style={textStyle}>{glyph.previous}</ThemedText>
+          <ThemedText type={type} tabular style={textStyle} maxFontSizeMultiplier={maxFontSizeMultiplier}>{glyph.previous}</ThemedText>
         </Animated.View>
       ) : null}
     </View>
@@ -143,6 +146,7 @@ export function RollingMoney({
   testID,
   figureStyle,
   prefixStyle,
+  maxFontSizeMultiplier,
 }: RollingMoneyProps) {
   const contextMoney = useLedgerMoney();
   const localeKey = useMoneyLocaleKey();
@@ -188,11 +192,11 @@ export function RollingMoney({
   const figure = activeRoll ? (
     <View key={activeRoll.id} style={styles.glyphRow}>
       {activeRoll.glyphs.map((glyph) => (
-        <RollingGlyphView key={glyph.key} glyph={glyph} height={lineHeight} type={type} color={color} figureStyle={figureStyle} />
+        <RollingGlyphView key={glyph.key} glyph={glyph} height={lineHeight} type={type} color={color} figureStyle={figureStyle} maxFontSizeMultiplier={maxFontSizeMultiplier} />
       ))}
     </View>
   ) : (
-    <ThemedText type={type} tabular style={[styles.value, figureStyle, color ? { color } : undefined]}
+    <ThemedText type={type} tabular maxFontSizeMultiplier={maxFontSizeMultiplier} style={[styles.value, figureStyle, color ? { color } : undefined]}
       onLayout={({ nativeEvent }) => {
         const next = Math.round(nativeEvent.layout.height);
         if (next !== lineHeight) setLineHeight(next);

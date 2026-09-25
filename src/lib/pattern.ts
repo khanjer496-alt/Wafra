@@ -57,7 +57,7 @@ export interface PatternReminders {
 export interface PatternInput {
   name?: string | null;
   goals?: readonly GoalId[];
-  /** Watched categories, in the person's own order. */
+  /** Watched categories; the first two (in the order given) become glyph tiles. */
   watched?: readonly CategoryId[];
   reminders?: Partial<PatternReminders>;
 }
@@ -140,8 +140,8 @@ export type PatternStateFields = Pick<AppState, 'userName' | 'wafraGoals' | 'bud
 
 /**
  * The input for a ledger: the stored name (never the placeholder), the goals
- * from onboarding, the categories that have a monthly limit (their order, not
- * their amounts), and which reminders have something to remind about —
+ * from onboarding, the categories that have a monthly limit (in a fixed
+ * order, never their amounts), and which reminders have something to remind about —
  * payment reminders fire for bills and card statements, the daily summary is
  * the person's own switch.
  */
@@ -149,7 +149,9 @@ export function patternInputFromState(state: PatternStateFields): PatternInput {
   return {
     name: state.userName === 'there' ? null : state.userName,
     goals: state.wafraGoals ?? [],
-    watched: state.budgets.map((budget) => budget.category),
+    // A fixed order, not the budgets array's: saving a limit moves its row to
+    // the end, and a limit edit must never redraw the pattern.
+    watched: state.budgets.map((budget) => budget.category).sort(),
     reminders: {
       bills: state.bills.length > 0,
       cards: state.cardDues.length > 0 ||

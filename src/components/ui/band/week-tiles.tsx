@@ -19,6 +19,9 @@ export interface WeekTileDay {
   today: boolean;
 }
 
+/** Longest value drawn above a bar ("12,345"); longer ones are only spoken. */
+const MAX_VALUE_CHARS = 6;
+
 const valueText = (fils: number, spec: LedgerMoneySpec | null, _localeKey: string) => spec
   ? formatMinorUnits(Math.round(Math.abs(fils)), spec, { decimals: false })
   : formatAmount(Math.abs(fils), { decimals: false });
@@ -46,13 +49,21 @@ export function WeekTiles({ days, palette, moneySpec, height = 70, accessibility
   const large = useLargeTextLayout();
   const spec = moneySpec ?? contextMoney;
   const max = Math.max(1, ...days.map((day) => day.fils));
+  // A figure is never cut into a misleading "12,3…": native shrinks it to fit
+  // (down to 60%); a figure too long for a bar column is left to the spoken
+  // label rather than drawn clipped.
+  const shown = (fils: number) => {
+    if (fils <= 0) return '';
+    const value = valueText(fils, spec, localeKey);
+    return value.length <= MAX_VALUE_CHARS ? value : '';
+  };
   return <View testID={testID} accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel} style={styles.row}>
     {days.map((day, index) => {
       const size = day.fils > 0 ? Math.max(6, Math.round((day.fils / max) * height)) : 3;
       return <View key={day.key} style={styles.day}>
-        {!large ? <ThemedText type="nano" numberOfLines={1}
+        {!large ? <ThemedText type="nano" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}
           style={[styles.value, { color: day.today ? palette.onBand : palette.onBandSecondary }]}>
-          {day.fils > 0 ? valueText(day.fils, spec, localeKey) : ''}
+          {shown(day.fils)}
         </ThemedText> : null}
         <View style={[styles.track, { height }]}>
           <GrowBar axis="height" delay={index * 50} size={size}

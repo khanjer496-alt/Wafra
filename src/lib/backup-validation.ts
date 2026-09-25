@@ -9,7 +9,7 @@ const categoryIds = new Set([
   'loan', 'salary', 'business', 'other',
 ]);
 // The five GoalId values in types.ts, spelled out like the category ids above
-// so this validator stays dependency-light; backup-goals.test pins the match.
+// so this validator stays dependency-light; pattern.test.cjs pins the match.
 export const BACKUP_GOAL_IDS: readonly string[] = ['salary', 'bills', 'subscriptions', 'spend-less', 'cash-cards'];
 type RecordValue = Record<string, unknown>;
 type Check = (value: unknown) => boolean;
@@ -173,9 +173,11 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,
     bestEffortAutoPost: boolean,
-    // What the person asked Wafra to do: known ids only, each once. No money.
-    wafraGoals: (v) => Array.isArray(v) && v.length <= BACKUP_GOAL_IDS.length &&
-      v.every((goal) => typeof goal === 'string' && BACKUP_GOAL_IDS.includes(goal)) && new Set(v).size === v.length,
+    // What the person asked Wafra to do: short code ids, never text or money.
+    // Ids a newer build added are accepted here and dropped by the restore's
+    // sanitizer, so a newer backup still restores on this build.
+    wafraGoals: (v) => Array.isArray(v) && v.length <= 16 &&
+      v.every((goal) => typeof goal === 'string' && /^[a-z][a-z-]{0,31}$/.test(goal)),
     bestEffortUndone: (v) => Array.isArray(v) && v.length <= 2000 && v.every(bestEffortUndoKey),
     androidCaptureSources: (v) => record(v) && required(v, { sms: boolean, notifications: boolean }),
     monthStartDay: (v) => integer(v) && (v as number) >= 1 && (v as number) <= 28,

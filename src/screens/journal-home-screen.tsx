@@ -589,7 +589,7 @@ export default function JournalHomeScreen() {
     </View>
     <View style={styles.stoppedActions}>
       <Pressable testID="home-capture-check" accessibilityRole="button" accessibilityLabel={summaryWords.checkSetup}
-        onPress={checkCaptureSetup} style={({ pressed }) => [styles.stoppedAction, { backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement }]}>
+        onPress={checkCaptureSetup} style={({ pressed }) => [styles.stoppedAction, { backgroundColor: pressed ? theme.backgroundSelected : band.card }]}>
         <ThemedText type="smallBold" themeColor="primary">{summaryWords.checkSetup}</ThemedText>
       </Pressable>
       <Pressable testID="home-capture-away" accessibilityRole="button" accessibilityLabel={summaryWords.away}
@@ -679,7 +679,7 @@ export default function JournalHomeScreen() {
   };
 
   const summaryProps = {
-    theme, language, largeText, greeting, dateLabel, periodLabel: periodLabel(period),
+    theme, band, language, largeText, greeting, dateLabel, periodLabel: periodLabel(period),
     incomeFils: dashboard.hero.incomeFils, expenseFils: dashboard.hero.expenseFils, netFils: dashboard.hero.netFils,
     moneySpec,
     onPeriod: () => setPeriodOpen(true), onAdd: () => router.push('/add-transaction'),
@@ -692,7 +692,7 @@ export default function JournalHomeScreen() {
     <BandScaffold band="home" tabbed testID="home-screen" contentStyle={styles.screen}
       floatingClearance={Platform.OS === 'android' ? HOME_ADD_BUTTON_CLEARANCE : 0}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={band.onBand} />}
-      bandContent={state.hydrated ? <ReferenceHomeBand {...summaryProps} band={band}
+      bandContent={state.hydrated ? <ReferenceHomeBand {...summaryProps}
         pattern={<YourPattern tile={24} gap={3} />}
         today={homeToday}
         onToday={() => router.push('/transactions')}

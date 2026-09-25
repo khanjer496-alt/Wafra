@@ -267,7 +267,10 @@ export function BandScaffold({
   const resolvedRefreshControl = refreshControl
     ? React.cloneElement(refreshControl, {
         tintColor: refreshControl.props.tintColor ?? palette.onBand,
+        // Android draws the arrow on its own disc: give it the card surface so
+        // a light tint never lands on the default white.
         colors: refreshControl.props.colors ?? [palette.tint],
+        progressBackgroundColor: refreshControl.props.progressBackgroundColor ?? palette.card,
       })
     : undefined;
 
@@ -277,7 +280,6 @@ export function BandScaffold({
       {...scrollProps}
       style={[styles.flex, scrollProps?.style]}
       contentInsetAdjustmentBehavior="never"
-      automaticallyAdjustKeyboardInsets={keyboardAware && Platform.OS === 'ios'}
       contentContainerStyle={styles.scrollContent}
       scrollIndicatorInsets={{ top: 0, bottom }}
       refreshControl={resolvedRefreshControl}>

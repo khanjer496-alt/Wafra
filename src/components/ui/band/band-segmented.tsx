@@ -48,8 +48,8 @@ export function BandSegmented<T extends string>({ segments, value, onChange, lab
 }
 
 const styles = StyleSheet.create({
-  track: { flexDirection: 'row', padding: 4, borderRadius: 22, gap: 4 },
+  track: { flexDirection: 'row', padding: 4, borderRadius: 26, gap: 4 },
   stack: { flexDirection: 'column', borderRadius: 20 },
-  segment: { flex: 1, minHeight: 40, borderRadius: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 8 },
+  segment: { flex: 1, minHeight: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 8 },
   label: { textAlign: 'center', flexShrink: 1 },
 });

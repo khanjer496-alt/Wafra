@@ -120,7 +120,9 @@ test('goal ids: known ids only, once each, canonical order; backups validate the
   assert.equal(types.sanitizeGoalIds('bills'), undefined);
   assert.equal(isValidBackupState({ transactions: [], wafraGoals: ['bills', 'salary'] }), true);
   assert.equal(isValidBackupState({ transactions: [] }), true, 'older backups without goals still restore');
-  for (const invalid of [['bills', 'bills'], ['retire-early'], 'bills', [1], {}]) {
+  assert.equal(isValidBackupState({ transactions: [], wafraGoals: ['bills', 'a-newer-goal'] }), true,
+    'a newer build\'s goal id restores here; the restore sanitizer drops it');
+  for (const invalid of ['bills', [1], {}, ['Free text, not an id'], Array.from({ length: 17 }, () => 'bills')]) {
     assert.equal(isValidBackupState({ transactions: [], wafraGoals: invalid }), false, JSON.stringify(invalid));
   }
 });
@@ -135,4 +137,17 @@ test('the store saves goals and drops anything unknown on hydrate and restore', 
   assert.equal('wafraGoals' in legacy, false, 'a ledger from before goals stays without them');
   const garbage = reducer(set, { type: 'restore', state: { onboarded: true, wafraGoals: 'bills' } });
   assert.equal('wafraGoals' in garbage, false);
+  const newer = reducer(set, { type: 'restore', state: { onboarded: true, wafraGoals: ['a-newer-goal', 'bills'] } });
+  assert.deepEqual(newer.wafraGoals, ['bills']);
+});
+
+test('saving a limit never redraws the pattern (the reducer moves the edited budget to the end)', () => {
+  const { reducer } = loadStore();
+  const state = reducer({}, { type: 'hydrate', state: { onboarded: true, userName: 'Sara', wafraGoals: ['bills'],
+    budgets: [{ category: 'groceries', limitFils: 200000 }, { category: 'dining', limitFils: 120000 }, { category: 'transport', limitFils: 50000 }] } });
+  const before = pattern.buildPattern(pattern.patternInputFromState(state));
+  const edited = reducer(state, { type: 'upsertBudget', budget: { category: 'dining', limitFils: 150000 } });
+  assert.notDeepEqual(edited.budgets.map((budget) => budget.category), state.budgets.map((budget) => budget.category),
+    'the fixture really does reorder');
+  assert.deepEqual(pattern.buildPattern(pattern.patternInputFromState(edited)), before);
 });

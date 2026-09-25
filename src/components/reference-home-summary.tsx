@@ -46,6 +46,8 @@ type Props = {
   onSetBudget?: () => void;
   /** Capture appears stopped: Left in budgets may be too high until it resumes. */
   captureStopped?: boolean;
+  /** The screen's band palette; the sheet's controls take its card surface. */
+  band?: BandPalette;
 };
 
 type BandProps = Props & {
@@ -179,7 +181,7 @@ export function ReferenceHomeSummary(p: Props) {
       <View style={styles.summaryTop}>
         <ThemedText type="smallBold" style={styles.sectionTitle}>{w.moneyOut}</ThemedText>
         <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod}
-          style={[styles.period, { backgroundColor: p.theme.backgroundSelected }]}>
+          style={[styles.period, { backgroundColor: p.band?.card ?? p.theme.backgroundSelected }]}>
           <ThemedText type="meta">{p.periodLabel}</ThemedText>
           <Icon name="chevron-down" size={14} color={p.theme.textSecondary} />
         </Pressable>

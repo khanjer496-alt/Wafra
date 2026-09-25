@@ -96,7 +96,7 @@ export function BandFigure({
 
   const figure = rolling
     ? <RollingMoney fils={fils} moneySpec={spec ?? undefined} sign={sign} decimals={decimals} type="amount"
-        figureStyle={figureStyle} prefixStyle={[styles.prefix, prefixStyle]} prefix />
+        figureStyle={figureStyle} prefixStyle={[styles.prefix, prefixStyle]} maxFontSizeMultiplier={multiplier} prefix />
     : <View style={[styles.inline, large && styles.stacked, !placement.spaced && styles.tight]}>
         {placement.position === 'after' ? null
           : <ThemedText style={[styles.prefix, prefixStyle]}>{currencyLabel}</ThemedText>}

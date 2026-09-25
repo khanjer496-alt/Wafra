@@ -136,7 +136,11 @@ style follows the focused band. The sheet rises 40pt on first mount where
 motion is allowed. `ScreenScaffold` is unchanged.
 
 Screens using it hide the native stack header (`headerShown: false`); the nav
-row replaces it.
+row replaces it. It must render inside a navigator (it reads `useIsFocused` to
+decide which screen owns the status bar); onboarding steps outside the router
+should compose `BandHeader` directly. `keyboardAware` avoids the keyboard with
+one mechanism per platform (KeyboardAvoidingView on iOS, measured padding on
+Android).
 
 ```tsx
 <BandScaffold
@@ -296,7 +300,8 @@ sand; reminder dots, ring and bars when bills, card statements or the daily
 summary have something to remind about. Same answers, same pattern, in any
 order; a missing answer leaves its cell empty. Tiles carry palette tokens only.
 `patternInputFromState(state)` maps a ledger (placeholder name → none;
-watched = categories with a monthly limit, their order not their amounts).
+watched = categories with a monthly limit in a fixed order, so saving a limit
+never redraws the pattern; never their amounts).
 
 ### `PatternMosaic` — `src/components/ui/pattern-mosaic.tsx`
 
@@ -318,8 +323,9 @@ version for Home, the lock screen and the recap cover.
 **`AppState.wafraGoals?: GoalId[]`** — not `goals`, which already holds savings
 goals with money in them. Set with the store action `setGoals(goals)`.
 Optional and migration-safe (absent on older ledgers), sanitized on hydrate and
-restore, validated in backups (`wafraGoals`, known ids once each), and kept
-from the phone when a restored backup predates it.
+restore (unknown ids dropped, each id once, canonical order), validated in
+backups as short code ids only (so a newer build's backup still restores here),
+and kept from the phone when a restored backup predates it.
 
 ## Tab bar
 
