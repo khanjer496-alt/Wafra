@@ -4062,12 +4062,12 @@ const S = {
   // The screen for a link that leads nowhere. It is the one place a person can
   // arrive at without having asked for it, which is exactly why it may not be
   // the one place that answers in the wrong language.
-  notFoundTitle: { en: 'This page moved on', ar: 'هذه الصفحة لم تعد هنا' },
+  notFoundTitle: { en: 'That page is not here.', ar: 'هذه الصفحة غير موجودة.' },
   notFoundBody: {
-    en: 'Nothing lives at that link. Your entries are untouched — this is a signpost pointing at a room that isn’t there.',
-    ar: 'لا شيء في هذا الرابط. عملياتك كما هي — هذه لافتة تشير إلى غرفة غير موجودة.',
+    en: 'The link may be old. Your ledger is fine.',
+    ar: 'ربما الرابط قديم. سجلّك سليم.',
   },
-  goHome: { en: 'Go home', ar: 'إلى الرئيسية' },
+  goHome: { en: 'Go to Home', ar: 'الذهاب إلى الرئيسية' },
 
   // ── Titles the PARSER mints ──
   //
