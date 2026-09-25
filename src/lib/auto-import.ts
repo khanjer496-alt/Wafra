@@ -19,6 +19,7 @@ import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
 import {
   nonPostingReason,
+  parseForeignAwaitingRate,
   PARSER_VERSION,
   type NonPostingReason,
   type ParsedSms,
@@ -43,8 +44,15 @@ import {
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { parsedTransactionReviewEvent } from '@/lib/parsed-review-event';
-import { detectLaunchMarketFromSender, pinnedLedgerCurrencyCode } from '@/lib/markets';
+import {
+  detectLaunchMarketFromAlert,
+  detectLaunchMarketFromSender,
+  pinnedLedgerCurrencyCode,
+  withMarketPackForParsing,
+} from '@/lib/markets';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { dateOrderForCountry, getActiveCountry } from '@/lib/country';
+import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-effort-autopost';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
@@ -679,6 +687,22 @@ export function inspectSourceFreeRefusedAlert(input: {
     return { kind: 'ignored', reason: 'non-financial' };
   }
 
+  // A launch-bank purchase in a currency the offline table cannot price
+  // (NGN, ISK, UZS ...) waits in Review in its own currency until a dated
+  // rate converts it at promotion. It is never dropped, even when the
+  // worldwide fallback below is skipped or cannot read the template.
+  const launchMarket = detectLaunchMarketFromAlert(input.source, input.sender);
+  const awaitingRate = launchMarket
+    ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(input.source, undefined, {
+        sender: input.sender, observedAt: input.observedAt,
+      }))
+    : null;
+  if (awaitingRate) {
+    const { raw: _raw, ...facts } = awaitingRate;
+    const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
+    if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
+  }
+
   const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
   const prepared = inspection
     ? prepareReviewAlert({
@@ -1019,9 +1043,12 @@ export async function scanInbox(
       // issuer evidence, but unlike an Android package identity they are not a
       // device-installed trust anchor. UAE/Saudi retain their mature automatic
       // parser; other markets use the sanitized worldwide Review path below.
+      // Other senders stay review-first unless the one unproven-format policy
+      // (best-effort-autopost.ts) proves a completed movement; such a row is
+      // marked "Auto-added — check". It never runs for AE/SA senders/routes.
       const p = launchSenderMarket
         ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket, sms.date)
-        : null;
+        : launchSession.parseUnproven(sms.body, sms.address, worldwide, sms.date);
       // Local-AI shadow evaluation over SMS history: the deterministic
       // universal fact is built only for money-bearing bodies and its redacted
       // window is queued for later scoring, so the scan never waits on the
@@ -1127,7 +1154,7 @@ export async function scanInbox(
           const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
           const p = launchSenderMarket
             ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket, sms.date)
-            : null;
+            : launchSession.parseUnproven(sms.body, sms.address, worldwide, sms.date);
           const reviewDecision = p && shouldReviewParsedIncome(p)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide)
             : null;
@@ -1275,7 +1302,12 @@ export async function scanInbox(
         // Review candidates still require event.decision === 'review'.
         const universalInspection = !launchParsed && autoAuthorized
           ? globalMarket
-            ? inspectUniversalBankEvent(source, { sender, market: globalMarket })
+            ? inspectUniversalBankEvent(source, {
+              sender,
+              market: globalMarket,
+              // A routed institution prints its own country's dates.
+              dateOrder: dateOrderForCountry(globalMarket) ?? undefined,
+            })
             : inspectGenericBankEventForReview(source, sender)
           : null;
         // Local-AI shadow evaluation is deliberately outside import authority.
@@ -1321,14 +1353,40 @@ export async function scanInbox(
           else if (certification.decision === 'adapter-required') notificationImportStats.certificationAdapterRequired += 1;
           else notificationImportStats.certificationReview += 1;
         }
-        const universalParsed = universalEvent &&
-          (certification?.decision === 'automatic' || certification?.decision === 'semantic-generalized')
+        // Green semantic generalization is an UNPROVEN format: it posts only
+        // through the same best-effort policy (and setting) as every other
+        // unproven alert, and carries the "Auto-added — check" marker. The
+        // ledger-currency gate below still refuses any foreign row here.
+        const semanticDecision = certification?.decision === 'semantic-generalized' && universalEvent
+          ? decideBestEffortAutoPost({
+              source,
+              event: universalEvent,
+              enabled: bestEffortAutoPostEnabled(),
+              country: getActiveCountry(),
+              routedMarket: globalMarket,
+              launchSenderMarket: null,
+              ledgerCurrency: null,
+              ledgerExponent: null,
+              observedAt: n.ts,
+              formatPrefix: 'semantic',
+            })
+          : null;
+        const universalPosting = universalEvent &&
+          (certification?.decision === 'automatic' || semanticDecision?.outcome === 'post')
           ? parsedUniversalPosting(universalEvent, source, overrides, routedMarket)
           : null;
+        const universalParsed = universalPosting && semanticDecision?.outcome === 'post'
+          ? { ...universalPosting, bestEffort: semanticDecision.marker }
+          : universalPosting;
         const parsedCurrencies = new Set(parsed.map((row) => row.currency));
         const batchCurrency = parsedCurrencies.size === 1 ? [...parsedCurrencies][0] : null;
         const requiredCurrency = pinnedLedgerCurrencyCode() ?? batchCurrency;
-        const parsedCandidate = launchParsed ?? universalParsed;
+        // A certified template is a PROVEN format: the universal reading of
+        // the same alert is not "best effort" and must not carry the marker.
+        const launchCandidate = launchParsed?.bestEffort && certification?.decision === 'automatic'
+          ? (({ bestEffort: _marker, ...proven }) => proven)(launchParsed)
+          : launchParsed;
+        const parsedCandidate = launchCandidate ?? universalParsed;
         // Parser success is not admission to the ledger. A trusted bank-app
         // package may auto-post globally, but only in the ledger's established
         // currency (or the single currency already established by this batch).

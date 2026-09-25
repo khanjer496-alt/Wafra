@@ -413,7 +413,7 @@ for (const section of ['Imports', 'Notifications', 'Preferences', 'Privacy', 'Da
 const settingsSweep = await pressEverything('settings', settings,
   { skip: ['Erase all data'], fullScroll: true });
 for (const control of [
-  'Wafra Pro', 'Import bank statements', 'Daily spend summary', 'Appearance',
+  'Wafra Pro', 'Add bank statements', 'Daily spend summary', 'Appearance',
   'Language', 'Customize Home', 'App lock', 'Privacy and data', 'Improve categories',
   'Improve accuracy', 'Back up everything (JSON)', 'Restore from backup',
   'Export transactions (CSV)', 'Expense report (PDF)', 'Send feedback', 'Erase all data',

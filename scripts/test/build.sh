@@ -44,6 +44,7 @@ rewrite() {
       -e "s|from '../../modules/sms-reader'|from './sms-reader'|" \
       -e "s|from '../../modules/wafra-stability'|from './wafra-stability'|" \
       -e "s|from '../../modules/wafra-live-capture'|from './wafra-live-capture-types'|" \
+      -e "s|from '../../modules/wafra-on-device-ai'|from './wafra-on-device-ai'|" \
       -e "s|from '../../modules/wafra-message-history/src/WafraMessageHistory.types'|from './wafra-message-history-types'|" \
       -e "s|from 'react-native'|from './stub-react-native'|" \
       -e "s|from 'expo-modules-core'|from './stub-expo-modules-core'|" \
@@ -65,24 +66,25 @@ rewrite() {
 # `--module commonjs` cannot follow. They get the nodenext .cts pass below.
 for f in types routes format categories ledger bill-alias capture-source-identity dedupe arabic-sms bank-amount-tokens sms-parser import-plan bills \
          transfer-reconciliation-types transfer-reconciliation transfer-evidence transfer-review-copy \
-         insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics growth-funnel period purchases markets known-banks i18n system-language balances \
+         insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics growth-funnel period purchases country-names country markets known-banks i18n system-language balances \
          brand-marks leaving-soon accounts heal accuracy onboarding onboarding-bank-examples reminders auto-import android-capture-sources \
          history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-filter capture-trace \
          launch-performance launch-benchmark runtime-performance \
-         relay-protocol trusted-device-contract cloud-import-contract statement-coverage statement-batch reimbursement-report fx \
+         relay-protocol trusted-device-contract cloud-import-contract statement-coverage statement-batch reimbursement-report fx fx-rates \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
          background-relay-storage uncategorised currency-metadata alert-draft bank-alert-semantic-types \
          bank-alert-semantic-rules bank-alert-semantic-output bank-alert-interpreter \
          alert-event-evidence alert-institution-grammars alert-market-detection alert-review-tray generic-review-entry review-source-bindings unparsed-launch-alert \
          universal-types universal-dates universal-fields universal-money universal-parser universal-confidence universal-template-certification universal-import universal-categorization \
-         ledger-money backup-validation ledger-export parsed-review-event wallet-near-match review-promotion launch-review-rollout trusted-bank-notification-packages \
+         ledger-money paste-sample backup-validation ledger-export parsed-review-event wallet-near-match review-promotion launch-review-rollout trusted-bank-notification-packages \
          sms-corpus parser-research-contract parser-research founder-pro \
-         alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me \
+         alert-market-pack-types alert-market-packs.us-eu alert-market-packs.india-me alert-market-packs.world \
          alert-market-packs alert-semantics alert-rollout feedback-wire historical-import ios-history-import \
          ios-bank-senders.generated ios-bank-senders local-message-record ios-apple-pay-record ios-capture-health ios-local-capture ios-notification-replay \
          wafra-assistant wafra-assistant-ai assistant-spending-analysis assistant-patterns home-widget-preferences \
          local-semantic-model local-semantic-runtime local-semantic-scheduler local-semantic-background-policy local-semantic-shadow local-semantic-inbox-shadow \
-         local-semantic-review local-semantic-review-runtime local-assistant-grounding growth-funnel-diagnostics stability-diagnostics; do
+         local-semantic-review local-semantic-review-runtime local-assistant-grounding growth-funnel-diagnostics stability-diagnostics \
+         local-semantic-flags on-device-ai on-device-assistant on-device-category best-effort-autopost; do
   [ -f "../../src/lib/$f.ts" ] || continue
   rewrite ../../src/lib/$f.ts build/$f.ts
 done
@@ -111,6 +113,7 @@ done
 rewrite ../../modules/sms-reader/index.ts build/sms-reader.ts
 rewrite ../../modules/notification-reader/index.ts build/notification-reader.ts
 rewrite ../../modules/wafra-stability/index.ts build/wafra-stability.ts
+rewrite ../../modules/wafra-on-device-ai/index.ts build/wafra-on-device-ai.ts
 rewrite ../../modules/wafra-live-capture/src/WafraLiveCapture.types.ts \
   build/wafra-live-capture-types.ts
 rewrite ../../modules/wafra-message-history/src/WafraMessageHistory.types.ts \

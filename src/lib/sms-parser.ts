@@ -7,8 +7,11 @@ import {
   keywordsForMarket,
   MARKETS,
 } from '@/lib/markets';
-import type { CategoryId, TransactionType } from '@/lib/types';
+import type { BestEffortMarker, CategoryId, TransactionType } from '@/lib/types';
 import { localMoneyPrefixPattern, malformedLocalMoneyTokens } from '@/lib/bank-amount-tokens';
+import { convertMinorUnits, currencyExponent, originalMoneyFields, type MinorExponent } from '@/lib/fx';
+import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
+import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
  *
@@ -410,14 +413,28 @@ export interface ParsedSms {
   amountFils: number;
   /** ISO 4217 currency of `amountFils` (the active market's ledger currency). */
   currency: string;
-  /** Original foreign amount, when the alert names one (two-decimal minor units). */
+  /** Set only by the unproven-format policy (best-effort-autopost.ts). */
+  bestEffort?: BestEffortMarker;
+  /**
+   * Original foreign amount as legacy two-decimal minor units (major × 100),
+   * present only when that representation is exact. See fx.ts originalMoneyOf.
+   */
   originalAmountMinor?: number;
-  /** ISO 4217 currency code for `originalAmountMinor`. */
+  /** ISO 4217 currency code of the original amount. */
   originalCurrency?: string;
+  /** Exact original amount in the original currency's own ISO exponent. */
+  originalMinorUnits?: number;
+  /** ISO exponent of `originalMinorUnits` (JPY 0, USD 2, KWD 3). */
+  originalExponent?: 0 | 2 | 3;
   /** Local-currency units per one original-currency unit. */
   fxRate?: number;
-  /** Whether the local value came from the bank or the offline parser table. */
-  fxSource?: 'bank' | 'fallback';
+  /** Effective date of a dated reference rate (`fxSource: 'reference'`). */
+  fxRateDate?: string;
+  /**
+   * `bank`: the alert stated the charged local amount; `fallback`: the offline
+   * parser table; `reference`: a dated provider rate applied after parsing.
+   */
+  fxSource?: 'bank' | 'fallback' | 'reference';
   merchant: string;
   /** ISO date if the message contained one, otherwise null (caller defaults to today). */
   date: string | null;
@@ -586,6 +603,11 @@ export interface ParseOptions {
   sender?: string;
   /** Original source received timestamp in milliseconds, never the import time. */
   observedAt?: number;
+  /**
+   * Network-free dated rate lookup for a currency outside the offline table.
+   * Defaults to rates already known on this device (fx-rates memory cache).
+   */
+  fxLookup?: (base: string, quote: string, date: string) => import('@/lib/fx').FxQuote | null;
 }
 
 /**
@@ -1597,7 +1619,38 @@ let DEBIT_WORDS = /x^/;
 let PAYMENT_FOR_RE = /x^/;
 let FX_PREFIX_RE = /x^/;
 let FX_SUFFIX_RE = /x^/;
+/** ISO codes outside the offline table; matched only during a rate pass. */
+let EXT_FX_PREFIX_RE = /x^/;
+let EXT_FX_SUFFIX_RE = /x^/;
 let compiledForMarket = '';
+
+/**
+ * CURRENCIES OUTSIDE THE OFFLINE TABLE ARE NEVER SILENTLY DROPPED.
+ *
+ * The table above is an approximation for ~40 travel corridors. A purchase
+ * in any other ISO currency (NGN, ISK, UZS ...) used to make the whole alert
+ * unparseable. Such a figure is now read in a second, explicit pass with a
+ * rate supplied by the caller:
+ *
+ *   - 'reference': a dated provider quote already known on the device. The
+ *     row posts converted, labelled `fxSource: 'reference'` with its date.
+ *   - 'probe': rate 1, used only to recover the parsed facts (merchant, card,
+ *     date, amount) so the purchase can wait in Review in its own currency
+ *     until a rate exists. A probe row is NEVER returned as a posting.
+ *
+ * Outside those passes the extended codes are not matched at all, so every
+ * alert the parser already handled parses exactly as before.
+ */
+type ExtendedRate = { rate: number; source: 'reference' | 'probe'; date?: string };
+let extendedRates: ((code: string) => ExtendedRate | null) | null = null;
+/**
+ * Extended codes that are also everyday uppercase words or brands ("ALL 3
+ * ITEMS", "TOP UP 50", "PEN 2"). Reading them as money is worse than asking.
+ */
+const EXTENDED_CODE_DENYLIST = new Set(['ALL', 'TOP', 'CUP', 'PEN', 'MOP', 'SOS', 'BOB', 'BAM', 'AMD']);
+const extendedCurrencyCodes = (local: string): string[] => Object.keys(CURRENCY_MINOR_UNITS).filter((code) =>
+  !(code in UNITS_PER_USD) && code !== local && !EXTENDED_CODE_DENYLIST.has(code) &&
+  currencyExponent(code) !== null && !['BOV', 'CHE', 'CHW', 'COU', 'MXV', 'USN', 'UYI', 'XAD', 'XCG'].includes(code));
 
 /**
  * The words that may sit between "your" and "card" in a card-settlement
@@ -1908,11 +1961,21 @@ function ensureCurrencyPatterns(): void {
       `|transferr(?:ed|ing)` +
       `|${AR_DEBIT_WORDS}`, 'i');
   const codes = Object.keys(UNITS_PER_USD).filter((c) => c !== m.currency.code).join('|');
-  FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*(${FIGURE})`, 'i');
+  // A foreign figure may carry its own currency's third decimal (KWD 12.345,
+  // BHD, OMR, JOD). Reading only two decimals silently dropped it. Whether
+  // the digits fit the currency's ISO exponent is decided per candidate in
+  // extractForeignAmount, never by this pattern.
+  const FX_FIGURE = String.raw`(?:[\d,]+(?:\.\d{1,3})?|\.\d{1,3})`;
+  FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*(${FX_FIGURE})`, 'i');
   // Same line only. "Card No XXXX4777 \n USD .00" used to read the card's last
   // four digits as USD 8,722 and file a 32,031.55 purchase for a message whose
   // amount was masked out entirely.
-  FX_SUFFIX_RE = new RegExp(`(${FIGURE})[^\\S\\r\\n]*(${codes})\\b`, 'i');
+  FX_SUFFIX_RE = new RegExp(`(${FX_FIGURE})[^\\S\\r\\n]*(${codes})\\b`, 'i');
+  // Uppercase only: an ISO code in a bank alert is written in capitals, and a
+  // lowercase "all 50" or "top 10" is prose.
+  const extended = extendedCurrencyCodes(m.currency.code).join('|');
+  EXT_FX_PREFIX_RE = new RegExp(`\\b(${extended})[^\\S\\r\\n]*(${FX_FIGURE})`);
+  EXT_FX_SUFFIX_RE = new RegExp(`(${FX_FIGURE})[^\\S\\r\\n]*(${extended})\\b`);
 }
 
 /**
@@ -1949,10 +2012,41 @@ function fxMinorPerUnit(code: string): number {
  * actually charged or leaves every estimate uncorrected forever.
  */
 interface ForeignAmount {
+  /** Where the rate came from: the offline table, a provider quote, or a probe. */
+  source: 'table' | 'reference' | 'probe';
+  rateDate?: string;
   currency: string;
+  /** Exact amount in the currency's OWN ISO exponent (JPY 1500, KWD 12345). */
   amountMinor: number;
+  exponent: MinorExponent;
   localFils: number;
   rate: number;
+}
+
+/**
+ * The foreign figure in two-decimal units (major × 100), possibly fractional
+ * for a three-decimal amount. Local fils are two-decimal on the AED/SAR ledgers
+ * this parser serves, so `local fils / this` is the local-per-foreign rate.
+ */
+function foreignHundredths(amount: Pick<ForeignAmount, 'amountMinor' | 'exponent'>): number {
+  return amount.exponent === 3 ? amount.amountMinor / 10 : amount.amountMinor * 10 ** (2 - amount.exponent);
+}
+
+/**
+ * "12.345" -> 12345 at exponent 3, "1,500" -> 1500 at exponent 0, without a
+ * binary multiply. More fraction digits than the currency has are accepted
+ * only when they are zeros ("JPY 1,500.00"); anything else is not an amount
+ * in that currency and returns null.
+ */
+function foreignFigureToMinor(figure: string, exponent: MinorExponent): number | null {
+  const value = figure.replace(/,/g, '');
+  const match = /^(\d*)(?:\.(\d+))?$/.exec(value);
+  if (!match || (!match[1] && !match[2])) return null;
+  const fraction = match[2] ?? '';
+  if (fraction.length > exponent && /[1-9]/.test(fraction.slice(exponent))) return null;
+  const digits = `${match[1] || '0'}${fraction.slice(0, exponent).padEnd(exponent, '0')}`;
+  const minor = Number(digits);
+  return Number.isSafeInteger(minor) && minor > 0 ? minor : null;
 }
 
 /**
@@ -1976,8 +2070,8 @@ interface ForeignAmount {
 function extractForeignAmount(raw: string): ForeignAmount | null {
   /** Where the CODE starts (the balance window ends there) and where the digits do. */
   const candidates: { at: number; digitsAt: number; code: string; num: string }[] = [];
-  const collect = (re: RegExp, codeGroup: 1 | 2) => {
-    const scan = new RegExp(re.source, 'gi');
+  const collect = (re: RegExp, codeGroup: 1 | 2, flags = 'gi') => {
+    const scan = new RegExp(re.source, flags);
     let m: RegExpExecArray | null;
     while ((m = scan.exec(raw))) {
       const num = codeGroup === 1 ? m[2] : m[1];
@@ -1989,29 +2083,63 @@ function extractForeignAmount(raw: string): ForeignAmount | null {
   };
   collect(FX_PREFIX_RE, 1);
   if (!candidates.length) collect(FX_SUFFIX_RE, 2);
+  if (!candidates.length && extendedRates) {
+    collect(EXT_FX_PREFIX_RE, 1, 'g');
+    if (!candidates.length) collect(EXT_FX_SUFFIX_RE, 2, 'g');
+  }
 
   for (const c of candidates) {
-    if (!(c.code in UNITS_PER_USD)) continue;
+    const extended = !(c.code in UNITS_PER_USD) ? extendedRates?.(c.code) ?? null : null;
+    if (!(c.code in UNITS_PER_USD) && !extended) continue;
     if (isMaskedFigure(raw, c.digitsAt)) continue;
     // 56, exactly as extractAmountFils: the window has to hold a balance noun
     // plus the card reference that can sit between it and the figure.
     if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, c.at - 56), c.at))) continue;
-    const original = Number(c.num.replace(/,/g, ''));
-    const amountMinor = Math.round(original * 100);
+    // Each currency keeps its OWN exponent: KWD 12.345 is 12345 thousandths,
+    // JPY 1,500 is 1500 yen. Storing everything as major × 100 lost the
+    // third decimal of every dinar charge.
+    const exponent = currencyExponent(c.code);
+    if (exponent === null) continue;
+    const amountMinor = foreignFigureToMinor(c.num, exponent);
+    if (amountMinor === null) continue;
+    if (extended) {
+      // A provider quote converts with exact integer arithmetic; a probe
+      // keeps the foreign minor units only to describe the purchase.
+      let fils: number;
+      try {
+        fils = extended.source === 'probe'
+          ? Math.max(1, Math.round(foreignHundredths({ amountMinor, exponent })))
+          : convertMinorUnits(amountMinor, exponent, extended.rate, 2);
+      } catch {
+        return null;
+      }
+      if (extended.source === 'reference' && fils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
+      return {
+        source: extended.source,
+        ...(extended.date ? { rateDate: extended.date } : {}),
+        currency: c.code,
+        amountMinor,
+        exponent,
+        localFils: fils,
+        rate: extended.rate,
+      };
+    }
     const rate = fxMinorPerUnit(c.code) / 100;
     // Convert the integer foreign minor units directly. Multiplying the major
     // value by a repeating cross-rate first made exact half-fils values land a
     // binary hair below .5 (17 AZN became 3672.499999...), rounding one fils
     // down. The tiny relative tolerance restores positive decimal half-up
     // rounding without moving values that are not at a floating-point tie.
-    const unroundedFils = amountMinor * rate;
+    const unroundedFils = foreignHundredths({ amountMinor, exponent }) * rate;
     const fils = Math.floor(
       unroundedFils + 0.5 + Number.EPSILON * Math.max(1, unroundedFils) * 4,
     );
     if (!Number.isFinite(fils) || fils <= 0 || fils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
     return {
+      source: 'table',
       currency: c.code,
       amountMinor,
+      exponent,
       localFils: fils,
       rate,
     };
@@ -3730,7 +3858,7 @@ function transactionMoney(raw: string) {
     !!foreignCandidate &&
     bankLocalFils !== null &&
     (() => {
-      const implied = bankLocalFils / foreignCandidate.amountMinor;
+      const implied = bankLocalFils / foreignHundredths(foreignCandidate);
       const table = foreignCandidate.rate;
       if (!(implied > 0) || !(table > 0)) return true;
       const ratio = implied / table;
@@ -3743,13 +3871,19 @@ function transactionMoney(raw: string) {
     amountFils,
     ...(foreignAmount
       ? {
-          originalAmountMinor: foreignAmount.amountMinor,
-          originalCurrency: foreignAmount.currency,
+          ...originalMoneyFields({
+            currency: foreignAmount.currency,
+            minorUnits: foreignAmount.amountMinor,
+            exponent: foreignAmount.exponent,
+          }),
           fxRate:
             bankLocalFils !== null
-              ? amountFils / foreignAmount.amountMinor
+              ? amountFils / foreignHundredths(foreignAmount)
               : foreignAmount.rate,
-          fxSource: bankLocalFils !== null ? ('bank' as const) : ('fallback' as const),
+          fxSource: bankLocalFils !== null ? ('bank' as const)
+            : foreignAmount.source === 'reference' ? ('reference' as const) : ('fallback' as const),
+          ...(bankLocalFils === null && foreignAmount.source === 'reference' && foreignAmount.rateDate
+            ? { fxRateDate: foreignAmount.rateDate } : {}),
         }
       : {}),
   };
@@ -3764,6 +3898,8 @@ interface TtPaymentAmount {
   type: 'income' | 'expense';
   originalAmountMinor?: number;
   originalCurrency?: string;
+  originalMinorUnits?: number;
+  originalExponent?: 2;
   fxRate?: number;
   fxSource?: 'fallback';
 }
@@ -3805,6 +3941,9 @@ const extractTtPaymentAmount = (raw: string): TtPaymentAmount | null => {
       type: match[3] === '+' ? 'income' : 'expense',
       originalAmountMinor,
       originalCurrency: code,
+      // USD/EUR/GBP only: all two-decimal, so both spellings are the same figure.
+      originalMinorUnits: originalAmountMinor,
+      originalExponent: 2,
       fxRate: rate,
       fxSource: 'fallback',
     };
@@ -6498,12 +6637,101 @@ function merchantsAgree(a: ParsedSms, b: ParsedSms): boolean {
  * that spells out "Emirates NBD Credit Card" is stating its issuer, while a
  * sender ID only suggests one.
  */
+/** Run one parse with extended (non-table) currency codes enabled. */
+function withExtendedRates<T>(rates: (code: string) => ExtendedRate | null, run: () => T): T {
+  const previous = extendedRates;
+  extendedRates = rates;
+  try {
+    return run();
+  } finally {
+    extendedRates = previous;
+  }
+}
+
+const localIsoDay = (epochMs: number | undefined): string | null => {
+  if (epochMs === undefined || !Number.isFinite(epochMs)) return null;
+  const day = new Date(epochMs);
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+};
+
+/**
+ * The purchase the offline table could not price, parsed with a probe rate
+ * so its facts are known. Only an ordinary transaction whose money came from
+ * an extended-code figure qualifies; anything else returns null.
+ */
+function probeExtendedForeign(
+  message: string,
+  overrides: Record<string, CategoryId> | undefined,
+  options: ParseOptions | undefined,
+): ParsedSms | null {
+  // Cheap prefilter: nearly every refused message names no extended code,
+  // and must not pay for a second full parse.
+  ensureCurrencyPatterns();
+  if (!EXT_FX_PREFIX_RE.test(message) && !EXT_FX_SUFFIX_RE.test(message)) return null;
+  const probe = withExtendedRates(() => ({ rate: 1, source: 'probe' }), () =>
+    parseSmsInner(message, overrides, options));
+  if (!probe || probe.kind !== 'transaction' || probe.fxSource === 'bank' ||
+    typeof probe.originalCurrency !== 'string' || probe.originalCurrency in UNITS_PER_USD ||
+    probe.originalMinorUnits === undefined || probe.originalExponent === undefined) return null;
+  return probe;
+}
+
+/**
+ * A foreign purchase this parser read but cannot price yet, restated in its
+ * OWN currency (amount in that currency's minor units, no conversion fields)
+ * for a Review item that waits for a rate. Null when the message is not such
+ * a purchase or when parseSms can already post it.
+ */
+export function parseForeignAwaitingRate(
+  message: string,
+  overrides?: Record<string, CategoryId>,
+  options?: ParseOptions,
+): ParsedSms | null {
+  ensureCurrencyPatterns();
+  // Prefilter before any full parse: refused alerts almost never name one.
+  if (!EXT_FX_PREFIX_RE.test(message) && !EXT_FX_SUFFIX_RE.test(message)) return null;
+  if (parseSms(message, overrides, options)) return null;
+  const probe = probeExtendedForeign(message, overrides, options);
+  if (!probe) return null;
+  const {
+    originalAmountMinor: _legacy, originalCurrency, originalMinorUnits, originalExponent: _exponent,
+    fxRate: _rate, fxRateDate: _rateDate, fxSource: _source, ...rest
+  } = probe;
+  return {
+    ...rest,
+    currency: originalCurrency!,
+    amountFils: originalMinorUnits!,
+    snapshotFils: null,
+    snapshotKind: null,
+  };
+}
+
 export function parseSms(
   message: string,
   overrides?: Record<string, CategoryId>,
   options?: ParseOptions,
 ): ParsedSms | null {
-  const parsed = parseSmsInner(message, overrides, options);
+  let parsed = parseSmsInner(message, overrides, options);
+  if (!parsed) {
+    // A currency outside the offline table: convert only with a dated rate
+    // already known on this device. Otherwise the alert is refused here and
+    // parseForeignAwaitingRate hands it to Review; it is never dropped.
+    ensureCurrencyPatterns();
+    const probe = probeExtendedForeign(message, overrides, options);
+    const day = probe ? probe.date ?? localIsoDay(options?.observedAt) : null;
+    if (probe && day) {
+      const local = getActiveMarket().currency.code;
+      const lookup = options?.fxLookup ?? ((base: string, quote: string, date: string) =>
+        cachedReferenceQuote(base, quote, date));
+      const quote = lookup(probe.originalCurrency!, local, day);
+      if (quoteFitsDay(quote, day) && quote.base === probe.originalCurrency && quote.quote === local) {
+        const priced = withExtendedRates((code) => code === quote.base
+          ? { rate: quote.rate, source: 'reference', date: quote.date } : null,
+        () => parseSmsInner(message, overrides, options));
+        if (priced && priced.fxSource === 'reference' && priced.originalCurrency === quote.base) parsed = priced;
+      }
+    }
+  }
   if (!parsed) return null;
   // The same obligation is named on both sides of its lifecycle: a provider
   // reminder calls it an account/party ID, while a bank bill-pay receipt often

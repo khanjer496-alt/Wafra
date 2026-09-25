@@ -40,9 +40,10 @@ import { reminderScheduleInputsChanged } from '@/lib/reminders';
 import { inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
-import { useStore } from '@/lib/store';
+import { useStoreActions, useStoreSelector } from '@/lib/store';
+import { fieldsEqual } from '@/lib/store-selection';
 import type { Subscription } from '@/lib/subscriptions';
-import type { CardDue, Transaction } from '@/lib/types';
+import type { AppState as LedgerState, CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 import { homeWidgetVisible, loadHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
 import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
@@ -79,6 +80,24 @@ let manualReminderTail: Promise<void> = Promise.resolve();
  * facts, date-grouped activity, then obligations and low-noise capture status.
  * No entrance timers/scale reveals delay access to the actual ledger.
  */
+/**
+ * Every AppState field Home reads, directly or through the helpers it hands
+ * `state` to (dashboard projection and insight, leaving-soon, accuracy,
+ * uncategorised, cash-flow, cards, transfer scope, recap, purchases). Home
+ * re-renders only when one of these changes; scan timestamps, the review
+ * tray, capture warnings and settings it never shows no longer re-render it.
+ * Import progress is listed: Home draws it. Add a field here whenever Home or
+ * one of those helpers starts reading it.
+ */
+export const HOME_STATE_FIELDS = [
+  'hydrated', 'onboarded', 'language', 'userName', 'privateMode', 'captureOptOut',
+  'pro', 'founderPro', 'trialStartTs', 'marketId', 'ledgerMoney',
+  'transactions', 'accounts', 'budgets', 'bills', 'cardDues', 'notSubscriptions',
+  'merchantOverrides', 'billAliases', 'transferInternalIds', 'transferNormalizationVersion',
+  'historyImport',
+] as const satisfies readonly (keyof LedgerState)[];
+const homeStateEqual = fieldsEqual<LedgerState>(HOME_STATE_FIELDS);
+
 export default function JournalHomeScreen() {
   const theme = useTheme();
   const language = useLanguage();
@@ -89,15 +108,15 @@ export default function JournalHomeScreen() {
   const privacyGateCleared = usePrivacyGateCleared();
   const router = useRouter();
   const toast = useToast();
+  const state = useStoreSelector(({ state: s }) => s, homeStateEqual);
   const {
-    state,
     getStateSnapshot,
     getStateGeneration,
     applyFxUpdates,
     setCaptureOptOut,
     beginHistoryImport,
     unlockFounderPro,
-  } = useStore();
+  } = useStoreActions();
   const { period } = usePeriod();
   // Restores can change denomination while all three figures stay identical.
   // Make it a prop so compiled children cannot retain ambient currency text.

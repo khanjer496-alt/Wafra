@@ -50,23 +50,40 @@ const captureInstrument: Check = (value) => record(value) && required(value, {
   last4: (tail) => typeof tail === 'string' && /^\d{4}$/.test(tail),
   kind: oneOf('credit', 'debit', 'account', 'unknown'),
 }) && optional(value, { bankIdentity: id });
+// Code-owned identifiers only (e.g. `universal:purchase:debit`), never text.
+const bestEffortMarker: Check = (value) => record(value) &&
+  Object.keys(value).every((key) => key === 'v' || key === 'format' || key === 'market') &&
+  required(value, {
+    v: oneOf(1),
+    format: (v) => typeof v === 'string' && /^(?:universal|semantic):[a-z-]{1,32}:(?:debit|credit)$/.test(v),
+    market: (v) => typeof v === 'string' && /^[A-Z]{2}$/.test(v),
+  });
+const bestEffortUndoKey: Check = (v) => typeof v === 'string' && v.length > 0 && v.length <= 256;
 const transaction: Check = (value) => {
   if (!record(value) || !required(value, {
     id, type: oneOf('expense', 'income'), amountFils: positive, category,
     accountId: id, title: text, date: isoDate,
   }) || !optional(value, {
     originalAmountMinor: positive, originalCurrency: (v) => typeof v === 'string' && /^[A-Z]{3}$/.test(v),
+    originalMinorUnits: positive, originalExponent: oneOf(0, 2, 3),
     fxRate: finitePositive, fxRateDate: isoDate, fxSource: oneOf('bank', 'reference', 'fallback'),
     note: text, ts: nonnegative, source: oneOf('sms', 'manual'), smsKey: text,
     notificationObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
     messageObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
     viaPush: boolean, walletBound: oneOf(true), captureInstrument, cardPaymentSide: oneOf('debit', 'receipt'),
     statementImportId: (v) => typeof v === 'string' && /^[a-f0-9]{32}$/.test(v),
+    bestEffort: bestEffortMarker,
     transferEvidence: isTransferEvidence, transferDecision: isTransferDecision, transferMatch: isTransferMatch,
     paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text,
     paymentInstrumentSource: oneOf('alert', 'user'), cashOutDate: isoDate,
     cashOutAccountId: id, isTransfer: boolean, userEdited: boolean, titleEdited: boolean, raw: text,
   })) return false;
+  // Exponent-correct originals travel as a pair and must agree with the
+  // legacy two-decimal figure when both are present.
+  if ((value.originalMinorUnits === undefined) !== (value.originalExponent === undefined)) return false;
+  if (value.originalMinorUnits !== undefined && value.originalAmountMinor !== undefined &&
+    (value.originalMinorUnits as number) * 100 !==
+      (value.originalAmountMinor as number) * 10 ** (value.originalExponent as number)) return false;
   if (value.splits !== undefined) {
     if (!Array.isArray(value.splits) || value.splits.length < 2) return false;
     let sum = 0;
@@ -114,6 +131,7 @@ const onboardingProfile: Check = (value) => record(value) && required(value, {
   // a ledger written by a newer build that knows more countries must still
   // restore, and an unknown code already falls back to neutral bank glyphs.
   country: (value) => value === null || (typeof value === 'string' && /^[A-Z]{2}$/.test(value)),
+  statementStepDone: boolean,
 });
 const dictionary = (check: Check): Check => (value) => record(value) &&
   Object.entries(value).every(([key, item]) =>
@@ -143,9 +161,11 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     transferNormalizationVersion: nonnegative, transferInternalIds: arrayOf(id),
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,
+    bestEffortAutoPost: boolean,
+    bestEffortUndone: (v) => Array.isArray(v) && v.length <= 2000 && v.every(bestEffortUndoKey),
     androidCaptureSources: (v) => record(v) && required(v, { sms: boolean, notifications: boolean }),
     monthStartDay: (v) => integer(v) && (v as number) >= 1 && (v as number) <= 28,
-    marketId: text, language: oneOf('en', 'ar', ''), languagePreference: oneOf('system', 'en', 'ar'),
+    marketId: text, country: (v) => v === '' || (typeof v === 'string' && /^[A-Z]{2}$/.test(v)), language: oneOf('en', 'ar', ''), languagePreference: oneOf('system', 'en', 'ar'),
     knownBanks: arrayOf(text),
     themePreference: oneOf('system', 'light', 'dark'),
     onboardingCurrencyEvidence: (v) => v === null || ledgerCurrency(v),

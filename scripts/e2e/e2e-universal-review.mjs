@@ -108,6 +108,12 @@ async function expectConfirmationRefusal(page) {
 
 async function scenario(name, fixtureName, run, route = '/review-alerts') {
   const context = await browser.newContext({ viewport: { width: 412, height: 915 }, colorScheme: 'light' });
+  // Synthetic ledgers only: block every non-local request (exchange rates included).
+  await context.route('**/*', (request) => {
+    const url = request.request().url();
+    return url.startsWith(new URL('/', BASE).href) || url.startsWith('data:') || url.startsWith('blob:')
+      ? request.continue() : request.abort();
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error)));
@@ -196,12 +202,15 @@ try {
     assert.equal(saved.transactions[0].type, 'expense');
   });
 
-  await scenario('a different currency is refused without losing the review', 'mismatch', async (page) => {
+  // Foreign money now converts with a dated reference rate. The context blocks
+  // every external request, so no rate exists: nothing is added and the review
+  // stays pending instead of posting a guessed conversion.
+  await scenario('a different currency waits for an exchange rate without losing the review', 'mismatch', async (page) => {
     await openReview(page);
     await visible(page.getByText('USD 15.00', { exact: true }));
     assert.equal(await button(page, 'Dining').count(), 0, 'known category is not re-confirmed');
     await click(page, CONFIRM);
-    await visible(page.getByText('Choose an amount in your ledger’s currency.', { exact: true }));
+    await visible(page.getByText('No exchange rate for that day yet. Nothing was added. Try again when you are online.', { exact: true }));
     await remainsPending(page);
     await page.reload({ waitUntil: 'networkidle' });
     const persisted = await waitForLedger(page, 0, 1);

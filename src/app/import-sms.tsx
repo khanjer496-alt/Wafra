@@ -115,10 +115,14 @@ import { isProActive, requiresPro } from '@/lib/purchases';
 import { parsePastedBankAlerts } from '@/lib/launch-alert-parser';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { activeCountryDateOrder } from '@/lib/country';
 import { prepareUniversalReviewAlert, type ReviewEntry } from '@/lib/alert-review-tray';
 import { isDeliberateOtherTitle, PARSER_VERSION } from '@/lib/sms-parser';
 import { collectLegacyReviewSourceKeys } from '@/lib/review-source-bindings';
 import { buildTrackedBillBatch, ImportMoneyError } from '@/lib/import-plan';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { ledgerCurrencyCode } from '@/lib/markets';
+import { pasteSampleForLedger } from '@/lib/paste-sample';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
 
@@ -130,12 +134,6 @@ interface PendingInboxResult {
 }
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
-
-const SAMPLE = `Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR MALL OF EMIRATES, DUBAI on 17/07/2026. Avl balance AED 12,345.67
-
-AED 55.00 was debited from your account for payment to SALIK RECHARGE on 16/07/2026
-
-Salary of AED 18,500.00 has been credited to your account ending 5678`;
 
 const PREVIEW_LIMIT = 60;
 const PANEL_HEIGHT = 186;
@@ -252,6 +250,9 @@ function ScanPanel({ reducedMotion }: { reducedMotion: boolean }) {
   );
 }
 
+/** History-card states that finish an import already under way. */
+const IOS_HISTORY_CARD_FINISHING: ReadonlySet<IosHistoryCardState> = new Set<IosHistoryCardState>(['review', 'running']);
+
 export default function ImportSmsScreen() {
   const router = useRouter();
   const keyboardHeight = useKeyboardHeight();
@@ -291,7 +292,9 @@ export default function ImportSmsScreen() {
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [scanning, setScanning] = useState(false);
   const [showManual, setShowManual] = useState(
-    () => (manual === '1' && !history) || (!isSmsScanningAvailable() && Platform.OS !== 'ios'),
+    // iPhone opens on pasting: reading past texts through Shortcuts is an
+    // experiment reached from Settings → Advanced, not this screen's lead.
+    () => (manual === '1' && !history) || (!isSmsScanningAvailable() && !history),
   );
   useEffect(() => {
     // The same route can be reused while mounted. An explicit quick-paste
@@ -360,6 +363,10 @@ export default function ImportSmsScreen() {
     handoffStartedAt: historySetup.handoffStartedAt,
     historySessionId: history,
   });
+  // The iPhone history card only finishes an import already under way (a
+  // returned session to review, or a handoff still running). Starting one
+  // lives in Settings → Advanced, because statements are the supported path.
+  const showIosHistoryCard = Platform.OS === 'ios' && IOS_HISTORY_CARD_FINISHING.has(historyCardState);
 
   useEffect(() => {
     const gate = createIosHistorySnapshotGate();
@@ -656,7 +663,7 @@ export default function ImportSmsScreen() {
       const reviews: ReviewEntry[] = [];
       const observedAt = Date.now();
       for (const source of refusedBlocks) {
-        const event = inspectUniversalBankEvent(source);
+        const event = inspectUniversalBankEvent(source, { dateOrder: activeCountryDateOrder() });
         if (event.decision !== 'review') continue;
         // Pasted text has no provider GUID. This opaque proposal identity is
         // deliberately not presented as a native Message identity.
@@ -1291,7 +1298,7 @@ export default function ImportSmsScreen() {
           {!history && <>
             <ImportSteps current={applying ? 'save' : plan !== null && !scanning ? 'review' : 'source'} />
           </>}
-          {Platform.OS === 'ios' && (
+          {showIosHistoryCard && (
             <Section index={0}>
               <View
                 testID="ios-history-card"
@@ -1507,8 +1514,13 @@ export default function ImportSmsScreen() {
                       variant="ghost"
                       label={t('trySample')}
                       onPress={() => {
-                        setText(SAMPLE);
-                        runParse(SAMPLE);
+                        // In the ledger's own currency: a fixed AED sample was
+                        // refused as a currency mismatch on every other ledger.
+                        const sample = pasteSampleForLedger(
+                          state.ledgerMoney ?? ledgerMoneySpec(ledgerCurrencyCode()),
+                        );
+                        setText(sample);
+                        runParse(sample);
                       }}
                     />
                   </View>

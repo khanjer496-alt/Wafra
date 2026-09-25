@@ -282,6 +282,17 @@ export async function createDownloadedSemanticRetriever(
   return createLocalSemanticRetriever(await getLocalSemanticEncoder(), index);
 }
 
+/**
+ * E5 is off by default. Installs that downloaded it before keep ~37 MB of
+ * model files; remove the whole `local-ai/` folder (model artifacts only, never
+ * user data) without first creating it. Never touches an active session.
+ */
+export function purgeLocalSemanticArtifacts(): void {
+  if (session) return;
+  const directory = new Directory(Paths.document, 'local-ai');
+  if (directory.exists) directory.delete();
+}
+
 /** Development/test cleanup only; user data is never stored in this directory. */
 export function clearLocalSemanticArtifacts(): void {
   const directory = runtimeDirectory();

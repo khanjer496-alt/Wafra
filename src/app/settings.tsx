@@ -43,7 +43,9 @@ import {
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { CountryPickerSheet, countryPickerName } from '@/components/country-picker-sheet';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
+import { COUNTRY_UNKNOWN } from '@/lib/country';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
@@ -109,6 +111,7 @@ import {
 import {
   createIosHistoryPostEraseCleanup,
   eraseIosHistorySessions,
+  iosSupportsMessageHistory,
 } from '@/lib/ios-history-setup';
 import { clearIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
@@ -124,7 +127,7 @@ import {
   onboardingProfileWithAlerts,
 } from '@/lib/onboarding';
 import { ClearAllError, useStore } from '@/lib/store';
-import { ledgerStateHasMoney } from '@/lib/ledger-money';
+import { displayRegion, ledgerStateHasMoney } from '@/lib/ledger-money';
 import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
 import {
@@ -157,9 +160,11 @@ export default function SettingsScreen() {
     setDailySummary,
     setPrivateMode,
     setCaptureOptOut,
+    setBestEffortAutoPost,
     setAndroidCaptureSources,
     beginHistoryImport,
     setLedgerMoney,
+    setCountry,
     setUiLanguage,
     exportBackup,
     getStateSnapshot,
@@ -220,6 +225,7 @@ export default function SettingsScreen() {
     scrollToRequestedSection();
   }, [section, scrollToRequestedSection]);
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
+  const [countrySheetVisible, setCountrySheetVisible] = useState(false);
   const [personalReviewBusy, setPersonalReviewBusy] = useState(false);
   const [personalReviewCount, setPersonalReviewCount] = useState(0);
   const personalReviewRunning = useRef(false);
@@ -860,6 +866,9 @@ export default function SettingsScreen() {
         currency: state.ledgerMoney?.currency ?? marketCurrencyCode(state.marketId),
         currencyExponent: state.ledgerMoney?.exponent ?? 2,
         language: state.language === 'ar' ? 'ar' : 'en',
+        // The device Region, not the language: an English (US) phone in the
+        // UAE keeps day-first UAE dates.
+        region: displayRegion(),
         from,
         to,
       });
@@ -1398,6 +1407,15 @@ export default function SettingsScreen() {
               gated(onNotificationAccess),
               { pro: true },
             )}
+          {switchRow(
+            t('autoAddedSettingTitle'),
+            t('autoAddedSettingBody'),
+            state.bestEffortAutoPost !== false,
+            (next) => {
+              setBestEffortAutoPost(next).catch(() => Alert.alert(t('autoAddedSettingTitle'), t('autoAddedSettingSaveFailed')));
+            },
+            true,
+          )}
         </Section>
 
         <Section index={2} style={[styles.settingsPanel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
@@ -1453,6 +1471,14 @@ export default function SettingsScreen() {
             t('homeCustomizeTitle'),
             t('homeCustomizeDetail'),
             () => router.push('/home-customize'),
+          )}
+          {linkRow(
+            t('settingsCountryTitle'),
+            // An unknown country asks to be set rather than reading as a choice.
+            `${state.country && state.country !== COUNTRY_UNKNOWN
+              ? countryPickerName(state.country)
+              : t('onboardCountryUnknown')} · ${t('settingsCountryDetail')}`,
+            () => setCountrySheetVisible(true),
           )}
           {Platform.OS !== 'web' && linkRow(
             t('settingsViewOnboarding'),
@@ -1510,6 +1536,16 @@ export default function SettingsScreen() {
             t('improveAccuracySettingsDetail'),
             () => router.push('/accuracy'),
           )}
+          {Platform.OS === 'ios' && iosSupportsMessageHistory(Platform.Version) && <>
+            {/* Statements bring in the past on iPhone. Reading old texts through
+                Shortcuts stays available, but only here, as an experiment. */}
+            <SectionHeader title={t('settingsAdvancedHeader')} />
+            {linkRow(
+              t('iosPastSmsTitle'),
+              t('iosPastSmsDetail'),
+              () => router.push({ pathname: '/ios-setup', params: { section: 'history' } }),
+            )}
+          </>}
           <SectionHeader title={t('dataHeader')} />
           {linkRow(t('backupJson'), null, backupJson)}
           {isSmsCorpusExportAvailable() && (
@@ -1638,6 +1674,16 @@ export default function SettingsScreen() {
         options={languageChoices}
         value={languagePreference}
         onSelect={applyLanguage}
+      />
+      <CountryPickerSheet
+        visible={countrySheetVisible}
+        value={state.country || null}
+        suggested={[state.country]}
+        title={t('settingsCountryTitle')}
+        subtitle={t('settingsCountrySheetBody')}
+        onClose={() => setCountrySheetVisible(false)}
+        onSelect={setCountry}
+        testID="settings-country-sheet"
       />
       <LedgerCurrencySheet
         visible={currencySheetVisible}

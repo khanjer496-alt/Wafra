@@ -179,7 +179,14 @@ export function primeInternalTransferIds(
   ids: readonly string[],
   canonical = true,
 ): void {
-  internalIdsCache = { transactions, accounts, value: new Set(ids), canonical };
+  // The store primes after EVERY dispatch, most of which (review tray, scan
+  // clock, preferences) carry the same arrays forward. Reuse the Set so its
+  // identity, and every UI memo keyed on it, survives those dispatches.
+  const reusable = persistedInternalIdsCache?.transactions === transactions &&
+    persistedInternalIdsCache.accounts === accounts && persistedInternalIdsCache.ids === ids;
+  const value = reusable ? persistedInternalIdsCache!.value : new Set(ids);
+  persistedInternalIdsCache = { transactions, accounts, ids: ids as string[], value };
+  internalIdsCache = { transactions, accounts, value, canonical };
 }
 
 export function internalTransferIds(
@@ -210,8 +217,10 @@ export function internalTransferIds(
  * import completion, but it is the same snapshot the rest of the UI uses.
  */
 export function internalTransferIdsForState(
-  state: Pick<AppState,
-    'transactions' | 'accounts' | 'transferInternalIds' | 'transferNormalizationVersion' | 'historyImport'>,
+  state: Pick<AppState, 'transactions' | 'accounts' | 'transferInternalIds' | 'transferNormalizationVersion'> & {
+    /** Only whether it is unfinished matters, so a status-only selection is enough. */
+    historyImport: Parameters<typeof historyImportIncomplete>[0];
+  },
 ): Set<string> {
   const ids = state.transferInternalIds;
   const receiptUsable = Array.isArray(ids) && (

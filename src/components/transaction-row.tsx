@@ -59,7 +59,8 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   const accountCaption = accountReview ?? (bankCaption
     ? `${bankCaption}${account?.last4 && !bankCaption.includes(account.last4) ? ` ·${account.last4}` : ''}`
     : undefined);
-  const label = [transaction.title, where, accountLabel, clock,
+  const autoAdded = transaction.bestEffort ? t('autoAddedCheck', language) : null;
+  const label = [transaction.title, autoAdded, where, accountLabel, clock,
     `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${ledgerCurrencyCode()}`]
     .filter(Boolean).join(', ');
 
@@ -70,7 +71,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
     const merchantWords = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
     const merchantLabel = isIncome ? merchantWords.incomeDetails : merchantWords.merchantDetails;
     return <View style={[styles.row, styles.splitRow, largeText && styles.splitRowLarge]} testID="merchant-transaction-row">
-      <Pressable accessibilityRole="button" accessibilityLabel={[`${merchantLabel}: ${transaction.title}`, accountReview].filter(Boolean).join('. ')}
+      <Pressable accessibilityRole="button" accessibilityLabel={[`${merchantLabel}: ${transaction.title}`, accountReview, autoAdded].filter(Boolean).join('. ')}
         testID="transaction-merchant-link"
         onPress={() => router.navigate(`/merchant?name=${encodeURIComponent(transaction.title.trim())}${isIncome ? '&type=income' : ''}`)}
         android_ripple={{ color: theme.backgroundSelected }}
@@ -81,6 +82,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
           <ThemedText type="smallBold">{transaction.title}</ThemedText>
           <ThemedText testID={meaningTestID} type="meta" themeColor="textSecondary" style={styles.metadata}>{[where, clock].filter(Boolean).join(' · ')}</ThemedText>
           {accountCaption ? <ThemedText type="meta" style={styles.metadata} themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountCaption}</ThemedText> : null}
+          {autoAdded ? <ThemedText testID="best-effort-marker" type="meta" style={[styles.metadata, { color: theme.warning }]}>{autoAdded}</ThemedText> : null}
         </View>
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={label} testID="transaction-details-link"
@@ -109,6 +111,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
       </View>
       <ThemedText testID={meaningTestID} type="meta" themeColor="textSecondary" style={styles.metadata}>{[where, clock].filter(Boolean).join(' · ')}</ThemedText>
       {accountCaption ? <ThemedText type="meta" style={styles.metadata} themeColor={accountReview ? 'textSecondary' : 'textTertiary'}>{accountCaption}</ThemedText> : null}
+      {autoAdded ? <ThemedText testID="best-effort-marker" type="meta" style={[styles.metadata, { color: theme.warning }]}>{autoAdded}</ThemedText> : null}
     </View>
   </Pressable>;
 }

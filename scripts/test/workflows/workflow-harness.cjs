@@ -40,7 +40,10 @@ function createWorkflowHarness(options={}) {
  // The country control renders for real; only its sheet chrome is a boundary,
  // so the closed state renders exactly the row a first-run user sees.
  d['@/components/ui/bottom-sheet']={BottomSheet:p=>p.visible?jsx('BottomSheet',p):null};
+ h.local('@/lib/country-names','src/lib/country-names.ts');h.local('@/lib/country','src/lib/country.ts');
+ h.local('@/components/country-picker-sheet');
  h.local('@/components/onboarding/country-confirm');
+ d['./alive-scenes']=d['@/components/onboarding/alive-scenes'];h.local('@/components/onboarding/statement-scene');h.local('@/components/onboarding/setup-intro-step');
  const copy=h.local('@/components/workflows/workflow-copy','src/components/workflows/workflow-copy.ts');
  d['./workflow-copy']=copy;h.local('@/components/workflows/workflow-surfaces');
  h.local('@/components/ui/action-icon-button');h.local('@/components/ui/screen-header');
@@ -76,7 +79,7 @@ function createWorkflowHarness(options={}) {
  d['@/lib/public-links']={configuredPublicUrl:()=>null};
  d['@/lib/relay']={getRelayConfig:async()=>null,getRelayConfigStrict:async()=>null,isLegacyShortcutCaptureActive:()=>false,isRelayPlatform:()=>false,RelayError:class extends Error{},unpairDevice:record('unpairDevice')};
  d['@/lib/capture']={eraseIosCaptureStore:record('eraseIosCaptureStore'),isCaptureAvailable:()=>false,setIosCaptureEnabled:record('setIosCaptureEnabled')};
- d['@/lib/ios-history-setup']={createIosHistoryPostEraseCleanup:()=>()=>{},eraseIosHistorySessions:record('eraseIosHistorySessions')};
+ d['@/lib/ios-history-setup']={createIosHistoryPostEraseCleanup:()=>()=>{},eraseIosHistorySessions:record('eraseIosHistorySessions'),iosSupportsMessageHistory:()=>true};
  d['@/lib/ios-message-onboarding']={clearIosMessageSetupProgress:record('clearIosMessageSetupProgress'),dispatchIosMessageSetup:record('dispatchIosMessageSetup'),loadIosMessageSetupProgress:async()=>null};
  d['@/lib/shortcut-cleanup']={openShortcutsApp:record('openShortcutsApp'),shortcutCleanupApplies:()=>false};
  d['@/lib/growth-funnel']={
@@ -132,7 +135,7 @@ function createWorkflowHarness(options={}) {
     './ios-setup-journey':load(path.join(root,'src/lib/ios-setup-journey.ts')),'./ios-history-setup':{isIosHistoryShortcutInstalled:async()=>false}});
    Object.assign(d['@/lib/ios-message-onboarding'],{progressForSource:progressModule.progressForSource,recordedIosCaptureSource:progressModule.recordedIosCaptureSource});
    Object.assign(d['@/lib/ios-history-setup'],{historyShortcutInstallUrl:()=>null,iosSupportsMessageHistory:()=>true});
-   for(const name of ['checklist-row','automation-guide','details-sheet'])h.local('@/components/ios-message-setup/'+name);
+   for(const name of ['checklist-row','automation-guide','details-sheet','setup-step'])h.local('@/components/ios-message-setup/'+name);
   }
 
   if(screen==='onboarding')h.local('@/lib/ios-statement-handoff','src/lib/ios-statement-handoff.ts');

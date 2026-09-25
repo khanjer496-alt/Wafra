@@ -13,7 +13,7 @@ import {
   createLaunchAlertSession,
   type LaunchAlertSession,
 } from '@/lib/launch-alert-parser';
-import { bankFromSender, detectLaunchMarketFromSender, soleBankNamedInText, withMarketPackForParsing } from '@/lib/markets';
+import { bankFromSender, detectLaunchMarketFromSender, pinnedLedgerCurrencyCode, soleBankNamedInText, withMarketPackForParsing } from '@/lib/markets';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
 import type { CategoryId } from '@/lib/types';
@@ -319,9 +319,16 @@ export function parseHistoricalMessageRecords(
     const foreignIssuer = !detectLaunchMarketFromSender(sender) && hasUniversalInstitutionSender(sender);
     const foreignRoute = inspection?.route.decision === 'single' &&
       inspection.route.market !== 'AE' && inspection.route.market !== 'SA';
-    const result = foreignIssuer || foreignRoute ? null
+    const result = foreignIssuer || foreignRoute
+      ? launchSession.parseUnproven(record.text, sender ?? '', inspection, timestamp)
       : launchSession.parse(record.text, sender ?? '', inspection, undefined, timestamp);
-    if (!result || (result.currency !== 'AED' && result.currency !== 'SAR')) {
+    // Launch-tested AED/SAR rows as before. An unproven-format row passed the
+    // best-effort policy and is marked for checking; it must be in the pinned
+    // ledger currency so it can never make a history batch mixed-currency.
+    const bestEffortAccepted = !!result?.bestEffort && result.kind === 'transaction' &&
+      result.currency === pinnedLedgerCurrencyCode();
+    if (!result || (!bestEffortAccepted && (result.bestEffort ||
+      (result.currency !== 'AED' && result.currency !== 'SAR')))) {
       const refusal = inspectHistoricalRefusal({
         record,
         timestamp,

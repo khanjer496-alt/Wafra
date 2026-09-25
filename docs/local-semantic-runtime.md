@@ -1,5 +1,18 @@
 # Local semantic runtime (on-device E5)
 
+> **Status (24 September 2026): OFF by default.** Shipping builds no longer
+> download, verify or start the E5 encoder on install, launch, an Ask question
+> or a Review alert. The evaluation found almost no useful output for a ~37 MB
+> download and ~400 MB of memory. Ask Wafra and category suggestions now use the
+> platform's own on-device model — Apple Foundation Models on iOS 26+ and
+> Gemini Nano (ML Kit GenAI Prompt API / AICore) on supported Android phones —
+> see [On-device AI](on-device-ai.md). The code below is kept for research builds
+> only: set `EXPO_PUBLIC_WAFRA_LOCAL_E5=1` at build time
+> (`src/lib/local-semantic-flags.ts`) to re-enable the warm start in
+> `app-root-layout.tsx`, the Ask fallback and Review family suggestions. With the
+> flag off, the shadow/review paths stay dormant because the runtime is never
+> `ready`, and Review shows no local-AI badge.
+
 Wafra ships an optional on-device multilingual sentence encoder
 (`alphaedge-ai/multilingual-e5-small-arb-32768`, dynamic INT8 ONNX, 384-d)
 used for three narrow jobs:
@@ -48,8 +61,8 @@ lease and a 40 ms inter-job gap. Inactive/headless apps do not start optional
 inference. Backgrounding, ledger replacement and capture/privacy opt-out cancel
 queued work, including Review suggestions.
 
-Optional initialization starts after fonts/hydration and a quiet 1.5-second
-window. Preparation rechecks lifecycle/navigation between asynchronous phases;
+When enabled by the research flag, optional initialization starts after
+fonts/hydration and a quiet 1.5-second window. Preparation rechecks lifecycle/navigation between asynchronous phases;
 an interactive request can promote the same single-flight preparation. Failed
 artifact tasks are all settled before retry, preventing overlapping file writes.
 An already-running synchronous/native phase cannot be interrupted; its next
@@ -81,8 +94,8 @@ the classifier for broader coverage or automatic posting. See
 
 ## Artifacts
 
-Runtime artifacts are **not** bundled in the APK. They are fetched once from
-the `local-ai-e5-v1` GitHub release and stored under the app document
+Runtime artifacts are **not** bundled in the APK. In research builds with the
+flag on, they are fetched once from the `local-ai-e5-v1` GitHub release and stored under the app document
 directory (`local-ai/<model-version>/`):
 
 | Artifact | Bytes | SHA-256 |

@@ -18,6 +18,139 @@ const ok = (name, condition, detail) => {
 const firstWaveMarkets = ['BH', 'DE', 'EG', 'ES', 'FR', 'GB', 'IN', 'IT', 'JO', 'KW', 'NL', 'OM', 'QA', 'US'];
 ok('all first-wave markets are reachable through the review interface',
   firstWaveMarkets.every((market) => inspectMarketAlert('Bank notice', market).market === market));
+const secondWaveMarkets = ['CA', 'AU', 'BR', 'MX', 'SG'];
+ok('all second-wave markets are reachable through the review interface',
+  secondWaveMarkets.every((market) => inspectMarketAlert('Bank notice', market).market === market));
+
+{
+  const rails = [
+    ['CA', 'Interac e-Transfer CAD 20.00 was credited to your account.', 'transfer', 'credit'],
+    ['AU', 'Osko AUD 20.00 was credited to your account.', 'transfer', 'credit'],
+    ['BR', 'transferência Pix BRL 20,00 creditada na sua conta.', 'transfer', 'credit'],
+    ['MX', 'transferencia SPEI MXN 20.00 abonado en tu cuenta.', 'transfer', 'credit'],
+    ['SG', 'PayNow transfer SGD 20.00 was credited to your account.', 'transfer', 'credit'],
+  ];
+  for (const [market, source, family, direction] of rails) {
+    const result = inspectMarketAlert(source, market);
+    ok(`${market}: local instant-payment rail is semantic evidence without enabling import`,
+      result.family === family && result.direction === direction && result.decision === 'review',
+      JSON.stringify({ status: result.status, family: result.family, direction: result.direction }));
+  }
+
+  const interacRequest = inspectMarketAlert(
+    'RBC: Interac e-Transfer request for CAD 50.00 received. Approve it in your banking app.',
+    'CA',
+  );
+  ok('a received Interac request is lifecycle information, not incoming money',
+    interacRequest.status === 'informational' && interacRequest.decision === 'refuse' &&
+      interacRequest.direction === 'none', JSON.stringify(interacRequest.status));
+
+  const pad = inspectMarketAlert('Pre-authorized debit CAD 45.00 was debited from your account.', 'CA');
+  ok('a Canadian pre-authorized debit is a completed recurring debit, not an authorization hold',
+    pad.status === 'posted' && pad.direction === 'debit' && pad.family === 'recurring-payment',
+    JSON.stringify({ status: pad.status, family: pad.family, direction: pad.direction }));
+}
+
+// Pending, held and requested money is never a completed posting, in any of
+// the second-wave languages, whichever market pack reads it.
+{
+  const { inspectUniversalBankEvent } = require('./build/universal-parser.js');
+  const neverPosted = [
+    ['BR', 'Itaú: compra com cartão BRL 89,90 em MERCADO TESTE pendente.'],
+    ['BR', 'Pix de BRL 150,00 em processamento.'],
+    ['BR', 'Compra aprovada BRL 45,00 aguardando confirmação.'],
+    ['BR', 'Você recebeu uma solicitação de pagamento Pix de BRL 80,00.'],
+    ['BR', 'Pré-autorização BRL 300,00 no HOTEL TESTE.'],
+    ['BR', 'Compra com cartão BRL 20,00 não aprovada.'],
+    ['BR', 'Pix BRL 20,00 não foi concluído.'],
+    ['MX', 'Banorte: compra MXN 1,250.00 SUPERMERCADO pendiente. Tarjeta terminación 1234.'],
+    ['MX', 'Compra MXN 500.00 pendiente de autorización en TIENDA.'],
+    ['MX', 'Tienes una solicitud de pago CoDi por MXN 200.00.'],
+    ['MX', 'Transferencia SPEI MXN 900.00 en proceso.'],
+    ['MX', 'Compra MXN 90.00 en TIENDA rechazada.'],
+    ['MX', 'Compra MXN 90.00 en TIENDA no autorizada.'],
+    ['MX', 'Banorte: ¿Reconoces esta compra por MXN 500.00 en TIENDA? Tarjeta terminación 1234.'],
+    ['MX', 'Obtén 10% de descuento en tu próxima compra de MXN 500.00 con tu tarjeta Banorte.'],
+    ['BR', 'Itaú: você reconhece esta compra de BRL 300,00 em LOJA TESTE?'],
+    // Documented template headings carry no completion verb, and the same
+    // headings open the holds/requests/reversals/questions/limits below.
+    ['BR', 'Itaú: compra com cartão BRL 89,90 em MERCADO TESTE.'],
+    ['MX', 'Banorte: 18/09 compra MXN 1,250.00 SUPERMERCADO. Tarjeta terminación 1234.'],
+    ['SG', 'DBS Bank: PayNow outgoing SGD 88.00 to SAMPLE PAYEE.'],
+    ['MX', 'Banorte: Solicitud de compra por MXN 250.00 en OXXO tarjeta 1234'],
+    ['MX', 'Banorte: Compra por MXN 250.00 en OXXO tarjeta 1234 requiere tu autorización'],
+    ['MX', 'Banorte: ¿Reconoces la compra por MXN 250.00 en OXXO con tarjeta 1234?'],
+    ['MX', 'Banorte: Promoción: compra a meses sin intereses con tu tarjeta desde MXN 250.00'],
+    ['MX', 'Banorte: Compra por MXN 250.00 en OXXO con tarjeta terminación 1234 no procede'],
+    ['MX', 'Banorte: Compra por MXN 250.00 en OXXO con tarjeta terminación 1234 retenida'],
+    ['MX', 'Banorte: Compra por MXN 250.00 en OXXO con tarjeta terminación 1234 se cargará mañana'],
+    ['MX', 'Banorte: Devolución por MXN 250.00 se abonará en 5 días'],
+    ['MX', 'Banorte: Cargo recurrente por MXN 199.00 de NETFLIX no aplicado'],
+    ['SG', 'DBS: PayNow outgoing limit changed to SGD 5,000.00'],
+    ['SG', 'DBS: PayNow outgoing SGD 50.00 to JOHN on hold for review'],
+    ['SG', 'DBS: Online card transaction limit set to SGD 500.00'],
+    ['SG', 'DBS: Online card transaction of SGD 45.00 at AMAZON requires your approval in digibank app'],
+    ['SG', 'DBS: Did you make this online card transaction of SGD 45.00 at AMAZON? Reply Y/N'],
+    ['SG', 'DBS: Local card transaction SGD 45.00 at SHELL is being authorised'],
+    ['BR', 'Itau: Compra com cartão final 1234 de R$ 50,00 em MERCADO será debitada'],
+    ['BR', 'Itau: Compra com cartão final 1234 de R$ 50,00 em MERCADO aguarda aprovação'],
+    ['BR', 'Você reconhece a compra com cartão de R$ 50,00 em LOJA?'],
+    ['AU', 'Osko: AUD 50.00 from John has not been received'],
+    ['AU', 'Osko payment of AUD 50.00 could not be received from John'],
+    ['CA', 'RBC: Purchase of CAD 45.00 at ESSO is pending, nothing was charged yet'],
+    ['ES', 'Compra con tarjeta EUR 45,00 pendiente en EJEMPLO.'],
+    ['US', 'Card purchase USD 48.20 at SAMPLE GAS is pending authorization.'],
+    ['US', 'Zelle payment USD 125.00 is pending acceptance by the recipient.'],
+    ['US', 'Chase fraud alert: Did you make this purchase of USD 120.00 at SAMPLE SHOP?'],
+    ['CA', 'TD Canada Trust: Interac e-Transfer request for CAD 50.00 received. Accept the request to pay.'],
+    ['AU', 'ANZ: PayTo agreement request AUD 30.00 received. Approve it in the app.'],
+    ['SG', 'DBS Bank: Card transaction SGD 30.00 pending authorisation.'],
+  ];
+  const markets = [...firstWaveMarkets, ...secondWaveMarkets];
+  for (const [home, source] of neverPosted) {
+    const posted = markets.filter((market) => inspectMarketAlert(source, market).status === 'posted');
+    ok(`${home}: pending/request/declined is never posted in any market pack — ${source}`,
+      posted.length === 0, posted.join(','));
+    for (const market of [undefined, home]) {
+      const event = inspectUniversalBankEvent(source, market ? { market } : {});
+      ok(`${home}: universal parser keeps it off the ledger (${market ?? 'no market'}) — ${source}`,
+        event.status !== 'posted', JSON.stringify({ status: event.status, decision: event.decision }));
+    }
+  }
+
+  const settled = [
+    ['BR', 'Itaú: compra com cartão BRL 89,90 em MERCADO TESTE foi debitada.', 'debit', 'purchase'],
+    ['BR', 'Pix BRL 20,00 recebido na sua conta.', 'credit', 'transfer'],
+    ['BR', 'Saque BRL 200,00 debitado da sua conta.', 'debit', 'cash-withdrawal'],
+    ['BR', 'Estorno BRL 35,00 creditado no seu cartão.', 'credit', 'refund'],
+    ['MX', 'Banorte: compra realizada por MXN 1,250.00 en SUPERMERCADO. Tarjeta terminación 1234.', 'debit', 'purchase'],
+    ['MX', 'Retiro de efectivo MXN 500.00 cargado a tu cuenta.', 'debit', 'cash-withdrawal'],
+    ['SG', 'DBS Bank: PayNow transfer SGD 88.00 to SAMPLE PAYEE was debited from your account.', 'debit', 'transfer'],
+  ];
+  for (const [market, source, direction, family] of settled) {
+    const result = inspectMarketAlert(source, market);
+    ok(`${market}: completed local-language alert is a reviewable posting — ${source}`,
+      result.status === 'posted' && result.decision === 'review' &&
+        result.direction === direction && result.family === family,
+      JSON.stringify({ status: result.status, family: result.family, direction: result.direction }));
+  }
+
+  {
+    const reversal = inspectMarketAlert('Itau: Compra com cartão final 1234 de R$ 50,00 em MERCADO foi estornada', 'BR');
+    ok('a Brazilian card reversal is never a purchase debit',
+      reversal.direction !== 'debit' && reversal.family !== 'purchase',
+      JSON.stringify({ status: reversal.status, family: reversal.family, direction: reversal.direction }));
+  }
+
+  // Market-scoped vocabulary never leaks: Spanish "compra"/Portuguese "saque"
+  // do not change how a first-wave pack reads the same text.
+  for (const source of ['Compra MXN 20.00 en TIENDA.', 'Saque BRL 200,00 debitado da sua conta.']) {
+    const readings = firstWaveMarkets.map((market) => inspectMarketAlert(source, market));
+    ok(`second-wave vocabulary is not a first-wave posting — ${source}`,
+      readings.every((reading) => reading.status !== 'posted' || reading.family !== 'purchase'),
+      JSON.stringify(readings.map((reading) => `${reading.market}:${reading.status}/${reading.family}`)));
+  }
+}
 
 {
   const identified = inspectMarketAlert(

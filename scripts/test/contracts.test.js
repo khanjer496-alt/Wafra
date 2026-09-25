@@ -950,7 +950,7 @@ function ktSources(dir) {
       `${setup}\n${setupWorkflow}`));
   ok('the Message-object and setup instructions have first-class Arabic copy',
     /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'اختر \{shortcut\} من القائمة \(وليس أتمتة جديدة فارغة\)، ثم تم'/.test(copy) &&
-      /أكملت الإعداد/.test(copy) &&
+      /iosLocalAutomationAdded:[\s\S]{0,80}ar: 'فعّلتها'/.test(copy) &&
       /جهات الاتصال فقط/.test(copy) &&
       /معرّفات رسائل البنوك ليست جهات اتصال/.test(copy) &&
       /صف وفرة المحمي/.test(copy) &&
@@ -1075,11 +1075,16 @@ function ktSources(dir) {
   ok('Home rechecks Android permission as soon as onboarding enables capture',
     /\[\s*entitlementActive,[\s\S]{0,80}refreshCaptureStatus,[\s\S]{0,80}sharedAccessUnavailable,[\s\S]{0,80}state\.captureOptOut,[\s\S]{0,80}state\.hydrated,[\s\S]{0,80}state\.onboarded,[\s\S]{0,80}watchStatus,?\s*\]/
       .test(hook));
+  // The scan hook reads the whole store, so it lives in its own control and
+  // only that control re-renders on store updates, not the tab.
+  const refreshControl = read('src/components/capture-refresh-control.tsx');
+  ok('the capture refresh control runs the pull-to-refresh scan',
+    /usePullToRefresh\(\)/.test(refreshControl) &&
+      /<RefreshControl \{\.\.\.props\} refreshing=\{refreshing\} onRefresh=\{onRefresh\}/.test(refreshControl));
   for (const tab of ['bills', 'wallet', 'flow']) {
     const src = read(`src/app/(tabs)/${tab}.tsx`);
     ok(`${tab} can pull to refresh`,
-      /usePullToRefresh\(\)/.test(src) &&
-        /<RefreshControl refreshing=\{refreshing\} onRefresh=\{onRefresh\}/.test(src));
+      /refreshControl=\{\s*<CaptureRefreshControl /.test(src) && !/usePullToRefresh\(\)/.test(src));
   }
   // The tabs shell keeps the mount + foreground watch regardless of which tab
   // Android restores after an update. Home separately owns the visible status
@@ -2352,14 +2357,22 @@ ok('the spoken label agrees with the sign on screen',
     'launch-alert-parser.ts',
     'universal-money.ts',
     'transfer-reconciliation.ts',
+    // Exponent-correct foreign originals and exact FX conversion.
+    'fx.ts',
+    // The unproven-format policy validates the principal amount's exponent.
+    'best-effort-autopost.ts',
+    // Any ISO purchase currency is read at its own exponent; outside the
+    // offline table it converts only with a dated rate or waits in Review.
+    'sms-parser.ts',
   ]);
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),
     metadataConsumers.join(' | '));
   // The universal extractor reads market packs to inspect alerts; template
-  // certification reads them only to refuse a market-inconsistent currency.
-  // Neither may write the ledger or reach the network.
-  const marketReviewModules = new Set(['universal-parser.ts', 'universal-template-certification.ts']);
+  // certification reads them only to refuse a market-inconsistent currency;
+  // the money extractor reads only a routed pack's own transaction labels.
+  // None may write the ledger or reach the network.
+  const marketReviewModules = new Set(['universal-parser.ts', 'universal-template-certification.ts', 'universal-money.ts']);
   const directWriterOrTransport = /(?:fetch\s*\(|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/;
   ok('global review semantics have no direct ledger writer or network transport',
     marketReviewConsumers.length === marketReviewModules.size &&

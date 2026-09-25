@@ -93,19 +93,23 @@ const translated = (key, lang) => {
 
 ok('iOS message setup: checklist row and details sheet are separate components',
   checklistRow.length > 0 && detailsSheet.length > 0);
-eq('iOS message setup: one checklist contains exactly the Future and Past rows',
+// 2026-09-25: iPhone setup is a guided Messages flow (Add → Test → Automate).
+// Past SMS import left setup: it renders only for Settings → Advanced's
+// `section=history` link, or to finish a handoff that is already running.
+eq('iOS message setup: one guide, and past SMS only as its own explicit section',
   [
+    (screen.match(/testID="ios-message-setup-guide"/g) || []).length,
     (screen.match(/testID="ios-message-setup-checklist"/g) || []).length,
     (screen.match(/<ChecklistRow/g) || []).length,
-  ], [1, 2]);
-ok('iOS message setup: Future is first, History is optional, and only the selected row expands',
-  screen.indexOf("title={t('iosMessageFutureTitle')}") >= 0 &&
-    screen.indexOf("title={t('iosMessageFutureTitle')}") <
-      screen.indexOf("title={t('iosMessagePastTitle')}") &&
-    /expanded=\{activeSection === 'future'\}/.test(screen) &&
-    /expanded=\{activeSection === 'history'\}/.test(screen) &&
-    translated('iosMessageFutureTitle', 'en') === 'Automatic bank alerts' &&
-    translated('iosMessagePastTitle', 'en') === 'Past messages · Optional');
+  ], [1, 1, 1]);
+ok('iOS message setup: the guide is numbered Add → Test → Automate and History needs an explicit request',
+  /const stepLabels = \[shortcutCopy\.stepAdd, shortcutCopy\.stepTest, shortcutCopy\.stepAutomate\]/.test(screen) &&
+    /<StepProgress current=/.test(screen) &&
+    /const historyVisible = historySupported &&\s*\(requestedSection === 'history' \|\| historySetup\.handoffStartedAt !== null\)/.test(screen) &&
+    screen.indexOf('historyMode ? (') < screen.indexOf('testID="ios-message-setup-guide"') &&
+    /section: 'history'/.test(settingsScreen) && /iosPastSmsTitle/.test(settingsScreen) &&
+    translated('iosMessagePastTitle', 'en') === 'Past messages · Optional' &&
+    translated('iosPastSmsTitle', 'en') === 'Import past SMS (experimental)');
 ok('iOS history explains Shortcut extraction before app review and keeps the phone-open instruction',
   /Shortcuts.*messages.*Wafra.*batches/.test(translated('iosMessageHistoryStartHelp', 'en')) &&
     /unlocked.*stops.*again.*progress/.test(translated('iosMessageHistoryRunningHelp', 'en')) &&
@@ -125,10 +129,10 @@ eq('iOS message setup: every checklist status has localized VoiceOver copy', [
   translated('iosMessageStatusComplete', 'en'),
   translated('iosMessageStatusSkipped', 'en'),
 ], ['Not started', 'In progress', 'Complete', 'Not finished']);
-eq('iOS message setup: compact navigation title and page heading stay distinct', [
+eq('iOS message setup: Settings row and page heading stay distinct', [
   translated('iosSetupTitle', 'en'),
-  translated('iosMessageSetupHeading', 'en'),
-], ['Bank alerts', 'Bank messages']);
+  execute('src/lib/ios-shortcut-setup-copy.ts').iosShortcutSetupCopy('en').liveTitle,
+], ['Capture sources', 'Catch new transactions']);
 
 const futureGuideKeys = [
   'iosMessageGuideMessage',
@@ -147,7 +151,7 @@ ok('iOS message setup: the unfiltered trigger is explained as on-device filterin
   translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&
     translated('iosMessageGuideNoFilter', 'en').includes('single space') &&
     translated('iosMessageGuideNoFilter', 'en').includes('discards other messages on this iPhone') &&
-    translated('iosMessageContinueManual', 'en').includes('without automatic capture') &&
+    translated('iosMessageContinueManual', 'en') === 'Skip for now' &&
     !/skip this setup|fake contact|add .* to Contacts/i.test(translated('iosMessageGuideNoFilter', 'en')));
 ok('iOS message setup: obsolete universal-trigger instructions are absent',
   !/Any Sender|iosLocalChoiceAnySender|iosLocalChoiceContainsEmpty/.test(
@@ -163,7 +167,7 @@ eq('iOS message setup: Future actions use the exact staged labels', [
   'Add Shortcut',
   'I added it',
   'Open Shortcuts',
-  'I set it up',
+  'I turned it on',
 ]);
 eq('iOS message setup: harmless proof remains honest about the real trigger',
   translated('iosLocalWaitingTitle', 'en'),

@@ -1,9 +1,11 @@
 import { captureSourceTimeMatches, isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
 import { canonicalUniversalSourceKey, planConfirmedUniversalImport, type UniversalImportRefusal } from '@/lib/universal-import';
+import type { FxQuote } from '@/lib/fx';
+import { convertForeignConfirmation, quoteFitsDay, type ReferenceConversion } from '@/lib/fx-rates';
 import { sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
 import type { UniversalMoney, UniversalInstrument } from '@/lib/universal-types';
 import { categorySupportsType } from '@/lib/categories';
-import { ledgerMoneySpec, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { ledgerMoneySpec, migrateLegacyLedgerMoney, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { toISODate, transactionTime } from '@/lib/format';
 import { isApplePayWalletRow } from '@/lib/dedupe';
 import {
@@ -58,7 +60,8 @@ export type ReviewPromotionFailure = UniversalImportRefusal | 'source-changed'
   | 'invalid-category'
   | 'invalid-title'
   | 'invalid-date'
-  | 'possible-duplicate';
+  | 'possible-duplicate'
+  | 'fx-rate-unavailable';
 
 export type ReviewPromotionPlan =
   | {
@@ -227,15 +230,46 @@ export const reviewTemplateRuleFor = (
 };
 
 /**
+ * The dated reference rate this promotion needs, or null when none is needed:
+ * the money is already in the ledger's currency or the ledger has no currency
+ * yet. The host fetches
+ * it (two currency codes and a day leave the device, nothing else) and passes
+ * the quote to planReviewPromotion; the planner never fetches.
+ */
+export const reviewPromotionFxNeed = (
+  state: AppState,
+  input: Pick<PromoteReviewAlertInput, 'reviewId' | 'date' | 'universal'>,
+): { base: string; quote: string; date: string } | null => {
+  const item = state.reviewTray.pending.find((candidate) => candidate.id === input.reviewId);
+  if (!item || !validDate(input.date)) return null;
+  let ledger: LedgerMoneySpec | null;
+  try {
+    ledger = migrateLegacyLedgerMoney(state);
+  } catch {
+    return null;
+  }
+  if (!ledger) return null;
+  const money = isUniversalReviewAlert(item) ? input.universal?.amount : item.amount;
+  if (!money || typeof money.currency !== 'string' || money.currency === ledger.currency) return null;
+  // Requested even when the alert states the charged ledger amount: the quote
+  // is what sanity-checks that figure. A failed request still lets the
+  // user-confirmed stated amount post.
+  return { base: money.currency, quote: ledger.currency, date: input.date };
+};
+
+/**
  * Plan one explicit review decision without touching React state or storage.
- * Review money is accepted only as the ledger's own exact currency/exponent;
- * cross-currency promotion needs a separate dated FX contract and is refused.
+ * Money in the ledger's own currency posts as-is. Foreign money is converted:
+ * the card's stated ledger amount wins, otherwise the caller's dated provider
+ * quote is required and recorded on the row. Without one the review stays
+ * pending ('fx-rate-unavailable'); no rate is ever guessed.
  */
 export const planReviewPromotion = (
   state: AppState,
   input: PromoteReviewAlertInput,
   transactionId: string,
   now: number,
+  fxQuote?: FxQuote | null,
 ): ReviewPromotionPlan => {
   const item = state.reviewTray.pending.find((candidate) => candidate.id === input.reviewId);
   if (!item) return { outcome: 'refused', reason: 'not-found' };
@@ -281,7 +315,7 @@ export const planReviewPromotion = (
       accountId: input.accountId, title: input.title, category: input.category,
       date: input.date, sourceKey: item.sourceKey, observedAt: item.observedAt,
       betweenOwnAccounts: input.betweenOwnAccounts,
-    });
+    }, fxQuote);
     if (planned.outcome === 'refused') return planned;
     if (planned.outcome === 'duplicate') return {
       outcome: 'duplicate',
@@ -332,9 +366,21 @@ export const planReviewPromotion = (
   if (amount <= 0n || amount > BigInt(Number.MAX_SAFE_INTEGER)) {
     return { outcome: 'refused', reason: 'invalid-money' };
   }
+  let conversion: ReferenceConversion | null = null;
   if (state.ledgerMoney && (state.ledgerMoney.currency !== expectedMoney.currency ||
     state.ledgerMoney.exponent !== expectedMoney.exponent)) {
-    return { outcome: 'refused', reason: 'currency-mismatch' };
+    if (state.ledgerMoney.currency === expectedMoney.currency) {
+      return { outcome: 'refused', reason: 'currency-mismatch' };
+    }
+    // A registered (launch-pack) review carries one amount only, so a dated
+    // provider quote is the only honest conversion.
+    const converted = convertForeignConfirmation(null, {
+      currency: expectedMoney.currency, minorUnits: Number(amount), exponent: expectedMoney.exponent,
+    }, state.ledgerMoney, quoteFitsDay(fxQuote, input.date) ? fxQuote : null);
+    if (converted === 'fx-rate-unavailable' || converted === 'invalid-money') {
+      return { outcome: 'refused', reason: converted };
+    }
+    conversion = converted;
   }
 
   const account = state.accounts.find((candidate) => candidate.id === input.accountId);
@@ -362,7 +408,7 @@ export const planReviewPromotion = (
     };
   }
 
-  const amountFils = Number(amount);
+  const amountFils = conversion ? conversion.amountFils : Number(amount);
   if (!separatePurchaseConfirmed && possibleApplePayDuplicate(state.transactions, {
     type: input.type, accountId: account.id, amountFils, observedAt: item.observedAt, walletMerchants: null,
     date: input.date,
@@ -380,6 +426,7 @@ export const planReviewPromotion = (
       id: transactionId,
       type: input.type,
       amountFils,
+      ...(conversion ? conversion.fields : {}),
       category: input.category,
       accountId: account.id,
       title,

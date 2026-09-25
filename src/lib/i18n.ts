@@ -25,6 +25,36 @@ const S = {
     ar: '{count} تحويلات مستبعدة من الصافي',
   },
   transactionDayTotal: { en: 'Day total', ar: 'إجمالي اليوم' },
+  // Rows added automatically from an unverified bank-alert format.
+  autoAddedCheck: { en: 'Auto-added — check', ar: 'أُضيفت تلقائيًا — راجِعها' },
+  autoAddedExplain: {
+    en: 'Wafra added this from a bank alert format it has not verified yet. Check the amount, date and whether money left or arrived.',
+    ar: 'أضاف وفرة هذه العملية من صيغة رسالة بنكية لم يتحقق منها بعد. راجِع المبلغ والتاريخ وهل خرج المال أم دخل.',
+  },
+  autoAddedSettingSaveFailed: {
+    en: 'This setting could not be saved. Try again.',
+    ar: 'تعذر حفظ هذا الإعداد. حاول مجدداً.',
+  },
+  autoAddedLooksRight: { en: 'Looks right', ar: 'صحيحة' },
+  autoAddedUndo: { en: 'Undo — remove', ar: 'تراجع — احذفها' },
+  autoAddedUndoConfirm: { en: 'Remove this auto-added entry?', ar: 'حذف هذه العملية المضافة تلقائيًا؟' },
+  autoAddedUndoHint: {
+    en: 'Removes this entry. This alert will not be added again.',
+    ar: 'يحذف هذه العملية، ولن تُضاف هذه الرسالة مرة أخرى.',
+  },
+  autoAddedFilter: { en: 'Auto-added to check', ar: 'مضافة تلقائيًا للمراجعة' },
+  autoAddedCount: {
+    en: '{count} auto-added to check',
+    ar: 'عمليات مضافة تلقائيًا للمراجعة: {count}',
+  },
+  autoAddedSettingTitle: {
+    en: 'Auto-add alerts from unverified bank formats',
+    ar: 'إضافة رسائل البنوك غير المُتحقَّق منها تلقائيًا',
+  },
+  autoAddedSettingBody: {
+    en: 'On: a clearly completed payment in a bank format Wafra has not verified is added and marked “Auto-added — check”. Off: those alerts wait in Review. Verified UAE and Saudi bank alerts are not affected.',
+    ar: 'عند التشغيل: تُضاف الدفعة المكتملة بوضوح من صيغة بنكية لم يتحقق منها وفرة وتُعلَّم بـ«أُضيفت تلقائيًا — راجِعها». عند الإيقاف: تنتظر هذه الرسائل في المراجعة. لا يتأثر ذلك برسائل بنوك الإمارات والسعودية المُتحقَّق منها.',
+  },
   rememberThisBill: { en: 'Remember this bill?', ar: 'تذكّر هذه الفاتورة؟' },
   billAliasAlso: {
     en: 'Use {title} · {category} for {n} matching past payment{s} and future payments from this biller.',
@@ -365,6 +395,28 @@ const S = {
   genericConfirmAdd: { en: 'Confirm and add', ar: 'أكد وأضف' },
   genericCompleteFields: { en: 'Complete the missing detail before adding.', ar: 'أكمل المعلومة الناقصة قبل الإضافة.' },
   genericCurrencyMismatch: { en: 'Choose an amount in your ledger’s currency.', ar: 'اختر مبلغاً بعملة سجلك.' },
+  foreignReviewConversionNote: {
+    en: 'Added in {ledger}: the card’s own {ledger} amount when the alert states it, otherwise a dated reference rate. The original amount is kept.',
+    ar: 'تُضاف بعملة {ledger}: بمبلغ البطاقة بعملة {ledger} إن ذكره التنبيه، وإلا بسعر مرجعي مؤرّخ. ويُحفظ المبلغ الأصلي.',
+  },
+  fxRateUnavailable: {
+    en: 'No exchange rate for that day yet. Nothing was added. Try again when you are online.',
+    ar: 'لا يتوفر سعر صرف لذلك اليوم بعد. لم تتم إضافة شيء. حاول مجدداً عند الاتصال بالإنترنت.',
+  },
+  amountInCurrency: { en: 'Amount in {currency}', ar: 'المبلغ بعملة {currency}' },
+  spendCurrencyTitle: { en: 'Currency paid', ar: 'عملة الدفع' },
+  spendCurrencyHint: {
+    en: 'Paid in another currency? Choose it here.',
+    ar: 'دفعت بعملة أخرى؟ اخترها هنا.',
+  },
+  spendCurrencyBody: {
+    en: 'Choose the currency on the receipt. Wafra records it in {ledger} with the dated public reference rate for that day and keeps the original amount. Only the two currency codes and the date are sent to get the rate.',
+    ar: 'اختر العملة المذكورة في الإيصال. يسجلها وفرة بعملة {ledger} بسعر مرجعي عام لذلك اليوم ويحتفظ بالمبلغ الأصلي. لا يُرسل للحصول على السعر إلا رمزا العملتين والتاريخ.',
+  },
+  foreignManualNote: {
+    en: 'Saved in {ledger} at the reference rate for this day; the {currency} amount is kept.',
+    ar: 'يُحفظ بعملة {ledger} بالسعر المرجعي لهذا اليوم، مع الاحتفاظ بالمبلغ بعملة {currency}.',
+  },
   genericSourceChanged: { en: 'This alert changed or expired. Reopen it to review.', ar: 'تغير هذا التنبيه أو انتهت صلاحيته. افتحه مجدداً للمراجعة.' },
   reviewAlertsTitle: { en: 'Bank alerts needing help', ar: 'تنبيهات بنكية تحتاج مساعدتك' },
   reviewAlertsHomeCount: {
@@ -712,6 +764,8 @@ const S = {
   otherSources: { en: 'Other sources', ar: 'مصادر أخرى' },
   showMoreSources: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
   showFewerSources: { en: 'Show fewer', ar: 'عرض أقل' },
+  /** Paged long lists (Categorise, Improve accuracy); {count} is the next page, not the total. */
+  showMoreRows: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
   noMoneySourcesYet: { en: 'No money sources yet.', ar: 'لا توجد مصادر أموال بعد.' },
   accountsHeader: { en: 'Accounts', ar: 'الحسابات' },
   inactiveHeader: { en: 'Inactive', ar: 'غير نشطة' },
@@ -886,6 +940,20 @@ const S = {
     en: 'Choose a category for {merchant}',
     ar: 'اختر تصنيفاً لـ {merchant}',
   },
+  categoriseAiSuggestion: {
+    en: 'On-device AI suggests: {category}',
+    ar: 'يقترح الذكاء الاصطناعي على جهازك: {category}',
+  },
+  categoriseRuleSuggestion: {
+    en: 'Suggested from the merchant name: {category}',
+    ar: 'مقترح من اسم التاجر: {category}',
+  },
+  categoriseSuggestionUse: { en: 'Use {category}', ar: 'استخدم {category}' },
+  categoriseSuggestionNote: {
+    en: 'Suggestion only. Nothing changes until you choose. Choosing applies it to {count} entr{ending}.',
+    ar: 'اقتراح فقط. لن يتغير شيء حتى تختار. عند الاختيار يُطبّق على {count} عملية.',
+  },
+  categoriseSuggestionChecking: { en: 'Checking the name on your device…', ar: 'جارٍ فحص الاسم على جهازك…' },
   categoriseDone: { en: 'Nothing needs your input', ar: 'لا توجد حالات تحتاج إدخالك' },
   categoriseDoneBody: {
     en: 'Confident matches are handled automatically. New unclear merchants or bank-payment nicknames will appear here only when Wafra cannot classify them safely.',
@@ -1291,8 +1359,8 @@ const S = {
     ar: 'تعذّر على الوضع الخاص فصل المرحّل. اتصل بالإنترنت وحاول مرة أخرى.',
   },
   capturePreferenceFailed: {
-    en: 'Wafra could not save the automatic capture setting. Try again.',
-    ar: 'تعذّر على وفرة حفظ إعداد الالتقاط التلقائي. حاول مرة أخرى.',
+    en: 'Capture setting didn’t save. Try again.',
+    ar: 'لم يُحفظ إعداد الالتقاط. حاول مجدداً.',
   },
   privacyRetentionExact: {
     en: 'The capture status and warning on this screen keep only source-free counts; they do not keep Message text or sender. Pending Message records wait in the protected local capture queue—a short-lived encrypted queue. They expire after 30 days and are removed the next time capture runs or Wafra checks the queue. Local capture works with your saved preferences.',
@@ -1309,7 +1377,7 @@ const S = {
   backupJson: { en: 'Back up everything (JSON)', ar: 'نسخ احتياطي كامل (JSON)' },
   restoreBackup: { en: 'Restore from backup', ar: 'استعادة من نسخة احتياطية' },
   exportCsv: { en: 'Export transactions (CSV)', ar: 'تصدير العمليات (CSV)' },
-  statementImportTitle: { en: 'Import bank statements', ar: 'استيراد كشوف البنك' },
+  statementImportTitle: { en: 'Add bank statements', ar: 'أضف كشوف البنك' },
   statementImportSettingsDetail: {
     en: 'Add history from one or several PDF, CSV, or TSV statements',
     ar: 'أضف السجل من كشف واحد أو عدة كشوف PDF أو CSV أو TSV',
@@ -1861,8 +1929,13 @@ const S = {
   onboardCountryNL: { en: 'Netherlands', ar: 'هولندا' },
   onboardCountryElsewhere: { en: 'Somewhere else', ar: 'مكان آخر' },
   onboardCountrySheetTitle: { en: 'Where do you bank?', ar: 'أين تتعامل مصرفياً؟' },
-  onboardCountrySheetBody: { en: 'This only picks the example banks Wafra shows you. Your own accounts come from your alerts, whichever country they are in.', ar: 'هذا يحدد فقط أمثلة البنوك التي يعرضها وفرة. أما حساباتك فتأتي من تنبيهاتك، في أي بلد كانت.' },
-  onboardCountryShowing: { en: 'Examples for', ar: 'أمثلة من' },
+  onboardCountrySheetBody: { en: 'This sets how dates in your bank messages and statements are read, and the example banks Wafra shows. Your own accounts still come from your alerts, whichever country they are in.', ar: 'يحدد هذا طريقة قراءة التواريخ في رسائل بنكك وكشوفه، وأمثلة البنوك التي يعرضها وفرة. أما حساباتك فتأتي دائماً من تنبيهاتك، في أي بلد كانت.' },
+  onboardCountryShowing: { en: 'Country:', ar: 'البلد:' },
+  settingsCountryTitle: { en: 'Country', ar: 'البلد' },
+  settingsCountryDetail: { en: 'Date format for alerts and statements', ar: 'صيغة التاريخ في التنبيهات والكشوف' },
+  settingsCountrySheetBody: { en: 'Wafra reads a date like 03/04 the way your country writes it. It does not change your ledger currency or which banks Wafra can read.', ar: 'يقرأ وفرة تاريخاً مثل 03/04 بالطريقة التي يكتبها بلدك. ولا يغيّر ذلك عملة سجلك ولا البنوك التي يستطيع وفرة قراءتها.' },
+  countrySearch: { en: 'Search countries', ar: 'ابحث عن بلد' },
+  countryNoMatch: { en: 'No country matches that search.', ar: 'لا يوجد بلد يطابق هذا البحث.' },
   onboardCountryUnknown: { en: 'Choose your country', ar: 'اختر بلدك' },
   onboardCountryChange: { en: 'Change', ar: 'تغيير' },
   onboardAlertsTitle: { en: 'How does your bank tell you about a payment?', ar: 'كيف يخبرك بنكك بعملية الدفع؟' },
@@ -2061,6 +2134,58 @@ const S = {
     ar: 'أرسل ملفات PDF أو CSV أو TSV عبر خدمة وفرة الآمنة. تُحلل الملفات الخام في الذاكرة ثم تُحذف.',
   },
   onboardStatementBack: { en: 'Back to setup', ar: 'العودة إلى الإعداد' },
+  onboardPastTitle: {
+    en: 'Bring in your past spending',
+    ar: 'أضف مصروفاتك السابقة',
+  },
+  onboardPastBody: {
+    en: 'Download a statement from your bank app and add it here.',
+    ar: 'نزّل كشفاً من تطبيق بنكك وأضفه هنا.',
+  },
+  onboardPastAction: {
+    en: 'Add a statement',
+    ar: 'أضف كشفاً',
+  },
+  onboardLater: {
+    en: 'Later',
+    ar: 'لاحقاً',
+  },
+  onboardHowItWorks: {
+    en: 'How it works',
+    ar: 'كيف يعمل',
+  },
+  onboardPastHowTitle: {
+    en: 'Bank statements',
+    ar: 'كشوف البنك',
+  },
+  onboardPastHowDownload: {
+    en: 'In your bank app, open Statements and download a PDF or CSV.',
+    ar: 'في تطبيق بنكك، افتح «الكشوف» ونزّل ملف PDF أو CSV.',
+  },
+  onboardPastHowPrivacy: {
+    en: 'Wafra’s server reads the file in memory, keeps only the transactions, and sends them encrypted to your devices.',
+    ar: 'يقرأ خادم وفرة الملف في الذاكرة، ويحتفظ بالعمليات فقط، ويرسلها مشفّرة إلى أجهزتك.',
+  },
+  onboardPastHowPassword: {
+    en: 'Password-protected PDFs work. Wafra asks for the password once and does not save it.',
+    ar: 'ملفات PDF المحمية بكلمة مرور مدعومة. يطلب وفرة كلمة المرور مرة واحدة ولا يحفظها.',
+  },
+  onboardLiveTitle: {
+    en: 'Catch new transactions',
+    ar: 'التقط العمليات الجديدة',
+  },
+  onboardLiveBody: {
+    en: 'A Shortcut sends new bank texts to Wafra on this iPhone.',
+    ar: 'يرسل اختصار رسائل بنكك الجديدة إلى وفرة على هذا الآيفون.',
+  },
+  onboardLiveAction: {
+    en: 'Set up',
+    ar: 'إعداد',
+  },
+  onboardNotNow: {
+    en: 'Not now',
+    ar: 'ليس الآن',
+  },
   onboardManualChoice: { en: 'Start manually', ar: 'ابدأ يدوياً' },
   onboardManualChoiceIos: { en: 'Start manually', ar: 'ابدأ يدوياً' },
   onboardManualChoiceBody: { en: 'Add entries yourself. No SMS access. Set up capture later.', ar: 'أضف العمليات بنفسك. دون وصول للرسائل. يمكنك إعداد الالتقاط لاحقاً.' },
@@ -2599,8 +2724,8 @@ const S = {
   hideManualPaste: { en: 'Hide manual paste', ar: 'إخفاء اللصق اليدوي' },
   importBankActivity: { en: 'Import bank activity', ar: 'استيراد النشاط البنكي' },
   importBankActivityIosDetail: {
-    en: 'Forwarded email, PDF statement, or your bank Shortcut',
-    ar: 'بريد محوّل أو كشف PDF أو اختصار البنك',
+    en: 'Paste a bank text or add a statement',
+    ar: 'الصق رسالة بنكية أو أضف كشفاً',
   },
   parsePasted: { en: 'Parse pasted text', ar: 'تحليل النص الملصق' },
   trySample: { en: 'Try sample', ar: 'جرّب مثالاً' },
@@ -2751,8 +2876,8 @@ const S = {
     ar: 'لم يُسجّل شيء. لم يتمكن وفرة من حذف الرسائل المؤقتة المحمية التي ألغيتها. أعد محاولة الحذف أو اتركها. تصبح مؤهلة للحذف بعد ساعة وتُزال في المرة التالية التي يفحص فيها وفرة سجل الاستيراد.',
   },
   historySetupStateFailed: {
-    en: 'Wafra could not update History Import setup. No Message text is stored in this setting. Try again.',
-    ar: 'تعذّر على وفرة تحديث إعداد استيراد السجل. لا يُخزّن أي نص للرسائل في هذا الإعداد. حاول مرة أخرى.',
+    en: 'Setup progress didn’t save. Tap Try again.',
+    ar: 'لم يُحفظ تقدّم الإعداد. اضغط «حاول مجدداً».',
   },
   historyStorageFailed: { en: 'Secure save failed', ar: 'فشل الحفظ الآمن' },
   historyStorageFailedBody: {
@@ -2795,8 +2920,26 @@ const S = {
   // "Shortcut" is اختصار, the Apple term, not شورت‌كت.
   legacyCapturePrivacyWarning: { en: 'An old Shortcut may still upload bank alerts. Review it in Shortcuts.', ar: 'قد يواصل اختصار قديم رفع التنبيهات البنكية. راجعه في تطبيق الاختصارات.' },
   messagesPrivacy: { en: 'Privacy and data', ar: 'الخصوصية والبيانات' },
-  iosSetupTitle: { en: 'Bank alerts', ar: 'تنبيهات البنك' },
-  iosMessageSettingsDetail: { en: 'Set up new messages or import history', ar: 'إعداد الرسائل الجديدة أو استيراد السجل' },
+  iosSetupTitle: {
+    en: 'Capture sources',
+    ar: 'مصادر الالتقاط',
+  },
+  iosMessageSettingsDetail: {
+    en: 'Messages, Apple Pay and more',
+    ar: 'الرسائل وApple Pay والمزيد',
+  },
+  iosPastSmsTitle: {
+    en: 'Import past SMS (experimental)',
+    ar: 'استيراد الرسائل السابقة (تجريبي)',
+  },
+  iosPastSmsDetail: {
+    en: 'Slow and experimental. Statements are faster.',
+    ar: 'بطيء وتجريبي. الكشوف أسرع.',
+  },
+  settingsAdvancedHeader: {
+    en: 'Advanced',
+    ar: 'متقدم',
+  },
   iosMessageSetupHeading: { en: 'Bank messages', ar: 'رسائل البنك' },
   iosMessageSetupSubtitle: { en: 'First connect new alerts. Importing old messages is optional.', ar: 'اربط التنبيهات الجديدة أولاً. استيراد الرسائل القديمة اختياري.' },
   iosMessageFutureTitle: {
@@ -2823,8 +2966,8 @@ const S = {
   reviewAlertsFullWaiting: { en: 'Review is full — {count} alerts waiting. Add or dismiss alerts here to make room; waiting alerts are kept on this iPhone until then.', ar: 'قائمة المراجعة ممتلئة — {count} من التنبيهات بالانتظار. أضف تنبيهات أو تجاهلها هنا لإفساح المجال، وستبقى التنبيهات المنتظرة على هذا الآيفون حتى ذلك الحين.' },
   reviewAlertsExpiredCount: { en: 'Expired before review in the last 30 days: {count}', ar: 'انتهت صلاحيتها قبل المراجعة خلال آخر 30 يوماً: {count}' },
   reviewAlertsEvictedCount: { en: 'Alerts that could not be kept for review because Review was full, in the last 30 days: {count}', ar: 'تنبيهات تعذّر الاحتفاظ بها للمراجعة لأن قائمة المراجعة كانت ممتلئة خلال آخر 30 يوماً: {count}' },
-  reviewAlertsCurrencyEvictedCount: { en: 'Other-currency alerts not kept for review in the last 30 days: {count}. Review keeps the newest 50; this ledger records one currency.', ar: 'تنبيهات بعملة أخرى لم يُحتفظ بها للمراجعة خلال آخر 30 يوماً: {count}. تحتفظ المراجعة بأحدث 50 تنبيهاً، وهذا السجل يعتمد عملة واحدة.' },
-  reviewAlertsCurrencySkipped: { en: 'Skipped because they use another currency: {count}. This ledger records one currency.', ar: 'تم تخطيها لأنها بعملة أخرى: {count}. هذا السجل يعتمد عملة واحدة.' },
+  reviewAlertsCurrencyEvictedCount: { en: 'Other-currency alerts not kept for review in the last 30 days: {count}. Review keeps the newest 50 waiting for an exchange rate.', ar: 'تنبيهات بعملة أخرى لم يُحتفظ بها للمراجعة خلال آخر 30 يوماً: {count}. تحتفظ المراجعة بأحدث 50 تنبيهاً بانتظار سعر الصرف.' },
+  reviewAlertsCurrencySkipped: { en: 'Statements and notices in another currency skipped: {count}. Purchases are converted into your ledger currency instead.', ar: 'كشوف وإشعارات بعملة أخرى تم تخطيها: {count}. أما المشتريات فتُحوَّل إلى عملة سجلك.' },
   reviewAlertExpiresIn: { en: 'Days left to review: {count}', ar: 'الأيام المتبقية للمراجعة: {count}' },
   iosNotificationHelpInput: { en: 'Pass notification text to Capture bank notification. Replace the setup test phrase with Shortcut Input before saving the automation.', ar: 'مرّر نص الإشعار إلى «التقاط إشعار بنكي». استبدل عبارة فحص الإعداد بمتغير إدخال الاختصار قبل حفظ الأتمتة.' },
   iosNotificationHelpStatus: { en: 'The permission check and your confirmation are separate from a real notification receipt. Check notification setup to see whether any text has arrived.', ar: 'فحص الأذونات وتأكيدك منفصلان عن استلام إشعار حقيقي. افحص إعداد الإشعارات لمعرفة ما إذا وصل نص فعلاً.' },
@@ -2842,10 +2985,16 @@ const S = {
   iosMessageHistoryCoverage: { en: 'Imports saved Messages in smaller batches.', ar: 'يستورد الرسائل المحفوظة على دفعات أصغر.' },
   iosMessageGuideSender: { en: 'Sender: leave empty · Message Contains: one space', ar: 'المرسل: اتركه فارغاً · تحتوي الرسالة على: مسافة واحدة' },
   iosMessageGuideNoFilter: { en: 'Type a single space in “Message Contains” so Next turns on. Messages containing a space run the Shortcut. Wafra keeps bank alerts and discards other messages on this iPhone.', ar: 'اكتب مسافة واحدة في «تحتوي الرسالة على» لتفعيل «التالي». تشغّل الرسائل التي تحتوي على مسافة الاختصار، ويصفّيها وفرة على هذا الآيفون.' },
-  iosMessageFutureInstallHelp: { en: 'Add {shortcut}. Next, run the setup check, then connect new messages.', ar: 'أضف {shortcut}. بعدها شغّل فحص الإعداد ثم اربط الرسائل الجديدة.' },
+  iosMessageFutureInstallHelp: {
+    en: 'Tap Add Shortcut, then add {shortcut} in Shortcuts.',
+    ar: 'اضغط «إضافة الاختصار»، ثم أضف {shortcut} في الاختصارات.',
+  },
   iosMessageFutureReturnHelp: { en: 'Added {shortcut}?', ar: 'أضفت {shortcut}؟' },
   iosMessagePermissionTitle: { en: 'Setup check', ar: 'فحص الإعداد' },
-  iosMessageRunPermissionCheck: { en: 'Run setup check', ar: 'تشغيل فحص الإعداد' },
+  iosMessageRunPermissionCheck: {
+    en: 'Run test',
+    ar: 'تشغيل الاختبار',
+  },
   iosMessagePermissionBody: { en: 'Run the setup check with this iPhone unlocked. Allow access to Wafra when Apple asks, then return here. The setup check tests the Shortcut; your first bank alert confirms automatic delivery.', ar: 'شغّل فحص الإعداد والآيفون مفتوح. اسمح بالوصول إلى وفرة عندما تطلب Apple ذلك، ثم عد إلى هنا. يختبر فحص الإعداد الاختصار؛ ويؤكد أول تنبيه بنكي وصول الرسائل تلقائياً.' },
   iosMessagePermissionLocked: { en: 'If a background run reports a permission error, open the Shortcut’s details → Privacy. Allow Wafra access and enable “Allow Running When Locked” if shown.', ar: 'إذا ظهر خطأ أذونات أثناء التشغيل في الخلفية، افتح تفاصيل الاختصار ← الخصوصية. اسمح بالوصول إلى وفرة وفعّل «السماح بالتشغيل عند القفل» إذا ظهر الخيار.' },
   iosMessageFutureReadyChoice: { en: 'New alerts are set up. Importing past messages is optional — now or later from Settings.', ar: 'تم إعداد التنبيهات الجديدة. استيراد الرسائل السابقة اختياري — الآن أو لاحقاً من الإعدادات.' },
@@ -2875,7 +3024,10 @@ const S = {
   iosMessageResetHistoryBody: { en: 'Stop the Shortcut first. Reset this attempt; saved entries stay unchanged.', ar: 'أوقف الاختصار أولاً. أعد ضبط المحاولة؛ تبقى العمليات المحفوظة كما هي.' },
   iosMessageGuideImmediate: { en: 'Choose Run Immediately, turn off Notify When Run if shown, then Next', ar: 'اختر تشغيل فوراً، وأوقف الإشعار عند التشغيل إن ظهر، ثم اضغط التالي' },
   iosMessageGuideRunShortcut: { en: 'Pick {shortcut} from the list (not New Blank Automation), then Done', ar: 'اختر {shortcut} من القائمة (وليس أتمتة جديدة فارغة)، ثم تم' },
-  iosMessageLearnMore: { en: 'Help', ar: 'مساعدة' },
+  iosMessageLearnMore: {
+    en: 'How it works',
+    ar: 'كيف يعمل',
+  },
   iosMessageDone: { en: 'Done', ar: 'تم' },
   iosMessageCloseSetup: { en: 'Close setup', ar: 'إغلاق الإعداد' },
   iosMessageStatusNotStarted: { en: 'Not started', ar: 'لم يبدأ' },
@@ -2883,8 +3035,8 @@ const S = {
   iosMessageStatusComplete: { en: 'Complete', ar: 'مكتمل' },
   iosMessageStatusSkipped: { en: 'Not finished', ar: 'غير مكتمل' },
   iosMessageFinishFailed: {
-    en: 'Setup could not be saved. Try Finish again.',
-    ar: 'تعذّر حفظ الإعداد. حاول الإنهاء مرة أخرى.',
+    en: 'Setup didn’t save. Try again.',
+    ar: 'لم يُحفظ الإعداد. حاول مجدداً.',
   },
   iosMessageHelpLocal: { en: 'Processed on this iPhone.', ar: 'تُعالج على هذا الآيفون.' },
   iosMessageHelpReadable: { en: 'Only readable messages saved on this iPhone.', ar: 'الرسائل المحفوظة والقابلة للقراءة على هذا الآيفون فقط.' },
@@ -2921,9 +3073,15 @@ const S = {
   },
   iosLocalInstallShortcut: { en: 'Add Shortcut', ar: 'إضافة الاختصار' },
   iosLocalAlreadyAdded: { en: 'I added it', ar: 'أضفته' },
-  iosLocalShortcutUnavailable: { en: 'Shortcut link unavailable in this build.', ar: 'رابط الاختصار غير متاح في هذا الإصدار.' },
+  iosLocalShortcutUnavailable: {
+    en: 'This build can’t add the shortcut. Update Wafra.',
+    ar: 'لا يمكن لهذا الإصدار إضافة الاختصار. حدّث وفرة.',
+  },
   iosLocalUnsupported: { en: 'Requires iOS 16 or later.', ar: 'يتطلب iOS 16 أو أحدث.' },
-  iosLocalUpdateRequired: { en: 'Update Wafra to enable message capture.', ar: 'حدّث وفرة لتفعيل التقاط الرسائل.' },
+  iosLocalUpdateRequired: {
+    en: 'This version can’t capture messages. Update Wafra.',
+    ar: 'هذا الإصدار لا يلتقط الرسائل. حدّث وفرة.',
+  },
   iosLocalPrivacyTitle: {
     en: 'Processed on this iPhone',
     ar: 'تُعالج على هذا الآيفون',
@@ -2948,9 +3106,15 @@ const S = {
     en: 'Apple’s Sender picker shows Contacts only, so leave Sender empty and type a single space in “Message Contains” so Next turns on. The automation then passes each new message to Wafra, which keeps bank alerts and discards the rest on this iPhone.',
     ar: 'تعرض قائمة المرسلين لدى Apple جهات الاتصال فقط، لذلك اترك المرسل فارغاً واكتب مسافة واحدة في «تحتوي الرسالة على» حتى يُفعَّل زر التالي. تمرّر الأتمتة عندها كل رسالة جديدة إلى وفرة، الذي يحتفظ بتنبيهات البنك ويتجاهل البقية على هذا الآيفون.',
   },
-  iosMessageContinueManual: { en: 'Continue to Wafra without automatic capture', ar: 'متابعة إلى وفرة دون التقاط تلقائي' },
+  iosMessageContinueManual: {
+    en: 'Skip for now',
+    ar: 'تخطَّ حالياً',
+  },
   iosLocalOpenAutomation: { en: 'Open Shortcuts', ar: 'فتح الاختصارات' },
-  iosLocalAutomationAdded: { en: 'I set it up', ar: 'أكملت الإعداد' },
+  iosLocalAutomationAdded: {
+    en: 'I turned it on',
+    ar: 'فعّلتها',
+  },
   iosLocalTestExplainer: {
     en: 'Confirmation runs only a harmless setup check. It cannot add a purchase or prove that Apple’s Message trigger works.',
     ar: 'يشغّل التأكيد فحص إعداد آمناً فقط. لا يمكنه إضافة عملية شراء أو إثبات عمل مشغّل الرسائل من Apple.',
@@ -2975,12 +3139,12 @@ const S = {
   iosLocalContinue: { en: 'Continue', ar: 'متابعة' },
   iosLocalBackToShortcut: { en: 'Back to Shortcut', ar: 'العودة إلى الاختصار' },
   iosLocalShortcutInstallFailed: {
-    en: 'Shortcut did not open. Try again.',
-    ar: 'لم يفتح الاختصار. حاول مرة أخرى.',
+    en: 'Shortcuts didn’t open. Tap Add Shortcut to try again.',
+    ar: 'لم تُفتح الاختصارات. اضغط «إضافة الاختصار» للمحاولة مجدداً.',
   },
   iosLocalShortcutRunFailed: {
-    en: 'The check did not finish. Run setup check with your iPhone unlocked and allow access to Wafra. If the Shortcut is missing, add it again from Help.',
-    ar: 'لم يكتمل الفحص. شغّله والآيفون مفتوح واسمح بالوصول إلى وفرة. إذا كان الاختصار مفقوداً، أضفه مجدداً من المساعدة.',
+    en: 'The test didn’t finish. Unlock your iPhone, then tap Run test.',
+    ar: 'لم يكتمل الاختبار. افتح قفل الآيفون، ثم اضغط «تشغيل الاختبار».',
   },
   iosLocalManualExitFailed: {
     en: 'Wafra could not stop local capture. Stay on this screen and try again.',
@@ -3098,8 +3262,8 @@ const S = {
   },
 
   iosShortcutsMissing: {
-    en: 'Apple Shortcuts is not installed.',
-    ar: 'تطبيق «الاختصارات» من Apple غير مثبّت.',
+    en: 'Apple Shortcuts isn’t installed. Install it, then try again.',
+    ar: 'تطبيق «الاختصارات» من Apple غير مثبّت. ثبّته ثم حاول مجدداً.',
   },
   iosShortcutsMissingRecovery: {
     en: 'Install Shortcuts from the App Store, return to Wafra, and try this step again.',

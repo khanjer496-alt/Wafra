@@ -27,6 +27,8 @@ import { committed } from '@/lib/haptics';
 import { t as tUi, tf as tfUi } from '@/lib/i18n';
 import { accountDisplayName } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
+import { cachedReferenceQuote, convertWithReferenceQuote, loadReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
+import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { reviewTemplateRuleFor, type PromoteReviewAlertInput } from '@/lib/review-promotion';
 import { isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
@@ -133,6 +135,9 @@ export default function AddTransactionScreen() {
   });
   const [selectedInstrument, setSelectedInstrument] = useState<UniversalInstrument | null>(reviewInstrument ?? null);
   const [amountText, setAmountText] = useState('');
+  /** Currency on the receipt for a manual entry; null = the ledger's own. */
+  const [spendCurrency, setSpendCurrency] = useState<string | null>(null);
+  const [spendSheetVisible, setSpendSheetVisible] = useState(false);
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   const suggestedCurrency = useMemo(suggestedLedgerCurrency, []);
   const [category, setCategory] = useState<CategoryId | null>(
@@ -190,14 +195,26 @@ export default function AddTransactionScreen() {
 
   const categories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
   const manualMoneySpec = state.ledgerMoney;
+  // Foreign spending is entered in the receipt's currency and converted on
+  // save with a dated reference rate; the original stays on the row.
+  const foreignSpec = !reviewItem && manualMoneySpec && spendCurrency &&
+    spendCurrency !== manualMoneySpec.currency ? ledgerMoneySpec(spendCurrency) : null;
   const amountFils = reviewItem
     ? parseAmountToFils(amountText)
-    : manualMoneySpec ? parseAmountWithMoneySpec(amountText, manualMoneySpec) : null;
+    : foreignSpec ? parseAmountWithMoneySpec(amountText, foreignSpec)
+      : manualMoneySpec ? parseAmountWithMoneySpec(amountText, manualMoneySpec) : null;
   const reviewRouteInvalid = !!reviewId && (!reviewItem || reviewItem.expiresAt <= Date.now());
   const sourceChanged = !!genericItem && (reviewBinding.current?.sourceKey !== genericItem.sourceKey ||
     reviewBinding.current?.observedAt !== genericItem.observedAt);
+  // A foreign amount is converted at promotion; only the same currency at a
+  // different exponent (unrepresentable) is still a mismatch.
   const moneyMatchesLedger = !selectedMoney || !state.ledgerMoney ||
-    (state.ledgerMoney.currency === selectedMoney.currency && state.ledgerMoney.exponent === selectedMoney.exponent);
+    state.ledgerMoney.currency !== selectedMoney.currency ||
+    state.ledgerMoney.exponent === selectedMoney.exponent;
+  const selectedMoneyForeign = !!selectedMoney && !!state.ledgerMoney &&
+    state.ledgerMoney.currency !== selectedMoney.currency;
+  const registeredMoneyForeign = !!registeredItem && !!state.ledgerMoney &&
+    state.ledgerMoney.currency !== registeredItem.amount.currency;
   const genericReady = !event || (ordinaryPosting && !sourceChanged && !!selectedMoney &&
     /^[1-9]\d*$/.test(selectedMoney.minorUnits) && moneyMatchesLedger && directionConfirmed &&
     title.trim().length > 0 && title.trim().length <= 80 &&
@@ -278,7 +295,9 @@ export default function AddTransactionScreen() {
           setConfirmingSeparate(false);
           setDuplicateReview({ item: reviewItem, generation: saveGeneration, input });
         } else {
-          toast.show(tUi('reviewAlertAddFailed'), { tone: 'error' });
+          const rateMissing = typeof error === 'object' && error !== null && 'reason' in error &&
+            error.reason === 'fx-rate-unavailable';
+          toast.show(tUi(rateMissing ? 'fxRateUnavailable' : 'reviewAlertAddFailed'), { tone: 'error' });
         }
       } finally {
         setSaving(false);
@@ -286,6 +305,40 @@ export default function AddTransactionScreen() {
       return;
     }
     if (!amountFils) return;
+    if (foreignSpec && manualMoneySpec) {
+      // Only two currency codes and the day are requested; Private Mode
+      // uses a rate already known on this device or none at all.
+      setSaving(true);
+      try {
+        const current = getStateSnapshot();
+        const quote = current.privateMode
+          ? cachedReferenceQuote(foreignSpec.currency, manualMoneySpec.currency, date, current.transactions)
+          : await loadReferenceQuote(foreignSpec.currency, manualMoneySpec.currency, date,
+            { transactions: current.transactions });
+        const conversion = quoteFitsDay(quote, date) ? convertWithReferenceQuote(
+          { currency: foreignSpec.currency, minorUnits: amountFils, exponent: foreignSpec.exponent },
+          manualMoneySpec.currency, manualMoneySpec.exponent, quote,
+        ) : null;
+        if (!conversion) {
+          toast.show(tUi('fxRateUnavailable'), { tone: 'error' });
+          return;
+        }
+        addTransaction({
+          type,
+          amountFils: conversion.amountFils,
+          ...conversion.fields,
+          category,
+          accountId,
+          title: title.trim() || categoryLabel(getCategory(category)),
+          date,
+          source: 'manual',
+        });
+        router.back();
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     addTransaction({
       type,
       amountFils,
@@ -607,6 +660,11 @@ export default function AddTransactionScreen() {
       {event && !directionConfirmed ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericChooseDirection')}</ThemedText> : null}
       {sourceChanged ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericSourceChanged')}</ThemedText> : null}
       {!moneyMatchesLedger ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericCurrencyMismatch')}</ThemedText> : null}
+      {(selectedMoneyForeign || registeredMoneyForeign) && state.ledgerMoney ? (
+        <ThemedText testID="review-foreign-conversion" type="small" themeColor="textSecondary">
+          {tfUi('foreignReviewConversionNote', { ledger: state.ledgerMoney.currency })}
+        </ThemedText>
+      ) : null}
       {/* A manual-only first run has no bank alert to establish accounting
           currency. Require one explicit choice instead of inheriting the
           parser pack's fallback currency. The phone region is only a hint. */}
@@ -708,22 +766,49 @@ export default function AddTransactionScreen() {
       ) : (
         <TextField
           ref={amountRef}
-          label={tUi('amountInLedgerCurrency')}
+          label={foreignSpec ? tfUi('amountInCurrency', { currency: foreignSpec.currency }) : tUi('amountInLedgerCurrency')}
           value={amountText}
           onChangeText={setAmountText}
           numeric
           placeholder="0"
           autoFocus
           invalid={amountInvalid}
-          errorText={amountInvalid ? tUi('amountInLedgerCurrency') : undefined}
+          errorText={amountInvalid ? (foreignSpec
+            ? tfUi('amountInCurrency', { currency: foreignSpec.currency }) : tUi('amountInLedgerCurrency')) : undefined}
           leading={(
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.currency}>
-              {state.ledgerMoney?.currency ?? '—'}
+              {foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '—'}
             </ThemedText>
           )}
           style={[styles.amountInput, { color: theme.text, fontFamily: state.language === 'ar' ? Fonts.arabicBold : Fonts.sansSemi }]}
         />
       )}
+      {!reviewItem && state.ledgerMoney ? (
+        <View style={styles.fieldBlock}>
+          <Pressable
+            testID="spend-currency-trigger"
+            accessibilityRole="button"
+            accessibilityLabel={`${tUi('spendCurrencyTitle')}: ${foreignSpec?.currency ?? state.ledgerMoney.currency}`}
+            accessibilityHint={tUi('spendCurrencyHint')}
+            onPress={() => setSpendSheetVisible(true)}
+            style={({ pressed }) => [styles.currencyPicker, {
+              borderColor: foreignSpec ? theme.primary : theme.controlBorder,
+              backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+            }]}>
+            <View style={styles.currencyPickerCopy}>
+              <ThemedText type="smallBold">
+                {`${tUi('spendCurrencyTitle')} · ${foreignSpec?.currency ?? state.ledgerMoney.currency}`}
+              </ThemedText>
+              <ThemedText type="meta" themeColor="textTertiary">
+                {foreignSpec
+                  ? tfUi('foreignManualNote', { ledger: state.ledgerMoney.currency, currency: foreignSpec.currency })
+                  : tUi('spendCurrencyHint')}
+              </ThemedText>
+            </View>
+            <Icon name="chevron-right" size={17} color={theme.textSecondary} />
+          </Pressable>
+        </View>
+      ) : null}
 
       {/* Title */}
       {!reviewItem ? <TextField
@@ -905,6 +990,17 @@ export default function AddTransactionScreen() {
       value={state.ledgerMoney?.currency ?? null}
       onClose={() => setCurrencySheetVisible(false)}
       onSelect={setLedgerMoney}
+    />
+    <LedgerCurrencySheet
+      visible={spendSheetVisible}
+      value={foreignSpec?.currency ?? state.ledgerMoney?.currency ?? null}
+      onClose={() => setSpendSheetVisible(false)}
+      onSelect={(code) => {
+        setSpendCurrency(code === state.ledgerMoney?.currency ? null : code);
+        setAmountText('');
+      }}
+      title={tUi('spendCurrencyTitle')}
+      body={tfUi('spendCurrencyBody', { ledger: state.ledgerMoney?.currency ?? '' })}
     />
     <BottomSheet
       visible={categoryPickerOpen}

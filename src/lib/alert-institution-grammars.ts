@@ -1,5 +1,6 @@
 /**
- * Review-only institution and alert-template evidence for first-wave markets.
+ * Review-only institution and alert-template evidence for the first- and
+ * second-wave worldwide review markets.
  *
  * This module does not parse money, classify transactions, or authorize an
  * import. It only answers which institution/template grammar a redacted alert
@@ -9,7 +10,8 @@
 
 export type InstitutionGrammarMarket =
   | 'US' | 'GB' | 'FR' | 'DE' | 'ES' | 'IT' | 'NL'
-  | 'IN' | 'QA' | 'KW' | 'BH' | 'OM' | 'EG' | 'JO';
+  | 'IN' | 'QA' | 'KW' | 'BH' | 'OM' | 'EG' | 'JO'
+  | 'CA' | 'AU' | 'BR' | 'MX' | 'SG';
 
 export type InstitutionEvidenceKind = 'sender' | 'body';
 export type InstitutionGrammarStatus = 'experimental' | 'verified';
@@ -114,7 +116,9 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
   ],
   ES: [
     { institution: 'santander-es', senders: ['santander', 'bancosantander'], body: /\bbanco santander\b/iu },
-    { institution: 'bbva-es', senders: ['bbva'], body: /\bbbva\b/iu },
+    // BBVA is multinational. "BBVA México" is the Mexican issuer's own brand
+    // and must not be read as Spanish body evidence; plain "BBVA" stays ES.
+    { institution: 'bbva-es', senders: ['bbva'], body: /\bbbva\b(?!\s+m[eé]xico)/iu },
     { institution: 'caixabank-es', senders: ['caixabank'], body: /\bcaixabank\b/iu },
   ],
   IT: [
@@ -157,18 +161,52 @@ const INSTITUTIONS: Record<InstitutionGrammarMarket, readonly InstitutionGrammar
     { institution: 'bank-al-etihad', senders: ['bankaletihad', 'aletihad'], body: /\bbank al etihad\b|بنك الاتحاد/iu },
     { institution: 'housing-bank-jordan', senders: ['housingbank', 'hbtf'], body: /\b(?:housing bank|hbtf)\b|بنك الإسكان/iu },
   ],
+  // Second-wave markets. A route to one of these markets lets a bare `$` mean
+  // that market's dollar, so brands shared with another SUPPORTED market need
+  // country-qualified evidence: TD and BMO also bank in the US, BBVA and
+  // Santander in Spain, and Scotiabank in Mexico (left out entirely because
+  // neither its sender nor its body names the country). Generic short senders
+  // such as "BB" and "NU" are omitted for the same reason.
+  CA: [
+    { institution: 'royal-bank-of-canada', senders: ['rbc', 'rbcroyalbank'], body: /\b(?:rbc|royal bank of canada)\b/iu },
+    { institution: 'td-canada-trust', senders: ['tdcanadatrust', 'tdcanada'], body: /\btd canada trust\b/iu },
+    { institution: 'bmo-canada', senders: ['bmocanada', 'bankofmontreal'], body: /\bbank of montreal\b/iu },
+  ],
+  AU: [
+    { institution: 'commonwealth-bank-australia', senders: ['commbank', 'cba'], body: /\b(?:commonwealth bank|commbank)\b/iu },
+    { institution: 'anz-australia', senders: ['anz', 'anzbank'], body: /\banz(?: bank)?\b/iu },
+    { institution: 'westpac-australia', senders: ['westpac'], body: /\bwestpac\b/iu },
+    { institution: 'nab-australia', senders: ['nab', 'nationalaustraliabank'], body: /\bnational australia bank\b/iu },
+  ],
+  BR: [
+    { institution: 'itau-brasil', senders: ['itau', 'itaubank'], body: /(?:^|[^\p{L}\p{N}])ita[uú](?:\s+unibanco)?(?=$|[^\p{L}\p{N}])/iu },
+    { institution: 'bradesco-brasil', senders: ['bradesco'], body: /\bbradesco\b/iu },
+    { institution: 'banco-do-brasil', senders: ['bancodobrasil'], body: /\bbanco do brasil\b/iu },
+    { institution: 'nubank-brasil', senders: ['nubank'], body: /\bnubank\b/iu },
+  ],
+  MX: [
+    { institution: 'bbva-mexico', senders: ['bbvamexico', 'bbvamx'], body: /\bbbva\s+m[eé]xico(?=$|[^\p{L}\p{N}])/iu },
+    { institution: 'banorte-mexico', senders: ['banorte'], body: /\bbanorte\b/iu },
+    { institution: 'santander-mexico', senders: ['santandermx', 'santandermexico'], body: /\bsantander\s+m[eé]xico(?=$|[^\p{L}\p{N}])/iu },
+    { institution: 'citibanamex', senders: ['citibanamex', 'banamex'], body: /\b(?:citibanamex|banamex)\b/iu },
+  ],
+  SG: [
+    { institution: 'dbs-singapore', senders: ['dbs', 'dbssg', 'posb'], body: /\b(?:dbs(?!\s+bank\s+(?:india|\(?hong\s+kong\)?|taiwan|indonesia|china)\b)|posb)(?: bank)?\b/iu },
+    { institution: 'ocbc-singapore', senders: ['ocbc', 'ocbcsg'], body: /\bocbc(?: bank)?\b/iu },
+    { institution: 'uob-singapore', senders: ['uob', 'uobsg'], body: /\buob(?: bank)?\b/iu },
+  ],
 };
 
 const TEMPLATE_RULES: readonly { template: AlertTemplateId; pattern: RegExp }[] = [
   { template: 'authentication', pattern: /\b(?:otp|one[ -]?time password|verification code|security code)\b|رمز (?:التحقق|التأكيد)/iu },
-  { template: 'cash-withdrawal', pattern: /\b(?:cash withdrawal|atm withdrawal|geldautomat|retrait d['’]?espèces|retiro de efectivo|prelievo contanti|geldopname)\b|سحب نقدي|صراف آلي/iu },
-  { template: 'recurring-debit', pattern: /\b(?:recurring|autopay|auto[ -]?debit|direct debit|standing order|prélèvement|lastschrift|domiciliación|addebito diretto|automatische incasso)\b|خصم (?:تلقائي|دوري)/iu },
-  { template: 'card-activity', pattern: /\b(?:card (?:purchase|payment|charged|used)|paiement par carte|kartenzahlung|compra con tarjeta|pagamento con carta|pasbetaling|pinbetaling)\b|شراء[^.\n]{0,24}بطاقة|دفع بالبطاقة/iu },
-  { template: 'fund-transfer', pattern: /\b(?:fund transfer|bank transfer|wire transfer|zelle|upi|imps|neft|rtgs|faster payments|sepa|virement|überweisung|transferencia|bonifico|overboeking)\b|تحويل/iu },
+  { template: 'cash-withdrawal', pattern: /\b(?:cash withdrawal|atm withdrawal|geldautomat|retrait d['’]?espèces|retiro de efectivo|prelievo contanti|geldopname|saque(?: em)? caixa eletr[oô]nico)\b|سحب نقدي|صراف آلي/iu },
+  { template: 'recurring-debit', pattern: /\b(?:recurring|autopay|auto[ -]?debit|direct debit|standing order|pre-authorized debit|payto|pix autom[aá]tico|d[eé]bito autom[aá]tico|prélèvement|lastschrift|domiciliación|addebito diretto|automatische incasso)\b|خصم (?:تلقائي|دوري)/iu },
+  { template: 'card-activity', pattern: /\b(?:card (?:purchase|payment|charged|used)|paiement par carte|kartenzahlung|compra con tarjeta|compra com cart[aã]o|pagamento con carta|pagamento com cart[aã]o|pasbetaling|pinbetaling)\b|شراء[^.\n]{0,24}بطاقة|دفع بالبطاقة/iu },
+  { template: 'fund-transfer', pattern: /\b(?:fund transfer|bank transfer|wire transfer|zelle|interac e-?transfer|osko|payid|pix|spei|paynow|upi|imps|neft|rtgs|faster payments|sepa|virement|überweisung|transferencia|bonifico|overboeking)\b|تحويل/iu },
   { template: 'fee', pattern: /\b(?:annual fee|monthly fee|service charge|bank fee|frais|gebühr|comisión|commissione|kosten)\b|رسوم|عمولة/iu },
   { template: 'balance', pattern: /\b(?:available balance|current balance|account balance|solde|kontostand|saldo)\b|الرصيد (?:الحالي|المتاح)/iu },
-  { template: 'account-debit', pattern: /\b(?:debited|charged|withdrawn|débité|belastet|abgebucht|cargado|addebitato|afgeschreven)\b|تم الخصم|خُصم/iu },
-  { template: 'account-credit', pattern: /\b(?:credited|deposited|received|crédité|gutgeschrieben|abonado|accreditato|bijgeschreven)\b|تم الإيداع|أودع/iu },
+  { template: 'account-debit', pattern: /\b(?:debited|charged|withdrawn|débité|belastet|abgebucht|cargado|addebitato|afgeschreven|debitad[oa])\b|تم الخصم|خُصم/iu },
+  { template: 'account-credit', pattern: /\b(?:credited|deposited|received|crédité|gutgeschrieben|abonado|accreditato|bijgeschreven|creditad[oa]|recebid[oa])\b|تم الإيداع|أودع/iu },
 ];
 
 const senderKey = (sender: string): string =>
