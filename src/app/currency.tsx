@@ -3,6 +3,7 @@ import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
+import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
@@ -18,10 +19,12 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, getCategory } from '@/lib/categories';
+import { detailsWords } from '@/lib/details-copy';
 import { formatAED, shortDate } from '@/lib/format';
 import { formatOriginalCurrency, originalMoneyOf } from '@/lib/fx';
 import { summarizeForeignActivity, type CurrencyActivity } from '@/lib/fx-summary';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
+import { ledgerStateHasMoney } from '@/lib/ledger-money';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { t, tf } from '@/lib/i18n';
 import { inPeriod } from '@/lib/period';
@@ -53,8 +56,13 @@ export default function CurrencyScreen() {
   const language = useLanguage();
   const largeText = useLargeTextLayout();
   const router = useRouter();
-  const { state } = useStore();
+  const { state, setLedgerMoney } = useStore();
   const { period } = usePeriod();
+  const d = detailsWords(language);
+  const [currencySheetOpen, setCurrencySheetOpen] = useState(false);
+  // The ledger currency is fixed once money is recorded (the store refuses a
+  // change); the row then explains instead of opening a picker it would ignore.
+  const ledgerLocked = ledgerStateHasMoney(state);
   const listInsets = useScreenContentInsets({ hasFooter: false });
   const [periodOpen, setPeriodOpen] = useState(false);
   const [entry, setEntry] = useState<Transaction | null>(null);
@@ -98,16 +106,10 @@ export default function CurrencyScreen() {
     return [transaction.title, transaction.originalCurrency, account?.bankName, account?.name]
       .some((value) => value?.toLowerCase().includes(normalizedQuery));
   }), [summary.transactions, selectedCurrency, normalizedQuery, accountById]);
-  const caption = tf(
-    'foreignActivityCaption',
-    {
-      count: chargeCount,
-      s: chargeCount === 1 ? '' : 's',
-      currencies: summary.groups.length,
-      ending: summary.groups.length === 1 ? 'y' : 'ies',
-    },
-    language,
-  );
+  const caption = d.currency.caption(chargeCount, summary.groups.length);
+  // One qualified line about how the ledger amounts were converted, from the
+  // per-row rate source (bank figure, dated reference rate or approximation).
+  const footer = d.currency.footer(summary);
 
   const currencyHeader: ScreenHeaderProps = {
     title: t('foreignSpending', language),
@@ -125,11 +127,7 @@ export default function CurrencyScreen() {
       : 0;
     const fillWidth = `${Math.max(2, Math.min(100, percent))}%` as `${number}%`;
     const original = formatOriginalCurrency(group.originalMinor, group.currency, language, group.originalExponent);
-    const meta = tf(
-      'foreignCurrencyOriginalSummary',
-      { amount: original, count: group.count, s: group.count === 1 ? '' : 's' },
-      language,
-    );
+    const meta = d.currency.meta(original, group.count);
     return (
       <Pressable
         key={group.currency}
@@ -169,7 +167,7 @@ export default function CurrencyScreen() {
         </ThemedText>
       </Pressable>
     );
-  }, [language, largeText, selectedCurrency, summary.totalLocalFils, theme, toggleCurrency]);
+  }, [d, language, largeText, selectedCurrency, summary.totalLocalFils, theme, toggleCurrency]);
 
   const renderTransaction = useCallback(({ item, index }: { item: Transaction; index: number }) => {
     const account = accountById.get(item.accountId);
@@ -225,10 +223,25 @@ export default function CurrencyScreen() {
         </View>
         <Money fils={summary.totalLocalFils} type="display" decimals />
         <ThemedText type="small" themeColor="textSecondary">{caption}</ThemedText>
-        <ThemedText type="meta" themeColor="textTertiary">
-          {t('foreignOriginalsKept', language)}
-        </ThemedText>
       </View>
+
+      <Pressable
+        testID="currency-ledger-row"
+        accessibilityRole={ledgerLocked ? undefined : 'button'}
+        accessibilityLabel={`${d.currency.ledgerTitle}: ${ledgerCurrency}. ${ledgerLocked ? t('ledgerCurrencyPermanentHint', language) : d.currency.ledgerBody(ledgerCurrency)}`}
+        disabled={ledgerLocked}
+        onPress={() => setCurrencySheetOpen(true)}
+        style={({ pressed }) => [styles.ledgerRow, { borderColor: theme.cardBorder },
+          pressed && !ledgerLocked ? { backgroundColor: theme.backgroundSelected } : undefined]}>
+        <View style={styles.transactionCopy}>
+          <ThemedText type="smallBold">{d.currency.ledgerTitle}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">
+            {ledgerLocked ? t('ledgerCurrencyPermanentHint', language) : d.currency.ledgerBody(ledgerCurrency)}
+          </ThemedText>
+        </View>
+        <ThemedText type="smallBold" tabular>{ledgerCurrency}</ThemedText>
+        <Icon name={ledgerLocked ? 'lock' : 'chevron-right'} size={ledgerLocked ? 13 : 16} color={theme.textTertiary} />
+      </Pressable>
 
       {summary.transactions.length > 0 ? (
         <>
@@ -264,15 +277,7 @@ export default function CurrencyScreen() {
                 onPress={() => setSelectedCurrency(null)}
                 style={[styles.activeFilter, { backgroundColor: theme.backgroundSelected }]}>
                 <ThemedText type="small" style={{ color: theme.primary }}>
-                  {tf(
-                    'foreignCurrencyFilter',
-                    {
-                      currency: selectedGroup.currency,
-                      count: selectedGroup.count,
-                      s: selectedGroup.count === 1 ? '' : 's',
-                    },
-                    language,
-                  )}
+                  {d.currency.filter(selectedGroup.currency, selectedGroup.count)}
                 </ThemedText>
                 <Icon name="close" size={14} color={theme.primary} />
               </Pressable>
@@ -323,6 +328,11 @@ export default function CurrencyScreen() {
               </ThemedText>
             </View>
           ) : null}
+          ListFooterComponent={footer && visibleTransactions.length > 0 ? (
+            <ThemedText testID="currency-fx-footer" type="meta" themeColor="textSecondary" style={styles.footer}>
+              {footer}
+            </ThemedText>
+          ) : null}
           contentContainerStyle={[listInsets.contentContainerStyle, styles.listContent]}
           contentInset={listInsets.contentInset}
           scrollIndicatorInsets={listInsets.scrollIndicatorInsets}
@@ -340,6 +350,12 @@ export default function CurrencyScreen() {
 
       <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
       <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
+      <LedgerCurrencySheet
+        visible={currencySheetOpen && !ledgerLocked}
+        value={state.ledgerMoney?.currency ?? null}
+        onClose={() => setCurrencySheetOpen(false)}
+        onSelect={(currency) => { setLedgerMoney(currency); setCurrencySheetOpen(false); }}
+      />
     </>
   );
 }
@@ -419,4 +435,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   noMatches: { alignItems: 'center', paddingVertical: Spacing.five },
+  footer: { paddingVertical: Spacing.four },
+  ledgerRow: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.control,
+  },
 });
