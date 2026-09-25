@@ -29,6 +29,9 @@ function ok(name, cond, detail) {
 
 const ROOT = path.join(__dirname, '../..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+// Settings is two screens since the redesign: the main list and Data and help
+// (exports, backup, erase). Every Settings contract reads both together.
+const settingsSurface = () => read('src/app/settings.tsx') + '\n' + read('src/app/settings-data.tsx');
 /**
  * Source with its comments removed.
  *
@@ -169,7 +172,7 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt',
   ));
   const scanner = code(read('src/lib/auto-import.ts'));
-  const settings = code(read('src/app/settings.tsx'));
+  const settings = code(settingsSurface());
   ok('SMS delivery never writes a second raw-message buffer',
     !receiver.includes('putString(') && !receiver.includes('JSONObject(') &&
       receiver.includes('SensitiveMessageFilter.shouldReject(body)') &&
@@ -374,7 +377,7 @@ function ktSources(dir) {
   ok('the paywall gives away no free unlock',
     !/onLongPress/.test(pro) && !/setPro\(next\)/.test(pro));
 
-  const settings = fs.readFileSync(path.join(ROOT, 'src/app/settings.tsx'), 'utf8');
+  const settings = settingsSurface();
   ok('Settings founder access cannot forge a store entitlement or reach production',
     !/\bsetPro\b/.test(settings) &&
       /isFounderUnlockBuild\(\)/.test(settings) &&
@@ -656,7 +659,7 @@ function ktSources(dir) {
   const store = read('src/lib/store.tsx');
   const ledgerImport = read('src/lib/ledger-import.ts');
   const capture = read('src/lib/capture.ts');
-  const settings = read('src/app/settings.tsx');
+  const settings = settingsSurface();
   const copy = read('src/lib/i18n.ts');
 
   ok('Private Mode is persisted as part of app state', /privateMode: boolean/.test(types));
@@ -1185,7 +1188,7 @@ function ktSources(dir) {
   // wake has already parsed are in a SECOND one, with its own key, that
   // `stateStorage.destroy` has never heard of. The iOS confirmation says
   // "this iPhone's relay queue will be permanently deleted" — so it has to be.
-  const settings = read('src/app/settings.tsx');
+  const settings = settingsSurface();
   const staged = read('src/lib/background-relay-storage.native.ts');
   const ledger = read('src/lib/state-storage.native.ts');
   const nameOf = (src) => src.match(/const DATABASE_NAME = '([^']+)'/)?.[1];
@@ -1199,7 +1202,7 @@ function ktSources(dir) {
 }
 
 {
-  const settings = read('src/app/settings.tsx');
+  const settings = settingsSurface();
   const recovery = code(read('src/components/storage-recovery.tsx'));
   const store = read('src/lib/store.tsx');
   const copy = read('src/lib/i18n.ts');
@@ -1229,7 +1232,7 @@ function ktSources(dir) {
   const types = read('src/lib/types.ts');
   const store = code(read('src/lib/store.tsx'));
   const home = read('src/screens/ledger-home-screen.tsx');
-  const settingsSource = read('src/app/settings.tsx');
+  const settingsSource = settingsSurface();
   const settings = code(settingsSource);
   const recovery = code(read('src/components/storage-recovery.tsx'));
   const layout = code(read('src/components/app-root-layout.tsx'));
@@ -1721,7 +1724,8 @@ for (const rel of ['src/app/cards.tsx']) {
   // AppState has to derive both sets and thread them through, or the merchant
   // it drops is the one on this list, not the one under test above.
   for (const [rel, callNeedle] of [
-    ['src/app/settings.tsx', 'reportExpenses(expenses,from,to,liveAccounts,internal)'],
+    // The expense report moved with the other exports to Settings → Data and help.
+    ['src/app/settings-data.tsx', 'reportExpenses(expenses,from,to,liveAccounts,internal)'],
     ["src/app/(tabs)/bills.tsx", 'detectSubscriptions(state.transactions,state.notSubscriptions,now,liveAccounts,internal)'],
     ['src/lib/leaving-soon.ts', 'detectSubscriptions(state.transactions,state.notSubscriptions,today,liveAccounts,internal)'],
     // The planning half of the reminder set moved out of notifications.ts into

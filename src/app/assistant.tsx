@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AccessibilityInfo, AppState as NativeAppState, Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AssistantMonthChart, AssistantPaymentRows } from '@/components/assistant-answer-extras';
 import { AssistantEvidenceSheet } from '@/components/assistant-evidence-sheet';
 import { AssistantCoverage, AssistantFindings } from '@/components/assistant-findings';
 import { PeriodSheet } from '@/components/period-sheet';
@@ -15,6 +16,7 @@ import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
+import { assistantScreenCopy, evidenceTransactionCount } from '@/lib/assistant-screen-copy';
 import { categoryLabel } from '@/lib/categories';
 import { toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
@@ -78,6 +80,10 @@ export default function AssistantScreen() {
   const { state, getStateSnapshot, getStateGeneration, editTransaction, resolveTransfers,
     setMerchantOverride, setNotSubscription } = useStore();
   const { period } = usePeriod();
+  // Redesign additions read plain state: no new hooks, so hook order is unchanged.
+  const screenLanguage: 'en' | 'ar' = state.language === 'ar' ? 'ar' : 'en';
+  const screenCopy = assistantScreenCopy(screenLanguage);
+  const ledgerMoney = state.ledgerMoney ?? null;
   const periodKey = JSON.stringify(period);
   const generation = getStateGeneration();
   const scrollRef = useRef<ScrollView>(null);
@@ -538,6 +544,11 @@ export default function AssistantScreen() {
           </Pressable>
         </View>
       </View>}>
+      <View testID="assistant-local-badge" accessible accessibilityLabel={screenCopy.onThisPhoneA11y}
+        style={[styles.localBadge, { backgroundColor: theme.primarySoft }]}>
+        <Icon name="lock" size={12} color={theme.primary} />
+        <ThemedText type="meta" themeColor="primary">{screenCopy.onThisPhone}</ThemedText>
+      </View>
       {currentTurns.length === 0 ? <View style={styles.hero}>
         <ThemedText type="heading">{copy.heading}</ThemedText>
         <ThemedText themeColor="textSecondary">{copy.privacy}</ThemedText>
@@ -577,7 +588,11 @@ export default function AssistantScreen() {
             <ThemedText type="heading" tabular selectable>{turn.answer.headline}</ThemedText>
             {turn.answer.meta ? <ThemedText type="meta" themeColor="textSecondary" selectable>{turn.answer.meta}</ThemedText> : null}
           </> : <ThemedText selectable>{turn.answer.body}</ThemedText>}
-          {turn.answer.facts?.length ? <View style={styles.facts}>
+          {turn.answer.monthlySeries?.length && ledgerMoney ? <AssistantMonthChart series={turn.answer.monthlySeries}
+            highlight={turn.answer.monthlySeriesHighlight} money={ledgerMoney} language={screenLanguage} /> : null}
+          {turn.answer.payments?.length && ledgerMoney ? <AssistantPaymentRows payments={turn.answer.payments}
+            money={ledgerMoney} language={screenLanguage} />
+          : turn.answer.facts?.length ? <View style={styles.facts}>
             {turn.answer.facts.map((fact, factIndex) => <View key={fact.label + '-' + factIndex} style={[styles.factRow, largeText && styles.factRowLarge]}>
               <ThemedText type="meta" themeColor="textSecondary" style={styles.factLabel}>{fact.label}</ThemedText>
               <ThemedText type="smallBold" tabular selectable style={styles.factValue}>{fact.value}</ThemedText>
@@ -591,7 +606,9 @@ export default function AssistantScreen() {
             <ThemedText type="meta" themeColor="textSecondary">{copy.stale}</ThemedText>
             <Button label={copy.refresh} variant="outline" onPress={() => refreshAnswer(turn)} />
           </View> : <>
-            {turn.answer.evidence?.length ? <Button label={copy.viewTransactions} icon="receipt" variant="outline"
+            {turn.answer.evidence?.length ? <Button label={evidenceTransactionCount(turn.answer.evidence) > 0
+              ? screenCopy.seeTransactions(evidenceTransactionCount(turn.answer.evidence))
+              : copy.viewTransactions} icon="receipt" variant="outline"
               onPress={() => { Keyboard.dismiss(); setEvidenceSelection({ turnId: turn.id }); }} /> : null}
             {turn.answer.destination ? <Button label={copy.viewPayments} variant="outline"
               onPress={() => router.push(turn.answer.destination!)} /> : null}
@@ -623,6 +640,8 @@ const styles = StyleSheet.create({
   questionBubble: { alignSelf: 'flex-end', maxWidth: '90%', borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.control, paddingHorizontal: 12, paddingVertical: 10 },
   facts: { gap: 6 },
+  localBadge: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderRadius: Radius.full, paddingHorizontal: 10, paddingVertical: 4 },
   factRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 },
   factRowLarge: { flexDirection: 'column', alignItems: 'stretch', gap: 2 },
   factLabel: { flex: 1, minWidth: 0 },

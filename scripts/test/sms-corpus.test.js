@@ -239,7 +239,8 @@ const rejects = async (name, run, code) => {
     }
   }, 'invalid_backup');
   ok('malformed app backup is never shared', malformedBackup.shared.length === 0);
-  const settings = fs.readFileSync(path.join(root, 'src/app/settings.tsx'), 'utf8');
+  // The personal review export moved with the other exports to Data and help.
+  const settings = fs.readFileSync(path.join(root, 'src/app/settings-data.tsx'), 'utf8');
   const githubBuild = fs.readFileSync(path.join(
     root,
     '.github/workflows/build-apk.yml',

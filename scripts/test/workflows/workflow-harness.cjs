@@ -94,6 +94,13 @@ function createWorkflowHarness(options={}) {
  // The real preference preset module has no native runtime; keep it source-executing.
  h.local('@/lib/onboarding','src/lib/onboarding.ts');
  h.local('@/lib/android-capture-sources','src/lib/android-capture-sources.ts');
+ // Settings and Data and help: the real copy, status helpers and row shapes.
+ // Only the biometric probe is a native boundary; `null` is "not known yet".
+ h.local('@/lib/biometric-kind','src/lib/biometric-kind.ts');
+ h.local('@/lib/settings-copy','src/lib/settings-copy.ts');
+ h.local('@/lib/settings-status','src/lib/settings-status.ts');
+ d['@/components/biometric-glyph']={useBiometricKind:()=>options.biometricKind??null,BiometricGlyph:p=>jsx('BiometricGlyph',p)};
+ h.local('@/components/settings-rows');
  function renderScreen(screen,props={}){
   if(screen==='review-alerts'){
    h.local('@/lib/review-alert-copy','src/lib/review-alert-copy.ts');
@@ -103,6 +110,7 @@ function createWorkflowHarness(options={}) {
   if(screen==='feedback'){
    d['@/lib/sms-parser']={STRUCTURAL_TITLES:new Set()};
    d['@/lib/feedback-wire']=load(path.join(root,'src/lib/feedback-wire.ts'),d,{TextEncoder});
+   h.local('@/lib/feedback-copy','src/lib/feedback-copy.ts');
    h.local('@/lib/feedback','src/lib/feedback.ts');
    d['@/lib/feedback'].submitFeedback=async payload=>{h.events.push(['submitFeedback',payload]);return {id:'fixture-receipt'}};
    d['@/lib/feedback-transport']={FeedbackSendError:class extends Error{}};
@@ -110,6 +118,7 @@ function createWorkflowHarness(options={}) {
   }
   if(screen==='pro'){
    h.local('@/lib/purchases','src/lib/purchases.ts');
+   h.local('@/lib/pro-copy','src/lib/pro-copy.ts');
    d['@/lib/billing']={isBillingAvailable:()=>false,loadStorePrices:async()=>null,purchasePro:record('purchasePro'),restorePro:record('restorePro'),subscriptionManagementUrl:async()=>null};
    d['@/components/superwall-billing-context']={useWafraBilling:()=>({
     available:false,configured:false,configurationError:null,paywallStatus:'idle',
@@ -139,7 +148,22 @@ function createWorkflowHarness(options={}) {
    for(const name of ['checklist-row','automation-guide','details-sheet','setup-step'])h.local('@/components/ios-message-setup/'+name);
   }
 
-  if(screen==='onboarding')h.local('@/lib/ios-statement-handoff','src/lib/ios-statement-handoff.ts');
+  if(screen==='onboarding'){
+   h.local('@/lib/ios-statement-handoff','src/lib/ios-statement-handoff.ts');
+   // Redesign additions run from source; the native capture status, the
+   // backup picker and the ledger analytics are explicit boundaries.
+   d['@/lib/capture']={...d['@/lib/capture'],getIosCaptureNativeModule:()=>null};
+   d['@/lib/ios-capture-setup']=d['@/lib/ios-capture-setup']??{resolveIosSetupReadiness:()=>'not-added'};
+   d['@/lib/subscriptions']={detectSubscriptions:()=>[]};
+   d['@/lib/ledger']={...(d['@/lib/ledger']??{}),liveAccountIds:()=>new Set(),internalTransferIdsForState:()=>new Set(),isSpending:tx=>tx.type==='expense'};
+   h.local('@/lib/splits','src/lib/splits.ts');
+   h.local('@/lib/onboarding-ready','src/lib/onboarding-ready.ts');
+   h.local('@/lib/ios-capture-checklist','src/lib/ios-capture-checklist.ts');
+   h.local('@/lib/ios-shortcut-setup-copy','src/lib/ios-shortcut-setup-copy.ts');
+   h.local('@/lib/onboarding-copy','src/lib/onboarding-copy.ts');
+   d['@/components/ui/grow-bar']={GrowBar:p=>jsx('GrowBar',p)};
+   for(const name of ['capture-checklist','ready-summary','sms-explainer'])h.local('@/components/onboarding/'+name);
+  }
   const file=screen==='onboarding'?'src/components/onboarding-gate.tsx':`src/app/${screen}.tsx`;
   const module=load(path.join(root,file),d,{process:{env:{EXPO_PUBLIC_WAFRA_E2E_DEMO:'1'}},__DEV__:false});
   return screen==='onboarding'?module.OnboardingGate({children:null,...props}):module.default(props);

@@ -178,9 +178,11 @@ function sessionHarness(options = {}) {
   }
   const find = predicate => walk(tree).find(predicate);
   const button = label => find(node => node.type === 'Button' && node.props.label === label);
+  // The evidence action carries its transaction count ("See 3 transactions").
+  const evidenceButton = () => find(node => node.type === 'Button' && /^See \d+ transactions?$/.test(node.props.label ?? ''));
   const turns = () => walk(tree).filter(node => node.props?.testID === 'assistant-turn');
   return {
-    render, flushFrames, calls, haptics, turns, find, button,
+    render, flushFrames, calls, haptics, turns, find, button, evidenceButton,
     get tree() { return tree; }, get state() { return state; }, get frameCount() { return frames.size; },
     patchState: patch => { state = { ...state, ...patch }; },
     setGeneration: value => { generation = value; },
@@ -380,7 +382,7 @@ test('cold route waits for hydration and the salary-day reporting period, then a
 test('equal-value period objects retain the conversation and its open evidence', () => using({ state: fixture }, h => {
   h.render();
   h.submit('How much did I spend?');
-  h.button('View transactions').props.onPress();
+  h.evidenceButton().props.onPress();
   h.render();
   assert.ok(h.find(node => node.type === 'EvidenceSheet'));
   h.setPeriod({ mode: 'month', key: '2026-09' });
@@ -392,7 +394,7 @@ test('equal-value period objects retain the conversation and its open evidence',
 
 test('replacement of a loaded ledger clears turns and evidence without replaying the route question', () => using({ state: fixture, question: 'How much did I spend?' }, h => {
   h.render(); h.flushFrames();
-  h.button('View transactions').props.onPress(); h.render();
+  h.evidenceButton().props.onPress(); h.render();
   assert.ok(h.find(node => node.type === 'EvidenceSheet'));
   h.patchState({ transactions: [] }); h.setGeneration(2); h.render(); h.flushFrames();
   assert.equal(h.turns().length, 0);
@@ -424,7 +426,7 @@ function refreshDateScenario(sourceTransform) {
     assert.equal(h.calls[0].now.toISOString(), '2026-09-20T12:00:00.000Z');
     h.setFocused(false); h.setNow('2026-09-21T12:00:00Z'); h.setFocused(true);
     assert.ok(h.button('Refresh answer'), 'returning after midnight marks an answer stale');
-    assert.equal(h.button('View transactions'), undefined, 'a stale answer cannot expose an apparently current ledger proof');
+    assert.equal(h.evidenceButton(), undefined, 'a stale answer cannot expose an apparently current ledger proof');
     h.button('Refresh answer').props.onPress(); h.render();
     assert.equal(h.calls[1].kind, 'refresh');
     assert.equal(h.calls[1].now.toISOString(), '2026-09-21T12:00:00.000Z', 'refresh must use the current date rather than answeredAt');
@@ -438,7 +440,7 @@ test('focus/date rollover marks old answers stale and refresh uses the current d
 
 test('native app activation catches midnight and ledger edits invalidate open evidence until refreshed', () => using({ state: fixture }, h => {
   h.render(); h.submit('How much did I spend?');
-  h.button('View transactions').props.onPress(); h.render();
+  h.evidenceButton().props.onPress(); h.render();
   assert.equal(h.find(node => node.type === 'EvidenceSheet').props.stale, false);
   h.patchState({ transactions: [transaction(9_000)] }); h.render();
   const staleSheet = h.find(node => node.type === 'EvidenceSheet');
@@ -449,7 +451,7 @@ test('native app activation catches midnight and ledger edits invalidate open ev
   assert.equal(h.calls.at(-1).state, h.state);
   assert.equal(h.find(node => node.type === 'EvidenceSheet'), undefined);
   assert.equal(h.button('Refresh answer'), undefined, 'refresh saves the new ledger input references');
-  h.button('View transactions').props.onPress(); h.render();
+  h.evidenceButton().props.onPress(); h.render();
   assert.equal(h.find(node => node.type === 'EvidenceSheet').props.evidence[0].totalFils, 9_000);
   h.setNow('2026-09-21T01:00:00Z'); h.appActive();
   assert.equal(h.find(node => node.type === 'EvidenceSheet').props.stale, true);
@@ -500,7 +502,7 @@ test('period picker cancel preserves context; explicit current-month apply reset
   h.submit('How much did I spend?');
   assert.equal(h.calls.at(-1).period.key, '2026-09');
   assert.ok(h.calls.at(-1).previous == null, 'the discarded August request must not override the selection');
-  h.button('View transactions').props.onPress(); h.render();
+  h.evidenceButton().props.onPress(); h.render();
   assert.equal(h.find(node => node.type === 'EvidenceSheet').props.evidence[0].totalFils, 6_000);
 }));
 

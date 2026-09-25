@@ -1,11 +1,13 @@
 import { useLanguage } from '@/hooks/use-language';
 import { clearIosStatementHandoff, matchesIosStatementHandoff } from '@/lib/ios-statement-handoff';
 import * as Crypto from 'expo-crypto';
+import * as DocumentPicker from 'expo-document-picker';
 import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState as RNAppState,
+  I18nManager,
   Linking,
   Platform,
   Pressable,
@@ -35,7 +37,10 @@ import {
   WafraTile,
   WelcomeMoneyScene,
 } from '@/components/onboarding/alive-scenes';
+import { CaptureChecklist } from '@/components/onboarding/capture-checklist';
 import { OnboardingCountryConfirm } from '@/components/onboarding/country-confirm';
+import { ReadySummary } from '@/components/onboarding/ready-summary';
+import { SmsPermissionExplainer } from '@/components/onboarding/sms-explainer';
 import { SetupIntroStep } from '@/components/onboarding/setup-intro-step';
 import { StatementScene } from '@/components/onboarding/statement-scene';
 import { WafraMark } from '@/components/wafra-logo';
@@ -62,6 +67,15 @@ import {
 } from '@/lib/growth-funnel';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { dispatchIosMessageSetup, loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
+import { getIosCaptureNativeModule } from '@/lib/capture';
+import { iosCaptureChecklist, type IosChecklistEvidence } from '@/lib/ios-capture-checklist';
+import { resolveIosSetupReadiness } from '@/lib/ios-capture-setup';
+import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
+import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
+import { onboardingCopy } from '@/lib/onboarding-copy';
+import { onboardingReadySummary } from '@/lib/onboarding-ready';
+import { readBackupPickerCopy } from '@/lib/share-text';
+import { detectSubscriptions } from '@/lib/subscriptions';
 import { disableRelayBackgroundSync } from '@/lib/background-relay';
 import {
   MAX_PREFERRED_NAME_LENGTH,
@@ -109,6 +123,9 @@ type OnboardingExit = '/pro' | '/statement-import';
 const STEP_TRANSITION_MS = 350;
 type CompletionOutcome = 'automatic' | 'manual' | 'denied' | 'failed';
 type ShortcutCleanupState = 'revoked' | 'uncertain' | null;
+
+/** Each language named in its own language, as in Settings. */
+const WELCOME_LANGUAGE_NAMES = { en: 'English', ar: 'العربية' } as const;
 
 const isWebPlatform = () => Platform.OS === 'web';
 const isPublicWebSurface = () =>
@@ -264,6 +281,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setCaptureOptOut,
     setAndroidCaptureSources,
     setDailySummary,
+    setUiLanguage,
+    restoreBackup,
   } = useStore();
   const [step, setStep] = useState<Step>('welcome');
   const [collectingName, setCollectingName] = useState(false);
@@ -308,6 +327,16 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     destination?: OnboardingExit;
     outcomeOverride?: CompletionOutcome;
   } | null>(null);
+  // Redesign additions. Declared after every earlier useState so the hook
+  // positions the source-executing harnesses address stay where they were.
+  /** A picked backup's text, waiting for the replace-everything confirmation. */
+  const [pendingRestore, setPendingRestore] = useState<string | null>(null);
+  /** Why the Welcome restore stopped: the file could not be read, or it was not a backup. */
+  const [restoreFailed, setRestoreFailed] = useState<'read' | 'invalid' | null>(null);
+  /** Android: the explainer shown before the system SMS permission prompt. */
+  const [smsExplainerVisible, setSmsExplainerVisible] = useState(false);
+  /** iPhone: recorded evidence behind the four-row capture checklist. */
+  const [checklistEvidence, setChecklistEvidence] = useState<IosChecklistEvidence | null>(null);
   const startedEventSent = useRef(false);
   const statementImportSession = useRef<string | null>(null);
   const isOnboardingStatementRoute =
@@ -547,7 +576,71 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     params.onboarding, router, resumeAttempt]);
 
   const activeStep: Step = !previewMode && params.onboarding === 'complete' ? 'complete' : step;
+  // The ready summary is read from the ledger as it stands, once per ledger
+  // change (memoised here, above every early return, so hook order is fixed).
+  const readySummary = useMemo(() => activeStep === 'complete' && state.transactions.length > 0
+    ? (() => {
+        const live = liveAccountIds(state.accounts);
+        const internal = internalTransferIdsForState(state);
+        return onboardingReadySummary({
+          transactions: state.transactions,
+          isSpending: (tx) => isSpending(tx, live, internal),
+          subscriptions: detectSubscriptions(state.transactions, state.notSubscriptions, new Date(), live, internal),
+        });
+      })()
+    : null,
+  // The summary reads only these ledger fields.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [activeStep, state.transactions, state.accounts, state.notSubscriptions, state.transferInternalIds,
+    state.transferNormalizationVersion, state.historyImport]);
   const capture = captureCopy();
+  const firstRunCopy = onboardingCopy(language);
+  const shortcutWords = iosShortcutSetupCopy(language);
+
+  /** Welcome's language switch: the same live switch Settings makes. */
+  const switchWelcomeLanguage = () => {
+    tapped();
+    const next = language === 'ar' ? 'en' : 'ar';
+    setUiLanguage(next);
+    if (Platform.OS !== 'web') {
+      I18nManager.allowRTL(next === 'ar');
+      I18nManager.forceRTL(next === 'ar');
+    }
+  };
+
+  /**
+   * "Restore from a backup" on Welcome: the same path as Settings → Data and
+   * help — pick the JSON file, confirm that it replaces what is on this phone,
+   * then hand it to the store's restore, which keeps this phone's Pro, trial
+   * and capture choices. A backup of an onboarded ledger closes first run.
+   */
+  const pickBackupToRestore = async () => {
+    setRestoreFailed(null);
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: ['application/json', 'text/plain', '*/*'],
+        copyToCacheDirectory: true,
+      });
+      if (picked.canceled || !picked.assets?.[0]) return;
+      setPendingRestore(await readBackupPickerCopy(picked.assets[0].uri));
+    } catch {
+      setRestoreFailed('read');
+    }
+  };
+
+  /**
+   * Android SMS: explain what the permission means before Android asks.
+   * A phone that already granted it, and the preview, go straight on.
+   */
+  const openSmsSource = async () => {
+    if (previewMode || androidSmsReady) {
+      await runSetupAction(startScan);
+      return;
+    }
+    const granted = await hasSmsPermission().catch(() => false);
+    if (granted) await runSetupAction(startScan);
+    else setSmsExplainerVisible(true);
+  };
 
   /**
    * A failed read is not a first run, and an incomplete erase is not a usable
@@ -934,6 +1027,42 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     router.push(`/statement-import?fromOnboarding=1&statementSession=${session}`);
   };
 
+  // The iPhone checklist reads only recorded evidence: the owner's own
+  // setup confirmations and the native queue's proof and first-capture time.
+  // It refreshes whenever Wafra comes back from Shortcuts.
+  useEffect(() => {
+    if (previewMode || Platform.OS !== 'ios' || activeStep !== 'live') return;
+    let cancelled = false;
+    // Refreshes can overlap (mount, then an immediate foreground). Only the
+    // latest one may publish, so a slow earlier read never overwrites it.
+    let latest = 0;
+    const refresh = async () => {
+      const request = ++latest;
+      const progress = await loadIosMessageSetupProgress().catch(() => null);
+      const native = getIosCaptureNativeModule();
+      const status = native ? await native.getCaptureStatus().catch(() => null) : null;
+      if (cancelled || request !== latest) return;
+      const recordedMessage = (progress?.futureCaptureSource ?? 'message') === 'message';
+      const parked = progress?.parkedSources?.message;
+      setChecklistEvidence({
+        shortcutConfirmed: recordedMessage ? progress?.futureShortcutConfirmed === true : parked?.shortcutConfirmed === true,
+        automationConfirmed: recordedMessage ? progress?.futureAutomationConfirmed === true : parked?.automationConfirmed === true,
+        // The setup screen's own rule: enabled, and this build's proof version.
+        readiness: status && native
+          ? resolveIosSetupReadiness(status, native.getMessageShortcutURL ? 3 : 1)
+          : 'not-added',
+      });
+    };
+    void refresh();
+    const subscription = RNAppState.addEventListener('change', (next) => {
+      if (next === 'active') void refresh();
+    });
+    return () => {
+      cancelled = true;
+      subscription.remove();
+    };
+  }, [activeStep, previewMode]);
+
   useEffect(() => {
     if (previewMode || Platform.OS !== 'android' || activeStep !== 'capture') return;
     let cancelled = false;
@@ -1218,10 +1347,15 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     !failedCompletion &&
     !finishSaveFailed &&
     !smsDenied;
+  // The ready summary is read from the ledger as it stands. A history import
+  // that is still running means the figures are not final, and says so.
+  const importsStillReading = state.historyImport?.status === 'running' ||
+    state.historyImport?.status === 'paused';
   const discoveredResult = result ?? (
     state.transactions.length > 0 || state.accounts.length > 0 || state.bills.length > 0 || state.cardDues.length > 0
       ? {
-          tx: state.transactions.length,
+          // One source for the count the card and the summary both describe.
+          tx: readySummary?.transactions ?? state.transactions.length,
           accounts: state.accounts.filter((account) => !account.archived).length,
           bills: state.bills.length + state.cardDues.length,
         }
@@ -1248,6 +1382,19 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                   <View style={styles.brandLine}>
                     <WafraTile size={42} />
                     <ThemedText style={styles.brandName}>{t('appName')}</ThemedText>
+                    {!previewMode && (
+                      // The language is named in its own language, like Settings.
+                      <Pressable
+                        testID="onboarding-language-switch"
+                        accessibilityRole="button"
+                        accessibilityLabel={firstRunCopy.switchLanguage}
+                        onPress={switchWelcomeLanguage}
+                        style={({ pressed }) => [styles.languageSwitch, { opacity: pressed ? 0.6 : 1 }]}>
+                        <ThemedText style={styles.languageSwitchText}>
+                          {language === 'ar' ? WELCOME_LANGUAGE_NAMES.en : WELCOME_LANGUAGE_NAMES.ar}
+                        </ThemedText>
+                      </Pressable>
+                    )}
                     {previewMode && (
                       <Pressable
                         accessibilityRole="button"
@@ -1290,6 +1437,23 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                     labelColor={night.onPrimary}
                     style={{ backgroundColor: night.primary }}
                   />
+                  {!previewMode && Platform.OS !== 'web' && (
+                    <Pressable
+                      testID="onboarding-restore-backup"
+                      accessibilityRole="button"
+                      accessibilityLabel={firstRunCopy.restoreBackup}
+                      disabled={transitioning}
+                      onPress={() => void pickBackupToRestore()}
+                      style={({ pressed }) => [styles.nameSkip, { opacity: pressed ? 0.6 : 1 }]}>
+                      <ThemedText style={styles.nameSkipText}>{firstRunCopy.restoreBackup}</ThemedText>
+                    </Pressable>
+                  )}
+                  {restoreFailed && (
+                    <ThemedText accessibilityLiveRegion="polite"
+                      style={[styles.inlineNote, styles.restoreNote, { color: night.warning }]}>
+                      {restoreFailed === 'read' ? firstRunCopy.restoreReadFailed : t('notAWafraBackup')}
+                    </ThemedText>
+                  )}
                   <View style={styles.setupTime}>
                     <Icon name="lock" size={14} color={night.textTertiary} />
                     <ThemedText style={styles.setupTimeText}>{t('onboardSetupTime')}</ThemedText>
@@ -1387,7 +1551,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             </Animated.ScrollView>
           ) : (
             <>
-              <BackHeader step={activeStep} onBack={goBack}
+              {/* Back from the SMS explainer returns to the source list on the
+                  same step; it never leaves the explainer flag set behind. */}
+              <BackHeader step={activeStep}
+                onBack={smsExplainerVisible ? () => setSmsExplainerVisible(false) : goBack}
                 onClose={previewMode ? closePreview : undefined}
                 disabled={setupBusy || finishing || transitioning}
                 progressSteps={JOURNEY_STEPS.includes(activeStep) ? JOURNEY_STEPS
@@ -1555,7 +1722,24 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                       testID="onboarding-ios-live"
                       title={t('onboardLiveTitle')}
                       body={t('onboardLiveBody')}
-                      scene={<CaptureMarketScene marketId={state.marketId} country={selectedCountry} />}
+                      scene={<CaptureChecklist
+                        rows={iosCaptureChecklist(previewMode ? null : checklistEvidence)}
+                        titles={{
+                          add: shortcutWords.add,
+                          test: shortcutWords.check,
+                          automate: shortcutWords.automate,
+                          'first-alert': firstRunCopy.checklistFirstAlert,
+                        }}
+                        details={{
+                          'first-alert': checklistEvidence && iosCaptureChecklist(checklistEvidence)[3].done
+                            ? firstRunCopy.checklistFirstAlertDone
+                            : shortcutWords.waitingAutomation,
+                        }}
+                        doneLabel={firstRunCopy.checklistDone}
+                        toDoLabel={firstRunCopy.checklistToDo}
+                        openShortcutsLabel={firstRunCopy.openShortcuts}
+                        onOpenShortcuts={openShortcutsApp}
+                      />}
                       primary={{
                         label: t('onboardLiveAction'),
                         icon: 'bolt',
@@ -1573,7 +1757,19 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                     />
                   )}
 
-                  {activeStep === 'capture' && Platform.OS !== 'ios' && (
+                  {activeStep === 'capture' && Platform.OS === 'android' && smsExplainerVisible && (
+                    <SmsPermissionExplainer
+                      language={language === 'ar' ? 'ar' : 'en'}
+                      disabled={setupBusy || transitioning}
+                      onContinue={() => {
+                        setSmsExplainerVisible(false);
+                        void runSetupAction(startScan);
+                      }}
+                      onNotNow={() => setSmsExplainerVisible(false)}
+                    />
+                  )}
+
+                  {activeStep === 'capture' && Platform.OS !== 'ios' && !smsExplainerVisible && (
                     <>
                       <View style={styles.captureHero}>
                         <ThemedText style={styles.questionTitle} accessibilityRole="header">
@@ -1607,7 +1803,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                           <Pressable accessibilityRole="button"
                             accessibilityState={{ selected: androidSmsReady, disabled: setupBusy || transitioning }}
                             disabled={setupBusy || transitioning}
-                            onPress={() => void runSetupAction(startScan)}
+                            onPress={() => void openSmsSource()}
                             style={({ pressed }) => [styles.captureSource, androidSmsReady && styles.captureSourceReady, { opacity: pressed ? 0.76 : 1 }]}>
                             <View style={[styles.captureSourceIcon, androidSmsReady && styles.captureSourceIconReady]}>
                               <Icon name="mail" size={21} color={androidSmsReady ? night.onPrimary : night.primary} />
@@ -1762,6 +1958,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
                             </View>
                           </View>
                         )}
+                        {readySummary && !failedCompletion && !smsDenied && (
+                          <ReadySummary
+                            summary={readySummary}
+                            money={state.ledgerMoney ?? null}
+                            language={language === 'ar' ? 'ar' : 'en'}
+                            pending={importsStillReading}
+                          />
+                        )}
                         {!failedCompletion && !smsDenied && (
                           <View style={styles.firstInsight} testID="onboarding-first-insight">
                             <View style={styles.firstInsightIcon}>
@@ -1912,6 +2116,22 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         </SafeAreaView>
       </View>
       <ConfirmSheet
+        visible={pendingRestore !== null}
+        onClose={() => setPendingRestore(null)}
+        question={t('restoreBackupQ')}
+        body={t('restoreReplacesAll')}
+        confirmLabel={t('restoreAction')}
+        destructive
+        onConfirm={() => {
+          const content = pendingRestore;
+          setPendingRestore(null);
+          if (content === null) return;
+          // The store's own restore: pro, trial clock and capture choices on
+          // this phone always win over what the file says.
+          setRestoreFailed(restoreBackup(content) ? null : 'invalid');
+        }}
+      />
+      <ConfirmSheet
         visible={shortcutCleanup !== null}
         onClose={() => setShortcutCleanup(null)}
         question={t('shortcutStillInstalledTitle')}
@@ -1958,6 +2178,17 @@ const styles = StyleSheet.create({
   brandLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   brandName: { color: night.text, fontFamily: Fonts.sansSemi, fontSize: 17, letterSpacing: -0.3 },
   previewClose: { marginStart: 'auto', minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.two },
+  languageSwitch: {
+    marginStart: 'auto',
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    borderColor: night.cardBorderStrong,
+  },
+  languageSwitchText: { color: night.text, fontFamily: Fonts.sansMedium, fontSize: 14 },
+  restoreNote: { marginTop: 0, textAlign: 'center' },
   previewCloseText: { color: night.textSecondary, fontFamily: Fonts.sansMedium, fontSize: 13 },
   eyebrow: {
     paddingTop: 12,

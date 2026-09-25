@@ -2598,6 +2598,19 @@ const CARD_PAYMENT_DEBIT =
           item.platform === 'ios' && item.locale === 'en-AE', JSON.stringify(item));
       ok('feedback read: the no-AI decision is explicit for every downstream reader',
         item.aiReviewConsent === false);
+      ok('feedback read: an untyped report carries a null type',
+        item.diagnostic.topic === null);
+      const typedWake = collector();
+      const typed = await call(env, 'POST', '/v1/feedback', {
+        body: { ...REPORT, diagnostic: { ...REPORT.diagnostic, topic: 'category' } }, ctx: typedWake.ctx,
+      });
+      const typedBody = await typed.json();
+      await typedWake.settled();
+      ok('feedback: a report typed on the screen is accepted', typed.status === 202, String(typed.status));
+      const typedItem = await (await call(env, 'GET', `/v1/feedback/${typedBody.id}`, {
+        token: 'read-token-abcdefghijklmnop',
+      })).json();
+      ok('feedback read: the chosen type reaches the maintainer', typedItem.diagnostic.topic === 'category');
       ok('feedback read: the diagnostic comes back as JSON, not as a string',
         item.diagnostic.reportSchema === 2 && item.diagnostic.delivery.thirdPartyAi === false &&
           item.diagnostic.detail === 'figures' && item.diagnostic.counts.transactions === 1 &&
@@ -2928,6 +2941,10 @@ const CARD_PAYMENT_DEBIT =
         (await bad({ ...REPORT, diagnostic: [1, 2] })).error === 'bad_diagnostic');
       ok('feedback: a diagnostic that is a string is refused, not wrapped',
         (await bad({ ...REPORT, diagnostic: 'everything is broken' })).error === 'bad_diagnostic');
+      ok('feedback: a report type outside the three the app offers is refused',
+        (await bad({ ...REPORT, diagnostic: { ...REPORT.diagnostic, topic: 'please call me' } })).error === 'bad_topic');
+      ok('feedback: a non-string report type is refused',
+        (await bad({ ...REPORT, diagnostic: { ...REPORT.diagnostic, topic: 3 } })).error === 'bad_topic');
       ok('feedback: nothing malformed reached the database', count(env.DB, 'feedback') === 0);
 
       // An error that quotes what it refused is a way to read data back out of

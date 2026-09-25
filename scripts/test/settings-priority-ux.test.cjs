@@ -32,7 +32,7 @@ assert.match(settings, /setPreferenceSheet\('appearance'\)/);
 assert.match(settings, /visible=\{preferenceSheet === 'appearance'\}/);
 assert.doesNotMatch(settings, /SegmentedControl/);
 assert.match(i18n, /themeSystemDetail: \{ en: 'System · follows phone'/);
-assert.match(i18n, /settingsPreferencesHeader: \{ en: 'Preferences'/);
+assert.match(i18n, /settingsPreferencesHeader: \{ en: 'Appearance'/);
 
 // Raw capture internals and a manual repair button do not belong in normal
 // Settings. Support diagnostics remain available separately when needed.

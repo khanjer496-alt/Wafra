@@ -171,7 +171,54 @@ export interface AssistantAnswer {
   showEvidence?: boolean;
   /** Structured, body-free numbers safe to pass to a future explanation model. */
   data?: Record<string, string | number | boolean | null>;
+  /**
+   * Upcoming-payments answers only: the rows behind `facts`, so the screen can
+   * draw each one with its merchant logo. Additive; `facts` is unchanged.
+   */
+  payments?: AssistantPaymentRow[];
+  /**
+   * Recorded monthly spending totals the answer was computed from, oldest
+   * first. Present only where the executor actually grouped the ledger by
+   * month; months with no recorded spending are absent, never zero-filled.
+   */
+  monthlySeries?: AssistantMonthTotal[];
+  /** The month in `monthlySeries` the answer names (highest month); absent when none is. */
+  monthlySeriesHighlight?: string;
 }
+
+export interface AssistantPaymentRow {
+  title: string;
+  category: CategoryId;
+  kind: 'card' | 'bill' | 'subscription';
+  dateISO: string;
+  daysLeft: number;
+  amountFils: number;
+}
+
+export interface AssistantMonthTotal {
+  /** YYYY-MM */
+  month: string;
+  totalFils: number;
+}
+
+/** At most this many recorded months are drawn beside a baseline answer. */
+const MONTHLY_SERIES_LIMIT = 6;
+/**
+ * The most recent recorded months, oldest first. A month the answer names is
+ * always kept, even when it is older than that window, so the bar the answer
+ * points at is on the chart.
+ */
+const monthlySeriesOf = (
+  months: readonly { key: string; totalFils: number }[],
+  mustInclude?: string,
+): AssistantMonthTotal[] => {
+  let shown = months.slice(-MONTHLY_SERIES_LIMIT);
+  if (mustInclude && !shown.some((month) => month.key === mustInclude)) {
+    const named = months.find((month) => month.key === mustInclude);
+    if (named) shown = [named, ...shown.slice(-(MONTHLY_SERIES_LIMIT - 1))];
+  }
+  return shown.map((month) => ({ month: month.key, totalFils: month.totalFils }));
+};
 
 export type AssistantCorrectionPlan =
   | { kind: 'merchant-category'; merchant: string; category: CategoryId; direction: 'income' | 'expense' }
@@ -1982,6 +2029,8 @@ function executeAssistantToolResult(
             { label: 'Current selection', value: formatLedgerMoney(currentTotal) }],
           data: { monthsAnalyzed: months.length, baselineFils: highest.totalFils, currentFils: currentTotal, monthKey: highest.key,
             selectedIsHighest },
+          monthlySeries: monthlySeriesOf(months, highest.key),
+          monthlySeriesHighlight: highest.key,
         };
       }
       if (request.baseline === 'typical-month') {
@@ -1998,6 +2047,7 @@ function executeAssistantToolResult(
           facts: [{ label: 'Recorded monthly median', value: formatLedgerMoney(typical) },
             { label: 'Selected period', value: formatLedgerMoney(currentTotal) }],
           data: { monthsAnalyzed: priorMonths.length, baselineFils: typical, currentFils: currentTotal, deltaFils: delta },
+          monthlySeries: monthlySeriesOf(priorMonths),
         };
       }
       const currentStart = periodStartISO(period, state.transactions) ?? toISODate(now);
@@ -2178,6 +2228,16 @@ function executeAssistantToolResult(
         facts: items.slice(0, 6).map((item) => ({
           label: `${item.title} · ${item.daysLeft < 0 ? `${Math.abs(item.daysLeft)}d late` : item.daysLeft === 0 ? 'today' : `in ${item.daysLeft}d`}`,
           value: formatLedgerMoney(item.amountFils),
+        })),
+        payments: items.slice(0, 6).map((item) => ({
+          title: item.title,
+          category: item.subscription?.category
+            ?? (item.billId ? state.bills.find((bill) => bill.id === item.billId)?.category : undefined)
+            ?? 'other',
+          kind: item.kind,
+          dateISO: item.dateISO,
+          daysLeft: item.daysLeft,
+          amountFils: item.amountFils,
         })),
         data: { withinDays, paymentCount: items.length, totalFils: amount },
       };

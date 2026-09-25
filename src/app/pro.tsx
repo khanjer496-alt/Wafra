@@ -19,14 +19,15 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { t, tf } from '@/lib/i18n';
 import { autoCaptureMethod, billingStore, trialDaysLeft, type ProPlan } from '@/lib/purchases';
+import { proCopy } from '@/lib/pro-copy';
 import { configuredPublicUrl } from '@/lib/public-links';
 import { subscriptionManagementUrl } from '@/lib/billing';
 import { useStore } from '@/lib/store';
 
 type FeatureRow = {
   icon: IconName;
-  titleKey: Parameters<typeof t>[0];
-  textKey: Parameters<typeof t>[0];
+  title: string;
+  text: string;
 };
 
 type BillingAction = 'purchase' | 'restore' | 'manage' | null;
@@ -35,16 +36,25 @@ type OfferState = 'loading' | 'ready' | 'unavailable';
 /** Yearly first: it is the plan the screen recommends when the store has both. */
 const PLAN_ORDER: ProPlan[] = ['yearly', 'monthly'];
 
-function features(): FeatureRow[] {
-  return [
-    {
-      icon: 'spark',
-      titleKey: 'featAutoTracking',
-      textKey:
-        autoCaptureMethod() === 'localAutomation' ? 'featAutoTrackingIosText' : 'featAutoTrackingText',
-    },
-    { icon: 'chart', titleKey: 'featInsights', textKey: 'featInsightsText' },
-  ];
+/**
+ * Only what Pro gates (see pro-copy.ts). Automatic capture everywhere; on
+ * Android the bank-app notification reader and the past-SMS inbox import are
+ * the same collect-without-asking feature. Insights and subscriptions are
+ * free and are not listed.
+ */
+function features(copy: ReturnType<typeof proCopy>): FeatureRow[] {
+  const rows: FeatureRow[] = [{
+    icon: 'spark',
+    title: t('featAutoTracking'),
+    text: t(autoCaptureMethod() === 'localAutomation' ? 'featAutoTrackingIosText' : 'featAutoTrackingText'),
+  }];
+  if (autoCaptureMethod() === 'inboxScan') {
+    rows.push(
+      { icon: 'bank', title: copy.notificationsTitle, text: copy.notificationsText },
+      { icon: 'calendar', title: copy.historyTitle, text: copy.historyText },
+    );
+  }
+  return rows;
 }
 
 /**
@@ -58,7 +68,9 @@ function features(): FeatureRow[] {
  * is shown as unavailable instead of being advertised at a guessed figure.
  */
 export default function ProScreen() {
-  const words = workflowCopy(useLanguage());
+  const language = useLanguage();
+  const words = workflowCopy(language);
+  const copy = proCopy(language);
   const theme = useTheme();
   const router = useRouter();
   const { state } = useStore();
@@ -262,26 +274,28 @@ export default function ProScreen() {
         key={offer.productId}
         accessibilityRole="radio"
         accessibilityState={{ selected }}
-        accessibilityLabel={`${label} · ${offer.priceString}`}
+        accessibilityLabel={`${label} · ${offer.priceString} ${period}`}
+        testID={`pro-plan-${offer.plan}`}
         onPress={() => setSelectedPlan(offer.plan)}
         style={[
           styles.planRow,
           {
-            borderColor: selected ? theme.primary : theme.cardBorder,
+            borderColor: selected ? theme.primary : theme.controlBorder,
+            borderWidth: selected ? 2 : 1,
             backgroundColor: selected ? theme.primarySoft : theme.backgroundElement,
           },
         ]}>
-        <View style={styles.featureText}>
-          <ThemedText type="smallBold">{label}</ThemedText>
-          <ThemedText type="meta" themeColor="textTertiary">{period}</ThemedText>
-        </View>
-        <ThemedText type="smallBold">{offer.priceString}</ThemedText>
         <View
           style={[
             styles.planMark,
-            { borderColor: selected ? theme.primary : theme.cardBorder },
+            { borderColor: selected ? theme.primary : theme.controlBorder },
           ]}>
-          {selected && <Icon name="check" size={13} color={theme.primary} />}
+          {selected && <View style={[styles.planDot, { backgroundColor: theme.primary }]} />}
+        </View>
+        <ThemedText type="smallBold" style={styles.featureText}>{label}</ThemedText>
+        <View style={styles.planPrice}>
+          <ThemedText type="smallBold" tabular>{offer.priceString}</ThemedText>
+          <ThemedText type="meta" themeColor="textSecondary">{period}</ThemedText>
         </View>
       </Pressable>
     );
@@ -322,6 +336,7 @@ export default function ProScreen() {
       contentStyle={styles.content}
       scrollProps={{ showsVerticalScrollIndicator: false }}>
       <Section index={0} style={styles.hero}>
+        <ThemedText type="title" accessibilityRole="header">{t('proOutcomeTitle')}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">{words.proBody}</ThemedText>
         <ThemedText type="default" themeColor="textSecondary">
           {entitled
@@ -350,14 +365,14 @@ export default function ProScreen() {
         <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionLabel}>
           {t('proBenefitsTitle')}
         </ThemedText>
-        {features().map((feature, index, rows) => (
-          <Row key={feature.titleKey} last={index === rows.length - 1}>
-            <View style={[styles.featureIcon, { backgroundColor: theme.backgroundSelected }]}>
-              <Icon name={feature.icon} size={18} color={theme.textSecondary} />
+        {features(copy).map((feature, index, rows) => (
+          <Row key={feature.title} last={index === rows.length - 1}>
+            <View style={[styles.featureIcon, { backgroundColor: theme.primarySoft }]}>
+              <Icon name={feature.icon} size={18} color={theme.primary} />
             </View>
             <View style={styles.featureText}>
-              <ThemedText type="small">{t(feature.titleKey)}</ThemedText>
-              <ThemedText type="meta" themeColor="textTertiary">{t(feature.textKey)}</ThemedText>
+              <ThemedText type="small">{feature.title}</ThemedText>
+              <ThemedText type="meta" themeColor="textSecondary">{feature.text}</ThemedText>
             </View>
           </Row>
         ))}
@@ -431,8 +446,8 @@ export default function ProScreen() {
             <Icon name="check" size={19} color={theme.income} />
           </View>
           <View style={styles.featureText}>
-            <ThemedText type="small">{t('featPasteFree')}</ThemedText>
-            <ThemedText type="meta" themeColor="textTertiary">{t('featPasteFreeText')}</ThemedText>
+            <ThemedText type="small">{copy.freeTitle}</ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary">{copy.freeText}</ThemedText>
             <Pressable accessibilityRole="button" onPress={() => router.push('/import-sms')} hitSlop={8}>
               <ThemedText type="micro" style={{ color: theme.primary }}>{t('pasteBankMessage')}</ThemedText>
             </Pressable>
@@ -513,16 +528,17 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     borderRadius: Radius.full,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  planDot: { width: 10, height: 10, borderRadius: Radius.full },
+  planPrice: { alignItems: 'flex-end', gap: 2 },
   planRow: {
-    minHeight: 60,
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
-    borderWidth: 1,
     borderRadius: Radius.sheet,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,

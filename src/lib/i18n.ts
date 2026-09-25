@@ -1033,9 +1033,11 @@ const S = {
   },
   trustedPreview: { en: 'SAMPLE HOUSEHOLD', ar: 'عائلة تجريبية' },
   trustedDisabled: { en: 'DEMO', ar: 'تجريبي' },
+  // Relay-only: trusted phones receive new relayed items after they join;
+  // nothing already in a ledger is copied, so there is no "one shared ledger".
   trustedPreviewBody: {
-    en: 'See how a family shares one encrypted ledger. Invitations are disabled in this demo.',
-    ar: 'شاهد كيف تشارك العائلة سجلاً واحداً مشفّراً. الدعوات معطلة في هذا العرض التجريبي.',
+    en: 'See how a family’s trusted phones receive new relayed items. Older transactions are not copied. Invitations are disabled in this demo.',
+    ar: 'شاهد كيف تستقبل هواتف العائلة الموثوقة العناصر الجديدة المرسلة عبر المرحّل. لا تُنسخ العمليات السابقة. الدعوات معطلة في هذا العرض التجريبي.',
   },
   trustedPreviewA11y: { en: 'Sample device, controls disabled', ar: 'جهاز تجريبي، عناصر التحكم معطلة' },
   trustedStartHeader: { en: 'START A TRUSTED VAULT', ar: 'ابدأ خزنة موثوقة' },
@@ -1069,6 +1071,13 @@ const S = {
   trustedInviteReady: { en: 'One-use invite ready', ar: 'الدعوة صالحة لاستخدام واحد' },
   trustedInviteCountdown: { en: 'Expires in {minutes}:{seconds}', ar: 'تنتهي خلال {minutes}:{seconds}' },
   trustedInviteExpired: { en: 'This invite has expired', ar: 'انتهت صلاحية هذه الدعوة' },
+  trustedInviteUntilExpiry: { en: 'until it expires', ar: 'حتى تنتهي صلاحيتها' },
+  // Relay-only: a phone that joins receives items relayed AFTER it joins.
+  // Nothing already in the ledger is copied to it.
+  trustedRelayOnly: {
+    en: 'The phone that joins receives only new items relayed after it joins. Older transactions are not copied.',
+    ar: 'يستقبل الهاتف المنضم فقط العناصر الجديدة المرسلة عبر المرحّل بعد انضمامه. لا تُنسخ العمليات السابقة.',
+  },
   trustedInvitePrivacy: {
     en: 'The invite contains a short-lived enrollment token and relay address only—no balances, transactions, bank details, or device secrets.',
     ar: 'تحتوي الدعوة فقط على رمز انضمام قصير الصلاحية وعنوان المرحّل — بلا أرصدة أو عمليات أو بيانات بنكية أو أسرار الجهاز.',
@@ -1718,7 +1727,6 @@ const S = {
   notAWafraBackup: { en: 'That does not look like a Wafra backup.', ar: 'لا يبدو هذا ملف نسخ احتياطي لوفرة.' },
   noServerTitle: { en: 'Processed on this phone', ar: 'تُعالَج على هذا الهاتف' },
   restoreReplacesAll: { en: 'This replaces everything currently in the app.', ar: 'سيستبدل هذا كل ما في التطبيق حالياً.' },
-  trySensorAgain: { en: 'Try the sensor again', ar: 'جرّب المستشعر مرة أخرى' },
   upToDate: { en: 'Up to date', ar: 'كل شيء محدّث' },
   notifsForCardDue: { en: 'Wafra needs notification permission to remind you before a payment is due.', ar: 'يحتاج وفرة إذن الإشعارات لتذكيرك قبل موعد السداد.' },
   notifsForBill: { en: 'Wafra needs notification permission to warn you before a charge lands.', ar: 'يحتاج وفرة إذن الإشعارات لتنبيهك قبل خصم أي مبلغ.' },
@@ -2393,10 +2401,7 @@ const S = {
   // Messages, so a Shortcut forwards them. Describing it as "reads your SMS"
   // there would promise something the platform forbids.
   featAutoTrackingIosText: { en: 'Supported bank alerts passed by your personal automation are processed locally into transactions, cards, dues, or review when needed. Set up once.', ar: 'تُعالج تنبيهات البنوك المدعومة التي تمررها أتمتتك الشخصية محلياً لتصبح عمليات أو بطاقات أو مستحقات، أو تُرسل للمراجعة عند الحاجة. إعداد مرة واحدة.' },
-  featPasteFree: { en: 'Pasting is always free', ar: 'لصق الرسائل مجاني دائماً' },
   featPasteFreeText: { en: 'Reading a bank message you hand over — and typing entries — never needs a subscription, on any phone.', ar: 'قراءة رسالة بنكية تلصقها بنفسك وإضافة العمليات يدوياً لا تحتاج اشتراكاً أبداً على أي هاتف.' },
-  featInsights: { en: 'Insights & subscriptions', ar: 'تحليلات واشتراكات' },
-  featInsightsText: { en: 'Auto-detected subscriptions, due-date countdowns, plain-language insights.', ar: 'اكتشاف تلقائي للاشتراكات وتذكير بالمستحقات وتحليلات واضحة.' },
   featSalaryMonths: { en: 'Salary-day months', ar: 'الشهر يبدأ يوم الراتب' },
   featSalaryMonthsText: { en: 'Your money month starts on payday, not the 1st.', ar: 'شهرك المالي يبدأ يوم استلام راتبك.' },
   // Onboarding
@@ -3439,23 +3444,11 @@ const S = {
   applyRange: { en: 'Apply range', ar: 'تطبيق النطاق' },
 
   unlockWafra: { en: 'Unlock Wafra', ar: 'فتح وفرة' },
-  locked: { en: 'Locked', ar: 'مقفل' },
-  lockedPrivacyBody: {
-    en: 'Your balances are hidden until the phone says it is you. Nothing left the phone while it was closed.',
-    ar: 'أرصدتك مخفية حتى يتحقق الهاتف من هويتك. لم تغادر أي بيانات الهاتف أثناء إغلاق التطبيق.',
-  },
   phoneHasNoLock: { en: 'This phone has no screen lock', ar: 'لا يوجد قفل شاشة لهذا الهاتف' },
   setPhoneLockBody: {
     en: 'Set up a fingerprint, face unlock, or a PIN and Wafra can use it.',
     ar: 'أعدّ بصمة أو تعرّفاً على الوجه أو رمز PIN ليتمكن وفرة من استخدامه.',
   },
-  unlockFingerprintA11y: { en: 'Unlock with your fingerprint', ar: 'افتح باستخدام بصمتك' },
-  touchSensor: { en: 'Touch the sensor to unlock', ar: 'المس المستشعر للفتح' },
-  biometricOrPin: {
-    en: 'Fingerprint, face unlock, or your phone PIN',
-    ar: 'البصمة أو التعرّف على الوجه أو رمز هاتفك',
-  },
-  usePinInstead: { en: 'Use PIN instead', ar: 'استخدم رمز PIN بدلاً من ذلك' },
 
   newLimitTitle: { en: 'New limit', ar: 'حد جديد' },
   categoryLimit: { en: '{category} limit', ar: 'حد {category}' },
@@ -3800,7 +3793,7 @@ const S = {
   supportHeader: { en: 'Support & feedback', ar: 'الدعم والملاحظات' },
   settingsStatusHeader: { en: 'Current state', ar: 'الحالة الحالية' },
   settingsMoneyHeader: { en: 'Money', ar: 'المال' },
-  settingsImportsHeader: { en: 'Imports', ar: 'الاستيراد' },
+  settingsImportsHeader: { en: 'Capture', ar: 'الالتقاط' },
   settingsNotificationsHeader: { en: 'Notifications', ar: 'الإشعارات' },
   insightsTitle: { en: 'Insight', ar: 'معلومة' },
   homeWidgetAssistantTitle: { en: 'Ask Wafra', ar: 'اسأل وفرة' },
@@ -3816,7 +3809,6 @@ const S = {
   homeCustomizeTitle: { en: 'Customize Home', ar: 'تخصيص الرئيسية' },
   homeCustomizeBody: { en: 'Choose what appears below your money overview and put the most useful sections first.', ar: 'اختر ما يظهر أسفل ملخص أموالك ورتّب الأقسام الأكثر فائدة أولاً.' },
   homeCustomizeDetail: { en: 'Choose and reorder Home sections', ar: 'اختر أقسام الرئيسية ورتّبها' },
-  homeCustomizeFixed: { en: 'Money overview and automatic capture stay fixed at the top.', ar: 'يبقى ملخص الأموال والالتقاط التلقائي ثابتين في الأعلى.' },
   moveUp: { en: 'Move up', ar: 'نقل للأعلى' },
   moveDown: { en: 'Move down', ar: 'نقل للأسفل' },
   assistantTitle: { en: 'Wafra Assistant', ar: 'مساعد وفرة' },
@@ -3832,7 +3824,7 @@ const S = {
   },
   assistantAsk: { en: 'Ask Wafra', ar: 'اسأل وفرة' },
   settingsAppearanceLanguageHeader: { en: 'Appearance & language', ar: 'المظهر واللغة' },
-  settingsPreferencesHeader: { en: 'Preferences', ar: 'التفضيلات' },
+  settingsPreferencesHeader: { en: 'Appearance', ar: 'المظهر' },
   settingsDangerHeader: { en: 'Danger zone', ar: 'منطقة الخطر' },
   supportWebsite: { en: 'Support', ar: 'الدعم' },
   publicLinkUnavailable: { en: 'Unavailable in this build', ar: 'غير متاح في هذا الإصدار' },
@@ -3891,9 +3883,11 @@ const S = {
     ar: 'الوضع الخاص يُبقي سجلك على هذا الهاتف.',
   },
   feedbackPreviewHeader: { en: 'EXACTLY WHAT WILL BE SENT', ar: 'ما سيُرسل بالضبط' },
+  // The preview carries more than the message: the chosen type and the build
+  // lines (app version, platform, language, market and currency) travel too.
   feedbackPreviewNote: {
-    en: 'This is the complete note sent to Wafra maintainers. No ledger, bank message, amount, account, or merchant is attached.',
-    ar: 'هذه هي الملاحظة الكاملة التي تُرسل إلى مشرفي وفرة. لا يُرفق سجل أو رسالة بنكية أو مبلغ أو حساب أو متجر.',
+    en: 'This is everything sent to Wafra maintainers: your message, the type you picked, and the app version, platform, language, market and currency shown here. No ledger, bank message, amount, account, or merchant is attached.',
+    ar: 'هذا كل ما يُرسل إلى مشرفي وفرة: رسالتك والنوع الذي اخترته وإصدار التطبيق والمنصة واللغة والسوق والعملة الظاهرة هنا. لا يُرفق سجل أو رسالة بنكية أو مبلغ أو حساب أو متجر.',
   },
   feedbackSend: { en: 'Send report', ar: 'إرسال التقرير' },
   feedbackSending: { en: 'Sending…', ar: 'جارٍ الإرسال…' },
@@ -4075,12 +4069,12 @@ const S = {
   // The screen for a link that leads nowhere. It is the one place a person can
   // arrive at without having asked for it, which is exactly why it may not be
   // the one place that answers in the wrong language.
-  notFoundTitle: { en: 'This page moved on', ar: 'هذه الصفحة لم تعد هنا' },
+  notFoundTitle: { en: 'That page is not here.', ar: 'هذه الصفحة غير موجودة.' },
   notFoundBody: {
-    en: 'Nothing lives at that link. Your entries are untouched — this is a signpost pointing at a room that isn’t there.',
-    ar: 'لا شيء في هذا الرابط. عملياتك كما هي — هذه لافتة تشير إلى غرفة غير موجودة.',
+    en: 'The link may be old. Your ledger is fine.',
+    ar: 'ربما الرابط قديم. سجلّك سليم.',
   },
-  goHome: { en: 'Go home', ar: 'إلى الرئيسية' },
+  goHome: { en: 'Go to Home', ar: 'الذهاب إلى الرئيسية' },
 
   // ── Titles the PARSER mints ──
   //

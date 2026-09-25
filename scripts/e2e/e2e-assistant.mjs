@@ -214,7 +214,7 @@ try {
         await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
         const answer = await ask(page, 'How much did I spend on groceries this month?');
         assert.ok((await answer.innerText()).includes(money(GROCERY_TOTAL)));
-        await click(answer.getByRole('button', { name: 'View transactions', exact: true }));
+        await click(answer.getByRole('button', { name: /^See \d+ transactions?$/ }));
         const sheet = evidence(page); await sheet.waitFor({ state: 'visible' });
         assert.equal(minor(await sheet.getByTestId('assistant-evidence-total').innerText()), GROCERY_TOTAL);
         assert.match(await sheet.innerText(), /27 recorded transactions/);
@@ -251,7 +251,7 @@ try {
       await check(name + '-comparison-groups', page, async () => {
         await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
         const answer = await ask(page, 'Why did my groceries spending change?');
-        await click(answer.getByRole('button', { name: 'View transactions', exact: true }));
+        await click(answer.getByRole('button', { name: /^See \d+ transactions?$/ }));
         const sheet = evidence(page); await sheet.waitFor({ state: 'visible' });
         const groups = sheet.getByRole('button', { name: /^(?:First period|Comparison period)$/ });
         assert.equal(await groups.count(), 2, 'comparison evidence keeps periods separate');
@@ -272,7 +272,7 @@ try {
       await check(name + '-largest-purchases', page, async () => {
         await page.goto(BASE + '/assistant', { waitUntil: 'networkidle' });
         const answer = await ask(page, 'Top 3 largest purchases this month');
-        await click(answer.getByRole('button', { name: 'View transactions', exact: true }));
+        await click(answer.getByRole('button', { name: /^See \d+ transactions?$/ }));
         const sheet = evidence(page); await sheet.waitFor({ state: 'visible' });
         assert.match(await sheet.innerText(), /3 recorded transactions/);
         assert.match(await sheet.innerText(), /largest purchases|top 3/i);
@@ -366,7 +366,7 @@ try {
         const july = await ask(page, 'What about last month?');
         const julyText = await july.innerText();
         assert.match(julyText, /No recorded transactions|0 transactions/i);
-        assert.equal(await july.getByRole('button', { name: 'View transactions', exact: true }).count(), 0,
+        assert.equal(await july.getByRole('button', { name: /^See \d+ transactions?$/ }).count(), 0,
           'zero-result answer must not offer an empty evidence sheet');
         const quick = screen(page).getByTestId('assistant-followups');
         const quickText = await quick.innerText();
@@ -542,7 +542,7 @@ try {
         assert.equal(await turns(page).count(), 1, 'hydration must preserve exactly one route answer');
         const answer = await turns(page).first().innerText();
         assert.ok(answer.includes(money(CURRENT_TOTAL)), answer);
-        await click(turns(page).first().getByRole('button', { name: 'View transactions', exact: true }));
+        await click(turns(page).first().getByRole('button', { name: /^See \d+ transactions?$/ }));
         const text = await evidence(page).innerText();
         assert.ok(text.includes(monthStartDay === 25 ? '2026-08-25' : '2026-09-01'), text);
         await shot(page, name);

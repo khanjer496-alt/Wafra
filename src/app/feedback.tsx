@@ -25,6 +25,7 @@ import { useRouter, type Href } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
   Platform,
+  Pressable,
   StyleSheet,
   View,
 } from 'react-native';
@@ -37,7 +38,7 @@ import { Block, Row, Section, SectionHeader } from '@/components/ui/layout';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
-import { Fonts, Spacing } from '@/constants/theme';
+import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
   buildFeedbackPayload,
@@ -47,7 +48,10 @@ import {
   scrubFeedbackMessage,
   submitFeedback,
 } from '@/lib/feedback';
+import { feedbackCopy } from '@/lib/feedback-copy';
 import { FeedbackSendError } from '@/lib/feedback-transport';
+import { FEEDBACK_TOPICS, type FeedbackTopic } from '@/lib/feedback-wire';
+import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { isParserResearchBuild } from '@/lib/parser-research-source';
@@ -129,6 +133,9 @@ export default function FeedbackScreen() {
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  // Declared last so earlier hook positions are unchanged.
+  const [topic, setTopic] = useState<FeedbackTopic | null>(null);
+  const chipCopy = feedbackCopy(language);
 
   const build = useMemo(
     () => ({
@@ -144,12 +151,13 @@ export default function FeedbackScreen() {
 
   const payload = useMemo(
     () => buildFeedbackPayload({
+      topic,
       message: scrubFeedbackMessage(message),
       detail: 'none',
       build,
       ledger: EMPTY_LEDGER,
     }),
-    [build, message],
+    [build, message, topic],
   );
 
   const preview = useMemo(() => formatFeedbackPayload(payload), [payload]);
@@ -205,6 +213,39 @@ export default function FeedbackScreen() {
               </Row>
             </Section>
           )}
+
+          <Section index={2} style={styles.group}>
+            <SectionHeader title={chipCopy.typeHeader}
+              trailing={<ThemedText type="meta" themeColor="textSecondary">{chipCopy.typeOptional}</ThemedText>} />
+            <View style={styles.chips} testID="feedback-topic-chips" accessibilityRole="radiogroup">
+              {FEEDBACK_TOPICS.map((value) => {
+                const selected = topic === value;
+                return (
+                  <Pressable
+                    key={value}
+                    testID={`feedback-topic-${value}`}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={chipCopy.topic[value]}
+                    onPress={() => {
+                      tapped();
+                      // Tapping the chosen chip again clears the choice: the type is optional.
+                      setTopic(selected ? null : value);
+                      setNotice(null);
+                    }}
+                    style={({ pressed }) => [styles.chip, {
+                      borderColor: selected ? theme.primary : theme.controlBorder,
+                      backgroundColor: selected ? theme.primarySoft : theme.backgroundElement,
+                      opacity: pressed ? 0.8 : 1,
+                    }]}>
+                    <ThemedText type="small" themeColor={selected ? 'primary' : 'text'}>
+                      {chipCopy.topic[value]}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </Section>
 
           <Section index={2} style={styles.group}>
             <SectionHeader title={t('feedbackWriteHeader')} />
@@ -298,6 +339,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 21,
     textAlignVertical: 'top',
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  chip: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.full,
+    borderWidth: 1,
   },
   metaRow: {
     flexDirection: 'row',

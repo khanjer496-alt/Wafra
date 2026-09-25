@@ -109,6 +109,9 @@ for (const language of ['en', 'ar']) {
     };
     h.deps['@/lib/feedback-transport'] = { FeedbackSendError: class extends Error {} };
     h.deps['@/lib/parser-research-source'] = { isParserResearchBuild: () => true };
+    // The type chips' list and copy run from source.
+    h.deps['@/lib/feedback-wire'] = load(path.join(root, 'src/lib/feedback-wire.ts'), {}, { TextEncoder });
+    h.deps['@/lib/feedback-copy'] = load(path.join(root, 'src/lib/feedback-copy.ts'));
     const tree = load(path.join(root, 'src/app/feedback.tsx'), h.deps).default();
     const row = walk(tree).find(node => node.props?.accessibilityLabel === h.deps['@/lib/i18n'].t('feedbackParserTitle'));
     assert.ok(row);

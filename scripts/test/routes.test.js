@@ -85,11 +85,14 @@ ok('Wallet opens cards by serializable account ID on a normal row press',
   ok('Parser Research remains gated to internal and test builds',
     /isParserResearchBuild\(\)[\s\S]{0,500}router\.push\('\/parser-research'/.test(feedback));
 
-  const settings = fs.readFileSync(path.join(APP, 'settings.tsx'), 'utf8');
+  // Erase (and its last-owner recovery) moved to Settings → Data and help.
+  const settings = fs.readFileSync(path.join(APP, 'settings.tsx'), 'utf8') +
+    fs.readFileSync(path.join(APP, 'settings-data.tsx'), 'utf8');
   ok('last-owner recovery can still reach Trusted Devices',
     /last_owner[\s\S]{0,800}router\.push\('\/trusted-devices'/.test(settings));
-  ok('Trusted Devices remains absent from the ordinary Settings rows',
-    !/linkRow\(\s*t\('trustedSettingsRow'\)/.test(settings));
+  // The redesign gives Trusted devices & family an ordinary Privacy row.
+  ok('Trusted Devices is an ordinary Settings row on phones',
+    /Platform\.OS !== 'web' && linkRow\(\s*copy\.trustedRow[\s\S]{0,160}router\.push\('\/trusted-devices'\)/.test(settings));
 }
 
 /** Every file under src/, so nothing is missed by only checking screens. */
@@ -177,11 +180,15 @@ function sources(dir = SRC) {
  * the paywall says so before it is tapped rather than after.
  */
 {
-  const settings = fs.readFileSync(path.join(SRC, 'app/settings.tsx'), 'utf8');
+  // Settings is the main list plus its Data and help sub-screen, drawn with
+  // the shared row shapes; the inventory holds across all three files.
+  const settings = fs.readFileSync(path.join(SRC, 'app/settings.tsx'), 'utf8') + '\n' +
+    fs.readFileSync(path.join(SRC, 'app/settings-data.tsx'), 'utf8') + '\n' +
+    fs.readFileSync(path.join(SRC, 'components/settings-rows.tsx'), 'utf8');
   const at = (needle) => settings.indexOf(needle);
 
   const settingsInventory = [
-    ['Pro summary', /<Block onPress=\{\(\) => router\.push\('\/pro'\)\}>/],
+    ['Pro summary', /testID="settings-pro-card"[\s\S]{0,300}router\.push\('\/pro'\)/],
     ['daily notifications', /toggleDailySummary\(next\)/],
     ['per-charge notifications', /requestInstantAlertsChange\(next\)[\s\S]*toggleChargeAlerts\(next\)/],
     ['SMS capture', /toggleSms/],
@@ -248,12 +255,13 @@ function sources(dir = SRC) {
   // The row now answers "which language am I in", which the old subtitle
   // ("English · العربية is available instantly") never did.
   ok('the language row shows the language that is on',
-    /linkRow\(t\('language'\), languagePreference === 'system'[\s\S]{0,180}LANGUAGE_NAMES\[language\]/
+    /linkRow\(t\('language'\)[\s\S]{0,400}value: languagePreference === 'system'[\s\S]{0,180}LANGUAGE_NAMES\[language\]/
       .test(settings));
 
   ok('ledger backup and restore remain available without Pro',
-    /linkRow\(t\('backupJson'\), null, backupJson\)/.test(settings) &&
-      /linkRow\(t\('restoreBackup'\), null, restoreFromFile\)/.test(settings));
+    /linkRow\(copy\.backupTitle, copy\.backupDetail, backupJson/.test(settings) &&
+      /linkRow\(copy\.restoreTitle, copy\.restoreDetail, restoreFromFile/.test(settings) &&
+      !/gated\(backupJson|gated\(restoreFromFile/.test(settings));
 
   const cards = fs.readFileSync(path.join(SRC, 'app/cards.tsx'), 'utf8');
   ok('Payment cards names stored instruments and keeps their details accessible',
@@ -298,7 +306,7 @@ function sources(dir = SRC) {
   // The navigation also uses privacyHeader; locate the actual section rather
   // than accidentally comparing notification content with its tab label.
   const notificationsAt = at("t('dailySummarySetting')");
-  const privacySectionAt = at("<SectionHeader title={t('privacyHeader')}");
+  const privacySectionAt = at("<SectionHeader title={copy.privacyAndSecurity}");
   ok('the notification switches are out of the Privacy group and above it',
     notificationsAt >= 0 && privacySectionAt > notificationsAt);
 
@@ -313,8 +321,9 @@ function sources(dir = SRC) {
       /Platform\.OS !== 'web' && isFounderUnlockBuild\(\)/.test(settings) &&
       /await unlockFounderPro\(\)/.test(settings));
 
-  ok('Trusted devices and family are hidden from Settings for now',
-    !/linkRow\(\s*t\('trustedSettingsRow'\)/.test(settings));
+  ok('Trusted devices and family has one Settings row, in Privacy and security',
+    (settings.match(/linkRow\(\s*copy\.trustedRow/g) ?? []).length === 1 &&
+      at('copy.trustedRow') > at('<SectionHeader title={copy.privacyAndSecurity}'));
 
   // A toggle row whose label and sub-line are dead text, beside link rows that
   // are tappable edge to edge, is a target the user has to find twice. The

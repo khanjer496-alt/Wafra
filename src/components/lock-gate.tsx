@@ -1,26 +1,18 @@
 import * as LocalAuthentication from 'expo-local-authentication';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { AppState, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
+import { AppState, Linking, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { BiometricGlyph, useBiometricKind } from '@/components/biometric-glyph';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/controls';
-import { Icon } from '@/components/ui/icon';
 import { WafraMark } from '@/components/wafra-logo';
-import { EASE, Motion, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Radius, ScreenPadding, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useStore } from '@/lib/store';
 import { t } from '@/lib/i18n';
-
-const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
+import { settingsCopy } from '@/lib/settings-copy';
 
 type BiometricState = 'prompting' | 'failed' | 'unavailable';
 
@@ -34,33 +26,26 @@ export function usePrivacyGateCleared(): boolean {
 /** Short trips out of the app — a permission sheet, the share card — do not re-lock. */
 const RELOCK_GRACE_MS = 20_000;
 
-/** The breathing ring around the sensor target: scale 1 → 1.4, opacity .85 → .3. */
-function SensorRing({ color }: { color: string }) {
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    progress.value = withRepeat(withTiming(1, { duration: Motion.pulse / 2, easing: EASING }), -1, true);
-  }, [progress]);
-
-  const style = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + progress.value * 0.12 }],
-    opacity: 0.85 - progress.value * 0.55,
-  }));
-
-  return <Animated.View style={[styles.ring, { borderColor: color }, style]} pointerEvents="none" />;
-}
-
 /**
  * Blocks the app behind device biometrics or the phone PIN when app lock is on.
  *
- * Every interactive element sits in the bottom 40% of the screen, so unlocking
- * is a thumb movement rather than a reach. Web — and devices with no screen
- * lock configured — pass straight through to a copy-only state.
+ * The lock names the hardware this phone actually uses — Face ID, Touch ID,
+ * a fingerprint or a face — instead of drawing a fingerprint on every phone,
+ * and it has ONE action: the unlock button, in the bottom of the screen where
+ * the thumb is. The system prompt itself offers the phone passcode, so a
+ * separate "Use PIN" button only repeated the same call. Nothing from the
+ * ledger is drawn behind the lock: no blurred balances, no rows.
+ *
+ * The copy says the balances stay HIDDEN, not "encrypted until you unlock":
+ * the ledger's encryption key is not bound to this lock.
  */
 export function LockGate({ children }: { children: React.ReactNode }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { state } = useStore();
+  const copy = settingsCopy(state.language);
+  // Asked only while App Lock is on; the lock screen is the only reader here.
+  const biometricKind = useBiometricKind(state.appLock);
   const [unlocked, setUnlocked] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [biometric, setBiometric] = useState<BiometricState>('prompting');
@@ -157,11 +142,11 @@ export function LockGate({ children }: { children: React.ReactNode }) {
       <ThemedView accessibilityViewIsModal style={[StyleSheet.absoluteFillObject, styles.root]}>
         <View style={styles.centre}>
           <WafraMark size={46} />
-          <ThemedText type="micro" themeColor="textTertiary">
-            {t('locked')}
+          <ThemedText type="subtitle" accessibilityRole="header" style={styles.centreText}>
+            {copy.lockedTitle}
           </ThemedText>
           <ThemedText type="default" themeColor="textSecondary" style={styles.copy}>
-            {t('lockedPrivacyBody')}
+            {copy.lockedBody}
           </ThemedText>
         </View>
 
@@ -198,26 +183,22 @@ export function LockGate({ children }: { children: React.ReactNode }) {
               },
             ]}>
             <View style={[styles.grab, { backgroundColor: theme.cardBorderStrong }]} />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('unlockFingerprintA11y')}
-              onPress={tryUnlock}
-              style={[
-                styles.sensor,
-                { backgroundColor: theme.backgroundSelected, borderColor: theme.controlBorder },
-              ]}>
-              <SensorRing color={theme.primary} />
-              <Icon name="fingerprint" size={38} color={theme.text} />
-            </Pressable>
-            <ThemedText type="small">
-              {biometric === 'failed' ? t('trySensorAgain') : t('touchSensor')}
-            </ThemedText>
-            <ThemedText type="meta" themeColor="textTertiary">
-              {t('biometricOrPin')}
+            <View
+              accessible={false}
+              importantForAccessibility="no-hide-descendants"
+              style={[styles.sensor, { backgroundColor: theme.primarySoft }]}>
+              <BiometricGlyph kind={biometricKind} size={30} color={theme.primary} />
+            </View>
+            {biometric === 'failed' ? (
+              <ThemedText type="small" accessibilityLiveRegion="polite" style={styles.centreText}>
+                {copy.lockedRetry}
+              </ThemedText>
+            ) : null}
+            <ThemedText type="meta" themeColor="textSecondary" style={styles.centreText}>
+              {copy.lockedFallback}
             </ThemedText>
             <Button
-              label={t('usePinInstead')}
-              variant="outline"
+              label={copy.unlockWith[biometricKind ?? 'passcode']}
               onPress={tryUnlock}
               style={styles.fullButton}
             />
@@ -271,18 +252,12 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.three,
   },
   sensor: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    borderWidth: 1,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: Spacing.two,
-  },
-  ring: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 38,
-    borderWidth: 2,
   },
   centreText: {
     textAlign: 'center',
