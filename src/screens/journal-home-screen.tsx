@@ -402,7 +402,8 @@ export default function JournalHomeScreen() {
   // graph is built after interactions, never during hydration or a running
   // history import, and not at all when no row could be a transfer.
   useEffect(() => {
-    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded || historyAnalysisBlocked) return;
+    if (historyAnalysisBlocked) { setPendingTransfers(null); return; }
+    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
     let cancelled = false;
     const task = InteractionManager.runAfterInteractions(() => {
       if (cancelled) return;
@@ -552,9 +553,11 @@ export default function JournalHomeScreen() {
   const periodStartISO = period.mode === 'month' ? monthStartISO(period.key)
     : period.mode === 'range' ? period.from : null;
   // First days: nothing recorded before this period, so offer the past.
-  const offerPast = periodStartISO !== null && state.hydrated && !hasRecordsBefore(state.transactions, periodStartISO);
+  const offerPast = periodStartISO !== null && state.hydrated && !history && !hasRecordsBefore(state.transactions, periodStartISO);
   const snoozeCapture = () => {
     const at = Date.now();
+    // Move Home's clock too: a snooze later than `now` would be ignored.
+    setNow(new Date(at));
     setCaptureSnoozedAt(at);
     void saveCapturePauseSnooze(at);
   };

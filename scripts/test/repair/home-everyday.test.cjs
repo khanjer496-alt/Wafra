@@ -69,14 +69,22 @@ test('capture stopped: notice, "I was away" snooze and the Left to spend caveat'
   const tree = h.render('home');
   const notice = byId(tree, 'home-capture-stopped');
   assert.ok(notice, 'four quiet days after four texts a day');
-  assert.match(text(notice), /No bank texts for 5 days/);
-  assert.match(text(notice), /several a day/);
+  assert.match(text(notice), /No payments captured for 5 days/);
+  assert.match(text(notice), /several are captured a day/);
+  assert.doesNotMatch(text(notice), /No bank texts/, 'Wafra sees captures, not the inbox');
   assert.match(text(byId(tree, 'home-left-caveat')), /May be too high until capture resumes/);
   byId(tree, 'home-capture-check').props.onPress();
   assert.deepEqual(h.events.at(-1), ['route', '/ios-setup']);
   byId(tree, 'home-capture-away').props.onPress();
   const snoozed = h.events.find((event) => event[0] === 'state' && event[1] === SNOOZE);
   assert.equal(typeof snoozed[2], 'number');
+  // Home's clock moves with the snooze, or a snooze later than `now` is ignored.
+  const clock = h.events.find((event) => event[0] === 'state' && event[2] instanceof Date);
+  assert.ok(clock, 'the Home clock is refreshed');
+  assert.equal(clock[2].getTime(), snoozed[2]);
+  const pause = require(path.join(root, 'scripts/test/repair/load-typescript.cjs'))(path.join(root, 'src/lib/capture-pause.ts'));
+  const times = capturedMonth(5).map((row) => row.ts);
+  assert.equal(pause.detectCapturePause({ captureTimes: times, nowMs: snoozed[2], snoozedAtMs: snoozed[2] }).stopped, false);
   assert.ok(h.events.some((event) => event[0] === 'snooze'), 'the snooze is persisted');
 
   const away = createHarness({ platform: 'ios', state: { transactions: capturedMonth(5) }, states: { [SNOOZE]: NOW - 3_600_000 } }).render('home');
@@ -87,7 +95,8 @@ test('capture stopped: notice, "I was away" snooze and the Left to spend caveat'
   assert.equal(byId(recent, 'home-capture-stopped'), undefined, 'two quiet days is within the rule');
   const android = createHarness({ platform: 'android', state: { transactions: capturedMonth(5) } });
   const androidTree = android.render('home');
-  assert.match(text(byId(androidTree, 'home-capture-stopped')), /No bank alerts for 5 days/);
+  assert.match(text(byId(androidTree, 'home-capture-stopped')), /No payments captured for 5 days/);
+  assert.match(text(byId(androidTree, 'home-capture-stopped')), /notification access/);
   byId(androidTree, 'home-capture-check').props.onPress();
   assert.deepEqual(android.events.at(-1), ['route', '/settings?section=imports']);
 });
