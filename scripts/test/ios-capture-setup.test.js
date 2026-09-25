@@ -4045,6 +4045,7 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/components/ui/toast') return { useToast: () => ({ show: () => {} }) };
+        if (id === '@/components/lock-gate') return { usePrivacyGateCleared: () => true };
         if (id === '@/lib/auto-import') {
           return {
             hasBankNotificationAccess: () => false,
@@ -4280,6 +4281,7 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/components/ui/toast') return { useToast: () => ({ show: () => {} }) };
+        if (id === '@/components/lock-gate') return { usePrivacyGateCleared: () => true };
         if (id === '@/lib/auto-import') {
           return {
             hasBankNotificationAccess: () => false,
