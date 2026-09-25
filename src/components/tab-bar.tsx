@@ -6,7 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { useTabBarMetrics } from '@/components/ui/tab-bar-metrics';
-import { Fonts, Spacing } from '@/constants/theme';
+import { Elevation, Fonts, Spacing, TabPill, type TabPillColors } from '@/constants/theme';
+import { useBandScheme } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { tapped } from '@/lib/haptics';
@@ -29,34 +30,42 @@ const TAB_LABELS: Record<string, StringKey> = {
   wallet: 'tabWallet',
 };
 
-const LedgerTabButton = ({ focused, icon, label, iconOnly, onPress, onPeek, testID }: {
+/** Each tab's own colour (design language E): Home ink, Spending clay, Bills ochre, Accounts slate. */
+export const TAB_BANDS = {
+  index: 'home',
+  flow: 'spending',
+  bills: 'bills',
+  wallet: 'accounts',
+} as const satisfies Record<string, 'home' | 'spending' | 'bills' | 'accounts'>;
+
+const LedgerTabButton = ({ focused, icon, label, iconOnly, onPress, onPeek, testID, colors, tone }: {
   focused: boolean; icon: IconName; label: string; iconOnly: boolean; onPress: () => void;
   onPeek: (label: string | null) => void; testID: string;
+  colors: TabPillColors; tone: { fill: string; text: string };
 }) => {
-  const theme = useTheme();
+  // The selected tab names itself; the others are icons whose names are
+  // always spoken, and — at the accessibility text sizes, where every tab is
+  // an icon — holding one shows its name, like the system's Large Content
+  // Viewer.
+  const showLabel = focused && !iconOnly;
   return <Pressable testID={testID} role="tab" aria-selected={focused} accessibilityRole="tab"
     accessibilityLabel={label} accessibilityState={{ selected: focused }}
     onPressIn={() => prioritizeForegroundNavigation()}
     onPress={onPress}
-    // At the accessibility text sizes the bar shows icons only, as the iOS
-    // system bar does; holding a tab shows its name, like the system's Large
-    // Content Viewer. Screen readers always hear the label.
-    onLongPress={iconOnly ? () => onPeek(label) : undefined}
-    onPressOut={iconOnly ? () => onPeek(null) : undefined}
-    android_ripple={{ color: theme.backgroundSelected, borderless: false }}
+    onLongPress={!showLabel ? () => onPeek(label) : undefined}
+    onPressOut={!showLabel ? () => onPeek(null) : undefined}
+    android_ripple={{ color: colors.ripple, borderless: true }}
     style={({ pressed }) => [styles.tab, { opacity: pressed ? 0.7 : 1 }]}>
-    {/* Material 3's active indicator: a pill behind the selected icon. It is
-        drawn, not animated — this bar is rebuilt on every navigation state
-        change and device traces tied tab-press jank to motion started here
-        (see perf-config.test.js). Selection is therefore immediate for every
-        user, which is also what Reduce Motion asks for. The pill is always
-        laid out, transparent when idle, so icons never shift. */}
-    <View testID={`${testID}-indicator`} style={[styles.indicator,
-      { backgroundColor: focused ? theme.primarySoft : 'transparent' }]}>
-      <Icon name={icon} size={iconOnly ? 26 : 22} color={focused ? theme.primary : theme.textSecondary} strokeWidth={focused ? 2.1 : 1.8} />
+    {/* The active indicator: a pill in the tab's own colour behind the icon
+        and name. It is drawn, not animated — this bar is rebuilt on every
+        navigation state change and device traces tied tab-press jank to
+        motion started here (see perf-config.test.js). Selection is therefore
+        immediate for every user, which is also what Reduce Motion asks for. */}
+    <View testID={`${testID}-indicator`} style={[styles.indicator, showLabel && styles.indicatorLabelled,
+      { backgroundColor: focused ? tone.fill : 'transparent' }]}>
+      <Icon name={icon} size={iconOnly ? 24 : focused ? 18 : 20} color={focused ? tone.text : colors.inactive} strokeWidth={focused ? 2.1 : 1.9} />
+      {showLabel && <ThemedText type="smallBold" style={[styles.tabLabel, styles.tabLabelFocused, { color: tone.text }]}>{label}</ThemedText>}
     </View>
-    {!iconOnly && <ThemedText type="meta" style={[styles.tabLabel, focused ? styles.tabLabelFocused : null,
-      { color: focused ? theme.text : theme.textSecondary }]}>{label}</ThemedText>}
   </Pressable>;
 };
 
@@ -65,6 +74,7 @@ const LedgerTabButton = ({ focused, icon, label, iconOnly, onPress, onPeek, test
  * capture, so the bar no longer makes hand-entry its largest control. */
 export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
   const theme = useTheme();
+  const colors = TabPill[useBandScheme()];
   const insets = useSafeAreaInsets();
   const { measuredHeight, setMeasuredHeight } = useTabBarMetrics();
   const navigationPendingRef = React.useRef<string | null>(null);
@@ -101,6 +111,8 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
         label={t(TAB_LABELS[route.name], lang)}
         iconOnly={iconOnly}
         onPeek={setPeek}
+        colors={colors}
+        tone={colors[TAB_BANDS[route.name as keyof typeof TAB_BANDS] ?? 'home']}
         onPress={() => {
           // Count pressure, not destinations. If the process dies during a tap
           // storm the next tester diagnostic can still tell us it happened,
@@ -134,20 +146,20 @@ export function WafraTabBar({ state, navigation }: BottomTabBarProps) {
     );
   };
 
+  // A floating ink pill (design language E). The measured height runs from
+  // the screen's bottom edge to the pill's top, which is what content clears.
   return (
     <View
+      pointerEvents="box-none"
       onLayout={({ nativeEvent: { layout } }) => {
         const height = Math.round(layout.height);
         if (height !== measuredHeight) setMeasuredHeight(height);
       }}
-      style={[
-        styles.wrap,
-        { backgroundColor: theme.background, borderTopColor: theme.cardBorder },
-      ]}>
+      style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, Spacing.two) + Spacing.two }]}>
       {peek !== null && <View pointerEvents="none" style={[styles.peek, { backgroundColor: theme.inverseSurface }]}>
         <ThemedText type="heading" style={{ color: theme.inverseText }}>{peek}</ThemedText>
       </View>}
-      <View role="tablist" style={[styles.bar, { paddingBottom: Math.max(insets.bottom, Spacing.two) }]}>
+      <View role="tablist" style={[styles.bar, { backgroundColor: colors.bar, borderColor: colors.border }]}>
         {routes.map(renderTab)}
       </View>
     </View>
@@ -160,33 +172,43 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    borderTopWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
+    paddingHorizontal: Spacing.three,
   },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 3,
-    paddingHorizontal: Spacing.two,
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    minHeight: 64,
+    borderRadius: 32,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     width: '100%',
-    maxWidth: 800,
+    maxWidth: 520,
+    shadowColor: Elevation.shadowColor,
+    shadowOpacity: Elevation.shadowOpacity,
+    shadowRadius: Elevation.shadowRadius,
+    shadowOffset: Elevation.shadowOffset,
+    elevation: Elevation.elevation,
   },
   tab: {
-    flex: 1,
-    minHeight: 54,
+    minHeight: 48,
+    minWidth: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    paddingTop: 8,
-    paddingBottom: 4,
   },
   indicator: {
-    width: 64,
-    height: 32,
-    borderRadius: 16,
+    minWidth: 44,
+    minHeight: 44,
+    borderRadius: 22,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
   },
+  indicatorLabelled: { paddingHorizontal: 14 },
   peek: {
     position: 'absolute',
     bottom: '100%',
@@ -198,8 +220,8 @@ const styles = StyleSheet.create({
     maxWidth: '90%',
   },
   tabLabel: {
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 14,
+    lineHeight: 18,
     textAlign: 'center',
     flexShrink: 1,
   },

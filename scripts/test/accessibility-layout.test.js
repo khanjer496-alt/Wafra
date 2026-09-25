@@ -294,9 +294,13 @@ ok('Money keeps hero figures whole: fitted from the width, never truncated, full
   /useHeroFigureMultiplier\(amount, type, fitInset\)/.test(money) &&
     /large && styles\.valueWhole/.test(money) && /valueWhole: \{ flexShrink: 0, maxWidth: '100%' \}/.test(money) &&
     /accessibilityLabel=\{label\}/.test(money) && !/numberOfLines/.test(money));
+// Design language E: the selected tab shows its name in its own colour; the
+// others are icons. At the accessibility sizes every tab is an icon. Every
+// unlabelled tab can be held to show its name, and every tab is spoken.
 ok('Tab bar goes icon-only at the accessibility sizes and keeps every label for assistive tech',
   /const iconOnly = useLargeTextLayout\(\)/.test(tabBar) && /accessibilityLabel=\{label\}/.test(tabBar) &&
-    /\{!iconOnly && <ThemedText/.test(tabBar) && /onLongPress=\{iconOnly \?/.test(tabBar));
+    /const showLabel = focused && !iconOnly;/.test(tabBar) && /\{showLabel && <ThemedText/.test(tabBar) &&
+    /onLongPress=\{!showLabel \?/.test(tabBar));
 ok('Sheets scroll their footer with the content at the accessibility sizes',
   /const pinFooter = hasFooter && !largeText;/.test(bottomSheet) &&
     /\{pinFooter \? null : footerNode\}\s*<\/ScrollView>/.test(bottomSheet));
