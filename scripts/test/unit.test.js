@@ -1634,6 +1634,21 @@ const lsLate = leaving.leavingSoon(
   lsToday,
 );
 ok('leavingSoon keeps an overdue statement', lsLate.some((r) => r.overdue && r.kind === 'card'));
+
+// A subscription the user marked cancelled is not "coming up" until it charges again.
+{
+  const netflix = {
+    title: 'Netflix', category: 'entertainment', group: 'subscription', status: 'active', cadence: 'monthly',
+    avgAmountFils: 1549, lastAmountFils: 1549, lastChargedISO: '2026-06-24', nextExpectedISO: '2026-07-24',
+    chargeCount: 4, paymentHistory: false, priceIncreased: false, priorTypicalFils: 1549, monthlyEquivalentFils: 1549,
+  };
+  const subsOnly = { kinds: ['subscription'], detectedSubscriptions: [netflix] };
+  eq('leavingSoon lists an active subscription', leaving.leavingSoon(lsBase, lsToday, subsOnly).length, 1);
+  eq('leavingSoon leaves out a subscription cancelled after its last charge',
+    leaving.leavingSoon({ ...lsBase, cancelledSubscriptions: { netflix: '2026-07-01' } }, lsToday, subsOnly).length, 0);
+  eq('leavingSoon brings it back once it charges after the cancel date',
+    leaving.leavingSoon({ ...lsBase, cancelledSubscriptions: { netflix: '2026-06-01' } }, lsToday, subsOnly).length, 1);
+}
 eq('daysPhrase late', leaving.daysPhrase(-3), '3 days late');
 eq('daysPhrase today', leaving.daysPhrase(0), 'today');
 eq('daysPhrase tomorrow', leaving.daysPhrase(1), 'tomorrow');

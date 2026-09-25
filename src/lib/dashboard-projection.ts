@@ -72,7 +72,7 @@ export function projectDashboardInsight(
     state.notSubscriptions,
     liveAccounts,
     internal,
-    { includeRecurringAnalysis: false },
+    { includeRecurringAnalysis: false, cancelledSubscriptions: state.cancelledSubscriptions },
   ).find((item) => item.id !== dismissedInsightId) ?? null;
 }
 
@@ -139,6 +139,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const cashOut = summarizeCashOutflow(state, period, { live: liveAccounts, internal });
   const insight = includeInsights ? buildInsights(
     state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal,
+    { cancelledSubscriptions: state.cancelledSubscriptions },
   ).find((item) => item.id !== dismissedInsightId) ?? null : null;
 
   return {

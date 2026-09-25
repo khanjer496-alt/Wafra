@@ -24,6 +24,7 @@ import {
   detectSubscriptions,
   subscriptionsMonthlyTotal,
   trueSubscriptions,
+  withoutCancelled,
 } from '@/lib/subscriptions';
 import type { Budget, CategoryId, Transaction } from '@/lib/types';
 
@@ -234,7 +235,7 @@ export function buildInsights(
   notSubscriptions: string[] = [],
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
-  options: { includeRecurringAnalysis?: boolean } = {},
+  options: { includeRecurringAnalysis?: boolean; cancelledSubscriptions?: Readonly<Record<string, string>> } = {},
 ): Insight[] {
   const insights: Insight[] = [];
   const period = toPeriod(periodLike);
@@ -458,11 +459,11 @@ export function buildInsights(
   // card must never trigger that heavy history job just after launch.
   const subs = options.includeRecurringAnalysis === false
     ? []
-    : activeSubscriptions(
+    : withoutCancelled(activeSubscriptions(
         trueSubscriptions(
           detectSubscriptions(transactions, notSubscriptions, today, liveAccounts, internalTransfers),
         ),
-      );
+      ), options.cancelledSubscriptions);
   if (subs.length >= 2) {
     const monthly = subscriptionsMonthlyTotal(subs);
     if (isMonthMode && current.incomeFils > 0 && monthly / current.incomeFils >= 0.08) {

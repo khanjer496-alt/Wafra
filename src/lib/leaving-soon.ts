@@ -9,6 +9,7 @@ import {
   activeSubscriptions,
   daysUntilNext,
   detectSubscriptions,
+  withoutCancelled,
   type Subscription,
 } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
@@ -122,11 +123,12 @@ export function leavingSoon(
   }
 
   if (kinds.has('subscription')) {
-    const subs = activeSubscriptions(
+    // A subscription the user marked cancelled stops being "coming up" until it charges again.
+    const subs = withoutCancelled(activeSubscriptions(
       opts.detectedSubscriptions
         ? [...opts.detectedSubscriptions]
         : detectSubscriptions(state.transactions, state.notSubscriptions, today, liveAccounts, internal),
-    );
+    ), state.cancelledSubscriptions);
     for (const sub of subs) {
       // Frequent prepaid top-ups are real commitments without a schedule.
       // They stay visible in Bills but cannot honestly be placed on a

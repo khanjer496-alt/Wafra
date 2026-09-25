@@ -33,6 +33,7 @@ import {
   detectSubscriptions,
   detectSubscriptionsCooperatively,
   trueSubscriptions,
+  withoutCancelled,
   type Subscription,
 } from '@/lib/subscriptions';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
@@ -1884,11 +1885,11 @@ function executeAssistantToolResult(
 
     case 'subscriptions': {
       const { live, internal } = ledgerScope(state);
-      const subs = activeSubscriptions(trueSubscriptions(
+      const subs = withoutCancelled(activeSubscriptions(trueSubscriptions(
         derived?.detectedSubscriptions
           ? [...derived.detectedSubscriptions]
           : detectSubscriptions(state.transactions, state.notSubscriptions, now, live, internal),
-      )).sort((a, b) => b.monthlyEquivalentFils - a.monthlyEquivalentFils);
+      )), state.cancelledSubscriptions).sort((a, b) => b.monthlyEquivalentFils - a.monthlyEquivalentFils);
       const monthly = checkedMinorSum(subs.map((item) => item.monthlyEquivalentFils));
       return {
         tool: request.tool,
