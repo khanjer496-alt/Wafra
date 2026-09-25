@@ -67,7 +67,7 @@ rewrite() {
 for f in types routes format categories ledger bill-alias capture-source-identity dedupe arabic-sms bank-amount-tokens sms-parser import-plan bills \
          transfer-reconciliation-types transfer-reconciliation transfer-evidence transfer-review-copy \
          insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics growth-funnel period purchases country-names country markets known-banks i18n system-language balances \
-         brand-marks leaving-soon accounts heal accuracy onboarding onboarding-bank-examples reminders auto-import android-capture-sources \
+         brand-marks leaving-soon accounts heal bnpl-category-repair accuracy onboarding onboarding-bank-examples reminders auto-import android-capture-sources \
          history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-filter capture-trace \
          launch-performance launch-benchmark runtime-performance \
          relay-protocol trusted-device-contract cloud-import-contract statement-coverage statement-batch reimbursement-report fx fx-rates \

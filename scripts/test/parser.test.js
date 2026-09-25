@@ -73,9 +73,14 @@ function ok(name, condition, detail) {
 }
 
 // ── The exact failure modes from the user's phone ──
+// A card charge whose payee IS the BNPL provider is the instalment of a
+// purchase: the bank never sent an alert for the purchase itself, so this row
+// is the only ledger record of that spending. It is Shopping, as it was until
+// a body-wide BNPL keyword briefly filed it as Loan (which also opens the
+// relaxed bill path).
 t('merchant stops at "with"',
   'Purchase of AED 50.00 to TABBY with Credit Card ending 1234. Avl limit AED 5,000.00',
-  { merchant: 'Tabby', amountFils: 5000, category: 'loan', type: 'expense' });
+  { merchant: 'Tabby', amountFils: 5000, category: 'shopping', type: 'expense' });
 
 t('Sharjah Islamic neutral foreign-currency transaction parses like the AED twin',
   'A transaction on your Card ending 1234 at SAMPLE CAFE for JOD 25.50 on 18-Sep at 14:30 is successful. Your available balance is 1234.56',
@@ -5778,6 +5783,179 @@ t('ADIB account-opening welcome is not a transaction',
 t('ADIB chequebook request is not a transaction',
   'Dear Customer, thank you for requesting a new chequebook for your A/C NO: ****1234. Your request will be fulfilled at the earliest. Sincerely, ADIB',
   null, { sender: 'ADIB' });
+
+// ── BNPL instalments are purchase spending; lender repayments stay Loan ──
+// Synthetic look-alikes of a private-export regression: every card charge to a
+// BNPL provider, and every purchase on a BNPL provider's own card, was filed
+// as Loan because the provider's name anywhere in the body decided it.
+t('BNPL provider as a field-list payee is shopping, not a loan',
+  'Credit Card Purchase\nCard No XXXX4417\nAED 63.20\nTABBY FZ LLC DUBAI ARE\n14/08/26 19:05\nAvailable Balance AED 8,120.55',
+  { amountFils: 6320, category: 'shopping', type: 'expense' });
+t('BNPL provider as a debit-card payee is shopping, not a loan',
+  'Purchase of AED 118.90 with Debit Card ending 5521 at POSTPAY, Dubai. Avl Balance is AED 2,310.00.',
+  { merchant: 'Postpay', amountFils: 11890, category: 'shopping' });
+t('Tamara instalment charged to a credit card is shopping, not a loan',
+  'Payment of AED 41.75 to TAMARA with Credit Card ending 6630. Avl Cr. Limit is AED 9,402.10.',
+  { merchant: 'Tamara', amountFils: 4175, category: 'shopping' });
+t("a purchase on a BNPL provider's own card keeps the merchant's category",
+  'You spent AED 96.50 at SAMPLE PIZZA RESTAURANT. Your Tabby Card limit is now AED 1,846.50. To split in up to 8 months, go to https://tabby.ai/sd/Qw34Er',
+  { merchant: 'Sample Pizza Restaurant', amountFils: 9650, category: 'dining' });
+t("a purchase on a BNPL provider's own card at a shop is shopping",
+  'You spent 212.00 AED at Sample Home Store Mall. Your available Tabby Card limit is now 3,410.00 AED.',
+  { amountFils: 21200, category: 'shopping' });
+t('an unknown merchant on a BNPL card is not guessed into Loan',
+  'You spent AED 57.00 at ZEPHYRINE LLC. Your Tabby Card limit is now AED 1,943.00. To split in up to 8 months, go to https://tabby.ai/sd/Xy12Ab',
+  { amountFils: 5700, category: 'other' });
+t('a restaurant that shares a BNPL brand word is still a restaurant',
+  'Purchase of AED 88.00 with Debit Card ending 5521 at TAMARA RESTAURANT, Dubai. Avl Balance is AED 900.00.',
+  { amountFils: 8800, category: 'dining' });
+t('a loan instalment debited to a lender stays a loan',
+  'Your loan instalment of AED 1,875.00 has been debited from your account XXXX6620.',
+  { amountFils: 187500, category: 'loan', type: 'expense' });
+
+// Every payment whose payee IS the BNPL provider is Shopping — a direct
+// debit or a bank transfer to it as much as a card charge — including its
+// legal entity, its domain descriptor and an acquirer's trailing city.
+t('a direct-debit instalment sent to a BNPL provider is shopping, not a loan',
+  'Dear Customer, your DD instalment of AED 350.00 has been debited from your FAB Account and has been sent to Tabby as per your UAE Direct Debit Service Instructions.',
+  { merchant: 'Tabby', amountFils: 35000, category: 'shopping', type: 'expense' });
+t("a bank transfer to a BNPL provider's finance entity is shopping",
+  'AED 350.00 has been transferred from your account XXXX6620 to TAMARA FINANCE COMPANY.',
+  { merchant: 'Tamara Finance Company', amountFils: 35000, category: 'shopping' });
+t('a BNPL legal entity with a trailing city is shopping',
+  'Purchase of AED 75.00 with Debit Card ending 5521 at TAMARA FINANCE COMPANY, RIYADH. Avl Balance is AED 900.00.',
+  { amountFils: 7500, category: 'shopping' });
+t('a BNPL field-list payee with a two-word city is shopping',
+  'Credit Card Purchase\nCard No XXXX4417\nAED 63.20\nTABBY ABU DHABI ARE\n14/08/26 19:05\nAvailable Balance AED 8,120.55',
+  { amountFils: 6320, category: 'shopping' });
+t('a single-line charge to the BNPL host WWW.TABBY.AI keeps the provider as merchant',
+  'Purchase of AED 250.00 at WWW.TABBY.AI on card 1234',
+  { merchant: 'Tabby', amountFils: 25000, category: 'shopping' });
+t('...and so does the same host followed by a city',
+  'Purchase of AED 250.00 with Credit Card ending 4417 at WWW.TABBY.AI, DUBAI.',
+  { merchant: 'Tabby', amountFils: 25000, category: 'shopping' });
+for (const descriptor of ['WWW.TABBY.AI', 'TABBY DUBAI', 'TAMARA FINANCE COMPANY', 'POSTPAY']) {
+  ok(`a BNPL payee descriptor is shopping: ${descriptor}`,
+    classifyMerchantDescription(descriptor, 'expense').categoryGuess === 'shopping',
+    classifyMerchantDescription(descriptor, 'expense'));
+}
+ok('a café that shares a BNPL brand word is not the provider',
+  classifyMerchantDescription('CASHEW CAFE', 'expense').categoryGuess === 'dining');
+
+// ── Synthetic single-message shapes that must never post one movement ──
+t('a credit-card statement announcement with a minimum payment is not spending',
+  'Your monthly credit-card statement is ready. Total amount due AED 2,640.00; minimum payment AED 132.00.',
+  null);
+t('a numbered card statement announcement with a minimum payment is not a purchase',
+  'Your credit-card statement for card ending 4417 is ready. Total amount due AED 2,640.00; minimum payment AED 132.00.',
+  null);
+t('a statement with a readable minimum-due label keeps its card-statement branch',
+  'Your monthly credit card statement is ready. Total amount due AED 2,640.00; minimum amount due AED 132.00.',
+  { kind: 'cardStatement', amountFils: 264000, minDueFils: 13200 });
+t('an Arabic purchase awaiting posting never posts',
+  'عملية شراء بمبلغ AED ٢٤٥٫٠٠ قيد الانتظار لدى متجر النخلة ولم يتم قيد الخصم بعد.',
+  null);
+t('an Arabic purchase still being processed never posts',
+  'عملية شراء بمبلغ AED 245.00 لدى متجر النخلة قيد المعالجة.',
+  null);
+t('an Arabic purchase described as pending never posts',
+  'عملية شراء معلقة بمبلغ AED 245.00 لدى متجر النخلة.',
+  null);
+ok('an Arabic pending purchase is affirmative non-posting evidence',
+  nonPostingReason('عملية شراء بمبلغ AED ٢٤٥٫٠٠ قيد الانتظار لدى متجر النخلة ولم يتم قيد الخصم بعد.') === 'pending-processing');
+t('an Arabic purchase not yet debited (ولم يتم … بعد) never posts',
+  'عملية شراء بمبلغ AED 245.00 لدى متجر النخلة ولم يتم خصمها بعد.',
+  null);
+// The pending idioms also describe OTHER things beside a debit that did happen.
+// These are shared non-posting evidence, which can delete a stored row, so a
+// settled Arabic verb or an idiom that does not qualify the movement wins.
+for (const [label, body] of [
+  ['a refund request still processing beside a settled debit',
+    'تم خصم 100.00 درهم من بطاقتك 1234 لدى متجر النخلة. طلب الاسترداد الخاص بك قيد المعالجة.'],
+  ["a transfer's onward status beside a settled debit",
+    'تم خصم مبلغ 2,000.00 درهم من حسابك 1234 لحوالة دولية الى SAMPLE PERSON. حالة الحوالة: قيد التنفيذ.'],
+  ['an app footer about pending requests',
+    'تم خصم 100.00 درهم من بطاقتك 1234 لدى متجر النخلة. للاطلاع على الطلبات قيد التنفيذ زوروا التطبيق.'],
+]) {
+  ok(`${label} is not non-posting evidence`, nonPostingReason(body) === null, nonPostingReason(body));
+  const p = parseSms(body);
+  ok(`${label} still posts its debit`, p !== null && p.kind === 'transaction' && p.type === 'expense', p);
+}
+// The pending idiom must describe THE transaction: a settled verb in any
+// definite/feminine form vetoes it, and a different noun (a request, an order,
+// a shipment, an earlier deposit) — or a "و" starting a new clause — between
+// the transaction noun and the idiom means the idiom is about that noun.
+for (const [label, body] of [
+  ['a debit noun beside a refund request joined by و',
+    'الخصم 100.00 درهم لدى نون بطاقة 1234 وطلب الاسترداد قيد المعالجة'],
+  ['a cash withdrawal beside an earlier deposit still processing',
+    'تم السحب من الصراف 500.00 درهم عملية الايداع السابقة قيد المعالجة'],
+  ['a purchase beside app orders in the same unpunctuated clause',
+    'شراء بمبلغ 250.00 ريال لدى امازون بطاقة 1234 الطلبات قيد التنفيذ'],
+  ['a completed purchase (تمت) beside an order still in progress',
+    'تمت عملية شراء بمبلغ 120.00 ريال من امازون بنجاح وطلبك قيد التنفيذ'],
+  ['a completed purchase (تم الشراء) beside a shipment in progress',
+    'تم الشراء بمبلغ 120.00 ريال لدى امازون بطاقة 1234 والشحنة قيد التنفيذ'],
+  ['a settled bill payment (تم سداد) beside the biller still processing',
+    'تم سداد فاتورة بمبلغ 300.00 ريال عملية السداد قيد المعالجة لدى المفوتر'],
+]) {
+  ok(`${label} is not non-posting evidence`, nonPostingReason(body) === null, nonPostingReason(body));
+}
+t('a cash withdrawal beside an earlier deposit still processing still posts',
+  'تم السحب من الصراف 500.00 درهم عملية الايداع السابقة قيد المعالجة',
+  { amountFils: 50000, type: 'expense' });
+t('a debit noun beside a refund request joined by و still posts',
+  'الخصم 100.00 درهم لدى نون بطاقة 1234 وطلب الاسترداد قيد المعالجة',
+  { amountFils: 10000, type: 'expense' });
+// ...while a pending idiom that does describe the purchase still refuses it.
+ok('a purchase whose status is pending in the same clause is still non-posting evidence',
+  nonPostingReason('عملية شراء بمبلغ 45.00 درهم لدى نون قيد الانتظار.') === 'pending-processing');
+ok('a completed-sounding purchase that is explicitly not yet debited stays non-posting',
+  nonPostingReason('تمت عملية شراء بمبلغ 45.00 درهم لدى نون ولم يتم الخصم بعد.') === 'pending-processing');
+ok('the Saudi transfer-status shape is not non-posting evidence either',
+  nonPostingReason('تم خصم مبلغ 2,000.00 ريال من حسابك 1234 لحوالة دولية الى SAMPLE PERSON. حالة الحوالة: قيد التنفيذ.') === null);
+t('a field-list footer about amounts not yet debited does not refuse the purchase',
+  'Credit Card Purchase\nCard No XXXX4417\nAED 58.10\nFIELD LIST SHOP DUBAI ARE\n14/08/26 19:05\nالمبالغ التي لم يتم خصمها بعد تظهر كمعلقة',
+  { amountFils: 5810, type: 'expense' });
+t('the settled twin of the pending Arabic purchase still posts',
+  'عملية شراء بمبلغ AED 245.00 لدى متجر النخلة.',
+  { amountFils: 24500, type: 'expense', merchant: 'متجر النخلة' });
+t('the single-movement twin of the two-movement Arabic alert still posts',
+  'تم خصم AED ٩٠ لعملية شراء لدى مكتبة الفنار.',
+  { amountFils: 9000, type: 'expense', merchant: 'مكتبة الفنار' });
+t('the single-movement twin of the two-movement English alert still posts',
+  'Purchase posted: AED 62.00 at Harbor Lamp Bakery.',
+  { amountFils: 6200, type: 'expense', merchant: 'Harbor Lamp Bakery' });
+t('two separate movements in one alert are not posted as one',
+  'Purchase posted: AED 62.00 at Harbor Lamp Bakery. A separate refund of AED 18.50 from Olive Crate Store was also credited today.',
+  null);
+t('two separate Arabic movements in one alert are not posted as one',
+  'تم خصم AED ٩٠ لعملية شراء لدى مكتبة الفنار، وتم تنفيذ تحويل صادر منفصل بمبلغ AED ٣٠٠.',
+  null);
+t('a footer about a future separate fee transaction does not refuse the purchase',
+  'Purchase of AED 500.00 with Credit Card ending 4417 at SAMPLE ELECTRONICS, DUBAI. Avl Cr. Limit is AED 9,500.00. Any conversion fee is shown as a separate transaction on your statement.',
+  { amountFils: 50000, merchant: 'Sample Electronics', type: 'expense' });
+t('an Arabic future separate movement (سيتم) is not a second posted movement',
+  'تم خصم AED ٩٠ لعملية شراء لدى مكتبة الفنار، وسيتم تحويل صادر منفصل بمبلغ AED ٣٠٠.',
+  { amountFils: 9000, type: 'expense' });
+t('a note about an earlier separate transfer does not refuse this transfer',
+  'AED 200.00 transferred to Sample Person. Avl bal AED 800.00. Note: a separate transfer was made earlier today.',
+  { amountFils: 20000, type: 'expense' });
+t('an amount stated in two currencies is one charge, not two candidates',
+  'Purchase of AED 100.00 at SAMPLE ELECTRONICS with Credit Card ending 4417. Amount: USD 27.23 or AED 100.00 approx.',
+  { amountFils: 10000, type: 'expense' });
+t('a revised amount pending merchant confirmation is refused (intended)',
+  'Purchase at SAMPLE ELECTRONICS of AED 45.00 on card 1234. The revised amount is pending merchant confirmation.',
+  null);
+t('a statement sent to email with a minimum payment is not spending',
+  'Your credit card statement has been sent to your email. Total amount due AED 2,640.00; min payment AED 132.00.',
+  null);
+t('an alert offering two possible amounts is not posted',
+  'Purchase of AED 45.00 at Harbor Lamp Bakery. Amount: AED 45.00 or AED 145.00; corrected amount not confirmed.',
+  null);
+t('a mixed-language alert with an unconfirmed corrected amount is not posted',
+  'تم تسجيل عملية شراء لدى Harbor Lamp Bakery. Amount: AED 45.00 or AED 145.00; corrected amount not confirmed.',
+  null);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

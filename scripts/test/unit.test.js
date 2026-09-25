@@ -367,6 +367,36 @@ ok('subscription: irregular merchant rejected',
     subTx('Random Shop', '2026-07-29', 2000, 'shopping'),
   ]).length === 0);
 
+// ── BNPL instalments (Shopping) and the recurring-bill paths ──
+// A payment to a BNPL provider is Shopping, so it no longer takes the relaxed
+// Loan path (one interval, amount stability waived within 3x). Intended:
+//  - a steady monthly instalment of one purchase is still found by the
+//    ordinary path (three charges, ±15%), as a commitment rather than a bill;
+//  - two charges alone are not enough evidence of a standing commitment;
+//  - instalments of DIFFERENT purchases that merely share the provider do not
+//    become one monthly bill — the Loan path used to mint exactly that.
+{
+  const today = new Date(2026, 6, 20);
+  const steady = subsLib.detectSubscriptions(
+    ['2026-04-14', '2026-05-14', '2026-06-14', '2026-07-14'].map((date) =>
+      subTx('Tabby', date, 21450, 'shopping')), [], today);
+  ok('a steady monthly BNPL instalment is still detected as recurring',
+    steady.length === 1 && steady[0].cadence === 'monthly', steady);
+  ok('...as a commitment, not a bill',
+    steady.length === 1 && subsLib.billCommitments(steady).length === 0, steady);
+  ok('two BNPL charges alone do not mint a recurring commitment',
+    subsLib.detectSubscriptions([
+      subTx('Tabby', '2026-06-14', 21450, 'shopping'),
+      subTx('Tabby', '2026-07-14', 21450, 'shopping'),
+    ], [], today).length === 0);
+  ok('instalments of different purchases do not become one monthly bill',
+    subsLib.detectSubscriptions([
+      subTx('Tabby', '2026-05-14', 12000, 'shopping'),
+      subTx('Tabby', '2026-06-14', 34000, 'shopping'),
+      subTx('Tabby', '2026-07-14', 9000, 'shopping'),
+    ], [], today).length === 0);
+}
+
 // ── recurring group classification ──
 const rentSubs = subsLib.detectSubscriptions([
   subTx('Apartment Rent', '2026-05-01', 550000, 'rent'),

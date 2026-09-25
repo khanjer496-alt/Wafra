@@ -89,7 +89,7 @@ function createHarness(options = {}) {
     // render — which is what the render-cost tests exist to catch.
     '@/hooks/use-today':{useToday:()=>harnessToday,useResumeClock:()=>harnessToday},
     '@/hooks/use-screen-entering':{useScreenEntering:()=>()=>undefined},'@/hooks/use-color-scheme':{useColorScheme:()=>options.theme??'light'},
-    '@/hooks/use-reduced-motion':{useReducedMotion:()=>true},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true},
+    '@/hooks/use-reduced-motion':{useReducedMotion:()=>true},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true,useFocusEffect:()=>{}},
     '@/lib/foreground-history-priority':{prioritizeForegroundNavigation(){}},
     '@/lib/i18n':i18n,
     '@/lib/format':format,'@/lib/markets':{ledgerCurrencyCode:()=> 'AED',ledgerCurrencyDisplay:()=>lang==='ar'?'د.إ':'AED'},

@@ -25,13 +25,16 @@ import type { Account } from '@/lib/types';
 // every MerchantAvatar/row into one ScrollView on the first Bills mount blocks
 // the JS/UI hand-off even when the underlying analysis is already cached.
 const PAYMENT_AGENDA_PAGE_SIZE = 24;
+const EMPTY_ACCOUNTS: readonly Account[] = [];
 
 const groupIcons: Record<PaymentGroup, IconName> = {
   subscriptions: 'repeat', utilities: 'bolt', cards: 'wallet', loans: 'bank', other: 'receipt',
 };
 
 /** Bills filters choose the payment family; due timing remains the visual hierarchy inside the list. */
-export function PaymentAgenda({ items, accounts = [], includePaid, group: selectedGroup, onOpen }: {
+// Memoised: Bills re-renders for sheets, forms and segment taps; the agenda
+// only needs to when its own inputs change.
+export const PaymentAgenda = React.memo(function PaymentAgenda({ items, accounts = EMPTY_ACCOUNTS, includePaid, group: selectedGroup, onOpen }: {
   items: readonly PaymentAgendaItem[];
   accounts?: readonly Account[];
   includePaid: boolean;
@@ -40,7 +43,10 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
 }) {
   const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
-  const accountById = new Map(accounts.map((account) => [account.id, account] as const));
+  const accountById = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account] as const)),
+    [accounts],
+  );
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
@@ -161,7 +167,7 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
     </Pressable>}
     {visibleCount > 0 && <ThemedText type="meta" themeColor="textTertiary" style={styles.notice}>{w.noteBody}</ThemedText>}
   </View>;
-}
+});
 const styles = StyleSheet.create({
   root: { gap: 18 }, section: { gap: 4 },
   sectionHeading: { minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
