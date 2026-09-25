@@ -43,3 +43,17 @@ export function captureToastContent(
     spoken: copy.captureAddedSpoken(merchant, category, spokenAmount),
   };
 }
+
+/**
+ * What the live-capture toast may name. Behind App Lock it names nothing and
+ * the caller keeps the generic "Transaction added" line: the locked UI is
+ * hidden, but a screen-reader announcement is spoken aloud regardless.
+ */
+export function liveCaptureToastContent(
+  row: Pick<Transaction, 'title' | 'category' | 'amountFils' | 'type'> | null | undefined,
+  money: LedgerMoneySpec | null | undefined,
+  language: string | undefined,
+  privacyGateCleared: boolean,
+): CaptureToastContent | null {
+  return privacyGateCleared ? captureToastContent(row, money, language) : null;
+}

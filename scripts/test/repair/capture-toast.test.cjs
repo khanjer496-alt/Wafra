@@ -11,7 +11,7 @@ const ledgerMoney = load(path.join(root, 'src/lib/ledger-money.ts'), {
   '@/lib/currency-metadata': require('../build/currency-metadata.js'),
 });
 const labels = { dining: ['Dining', 'مطاعم'], groceries: ['Groceries', 'بقالة'], salary: ['Salary', 'راتب'] };
-const { captureToastContent } = load(path.join(root, 'src/lib/capture-toast.ts'), {
+const { captureToastContent, liveCaptureToastContent } = load(path.join(root, 'src/lib/capture-toast.ts'), {
   '@/lib/categories': { categoryLabel: (id, lang) => labels[id][lang === 'ar' ? 1 : 0] },
   '@/lib/ledger-money': ledgerMoney,
   '@/lib/motion-android-copy': copy,
@@ -62,6 +62,16 @@ test('the live capture path uses the light haptic, names only one known row, and
   assert.match(body, /placement: 'top'/);
   assert.match(body, /t\('liveTransactionAdded'\)/, 'generic copy remains the fallback');
   assert.match(body, /announcement: content\.spoken/);
+});
+
+test('behind App Lock a live capture names nothing, on screen or aloud', () => {
+  assert.equal(liveCaptureToastContent(row(), USD, 'en', false), null, 'the generic line is used instead');
+  assert.equal(liveCaptureToastContent(row(), USD, 'en', true).spoken, 'Starbucks added to Dining, USD 6.75');
+  const hook = fs.readFileSync(path.join(root, 'src/hooks/use-auto-import.ts'), 'utf8');
+  const body = hook.slice(hook.indexOf('const showLiveCaptureFeedback'), hook.indexOf('const performAutoImport'));
+  assert.match(hook, /privacyGateCleared\.current = usePrivacyGateCleared\(\);/);
+  assert.match(body, /liveCaptureToastContent\(row, current\.ledgerMoney \?\? null, current\.language, privacyGateCleared\.current\)/);
+  assert.doesNotMatch(body, /captureToastContent\(/, 'no path names the row without the gate');
 });
 
 test('the toast stays backward compatible and announces the full sentence', () => {
