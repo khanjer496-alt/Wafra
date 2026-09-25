@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { useTabBarMetrics } from '@/components/ui/tab-bar-metrics';
-import { Spacing } from '@/constants/theme';
+import { Fonts, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { tapped } from '@/lib/haptics';
 import { t, type StringKey } from '@/lib/i18n';
@@ -38,8 +38,18 @@ const LedgerTabButton = ({ focused, icon, label, onPress, testID }: {
     onPress={onPress}
     android_ripple={{ color: theme.backgroundSelected, borderless: false }}
     style={({ pressed }) => [styles.tab, { opacity: pressed ? 0.7 : 1 }]}>
-    <Icon name={icon} size={21} color={focused ? theme.primary : theme.textTertiary} strokeWidth={focused ? 2.1 : 1.8} />
-    <ThemedText type="meta" style={[styles.tabLabel, { color: focused ? theme.primary : theme.textTertiary }]}>{label}</ThemedText>
+    {/* Material 3's active indicator: a pill behind the selected icon. It is
+        drawn, not animated — this bar is rebuilt on every navigation state
+        change and device traces tied tab-press jank to motion started here
+        (see perf-config.test.js). Selection is therefore immediate for every
+        user, which is also what Reduce Motion asks for. The pill is always
+        laid out, transparent when idle, so icons never shift. */}
+    <View testID={`${testID}-indicator`} style={[styles.indicator,
+      { backgroundColor: focused ? theme.primarySoft : 'transparent' }]}>
+      <Icon name={icon} size={22} color={focused ? theme.primary : theme.textSecondary} strokeWidth={focused ? 2.1 : 1.8} />
+    </View>
+    <ThemedText type="meta" style={[styles.tabLabel, focused ? styles.tabLabelFocused : null,
+      { color: focused ? theme.text : theme.textSecondary }]}>{label}</ThemedText>
   </Pressable>;
 };
 
@@ -152,8 +162,16 @@ const styles = StyleSheet.create({
     minHeight: 54,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 2,
-    paddingVertical: 4,
+    gap: 4,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  indicator: {
+    width: 64,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tabLabel: {
     fontSize: 12,
@@ -161,4 +179,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     flexShrink: 1,
   },
+  // Android ignores fontWeight on a custom family; the weight is its own face.
+  tabLabelFocused: { fontFamily: Fonts.sansSemi },
 });
