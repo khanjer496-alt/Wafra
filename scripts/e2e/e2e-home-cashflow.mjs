@@ -57,7 +57,8 @@ try {
             }
             return null;
           });
-          assert.equal(background, mode === 'dark' ? 'rgb(20, 18, 15)' : 'rgb(244, 241, 234)');
+          // Design language E: the period summary sits on Home's sheet (#F4F1EA light, #1C1A16 dark).
+          assert.equal(background, mode === 'dark' ? 'rgb(28, 26, 22)' : 'rgb(244, 241, 234)');
           for (const row of [incoming, outgoing, net]) {
             await row.scrollIntoViewIfNeeded();
             const clipped = await row.evaluate(node => [...node.querySelectorAll('*')]

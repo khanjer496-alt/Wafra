@@ -32,24 +32,29 @@ test('settings and explicit manual entry remain working visible quick actions', 
   assert.deepEqual(android.events.filter((e) => e[0] === 'route'), [['route', '/add-transaction']]);
 });
 test('Android Home reserves room under its last row for the floating Add; iOS does not', () => {
-  const scaffold = (platform) => walk(harness({ platform }).tree).find((n) => n.type === 'Scaffold');
+  // Home is a design-language-E band screen: BandScaffold, the ink band.
+  const scaffold = (platform) => walk(harness({ platform }).tree).find((n) => n.type === 'BandScaffold');
+  assert.equal(scaffold('ios').props.band, 'home');
+  assert.equal(scaffold('ios').props.tabbed, true);
   // The 56pt button plus a gap, on top of the tab-bar clearance the scaffold adds.
   assert.ok(scaffold('android').props.floatingClearance >= 56 + 8);
   assert.equal(scaffold('ios').props.floatingClearance, 0);
-  // ...and the scaffold adds it to the Android scroll padding.
+  // ...and the scaffold adds it to the tab screen's bottom padding.
   const path = require('node:path');
   const load = require('./load-typescript.cjs');
-  const { useScreenContentInsets: insetsFor } = load(path.join(__dirname, '../../../src/components/ui/screen-scaffold.tsx'), {
-    react: { useMemo: (fn) => fn() }, 'react/jsx-runtime': { jsx() {}, jsxs() {} },
-    'react-native': { Platform: { OS: 'android' }, StyleSheet: { create: (s) => s } },
+  const { useBandBottomInset } = load(path.join(__dirname, '../../../src/components/ui/band-scaffold.tsx'), {
+    react: { useEffect() {}, useRef: (v) => ({ current: v }) }, 'react/jsx-runtime': { jsx() {}, jsxs() {}, Fragment: 'Fragment' },
+    'react-native': { Platform: { OS: 'android' }, StyleSheet: { create: (s) => s }, ScrollView: 'ScrollView', View: 'View', Pressable: 'Pressable', KeyboardAvoidingView: 'KAV' },
+    'react-native-reanimated': { __esModule: true, default: { View: 'View' }, useAnimatedStyle: (f) => f(), useSharedValue: (v) => ({ value: v }), withSpring: (v) => v },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 16 }) },
-    '@/components/themed-view': {}, '@/components/ui/screen-header': {},
-    '@/constants/theme': { MaxContentWidth: 800, ScreenPadding: 16, Spacing: { three: 16, four: 24 } },
-    '@/hooks/use-keyboard-height': {}, '@/hooks/use-tab-bar-clearance': { useTabBarClearance: () => 90 },
+    '@react-navigation/native': { useIsFocused: () => true }, 'expo-status-bar': { StatusBar: 'StatusBar' }, 'expo-router': { useRouter: () => ({}) },
+    '@/components/themed-text': {}, '@/components/ui/icon': {}, '@/hooks/use-band': {}, '@/hooks/use-keyboard-height': {},
+    '@/hooks/use-language': {}, '@/hooks/use-large-text-layout': {}, '@/hooks/use-reduced-motion': {}, '@/lib/band-copy': {},
+    '@/constants/theme': { BandLayout: { sheetOverlap: 28, sheetRadius: 28, buttonHeight: 56 }, MaxContentWidth: 800, MotionSpring: {}, Spacing: { one: 4, two: 8, three: 16, four: 24 } },
+    '@/hooks/use-tab-bar-clearance': { useTabBarClearance: () => 90 },
   });
-  const bottom = (floatingClearance) => insetsFor({ tabbed: true, floatingClearance }).contentInset.bottom;
-  assert.equal(bottom(undefined), 90);
-  assert.equal(bottom(72), 162);
+  assert.equal(useBandBottomInset({ tabbed: true }), 90);
+  assert.equal(useBandBottomInset({ tabbed: true, floatingClearance: 72 }), 162);
 });
 test('Founder logo unlock exists only in founder-enabled internal builds', async () => {
   const production = harness();

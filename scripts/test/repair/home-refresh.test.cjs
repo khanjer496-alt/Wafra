@@ -11,7 +11,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-// Run the actual Home component AND ScreenScaffold. Keep the native primitives
+// Run the actual Home component AND its BandScaffold. Keep the native primitives
 // and asynchronous capture/reminder boundaries explicit; this verifies wiring
 // and state, not Android touch interception, layout, or spinner animation.
 function refreshHarness({ platform = 'android', empty = false, scan, reminders } = {}) {
@@ -64,9 +64,14 @@ function refreshHarness({ platform = 'android', empty = false, scan, reminders }
   h.deps['react-native-safe-area-context'] = {
     useSafeAreaInsets: () => ({ top: 24, bottom: 16, left: 0, right: 0 }),
   };
-  h.local('@/components/ui/screen-scaffold');
+  h.deps['react-native'].KeyboardAvoidingView = 'KeyboardAvoidingView';
+  h.deps['expo-status-bar'] = { StatusBar: props => h.jsx('StatusBar', props) };
+  h.deps['@/hooks/use-reduced-motion'] = { useReducedMotion: () => true, useMotionPreference: () => ({ ready: true, reducedMotion: true }) };
+  h.local('@/lib/band-copy', 'src/lib/band-copy.ts');
+  h.local('@/components/ui/band-scaffold');
   h.deps['@/components/reference-home-summary'] = {
     ReferenceHomeSummary: props => h.jsx('Summary', props),
+    ReferenceHomeBand: props => h.jsx('HomeBand', props),
   };
   h.deps['@/lib/period-context'] = { usePeriod: () => ({ period }) };
   h.deps['@/lib/dashboard-projection'] = { projectDashboard: () => ({

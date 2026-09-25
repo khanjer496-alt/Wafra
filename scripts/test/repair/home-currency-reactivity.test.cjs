@@ -48,7 +48,12 @@ function harness() {
     'react-native': { Pressable: 'Pressable', View: 'View', TextInput: 'TextInput', StyleSheet: { create: value => value },
       useWindowDimensions: () => ({ width: 390, fontScale: 1 }) },
     '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/icon': { Icon: 'Icon' },
-    '@/components/wafra-logo': { WafraMark: 'Mark' }, '@/constants/theme': { Fonts: {}, Spacing: { two: 8 },
+    '@/components/wafra-logo': { WafraMark: 'Mark' },
+    // Home's band pieces are presentational boundaries here; the period
+    // summary under test is the sheet half of reference-home-summary.
+    '@/components/ui/band/band-figure': { BandFigure: 'BandFigure' },
+    '@/components/ui/band/stat-tile': { StatTile: 'StatTile', statTileColors: () => ({}) },
+    '@/components/ui/band/week-tiles': { WeekTiles: 'WeekTiles' }, '@/constants/theme': { Fonts: {}, Spacing: { two: 8 },
       DataViz: { light: { neutral: '#E3DED2' }, dark: { neutral: '#3B362E' } } },
     '@/hooks/use-theme': { useTheme: () => theme }, '@/lib/reference-copy': local('reference-copy'),
     '@/hooks/use-language': { useLanguage: () => i18n.getLanguage() },

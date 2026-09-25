@@ -13,18 +13,21 @@ import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { Icon } from '@/components/ui/icon';
-import { ReferenceHomeSummary } from '@/components/reference-home-summary';
+import { MerchantAvatar } from '@/components/ui/merchant-avatar';
+import { ReferenceHomeBand, ReferenceHomeSummary } from '@/components/reference-home-summary';
 import { HOME_ADD_BUTTON_CLEARANCE, HomeAddButton } from '@/components/home-add-button';
 import { LimitSheet } from '@/components/limit-sheet';
 import { TransferReviewNotice } from '@/components/transfer-review-notice';
 import { RecapLogoTrigger } from '@/components/recap/recap-logo-trigger';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
+import { BandScaffold } from '@/components/ui/band-scaffold';
+import { YourPattern } from '@/components/ui/your-pattern';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
 import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { useTheme } from '@/hooks/use-theme';
+import { ThemeScope, useTheme } from '@/hooks/use-theme';
+import { useBand } from '@/hooks/use-band';
 import { projectDashboard, projectDashboardInsight } from '@/lib/dashboard-projection';
 import type { Insight } from '@/lib/insights';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
@@ -112,6 +115,8 @@ const homeStateEqual = fieldsEqual<LedgerState>(HOME_STATE_FIELDS);
 
 export default function JournalHomeScreen() {
   const theme = useTheme();
+  // Design language E: Home wears the ink band in both schemes.
+  const band = useBand('home');
   const language = useLanguage();
   const words = copy[language === 'ar' ? 'ar' : 'en'];
   const transferWords = transferActivityCopy(language);
@@ -650,6 +655,8 @@ export default function JournalHomeScreen() {
         <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{id === 'due' ? t('homeWidgetDueTitle') : words.upcoming}</ThemedText>
           <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" accessibilityLabel={words.more} style={styles.smallAction}><Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
         <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{due.slice(0, 2).map(item => <Pressable key={item.id} accessibilityRole="button" onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
+          {/* Every payee row keeps its logo tile; the category glyph is only the fallback. */}
+          <MerchantAvatar title={item.title} category={item.subscription?.category ?? 'other'} size={36} />
           <View style={styles.grow}><ThemedText type="smallBold">{item.title}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{daysPhrase(item.daysLeft)}</ThemedText></View>
           <ThemedText type="smallBold" tabular style={largeText && styles.paymentAmountStacked}>{formatAmount(item.amountFils)}</ThemedText></Pressable>)}</View>
       </View>;
@@ -671,39 +678,47 @@ export default function JournalHomeScreen() {
     </View>;
   };
 
+  const summaryProps = {
+    theme, language, largeText, greeting, dateLabel, periodLabel: periodLabel(period),
+    incomeFils: dashboard.hero.incomeFils, expenseFils: dashboard.hero.expenseFils, netFils: dashboard.hero.netFils,
+    moneySpec,
+    onPeriod: () => setPeriodOpen(true), onAdd: () => router.push('/add-transaction'),
+    onSettings: () => router.push('/settings'),
+    onIncome: () => router.push('/transactions?type=income'),
+    onSpending: () => router.push('/flow'),
+  };
+
   return <>
-    <ScreenScaffold tabbed headerMode="inline" contentStyle={styles.screen}
+    <BandScaffold band="home" tabbed testID="home-screen" contentStyle={styles.screen}
       floatingClearance={Platform.OS === 'android' ? HOME_ADD_BUTTON_CLEARANCE : 0}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />}>
-      {!state.hydrated ? <View accessibilityRole="progressbar" accessibilityLabel={t('loadingLedger')} style={styles.loading}>
-        <SkeletonRows count={1} height={160} /><SkeletonRows count={4} height={66} />
-      </View> : <>
-        <ReferenceHomeSummary theme={theme} language={language} largeText={largeText}
-          greeting={greeting} dateLabel={dateLabel} periodLabel={periodLabel(period)}
-          incomeFils={dashboard.hero.incomeFils} expenseFils={dashboard.hero.expenseFils}
-          netFils={dashboard.hero.netFils}
-          moneySpec={moneySpec}
-          onPeriod={() => setPeriodOpen(true)} onAdd={() => router.push('/add-transaction')}
-          onSettings={() => router.push('/settings')}
-          onIncome={() => router.push('/transactions?type=income')}
-          onSpending={() => router.push('/flow')}
-          today={homeToday}
-          onToday={() => router.push('/transactions')}
-          hideHeaderAdd={Platform.OS === 'android'}
-          onAsk={Platform.OS === 'android' ? () => router.push('/assistant') : undefined}
-          onSetBudget={budgetMonthKey ? () => setBudgetSheetOpen(true) : undefined}
-          captureStopped={captureStopped}
-          leadNotice={captureStoppedNotice}
-          todayNotice={transferNotice}
-          brandMark={openRecap ? <RecapLogoTrigger
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={band.onBand} />}
+      bandContent={state.hydrated ? <ReferenceHomeBand {...summaryProps} band={band}
+        pattern={<YourPattern tile={24} gap={3} />}
+        today={homeToday}
+        onToday={() => router.push('/transactions')}
+        hideHeaderAdd={Platform.OS === 'android'}
+        onAsk={Platform.OS === 'android' ? () => router.push('/assistant') : undefined}
+        onSetBudget={budgetMonthKey ? () => setBudgetSheetOpen(true) : undefined}
+        captureStopped={captureStopped}
+        // The recap W sits on the dark band, so it draws in the dark palette.
+        brandMark={openRecap ? <ThemeScope.Provider value={band.statusBar === 'light' ? 'dark' : 'light'}>
+          <RecapLogoTrigger
             unread={recapEntry?.unread ?? false}
             accessibilityLabel={language === 'ar'
               ? `ملخص وفرة · ${recapEntry?.descriptor.label ?? ''}`
               : `Wafra Recap · ${recapEntry?.descriptor.label ?? ''}`}
             onPress={openRecap}
             onLongPress={unlockFounder}
-          /> : undefined}
-          onFounderUnlock={unlockFounder} />
+          /></ThemeScope.Provider> : undefined}
+        onFounderUnlock={unlockFounder} /> : null}>
+      {!state.hydrated ? <View accessibilityRole="progressbar" accessibilityLabel={t('loadingLedger')} style={styles.loading}>
+        <SkeletonRows count={1} height={160} /><SkeletonRows count={4} height={66} />
+      </View> : <>
+        {/* Notices that change how the band's figures read come first on the sheet. */}
+        {captureStoppedNotice}
+        {transferNotice}
+        {/* The period's reconciled figures: spending, income and net. */}
+        <ReferenceHomeSummary {...summaryProps} />
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}
         {moneyPicture
@@ -765,7 +780,7 @@ export default function JournalHomeScreen() {
             <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable>
         </View>
       </>}
-    </ScreenScaffold>
+    </BandScaffold>
     <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
     <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
     <CardPaymentSheet due={cardDue} onClose={() => setCardDue(null)} />
