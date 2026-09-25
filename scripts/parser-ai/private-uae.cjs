@@ -35,11 +35,8 @@ const CUES = [
   ['promo', /\bcashback\b|\boffer\b|\bdiscount\b|\bpromo|\bvoucher\b|\bwin\b|\bearn\b\s+\d|%\s*off|عرض|تخفيض|اربح/iu],
 ];
 
-function main() {
-  const [file] = process.argv.slice(2);
-  const jsonOut = process.argv.includes('--json') ? process.argv[process.argv.indexOf('--json') + 1] : null;
-  const dump = process.argv.includes('--dump') ? process.argv[process.argv.indexOf('--dump') + 1] : null;
-  if (!file) throw new Error('usage: private-uae.cjs <export.json>');
+/** Weak-labelled rows (with the joined ledger row as `tx`) plus join statistics. */
+function buildPrivateUaeRowsWithStats(file) {
   const data = JSON.parse(fs.readFileSync(file, 'utf8'));
   const messages = data.sms.messages;
   const txs = data.backup.data.transactions;
@@ -83,6 +80,17 @@ function main() {
     cueCounts[cue[0]] = (cueCounts[cue[0]] ?? 0) + 1;
     rows.push({ ...base, weak: `cue:${cue[0]}`, label: { status: cue[0], shouldPost: false, family: 'non-posting', direction: 'none' } });
   });
+  return { rows, messages, txs, ambiguousJoin, moneyUnjoined, unjoinedUncuedPosted, cueCounts };
+}
+
+const buildPrivateUaeRows = (file) => buildPrivateUaeRowsWithStats(file).rows;
+
+function main() {
+  const [file] = process.argv.slice(2);
+  const jsonOut = process.argv.includes('--json') ? process.argv[process.argv.indexOf('--json') + 1] : null;
+  const dump = process.argv.includes('--dump') ? process.argv[process.argv.indexOf('--dump') + 1] : null;
+  if (!file) throw new Error('usage: private-uae.cjs <export.json>');
+  const { rows, messages, txs, ambiguousJoin, moneyUnjoined, unjoinedUncuedPosted, cueCounts } = buildPrivateUaeRowsWithStats(file);
 
   // Field agreement with the ledger beyond the scorer: category, date, transfer flag.
   const agree = { n: 0, posted: 0, amount: 0, amountN: 0, direction: 0, merchantStrict: 0, merchantLoose: 0, merchantN: 0,
@@ -133,3 +141,4 @@ function main() {
 }
 
 if (require.main === module) main();
+module.exports = { buildPrivateUaeRows };

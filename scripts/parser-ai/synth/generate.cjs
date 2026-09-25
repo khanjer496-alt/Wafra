@@ -291,7 +291,11 @@ function generate({ seed = 20260925, perTemplate = { train: 24, dev: 12, test: 3
   return rows;
 }
 
-module.exports = { generate, templateCatalog, formatNumber, compose };
+module.exports = {
+  generate, templateCatalog, formatNumber, compose,
+  // Shared with generate-v2.cjs (phase 2); exporting them changes no output.
+  rngFrom, money, drawAmount, formatDate, exponentOf, half, PEOPLE, EMPLOYERS, BILLERS, ATMS, FOOTERS, YEARLESS,
+};
 
 if (require.main === module) {
   const args = process.argv.slice(2);
