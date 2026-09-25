@@ -121,7 +121,11 @@ function harness(options = {}) {
   dependencies['@/lib/transactions-copy'] = load(path.join(root, 'src/lib/transactions-copy.ts'), dependencies);
   dependencies['@/lib/capture-pause'] = load(path.join(root, 'src/lib/capture-pause.ts'), dependencies);
   dependencies['@/lib/capture-pause-state'] = { loadCapturePauseSnooze: async () => null, saveCapturePauseSnooze: async (at) => { events.push(['snooze', at]); } };
-  dependencies['@/components/home-add-button'] = { HomeAddButton: (props) => jsx('HomeAddButton', props) };
+  // The real clearance constant, with the button itself left as a marker.
+  const { HOME_ADD_BUTTON_CLEARANCE } = load(path.join(root, 'src/components/home-add-button.tsx'), {
+    ...dependencies, '@/hooks/use-tab-bar-clearance': { useTabBarClearance: () => 0 },
+  });
+  dependencies['@/components/home-add-button'] = { HOME_ADD_BUTTON_CLEARANCE, HomeAddButton: (props) => jsx('HomeAddButton', props) };
   dependencies['@/components/limit-sheet'] = { LimitSheet: (props) => jsx('Sheet', { ...props, name: 'LimitSheet' }) };
   dependencies['@/lib/widget-snapshot'] = load(path.join(root, 'src/lib/widget-snapshot.ts'), dependencies);
   dependencies['../../modules/wafra-widgets'] = { setWidgetSnapshot() {}, clearWidgetSnapshot() {} };

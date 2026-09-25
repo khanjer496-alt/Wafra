@@ -31,6 +31,26 @@ test('settings and explicit manual entry remain working visible quick actions', 
   fab.props.onPress();
   assert.deepEqual(android.events.filter((e) => e[0] === 'route'), [['route', '/add-transaction']]);
 });
+test('Android Home reserves room under its last row for the floating Add; iOS does not', () => {
+  const scaffold = (platform) => walk(harness({ platform }).tree).find((n) => n.type === 'Scaffold');
+  // The 56pt button plus a gap, on top of the tab-bar clearance the scaffold adds.
+  assert.ok(scaffold('android').props.floatingClearance >= 56 + 8);
+  assert.equal(scaffold('ios').props.floatingClearance, 0);
+  // ...and the scaffold adds it to the Android scroll padding.
+  const path = require('node:path');
+  const load = require('./load-typescript.cjs');
+  const { useScreenContentInsets: insetsFor } = load(path.join(__dirname, '../../../src/components/ui/screen-scaffold.tsx'), {
+    react: { useMemo: (fn) => fn() }, 'react/jsx-runtime': { jsx() {}, jsxs() {} },
+    'react-native': { Platform: { OS: 'android' }, StyleSheet: { create: (s) => s } },
+    'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 16 }) },
+    '@/components/themed-view': {}, '@/components/ui/screen-header': {},
+    '@/constants/theme': { MaxContentWidth: 800, ScreenPadding: 16, Spacing: { three: 16, four: 24 } },
+    '@/hooks/use-keyboard-height': {}, '@/hooks/use-tab-bar-clearance': { useTabBarClearance: () => 90 },
+  });
+  const bottom = (floatingClearance) => insetsFor({ tabbed: true, floatingClearance }).contentInset.bottom;
+  assert.equal(bottom(undefined), 90);
+  assert.equal(bottom(72), 162);
+});
 test('Founder logo unlock exists only in founder-enabled internal builds', async () => {
   const production = harness();
   assert.equal(walk(production.tree).some((node) => node.props.testID === 'founder-unlock-logo'), false);
