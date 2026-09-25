@@ -109,6 +109,7 @@ function createWorkflowHarness(options={}) {
   if(screen==='feedback'){
    d['@/lib/sms-parser']={STRUCTURAL_TITLES:new Set()};
    d['@/lib/feedback-wire']=load(path.join(root,'src/lib/feedback-wire.ts'),d,{TextEncoder});
+   h.local('@/lib/feedback-copy','src/lib/feedback-copy.ts');
    h.local('@/lib/feedback','src/lib/feedback.ts');
    d['@/lib/feedback'].submitFeedback=async payload=>{h.events.push(['submitFeedback',payload]);return {id:'fixture-receipt'}};
    d['@/lib/feedback-transport']={FeedbackSendError:class extends Error{}};

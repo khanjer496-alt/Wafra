@@ -66,7 +66,9 @@ import { cardDiagnostics, parserCoverage, unreadFormats } from '@/lib/accuracy';
 import { categoryLabel } from '@/lib/categories';
 import {
   FEEDBACK_DELIVERY,
+  isFeedbackTopic,
   type FeedbackDeliveryDisclosure,
+  type FeedbackTopic,
 } from '@/lib/feedback-wire';
 import { STRUCTURAL_TITLES } from '@/lib/sms-parser';
 import type { Account, CardDue, CategoryId, Transaction } from '@/lib/types';
@@ -121,6 +123,8 @@ export interface FeedbackLedger {
 }
 
 export interface FeedbackInput {
+  /** What the report is about, if the user picked a type. */
+  topic?: FeedbackTopic | null;
   /** The user's own words. Truncated and digit-masked, never otherwise edited. */
   message: string;
   /** What the user asked to attach. Private Mode may override it. */
@@ -175,6 +179,8 @@ export interface FeedbackCounts {
 
 export interface FeedbackPayload {
   schema: number;
+  /** The user's chosen type, or null when none was picked. */
+  topic: FeedbackTopic | null;
   /** The user's words, truncated to the cap and with long digit runs masked. */
   message: string;
   /** What the user asked for. */
@@ -554,6 +560,7 @@ export function buildFeedbackPayload(input: FeedbackInput): FeedbackPayload {
 
   const base: FeedbackPayload = {
     schema: FEEDBACK_SCHEMA,
+    topic: isFeedbackTopic(input.topic) ? input.topic : null,
     message: scrubFeedbackMessage(input.message),
     detailRequested: requested,
     detail,
@@ -639,8 +646,21 @@ const DETAIL_LINES: Record<FeedbackDetail, string> = {
  * complete, so this function is checked field-by-field in the suite rather
  * than eyeballed.
  */
+/** The preview is the English report the maintainers read, like every other line in it. */
+const FEEDBACK_TOPIC_LINES: Record<FeedbackTopic, string> = {
+  idea: 'idea',
+  broken: 'something broke',
+  category: 'wrong category',
+};
+
 export function formatFeedbackPayload(p: FeedbackPayload): string {
   const out: string[] = ['WAFRA FEEDBACK', `schema ${p.schema}`, ''];
+
+  if (p.topic) {
+    out.push('TYPE');
+    out.push(`  ${FEEDBACK_TOPIC_LINES[p.topic]}`);
+    out.push('');
+  }
 
   out.push('WHAT YOU WROTE');
   out.push(...(p.message ? p.message.split('\n').map((l) => `  ${l}`) : ['  (nothing yet)']));

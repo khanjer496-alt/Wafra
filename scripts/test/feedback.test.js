@@ -492,6 +492,19 @@ for (const asked of ['shapes', 'figures']) {
 {
   const p = build({ detail: 'figures' });
   const wire = toFeedbackWirePayload(p);
+  ok('wire: an untyped report sends a null type', wire.diagnostic.topic === null);
+  {
+    const typed = buildFeedbackPayload({ topic: 'broken', message: 'The add button does nothing', detail: 'none',
+      build: p.build, ledger: { accounts: [], transactions: [], cardDues: [], merchantOverrides: {} } });
+    ok('wire: the chosen type travels in the diagnostic',
+      typed.topic === 'broken' && toFeedbackWirePayload(typed).diagnostic.topic === 'broken');
+    ok('preview: the chosen type is shown in the outbound preview',
+      /\nTYPE\n  something broke\n/.test(formatFeedbackPayload(typed)));
+    const forged = buildFeedbackPayload({ topic: 'call me', message: 'x', detail: 'none',
+      build: p.build, ledger: { accounts: [], transactions: [], cardDues: [], merchantOverrides: {} } });
+    ok('payload: an unknown type is dropped, never sent as free text',
+      forged.topic === null && toFeedbackWirePayload(forged).diagnostic.topic === null);
+  }
   ok('the app and Worker share one versioned feedback contract',
     wire.schema === FEEDBACK_WIRE_SCHEMA && wire.diagnostic.reportSchema === FEEDBACK_SCHEMA);
   ok('feedback is retained for the disclosed maximum',

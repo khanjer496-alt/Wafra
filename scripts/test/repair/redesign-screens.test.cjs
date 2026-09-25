@@ -159,6 +159,23 @@ test('Ask Wafra copy is paired; the evidence count counts distinct transactions'
   assert.doesNotMatch(screen, /afford/i);
 });
 
+test('Feedback type chips are paired, optional and use the wire topics', () => {
+  const wire = load(path.join(root, 'src/lib/feedback-wire.ts'), {}, { TextEncoder });
+  const { FEEDBACK_COPY } = load(path.join(root, 'src/lib/feedback-copy.ts'));
+  assertParity(FEEDBACK_COPY.en, FEEDBACK_COPY.ar);
+  assert.deepEqual(Object.keys(FEEDBACK_COPY.en.topic).sort(), [...wire.FEEDBACK_TOPICS].sort());
+  assert.deepEqual(Object.values(FEEDBACK_COPY.en.topic), ['Idea', 'Something broke', 'Wrong category']);
+  const screen = read('src/app/feedback.tsx');
+  assert.match(screen, /FEEDBACK_TOPICS\.map/);
+  assert.match(screen, /setTopic\(selected \? null : value\)/, 'the type can be cleared again');
+  assert.match(screen, /buildFeedbackPayload\(\{\s*topic,/);
+  // The outbound preview stays, and its note names everything that is sent.
+  assert.match(screen, /t\('feedbackPreviewNote'\)[\s\S]{0,700}\{preview\}/);
+  assert.match(read('src/lib/i18n.ts'), /feedbackPreviewNote: \{\s*en: 'This is everything sent to Wafra maintainers: your message, the type you picked, and the app version, platform, language, market and currency/);
+  // Server-side validation of the same list.
+  assert.match(read('server/src/feedback.ts'), /!isFeedbackTopic\(topic\)[\s\S]{0,80}'bad_topic'/);
+});
+
 test('Trusted devices shows the invite countdown as its hero and says what is relayed', () => {
   const screen = read('src/app/trusted-devices.tsx');
   const i18n = read('src/lib/i18n.ts');

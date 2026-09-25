@@ -3881,9 +3881,11 @@ const S = {
     ar: 'الوضع الخاص يُبقي سجلك على هذا الهاتف.',
   },
   feedbackPreviewHeader: { en: 'EXACTLY WHAT WILL BE SENT', ar: 'ما سيُرسل بالضبط' },
+  // The preview carries more than the message: the chosen type and the build
+  // lines (app version, platform, language, market and currency) travel too.
   feedbackPreviewNote: {
-    en: 'This is the complete note sent to Wafra maintainers. No ledger, bank message, amount, account, or merchant is attached.',
-    ar: 'هذه هي الملاحظة الكاملة التي تُرسل إلى مشرفي وفرة. لا يُرفق سجل أو رسالة بنكية أو مبلغ أو حساب أو متجر.',
+    en: 'This is everything sent to Wafra maintainers: your message, the type you picked, and the app version, platform, language, market and currency shown here. No ledger, bank message, amount, account, or merchant is attached.',
+    ar: 'هذا كل ما يُرسل إلى مشرفي وفرة: رسالتك والنوع الذي اخترته وإصدار التطبيق والمنصة واللغة والسوق والعملة الظاهرة هنا. لا يُرفق سجل أو رسالة بنكية أو مبلغ أو حساب أو متجر.',
   },
   feedbackSend: { en: 'Send report', ar: 'إرسال التقرير' },
   feedbackSending: { en: 'Sending…', ar: 'جارٍ الإرسال…' },
