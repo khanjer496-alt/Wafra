@@ -2896,6 +2896,11 @@ const TRANSFER_HINT_RE =
 const BNPL_PAYEE_RE =
   /^(?:www\.)?(?:tabby|tamara|postpay|cashew)(?:\.(?:ai|com|co|ae|sa))?(?:[\s,]+(?:fz[\s-]*llc|fzco|fze|llc|l\.l\.c\.?|finance|financing|company|co\.?|technologies|payments?|uae|ae|are|ksa|sa|sau|dubai|abu\s+dhabi|sharjah|riyadh|jeddah))*$/i;
 
+/** Is this payee name a BNPL provider and nothing else? (Stored-row repair.) */
+export function isBnplPayee(name: string): boolean {
+  return BNPL_PAYEE_RE.test(name.trim());
+}
+
 const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // Exchange houses move money; they do not sell anything. There is no
   // remittance category to file them under, so they resolve to `other` —

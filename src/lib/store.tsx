@@ -84,6 +84,7 @@ import {
 import { countsInTotals, internalTransferIdsForState, primeInternalTransferIds } from '@/lib/ledger';
 import { accountsLabelledWithBank, sanitizeKnownBanks, singleKnownBank } from '@/lib/known-banks';
 import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
+import { BNPL_CATEGORY_REPAIR_VERSION, repairBnplCategories } from '@/lib/bnpl-category-repair';
 import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
   createLedgerPersistence,
@@ -775,6 +776,17 @@ export function migratePersistedState(
     markLaunchPhase('ledger-row-transforms-complete');
   }
   markLaunchPhase('ledger-reparse-complete');
+
+  // One-time category repair for rows a body-wide BNPL keyword filed as Loan.
+  // Hydration trusts its own receipt; a restored backup always runs it, since
+  // it is idempotent and the file's receipt describes another installation.
+  if (parsed.transactions && (
+    options?.reuseCompletedReparse !== true ||
+    (parsed.bnplCategoryRepairVersion ?? 0) < BNPL_CATEGORY_REPAIR_VERSION
+  )) {
+    parsed.transactions = repairBnplCategories(parsed.transactions, parsed.merchantOverrides);
+  }
+  if (parsed.transactions) parsed.bnplCategoryRepairVersion = BNPL_CATEGORY_REPAIR_VERSION;
 
   if (parsed.cardDues?.length && parsed.accounts?.length) {
     // A CardDue can only describe a credit-card statement. Older parsers
@@ -3026,6 +3038,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       reviewTray: _reviewTray,
       hydrationReparseKey: _hydrationReparseKey,
       hydrationFinalizeVersion: _hydrationFinalizeVersion,
+      bnplCategoryRepairVersion: _bnplCategoryRepairVersion,
       ...data
     } = authoritativeState.current;
     return JSON.stringify({ app: 'wafra', version: 1, exportedAt: new Date().toISOString(), data });
