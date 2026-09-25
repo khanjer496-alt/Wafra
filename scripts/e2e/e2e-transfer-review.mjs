@@ -121,10 +121,10 @@ async function home(page, expected, pendingCount) {
     amounts.push(minor(await item.getAttribute('aria-label')));
   }
   assert.deepEqual(amounts, expected, 'confirmed Home income, spending and Net');
-  // Pending transfer review no longer interrupts Home. The shipping flow keeps
-  // review contextual to a transaction detail instead of a permanent Wallet row,
-  // while Home remains focused on confirmed Income / Spending / Net.
-  assert.equal(await page.getByTestId('transfer-review-notice').count(), 0);
+  // Home shows a compact "N transfers to confirm" disclosure only while the
+  // review queue is non-empty (computed after interactions). With nothing
+  // pending it must be absent; its figures stay confirmed Income/Spending/Net.
+  if (!pendingCount) assert.equal(await page.getByTestId('transfer-review-notice').count(), 0);
 }
 async function choose(page, words, id, ownership) {
   await page.goto(`${BASE}/review-transfers?transactionId=${id}`, { waitUntil: 'networkidle' });
