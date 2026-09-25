@@ -33,6 +33,7 @@ import {
 } from '@/lib/format';
 import { daysPhrase } from '@/lib/leaving-soon';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
+import { applyBillEdit } from '@/lib/money-places';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { requestNotificationPermission, syncPaymentReminders } from '@/lib/notifications';
 import { useStore } from '@/lib/store';
@@ -389,8 +390,14 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
   const money = state.ledgerMoney;
   const draftAmount = money ? parseAmountWithMoneySpec(amountText, money) : null;
   const draftDay = Number(dayText);
-  const draftValid = Boolean(nameText.trim()) && draftAmount !== null && draftAmount > 0 &&
+  const draftShapeValid = Boolean(nameText.trim()) && draftAmount !== null && draftAmount > 0 &&
     dayText.trim() !== '' && Number.isInteger(draftDay) && draftDay >= 1 && draftDay <= 31;
+  // The store's own rule, asked before Save is offered: a yearly reminder
+  // refuses a day its anniversary month does not have, and a refused edit
+  // must not close the form as if it had saved.
+  const draftValid = draftShapeValid && draftAmount !== null &&
+    applyBillEdit(reminder, { title: nameText, amountFils: draftAmount, dueDay: draftDay }) !== null;
+  const dayRefused = draftShapeValid && !draftValid;
   const openEdit = () => {
     setNameText(reminder.title);
     setAmountText(formatAmountForInput(reminder.amountFils));
@@ -447,6 +454,11 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
             <TextField numeric label={w.billAmount} value={amountText} onChangeText={setAmountText} placeholder={w.billAmount}
               leading={<ThemedText type="smallBold" themeColor="textSecondary">{money?.currency ?? '—'}</ThemedText>} />
             <TextField numeric label={w.billDueDay} value={dayText} onChangeText={setDayText} placeholder="1-31" />
+            {dayRefused && reminder.yearlyOnISO && (
+              <ThemedText type="meta" accessibilityLiveRegion="polite" style={{ color: theme.expense }}>
+                {w.dayNotInMonth(shortDate(reminder.yearlyOnISO))}
+              </ThemedText>
+            )}
             <View style={[styles.actionsRow, large && styles.stack]}>
               <Button inline={!large} label={w.saveBill} disabled={!draftValid} onPress={saveEdit} />
               <Button inline={!large} variant="outline" label={t('cancel')} onPress={() => setEditing(false)} />

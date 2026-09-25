@@ -103,7 +103,8 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
     );
   }
 
-  const freshness = accountSnapshotFreshness(account, now, language);
+  // Only a balance snapshot dates the figure shown; a quoted limit is not one.
+  const freshness = account.snapshotKind === 'balance' ? accountSnapshotFreshness(account, now, language) : null;
   const handKept = account.snapshotTs === undefined && balanceFils !== null;
   const kindLabel = account.kind === 'cash' ? w.cashAccount : w.bankAccount;
   const identity = [account.bankName && account.bankName !== account.name ? account.bankName : null,

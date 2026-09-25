@@ -116,6 +116,7 @@ import {
   type ReviewResolutionOutcome,
 } from '@/lib/alert-review-tray';
 import { accountBalanceFils } from '@/lib/balances';
+import { applyBillEdit, type BillEdit } from '@/lib/money-places';
 import { mergeImportedCardDues } from '@/lib/cards';
 import { reconcileCaptureDuplicates } from '@/lib/dedupe';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
@@ -983,50 +984,6 @@ function requireSelectedLedgerMoney(state: AppState): void {
   throw new Error('Choose a ledger currency before recording money');
 }
 
-/** What "Edit bill" may change on a reminder the user created. */
-export interface BillEdit {
-  title?: string;
-  amountFils?: number;
-  dueDay?: number;
-}
-
-/**
- * A hand-made reminder with an edit applied, or null when the edit cannot be.
- *
- * Detected reminders (`autoDetected`) are refused outright: the next bank
- * notice refreshes their amount and due day (`mergeImportedBills`), so an edit
- * would be silently undone and the user told nothing. A yearly reminder keeps
- * its anniversary in step with the new day — `dueDay` must always equal that
- * date's day (types.ts) — and a day the anniversary month does not have is
- * refused rather than clamped into a different date.
- */
-export function applyBillEdit(bill: Bill, patch: BillEdit): Bill | null {
-  if (bill.autoDetected) return null;
-  let next = bill;
-  if (patch.title !== undefined) {
-    const title = patch.title.trim();
-    if (!title) return null;
-    next = { ...next, title };
-  }
-  if (patch.amountFils !== undefined) {
-    if (!Number.isSafeInteger(patch.amountFils) || patch.amountFils <= 0) return null;
-    next = { ...next, amountFils: patch.amountFils };
-  }
-  if (patch.dueDay !== undefined) {
-    const day = patch.dueDay;
-    if (!Number.isInteger(day) || day < 1 || day > 31) return null;
-    if (next.yearlyOnISO) {
-      const year = Number(next.yearlyOnISO.slice(0, 4));
-      const month = Number(next.yearlyOnISO.slice(5, 7));
-      if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null;
-      next = { ...next, dueDay: day, yearlyOnISO: `${next.yearlyOnISO.slice(0, 8)}${String(day).padStart(2, '0')}` };
-    } else {
-      next = { ...next, dueDay: day };
-    }
-  }
-  return next;
-}
-
 /**
  * "Set today's balance" for a bank or cash account.
  *
@@ -1068,6 +1025,8 @@ export function reduceSetAccountBalance(state: AppState, id: string, fils: numbe
     accounts: state.accounts.map((candidate) => (candidate.id === id ? { ...candidate, ...patch } : candidate)),
   };
 }
+
+export { applyBillEdit, type BillEdit };
 
 /** Keys an object literal must never be given from user-typed merchant names. */
 const UNSAFE_RECORD_KEYS = new Set(['__proto__', 'prototype', 'constructor']);

@@ -8,7 +8,7 @@
  */
 import { daysBetweenISO, monthKey } from '@/lib/format';
 import { isSpending } from '@/lib/ledger';
-import type { Account, CardDue, Goal, Transaction } from '@/lib/types';
+import type { Account, Bill, CardDue, Goal, Transaction } from '@/lib/types';
 
 /** Wallet opens the account screen for bank and cash accounts; cards keep their statement sheet. */
 export function isAccountDetailTarget(account: Pick<Account, 'kind' | 'cardType'>): boolean {
@@ -250,4 +250,50 @@ export function timelinePins(
     perDay.set(pin.day, lane + 1);
   }
   return pins;
+}
+
+/* ── Editing a hand-made bill ───────────────────────────────────────── */
+
+/** What "Edit bill" may change on a reminder the user created. */
+export interface BillEdit {
+  title?: string;
+  amountFils?: number;
+  dueDay?: number;
+}
+
+/**
+ * A hand-made reminder with an edit applied, or null when the edit cannot be.
+ *
+ * Detected reminders (`autoDetected`) are refused outright: the next bank
+ * notice refreshes their amount and due day (`mergeImportedBills`), so an edit
+ * would be silently undone and the user told nothing. A yearly reminder keeps
+ * its anniversary in step with the new day — `dueDay` must always equal that
+ * date's day (types.ts) — and a day the anniversary month does not have is
+ * refused rather than clamped into a different date.
+ */
+export function applyBillEdit(bill: Bill, patch: BillEdit): Bill | null {
+  if (bill.autoDetected) return null;
+  let next = bill;
+  if (patch.title !== undefined) {
+    const title = patch.title.trim();
+    if (!title) return null;
+    next = { ...next, title };
+  }
+  if (patch.amountFils !== undefined) {
+    if (!Number.isSafeInteger(patch.amountFils) || patch.amountFils <= 0) return null;
+    next = { ...next, amountFils: patch.amountFils };
+  }
+  if (patch.dueDay !== undefined) {
+    const day = patch.dueDay;
+    if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+    if (next.yearlyOnISO) {
+      const year = Number(next.yearlyOnISO.slice(0, 4));
+      const month = Number(next.yearlyOnISO.slice(5, 7));
+      if (day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null;
+      next = { ...next, dueDay: day, yearlyOnISO: `${next.yearlyOnISO.slice(0, 8)}${String(day).padStart(2, '0')}` };
+    } else {
+      next = { ...next, dueDay: day };
+    }
+  }
+  return next;
 }

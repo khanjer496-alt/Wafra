@@ -245,6 +245,14 @@ test('a detected reminder cannot be edited; a hand-made one saves through editBi
     [['editBill', 'dewa', { title: 'DEWA home', amountFils: 35000, dueDay: 9 }]]);
 });
 
+test('a yearly bill edit to a day its month lacks is refused before Save, not dropped after it', () => {
+  const yearly = { id: 'insurance', title: 'Insurance', category: 'other', amountFils: 120000, dueDay: 10, yearlyOnISO: '2026-02-10', paidMonths: [] };
+  const h = createHarness({ states: { 1: true, 2: 'Insurance', 3: '1200', 4: '30' } });
+  const form = renderBillSheet(h, { bill: { bill: yearly, status: 'upcoming', daysLeft: 20, dueISO: '2027-02-10' } });
+  assert.equal(walk(form).find((n) => n.props?.accessibilityLabel === 'Save bill').props.disabled, true);
+  assert.match(text(byId(form, 'bill-detail-edit')), /does not exist in the month/);
+});
+
 test('Arabic Bills speaks Arabic in the new sections', () => {
   const tree = billsWith([netflix, spotifyUp], { language: 'ar' }).render('bills');
   assert.match(text(byId(tree, 'bills-subscriptions')), /الاشتراكات/);

@@ -73,6 +73,8 @@ function loadStore({ storePath = 'src/lib/store.tsx', counted = {} } = {}) {
       throw new Error(`unexpected dependency ${id}`);
     }),
     './balances': {},
+    // Pure Accounts/Bills helpers (applyBillEdit); not part of the shared build.
+    '@/lib/money-places': execute('src/lib/money-places.ts', (id) => require(path.join(BUILD, id.slice(6)))),
   };
   const calls = {};
   for (const [id, names] of Object.entries(counted)) {
