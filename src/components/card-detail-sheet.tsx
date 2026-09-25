@@ -1,18 +1,23 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ProgressBar } from '@/components/ui/charts';
+import { Button } from '@/components/ui/controls';
 import { Row, SectionHeader } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { AccountTile } from '@/components/ui/tile';
 import { Spacing } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { cardStatementView } from '@/lib/cards';
-import { shortDate } from '@/lib/format';
+import { formatAED, shortDate } from '@/lib/format';
+import { cardUsage } from '@/lib/money-places';
+import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { useStore } from '@/lib/store';
-import type { Account } from '@/lib/types';
+import type { Account, CardDue } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
 interface CardDetailSheetProps {
@@ -30,7 +35,13 @@ interface CardDetailSheetProps {
  */
 export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetProps) {
   const theme = useTheme();
+  const w = moneyPlacesWords(useLanguage());
   const { state } = useStore();
+  // "Record a payment" opens the payment sheet on top of this one.
+  const [paying, setPaying] = useState<CardDue | null>(null);
+  useEffect(() => {
+    setPaying(null);
+  }, [account]);
 
   // Every rule about what a card owes lives in cards.ts, next to `openDues`
   // and `allocatePayments` — and, unlike a .tsx, under test. This sheet got
@@ -47,6 +58,13 @@ export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetPro
     data.billedFils > 0
       ? Math.min(1, (data.billedFils - data.outstandingFils) / data.billedFils)
       : 0;
+  const statement = data.open[0] ?? null;
+  // Only a limit the user entered, against a bank-quoted figure (money-places.ts).
+  const usage = cardUsage(account);
+  // "Min" is the bank's figure or nothing; an estimate is never shown as one.
+  const statedMinimum = statement && !statement.minDueEstimated && statement.minDueFils > 0
+    ? statement.minDueFils
+    : null;
 
   return (
     <BottomSheet visible onClose={onClose} title={t('cardDetail')} footer={footer}>
@@ -82,30 +100,38 @@ export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetPro
       {data.billable && (
         <>
           {/* The one figure the user opened this for, before any list. */}
-          {data.open.length > 0 && (
-            <View style={styles.summary}>
-              <View style={styles.summaryRow}>
-                <ThemedText type="micro" themeColor="textTertiary">
-                  {t('stillOwed')}
-                </ThemedText>
-                <ThemedText type="nano" themeColor="textTertiary">
-                  {tf('openStatements', {
-                    count: data.open.length,
-                    s: data.open.length === 1 ? '' : 's',
-                  })}
-                </ThemedText>
-              </View>
-              <Money
-                fils={data.outstandingFils}
-                type="sheetAmount"
-                prefix={false}
-                color={theme.expense}
-              />
+          {statement && (
+            <View style={styles.summary} testID="card-statement-hero">
+              <ThemedText type="small" themeColor="textSecondary">
+                {w.statementBalance}
+              </ThemedText>
+              <Money fils={data.outstandingFils} type="sheetAmount" />
               {/* Progress is only honest once something has been paid; a
                   full-width empty track reads as a bug. */}
               {settledShare > 0 && (
-                <ProgressBar ratio={settledShare} color={theme.income} height={5} />
+                <>
+                  <ProgressBar ratio={settledShare} color={theme.income} height={5} />
+                  <ThemedText type="meta" themeColor="textSecondary">
+                    {w.leftOfStatement(formatAED(data.outstandingFils), formatAED(data.billedFils))}
+                  </ThemedText>
+                </>
               )}
+              <ThemedText type="meta" themeColor="textSecondary" testID="card-statement-due">
+                {w.dueOn(shortDate(statement.dueDate))}
+                {statedMinimum !== null ? ` · ${w.minimum(formatAED(statedMinimum))}` : ''}
+              </ThemedText>
+              {usage && (
+                <View style={styles.usage} testID="card-usage">
+                  <ProgressBar ratio={usage.ratio} color={theme.primary} height={5} />
+                  <ThemedText type="meta" themeColor="textSecondary">
+                    {w.usedOfLimit(formatAED(usage.usedFils, { decimals: false }), formatAED(usage.limitFils, { decimals: false }))}
+                  </ThemedText>
+                </View>
+              )}
+              <Button label={w.recordPayment} icon="check" onPress={() => setPaying(statement)} />
+              <ThemedText type="meta" themeColor="textTertiary">
+                {w.cardReminder(shortDate(statement.dueDate))}
+              </ThemedText>
             </View>
           )}
 
@@ -182,6 +208,8 @@ export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetPro
           </View>
         </>
       )}
+      {/* Nested so the payment sheet stacks over this one on every platform. */}
+      <CardPaymentSheet due={paying} onClose={() => setPaying(null)} />
     </BottomSheet>
   );
 }
@@ -199,11 +227,8 @@ const styles = StyleSheet.create({
   summary: {
     gap: Spacing.two + 2,
   },
-  summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
+  usage: {
+    gap: Spacing.one,
   },
   dot: {
     width: 6,
