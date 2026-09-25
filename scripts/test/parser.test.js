@@ -5828,6 +5828,12 @@ t('a BNPL legal entity with a trailing city is shopping',
 t('a BNPL field-list payee with a two-word city is shopping',
   'Credit Card Purchase\nCard No XXXX4417\nAED 63.20\nTABBY ABU DHABI ARE\n14/08/26 19:05\nAvailable Balance AED 8,120.55',
   { amountFils: 6320, category: 'shopping' });
+t('a single-line charge to the BNPL host WWW.TABBY.AI keeps the provider as merchant',
+  'Purchase of AED 250.00 at WWW.TABBY.AI on card 1234',
+  { merchant: 'Tabby', amountFils: 25000, category: 'shopping' });
+t('...and so does the same host followed by a city',
+  'Purchase of AED 250.00 with Credit Card ending 4417 at WWW.TABBY.AI, DUBAI.',
+  { merchant: 'Tabby', amountFils: 25000, category: 'shopping' });
 for (const descriptor of ['WWW.TABBY.AI', 'TABBY DUBAI', 'TAMARA FINANCE COMPANY', 'POSTPAY']) {
   ok(`a BNPL payee descriptor is shopping: ${descriptor}`,
     classifyMerchantDescription(descriptor, 'expense').categoryGuess === 'shopping',
@@ -5875,6 +5881,37 @@ for (const [label, body] of [
   const p = parseSms(body);
   ok(`${label} still posts its debit`, p !== null && p.kind === 'transaction' && p.type === 'expense', p);
 }
+// The pending idiom must describe THE transaction: a settled verb in any
+// definite/feminine form vetoes it, and a different noun (a request, an order,
+// a shipment, an earlier deposit) — or a "و" starting a new clause — between
+// the transaction noun and the idiom means the idiom is about that noun.
+for (const [label, body] of [
+  ['a debit noun beside a refund request joined by و',
+    'الخصم 100.00 درهم لدى نون بطاقة 1234 وطلب الاسترداد قيد المعالجة'],
+  ['a cash withdrawal beside an earlier deposit still processing',
+    'تم السحب من الصراف 500.00 درهم عملية الايداع السابقة قيد المعالجة'],
+  ['a purchase beside app orders in the same unpunctuated clause',
+    'شراء بمبلغ 250.00 ريال لدى امازون بطاقة 1234 الطلبات قيد التنفيذ'],
+  ['a completed purchase (تمت) beside an order still in progress',
+    'تمت عملية شراء بمبلغ 120.00 ريال من امازون بنجاح وطلبك قيد التنفيذ'],
+  ['a completed purchase (تم الشراء) beside a shipment in progress',
+    'تم الشراء بمبلغ 120.00 ريال لدى امازون بطاقة 1234 والشحنة قيد التنفيذ'],
+  ['a settled bill payment (تم سداد) beside the biller still processing',
+    'تم سداد فاتورة بمبلغ 300.00 ريال عملية السداد قيد المعالجة لدى المفوتر'],
+]) {
+  ok(`${label} is not non-posting evidence`, nonPostingReason(body) === null, nonPostingReason(body));
+}
+t('a cash withdrawal beside an earlier deposit still processing still posts',
+  'تم السحب من الصراف 500.00 درهم عملية الايداع السابقة قيد المعالجة',
+  { amountFils: 50000, type: 'expense' });
+t('a debit noun beside a refund request joined by و still posts',
+  'الخصم 100.00 درهم لدى نون بطاقة 1234 وطلب الاسترداد قيد المعالجة',
+  { amountFils: 10000, type: 'expense' });
+// ...while a pending idiom that does describe the purchase still refuses it.
+ok('a purchase whose status is pending in the same clause is still non-posting evidence',
+  nonPostingReason('عملية شراء بمبلغ 45.00 درهم لدى نون قيد الانتظار.') === 'pending-processing');
+ok('a completed-sounding purchase that is explicitly not yet debited stays non-posting',
+  nonPostingReason('تمت عملية شراء بمبلغ 45.00 درهم لدى نون ولم يتم الخصم بعد.') === 'pending-processing');
 ok('the Saudi transfer-status shape is not non-posting evidence either',
   nonPostingReason('تم خصم مبلغ 2,000.00 ريال من حسابك 1234 لحوالة دولية الى SAMPLE PERSON. حالة الحوالة: قيد التنفيذ.') === null);
 t('a field-list footer about amounts not yet debited does not refuse the purchase',

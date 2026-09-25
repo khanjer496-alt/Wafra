@@ -52,6 +52,12 @@ export function bnplRepairedCategory(
   return parsed.categoryGuess;
 }
 
+/** Will the repair re-read any retained SMS? (Then the ledger's pack must be live.) */
+export function bnplRepairNeedsParser(transactions: readonly Transaction[]): boolean {
+  return transactions.some((t) =>
+    t.category === 'loan' && t.type === 'expense' && typeof t.raw === 'string' && BNPL_WORD_RE.test(t.raw));
+}
+
 /** Returns the same array when nothing moved, so callers can detect a no-op. */
 export function repairBnplCategories(
   transactions: Transaction[],

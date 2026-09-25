@@ -1610,8 +1610,16 @@ const AMBIGUOUS_AMOUNT_RE =
 const MONEY_FIGURE_RE = /\b(?:[A-Z]{3}|Dhs?)\s*\d|\d(?:[\d,]*\.?\d*)\s*(?:[A-Z]{3}\b|Dhs?\b|درهم|ريال)/;
 /** One movement stated as done in Arabic — a posted clause, not a notice. */
 const AR_SETTLED_VERB_RE = new RegExp(
-  `(?<![${AR_LETTER}])و?تم\\s+(?:خصم|الخصم|شراء|سحب|دفع|الدفع|تحويل)`,
+  // Definite forms too: تم الشراء / تم السحب / تم التحويل / تم السداد. And a
+  // body that OPENS with the debit noun and its figure ("الخصم 100.00 درهم")
+  // is the bank stating the debit, not a status.
+  `(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:خصم|شراء|سحب|دفع|تحويل|سداد)|^\\s*(?:ال)?خصم\\s+(?:مبلغ\\s+)?(?:[A-Z]{3}\\s*)?\\d`,
 );
+/**
+ * "تمت" (it was completed). Vetoes only the قيد/معلقة idioms: an explicit
+ * "لم يتم الخصم بعد" after it still says the debit has not happened.
+ */
+const AR_COMPLETED_RE = new RegExp(`(?<![${AR_LETTER}])و?تمت(?![${AR_LETTER}])`);
 const STRONG_SENDERLESS_POSTING_RE =
   /\b(?:transaction|txn|payment|purchase|withdrawal|transfer|debit|credit)\b(?:[^.\n]|\.\d){0,120}?\b(?:amount\s+(?:of|is)|for|of)?\s*(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is)\s+(?:successfully\s+)?(?:paid|completed|processed|posted|debited|credited|charged|refunded|reversed|successful|succeeded)\b|\b(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,96}?\b(?:has\s+been|was)\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|refunded|reversed|received|withdrawn|transferred)\b/i;
 /**
@@ -1643,12 +1651,27 @@ const PENDING_PROCESSING_RE =
  * present, because this is shared evidence that can delete a stored row.
  * The clause class admits "180.00" / "1,000" so a figure does not end it.
  */
-const AR_CLAUSE = `(?:[^.\\n,;]|[.,]\\d)`;
-const AR_PENDING_POSTING_RE = new RegExp(
-  `(?:عمليه|معامله|حركه|شراء|الخصم)${AR_CLAUSE}{0,60}?(?<![${AR_LETTER}])قيد\\s+(?:الانتظار|المعالجه|التنفيذ)(?![${AR_LETTER}])` +
-    `|(?:عمليه|معامله|حركه|شراء)${AR_CLAUSE}{0,80}?(?<![${AR_LETTER}])و?لم\\s+يتم\\s+(?:قيد\\s+)?(?:الخصم|خصم[${AR_LETTER}]*|الدفع|دفع[${AR_LETTER}]*|القيد)\\s+بعد(?![${AR_LETTER}])` +
+// One clause AFTER the transaction noun. It ends at punctuation (a figure's
+// "." or "," does not count), at a "و" opening a new clause, and at any other
+// noun the idiom could be describing instead: a request, an order, a
+// shipment/delivery, a refund, a deposit, a bill payment, the biller or bank.
+const AR_OTHER_SUBJECT = `(?:ال)?(?:طلب|طلبات|شحن|شحنه|توصيل|استرداد|ايداع|سداد|مفوتر|بنك)`;
+const AR_CLAUSE =
+  `(?:(?!\\sو[${AR_LETTER}])(?!(?<![${AR_LETTER}])${AR_OTHER_SUBJECT})(?:[^.\\n,;]|[.,]\\d))`;
+const AR_TXN_NOUN = `(?<![${AR_LETTER}])(?:ال)?(?:عمليه|معامله|حركه|شراء|خصم)(?![${AR_LETTER}])`;
+/** The قيد/معلقة idioms, qualifying the transaction noun itself. */
+const AR_PENDING_IDIOM_RE = new RegExp(
+  `${AR_TXN_NOUN}${AR_CLAUSE}{0,60}?\\s*(?<![${AR_LETTER}])قيد\\s+(?:الانتظار|المعالجه|التنفيذ)(?![${AR_LETTER}])` +
     `|(?<![${AR_LETTER}])(?:عمليه|معامله|حركه)(?:\\s+[${AR_LETTER}]+){0,2}\\s+معلقه(?![${AR_LETTER}])`,
 );
+/** "(و)لم يتم (قيد) الخصم ... بعد" — not yet debited — after the transaction noun. */
+const AR_NOT_YET_RE = new RegExp(
+  `${AR_TXN_NOUN}${AR_CLAUSE}{0,80}?\\s(?:و)?لم\\s+يتم\\s+(?:قيد\\s+)?(?:الخصم|خصم[${AR_LETTER}]*|الدفع|دفع[${AR_LETTER}]*|القيد)\\s+بعد(?![${AR_LETTER}])`,
+);
+function arabicPendingPosting(body: string): boolean {
+  if (AR_SETTLED_VERB_RE.test(body)) return false;
+  return (AR_PENDING_IDIOM_RE.test(body) && !AR_COMPLETED_RE.test(body)) || AR_NOT_YET_RE.test(body);
+}
 const EXPECTED_FUTURE_MOVEMENT_RE =
   /\b(?:expected|anticipated)\b(?:[^.]|\.\d){0,80}\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b|\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b(?:[^.]|\.\d){0,80}\b(?:expected|anticipated)\b|(?:راتب|مرتب|دفع|تحويل|ايداع)[\s\S]{0,80}متوقع|سيصل[\s\S]{0,80}(?:راتب|مرتب|دفع|تحويل|ايداع)/iu;
 const REQUEST_RECEIVED_RE =
@@ -2467,7 +2490,8 @@ const MERCHANT_RE = new RegExp(
     NAME_INITIALS +
     String.raw`[A-Za-z0-9%][A-Za-z0-9%·• &'\-*/()+_]{1,40}?(?:` +
     HOST_LABELS +
-    String.raw`\.(?:com|ae|net|org|io|co)\b)?)` +
+    // ".ai" for the BNPL host "WWW.TABBY.AI", which otherwise lost its name.
+    String.raw`\.(?:com|ae|net|org|io|co|ai)\b)?)` +
     MERCHANT_STOP,
   'gi',
 );
@@ -2804,7 +2828,7 @@ function cleanDescriptor(name: string): string {
   // The TLD list is the same one MERCHANT_RE will accept, so this can only
   // ever strip a suffix the merchant grammar itself put there.
   out = out.replace(/^www\./i, '').trim();
-  return out.replace(/(?:\s+COM|\.(?:com|ae|net|org|io|co))$/i, '').trim();
+  return out.replace(/(?:\s+COM|\.(?:com|ae|net|org|io|co|ai))$/i, '').trim();
 }
 
 function merchantFromLines(raw: string): string {
@@ -4244,7 +4268,7 @@ function nonPostingReasonInBody(
   }
   if (RETURNED_UNPAID_RE.test(body)) return 'returned-unpaid';
   if (!settledRefund && (PENDING_PROCESSING_RE.test(body) ||
-    (AR_PENDING_POSTING_RE.test(body) && !AR_SETTLED_VERB_RE.test(body)) ||
+    arabicPendingPosting(body) ||
     EXPECTED_FUTURE_MOVEMENT_RE.test(body) ||
     REQUEST_RECEIVED_RE.test(body) || MANDATE_LIFECYCLE_RE.test(body) ||
     CONDITIONAL_PAYOUT_RE.test(body) || CONDITIONAL_MOVEMENT_RE.test(body))) {

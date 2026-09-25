@@ -3334,6 +3334,24 @@ asyncSuites.push((async () => {
   ok('BNPL repair: a launch without the receipt repairs once and stamps it',
     first.transactions[0].category === 'shopping' && first.bnplCategoryRepairVersion === 1);
 
+  // A retained SMS is re-read under the LEDGER's pack even on the launch path,
+  // where the raw reparse is skipped and whatever pack was live stays live.
+  {
+    const realMarkets = require('./build/markets');
+    realMarkets.setActiveMarket('AE');
+    const saudi = real.migratePersistedState({
+      onboarded: true, marketId: 'SA', parserVersion: 999,
+      hydrationReparseKey: JSON.stringify([2, require('./build/sms-parser').PARSER_BACKFILL_VERSION, 'SA']),
+      transactions: [tx('saudi-bnpl-card', {
+        title: 'Sample Pizza Restaurant', category: 'loan', amountFils: 30000,
+        raw: 'You spent SAR 300.00 at SAMPLE PIZZA RESTAURANT. Your Tabby Card limit is now SAR 1,846.50.',
+      })],
+    }, { reuseCompletedReparse: true });
+    ok('BNPL repair: a Saudi BNPL-card purchase is re-read under the Saudi pack and repaired',
+      saudi.transactions[0].category === 'dining', saudi.transactions[0]);
+    realMarkets.setActiveMarket('AE');
+  }
+
   // A backup is normalised by the receiving build, whatever receipt it carries.
   const restored = hydration.parseBackupForRestore(JSON.stringify({
     app: 'wafra', version: 1,

@@ -84,7 +84,7 @@ import {
 import { countsInTotals, internalTransferIdsForState, primeInternalTransferIds } from '@/lib/ledger';
 import { accountsLabelledWithBank, sanitizeKnownBanks, singleKnownBank } from '@/lib/known-banks';
 import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
-import { BNPL_CATEGORY_REPAIR_VERSION, repairBnplCategories } from '@/lib/bnpl-category-repair';
+import { BNPL_CATEGORY_REPAIR_VERSION, bnplRepairNeedsParser, repairBnplCategories } from '@/lib/bnpl-category-repair';
 import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
   createLedgerPersistence,
@@ -784,6 +784,15 @@ export function migratePersistedState(
     options?.reuseCompletedReparse !== true ||
     (parsed.bnplCategoryRepairVersion ?? 0) < BNPL_CATEGORY_REPAIR_VERSION
   )) {
+    // A retained SMS is re-read under THIS ledger's pack, exactly as the raw
+    // reparse above does: a Saudi "SAR 300.00" row read under the default AE
+    // pack would not match its stored amount and be silently skipped. The
+    // hydrate reducer (and restore's captureMarketContext) reinstate the pack
+    // and ledger currency afterwards, as they already do for that reparse.
+    if (bnplRepairNeedsParser(parsed.transactions)) {
+      setGlobalLedgerCurrency(null);
+      if (parsed.marketId) setActiveMarket(parsed.marketId);
+    }
     parsed.transactions = repairBnplCategories(parsed.transactions, parsed.merchantOverrides);
   }
   if (parsed.transactions) parsed.bnplCategoryRepairVersion = BNPL_CATEGORY_REPAIR_VERSION;
