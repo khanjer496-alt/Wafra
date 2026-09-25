@@ -1152,6 +1152,12 @@ const legacyCaptureBalanceState = {
 ok('net worth preserves legacy captured-row balance semantics without the modern source marker',
   bal.netWorthBreakdown(legacyCaptureBalanceState).balanceByAccountId['legacy-captured'] ===
     bal.reliableBalanceFils(legacyCaptureBalanceState, legacyCaptureBalanceState.accounts[0]));
+// A row with only a durable smsKey is a bank row: its account's running sum is
+// as partial as any other captured account's, so it is unknown, not a figure.
+ok('a legacy smsKey-only captured account is unknown, like any bank-fed account',
+  bal.isCapturedRow({ smsKey: 's1-1' }) && bal.isCapturedRow({ source: 'sms' }) && !bal.isCapturedRow({ source: 'manual' }) &&
+    bal.reliableBalanceFils(legacyCaptureBalanceState, legacyCaptureBalanceState.accounts[0]) === null &&
+    bal.netWorthBreakdown(legacyCaptureBalanceState).balanceByAccountId['legacy-captured'] === null);
 
 // ── One payment must not settle two overlapping statements ──
 const allocLib = require('./build/cards');

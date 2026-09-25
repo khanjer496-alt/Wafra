@@ -204,6 +204,24 @@ test('reminders skip a subscription the user cancelled, and reschedule when that
   assert.equal(reminders.reminderScheduleInputsChanged(state, cancelled), true);
 });
 
+test('a legacy account whose rows carry only an smsKey is bank-fed in the balance and in Set balance alike', () => {
+  const legacyRow = { id: 'tx-legacy', type: 'expense', amountFils: 1_200, category: 'dining', accountId: 'old',
+    title: 'Cafe', date: '2026-07-03', smsKey: 's1783036800000-1200' };
+  const old = { id: 'old', name: 'Old bank', kind: 'bank', openingFils: 50_000, color: '#000' };
+  const before = base({ accounts: [old], transactions: [legacyRow] });
+  const legacy = before.accounts.find((a) => a.id === 'old');
+  assert.equal(before.transactions[0].source, undefined, 'still a legacy row after hydration');
+  assert.equal(balances.reliableBalanceFils(before, legacy), null, 'a partial alert history is not a balance');
+  assert.equal(balances.netWorthBreakdown(before).balanceByAccountId.old, null);
+  const after = setBalance(before, 'old', 70_000);
+  const account = after.accounts.find((a) => a.id === 'old');
+  assert.equal(account.snapshotFils, 70_000);
+  assert.equal(account.manualSnapshotTs, TS);
+  assert.equal(account.openingFils, 50_000, 'the opening balance is not rewritten');
+  assert.equal(balances.reliableBalanceFils(after, account), 70_000);
+  assert.equal(balances.netWorthBreakdown(after).balanceByAccountId.old, 70_000);
+});
+
 test('backups carrying the new fields validate, and malformed ones are refused', () => {
   const validate = build('backup-validation').isValidBackupState;
   assert.equal(validate({ transactions: [], accounts: [{ ...bank, manualSnapshotTs: TS }], cancelledSubscriptions: { 'city gym': '2026-09-25' } }), true);
