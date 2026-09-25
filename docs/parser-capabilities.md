@@ -27,6 +27,24 @@ The user's country (any ISO 3166-1 country, defaulting from the device Region an
 - Statements (PDF, CSV, forwarded email): amounts are parsed in decimal-comma form (`1.234,56`, `1 234,56` in a CSV cell or with a no-break space in a PDF) only when the file's own figures prove that convention and none contradicts it; apostrophe grouping (`1'234.56`) is read in decimal-point files. Named-month dates are read in English, French, German, Spanish, Portuguese, Italian, Dutch, Turkish, Indonesian and Arabic. Column headers are still recognised in English and Arabic only.
 - Forwarded statement emails: the relay can read them in the ledger currency recorded when a forwarding address is created, but the app does not yet offer a way to create one, so this path is not user-reachable today; existing addresses keep the launch AED/SAR reading.
 
+## AI reading of unrecognised alerts
+
+An optional on-device model (downloaded only when the person asks, never bundled) can suggest amount, currency, merchant, direction and date for an alert every rule-based path refused, as a Review item the person confirms. It never runs for UAE/Saudi senders or routes and never adds a ledger row by itself. Automatic posting from a model reading is allowed per language only after that language passes on at least 500 labelled real messages (at most 3 false posts per 1,000 non-posting alerts and at least 98 in 100 posted rows fully correct).
+
+| Language | Auto-post | Labelled real messages evaluated |
+| --- | --- | ---: |
+| en | off | 0 |
+| ar | off | 0 |
+| es | off | 0 |
+| pt | off | 0 |
+| fr | off | 0 |
+| de | off | 0 |
+| it | off | 0 |
+| nl | off | 0 |
+| tr | off | 0 |
+| id | off | 0 |
+| hi-latn | off | 0 |
+
 ## How new evidence enters the matrix
 
 Wafra’s parser-sample screen prepares a local, redacted JSON file. Wafra uploads nothing; the user chooses Save/Share and can attach that file to a Codex task. A new format is added only with a failing positive test, a conservative parser change, and a paired non-posting or adversarial negative. After the reviewed fixture lands, regenerate this document with `npm run report:parser-capabilities`.
