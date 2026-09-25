@@ -212,6 +212,14 @@ function createHarness(options = {}) {
   local('@/lib/money-picture-progress','src/lib/money-picture-progress.ts');
   local('@/components/money-picture-progress');
   local('@/components/transfer-review-notice');
+  // Design language E: the band palette resolves from the real theme; the
+  // scaffold renders its band content and sheet as children so tests reach
+  // both; the pattern is its own subscribed component (pattern.test.cjs).
+  deps['@/hooks/use-band']={useBand:(id)=>themes.BandPalettes[options.theme??'light'][id],useBandScheme:()=>options.theme??'light'};
+  deps['@/hooks/use-theme'].ThemeScope={Provider:'ThemeScope'};
+  deps['@/components/ui/band-scaffold']={BandScaffold:p=>jsx('BandScaffold',{...p,children:[p.bandContent,p.children]})};
+  deps['@/components/ui/your-pattern']={YourPattern:p=>jsx('YourPattern',p)};
+  local('@/components/ui/band/band-figure');local('@/components/ui/band/stat-tile');local('@/components/ui/band/week-tiles');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
   local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');
   local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/bills/bills-timeline');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');

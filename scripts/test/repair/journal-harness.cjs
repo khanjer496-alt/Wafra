@@ -154,6 +154,15 @@ function harness(options = {}) {
   dependencies['@/components/history-reading-status'] = load(path.join(root, 'src/components/history-reading-status.tsx'), dependencies);
   dependencies['@/lib/money-picture-progress'] = load(path.join(root, 'src/lib/money-picture-progress.ts'), dependencies);
   dependencies['@/components/money-picture-progress'] = load(path.join(root, 'src/components/money-picture-progress.tsx'), dependencies);
+  // Design language E: real band palettes; the scaffold renders its band and
+  // sheet as children; the pattern is a separately subscribed component.
+  dependencies['@/hooks/use-band'] = { useBand: (id) => themeModule.BandPalettes[options.theme ?? 'light'][id], useBandScheme: () => options.theme ?? 'light' };
+  dependencies['@/hooks/use-theme'].ThemeScope = { Provider: 'ThemeScope' };
+  dependencies['@/components/ui/band-scaffold'] = { BandScaffold: (props) => jsx('BandScaffold', { ...props, children: [props.bandContent, props.children] }) };
+  dependencies['@/components/ui/your-pattern'] = { YourPattern: (props) => jsx('YourPattern', props) };
+  for (const name of ['band-figure', 'stat-tile', 'week-tiles']) {
+    dependencies[`@/components/ui/band/${name}`] = load(path.join(root, `src/components/ui/band/${name}.tsx`), dependencies);
+  }
   dependencies['@/components/reference-home-summary'] = load(path.join(root, 'src/components/reference-home-summary.tsx'), dependencies);
   dependencies['@/lib/merchant-spending-copy'] = load(path.join(root, 'src/lib/merchant-spending-copy.ts'));
   const bankIdentity = load(path.join(root, 'src/lib/markets.ts'));

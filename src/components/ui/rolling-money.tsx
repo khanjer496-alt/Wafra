@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Platform, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Platform, StyleSheet, View, type StyleProp, type TextStyle, type ViewStyle } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -37,6 +37,13 @@ interface RollingMoneyProps {
    */
   motionOnAndroid?: boolean;
   testID?: string;
+  /**
+   * Extra style for the figure's text (language E's band figures set Geist
+   * SemiBold with tabular digits and their own size). Applied after the type.
+   */
+  figureStyle?: StyleProp<TextStyle>;
+  /** Extra style for the currency label (its colour on a band). */
+  prefixStyle?: StyleProp<TextStyle>;
 }
 
 function signGlyph(fils: number, sign: Sign): string {
@@ -68,11 +75,12 @@ const placementFor = (currency: string, _localeKey: string) => currencyPlacement
 const labelFor = (code: string, _localeKey: string) => currencyDisplayLabel(code);
 
 /** One rolling position: the old digit leaves upward as the new one arrives. */
-function RollingGlyphView({ glyph, height, type, color }: {
+function RollingGlyphView({ glyph, height, type, color, figureStyle }: {
   glyph: RollingGlyph;
   height: number;
   type: TextType;
   color?: string;
+  figureStyle?: StyleProp<TextStyle>;
 }) {
   const progress = useSharedValue(glyph.changed ? 0 : 1);
   useEffect(() => {
@@ -91,7 +99,7 @@ function RollingGlyphView({ glyph, height, type, color }: {
     opacity: 1 - progress.value,
     transform: [{ translateY: -progress.value * height }],
   }));
-  const textStyle = [styles.glyph, color ? { color } : undefined];
+  const textStyle = [styles.glyph, figureStyle, color ? { color } : undefined];
 
   if (!glyph.changed) {
     return <ThemedText type={type} tabular style={textStyle}>{glyph.char}</ThemedText>;
@@ -133,6 +141,8 @@ export function RollingMoney({
   style,
   motionOnAndroid = false,
   testID,
+  figureStyle,
+  prefixStyle,
 }: RollingMoneyProps) {
   const contextMoney = useLedgerMoney();
   const localeKey = useMoneyLocaleKey();
@@ -171,18 +181,18 @@ export function RollingMoney({
   const [lineHeight, setLineHeight] = useState(0);
 
   const currencyNode = prefix ? (
-    <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}>
+    <ThemedText themeColor="textSecondary" style={[styles.currencyPrefix, prefixStyle]}>
       {labelFor(currency, localeKey)}
     </ThemedText>
   ) : null;
   const figure = activeRoll ? (
     <View key={activeRoll.id} style={styles.glyphRow}>
       {activeRoll.glyphs.map((glyph) => (
-        <RollingGlyphView key={glyph.key} glyph={glyph} height={lineHeight} type={type} color={color} />
+        <RollingGlyphView key={glyph.key} glyph={glyph} height={lineHeight} type={type} color={color} figureStyle={figureStyle} />
       ))}
     </View>
   ) : (
-    <ThemedText type={type} tabular style={[styles.value, color ? { color } : undefined]}
+    <ThemedText type={type} tabular style={[styles.value, figureStyle, color ? { color } : undefined]}
       onLayout={({ nativeEvent }) => {
         const next = Math.round(nativeEvent.layout.height);
         if (next !== lineHeight) setLineHeight(next);
