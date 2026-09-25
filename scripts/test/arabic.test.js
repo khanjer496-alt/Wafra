@@ -250,7 +250,8 @@ check('the Arabic face also carries Latin', glyphIds('NotoKufiArabic-Regular.ttf
 // cannot skip. The rescue has to come AFTER `style` to undo that.
 {
   const src = read('src/components/themed-text.tsx');
-  const array = src.match(/style=\{\[([\s\S]*?)\]\}/)[1];
+  // The array is built as `composed` so the E2E font-scale harness can wrap it.
+  const array = src.match(/const composed: StyleProp<TextStyle> = \[([\s\S]*?)\n  \];/)[1];
   const entries = array
     .split('\n')
     .map((l) => l.trim())
