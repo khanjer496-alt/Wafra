@@ -68,6 +68,16 @@ class BankNotificationListenerService : NotificationListenerService() {
       if (sbn.packageName == packageName) return
       if (!NotificationCapturePolicy.isEnabled(this)) return
       recordAdmission("active", adcb)
+      // A group summary restates its children, each of which is posted (and
+      // captured) on its own; reading it re-captured whichever older alert it
+      // summarised every time the group was re-posted. Skip it only while a
+      // child is actually visible: an app that posts a summary alone, or
+      // whose child was already dismissed, would otherwise lose the alert.
+      if ((sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0 &&
+          summaryHasVisibleChild(sbn)) {
+        recordAdmission("groupSummary", adcb)
+        return
+      }
       val extras = sbn.notification.extras
       val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
       val trustedPackage = TrustedBankNotificationPackages.isTrusted(this, sbn.packageName)
@@ -95,40 +105,68 @@ class BankNotificationListenerService : NotificationListenerService() {
         }
       }
 
-      // Public Notification fields first. These cover ordinary, BigTextStyle,
-      // InboxStyle and MessagingStyle notifications across AOSP and most OEMs.
+      // Public single-posting fields first, BIG_TEXT then TEXT: together they
+      // are the body of ordinary and BigTextStyle notifications on AOSP and
+      // most OEMs, and they describe THIS posting.
       addText(extras.getCharSequence(Notification.EXTRA_BIG_TEXT))
       addText(extras.getCharSequence(Notification.EXTRA_TEXT))
-      addText(extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES))
+      val preferredCandidates = textCandidates.toList()
       addText(extras.getCharSequence(Notification.EXTRA_SUB_TEXT))
       addText(extras.getCharSequence(Notification.EXTRA_INFO_TEXT))
       addText(extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT))
       addText(extras.getCharSequence(Notification.EXTRA_TITLE_BIG))
-      addText(extras.get(Notification.EXTRA_MESSAGES))
-      addText(extras.get(Notification.EXTRA_HISTORIC_MESSAGES))
       addText(sbn.notification.tickerText)
+
+      // InboxStyle lines and MessagingStyle messages are different: they are a
+      // running history, so an update re-posts every older alert with it.
+      // Choosing the longest of them re-captured an old charge whenever it
+      // happened to be worded longer than the new one. They are read only as
+      // a fallback when no single-posting field carries an amount, and only
+      // the one entry NotificationTextSurfaces.newest() can identify — never
+      // historic messages, which are context by definition.
+      val conversationSurfaces = conversationTexts(
+        extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES),
+        extras.get(Notification.EXTRA_MESSAGES),
+        extras.get(Notification.EXTRA_HISTORIC_MESSAGES),
+      )
+      val newestConversationText = newestConversationText(
+        extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES),
+        extras.get(Notification.EXTRA_MESSAGES),
+      )
 
       // ColorOS/OxygenOS bank notifications can render the visible transaction
       // from a vendor text/message extra instead of EXTRA_TEXT/BIG_TEXT. For an
       // exact curated bank package we can safely inspect bounded textual extras
       // whose key itself says it is display text. Unknown Play apps do NOT get
       // this broader surface; they still need the ordinary money gate below.
+      // The standard conversation keys are excluded: their key names look like
+      // text, and sweeping them here would reintroduce every older message.
       val standardCandidateCount = textCandidates.size
       if (trustedPackage) {
         extras.keySet()
           .asSequence()
+          .filter { key -> !CONVERSATION_EXTRA_KEYS.contains(key) }
           .filter { key -> looksLikeTextExtraKey(key) }
           .take(MAX_EXTRA_KEYS)
           .forEach { key -> addText(extras.get(key)) }
       }
+      // Every package gets this fallback: an unknown app's row still needs the
+      // money gate below and a verified parse, and is Review-first otherwise.
+      if (newestConversationText != null &&
+          textCandidates.none { MONEY_RE.containsMatchIn(it) }) {
+        recordAdmission("conversationFallback", adcb)
+        addText(newestConversationText)
+      }
       // ColorOS can expose several populated standard fields for the same
       // notification. ADCB's first non-blank field is not necessarily the
-      // visible charge body. Prefer the bounded field that actually carries a
-      // money amount; otherwise retain the old first-nonblank fallback.
+      // visible charge body. Prefer BIG_TEXT then TEXT when they carry a money
+      // amount; otherwise the longest bounded field that does; otherwise
+      // retain the old first-nonblank fallback.
       val nonBlankTextCandidates = textCandidates.filter { it.isNotBlank() }
-      val moneyCandidate = nonBlankTextCandidates
-        .filter { MONEY_RE.containsMatchIn(it) }
-        .maxByOrNull { it.length }
+      val moneyCandidate = preferredCandidates.firstOrNull { MONEY_RE.containsMatchIn(it) }
+        ?: nonBlankTextCandidates
+          .filter { MONEY_RE.containsMatchIn(it) }
+          .maxByOrNull { it.length }
       if (moneyCandidate != null && textCandidates.indexOf(moneyCandidate) >= standardCandidateCount) {
         recordAdmission("extendedMoneySurface", adcb)
       }
@@ -160,8 +198,10 @@ class BankNotificationListenerService : NotificationListenerService() {
       }
       // Security rejection considers every textual surface, not only the one
       // selected for parsing, so an OTP/security warning cannot be hidden in a
-      // secondary Android notification field.
-      val body = (listOf(title) + nonBlankTextCandidates).joinToString(" ").trim()
+      // secondary Android notification field — including the conversation
+      // history that is otherwise no longer read for parsing.
+      val body = (listOf(title) + nonBlankTextCandidates + conversationSurfaces)
+        .joinToString(" ").trim()
       if (body.isEmpty()) {
         recordAdmission("emptyBody", adcb)
         return
@@ -239,6 +279,27 @@ class BankNotificationListenerService : NotificationListenerService() {
       // Never crash the listener; a dropped notification is recoverable, a
       // dead listener is not.
     }
+  }
+
+  /**
+   * Whether a non-summary child of [summary]'s group is still visible. A
+   * failed read counts as "no": the summary is then captured rather than
+   * silently dropped.
+   */
+  private fun summaryHasVisibleChild(summary: StatusBarNotification): Boolean {
+    val active = try { activeNotifications?.toList() ?: emptyList() }
+    catch (_: Exception) { return false }
+    return NotificationTextSurfaces.summaryHasVisibleChild(
+      summary.key,
+      summary.groupKey,
+      active.map {
+        NotificationTextSurfaces.Member(
+          it.key,
+          it.groupKey,
+          (it.notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0,
+        )
+      },
+    )
   }
 
   /**
@@ -388,6 +449,49 @@ class BankNotificationListenerService : NotificationListenerService() {
     private val recoveryExecutor = Executors.newSingleThreadExecutor { runnable ->
       Thread(runnable, "wafra-notification-recovery").apply { isDaemon = true }
     }
+
+    /** Standard history-bearing extras, read only through the helpers below. */
+    private val CONVERSATION_EXTRA_KEYS = setOf(
+      Notification.EXTRA_TEXT_LINES,
+      Notification.EXTRA_MESSAGES,
+      Notification.EXTRA_HISTORIC_MESSAGES,
+    )
+    // MessagingStyle keeps at most 25 messages; read the newest end of it.
+    private const val MAX_CONVERSATION_ENTRIES = 25
+    // Bundle keys of android.app.Notification.MessagingStyle.Message.
+    private const val MESSAGE_TEXT_KEY = "text"
+    private const val MESSAGE_TIME_KEY = "time"
+
+    private fun boundedText(value: CharSequence?): String? =
+      value?.toString()?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_TEXT_CHARS }
+
+    private fun textLines(value: Array<out CharSequence?>?): List<String> =
+      value?.toList()?.takeLast(MAX_CONVERSATION_ENTRIES)?.mapNotNull { boundedText(it) } ?: emptyList()
+
+    private fun messages(value: Any?): List<NotificationTextSurfaces.Message> {
+      val items: List<Any?> = when (value) {
+        is Array<*> -> value.toList()
+        is Iterable<*> -> value.toList()
+        else -> return emptyList()
+      }
+      return items.takeLast(MAX_CONVERSATION_ENTRIES).mapNotNull { item ->
+        val bundle = item as? Bundle ?: return@mapNotNull null
+        val text = boundedText(bundle.getCharSequence(MESSAGE_TEXT_KEY)) ?: return@mapNotNull null
+        NotificationTextSurfaces.Message(bundle.getLong(MESSAGE_TIME_KEY, 0L), text)
+      }
+    }
+
+    /** Every conversation entry, for the security filter only. */
+    private fun conversationTexts(
+      lines: Array<out CharSequence?>?,
+      current: Any?,
+      historic: Any?,
+    ): List<String> =
+      textLines(lines) + messages(current).map { it.text } + messages(historic).map { it.text }
+
+    /** The one entry that describes the posting that triggered this update. */
+    private fun newestConversationText(lines: Array<out CharSequence?>?, current: Any?): String? =
+      NotificationTextSurfaces.newest(textLines(lines), messages(current)) { MONEY_RE.containsMatchIn(it) }
 
     private fun looksLikeTextExtraKey(key: String): Boolean {
       val normalized = key.lowercase()

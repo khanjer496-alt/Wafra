@@ -229,6 +229,22 @@ for (let index = 0; index < CLOCK_CASES.length; index++) {
     out.split('\n').filter((line) => line.startsWith(`CLOCK wrong ${index} `)));
 }
 
+// The SMS carrier-duplicate fold (auto-import.ts) decides whether to DISCARD
+// an identical SMS on the same clock the notification re-post guard uses. If
+// the two drifted, one channel would fold a same-minute double charge the
+// other keeps. Same source, same flags, same verdict on every clock case.
+{
+  const kotlin = PATTERNS.find(([n]) => n === 'CLOCK_RE')[1];
+  const { CARRIER_DUPLICATE_DATETIME_RE } = require('./build/auto-import.js');
+  ok('SMS carrier-duplicate clock is byte-identical to the notification re-post clock',
+    CARRIER_DUPLICATE_DATETIME_RE.source === kotlin && CARRIER_DUPLICATE_DATETIME_RE.flags === '',
+    { kotlin, js: CARRIER_DUPLICATE_DATETIME_RE.source, flags: CARRIER_DUPLICATE_DATETIME_RE.flags });
+  const disagreements = CLOCK_CASES.filter(([body, want]) =>
+    CARRIER_DUPLICATE_DATETIME_RE.test(body) !== want);
+  ok('SMS carrier-duplicate clock gives the JVM verdict on every clock case',
+    disagreements.length === 0, disagreements);
+}
+
 for (let index = 0; index < CREDENTIAL_CASES.length; index++) {
   ok(`Java credential gate handles case ${index + 1}`,
     out.includes(`CREDENTIAL ok ${index}`),
@@ -236,6 +252,73 @@ for (let index = 0; index < CREDENTIAL_CASES.length; index++) {
 }
 
 fs.rmSync(dir, { recursive: true, force: true });
+
+/* ── the pure notification policies, compiled by kotlinc when present ── */
+//
+// NotificationTextSurfaces is deliberately free of Android types so its
+// DECISIONS — which conversation entry is the posting — run here as real
+// Kotlin, not as a restatement. kotlinc is not part of the usual toolchain, so
+// this section is skipped (loudly) without it; set KOTLINC to its path.
+function findKotlinc() {
+  for (const candidate of [process.env.KOTLINC, 'kotlinc'].filter(Boolean)) {
+    try {
+      execFileSync(candidate, ['-version'], { stdio: 'ignore' });
+      return candidate;
+    } catch {
+      // try the next
+    }
+  }
+  return null;
+}
+const kotlinc = findKotlinc();
+if (!kotlinc) {
+  console.log('— no kotlinc (set KOTLINC); pure notification policies not executed as Kotlin');
+} else {
+  const kdir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-ktc-'));
+  const cases = [
+    // [expression, expected printed value]
+    // History entries: the newest by its own timestamp; without one, never
+    // guess — only a single amount-bearing entry is used.
+    [`NotificationTextSurfaces.newest(listOf("old AED 900.00", "new AED 5.00"), emptyList(), amt)`, 'null'],
+    [`NotificationTextSurfaces.newest(listOf("Your statement is ready", "new AED 5.00"), emptyList(), amt)`, 'new AED 5.00'],
+    [`NotificationTextSurfaces.newest(listOf("line AED 1.00"), listOf(NotificationTextSurfaces.Message(200L, "newest AED 5.00"), NotificationTextSurfaces.Message(100L, "older and much longer AED 900.00")), amt)`, 'newest AED 5.00'],
+    [`NotificationTextSurfaces.newest(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "first AED 1.00"), NotificationTextSurfaces.Message(100L, "second AED 2.00")), amt)`, 'null'],
+    [`NotificationTextSurfaces.newest(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "hello"), NotificationTextSurfaces.Message(100L, "second AED 2.00")), amt)`, 'second AED 2.00'],
+    [`NotificationTextSurfaces.newest(emptyList(), listOf(NotificationTextSurfaces.Message(0L, "a AED 1.00"), NotificationTextSurfaces.Message(0L, "b AED 2.00")), amt)`, 'null'],
+    [`NotificationTextSurfaces.newest(emptyList(), emptyList(), amt)`, 'null'],
+    // A group summary is redundant only while one of its children is visible.
+    [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true), NotificationTextSurfaces.Member("c", "g", false)))`, 'true'],
+    [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true)))`, 'false'],
+    [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true), NotificationTextSurfaces.Member("c", "other", false), NotificationTextSurfaces.Member("t", "g", true)))`, 'false'],
+    [`NotificationTextSurfaces.summaryHasVisibleChild("s", null, listOf(NotificationTextSurfaces.Member("c", null, false)))`, 'false'],
+  ];
+  fs.writeFileSync(path.join(kdir, 'Check.kt'), `package expo.modules.notificationreader
+fun main() {
+  val amt: (String) -> Boolean = { it.contains("AED") }
+${cases.map(([expr], index) => `  println("CASE ${index} " + (${expr}).toString())`).join('\n')}
+}
+`, 'utf8');
+  let kout = '';
+  let kcompiled = false;
+  try {
+    execFileSync(kotlinc, [
+      path.join(__dirname, '../../modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationTextSurfaces.kt'),
+      path.join(kdir, 'Check.kt'),
+      '-include-runtime', '-d', path.join(kdir, 'check.jar'),
+    ], { cwd: kdir, stdio: 'pipe' });
+    kcompiled = true;
+    kout = execFileSync('java', ['-Dfile.encoding=UTF-8', '-cp', path.join(kdir, 'check.jar'),
+      'expo.modules.notificationreader.CheckKt'], { cwd: kdir, encoding: 'utf8' });
+  } catch (e) {
+    kout = `${e.stdout ?? ''}${e.stderr ?? ''}`;
+  }
+  ok('the pure notification policies compile as Kotlin', kcompiled, kout.slice(0, 400));
+  cases.forEach(([expr, want], index) => {
+    const line = kout.split('\n').find((l) => l.startsWith(`CASE ${index} `));
+    ok(`Kotlin: ${expr.slice(0, 70)} → ${want}`, line === `CASE ${index} ${want}`, line);
+  });
+  fs.rmSync(kdir, { recursive: true, force: true });
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

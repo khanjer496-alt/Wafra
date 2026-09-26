@@ -47,6 +47,7 @@ import { t, tf } from '@/lib/i18n';
 import { merchantSpendingHref } from '@/lib/merchant-spending';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { duplicateTransactionIds, isListedExternalTransfer } from '@/lib/transfer-activity';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 
 type ViewMode = 'categories' | 'compare' | 'calendar';
@@ -104,9 +105,16 @@ export default function FlowScreen() {
 
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = internalTransferIdsForState(state);
-  const hasTransferSpending = useMemo(() => view === 'calendar' && state.transactions.some(transaction =>
-    isTransferCandidate(transaction) && isSpending(transaction, live, internal) && inPeriod(transaction.date, period)),
-  [view, state.transactions, live, internal, period]);
+  // Transfers that still count as spending but are listed on the Transfers
+  // screen instead of here. The test is row-local (no transfer graph on a tab)
+  // and matches getTransferActivity membership exactly for spending rows.
+  const hasTransferSpending = useMemo(() => {
+    if (view !== 'calendar') return false;
+    const duplicates = duplicateTransactionIds(state.transactions);
+    return state.transactions.some(transaction => inPeriod(transaction.date, period) &&
+      isTransferCandidate(transaction) && isSpending(transaction, live, internal) &&
+      isListedExternalTransfer(transaction, duplicates));
+  }, [view, state.transactions, live, internal, period]);
   const summary = useMemo(() => summarizeMonth(state.transactions, period, live, internal), [state.transactions, period, live, internal]);
   const foreign = useMemo(() => view === 'categories'
     ? summarizeForeignActivity(
@@ -181,6 +189,7 @@ export default function FlowScreen() {
     let previousDate: string | null = null;
     let newestFirst = true;
     let seenInPeriod = false;
+    let duplicates: ReadonlySet<string> | undefined;
     for (const tx of state.transactions) {
       if (newestFirst && previousDate !== null && tx.date > previousDate) newestFirst = false;
       previousDate = tx.date;
@@ -190,7 +199,11 @@ export default function FlowScreen() {
         continue;
       }
       seenInPeriod = true;
-      if (isTransferCandidate(tx) || !isSpending(tx, live, internal)) continue;
+      if (!isSpending(tx, live, internal)) continue;
+      if (isTransferCandidate(tx)) {
+        if (!duplicates) duplicates = duplicateTransactionIds(state.transactions);
+        if (isListedExternalTransfer(tx, duplicates)) continue;
+      }
       if (calendarDay !== null && tx.date !== calendarDay) continue;
       if (needle) {
         const haystack = `${tx.title} ${accountById.get(tx.accountId)?.name ?? ''}`.toLocaleLowerCase();
@@ -202,8 +215,17 @@ export default function FlowScreen() {
     return out;
   }, [view, state.transactions, live, internal, period, appliedQuery, accountById, calendarDay]);
   const activity = sortedActivity;
-  const calendarDays = useMemo(() => view === 'calendar' && period.mode === 'month'
-    ? dailySpendForMonth(state.transactions, period.key, live, internal, (transaction) => !isTransferCandidate(transaction)) : [],
+  // The calendar counts exactly the rows the list below keeps: transfer
+  // candidates drop out only when the Transfers screen lists them.
+  const calendarDays = useMemo(() => {
+    if (view !== 'calendar' || period.mode !== 'month') return [];
+    let duplicates: ReturnType<typeof duplicateTransactionIds> | undefined;
+    return dailySpendForMonth(state.transactions, period.key, live, internal, (transaction) => {
+      if (!isTransferCandidate(transaction)) return true;
+      duplicates ??= duplicateTransactionIds(state.transactions);
+      return !isListedExternalTransfer(transaction, duplicates);
+    });
+  },
   [view, period, state.transactions, live, internal]);
   const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const analysis = useMemo(() => {

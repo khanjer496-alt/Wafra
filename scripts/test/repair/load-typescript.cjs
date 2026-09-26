@@ -125,6 +125,12 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/country-names') {
         return require('../build/country-names.js');
       }
+      // BNPL provider identity is a pure sender/package registry consulted by
+      // the parser, the launch session and the capture scanner. Harnesses that
+      // stub the parser still get the real registry, never a drifting copy.
+      if (name === '@/lib/bnpl-providers') {
+        return require('../build/bnpl-providers.js');
+      }
       // The on-device semantic model is native-only and advisory. Screen and
       // journey harnesses get the same fail-closed behaviour the web build has:
       // the deterministic plan is returned unchanged and the runtime is never

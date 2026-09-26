@@ -38,7 +38,7 @@ import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
-import { countsInCashflowTotals, isSpending, liveAccountIds } from '@/lib/ledger';
+import { isSpending, liveAccountIds, transferReconciliationForState } from '@/lib/ledger';
 import { hasRecordsBefore, liveCaptureTimes, pendingTransferSummary, summarizeHomeToday, type PendingTransferSummary } from '@/lib/home-today';
 import { detectCapturePause } from '@/lib/capture-pause';
 import { loadCapturePauseSnooze, saveCapturePauseSnooze } from '@/lib/capture-pause-state';
@@ -65,7 +65,7 @@ import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
 import { loadViewedRecaps } from '@/lib/recap-view-state';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 
 /** Presentation-only vocabulary; every amount still comes from the shared ledger. */
 const copy = {
@@ -291,15 +291,6 @@ export default function JournalHomeScreen() {
       state.historyImport?.status, state.marketId, period, projectionDay]);
   const payments = dashboard.upcoming.items;
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  // Primary tabs keep the store's persisted/provisional accounting receipt.
-  // Row-local presentation checks must not force a full reconciliation graph
-  // during hydration or an intermediate import page.
-  const hasPeriodTransfers = useMemo(() => state.transactions.some(transaction =>
-    inPeriod(transaction.date, period) && liveAccounts.has(transaction.accountId) && isTransferCandidate(transaction)),
-  [state.transactions, liveAccounts, period]);
-  const hasPeriodRecords = useMemo(() => state.transactions.some(transaction =>
-    liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
-  [state.transactions, liveAccounts, period]);
   // Today and this week use the same spending definition and transfer scope as
   // the period totals below them. Budget pace applies only to the live month.
   const homeToday = useMemo(() => {
@@ -364,17 +355,12 @@ export default function JournalHomeScreen() {
     // `now` moves on every return to the foreground, so widgets are re-stamped
     // even when no money changed and never age into their stale state.
   }, [widgetToday, payments, moneySpec, language, state.hydrated, state.onboarded, state.privateMode, now]);
-  const recentActivity = useMemo(() => {
-    const rows: Transaction[] = [];
-    for (const transaction of state.transactions) {
-      // Cheap period check first: isTransferCandidate runs several regexes.
-      if (!inPeriod(transaction.date, period) || isTransferCandidate(transaction) ||
-        !countsInCashflowTotals(transaction, liveAccounts, dashboard.internalTransactionIds)) continue;
-      rows.push(transaction);
-      if (rows.length === 5) break;
-    }
-    return rows;
-  }, [state.transactions, liveAccounts, dashboard.internalTransactionIds, period]);
+  // Recent activity, and which transfers it leaves to the Transfers screen,
+  // come from the one dashboard projection rather than a second ledger walk.
+  const hasPeriodTransfers = dashboard.hasPeriodTransfers === true;
+  // "Empty month" means no live record at all, not merely no recent cash-flow
+  // row: card-payment settlements and internal movements are records too.
+  const hasPeriodRecords = dashboard.hasPeriodRecords === true || hasPeriodTransfers;
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
   const historyAnalysisBlocked = state.historyImport !== null && state.historyImport.status !== 'complete';
   useEffect(() => {
@@ -412,8 +398,11 @@ export default function JournalHomeScreen() {
     let cancelled = false;
     const task = InteractionManager.runAfterInteractions(() => {
       if (cancelled) return;
-      const next = state.transactions.some(isTransferCandidate)
-        ? pendingTransferSummary(state.transactions, reconcileTransfers(state.transactions, state.accounts).pendingIds)
+      // The reconciliation cached per stored transfer receipt, shared with
+      // Transactions and Transfers, rather than a second full graph build.
+      const reconciliation = state.transactions.some(isTransferCandidate) ? transferReconciliationForState(state) : null;
+      const next = reconciliation
+        ? pendingTransferSummary(state.transactions, reconciliation.pendingIds)
         : { count: 0, incomingFils: 0, outgoingFils: 0 };
       if (!cancelled) setPendingTransfers(next);
     });
@@ -421,7 +410,10 @@ export default function JournalHomeScreen() {
       cancelled = true;
       task.cancel();
     };
-  }, [focused, privacyGateCleared, state.hydrated, state.onboarded, historyAnalysisBlocked, state.transactions, state.accounts]);
+    // Transfer receipts change the reconciliation even when the arrays do not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focused, privacyGateCleared, state.hydrated, state.onboarded, historyAnalysisBlocked, state.transactions, state.accounts,
+    state.transferInternalIds, state.transferNormalizationVersion]);
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
@@ -664,7 +656,7 @@ export default function JournalHomeScreen() {
     return <View key={id} style={styles.section} testID="home-widget-activity">
       <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.activity}</ThemedText>
         <Pressable onPress={() => router.push('/transactions')} accessibilityRole="button" style={styles.smallAction}><Icon name="search" size={18} color={theme.text} /><ThemedText type="meta">{t('allActivity')}</ThemedText></Pressable></View>
-      <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{recentActivity.map(transaction =>
+      <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{dashboard.activityRows.slice(0, 5).map(transaction =>
         <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />)}</View>
       {hasPeriodTransfers && <View style={styles.section}>
         <ThemedText type="meta" themeColor="textSecondary">{transferWords.walletDetail}</ThemedText>
@@ -674,7 +666,7 @@ export default function JournalHomeScreen() {
           <ThemedText type="meta" themeColor="primary">{transferWords.viewAll}</ThemedText>
         </Pressable>
       </View>}
-      {recentActivity.length === 0 && !hasPeriodRecords && <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />}
+      {dashboard.activityRows.length === 0 && !hasPeriodRecords && <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />}
     </View>;
   };
 

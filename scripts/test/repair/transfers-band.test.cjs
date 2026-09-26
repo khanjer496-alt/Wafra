@@ -43,6 +43,8 @@ for (const language of ['en', 'ar']) {
       ['in', { id: 'in', status: 'confirmed-own', reason: 'user', counterpartId: 'out', candidateIds: [] }],
     ]) };
     h.deps['@/lib/transfer-reconciliation'] = { ...h.deps['@/lib/transfer-reconciliation'], reconcileTransfers: () => reconciliation };
+    // The screen first asks for the reconciliation cached per stored transfer receipt.
+    h.deps['@/lib/ledger'] = { ...h.deps['@/lib/ledger'], transferReconciliationForState: () => reconciliation };
     const tree = h.renderScreen('transfers');
     const pairs = walk(tree).filter(node => node.props?.testID === 'transfer-matched-pair');
     assert.equal(pairs.length, 1);

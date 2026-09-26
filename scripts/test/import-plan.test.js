@@ -2228,6 +2228,84 @@ const DECLINE_SMS = [{
       }));
   }
 
+  /* 3a — a bank app can post its notification many minutes after the SMS
+   *      (an ADCB credit-card push arrived 10 min 48 s later). Beyond two
+   *      minutes the pair must be proven by the alerts themselves: the same
+   *      stated card digits and the same NAMED merchant, one-to-one. */
+  {
+    const card = { last4: '4821', kind: 'credit', bankIdentity: 'adcb' };
+    const lag = 648_000;
+    const smsRow = (extra) => ({
+      id: 'sms-lag', type: 'expense', amountFils: 18_900, category: 'shopping',
+      accountId: 'adcb-card', title: 'Sample Store', date: '2026-07-10', source: 'sms',
+      smsKey: `ha41200t${D0}`, ts: D0, captureInstrument: card, ...extra,
+    });
+    const push = (extra) => ({
+      date: '2026-07-10', amountFils: 18_900, title: 'Sample Store', type: 'expense',
+      smsKey: `s${D0 + lag}-18900`, ts: D0 + lag, channel: 'push', captureInstrument: card, ...extra,
+    });
+    ok('lagged cross-channel: the late push for the same card and merchant is one event',
+      duplicateGuard([smsRow()]).has(push()));
+    ok('lagged cross-channel: a generic push title still needs the two-minute clock',
+      !duplicateGuard([smsRow()]).has(push({ title: 'Card purchase' })));
+    ok('lagged cross-channel: another card is another charge',
+      !duplicateGuard([smsRow()]).has(push({ captureInstrument: { ...card, last4: '4822' } })));
+    ok('lagged cross-channel: a push that states no card cannot use the wider window',
+      !duplicateGuard([smsRow()]).has(push({ captureInstrument: undefined })));
+    ok('lagged cross-channel: an edited SMS row is never matched on the wider window',
+      !duplicateGuard([smsRow({ userEdited: true, title: 'Gift' })]).has(push()));
+    ok('lagged cross-channel: beyond fifteen minutes they stay two',
+      !duplicateGuard([smsRow()]).has(push({ ts: D0 + 15 * 60_000 + 1_000,
+        smsKey: `s${D0 + 15 * 60_000 + 1_000}-18900` })));
+    {
+      const guard = duplicateGuard([smsRow()]);
+      guard.has(push());
+      ok('lagged cross-channel: one SMS explains one late push, not a second purchase',
+        !guard.has(push({ ts: D0 + lag + 60_000, smsKey: `s${D0 + lag + 60_000}-18900` })));
+    }
+    // Reverse order: the push was stored first; the SMS arrives 10 minutes later.
+    const storedPush = {
+      id: 'push-lag', type: 'expense', amountFils: 18_900, category: 'shopping',
+      accountId: 'adcb-card', title: 'Sample Store', date: '2026-07-10', source: 'sms', viaPush: true,
+      smsKey: `s${D0}-18900`, ts: D0, captureInstrument: card,
+    };
+    ok('lagged cross-channel: a late SMS replaces the stored push for the same card and merchant',
+      duplicateGuard([storedPush]).supersedes({
+        date: '2026-07-10', amountFils: 18_900, title: 'Sample Store', type: 'expense',
+        smsKey: `ha41201t${D0 + lag}`, ts: D0 + lag, channel: 'inbox', captureInstrument: card,
+      }) === 'push-lag');
+    // Two identical purchases on one channel keep the two-minute same-event rule.
+    const coffee = (id, ts, extra) => ({
+      id, type: 'expense', amountFils: 1_600, category: 'dining', accountId: 'adcb-card',
+      title: 'Corner Coffee', date: '2026-07-10', source: 'sms', smsKey: `s${ts}-1600`, ts,
+      captureInstrument: card, ...extra,
+    });
+    ok('lagged cross-channel: two equal SMS coffees five minutes apart stay two',
+      !duplicateGuard([coffee('c1', D0)]).has({
+        date: '2026-07-10', amountFils: 1_600, title: 'Corner Coffee', type: 'expense',
+        smsKey: `s${D0 + 300_000}-1600`, ts: D0 + 300_000, channel: 'inbox', captureInstrument: card,
+      }) && reconcileCaptureDuplicates([coffee('c1', D0), coffee('c2', D0 + 300_000)]).length === 2);
+    ok('lagged cross-channel: two equal push coffees five minutes apart stay two',
+      reconcileCaptureDuplicates([
+        coffee('p1', D0, { viaPush: true }), coffee('p2', D0 + 300_000, { viaPush: true }),
+      ]).length === 2);
+
+    // The stored pair an older build already booked twice: the hydration /
+    // import repair keeps the SMS, drops the unedited push, and stays one-to-one.
+    const laggedPush = { ...storedPush, id: 'push-late', ts: D0 + lag, smsKey: `s${D0 + lag}-18900` };
+    const repaired = reconcileCaptureDuplicates([smsRow(), laggedPush]);
+    ok('lagged repair: a stored SMS + late push pair becomes the one SMS row',
+      repaired.length === 1 && repaired[0].id === 'sms-lag' && repaired[0].viaPush !== true, repaired);
+    ok('lagged repair: an edited push is never removed by the wider window',
+      reconcileCaptureDuplicates([smsRow(), { ...laggedPush, userEdited: true }]).length === 2);
+    ok('lagged repair: one SMS absorbs one late push; a second genuine push survives',
+      reconcileCaptureDuplicates([smsRow(), laggedPush,
+        { ...laggedPush, id: 'push-later', ts: D0 + lag + 120_000, smsKey: `s${D0 + lag + 120_000}-18900` },
+      ]).length === 2);
+    ok('lagged repair: a generic push title is not folded across the wider window',
+      reconcileCaptureDuplicates([smsRow(), { ...laggedPush, title: 'Card purchase' }]).length === 2);
+  }
+
   /* 3b — dedupe.ts restates sms-parser's STRUCTURAL_TITLES rather than
    *      importing it (db.test.js pins that it has no dependencies), so the
    *      copy has to be held to the original. A title the parser assigns from

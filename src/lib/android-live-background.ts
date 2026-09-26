@@ -204,9 +204,6 @@ async function boundedCollector(
     },
   );
 
-  const noObservedSms = source === 'sms' && result.inboxScannedCount === 0 &&
-    result.parsed.length === 0 && result.declined.length === 0 &&
-    result.reviewCandidates.length === 0;
   const holdPushAcknowledgement = result.reviewCandidates.length > 0;
 
   return {
@@ -220,8 +217,14 @@ async function boundedCollector(
     // A killed-process task does not persist Review rows. Keep the SMS cursor
     // where it was so the next normal foreground scan can still stage any
     // ambiguous alert from this tiny window. Already-imported rows dedupe.
-    newestTs: source === 'sms' ? state.lastScanTs :
-      (noObservedSms ? state.lastScanTs : result.newestTs),
+    //
+    // A push wake never moves it either. lastScanTs is the SMS watermark, and
+    // this wake read no SMS: stamping the notification's post time on it made
+    // the next foreground scan start after that moment and skip every SMS the
+    // 2-minute event wake had not imported (an owner's card purchase received
+    // at 22:43 was never read after a push import at 02:45). The foreground
+    // notification-only drain already keeps lastScanTs for the same reason.
+    newestTs: state.lastScanTs,
     scannedCount: result.scannedCount,
     inboxScannedCount: result.inboxScannedCount,
     historicalReread: false,

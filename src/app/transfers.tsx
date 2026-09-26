@@ -21,7 +21,7 @@ import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { detailsWords } from '@/lib/details-copy';
 import { formatAED, friendlyDate, shortDate, toISODate } from '@/lib/format';
 import { t } from '@/lib/i18n';
-import { accountDisplayName } from '@/lib/ledger';
+import { accountDisplayName, transferReconciliationForState } from '@/lib/ledger';
 import { formatMinorUnits } from '@/lib/ledger-money';
 import { inPeriod } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -32,7 +32,7 @@ import { reconcileTransfers } from '@/lib/transfer-reconciliation';
 import { matchedTransferPairs, suggestedTransferPairs } from '@/lib/transfer-pairs';
 
 type Activity = ReturnType<typeof getTransferActivity>[number];
-type Scope = 'all' | 'confirmed' | 'pending';
+type Scope = 'all' | 'confirmed' | 'unconfirmed';
 const MATCHED_PREVIEW = 5;
 
 export default function TransfersScreen() {
@@ -51,7 +51,12 @@ export default function TransfersScreen() {
   const search = useDeferredValue(query.trim().toLocaleLowerCase());
   const [periodOpen, setPeriodOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const reconciliation = useMemo(() => reconcileTransfers(state.transactions, state.accounts), [state.transactions, state.accounts]);
+  // Reuse the reconciliation keyed on the stored transfer receipt. Only while a
+  // history import holds a provisional receipt does this dedicated screen
+  // build the graph itself (array-identity memoized in the reconciler).
+  const storedReconciliation = transferReconciliationForState(state);
+  const reconciliation = useMemo(() => storedReconciliation ?? reconcileTransfers(state.transactions, state.accounts),
+    [storedReconciliation, state.transactions, state.accounts]);
   const activity = useMemo(() => getTransferActivity(state.transactions, state.accounts, reconciliation),
     [state.transactions, state.accounts, reconciliation]);
   const accounts = useMemo(() => new Map(state.accounts.map(account => [account.id, account])), [state.accounts]);
@@ -76,8 +81,8 @@ export default function TransfersScreen() {
     const days = new Map<string, Activity[]>();
     const rows = activity.filter(item => {
       if (!inPeriod(item.transaction.date, period)) return false;
-      if (scope === 'confirmed' && item.needsReview) return false;
-      if (scope === 'pending' && !item.needsReview) return false;
+      if (scope === 'confirmed' && !item.confirmed) return false;
+      if (scope === 'unconfirmed' && item.confirmed) return false;
       if (!search) return true;
       const account = accounts.get(item.transaction.accountId);
       return [item.transaction.title, account?.name, account?.bankName, account?.last4,
@@ -129,7 +134,7 @@ export default function TransfersScreen() {
             trailing={query ? <ActionIconButton icon="close" label={t('clearSearch', language)}
               variant="plain" onPress={() => setQuery('')} /> : undefined} />
           <SegmentedControl<Scope> label={words.title} value={scope} onChange={setScope}
-            segments={[{ value: 'all', label: words.all }, { value: 'confirmed', label: words.confirmed }, { value: 'pending', label: words.pending }]} />
+            segments={[{ value: 'all', label: words.all }, { value: 'confirmed', label: words.confirmed }, { value: 'unconfirmed', label: words.unconfirmedScope }]} />
           <ThemedText type="meta" themeColor="textSecondary">{words.recordsNote}</ThemedText>
           {suggestedPairs > 0 ? <Pressable testID="transfer-pairs-link" accessibilityRole="button"
             accessibilityLabel={d.transfers.pairsLink(suggestedPairs)}
@@ -164,7 +169,10 @@ export default function TransfersScreen() {
         renderItem={({ item }) => {
           const tx = item.transaction;
           const account = accounts.get(tx.accountId);
-          const status = item.needsReview ? words.unknown : item.ownership === 'own' ? words.own : words.external;
+          // Only the reconciler's review queue is a chore. A generic transfer
+          // with no link to another owned account is stated neutrally.
+          const status = item.confirmed ? item.ownership === 'own' ? words.own : words.external
+            : item.needsReview ? words.needsReview : words.unconfirmed;
           const accountLabel = account ? accountDisplayName(account) : words.accountUnknown;
           const direction = tx.type === 'income' ? words.incoming : words.outgoing;
           const amountLabel = moneySpec

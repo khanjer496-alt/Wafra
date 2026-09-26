@@ -7,7 +7,8 @@ const root = path.resolve(__dirname, '../../..');
 const source = name => path.join(root, 'src/lib', `${name}.ts`);
 
 function harness(result = {}, initial = {}, options = {}) {
-  let current = { hydrated: true, parserVersion: 39, lastScanTs: 1000,
+  // Steady state: this parser's recent-window re-read already completed.
+  let current = { hydrated: true, parserVersion: 39, recentRereadParserVersion: 39, lastScanTs: 1000,
     merchantOverrides: {}, transactions: [], accounts: [], captureOptOut: false,
     privateMode: false, marketId: 'AE', ...initial };
   const events = [], requested = [], modes = [], batches = [];
@@ -24,7 +25,8 @@ function harness(result = {}, initial = {}, options = {}) {
       } },
     '@/lib/background-relay-storage': {}, '@/lib/relay': relay,
     '@/lib/sms-parser': { PARSER_VERSION: 39, PARSER_BACKFILL_VERSION: 39 },
-    '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [] },
+    '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [],
+      withoutRecordedReviews: require('../build/review-source-bindings.js').withoutRecordedReviews },
   });
   const executor = load(source('capture-executor'), {
     '@/lib/auto-import': {}, '@/lib/capture': capture, '@/lib/relay': relay,

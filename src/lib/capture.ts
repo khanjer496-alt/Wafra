@@ -37,9 +37,13 @@ import {
   isRelayRevokedError,
   syncRelay,
 } from '@/lib/relay';
-import { PARSER_BACKFILL_VERSION } from '@/lib/sms-parser';
+import { PARSER_BACKFILL_VERSION, PARSER_VERSION } from '@/lib/sms-parser';
 import type { ReviewEntry } from '@/lib/alert-review-tray';
-import { collectLegacyReviewSourceKeys, type ReviewSourceBinding } from '@/lib/review-source-bindings';
+import {
+  collectLegacyReviewSourceKeys,
+  withoutRecordedReviews,
+  type ReviewSourceBinding,
+} from '@/lib/review-source-bindings';
 import type { AppState } from '@/lib/types';
 import type { HistoryImportProgress } from '@/lib/history-import';
 
@@ -72,6 +76,11 @@ export interface CaptureResult {
   historicalReread?: boolean;
   /** Hand an incomplete parser migration to the existing resumable owner. */
   historyImport?: HistoryImportProgress;
+  /**
+   * PARSER_VERSION whose recent-window re-read this collection completed; the
+   * executor stamps it with the batch. See PARSER_RECOVERY_WINDOW_MS.
+   */
+  recentRereadParserVersion?: number;
   /** Strong per-alert evidence for the launch-tested UAE/Saudi parser pack. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
   source: CaptureSource;
@@ -88,6 +97,27 @@ export interface CaptureResult {
 }
 
 const NOOP = async () => {};
+
+/**
+ * How far back the one-time re-read after a parser release reaches.
+ *
+ * The routine Android scan starts after lastScanTs, so every message is parsed
+ * exactly once, by whichever parser was installed when it arrived. When that
+ * parser sent it to Review and Review lost it, or refused it outright, nothing
+ * ever read it again: an owner's salary credit, routed to Review by the older
+ * parser and absent from both Review and the ledger, was still missing after
+ * installing v54, which reads it as Salary, because the cursor was past it.
+ *
+ * So the first scan under a new PARSER_VERSION reaches back this far instead
+ * of to lastScanTs, through the normal pipeline: rows already in the ledger
+ * match their exact source identity (and the cross-channel guard), Review
+ * decisions keep their tombstones, and only messages with no outcome at all
+ * are added. Two weeks is a few hundred messages at most, so it stays cheap on
+ * a years-long inbox; a full-history repair remains PARSER_BACKFILL_VERSION's
+ * job. It also covers a message a stale cursor skipped.
+ */
+export const PARSER_RECOVERY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
 
 const iosCaptureStatusListeners = new Set<() => void>();
 const iosCaptureEntitlementResetListeners = new Set<() => void>();
@@ -335,9 +365,16 @@ export async function collectNewMessages(
     // one is present. Keep routine foreground capture incremental so it does
     // not race the history coordinator through the same inbox.
     const fullHistoricalReread = reread && state.historyImport == null;
+    // Once per parser release, reach back over the recent window (see
+    // PARSER_RECOVERY_WINDOW_MS). A full-history read covers it anyway.
+    const recoveryFloor = Math.max(0, Date.now() - PARSER_RECOVERY_WINDOW_MS);
+    const recentRereadDue = !notificationOnly &&
+      (state.recentRereadParserVersion ?? 0) < PARSER_VERSION;
     const sinceMs = notificationOnly || fullHistoricalReread || state.lastScanTs <= 0
       ? 0
-      : state.lastScanTs + 1;
+      : recentRereadDue
+        ? Math.min(state.lastScanTs + 1, recoveryFloor)
+        : state.lastScanTs + 1;
     // `declined` is the other half of that re-read. A decline the old parser
     // booked as an expense cannot be healed into anything — the money never
     // moved — so the row has to be retired, and the proof is the message
@@ -345,7 +382,7 @@ export async function collectNewMessages(
     // only place that proof exists. The default covers a stubbed scanInbox.
     const {
       parsed,
-      reviewCandidates = [],
+      reviewCandidates: scannedReviewCandidates = [],
       reviewSourceBindings = [],
       declined = [],
       newestTs,
@@ -376,6 +413,12 @@ export async function collectNewMessages(
     // that a successful zero-change scan stamps the backfill receipt and strands all
     // older Fishbasket/Fbinter/Nazemhome receipts forever. An established SMS
     // ledger proves that zero rows is not a credible full-history result.
+    // A re-read meets messages the ledger already booked. When the current
+    // parser would park one of those in Review, the ledger row IS its outcome;
+    // offering it again invites the same money to be added twice.
+    const reviewCandidates = recentRereadDue
+      ? withoutRecordedReviews(scannedReviewCandidates, state.transactions)
+      : scannedReviewCandidates;
     const hasStoredInboxHistory = state.transactions.some(
       (row) => row.source === 'sms' && row.viaPush !== true,
     );
@@ -405,6 +448,10 @@ export async function collectNewMessages(
       inboxScannedCount,
       scannedCount,
       historicalReread: fullHistoricalReread && inboxHistoryComplete,
+      // Only a read that started at or before the window floor and reached its
+      // end proves the window was re-evaluated by this parser.
+      ...(recentRereadDue && sinceMs <= recoveryFloor && inboxHistoryComplete
+        ? { recentRereadParserVersion: PARSER_VERSION } : {}),
       ...(fullHistoricalReread && !inboxHistoryComplete && nextCursor ? { historyImport: {
         status: 'paused' as const, cursor: nextCursor, scanned: scannedCount,
         found: parsed.length + reviewCandidates.length, startedAt: migrationTime,

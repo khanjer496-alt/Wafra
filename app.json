@@ -199,7 +199,6 @@
           }
         }
       ],
-      "./plugins/onnxruntime-gradle9-compat",
       "@bacons/apple-targets"
     ],
     "experiments": {

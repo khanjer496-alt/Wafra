@@ -10,7 +10,15 @@ function harness(rows = [], options = {}) {
   const calls = { unread: 0, cashOut: 0, comparison: 0, foreign: 0, upcomingKinds: [] };
   const state = { transactions: rows, accounts: [{ id: 'bank' }], budgets: [], notSubscriptions: [],
     reviewTray: { pending: options.pending ?? [] } };
+  // Row-local transfer facts are fixture fields; the projection must never
+  // rebuild the transfer graph, so reconciliation itself throws.
+  const reconciliation = { isTransferCandidate: row => row.ownership !== undefined,
+    transferOwnership: row => row.ownership ?? null,
+    reconcileTransfers: () => { throw new Error('dashboard projection rebuilt the transfer graph'); } };
+  const transferActivity = load(path.resolve(__dirname, '../../../src/lib/transfer-activity.ts'), {
+    '@/lib/transfer-reconciliation': reconciliation });
   const { projectDashboard } = load(path.resolve(__dirname, '../../../src/lib/dashboard-projection.ts'), {
+    '@/lib/transfer-reconciliation': reconciliation, '@/lib/transfer-activity': transferActivity,
     '@/lib/accuracy': { unreadFormatCount: () => { calls.unread++; return options.unread ?? 0; }, REPORT_PROMPT_THRESHOLD: 5 },
     '@/lib/analytics': { periodComparison: () => { calls.comparison++; return null; } },
     '@/lib/cash-flow': { summarizeCashOutflow: () => { calls.cashOut++; return { totalFils: 120, cardPaymentsFils: 20, accountOutflowFils: 100 }; } },
@@ -85,4 +93,26 @@ test('parser review state no longer hides Home unread-format work', () => {
   assert.equal(projected.unreadFormats.count, 8);
   assert.equal(projected.unreadFormats.shouldPrompt, true);
   assert.equal(h.counts().unread, 1);
+});
+
+test('Home leaves only row-locally settled external transfers to the Transfers screen', () => {
+  const rows = [
+    { id: 'sent', date: '2026-09-06', accountId: 'bank', ownership: 'external' },
+    { id: 'unknown', date: '2026-09-06', accountId: 'bank', ownership: 'unknown' },
+    { id: 'dup', date: '2026-09-06', accountId: 'bank', ownership: 'external' },
+    { id: 'dup', date: '2026-09-06', accountId: 'bank', ownership: 'external' },
+    { id: 'coffee', date: '2026-09-06', accountId: 'bank' },
+  ];
+  const home = harness(rows).project({ surface: 'home' });
+  // Unknown ownership may be a likely card repayment that Transfers does not
+  // list; duplicate ids are left to review. Both stay visible here.
+  assert.deepEqual(Array.from(home.activityRows, r => r.id), ['unknown', 'dup', 'dup', 'coffee']);
+  assert.equal(home.hasPeriodTransfers, true);
+  assert.equal(home.hasPeriodRecords, true);
+  assert.deepEqual(Array.from(harness(rows).project().activityRows, r => r.id), ['sent', 'unknown', 'dup', 'dup', 'coffee'],
+    'the full dashboard surface keeps its existing activity rows');
+  assert.equal(harness([{ id: 'coffee', date: '2026-09-06', accountId: 'bank' },
+    { id: 'old-sent', date: '2026-08-06', accountId: 'bank', ownership: 'external' },
+    { id: 'hidden-sent', date: '2026-09-06', accountId: 'hidden', ownership: 'external' }])
+    .project({ surface: 'home' }).hasPeriodTransfers, false, 'other periods and hidden accounts do not count');
 });

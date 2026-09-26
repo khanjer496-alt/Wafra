@@ -215,6 +215,20 @@ export interface DuplicateGuard {
 const SAME_EVENT_MS = 120_000;
 /** Push and SMS clocks may drift, but a day-wide match erases real purchases. */
 const CROSS_CHANNEL_EVENT_MS = 120_000;
+/**
+ * The same card event on the OTHER channel, when the alerts prove it.
+ *
+ * A bank app does not always post its notification when the SMS lands: an
+ * owner's ADCB credit-card push arrived 10 min 48 s after the SMS about the
+ * same charge (same card digits, amount and merchant), so the two-minute
+ * window above booked it twice. Beyond two minutes a push and an SMS pair only
+ * on evidence the bare money cannot supply: both alerts state the SAME card or
+ * account digits, both NAME the same merchant (a generic "Card purchase" never
+ * qualifies), neither row was edited, and the match is nearest-first and
+ * one-to-one. Two identical charges on one channel never use this path; they
+ * keep the two-minute same-event rule, so two equal coffees stay two.
+ */
+export const CROSS_CHANNEL_INSTRUMENT_EVENT_MS = 15 * 60_000;
 /** Debit-account confirmation and card receipt can be several minutes apart. */
 const CARD_PAYMENT_PAIR_MS = 30 * 60_000;
 
@@ -268,6 +282,57 @@ export function isStatementCaptureSource(source: CaptureSource | undefined): boo
  */
 function crossChannelPair(row: SeenEvent, title: string): boolean {
   return row.userEdited === true || sameMerchantCapture(row.title, title);
+}
+
+/** Both alerts state the same card/account digits; absence proves nothing here. */
+function sameStatedInstrument(a?: CaptureInstrument, b?: CaptureInstrument): boolean {
+  return !!a && !!b && /^\d{4}$/.test(a.last4) && a.last4 === b.last4 &&
+    compatibleCaptureInstrument(a, b);
+}
+
+/** Both titles name a merchant, and the same one (whole-word prefix allowed). */
+function sameNamedMerchant(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  return !!x && !!y && !GENERIC_CAPTURE_TITLES.has(x) && !GENERIC_CAPTURE_TITLES.has(y) &&
+    sameMerchantCapture(x, y);
+}
+
+/**
+ * The strong-evidence push/SMS pairing beyond the two-minute window; see
+ * CROSS_CHANNEL_INSTRUMENT_EVENT_MS. Exported for the hydration repair and
+ * tests; callers still enforce opposite channels and one-to-one consumption.
+ */
+export function laggedCrossChannelEvent(
+  a: { ts: number | null; title: string; captureInstrument?: CaptureInstrument; userEdited?: boolean },
+  b: { ts: number | null; title: string; captureInstrument?: CaptureInstrument; userEdited?: boolean },
+): boolean {
+  return a.userEdited !== true && b.userEdited !== true &&
+    sameStatedInstrument(a.captureInstrument, b.captureInstrument) &&
+    sameNamedMerchant(a.title, b.title) &&
+    closeEnough(a.ts, b.ts, CROSS_CHANNEL_INSTRUMENT_EVENT_MS);
+}
+
+/**
+ * Nearest unconsumed capture on the other channel that the lagged rule pairs
+ * with `c`: an SMS row for an incoming push (`wanted: 'inbox'`), or a stored
+ * push row for an incoming SMS (`wanted: 'push'`).
+ */
+function nearestLaggedCrossChannel(
+  rows: readonly SeenEvent[],
+  c: DuplicateCandidate,
+  mine: number | null,
+  wanted: 'inbox' | 'push',
+): SeenEvent | undefined {
+  if (mine === null) return undefined;
+  let best: SeenEvent | undefined;
+  for (const row of rows) {
+    if (row.consumed || row.ts === null) continue;
+    if (wanted === 'push' ? row.channel !== 'push' || !row.id : row.channel === 'push') continue;
+    if (!laggedCrossChannelEvent(row, { ts: mine, title: c.title, captureInstrument: c.captureInstrument })) continue;
+    if (!best || Math.abs(row.ts - mine) < Math.abs(best.ts! - mine)) best = row;
+  }
+  return best;
 }
 
 /** One occurrence filed under a day/amount/title fingerprint. */
@@ -851,7 +916,7 @@ export function duplicateGuard(
             compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
             crossChannelPair(row, c.title) &&
             closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS),
-        );
+        ) ?? nearestLaggedCrossChannel(rows, c, mine, 'inbox');
         if (match) {
           // One SMS row accounts for one notification. Left uncounted, a
           // single AED 25 SMS silenced every AED 25 push in the next two
@@ -886,6 +951,10 @@ export function duplicateGuard(
           continue;
         }
         if (!best || Math.abs(row.ts! - mine!) < Math.abs(best.ts! - mine!)) best = row;
+      }
+      if (!best) {
+        const lagged = nearestLaggedCrossChannel(rows, c, mine, 'push');
+        if (lagged?.id) best = lagged;
       }
       return best?.id ?? null;
     },
@@ -968,11 +1037,24 @@ export function duplicateGuard(
 export function reconcileCaptureDuplicates(transactions: Transaction[]): Transaction[] {
   const kept: Transaction[] = [];
   let changed = false;
+  // Every capture and every launch run this over the whole ledger, so the
+  // time-bucketed indexes are keyed on each row's own fingerprint alone and
+  // hold flat lists in insertion order instead of one composite
+  // `${fingerprint}|${bucket}` string per bucket. A bucket is an integer and
+  // holds no "|", so such a string names exactly one (fingerprint, bucket)
+  // pair: scanning a fingerprint's list for one bucket yields precisely the
+  // rows, in precisely the order, the composite keys did, without building and
+  // hashing a string per probe.
   const bySmsKey = new Map<string, number[]>();
-  const byCrossBucket = new Map<string, number[]>();
-  const byTitleBucket = new Map<string, number[]>();
-  const byCardPaymentBucket = new Map<string, number[]>();
+  /** crossChannelKey -> [crossBucket, laggedBucket, index, ...]. */
+  const byCross = new Map<string, number[]>();
+  /** dedupeKey -> [titleBucket, index, ...]. */
+  const byTitle = new Map<string, number[]>();
+  /** amount|account -> [cardPaymentBucket, index, ...]. */
+  const byCardPayment = new Map<string, number[]>();
   const pairedCardPayments = new Set<number>();
+  /** A kept row that absorbed a lagged cross-channel copy explains exactly one. */
+  const laggedAbsorbed = new Set<number>();
 
   const timeOf = (t: Transaction): number | null =>
     Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey);
@@ -982,19 +1064,48 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     if (rows) rows.push(index);
     else map.set(key, [index]);
   };
+  const pushPair = (map: Map<string, number[]>, key: string, slot: number, index: number) => {
+    const rows = map.get(key);
+    if (rows) rows.push(slot, index);
+    else map.set(key, [slot, index]);
+  };
+  const pushTriple = (map: Map<string, number[]>, key: string, slot: number, lagged: number, index: number) => {
+    const rows = map.get(key);
+    if (rows) rows.push(slot, lagged, index);
+    else map.set(key, [slot, lagged, index]);
+  };
   const bucket = (ts: number, width: number) => Math.floor(ts / width);
-  const noteAt = (row: Transaction, index: number) => {
-    if (row.smsKey) pushIndex(bySmsKey, canonicalCaptureSourceKey(row.smsKey, row.ts), index);
+  /** `keys` are this row's own fingerprints when the caller already built them. */
+  const noteAt = (
+    row: Transaction,
+    index: number,
+    keys?: { source: string | undefined; cross: string; title: string },
+  ) => {
+    if (row.smsKey) pushIndex(bySmsKey, keys?.source ?? canonicalCaptureSourceKey(row.smsKey, row.ts), index);
     const ts = timeOf(row);
     if (ts === null || row.source !== 'sms') return;
-    const cross = crossChannelKey(row.date, row.amountFils, row.type);
-    pushIndex(byCrossBucket, `${cross}|${bucket(ts, CROSS_CHANNEL_EVENT_MS)}`, index);
-    const title = dedupeKey(row.date, row.amountFils, row.title);
-    pushIndex(byTitleBucket, `${title}|${bucket(ts, 30_000)}`, index);
+    pushTriple(byCross, keys?.cross ?? crossChannelKey(row.date, row.amountFils, row.type),
+      bucket(ts, CROSS_CHANNEL_EVENT_MS), bucket(ts, CROSS_CHANNEL_INSTRUMENT_EVENT_MS), index);
+    pushPair(byTitle, keys?.title ?? dedupeKey(row.date, row.amountFils, row.title), bucket(ts, 30_000), index);
     if (row.cardPaymentSide && row.isTransfer === true) {
-      const payment = `${row.amountFils}|${row.accountId}`;
-      pushIndex(byCardPaymentBucket, `${payment}|${bucket(ts, CARD_PAYMENT_PAIR_MS)}`, index);
+      pushPair(byCardPayment, `${row.amountFils}|${row.accountId}`, bucket(ts, CARD_PAYMENT_PAIR_MS), index);
     }
+  };
+  // Reusable, insertion-ordered, de-duplicated candidate lists: the Sets they
+  // replace were allocated for every row although most rows match nothing.
+  const candidates: number[] = [];
+  const seenCandidates = new Set<number>();
+  const laggedCandidates: number[] = [];
+  const seenLagged = new Set<number>();
+  const addCandidate = (index: number) => {
+    if (seenCandidates.has(index)) return;
+    seenCandidates.add(index);
+    candidates.push(index);
+  };
+  const addLagged = (index: number) => {
+    if (seenLagged.has(index)) return;
+    seenLagged.add(index);
+    laggedCandidates.push(index);
   };
   const isOppositeCardPaymentPair = (
     row: Transaction,
@@ -1022,30 +1133,52 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       continue;
     }
     const rowTime = timeOf(row);
-    const candidates = new Set<number>();
-    if (row.smsKey) for (const index of bySmsKey.get(canonicalCaptureSourceKey(row.smsKey, row.ts)) ?? []) candidates.add(index);
+    candidates.length = 0;
+    seenCandidates.clear();
+    laggedCandidates.length = 0;
+    seenLagged.clear();
+    const rowSourceKey = row.smsKey ? canonicalCaptureSourceKey(row.smsKey, row.ts) : undefined;
+    if (rowSourceKey !== undefined) {
+      for (const index of bySmsKey.get(rowSourceKey) ?? []) addCandidate(index);
+    }
+    let rowKeys: { source: string | undefined; cross: string; title: string } | undefined;
     if (rowTime !== null) {
-      const cross = crossChannelKey(row.date, row.amountFils, row.type);
-      const title = dedupeKey(row.date, row.amountFils, row.title);
-      for (const offset of [-1, 0, 1]) {
-        for (const index of
-          byCrossBucket.get(
-            `${cross}|${bucket(rowTime, CROSS_CHANNEL_EVENT_MS) + offset}`,
-          ) ?? []) candidates.add(index);
-        for (const index of
-          byTitleBucket.get(`${title}|${bucket(rowTime, 30_000) + offset}`) ?? []) {
-          candidates.add(index);
+      rowKeys = {
+        source: rowSourceKey,
+        cross: crossChannelKey(row.date, row.amountFils, row.type),
+        title: dedupeKey(row.date, row.amountFils, row.title),
+      };
+      const cross = byCross.get(rowKeys.cross);
+      const titled = byTitle.get(rowKeys.title);
+      const payments = row.cardPaymentSide && row.isTransfer === true
+        ? byCardPayment.get(`${row.amountFils}|${row.accountId}`)
+        : undefined;
+      const crossSlot = bucket(rowTime, CROSS_CHANNEL_EVENT_MS);
+      const laggedSlot = bucket(rowTime, CROSS_CHANNEL_INSTRUMENT_EVENT_MS);
+      const titleSlot = bucket(rowTime, 30_000);
+      const paymentSlot = bucket(rowTime, CARD_PAYMENT_PAIR_MS);
+      for (let offset = -1; offset <= 1; offset += 1) {
+        if (cross) {
+          for (let at = 0; at < cross.length; at += 3) {
+            if (cross[at] === crossSlot + offset) addCandidate(cross[at + 2]);
+          }
+          for (let at = 0; at < cross.length; at += 3) {
+            if (cross[at + 1] === laggedSlot + offset) addLagged(cross[at + 2]);
+          }
         }
-        if (row.cardPaymentSide && row.isTransfer === true) {
-          const payment = `${row.amountFils}|${row.accountId}`;
-          for (const index of
-            byCardPaymentBucket.get(
-              `${payment}|${bucket(rowTime, CARD_PAYMENT_PAIR_MS) + offset}`,
-            ) ?? []) candidates.add(index);
+        if (titled) {
+          for (let at = 0; at < titled.length; at += 2) {
+            if (titled[at] === titleSlot + offset) addCandidate(titled[at + 1]);
+          }
+        }
+        if (payments) {
+          for (let at = 0; at < payments.length; at += 2) {
+            if (payments[at] === paymentSlot + offset) addCandidate(payments[at + 1]);
+          }
         }
       }
     }
-    const duplicateAt = [...candidates].find((index) => {
+    const primaryAt = candidates.find((index) => {
       const prior = kept[index];
       if (prior.source !== 'sms') return false;
       // Import already matched statement uploads one-to-one; a shared midday
@@ -1054,7 +1187,7 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       const rowPinned = Boolean(row.userEdited || row.transferDecision);
       const priorPinned = Boolean(prior.userEdited || prior.transferDecision);
       const bothEdited = rowPinned && priorPinned;
-      const rowSource = row.smsKey ? canonicalCaptureSourceKey(row.smsKey, row.ts) : undefined;
+      const rowSource = rowSourceKey;
       const priorSource = prior.smsKey ? canonicalCaptureSourceKey(prior.smsKey, prior.ts) : undefined;
       if (row.smsKey && rowSource && !isUnboundAndroidSourceKey(rowSource) && rowSource === priorSource &&
         (row.smsKey.startsWith('h') || (row.type === prior.type &&
@@ -1118,9 +1251,33 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
         closeEnough(rowTime, priorTime, 30_000)
       );
     });
+    // Second, narrower pass: only when nothing above matched may a push and an
+    // SMS for the same stated card and named merchant pair across the lagged
+    // window, nearest first and one-to-one. Neither row may be edited, so no
+    // user decision is ever folded by this rule.
+    let laggedAt: number | undefined;
+    if (primaryAt === undefined && rowTime !== null && !row.userEdited && !row.transferDecision &&
+      !isApplePayWalletRow(row) && row.walletBound !== true) {
+      for (const index of laggedCandidates) {
+        const prior = kept[index];
+        const priorTime = timeOf(prior);
+        if (laggedAbsorbed.has(index) || prior.source !== 'sms' || priorTime === null ||
+          prior.transferDecision || isApplePayWalletRow(prior) || prior.walletBound === true ||
+          fromDifferentStatementUploads(row, prior) ||
+          Boolean(row.viaPush) === Boolean(prior.viaPush) ||
+          row.date !== prior.date || row.amountFils !== prior.amountFils || row.type !== prior.type ||
+          !laggedCrossChannelEvent(
+            { ts: rowTime, title: row.title, captureInstrument: row.captureInstrument, userEdited: row.userEdited },
+            { ts: priorTime, title: prior.title, captureInstrument: prior.captureInstrument, userEdited: prior.userEdited },
+          )) continue;
+        if (laggedAt === undefined ||
+          Math.abs(priorTime - rowTime) < Math.abs(timeOf(kept[laggedAt])! - rowTime)) laggedAt = index;
+      }
+    }
+    const duplicateAt = primaryAt ?? laggedAt;
     if (duplicateAt === undefined) {
       kept.push(row);
-      noteAt(row, kept.length - 1);
+      noteAt(row, kept.length - 1, rowKeys);
       continue;
     }
 
@@ -1178,6 +1335,11 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
           }),
     };
     if (cardPaymentPair) pairedCardPayments.add(duplicateAt);
+    // Any push/SMS fold has explained its one cross-channel copy; the lagged
+    // rule may not attach a second, later push to the same row.
+    if (primaryAt === undefined || Boolean(row.viaPush) !== Boolean(prior.viaPush)) {
+      laggedAbsorbed.add(duplicateAt);
+    }
     // Maps may retain the old row's keys at this index; every candidate is
     // revalidated above, and adding the preferred keys keeps future lookups
     // complete without an O(n) map cleanup.

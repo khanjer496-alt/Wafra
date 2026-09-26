@@ -84,8 +84,10 @@ test('background capture and foreground StoreProvider never become competing led
 test('headless SMS leaves the normal cursor review-safe and push review rows remain recoverable', () => {
   const background = read('src/lib/android-live-background.ts');
 
-  assert.match(background, /newestTs: source === 'sms' \? state\.lastScanTs/,
+  assert.match(background, /newestTs: state\.lastScanTs,/,
     'a background SMS pass must not hide a review-only row behind a new cursor');
+  assert.doesNotMatch(background, /newestTs:[^\n]*result\.newestTs/,
+    'a background push wake read no SMS and must never advance the SMS watermark');
   assert.match(background, /const holdPushAcknowledgement = result\.reviewCandidates\.length > 0/);
   assert.match(background, /commit: holdPushAcknowledgement \? async \(\) => \{\} : result\.commit/);
 });

@@ -171,7 +171,8 @@ function createHarness(options = {}) {
     isCancelledByUser:(sub,c)=>!!c&&Object.prototype.hasOwnProperty.call(c,sub.title.trim().toLowerCase())&&sub.lastChargedISO<=c[sub.title.trim().toLowerCase()],
     withoutCancelled:(subs,c)=>subs.filter(sub=>!deps['@/lib/subscriptions'].isCancelledByUser(sub,c)),
     cancelledByUser:(subs,c)=>subs.filter(sub=>deps['@/lib/subscriptions'].isCancelledByUser(sub,c)),
-    subscriptionsMonthlyEquivalent:(subs,c)=>subs.filter(sub=>sub.group==='subscription'&&sub.status==='active'&&!deps['@/lib/subscriptions'].isCancelledByUser(sub,c)).reduce((sum,sub)=>sum+sub.monthlyEquivalentFils,0)};
+    subscriptionsMonthlyEquivalent:(subs,c)=>subs.filter(sub=>sub.group==='subscription'&&sub.status==='active'&&!deps['@/lib/subscriptions'].isCancelledByUser(sub,c)).reduce((sum,sub)=>sum+sub.monthlyEquivalentFils,0),
+    peekSubscriptionDetection:()=>null,subscriptionDetectionRunning:()=>false};
   local('@/lib/transaction-filter','src/lib/transaction-filter.ts');
   local('@/lib/insights','src/lib/insights.ts');local('@/lib/analytics','src/lib/analytics.ts');local('@/lib/reference-presentation','src/lib/reference-presentation.ts');local('@/lib/upcoming-window','src/lib/upcoming-window.ts');
   const summary=deps['@/lib/insights'].summarizeMonth(state.transactions,period,new Set(state.accounts.map(a=>a.id)),new Set());

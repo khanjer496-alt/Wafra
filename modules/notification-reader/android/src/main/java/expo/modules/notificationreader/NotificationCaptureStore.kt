@@ -136,13 +136,19 @@ object NotificationCaptureStore {
 
   /** Source-free reason helper for admission diagnostics; never returns queue text. */
   @Synchronized
-  fun admissionBlockReason(context: Context, pkg: String, text: String, ts: Long): String? {
+  fun admissionBlockReason(context: Context, pkg: String, title: String, text: String, ts: Long): String? {
     if (!NotificationCapturePolicy.isEnabled(context)) return "policy"
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return "cleared-through"
     if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) return "acknowledged"
     return try {
-      if (readAll(context).any { it.pkg == pkg && it.text == text && it.ts == ts }) "duplicate" else null
+      if (readAll(context).any { it.pkg == pkg && it.text == text && it.ts == ts }) return "duplicate"
+      // Same test append() applies, so diagnostics name a suppressed re-post
+      // instead of reporting an admissible notification.
+      val eventIdentity = contentFingerprint(pkg, title, text)
+      if (eventIdentity != null && recentContent(prefs).any {
+          it.first == eventIdentity && kotlin.math.abs(it.second - ts) <= REPOST_WINDOW_MS
+        }) "repost" else null
     } catch (_: Exception) {
       "store-error"
     }
