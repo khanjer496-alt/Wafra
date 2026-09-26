@@ -64,7 +64,7 @@ export default function NotFoundScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, paddingHorizontal: BAND_GUTTER + 8 },
+  root: { flex: 1, paddingHorizontal: BAND_GUTTER },
   flex: { flex: 1 },
   body: { gap: Spacing.three, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
   title: { fontFamily: Fonts.sansSemi, fontSize: 44, lineHeight: 48, letterSpacing: -1.6 },

@@ -28,6 +28,7 @@ import { useRouter, type Href } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
   Platform,
+  Pressable,
   StyleSheet,
   View,
 } from 'react-native';
@@ -35,12 +36,11 @@ import {
 import { BandTitle } from '@/components/settings-band/band-title';
 import { SettingsGroupTitle, SettingsLinkRow } from '@/components/settings-rows';
 import { ThemedText } from '@/components/themed-text';
-import { BandChip } from '@/components/ui/band/band-chip';
 import { EButton } from '@/components/ui/band/e-button';
 import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { TextField } from '@/components/ui/text-field';
-import { Fonts, Spacing } from '@/constants/theme';
+import { BandLayout, Fonts, Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import {
   buildFeedbackPayload,
@@ -201,11 +201,12 @@ export default function FeedbackScreen() {
               <ThemedText type="smallBold" style={{ color: band.onBand }}>{chipCopy.typeHeader}</ThemedText>
               <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{chipCopy.typeOptional}</ThemedText>
             </View>
-            <View style={styles.chips} testID="feedback-topic-chips">
+            <View style={styles.chips} testID="feedback-topic-chips" accessibilityRole="radiogroup"
+              accessibilityLabel={chipCopy.typeHeader}>
               {FEEDBACK_TOPICS.map((value) => {
                 const selected = topic === value;
                 return (
-                  <BandChip
+                  <TopicChip
                     key={value}
                     testID={`feedback-topic-${value}`}
                     palette={band}
@@ -317,7 +318,36 @@ export default function FeedbackScreen() {
   );
 }
 
+/**
+ * One topic on the band: a 38pt chip in the band's own tone (BandChip's
+ * look) that is a radio, because exactly one topic — or none — is chosen.
+ * Tapping the chosen one again clears it.
+ */
+function TopicChip({ label, selected, onPress, palette, testID }: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  palette: BandPalette;
+  testID?: string;
+}) {
+  const fg = selected ? palette.onSelected : palette.onBand;
+  return (
+    <Pressable testID={testID} accessibilityRole="radio" accessibilityLabel={label}
+      accessibilityState={{ checked: selected, selected }} onPress={onPress} hitSlop={3}
+      style={({ pressed }) => [styles.chip, { backgroundColor: selected ? palette.selected : palette.tile, opacity: pressed ? 0.75 : 1 }]}>
+      <ThemedText type={selected ? 'smallBold' : 'small'} style={{ color: fg }}>{label}</ThemedText>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  chip: {
+    minHeight: BandLayout.chipHeight,
+    borderRadius: BandLayout.chipHeight / 2,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   content: {
     gap: Spacing.four,
   },

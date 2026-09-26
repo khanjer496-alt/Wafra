@@ -79,6 +79,7 @@ test('unknown settings deep-links retain the complete screen without acting on t
  // The danger zone lives on Data and help, and a deep link never reaches it.
  const data=createWorkflowHarness({params:{section:'erase-now'}}),dataTree=data.renderScreen('settings-data');
  assert.ok(walk(dataTree).some(n=>n.props?.testID==='settings-data-erase'),'Erase stands alone at the bottom of Data and help');
+ assert.ok(isHeader(walk(dataTree).find(n=>n.props?.testID==='settings-data-erase'),data.deps['@/lib/i18n'].t('settingsDangerHeader')),'Erase has its own heading');
  assert.deepEqual(data.events,[]);
 });
 for(const language of ['en','ar'])test(`Data and help keeps every data row, with honest counts and backup wording: ${language}`,()=>{

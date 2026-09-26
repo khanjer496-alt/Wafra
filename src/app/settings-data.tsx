@@ -545,7 +545,7 @@ export default function SettingsDataScreen() {
   ) => {
     if (url) return linkRow(title, null, () => void openPublicLink(url), { last });
     return (
-      <Row last={last}>
+      <Row last={last} style={{ borderTopColor: band.rule, borderBottomColor: band.rule }}>
         <View style={styles.rowText}>
           <ThemedText type="smallBold" style={{ color: band.text }}>{title}</ThemedText>
           <ThemedText type="meta" style={{ color: band.textSecondary }}>
@@ -673,6 +673,7 @@ export default function SettingsDataScreen() {
         {/* Twice the gap every other group gets, and nothing routine beside
             it: Erase is the only control here that cannot be undone. */}
         <View testID="settings-data-erase" style={styles.danger}>
+          <SettingsGroupTitle title={t('settingsDangerHeader')} palette={band} />
           <EButton
             label={t('eraseAll')}
             palette={band}
@@ -743,7 +744,7 @@ export default function SettingsDataScreen() {
  * method and an erase that silently does nothing gets tapped twice. Modal's
  * fade is a cross-fade, which is also what Reduce Motion asks for.
  *
- * Design language E: a card on the sheet surface, lifted, with the sheet's
+ * Design language E: a card of the lifted surface (card tone), with the sheet's
  * 28pt radius. "Keep my data" is the primary (filled) action and comes
  * first; Erase is the destructive one under it. At the accessibility text
  * sizes the card scrolls rather than pushing its buttons off screen.
@@ -783,12 +784,13 @@ function EraseDialog({
       <View style={[styles.scrim, { backgroundColor: theme.scrim }]}>
         <View
           accessibilityViewIsModal
-          accessibilityRole="alert"
           onAccessibilityEscape={onKeep}
           testID="settings-erase-dialog"
-          style={[styles.dialog, { backgroundColor: palette.sheet, borderColor: palette.rule }]}>
+          style={[styles.dialog, { backgroundColor: palette.card, borderColor: palette.rule }]}>
+          {/* Always scrollable: near the large-text threshold the buttons
+              could otherwise be clipped below the card's 90% height. */}
           <ScrollView bounces={false} contentContainerStyle={styles.dialogBody}
-            scrollEnabled={largeText} showsVerticalScrollIndicator={largeText}>
+            showsVerticalScrollIndicator={largeText}>
             <ThemedText accessibilityRole="header" style={[styles.dialogTitle, { color: palette.text }]}>
               {title}
             </ThemedText>
@@ -859,7 +861,9 @@ const styles = StyleSheet.create({
     maxWidth: 380,
     maxHeight: '90%',
     borderRadius: BandLayout.sheetRadius,
-    borderWidth: StyleSheet.hairlineWidth,
+    // A full rule, not a hairline: in dark mode the lifted card and the dimmed
+    // page are close in tone, and the edge is what separates them.
+    borderWidth: 1.5,
     overflow: 'hidden',
   },
   dialogBody: { padding: Spacing.four, gap: Spacing.two + 2 },

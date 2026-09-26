@@ -9,8 +9,9 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
  * A screen's plain title set large on its band ("Settings", "Data and help",
  * "Customize Home"), with at most one sentence under it. Geist SemiBold — no
  * serif, no slogan; the title says what the screen is. At the accessibility
- * text sizes it steps down so a long Arabic or German word still fits the
- * width instead of breaking mid-word.
+ * text sizes it steps down and its growth is capped (1.5×, 45pt), so a long
+ * word ("Customize", "feedback") still fits the width instead of breaking
+ * mid-word; the sentence under it scales freely.
  */
 export function BandTitle({ title, body, palette, testID }: {
   title: string;
@@ -21,7 +22,7 @@ export function BandTitle({ title, body, palette, testID }: {
   const largeText = useLargeTextLayout();
   return (
     <View style={styles.wrap} testID={testID}>
-      <ThemedText accessibilityRole="header"
+      <ThemedText accessibilityRole="header" maxFontSizeMultiplier={largeText ? 1.5 : 1.4}
         style={[largeText ? styles.titleLarge : styles.title, { color: palette.onBand }]}>
         {title}
       </ThemedText>

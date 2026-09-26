@@ -32,6 +32,13 @@ const en = {
   /** Trusted devices' band while an invite is live. */
   inviteExpiresIn: 'Invite code expires in',
   inviteExpired: 'This invite has expired',
+  /** Trusted devices' group names, in the sentence case every E screen uses. */
+  trustedSample: 'Sample household · demo',
+  trustedStart: 'Start a trusted vault',
+  trustedDevices: 'Devices',
+  trustedThisDevice: 'This device',
+  trustedInvite: 'Add someone you trust',
+  trustedVault: 'Trusted vault',
 
   /** Feedback's sheet: plain group names instead of the older caps labels. */
   feedbackMessage: 'Your message',
@@ -59,6 +66,12 @@ const ar: SettingsECopy = {
 
   inviteExpiresIn: 'تنتهي صلاحية رمز الدعوة خلال',
   inviteExpired: 'انتهت صلاحية هذه الدعوة',
+  trustedSample: 'عائلة تجريبية · عرض',
+  trustedStart: 'ابدأ خزنة موثوقة',
+  trustedDevices: 'الأجهزة',
+  trustedThisDevice: 'هذا الجهاز',
+  trustedInvite: 'أضف شخصاً تثق به',
+  trustedVault: 'الخزنة الموثوقة',
 
   feedbackMessage: 'رسالتك',
   feedbackWhatWeSend: 'ما سنرسله',

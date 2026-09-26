@@ -356,16 +356,17 @@ for (const marker of settingsGroupMarkers) {
   previousSettingsGroup = next;
 }
 const settingsDataRender = task7SettingsData.slice(task7SettingsData.indexOf('<React.Fragment>'));
-assert.equal((settingsDataRender.match(/<SettingsGroupTitle title=\{/g) ?? []).length, 4, 'Data and help renders four titled groups');
+assert.equal((settingsDataRender.match(/<SettingsGroupTitle title=\{/g) ?? []).length, 5, 'Data and help renders five titled groups');
 let previousDataGroup = -1;
 for (const marker of [
   '<SettingsGroupTitle title={copy.yourData} palette={band} />',
   '<SettingsGroupTitle title={copy.helpImprove} palette={band} />',
   '<SettingsGroupTitle title={copy.advanced} palette={band} />',
   '<SettingsGroupTitle title={copy.about} palette={band} />',
-  // Erase stands alone at the bottom, with distance above it, as the one
-  // destructive row (the board draws no "Danger zone" heading).
+  // Erase stands alone at the bottom, with distance above it, under its own
+  // heading so a screen reader announces the danger before the button.
   'testID="settings-data-erase"',
+  "<SettingsGroupTitle title={t('settingsDangerHeader')} palette={band} />",
 ]) {
   const next = settingsDataRender.indexOf(marker);
   assert.ok(next > previousDataGroup, `Data and help group order lost ${marker}`);
@@ -412,7 +413,7 @@ const settingsPublicRows = task7SettingsData.match(
 assert.ok(settingsPublicRows.length > 0, 'Settings public-link row helper was not found');
 assert.match(settingsPublicRows, /if \(url\) return linkRow\(title, null, \(\) => void openPublicLink\(url\)/);
 const unavailableSettingsPublicRow = settingsPublicRows.match(
-  /return \(\s*(<Row last=\{last\}>[\s\S]*?<\/Row>)\s*\);/,
+  /return \(\s*(<Row last=\{last\}[^>]*>[\s\S]*?<\/Row>)\s*\);/,
 )?.[1] ?? '';
 assert.match(unavailableSettingsPublicRow, /<Icon name="alert"/);
 assert.match(unavailableSettingsPublicRow, /t\('publicLinkUnavailable'\)/);
@@ -430,7 +431,7 @@ const proPublicRows = task7Pro.match(
 assert.ok(proPublicRows.length > 0, 'Pro public-link row helper was not found');
 assert.match(proPublicRows, /if \(url\) return \([\s\S]*?<Pressable[\s\S]*?accessibilityRole="link"[\s\S]*?openLegal\(url\)/);
 const unavailableProPublicRow = proPublicRows.match(
-  /return \(\s*(<Row last=\{last\}>[\s\S]*?<\/Row>)\s*\);/,
+  /return \(\s*(<Row last=\{last\}[^>]*>[\s\S]*?<\/Row>)\s*\);/,
 )?.[1] ?? '';
 assert.match(unavailableProPublicRow, /<Icon name="alert"/);
 assert.match(unavailableProPublicRow, /t\('publicLinkUnavailable'\)/);

@@ -49,7 +49,6 @@ import { COUNTRY_UNKNOWN } from '@/lib/country';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Button } from '@/components/ui/controls';
 import { EButton } from '@/components/ui/band/e-button';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { Block } from '@/components/ui/layout';
@@ -1183,9 +1182,9 @@ export default function SettingsScreen() {
           <ThemedText style={{ color: band.textSecondary }}>{t('privacySecurityExact')}</ThemedText>
           <ThemedText style={{ color: band.textSecondary }}>{t('privacyLogosBody')}</ThemedText>
           {state.privateMode && <Block>
-            <ThemedText type="smallBold">{t('privacyLegacyTitle')}</ThemedText>
-            <ThemedText themeColor="textSecondary">{t('privacyLegacyBody')}</ThemedText>
-            <Button label={t('privacyLegacyReview')} variant="outline" onPress={reviewLegacyPrivacyPreference} />
+            <ThemedText type="smallBold" style={{ color: band.text }}>{t('privacyLegacyTitle')}</ThemedText>
+            <ThemedText style={{ color: band.textSecondary }}>{t('privacyLegacyBody')}</ThemedText>
+            <EButton palette={band} label={t('privacyLegacyReview')} variant="secondary" onPress={reviewLegacyPrivacyPreference} />
           </Block>}
         </View>
       </BottomSheet>

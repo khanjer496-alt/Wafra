@@ -522,7 +522,7 @@ export default function TrustedDevicesScreen() {
           {isPreview && (
             <View style={[styles.card, { backgroundColor: band.card, borderColor: band.rule }]}>
               <ThemedText type="smallBold" style={{ color: band.text }}>
-                {t('trustedPreview', language)} · {t('trustedDisabled', language)}
+                {eWords.trustedSample}
               </ThemedText>
               <ThemedText type="meta" style={{ color: band.textSecondary }}>
                 {t('trustedPreviewBody', language)}
@@ -532,7 +532,7 @@ export default function TrustedDevicesScreen() {
 
           {!config && !loading && !isPreview && (
             <View style={styles.section}>
-              <SettingsGroupTitle title={t('trustedStartHeader', language)} palette={band} />
+              <SettingsGroupTitle title={eWords.trustedStart} palette={band} />
               <ThemedText type="meta" style={{ color: band.textSecondary }}>{words.devicesBody}</ThemedText>
               {privateModeBlocksRelay && (
                 <View style={[styles.privateNotice, { backgroundColor: band.statusNearSoft }]}>
@@ -574,7 +574,7 @@ export default function TrustedDevicesScreen() {
           {(config || isPreview) && (
             <View style={styles.section} testID="trusted-devices-list">
               <SettingsGroupTitle
-                title={t('trustedDevicesHeader', language)}
+                title={eWords.trustedDevices}
                 palette={band}
                 trailing={
                   <ThemedText type="meta" tabular style={{ color: band.textSecondary }}>
@@ -620,7 +620,7 @@ export default function TrustedDevicesScreen() {
                         {device.isCurrent && (
                           <View style={[styles.badge, { backgroundColor: band.glyphGround }]}>
                             <ThemedText type="meta" style={{ color: band.text }}>
-                              {t('trustedThisDevice', language)}
+                              {eWords.trustedThisDevice}
                             </ThemedText>
                           </View>
                         )}
@@ -638,7 +638,7 @@ export default function TrustedDevicesScreen() {
 
           {config && owner && (
             <View style={styles.section} testID="trusted-invite">
-              <SettingsGroupTitle title={t('trustedInviteHeader', language)} palette={band} />
+              <SettingsGroupTitle title={eWords.trustedInvite} palette={band} />
               {!invite ? (
                 <EButton
                   palette={band}
@@ -665,7 +665,7 @@ export default function TrustedDevicesScreen() {
 
           {config && owner && (
             <View style={[styles.section, styles.dangerSection]}>
-              <SettingsGroupTitle title={t('trustedVaultHeader', language)} palette={band} />
+              <SettingsGroupTitle title={eWords.trustedVault} palette={band} />
               <ThemedText type="meta" style={{ color: band.textSecondary }}>
                 {t('trustedVaultBody', language)}
               </ThemedText>

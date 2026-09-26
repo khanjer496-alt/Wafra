@@ -19,6 +19,7 @@ import { useProCheckout } from '@/hooks/use-pro-checkout';
 import { t, tf } from '@/lib/i18n';
 import { autoCaptureMethod } from '@/lib/purchases';
 import { proCopy } from '@/lib/pro-copy';
+import { settingsCopy } from '@/lib/settings-copy';
 
 type FeatureRow = {
   icon: IconName;
@@ -93,7 +94,7 @@ export default function ProScreen() {
       </Pressable>
     );
     return (
-      <Row last={last}>
+      <Row last={last} style={{ borderTopColor: band.rule, borderBottomColor: band.rule }}>
         <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
           <ThemedText type="small" style={{ color: band.text }}>{title}</ThemedText>
           <ThemedText type="meta" style={{ color: band.textSecondary }}>
@@ -108,7 +109,8 @@ export default function ProScreen() {
   const status = entitled
     ? t('proActiveThanks')
     : trial > 0
-      ? tf('proTrialActiveBody', { left: trial, s: trial === 1 ? '' : 's' })
+      // settings-copy's sentence has correct Arabic counts (3 أيام, 11 يومًا).
+      ? settingsCopy(language).proTrialBody(trial)
       : t('proTrialEndedBody');
 
   return (
