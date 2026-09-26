@@ -12,6 +12,9 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.RelativeSizeSpan
 import android.util.Log
 import android.view.View
 import android.widget.RemoteViews
@@ -19,6 +22,7 @@ import java.text.DateFormatSymbols
 import java.util.Calendar
 import java.util.GregorianCalendar
 import java.util.Locale
+import java.util.TimeZone
 
 /**
  * Stores the snapshot and renders both widgets from it. Nothing here reads the
@@ -41,6 +45,9 @@ internal object WafraWidgets {
   private val BILL_TITLES = intArrayOf(R.id.wafra_bill_title_1, R.id.wafra_bill_title_2, R.id.wafra_bill_title_3)
   private val BILL_DATES = intArrayOf(R.id.wafra_bill_date_1, R.id.wafra_bill_date_2, R.id.wafra_bill_date_3)
   private val BILL_AMOUNTS = intArrayOf(R.id.wafra_bill_amount_1, R.id.wafra_bill_amount_2, R.id.wafra_bill_amount_3)
+  private val BILL_TILES = intArrayOf(R.id.wafra_bill_tile_1, R.id.wafra_bill_tile_2, R.id.wafra_bill_tile_3)
+  private val BILL_GLYPHS = intArrayOf(R.id.wafra_bill_glyph_1, R.id.wafra_bill_glyph_2, R.id.wafra_bill_glyph_3)
+  private const val DAY_MS = 24L * 60L * 60L * 1000L
 
   fun isRefreshAction(action: String?): Boolean = action != null && action in REFRESH_ACTIONS
 
@@ -85,6 +92,7 @@ internal object WafraWidgets {
     // A snapshot from an earlier day would present yesterday's spending as today's.
     val usable = snapshot != null && snapshot.isFresh(now) && snapshot.todayISO == todayISO
     if (snapshot == null || !usable) {
+      views.setViewVisibility(R.id.wafra_today_bars, View.GONE)
       views.setViewVisibility(R.id.wafra_today_content, View.GONE)
       views.setViewVisibility(R.id.wafra_today_empty, View.VISIBLE)
       views.setTextViewText(R.id.wafra_today_empty, res.getString(R.string.wafra_widget_open_to_update))
@@ -94,12 +102,11 @@ internal object WafraWidgets {
     views.setViewVisibility(R.id.wafra_today_content, View.VISIBLE)
 
     val amount = snapshot.formatMinor(snapshot.todayMinor)
-    views.setTextViewText(R.id.wafra_today_amount, amount)
+    views.setTextViewText(R.id.wafra_today_amount, bandFigure(amount, snapshot))
     views.setContentDescription(
       R.id.wafra_today_amount,
       if (amount == WidgetSnapshot.DASH) res.getString(R.string.wafra_widget_amount_hidden) else amount,
     )
-    views.setTextViewText(R.id.wafra_today_count, paymentsText(res, snapshot.todayCount))
 
     if (snapshot.last7Minor.size == 7) {
       views.setViewVisibility(R.id.wafra_today_bars, View.VISIBLE)
@@ -109,18 +116,40 @@ internal object WafraWidgets {
       views.setViewVisibility(R.id.wafra_today_bars, View.INVISIBLE)
     }
 
+    // One line under the figure: what is left in budgets when they are set,
+    // otherwise today's payment count.
     val left = snapshot.leftInBudgetsMinor
     if (left != null && !snapshot.hidden) {
+      views.setViewVisibility(R.id.wafra_today_count, View.GONE)
       views.setViewVisibility(R.id.wafra_today_budget, View.VISIBLE)
       views.setTextViewText(
         R.id.wafra_today_budget,
-        res.getString(R.string.wafra_widget_left_in_budgets, snapshot.formatMinor(left)),
+        res.getString(R.string.wafra_widget_left_in_budgets, isolate(snapshot.formatMinor(left), snapshot.language)),
       )
     } else {
       views.setViewVisibility(R.id.wafra_today_budget, View.GONE)
+      views.setViewVisibility(R.id.wafra_today_count, View.VISIBLE)
+      views.setTextViewText(R.id.wafra_today_count, paymentsText(res, snapshot.todayCount))
     }
     return views
   }
+
+  /**
+   * The band figure: "AED 24.00" with the currency code set smaller, as on the
+   * app's band figures. Kept in reading order inside Arabic text.
+   */
+  private fun bandFigure(amount: String, snapshot: WidgetSnapshot): CharSequence {
+    if (amount == WidgetSnapshot.DASH || !amount.startsWith(snapshot.currency)) return amount
+    val text = isolate(amount, snapshot.language)
+    val start = text.indexOf(snapshot.currency)
+    val figure = SpannableString(text)
+    figure.setSpan(RelativeSizeSpan(0.62f), start, start + snapshot.currency.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    return figure
+  }
+
+  /** Keeps "USD 15.49" in reading order inside right-to-left text. */
+  private fun isolate(text: String, language: String): String =
+    if (language == "ar" && text != WidgetSnapshot.DASH) "\u200E$text\u200E" else text
 
   private fun renderUpcoming(context: Context, snapshot: WidgetSnapshot?, now: Long, todayISO: String): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.wafra_widget_upcoming)
@@ -150,7 +179,19 @@ internal object WafraWidgets {
     for ((i, bill) in bills.withIndex()) {
       views.setViewVisibility(BILL_ROWS[i], View.VISIBLE)
       views.setTextViewText(BILL_TITLES[i], bill.title.ifEmpty { WidgetSnapshot.DASH })
-      views.setTextViewText(BILL_DATES[i], shortDate(bill.dueISO, locale))
+      // Merchant tile: the title's initial; a title with no letter (a masked
+      // card) shows a plain calendar glyph rather than a digit.
+      val initial = initialOf(bill.title)
+      if (initial != null) {
+        views.setTextViewText(BILL_TILES[i], initial)
+        views.setViewVisibility(BILL_TILES[i], View.VISIBLE)
+        views.setViewVisibility(BILL_GLYPHS[i], View.GONE)
+      } else {
+        views.setTextViewText(BILL_TILES[i], "")
+        views.setViewVisibility(BILL_TILES[i], View.GONE)
+        views.setViewVisibility(BILL_GLYPHS[i], View.VISIBLE)
+      }
+      views.setTextViewText(BILL_DATES[i], dueWord(res, bill.dueISO, todayISO, locale))
       val formatted = snapshot.formatMinor(bill.amountMinor)
       val amount = if (bill.estimated && formatted != WidgetSnapshot.DASH) "≈ $formatted" else formatted
       views.setTextViewText(BILL_AMOUNTS[i], amount)
@@ -187,18 +228,53 @@ internal object WafraWidgets {
     return String.format(Locale.US, template, count)
   }
 
+  /** First letter of a title, upper-cased, for its tile; null when it has none. */
+  internal fun initialOf(title: String): String? {
+    var index = 0
+    while (index < title.length) {
+      val codePoint = title.codePointAt(index)
+      if (Character.isLetter(codePoint)) return String(Character.toChars(codePoint)).uppercase(Locale.ROOT)
+      index += Character.charCount(codePoint)
+    }
+    return null
+  }
+
+  /**
+   * "Today", "Tomorrow", the weekday within the coming week ("Monday"), or
+   * "Mon 5 Oct" further out, so a weekday never means next week's.
+   */
+  internal fun dueWord(res: Resources, dueISO: String, todayISO: String, locale: Locale): String {
+    val due = parseDay(dueISO) ?: return dueISO
+    val today = parseDay(todayISO) ?: return shortDate(dueISO, locale)
+    return when ((due.timeInMillis - today.timeInMillis) / DAY_MS) {
+      0L -> res.getString(R.string.wafra_widget_today)
+      1L -> res.getString(R.string.wafra_widget_tomorrow)
+      in 2L..6L -> DateFormatSymbols.getInstance(locale).weekdays[due.get(Calendar.DAY_OF_WEEK)]
+      else -> shortDate(dueISO, locale)
+    }
+  }
+
+  /** A valid YYYY-MM-DD at UTC midnight (so day differences are exact), or null. */
+  private fun parseDay(iso: String): Calendar? {
+    if (iso.length != 10) return null
+    val year = iso.substring(0, 4).toIntOrNull() ?: return null
+    val month = iso.substring(5, 7).toIntOrNull() ?: return null
+    val day = iso.substring(8, 10).toIntOrNull() ?: return null
+    if (month !in 1..12 || day !in 1..31) return null
+    val calendar = GregorianCalendar(TimeZone.getTimeZone("UTC"))
+    calendar.clear()
+    calendar.set(year, month - 1, day)
+    if (calendar.get(Calendar.DAY_OF_MONTH) != day || calendar.get(Calendar.MONTH) != month - 1) return null
+    return calendar
+  }
+
   /** "Mon 28 Sep" / "الاثنين 28 سبتمبر", always with Latin digits like the app. */
   private fun shortDate(iso: String, locale: Locale): String {
-    val year = iso.substring(0, 4).toIntOrNull() ?: return iso
-    val month = iso.substring(5, 7).toIntOrNull() ?: return iso
-    val day = iso.substring(8, 10).toIntOrNull() ?: return iso
-    if (month !in 1..12 || day !in 1..31) return iso
-    val calendar = GregorianCalendar(year, month - 1, day)
-    if (calendar.get(Calendar.DAY_OF_MONTH) != day) return iso
+    val calendar = parseDay(iso) ?: return iso
     val symbols = DateFormatSymbols.getInstance(locale)
     val weekday = symbols.shortWeekdays[calendar.get(Calendar.DAY_OF_WEEK)]
-    val monthName = symbols.shortMonths[month - 1]
-    return "$weekday $day $monthName"
+    val monthName = symbols.shortMonths[calendar.get(Calendar.MONTH)]
+    return "$weekday ${calendar.get(Calendar.DAY_OF_MONTH)} $monthName"
   }
 
   private fun isoDate(calendar: Calendar): String = String.format(
@@ -216,13 +292,15 @@ internal object WafraWidgets {
    */
   private fun barsBitmap(context: Context, values: List<Long?>, hidden: Boolean): Bitmap {
     val density = context.resources.displayMetrics.density
-    val width = Math.max(1, Math.round(160f * density))
-    val height = Math.max(1, Math.round(40f * density))
+    // Drawn at the 24dp strip's height across a typical 2x2 width; the
+    // ImageView stretches it to the widget's width.
+    val width = Math.max(1, Math.round(140f * density))
+    val height = Math.max(1, Math.round(24f * density))
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    val track = context.getColor(R.color.wafra_widget_track)
-    val accent = context.getColor(R.color.wafra_widget_accent)
+    val track = context.getColor(R.color.wafra_widget_today_mark)
+    val accent = context.getColor(R.color.wafra_widget_today_accent)
     val rtl = context.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL
 
     val amounts = values.map { if (hidden) 0L else Math.max(0L, it ?: 0L) }

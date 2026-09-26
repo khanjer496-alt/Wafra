@@ -13,11 +13,15 @@
   <string name="wafra_widget_open_to_update">افتح وفرة للتحديث</string>
   <string name="wafra_widget_no_payments">لا دفعات بعد</string>
   <string name="wafra_widget_preview_count">3 دفعات</string>
+  <string name="wafra_widget_tomorrow">غداً</string>
   <string name="wafra_widget_preview_bill_1">الإيجار</string>
-  <string name="wafra_widget_preview_date_1">الاثنين 28 سبتمبر</string>
+  <string name="wafra_widget_preview_tile_1">ا</string>
+  <string name="wafra_widget_preview_date_1">غداً</string>
   <string name="wafra_widget_preview_bill_2">باقة الجوال</string>
-  <string name="wafra_widget_preview_date_2">الخميس 1 أكتوبر</string>
+  <string name="wafra_widget_preview_tile_2">ب</string>
+  <string name="wafra_widget_preview_date_2">الخميس</string>
   <string name="wafra_widget_preview_bill_3">الكهرباء</string>
+  <string name="wafra_widget_preview_tile_3">ا</string>
   <string name="wafra_widget_preview_date_3">السبت 3 أكتوبر</string>
   <plurals name="wafra_widget_payments">
     <item quantity="zero">لا دفعات</item>

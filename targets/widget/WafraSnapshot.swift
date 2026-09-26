@@ -312,12 +312,19 @@ enum WafraDates {
     return formatter
   }
 
-  /// "Today", "Tomorrow", or e.g. "Mon 15 Sep".
+  /// "Today", "Tomorrow", the weekday within the coming week ("Monday"), or
+  /// e.g. "Mon 15 Sep" further out, so a weekday never means next week's.
   static func dueLabel(_ due: Date, now: Date, strings: WafraStrings) -> String {
+    let calendar = self.calendar
     let today = calendar.startOfDay(for: now)
-    if due == today { return strings.today }
-    if let tomorrow = startOfNextDay(after: now), due == tomorrow { return strings.tomorrow }
-    return formatter(strings.language, template: "EEEdMMM").string(from: due)
+    let day = calendar.startOfDay(for: due)
+    let ahead = calendar.dateComponents([.day], from: today, to: day).day ?? Int.min
+    switch ahead {
+    case 0: return strings.today
+    case 1: return strings.tomorrow
+    case 2...6: return formatter(strings.language, template: "EEEE").string(from: due)
+    default: return formatter(strings.language, template: "EEEdMMM").string(from: due)
+    }
   }
 
   /// Short weekday, e.g. "Mon".
@@ -340,6 +347,13 @@ enum WafraMoney {
   static func number(_ minor: Int64?, in snapshot: WafraSnapshot) -> String {
     guard !snapshot.hidden, let minor, let text = number(minor, exponent: snapshot.exponent) else { return "—" }
     return isolate(text, snapshot.language)
+  }
+
+  /// The currency code and the number apart, so the band figure can set the
+  /// code smaller. Nil when the amount is hidden or unusable ("—").
+  static func parts(_ minor: Int64?, in snapshot: WafraSnapshot) -> (currency: String, number: String)? {
+    guard !snapshot.hidden, let minor, let text = number(minor, exponent: snapshot.exponent) else { return nil }
+    return (snapshot.currency, text)
   }
 
   static func format(_ minor: Int64, currency: String, exponent: Int) -> String? {
@@ -369,6 +383,18 @@ enum WafraMoney {
   }
 }
 
+// MARK: - Merchant tile
+
+enum WafraInitial {
+  /// The first letter of a bill's title for its tile ("DEWA" -> "D"). Nil when
+  /// the title has no letter (a masked card such as "•••• 1234"); the tile
+  /// then shows a plain glyph rather than a digit that reads like a figure.
+  static func of(_ title: String) -> String? {
+    guard let letter = title.first(where: { $0.isLetter }) else { return nil }
+    return String(letter).uppercased()
+  }
+}
+
 // MARK: - Copy
 
 struct WafraStrings {
@@ -384,6 +410,15 @@ struct WafraStrings {
   var over: String { pick("Over", "تجاوز") }
   var openToUpdate: String { pick("Open Wafra to update", "افتح وفرة للتحديث") }
   var estimatePrefix: String { "≈ " }
+  /// Spoken in place of "—" when an amount is hidden or unknown.
+  var amountHidden: String { pick("Amount hidden", "المبلغ مخفي") }
+  /// Words beside the amount in the Today widget. The amount is a separate,
+  /// privacy-sensitive view, so these stay readable on the Lock Screen.
+  var leftInBudgets: String { pick("left in budgets", "المتبقي في الميزانيات") }
+  var overBudgets: String { pick("over budgets", "تجاوز الميزانيات") }
+  /// Reading order of amount and words: "USD 360.00 left in budgets" /
+  /// "المتبقي في الميزانيات USD 360.00".
+  var amountLeadsBudgetLine: Bool { language == .en }
 
   func payments(_ count: Int?) -> String {
     guard let count else { return "—" }

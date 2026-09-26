@@ -66,7 +66,8 @@ internal data class WidgetSnapshot(
         val todayISO = root.optString("todayISO", "")
         if (!ISO_DATE.matches(todayISO)) return null
         val generatedAt = integerOrNull(root, "generatedAt") ?: return null
-        val hidden = root.optBoolean("hidden", false)
+        // A missing privacy flag falls back to the more private reading, as on iOS.
+        val hidden = root.optBoolean("hidden", true)
 
         val last7 = ArrayList<Long?>()
         val week = root.optJSONArray("last7Minor")

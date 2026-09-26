@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Today wears Home's ink band. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-  <corners android:radius="3dp" />
-  <solid android:color="@color/wafra_widget_today_mark" />
+  <corners android:radius="24dp" />
+  <solid android:color="@color/wafra_widget_today_band" />
 </shape>

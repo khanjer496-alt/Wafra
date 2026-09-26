@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Dark mode deepens each band so it never glares at night; text on every
+     dark band is light (docs/design/language-e.md, dark.py). -->
 <resources>
-  <color name="wafra_widget_background">#1C1A16</color>
-  <color name="wafra_widget_text">#F2EFE8</color>
-  <color name="wafra_widget_secondary">#A9A29A</color>
-  <color name="wafra_widget_accent">#57B894</color>
-  <color name="wafra_widget_track">#5E584F</color>
+  <color name="wafra_widget_today_band">#0B0A08</color>
+  <color name="wafra_widget_today_text">#F2EFE8</color>
+  <color name="wafra_widget_today_secondary">#96938E</color>
+  <color name="wafra_widget_today_mark">#605F5B</color>
+  <color name="wafra_widget_today_accent">#57B894</color>
+  <color name="wafra_widget_upcoming_band">#5E4719</color>
+  <color name="wafra_widget_upcoming_text">#F2EFE8</color>
+  <color name="wafra_widget_upcoming_secondary">#D6CFC1</color>
+  <color name="wafra_widget_upcoming_tile">#6A542A</color>
 </resources>

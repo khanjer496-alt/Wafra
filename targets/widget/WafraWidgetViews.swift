@@ -1,29 +1,104 @@
 import SwiftUI
 import WidgetKit
 
-// MARK: - Palette
+// MARK: - Bands (design language E)
 
-struct WafraPalette {
-  let background: Color
-  let surface: Color
-  let ink: Color
-  let secondary: Color
+/// A widget wears its tab's band from src/constants/theme.ts (BandPalettes):
+/// Today is Home's ink, Coming up is Bills' ochre. Dark mode deepens each band
+/// (docs/design/language-e.md). Keep these hexes in step with theme.ts;
+/// scripts/test/repair/widget-native-e.test.cjs checks them.
+struct WafraBand {
+  let band: Color
+  let onBand: Color
+  let onBandSecondary: Color
+  /// The band's own tone, for merchant tiles.
+  let tile: Color
+  /// Week bars other than today.
+  let mark: Color
+  /// Mint: today's bar, the one good-news mark.
   let accent: Color
 
-  init(_ scheme: ColorScheme) {
+  static func home(_ scheme: ColorScheme) -> WafraBand {
     if scheme == .dark {
-      background = Color(hex: 0x1C1A16)
-      surface = Color(hex: 0x26231E)
-      ink = Color(hex: 0xF2EFE8)
-      secondary = Color(hex: 0xA9A29A)
-      accent = Color(hex: 0x57B894)
-    } else {
-      background = Color(hex: 0xF4F1EA)
-      surface = Color(hex: 0xFBF9F4)
-      ink = Color(hex: 0x16130F)
-      secondary = Color(hex: 0x57524A)
-      accent = Color(hex: 0x1F6B52)
+      return WafraBand(
+        band: Color(hex: 0x0B0A08), onBand: Color(hex: 0xF2EFE8), onBandSecondary: Color(hex: 0x96938E),
+        tile: Color(hex: 0x1D1C1A), mark: Color(hex: 0x605F5B), accent: Color(hex: 0x57B894)
+      )
     }
+    return WafraBand(
+      band: Color(hex: 0x16130F), onBand: Color(hex: 0xF4F1EA), onBandSecondary: Color(hex: 0xA09D96),
+      tile: Color(hex: 0x282521), mark: Color(hex: 0x64615C), accent: Color(hex: 0x57B894)
+    )
+  }
+
+  /// Ochre is light: ink text on it. Dark ochre takes light text.
+  static func bills(_ scheme: ColorScheme) -> WafraBand {
+    if scheme == .dark {
+      return WafraBand(
+        band: Color(hex: 0x5E4719), onBand: Color(hex: 0xF2EFE8), onBandSecondary: Color(hex: 0xD6CFC1),
+        tile: Color(hex: 0x6A542A), mark: Color(hex: 0xA4967A), accent: Color(hex: 0xF2EFE8)
+      )
+    }
+    return WafraBand(
+      band: Color(hex: 0xE2B45A), onBand: Color(hex: 0x16130F), onBandSecondary: Color(hex: 0x574727),
+      tile: Color(hex: 0xE9CC94), mark: Color(hex: 0x7A6234), accent: Color(hex: 0x16130F)
+    )
+  }
+
+  /// When iOS does not draw the band (tinted or clear Home Screen, StandBy,
+  /// the iPad Lock Screen) the system recolours content to one tone and keeps
+  /// only opacity. Solid tiles would then swallow the letters on them and ink
+  /// text could vanish on a dark ground, so those renderings use the system's
+  /// primary colour with translucent tiles and marks instead.
+  func adapted(fullColor: Bool, backgroundShown: Bool) -> WafraBand {
+    guard !fullColor || !backgroundShown else { return self }
+    return WafraBand(
+      band: band,
+      onBand: .primary,
+      onBandSecondary: Color.primary.opacity(0.72),
+      tile: Color.primary.opacity(0.16),
+      mark: Color.primary.opacity(0.35),
+      accent: fullColor ? accent : .primary
+    )
+  }
+}
+
+/// Resolves a band for the current scheme and rendering, and hands it to the
+/// widget's content.
+struct WafraBandReader<Content: View>: View {
+  let palette: (ColorScheme) -> WafraBand
+  @ViewBuilder let content: (WafraBand) -> Content
+
+  var body: some View {
+    if #available(iOS 17.0, *) {
+      WafraBandReader17(palette: palette, content: content)
+    } else {
+      WafraBandReader16(palette: palette, content: content)
+    }
+  }
+}
+
+@available(iOS 17.0, *)
+private struct WafraBandReader17<Content: View>: View {
+  let palette: (ColorScheme) -> WafraBand
+  let content: (WafraBand) -> Content
+  @Environment(\.colorScheme) private var scheme
+  @Environment(\.widgetRenderingMode) private var mode
+  @Environment(\.showsWidgetContainerBackground) private var backgroundShown
+
+  var body: some View {
+    content(palette(scheme).adapted(fullColor: mode == .fullColor, backgroundShown: backgroundShown))
+  }
+}
+
+private struct WafraBandReader16<Content: View>: View {
+  let palette: (ColorScheme) -> WafraBand
+  let content: (WafraBand) -> Content
+  @Environment(\.colorScheme) private var scheme
+  @Environment(\.widgetRenderingMode) private var mode
+
+  var body: some View {
+    content(palette(scheme).adapted(fullColor: mode == .fullColor, backgroundShown: true))
   }
 }
 
@@ -104,17 +179,17 @@ struct WafraEntry: TimelineEntry {
 struct WafraUpdateNeededView: View {
   let title: String
   let strings: WafraStrings
-  let palette: WafraPalette
+  let band: WafraBand
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       Text(title)
         .font(.caption.weight(.semibold))
-        .foregroundColor(palette.secondary)
+        .foregroundColor(band.onBandSecondary)
       Spacer(minLength: 0)
       Text(strings.openToUpdate)
         .font(.subheadline.weight(.medium))
-        .foregroundColor(palette.ink)
+        .foregroundColor(band.onBand)
         .lineLimit(3)
         .minimumScaleFactor(0.8)
     }
@@ -122,57 +197,139 @@ struct WafraUpdateNeededView: View {
   }
 }
 
-// MARK: - Today (systemSmall)
+// MARK: - Today (systemSmall, ink band)
 
 struct WafraTodayView: View {
   let entry: WafraEntry
   @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
-    let palette = WafraPalette(colorScheme)
     let strings = entry.strings
-    Group {
-      if let snapshot = entry.todaySnapshot {
-        content(snapshot, strings: strings, palette: palette)
-      } else {
-        WafraUpdateNeededView(title: strings.today, strings: strings, palette: palette)
+    WafraBandReader(palette: WafraBand.home) { band in
+      Group {
+        if let snapshot = entry.todaySnapshot {
+          content(snapshot, strings: strings, band: band)
+        } else {
+          WafraUpdateNeededView(title: strings.today, strings: strings, band: band)
+        }
       }
     }
     .wafraDirection(entry.language)
-    .wafraWidgetBackground(palette.background)
+    .wafraWidgetBackground(WafraBand.home(colorScheme).band)
     .widgetURL(WafraShared.appURL)
   }
 
-  private func content(_ snapshot: WafraSnapshot, strings: WafraStrings, palette: WafraPalette) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(strings.today)
-        .font(.caption.weight(.semibold))
-        .foregroundColor(palette.secondary)
-      Text(WafraMoney.format(snapshot.todayMinor, in: snapshot))
-        .font(.title3.weight(.semibold))
-        .foregroundColor(palette.ink)
-        .lineLimit(1)
-        .minimumScaleFactor(0.5)
-        .wafraAmount(snapshot)
-      Text(strings.payments(snapshot.todayCount))
-        .font(.caption2)
-        .foregroundColor(palette.secondary)
-        .lineLimit(1)
-      Spacer(minLength: 4)
-      WafraWeekBars(snapshot: snapshot, palette: palette)
-        .frame(height: 26)
-      if let left = snapshot.leftInBudgetsMinor {
-        WafraLeftLine(left: left, snapshot: snapshot, strings: strings)
-          .font(.caption2)
-          .foregroundColor(palette.secondary)
-          .padding(.top, 4)
+  // Week bars from real figures at the top; the one figure that matters sits
+  // low on the band, as in the Home header.
+  private func content(_ snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
+      WafraWeekBars(snapshot: snapshot, band: band)
+        .frame(height: 22)
+      Spacer(minLength: 6)
+      VStack(alignment: .leading, spacing: 0) {
+        Text(strings.today)
+          .font(.caption.weight(.medium))
+          .foregroundColor(band.onBandSecondary)
+          .lineLimit(1)
+        WafraBandFigure(minor: snapshot.todayMinor, snapshot: snapshot, strings: strings, band: band)
       }
+      WafraTodayLine(snapshot: snapshot, strings: strings, band: band)
+        .padding(.top, 2)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 }
 
+/// The band figure: the currency code set smaller, then the number in a
+/// semibold system face with tabular digits (never a monospaced face, whose
+/// comma spaces out "5 , 480").
+struct WafraBandFigure: View {
+  let minor: Int64?
+  let snapshot: WafraSnapshot
+  let strings: WafraStrings
+  let band: WafraBand
+
+  var body: some View {
+    figure
+      .lineLimit(1)
+      .minimumScaleFactor(0.45)
+      .widgetAccentable()
+      .wafraAmount(snapshot)
+      .modifier(HiddenAmountLabel(label: parts == nil ? strings.amountHidden : nil))
+  }
+
+  private var parts: (currency: String, number: String)? { WafraMoney.parts(minor, in: snapshot) }
+
+  private var figure: Text {
+    let numberFont = Font.title.weight(.semibold).monospacedDigit()
+    guard let parts else {
+      return Text("—").font(numberFont).foregroundColor(band.onBand)
+    }
+    // Keeps "AED 24.00" in reading order inside Arabic text.
+    let mark = snapshot.language == .ar ? "\u{200E}" : ""
+    return Text(mark + parts.currency + " ")
+      .font(.body.weight(.medium))
+      .foregroundColor(band.onBandSecondary)
+      + Text(parts.number + mark)
+      .font(numberFont)
+      .foregroundColor(band.onBand)
+  }
+}
+
+private struct HiddenAmountLabel: ViewModifier {
+  let label: String?
+
+  func body(content: Content) -> some View {
+    if let label {
+      content.accessibilityLabel(label)
+    } else {
+      content
+    }
+  }
+}
+
+/// "USD 360.00 left in budgets" when budgets are set, otherwise today's
+/// payment count. Only the amount is privacy-sensitive; the words stay.
+struct WafraTodayLine: View {
+  let snapshot: WafraSnapshot
+  let strings: WafraStrings
+  let band: WafraBand
+
+  var body: some View {
+    Group {
+      if let left = snapshot.leftInBudgetsMinor {
+        ViewThatFits(in: .horizontal) {
+          HStack(spacing: 4) { ordered(left) }
+            .fixedSize()
+          VStack(alignment: .leading, spacing: 0) { ordered(left) }
+        }
+      } else {
+        Text(strings.payments(snapshot.todayCount))
+          .lineLimit(1)
+          .minimumScaleFactor(0.8)
+      }
+    }
+    .font(.caption2)
+    .foregroundColor(band.onBandSecondary)
+  }
+
+  @ViewBuilder
+  private func ordered(_ left: Int64) -> some View {
+    let words = Text(left < 0 ? strings.overBudgets : strings.leftInBudgets)
+    let amount = Text(WafraMoney.format(left < 0 ? -left : left, in: snapshot))
+      .font(.caption2.monospacedDigit())
+    if strings.amountLeadsBudgetLine {
+      amount.lineLimit(1).minimumScaleFactor(0.7).wafraAmount(snapshot)
+      words.lineLimit(1).minimumScaleFactor(0.8)
+    } else {
+      words.lineLimit(1).minimumScaleFactor(0.8)
+      amount.lineLimit(1).minimumScaleFactor(0.7).wafraAmount(snapshot)
+    }
+  }
+}
+
 /// "Left USD 120.00", or "Over USD 40.00" when the budgets are exceeded.
+/// The Lock Screen's rectangular widget uses it.
 struct WafraLeftLine: View {
   let left: Int64
   let snapshot: WafraSnapshot
@@ -190,11 +347,11 @@ struct WafraLeftLine: View {
   }
 }
 
-/// Seven days ending today, oldest first; today in the accent colour. The bar
-/// heights reveal relative spending, so they are redacted with the amounts.
+/// Seven days ending today, oldest first; today in mint. The bar heights
+/// reveal relative spending, so they are redacted with the amounts.
 struct WafraWeekBars: View {
   let snapshot: WafraSnapshot
-  let palette: WafraPalette
+  let band: WafraBand
 
   var body: some View {
     let days = snapshot.last7Minor
@@ -206,7 +363,7 @@ struct WafraWeekBars: View {
           let value = index < days.count ? days[index] : nil
           let isToday = index == 6
           RoundedRectangle(cornerRadius: 2, style: .continuous)
-            .fill(isToday ? palette.accent : palette.secondary.opacity(0.35))
+            .fill(isToday ? band.accent : band.mark)
             .frame(height: barHeight(value, peak: peak, full: proxy.size.height))
             .frame(maxWidth: .infinity)
             .modifier(AccentableIf(isToday))
@@ -235,60 +392,49 @@ private struct AccentableIf: ViewModifier {
   }
 }
 
-// MARK: - Coming up (systemMedium)
+// MARK: - Coming up (systemMedium, ochre band)
 
 struct WafraComingUpView: View {
   let entry: WafraEntry
   @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
-    let palette = WafraPalette(colorScheme)
     let strings = entry.strings
-    Group {
-      if let snapshot = entry.freshSnapshot {
-        content(snapshot, strings: strings, palette: palette)
-      } else {
-        WafraUpdateNeededView(title: strings.comingUp, strings: strings, palette: palette)
+    WafraBandReader(palette: WafraBand.bills) { band in
+      Group {
+        if let snapshot = entry.freshSnapshot {
+          content(snapshot, strings: strings, band: band)
+        } else {
+          WafraUpdateNeededView(title: strings.comingUp, strings: strings, band: band)
+        }
       }
     }
     .wafraDirection(entry.language)
-    .wafraWidgetBackground(palette.background)
+    .wafraWidgetBackground(WafraBand.bills(colorScheme).band)
     .widgetURL(WafraShared.appURL)
   }
 
-  private func content(_ snapshot: WafraSnapshot, strings: WafraStrings, palette: WafraPalette) -> some View {
+  private func content(_ snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand) -> some View {
     let bills = snapshot.upcomingBills(at: entry.date)
-    return VStack(alignment: .leading, spacing: 6) {
+    return VStack(alignment: .leading, spacing: 0) {
       Text(strings.comingUp)
         .font(.caption.weight(.semibold))
-        .foregroundColor(palette.secondary)
+        .foregroundColor(band.onBand)
+        .lineLimit(1)
+        .padding(.bottom, 8)
       if bills.isEmpty {
         Spacer(minLength: 0)
         Text(strings.nothingComingUp)
-          .font(.subheadline)
-          .foregroundColor(palette.ink)
+          .font(.subheadline.weight(.medium))
+          .foregroundColor(band.onBand)
         Spacer(minLength: 0)
       } else {
-        ForEach(bills, id: \.self) { bill in
-          HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 0) {
-              Text(bill.title)
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(palette.ink)
-                .lineLimit(1)
-              Text(WafraDates.dueLabel(bill.due, now: entry.date, strings: strings))
-                .font(.caption2)
-                .foregroundColor(palette.secondary)
-                .lineLimit(1)
-            }
-            Spacer(minLength: 4)
-            Text(amountText(bill, snapshot: snapshot, strings: strings))
-              .font(.subheadline.weight(.semibold))
-              .foregroundColor(palette.ink)
-              .lineLimit(1)
-              .minimumScaleFactor(0.6)
-              .wafraAmount(snapshot)
-          }
+        // Three rows where they fit; the smallest phones and the largest
+        // text sizes show the first two (or one) instead of clipping.
+        ViewThatFits(in: .vertical) {
+          rows(bills, snapshot: snapshot, strings: strings, band: band)
+          rows(Array(bills.prefix(2)), snapshot: snapshot, strings: strings, band: band)
+          rows(Array(bills.prefix(1)), snapshot: snapshot, strings: strings, band: band)
         }
         Spacer(minLength: 0)
       }
@@ -296,10 +442,67 @@ struct WafraComingUpView: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 
+  private func rows(_ bills: [WafraBill], snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      ForEach(bills, id: \.self) { bill in
+        HStack(spacing: 10) {
+          WafraMerchantTile(title: bill.title, band: band)
+          VStack(alignment: .leading, spacing: 0) {
+            Text(bill.title)
+              .font(.footnote.weight(.semibold))
+              .foregroundColor(band.onBand)
+              .lineLimit(1)
+            Text(WafraDates.dueLabel(bill.due, now: entry.date, strings: strings))
+              .font(.caption)
+              .foregroundColor(band.onBandSecondary)
+              .lineLimit(1)
+          }
+          Spacer(minLength: 6)
+          Text(amountText(bill, snapshot: snapshot, strings: strings))
+            .font(.footnote.weight(.semibold).monospacedDigit())
+            .foregroundColor(band.onBand)
+            .lineLimit(1)
+            .minimumScaleFactor(0.6)
+            .wafraAmount(snapshot)
+            .modifier(HiddenAmountLabel(label: bill.amountMinor == nil || snapshot.hidden ? strings.amountHidden : nil))
+        }
+        // Children stay separate accessibility elements: combining them would
+        // fold the privacy-sensitive amount into one label with the title.
+      }
+    }
+  }
+
   private func amountText(_ bill: WafraBill, snapshot: WafraSnapshot, strings: WafraStrings) -> String {
     let amount = WafraMoney.format(bill.amountMinor, in: snapshot)
     guard bill.estimated, amount != "—" else { return amount }
     return WafraMoney.isolate(strings.estimatePrefix + amount, snapshot.language)
+  }
+}
+
+/// The bill's merchant tile: its initial on the band's own tone (the widget
+/// has no logo images; the snapshot carries titles only). A title with no
+/// letter shows a plain calendar glyph.
+struct WafraMerchantTile: View {
+  let title: String
+  let band: WafraBand
+
+  var body: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: 8, style: .continuous)
+        .fill(band.tile)
+      if let initial = WafraInitial.of(title) {
+        Text(initial)
+          .font(.system(size: 14, weight: .bold))
+          .foregroundColor(band.onBand)
+      } else {
+        Image(systemName: "calendar")
+          .font(.system(size: 13, weight: .semibold))
+          .foregroundColor(band.onBand)
+      }
+    }
+    .frame(width: 28, height: 28)
+    .widgetAccentable()
+    .accessibilityHidden(true)
   }
 }
 

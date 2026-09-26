@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Live "Coming up" widget: up to three bills from the snapshot. -->
+<!-- Live "Coming up" widget on Bills' ochre band: up to three bills from the
+     snapshot, each with its merchant tile (initial on the band's own tone),
+     due word and amount. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
   android:id="@+id/wafra_widget_root"
   android:layout_width="match_parent"
   android:layout_height="match_parent"
-  android:background="@drawable/wafra_widget_background"
+  android:background="@drawable/wafra_widget_upcoming_background"
   android:orientation="vertical"
   android:padding="16dp">
 
@@ -12,36 +14,64 @@
     android:id="@+id/wafra_upcoming_label"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:fontFamily="sans-serif-medium"
     android:maxLines="1"
     android:ellipsize="end"
     android:text="@string/wafra_widget_upcoming"
     android:textAlignment="viewStart"
-    android:textColor="@color/wafra_widget_secondary"
-    android:textSize="13sp"
-    android:textStyle="bold" />
+    android:textColor="@color/wafra_widget_upcoming_text"
+    android:textSize="13sp" />
 
   <TextView
     android:id="@+id/wafra_upcoming_empty"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginTop="8dp"
+    android:fontFamily="sans-serif-medium"
     android:text="@string/wafra_widget_open_to_update"
     android:textAlignment="viewStart"
-    android:textColor="@color/wafra_widget_text"
+    android:textColor="@color/wafra_widget_upcoming_text"
     android:textSize="15sp" />
 
   <LinearLayout
     android:id="@+id/wafra_bill_row_1"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginTop="4dp"
+    android:layout_marginTop="8dp"
     android:gravity="center_vertical"
     android:orientation="horizontal"
     android:visibility="gone">
 
+    <FrameLayout
+      android:layout_width="28dp"
+      android:layout_height="28dp"
+      android:background="@drawable/wafra_widget_tile"
+      android:importantForAccessibility="noHideDescendants">
+
+      <TextView
+        android:id="@+id/wafra_bill_tile_1"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="@color/wafra_widget_upcoming_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+      <ImageView
+        android:id="@+id/wafra_bill_glyph_1"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_gravity="center"
+        android:importantForAccessibility="no"
+        android:src="@drawable/wafra_widget_glyph_calendar"
+        android:visibility="gone" />
+    </FrameLayout>
+
     <LinearLayout
       android:layout_width="0dp"
       android:layout_height="wrap_content"
+      android:layout_marginStart="10dp"
       android:layout_weight="1"
       android:orientation="vertical">
 
@@ -49,11 +79,12 @@
         android:id="@+id/wafra_bill_title_1"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium"
         android:maxLines="1"
         android:ellipsize="end"
         android:textAlignment="viewStart"
-        android:textColor="@color/wafra_widget_text"
-        android:textSize="14sp" />
+        android:textColor="@color/wafra_widget_upcoming_text"
+        android:textSize="13sp" />
 
       <TextView
         android:id="@+id/wafra_bill_date_1"
@@ -62,7 +93,7 @@
         android:maxLines="1"
         android:ellipsize="end"
         android:textAlignment="viewStart"
-        android:textColor="@color/wafra_widget_secondary"
+        android:textColor="@color/wafra_widget_upcoming_secondary"
         android:textSize="12sp" />
     </LinearLayout>
 
@@ -71,10 +102,11 @@
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
       android:layout_marginStart="12dp"
+      android:fontFamily="sans-serif-medium"
+      android:fontFeatureSettings="tnum"
       android:maxLines="1"
-      android:textColor="@color/wafra_widget_text"
-      android:textSize="14sp"
-      android:textStyle="bold" />
+      android:textColor="@color/wafra_widget_upcoming_text"
+      android:textSize="13sp" />
   </LinearLayout>
 
   <LinearLayout
@@ -86,9 +118,36 @@
     android:orientation="horizontal"
     android:visibility="gone">
 
+    <FrameLayout
+      android:layout_width="28dp"
+      android:layout_height="28dp"
+      android:background="@drawable/wafra_widget_tile"
+      android:importantForAccessibility="noHideDescendants">
+
+      <TextView
+        android:id="@+id/wafra_bill_tile_2"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="@color/wafra_widget_upcoming_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+      <ImageView
+        android:id="@+id/wafra_bill_glyph_2"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_gravity="center"
+        android:importantForAccessibility="no"
+        android:src="@drawable/wafra_widget_glyph_calendar"
+        android:visibility="gone" />
+    </FrameLayout>
+
     <LinearLayout
       android:layout_width="0dp"
       android:layout_height="wrap_content"
+      android:layout_marginStart="10dp"
       android:layout_weight="1"
       android:orientation="vertical">
 
@@ -96,11 +155,12 @@
         android:id="@+id/wafra_bill_title_2"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium"
         android:maxLines="1"
         android:ellipsize="end"
         android:textAlignment="viewStart"
-        android:textColor="@color/wafra_widget_text"
-        android:textSize="14sp" />
+        android:textColor="@color/wafra_widget_upcoming_text"
+        android:textSize="13sp" />
 
       <TextView
         android:id="@+id/wafra_bill_date_2"
@@ -109,7 +169,7 @@
         android:maxLines="1"
         android:ellipsize="end"
         android:textAlignment="viewStart"
-        android:textColor="@color/wafra_widget_secondary"
+        android:textColor="@color/wafra_widget_upcoming_secondary"
         android:textSize="12sp" />
     </LinearLayout>
 
@@ -118,10 +178,11 @@
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
       android:layout_marginStart="12dp"
+      android:fontFamily="sans-serif-medium"
+      android:fontFeatureSettings="tnum"
       android:maxLines="1"
-      android:textColor="@color/wafra_widget_text"
-      android:textSize="14sp"
-      android:textStyle="bold" />
+      android:textColor="@color/wafra_widget_upcoming_text"
+      android:textSize="13sp" />
   </LinearLayout>
 
   <LinearLayout
@@ -133,9 +194,36 @@
     android:orientation="horizontal"
     android:visibility="gone">
 
+    <FrameLayout
+      android:layout_width="28dp"
+      android:layout_height="28dp"
+      android:background="@drawable/wafra_widget_tile"
+      android:importantForAccessibility="noHideDescendants">
+
+      <TextView
+        android:id="@+id/wafra_bill_tile_3"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:maxLines="1"
+        android:textColor="@color/wafra_widget_upcoming_text"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+      <ImageView
+        android:id="@+id/wafra_bill_glyph_3"
+        android:layout_width="16dp"
+        android:layout_height="16dp"
+        android:layout_gravity="center"
+        android:importantForAccessibility="no"
+        android:src="@drawable/wafra_widget_glyph_calendar"
+        android:visibility="gone" />
+    </FrameLayout>
+
     <LinearLayout
       android:layout_width="0dp"
       android:layout_height="wrap_content"
+      android:layout_marginStart="10dp"
       android:layout_weight="1"
       android:orientation="vertical">
 
@@ -143,11 +231,12 @@
         android:id="@+id/wafra_bill_title_3"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium"
         android:maxLines="1"
         android:ellipsize="end"
         android:textAlignment="viewStart"
-        android:textColor="@color/wafra_widget_text"
-        android:textSize="14sp" />
+        android:textColor="@color/wafra_widget_upcoming_text"
+        android:textSize="13sp" />
 
       <TextView
         android:id="@+id/wafra_bill_date_3"
@@ -156,7 +245,7 @@
         android:maxLines="1"
         android:ellipsize="end"
         android:textAlignment="viewStart"
-        android:textColor="@color/wafra_widget_secondary"
+        android:textColor="@color/wafra_widget_upcoming_secondary"
         android:textSize="12sp" />
     </LinearLayout>
 
@@ -165,9 +254,10 @@
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
       android:layout_marginStart="12dp"
+      android:fontFamily="sans-serif-medium"
+      android:fontFeatureSettings="tnum"
       android:maxLines="1"
-      android:textColor="@color/wafra_widget_text"
-      android:textSize="14sp"
-      android:textStyle="bold" />
+      android:textColor="@color/wafra_widget_upcoming_text"
+      android:textSize="13sp" />
   </LinearLayout>
 </LinearLayout>
