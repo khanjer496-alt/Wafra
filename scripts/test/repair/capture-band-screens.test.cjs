@@ -190,6 +190,14 @@ test('Statement import: sand band with the title, the true privacy line above th
   const onboarding = statements({ params: { fromOnboarding: '1' } });
   assert.match(text(onboarding.tree.props.bandContent), /Bring in your past spending/);
   assert.ok(walk(onboarding.tree.props.children).some((n) => n.props?.accessibilityLabel === onboarding.copy.later));
+  // From setup, the way back says where it goes, as before the band.
+  const toSetup = walk(onboarding.tree.props.nav.leading).find((n) => n.props?.testID === 'statement-import-back-to-setup');
+  assert.equal(toSetup.props.accessibilityLabel, 'Back to setup');
+  assert.equal(toSetup.props.accessibilityRole, 'button');
+  assert.match(text(toSetup), /Back to setup/);
+  assert.equal(onboarding.tree.props.nav.back, undefined, 'one back control, not two');
+  toSetup.props.onPress();
+  assert.equal(typeof tree.props.nav.back, 'function', 'from Settings it is the plain back');
 });
 
 test('Statement import: file rows carry a doc tile and a status in the status colour; private mode hides the control', () => {

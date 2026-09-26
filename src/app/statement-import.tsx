@@ -1,10 +1,11 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { SupplementImports } from '@/components/supplement-imports';
 import { ThemedText } from '@/components/themed-text';
 import { BandScaffold } from '@/components/ui/band-scaffold';
+import { Icon } from '@/components/ui/icon';
 import { Fonts } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { t } from '@/lib/i18n';
@@ -29,7 +30,16 @@ export default function StatementImportScreen() {
         <BandScaffold
           band="settings"
           testID="statement-import"
-          nav={{ back: router.back }}
+          // From first-run setup the way back says where it goes ("Back to
+          // setup"), as it did before; the shared nav's back only says "Back".
+          nav={fromOnboarding ? {
+            leading: <Pressable testID="statement-import-back-to-setup" accessibilityRole="button"
+              accessibilityLabel={t('onboardStatementBack')} onPress={router.back} hitSlop={4}
+              style={({ pressed }) => [styles.setupBack, { opacity: pressed ? 0.6 : 1 }]}>
+              <Icon name="chevron-left" size={22} color={band.onBand} strokeWidth={2.2} />
+              <ThemedText type="smallBold" style={{ color: band.onBand }}>{t('onboardStatementBack')}</ThemedText>
+            </Pressable>,
+          } : { back: router.back }}
           bandContent={<View style={styles.band}>
             <ThemedText accessibilityRole="header" style={[styles.title, { color: band.onBand }]}>{title}</ThemedText>
             {bandPart}
@@ -46,4 +56,6 @@ export default function StatementImportScreen() {
 const styles = StyleSheet.create({
   band: { gap: 12, paddingTop: 4, paddingBottom: 8 },
   title: { fontFamily: Fonts.sansSemi, fontSize: 36, lineHeight: 42, letterSpacing: -1.2 },
+  setupBack: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4, marginStart: -8, paddingEnd: 8 },
+
 });
