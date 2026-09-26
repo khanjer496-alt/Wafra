@@ -1,8 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Design language E: each widget wears its tab's band from
+     src/constants/theme.ts (BandPalettes). Today is Home's ink band; Coming up
+     is Bills' ochre band (ink text on it). values-night deepens both. Kept in
+     step with theme.ts by scripts/test/repair/widget-native-e.test.cjs. -->
 <resources>
-  <color name="wafra_widget_background">#FBF9F4</color>
-  <color name="wafra_widget_text">#16130F</color>
-  <color name="wafra_widget_secondary">#57524A</color>
-  <color name="wafra_widget_accent">#1F6B52</color>
-  <color name="wafra_widget_track">#81796B</color>
+  <color name="wafra_widget_today_band">#16130F</color>
+  <color name="wafra_widget_today_text">#F4F1EA</color>
+  <color name="wafra_widget_today_secondary">#A09D96</color>
+  <color name="wafra_widget_today_mark">#64615C</color>
+  <color name="wafra_widget_today_accent">#57B894</color>
+  <color name="wafra_widget_upcoming_band">#E2B45A</color>
+  <color name="wafra_widget_upcoming_text">#16130F</color>
+  <color name="wafra_widget_upcoming_secondary">#574727</color>
+  <color name="wafra_widget_upcoming_tile">#E9CC94</color>
 </resources>

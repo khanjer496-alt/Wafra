@@ -3,51 +3,58 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
   android:layout_width="match_parent"
   android:layout_height="match_parent"
-  android:background="@drawable/wafra_widget_background"
+  android:background="@drawable/wafra_widget_today_background"
   android:orientation="vertical"
   android:padding="16dp">
 
-  <TextView
+  <LinearLayout
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:text="@string/wafra_widget_today"
-    android:textAlignment="viewStart"
-    android:textColor="@color/wafra_widget_secondary"
-    android:textSize="13sp"
-    android:textStyle="bold" />
-
-  <TextView
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginTop="2dp"
-    android:maxLines="1"
-    android:text="@string/wafra_widget_preview_amount"
-    android:textAlignment="viewStart"
-    android:textColor="@color/wafra_widget_text"
-    android:textSize="24sp"
-    android:textStyle="bold" />
-
-  <TextView
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:text="@string/wafra_widget_preview_count"
-    android:textAlignment="viewStart"
-    android:textColor="@color/wafra_widget_secondary"
-    android:textSize="13sp" />
+    android:layout_height="24dp"
+    android:baselineAligned="false"
+    android:gravity="bottom"
+    android:orientation="horizontal">
+    <FrameLayout android:layout_width="0dp" android:layout_height="12dp" android:layout_weight="1" android:layout_marginStart="0dp" android:background="@drawable/wafra_widget_bar_track" />
+    <FrameLayout android:layout_width="0dp" android:layout_height="20dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_track" />
+    <FrameLayout android:layout_width="0dp" android:layout_height="8dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_track" />
+    <FrameLayout android:layout_width="0dp" android:layout_height="16dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_track" />
+    <FrameLayout android:layout_width="0dp" android:layout_height="24dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_track" />
+    <FrameLayout android:layout_width="0dp" android:layout_height="10dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_track" />
+    <FrameLayout android:layout_width="0dp" android:layout_height="17dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_accent" />
+  </LinearLayout>
 
   <LinearLayout
     android:layout_width="match_parent"
     android:layout_height="0dp"
-    android:layout_marginTop="8dp"
     android:layout_weight="1"
     android:gravity="bottom"
-    android:orientation="horizontal">
-    <FrameLayout android:layout_width="0dp" android:layout_height="18dp" android:layout_weight="1" android:layout_marginStart="0dp" android:background="@drawable/wafra_widget_bar_track" />
-    <FrameLayout android:layout_width="0dp" android:layout_height="30dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_track" />
-    <FrameLayout android:layout_width="0dp" android:layout_height="12dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_track" />
-    <FrameLayout android:layout_width="0dp" android:layout_height="24dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_track" />
-    <FrameLayout android:layout_width="0dp" android:layout_height="34dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_track" />
-    <FrameLayout android:layout_width="0dp" android:layout_height="16dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_track" />
-    <FrameLayout android:layout_width="0dp" android:layout_height="26dp" android:layout_weight="1" android:layout_marginStart="6dp" android:background="@drawable/wafra_widget_bar_accent" />
+    android:orientation="vertical">
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="@string/wafra_widget_today"
+      android:textAlignment="viewStart"
+      android:textColor="@color/wafra_widget_today_secondary"
+      android:textSize="12sp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:fontFamily="sans-serif-medium"
+      android:fontFeatureSettings="tnum"
+      android:letterSpacing="-0.02"
+      android:maxLines="1"
+      android:text="@string/wafra_widget_preview_amount"
+      android:textAlignment="viewStart"
+      android:textColor="@color/wafra_widget_today_text"
+      android:textSize="26sp" />
+
+    <TextView
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="@string/wafra_widget_preview_count"
+      android:textAlignment="viewStart"
+      android:textColor="@color/wafra_widget_today_secondary"
+      android:textSize="12sp" />
   </LinearLayout>
 </LinearLayout>

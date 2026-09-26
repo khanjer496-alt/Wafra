@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Coming up wears Bills' ochre band. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
   <corners android:radius="24dp" />
-  <solid android:color="@color/wafra_widget_background" />
+  <solid android:color="@color/wafra_widget_upcoming_band" />
 </shape>
