@@ -42,7 +42,7 @@ import { moneyPictureProgress } from '@/lib/money-picture-progress';
 import { normalizePreferredName } from '@/lib/onboarding';
 import { syncPaymentReminders } from '@/lib/notifications';
 import { reminderScheduleInputsChanged } from '@/lib/reminders';
-import { periodLabel } from '@/lib/period';
+import { inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
