@@ -359,6 +359,12 @@ export { buildImportPlan } from '@/lib/import-plan';
 export interface InboxScanCursor {
   beforeDateMs: number;
   beforeId: number;
+  /**
+   * The row this cursor deliberately reads again: the previous chunk's last
+   * row, already imported or declined there. On resume it is adjacency
+   * context only (see the page loop). Absent on cursors saved by older builds.
+   */
+  overlapId?: number;
 }
 
 export interface ScanInboxOptions {
@@ -1208,7 +1214,18 @@ export async function scanInbox(
         providerCopies.add(index);
       }
     });
-    const carrierCopies = carrierRedeliveryIndexes(batch, providerCopies);
+    // A resumed chunk starts by re-reading the previous chunk's last row so a
+    // provider double insert split across the boundary is still adjacent.
+    // That row was already imported or declined there; processing it again
+    // imported the copy the exact-provider rule had declined. Only the exact
+    // row the cursor names is skipped: if the inbox changed and another row
+    // comes first, it is processed as usual.
+    const overlapIndex = pagesRead === 1 && options.cursor?.overlapId !== undefined &&
+      batch[0].id === options.cursor.overlapId ? 0 : -1;
+    const carrierCopies = carrierRedeliveryIndexes(
+      batch,
+      overlapIndex === 0 ? new Set([...providerCopies, 0]) : providerCopies,
+    );
     const pageStarted = tracing ? Date.now() : 0;
     let traceCheckpoint = pageStarted;
     for (let i = 0; i < batch.length; i++) {
@@ -1221,6 +1238,7 @@ export async function scanInbox(
       if (sms.date > newestTs) newestTs = sms.date;
       inboxBodies.add(bodyPrint(sms.body));
       previousInboxSms = sms;
+      if (i === overlapIndex) continue;
       if (providerCopies.has(i)) {
         declined.push({
           smsTs: sms.date,
@@ -1356,6 +1374,7 @@ export async function scanInbox(
       nextCursor = {
         beforeDateMs: overlapBoundary.date,
         beforeId: overlapBoundary.id,
+        overlapId: batch[batch.length - 1].id,
       };
       break;
     }

@@ -1522,6 +1522,45 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       unique: resumableIds.size,
     }));
 
+  {
+    // A provider double insert split at a history chunk boundary: the chunk
+    // ends [..., P'(4501), P(4500)], so P is declined there. The next chunk
+    // re-reads P only as adjacency context and must not import it as well.
+    const pairBody = 'Credit Card XX7720 was used for AED25.90 on 14/09/2026 23:52:52 at TEST MERCHANT';
+    const pagedInbox = inboxRows;
+    const boundaryRows = [
+      { id: 4_502, address: 'FAB', date: NOW + 50_300,
+        body: 'Purchase of AED 3.00 at BOUNDARY ONE with Debit Card ending 1234' },
+      { id: 4_501, address: 'FAB', body: pairBody, date: NOW + 50_000 },
+      { id: 4_500, address: 'FAB', body: pairBody, date: NOW + 49_400 },
+      { id: 4_400, address: 'FAB', date: NOW + 40_000,
+        body: 'Purchase of AED 4.00 at BOUNDARY TWO with Debit Card ending 1234' },
+    ];
+    const chunk = (cursor) => scanInbox(0, {}, undefined, 'en-AE', { maxInboxPages: 1, pageSize: 3, cursor });
+    const idsOf = (...scans) => scans.flatMap((scan) => scan.parsed.map((row) => row.sourceEventId));
+    inboxRows = boundaryRows;
+    const first = await chunk(undefined);
+    const second = await chunk(first.nextCursor);
+    ok('a provider double insert split at a history chunk boundary is imported once',
+      first.nextCursor?.overlapId === 4_500 &&
+        first.declined.some((row) => row.sourceEventId === 'a4500') &&
+        idsOf(first, second).filter((id) => id === 'a4501').length === 1 &&
+        !idsOf(first, second).includes('a4500') && idsOf(second).includes('a4400'),
+      JSON.stringify({ first: idsOf(first), second: idsOf(second), cursor: first.nextCursor }));
+    // The overlap row is skipped only when it is the exact row the cursor
+    // names. If it is gone, the next row is processed as usual.
+    inboxRows = boundaryRows.filter((row) => row.id !== 4_500);
+    const changed = await chunk(first.nextCursor);
+    ok('a resumed chunk whose overlap row disappeared still processes its first row',
+      idsOf(changed).includes('a4400'), JSON.stringify(idsOf(changed)));
+    // A cursor saved by an older build has no overlapId and resumes as before.
+    inboxRows = boundaryRows;
+    const legacy = await chunk({ beforeDateMs: first.nextCursor.beforeDateMs, beforeId: first.nextCursor.beforeId });
+    ok('a cursor without an overlap id resumes exactly as before',
+      idsOf(legacy).includes('a4500') && idsOf(legacy).includes('a4400'), JSON.stringify(idsOf(legacy)));
+    inboxRows = pagedInbox;
+  }
+
   inboxReadCursors.length = 0;
   const largerHistoryPage = await scanInbox(
     0,

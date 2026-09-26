@@ -16,6 +16,8 @@ export function requestHistoryImportRun(): void {
 export interface HistoryImportCursor {
   beforeDateMs: number;
   beforeId: number;
+  /** The overlap row the next chunk reads only as context (auto-import.ts InboxScanCursor). */
+  overlapId?: number;
 }
 
 export interface HistoryImportProgress {
@@ -79,7 +81,11 @@ const cursorFrom = (value: unknown): HistoryImportCursor | null => {
   const candidate = value as Partial<HistoryImportCursor>;
   const beforeDateMs = finiteNonNegativeInteger(candidate.beforeDateMs);
   const beforeId = finiteNonNegativeInteger(candidate.beforeId);
-  return beforeDateMs === null || beforeId === null ? null : { beforeDateMs, beforeId };
+  if (beforeDateMs === null || beforeId === null) return null;
+  // Optional: a cursor saved without it, or with an invalid one, still
+  // resumes; the overlap row is then processed again as before.
+  const overlapId = finiteNonNegativeInteger(candidate.overlapId);
+  return overlapId === null ? { beforeDateMs, beforeId } : { beforeDateMs, beforeId, overlapId };
 };
 
 export function createHistoryImportProgress(now: number): HistoryImportProgress {

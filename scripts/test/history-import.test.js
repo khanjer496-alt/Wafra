@@ -174,6 +174,16 @@ const smsReaderNativeSource = fs.readFileSync(path.join(
       error: null,
     });
 
+  const normalizedCursor = (cursor) => history.normalizeHistoryImportProgress({
+    status: 'paused', cursor, scanned: 1, found: 0, startedAt: 100, updatedAt: 200, error: null,
+  })?.cursor;
+  eq('a persisted cursor keeps the overlap row id the next chunk reads only as context',
+    normalizedCursor({ beforeDateMs: 900, beforeId: 90, overlapId: 89 }),
+    { beforeDateMs: 900, beforeId: 90, overlapId: 89 });
+  eq('an invalid overlap id is dropped and the cursor still resumes',
+    normalizedCursor({ beforeDateMs: 900, beforeId: 90, overlapId: -1 }),
+    { beforeDateMs: 900, beforeId: 90 });
+
   {
     let now = 100;
     let progress = history.createHistoryImportProgress(now);
