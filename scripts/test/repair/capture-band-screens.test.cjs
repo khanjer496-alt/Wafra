@@ -201,3 +201,81 @@ test('Statement import: file rows carry a doc tile and a status in the status co
   assert.equal(byId(locked.tree.props.bandContent, 'statement-choose'), undefined);
   assert.ok(byId(locked.tree.props.children, 'statement-private'));
 });
+
+/* ── Past bank texts (Android read) ───────────────────────────────────── */
+
+// Render the shipping band fragments of the 2,200-line import screen with
+// explicit inputs; the read, the plan and the native count are outside.
+function importBand(name, input) {
+  const fs = require('node:fs');
+  const ts = require('typescript');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(root, 'src/app/import-sms.tsx'), 'utf8');
+  const ast = ts.createSourceFile('import-sms.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let initializer;
+  (function find(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === name) initializer = node.initializer;
+    ts.forEachChild(node, find);
+  })(ast);
+  assert.ok(initializer, `${name} exists`);
+  const program = ts.transpileModule(`(${initializer.getText(ast)})`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText;
+  const jsx = (type, props = {}) => ({ type: typeof type === 'function' ? type.name || 'Component' : type, props });
+  const stub = (label) => Object.defineProperty(function () {}, 'name', { value: label });
+  const flow = themes.BandPalettes.light.flow;
+  const scanCopy = load(path.join(root, 'src/lib/motion-android-copy.ts'), { '@/lib/i18n': { getLanguage: () => 'en' } }).motionAndroidCopy('en');
+  return vm.runInNewContext(program, {
+    exports: {}, require: (id) => { assert.equal(id, 'react/jsx-runtime'); return { jsx, jsxs: jsx, Fragment: 'Fragment' }; },
+    styles: new Proxy({}, { get: (_t, key) => ({ key }) }), View: 'View',
+    ThemedText: stub('ThemedText'), ScanRing: stub('ScanRing'), ScanPanel: stub('ScanPanel'), PulseDot: stub('PulseDot'),
+    StatTile: stub('StatTile'), BandCount: stub('BandCount'), EButton: stub('EButton'),
+    band: flow, bandTile: { fg: flow.onBand }, mintTile: { fg: flow.onAccent }, scanCopy,
+    t: (key) => key, tf: (key, values) => `${key}:${JSON.stringify(values)}`,
+    formatCount: (value) => value.toLocaleString('en-US'), reducedMotion: false, largeText: false,
+    history: undefined, showManual: false, runScan() {}, setShowManual() {}, isSmsScanningAvailable: () => true,
+    ...input,
+  });
+}
+
+test('Past bank texts: the ring only when the native count answered, and real counters in band tiles', () => {
+  const progress = { scanned: 1904, found: 212 };
+  const scanDetail = { promotionsSkipped: 388, recentFound: [] };
+  const counted = importBand('scanBand', { scanPercent: 72, inboxTotal: 2600, progress, scanDetail });
+  const ring = walk(counted).find((n) => n.type === 'ScanRing');
+  assert.equal(ring.props.percent, '72%');
+  assert.equal(ring.props.fraction, 0.72);
+  assert.equal(walk(counted).some((n) => n.type === 'ScanPanel'), false);
+  const bar = byId(counted, 'import-scan-progress');
+  assert.equal(bar.props.accessibilityRole, 'progressbar');
+  assert.deepEqual({ ...bar.props.accessibilityValue }, { min: 0, max: 100, now: 72 });
+  const tile = (id) => byId(counted, `import-scan-${id}`);
+  assert.equal(tile('checked').props.tone, 'band');
+  assert.equal(tile('found').props.tone, 'accent', 'found is the one mint figure');
+  assert.equal(tile('promos').props.tone, 'band');
+  assert.equal(walk(tile('found')).find((n) => n.type === 'BandCount').props.value, '212');
+  assert.equal(walk(tile('checked')).find((n) => n.type === 'BandCount').props.value, '1,904');
+  assert.match(tile('promos').props.accessibilityLabel, /388/);
+
+  // No native count: the indeterminate panel, never a percent.
+  const uncounted = importBand('scanBand', { scanPercent: null, inboxTotal: null, progress, scanDetail });
+  assert.ok(walk(uncounted).some((n) => n.type === 'ScanPanel'));
+  assert.equal(walk(uncounted).some((n) => n.type === 'ScanRing'), false);
+  assert.equal(byId(uncounted, 'import-scan-progress').props.accessibilityValue, undefined);
+  // A paste or an iPhone history review keeps its plain counts and no tiles.
+  const plain = importBand('scanBand', { scanPercent: null, inboxTotal: null, progress, scanDetail: null });
+  assert.equal(byId(plain, 'import-scan-stats'), undefined);
+  // Large text stacks the tiles.
+  const large = importBand('scanBand', { scanPercent: 72, inboxTotal: 2600, progress, scanDetail, largeText: true });
+  assert.ok(JSON.stringify(byId(large, 'import-scan-stats').props.style).includes('bandTilesStacked'));
+});
+
+test('Past bank texts: the band leads with the true line and the read; paste-only phones say pasting is free', () => {
+  const android = importBand('introBand', {});
+  assert.match(text(android), /scanBankAlertsPrivacy/);
+  assert.ok(byId(android, 'import-find-alerts'));
+  assert.ok(byId(android, 'import-paste-toggle'));
+  const iphone = importBand('introBand', { isSmsScanningAvailable: () => false });
+  assert.match(text(iphone), /pasteHint[\s\S]*featPasteFreeText/);
+  assert.equal(byId(iphone, 'import-find-alerts'), undefined);
+});

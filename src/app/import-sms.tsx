@@ -28,7 +28,6 @@ import {
   AppState as RNAppState,
   Linking,
   Platform,
-  ScrollView,
   StyleSheet,
   TextInput,
   View,
@@ -41,26 +40,28 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 
+import { BandCount } from '@/components/capture/band-count';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { SupplementImports } from '@/components/supplement-imports';
 import { HistoryDetailsSheet } from '@/components/ios-message-setup/history-details-sheet';
 import { Button } from '@/components/ui/controls';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
+import { EButton } from '@/components/ui/band/e-button';
+import { StatTile, statTileColors } from '@/components/ui/band/stat-tile';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Icon } from '@/components/ui/icon';
-import { Block, Row, ScreenHeader, Section, SectionHeader } from '@/components/ui/layout';
+import { Block, Row, Section, SectionHeader } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { PulseDot } from '@/components/ui/states';
 import { CategoryTile } from '@/components/ui/tile';
-import { Fonts, EASE, MaxContentWidth, Motion, Radius, ScreenPadding, Spacing } from '@/constants/theme';
-import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
+import { Fonts, EASE, Motion, Radius, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
-import { SetupShell, SetupHeader } from '@/components/onboarding/setup-shell';
 import {
   buildImportPlan,
   countInboxMessages,
@@ -229,7 +230,7 @@ type Notice = { title: string; body: string };
  * No spinner — a spinner says "wait", this says what is being read.
  */
 function ScanPanel({ reducedMotion }: { reducedMotion: boolean }) {
-  const theme = useTheme();
+  const band = useBand('flow');
   const y = useSharedValue(0);
 
   useEffect(() => {
@@ -243,14 +244,14 @@ function ScanPanel({ reducedMotion }: { reducedMotion: boolean }) {
   const line = useAnimatedStyle(() => ({ transform: [{ translateY: y.value * PANEL_HEIGHT }] }));
 
   return (
-    <View style={[styles.panel, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+    <View testID="import-scan-panel" style={[styles.panel, { backgroundColor: band.tile }]}>
       {[0.82, 0.55, 0.7, 0.4, 0.88, 0.6, 0.35].map((w, i) => (
         <View
           key={i}
-          style={[styles.panelLine, { width: `${w * 100}%`, backgroundColor: theme.backgroundSelected }]}
+          style={[styles.panelLine, { width: `${w * 100}%`, backgroundColor: band.bandRule }]}
         />
       ))}
-      <Animated.View style={[styles.scanLine, { backgroundColor: theme.primary }, line]} />
+      <Animated.View style={[styles.scanLine, { backgroundColor: band.accent }, line]} />
     </View>
   );
 }
@@ -266,9 +267,9 @@ type ScanProgress = { scanned: number; found: number; detail?: ScanProgressDetai
  * exists. Updated per page without animation: the figure is the information.
  */
 function ScanRing({ percent, fraction, caption }: { percent: string; fraction: number; caption: string }) {
-  const theme = useTheme();
-  const size = 132;
-  const stroke = 8;
+  const band = useBand('flow');
+  const size = 184;
+  const stroke = 16;
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference * (1 - Math.max(0, Math.min(1, fraction)));
@@ -276,14 +277,14 @@ function ScanRing({ percent, fraction, caption }: { percent: string; fraction: n
     <View testID="import-scan-ring" style={styles.ring} importantForAccessibility="no-hide-descendants"
       accessibilityElementsHidden>
       <Svg width={size} height={size} style={styles.ringSvg}>
-        <Circle cx={size / 2} cy={size / 2} r={radius} stroke={theme.track} strokeWidth={stroke} fill="none" />
-        <Circle cx={size / 2} cy={size / 2} r={radius} stroke={theme.primary} strokeWidth={stroke} fill="none"
+        <Circle cx={size / 2} cy={size / 2} r={radius} stroke={band.tile} strokeWidth={stroke} fill="none" />
+        <Circle cx={size / 2} cy={size / 2} r={radius} stroke={band.accent} strokeWidth={stroke} fill="none"
           strokeLinecap="round" strokeDasharray={`${circumference} ${circumference}`} strokeDashoffset={offset}
           transform={`rotate(-90 ${size / 2} ${size / 2})`} />
       </Svg>
       <View style={styles.ringCopy}>
-        <ThemedText type="title" tabular>{percent}</ThemedText>
-        <ThemedText type="meta" themeColor="textTertiary" style={styles.ringCaption}>{caption}</ThemedText>
+        <BandCount value={percent} color={band.onBand} style={styles.ringFigure} />
+        <ThemedText type="meta" style={[styles.ringCaption, { color: band.onBandSecondary }]}>{caption}</ThemedText>
       </View>
     </View>
   );
@@ -294,7 +295,8 @@ const IOS_HISTORY_CARD_FINISHING: ReadonlySet<IosHistoryCardState> = new Set<Ios
 
 export default function ImportSmsScreen() {
   const router = useRouter();
-  const keyboardHeight = useKeyboardHeight();
+  const band = useBand('flow');
+  const largeText = useLargeTextLayout();
   const reducedMotion = useReducedMotion();
   const { auto, manual, history: historyParam } = useLocalSearchParams<{
     auto?: string;
@@ -308,19 +310,8 @@ export default function ImportSmsScreen() {
     pagedHistoryEnabled();
   const { state, getStateSnapshot, importBatch, ensureDurable, stageReviewAlerts } = useStore();
 
-  const [restoredOnboarding, setRestoredOnboarding] = useState(false);
-  const onboardingPresentation = Platform.OS === 'ios' &&
-    (restoredOnboarding || (state.hydrated === true && state.onboarded === false));
-  const theme = useTheme(onboardingPresentation ? 'dark' : undefined);
-  useEffect(() => {
-    let current = true;
-    if (Platform.OS === 'ios') {
-      void loadIosMessageSetupProgress().then(progress => {
-        if (current) setRestoredOnboarding(progress.returnToOnboarding);
-      }).catch(() => { /* The durable store still supplies first-run scope. */ });
-    }
-    return () => { current = false; };
-  }, [history]);
+  // The sheet reads the ordinary surface tokens; the band is the green flow band.
+  const theme = useTheme();
 
   const [text, setText] = useState('');
   const pasteRunning = useRef(false);
@@ -1387,698 +1378,710 @@ export default function ImportSmsScreen() {
     return state.accounts.find((a) => a.id === ref)?.name ?? '';
   };
 
-  return (
-    <SetupShell onboarding={onboardingPresentation}>
-    <ThemedView style={[styles.root, onboardingPresentation && { backgroundColor: 'transparent' }]}>
-      <Stack.Screen options={{ gestureEnabled: !validIosHistorySessionId(history) }} />
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        <View style={styles.headerWrap}>
-          {/* The title has to describe what this screen can actually do on the
-              phone it is running on: iOS gives no app access to Messages, so
-              "Read my inbox" named something the screen cannot do there. This
-              key is deliberately platform-neutral rather than branched on
-              Platform.OS — it is true on both, and it has an Arabic value. */}
-          {onboardingPresentation ? <SetupHeader onboarding title={t('importBankActivity')}
-            back={{ label: t('back'), onPress: requestLeaveScreen }} />
-            : <ScreenHeader title={t('importBankActivity')} onBack={requestLeaveScreen} />}
-        </View>
+  // The title has to describe what this screen can actually do on the phone
+  // it is running on: iOS gives no app access to Messages, so "Read my inbox"
+  // named something the screen cannot do there. This key is deliberately
+  // platform-neutral rather than branched on Platform.OS — it is true on
+  // both, and it has an Arabic value. Back asks before discarding an unsaved
+  // history review (requestLeaveScreen).
+  const importNav: BandNav = { back: requestLeaveScreen, title: t('importBankActivity') };
+  const bandTile = statTileColors(band, 'band');
+  const mintTile = statTileColors(band, 'accent');
 
-        <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: keyboardHeight + Spacing.six }]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}>
-          {!history && <>
-            <ImportSteps current={applying ? 'save' : plan !== null && !scanning ? 'review' : 'source'} />
-          </>}
-          {showIosHistoryCard && (
-            <Section index={0}>
-              <View
-                testID="ios-history-card"
-                style={[
-                  styles.historyCard,
-                  { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
-                ]}>
-                <View
-                  accessible
-                  accessibilityRole="header"
-                  accessibilityLabel={t('historyCardTitle')}
-                  style={styles.historyCardHeading}>
-                  <Icon name="calendar" size={19} color={theme.primary} />
-                  <View style={styles.rowText}>
-                    <ThemedText type="small">{t('historyCardTitle')}</ThemedText>
-                    <ThemedText type="meta" themeColor="textTertiary">
-                      {historyCardState === 'unsupported'
-                        ? t('historyRequiresIos26')
-                        : historyCardState === 'install-unavailable'
-                          ? t('historyInstallUnavailable')
-                          : historyCardState === 'running'
-                            ? t('historyRunningCompact')
-                            : historyCardState === 'review'
-                              ? t('historyReviewCompact')
-                              : t('historyReadyCompact')}
-                    </ThemedText>
-                  </View>
-                </View>
-                {historySourceSummary && (
-                  <View
-                    accessibilityLiveRegion="polite"
-                    style={styles.historySourceCounts}>
-                    <ThemedText
-                      testID="ios-history-source-count-row"
-                      type="meta"
-                      tabular
-                      themeColor="textSecondary">
-                      {tf('historySourceCountsRead', {
-                        understood: historySourceSummary.understood,
-                        unread: historySourceSummary.unread,
-                      })}
-                    </ThemedText>
-                    <ThemedText
-                      testID="ios-history-source-count-row"
-                      type="meta"
-                      tabular
-                      themeColor="textSecondary">
-                      {tf('historySourceCountsFiled', {
-                        alreadyFiled: historySourceSummary.alreadyFiled,
-                        notAlreadyFiled: historySourceSummary.notAlreadyFiled,
-                      })}
-                    </ThemedText>
-                  </View>
-                )}
-                {!history && usePagedHistory ?
-                  <Button label={t('historyStartAction')} icon="calendar"
-                    disabled={historyActionBusy} wrapLabel onPress={() => router.push({ pathname: '/ios-paging-beta', params: { origin: 'import' } })} /> : <Button
-                  label={
-                    historyCardState === 'unsupported'
-                      ? t('historyPasteManually')
-                      : historyCardState === 'install-unavailable'
-                        ? t('historyInstallUnavailableAction')
-                        : historyCardState === 'needs-install'
-                          ? t(historyInstallOpened ? 'historyAddedAction' : 'historyAddAction')
-                          : historyCardState === 'ready'
-                            ? t(historyHandoffExpired ? 'historyTryAgain' : 'historyStartAction')
-                            : historyCardState === 'running'
-                              ? t('historyContinueAction')
-                              : t('historyReviewAction')
-                  }
-                  icon={historyCardState === 'needs-install' ? 'download' : 'calendar'}
-                  disabled={
-                    historyActionBusy ||
-                    historyCardState === 'install-unavailable' ||
-                    historyCardState === 'review'
-                  }
-                  onPress={historyCardPrimaryAction}
-                  wrapLabel
-                />}
-                {!usePagedHistory && historyCardState === 'running' && (
-                  <Button
-                    label={t('cancel')}
-                    variant="ghost"
-                    disabled={historyActionBusy}
-                    onPress={() => void cancelHistoryHandoff()}
-                  />
-                )}
-                {!usePagedHistory && historyCardState === 'ready' && historyHandoffExpired && (
-                  <Button
-                    label={t('historyReinstallAction')}
-                    variant="outline"
-                    disabled={historyActionBusy}
-                    onPress={() => void openHistoryInstall(true)}
-                    wrapLabel
-                  />
-                )}
-                {!history && historyCardState !== 'unsupported' && (
-                  <Button
-                    label={showManual ? t('hideManualPaste') : t('historyPasteManually')}
-                    variant="ghost"
-                    disabled={historyActionBusy}
-                    onPress={() => setShowManual((value) => !value)}
-                    wrapLabel
-                  />
-                )}
-                <Button
-                  label={t('historyLearnMore')}
-                  variant="ghost"
-                  onPress={() => setHistoryDetailsVisible(true)}
-                />
-              </View>
-            </Section>
-          )}
-          {scanning ? (
-            <Section
-              index={0}
-              style={styles.scanning}
-              accessibilityRole="progressbar"
-              accessibilityState={{ busy: true }}
-              accessibilityLabel={scanPercent !== null && inboxTotal !== null
-                ? scanCopy.importPercentSpoken(scanPercent, inboxTotal)
-                : tf('importProgressCounts', {
+  // Past bank texts on the green flow band. While a read runs the band holds
+  // its progress: the ring only when the native inbox count answered (never
+  // a made-up percent), otherwise the indeterminate panel; then the read's
+  // real counters (checked, found in mint, promos skipped). Otherwise the
+  // band holds the one line about what this screen does on this phone and
+  // its first action.
+  const scanBand = (
+    <View style={styles.bandBlock}>
+      <View
+        testID="import-scan-progress"
+        style={styles.scanning}
+        accessibilityRole="progressbar"
+        accessibilityState={{ busy: true }}
+        accessibilityLabel={scanPercent !== null && inboxTotal !== null
+          ? scanCopy.importPercentSpoken(scanPercent, inboxTotal)
+          : tf('importProgressCounts', {
+            read: progress?.scanned ?? 0,
+            matched: progress?.found ?? 0,
+          })}
+        accessibilityValue={scanPercent !== null ? { min: 0, max: 100, now: scanPercent } : undefined}>
+        {scanPercent !== null && inboxTotal !== null
+          ? <ScanRing percent={scanCopy.importPercent(scanPercent)} fraction={scanPercent / 100}
+            caption={scanCopy.importPercentOf(inboxTotal)} />
+          : <ScanPanel reducedMotion={reducedMotion} />}
+        <View style={styles.progressHead}>
+          <View style={styles.progressLabel}>
+            <PulseDot color={band.accent} />
+            <ThemedText type="small" style={{ color: band.onBandSecondary }}>
+              {t('importProgress')}
+            </ThemedText>
+          </View>
+          {scanDetail ? null : <ThemedText type="small" tabular style={{ color: band.onBand }}>
+            {history && progress === null
+              ? t('historyPreparingReview')
+              : tf('importProgressCounts', {
                   read: progress?.scanned ?? 0,
                   matched: progress?.found ?? 0,
                 })}
-              accessibilityValue={scanPercent !== null ? { min: 0, max: 100, now: scanPercent } : undefined}>
-              {scanPercent !== null && inboxTotal !== null
-                ? <ScanRing percent={scanCopy.importPercent(scanPercent)} fraction={scanPercent / 100}
-                  caption={scanCopy.importPercentOf(inboxTotal)} />
-                : <ScanPanel reducedMotion={reducedMotion} />}
-              <View style={styles.progressHead}>
-                <View style={styles.progressLabel}>
-                  <PulseDot color={theme.primary} />
-                  <ThemedText type="micro" themeColor="textTertiary">
-                    {t('importProgress')}
+          </ThemedText>}
+        </View>
+      </View>
+      {scanDetail && progress ? (
+        <View testID="import-scan-stats" style={[styles.bandTiles, largeText && styles.bandTilesStacked]}>
+          {[
+            { key: 'checked', value: progress.scanned, label: scanCopy.importChecked, tone: 'band' as const },
+            { key: 'found', value: progress.found, label: scanCopy.importFound, tone: 'accent' as const },
+            { key: 'promos', value: scanDetail.promotionsSkipped, label: scanCopy.importPromosSkipped, tone: 'band' as const,
+              spoken: scanCopy.importPromosSpoken(scanDetail.promotionsSkipped) },
+          ].map((stat) => (
+            <StatTile key={stat.key} testID={`import-scan-${stat.key}`} palette={band} tone={stat.tone} label={stat.label}
+              accessibilityLabel={stat.spoken ?? `${formatCount(stat.value)} ${stat.label}`}>
+              <BandCount value={formatCount(stat.value)} color={stat.tone === 'accent' ? mintTile.fg : bandTile.fg} />
+            </StatTile>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+
+  const introBand = (
+    <View style={styles.bandBlock} testID="import-intro">
+      <ThemedText type="default" style={{ color: band.onBand }}>
+        {history
+          ? t('historyReviewCompact')
+          : isSmsScanningAvailable()
+          ? t('scanBankAlertsPrivacy')
+          : t('pasteHint')}
+      </ThemedText>
+      {/* THE PLATFORM-FAIR LINE. Pasting used to sit behind the
+          paywall, which on a phone with no inbox scan meant an iPhone
+          user paid to do by hand exactly what an Android user got for
+          free and automatically. runParse() no longer gates, and the
+          screen has to SAY so on the platform where pasting is the
+          only path — otherwise the wall is gone and nobody knows.
+          Same key as the paywall's own row, so the two can never
+          disagree about what is free. */}
+      {!history && !isSmsScanningAvailable() && (
+        <ThemedText type="meta" style={{ color: band.onBandSecondary }}>
+          {t('featPasteFreeText')}
+        </ThemedText>
+      )}
+      {!history && isSmsScanningAvailable() && (
+        <>
+          <EButton testID="import-find-alerts" palette={band} icon="search" label={t('findBankAlerts')}
+            color={{ fill: band.onBand, text: band.band }} onPress={runScan} />
+          <EButton testID="import-paste-toggle" palette={band}
+            label={showManual ? t('hideManualPaste') : t('pasteInstead')}
+            color={{ fill: band.tile, text: band.onBand }}
+            onPress={() => setShowManual((value) => !value)} />
+        </>
+      )}
+    </View>
+  );
+
+  const fileFooter = plan !== null && !scanning && (
+    plan.txCount > 0 ||
+    plan.dueCount > 0 ||
+    plan.healedCount > 0 ||
+    (history && plan.billDues.length > 0)
+  ) ? (
+    /* The button appears for dues and healed rows too, so labelling
+       it from txCount alone offered to "File 0 entries" after a scan
+       that found only statement reminders. Name what is actually
+       about to be filed. */
+    <EButton
+      testID="import-file-plan"
+      palette={band}
+      label={
+        plan.txCount > 0
+          ? tf('fileEntries', {
+              count: plan.txCount,
+              ending: plan.txCount === 1 ? 'y' : 'ies',
+            })
+          : plan.dueCount > 0
+            ? tf('fileCardDues', {
+                count: plan.dueCount,
+                s: plan.dueCount === 1 ? '' : 's',
+              })
+            : history && plan.billDues.length > 0
+              ? tf('fileBillReminders', {
+                  count: plan.billDues.length,
+                  s: plan.billDues.length === 1 ? '' : 's',
+                })
+            : tf('fixEntries', {
+                count: plan.healedCount,
+                ending: plan.healedCount === 1 ? 'y' : 'ies',
+              })
+      }
+      onPress={applyPlan}
+      disabled={applying}
+    />
+  ) : undefined;
+
+  return (
+    <BandScaffold
+      band="flow"
+      testID="import-sms"
+      nav={importNav}
+      bandContent={scanning ? scanBand : introBand}
+      footer={fileFooter}
+      keyboardAware
+      scrollProps={{ keyboardShouldPersistTaps: 'handled', showsVerticalScrollIndicator: false }}>
+      <Stack.Screen options={{ gestureEnabled: !validIosHistorySessionId(history) }} />
+      <View style={styles.sheet}>
+        {!history && <>
+          <ImportSteps current={applying ? 'save' : plan !== null && !scanning ? 'review' : 'source'} />
+        </>}
+        {showIosHistoryCard && (
+          <Section index={0}>
+            <View
+              testID="ios-history-card"
+              style={[
+                styles.historyCard,
+                { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder },
+              ]}>
+              <View
+                accessible
+                accessibilityRole="header"
+                accessibilityLabel={t('historyCardTitle')}
+                style={styles.historyCardHeading}>
+                <Icon name="calendar" size={19} color={theme.primary} />
+                <View style={styles.rowText}>
+                  <ThemedText type="small">{t('historyCardTitle')}</ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {historyCardState === 'unsupported'
+                      ? t('historyRequiresIos26')
+                      : historyCardState === 'install-unavailable'
+                        ? t('historyInstallUnavailable')
+                        : historyCardState === 'running'
+                          ? t('historyRunningCompact')
+                          : historyCardState === 'review'
+                            ? t('historyReviewCompact')
+                            : t('historyReadyCompact')}
                   </ThemedText>
                 </View>
-                {scanDetail ? null : <ThemedText type="small" tabular>
-                  {history && progress === null
-                    ? t('historyPreparingReview')
-                    : tf('importProgressCounts', {
-                        read: progress?.scanned ?? 0,
-                        matched: progress?.found ?? 0,
-                      })}
-                </ThemedText>}
               </View>
-              {scanDetail && progress ? (
-                <View testID="import-scan-stats" style={styles.scanStats}>
-                  {[
-                    { key: 'checked', value: progress.scanned, label: scanCopy.importChecked },
-                    { key: 'found', value: progress.found, label: scanCopy.importFound },
-                    { key: 'promos', value: scanDetail.promotionsSkipped, label: scanCopy.importPromosSkipped,
-                      spoken: scanCopy.importPromosSpoken(scanDetail.promotionsSkipped) },
-                  ].map((stat) => (
-                    <View key={stat.key} testID={`import-scan-${stat.key}`} style={styles.scanStat} accessible
-                      accessibilityLabel={stat.spoken ?? `${formatCount(stat.value)} ${stat.label}`}>
-                      <ThemedText type="heading" tabular>{formatCount(stat.value)}</ThemedText>
-                      <ThemedText type="meta" themeColor="textTertiary">{stat.label}</ThemedText>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-              {scanDetail && scanDetail.recentFound.length > 0 ? (
-                <View testID="import-live-found" style={styles.liveFound}>
-                  <ThemedText type="micro" themeColor="textTertiary">{scanCopy.importFoundHeading}</ThemedText>
-                  {scanDetail.recentFound.map((row, i) => {
-                    const spec = ledgerMoneySpec(row.currency);
-                    return (
-                      <Animated.View
-                        key={`${row.merchant}-${row.amountMinor}-${row.type}-${i}`}
-                        entering={reducedMotion ? undefined : FadeInDown.duration(Motion.change)}>
-                        <Row last={i === scanDetail.recentFound.length - 1}>
-                          <MerchantAvatar title={row.merchant} category={row.category} size={36} />
-                          <View style={styles.rowText}>
-                            <ThemedText type="small" numberOfLines={1}>{row.merchant}</ThemedText>
-                            <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
-                              {`${categoryLabel(row.category)} · ${scanCopy.importJustFound}`}
-                            </ThemedText>
-                          </View>
-                          {spec ? (
-                            <Money fils={row.amountMinor} moneySpec={spec} prefix={false} decimals
-                              sign={row.type === 'income' ? 'plus' : 'minus'}
-                              color={row.type === 'income' ? theme.income : theme.text} />
-                          ) : null}
-                        </Row>
-                      </Animated.View>
-                    );
-                  })}
-                </View>
-              ) : null}
-              <ThemedText type="meta" themeColor="textTertiary">
-                {history ? t('historyRunningCompact') : t('importProgressPrivacy')}
-              </ThemedText>
-            </Section>
-          ) : (
-            <Section index={0} style={styles.intro}>
-              <ThemedText type="default" themeColor="textSecondary">
-                {history
-                  ? t('historyReviewCompact')
-                  : isSmsScanningAvailable()
-                  ? t('scanBankAlertsPrivacy')
-                  : t('pasteHint')}
-              </ThemedText>
-              {/* THE PLATFORM-FAIR LINE. Pasting used to sit behind the
-                  paywall, which on a phone with no inbox scan meant an iPhone
-                  user paid to do by hand exactly what an Android user got for
-                  free and automatically. runParse() no longer gates, and the
-                  screen has to SAY so on the platform where pasting is the
-                  only path — otherwise the wall is gone and nobody knows.
-                  Same key as the paywall's own row, so the two can never
-                  disagree about what is free. */}
-              {!history && !isSmsScanningAvailable() && (
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {t('featPasteFreeText')}
-                </ThemedText>
-              )}
-              {!history && isSmsScanningAvailable() && (
-                <>
-                  <Button label={t('findBankAlerts')} icon="search" onPress={runScan} />
-                  <Button
-                    label={showManual ? t('hideManualPaste') : t('pasteInstead')}
-                    variant="ghost"
-                    onPress={() => setShowManual((value) => !value)}
-                  />
-                </>
-              )}
-              {!history && showManual && (
-                <>
-                  <TextInput
-                    accessibilityLabel={t('pasteBankMessagesA11y')}
-                    value={text}
-                    // A verdict is about the text that produced it. Editing
-                    // the box makes it stale, so it goes when the text does.
-                    onChangeText={(value) => {
-                      setText(value);
-                      setPasteVerdict(null);
-                      setNotice(null);
-                    }}
-                    multiline
-                    placeholder={t('bankMessageExample')}
-                    placeholderTextColor={theme.textTertiary}
-                    style={[
-                      styles.textarea,
-                      {
-                        backgroundColor: theme.backgroundElement,
-                        borderColor: theme.controlBorder,
-                        color: theme.text,
-                        textAlign: state.language === 'ar' ? 'right' : 'left',
-                        fontFamily: state.language === 'ar' ? Fonts.arabic : Fonts.sans,
-                      },
-                    ]}
-                  />
-                  <View style={styles.parseRow}>
-                    <Button
-                      inline
-                      variant="outline"
-                      label={t('parsePastedText')}
-                      onPress={() => runParse(text)}
-                      disabled={!text.trim()}
-                    />
-                    <Button
-                      inline
-                      variant="ghost"
-                      label={t('trySample')}
-                      onPress={() => {
-                        // In the ledger's own currency: a fixed AED sample was
-                        // refused as a currency mismatch on every other ledger.
-                        const sample = pasteSampleForLedger(
-                          state.ledgerMoney ?? ledgerMoneySpec(ledgerCurrencyCode()),
-                        );
-                        setText(sample);
-                        runParse(sample);
-                      }}
-                    />
-                  </View>
-                </>
-              )}
-              {/* B's screen ended with a "Stop pasting" card linking to the
-                  iPhone setup wizard. Deliberately not carried across: the
-                  same job is done below by <SupplementImports />, which offers
-                  the relay, forwarded email and PDF paths through a translated
-                  copy layer, and the card's two sentences exist in no i18n key
-                  (contracts.test.js bans an English literal here). If it comes
-                  back it needs t() keys with ar: values, and its href is
-                  /ios-setup — iphone-setup.tsx was the losing filename and is
-                  gone. */}
-            </Section>
-          )}
-
-          {/* The answer to a tap that could not do what it offered. It sits
-              above the plan because it is the reason the plan is empty, or the
-              reason there is no plan at all. */}
-          {pasteReviewCount > 0 && !scanning ? (
-            <Section index={1}>
-              <Button label={tf('genericReviewCount', { count: pasteReviewCount, s: pasteReviewCount === 1 ? '' : 's' })}
-                onPress={() => router.push('/review-alerts')} />
-            </Section>
-          ) : null}
-          {notice !== null && !scanning && (
-            <Section index={1}>
-              <View accessibilityLiveRegion="polite">
-                <Block>
-                  <View style={styles.unreadRow}>
-                    <Icon name="alert" size={17} color={theme.warning} />
-                    <View style={styles.rowText}>
-                      <ThemedText type="small">{notice.title}</ThemedText>
-                      <ThemedText type="meta" themeColor="textTertiary">
-                        {notice.body}
-                      </ThemedText>
-                    </View>
-                  </View>
-                </Block>
-              </View>
-              {validIosHistorySessionId(history) &&
-                historyCommitState === 'source-retained' && (
-                  <Button
-                    label={t('retryHistoryRead')}
-                    variant="outline"
-                    onPress={() => setHistoryAttempt((attempt) => attempt + 1)}
-                  />
-                )}
-              {history && (
-                historyCommitState === 'cleanup-failed' ||
-                historyCommitState === 'source-cleanup-failed' ||
-                historyCommitState === 'cancel-cleanup-failed'
-              ) && (
-                <Button
-                  label={t('deleteStagedMessages')}
-                  variant="outline"
-                  onPress={leaveScreen}
-                />
-              )}
-              {historyCommitState === 'storage-failed' && (
-                <Button
-                  label={t('retrySecureSave')}
-                  variant="outline"
-                  disabled={applying}
-                  onPress={retrySecureSave}
-                />
-              )}
-              {history && (
-                historyCommitState === 'cleanup-failed' ||
-                historyCommitState === 'source-cleanup-failed' ||
-                historyCommitState === 'cancel-cleanup-failed' ||
-                historyCommitState === 'storage-failed'
-              ) && (
-                <Button
-                  label={t('leaveImportScreen')}
-                  variant="ghost"
-                  onPress={leaveProtectedSessionForExpiry}
-                />
-              )}
-            </Section>
-          )}
-
-          {plan !== null && !scanning && (
-            <>
-              <Section index={1}>
-                <View style={[styles.stats, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
-                  {(
-                    [
-                      [plan.txCount, t('matchedLabel'), theme.text],
-                      [plan.newAccountCount, t('cardsTitle'), theme.text],
-                      [
-                        unreadCount + categoryOnlyCount,
-                        history ? t('skippedLabel') : categoryOnlyCount > 0 ? t('review') : t('unreadLabel'),
-                        unreadCount + categoryOnlyCount > 0 ? theme.warning : theme.textTertiary,
-                      ],
-                    ] as const
-                  ).map(([value, label, color], i) => (
-                    <View
-                      key={label}
-                      style={[
-                        styles.statCell,
-                        i > 0 && { borderStartWidth: 1, borderStartColor: theme.cardBorder },
-                      ]}>
-                      <ThemedText type="small" tabular style={[styles.statFigure, { color }]}>
-                        {value}
-                      </ThemedText>
-                      <ThemedText type="nano" style={{ color }}>
-                        {label}
-                      </ThemedText>
-                    </View>
-                  ))}
-                </View>
-                {skippedCount > 0 && (
-                  <ThemedText type="meta" themeColor="textTertiary" style={styles.skipped}>
-                    {skippedCount} {t('alreadyFiledSkipped')}
-                  </ThemedText>
-                )}
-                {plan.healedCount > 0 && (
-                  <ThemedText type="meta" style={{ color: theme.income }}>
-                    {tf('improvedExistingEntries', {
-                      count: plan.healedCount,
-                      ending: plan.healedCount === 1 ? 'y' : 'ies',
+              {historySourceSummary && (
+                <View
+                  accessibilityLiveRegion="polite"
+                  style={styles.historySourceCounts}>
+                  <ThemedText
+                    testID="ios-history-source-count-row"
+                    type="meta"
+                    tabular
+                    themeColor="textSecondary">
+                    {tf('historySourceCountsRead', {
+                      understood: historySourceSummary.understood,
+                      unread: historySourceSummary.unread,
                     })}
                   </ThemedText>
-                )}
-              </Section>
-
-              {plan.batch.newDues.length > 0 && (
-                <Section index={2}>
-                  <SectionHeader title={plan.batch.newDues.length > PREVIEW_LIMIT
-                    ? `${t('statements')} · ${PREVIEW_LIMIT}/${plan.batch.newDues.length}`
-                    : t('statements')} />
-                  {previewDues.map((due, i) => (
-                    <Block key={`${due.accountId}-${due.dueDate}-${i}`}>
-                      <Row>
-                        <View style={styles.rowText}>
-                          <ThemedText type="smallBold">{accountName(due.accountId) || t('card')}</ThemedText>
-                          <ThemedText type="meta" themeColor="textSecondary">
-                            {tf('dueDate', { date: `${shortDate(due.dueDate)} ${due.dueDate.slice(0, 4)}` })}
-                          </ThemedText>
-                        </View>
-                      </Row>
-                      <Row>
-                        <ThemedText type="meta" themeColor="textSecondary" style={styles.rowText}>
-                          {t('genericStatementTotal')}
-                        </ThemedText>
-                        <Money fils={due.totalDueFils} moneySpec={plan.batch.importMoney} decimals />
-                      </Row>
-                      <Row last>
-                        {due.minDueEstimated ? (
-                          <ThemedText type="meta" themeColor="textSecondary">
-                            {t('statementMinimumUnconfirmed')}
-                          </ThemedText>
-                        ) : (
-                          <>
-                            <ThemedText type="meta" themeColor="textSecondary" style={styles.rowText}>
-                              {t('minimumDueLabel')}
-                            </ThemedText>
-                            <Money fils={due.minDueFils} moneySpec={plan.batch.importMoney} decimals />
-                          </>
-                        )}
-                      </Row>
-                    </Block>
-                  ))}
-                </Section>
+                  <ThemedText
+                    testID="ios-history-source-count-row"
+                    type="meta"
+                    tabular
+                    themeColor="textSecondary">
+                    {tf('historySourceCountsFiled', {
+                      alreadyFiled: historySourceSummary.alreadyFiled,
+                      notAlreadyFiled: historySourceSummary.notAlreadyFiled,
+                    })}
+                  </ThemedText>
+                </View>
               )}
-
-              {newBills.length > 0 && (
-                <Section index={2}>
-                  <SectionHeader title={t('billRemindersDetected')} />
-                  {newBills.map((p, i) => {
-                    const tracked = trackedBills.has(i);
-                    return (
-                      <Row key={`bill-${i}`} last={i === newBills.length - 1}>
-                        <CategoryTile category={p.categoryGuess} />
-                        <View style={styles.rowText}>
-                          <ThemedText type="small" numberOfLines={1}>
-                            {p.merchant}
-                          </ThemedText>
-                          <ThemedText type="meta" themeColor="textTertiary">
-                            {categoryLabel(p.categoryGuess)}
-                            {p.dueDay ? ` · ${tf('dueDay', { day: p.dueDay })}` : ''}
-                          </ThemedText>
-                        </View>
-                        {!history && (
-                          <Button
-                            variant={tracked ? 'ghost' : 'outline'}
-                            label={tracked ? t('tracked') : t('track')}
-                            disabled={tracked || applying}
-                            onPress={() => void trackReminder(p, i)}
-                            style={styles.trackButton}
-                          />
-                        )}
-                        {history && (
-                          <ThemedText type="meta" themeColor="textTertiary">
-                            {t('filesOnConfirm')}
-                          </ThemedText>
-                        )}
-                      </Row>
-                    );
-                  })}
-                </Section>
+              {!history && usePagedHistory ?
+                <Button label={t('historyStartAction')} icon="calendar"
+                  disabled={historyActionBusy} wrapLabel onPress={() => router.push({ pathname: '/ios-paging-beta', params: { origin: 'import' } })} /> : <Button
+                label={
+                  historyCardState === 'unsupported'
+                    ? t('historyPasteManually')
+                    : historyCardState === 'install-unavailable'
+                      ? t('historyInstallUnavailableAction')
+                      : historyCardState === 'needs-install'
+                        ? t(historyInstallOpened ? 'historyAddedAction' : 'historyAddAction')
+                        : historyCardState === 'ready'
+                          ? t(historyHandoffExpired ? 'historyTryAgain' : 'historyStartAction')
+                          : historyCardState === 'running'
+                            ? t('historyContinueAction')
+                            : t('historyReviewAction')
+                }
+                icon={historyCardState === 'needs-install' ? 'download' : 'calendar'}
+                disabled={
+                  historyActionBusy ||
+                  historyCardState === 'install-unavailable' ||
+                  historyCardState === 'review'
+                }
+                onPress={historyCardPrimaryAction}
+                wrapLabel
+              />}
+              {!usePagedHistory && historyCardState === 'running' && (
+                <Button
+                  label={t('cancel')}
+                  variant="ghost"
+                  disabled={historyActionBusy}
+                  onPress={() => void cancelHistoryHandoff()}
+                />
               )}
-
-              {previewRows.length > 0 && (
-                <Section index={3}>
-                  <SectionHeader
-                    title={
-                      plan.txCount > PREVIEW_LIMIT
-                        ? `${t('readyToFile')} · ${PREVIEW_LIMIT}/${plan.txCount}`
-                        : t('readyToFile')
-                    }
-                  />
-                  {previewRows.map((tx, i) => (
+              {!usePagedHistory && historyCardState === 'ready' && historyHandoffExpired && (
+                <Button
+                  label={t('historyReinstallAction')}
+                  variant="outline"
+                  disabled={historyActionBusy}
+                  onPress={() => void openHistoryInstall(true)}
+                  wrapLabel
+                />
+              )}
+              {!history && historyCardState !== 'unsupported' && (
+                <Button
+                  label={showManual ? t('hideManualPaste') : t('historyPasteManually')}
+                  variant="ghost"
+                  disabled={historyActionBusy}
+                  onPress={() => setShowManual((value) => !value)}
+                  wrapLabel
+                />
+              )}
+              <Button
+                label={t('historyLearnMore')}
+                variant="ghost"
+                onPress={() => setHistoryDetailsVisible(true)}
+              />
+            </View>
+          </Section>
+        )}
+        {scanning ? (
+          <Section index={0} style={styles.scanning}>
+            {scanDetail && scanDetail.recentFound.length > 0 ? (
+              <View testID="import-live-found" style={styles.liveFound}>
+                <ThemedText type="smallBold" accessibilityRole="header" style={styles.sheetTitle}>
+                  {scanCopy.importFoundHeading}
+                </ThemedText>
+                {scanDetail.recentFound.map((row, i) => {
+                  const spec = ledgerMoneySpec(row.currency);
+                  return (
                     <Animated.View
-                      key={`${tx.date}-${tx.title}-${i}`}
-                      entering={
-                        reducedMotion || i >= 6
-                          ? undefined
-                          : FadeInDown.delay(i * 45).duration(180)
-                      }>
-                      <Row last={i === previewRows.length - 1}>
-                        <CategoryTile category={tx.category} />
+                      key={`${row.merchant}-${row.amountMinor}-${row.type}-${i}`}
+                      entering={reducedMotion ? undefined : FadeInDown.duration(Motion.change)}>
+                      <Row last={i === scanDetail.recentFound.length - 1}>
+                        <MerchantAvatar title={row.merchant} category={row.category} size={36} />
                         <View style={styles.rowText}>
-                          <ThemedText type="small" numberOfLines={1}>
-                            {tx.title}
-                          </ThemedText>
-                          <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
-                            {categoryLabel(tx.category)} · {shortDate(tx.date)}
-                            {accountName(tx.accountId) ? ` · ${accountName(tx.accountId)}` : ''}
+                          <ThemedText type="small" numberOfLines={1}>{row.merchant}</ThemedText>
+                          <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1}>
+                            {`${categoryLabel(row.category)} · ${scanCopy.importJustFound}`}
                           </ThemedText>
                         </View>
-                        <Money
-                          fils={tx.amountFils}
-                          prefix={false}
-                          sign={tx.type === 'income' ? 'plus' : 'minus'}
-                          color={tx.type === 'income' ? theme.income : theme.text}
-                        />
+                        {spec ? (
+                          <Money fils={row.amountMinor} moneySpec={spec} prefix={false} decimals
+                            sign={row.type === 'income' ? 'plus' : 'minus'}
+                            color={row.type === 'income' ? theme.income : theme.text} />
+                        ) : null}
                       </Row>
                     </Animated.View>
-                  ))}
-                </Section>
-              )}
+                  );
+                })}
+              </View>
+            ) : null}
+            {/* The true line about where the read happens. */}
+            <ThemedText type="meta" themeColor="textSecondary" testID="import-scan-privacy">
+              {history ? t('historyRunningCompact') : t('importProgressPrivacy')}
+            </ThemedText>
+          </Section>
+        ) : !history && showManual ? (
+          <Section index={0} style={styles.intro} testID="import-paste">
+            <TextInput
+              accessibilityLabel={t('pasteBankMessagesA11y')}
+              value={text}
+              // A verdict is about the text that produced it. Editing
+              // the box makes it stale, so it goes when the text does.
+              onChangeText={(value) => {
+                setText(value);
+                setPasteVerdict(null);
+                setNotice(null);
+              }}
+              multiline
+              placeholder={t('bankMessageExample')}
+              placeholderTextColor={theme.textTertiary}
+              style={[
+                styles.textarea,
+                {
+                  backgroundColor: theme.backgroundElement,
+                  borderColor: theme.controlBorder,
+                  color: theme.text,
+                  textAlign: state.language === 'ar' ? 'right' : 'left',
+                  fontFamily: state.language === 'ar' ? Fonts.arabic : Fonts.sans,
+                },
+              ]}
+            />
+            <View style={styles.parseRow}>
+              <Button
+                inline
+                variant="outline"
+                label={t('parsePastedText')}
+                onPress={() => runParse(text)}
+                disabled={!text.trim()}
+              />
+              <Button
+                inline
+                variant="ghost"
+                label={t('trySample')}
+                onPress={() => {
+                  // In the ledger's own currency: a fixed AED sample was
+                  // refused as a currency mismatch on every other ledger.
+                  const sample = pasteSampleForLedger(
+                    state.ledgerMoney ?? ledgerMoneySpec(ledgerCurrencyCode()),
+                  );
+                  setText(sample);
+                  runParse(sample);
+                }}
+              />
+            </View>
+            {/* B's screen ended with a "Stop pasting" card linking to the
+                iPhone setup wizard. Deliberately not carried across: the
+                same job is done below by <SupplementImports />, which offers
+                the relay, forwarded email and PDF paths through a translated
+                copy layer, and the card's two sentences exist in no i18n key
+                (contracts.test.js bans an English literal here). If it comes
+                back it needs t() keys with ar: values, and its href is
+                /ios-setup — iphone-setup.tsx was the losing filename and is
+                gone. */}
+          </Section>
+        ) : null}
 
-              {categoryOnlyCount > 0 && (
-                <Section index={4}>
-                  <Block>
-                    <View style={styles.unreadRow}>
-                      <Icon name="alert" size={17} color={theme.warning} />
-                      <ThemedText type="small" style={styles.rowText}>
-                        {categoryOnlyCount} · {t('noCategoryYet')}
-                      </ThemedText>
-                    </View>
-                  </Block>
-                </Section>
-              )}
-
-              {unreadCount > 0 && (
-                <Section index={4}>
-                  <Block onPress={() => router.push('/accuracy')}>
-                    <View style={styles.unreadRow}>
-                      <Icon name="alert" size={17} color={theme.warning} />
-                      <View style={styles.rowText}>
-                        <ThemedText type="small">
-                          {tf('unknownMessageFormats', {
-                            count: unreadCount,
-                            s: unreadCount === 1 ? '' : 's',
-                          })}
-                        </ThemedText>
-                        <ThemedText type="meta" themeColor="textTertiary">
-                          {t('shareMaskedFormatsHint')}
-                        </ThemedText>
-                      </View>
-                      <Icon name="chevron-right" size={15} color={theme.textTertiary} />
-                    </View>
-                  </Block>
-                </Section>
-              )}
-            </>
-          )}
-
-          {/* The answer to a paste that filed nothing. It sits ABOVE the
-              alternative routes and leaves them on screen, because "we cannot
-              read this one" and "here are the other ways in" are one thought. */}
-          {pasteVerdict !== null && !scanning && (
-            <Section index={1}>
+        {/* The answer to a tap that could not do what it offered. It sits
+            above the plan because it is the reason the plan is empty, or the
+            reason there is no plan at all. */}
+        {pasteReviewCount > 0 && !scanning ? (
+          <Section index={1}>
+            <Button label={tf('genericReviewCount', { count: pasteReviewCount, s: pasteReviewCount === 1 ? '' : 's' })}
+              onPress={() => router.push('/review-alerts')} />
+          </Section>
+        ) : null}
+        {notice !== null && !scanning && (
+          <Section index={1}>
+            <View accessibilityLiveRegion="polite">
               <Block>
                 <View style={styles.unreadRow}>
-                  <Icon
-                    name="alert"
-                    size={17}
-                    color={pasteVerdict.kind === 'filed' ? theme.textTertiary : theme.warning}
-                  />
+                  <Icon name="alert" size={17} color={theme.warning} />
                   <View style={styles.rowText}>
-                    <ThemedText type="small">
-                      {pasteVerdict.kind === 'filed'
-                        ? t('upToDate')
-                        : tf('unknownMessageFormats', {
-                            count: pasteVerdict.count,
-                            s: pasteVerdict.count === 1 ? '' : 's',
-                          })}
-                    </ThemedText>
+                    <ThemedText type="small">{notice.title}</ThemedText>
                     <ThemedText type="meta" themeColor="textTertiary">
-                      {pasteVerdict.kind === 'filed'
-                        ? `${pasteVerdict.count} ${t('alreadyFiledSkipped')}`
-                        : t('pasteHint')}
+                      {notice.body}
                     </ThemedText>
                   </View>
                 </View>
               </Block>
-            </Section>
-          )}
-
-          {!history && !scanning && plan === null && (
-            <Section index={2}>
-              <SupplementImports />
-            </Section>
-          )}
-        </ScrollView>
+            </View>
+            {validIosHistorySessionId(history) &&
+              historyCommitState === 'source-retained' && (
+                <Button
+                  label={t('retryHistoryRead')}
+                  variant="outline"
+                  onPress={() => setHistoryAttempt((attempt) => attempt + 1)}
+                />
+              )}
+            {history && (
+              historyCommitState === 'cleanup-failed' ||
+              historyCommitState === 'source-cleanup-failed' ||
+              historyCommitState === 'cancel-cleanup-failed'
+            ) && (
+              <Button
+                label={t('deleteStagedMessages')}
+                variant="outline"
+                onPress={leaveScreen}
+              />
+            )}
+            {historyCommitState === 'storage-failed' && (
+              <Button
+                label={t('retrySecureSave')}
+                variant="outline"
+                disabled={applying}
+                onPress={retrySecureSave}
+              />
+            )}
+            {history && (
+              historyCommitState === 'cleanup-failed' ||
+              historyCommitState === 'source-cleanup-failed' ||
+              historyCommitState === 'cancel-cleanup-failed' ||
+              historyCommitState === 'storage-failed'
+            ) && (
+              <Button
+                label={t('leaveImportScreen')}
+                variant="ghost"
+                onPress={leaveProtectedSessionForExpiry}
+              />
+            )}
+          </Section>
+        )}
 
         {plan !== null && !scanning && (
-          plan.txCount > 0 ||
-          plan.dueCount > 0 ||
-          plan.healedCount > 0 ||
-          (history && plan.billDues.length > 0)
-        ) && (
-          <View style={styles.footer}>
-            {/* The button appears for dues and healed rows too, so labelling
-                it from txCount alone offered to "File 0 entries" after a scan
-                that found only statement reminders. Name what is actually
-                about to be filed. */}
-            <Button
-              label={
-                plan.txCount > 0
-                  ? tf('fileEntries', {
-                      count: plan.txCount,
-                      ending: plan.txCount === 1 ? 'y' : 'ies',
-                    })
-                  : plan.dueCount > 0
-                    ? tf('fileCardDues', {
-                        count: plan.dueCount,
-                        s: plan.dueCount === 1 ? '' : 's',
-                      })
-                    : history && plan.billDues.length > 0
-                      ? tf('fileBillReminders', {
-                          count: plan.billDues.length,
-                          s: plan.billDues.length === 1 ? '' : 's',
-                        })
-                    : tf('fixEntries', {
-                        count: plan.healedCount,
-                        ending: plan.healedCount === 1 ? 'y' : 'ies',
-                      })
-              }
-              onPress={applyPlan}
-              disabled={applying}
-            />
-          </View>
+          <>
+            <Section index={1}>
+              <View style={[styles.stats, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
+                {(
+                  [
+                    [plan.txCount, t('matchedLabel'), theme.text],
+                    [plan.newAccountCount, t('cardsTitle'), theme.text],
+                    [
+                      unreadCount + categoryOnlyCount,
+                      history ? t('skippedLabel') : categoryOnlyCount > 0 ? t('review') : t('unreadLabel'),
+                      unreadCount + categoryOnlyCount > 0 ? theme.warning : theme.textTertiary,
+                    ],
+                  ] as const
+                ).map(([value, label, color], i) => (
+                  <View
+                    key={label}
+                    style={[
+                      styles.statCell,
+                      i > 0 && { borderStartWidth: 1, borderStartColor: theme.cardBorder },
+                    ]}>
+                    <ThemedText type="small" tabular style={[styles.statFigure, { color }]}>
+                      {value}
+                    </ThemedText>
+                    <ThemedText type="nano" style={{ color }}>
+                      {label}
+                    </ThemedText>
+                  </View>
+                ))}
+              </View>
+              {skippedCount > 0 && (
+                <ThemedText type="meta" themeColor="textTertiary" style={styles.skipped}>
+                  {skippedCount} {t('alreadyFiledSkipped')}
+                </ThemedText>
+              )}
+              {plan.healedCount > 0 && (
+                <ThemedText type="meta" style={{ color: theme.income }}>
+                  {tf('improvedExistingEntries', {
+                    count: plan.healedCount,
+                    ending: plan.healedCount === 1 ? 'y' : 'ies',
+                  })}
+                </ThemedText>
+              )}
+            </Section>
+
+            {plan.batch.newDues.length > 0 && (
+              <Section index={2}>
+                <SectionHeader title={plan.batch.newDues.length > PREVIEW_LIMIT
+                  ? `${t('statements')} · ${PREVIEW_LIMIT}/${plan.batch.newDues.length}`
+                  : t('statements')} />
+                {previewDues.map((due, i) => (
+                  <Block key={`${due.accountId}-${due.dueDate}-${i}`}>
+                    <Row>
+                      <View style={styles.rowText}>
+                        <ThemedText type="smallBold">{accountName(due.accountId) || t('card')}</ThemedText>
+                        <ThemedText type="meta" themeColor="textSecondary">
+                          {tf('dueDate', { date: `${shortDate(due.dueDate)} ${due.dueDate.slice(0, 4)}` })}
+                        </ThemedText>
+                      </View>
+                    </Row>
+                    <Row>
+                      <ThemedText type="meta" themeColor="textSecondary" style={styles.rowText}>
+                        {t('genericStatementTotal')}
+                      </ThemedText>
+                      <Money fils={due.totalDueFils} moneySpec={plan.batch.importMoney} decimals />
+                    </Row>
+                    <Row last>
+                      {due.minDueEstimated ? (
+                        <ThemedText type="meta" themeColor="textSecondary">
+                          {t('statementMinimumUnconfirmed')}
+                        </ThemedText>
+                      ) : (
+                        <>
+                          <ThemedText type="meta" themeColor="textSecondary" style={styles.rowText}>
+                            {t('minimumDueLabel')}
+                          </ThemedText>
+                          <Money fils={due.minDueFils} moneySpec={plan.batch.importMoney} decimals />
+                        </>
+                      )}
+                    </Row>
+                  </Block>
+                ))}
+              </Section>
+            )}
+
+            {newBills.length > 0 && (
+              <Section index={2}>
+                <SectionHeader title={t('billRemindersDetected')} />
+                {newBills.map((p, i) => {
+                  const tracked = trackedBills.has(i);
+                  return (
+                    <Row key={`bill-${i}`} last={i === newBills.length - 1}>
+                      <CategoryTile category={p.categoryGuess} />
+                      <View style={styles.rowText}>
+                        <ThemedText type="small" numberOfLines={1}>
+                          {p.merchant}
+                        </ThemedText>
+                        <ThemedText type="meta" themeColor="textTertiary">
+                          {categoryLabel(p.categoryGuess)}
+                          {p.dueDay ? ` · ${tf('dueDay', { day: p.dueDay })}` : ''}
+                        </ThemedText>
+                      </View>
+                      {!history && (
+                        <Button
+                          variant={tracked ? 'ghost' : 'outline'}
+                          label={tracked ? t('tracked') : t('track')}
+                          disabled={tracked || applying}
+                          onPress={() => void trackReminder(p, i)}
+                          style={styles.trackButton}
+                        />
+                      )}
+                      {history && (
+                        <ThemedText type="meta" themeColor="textTertiary">
+                          {t('filesOnConfirm')}
+                        </ThemedText>
+                      )}
+                    </Row>
+                  );
+                })}
+              </Section>
+            )}
+
+            {previewRows.length > 0 && (
+              <Section index={3}>
+                <SectionHeader
+                  title={
+                    plan.txCount > PREVIEW_LIMIT
+                      ? `${t('readyToFile')} · ${PREVIEW_LIMIT}/${plan.txCount}`
+                      : t('readyToFile')
+                  }
+                />
+                {previewRows.map((tx, i) => (
+                  <Animated.View
+                    key={`${tx.date}-${tx.title}-${i}`}
+                    entering={
+                      reducedMotion || i >= 6
+                        ? undefined
+                        : FadeInDown.delay(i * 45).duration(180)
+                    }>
+                    <Row last={i === previewRows.length - 1}>
+                      <CategoryTile category={tx.category} />
+                      <View style={styles.rowText}>
+                        <ThemedText type="small" numberOfLines={1}>
+                          {tx.title}
+                        </ThemedText>
+                        <ThemedText type="meta" themeColor="textTertiary" numberOfLines={1}>
+                          {categoryLabel(tx.category)} · {shortDate(tx.date)}
+                          {accountName(tx.accountId) ? ` · ${accountName(tx.accountId)}` : ''}
+                        </ThemedText>
+                      </View>
+                      <Money
+                        fils={tx.amountFils}
+                        prefix={false}
+                        sign={tx.type === 'income' ? 'plus' : 'minus'}
+                        color={tx.type === 'income' ? theme.income : theme.text}
+                      />
+                    </Row>
+                  </Animated.View>
+                ))}
+              </Section>
+            )}
+
+            {categoryOnlyCount > 0 && (
+              <Section index={4}>
+                <Block>
+                  <View style={styles.unreadRow}>
+                    <Icon name="alert" size={17} color={theme.warning} />
+                    <ThemedText type="small" style={styles.rowText}>
+                      {categoryOnlyCount} · {t('noCategoryYet')}
+                    </ThemedText>
+                  </View>
+                </Block>
+              </Section>
+            )}
+
+            {unreadCount > 0 && (
+              <Section index={4}>
+                <Block onPress={() => router.push('/accuracy')}>
+                  <View style={styles.unreadRow}>
+                    <Icon name="alert" size={17} color={theme.warning} />
+                    <View style={styles.rowText}>
+                      <ThemedText type="small">
+                        {tf('unknownMessageFormats', {
+                          count: unreadCount,
+                          s: unreadCount === 1 ? '' : 's',
+                        })}
+                      </ThemedText>
+                      <ThemedText type="meta" themeColor="textTertiary">
+                        {t('shareMaskedFormatsHint')}
+                      </ThemedText>
+                    </View>
+                    <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+                  </View>
+                </Block>
+              </Section>
+            )}
+          </>
         )}
-        <ConfirmSheet
-          visible={historyLeaveSession !== null && historyLeaveSession === history}
-          onClose={() => setHistoryLeaveSession(null)}
-          question={t('historyLeaveReviewTitle')}
-          body={t('historyLeaveReviewBody')}
-          cancelLabel={t('historyKeepReviewing')}
-          confirmLabel={t('historyDiscardAndLeave')}
-          destructive
-          onConfirm={confirmLeaveHistory}
-        />
-        <HistoryDetailsSheet
-          visible={historyDetailsVisible}
-          onClose={() => setHistoryDetailsVisible(false)}
-        />
-      </SafeAreaView>
-    </ThemedView>
-    </SetupShell>
+
+        {/* The answer to a paste that filed nothing. It sits ABOVE the
+            alternative routes and leaves them on screen, because "we cannot
+            read this one" and "here are the other ways in" are one thought. */}
+        {pasteVerdict !== null && !scanning && (
+          <Section index={1}>
+            <Block>
+              <View style={styles.unreadRow}>
+                <Icon
+                  name="alert"
+                  size={17}
+                  color={pasteVerdict.kind === 'filed' ? theme.textTertiary : theme.warning}
+                />
+                <View style={styles.rowText}>
+                  <ThemedText type="small">
+                    {pasteVerdict.kind === 'filed'
+                      ? t('upToDate')
+                      : tf('unknownMessageFormats', {
+                          count: pasteVerdict.count,
+                          s: pasteVerdict.count === 1 ? '' : 's',
+                        })}
+                  </ThemedText>
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {pasteVerdict.kind === 'filed'
+                      ? `${pasteVerdict.count} ${t('alreadyFiledSkipped')}`
+                      : t('pasteHint')}
+                  </ThemedText>
+                </View>
+              </View>
+            </Block>
+          </Section>
+        )}
+
+        {!history && !scanning && plan === null && (
+          <Section index={2}>
+            <SupplementImports />
+          </Section>
+        )}
+      </View>
+      <ConfirmSheet
+        visible={historyLeaveSession !== null && historyLeaveSession === history}
+        onClose={() => setHistoryLeaveSession(null)}
+        question={t('historyLeaveReviewTitle')}
+        body={t('historyLeaveReviewBody')}
+        cancelLabel={t('historyKeepReviewing')}
+        confirmLabel={t('historyDiscardAndLeave')}
+        destructive
+        onConfirm={confirmLeaveHistory}
+      />
+      <HistoryDetailsSheet
+        visible={historyDetailsVisible}
+        onClose={() => setHistoryDetailsVisible(false)}
+      />
+    </BandScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  safe: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  headerWrap: {
-    paddingHorizontal: ScreenPadding,
-  },
-  content: {
-    paddingHorizontal: ScreenPadding,
-    paddingBottom: Spacing.four,
+  sheet: {
     gap: 14,
+  },
+  bandBlock: {
+    gap: 14,
+    paddingTop: Spacing.one,
+  },
+  bandTiles: {
+    flexDirection: 'row',
+    gap: Spacing.two,
+  },
+  bandTilesStacked: {
+    flexDirection: 'column',
   },
   intro: {
     gap: Spacing.three - 2,
@@ -2102,8 +2105,7 @@ const styles = StyleSheet.create({
   },
   panel: {
     height: PANEL_HEIGHT,
-    borderWidth: 1,
-    borderRadius: Radius.sheet,
+    borderRadius: 22,
     padding: 14,
     gap: 12,
     overflow: 'hidden',
@@ -2132,19 +2134,16 @@ const styles = StyleSheet.create({
   },
   ring: {
     alignSelf: 'center',
-    width: 132,
-    height: 132,
+    width: 184,
+    height: 184,
     alignItems: 'center',
     justifyContent: 'center',
   },
   ringSvg: { position: 'absolute', top: 0, left: 0 },
-  ringCopy: { alignItems: 'center', maxWidth: 104 },
+  ringCopy: { alignItems: 'center', maxWidth: 136 },
+  ringFigure: { fontSize: 44, lineHeight: 50, letterSpacing: -1.6 },
   ringCaption: { textAlign: 'center' },
-  scanStats: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-  },
-  scanStat: { flex: 1, gap: Spacing.half },
+  sheetTitle: { fontSize: 17, lineHeight: 24 },
   liveFound: { gap: Spacing.one },
   textarea: {
     minHeight: 160,
@@ -2192,10 +2191,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two + 2,
-  },
-  footer: {
-    paddingHorizontal: ScreenPadding,
-    paddingTop: 6,
-    paddingBottom: 12,
   },
 });
