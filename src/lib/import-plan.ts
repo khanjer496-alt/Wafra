@@ -18,6 +18,7 @@ import {
   isStatementCaptureSource,
   mergeCaptureInstrument,
   statementUploadOf,
+  type CaptureChannel,
   type DuplicateCandidate,
 } from '@/lib/dedupe';
 import { readBillAlias } from '@/lib/bill-alias';
@@ -47,7 +48,6 @@ import {
   type NonPostingReason,
   type ParsedSms,
 } from '@/lib/sms-parser';
-import type { CaptureChannel } from '@/lib/dedupe';
 import { bestEffortObservationKey } from '@/lib/best-effort-autopost';
 import type { Account, AppState, Bill, CaptureInstrument, CaptureSource, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
@@ -1958,8 +1958,10 @@ function buildImportPlanInMarket(
         const row = priorBySmsKey.get(canonicalCaptureSourceKey(`h${d.sourceEventId}`, d.smsTs));
         if (!row || swept.has(row.id)) continue;
         // The scanner already proved byte-identical body, sender, adjacent
-        // provider ids and sub-second delivery. Preserve anything user-owned.
-        if (row.source !== 'sms' || row.userEdited || row.transferDecision || row.splits) continue;
+        // provider ids and sub-second delivery. Preserve anything user-owned,
+        // and anything a transfer pairing depends on.
+        if (row.source !== 'sms' || row.userEdited || row.transferDecision || row.splits ||
+            row.transferMatch || row.isTransfer) continue;
         swept.add(row.id);
         updates.push({ id: row.id, remove: true });
         declineReconciledCount += 1;

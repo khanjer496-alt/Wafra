@@ -6,6 +6,7 @@ const {
   extractOutgoingTransferParties,
   isDeclinedMessage,
   nonPostingReason,
+  isBnplProviderSource,
 } = require('./build/sms-parser');
 
 let pass = 0, fail = 0;
@@ -938,6 +939,62 @@ if (payAgainst && payAgainst.kind === 'cardPayment' && payAgainst.amountFils ===
 t('tabby charge-tomorrow preview is skipped (real charge arrives separately)',
   'Your Noon order for AED 49.75 is due tomorrow and will be charged to your default card. Pay it now at https://s.tabby.ai/s3b4DC',
   null);
+
+// BNPL PROVIDER AS THE SOURCE. One Tabby/Tamara instalment arrives twice: the
+// bank's own card alert ("Purchase of AED 49.75 to TABBY ...", above — the one
+// real outflow) and the provider's restatement of it from the provider's SMS
+// sender or Android app, which names the SHOP ("your Noon order"), not the
+// provider. dedupe.ts pairs cross-channel copies only when the merchants
+// agree, and Noon never equals Tabby, so every instalment was counted twice —
+// and "split into 4 payments" booked the whole order on top of the four card
+// charges. The gate is the provider's IDENTITY, never its wording: the bodies
+// below are ILLUSTRATIVE, not verified Tabby/Tamara templates, and the same
+// bodies with no sender (last case) keep today's behaviour.
+{
+  const providerBodies = [
+    'AED 49.75 charged to your card ending 1234 for your Noon order. Remaining: 2 payments.',
+    'Your payment of AED 49.75 for your Noon order has been received. Thank you!',
+    'Your order of AED 199.00 at Noon is split into 4 payments. First payment of AED 49.75 paid.',
+    'Refund of AED 49.75 for your Noon order has been processed to your card ending 1234.',
+    'We have received your payment of AED 120.00 for your order from Namshi.',
+    // Arabic rendering of the same restatement, as an Arabic-locale handset would show it.
+    'تم خصم 49.75 درهم من بطاقتك المنتهية بـ 1234 لطلبك من نون',
+  ];
+  const providerSenders = [
+    'Tabby', 'TABBY', 'tabby', 'AD-Tabby', 'Tabby-AD', 'tabby.ai', 'Tamara', 'TAMARA', 'postpay', 'Cashew',
+    // Android package identities (verified on Google Play: developer "Tabby" and
+    // "TAMARA FZE"), bare and in the `${pkg} ${title}` form a learned package
+    // is parsed under.
+    'app.tabby.client', 'co.tamara.user', 'app.tabby.client Tabby',
+  ];
+  for (const sender of providerSenders) {
+    for (const body of providerBodies) {
+      t(`BNPL provider source ${JSON.stringify(sender)} never posts: ${body.slice(0, 40)}`, body, null, { sender });
+    }
+  }
+  t('BNPL: the bank card charge to TABBY stays the single real expense',
+    'Purchase of AED 49.75 to TABBY with Credit Card ending 1234. Avl limit AED 5,000.00',
+    { kind: 'transaction', type: 'expense', amountFils: 4975, merchant: 'Tabby', category: 'loan' },
+    { sender: 'ADCB' });
+  // The bank-side refund template is the real PAYPAL one further down this
+  // file with the counterparty swapped: provider refunds still arrive here.
+  t('BNPL: a bank refund from TABBY to the card still posts as income',
+    'Your refund of AED 49.75 from TABBY has been posted to your Debit Card ending 6737. Your available balance is AED 266.43',
+    { kind: 'transaction', type: 'income', amountFils: 4975, merchant: 'Tabby' },
+    { sender: 'ADCB' });
+  t('BNPL: a bank EPP offer that merely names TABBY behaves as before',
+    'Enjoy easy monthly instalments on your purchase of AED 787.50 at TABBY Dubai with an attractive profit rate and zero processing fee.',
+    null, { sender: 'ADCB' });
+  t('BNPL: a merchant whose name contains Tabby is not a provider source',
+    'Purchase of AED 50.00 at TABBY TAILORING with Debit Card ending 1234',
+    { kind: 'transaction', type: 'expense', amountFils: 5000, merchant: 'Tabby Tailoring' },
+    { sender: 'ADCB' });
+  ok('BNPL: provider identity is exact — near-miss senders are not providers',
+    typeof isBnplProviderSource === 'function' && ['TabbyTailoring', 'Tamara Restaurant', 'TABBYCATS', 'ADCB', 'Mashreq', 'CASHEWNUTS', 'app.tabby.cashier',
+      'co.tamara.merchant', 'com.example.tabby', ''].every((s) => !isBnplProviderSource(s)) &&
+      !isBnplProviderSource(undefined),
+    'a sender that only contains a provider name was treated as the provider');
+}
 
 t('instalment conversion offer is skipped',
   '*Convert now* Pay as low as AED 226.8 per month for the purchase of AED 7379.54 at AL AIN AHLIA INS CO with credit card ending 9190 via clicking https://www.emiratesnbd.com/en/ipp/?ipp=5551144',

@@ -1,4 +1,5 @@
 import type { Account, AppState, Transaction } from '@/lib/types';
+import type { TransferReconciliationResult } from '@/lib/transfer-reconciliation-types';
 import { bankIdentityForName } from '@/lib/markets';
 import { historyImportIncomplete } from '@/lib/history-import';
 import {
@@ -272,6 +273,47 @@ export function internalTransferIdsForState(
     canonical: state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION,
   };
   return value;
+}
+
+let receiptReconciliationCache: {
+  receipt: readonly string[];
+  accounts: Account[];
+  result: TransferReconciliationResult;
+} | null = null;
+
+/**
+ * Per-row transfer statuses for browsing surfaces (Transactions separation,
+ * Transfers history) that must agree with `internalTransferIdsForState`.
+ *
+ * - Provisional history receipt (import unfinished, not stamped final):
+ *   returns null. `internal` is the provisional id set, and a fresh graph over
+ *   the half-imported rows could classify differently. Callers keep every row
+ *   in its ordinary place until the final page reconciles once.
+ * - Final receipt: the store replaces `transferInternalIds` whenever the
+ *   transfer graph may have changed (any transfer-relevant row, any add or
+ *   delete, any account change), and keeps the same array otherwise. That
+ *   array plus the accounts array is therefore a cheap revision key: one
+ *   reconciliation per receipt, not per ledger edit. Untouched rows keep their
+ *   ids, so a status computed for the receipt's snapshot still describes them;
+ *   callers look statuses up against the current rows.
+ * - No receipt (legacy/restored state): the same array-identity memo the
+ *   `internal` fallback above uses.
+ */
+export function transferReconciliationForState(
+  state: Pick<AppState, 'transactions' | 'accounts' | 'transferInternalIds' | 'transferNormalizationVersion'> & {
+    historyImport: Parameters<typeof historyImportIncomplete>[0];
+  },
+): TransferReconciliationResult | null {
+  const receipt = state.transferInternalIds;
+  const final = Array.isArray(receipt) && state.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION;
+  if (!final && Array.isArray(receipt) && historyImportIncomplete(state.historyImport)) return null;
+  if (!final) return reconcileTransfers(state.transactions, state.accounts);
+  if (receiptReconciliationCache?.receipt === receipt && receiptReconciliationCache.accounts === state.accounts) {
+    return receiptReconciliationCache.result;
+  }
+  const result = reconcileTransfers(state.transactions, state.accounts);
+  receiptReconciliationCache = { receipt, accounts: state.accounts, result };
+  return result;
 }
 
 /**

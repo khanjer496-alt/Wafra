@@ -4,6 +4,7 @@ import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { tapped } from '@/lib/haptics';
+import { alignEnd } from '@/lib/i18n';
 
 type SectionHeaderTrailing =
   | { value: string; action?: never; trailing?: never }
@@ -23,7 +24,7 @@ export function SectionHeader({ title, value, action, trailing }: SectionHeaderP
         {title}
       </ThemedText>
       {value !== undefined ? (
-        <ThemedText type="meta" themeColor="textSecondary" tabular style={styles.value}>
+        <ThemedText type="meta" themeColor="textSecondary" tabular style={[styles.value, { textAlign: alignEnd() }]}>
           {value}
         </ThemedText>
       ) : null}
@@ -57,7 +58,8 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.two,
   },
   title: { flexGrow: 1, flexShrink: 1 },
-  value: { flexShrink: 1, textAlign: 'right' },
+  // textAlign is resolved per language at render: figures end the row.
+  value: { flexShrink: 1 },
   action: { minWidth: 44, minHeight: 44, maxWidth: '100%', alignItems: 'center', justifyContent: 'center' },
   actionLabel: { flexShrink: 1 },
   androidAction: { minWidth: 48, minHeight: 48 },

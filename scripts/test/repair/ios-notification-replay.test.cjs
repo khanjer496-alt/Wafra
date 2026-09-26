@@ -110,13 +110,16 @@ test('the helper touches only parsed notification transactions and compares ever
   }
 });
 
-test('an unsafe replay identity fails closed with a bounded source-free error', () => {
+// A throw here wedged the iOS drain on this record; held keeps it queued,
+// unacknowledged and unposted while later records keep flowing.
+const HELD = { kind: 'held', market: null, milestone: 'none' };
+
+test('an unsafe replay identity fails closed as a held, source-free outcome', () => {
   const guard = createIosNotificationReplayGuard([ledger()]);
-  assert.throws(() => guard(parsed(), 'BANK: ' + body), error => {
-    assert.equal(error.message, 'Notification replay review unavailable');
-    assert.equal(error.message.includes(body), false);
-    return true;
-  });
+  const outcome = guard(parsed(), 'BANK: ' + body);
+  assert.deepEqual({ ...outcome }, HELD);
+  assert.equal(JSON.stringify(outcome).includes(body), false);
+  assert.equal(JSON.stringify(outcome).includes('Wafra Notification'), false);
 });
 
 test('replay review retains structured money and cannot silently fall back to automatic posting', () => {
@@ -129,8 +132,7 @@ test('replay review retains structured money and cannot silently fall back to au
   assert.equal(review.item.event.merchant.value, first.row.merchant);
   assert.equal(review.item.event.instrument.value.last4, '4417');
   const cannotRepresent = { ...first, row: { ...first.row, currency: 'XXX' } };
-  assert.throws(() => createIosNotificationReplayGuard([ledger(first)])(cannotRepresent, nextUuid),
-    { message: 'Notification replay review unavailable' });
+  assert.deepEqual({ ...createIosNotificationReplayGuard([ledger(first)])(cannotRepresent, nextUuid) }, HELD);
 });
 
 

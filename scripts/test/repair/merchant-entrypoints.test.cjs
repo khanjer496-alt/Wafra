@@ -143,3 +143,16 @@ test('Arabic and large text preserve both minimum-size touch targets and exact m
   assert.ok(walk(tree).filter(n => n.type === 'Text').every(n => n.props.numberOfLines === undefined));
   assert.equal(tree.props.style[2].flexDirection, 'column');
 });
+test('money movements such as ATM cash do not open a merchant spending page', () => {
+  // Spending and merchant analytics exclude these by design, so the page
+  // would always report AED 0 and "no spending" for a row the user can see.
+  for (const overrides of [
+    { title: 'ATM withdrawal', category: 'cash-withdrawal' },
+    { title: 'Sarwa', category: 'investing' },
+    { title: 'Cash deposit', category: 'other', type: 'income' },
+  ]) {
+    const h = rowFixture(); const tree = h.render(overrides);
+    assert.equal(byId(tree, 'transaction-merchant-link'), undefined, overrides.title);
+    assert.equal(byId(tree, 'merchant-transaction-row'), undefined, overrides.title);
+  }
+});
