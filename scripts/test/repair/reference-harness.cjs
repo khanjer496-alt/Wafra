@@ -229,6 +229,9 @@ function createHarness(options = {}) {
   local('@/components/ui/band/band-segmented');local('@/components/ui/band/band-chip');local('@/components/ui/band/share-bar');
   local('@/components/ui/band/glyph-tile');local('@/components/ui/band/status-bar');local('@/components/ui/band/e-button');
   local('@/components/spending/spending-band');
+  // The limit dial's drag is native; its steppers and adjustable actions run.
+  native.PanResponder={create:()=>({panHandlers:{}})};
+  local('@/components/ui/band/dial-limit');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
   local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');
   local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/bills/bills-timeline');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');

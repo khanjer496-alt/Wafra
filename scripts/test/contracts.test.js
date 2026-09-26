@@ -1525,7 +1525,7 @@ function ktSources(dir) {
     `${picker}, ${current}, ${amount}, ${suggestions}, ${merchants}`);
   ok('the limit editor keeps shared footer actions and existing delete behavior',
     /const removeExisting = \(\) => \{[\s\S]*?deleteBudget\(existing\.category\);[\s\S]*?onClose\(\)/.test(sheet) &&
-      /footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('remove'\)\}[\s\S]*?variant="danger"[\s\S]*?<Button[\s\S]*?label=\{t\('saveLimit'\)\}[\s\S]*?disabled=\{!picked \|\| !limitFils\}/.test(sheet));
+      /footer=\{\([\s\S]*?<EButton[\s\S]*?label=\{t\('remove'\)\}[\s\S]*?onPress=\{removeExisting\}[\s\S]*?<EButton[\s\S]*?label=\{t\('saveLimit'\)\}[\s\S]*?disabled=\{!picked \|\| !limitFils\}/.test(sheet));
 }
 
 /* ── one card's obligation is decided in one place ──────────────────── */

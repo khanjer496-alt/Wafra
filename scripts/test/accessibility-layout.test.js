@@ -275,7 +275,7 @@ ok('Card detail presents billable obligations before identity and payment histor
   /\{data\.billable && \([\s\S]*?styles\.summary[\s\S]*?title=\{t\('statements'\)\}[\s\S]*?styles\.head[\s\S]*?title=\{t\('paymentsMade'\)\}/.test(cardDetail) &&
     !/type="subtitle" numberOfLines=\{1\}/.test(cardDetail));
 ok('Limit editor delegates keyboard scrolling to the shared labelled sheet and field',
-  /<BottomSheet/.test(limitSheet) && /<TextField[\s\S]*?label=\{t\('monthlyLimit'\)\}/.test(limitSheet) &&
+  /<BottomSheet/.test(limitSheet) && /<TextField[\s\S]*?label=\{state\.ledgerMoney \? bandWords\.exactLimit : t\('monthlyLimit'\)\}/.test(limitSheet) &&
     !/<Modal/.test(limitSheet) && !/<ScrollView/.test(limitSheet) && !/useKeyboardHeight/.test(limitSheet));
 
 /* ── Larger Text (docs/design/2026-09-25-large-text-audit.md) ─────────── */
