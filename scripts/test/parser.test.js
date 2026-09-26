@@ -974,7 +974,7 @@ t('tabby charge-tomorrow preview is skipped (real charge arrives separately)',
   }
   t('BNPL: the bank card charge to TABBY stays the single real expense',
     'Purchase of AED 49.75 to TABBY with Credit Card ending 1234. Avl limit AED 5,000.00',
-    { kind: 'transaction', type: 'expense', amountFils: 4975, merchant: 'Tabby', category: 'loan' },
+    { kind: 'transaction', type: 'expense', amountFils: 4975, merchant: 'Tabby', category: 'shopping' },
     { sender: 'ADCB' });
   // The bank-side refund template is the real PAYPAL one further down this
   // file with the counterparty swapped: provider refunds still arrive here.

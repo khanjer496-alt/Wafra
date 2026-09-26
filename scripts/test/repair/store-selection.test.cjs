@@ -160,6 +160,7 @@ test('every state field the Home projections read is in HOME_STATE_FIELDS', () =
     '@/lib/accuracy': built('accuracy'), '@/lib/analytics': built('analytics'), '@/lib/cash-flow': built('cash-flow'),
     '@/lib/fx-summary': built('fx-summary'), '@/lib/insights': built('insights'), '@/lib/leaving-soon': built('leaving-soon'),
     '@/lib/ledger': built('ledger'), '@/lib/period': built('period'), '@/lib/uncategorised': built('uncategorised'),
+    '@/lib/transfer-activity': built('transfer-activity'), '@/lib/transfer-reconciliation': built('transfer-reconciliation'),
   });
   const read = new Set();
   const base = { ...h.state, billAliases: {}, transferInternalIds: undefined, transferNormalizationVersion: undefined,

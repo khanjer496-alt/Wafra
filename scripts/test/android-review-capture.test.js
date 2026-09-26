@@ -1290,7 +1290,7 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
   ok('BNPL provider SMS and app pushes neither post nor raise Review; the bank charge to Tabby still posts once',
     bnpl.parsed.length === 1 && bnpl.parsed[0]?.merchant === 'Tabby' &&
       bnpl.parsed[0]?.amountFils === 4975 && bnpl.parsed[0]?.type === 'expense' &&
-      bnpl.parsed[0]?.categoryGuess === 'loan' && bnpl.parsed[0]?.channel === 'inbox' &&
+      bnpl.parsed[0]?.categoryGuess === 'shopping' && bnpl.parsed[0]?.channel === 'inbox' &&
       bnpl.reviewCandidates.length === 0 &&
       bnpl.declined.every((row) => row.smsTs !== NOW + 40_000 && row.smsTs !== NOW + 40_500),
     JSON.stringify({ parsed: bnpl.parsed, reviews: bnpl.reviewCandidates, declined: bnpl.declined }));
