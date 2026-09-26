@@ -431,7 +431,6 @@ assert.match(task7Pro, /entitled \? \([\s\S]*?manageSubscription[\s\S]*?proConti
 const task8Routes = [
   ['accuracy', 'accuracyHeader'],
   ['categorise', 'categoriseHeader'],
-  ['currency', 'currencyHeader'],
   ['feedback', 'feedbackHeader'],
   ['review-alerts', 'reviewAlertsHeader'],
   ['trusted-devices', 'trustedDevicesHeader'],
@@ -470,24 +469,26 @@ const task8Currency = read('src/app/currency.tsx');
 for (const seam of [
   'summarizeForeignActivity(', 'inPeriod(transaction.date, period)', 'ledgerCurrency,',
   'visibleGroups', 'visibleTransactions', 'normalizedQuery', 'liveAccountIds(', 'internalTransferIdsForState(',
-  '<PeriodSheet', '<EntryDetailSheet', '<MerchantAvatar', '<Money',
+  '<PeriodSheet', '<EntryDetailSheet', '<MerchantAvatar', '<BandFigure', 'fxRowSource(item)',
 ]) assert.ok(task8Currency.includes(seam), `Currency lost ${seam}`);
-assert.match(task8Currency, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/,
+// Design language E: a Spending detail on the clay band, the sheet owning the virtualized list.
+assert.match(task8Currency, /<BandScaffold[\s\S]*?band="spending"[\s\S]*?scroll=\{false\}/,
   'Foreign spending virtualizes its transaction history instead of mounting the whole ledger in a ScrollView');
 assert.match(task8Currency, /<FlatList[\s\S]*?ListHeaderComponent=\{listHeader\}/);
-assert.match(task8Currency, /contentContainerStyle=\{\[listInsets\.contentContainerStyle, styles\.listContent\]\}/);
+assert.match(task8Currency, /contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}\]\}/);
 assert.match(task8Currency, /removeClippedSubviews=\{Platform\.OS === 'android'\}/);
 assert.doesNotMatch(task8Currency, /visibleTransactions\.map|summary\.transactions\.map/,
   'hundreds of foreign charges must not be mounted eagerly');
 assert.match(task8Currency, /const INITIAL_CURRENCY_ROWS = 5/);
 assert.match(task8Currency, /summary\.groups\.slice\(0, INITIAL_CURRENCY_ROWS\)/);
-assert.match(task8Currency, /const percent = summary\.totalLocalFils > 0[\s\S]*?group\.localFils \/ summary\.totalLocalFils/);
+assert.match(task8Currency, /const shareOf = [\s\S]*?totalLocalFils > 0[\s\S]*?group\.localFils \/ totalLocalFils/);
 assert.match(task8Currency, /styles\.currencyTrack[\s\S]*?styles\.currencyFill/,
   'currency impact stays a restrained Ledger & Light progress treatment rather than decorative cards');
 assert.match(task8Currency, /setSelectedCurrency\(\(current\) => current === currency \? null : currency\)/);
 assert.match(task8Currency, /transaction\.originalCurrency\?\.toUpperCase\(\) !== selectedCurrency/);
 const currencyHierarchy = task8Currency.match(
-  /<Money[\s\S]*?<SectionHeader title=\{t\('currencyBreakdown'[\s\S]*?<SectionHeader title=\{t\('foreignRecent'[\s\S]*?<TextField/,
+  /<BandFigure[\s\S]*?<SectionHeader title=\{t\('currencyBreakdown'[\s\S]*?<SectionHeader title=\{t\('foreignRecent'[\s\S]*?<TextField/,
+
 )?.[0] ?? '';
 assert.ok(currencyHierarchy.length > 0,
   'Currency hierarchy remains total → currencies → transactions/search');
