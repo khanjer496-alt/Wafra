@@ -40,6 +40,7 @@ estimated, dueISO}]`. Amounts are whole minor units shown as
 ## Safety rules
 
 - `hidden == true`, a null amount or a non-integer amount shows `—`, never a guess.
+  A snapshot without a `hidden` flag is read as hidden, as on iOS.
 - A snapshot older than 36 hours, missing or malformed shows "Open Wafra to update".
 - **Today** also requires `todayISO` to equal the phone's local date, so
   yesterday's total is never shown as today's.

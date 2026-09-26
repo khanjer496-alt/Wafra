@@ -233,7 +233,6 @@ struct WafraTodayView: View {
           .lineLimit(1)
         WafraBandFigure(minor: snapshot.todayMinor, snapshot: snapshot, strings: strings, band: band)
       }
-      .accessibilityElement(children: .combine)
       WafraTodayLine(snapshot: snapshot, strings: strings, band: band)
         .padding(.top, 2)
     }
@@ -304,7 +303,6 @@ struct WafraTodayLine: View {
             .fixedSize()
           VStack(alignment: .leading, spacing: 0) { ordered(left) }
         }
-        .accessibilityElement(children: .combine)
       } else {
         Text(strings.payments(snapshot.todayCount))
           .lineLimit(1)
@@ -468,7 +466,8 @@ struct WafraComingUpView: View {
             .wafraAmount(snapshot)
             .modifier(HiddenAmountLabel(label: bill.amountMinor == nil || snapshot.hidden ? strings.amountHidden : nil))
         }
-        .accessibilityElement(children: .combine)
+        // Children stay separate accessibility elements: combining them would
+        // fold the privacy-sensitive amount into one label with the title.
       }
     }
   }

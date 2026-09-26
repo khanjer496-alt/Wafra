@@ -54,6 +54,7 @@ test('iOS widgets wear the Home and Bills bands from theme.ts, light and dark', 
     }
   }
   assert.equal(swiftBandHexes('home').light.accent, BandPalettes.light.home.accent, 'today bar is mint');
+  assert.equal(swiftBandHexes('home').dark.accent, BandPalettes.dark.home.accent, 'today bar is mint in dark');
 });
 
 test('Android widgets wear the same bands, and night deepens them', () => {
@@ -87,9 +88,13 @@ test('iOS keeps Lock Screen and StandBy redaction, deep links and tinted legibil
     const next = swiftViews.indexOf('\nstruct ', start + 1);
     return swiftViews.slice(start, next < 0 ? undefined : next);
   };
-  for (const name of ['WafraBandFigure', 'WafraTodayLine', 'WafraWeekBars', 'WafraComingUpView', 'WafraLeftLine', 'WafraLockScreenView']) {
-    assert.match(structBody(name), /\.wafraAmount\(snapshot\)/, `${name} redacts its amounts`);
+  const redactions = { WafraBandFigure: 1, WafraTodayLine: 2, WafraWeekBars: 1, WafraComingUpView: 1, WafraLeftLine: 1, WafraLockScreenView: 2 };
+  for (const [name, count] of Object.entries(redactions)) {
+    const found = (structBody(name).match(/\.wafraAmount\(snapshot\)/g) || []).length;
+    assert.ok(found >= count, `${name} redacts every amount it draws (${found} of ${count})`);
   }
+  // Combining children would fold a redacted amount into one spoken label.
+  assert.doesNotMatch(swiftViews, /accessibilityElement\(children: \.combine\)/);
   // The one-line inline family cannot redact part of itself: amounts only when not sensitive.
   assert.match(structBody('WafraLockScreenView'), /if !snapshot\.amountsSensitive, !snapshot\.hidden/);
   assert.equal((swiftViews.match(/\.widgetURL\(WafraShared\.appURL\)/g) || []).length, 3, 'every widget opens the app');
@@ -173,7 +178,9 @@ test('Android keeps amount hiding, spoken hidden amounts and the tap-to-open lin
   const kotlin = read(`${kotlinDir}/WafraWidgets.kt`);
   assert.match(kotlin, /setOnClickPendingIntent\(R\.id\.wafra_widget_root/);
   assert.match(kotlin, /wafra_widget_amount_hidden/);
-  assert.match(read(`${kotlinDir}/WidgetSnapshot.kt`), /if \(hidden \|\| minor == null\) return DASH/);
+  const snapshotKt = read(`${kotlinDir}/WidgetSnapshot.kt`);
+  assert.match(snapshotKt, /if \(hidden \|\| minor == null\) return DASH/);
+  assert.match(snapshotKt, /optBoolean\("hidden", true\)/, 'a missing privacy flag reads as hidden, as on iOS');
   assert.match(kotlin, /left != null && !snapshot\.hidden/, 'no budget line when amounts are hidden');
   // Due words match iOS: today, tomorrow, weekday within the coming week, then a date.
   assert.match(kotlin, /in 2L\.\.6L ->/);
