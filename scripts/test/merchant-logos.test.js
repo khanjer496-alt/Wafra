@@ -178,8 +178,8 @@ const real = MerchantAvatar({ title: 'Lulu Hypermarket', category: 'groceries', 
 assert.equal(real.key, 'lulu');
 assert.equal(real.type(real.props).props.testID, 'merchant-logo-lulu');
 const detail = fs.readFileSync(path.join(root, 'src/components/entry-detail-sheet.tsx'), 'utf8');
-assert.match(detail, /MerchantAvatar title=\{transaction.title\} category=\{transaction.category\} size=\{52\}/,
-  'transaction details keep the current compact merchant-logo treatment');
+assert.match(detail, /MerchantAvatar title=\{transaction.title\} category=\{transaction.category\} size=\{64\}/,
+  'transaction details keep the merchant logo tile, centred at 64pt (design language E)');
 const avatarSource = fs.readFileSync(path.join(root, 'src/components/ui/merchant-avatar.tsx'), 'utf8');
 assert.match(avatarSource,
   /Platform\.OS === 'android' && typeof source !== 'number' \? 'disk' : 'memory-disk'/,

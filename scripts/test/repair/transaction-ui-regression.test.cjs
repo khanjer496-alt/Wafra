@@ -57,7 +57,11 @@ for (const language of ['en', 'ar']) {
       const t = h.deps['@/lib/i18n'].t;
       assert.equal(tree.props.testID, 'entry-detail-sheet');
       assert.ok(tree.props.footer);
-      assert.equal(style(tree.props.footer).flexDirection, largeText ? 'column' : 'row');
+      // Design language E: Done closes a read; Edit and Delete sit beside each
+      // other under it (stacked at the accessibility sizes).
+      assert.ok(labelled(tree.props.footer, h.deps['@/lib/reference-copy'].entryDetailCopy[language].done));
+      const actions = walk(tree.props.footer).find(n => n.props?.testID === 'entry-detail-actions');
+      assert.equal(style(actions).flexDirection, largeText ? 'column' : 'row');
       assert.ok(labelled(tree.props.footer, t('editEntry')));
       assert.ok(labelled(tree.props.footer, t('delete')));
       assert.equal(labelled(tree.props.children, t('delete')), undefined);

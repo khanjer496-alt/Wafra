@@ -341,7 +341,7 @@ export default function FlowScreen() {
       </>}
     </BandScaffold>
     <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} onApply={() => setTrendWindowEndKey(null)} />
-    <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
+    <EntryDetailSheet transaction={entry} band="spending" onClose={() => setEntry(null)} />
     <BottomSheet
       visible={category !== null}
       onClose={closeCategory}
