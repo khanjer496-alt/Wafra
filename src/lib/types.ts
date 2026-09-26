@@ -185,6 +185,15 @@ export interface Transaction {
   /** Local notification queue receipt, never a bank-event/deduplication identity. */
   notificationObservationId?: string;
   /**
+   * Opaque digest of the bank event the alert text stated to the second
+   * (dedupe.ts captureEventIdentity: bank, card, direction, amount, explicit
+   * clock with seconds, remaining money figures). Lets a re-posted bank-app
+   * notification, or the SMS about it, be recognised as the same event
+   * whenever it arrives. Absent on rows whose alert stated no such clock and
+   * on every row imported before it existed.
+   */
+  captureEventIdentity?: string;
+  /**
    * An Apple Pay (Wallet) row the user confirmed ("Already recorded") is the
    * same purchase as a bank Message, whose identity it now carries. It stays
    * in the ten-minute possible-duplicate net for that purchase's other alerts

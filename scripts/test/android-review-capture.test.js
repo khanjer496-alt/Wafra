@@ -54,6 +54,9 @@ const notificationListener = fs.readFileSync(
 const notificationStore = fs.readFileSync(
   path.join(notificationRoot, 'NotificationCaptureStore.kt'), 'utf8',
 );
+const notificationRepostIdentity = fs.readFileSync(
+  path.join(notificationRoot, 'NotificationRepostIdentity.kt'), 'utf8',
+);
 ok('a re-posted bank notification is one posting, not a second charge',
   // Identity was (package, postTime) alone, and everything downstream trusted
   // it: a notification's capture key is `s{postTime}-{amount}` and dedupe.ts
@@ -61,16 +64,26 @@ ok('a re-posted bank notification is one posting, not a second charge',
   // redelivering one alert with a fresh postTime therefore double-counted the
   // charge, with no window anywhere able to see the two copies as one event.
   notificationStore.includes('REPOST_WINDOW_MS = 30L * 60 * 1000') &&
-    notificationStore.includes('contentFingerprint(pkg: String, title: String, text: String)') &&
-    /digest\("\$pkg\\u0000\$title\\u0000\$text"/.test(notificationStore) &&
+    notificationStore.includes('repostReceipt(pkg: String, title: String, text: String, ts: Long)') &&
+    // The identity is the normalized essentials, never the raw bytes: a
+    // byte-exact `pkg\0title\0text` digest let one ADCB alert the bank
+    // re-posted three times (another builder, title or text surface) reach
+    // the ledger twice. NotificationRepostIdentity runs as Kotlin in
+    // kotlin-regex.test.js.
+    notificationStore.includes('NotificationRepostIdentity.of(pkg, title, text)') &&
+    !/digest\("\$pkg\\u0000\$title\\u0000\$text"/.test(notificationStore) &&
     notificationStore.includes('return "repost"') &&
     // The guard must be consulted before the row is queued, and must outlive
     // the queue row itself — by redelivery time the first copy is normally
     // drained, so comparing against the queue alone would see nothing.
     notificationStore.indexOf('return "repost"') <
       notificationStore.indexOf('writeAll(context, next)') &&
-    notificationStore.includes('recordRecentContent(prefs, eventIdentity, ts)') &&
-    notificationStore.includes('contentFingerprint(pkg, title, text)?.let { recordRecentContent(prefs, it, ts) }'),
+    notificationStore.includes('if (eventIdentity != null) recordRecentContent(prefs, eventIdentity)') &&
+    // Every path that admits or re-sees a posting records its receipt: a
+    // repaired row, and a shade sweep re-reading a queued or acknowledged one.
+    notificationStore.includes('eventIdentity?.let { recordRecentContent(prefs, it) }\n      return "repaired"') &&
+    /eventIdentity\?\.let \{ ensureRecentContent\(prefs, it\) \}\s*return "acknowledged"/.test(notificationStore) &&
+    /eventIdentity\?\.let \{ ensureRecentContent\(prefs, it\) \}\s*return "duplicate"/.test(notificationStore),
   JSON.stringify({ notificationStore: notificationStore.length }));
 ok('retained re-post receipts stay ciphertext and are erased with the queue',
   // The class invariant is that SharedPreferences holds only opaque ids, IVs
@@ -82,10 +95,12 @@ ok('retained re-post receipts stay ciphertext and are erased with the queue',
     !/putString\(RECENT_CONTENT, (?!encryptPayload)/.test(notificationStore),
   JSON.stringify({ notificationStore: notificationStore.length }));
 ok('re-post suppression requires an explicit transaction clock',
-  notificationStore.includes('TRANSACTION_DATETIME_RE') &&
-    notificationStore.includes('val eventIdentity = contentFingerprint(pkg, title, text)') &&
-    notificationStore.includes('if (eventIdentity != null && recent.any') &&
-    notificationStore.includes('if (!TRANSACTION_DATETIME_RE.containsMatchIn(text)) return null'),
+  notificationRepostIdentity.includes('val TRANSACTION_DATETIME_RE') &&
+    notificationRepostIdentity.includes('TRANSACTION_DATETIME_RE.findAll(surface)') &&
+    notificationRepostIdentity.includes('if (clocks.isEmpty()) return null') &&
+    notificationStore.includes('val eventIdentity = repostReceipt(pkg, title, text, ts)') &&
+    notificationStore.includes('if (eventIdentity != null && isRecentRepost(recentContent(prefs), eventIdentity))') &&
+    notificationStore.includes('kotlin.math.abs(it.ts - candidate.ts) <= REPOST_WINDOW_MS'),
   JSON.stringify({ notificationStore: notificationStore.length }));
 ok('a summary is skipped only beside a visible child, and history is never read as the posting',
   // A summary restates its children, and InboxStyle/MessagingStyle history
@@ -123,8 +138,8 @@ ok('a summary is skipped only beside a visible child, and history is never read 
   const diagnostics = start >= 0 && end > start ? notificationStore.slice(start, end) : '';
   ok('admission diagnostics name a suppressed re-post with the same test append() applies',
     diagnostics.includes('pkg: String, title: String, text: String, ts: Long') &&
-      diagnostics.includes('val eventIdentity = contentFingerprint(pkg, title, text)') &&
-      diagnostics.includes('kotlin.math.abs(it.second - ts) <= REPOST_WINDOW_MS') &&
+      diagnostics.includes('val eventIdentity = repostReceipt(pkg, title, text, ts)') &&
+      diagnostics.includes('isRecentRepost(recentContent(prefs), eventIdentity)') &&
       diagnostics.includes('"repost" else null'),
     JSON.stringify({ diagnostics: diagnostics.length }));
 }
@@ -435,6 +450,119 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     acknowledgedNotifications.length === ackBeforeAdcbPush + 1 &&
       acknowledgedNotifications.includes('adcb-notification-format-0001'),
     JSON.stringify(acknowledgedNotifications));
+
+  // An owner's ADCB app posted ONE charge three times (owner-consented text,
+  // already masked). The native re-post guard missed a copy and the ledger
+  // got two rows 160 s apart — past the two-minute push↔push title rule. The
+  // alert states its own clock to the second, and that stated event is what
+  // the ledger now matches, however the copies' delivery times, titles and
+  // text surfaces differ. Two genuine charges state different seconds.
+  {
+    const { buildImportPlan } = require('./build/import-plan.js');
+    const { reconcileCaptureDuplicates } = require('./build/dedupe.js');
+    const adcbText = 'Credit Card XX2518 was used for AED290.00 on 25/09/2026 17:38:39 at SOUTHERN FRIED CHICK, Sharjah-AE. Available limit AED58823.09';
+    const firstPost = 1790343524092; // 13:38:44Z, the owner's first stored copy
+    const copies = [
+      { id: 'adcb-repost-copy-0001', pkg: 'com.adcb.nexgen', title: 'ADCBAlert', text: adcbText, ts: firstPost },
+      // BIG_TEXT vs TEXT surface: line breaks and doubled spaces; app-name title.
+      { id: 'adcb-repost-copy-0002', pkg: 'com.adcb.nexgen', title: 'ADCB',
+        text: `  ${adcbText.replace(' was used', '\n was  used').replace(' at ', '  at ')} `, ts: 1790343684541 },
+      { id: 'adcb-repost-copy-0003', pkg: 'com.adcb.nexgen', title: 'ADCBAlert',
+        text: adcbText.replace('AED290.00', 'AED 290.00'), ts: firstPost + 300_000 },
+    ];
+    const scanCopies = async (rows) => {
+      notificationRows = rows;
+      const scanned = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+      await scanned.commit();
+      return scanned;
+    };
+    const stored = (plan, state = baseLedgerState(), prefix = 'row') => ({ ...state,
+      transactions: [...state.transactions,
+        ...plan.batch.transactions.map((row, index) => ({ ...row, id: `${prefix}-${index}` }))] });
+
+    const all = await scanCopies(copies);
+    const onePlan = buildImportPlan(all.parsed, baseLedgerState(), all.newestTs);
+    ok('three copies of one re-posted ADCB alert in one scan become exactly one ledger row',
+      all.parsed.length === 3 && onePlan.batch.transactions.length === 1 &&
+        onePlan.batch.transactions[0].amountFils === 29000 &&
+        onePlan.batch.transactions[0].title === 'Southern Fried Chick' &&
+        /^e1:[0-9a-f]{16}:[0-9a-f]{16}$/.test(onePlan.batch.transactions[0].captureEventIdentity ?? ''),
+      JSON.stringify({ parsed: all.parsed.length, rows: onePlan.batch.transactions }));
+
+    const first = await scanCopies(copies.slice(0, 1));
+    let ledger = stored(buildImportPlan(first.parsed, baseLedgerState(), first.newestTs));
+    const second = await scanCopies(copies.slice(1, 2));
+    const secondPlan = buildImportPlan(second.parsed, ledger, second.newestTs);
+    const third = await scanCopies(copies.slice(2));
+    const thirdPlan = buildImportPlan(third.parsed, ledger, third.newestTs);
+    ok('later copies (160 s and 300 s after, other title/surface) add nothing to a stored row',
+      ledger.transactions.length === 1 && secondPlan.batch.transactions.length === 0 &&
+        thirdPlan.batch.transactions.length === 0 &&
+        // Nothing rewrites the stored row's clock or identity either.
+        secondPlan.batch.updates.length === 0 && thirdPlan.batch.updates.length === 0,
+      JSON.stringify({ second: secondPlan.batch, third: thirdPlan.batch }));
+
+    const genuine = await scanCopies([
+      copies[0],
+      { id: 'adcb-genuine-second-01', pkg: 'com.adcb.nexgen', title: 'ADCBAlert',
+        text: adcbText.replace('17:38:39', '17:39:02'), ts: firstPost + 23_000 },
+    ]);
+    ok('two genuine identical charges 23 s apart (17:38:39, 17:39:02) stay two rows',
+      buildImportPlan(genuine.parsed, baseLedgerState(), genuine.newestTs).batch.transactions.length === 2,
+      JSON.stringify(genuine.parsed.map((row) => row.smsTs)));
+    const genuineLater = await scanCopies([{ id: 'adcb-genuine-second-02', pkg: 'com.adcb.nexgen', title: 'ADCBAlert',
+      text: adcbText.replace('17:38:39', '17:39:02'), ts: firstPost + 23_000 }]);
+    ok('a genuine second charge arriving after the first was stored is still posted',
+      buildImportPlan(genuineLater.parsed, ledger, genuineLater.newestTs).batch.transactions.length === 1);
+
+    const noSeconds = adcbText.replace('17:38:39', '17:38');
+    const clockless = await scanCopies([
+      { ...copies[0], id: 'adcb-no-seconds-0001', text: noSeconds },
+      { ...copies[0], id: 'adcb-no-seconds-0002', text: noSeconds, ts: firstPost + 160_000 },
+      { ...copies[0], id: 'adcb-no-seconds-0003', text: noSeconds, ts: firstPost + 190_000 },
+    ]);
+    const clocklessPlan = buildImportPlan(clockless.parsed, baseLedgerState(), clockless.newestTs);
+    ok('an alert without seconds keeps the old rules: no identity, two-minute title window only',
+      clocklessPlan.batch.transactions.length === 2 &&
+        clocklessPlan.batch.transactions.every((row) => row.captureEventIdentity === undefined),
+      JSON.stringify(clocklessPlan.batch.transactions.map((row) => row.ts)));
+
+    // The bank SMS about the same charge, twenty minutes away from the push
+    // in either order — beyond both the two-minute and the lagged window.
+    const { parseSms } = require('./build/sms-parser.js');
+    const smsBody = 'Your Cr.Card XXX2518 was used for AED290.00 on 25/09/2026 17:38:39 at SOUTHERN FRIED CHICK,Sharjah-AE. Avl Cr.Limit is AED58823.09';
+    const smsAt = (ts) => ({ ...parseSms(smsBody, {}, { sender: 'ADCBAlert', observedAt: ts }),
+      smsTs: ts, sender: 'ADCBAlert', channel: 'inbox' });
+    const smsLedger = stored(buildImportPlan([smsAt(firstPost - 20 * 60_000)], baseLedgerState(), firstPost));
+    const pushAfterSms = await scanCopies(copies);
+    ok('an SMS stored 20 minutes earlier explains every push copy of the same stated event',
+      smsLedger.transactions.length === 1 &&
+        buildImportPlan(pushAfterSms.parsed, smsLedger, pushAfterSms.newestTs).batch.transactions.length === 0,
+      JSON.stringify(smsLedger.transactions));
+    const smsLater = buildImportPlan([smsAt(firstPost + 20 * 60_000)], ledger, firstPost + 20 * 60_000);
+    ok('an SMS arriving 20 minutes after the stored push replaces it instead of adding a row',
+      smsLater.batch.transactions.length === 0 &&
+        smsLater.batch.updates.some((update) => update.id === 'row-0' && update.viaPush === false),
+      JSON.stringify(smsLater.batch));
+
+    // Rows a racing drain already stored twice: the repair keeps the first,
+    // folds only a copy of the same stated event, and never an edited row.
+    const pushRow = ledger.transactions[0];
+    const copyRow = { ...pushRow, id: 'row-copy', ts: 1790343684541, smsKey: 's1790343684541-29000' };
+    ok('repair: a stored push copy of the same stated event folds into the first row',
+      reconcileCaptureDuplicates([pushRow, copyRow]).map((row) => row.id).join() === 'row-0');
+    ok('repair: an edited copy is kept, never removed',
+      reconcileCaptureDuplicates([pushRow, { ...copyRow, userEdited: true, title: 'Lunch' }])
+        .some((row) => row.title === 'Lunch'));
+    ok('repair: two edited copies both stay',
+      reconcileCaptureDuplicates([{ ...pushRow, userEdited: true }, { ...copyRow, userEdited: true }]).length === 2);
+    const genuineRow = { ...copyRow, id: 'row-genuine',
+      captureEventIdentity: buildImportPlan(genuineLater.parsed, baseLedgerState(), genuineLater.newestTs)
+        .batch.transactions[0].captureEventIdentity };
+    ok('repair: a genuine charge with another stated second is never folded',
+      reconcileCaptureDuplicates([pushRow, genuineRow]).length === 2 &&
+        genuineRow.captureEventIdentity !== pushRow.captureEventIdentity);
+  }
 
   // The default SMS app re-announces every bank SMS. While Wafra can read
   // SMS itself, a Messages notification is a second copy: it must neither

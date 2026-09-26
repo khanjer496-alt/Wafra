@@ -70,7 +70,7 @@ const PATTERNS = [
   ['SMS_MONEY_RE', patternSource('SmsDeliveryReceiver', 'MONEY_RE')],
   ['SMS_CREDENTIAL_RE', patternSource('SensitiveMessageFilter', 'CREDENTIAL_RE')],
   ['NOTIFICATION_CREDENTIAL_RE', patternSource('SensitiveNotificationFilter', 'CREDENTIAL_RE')],
-  ['CLOCK_RE', rawPatternSource('NotificationCaptureStore', 'TRANSACTION_DATETIME_RE')],
+  ['CLOCK_RE', rawPatternSource('NotificationRepostIdentity', 'TRANSACTION_DATETIME_RE')],
 ];
 
 // Two gates decide whether a message is about money at all — one for SMS at
@@ -243,6 +243,13 @@ for (let index = 0; index < CLOCK_CASES.length; index++) {
     CARRIER_DUPLICATE_DATETIME_RE.test(body) !== want);
   ok('SMS carrier-duplicate clock gives the JVM verdict on every clock case',
     disagreements.length === 0, disagreements);
+  // The ledger's own event identity (dedupe.ts) reads the same clock, so a
+  // notification the native guard treats as clockless never gets a JS
+  // identity either, and vice versa.
+  const { CAPTURE_EVENT_CLOCK_RE } = require('./build/dedupe.js');
+  ok('ledger event-identity clock is byte-identical to the notification re-post clock',
+    CAPTURE_EVENT_CLOCK_RE.source === kotlin && CAPTURE_EVENT_CLOCK_RE.flags === '',
+    { kotlin, js: CAPTURE_EVENT_CLOCK_RE.source, flags: CAPTURE_EVENT_CLOCK_RE.flags });
 }
 
 for (let index = 0; index < CREDENTIAL_CASES.length; index++) {
@@ -291,8 +298,35 @@ if (!kotlinc) {
     [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true)))`, 'false'],
     [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true), NotificationTextSurfaces.Member("c", "other", false), NotificationTextSurfaces.Member("t", "g", true)))`, 'false'],
     [`NotificationTextSurfaces.summaryHasVisibleChild("s", null, listOf(NotificationTextSurfaces.Member("c", null, false)))`, 'false'],
+    // The re-post identity (NotificationRepostIdentity): an owner's ADCB app
+    // posted this alert three times and a byte-exact digest let a copy with
+    // another title/text surface through. Owner-consented, already masked.
+    [`same("ADCBAlert", ADCB, "ADCB", ADCB)`, 'true'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", "  " + ADCB.replace(" was used", "\\n was  used") + " ")`, 'true'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("AED290.00", "AED\\u00A0290.00").replace("Credit", "\\u200BCredit"))`, 'true'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", "ADCBAlert: " + ADCB)`, 'true'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.uppercase())`, 'true'],
+    // A copy cut off before the limit still states the same charge.
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.substringBefore(". Available"))`, 'true'],
+    // Two genuine charges: another second, or a same-second repeat whose
+    // limit moved, never collide.
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("17:38:39", "17:39:02"))`, 'false'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("58823.09", "58533.09"))`, 'false'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("AED290.00", "AED29.00"))`, 'false'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("XX2518", "XX2519"))`, 'false'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", "Reversal: " + ADCB)`, 'false'],
+    [`NotificationRepostIdentity.of("p", "a", ADCB) == NotificationRepostIdentity.of("q", "a", ADCB)`, 'false'],
+    // No clock with seconds, no identity: two same-minute charges both stand.
+    [`NotificationRepostIdentity.of("p", "ADCBAlert", ADCB.replace("17:38:39", "17:38"))`, 'null'],
+    [`NotificationRepostIdentity.of("p", "ADCBAlert", "Purchase of AED 10.00 on 1-9-26 7:10:20")?.core?.contains("1/9/2026 7:10:20")`, 'true'],
   ];
   fs.writeFileSync(path.join(kdir, 'Check.kt'), `package expo.modules.notificationreader
+const val ADCB = "Credit Card XX2518 was used for AED290.00 on 25/09/2026 17:38:39 at SOUTHERN FRIED CHICK, Sharjah-AE. Available limit AED58823.09"
+fun same(titleA: String, textA: String, titleB: String, textB: String): Boolean {
+  val a = NotificationRepostIdentity.of("com.adcb.nexgen", titleA, textA) ?: return false
+  val b = NotificationRepostIdentity.of("com.adcb.nexgen", titleB, textB) ?: return false
+  return NotificationRepostIdentity.samePosting(a.core, a.extra, b.core, b.extra)
+}
 fun main() {
   val amt: (String) -> Boolean = { it.contains("AED") }
 ${cases.map(([expr], index) => `  println("CASE ${index} " + (${expr}).toString())`).join('\n')}
@@ -303,6 +337,7 @@ ${cases.map(([expr], index) => `  println("CASE ${index} " + (${expr}).toString(
   try {
     execFileSync(kotlinc, [
       path.join(__dirname, '../../modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationTextSurfaces.kt'),
+      path.join(__dirname, '../../modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationRepostIdentity.kt'),
       path.join(kdir, 'Check.kt'),
       '-include-runtime', '-d', path.join(kdir, 'check.jar'),
     ], { cwd: kdir, stdio: 'pipe' });
@@ -318,6 +353,35 @@ ${cases.map(([expr], index) => `  println("CASE ${index} " + (${expr}).toString(
     ok(`Kotlin: ${expr.slice(0, 70)} → ${want}`, line === `CASE ${index} ${want}`, line);
   });
   fs.rmSync(kdir, { recursive: true, force: true });
+
+  // The real NotificationCaptureStore, run against small Android/org.json
+  // stubs and an in-memory "AndroidKeyStore" JCA provider, so the re-post
+  // guard's append()/admissionBlockReason() decisions — not a restatement of
+  // them — are exercised here. See kotlin-harness/notification-store.
+  const sdir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-kts-'));
+  const nr = path.join(__dirname, '../../modules/notification-reader/android/src/main/java/expo/modules/notificationreader');
+  const harness = path.join(__dirname, 'kotlin-harness/notification-store');
+  let sout = '';
+  let scompiled = false;
+  try {
+    execFileSync(kotlinc, [
+      ...fs.readdirSync(harness).filter((f) => f.endsWith('.kt')).map((f) => path.join(harness, f)),
+      ...['NotificationCaptureStore.kt', 'NotificationRepostIdentity.kt', 'NotificationCapturePolicy.kt',
+        'SensitiveNotificationFilter.kt'].map((f) => path.join(nr, f)),
+      '-include-runtime', '-d', path.join(sdir, 'store.jar'),
+    ], { cwd: sdir, stdio: 'pipe' });
+    scompiled = true;
+    sout = execFileSync('java', ['-Dfile.encoding=UTF-8', '-cp', path.join(sdir, 'store.jar'),
+      'expo.modules.notificationreader.NotificationCaptureStoreCheckKt'],
+    { cwd: sdir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    sout = `${e.stdout ?? ''}${e.stderr ?? ''}`;
+  }
+  ok('NotificationCaptureStore compiles and runs against the off-device stubs', scompiled, sout.slice(-600));
+  const storeLines = sout.split('\n').filter((line) => /^(ok|FAIL) /.test(line));
+  ok('the store harness ran every case', storeLines.length >= 17 && sout.includes('STORE ALL OK'), storeLines);
+  for (const line of storeLines) ok(`Kotlin store: ${line.replace(/^(ok|FAIL)\s+/, '')}`, line.startsWith('ok '));
+  fs.rmSync(sdir, { recursive: true, force: true });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

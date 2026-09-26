@@ -41,6 +41,134 @@ export function bodyPrint(body: string): string {
   return body.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+/**
+ * An explicit transaction clock at SECOND precision — the same source as the
+ * Android re-post guard (NotificationRepostIdentity.TRANSACTION_DATETIME_RE)
+ * and auto-import's CARRIER_DUPLICATE_DATETIME_RE; kotlin-regex.test.js pins
+ * all three byte-for-byte. Minute precision is refused on purpose: a terminal
+ * double-tap inside one minute is two real charges with identical text.
+ */
+export const CAPTURE_EVENT_CLOCK_RE = /\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s+\d{1,2}:\d{2}:\d{2}\b/;
+const CAPTURE_EVENT_CLOCKS = new RegExp(CAPTURE_EVENT_CLOCK_RE.source, 'g');
+const CAPTURE_EVENT_MONEY_BEFORE =
+  /(?<![\p{L}\p{N}])(aed|dhs?|sar|sr|qar|kwd|bhd|omr|egp|inr|pkr|php|usd|eur|gbp|cad|aud|jpy|cny|chf|try|ghs|د\.إ|ر\.س|درهم|ريال)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/gu;
+const CAPTURE_EVENT_MONEY_AFTER = /(?<![0-9.,])([0-9][0-9,]*(?:\.[0-9]+)?)\s*(د\.إ|ر\.س|درهم|ريال)/gu;
+const CAPTURE_EVENT_IDENTITY = /^e1:([0-9a-f]{16}):([0-9a-f]{16}|-)$/;
+
+/** NFKC, ASCII digits, no invisible format characters, single spaces, lower case. */
+function normalizeAlertText(value: string): string {
+  return value.normalize('NFKC')
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
+    .replace(/٫/g, '.')
+    .replace(/٬/g, ',')
+    .replace(/\p{Cf}+/gu, '')
+    .replace(/[\s\p{Z}]+/gu, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function canonicalAlertNumber(value: string): string {
+  let number = value.replace(/,/g, '');
+  if (number.includes('.')) number = number.replace(/0+$/, '').replace(/\.$/, '');
+  number = number.replace(/^0+/, '');
+  return !number || number.startsWith('.') ? `0${number}` : number;
+}
+
+function canonicalAlertCurrency(value: string): string {
+  if (value === 'dh' || value === 'dhs' || value === 'د.إ' || value === 'درهم') return 'aed';
+  if (value === 'sr' || value === 'ر.س') return 'sar';
+  return value;
+}
+
+/** 64-bit non-cryptographic digest (cyrb53-style, two 32-bit lanes) as 16 hex. */
+function alertDigest(value: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * The bank event an alert describes, independent of when it was delivered.
+ *
+ * A bank app can post one alert several times (an owner's ADCB app posted
+ * the same charge three times, minutes apart). Each copy's capture key is
+ * `s{postTime}-{amount}`, and the push↔push title rule stops at two minutes,
+ * so a copy that slipped past the native re-post guard became a second row.
+ * When the alert text states its own transaction clock to the second, that
+ * clock plus the parsed money and card IS the event, whatever the delivery
+ * time: `e1:<core>:<extra>`, where
+ *
+ *   core  = bank identity | card last4 | direction | currency | amount |
+ *           every explicit clock with seconds
+ *   extra = the alert's remaining money figures (typically the available
+ *           balance or limit), `-` when it states none
+ *
+ * Both parts are opaque digests: the identity is only ever compared for
+ * equality and must not add readable balances to the ledger or backups.
+ * Undefined — no identity, old behaviour — without a clock at second
+ * precision, a stated bank and card, or local source text.
+ */
+export function captureEventIdentity(input: {
+  raw?: string;
+  amountFils: number;
+  type: TransactionType;
+  currency?: string;
+  captureInstrument?: CaptureInstrument;
+}): string | undefined {
+  const instrument = input.captureInstrument;
+  if (typeof input.raw !== 'string' || !instrument?.bankIdentity || !/^\d{4}$/.test(instrument.last4) ||
+    !Number.isSafeInteger(input.amountFils) || input.amountFils <= 0) return undefined;
+  const surface = normalizeAlertText(input.raw);
+  const clocks = new Set<string>();
+  for (const match of surface.matchAll(CAPTURE_EVENT_CLOCKS)) {
+    const [d, m, y, hh, mm, ss] = match[0].split(/[^0-9]+/).map(Number);
+    clocks.add(`${d}/${m}/${y < 100 ? y + 2000 : y} ${hh}:${mm}:${ss}`);
+  }
+  if (clocks.size === 0) return undefined;
+  const money: { at: number; token: string }[] = [];
+  for (const match of surface.matchAll(CAPTURE_EVENT_MONEY_BEFORE)) {
+    money.push({ at: match.index ?? 0, token: `${canonicalAlertCurrency(match[1])}:${canonicalAlertNumber(match[2])}` });
+  }
+  for (const match of surface.matchAll(CAPTURE_EVENT_MONEY_AFTER)) {
+    money.push({ at: match.index ?? 0, token: `${canonicalAlertCurrency(match[2])}:${canonicalAlertNumber(match[1])}` });
+  }
+  money.sort((a, b) => a.at - b.at);
+  // The first figure is the charge, already held to by amountFils; the rest
+  // is what a same-second repeat cannot share and a truncated copy may lack.
+  const others = [...new Set(money.slice(1).map((m) => m.token).filter((t) => t !== money[0]?.token))].sort();
+  const core = [instrument.bankIdentity, instrument.last4, input.type, input.currency ?? '', input.amountFils,
+    [...clocks].sort().join(',')].join('|');
+  return `e1:${alertDigest(core)}:${others.length ? alertDigest(others.join(',')) : '-'}`;
+}
+
+/** The same bank event: equal core, and equal remaining money unless one side states none. */
+export function sameCaptureEvent(a: string | undefined, b: string | undefined): boolean {
+  const x = a ? CAPTURE_EVENT_IDENTITY.exec(a) : null;
+  const y = b ? CAPTURE_EVENT_IDENTITY.exec(b) : null;
+  return !!x && !!y && x[1] === y[1] && (x[2] === '-' || y[2] === '-' || x[2] === y[2]);
+}
+
+/**
+ * Both alerts state their event, and they are different events: another
+ * clock/amount/card, or the same one with different remaining money (a
+ * same-second repeat). Used only between two copies from the SAME bank app,
+ * whose clocks come from one generator; an SMS and a push may stamp one event
+ * a few seconds apart, so this is never a veto across channels.
+ */
+export function distinctCaptureEvents(a: string | undefined, b: string | undefined): boolean {
+  const x = a ? CAPTURE_EVENT_IDENTITY.exec(a) : null;
+  const y = b ? CAPTURE_EVENT_IDENTITY.exec(b) : null;
+  return !!x && !!y && !(x[1] === y[1] && (x[2] === '-' || y[2] === '-' || x[2] === y[2]));
+}
+
 /** Day, amount and name — the everyday duplicate check. */
 export function dedupeKey(date: string, amountFils: number, title: string): string {
   return `${date}|${amountFils}|${title.toLowerCase()}`;
@@ -165,6 +293,8 @@ export interface DuplicateCandidate {
    * another live observation; bound to at most one History copy.
    */
   liveObservation?: boolean;
+  /** captureEventIdentity() of the alert, when its text stated a clock with seconds. */
+  eventIdentity?: string;
 }
 
 export interface DuplicateGuard {
@@ -349,6 +479,19 @@ interface SeenOccurrence {
   type: TransactionType;
   /** Statement provenance, so a statement from another upload is left to its own matcher. */
   statement?: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>;
+  /** A bank-app notification copy, and the event its text stated (captureEventIdentity). */
+  push?: boolean;
+  eventIdentity?: string;
+}
+
+/** One stored or batch capture filed under its stated bank event. */
+interface SeenIdentityEvent {
+  eventIdentity: string;
+  ts: number | null;
+  push: boolean;
+  id?: string;
+  /** Its cross-channel entry, so a push explained by an SMS consumes that SMS there too. */
+  cross?: SeenEvent;
 }
 
 /** Only facts from the alerts can prove two captures describe different instruments. */
@@ -476,12 +619,15 @@ export function duplicateGuard(
     flags: {
       liveObservation?: boolean; renamed?: boolean; boundLiveCopy?: boolean;
       statement?: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>;
+      push?: boolean; eventIdentity?: string;
     } = {},
   ) => {
     const at = seen.get(key);
     const historyIdentity = smsKey?.startsWith('h') === true;
     const occurrence: SeenOccurrence = {
       ts, id, type, captureInstrument, historyIdentity,
+      ...(flags.push ? { push: true } : {}),
+      ...(flags.eventIdentity ? { eventIdentity: flags.eventIdentity } : {}),
       ...(flags.statement && isStatementCaptureSource(flags.statement.captureSource)
         ? { statement: { captureSource: flags.statement.captureSource,
           statementImportId: flags.statement.statementImportId } } : {}),
@@ -534,6 +680,8 @@ export function duplicateGuard(
         renamed: t.userEdited === true || t.titleEdited === true,
         boundLiveCopy: hasMessageObservationId(t),
         statement: t,
+        push: t.source === 'sms' && t.viaPush === true,
+        eventIdentity: t.captureEventIdentity,
       });
   }
   // Delivery clocks can collide across cards; retain every candidate per key.
@@ -563,6 +711,32 @@ export function duplicateGuard(
     if (rows) rows.push(event);
     else crossChannel.set(key, [event]);
     if (event.id) crossById.set(event.id, event);
+  };
+  /**
+   * Captures whose alert text stated its own clock to the second, by the
+   * core of that event identity. A notification copy whose event is already
+   * here is that event again, however long after it was delivered.
+   */
+  const byEventIdentity = new Map<string, SeenIdentityEvent[]>();
+  const noteEventIdentity = (event: SeenIdentityEvent) => {
+    const core = event.eventIdentity.slice(0, 20);
+    const rows = byEventIdentity.get(core);
+    if (rows) rows.push(event);
+    else byEventIdentity.set(core, [event]);
+  };
+  /** Nearest capture of the same stated event; `pushOnly` limits it to unconsumed stored push rows. */
+  const nearestSameEvent = (
+    eventIdentity: string, mine: number | null, pushOnly: boolean,
+  ): SeenIdentityEvent | undefined => {
+    let best: SeenIdentityEvent | undefined;
+    for (const event of byEventIdentity.get(eventIdentity.slice(0, 20)) ?? []) {
+      if (!sameCaptureEvent(event.eventIdentity, eventIdentity)) continue;
+      if (pushOnly && (!event.push || !event.id || event.cross?.consumed)) continue;
+      if (!best) { best = event; continue; }
+      const distance = (e: SeenIdentityEvent) => e.ts === null || mine === null ? Number.POSITIVE_INFINITY : Math.abs(e.ts - mine);
+      if (distance(event) < distance(best)) best = event;
+    }
+    return best;
   };
   /**
    * Statement ↔ live-capture overlap cannot use the push/SMS clock/title rule.
@@ -698,14 +872,20 @@ export function duplicateGuard(
   };
   for (const t of heuristicRows) {
     if (t.source === 'sms') {
-      noteCross(crossChannelKey(t.date, t.amountFils, t.type), {
+      const cross: SeenEvent = {
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
         channel: t.viaPush ? 'push' : 'inbox',
         id: t.id,
         title: t.title,
         captureInstrument: t.captureInstrument,
         userEdited: t.userEdited,
-      });
+      };
+      noteCross(crossChannelKey(t.date, t.amountFils, t.type), cross);
+      if (typeof t.captureEventIdentity === 'string' && CAPTURE_EVENT_IDENTITY.test(t.captureEventIdentity)) {
+        noteEventIdentity({
+          eventIdentity: t.captureEventIdentity, ts: cross.ts, push: t.viaPush === true, id: t.id, cross,
+        });
+      }
     }
     // Statement provenance is persisted on parser-owned rows, but older live
     // SMS rows legitimately have no captureSource at all. Index both groups;
@@ -782,6 +962,21 @@ export function duplicateGuard(
         }
       }
       const mine = candidateTime(c);
+      // A bank-app notification whose stated event (clock to the second,
+      // money, card) is already captured — as another copy of the same push
+      // or as the bank SMS about it — is that event again, whenever it was
+      // delivered. Many copies may fold into one row: they ARE one event.
+      if (c.channel === 'push' && c.eventIdentity) {
+        const same = nearestSameEvent(c.eventIdentity, mine, false);
+        if (same) {
+          // An SMS row now explains this push; it must not also explain a
+          // different push through the money/clock rule below.
+          if (!same.push && same.cross) same.cross.consumed = true;
+          // Only another copy of the same push may be healed from this parse.
+          lastMatchedId = same.push ? same.id ?? null : null;
+          return true;
+        }
+      }
       if (c.eventKind === 'cardPayment' && c.accountId) {
         const side = c.cardPaymentSide ?? 'unknown';
         const manual = (
@@ -845,7 +1040,12 @@ export function duplicateGuard(
           // Likewise two GUID-less live observations are two delivered
           // Messages: the native queue stages each Message once.
           const incomingLive = c.liveObservation === true && !c.smsKey?.startsWith('h');
+          // Two copies from the bank app that each state their event, and
+          // state different ones (another second, or a different balance at
+          // the same second), are two charges however close their delivery.
+          const incomingPush = c.channel === 'push';
           const comparable = at.filter((row) =>
+            !(incomingPush && row.push === true && distinctCaptureEvents(row.eventIdentity, c.eventIdentity)) &&
             row.type === c.type &&
             !(row.statement && fromDifferentStatementUploads(row.statement, c)) &&
             compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
@@ -937,6 +1137,12 @@ export function duplicateGuard(
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return null;
       if (c.channel === 'push') return null;
       const mine = candidateTime(c);
+      // The SMS about an event a stored push row already stated replaces
+      // that row, however far apart they arrived; nearest first, one row.
+      if (c.eventIdentity) {
+        const same = nearestSameEvent(c.eventIdentity, mine, true);
+        if (same?.id) return same.id;
+      }
       const rows = crossChannel.get(crossChannelKey(c.date, c.amountFils, c.type)) ?? [];
       let best: SeenEvent | null = null;
       for (const row of rows) {
@@ -984,15 +1190,22 @@ export function duplicateGuard(
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return;
       const ts = candidateTime(c);
       note(dedupeKey(c.date, c.amountFils, c.title), ts, c.type, c.amountFils, c.smsKey, c.id,
-        c.captureInstrument, { liveObservation: c.liveObservation === true, statement: c });
+        c.captureInstrument, {
+          liveObservation: c.liveObservation === true, statement: c,
+          push: c.channel === 'push', eventIdentity: c.eventIdentity,
+        });
       noteExact(c);
-      noteCross(crossChannelKey(c.date, c.amountFils, c.type), {
+      const cross: SeenEvent = {
         ts,
         channel: c.channel ?? 'inbox',
         id: c.id,
         title: c.title,
         captureInstrument: c.captureInstrument,
-      });
+      };
+      noteCross(crossChannelKey(c.date, c.amountFils, c.type), cross);
+      if (c.eventIdentity && CAPTURE_EVENT_IDENTITY.test(c.eventIdentity)) {
+        noteEventIdentity({ eventIdentity: c.eventIdentity, ts, push: c.channel === 'push', id: c.id, cross });
+      }
       noteStatementPair({
         date: c.date,
         amountFils: c.amountFils,
@@ -1052,6 +1265,11 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
   const byTitle = new Map<string, number[]>();
   /** amount|account -> [cardPaymentBucket, index, ...]. */
   const byCardPayment = new Map<string, number[]>();
+  /** captureEventIdentity core -> [index, ...], for rows whose alert stated its clock to the second. */
+  const byEventIdentity = new Map<string, number[]>();
+  const eventIdentityCore = (t: Transaction): string | undefined =>
+    typeof t.captureEventIdentity === 'string' && CAPTURE_EVENT_IDENTITY.test(t.captureEventIdentity)
+      ? t.captureEventIdentity.slice(0, 20) : undefined;
   const pairedCardPayments = new Set<number>();
   /** A kept row that absorbed a lagged cross-channel copy explains exactly one. */
   const laggedAbsorbed = new Set<number>();
@@ -1082,6 +1300,10 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     keys?: { source: string | undefined; cross: string; title: string },
   ) => {
     if (row.smsKey) pushIndex(bySmsKey, keys?.source ?? canonicalCaptureSourceKey(row.smsKey, row.ts), index);
+    if (row.source === 'sms') {
+      const core = eventIdentityCore(row);
+      if (core !== undefined) pushIndex(byEventIdentity, core, index);
+    }
     const ts = timeOf(row);
     if (ts === null || row.source !== 'sms') return;
     pushTriple(byCross, keys?.cross ?? crossChannelKey(row.date, row.amountFils, row.type),
@@ -1140,6 +1362,10 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     const rowSourceKey = row.smsKey ? canonicalCaptureSourceKey(row.smsKey, row.ts) : undefined;
     if (rowSourceKey !== undefined) {
       for (const index of bySmsKey.get(rowSourceKey) ?? []) addCandidate(index);
+    }
+    const rowEventCore = eventIdentityCore(row);
+    if (rowEventCore !== undefined) {
+      for (const index of byEventIdentity.get(rowEventCore) ?? []) addCandidate(index);
     }
     let rowKeys: { source: string | undefined; cross: string; title: string } | undefined;
     if (rowTime !== null) {
@@ -1221,6 +1447,16 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
         isLiveMessageObservationRow(prior) &&
         row.messageObservationId!.toLowerCase() !== prior.messageObservationId!.toLowerCase()
       ) return false;
+      // One stated bank event (explicit clock to the second, money, card)
+      // captured again from the bank app — a re-posted notification, or the
+      // push beside its SMS — whenever each copy was delivered. Two SMS rows
+      // keep the rules below; an edited copy is kept, never discarded.
+      if (
+        (row.viaPush === true || prior.viaPush === true) &&
+        row.type === prior.type &&
+        row.amountFils === prior.amountFils &&
+        sameCaptureEvent(row.captureEventIdentity, prior.captureEventIdentity)
+      ) return !bothEdited;
       if (
         row.date !== prior.date ||
         row.amountFils !== prior.amountFils ||

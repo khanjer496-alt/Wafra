@@ -11,6 +11,7 @@ import {
 import { singleKnownBank } from '@/lib/known-banks';
 import {
   bodyPrint,
+  captureEventIdentity,
   compatibleCaptureInstrument,
   duplicateGuard,
   fromDifferentStatementUploads,
@@ -1617,6 +1618,14 @@ function buildImportPlanInMarket(
     const sourceCorrectionPrior = exactPrior ? undefined : legacyTransferSourcePrior(p);
     const stablePrior = exactPrior ?? sameStatementUploadOrNone(stableLocalPrior(p), p) ?? sourceCorrectionPrior;
     const prior = stablePrior;
+    // The event the alert text itself stated (clock to the second, money,
+    // card): lets a re-posted bank-app notification, or the SMS about it, be
+    // matched however long after the first copy it was delivered. Statement
+    // rows carry no source text and keep their own one-to-one matcher.
+    const eventIdentity = isStatementCaptureSource(p.captureSource) ? undefined : captureEventIdentity({
+      raw: p.raw, amountFils: p.amountFils, type: p.type, currency: p.currency,
+      captureInstrument: captureInstrumentOf(p),
+    });
     const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
@@ -1625,6 +1634,7 @@ function buildImportPlanInMarket(
       ...(liveMessageObservation(p) ? { liveObservation: true } : {}),
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
+      ...(eventIdentity ? { eventIdentity } : {}),
     };
     const protectedEditedPush = exactPrior ? undefined : protectedEditedPushFor(p, date);
     if (protectedEditedPush && smsKey) {
@@ -1852,6 +1862,7 @@ function buildImportPlanInMarket(
       ...(p.bestEffort ? { bestEffort: p.bestEffort } : {}),
       smsKey,
       viaPush: p.channel === 'push' || undefined,
+      ...(eventIdentity ? { captureEventIdentity: eventIdentity } : {}),
       ...(p.channel === 'push' && p.captureSource === undefined && p.sourceEventId === undefined &&
         typeof p.notificationObservationId === 'string' &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p.notificationObservationId)
