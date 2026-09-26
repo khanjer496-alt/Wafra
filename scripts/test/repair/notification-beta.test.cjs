@@ -133,7 +133,8 @@ test('notification diagnostics expose only source-free listener and queue state'
   const store = read('modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationCaptureStore.kt');
   assert.match(store, /"cleared-through"/);
   assert.match(store, /indexOfFirst \{ it\.pkg == pkg && it\.ts == ts \}/);
-  assert.match(store, /prior\.copy\(title = title, text = text\)/);
+  // A healed row also takes the new extraction's review-only flag.
+  assert.match(store, /prior\.copy\(title = title, text = text, reviewOnly = reviewOnly\)/);
   assert.match(store, /private const val ACKED = "acked_fingerprints"/);
   assert.match(store, /notificationFingerprint\(pkg, ts\)/);
   assert.match(store, /return "acknowledged"/);
@@ -204,7 +205,7 @@ test('the scanner reads only with native availability and granted notification a
     '../../modules/notification-reader': { __esModule: true, default: notification },
     '../../modules/sms-reader': { __esModule: true, default: { getInboxSms: async () => [] } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
-    '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/dedupe': { bodyPrint: value => value, statesSingleEventClock: () => false }, '@/lib/sms-parser': {},
     '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
     '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
     '@/lib/ledger-money': globalMoneyStub,
@@ -238,7 +239,7 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
       getInboxSms: async () => { smsReads++; throw new Error('SMS must not be read'); },
     } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
-    '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/dedupe': { bodyPrint: value => value, statesSingleEventClock: () => false }, '@/lib/sms-parser': {},
     '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
     '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
     '@/lib/ledger-money': globalMoneyStub,
@@ -313,7 +314,7 @@ test('500 queued notification candidates process without touching SMS and ACK on
       getInboxSms: async () => { smsReads++; return []; },
     } },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
-    '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/dedupe': { bodyPrint: value => value, statesSingleEventClock: () => false }, '@/lib/sms-parser': {},
     '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
     '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
     '@/lib/ledger-money': globalMoneyStub,
@@ -461,7 +462,7 @@ test(`${transport} shadow ${mode}: no discarded inspection, admission delay, or 
       buildLocalParserSemanticWindow: () => null,
     },
     '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
-    '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/dedupe': { bodyPrint: value => value, statesSingleEventClock: () => false }, '@/lib/sms-parser': {},
     '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
     '@/lib/markets': { detectLaunchMarketFromSender: () => 'AE', pinnedLedgerCurrencyCode: () => null },
     '@/lib/ledger-money': globalMoneyStub, '@/lib/universal-categorization': globalCategoryStub,

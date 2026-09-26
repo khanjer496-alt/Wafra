@@ -35,7 +35,7 @@ async function scan(initialState, returnToForegroundAt = Infinity) {
     // deterministic parser instead of the Review-first global SMS boundary.
     '@/lib/markets': { detectLaunchMarketFromSender: () => 'AE', pinnedLedgerCurrencyCode: () => null },
     '@/lib/universal-categorization': { suggestUniversalCategory: () => ({ merchant: '', category: 'other', deliberate: false }) },
-    '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/dedupe': { bodyPrint: value => value, statesSingleEventClock: () => false }, '@/lib/sms-parser': {},
     '@/lib/launch-alert-parser': { inspectGenericBankEventForReview: () => null, hasBankAlertMoneyHint: () => false, hasGenericBankAlertContext: () => false, createLaunchAlertSession: () => ({
       inspect: () => null, detectedMarket: () => null,
       parse: body => {
