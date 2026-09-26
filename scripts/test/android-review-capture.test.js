@@ -854,9 +854,20 @@ const { scanInbox, getAndroidNotificationImportDiagnostics } = require('./build/
   ok('receipt time never fills a missing transaction date in a universal suggestion',
     undatedSuggestion?.event.transactionDate.evidence === 'missing' &&
       undatedSuggestion.event.transactionDate.value === null);
+  // The learning draft (learned-format-capture.ts) is the one place a bank's
+  // sender id appears: it is the learned format's key, exactly what a learned
+  // template stores. It never holds the message, its digits or spans.
+  const withoutDraft = ({ learn: _draft, ...facts }) => facts;
   ok('universal review output never retains raw messages, sender or source spans',
     suggestions.every((item) => !Object.hasOwn(item, 'raw') && !Object.hasOwn(item, 'sender') &&
-      !JSON.stringify(item).includes('UNLISTED-BANK') && !/"spans":\[(?!\])/.test(JSON.stringify(item))));
+      !JSON.stringify(withoutDraft(item)).includes('UNLISTED-BANK') &&
+      !/"spans":\[(?!\])/.test(JSON.stringify(item))));
+  ok('a learning draft keeps only boilerplate, slot types and the sender id as its key',
+    suggestions.some((item) => item.learn) && suggestions.every((item) => !item.learn || (
+      item.learn.key === 's:UNLISTED-BANK' &&
+      !['2490', '24.90', '24,90', '2400', '12345', '2026-09-05'].some((digits) => JSON.stringify(item.learn).includes(digits)) &&
+      !JSON.stringify(item.learn).toLowerCase().includes('cafe'))),
+    JSON.stringify(suggestions.map((item) => item.learn ?? null)));
 
   const registeredBody = 'AED 2,500.00 has been credited to your account from JOHN DOE.';
   inboxRows = [{ id: 9200, address: 'FAB', date: NOW + 10, body: registeredBody }];

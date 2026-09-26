@@ -177,7 +177,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     goals: state.goals.map(row => fields(row, 'id title emoji targetFils savedFils')),
     merchantOverrides: dictionary(state.merchantOverrides), accountHints: dictionary(state.accountHints),
     notSubscriptions: (state.notSubscriptions ?? []).filter(v => typeof v === 'string'),
-    reviewTray: normalizeAlertReviewTray(state.reviewTray, now),
+    reviewTray: withoutLearnDrafts(normalizeAlertReviewTray(state.reviewTray, now)),
     reviewCoverage: 'Validated current review entries; expired or malformed entries excluded by the normal privacy retention policy.',
     merchants: [...merchantMap.values()].map(item => ({ ...item, categories: [...item.categories] })),
     monthlyTotals: [...monthly.entries()].map(([month, values]) => ({ month, ...values, netMinor: values.incomeMinor - values.spendingMinor })),
@@ -201,6 +201,18 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
       ? { launch: getLaunchMetrics().map(metric => ({ phase: metric.phase, elapsedMs: Math.round(metric.elapsedMs) })),
         capture: captureTraceSnapshot() }
       : null,
+  };
+}
+
+/** Learning drafts (message boilerplate) stay on the phone; the item's facts are exported as before. */
+function withoutLearnDrafts(tray: ReturnType<typeof normalizeAlertReviewTray>): ReturnType<typeof normalizeAlertReviewTray> {
+  return {
+    ...tray,
+    pending: tray.pending.map((item) => {
+      if (!('learn' in item)) return item;
+      const { learn: _draft, ...rest } = item;
+      return rest;
+    }),
   };
 }
 

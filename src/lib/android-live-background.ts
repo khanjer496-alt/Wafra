@@ -37,6 +37,8 @@ import {
 } from '@/lib/markets';
 import { setActiveCountry } from '@/lib/country';
 import { setBestEffortAutoPostEnabled } from '@/lib/best-effort-autopost';
+import { normalizeLearnedFormatStore, setLearnedFormatCaptureState } from '@/lib/learned-format-capture';
+import { setAiAlertPrefillEnabled } from '@/lib/ai-alert-reader';
 import { isProActive } from '@/lib/purchases';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import type { AppState, ImportBatchInput, Transaction } from '@/lib/types';
@@ -131,6 +133,14 @@ function applyLedgerContext(state: AppState): boolean {
     // "Auto-add alerts from unverified bank formats": a killed-process wake
     // must honour OFF exactly as the foreground does, never the module default.
     setBestEffortAutoPostEnabled(state.bestEffortAutoPost);
+    // Learned formats and the on-device AI setting, read by the same parser
+    // session; a killed-process wake must use the stored values.
+    setLearnedFormatCaptureState({
+      store: normalizeLearnedFormatStore(state.learnedAlertFormats),
+      autoPost: state.learnedFormatAutoPost,
+      privateMode: state.privateMode,
+    });
+    setAiAlertPrefillEnabled(state.aiAlertPrefill);
     setGlobalLedgerCurrency(state.ledgerMoney!.currency, state.ledgerMoney!.exponent);
     setLanguage(state.language === 'ar' ? 'ar' : 'en');
     return true;

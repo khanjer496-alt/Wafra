@@ -304,8 +304,12 @@ export const planReviewPromotion = (
       confirmation.expectedObservedAt !== item.observedAt) {
       return { outcome: 'refused', reason: 'source-changed' };
     }
-    const event = sanitizeUniversalReviewEvent(item.event);
-    if (!event) return { outcome: 'refused', reason: 'invalid-event' };
+    const sanitized = sanitizeUniversalReviewEvent(item.event);
+    if (!sanitized) return { outcome: 'refused', reason: 'invalid-event' };
+    // A learned format's or an on-device model's direction is a suggestion the
+    // person may correct on the Review screen; the amount stays grounded.
+    const event = item.suggestedBy === 'learned' || item.suggestedBy === 'ai'
+      ? { ...sanitized, direction: 'unknown' as const } : sanitized;
     // The UI supplies choices only. Bind identity/timing here and re-plan on
     // the current ledger; no UI-supplied batch or cached import is trusted.
     const planned = planConfirmedUniversalImport(state, event, {

@@ -10,6 +10,7 @@ import {
   type ReviewEntry,
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
+import { enqueueAiPrefill } from '@/lib/ai-alert-prefill-queue';
 import {
   iosBankSenderIdentity,
   type IosBankSenderRegistry,
@@ -373,6 +374,17 @@ function sanitizedRefusal(
       },
       milestone: 'decline-candidate',
     };
+  }
+  if (decision.kind === 'ignored' && decision.reason === 'unrecognized' && market === null) {
+    // No parser, learned format or generic reading: an on-device model may
+    // still suggest fields later (bounded background queue; Review only).
+    enqueueAiPrefill({
+      source: envelope.text,
+      sender: envelope.sender,
+      observedAt,
+      channel,
+      identity: localReviewIdentity(envelope.id),
+    });
   }
   if (decision.kind === 'review') {
     const item = identifySourceFreeReviewAlert(

@@ -6,6 +6,7 @@ import type { AlertFamily, MoneyDirection } from '@/lib/alert-market-pack-types'
 import type { DetectedMarket, UniversalAlertReview } from '@/lib/alert-market-detection';
 import type { InstitutionGrammarMetadata } from '@/lib/alert-institution-grammars';
 import type { UnparsedLaunchAlertReview } from '@/lib/unparsed-launch-alert';
+import { validateLearnedTemplate, type LearnDraft } from '@/lib/learned-alert-formats';
 
 export const REVIEW_ALERT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const REVIEW_TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
@@ -81,6 +82,19 @@ export interface UniversalReviewAlert {
   /** Android app provenance only; never notification text. */
   sourcePackage?: string;
   sourceClass?: 'trusted-bank' | 'play-finance' | 'financial-candidate';
+  /**
+   * Who proposed the fields: `learned` = one of the person's learned bank
+   * formats ("Recognised format — confirm"); `ai` = an on-device model
+   * ("Suggested by on-device AI"). Absent for the ordinary parsers. Only a
+   * label: every field is still confirmed or edited by the person.
+   */
+  suggestedBy?: 'learned' | 'ai';
+  /**
+   * Source-free learning draft (learned-alert-formats.ts createLearnDraft):
+   * boilerplate literals and slot types only, never digits or message text.
+   * Confirming the item turns it into (or counts toward) a learned format.
+   */
+  learn?: LearnDraft;
 }
 
 export type ReviewEntry = ReviewAlert | UniversalReviewAlert;
@@ -755,7 +769,14 @@ const normalizeReviewEntry = (value: unknown, now: number): ReviewEntry | null =
     : {};
   const conflict = (common as UniversalReviewAlert).currencyConflict === true
     ? { currencyConflict: true as const } : {};
-  return { ...item, ...sourceMeta, ...attention, ...conflict, expiresAt: common.expiresAt };
+  const suggestedBy = (common as UniversalReviewAlert).suggestedBy;
+  const provenance = suggestedBy === 'learned' || suggestedBy === 'ai' ? { suggestedBy } : {};
+  // A draft that fails the same validation a backup restore uses is dropped;
+  // the item itself stays reviewable.
+  const draft = (common as UniversalReviewAlert).learn === undefined ? null
+    : validateLearnedTemplate((common as UniversalReviewAlert).learn);
+  const learn = draft ? { learn: draft } : {};
+  return { ...item, ...sourceMeta, ...attention, ...conflict, ...provenance, ...learn, expiresAt: common.expiresAt };
   }
   const item = value as ReviewAlert;
   const instrument = item?.instrument;

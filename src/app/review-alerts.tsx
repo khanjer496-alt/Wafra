@@ -21,6 +21,7 @@ import { reviewAlertCopy } from '@/lib/review-alert-copy';
 import type { UniversalField, UniversalMoney } from '@/lib/universal-types';
 import { useStore } from '@/lib/store';
 import { localReviewAdvisor } from '@/lib/local-semantic-review';
+import { ReviewProvenance } from '@/components/review-provenance';
 
 const FAMILY_COPY: Record<ReviewAlert['family'], { label: StringKey; icon: IconName }> = {
   purchase: { label: 'reviewAlertPossiblePurchase', icon: 'cart' },
@@ -96,7 +97,9 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
   ];
   const fact = facts.find(([, field]) => field.evidence === 'explicit' && field.value !== null);
   const amount = fact?.[1].value ? universalMoneyLabel(fact[1].value) : t('genericAmountNeedsReview');
-  const identity = [t(key), event.merchant.evidence === 'explicit' ? event.merchant.value : null,
+  const provenance = item.suggestedBy === 'learned' ? t('reviewRecognisedFormat')
+    : item.suggestedBy === 'ai' ? t('reviewSuggestedByAi') : null;
+  const identity = [provenance, t(key), event.merchant.evidence === 'explicit' ? event.merchant.value : null,
     fact ? `${t(fact[0])}: ${amount}` : amount].filter(Boolean).join('. ');
   return (
     <View testID="review-alert-row" style={[styles.alertRow, { borderColor: theme.cardBorder }]}>
@@ -109,6 +112,7 @@ function UniversalAlertRow({ item, busy, onAdd, onDismiss }: {
         {item.attentionReason === 'possible-apple-pay-duplicate' && (
           <ThemedText testID="review-alert-apple-pay-duplicate" type="smallBold" themeColor="warning">{t('reviewAlertPossibleApplePayDuplicate')}</ThemedText>
         )}
+        <ReviewProvenance suggestedBy={item.suggestedBy} />
         <ThemedText type="smallBold">{t(key)}</ThemedText>
         {event.merchant.evidence === 'explicit' ? <ThemedText type="small">{event.merchant.value}</ThemedText> : null}
         {fact ? <ThemedText type="meta" themeColor="textSecondary">{t(fact[0])}</ThemedText> : null}

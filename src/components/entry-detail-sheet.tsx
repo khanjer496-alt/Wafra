@@ -301,8 +301,12 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         <View
           testID="best-effort-check"
           style={[styles.transferMeaning, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
-          <ThemedText type="smallBold">{t('autoAddedCheck')}</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">{t('autoAddedExplain')}</ThemedText>
+          <ThemedText type="smallBold">
+            {t(transaction.bestEffort.format.startsWith('learned:') ? 'learnedFormatCheck' : 'autoAddedCheck')}
+          </ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            {t(transaction.bestEffort.format.startsWith('learned:') ? 'learnedFormatExplain' : 'autoAddedExplain')}
+          </ThemedText>
           <View style={[styles.actions, largeText && styles.actionsLarge]}>
             <Button inline={!largeText} wrapLabel label={t('autoAddedLooksRight')}
               onPress={() => resolveBestEffort(transaction.id, 'confirm')} />

@@ -49,6 +49,8 @@ export const APP_ROUTES = [
   '/add-transaction',
   '/pro',
   '/feedback',
+  '/learned-formats',
+  '/alert-reader',
 ] as const;
 
 /** A screen, with no query string. */

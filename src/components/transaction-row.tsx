@@ -59,7 +59,9 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   const accountCaption = accountReview ?? (bankCaption
     ? `${bankCaption}${account?.last4 && !bankCaption.includes(account.last4) ? ` ·${account.last4}` : ''}`
     : undefined);
-  const autoAdded = transaction.bestEffort ? t('autoAddedCheck', language) : null;
+  const autoAdded = transaction.bestEffort
+    ? t(transaction.bestEffort.format.startsWith('learned:') ? 'learnedFormatCheck' : 'autoAddedCheck', language)
+    : null;
   const label = [transaction.title, autoAdded, where, accountLabel, clock,
     `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${ledgerCurrencyCode()}`]
     .filter(Boolean).join(', ');

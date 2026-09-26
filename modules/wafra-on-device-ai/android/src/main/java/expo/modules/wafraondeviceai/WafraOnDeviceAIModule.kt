@@ -1,6 +1,10 @@
 package expo.modules.wafraondeviceai
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.PowerManager
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
@@ -59,7 +63,7 @@ class WafraOnDeviceAIModule : Module() {
       schemaJson: String, maxTokens: Int, timeoutMs: Int ->
       val engine = engine() ?: throw failure("ERR_ON_DEVICE_AI_UNAVAILABLE")
       val schema = ClosedSchema.parse(schemaJson)
-      if (schema == null || (task != "ask-plan" && task != "categorize") || requestId.isEmpty() ||
+      if (schema == null || task !in ALLOWED_TASKS || requestId.isEmpty() ||
         requestId.length > 64 || prompt.isEmpty() || prompt.length > MAX_PROMPT_CHARACTERS ||
         instructions.length > MAX_PROMPT_CHARACTERS || maxTokens !in 16..1024 || timeoutMs !in 500..60_000) {
         throw failure("ERR_ON_DEVICE_AI_INVALID_REQUEST")
@@ -88,6 +92,16 @@ class WafraOnDeviceAIModule : Module() {
       }
     }
 
+    // Background model work is skipped in Battery Saver.
+    AsyncFunction("getPowerState") Coroutine { ->
+      mapOf("lowPowerMode" to lowPowerMode())
+    }
+
+    // "Wi-Fi only" downloads. Reads OS connectivity state; sends nothing.
+    AsyncFunction("getNetworkType") Coroutine { ->
+      networkType()
+    }
+
     AsyncFunction("cancel") { requestId: String ->
       synchronized(active) { active[requestId] }?.cancel()
       Unit
@@ -99,8 +113,40 @@ class WafraOnDeviceAIModule : Module() {
     }
   }
 
+  private fun context(): Context? = appContext.reactContext
+
+  private fun lowPowerMode(): Boolean = try {
+    (context()?.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isPowerSaveMode == true
+  } catch (_: Exception) {
+    false
+  }
+
+  /**
+   * "wifi" for Wi-Fi or Ethernet that is not metered, "cellular" for
+   * cellular or a metered network, "none" offline, "unknown" otherwise.
+   */
+  private fun networkType(): String = try {
+    val manager = context()?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+    val network = manager?.activeNetwork
+    val caps = if (network != null) manager?.getNetworkCapabilities(network) else null
+    when {
+      manager == null -> "unknown"
+      network == null || caps == null -> "none"
+      (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) &&
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) -> "wifi"
+      caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+        !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) -> "cellular"
+      else -> "unknown"
+    }
+  } catch (_: Exception) {
+    "unknown"
+  }
+
   private companion object {
     const val PROVIDER = "gemini-nano"
     const val MAX_PROMPT_CHARACTERS = 6_000
+    /** `alert-read` pre-fills a Review item; its output is gated in JavaScript and never posts. */
+    val ALLOWED_TASKS = setOf("ask-plan", "categorize", "alert-read")
   }
 }

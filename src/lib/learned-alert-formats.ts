@@ -197,6 +197,8 @@ const MAX_MERCHANT_TOKENS = 16;
 const MAX_MERCHANT_CHARS = 96;
 const MAX_CONFIRMATIONS = 1000;
 const LAUNCH = new Set(['AE', 'SA']);
+/** Template ids: `lf_` plus an 11-character base-36 hash. */
+export const LEARNED_TEMPLATE_ID_RE = /^lf_[0-9a-z]{11}$/;
 
 /* ── small utilities ─────────────────────────────────────────────────── */
 
@@ -238,6 +240,9 @@ const localIsoDay = (epochMs: number | undefined): string | null => {
 /** Normalised sender key: upper case, whitespace collapsed, Indian DLT prefix/suffix removed. */
 export function normalizeLearnedSender(sender: string | null | undefined): string | null {
   if (typeof sender !== 'string') return null;
+  // A phone number is never stored as a format key: such formats are keyed by
+  // their anchor signature instead, on both the learning and matching side.
+  if (/^\+?[\d\s().-]{7,}$/.test(sender.trim()) && (sender.match(/\d/g) ?? []).length >= 7) return null;
   let value = sender.normalize('NFKC').trim().toUpperCase().replace(/\s+/g, ' ');
   const dlt = value.match(/^[A-Z]{2}-([A-Z0-9]{4,})(?:-[A-Z])?$/);
   if (dlt) value = dlt[1];
@@ -729,7 +734,7 @@ export function recordLearnedConfirmation(
   input: LearnInput,
 ): { ok: true; store: LearnedFormatStore; template: LearnedTemplate } | { ok: false; reason: LearnRefusal; store: LearnedFormatStore } {
   const learned = learnFromConfirmation(input);
-  if (!learned.ok) return { ok: false, reason: learned.reason, store };
+  if ('reason' in learned) return { ok: false, reason: learned.reason, store };
   const next = addOrUpdateLearnedTemplate(store, learned.template, input.now);
   return { ok: true, store: next, template: next.templates.find((row) => row.id === learned.template.id) ?? learned.template };
 }
@@ -747,6 +752,107 @@ export function removeLearnedTemplate(store: LearnedFormatStore, id: string): Le
 }
 
 export const clearLearnedFormats = (): LearnedFormatStore => emptyLearnedFormatStore();
+
+/**
+ * The person confirmed ("Looks right") a row a learned template auto-added:
+ * count it as one more consistent confirmation. A blocked or unknown template
+ * is left alone.
+ */
+export function confirmLearnedTemplate(store: LearnedFormatStore, id: string, now: number): LearnedFormatStore {
+  const templates = store?.templates ?? [];
+  if (!templates.some((row) => row.id === id && !row.blocked)) return { version: 1, templates: [...templates] };
+  return {
+    version: 1,
+    templates: templates.map((row) => (row.id === id
+      ? { ...row, confirmations: Math.min(MAX_CONFIRMATIONS, row.confirmations + 1), updatedAt: now }
+      : row)),
+  };
+}
+
+/* ── learning drafts (source-free, kept with a pending Review item) ───── */
+
+/**
+ * A LEARN DRAFT is the template `learnFromConfirmation` induces from the
+ * message using the Review item's own suggested amount, merchant span and
+ * date, computed while the source is still in hand at capture time. It holds
+ * exactly what a learned template holds (literal boilerplate and slot types;
+ * never digits, amounts or raw text), so a Review item never needs to keep
+ * the message. When the person later confirms the item, `finalizeLearnDraft`
+ * turns it into a real template with the CONFIRMED direction; a confirmation
+ * with a different amount learns nothing.
+ */
+export type LearnDraft = LearnedTemplate;
+
+export function createLearnDraft(input: {
+  source: string;
+  sender?: string | null;
+  amountMinor: number | string;
+  currency: string;
+  exponent: number;
+  /** Suggested direction; the confirmation replaces it. */
+  direction?: LearnedDirection | null;
+  merchant?: string | null;
+  date?: string | null;
+  context?: LearnContext;
+  now: number;
+}): LearnDraft | null {
+  const base = {
+    source: input.source,
+    sender: input.sender ?? null,
+    context: input.context,
+    now: input.now,
+  };
+  const confirmed: ConfirmedFields = {
+    amountMinor: input.amountMinor,
+    currency: input.currency,
+    exponent: input.exponent,
+    direction: input.direction === 'credit' ? 'credit' : 'debit',
+    merchant: input.merchant ?? null,
+    date: input.date ?? null,
+  };
+  let learned = learnFromConfirmation({ ...base, confirmed });
+  // A prettified merchant that is not in the text: learn the shape without it.
+  if ('reason' in learned && learned.reason === 'merchant-not-grounded') {
+    learned = learnFromConfirmation({ ...base, confirmed: { ...confirmed, merchant: null } });
+  }
+  return learned.ok ? learned.template : null;
+}
+
+/** Validates one template or draft exactly as a restore would; null when unusable. */
+export function validateLearnedTemplate(value: unknown): LearnedTemplate | null {
+  return validTemplate(value);
+}
+
+/**
+ * The template a confirmed draft becomes. `keepDate` false (the person chose
+ * another day than the message's) turns the learned DATE slot into an
+ * unextracted date, so the template never reads a date it was not confirmed on.
+ */
+export function finalizeLearnDraft(
+  draft: LearnDraft,
+  input: { direction: LearnedDirection; keepDate: boolean; now: number },
+): LearnedTemplate | null {
+  const valid = validTemplate(draft);
+  if (!valid || (input.direction !== 'debit' && input.direction !== 'credit') || !Number.isFinite(input.now)) return null;
+  const tokens: TemplateToken[] = input.keepDate
+    ? valid.tokens
+    : valid.tokens.map((token) => (token.k === 'DATE' ? { k: 'DATEX', f: token.f } : token));
+  const dateless = !tokens.some((token) => token.k === 'DATE');
+  const key = keyFor(valid.sender, tokens);
+  const template: LearnedTemplate = {
+    ...valid,
+    key,
+    id: templateId(key, tokens),
+    tokens,
+    direction: input.direction,
+    dateOrder: dateless ? null : valid.dateOrder,
+    confirmations: 1,
+    blocked: false,
+    createdAt: input.now,
+    updatedAt: input.now,
+  };
+  return validTemplate(template);
+}
 
 /* ── matching ────────────────────────────────────────────────────────── */
 

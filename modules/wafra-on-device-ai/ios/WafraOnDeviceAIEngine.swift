@@ -1,4 +1,5 @@
 import Foundation
+import Network
 #if canImport(FoundationModels)
 import FoundationModels
 #endif
@@ -186,8 +187,70 @@ final class WafraOnDeviceAIRegistry: @unchecked Sendable {
   }
 }
 
+/// Device conditions JavaScript checks before optional model work: Low Power
+/// Mode, and the connection type for "Wi-Fi only" downloads. Neither reads
+/// or sends any user data.
+enum WafraDeviceState {
+  static func lowPowerMode() -> Bool {
+    ProcessInfo.processInfo.isLowPowerModeEnabled
+  }
+
+  /// "wifi" for Wi-Fi or Ethernet that is not marked expensive (a phone
+  /// hotspot is), "cellular" for cellular or an expensive path, "none" when
+  /// offline, "unknown" when the OS does not answer within the timeout.
+  static func classify(satisfied: Bool, wifiOrWired: Bool, cellular: Bool, expensive: Bool) -> String {
+    guard satisfied else { return "none" }
+    if wifiOrWired { return expensive ? "cellular" : "wifi" }
+    if cellular || expensive { return "cellular" }
+    return "unknown"
+  }
+
+  static func networkType(timeout: TimeInterval = 1.5) async -> String {
+    let monitor = NWPathMonitor()
+    let queue = DispatchQueue(label: "app.wafra.on-device-ai.network")
+    let once = WafraOnce()
+    return await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
+      monitor.pathUpdateHandler = { path in
+        guard once.claim() else { return }
+        monitor.cancel()
+        monitor.pathUpdateHandler = nil
+        continuation.resume(returning: classify(
+          satisfied: path.status == .satisfied,
+          wifiOrWired: path.usesInterfaceType(.wifi) || path.usesInterfaceType(.wiredEthernet),
+          cellular: path.usesInterfaceType(.cellular),
+          expensive: path.isExpensive))
+      }
+      monitor.start(queue: queue)
+      queue.asyncAfter(deadline: .now() + timeout) {
+        guard once.claim() else { return }
+        monitor.cancel()
+        monitor.pathUpdateHandler = nil
+        continuation.resume(returning: "unknown")
+      }
+    }
+  }
+}
+
+/// A one-shot latch: the first claimant wins, every later claim fails.
+final class WafraOnce: @unchecked Sendable {
+  private let lock = NSLock()
+  private var claimed = false
+
+  func claim() -> Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    if claimed { return false }
+    claimed = true
+    return true
+  }
+}
+
 enum WafraOnDeviceAIEngine {
   static let maxPromptCharacters = 6_000
+  /// Tasks JavaScript may request. `alert-read` pre-fills a Review item for a
+  /// bank alert no parser read; its output is gated in JavaScript and never
+  /// posts money.
+  static let allowedTasks: Set<String> = ["ask-plan", "categorize", "alert-read"]
 
   static func availability() -> WafraOnDeviceAIAvailability {
     #if canImport(FoundationModels)

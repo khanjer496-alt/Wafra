@@ -1414,7 +1414,17 @@ export default function SettingsScreen() {
             (next) => {
               setBestEffortAutoPost(next).catch(() => Alert.alert(t('autoAddedSettingTitle'), t('autoAddedSettingSaveFailed')));
             },
-            true,
+          )}
+          {linkRow(
+            t('learnedFormatsTitle'),
+            tf('learnedFormatsRowBody', { count: state.learnedAlertFormats?.templates.length ?? 0 }),
+            () => router.push('/learned-formats'),
+          )}
+          {linkRow(
+            t('aiReaderTitle'),
+            t(state.aiAlertPrefill !== false ? 'aiReaderRowOn' : 'aiReaderRowOff'),
+            () => router.push('/alert-reader'),
+            { last: true },
           )}
         </Section>
 

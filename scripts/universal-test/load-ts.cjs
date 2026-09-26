@@ -22,6 +22,10 @@ function createLoader() {
     else if (request.startsWith('.') || path.isAbsolute(request)) file = path.resolve(path.dirname(parent), request);
     else return Module.createRequire(parent)(request);
     if (!fs.existsSync(file) && fs.existsSync(file + '.ts')) file += '.ts';
+    // A native module wrapper directory (modules/<name>/index.ts).
+    else if (fs.existsSync(file) && fs.statSync(file).isDirectory() && fs.existsSync(path.join(file, 'index.ts'))) {
+      file = path.join(file, 'index.ts');
+    }
     if (cache.has(file)) return cache.get(file).exports;
     if (!file.endsWith('.ts') && !file.endsWith('.tsx')) return Module.createRequire(parent)(file);
     const module = { exports: {} };

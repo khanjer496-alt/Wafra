@@ -169,8 +169,11 @@ assert.match(task3Add, /scrollProps=\{\{ keyboardShouldPersistTaps: 'handled' \}
 assert.match(task3Add, /footer=\{/);
 assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 2,
   'Manual Add keeps labelled amount/title fields while alert review avoids redundant editable fields');
-assert.match(task3Add, /!reviewItem \? <TextField[\s\S]*?descriptionOptional/,
+// The one exception: a merchant an on-device model PROPOSED (suggestedBy 'ai')
+// is a guess the person may correct before confirming.
+assert.match(task3Add, /!reviewItem(?: \|\| aiSuggestedTitle)? \? <TextField[\s\S]*?descriptionOptional/,
   'captured-alert review does not ask the user to rewrite a title Wafra already has');
+assert.match(task3Add, /const aiSuggestedTitle = genericItem\?\.suggestedBy === 'ai';/);
 assert.match(task3Add, /const focusFirstInvalid = \(\) => \{/);
 assert.match(task3Add, /const onSavePress = \(\) => \{[\s\S]*?setShowValidation\(true\)[\s\S]*?focusFirstInvalid\(\)/);
 assert.match(task3Add, /disabled=\{saving \|\| reviewRouteInvalid\}/);

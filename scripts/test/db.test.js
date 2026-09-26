@@ -544,6 +544,13 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // The real unproven-format policy: the store mirrors its setting and
     // writes its undo tombstones on hydrate/undo/delete.
     '@/lib/best-effort-autopost': require('./build/best-effort-autopost'),
+    // The real learned-format store helpers: hydration validates the store
+    // and the capture mirror follows every change.
+    '@/lib/learned-alert-formats': require('./build/learned-alert-formats'),
+    '@/lib/learned-format-capture': require('./build/learned-format-capture'),
+    // On-device AI settings mirror and the iOS suggestion queue's sink: inert here.
+    '@/lib/ai-alert-reader': { setAiAlertPrefillEnabled() {} },
+    '@/lib/ai-alert-prefill-queue': { setAiPrefillSink() {}, clearAiPrefillQueue() {} },
     // Provider plumbing only: the locale key for memoised money text.
     '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
     // The real selector helpers (dependency-free).

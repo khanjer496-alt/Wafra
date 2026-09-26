@@ -1,4 +1,5 @@
 import { aiReviewEventForRefusedAlert } from '@/lib/ai-alert-reader';
+import { learnDraftForEvent, learnedReviewEvent } from '@/lib/learned-format-capture';
 import { AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -561,7 +562,7 @@ export function parsedFinancialCandidateReview(
 function universalEventReviewCandidate(
   event: UniversalBankEvent,
   observedAt: number,
-  channel: CaptureChannel = 'push',
+  channel: UniversalReviewAlert['channel'] = 'push',
 ): SourceFreeReviewCandidate | null {
   const prepared = prepareUniversalReviewAlert({
     id: 'capture_probe_id_0001',
@@ -574,6 +575,31 @@ function universalEventReviewCandidate(
   const { id: _id, sourceKey: _sourceKey, ...candidate } = prepared;
   return candidate;
 }
+
+/**
+ * A Review candidate from an AI reading (ai-alert-reader.ts): labelled
+ * "Suggested by on-device AI", carrying a learning draft so confirming it
+ * teaches the format. Source and sender are consumed here and not retained.
+ */
+export function aiReviewCandidate(
+  source: string,
+  sender: string,
+  event: UniversalBankEvent,
+  observedAt: number,
+  channel: UniversalReviewAlert['channel'],
+): SourceFreeReviewCandidate | null {
+  const candidate = universalEventReviewCandidate(event, observedAt, channel);
+  if (!candidate || !('kind' in candidate) || candidate.kind !== 'universal') return null;
+  const draft = isOrdinaryReviewPosting(candidate.event)
+    ? learnDraftForEvent(source, sender, candidate.event, { observedAt, country: getActiveCountry(), routedMarket: null })
+    : null;
+  return { ...candidate, suggestedBy: 'ai' as const, ...(draft ? { learn: draft } : {}) };
+}
+
+/** Same test as the Review screen's "ordinary posting" (universal-review-fields.tsx). */
+const isOrdinaryReviewPosting = (event: UniversalBankEvent): boolean =>
+  ['purchase', 'transfer', 'cash-withdrawal', 'refund', 'fee', 'utility', 'recurring-payment', 'unknown'].includes(event.family) &&
+  (event.status === 'posted' || event.status === 'unknown');
 
 const AUTOMATIC_UNIVERSAL_FAMILIES = new Set<UniversalBankEvent['family']>([
   'purchase', 'refund', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment', 'transfer',
@@ -736,6 +762,27 @@ export function inspectSourceFreeRefusedAlert(input: {
     // issuer routing and can be very expensive on rich OEM notification text.
     // Leave the encrypted row unresolved for a future parser instead.
     if (input.skipUniversalFallback) return { kind: 'ignored', reason: 'unrecognized' };
+    const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;
+    // The person's learned formats come before the generic reading: a
+    // template they confirmed pre-fills the fields ("Recognised format").
+    // With no learned templates this returns null and nothing changes.
+    const learned = learnedReviewEvent(input.source, input.sender, {
+      observedAt: input.observedAt, routedMarket,
+    });
+    const learnedItem = learned ? prepareUniversalReviewAlert({
+      id: 'capture_probe_id_0001',
+      sourceKey: 'capture_probe_key_001',
+      observedAt: input.observedAt,
+      channel: input.channel,
+      event: learned.event,
+    }) : null;
+    if (learnedItem && learned) {
+      const { id: _id, sourceKey: _sourceKey, ...candidate } = learnedItem;
+      return {
+        kind: 'review',
+        candidate: { ...candidate, suggestedBy: 'learned' as const, ...(learned.draft ? { learn: learned.draft } : {}) },
+      };
+    }
     const event = inspectGenericBankEventForReview(input.source, input.sender);
     const universal = event ? prepareUniversalReviewAlert({
       id: 'capture_probe_id_0001',
@@ -746,7 +793,14 @@ export function inspectSourceFreeRefusedAlert(input: {
     }) : null;
     if (!universal) return { kind: 'ignored', reason: 'unrecognized' };
     const { id: _id, sourceKey: _sourceKey, ...candidate } = universal;
-    return { kind: 'review', candidate };
+    // Learning draft, made while the message is in hand (the item keeps no
+    // text). Only for an item the person could add as an ordinary movement.
+    const draft = event && isOrdinaryReviewPosting(candidate.event)
+      ? learnDraftForEvent(input.source, input.sender, candidate.event, {
+          observedAt: input.observedAt, country: getActiveCountry(), routedMarket,
+        })
+      : null;
+    return { kind: 'review', candidate: draft ? { ...candidate, learn: draft } : candidate };
   }
   const {
     id: _id,
@@ -890,9 +944,11 @@ export async function scanInbox(
     // suggested fields; with no model it resolves null and nothing changes.
     if (aiEligible && !parsedFallback && !skipUniversalFallback &&
       decision.kind === 'ignored' && decision.reason === 'unrecognized') {
-      const aiEvent = await aiReviewEventForRefusedAlert(body, sender, ts);
+      const aiReading = await aiReviewEventForRefusedAlert(body, sender, ts);
       let aiCandidate: SourceFreeReviewCandidate | null = null;
-      try { aiCandidate = aiEvent ? universalEventReviewCandidate(aiEvent, ts, channel) : null; } catch { aiCandidate = null; }
+      try {
+        aiCandidate = aiReading ? aiReviewCandidate(body, sender, aiReading.event, ts, channel) : null;
+      } catch { aiCandidate = null; }
       if (aiCandidate) decision = { kind: 'review', candidate: aiCandidate };
     }
     if (decision.kind === 'declined') {

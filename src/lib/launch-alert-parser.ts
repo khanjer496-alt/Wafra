@@ -19,6 +19,7 @@ import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-m
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import type { FxQuote } from '@/lib/fx';
 import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
+import { learnedPosting } from '@/lib/learned-format-capture';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 
 // Cheap supersets used only to decide whether market routing must run. The
@@ -350,6 +351,7 @@ export const createLaunchAlertSession = ({
   activeMarket = getActiveMarket().id,
   fxLookup = (base, quote, date) => cachedReferenceQuote(base, quote, date),
   bestEffort = { enabled: bestEffortAutoPostEnabled(), country: getActiveCountry() },
+  learnedFormats = true,
 }: {
   overrides: Record<string, CategoryId>;
   regionHint?: string | null;
@@ -359,6 +361,12 @@ export const createLaunchAlertSession = ({
   fxLookup?: ParseFxLookup;
   /** Unproven-format policy inputs; defaults mirror the persisted setting and country. */
   bestEffort?: { enabled: boolean; country: string | null };
+  /**
+   * The person's learned formats (learned-format-capture.ts) may add a row
+   * after every proven path and the best-effort policy declined. They carry
+   * their own setting, AE/SA refusal and threshold; false disables them.
+   */
+  learnedFormats?: boolean;
 }): LaunchAlertSession => {
   const actualPinned = pinnedLedgerCurrencyCode();
   const pinnedExponent = pinnedCurrency
@@ -442,7 +450,33 @@ export const createLaunchAlertSession = ({
     return result;
   };
 
-  const parse = (
+  /**
+   * LEARNED FORMATS, after every path of `parse` / `parseUnproven` (the
+   * proven grammar, certified templates and the best-effort policy) returned
+   * nothing. Only a template the person confirmed twice may post; it refuses
+   * AE/SA senders, routes, users and AED/SAR ledgers itself.
+   */
+  const parseLearned = (
+    source: string,
+    sender: string,
+    inspection: UniversalAlertReview | null,
+    observedAt: number | undefined,
+  ): ParsedSms | null => {
+    if (!learnedFormats || !pinnedCurrency) return null;
+    return learnedPosting({
+      source,
+      sender,
+      observedAt,
+      routedMarket: inspection?.route.decision === 'single' ? inspection.route.market : null,
+      country: bestEffort.country,
+      ledgerCurrency: pinnedCurrency,
+      ledgerExponent: pinnedExponent,
+      fxLookup,
+      overrides,
+    });
+  };
+
+  const parseProven = (
     source: string,
     sender: string,
     inspection: UniversalAlertReview | null = null,
@@ -508,7 +542,17 @@ export const createLaunchAlertSession = ({
     });
   };
 
-  const parseUnproven = (
+  const parse = (
+    source: string,
+    sender: string,
+    inspection: UniversalAlertReview | null = null,
+    forcedMarket?: string,
+    observedAt?: number,
+  ): ParsedSms | null =>
+    parseProven(source, sender, inspection, forcedMarket, observedAt) ??
+      parseLearned(source, sender, inspection, observedAt);
+
+  const parseUnprovenPolicy = (
     source: string,
     sender: string,
     inspection: UniversalAlertReview | null = null,
@@ -533,6 +577,15 @@ export const createLaunchAlertSession = ({
       launchSenderMarket,
     });
   };
+
+  const parseUnproven = (
+    source: string,
+    sender: string,
+    inspection: UniversalAlertReview | null = null,
+    observedAt?: number,
+  ): ParsedSms | null =>
+    parseUnprovenPolicy(source, sender, inspection, observedAt) ??
+      parseLearned(source, sender, inspection, observedAt);
 
   return { inspect, parse, parseUnproven, detectedMarket: () => detected };
 };

@@ -26,7 +26,7 @@ export type OnDeviceAIStatus =
   | 'model-not-ready'
   | 'unavailable';
 export type OnDeviceAIProvider = 'apple-foundation-models' | 'gemini-nano';
-export type OnDeviceAITask = 'ask-plan' | 'categorize';
+export type OnDeviceAITask = 'ask-plan' | 'categorize' | 'alert-read';
 export type OnDeviceAILanguage = 'en' | 'ar';
 
 export interface OnDeviceAIAvailability {
@@ -75,7 +75,7 @@ export type OnDeviceAIResult =
 const STATUSES: readonly OnDeviceAIStatus[] = ['available', 'unsupported-os', 'device-not-eligible',
   'not-enabled', 'model-not-ready', 'unavailable'];
 const PROVIDERS: readonly OnDeviceAIProvider[] = ['apple-foundation-models', 'gemini-nano'];
-const TASKS: readonly OnDeviceAITask[] = ['ask-plan', 'categorize'];
+const TASKS: readonly OnDeviceAITask[] = ['ask-plan', 'categorize', 'alert-read'];
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]{0,39}$/;
 const MAX_PROMPT = 6_000;
 const MAX_OUTPUT = 4_096;
@@ -197,8 +197,17 @@ function failureKind(error: unknown): OnDeviceAIFailureKind {
   }
 }
 
+export type OnDeviceNetworkType = 'wifi' | 'cellular' | 'none' | 'unknown';
+
 export interface OnDeviceAI {
   getAvailability(options?: { refresh?: boolean }): Promise<OnDeviceAIAvailability>;
+  /**
+   * True when the phone is in Low Power Mode (iOS) / Battery Saver (Android).
+   * Background model work is skipped then. Unknown (older native build) = false.
+   */
+  lowPowerMode(): Promise<boolean>;
+  /** Current connection type for "Wi-Fi only" downloads; 'unknown' is never treated as Wi-Fi. */
+  networkType(): Promise<OnDeviceNetworkType>;
   /** Last known availability without touching native code; null before the first check. */
   peekAvailability(): OnDeviceAIAvailability | null;
   /** Explicit user action only (Android): asks AICore to fetch Gemini Nano. */
@@ -274,6 +283,24 @@ export function createOnDeviceAI(
 
   return {
     getAvailability,
+    async lowPowerMode() {
+      if (!native || typeof native.getPowerState !== 'function') return false;
+      try {
+        const state = await native.getPowerState();
+        return !!state && typeof state === 'object' && (state as { lowPowerMode?: unknown }).lowPowerMode === true;
+      } catch {
+        return false;
+      }
+    },
+    async networkType() {
+      if (!native || typeof native.getNetworkType !== 'function') return 'unknown';
+      try {
+        const type = await native.getNetworkType();
+        return type === 'wifi' || type === 'cellular' || type === 'none' ? type : 'unknown';
+      } catch {
+        return 'unknown';
+      }
+    },
     peekAvailability: () => cached?.value ?? null,
     async prepare() {
       if (!native) return remember(UNAVAILABLE);
