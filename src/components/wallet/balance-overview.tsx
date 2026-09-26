@@ -40,7 +40,7 @@ export function BalanceOverview(p: BalanceOverviewProps) {
       : <View accessible accessibilityRole="text" testID="wallet-balance-figure"
           accessibilityLabel={`${t('availableBalances')}. ${w.noBalanceFigure}. ${p.balanceCoverageText}`} style={styles.empty}>
           <ThemedText type="small" style={{ color: band.onBandSecondary }}>{t('availableBalances')}</ThemedText>
-          <ThemedText style={[styles.dash, { color: band.onBand }]}>—</ThemedText>
+          <ThemedText maxFontSizeMultiplier={1.5} style={[styles.dash, { color: band.onBand }]}>—</ThemedText>
           <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{p.sourceNote}</ThemedText>
         </View>}
     <View style={[styles.chips, p.largeText && styles.stack]} testID="wallet-coverage-chips">

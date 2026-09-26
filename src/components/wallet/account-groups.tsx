@@ -138,10 +138,16 @@ export function AccountGroups({ rows, onOpen, onManage, onUpdateBalance, onHide,
   const cardBlock = (row: AccountDisplayRow) => {
     const statement = row.statement;
     const usage = row.usage;
+    // The caption says what the figure is ("Owed") before when it was seen,
+    // so a card's debt never reads as a balance under the band's figure.
     const sub = [
       row.account.last4 ? `•• ${row.account.last4}` : null,
-      row.freshness || row.caption,
+      row.caption,
+      row.freshness || null,
     ].filter(Boolean).join(' · ');
+    const quietActions = row.quiet && onHide;
+    // Status tints read on the ink card in both schemes (it is dark in both).
+    const quietColor = BandPalettes.dark.home.statusNear;
     return <View key={row.account.id} testID={`wallet-card-${row.account.id}`}
       style={[styles.card, { backgroundColor: ink.band, borderColor: ink.bandRule }]}>
       <View style={styles.rowWrapper}>
@@ -152,7 +158,8 @@ export function AccountGroups({ rows, onOpen, onManage, onUpdateBalance, onHide,
             <AccountTile account={row.account} size={36} />
             <View style={styles.grow}>
               <ThemedText type="smallBold" style={{ color: ink.onBand }} numberOfLines={large ? undefined : 2}>{row.account.name}</ThemedText>
-              <ThemedText type="meta" style={{ color: ink.onBandSecondary }}>{sub}</ThemedText>
+              <ThemedText type="meta" testID={row.quiet ? 'wallet-quiet-line' : undefined}
+                style={{ color: row.quiet ? quietColor : ink.onBandSecondary }}>{sub}</ThemedText>
             </View>
           </View>
           {row.figureFils === null
@@ -183,6 +190,8 @@ export function AccountGroups({ rows, onOpen, onManage, onUpdateBalance, onHide,
           () => onMarkPaid(statement.due, 'minimum'), `wallet-mark-minimum-${row.account.id}`, { bg: ink.tile, fg: ink.onBand })}
         {pill(m.details, m.detailsA11y(row.account.name), () => onOpen(row.account), `wallet-card-details-${row.account.id}`,
           { bg: ink.tile, fg: ink.onBand })}
+        {quietActions && pill(m.hide, `${m.hide}: ${row.account.name}`, () => onHide(row.account), `wallet-hide-${row.account.id}`,
+          { bg: 'transparent', fg: ink.onBand, border: ink.bandRule })}
       </View>
     </View>;
   };

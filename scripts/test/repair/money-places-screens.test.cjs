@@ -74,6 +74,18 @@ test('a quiet account offers Update balance and Hide inline', () => {
   assert.equal(byId(tree, 'wallet-update-balance-enbd'), undefined);
 });
 
+test('a credit card on its ink card says its figure is owed, and a quiet one can still be hidden', () => {
+  const h = createHarness();
+  const tree = h.render('wallet');
+  assert.match(text(byId(tree, 'wallet-card-credit')), /· owed ·/);
+  const quiet = createHarness({ state: { cardDues: [] } });
+  quiet.state.accounts = quiet.state.accounts.map((a) => a.id === 'credit' ? { ...a, snapshotTs: QUIET_TS } : a);
+  const quietTree = quiet.render('wallet');
+  assert.ok(byId(quietTree, 'wallet-quiet-line'));
+  press(byId(quietTree, 'wallet-hide-credit'));
+  assert.deepEqual(JSON.parse(JSON.stringify(quiet.events.filter((e) => e[0] === 'editAccount'))), [['editAccount', 'credit', { archived: true }]]);
+});
+
 test('Add activity lists statement import, add by hand and paste, each to an existing screen', () => {
   const h = createHarness({ platform: 'ios' });
   const tree = h.render('wallet');

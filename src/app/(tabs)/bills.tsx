@@ -759,7 +759,7 @@ export default function BillsScreen() {
         testID={`bills-mark-cancelled-${sub.title.trim().toLowerCase()}`}
         onPress={() => onMarkCancelled(sub)}
         style={({ pressed }) => [styles.pill, { borderColor: band.rule,
-          backgroundColor: pressed ? theme.backgroundSelected : band.card }]}>
+          backgroundColor: band.card, opacity: pressed ? 0.75 : 1 }]}>
         <ThemedText type="smallBold">{w.markCancelled}</ThemedText>
       </Pressable>
     </View>
@@ -897,7 +897,7 @@ export default function BillsScreen() {
                       testID={`bills-still-paying-${sub.title.trim().toLowerCase()}`}
                       onPress={() => undoCancelled(sub.title)}
                       style={({ pressed }) => [styles.pill, { borderColor: band.rule,
-                        backgroundColor: pressed ? theme.backgroundSelected : band.sheet }]}>
+                        backgroundColor: band.sheet, opacity: pressed ? 0.75 : 1 }]}>
                       <ThemedText type="smallBold">{w.stillPaying}</ThemedText>
                     </Pressable>
                   </View>

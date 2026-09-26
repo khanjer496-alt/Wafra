@@ -102,11 +102,12 @@ function GoalScreen({ goalId }: { goalId: string }) {
         contentStyle={styles.content}
         scrollProps={{ showsVerticalScrollIndicator: false }}
         bandContent={(
-          <View style={styles.hero} testID="goal-progress" accessible accessibilityRole="text"
-            accessibilityLabel={`${goal.title}. ${w.progressA11y(progress.percent)}. ${w.savedOf(formatAED(goal.savedFils), formatAED(goal.targetFils))}`}>
-            <View style={styles.ring}>
+          <View style={styles.hero} testID="goal-progress">
+            {/* The ring speaks its percent; the name below stays the screen's header. */}
+            <View style={styles.ring} accessible accessibilityRole="image"
+              accessibilityLabel={`${w.progressA11y(progress.percent)}. ${w.savedOf(formatAED(goal.savedFils), formatAED(goal.targetFils))}`}>
               <Svg width={RING} height={RING}>
-                <Circle cx={RING / 2} cy={RING / 2} r={ring.radius} stroke={band.tile} strokeWidth={STROKE} fill="none" />
+                <Circle cx={RING / 2} cy={RING / 2} r={ring.radius} stroke={band.bandRule} strokeWidth={STROKE} fill="none" />
                 {ring.drawn && (
                   <Circle
                     cx={RING / 2}
@@ -123,13 +124,13 @@ function GoalScreen({ goalId }: { goalId: string }) {
                 )}
               </Svg>
               <View style={styles.ringLabel} pointerEvents="none">
-                <ThemedText tabular style={[styles.percent, { color: band.onBand }]}>{`${progress.percent}%`}</ThemedText>
-                <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{w.savedWord}</ThemedText>
+                <ThemedText tabular maxFontSizeMultiplier={1.2} style={[styles.percent, { color: band.onBand }]}>{`${progress.percent}%`}</ThemedText>
+                <ThemedText type="meta" maxFontSizeMultiplier={1.4} style={{ color: band.onBandSecondary }}>{w.savedWord}</ThemedText>
               </View>
             </View>
             <View style={styles.titleRow}>
               <Icon name={goalIcon(goal.emoji)} size={20} color={band.onBand} />
-              <ThemedText accessibilityRole="header" style={[styles.goalName, { color: band.onBand }]}>{goal.title}</ThemedText>
+              <ThemedText accessibilityRole="header" maxFontSizeMultiplier={1.6} style={[styles.goalName, { color: band.onBand }]}>{goal.title}</ThemedText>
             </View>
             <ThemedText type="default" tabular style={[styles.center, { color: band.onBandSecondary }]}>
               {w.savedOf(formatAED(goal.savedFils), formatAED(goal.targetFils))}

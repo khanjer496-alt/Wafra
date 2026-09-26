@@ -180,7 +180,7 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
               ? <View testID="account-detail-balance" accessible accessibilityRole="text"
                   accessibilityLabel={[w.latestBalance, w.noBalanceYet].join('. ')} style={styles.noBalance}>
                   <ThemedText type="small" style={{ color: band.onBandSecondary }}>{w.latestBalance}</ThemedText>
-                  <ThemedText style={[styles.dash, { color: band.onBand }]}>—</ThemedText>
+                  <ThemedText maxFontSizeMultiplier={1.5} style={[styles.dash, { color: band.onBand }]}>—</ThemedText>
                   <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{w.noBalanceYet}</ThemedText>
                 </View>
               : <View style={styles.balance}>

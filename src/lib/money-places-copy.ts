@@ -146,7 +146,7 @@ export const moneyPlacesCopy = {
     savedWord: 'saved',
     leftToSave: 'Left to save',
     recordAmount: (amount: string) => `Record ${amount}`,
-    settlesIt: 'Settles it',
+    settlesIt: 'Clears the statement',
     asBankStated: 'As your bank stated',
     typeIt: 'Type it',
     cardsCount: (n: number) => n === 1 ? '1 card' : `${n} cards`,
@@ -283,7 +283,7 @@ export const moneyPlacesCopy = {
     savedWord: 'مُدّخر',
     leftToSave: 'المتبقي للادخار',
     recordAmount: (amount: string) => `تسجيل ${amount}`,
-    settlesIt: 'يسدّد الكشف',
+    settlesIt: 'لا يبقى شيء في الكشف',
     asBankStated: 'كما ذكره بنكك',
     typeIt: 'اكتبه',
     cardsCount: (n: number) => n === 1 ? 'بطاقة واحدة' : n === 2 ? 'بطاقتان'
