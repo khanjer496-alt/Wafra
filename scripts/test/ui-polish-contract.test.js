@@ -167,13 +167,15 @@ assert.match(task3Transactions, /<ActionIconButton[\s\S]*?label=\{tr\('clearSear
 assert.match(task3Transactions, /const clearFilters[\s\S]*?setSmsOnly\(false\)/);
 
 const task3Add = read('src/app/add-transaction.tsx');
-assert.match(task3Add, /<ScreenScaffold[\s\S]*?keyboardAware[\s\S]*?headerMode="inline"/);
+// Design language E: Add is a green band (type, amount, merchant, suggested
+// categories) over a sheet holding the detail chips and keypad.
+assert.match(task3Add, /<BandScaffold[\s\S]*?band="flow"[\s\S]*?keyboardAware[\s\S]*?bandContent=\{manualBand\}/);
 assert.match(task3Add, /scrollProps=\{\{ keyboardShouldPersistTaps: 'handled' \}\}/);
 assert.match(task3Add, /footer=\{/);
-assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 2,
-  'Manual Add keeps labelled amount/title fields while alert review avoids redundant editable fields');
-assert.match(task3Add, /!reviewItem \? <TextField[\s\S]*?descriptionOptional/,
-  'captured-alert review does not ask the user to rewrite a title Wafra already has');
+assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 1,
+  'Manual Add keeps a labelled typed-amount field');
+assert.match(task3Add, /const manualBand = reviewItem \? undefined[\s\S]*?<BandTextField[\s\S]*?label=\{tUi\('descriptionOptional'\)\}/,
+  'captured-alert review does not ask the user to rewrite a title Wafra already has; a manual entry labels its merchant field');
 assert.match(task3Add, /const focusFirstInvalid = \(\) => \{/);
 assert.match(task3Add, /const onSavePress = \(\) => \{[\s\S]*?setShowValidation\(true\)[\s\S]*?focusFirstInvalid\(\)/);
 assert.match(task3Add, /disabled=\{saving \|\| reviewRouteInvalid\}/);

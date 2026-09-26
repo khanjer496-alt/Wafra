@@ -232,6 +232,7 @@ function createHarness(options = {}) {
   // The limit dial's drag is native; its steppers and adjustable actions run.
   native.PanResponder={create:()=>({panHandlers:{}})};
   local('@/components/ui/band/dial-limit');
+  local('@/components/add-band-field');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
   local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');
   local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/bills/bills-timeline');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');
