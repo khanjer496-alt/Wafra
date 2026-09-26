@@ -23,7 +23,8 @@ for(const language of ['en','ar'])for(const theme of ['light','dark']){
   }
  });
  test(`review separates unconfirmed entries: ${language}/${theme}`,()=>{
-  const h=createWorkflowHarness({language,theme,state:{reviewTray:{pending:[pending(),pending('expired',{expiresAt:Date.now()-1,amount:{currency:'AED',minorUnits:'99999',exponent:2}})]}}});
+  // State slot 2 is Review's one-at-a-time mode (the default); these read the list.
+  const h=createWorkflowHarness({language,theme,states:{2:false},state:{reviewTray:{pending:[pending(),pending('expired',{expiresAt:Date.now()-1,amount:{currency:'AED',minorUnits:'99999',exponent:2}})]}}});
   const tree=h.renderScreen('review-alerts'),words=h.deps['@/components/workflows/workflow-copy'].workflowCopy(language);
   assert.ok(text(tree).includes(words.reviewBody));assert.ok(text(tree).includes('123.45'));assert.ok(!text(tree).includes('999.99'));
   assert.deepEqual(h.events,[]);
@@ -95,15 +96,15 @@ for(const language of ['en','ar'])test(`Data and help keeps every data row, with
  assert.ok(!h.events.some(e=>['unpairDevice','clearAll','setIosCaptureEnabled'].includes(e[0])),'asking to erase erases nothing');
 });
 test('review action preserves source reviewId rather than silently inserting money',()=>{
- const h=createWorkflowHarness({state:{reviewTray:{pending:[pending('source-identity')]}}}),tree=h.renderScreen('review-alerts');
+ const h=createWorkflowHarness({states:{2:false},state:{reviewTray:{pending:[pending('source-identity')]}}}),tree=h.renderScreen('review-alerts');
  const button=walk(tree).find(n=>n.props?.accessibilityLabel?.startsWith(h.deps['@/lib/i18n'].t('reviewAlertReview'))&&n.props.onPress);
  button.props.onPress();assert.deepEqual(JSON.parse(JSON.stringify(h.events)),[['route',{pathname:'/add-transaction',params:{reviewId:'source-identity'}}]]);
 });
 test('dismiss requests confirmation; confirmation alone calls retained dismissal handler',async()=>{
- const item=pending('review-to-dismiss'),h=createWorkflowHarness({state:{reviewTray:{pending:[item]}}}),tree=h.renderScreen('review-alerts');
+ const item=pending('review-to-dismiss'),h=createWorkflowHarness({states:{2:false},state:{reviewTray:{pending:[item]}}}),tree=h.renderScreen('review-alerts');
  walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel?.startsWith(h.deps['@/lib/i18n'].t('dismiss')+'.')).props.onPress();
  assert.deepEqual(h.events,[['state',0,item]]);assert.equal(boundary(tree,'ConfirmSheet').props.visible,false);
- const confirmed=createWorkflowHarness({state:{reviewTray:{pending:[item]}},states:{0:item}}),next=confirmed.renderScreen('review-alerts');
+ const confirmed=createWorkflowHarness({state:{reviewTray:{pending:[item]}},states:{0:item,2:false}}),next=confirmed.renderScreen('review-alerts');
  const sheet=boundary(next,'ConfirmSheet');assert.equal(sheet.props.visible,true);assert.equal(sheet.props.destructive,true);
  sheet.props.onConfirm();await Promise.resolve();await Promise.resolve();
  assert.ok(confirmed.events.some(e=>e[0]==='dismissReviewAlert'&&e[1]===item.id&&e[2]==='dismissed'));

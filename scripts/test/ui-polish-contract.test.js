@@ -432,7 +432,7 @@ const task8Routes = [
   ['accuracy', 'accuracyHeader'],
   ['categorise', 'categoriseHeader'],
   ['feedback', 'feedbackHeader'],
-  ['review-alerts', 'reviewAlertsHeader'],
+  // Review moved onto the green band (design language E); asserted below.
   ['trusted-devices', 'trustedDevicesHeader'],
 ];
 for (const [route, header] of task8Routes) {
@@ -514,9 +514,12 @@ assert.match(task8Feedback, /isParserResearchBuild\(\)[\s\S]{0,500}router\.push\
 assert.match(task8Feedback, /fontFamily: Fonts\.mono[\s\S]*?textAlign: 'left'[\s\S]*?writingDirection: 'ltr'/);
 
 const task8Review = read('src/app/review-alerts.tsx');
-assert.match(task8Review, /useScreenContentInsets\(\{ hasFooter: false \}\)/);
-assert.match(task8Review, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"[\s\S]*?header=\{reviewAlertsHeader\}/);
-assert.match(task8Review, /<FlatList[\s\S]*?contentContainerStyle=\{\[listInsets\.contentContainerStyle,[\s\S]*?contentInset=\{listInsets\.contentInset\}[\s\S]*?scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}[\s\S]*?contentInsetAdjustmentBehavior="automatic"/);
+// Green band: one card at a time scrolls with its band; the full list keeps
+// its own virtualized scroll on the sheet and clears the home indicator.
+assert.match(task8Review, /const band = useBand\('flow'\)/);
+assert.match(task8Review, /const listBottom = useBandBottomInset\(\)/);
+assert.match(task8Review, /<BandScaffold[\s\S]*?band="flow"[\s\S]*?scroll=\{stepMode\}[\s\S]*?nav=\{\{ back: true,/);
+assert.match(task8Review, /<FlatList[\s\S]*?contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}[\s\S]*?scrollIndicatorInsets=\{\{ top: 0, bottom: listBottom \}\}/);
 assert.match(task8Review, /item\.expiresAt > now/);
 assert.match(task8Review, /minorUnits\.padStart\(exponent \+ 1, '0'\)/);
 assert.match(task8Review, /pathname: '\/add-transaction', params: \{ reviewId: item\.id \}/);

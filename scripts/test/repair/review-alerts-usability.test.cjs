@@ -25,17 +25,25 @@ for (const language of ['en', 'ar']) {
     assert.equal(byId(empty, 'review-alerts-intro'), undefined);
     assert.equal(text(empty).split(words.complete).length - 1, 1);
     assert.deepEqual(h.events, []);
+    // One at a time is the default: the band says "1 of 2" and the count.
     const active = createWorkflowHarness({ language, state: { reviewTray: { pending: [pending('purchase'), pending('balance')] } } });
+    const count = active.deps['@/lib/i18n'].tf('reviewAlertsSettingsCount', { count: 2 });
     const intro = byId(active.renderScreen('review-alerts'), 'review-alerts-intro');
-    assert.ok(text(intro).includes(active.deps['@/lib/i18n'].tf('reviewAlertsSettingsCount', { count: 2 })));
-    assert.ok(text(intro).includes(words.reviewBody));
+    assert.ok(text(intro).includes(count));
+    assert.ok(text(intro).includes(active.deps['@/lib/details-copy'].detailsCopy[language].review.position(1, 2)));
     assert.deepEqual(active.events, []);
+    // The list's band keeps the count and the one-line explanation.
+    const list = createWorkflowHarness({ language, state: { reviewTray: { pending: [pending('purchase'), pending('balance')] } }, states: { 2: false } });
+    const listIntro = byId(list.renderScreen('review-alerts'), 'review-alerts-intro');
+    assert.ok(text(listIntro).includes(count));
+    assert.ok(text(listIntro).includes(words.reviewBody));
+    assert.deepEqual(list.events, []);
   });
   for (const [family, name, label] of [['purchase', 'amount', 'genericAmount'], ['statement', 'statementTotal', 'genericStatementTotal'],
     ['balance', 'balance', 'genericBalance'], ['balance', 'creditLimit', 'genericCreditLimit'], ['statement', 'minimumDue', 'genericMinimumDue']]) {
     test(`${language}/${family}/${name}: a captured amount names the exact financial fact`, () => {
       const item = pending(family, { [name]: field(money('12567', 3)) });
-      const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [item] } } });
+      const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [item] } }, states: { 2: false } });
       const tree = h.renderScreen('review-alerts');
       const row = byId(tree, 'review-alert-row');
       assert.ok(text(row).includes(h.deps['@/lib/i18n'].t(label)));
@@ -75,7 +83,7 @@ for (const language of ['en', 'ar']) {
     const expiredAt = Date.now() - 86400000;
     const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [soon, later], tombstones: [
       { sourceKey: 'synthetic-expired', resolvedAt: expiredAt, expiresAt: expiredAt + 90 * 86400000, outcome: 'expired' },
-    ] } } });
+    ] } }, states: { 2: false } });
     const tf = h.deps['@/lib/i18n'].tf;
     const tree = h.renderScreen('review-alerts');
     const expiries = walk(tree).filter(node => node.props?.testID === 'review-alert-expiry');
@@ -109,7 +117,7 @@ for (const language of ['en', 'ar']) {
   });
   test(`${language}: ambiguous amounts do not become an explicit financial fact`, () => {
     const item = pending('purchase', { amount: field(money(), 'ambiguous') });
-    const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [item] } } });
+    const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [item] } }, states: { 2: false } });
     const row = byId(h.renderScreen('review-alerts'), 'review-alert-row');
     assert.ok(text(row).includes(h.deps['@/lib/i18n'].t('genericAmountNeedsReview')));
     assert.ok(!text(row).includes('123.45'));
@@ -269,7 +277,8 @@ for (const language of ['en', 'ar']) {
     const named = pending('purchase', { amount: field(money()) });
     const unnamed = pending('purchase', { amount: field(money()), merchant: field('Maybe shop', 'ambiguous') });
     unnamed.id = 'synthetic-unnamed'; unnamed.sourceKey = 'synthetic-source-unnamed';
-    const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [named, unnamed] } } });
+    unnamed.observedAt = named.observedAt - 1000; // newest first: pin the row order
+    const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [named, unnamed] } }, states: { 2: false } });
     const words = h.deps['@/lib/details-copy'].detailsCopy[language].review.why;
     const rows = walk(h.renderScreen('review-alerts')).filter(node => node.props?.testID === 'review-alert-row');
     assert.equal(rows.length, 2);
@@ -278,33 +287,50 @@ for (const language of ['en', 'ar']) {
     // The alert-stated merchant heads the card; an unsure one is never shown as a name.
     assert.ok(text(rows[0]).includes('Synthetic shop'));
     assert.ok(!text(rows[1]).includes('Maybe shop'));
+    // Logo tiles only for a merchant the alert stated; otherwise the family glyph.
+    assert.ok(byId(rows[0], 'review-merchant-tile'));
+    assert.ok(byId(rows[1], 'review-family-tile'));
+    assert.equal(byId(rows[1], 'review-merchant-tile'), undefined);
   });
   test(`${language}: one at a time shows "1 of N" and answers through the existing Add and Dismiss paths`, () => {
     const purchase = pending('purchase', { amount: field(money()) });
     const balance = pending('balance', { balance: field(money('99900')) });
-    const list = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } } });
+    // Newest first: pin the order so the purchase is always card one.
+    balance.observedAt = purchase.observedAt - 1000;
+    const list = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } }, states: { 2: false } });
     const words = list.deps['@/lib/details-copy'].detailsCopy[language].review;
     const listTree = list.renderScreen('review-alerts');
-    assert.ok(byId(listTree, 'review-mode-toggle'), 'the mode is offered when more than one item waits');
-    assert.equal(byId(listTree, 'review-stepper'), undefined, 'the list stays the default');
-    const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } }, states: { 2: true } });
+    assert.ok(byId(listTree, 'review-mode-toggle'), 'the list offers one at a time when more than one item waits');
+    assert.equal(byId(listTree, 'review-stepper'), undefined);
+    assert.equal(walk(listTree).filter(node => node.props?.testID === 'review-alert-row').length, 2);
+    // One at a time is the default way in, with the full list one tap away.
+    const h = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } } });
     const tree = h.renderScreen('review-alerts');
+    assert.ok(byId(tree, 'review-stepper'));
+    assert.ok(text(byId(tree, 'review-mode-toggle')).includes(words.showList));
     assert.ok(text(byId(tree, 'review-step-position')).includes(words.position(1, 2)));
     assert.equal(walk(tree).filter(node => node.props?.testID === 'review-step-card').length, 1);
     assert.equal(walk(tree).filter(node => node.props?.testID === 'review-alert-row').length, 0);
     const card = byId(tree, 'review-step-card');
     assert.ok(text(card).includes('AED 123.45'), 'the amount is the alert\'s own, not converted');
-    assert.ok(text(card).includes(words.notPurchase));
-    byId(card, 'review-step-dismiss').props.onPress();
-    byId(card, 'review-alert-open').props.onPress();
+    assert.ok(text(card).includes('Synthetic shop'), 'the merchant the alert named heads the card');
+    assert.ok(byId(card, 'review-merchant-tile'), 'a named merchant gets its logo tile');
+    assert.equal(walk(tree).filter(node => node.props?.testID === 'review-stack-peek').length, 1, 'one more item waits behind this one');
+    assert.ok(text(byId(tree, 'review-step-dismiss')).includes(words.notPurchase));
+    assert.ok(text(byId(tree, 'review-alert-open')).includes(words.looksRight));
+    byId(tree, 'review-step-dismiss').props.onPress();
+    byId(tree, 'review-alert-open').props.onPress();
     const events = JSON.parse(JSON.stringify(h.events));
     assert.deepEqual(events.filter(event => event[0] !== 'state'), [['route', { pathname: '/add-transaction', params: { reviewId: purchase.id } }]],
       'nothing is added or dismissed from the card itself');
     assert.ok(events.some(event => event[0] === 'state' && event[1] === 0 && event[2]?.id === purchase.id),
       '"Not a purchase" opens the same dismissal confirmation as the list');
-    const second = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } }, states: { 2: true, 3: 1 } });
-    const secondCard = byId(second.renderScreen('review-alerts'), 'review-step-card');
-    assert.ok(!text(secondCard).includes(words.notPurchase), 'a balance update is dismissed, not called "not a purchase"');
+    const second = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } }, states: { 3: 1 } });
+    const secondTree = second.renderScreen('review-alerts');
+    const secondCard = byId(secondTree, 'review-step-card');
+    assert.ok(text(byId(secondTree, 'review-step-position')).includes(words.position(2, 2)));
+    assert.ok(!text(byId(secondTree, 'review-step-dismiss')).includes(words.notPurchase), 'a balance update is dismissed, not called "not a purchase"');
     assert.ok(text(secondCard).includes(h.deps['@/lib/details-copy'].detailsCopy[language].review.why['not-a-payment']));
+    assert.equal(walk(secondTree).filter(node => node.props?.testID === 'review-stack-peek').length, 0, 'nothing waits behind the last item');
   });
 }
