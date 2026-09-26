@@ -19,6 +19,21 @@ export interface CurrencyActivity {
   latestDate: string;
 }
 
+/** How one converted row got its ledger amount. */
+export type FxRowSource = 'bank' | 'reference' | 'estimated';
+
+/**
+ * The rate source of one foreign row, by the same rule the summary counts
+ * with: the bank's own converted figure, a dated reference rate, or anything
+ * else (a fallback, or a row from before the source was recorded), which is
+ * an approximation until a reference rate replaces it.
+ */
+export function fxRowSource(tx: Pick<Transaction, 'fxSource'>): FxRowSource {
+  if (tx.fxSource === 'bank') return 'bank';
+  if (tx.fxSource === 'reference') return 'reference';
+  return 'estimated';
+}
+
 export interface ForeignActivitySummary {
   groups: CurrencyActivity[];
   transactions: Transaction[];
@@ -92,8 +107,9 @@ export function summarizeForeignActivity(
     row.localFils += tx.amountFils;
     row.count += 1;
     row.latestDate = row.latestDate > tx.date ? row.latestDate : tx.date;
-    if (tx.fxSource === 'bank') row.bankQuotedCount += 1;
-    else if (tx.fxSource === 'reference') row.referenceCount += 1;
+    const source = fxRowSource(tx);
+    if (source === 'bank') row.bankQuotedCount += 1;
+    else if (source === 'reference') row.referenceCount += 1;
     else row.estimatedCount += 1;
     grouped.set(currency, row);
   }

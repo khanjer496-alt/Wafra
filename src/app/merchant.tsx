@@ -1,32 +1,42 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { FlatList, Platform, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { MerchantCategoryRule } from '@/components/merchant-category-rule';
 import { MerchantMonthBars } from '@/components/merchant-month-bars';
 import { PeriodSheet } from '@/components/period-sheet';
 import { TransactionRow } from '@/components/transaction-row';
-import { Button } from '@/components/ui/controls';
+import { BandScaffold } from '@/components/ui/band-scaffold';
+import { BandFigure } from '@/components/ui/band/band-figure';
+import { EButton } from '@/components/ui/band/e-button';
+import { StatTile, statTileColors } from '@/components/ui/band/stat-tile';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Money } from '@/components/ui/money';
 import { SkeletonRows } from '@/components/ui/states';
 import { SegmentedControl } from '@/components/ui/segmented-control';
-import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
+import { Fonts } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { useTheme } from '@/hooks/use-theme';
 import { assistantCopy } from '@/lib/assistant-copy';
+import { categoryLabel } from '@/lib/categories';
+import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { countsInTotals, internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { projectMerchantSpending } from '@/lib/merchant-spending';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
 import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
-import type { Transaction } from '@/lib/types';
+import type { CategoryId, Transaction } from '@/lib/types';
 
-const transactionKey = (tx: Transaction) => tx.id;
 const RECENT_TRANSACTION_LIMIT = 6;
+
+/** The one category every row shares, or null when they differ (or there are none). */
+function sharedCategory(rows: readonly Transaction[]): CategoryId | null {
+  const first = rows[0]?.category;
+  return first && rows.every(row => row.category === first) ? first : null;
+}
 
 export default function MerchantRoute() {
   const { name, type } = useLocalSearchParams<{ name?: string | string[]; type?: string | string[] }>();
@@ -35,11 +45,18 @@ export default function MerchantRoute() {
   return <MerchantScreen key={`${merchant}:${activityType}`} merchant={merchant} activityType={activityType} />;
 }
 
+/**
+ * One merchant in design language E. A Spending detail, so it wears the clay
+ * band: the logo tile, name and payment count, the period's total with the
+ * average under it, and the month-by-month bars. The sheet holds the
+ * "Always <category>" rule, Ask, the recent rows (at most six) and the
+ * handoff to every transaction.
+ */
 function MerchantScreen({ merchant, activityType }: { merchant: string; activityType: Transaction['type'] }) {
-  const router = useRouter(); const theme = useTheme(); const language = useLanguage();
+  const router = useRouter(); const language = useLanguage();
+  const band = useBand('spending');
   const large = useLargeTextLayout(); const { state } = useStore(); const { period, setPeriod } = usePeriod();
   const w = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
-  const insets = useScreenContentInsets({ hasFooter: false });
   const income = activityType === 'income';
   const [view, setView] = useState<'spending' | 'received' | 'all'>(income ? 'received' : 'spending');
   const [entry, setEntry] = useState<Transaction | null>(null); const [periodOpen, setPeriodOpen] = useState(false);
@@ -60,108 +77,119 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
   const fallback = income ? '/transactions?type=income' : '/merchants';
   const data = useMemo(() => matches.slice(0, RECENT_TRANSACTION_LIMIT), [matches]);
   const openEntry = useCallback((tx: Transaction) => setEntry(tx), []);
-  const renderRow = useCallback(({ item }: { item: Transaction }) => <View style={[styles.transaction, { borderColor: theme.cardBorder }]}>
-    <ThemedText type="meta" themeColor="textSecondary">{item.date}</ThemedText>
-    <TransactionRow transaction={item} account={accountById.get(item.accountId)} internal={internal.has(item.id)} onPress={openEntry} merchantLinks={false} />
-    {!countsInTotals(item, live, internal) && <ThemedText type="meta" themeColor="textSecondary">{income ? w.excludedIncomeRow : w.excludedRow}</ThemedText>}
-  </View>, [theme.cardBorder, accountById, internal, live, openEntry, income, w.excludedIncomeRow, w.excludedRow]);
+  const category = sharedCategory(primaryRows);
+  const lang = language === 'ar' ? 'ar' : 'en';
+  const range = periodRange(period);
+  const countLabel = income ? w.incomeCount : w.purchases;
+  const averageLabel = `${income ? w.averageReceived : w.average}${approximate ? ' ≈' : ''}`;
+  const tileText = statTileColors(band, 'band');
+
+  const bandContent = state.hydrated ? <View style={styles.band}>
+    <View style={[styles.identity, large && styles.stack]}>
+      <MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={56} />
+      <View style={styles.identityCopy}>
+        <ThemedText type="title" accessibilityRole="header" numberOfLines={large ? undefined : 2}
+          style={[styles.name, { color: band.onBand }]}>{merchant || pickLabel}</ThemedText>
+        {/* A category only when every row shares it; mixed rows name none. */}
+        {category ? <ThemedText type="small" style={{ color: band.onBandSecondary }}>{categoryLabel(category, lang)}</ThemedText> : null}
+      </View>
+    </View>
+    <BandFigure testID={income ? 'merchant-total-received' : 'merchant-total-spent'} palette={band}
+      label={`${income ? w.totalReceived : w.total} · ${periodLabel(period)}`} fils={primaryTotal}
+      qualifier={range ?? undefined} />
+    <View style={[styles.tiles, large && styles.stack]}>
+      <StatTile palette={band} label={countLabel} accessibilityLabel={`${countLabel}: ${primaryRows.length}`}
+        style={large ? styles.tileFull : undefined}>
+        <ThemedText type="title" tabular testID={income ? 'merchant-income-count' : 'merchant-purchase-count'}
+          style={[styles.tileFigure, { color: tileText.fg }]}>{primaryRows.length}</ThemedText>
+      </StatTile>
+      {average !== null && <StatTile palette={band} label={averageLabel} style={large ? styles.tileFull : undefined}>
+        <BandFigure palette={band} size="medium" fils={average} color={tileText.fg} secondaryColor={tileText.fgSecondary}
+          fitInset={large ? 28 : 200} />
+      </StatTile>}
+    </View>
+    {merchant ? <MerchantMonthBars transactions={state.transactions} merchant={merchant} period={period}
+      live={live} internal={internal} kind={income ? 'income' : 'expense'} monthStartDay={state.monthStartDay} palette={band} /> : null}
+  </View> : null;
 
   return <>
-    <ScreenScaffold scroll={false} virtualized testID="merchant-detail"
-      header={{ title: activityTitle, back: { label: w.back, onPress: () => router.canGoBack() ? router.back() : router.replace(fallback) } }}>
-      {!state.hydrated ? <View style={styles.empty}><SkeletonRows count={3} height={80} /></View> :
-      <FlatList data={data} renderItem={renderRow} keyExtractor={transactionKey}
-        contentContainerStyle={[insets.contentContainerStyle, styles.listContent]} contentInset={insets.contentInset}
-        scrollIndicatorInsets={insets.scrollIndicatorInsets} contentInsetAdjustmentBehavior="automatic"
-        keyboardShouldPersistTaps="handled" initialNumToRender={12} maxToRenderPerBatch={10} windowSize={7}
-        removeClippedSubviews={Platform.OS === 'android'}
-        ListHeaderComponent={<View style={styles.header}>
-          <View style={[styles.hero, { borderColor: theme.cardBorder }]}>
-            <View style={[styles.identity, large && styles.stack]}>
-              <MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={52} />
-              <View style={styles.identityCopy}>
-                <ThemedText type="heading" numberOfLines={2}>{merchant || pickLabel}</ThemedText>
-                {periodRange(period) ? <ThemedText type="meta" themeColor="textSecondary">{periodRange(period)}</ThemedText> : null}
-              </View>
-              <View testID="merchant-period" style={styles.periodSlot}>
-                <Button label={periodLabel(period)} icon="calendar" variant="ghost" wrapLabel onPress={() => setPeriodOpen(true)} />
-              </View>
-            </View>
-            <View style={styles.heroAmount} testID={income ? 'merchant-total-received' : 'merchant-total-spent'}>
-              <ThemedText type="micro" themeColor="textSecondary">{income ? w.totalReceived : w.total}</ThemedText>
-              <Money fils={primaryTotal} type="amount" color={income ? theme.income : undefined} />
-            </View>
-          </View>
-          <View style={[styles.tileRow, large && styles.stack]}>
-            <View style={[styles.tile, { borderColor: theme.cardBorder }]}>
-              <ThemedText type="micro" themeColor="textSecondary">{income ? w.incomeCount : w.purchases}</ThemedText>
-              <ThemedText type="title" tabular testID={income ? 'merchant-income-count' : 'merchant-purchase-count'}>{primaryRows.length}</ThemedText>
-            </View>
-            {average !== null && <View style={[styles.tile, { borderColor: theme.cardBorder }]}>
-              <ThemedText type="micro" themeColor="textSecondary">{income ? w.averageReceived : w.average}{approximate ? ' ≈' : ''}</ThemedText>
-              <Money fils={average} type="subtitle" />
-            </View>}
-          </View>
-          {merchant ? <MerchantMonthBars transactions={state.transactions} merchant={merchant} period={period}
-            live={live} internal={internal} kind={income ? 'income' : 'expense'} monthStartDay={state.monthStartDay} /> : null}
-          {merchant ? <MerchantCategoryRule merchant={merchant} kind={income ? 'income' : 'expense'} /> : null}
-          {merchant && view !== 'all' && <View testID="merchant-ask-wafra" style={styles.assistantAction}>
-            <Button label={income ? assistantCopy.askIncome : assistantCopy.askMerchant} variant="ghost" icon="spark"
-              onPress={() => router.push({ pathname: '/assistant', params: { question: income
-                ? assistantCopy.incomeQuestion(merchant)
-                : assistantCopy.merchantChangedQuestion(merchant) } })} />
-          </View>}
-          {!income && summary.received.length > 0 && <View style={[styles.received, { borderColor: theme.cardBorder }]} testID="merchant-money-received">
-            <View style={styles.receivedRow}>
-              <ThemedText type="smallBold">{w.received}</ThemedText>
-              <Money fils={summary.receivedFils} type="smallBold" color={theme.income} />
-            </View>
-            <ThemedText type="meta" themeColor="textSecondary">{w.receivedNote}</ThemedText>
-          </View>}
-          <ThemedText type="meta" themeColor="textTertiary" style={styles.exclusions}>{income ? w.incomeExclusions : w.exclusions}</ThemedText>
-          <SegmentedControl value={view} onChange={setView} label={activityTitle} segments={[
-            income ? { value: 'received', label: w.income } : { value: 'spending', label: w.spending }, { value: 'all', label: w.allActivity },
-          ]} />
-          <View style={styles.recentHeading}>
-            <ThemedText type="smallBold">{w.recent}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary" accessibilityLiveRegion="polite">{data.length} / {matches.length}</ThemedText>
-          </View>
+    <BandScaffold band="spending" testID="merchant-detail" contentStyle={styles.sheet}
+      nav={{
+        back: () => router.canGoBack() ? router.back() : router.replace(fallback),
+        title: activityTitle,
+        actions: [{ icon: 'calendar', label: everydayBandCopy(language).choosePeriod(periodLabel(period)),
+          onPress: () => setPeriodOpen(true), testID: 'merchant-period' }],
+      }}
+      bandContent={bandContent}>
+      {!state.hydrated ? <View style={styles.empty}><SkeletonRows count={3} height={80} /></View> : <>
+        {merchant ? <MerchantCategoryRule merchant={merchant} kind={income ? 'income' : 'expense'} palette={band} /> : null}
+        {merchant && view !== 'all' && <View testID="merchant-ask-wafra">
+          <EButton palette={band} variant="secondary" icon="spark"
+            label={income ? assistantCopy.askIncome : assistantCopy.askMerchant}
+            onPress={() => router.push({ pathname: '/assistant', params: { question: income
+              ? assistantCopy.incomeQuestion(merchant)
+              : assistantCopy.merchantChangedQuestion(merchant) } })} />
         </View>}
-        ListEmptyComponent={<View style={styles.empty}><ThemedText type="smallBold">{view === 'received' ? w.incomeEmpty : view === 'spending' ? w.empty : w.emptyActivity}</ThemedText>
-          <Button label={merchant ? w.allTime : pickLabel} variant="outline" onPress={() => merchant ? setPeriod({ mode: 'all' }) : router.replace(fallback)} />
+        {!income && summary.received.length > 0 && <View style={[styles.received, { backgroundColor: band.card, borderColor: band.rule }]}
+          testID="merchant-money-received">
+          <View style={styles.receivedRow}>
+            <ThemedText type="smallBold" style={{ color: band.text }}>{w.received}</ThemedText>
+            <Money fils={summary.receivedFils} type="smallBold" color={band.text} />
+          </View>
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{w.receivedNote}</ThemedText>
         </View>}
-        ListFooterComponent={<View style={styles.footer}>
-          {merchant && <View testID="merchant-view-all-transactions"><Button label={view === 'received' ? w.viewAllIncome : w.viewAllTransactions}
-            variant="outline" icon="arrow-up-right" wrapLabel
+        <SegmentedControl value={view} onChange={setView} label={activityTitle} segments={[
+          income ? { value: 'received', label: w.income } : { value: 'spending', label: w.spending }, { value: 'all', label: w.allActivity },
+        ]} />
+        <View style={styles.recentHeading}>
+          <ThemedText type="subtitle" accessibilityRole="header" style={{ color: band.text }}>{w.recent}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.textSecondary }} accessibilityLiveRegion="polite">{data.length} / {matches.length}</ThemedText>
+        </View>
+        {data.length === 0 ? <View style={styles.empty} testID="merchant-recent-empty">
+          <ThemedText type="smallBold" style={{ color: band.text }}>{view === 'received' ? w.incomeEmpty : view === 'spending' ? w.empty : w.emptyActivity}</ThemedText>
+          <EButton palette={band} variant="secondary" label={merchant ? w.allTime : pickLabel}
+            onPress={() => merchant ? setPeriod({ mode: 'all' }) : router.replace(fallback)} />
+        </View> : <View testID="merchant-recent-rows">
+          {data.map((item, index) => <View key={item.id} testID="merchant-recent-row"
+            style={[styles.transaction, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{item.date}</ThemedText>
+            <TransactionRow transaction={item} account={accountById.get(item.accountId)} internal={internal.has(item.id)}
+              onPress={openEntry} merchantLinks={false} />
+            {!countsInTotals(item, live, internal) && <ThemedText type="meta" style={{ color: band.textSecondary }}>
+              {income ? w.excludedIncomeRow : w.excludedRow}</ThemedText>}
+          </View>)}
+        </View>}
+        <View style={styles.footer}>
+          {merchant && <View testID="merchant-view-all-transactions"><EButton palette={band} variant="secondary"
+            label={view === 'received' ? w.viewAllIncome : w.viewAllTransactions}
             onPress={() => router.push(`/transactions?type=${view === 'received' ? 'income' : 'all'}&merchant=${encodeURIComponent(merchant)}`)} /></View>}
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{income ? w.incomeExclusions : w.exclusions}</ThemedText>
           {(view === 'received' ? summary.hasConvertedIncome : view === 'spending' ? summary.hasConvertedAmounts :
             summary.hasConvertedAmounts || summary.hasConvertedIncome) &&
-            <ThemedText type="meta" themeColor="textSecondary">{w.converted}</ThemedText>}
-          <ThemedText type="meta" themeColor="textSecondary">{income ? w.sourceIdentity : w.identity} {income ? w.incomePeriod : w.sharedPeriod}</ThemedText>
-        </View>} />}
-    </ScreenScaffold>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{w.converted}</ThemedText>}
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{income ? w.sourceIdentity : w.identity} {income ? w.incomePeriod : w.sharedPeriod}</ThemedText>
+        </View>
+      </>}
+    </BandScaffold>
     <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
     <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} showMerchantLink={false} />
   </>;
 }
 
 const styles = StyleSheet.create({
-  assistantAction: { alignSelf: 'flex-start', maxWidth: '100%' },
-  listContent: { gap: 0 },
-  header: { gap: 14, paddingBottom: 12 },
-  hero: { gap: 14, paddingVertical: 16, paddingHorizontal: 16, borderWidth: 1, borderRadius: 14 },
-  identity: { flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
-  identityCopy: { flex: 1, minWidth: 120, gap: 2 },
-  periodSlot: { alignSelf: 'center', maxWidth: '100%' },
-  heroAmount: { gap: 4 },
-  tileRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
-  tile: { flex: 1, minWidth: 140, paddingVertical: 12, paddingHorizontal: 14, gap: 6, borderWidth: 1, borderRadius: 12 },
-  recentHeading: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  band: { gap: 18 },
+  sheet: { gap: 14 },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: 14, flexWrap: 'wrap' },
+  identityCopy: { flex: 1, minWidth: 140, gap: 2 },
+  name: { fontFamily: Fonts.sansSemi, letterSpacing: -0.6 },
+  tiles: { flexDirection: 'row', gap: 10 },
+  tileFull: { alignSelf: 'stretch', flex: 0 },
+  tileFigure: { fontFamily: Fonts.sansSemi, fontSize: 22, lineHeight: 28 },
   stack: { flexDirection: 'column', alignItems: 'flex-start' },
-  received: { gap: 6, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderRadius: 12 },
+  recentHeading: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, paddingTop: 6 },
+  received: { gap: 6, paddingVertical: 12, paddingHorizontal: 16, borderWidth: 1, borderRadius: 18 },
   receivedRow: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
-  exclusions: { paddingTop: 2 },
-  transaction: { paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  transaction: { paddingVertical: 8 },
   empty: { gap: 16, paddingVertical: 24 },
-  footer: { gap: 8, paddingVertical: 24 },
+  footer: { gap: 10, paddingTop: 12, paddingBottom: 12 },
 });

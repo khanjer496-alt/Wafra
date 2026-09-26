@@ -73,14 +73,16 @@ try {
       assert.equal((await page.getByTestId('merchant-purchase-count').innerText()).trim(), '2');
       assert.equal(minor(await page.getByTestId('merchant-money-received').innerText()), 501);
       assert.equal(await page.getByTestId('view-merchant-spending').count(), 0, 'No recursive merchant action in profile');
+      // Language E: a Spending detail wears the clay band (deepened in dark mode).
       const background = await page.getByTestId('merchant-detail').evaluate(el => getComputedStyle(el).backgroundColor);
-      assert.equal(background, mode === 'dark' ? 'rgb(20, 18, 15)' : 'rgb(244, 241, 234)');
+      assert.equal(background, mode === 'dark' ? 'rgb(110, 43, 30)' : 'rgb(164, 67, 47)');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
       await page.screenshot({ path: path.join(out, `detail-${name}.png`) });
       await page.getByRole('tab', { name: language === 'ar' ? 'كل الحركات' : 'All activity', exact: true }).click();
       await page.getByText(language === 'ar' ? 'غير مشمولة في إجمالي الإنفاق' : 'Not included in spending totals', { exact: true }).first().waitFor({ state: 'visible' });
       assert.equal(minor(await page.getByTestId('merchant-total-spent').innerText()), 3501, 'Viewing transfers does not inflate spending');
-      await page.getByTestId('merchant-period').getByRole('button').click();
+      await page.getByTestId('merchant-period').click();
+
       const dialog = page.locator('[role="dialog"]:visible').last();
       await dialog.getByRole('button', { name: language === 'ar' ? 'كل الفترات' : 'All time', exact: true }).click();
       await dialog.waitFor({ state: 'hidden' });

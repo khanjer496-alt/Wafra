@@ -128,7 +128,8 @@ try {
 
       // Changing the existing global period updates counts and totals, not just
       // a heading. The following Activity handoff must retain that same scope.
-      await tapOnTop(active(page, 'merchant-period').getByRole('button'));
+      await tapOnTop(active(page, 'merchant-period'));
+
       const dialog = page.locator('[role="dialog"]:visible').last();
       await dialog.getByRole('button', { name: language === 'ar' ? 'كل الفترات' : 'All time', exact: true }).click();
       await dialog.waitFor({ state: 'hidden' });
