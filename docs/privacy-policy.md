@@ -367,12 +367,19 @@ third-party AI. A tester may separately and explicitly authorize GitHub Actions
 and Anthropic Claude to process the redacted parser templates described above.
 
 Buy-now-pay-later providers restate instalments that the paying bank has
-already alerted on. Wafra therefore ignores, on the device, SMS and iPhone
-Messages whose sender ID it recognises as Tabby, Tamara, Postpay or Cashew,
-and Android notifications from the Tabby and Tamara consumer apps. They are
-not stored as transactions or sent to Review; the paying bank's own alert is
-the record Wafra uses. Bank alerts that merely mention a provider are
-processed normally.
+already alerted on. Wafra recognises, on the device, SMS and iPhone Messages
+whose sender ID is Tabby, Tamara, Postpay or Cashew (including when an
+Android SMS app's notification shows that sender), and Android notifications
+from the Tabby and Tamara consumer apps. Wafra never adds these messages to
+the ledger automatically, and approving one in Review never makes Wafra trust
+the provider's app. When such a message restates a card charge (an instalment
+or payment for an order, an order split into payments, an order refund to the
+card, or a notice of tomorrow's charge), Wafra ignores it; the paying bank's
+own alert is the record Wafra uses. Other messages from these providers, such
+as Tabby Cash card spending or transfers, have no bank alert behind them, so
+Wafra shows them in Review like any other financial alert it cannot read with
+confidence, and they become transactions only if the user approves them. Bank
+alerts that merely mention a provider are processed normally.
 
 ## Security and retention
 
