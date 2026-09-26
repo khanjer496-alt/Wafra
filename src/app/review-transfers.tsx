@@ -3,6 +3,7 @@ import React, { useDeferredValue, useMemo, useRef, useState } from 'react';
 import { FlatList, Keyboard, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { TransferPairAccounts } from '@/components/transfer-pair-accounts';
 import { BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button } from '@/components/ui/controls';
@@ -112,26 +113,6 @@ function PairPill({ label, primary, disabled, onPress, palette, testID }: {
   </Pressable>;
 }
 
-/** Out of one account, into another: the two legs of one movement on one line (stacked at large text). */
-function PairAccounts({ outAccount, inAccount, palette, stacked }: {
-  outAccount: string; inAccount: string; palette: BandPalette; stacked: boolean;
-}) {
-  const copy = reviewBandCopy(useLanguage());
-  return <View style={[styles.pairAccounts, stacked && styles.pairAccountsStacked]}>
-    <View style={styles.leg}>
-      <ThemedText type="meta" style={{ color: palette.textSecondary }}>{copy.outOf}</ThemedText>
-      <ThemedText type="smallBold" numberOfLines={2} style={{ color: palette.text }}>{outAccount}</ThemedText>
-    </View>
-    <View style={[styles.swap, { backgroundColor: palette.fill }]}>
-      <Icon name="repeat" size={17} color={palette.onFill} strokeWidth={2} />
-    </View>
-    <View style={[styles.leg, !stacked && styles.legEnd]}>
-      <ThemedText type="meta" style={[{ color: palette.textSecondary }, !stacked && styles.endText]}>{copy.into}</ThemedText>
-      <ThemedText type="smallBold" numberOfLines={2} style={[{ color: palette.text }, !stacked && styles.endText]}>{inAccount}</ThemedText>
-    </View>
-  </View>;
-}
-
 /** Both legs of one suggested own-account transfer, answered with one tap. */
 function PairCard({ pair, outAccount, inAccount, busy, onMatch, onSeparate, palette, stacked }: {
   pair: TransferPair; outAccount: string; inAccount: string; busy: boolean;
@@ -146,7 +127,7 @@ function PairCard({ pair, outAccount, inAccount, busy, onMatch, onSeparate, pale
   return <View testID="transfer-pair-card" style={[styles.pairCard, { borderColor: palette.rule, backgroundColor: palette.card }]}>
     <View testID="transfer-pair-legs" style={styles.pairLegs} accessible accessibilityRole="text"
       accessibilityLabel={`${d.transfers.pairA11y(outAccount, inAccount, amount)}. ${fullDateTime(pair.out)}`}>
-      <PairAccounts outAccount={outAccount} inAccount={inAccount} palette={palette} stacked={stacked} />
+      <TransferPairAccounts outAccount={outAccount} inAccount={inAccount} palette={palette} stacked={stacked} />
       <View style={styles.pairFigure}>
         <ThemedText style={[styles.pairAmount, { color: palette.text }]}>{amount}</ThemedText>
         <ThemedText type="meta" style={{ color: palette.textSecondary }}>{fullDateTime(pair.out)}</ThemedText>
@@ -426,7 +407,7 @@ export default function ReviewTransfersScreen() {
         accessibilityLabel={`${d.transfers.pairA11y(outAccount, inAccount, amount)}. ${shortDate(pair.out.date)}`}
         style={[styles.matchedRow, { borderTopColor: band.rule }]}>
         <View style={styles.flexText}>
-          <PairAccounts outAccount={outAccount} inAccount={inAccount} palette={band} stacked={largeText} />
+          <TransferPairAccounts outAccount={outAccount} inAccount={inAccount} palette={band} stacked={largeText} />
         </View>
         <View style={styles.matchedFigure}>
           <ThemedText type="smallBold" tabular style={{ color: band.text }}>{amount}</ThemedText>
@@ -579,12 +560,6 @@ const styles = StyleSheet.create({
   pairs: { gap: 10 },
   pairCard: { borderWidth: 1, borderRadius: 22, padding: Spacing.three, gap: Spacing.three },
   pairLegs: { gap: Spacing.two },
-  pairAccounts: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  pairAccountsStacked: { flexDirection: 'column', alignItems: 'flex-start' },
-  leg: { flex: 1, minWidth: 0, gap: 2 },
-  legEnd: { alignItems: 'flex-end' },
-  endText: { textAlign: 'right' },
-  swap: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center' },
   pairFigure: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.two },
   pairAmount: { fontFamily: Fonts.sansSemi, fontSize: 26, lineHeight: 32, letterSpacing: -1, fontVariant: ['tabular-nums'] },
   pairActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },

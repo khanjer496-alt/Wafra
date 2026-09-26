@@ -84,6 +84,7 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
     '@/lib/period': { currentMonthPeriod: () => ({ mode: 'month', key: '2026-09' }), inPeriod: date => date.startsWith('2026-09') },
   };
   deps['@/lib/review-band-copy'] = load(path.join(root, 'src/lib/review-band-copy.ts'));
+  deps['@/components/transfer-pair-accounts'] = load(path.join(root, 'src/components/transfer-pair-accounts.tsx'), deps);
   deps['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'), deps);
   deps['@/lib/transfer-review-copy'] = load(path.join(root, 'src/lib/transfer-review-copy.ts'), deps);
   deps['@/lib/reference-copy'] = load(path.join(root, 'src/lib/reference-copy.ts'));
