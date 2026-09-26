@@ -11,13 +11,17 @@ import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Row, Section, SectionHeader } from '@/components/ui/layout';
 import { AmountField, Money } from '@/components/ui/money';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
+import { BandChip } from '@/components/ui/band/band-chip';
+import { EButton } from '@/components/ui/band/e-button';
 import { AccountTile } from '@/components/ui/tile';
 import { Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
+import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { useToday } from '@/hooks/use-today';
+import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { internalTransferIdsForState, isSpending } from '@/lib/ledger';
 import { accountLastActivityISO, isInactiveAccount, openDues } from '@/lib/cards';
 import { formatAmount, formatAmountForInput, monthKey, parseAmountWithMoneySpec, shortDate } from '@/lib/format';
@@ -58,6 +62,9 @@ type CardAction = 'visibility' | 'bank' | 'delete';
  */
 export default function CardsScreen() {
   const theme = useTheme();
+  // Cards live under Accounts: the slate band.
+  const band = useBand('accounts');
+  const placeWords = moneyPlacesWords(useLanguage());
   const largeText = useLargeTextLayout();
   const router = useRouter();
   const { state, editAccount, deleteAccount, setLedgerMoney } = useStore();
@@ -194,9 +201,9 @@ export default function CardsScreen() {
       });
   };
 
-  const cardsHeader: ScreenHeaderProps = {
+  const cardsNav: BandNav = {
     title: t('cardsTitle'),
-    back: { label: t('back'), onPress: () => router.back() },
+    back: () => router.back(),
   };
 
   const renderCard = (card: Account, i: number, list: Account[], inactive: boolean) => {
@@ -275,11 +282,20 @@ export default function CardsScreen() {
 
   return (
     <>
-      <ScreenScaffold
-        headerMode="native"
-        header={cardsHeader}
+      <BandScaffold
+        band="accounts"
+        testID="cards-screen"
+        nav={cardsNav}
         contentStyle={styles.content}
-        scrollProps={{ showsVerticalScrollIndicator: false }}>
+        scrollProps={{ showsVerticalScrollIndicator: false }}
+        bandContent={(
+          <View style={styles.bandChips}>
+            <BandChip palette={band} label={placeWords.cardsCount(activeCards.length)} testID="cards-count-chip" />
+            {inactiveCards.length > 0
+              ? <BandChip palette={band} label={`${t('inactiveCards')} · ${inactiveCards.length}`} />
+              : null}
+          </View>
+        )}>
           <Section index={0}>
             {activeCards.map((c, i) => renderCard(c, i, activeCards, false))}
             {activeCards.length === 0 && (
@@ -309,7 +325,7 @@ export default function CardsScreen() {
               {showInactive && inactiveCards.map((c, i) => renderCard(c, i, inactiveCards, true))}
             </Section>
           )}
-      </ScreenScaffold>
+      </BandScaffold>
 
       <CardDetailSheet
         account={detail}
@@ -317,7 +333,10 @@ export default function CardsScreen() {
         footer={detail ? (
           <View style={styles.detailActions}>
             {detail.cardType === 'credit' && (
-              <Button
+              <EButton
+                palette={band}
+                variant="secondary"
+                testID="card-set-limit"
                 label={t('setCreditLimit')}
                 onPress={() => {
                   setDetail(null);
@@ -325,8 +344,10 @@ export default function CardsScreen() {
                 }}
               />
             )}
-            <Button
-              variant="outline"
+            <EButton
+              palette={band}
+              variant="quiet"
+              testID="card-manage"
               label={t('manage')}
               onPress={() => {
                 setDetail(null);
@@ -341,7 +362,7 @@ export default function CardsScreen() {
         onClose={() => setLimitFor(null)}
         title={t('creditLimitTitle')}
         footer={(
-          <Button wrapLabel label={t('saveLimit')} onPress={saveCreditLimit} disabled={!creditLimitFils} />
+          <EButton palette={band} label={t('saveLimit')} onPress={saveCreditLimit} disabled={!creditLimitFils} testID="card-save-limit" />
         )}>
         <ThemedText type="default" themeColor="textSecondary">
           {tf('creditLimitBody', { name: limitFor?.name ?? t('card') })}
@@ -407,6 +428,7 @@ const styles = StyleSheet.create({
   content: {
     gap: Spacing.four + 2,
   },
+  bandChips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   rowText: {
     flex: 1,
     minWidth: 0,

@@ -3,15 +3,16 @@ import { StyleSheet, View } from 'react-native';
 
 import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { ThemedText } from '@/components/themed-text';
+import { BandFigure } from '@/components/ui/band/band-figure';
+import { EButton } from '@/components/ui/band/e-button';
+import { StatusBar } from '@/components/ui/band/status-bar';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ProgressBar } from '@/components/ui/charts';
-import { Button } from '@/components/ui/controls';
-import { Row, SectionHeader } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { AccountTile } from '@/components/ui/tile';
 import { Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
-import { useTheme } from '@/hooks/use-theme';
 import { cardStatementView } from '@/lib/cards';
 import { formatAED, shortDate } from '@/lib/format';
 import { cardUsage } from '@/lib/money-places';
@@ -34,7 +35,10 @@ interface CardDetailSheetProps {
  * card, not a reason to change screens.
  */
 export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetProps) {
-  const theme = useTheme();
+  // Accounts' slate for the sheet's controls, and the ink card (a piece of
+  // the Home band, dark in both schemes) for the statement itself.
+  const band = useBand('accounts');
+  const ink = useBand('home');
   const w = moneyPlacesWords(useLanguage());
   const { state } = useStore();
   // "Record a payment" opens the payment sheet on top of this one.
@@ -65,6 +69,22 @@ export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetPro
   const statedMinimum = statement && !statement.minDueEstimated && statement.minDueFils > 0
     ? statement.minDueFils
     : null;
+  // On the ink card for a credit card with a bill; on the sheet otherwise.
+  const onInk = data.billable;
+  const identity = (
+    <View style={styles.identity} testID="card-identity">
+      <AccountTile account={account} size={40} />
+      <View style={styles.identityText}>
+        <ThemedText type="smallBold" accessibilityRole="header" style={{ color: onInk ? ink.onBand : band.text }}>
+          {account.bankName ?? account.name}
+        </ThemedText>
+        <ThemedText type="meta" style={{ color: onInk ? ink.onBandSecondary : band.textSecondary }}>
+          {account.cardType === 'credit' ? t('credit') : t('debit')}
+          {account.last4 ? ` ·· ${account.last4}` : ''}
+        </ThemedText>
+      </View>
+    </View>
+  );
 
   return (
     <BottomSheet visible onClose={onClose} title={t('cardDetail')} footer={footer}>
@@ -79,18 +99,7 @@ export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetPro
       */}
       {!data.billable && (
         <>
-          <View style={styles.head}>
-            <AccountTile account={account} size={46} />
-            <View style={styles.headText}>
-              <ThemedText type="subtitle">
-                {account.bankName ?? account.name}
-              </ThemedText>
-              <ThemedText type="meta" themeColor="textTertiary">
-                {account.cardType === 'credit' ? t('credit') : t('debit')}
-                {account.last4 ? ` ·· ${account.last4}` : ''}
-              </ThemedText>
-            </View>
-          </View>
+          {identity}
           <ThemedText type="default" themeColor="textSecondary">
             {t('debitHasNoStatement')}
           </ThemedText>
@@ -99,44 +108,47 @@ export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetPro
 
       {data.billable && (
         <>
-          {/* The one figure the user opened this for, before any list. */}
+          {/* The one figure the user opened this for, on the card itself. */}
+          <View style={[styles.inkCard, { backgroundColor: ink.band, borderColor: ink.bandRule }]} testID="card-ink">
+            {identity}
+            {statement
+              ? <BandFigure testID="card-statement-hero" label={w.statementBalance} fils={data.outstandingFils} decimals
+                  palette={ink} size="large" fitInset={40} />
+              : null}
+          </View>
           {statement && (
-            <View style={styles.summary} testID="card-statement-hero">
-              <ThemedText type="small" themeColor="textSecondary">
-                {w.statementBalance}
-              </ThemedText>
-              <Money fils={data.outstandingFils} type="sheetAmount" />
+            <View style={styles.summary}>
               {/* Progress is only honest once something has been paid; a
                   full-width empty track reads as a bug. */}
               {settledShare > 0 && (
                 <>
-                  <ProgressBar ratio={settledShare} color={theme.income} height={5} />
+                  <ProgressBar ratio={settledShare} color={band.statusOk} height={5} />
                   <ThemedText type="meta" themeColor="textSecondary">
                     {w.leftOfStatement(formatAED(data.outstandingFils), formatAED(data.billedFils))}
                   </ThemedText>
                 </>
               )}
-              <ThemedText type="meta" themeColor="textSecondary" testID="card-statement-due">
+              <ThemedText type="small" testID="card-statement-due">
                 {w.dueOn(shortDate(statement.dueDate))}
                 {statedMinimum !== null ? ` · ${w.minimum(formatAED(statedMinimum))}` : ''}
               </ThemedText>
               {usage && (
                 <View style={styles.usage} testID="card-usage">
-                  <ProgressBar ratio={usage.ratio} color={theme.primary} height={5} />
+                  <StatusBar spentMinor={usage.usedFils} limitMinor={usage.limitFils} palette={band} />
                   <ThemedText type="meta" themeColor="textSecondary">
                     {w.usedOfLimit(formatAED(usage.usedFils, { decimals: false }), formatAED(usage.limitFils, { decimals: false }))}
                   </ThemedText>
                 </View>
               )}
-              <Button label={w.recordPayment} icon="check" onPress={() => setPaying(statement)} />
-              <ThemedText type="meta" themeColor="textTertiary">
+              <EButton palette={band} label={w.recordPayment} onPress={() => setPaying(statement)} testID="card-record-payment" />
+              <ThemedText type="meta" themeColor="textSecondary">
                 {w.cardReminder(shortDate(statement.dueDate))}
               </ThemedText>
             </View>
           )}
 
-          <View>
-            <SectionHeader title={t('statements')} />
+          <View style={styles.section}>
+            <ThemedText type="heading" accessibilityRole="header">{t('statements')}</ThemedText>
             {data.statements.length === 0 ? (
               <ThemedText type="default" themeColor="textSecondary">
                 {t('noStatementYet')}
@@ -146,18 +158,13 @@ export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetPro
                 const paid = data.paidByDueId.get(d.id) ?? 0;
                 const settled = paid >= d.totalDueFils;
                 return (
-                  <Row key={d.id} last={i === data.statements.length - 1}>
-                    <View
-                      style={[
-                        styles.dot,
-                        { backgroundColor: settled ? theme.income : theme.expense },
-                      ]}
-                    />
+                  <View key={d.id} style={[styles.listRow,
+                    i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
                     <View style={styles.rowText}>
-                      <ThemedText type="small">
+                      <ThemedText type="smallBold">
                         {tf('dueDate', { date: shortDate(d.dueDate) })}
                       </ThemedText>
-                      <ThemedText type="meta" themeColor="textTertiary" tabular>
+                      <ThemedText type="meta" tabular style={{ color: settled ? band.statusOk : band.textSecondary }}>
                         {settled
                           ? t('settled')
                           : tf('percentPaid', {
@@ -165,44 +172,31 @@ export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetPro
                             })}
                       </ThemedText>
                     </View>
-                    <Money fils={d.totalDueFils} prefix={false} />
-                  </Row>
+                    <Money fils={d.totalDueFils} type="smallBold" />
+                  </View>
                 );
               })
             )}
           </View>
 
-          <View style={styles.head}>
-            <AccountTile account={account} size={46} />
-            <View style={styles.headText}>
-              <ThemedText type="subtitle">
-                {account.bankName ?? account.name}
-              </ThemedText>
-              <ThemedText type="meta" themeColor="textTertiary">
-                {account.cardType === 'credit' ? t('credit') : t('debit')}
-                {account.last4 ? ` ·· ${account.last4}` : ''}
-              </ThemedText>
+          <View style={styles.section}>
+            <View style={styles.sectionHead}>
+              <ThemedText type="heading" accessibilityRole="header" style={styles.rowText}>{t('paymentsMade')}</ThemedText>
+              <Money fils={data.paidTotalFils} type="small" color={band.textSecondary} />
             </View>
-          </View>
-
-          <View>
-            <SectionHeader
-              title={t('paymentsMade')}
-              trailing={<Money fils={data.paidTotalFils} prefix={false} type="nano" />}
-            />
             {data.payments.length === 0 ? (
               <ThemedText type="default" themeColor="textSecondary">
                 {t('noCardPaymentYet')}
               </ThemedText>
             ) : (
               data.payments.slice(0, 24).map((p, i) => (
-                <Row key={p.id} last={i === Math.min(data.payments.length, 24) - 1}>
-                  <View style={[styles.dot, { backgroundColor: theme.income }]} />
+                <View key={p.id} style={[styles.listRow,
+                  i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
                   <ThemedText type="small" style={styles.rowText}>
                     {shortDate(p.date)}
                   </ThemedText>
-                  <Money fils={p.amountFils} prefix={false} color={theme.income} />
-                </Row>
+                  <Money fils={p.amountFils} type="smallBold" color={band.statusOk} />
+                </View>
               ))
             )}
           </View>
@@ -215,28 +209,13 @@ export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetPro
 }
 
 const styles = StyleSheet.create({
-  head: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three - 2,
-  },
-  headText: {
-    flex: 1,
-    gap: Spacing.half,
-  },
-  summary: {
-    gap: Spacing.two + 2,
-  },
-  usage: {
-    gap: Spacing.one,
-  },
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  rowText: {
-    flex: 1,
-    gap: Spacing.half,
-  },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  identityText: { flex: 1, minWidth: 0, gap: Spacing.half },
+  inkCard: { borderRadius: 22, padding: 16, gap: 18, borderWidth: StyleSheet.hairlineWidth },
+  summary: { gap: Spacing.two + 2 },
+  usage: { gap: Spacing.one },
+  section: { gap: 2, paddingTop: Spacing.two },
+  sectionHead: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: Spacing.two },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingVertical: 10 },
+  rowText: { flex: 1, minWidth: 0, gap: Spacing.half },
 });

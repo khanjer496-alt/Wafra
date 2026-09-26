@@ -1,17 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { KeyValueRows } from '@/components/money-places/key-value-rows';
 import { ThemedText } from '@/components/themed-text';
+import { BandFigure } from '@/components/ui/band/band-figure';
+import { EButton } from '@/components/ui/band/e-button';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Button } from '@/components/ui/controls';
-import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { ProgressBar } from '@/components/ui/progress-bar';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
-import { useTheme } from '@/hooks/use-theme';
 import { dueWithStatus, duePaidFils, duePayments } from '@/lib/cards';
 import { formatAED, formatAmount, monthKey, parseAmountWithMoneySpec, shortDate, toISODate } from '@/lib/format';
 import { internalTransferIdsForState, isSpending } from '@/lib/ledger';
@@ -41,7 +42,8 @@ interface CardPaymentSheetProps {
  * or date picker — a guessed source would double the bank's own alert.
  */
 export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardPaymentSheetProps) {
-  const theme = useTheme();
+  // Cards belong to Accounts: the slate band's sheet tokens.
+  const band = useBand('accounts');
   const language = useLanguage();
   const w = moneyPlacesWords(language);
   const { state, payCardDue } = useStore();
@@ -180,25 +182,26 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
     });
   };
 
-  const choices: { value: CardPaymentChoice; label: string; fils: number | null }[] = [
-    { value: 'full', label: paid > 0 ? w.restOfStatement : w.fullStatement, fils: options.fullFils },
+  const choices: { value: CardPaymentChoice; label: string; note: string | null; fils: number | null }[] = [
+    { value: 'full', label: paid > 0 ? w.restOfStatement : w.fullStatement, note: w.settlesIt, fils: options.fullFils },
     ...(options.minimumFils !== null
-      ? [{ value: 'minimum' as const, label: paid > 0 ? w.restOfMinimum : w.minimumDue, fils: options.minimumFils }]
+      ? [{ value: 'minimum' as const, label: paid > 0 ? w.restOfMinimum : w.minimumDue, note: w.asBankStated, fils: options.minimumFils }]
       : []),
-    { value: 'other', label: w.anotherAmount, fils: null },
+    { value: 'other', label: w.anotherAmount, note: null, fils: null },
   ];
 
   return (
     <BottomSheet visible onClose={onClose} title={w.cardPaymentTitle}>
       <View style={styles.head} testID="card-payment-status">
-        <ThemedText type="smallBold">{w.cardPaymentFor(name, shortDate(live.dueDate))}</ThemedText>
-        <ThemedText type="meta" style={{ color: status.daysLeft < 0 ? theme.expense : theme.textSecondary }}>
+        <ThemedText type="small" themeColor="textSecondary">{w.cardPaymentFor(name, shortDate(live.dueDate))}</ThemedText>
+        <BandFigure fils={status.remainingFils} decimals palette={band} size="large" color={band.text}
+          secondaryColor={band.textSecondary} />
+        <ThemedText type="meta" style={{ color: status.daysLeft < 0 ? band.statusOver : band.textSecondary }}>
           {status.daysLeft < 0
             ? tf('lateDays', { days: -status.daysLeft })
             : tf('daysShort', { days: status.daysLeft })}
         </ThemedText>
-        <Money fils={status.remainingFils} type="sheetAmount" />
-        {paidShare > 0 && <ProgressBar ratio={paidShare} color={theme.income} height={5} />}
+        {paidShare > 0 && <ProgressBar ratio={paidShare} color={band.statusOk} height={5} />}
         <ThemedText type="meta" themeColor="textSecondary">
           {tf('paidOfTotal', {
             paid: formatAmount(paid, { decimals: false }),
@@ -211,7 +214,7 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
             : ''}
         </ThemedText>
         {status.belowMinimum && (
-          <ThemedText type="meta" style={{ color: theme.expense }}>
+          <ThemedText type="meta" style={{ color: band.statusOver }}>
             {t('underMinimumDue')}
           </ThemedText>
         )}
@@ -219,26 +222,36 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
 
       {status.remainingFils > 0 ? (
         <View accessibilityRole="radiogroup" style={styles.choices} testID="card-payment-choices">
-          {choices.map((option, index) => {
+          {choices.map((option) => {
             const active = selected === option.value;
             return (
               <Pressable
                 key={option.value}
                 accessibilityRole="radio"
                 accessibilityState={{ checked: active }}
-                accessibilityLabel={option.fils !== null ? `${option.label}, ${formatAED(option.fils)}` : option.label}
+                accessibilityLabel={[option.label, option.note, option.fils !== null ? formatAED(option.fils) : null]
+                  .filter(Boolean).join(', ')}
                 testID={`card-payment-${option.value}`}
                 onPress={() => setChoice(option.value)}
                 style={({ pressed }) => [
                   styles.choice,
-                  index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
-                  pressed && { backgroundColor: theme.backgroundSelected },
+                  {
+                    borderColor: active ? band.tint : band.rule,
+                    borderWidth: active ? 2 : 1,
+                    backgroundColor: band.card,
+                    opacity: pressed ? 0.85 : 1,
+                  },
                 ]}>
-                <View style={[styles.radio, { borderColor: active ? theme.primary : theme.controlBorder }]}>
-                  {active && <View style={[styles.radioDot, { backgroundColor: theme.primary }]} />}
+                <View style={[styles.radio, { borderColor: active ? band.tint : band.textSecondary }]}>
+                  {active && <View style={[styles.radioDot, { backgroundColor: band.tint }]} />}
                 </View>
-                <ThemedText type={active ? 'smallBold' : 'small'} style={styles.grow}>{option.label}</ThemedText>
-                {option.fils !== null && <Money fils={option.fils} type="smallBold" />}
+                <View style={styles.grow}>
+                  <ThemedText type="smallBold">{option.label}</ThemedText>
+                  {option.note ? <ThemedText type="meta" themeColor="textSecondary">{option.note}</ThemedText> : null}
+                </View>
+                {option.fils !== null
+                  ? <Money fils={option.fils} type="smallBold" />
+                  : <ThemedText type="meta" themeColor="textSecondary">{w.typeIt}</ThemedText>}
               </Pressable>
             );
           })}
@@ -257,7 +270,7 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
                 )}
               />
               {otherProblem && (
-                <ThemedText type="meta" accessibilityLiveRegion="polite" style={{ color: theme.expense }}>
+                <ThemedText type="meta" accessibilityLiveRegion="polite" style={{ color: band.statusOver }}>
                   {otherProblem}
                 </ThemedText>
               )}
@@ -266,50 +279,18 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
         </View>
       ) : null}
 
-      <ThemedText type="meta" themeColor="textSecondary">{w.paymentNote}</ThemedText>
-
-      <LabelTable
-        rows={[
-          {
-            label: t('card'),
-            value: <ThemedText type="small">{account?.name ?? t('card')}</ThemedText>,
-          },
-          {
-            label: t('thisMonth'),
-            value: (
-              <ThemedText type="small" tabular>
-                {tf('chargesAcross', {
-                  amount: formatAED(monthFils, { decimals: false }),
-                  count: charges,
-                  s: charges === 1 ? '' : 's',
-                })}
-              </ThemedText>
-            ),
-          },
-          {
-            label: t('matched'),
-            value: (
-              <ThemedText type="default" themeColor="textSecondary">
-                {payments === 0
-                  ? t('noCardPaymentYet')
-                  : tf('matchedPayments', {
-                      count: payments,
-                      s: payments === 1 ? '' : 's',
-                    })}
-              </ThemedText>
-            ),
-          },
-        ]}
-      />
+      {/* Wafra records; it never moves money. Said before the button. */}
+      <ThemedText type="meta" themeColor="textSecondary" testID="card-payment-note">{w.paymentNote}</ThemedText>
 
       <View style={styles.actions}>
-        <Button
-          inline
-          label={w.recordThisPayment}
+        <EButton
+          palette={band}
+          testID="card-payment-record"
+          label={resolution.ok ? w.recordAmount(formatAED(resolution.amountFils)) : w.recordThisPayment}
           onPress={() => setConfirming(true)}
           disabled={!canRecord}
         />
-        <Button inline variant="outline" label={t('remindMe')} onPress={remindMe} />
+        <EButton palette={band} variant="secondary" label={t('remindMe')} onPress={remindMe} testID="card-payment-remind" />
       </View>
 
       {notice && (
@@ -317,7 +298,7 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
           accessibilityLiveRegion="polite"
           style={[
             styles.notice,
-            { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
+            { borderColor: band.rule, backgroundColor: band.card },
           ]}>
           <ThemedText type="smallBold">{notice.title}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary">
@@ -326,6 +307,32 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
         </View>
       )}
 
+      <KeyValueRows
+        palette={band}
+        testID="card-payment-facts"
+        rows={[
+          { key: 'card', label: t('card'), value: account?.name ?? t('card') },
+          {
+            key: 'month',
+            label: t('thisMonth'),
+            value: tf('chargesAcross', {
+              amount: formatAED(monthFils, { decimals: false }),
+              count: charges,
+              s: charges === 1 ? '' : 's',
+            }),
+          },
+          {
+            key: 'matched',
+            label: t('matched'),
+            value: payments === 0
+              ? t('noCardPaymentYet')
+              : tf('matchedPayments', {
+                  count: payments,
+                  s: payments === 1 ? '' : 's',
+                }),
+          },
+        ]}
+      />
       {/* Nested inside this sheet rather than beside it: a Modal presented
           from within the presented one stacks, where dismissing this sheet
           and presenting another in the same frame does not. */}
@@ -348,17 +355,21 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
 
 const styles = StyleSheet.create({
   head: {
+    gap: Spacing.one,
+  },
+  // Plan-style rows: each choice is its own card; the chosen one takes a
+  // 2pt rule in the band tint.
+  choices: {
     gap: Spacing.two,
   },
-  choices: {
-    borderRadius: Radius.sheet,
-  },
   choice: {
-    minHeight: 52,
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two + 2,
-    paddingVertical: Spacing.two,
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 16,
   },
   radio: {
     width: 22,
@@ -379,8 +390,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.two,
   },
   actions: {
-    flexDirection: 'row',
-    gap: Spacing.two + 2,
+    gap: Spacing.two,
   },
   notice: {
     borderWidth: StyleSheet.hairlineWidth,

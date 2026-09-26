@@ -20,11 +20,10 @@ import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { AccountTile } from '@/components/ui/tile';
 import { TextField } from '@/components/ui/text-field';
 import { Icon } from '@/components/ui/icon';
-import { SectionHeader } from '@/components/ui/period-pill';
 import { ProgressBar } from '@/components/ui/progress-bar';
-import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
 import { Radius, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useTheme } from '@/hooks/use-theme';
 import { useResumeClock, useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -42,6 +41,7 @@ import {
   isAccountDetailTarget,
   type CardPaymentChoice,
 } from '@/lib/money-places';
+import { accountsBandCounts } from '@/lib/money-places-band';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import {
@@ -106,7 +106,8 @@ type AccountAction = 'visibility' | 'bank' | 'delete';
 
 export default function WalletScreen() {
   const theme = useTheme();
-  const walletInsets = useScreenContentInsets({ tabbed: true });
+  // Design language E: Accounts wears the slate band.
+  const band = useBand('accounts');
   const largeText = useLargeTextLayout();
   const language = useLanguage();
   const transferWords = transferActivityCopy(language);
@@ -156,18 +157,20 @@ export default function WalletScreen() {
   const [optionsFor, setOptionsFor] = useState<Account | null>(null);
   const [bankFor, setBankFor] = useState<Account | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
-  const walletHeader: ScreenHeaderProps = {
+  const walletNav: BandNav = {
     title: t('walletTitle'),
     actions: [
       {
         label: t('settingsTitle'),
         icon: 'sliders',
         onPress: () => router.push('/settings'),
+        testID: 'wallet-settings',
       },
       {
         label: t('newAccount'),
         icon: 'plus',
         onPress: () => setAdderVisible(true),
+        testID: 'wallet-add-account',
       },
     ],
   };
@@ -202,6 +205,8 @@ export default function WalletScreen() {
       total: accounts.length,
     };
   }, [state.accounts, balances.balanceByAccountId]);
+  // The band's second chip: credit cards shown on their own, never netted.
+  const bandCounts = useMemo(() => accountsBandCounts(state.accounts), [state.accounts]);
   const balanceCoverageText =
     balanceAccountCoverage.total === 0
       ? t('addAccountForBalances')
@@ -390,44 +395,35 @@ export default function WalletScreen() {
 
   return (
     <>
-      <ScreenScaffold
+      <BandScaffold
+        band="accounts"
         tabbed
-        headerMode="inline"
-        header={walletHeader}
-        refreshControl={
-          <CaptureRefreshControl tintColor={theme.primary} />
-        }
+        testID="wallet-screen"
+        nav={walletNav}
+        refreshControl={<CaptureRefreshControl />}
         contentStyle={styles.content}
-        scrollProps={{
-          contentOffset: Platform.OS === 'ios'
-            ? { x: 0, y: -walletInsets.contentInset.top }
-            : undefined,
-          showsVerticalScrollIndicator: false,
-        }}>
-
-          {/* Wallet answers concrete account questions. Inbox history is not
-              complete enough to make a defensible net-worth claim. */}
-          <View style={styles.balanceSummary}>
-            <BalanceOverview
-              onAddAccount={() => setAdderVisible(true)}
-              balanceCoverageText={balanceCoverageText}
-              balanceFils={balances.balanceFils}
-              knownBalanceCount={balanceAccountCoverage.known}
-              activeSourceCount={activeSources.length}
-              largeText={largeText}
-              theme={theme}
-            />
-            <ThemedText type="meta" themeColor="textSecondary">
-              {accountGroupsCopy[language === 'ar' ? 'ar' : 'en'].sourceBody}
-            </ThemedText>
-          </View>
+        scrollProps={{ showsVerticalScrollIndicator: false }}
+        bandContent={(
+          // Wallet answers concrete account questions. Inbox history is not
+          // complete enough to make a defensible net-worth claim.
+          <BalanceOverview
+            onAddAccount={() => setAdderVisible(true)}
+            balanceCoverageText={balanceCoverageText}
+            balanceFils={balances.balanceFils}
+            knownBalanceCount={balanceAccountCoverage.known}
+            activeSourceCount={activeSources.length}
+            creditCardCount={bandCounts.creditCards}
+            sourceNote={accountGroupsCopy[language === 'ar' ? 'ar' : 'en'].sourceBody}
+            language={language}
+            largeText={largeText}
+            palette={band}
+          />
+        )}>
 
           {/* Accounts is the source-of-truth surface for balances and instruments.
               Transfer reconciliation is contextual work, not a permanent section
               between the balance hero and the accounts it summarizes. */}
           <View style={styles.section}>
-
-
             {reissues.map((r) => {
               const fresh = state.accounts.find((a) => a.id === r.newAccountId);
               const prior = state.accounts.find((a) => a.id === r.candidateIds[0]);
@@ -438,11 +434,11 @@ export default function WalletScreen() {
                   style={[
                     styles.reissue,
                     {
-                      borderColor: theme.cardBorder,
-                      backgroundColor: theme.backgroundElement,
+                      borderColor: band.rule,
+                      backgroundColor: band.card,
                     },
                   ]}>
-                  <ThemedText type="small">{t('sameCardRenewed')}</ThemedText>
+                  <ThemedText type="smallBold">{t('sameCardRenewed')}</ThemedText>
                   <ThemedText type="meta" themeColor="textSecondary">
                     {tf('renewedCardDetected', {
                       last4: fresh.last4 ?? '••••',
@@ -460,8 +456,8 @@ export default function WalletScreen() {
                         tapped();
                         mergeRenewedCard(prior.id, fresh.id);
                       }}
-                      style={[styles.reissueBtn, { backgroundColor: theme.primary }]}>
-                      <ThemedText type="nano" style={{ color: theme.onPrimary }}>
+                      style={[styles.reissueBtn, { backgroundColor: band.fill, borderColor: band.fill }]}>
+                      <ThemedText type="smallBold" style={{ color: band.onFill }}>
                         {tf('sameAsCard', { last4: prior.last4 ?? '••••' })}
                       </ThemedText>
                     </Pressable>
@@ -474,11 +470,8 @@ export default function WalletScreen() {
                         tapped();
                         markCardsDistinct(fresh.id);
                       }}
-                      style={[
-                        styles.reissueBtn,
-                        { borderWidth: 1, borderColor: theme.controlBorder },
-                      ]}>
-                      <ThemedText type="nano" themeColor="textSecondary">
+                      style={[styles.reissueBtn, { backgroundColor: band.sheet, borderColor: band.rule }]}>
+                      <ThemedText type="smallBold">
                         {t('differentCard')}
                       </ThemedText>
                     </Pressable>
@@ -489,22 +482,30 @@ export default function WalletScreen() {
 
             <AccountGroups rows={accountRows} onOpen={openAccount} onManage={setOptionsFor}
               onUpdateBalance={updateBalance} onHide={hideAccount}
-              onMarkPaid={(due, choice) => setPaying({ due, choice })} />
-            <Pressable accessibilityRole="button" accessibilityLabel={transferWords.title}
-              testID="wallet-transfers-link" onPress={() => router.push('/transfers')}
-              style={({ pressed }) => [styles.transfersLink, { borderColor: theme.cardBorder,
-                backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-              <Icon name="repeat" size={20} color={theme.primary} />
-              <View style={styles.transferCopy}>
-                <ThemedText type="smallBold">{transferWords.title}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">{transferWords.walletDetail}</ThemedText>
-              </View>
-              <Icon name="chevron-right" size={16} color={theme.primary} />
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => router.push('/cards')} style={styles.sectionHeader}>
-              <ThemedText type="linkPrimary">{t('cardsHeader')}</ThemedText>
-              <Icon name="chevron-right" size={16} color={theme.primary} />
-            </Pressable>
+              onMarkPaid={(due, choice) => setPaying({ due, choice })} palette={band} />
+            <View style={[styles.linkGroup, { borderColor: band.rule }]}>
+              <Pressable accessibilityRole="button" accessibilityLabel={transferWords.title}
+                testID="wallet-transfers-link" onPress={() => router.push('/transfers')}
+                style={({ pressed }) => [styles.linkRow, { opacity: pressed ? 0.7 : 1 }]}>
+                <View style={[styles.linkTile, { backgroundColor: band.glyphGround }]}>
+                  <Icon name="repeat" size={20} color={band.tint} />
+                </View>
+                <View style={styles.transferCopy}>
+                  <ThemedText type="smallBold">{transferWords.title}</ThemedText>
+                  <ThemedText type="meta" themeColor="textSecondary">{transferWords.walletDetail}</ThemedText>
+                </View>
+                <Icon name="chevron-right" size={16} color={band.textSecondary} />
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel={t('cardsHeader')} testID="wallet-cards-link"
+                onPress={() => router.push('/cards')}
+                style={({ pressed }) => [styles.linkRow, styles.linkRowRule, { borderTopColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
+                <View style={[styles.linkTile, { backgroundColor: band.glyphGround }]}>
+                  <Icon name="wallet" size={20} color={band.tint} />
+                </View>
+                <ThemedText type="smallBold" style={styles.transferCopy}>{t('cardsHeader')}</ThemedText>
+                <Icon name="chevron-right" size={16} color={band.textSecondary} />
+              </Pressable>
+            </View>
           </View>
           {/* Inactive: expired/unused cards and accounts */}
           {inactiveAccounts.length > 0 && (
@@ -515,13 +516,13 @@ export default function WalletScreen() {
                 accessibilityState={{ expanded: showInactive }}
                 onPress={() => setShowInactive((v) => !v)}
                 style={styles.sectionHeader}>
-                <ThemedText type="micro" themeColor="textSecondary">
+                <ThemedText type="smallBold" themeColor="textSecondary">
                   {t('inactiveHeader')} ({inactiveAccounts.length})
                 </ThemedText>
                 <Icon
                   name={showInactive ? 'chevron-down' : 'chevron-right'}
                   size={15}
-                  color={theme.textSecondary}
+                  color={band.textSecondary}
                 />
               </Pressable>
               {showInactive && (
@@ -536,7 +537,7 @@ export default function WalletScreen() {
                       style={[
                         styles.accountRow,
                         styles.inactiveRow,
-                        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder },
+                        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule },
                       ]}>
                       <AccountTile account={account} />
                       <View style={styles.accountInfo}>
@@ -555,13 +556,15 @@ export default function WalletScreen() {
           )}
 
           {/* Goals */}
-          <View style={styles.section}>
-            <SectionHeader
-              title={t('goalsHeader')}
-              right={t('newGoal')}
-              onPressRight={() => setGoalVisible(true)}
-            />
-            {state.goals.map((goal) => {
+          <View style={styles.section} testID="wallet-goals">
+            <View style={styles.sectionTitleRow}>
+              <ThemedText type="heading" accessibilityRole="header" style={styles.transferCopy}>{t('goalsHeader')}</ThemedText>
+              <Pressable accessibilityRole="button" accessibilityLabel={t('newGoal')} testID="wallet-new-goal"
+                onPress={() => setGoalVisible(true)} hitSlop={4} style={styles.sectionAction}>
+                <ThemedText type="smallBold" style={{ color: band.tint }}>{t('newGoal')}</ThemedText>
+              </Pressable>
+            </View>
+            {state.goals.map((goal, i) => {
               const ratio = goal.targetFils > 0 ? goal.savedFils / goal.targetFils : 0;
               return (
                 <Pressable
@@ -579,25 +582,25 @@ export default function WalletScreen() {
                   }
                   accessibilityRole="button"
                   accessibilityLabel={`${goal.title}. ${ledgerCurrencyDisplay()} ${formatAmount(goal.savedFils, { decimals: false })} / ${formatAmount(goal.targetFils, { decimals: false })}`}
-                  style={styles.goalRow}>
-                  <View style={[styles.goalTop, largeText && styles.goalTopStacked]}>
-                    <View style={styles.goalTitle}>
-                      <Icon
-                        name={isIconName(goal.emoji) ? goal.emoji : 'target'}
-                        size={14}
-                        color={theme.textSecondary}
-                      />
-                      <ThemedText type="small" style={styles.goalTitleText}>{goal.title}</ThemedText>
-                    </View>
-                    <ThemedText type="small" tabular>
-                      {formatAmount(goal.savedFils, { decimals: false })}
-                      <ThemedText type="meta" themeColor="textTertiary" tabular>
-                        {'  / '}
-                        {formatAmount(goal.targetFils, { decimals: false })}
-                      </ThemedText>
-                    </ThemedText>
+                  style={({ pressed }) => [styles.goalRow,
+                    i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule },
+                    { opacity: pressed ? 0.7 : 1 }]}>
+                  <View style={[styles.linkTile, { backgroundColor: band.glyphGround }]}>
+                    <Icon name={isIconName(goal.emoji) ? goal.emoji : 'target'} size={20} color={band.text} />
                   </View>
-                  <ProgressBar ratio={ratio} color={ratio >= 1 ? theme.income : theme.primary} height={6} />
+                  <View style={styles.goalBody}>
+                    <View style={[styles.goalTop, largeText && styles.goalTopStacked]}>
+                      <ThemedText type="smallBold" style={styles.goalTitleText}>{goal.title}</ThemedText>
+                      <ThemedText type="small" tabular>
+                        {formatAmount(goal.savedFils, { decimals: false })}
+                        <ThemedText type="meta" themeColor="textSecondary" tabular>
+                          {'  / '}
+                          {formatAmount(goal.targetFils, { decimals: false })}
+                        </ThemedText>
+                      </ThemedText>
+                    </View>
+                    <ProgressBar ratio={ratio} color={ratio >= 1 ? band.statusOk : band.tint} height={6} />
+                  </View>
                 </Pressable>
               );
             })}
@@ -608,12 +611,12 @@ export default function WalletScreen() {
                 style={({ pressed }) => [
                   styles.goalEmpty,
                   {
-                    borderColor: theme.controlBorder,
-                    backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
+                    borderColor: band.rule,
+                    backgroundColor: pressed ? theme.backgroundSelected : band.card,
                   },
                 ]}>
-                <View style={[styles.goalEmptyIcon, { backgroundColor: theme.primarySoft }]}>
-                  <Icon name="target" size={17} color={theme.primary} strokeWidth={1.8} />
+                <View style={[styles.linkTile, { backgroundColor: band.glyphGround }]}>
+                  <Icon name="target" size={20} color={band.tint} strokeWidth={1.8} />
                 </View>
                 <View style={styles.accountInfo}>
                   <ThemedText type="smallBold">{t('setSavingsGoal')}</ThemedText>
@@ -621,26 +624,19 @@ export default function WalletScreen() {
                     {t('savingsGoalHint')}
                   </ThemedText>
                 </View>
-                <Icon name="chevron-right" size={16} color={theme.textSecondary} />
+                <Icon name="chevron-right" size={16} color={band.textSecondary} />
               </Pressable>
             )}
           </View>
 
-          {/* Where the numbers above came from. The claim that nothing leaves
-              the phone is worth stating on the screen that shows balances,
-              not only in Settings.
-
-              SMS reading is Android-only, so the scan claim only appears
-              where scanning is real. The block itself still does, because
-              pasting a bank alert by hand works on every platform and this
-              is the only route to the screen that accepts one — gating the
-              whole block left iOS and web with no way in at all. */}
           {/* Add activity: the three ways money gets into Wafra besides live
               alerts, each an existing screen. The Android inbox row keeps
               saying when the inbox was last read, because that is where
-              reading happens there; elsewhere it is the paste route. */}
+              reading happens there; elsewhere it is the paste route. SMS
+              reading is Android-only, so the scan claim only appears where
+              scanning is real; pasting a bank alert by hand works everywhere. */}
           <View style={styles.section} testID="wallet-add-activity">
-            <ThemedText type="micro" themeColor="textSecondary" accessibilityRole="header">
+            <ThemedText type="heading" accessibilityRole="header">
               {placeWords.addActivity}
             </ThemedText>
             {[
@@ -666,22 +662,21 @@ export default function WalletScreen() {
                 onPress={() => router.push(row.route)}
                 style={({ pressed }) => [
                   styles.scan,
-                  index === 0 && styles.scanFirst,
-                  {
-                    borderColor: theme.cardBorder,
-                    backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
-                  },
+                  index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule },
+                  { opacity: pressed ? 0.7 : 1 },
                 ]}>
-                <Icon name={row.icon} size={17} color={theme.textSecondary} />
-                <View style={styles.scanText}>
-                  <ThemedText type="small">{row.title}</ThemedText>
-                  <ThemedText type="meta" themeColor="textTertiary">{row.detail}</ThemedText>
+                <View style={[styles.linkTile, { backgroundColor: band.glyphGround }]}>
+                  <Icon name={row.icon} size={18} color={band.text} />
                 </View>
-                <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+                <View style={styles.scanText}>
+                  <ThemedText type="smallBold">{row.title}</ThemedText>
+                  <ThemedText type="meta" themeColor="textSecondary">{row.detail}</ThemedText>
+                </View>
+                <Icon name="chevron-right" size={16} color={band.textSecondary} />
               </Pressable>
             ))}
           </View>
-      </ScreenScaffold>
+      </BandScaffold>
 
       {/* Add account sheet */}
       <BottomSheet visible={adderVisible} onClose={() => setAdderVisible(false)} title={t('newAccount')}
@@ -870,40 +865,45 @@ export default function WalletScreen() {
 }
 
 const styles = StyleSheet.create({
-  transfersLink: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, minHeight: 64,
-    paddingVertical: Spacing.three, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
-  transferCopy: { flex: 1, minWidth: 0, gap: Spacing.one },
+  transferCopy: { flex: 1, minWidth: 0, gap: Spacing.half },
+  linkGroup: { borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, marginTop: Spacing.two },
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 64, paddingVertical: Spacing.two + 2 },
+  linkRowRule: { borderTopWidth: StyleSheet.hairlineWidth },
+  // One glyph ground for every tile on the sheet (design language E).
+  linkTile: { width: 40, height: 40, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two, minHeight: 44 },
+  sectionAction: { minHeight: 44, minWidth: 44, justifyContent: 'center' },
   reissue: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.tile,
+    borderRadius: 22,
     padding: Spacing.three,
     gap: Spacing.two - 2,
     marginBottom: Spacing.two,
   },
   reissueActions: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Spacing.two,
     paddingTop: Spacing.two - 2,
   },
   reissueBtn: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two - 2,
-    borderRadius: Radius.full,
+    borderRadius: 22,
+    borderWidth: 1,
   },
   content: {
-    gap: Spacing.three,
+    gap: Spacing.four,
   },
-  balanceSummary: { gap: Spacing.two },
   scan: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two + 2,
-    minHeight: 60,
+    gap: 14,
+    minHeight: 64,
     paddingVertical: Spacing.two + 2,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  scanFirst: { borderTopWidth: StyleSheet.hairlineWidth },
-  scanText: { flex: 1, gap: 1 },
+  scanText: { flex: 1, minWidth: 0, gap: 1 },
   section: {
     gap: Spacing.two,
   },
@@ -1009,9 +1009,13 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   goalRow: {
-    gap: Spacing.one + 2,
-    paddingVertical: Spacing.one + 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    minHeight: 64,
+    paddingVertical: Spacing.two + 2,
   },
+  goalBody: { flex: 1, minWidth: 0, gap: Spacing.one + 2 },
   goalEmpty: {
     flexDirection: 'row',
     alignItems: 'center',
