@@ -26,8 +26,9 @@
  * everything a provider sends dropped those movements without trace. Only a
  * recognised RESTATEMENT of a bank card charge — an instalment or payment
  * charged, paid or received for an order; an order split into N payments; an
- * order refund to the card; a "will be charged tomorrow" preview — is
- * ignored. Anything else a provider sends reaches Review like any other
+ * order refund to the card; a "will be charged tomorrow" preview; a plain
+ * receipt for the shopper's payment that names no shop, person or other
+ * payee ("Payment of AED 49.75 collected", "2 of 4 paid") — is ignored. Anything else a provider sends reaches Review like any other
  * unparsed financial alert, where the user decides.
  *
  * The restatement test is deliberately narrow, and anything that names the
@@ -143,6 +144,33 @@ const CHARGE_PREVIEW_RE = new RegExp([
   'سيتم\\s+(?:خصم|تحصيل|سحب)',
 ].join('|'), 'iu');
 
+// Within one sentence: a decimal point ("49.75") does not end it.
+const SAME_SENTENCE = '(?:[^.!?؟\\n]|\\.(?=\\d))';
+
+/**
+ * A plain receipt for the shopper's own payment to the provider, which the
+ * paying bank alerts on as a charge to the provider: "Payment of AED 49.75
+ * collected successfully", "We have received your payment of AED 49.75",
+ * "AED 49.75 was charged to your card ending 1234", "2 of 4 paid". Used only
+ * with PAYEE_RE below: a payment AT a shop, TO a person or FROM someone is
+ * the provider's own money (a card purchase, a transfer), never a receipt.
+ */
+const PAYMENT_RECEIPT_RE = new RegExp([
+  `\\bpayment\\b${SAME_SENTENCE}{0,60}?\\b(?:collected|received|successful(?:ly)?|processed|confirmed|completed)\\b`,
+  '\\b(?:received|collected|processed)\\s+your\\s+payment\\b',
+  '\\b(?:charged|debited|deducted|collected)\\s+(?:to|from|on)\\s+your\\s+(?:saved\\s+|default\\s+|debit\\s+|credit\\s+|bank\\s+)?card\\b',
+  '\\b\\d{1,2}\\s+of\\s+\\d{1,2}\\s+(?:paid|payments?|instal(?:l)?ments?)\\b',
+  `(?:خصم|تحصيل|سحب)${SAME_SENTENCE}{0,40}?من\\s+بطاقت(?:ك|كم)`,
+  arabicWord('(?:استلام|استلمنا)') + '\\s+' + arabicWord('دفعت(?:ك|كم)'),
+  arabicWord('دفعت(?:ك|كم)') + `${SAME_SENTENCE}{0,40}?(?:بنجاح|ناجح[ةه]?)`,
+].join('|'), 'iu');
+
+/** A counterparty other than the shopper: "at CARREFOUR", "to Sara", "from Ahmed". */
+const PAYEE_RE = new RegExp([
+  '\\b(?:at|to|from)\\s+(?!(?:your|you)\\b)[\\p{L}\\p{N}]',
+  arabicWord('(?:في|إلى|الى)') + '\\s+(?!بطاقت)',
+].join('|'), 'iu');
+
 /**
  * Is this message a BNPL provider RESTATING a charge the paying bank already
  * alerted on (see the header)? Only then may it be ignored. False for every
@@ -156,5 +184,6 @@ export function isBnplProviderRestatement(sender: string | null | undefined, tex
   const value = text.normalize('NFKC').replace(/[ـً-ْ]/g, '');
   if (PROVIDER_OWN_MONEY_RE.test(value)) return false;
   return INSTALMENT_PLAN_RE.test(value) || CHARGE_PREVIEW_RE.test(value) ||
-    (ORDER_RE.test(value) && ORDER_PAYMENT_RE.test(value));
+    (ORDER_RE.test(value) && ORDER_PAYMENT_RE.test(value)) ||
+    (PAYMENT_RECEIPT_RE.test(value) && !PAYEE_RE.test(value));
 }

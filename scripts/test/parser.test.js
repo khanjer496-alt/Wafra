@@ -1132,6 +1132,16 @@ t('tabby charge-tomorrow preview is skipped (real charge arrives separately)',
     'تم تقسيم طلبك من نون بقيمة 199.00 درهم على 4 دفعات. تم خصم الدفعة الأولى 49.75 درهم من بطاقتك.',
     'تم استرداد 49.75 درهم لطلبك من نون إلى بطاقتك المنتهية بـ 1234',
     'سيتم خصم القسط القادم بقيمة 49.75 درهم من بطاقتك غدا',
+    // Plain receipts for an instalment the bank alerts on as a charge to
+    // TABBY: no order, plan or preview wording, and no payee.
+    'Payment of AED 49.75 collected successfully.',
+    'We have received your payment of AED 49.75. Thank you!',
+    'AED 49.75 was charged to your card ending 1234.',
+    'Your payment of AED 49.75 for Noon was successful.',
+    'AED 49.75 paid for your Noon purchase. 2 of 4 paid.',
+    'Autopay: AED 49.75 was charged to your card ending 1234 for Noon.',
+    'تم خصم 49.75 درهم من بطاقتك المنتهية بـ 1234',
+    'تم استلام دفعتك بقيمة 49.75 درهم. شكرا لك',
   ];
   const providerOwnMoney = [
     'You spent AED 35.00 at CARREFOUR with your Tabby Cash Card ending 1234.',
@@ -1153,6 +1163,13 @@ t('tabby charge-tomorrow preview is skipped (real charge arrives separately)',
     'You paid AED 50.00 to Sara.',
     // "طلب" is also a request: "Ahmed's request for AED 50 was paid".
     'تم دفع طلب أحمد بقيمة 50.00 درهم',
+    // Receipt wording with a payee is a purchase or a transfer, not a
+    // receipt for the shopper's instalment.
+    'Payment of AED 500.00 received from Ahmed.',
+    'Your payment of AED 35.00 at IKEA was successful.',
+    'AED 35.00 was charged to your card at CARREFOUR.',
+    'Your payment of AED 75.00 to Sara was successful.',
+    'تم خصم 35.00 درهم من بطاقتك في كارفور',
   ];
   ok('BNPL: provider restatements of a bank card charge are recognised, English and Arabic',
     typeof isBnplProviderRestatement === 'function' &&

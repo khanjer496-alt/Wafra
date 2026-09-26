@@ -374,7 +374,8 @@ from the Tabby and Tamara consumer apps. Wafra never adds these messages to
 the ledger automatically, and approving one in Review never makes Wafra trust
 the provider's app. When such a message restates a card charge (an instalment
 or payment for an order, an order split into payments, an order refund to the
-card, or a notice of tomorrow's charge), Wafra ignores it; the paying bank's
+card, a notice of tomorrow's charge, or a receipt for the user's payment that
+names no shop or person), Wafra ignores it; the paying bank's
 own alert is the record Wafra uses. Other messages from these providers, such
 as Tabby Cash card spending or transfers, have no bank alert behind them, so
 Wafra shows them in Review like any other financial alert it cannot read with

@@ -1822,6 +1822,58 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
   notificationRows = [];
   notificationsEnabled = false;
 
+  // PLAIN INSTALMENT RECEIPTS. A provider often confirms the shopper's
+  // instalment with no order, plan or preview wording at all. The bank alerts
+  // on the same charge to TABBY, so the receipt is a restatement: ignored on
+  // every lane, never a Review card that would count the instalment twice if
+  // approved. The same wording with a payee ("at IKEA") is a provider-card
+  // purchase and still reaches Review.
+  {
+    notificationsEnabled = true;
+    inboxRows = [
+      { id: 9601, address: 'Tabby', date: NOW + 45_000, body: 'Payment of AED 49.75 collected successfully.' },
+      { id: 9602, address: 'AD-Tabby', date: NOW + 45_100, body: 'AED 49.75 was charged to your card ending 1234.' },
+      { id: 9603, address: 'Tamara', date: NOW + 45_200, body: 'AED 49.75 paid for your Noon purchase. 2 of 4 paid.' },
+      { id: 9604, address: 'ADCB', date: NOW + 45_300, body: bankChargeToTabby },
+    ];
+    receivedRows = [];
+    notificationRows = [
+      { id: 'tabby-receipt-push-01', pkg: 'app.tabby.client', appLabel: 'Tabby', title: 'Tabby',
+        text: 'We have received your payment of AED 49.75. Thank you!', ts: NOW + 45_400 },
+      { id: 'tabby-card-at-shop-01', pkg: 'app.tabby.client', appLabel: 'Tabby', title: 'Tabby',
+        text: 'Your payment of AED 35.00 at IKEA was successful.', ts: NOW + 45_500 },
+    ];
+    const receipts = await scanInbox(0, {}, undefined, 'en-AE');
+    const receiptDiagnostics = getAndroidNotificationImportDiagnostics();
+    const shopReview = receipts.reviewCandidates.find((item) => item.observedAt === NOW + 45_500);
+    ok('plain provider instalment receipts are ignored on the SMS and app lanes; the bank charge posts once',
+      receipts.parsed.length === 1 && receipts.parsed[0]?.merchant === 'Tabby' &&
+        receipts.parsed[0]?.amountFils === 4975 &&
+        receipts.reviewCandidates.length === 1 && !!shopReview && reviewMoney(shopReview) === 'debit:3500' &&
+        receiptDiagnostics?.ignored === 1 && receiptDiagnostics?.review === 1,
+      JSON.stringify({ parsed: receipts.parsed, reviews: receipts.reviewCandidates, receiptDiagnostics }));
+    await receipts.commit();
+
+    reactNative.PermissionsAndroid.check = async () => false;
+    inboxRows = [];
+    notificationRows = [
+      { id: 'messages-tabby-rcpt-01', pkg: 'com.google.android.apps.messaging', appLabel: 'Messages', title: 'Tabby',
+        text: 'Your payment of AED 49.75 for Noon was successful.', ts: NOW + 45_600, sourceClass: 'messaging-review' },
+    ];
+    const ackBeforeReceiptLane = acknowledgedNotifications.length;
+    const receiptLane = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+    const receiptLaneDiagnostics = getAndroidNotificationImportDiagnostics();
+    await receiptLane.commit();
+    ok('without READ_SMS, a plain provider receipt via the Messages app is ignored and acknowledged',
+      receiptLane.parsed.length === 0 && receiptLane.reviewCandidates.length === 0 &&
+        receiptLaneDiagnostics?.ignored === 1 &&
+        acknowledgedNotifications.slice(ackBeforeReceiptLane).includes('messages-tabby-rcpt-01'),
+      JSON.stringify({ reviews: receiptLane.reviewCandidates, receiptLaneDiagnostics }));
+    reactNative.PermissionsAndroid.check = originalSmsCheck;
+    notificationRows = [];
+    notificationsEnabled = false;
+  }
+
   // History import, iOS local capture and diagnostics parse through the launch
   // session with the record's own sender. On a ledger with no pinned currency
   // the worldwide fallback used to post the provider's "split into 4" notice
