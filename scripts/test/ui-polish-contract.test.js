@@ -449,10 +449,15 @@ const task8Routes = [
   ['accuracy', 'accuracyHeader'],
   ['categorise', 'categoriseHeader'],
   ['currency', 'currencyHeader'],
-  ['feedback', 'feedbackHeader'],
   ['review-alerts', 'reviewAlertsHeader'],
-  ['trusted-devices', 'trustedDevicesHeader'],
 ];
+// Design language E: Feedback (green) and Trusted devices (slate) are band
+// screens; the band's nav row holds Back and the plain title sits on the band.
+for (const [route, band, nav] of [['feedback', 'flow', 'feedbackNav'], ['trusted-devices', 'accounts', 'trustedNav']]) {
+  const source = read(`src/app/${route}.tsx`);
+  assert.match(source, new RegExp(`const ${nav}: BandNav = \\{ back: true`), `${route} lacks its band back control`);
+  assert.match(source, new RegExp(`<BandScaffold[\\s\\S]*?band="${band}"[\\s\\S]*?nav=\\{${nav}\\}`), `${route} is not on its band`);
+}
 for (const [route, header] of task8Routes) {
   const source = read(`src/app/${route}.tsx`);
   assert.match(source, new RegExp(`const ${header}: ScreenHeaderProps = \\{[\\s\\S]*?back: \\{ label: [\\s\\S]*?onPress: \\(\\) => router\\.back\\(\\) \\}`));
@@ -519,7 +524,7 @@ assert.doesNotMatch(task8Currency, /conversionQuality|bankQuoted|referenceRate|o
   'Foreign spending should not expose FX diagnostics as a primary page section');
 
 const task8Feedback = read('src/app/feedback.tsx');
-assert.match(task8Feedback, /<ScreenScaffold[\s\S]*?keyboardAware[\s\S]*?headerMode="native"[\s\S]*?header=\{feedbackHeader\}/);
+assert.match(task8Feedback, /<BandScaffold[\s\S]*?keyboardAware[\s\S]*?nav=\{feedbackNav\}/);
 assert.match(task8Feedback, /scrollProps=\{\{ keyboardShouldPersistTaps: 'handled'/);
 assert.match(task8Feedback, /<TextField[\s\S]*?label=\{t\('feedbackInputA11y'\)\}[\s\S]*?value=\{message\}[\s\S]*?multiline[\s\S]*?maxLength=\{FEEDBACK_MESSAGE_MAX\}/);
 for (const seam of [

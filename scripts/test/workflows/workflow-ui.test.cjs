@@ -209,7 +209,13 @@ for(const platform of ['android','ios'])test(`paywall does not manufacture a sto
 });
 test('unpaired trusted devices preserves privacy disclosure and makes no connection on render',()=>{
  const h=createWorkflowHarness({state:{privateMode:true},states:{2:false}}),tree=h.renderScreen('trusted-devices');
- assert.ok(text(tree).includes(h.deps['@/components/workflows/workflow-copy'].workflowCopy('en').devicesTitle));assert.deepEqual(h.events,[]);
+ const t=h.deps['@/lib/i18n'].t;
+ // No relay URL in this build: the screen is the labelled sample, and the
+ // band still states what a trusted device can and cannot receive.
+ assert.ok(text(tree).includes(t('trustedPreviewBody')),'the sample is labelled as a sample');
+ assert.ok(text(tree).includes(t('trustedAndroidTruth')),'the relay-only truth is on the band');
+ assert.ok(walk(tree).some(n=>n.props?.testID==='trusted-title'),'the plain title is the band headline');
+ assert.deepEqual(h.events,[]);
 });
 for(const language of ['en','ar'])test(`iOS setup renders the actual guided steps without invoking permission or install: ${language}`,()=>{
  const h=createWorkflowHarness({language,platform:'ios',states:{0:{loading:false,supported:true,shortcutAvailable:false,stage:'shortcut',readiness:'not-added',opening:false,failure:null},3:true,4:true}}),tree=h.renderScreen('ios-setup'); // useState 3/4: progressLoaded/historyReady (2 is the viewed capture source)

@@ -207,7 +207,10 @@ test('Feedback type chips are paired, optional and use the wire topics', () => {
 test('Trusted devices shows the invite countdown as its hero and says what is relayed', () => {
   const screen = read('src/app/trusted-devices.tsx');
   const i18n = read('src/lib/i18n.ts');
-  assert.match(screen, /testID="trusted-invite-countdown"[\s\S]{0,900}type="display"[\s\S]{0,200}secondsLeft \/ 60/);
+  // Design language E: the countdown is the slate band's figure (mm:ss from
+  // the pure inviteCountdown), spoken once as a sentence.
+  assert.match(screen, /const countdown = inviteCountdown\(secondsLeft\)/);
+  assert.match(screen, /bandContent=\{inviteLive \? \([\s\S]{0,400}testID="trusted-invite-countdown"[\s\S]{0,900}\{countdown\.text\}/);
   assert.match(screen, /t\('trustedRelayOnly', language\)/);
   assert.match(i18n, /trustedRelayOnly: \{\s*en: 'The phone that joins receives only new items relayed after it joins\. Older transactions are not copied\.'/);
   // The board's "Share one ledger" promise is not made anywhere.

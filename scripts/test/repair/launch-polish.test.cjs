@@ -112,8 +112,13 @@ for (const language of ['en', 'ar']) {
     // The type chips' list and copy run from source.
     h.deps['@/lib/feedback-wire'] = load(path.join(root, 'src/lib/feedback-wire.ts'), {}, { TextEncoder });
     h.deps['@/lib/feedback-copy'] = load(path.join(root, 'src/lib/feedback-copy.ts'));
+    // Design language E: the band title and settings-style rows run from source.
+    h.deps['@/lib/settings-e-copy'] = load(path.join(root, 'src/lib/settings-e-copy.ts'));
+    h.deps['@/components/settings-band/band-title'] = load(path.join(root, 'src/components/settings-band/band-title.tsx'), h.deps);
+    h.deps['@/components/settings-rows'] = load(path.join(root, 'src/components/settings-rows.tsx'), h.deps);
     const tree = load(path.join(root, 'src/app/feedback.tsx'), h.deps).default();
-    const row = walk(tree).find(node => node.props?.accessibilityLabel === h.deps['@/lib/i18n'].t('feedbackParserTitle'));
+    // The row speaks its title first, then its detail (SettingsLinkRow).
+    const row = walk(tree).find(node => node.props?.onPress && node.props.accessibilityLabel?.startsWith(h.deps['@/lib/i18n'].t('feedbackParserTitle')));
     assert.ok(row);
     row.props.onPress();
     assert.deepEqual(h.events, [['route', '/parser-research']]);
