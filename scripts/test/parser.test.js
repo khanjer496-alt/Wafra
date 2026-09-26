@@ -709,6 +709,90 @@ if (parseSms('Account activity\nCredit\nAccount XXXX0004\nAED 1,250.75\n26/06/20
   fail++; console.log('✗ field-list Credit Account requires FAB sender context');
 }
 
+// ── Salary credits (PARSER_VERSION 54) ──
+// The owner's own salary alert, verbatim, account masked by them. From FAB it
+// took the field-list branch above and came back "Account credit" / other /
+// not deliberate — exactly what shouldReviewParsedIncome parks in Review — so
+// the salary never reached the ledger. Its date is an unlabelled field after
+// the amount, so it also carried no date and took the import day.
+const OWNER_SALARY = 'Salary Credit\nAccount XXXX0002\nAED 28500.00\n26/09/2026\nBalance AED 28965.77';
+const OWNER_SALARY_EXPECT = {
+  kind: 'transaction', type: 'income', amountFils: 2850000, currency: 'AED',
+  merchant: 'Salary', category: 'salary', deliberate: true, date: '2026-09-26',
+  card: { last4: '0002', kind: 'account' }, snapshotKind: 'balance', snapshotFils: 2896577,
+  transfer: false,
+};
+t('owner salary field list from FAB is Salary income, dated, with the balance as a balance',
+  OWNER_SALARY, OWNER_SALARY_EXPECT, { sender: 'FAB' });
+t('owner salary field list from another UAE sender reads the same',
+  OWNER_SALARY, OWNER_SALARY_EXPECT, { sender: 'ADCBAlert' });
+t('owner salary field list with no sender reads the same',
+  OWNER_SALARY, OWNER_SALARY_EXPECT);
+// The same message flattened onto one line (a joined notification). The date
+// directly after the amount used to make "28500.00 26" one malformed money
+// token, refusing the whole alert.
+t('owner salary flattened onto one line from FAB is still Salary income',
+  'Salary Credit Account XXXX0002 AED 28500.00 26/09/2026 Balance AED 28965.77',
+  OWNER_SALARY_EXPECT, { sender: 'FAB' });
+t('owner salary flattened onto one line without FAB context: amount, not the balance',
+  'Salary Credit Account XXXX0002 AED 28500.00 26/09/2026 Balance AED 28965.77',
+  { type: 'income', amountFils: 2850000, merchant: 'Salary', category: 'salary',
+    date: '2026-09-26', card: { last4: '0002', kind: 'account' } });
+// A salary word only names the FAB field-list credit when it is the header,
+// and a salary ADVANCE is financing, not pay.
+t('FAB field list with a salary-advance header is not filed as Salary',
+  'Salary Advance Credit\nAccount XXXX0002\nAED 5000.00\n26/09/2026\nBalance AED 5965.77',
+  { type: 'income', amountFils: 500000, merchant: 'Account credit', category: 'other',
+    deliberate: false, date: '2026-09-26' }, { sender: 'FAB' });
+t('FAB field list "Account activity / Credit" keeps its neutral title, now dated',
+  'Account activity\nCredit\nAccount XXXX0004\nAED 1,250.75\n26/06/2026\nBalance AED 40,191.68',
+  { type: 'income', amountFils: 125075, merchant: 'Account credit', category: 'other',
+    date: '2026-06-26', snapshotFils: 4019168 }, { sender: 'FAB' });
+// "Payroll credit:" — the colon defeated credit(?=\s+(?:of|to|…)), and
+// "payroll" was only a category word, not a direction word.
+t('"Payroll credit:" is salary income, not an expense titled Account debit',
+  'Payroll credit: AED 6,250.00 to account 1234 on 26/09/2026. Available balance AED 7,100.00',
+  { type: 'income', amountFils: 625000, merchant: 'Salary', category: 'salary',
+    date: '2026-09-26', snapshotKind: 'balance', snapshotFils: 710000 });
+t('"Payroll credit:" with no balance is salary income, not dropped',
+  'Payroll credit: AED 6,250.00 to account 1234',
+  { type: 'income', amountFils: 625000, merchant: 'Salary', category: 'salary' });
+// "credit transaction of" — DEBIT_WORDS' bare "transaction of" made it an
+// expense even though the sentence says which way the money went.
+t('"A credit transaction of … Description: SALARY" is salary income',
+  'A credit transaction of AED 18,000.00 has been processed on your account XXXX1234 on 26/09/2026. Description: SALARY',
+  { type: 'income', amountFils: 1800000, merchant: 'Salary', category: 'salary', date: '2026-09-26' });
+// Negatives: none of the new wording may turn spending, product nouns,
+// reminders or non-postings into income.
+t('a purchase on a Payroll Credit Card stays spending',
+  'AED 50.00 at CARREFOUR with Payroll Credit Card 1234 on 26/09/2026',
+  { type: 'expense', amountFils: 5000, merchant: 'Carrefour' });
+t('a purchase on a Payroll Card stays spending',
+  'AED 50.00 at CARREFOUR with Payroll Card 1234 on 26/09/2026',
+  { type: 'expense', amountFils: 5000, merchant: 'Carrefour' });
+t('a Credit Card "transaction of" is still spending',
+  'Credit card transaction of AED 50.00 at NOON on 26/09/2026',
+  { type: 'expense', amountFils: 5000, merchant: 'Noon' });
+t('a salary-advance loan repayment is a debit, not salary income',
+  'Salary advance loan repayment of AED 1,500.00 debited from your account 1234 on 26/09/2026',
+  { type: 'expense', amountFils: 150000, category: 'loan' });
+t('a reversed payroll credit is money leaving',
+  'Payroll credit of AED 6,250.00 was reversed from your account 1234',
+  { type: 'expense', amountFils: 625000 });
+t('"Credit card payment due" stays a reminder',
+  'Credit card payment due: AED 1,200.00 by 05/10/2026',
+  { kind: 'billDue', type: 'expense', amountFils: 120000 });
+t('a credit limit quote is not income', 'Your credit limit is AED 20,000.00', null);
+t('a pending credit transaction is not posted',
+  'A credit transaction of AED 500.00 is pending on your account 1234', null);
+t('a payroll credit that could not be processed is not posted',
+  'Your payroll credit of AED 6,250.00 could not be processed', null);
+t('an OTP for a credit transaction is not posted',
+  '123456 is your OTP for credit transaction of AED 500.00', null);
+t('a statement total followed by a date line is still a statement, not income',
+  'Your Credit Card statement: Total due AED 1,000.00\n25/10/2026\nMinimum due AED 100.00',
+  { kind: 'cardStatement', amountFils: 100000 });
+
 t('bare "daily limit" mention is NOT a snapshot source of truth',
   'Purchase of AED 200.00 at CARREFOUR with Debit Card ending 1234. Daily limit AED 5,000 applies',
   { amountFils: 20000 });

@@ -404,8 +404,17 @@ export interface ParsedCard {
  * the shop's name double-counted it. Future captures only; rows an older
  * version already posted from a provider source are not deleted by a reread,
  * so PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 54: salary credits post as Salary income. FAB's field-list credit with a
+ * salary header ("Salary Credit / Account XXXX0002 / AED … / DD/MM/YYYY /
+ * Balance …") is Salary instead of an uncategorised "Account credit" parked
+ * in Review, and the unlabelled date field after the amount is its posting
+ * date. "Payroll credit: AED …" and "A credit transaction of AED …" are
+ * income, not dropped or booked as expenses. A date directly after the amount
+ * no longer makes a flattened field list's amount token look malformed.
+ * Future captures only; PARSER_BACKFILL_VERSION remains 49.
  */
-export const PARSER_VERSION = 53;
+export const PARSER_VERSION = 54;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -663,8 +672,16 @@ const AR_CREDIT_WORDS =
 // So a bare "credit" now has to be doing a MONEY job: credit OF, credit TO,
 // credit advice, credit AED. The verb "credited" is unchanged and still counts
 // on its own, which is how every real credit alert in this corpus states it.
+//
+// "Payroll credit" is the same money job as "salary" (already listed): with
+// only the lookahead form, "Payroll credit: AED 6,250.00 to account 1234"
+// named no direction at all and was dropped, or — with a balance quoted —
+// booked as an EXPENSE. Anchored to the noun pair, never bare "payroll", and
+// never before a product noun: a "Payroll (Credit) Card" purchase must stay
+// spending.
 const CREDIT_WORDS = new RegExp(
   `credited|\\bcredit(?=\\s+(?:of|to|for|amount|advice|note|entry|txn|transaction|aed|dhs|sar)\\b)` +
+    `|\\bpayroll\\s+credit(?:ed)?\\b(?!\\s+(?:card|limit|line|facility))` +
     `|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your|${AR_CREDIT_WORDS}`,
   'i',
 );
@@ -1716,6 +1733,7 @@ let SNAPSHOT_RE = /x^/;
 let PLAIN_BALANCE_RE = /x^/;
 let CARD_PAYMENT_RE = /x^/;
 let CARD_RECEIPT_DATE_RE = /x^/;
+let FIELD_LIST_DATE_RE = /x^/;
 let DEBIT_WORDS = /x^/;
 let PAYMENT_FOR_RE = /x^/;
 let FX_PREFIX_RE = /x^/;
@@ -1861,6 +1879,11 @@ function ensureCurrencyPatterns(): void {
   // not as part of the amount. Require whitespace after label punctuation:
   // without it, "AED.99" loses its decimal and inflates 99 fils to AED 99.
   AED_AMOUNT_RE = new RegExp(`${PREFIX}\\s*(${FIGURE})`, 'gi');
+  // See fieldListPostingDate: the date field directly after the amount field.
+  FIELD_LIST_DATE_RE = new RegExp(
+    `(?:^|\\s)(?:${PREFIX})\\s*${FIGURE}[^\\S\\n]*\\n?[^\\S\\n]*` +
+      `(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4})(?!\\d)(?![/.-]\\d)`,
+    'i');
   // The trailing guard covers Arabic too: without it "50 دار" would read its
   // first two letters as the currency symbol and invent an amount.
   AED_SUFFIX_RE = new RegExp(
@@ -2050,8 +2073,12 @@ function ensureCurrencyPatterns(): void {
   // isBillDue requires !hasDebit — so the reminder became a posted expense for
   // money the user had not yet sent. Same failure the `payment(?!\s+due)`
   // guard beside it exists to prevent, one word later.
+  // "transaction of" is a debit only when nothing says which way: "A CREDIT
+  // transaction of AED 18,000.00 has been processed on your account ...
+  // Description: SALARY" is money arriving, and the bare noun booked a salary
+  // as an AED 18,000 expense titled "Account debit".
   DEBIT_WORDS = new RegExp(
-    `purchase|debit(?:ed)?|deducted|spent|\\bpaid\\b|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|\\bused\\b|utilis(?:e|ed)|utiliz(?:e|ed)|swiped|tapped|transacted|transaction\\s+(?:of|amount)|cash\\s+advance|charged|(?:via|using|through)\\s+(?:your\\s+)?(?:credit|debit|covered|charge|prepaid)\\s+card` +
+    `purchase|debit(?:ed)?|deducted|spent|\\bpaid\\b|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|\\bused\\b|utilis(?:e|ed)|utiliz(?:e|ed)|swiped|tapped|transacted|(?<!\\bcredit\\s{1,3})transaction\\s+(?:of|amount)|cash\\s+advance|charged|(?:via|using|through)\\s+(?:your\\s+)?(?:credit|debit|covered|charge|prepaid)\\s+card` +
       // "AED 500 has been TRANSFERRED from your account to MOHAMMED ALI" named
       // no verb either list knew — only the opposite-direction phrase
       // "transferred to your" was listed — so an outgoing transfer returned
@@ -4920,6 +4947,25 @@ function sourceBackedReceiptDate(
   return { date, dateRepairFrom: previous };
 }
 
+/**
+ * The posting date of a FIELD-LIST alert, which labels nothing:
+ *
+ *   Salary Credit / Account XXXX0002 / AED 28500.00 / 26/09/2026 / Balance …
+ *
+ * DATE_RE needs a lead-in word ("on", "value date"), so this family arrived
+ * with date null and was filed on the day it happened to be imported — a
+ * history import put every month's salary on one day. Only the field that
+ * DIRECTLY follows the local amount field (next line, or next token when the
+ * list is flattened onto one line) counts, with a four-digit year; a date
+ * anywhere else in the body is not read by this rule. Posting date only: the
+ * reminder/statement branches never consult it.
+ */
+function fieldListPostingDate(raw: string): string | null {
+  ensureCurrencyPatterns();
+  const m = raw.match(FIELD_LIST_DATE_RE);
+  return m ? numericDate(m[1], m[2], m[3]) : null;
+}
+
 function extractDate(raw: string): string | null {
   // Each format falls through to the next: a numeric date that matched but
   // could not be resolved must not stop the named-month form from being read.
@@ -5230,7 +5276,8 @@ function parseSmsInner(
   // reason there are two variables: on the billDue and cardStatement paths
   // that clause is the answer, and those branches read `statedDate`.
   const statedDate = extractDate(raw);
-  const date = extractDate(blank(raw, DUE_DATE_FOOTER_RE));
+  const postingText = blank(raw, DUE_DATE_FOOTER_RE);
+  const date = extractDate(postingText) ?? fieldListPostingDate(postingText);
   const snapshot = extractSnapshot(raw);
   const snapshotFils = snapshot?.fils ?? null;
   let snapshotKind = snapshot?.kind ?? null;
@@ -5316,6 +5363,17 @@ function parseSmsInner(
    * Keep this sender-gated and shape-gated. The first AED figure after the
    * masked account is the movement; extractSnapshot independently reads the
    * later Balance figure. No FAB sender => no special interpretation.
+   *
+   * The same field list arrives with a SALARY header instead of "Account
+   * activity" (the owner's own alert, account masked by them):
+   *
+   *   Salary Credit / Account XXXX0002 / AED 28500.00 / 26/09/2026 / Balance …
+   *
+   * Titled "Account credit" and left in `other`, that row is exactly what
+   * shouldReviewParsedIncome parks in Review, so a salary never reached the
+   * ledger. Only the HEADER before "Credit Account" can name it — a salary
+   * word anywhere else in the body proves nothing about this movement — and a
+   * salary ADVANCE or loan header is financing, not pay.
    */
   const fabAccountCredit = bank?.name === 'FAB'
     ? raw.match(
@@ -5328,12 +5386,15 @@ function parseSmsInner(
     const fabBalanceFils = fabBalance
       ? Math.round(Number(fabBalance[1].replace(/,/g, '')) * 100)
       : null;
+    const fabHeader = raw.slice(0, fabAccountCredit.index ?? 0);
+    const fabSalary = SALARY_RE.test(fabHeader) && !/\b(?:advance|loan|financ\w*)\b/i.test(fabHeader);
+    const fabCategory = fabSalary ? categoryOf('Salary', 'income', overrides, 'Salary') : null;
     if (Number.isFinite(amountFils) && amountFils > 0) {
       return {
         kind: 'transaction',
         type: 'income',
         amountFils,
-        merchant: 'Account credit',
+        merchant: fabSalary ? 'Salary' : 'Account credit',
         date,
         dueDay: null,
         minDueFils: null,
@@ -5341,8 +5402,9 @@ function parseSmsInner(
         transferHint: false,
         snapshotFils: Number.isFinite(fabBalanceFils) ? fabBalanceFils : snapshotFils,
         snapshotKind: Number.isFinite(fabBalanceFils) ? 'balance' : snapshotKind,
-        categoryGuess: 'other',
-        categoryDeliberate: false,
+        categoryGuess: fabCategory?.id ?? 'other',
+        categoryDeliberate: fabCategory?.deliberate ?? false,
+        ...(fabCategory?.pinned ? { categoryPinned: true as const } : {}),
         currency,
         reference,
         raw: source,

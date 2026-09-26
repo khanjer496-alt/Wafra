@@ -34,7 +34,12 @@ export function malformedLocalMoneyTokens(
   let scanner = scanners.get(key);
   if (!scanner) {
     const currency = `(?:${key})`;
-    const number = String.raw`(?:\d[\d.,]*|\.\d[\d.,]*)(?:[ \u00a0\u2009\u202f]+\d[\d.,]*)*(?:[eE][+-]?\d+)?`;
+    // A space-separated digit group continues the figure ("28 500.00"), but a
+    // group shaped like a whole date does not: a field-list alert flattened
+    // onto one line reads "AED 28500.00 26/09/2026", and swallowing the day
+    // made the complete token look malformed, refusing a valid amount.
+    const dateGroup = String.raw`(?!\d{1,2}[/-]\d{1,2}[/-]\d{2,4}(?!\d)|\d{1,2}\.\d{1,2}\.\d{4}(?!\d))`;
+    const number = String.raw`(?:\d[\d.,]*|\.\d[\d.,]*)(?:[ \u00a0\u2009\u202f]+${dateGroup}\d[\d.,]*)*(?:[eE][+-]?\d+)?`;
     scanner = {
       prefix: new RegExp(String.raw`(?<![\p{L}])${localMoneyPrefixPattern(currencyAliases)}(?![\p{L}])\s*(${number})`, 'giu'),
       suffix: new RegExp(String.raw`(${number})\s*${currency}(?![\p{L}])`, 'giu'),

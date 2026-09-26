@@ -700,6 +700,26 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       uncertainIncoming.reviewCandidates[0]?.amount.minorUnits === '250000',
     JSON.stringify(uncertainIncoming));
 
+  // The owner's FAB salary field list, verbatim (account masked by them). It
+  // used to parse as an uncategorised "Account credit", which
+  // shouldReviewParsedIncome sends to Review, so the salary never posted.
+  inboxRows = [{
+    address: 'FAB',
+    body: 'Salary Credit\nAccount XXXX0002\nAED 28500.00\n26/09/2026\nBalance AED 28965.77',
+    date: NOW + 259_204_750,
+  }];
+  const fabFieldSalary = await scanInbox(0, {}, undefined, 'en-AE');
+  ok('a FAB field-list salary credit posts as Salary income on its stated date, not Review',
+    fabFieldSalary.parsed.length === 1 && fabFieldSalary.reviewCandidates.length === 0 &&
+      fabFieldSalary.parsed[0]?.merchant === 'Salary' &&
+      fabFieldSalary.parsed[0]?.categoryGuess === 'salary' &&
+      fabFieldSalary.parsed[0]?.type === 'income' &&
+      fabFieldSalary.parsed[0]?.amountFils === 2850000 &&
+      fabFieldSalary.parsed[0]?.date === '2026-09-26' &&
+      fabFieldSalary.parsed[0]?.card?.last4 === '0002' &&
+      fabFieldSalary.parsed[0]?.snapshotFils === 2896577,
+    JSON.stringify(fabFieldSalary));
+
   inboxRows = [
     { address: 'BNPPARIBAS', body: france, date: NOW + 1_000 },
     { address: 'ADCB', body: uae, date: NOW + 2_000 },
