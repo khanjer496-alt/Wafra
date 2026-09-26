@@ -163,6 +163,15 @@ const FOREGROUND_PARSE_YIELD_MS = 16;
 const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
 
 /**
+ * A masked card or account number as a bank prints it: "XX1234", "**1234",
+ * "...1234", "ending (in) 1234", "المنتهية بـ 1234". The same shapes as the
+ * Android re-post identity (NotificationRepostIdentity MASKED_DIGITS_RE,
+ * ENDING_DIGITS_RE), plus the Arabic "ending with".
+ */
+const MASKED_INSTRUMENT_RE =
+  /(?<![\p{L}\p{N}])(?:[x*•#]{2,}|\.{3,})\s?\d{3,6}(?!\d)|\bending\s+(?:in\s+|with\s+)?(?:no\.?\s*)?\d{3,6}(?!\d)|المنتهي[ةه]?\s+ب/iu;
+
+/**
  * The provider's double insert: [sms] directly follows [previous] in the
  * newest-first inbox with the next lower id, the same sender and text, and
  * under a second earlier. [sms], the older id, is the copy declined.
@@ -1765,12 +1774,14 @@ export async function scanInbox(
         // Without READ_SMS an SMS app's notification can be anyone's text,
         // and one the parser cannot resolve is treated as personal ("Can you
         // transfer AED 500 tonight?"). It is acknowledged now, as ignored.
-        // Only a row that still reads as a bank alert — money plus bank
-        // context such as a card or account, or a recognised bank sender as
-        // the conversation title — is retained in the encrypted queue for a
-        // future parser, the way an unresolved bank-app row is.
-        if (!handled && messagingRow &&
-            !(hasBankAlertMoneyHint(source) && hasGenericBankAlertContext(source, n.title))) {
+        // Only a row that still reads as a bank alert — money plus a
+        // recognised bank sender ID as the conversation title, or a masked
+        // card or account number — is retained in the encrypted queue for a
+        // future parser, the way an unresolved bank-app row is. A word like
+        // "account" (حساب) is not enough: people write it to each other.
+        if (!handled && messagingRow && !(hasBankAlertMoneyHint(source) &&
+            (detectLaunchMarketFromSender(n.title) !== null || hasUniversalInstitutionSender(n.title) ||
+              MASKED_INSTRUMENT_RE.test(source)))) {
           if (notificationImportStats) notificationImportStats.ignored += 1;
           handled = true;
         }

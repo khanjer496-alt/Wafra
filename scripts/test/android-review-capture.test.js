@@ -707,7 +707,26 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     const personalId = `samsung-messages-personal-${suffix}`;
     const bankId = `samsung-messages-bank-sms-${suffix}`;
     const unreadBankId = `samsung-messages-hdfc-unread-${suffix}`;
+    // "I sent 200 AED to your account", "send 150 AED to my account please":
+    // a person's texts, whatever the word for account.
+    const arabicPersonalIds = [`samsung-messages-ar-sent-${suffix}`, `samsung-messages-ar-ask-${suffix}`];
     notificationRows = [{
+      id: arabicPersonalIds[0],
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'أحمد',
+      text: 'حولت لك 200 درهم على حسابك',
+      ts: NOW + 5_380,
+      sourceClass: smsAppClass,
+    }, {
+      id: arabicPersonalIds[1],
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'Ahmed',
+      text: 'ارسل 150 درهم لحسابي الله يخليك',
+      ts: NOW + 5_385,
+      sourceClass: smsAppClass,
+    }, {
       id: unreadBankId,
       pkg: 'com.samsung.android.messaging',
       appLabel: 'Messages',
@@ -740,13 +759,15 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_410 &&
           item.sourcePackage === undefined) &&
         !personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_390) &&
+        !personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_380 || item.observedAt === NOW + 5_385) &&
         personalDiagnostics?.unresolved === 1 &&
-        personalDiagnostics?.acknowledgementPlanned === 2,
+        personalDiagnostics?.acknowledgementPlanned === 4,
       JSON.stringify({ reviews: personal.reviewCandidates, personalDiagnostics }));
     const ackBeforePersonal = acknowledgedNotifications.length;
     await personal.commit();
     ok(`without READ_SMS, an unresolvable SMS-app row (${smsAppClass}) is acknowledged with the reviewed bank SMS`,
-      acknowledgedNotifications.slice(ackBeforePersonal).includes(personalId) &&
+      arabicPersonalIds.every((id) => acknowledgedNotifications.slice(ackBeforePersonal).includes(id)) &&
+        acknowledgedNotifications.slice(ackBeforePersonal).includes(personalId) &&
         acknowledgedNotifications.slice(ackBeforePersonal).includes(bankId),
       JSON.stringify(acknowledgedNotifications.slice(ackBeforePersonal)));
     ok(`without READ_SMS, an unreadable SMS-app row that reads as a bank alert (${smsAppClass}) stays queued`,

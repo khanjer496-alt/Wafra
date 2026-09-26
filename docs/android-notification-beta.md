@@ -28,8 +28,11 @@ Because Android Notification access is device-wide, intake is layered:
   refuses non-Play/sideloaded apps outside the two lanes above. Android does
   not expose the Play store category, so none is inferred. When the installed
   app's own label independently identifies a bank or finance institution, its
-  confident parses may auto-import; outside the launch-tested UAE and Saudi
-  formats that additionally requires a certified template. Otherwise the
+  confident parses may auto-import. Outside the launch-tested UAE and Saudi
+  formats that needs a certified template, or the unproven-format path: a
+  clearly completed payment is added and marked "Auto-added — check" while
+  that setting is on (the default), and waits in Review when it is off.
+  Otherwise the
   source is **review-only** and its package name is not treated as issuer
   proof. If the user confirms the review item, Wafra learns that package
   locally on that phone and future high-confidence alerts may auto-import.
@@ -41,7 +44,7 @@ A messaging app is never a bank's own notification channel. The known
 messaging apps below are never financial candidates, never learned as a
 trusted package and never auto-imported.
 
-- **Known chat apps are never read.** Notifications from the packages in
+- **Known chat apps are never queued.** Notifications from the packages in
   `chatAppPackages` (WhatsApp, WhatsApp Business, Telegram, Signal, Messenger,
   Viber, LINE, WeChat, imo and BOTIM) are never queued, and a queued row from an
   older build is acknowledged as ignored. A chat or social app outside that
@@ -61,10 +64,10 @@ trusted package and never auto-imported.
   approving it never teaches Wafra to trust the SMS app, and later alerts from
   it still go to Review. A row the parser cannot resolve is treated as a
   personal message and is acknowledged (deleted from the queue) in the same
-  scan. The exception is a row that still reads as a bank alert (money plus a
-  card, an account or a bank sender ID as the conversation title). It is kept
-  encrypted, like an unresolved bank-app row, for up to seven days so a later
-  parser can read it.
+  scan. The exception is a row that still reads as a bank alert: an amount
+  plus a recognised bank sender ID as the conversation title, or a masked
+  card or account number. It is kept encrypted, like an unresolved bank-app
+  row, for up to seven days so a later parser can read it.
 
 The listener rejects OTP/security prompts before persistence. A bounded,
 seven-day queue stores candidates under an AndroidKeyStore key and acknowledges
@@ -81,12 +84,15 @@ and MessagingStyle messages are a running history, so they are read only when
 no single-posting field (BIG_TEXT, TEXT and the other standard text fields)
 carries an amount. Then the one entry that is identifiably the newest is used.
 When two or more entries carry an amount and nothing says which is new
-(untimed lines, or a tie at the newest timestamp), the alert is not dropped:
-the lines and messages become ordinary candidates, as in earlier builds, and
-the longest amount-bearing one is used. That can be an older charge that was
-already imported, so the row is queued review-only: it goes to Review for the
-user to confirm and never auto-imports, even from a curated bank. The
-`conversationAmbiguous` admission counter records how often that happens.
+(untimed lines, or a tie at the newest timestamp), the lines and messages
+(up to the first 16 of each) become ordinary candidates, as in earlier
+builds, and the longest amount-bearing one is used. That can be an older
+charge already imported rather than the new one, so the row is queued
+review-only: it goes to Review, marked as a possible repeat, and never
+auto-imports, even from a curated bank. The native re-post guard still
+applies to it, so a pick that repeats a seconds-clock charge from the last
+30 minutes is not queued at all. The `conversationAmbiguous` admission
+counter records how often this fallback runs.
 
 ## HSBC UAE qualification
 
