@@ -191,7 +191,7 @@ const ar: OnboardingECopy = {
   remindCardsWhen: 'قبل موعد الاستحقاق بثلاثة أيام، وفي يومه',
   remindIncluded: 'مع تفعيل الإشعارات',
   remindDailyTitle: 'الملخص اليومي',
-  remindDailyWhen: 'ما أنفقته اليوم، الساعة ٩ مساءً',
+  remindDailyWhen: 'ما أنفقته اليوم، الساعة 9 مساءً',
   allowNotifications: 'السماح بالإشعارات',
   captureTitle: 'أول دفعة لك',
   captureBodyAndroid: 'اسمح لوفرة بقراءة تنبيهات بنكك على هذا الهاتف، وستُضاف كل دفعة تلقائياً.',

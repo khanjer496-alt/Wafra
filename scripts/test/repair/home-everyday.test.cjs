@@ -113,11 +113,13 @@ test('the transfer notice appears only for a non-empty review queue and opens th
 });
 
 test('Arabic week row uses full weekday names when they fit, and always speaks them', () => {
-  const wide = createHarness({ language: 'ar', width: 390 }).render('home');
+  // Full names need about 61pt a column (الخميس in Noto Kufi); a 390pt phone
+  // gives ~44pt, so full names start at 430pt.
+  const wide = createHarness({ language: 'ar', width: 430 }).render('home');
   const week = byId(wide, 'home-week');
   assert.match(text(week), /السبت/);
   assert.match(week.props.accessibilityLabel, /الأحد|السبت/);
-  const narrow = createHarness({ language: 'ar', width: 330 }).render('home');
+  const narrow = createHarness({ language: 'ar', width: 390 }).render('home');
   const narrowWeek = byId(narrow, 'home-week');
   assert.doesNotMatch(text(narrowWeek), /السبت/);
   assert.match(narrowWeek.props.accessibilityLabel, /السبت/);

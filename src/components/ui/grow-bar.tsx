@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import type { StyleProp, ViewStyle } from 'react-native';
+import { Platform, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, {
   Easing,
   ReduceMotion,
@@ -32,7 +32,10 @@ export function GrowBar({ size, axis, delay = 0, style }: {
   delay?: number;
   style?: StyleProp<ViewStyle>;
 }) {
-  const { ready, reducedMotion } = useMotionPreference();
+  const motion = useMotionPreference();
+  // Android keeps its measured motion bypass (bars now sit in every limit row).
+  const reducedMotion = motion.reducedMotion || Platform.OS === 'android';
+  const { ready } = motion;
   const shown = useRef(false);
   const value = useSharedValue(reducedMotion ? size : 0);
 

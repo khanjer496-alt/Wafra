@@ -75,6 +75,12 @@ export type BandScaffoldProps = {
   refreshControl?: React.ReactElement<RefreshControlProps>;
   keyboardAware?: boolean;
   keyboardVerticalOffset?: number;
+  /**
+   * The route is an iOS page-sheet modal (Add). The sheet already starts below
+   * the status bar, but the window inset still reports it, so the band would
+   * open with an empty strip; iOS modals take no top inset.
+   */
+  presentedAsModal?: boolean;
   /** A tab root: the sheet clears the tab bar. */
   tabbed?: boolean;
   /** Extra bottom space for a control floating over the content (Android's Home Add). */
@@ -201,6 +207,7 @@ export function BandScaffold({
   refreshControl,
   keyboardAware = false,
   keyboardVerticalOffset = 0,
+  presentedAsModal = false,
   tabbed = false,
   floatingClearance = 0,
   contentStyle,
@@ -303,7 +310,8 @@ export function BandScaffold({
     {androidReserve > 0 ? <View style={{ height: androidReserve, backgroundColor: palette.sheet }} /> : null}
   </>;
 
-  return <View testID={testID} style={[styles.root, { backgroundColor: palette.band, paddingTop: insets.top }]}>
+  const topInset = presentedAsModal && Platform.OS === 'ios' ? 0 : insets.top;
+  return <View testID={testID} style={[styles.root, { backgroundColor: palette.band, paddingTop: topInset }]}>
     {/* The status bar follows the focused screen's band. */}
     {focused ? <StatusBar style={palette.statusBar} /> : null}
     {keyboardAware ? (

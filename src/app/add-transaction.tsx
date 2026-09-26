@@ -888,6 +888,7 @@ export default function AddTransactionScreen() {
     <BandScaffold
       band="flow"
       keyboardAware
+      presentedAsModal
       testID="add-transaction-screen"
       nav={{
         close: () => router.back(),

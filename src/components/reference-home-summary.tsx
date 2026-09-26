@@ -8,7 +8,7 @@ import { BandFigure } from '@/components/ui/band/band-figure';
 import { StatTile, statTileColors } from '@/components/ui/band/stat-tile';
 import { WeekTiles } from '@/components/ui/band/week-tiles';
 import { Fonts, type BandPalette, type Colors } from '@/constants/theme';
-import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
 import type { HomeToday } from '@/lib/home-today';
 
 type Props = {
@@ -62,7 +62,10 @@ function TodayTiles({ p, today }: { p: BandProps; today: HomeToday }) {
   const w = copy[p.language === 'ar' ? 'ar' : 'en'];
   const { width, fontScale } = useWindowDimensions();
   const currency = p.moneySpec.currency;
+  // Spoken amounts keep the ISO code; visible text follows the same symbol and
+  // placement as the band figures ("$75" beside "$15 a day", never "USD 15").
   const money = (fils: number) => `${currency} ${formatMinorUnits(Math.round(Math.abs(fils)), p.moneySpec)}`;
+  const shown = (fils: number) => formatMoneyText(Math.round(Math.abs(fils)), p.moneySpec);
   const countLabel = today.todayCount === 0 ? w.noPaymentsToday
     : `${today.todayCount} ${today.todayCount === 1 ? w.payment : w.payments}`;
   const budget = today.budget;
@@ -75,14 +78,15 @@ function TodayTiles({ p, today }: { p: BandProps; today: HomeToday }) {
   const rightLabel = budget || offerBudget ? w.leftToSpend : w.dailyAverage;
   const rightFils = budget ? budget.leftFils : average?.fils ?? 0;
   const rightMeta = budget
-    ? [`${money(budget.perDayFils)} ${w.perDay}`, budget.overCount > 0 ? w.budgetsOver(budget.overCount) : w.daysLeft(budget.daysLeft)].join(' · ')
+    ? [`${shown(budget.perDayFils)} ${w.perDay}`, budget.overCount > 0 ? w.budgetsOver(budget.overCount) : w.daysLeft(budget.daysLeft)].join(' · ')
     : `${w.overDays(average?.days ?? 0)}, ${w.excludingFixed}`;
   const rightWarning = budget !== null && budget.overCount > 0;
   const caveat = budget !== null && p.captureStopped === true;
   const accent = statTileColors(p.band, 'accent');
-  // Full Arabic weekday names when seven fit at this width and text size;
-  // otherwise the initials, with full names always spoken.
-  const fullWeekdays = p.language === 'ar' && !p.largeText && width / Math.max(fontScale, 1) >= 370;
+  // Full Arabic weekday names only where seven really fit: a column is about
+  // 44pt on a 390pt phone, narrower than الخميس in Noto Kufi. Otherwise the
+  // initials, with full names always spoken.
+  const fullWeekdays = p.language === 'ar' && !p.largeText && width / Math.max(fontScale, 1) >= 430;
   const weekSpoken = `${w.weekTotal} ${money(today.weekFils)}. ` +
     today.week.map(day => `${w.weekdayFull(day.weekday)} ${money(day.fils)}`).join(', ');
   return <View style={styles.todayBlock} testID="home-today">
@@ -114,7 +118,7 @@ function TodayTiles({ p, today }: { p: BandProps; today: HomeToday }) {
     </View>
     <View style={styles.weekHead}>
       <ThemedText type="smallBold" style={{ color: p.band.onBand }}>{w.thisWeek}</ThemedText>
-      <ThemedText type="meta" style={{ color: p.band.onBandSecondary }}>{money(today.weekFils)}</ThemedText>
+      <ThemedText type="meta" style={{ color: p.band.onBandSecondary }}>{shown(today.weekFils)}</ThemedText>
     </View>
     <WeekTiles testID="home-week" palette={p.band} moneySpec={p.moneySpec} height={70} accessibilityLabel={weekSpoken}
       days={today.week.map(day => ({ key: day.dateISO, label: fullWeekdays ? w.weekdayFull(day.weekday) : w.weekday(day.weekday),
@@ -134,7 +138,7 @@ export function ReferenceHomeBand(p: BandProps) {
     <Pressable
       testID="founder-unlock-logo"
       accessibilityRole="button"
-      accessibilityLabel="Unlock Founder Pro"
+      accessibilityLabel={copy[p.language === 'ar' ? 'ar' : 'en'].founderUnlock}
       hitSlop={8}
       onPress={p.onFounderUnlock}
       style={({ pressed }) => ({ opacity: pressed ? 0.65 : 1 })}>

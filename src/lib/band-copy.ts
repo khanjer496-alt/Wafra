@@ -5,9 +5,10 @@
  * English and Arabic carry identical keys (band-copy.test.cjs).
  */
 
-/** Arabic count + noun: ١ ← singular, ٢ ← dual, ٣–١٠ ← plural, ١١+ ← singular accusative. */
+/** Figures use Western digits, like every money figure in the app.
+ * Arabic count + noun: ١ ← singular, ٢ ← dual, ٣–١٠ ← plural, ١١+ ← singular accusative. */
 function arabicCount(n: number, one: string, two: string, few: string, many: string): string {
-  const shown = n.toLocaleString('ar-AE');
+  const shown = n.toLocaleString('en-US');
   if (n === 1) return one;
   if (n === 2) return two;
   if (n >= 3 && n <= 10) return `${shown} ${few}`;
@@ -43,21 +44,21 @@ export const bandCopyTables = {
     back: 'رجوع',
     close: 'إغلاق',
     pattern: 'نمطك',
-    shareMore: (count: number) => `+${count.toLocaleString('ar-AE')} أخرى`,
+    shareMore: (count: number) => `+${count.toLocaleString('en-US')} أخرى`,
     shareOthers: (count: number, percent: string) =>
       `${arabicCount(count, 'فئة أخرى', 'فئتان أخريان', 'فئات أخرى', 'فئة أخرى')} ${percent}`,
     shareOf: 'حصة',
-    percent: (value: number) => `${value.toLocaleString('ar-AE')}٪`,
+    percent: (value: number) => `${value.toLocaleString('en-US')}٪`,
     lastDays: (count: number) => `آخر ${arabicCount(count, 'يوم', 'يومين', 'أيام', 'يوماً')}`,
     today: 'اليوم',
     lower: (step: string) => `خفض بمقدار ${step}`,
     raise: (step: string) => `رفع بمقدار ${step}`,
     limitPerMonth: 'شهرياً',
-    inDays: (days: number) => `+${days.toLocaleString('ar-AE')}`,
+    inDays: (days: number) => `+${days.toLocaleString('en-US')}`,
     dueIn: (days: number) => days === 0 ? 'اليوم' : days === 1 ? 'غداً'
       : `بعد ${arabicCount(days, 'يوم', 'يومين', 'أيام', 'يوماً')}`,
     nextDays: (count: number) => count === 1 ? 'خلال اليوم القادم' : count === 2 ? 'خلال اليومين القادمين'
-      : `خلال الأيام الـ${count.toLocaleString('ar-AE')} القادمة`,
+      : `خلال الأيام الـ${count.toLocaleString('en-US')} القادمة`,
     morePins: (count: number) => `و${arabicCount(count, 'دفعة أخرى', 'دفعتان أخريان', 'دفعات أخرى', 'دفعة أخرى')}`,
   },
 };
