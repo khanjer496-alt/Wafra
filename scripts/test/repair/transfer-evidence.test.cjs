@@ -212,6 +212,8 @@ test('a reread that learns a named purchase removes obsolete transfer evidence',
 
 test('native history drops raw body and sender while keeping bounded transfer evidence', () => {
   cache.set('auto-import', { shouldReviewParsedIncome: () => false });
+  // The iOS AI suggestion queue is native-backed; it has no sink here.
+  cache.set('ai-alert-prefill-queue', { enqueueAiPrefill: () => false });
   const { parseLocalMessageRecord } = local('local-message-record');
   const text = 'Funds transferred from your FAB account 1111 to Emirates NBD account 2222.';
   const outcome = parseLocalMessageRecord(JSON.stringify({ v: 1,

@@ -7,4 +7,7 @@
     loading any ML Kit class below API 26.
   -->
   <uses-sdk tools:overrideLibrary="com.google.mlkit.genai.prompt, com.google.mlkit.genai.common" />
+  <!-- Normal (install-time) permission: getNetworkType reads whether the
+       active connection is unmetered Wi-Fi for "Wi-Fi only" model downloads. -->
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 </manifest>

@@ -1,3 +1,4 @@
+import type { LearnedFormatStore } from '@/lib/learned-alert-formats';
 import type { LedgerMoneySpec } from '@/lib/ledger-money';
 import type { AlertReviewTrayState } from '@/lib/alert-review-tray';
 import type { HistoryImportProgress } from '@/lib/history-import';
@@ -114,6 +115,12 @@ export interface BestEffortMarker {
   format: string;
   /** Routed market or the user's country (ISO 3166-1 alpha-2), `ZZ` if unknown. */
   market: string;
+  /**
+   * `learned:*` rows only: the id (`lf_…`) of the person's learned format
+   * that added the row, so "Looks right" counts toward it and "Undo" stops
+   * it. A code-owned hash, never message text.
+   */
+  template?: string;
 }
 
 export interface Transaction {
@@ -804,6 +811,25 @@ export interface AppState {
    * Bounded; rescans and history re-reads never re-add these alerts.
    */
   bestEffortUndone?: string[];
+  /**
+   * The person's learned bank-alert formats (learned-alert-formats.ts):
+   * boilerplate literals and slot types induced from Review confirmations,
+   * never message text, digits or amounts. Ledger data: backed up, restored
+   * (validated) and erased with the ledger.
+   */
+  learnedAlertFormats?: LearnedFormatStore;
+  /**
+   * "Auto-add from learned formats". Undefined = ON. OFF keeps every learned
+   * match as a pre-filled Review item. A capture preference, like
+   * bestEffortAutoPost.
+   */
+  learnedFormatAutoPost?: boolean;
+  /**
+   * "Suggest fields with on-device AI" for alerts nothing else could read
+   * (Apple Intelligence / Gemini Nano / the downloaded reader). Undefined = ON.
+   * Review suggestions only; never posts.
+   */
+  aiAlertPrefill?: boolean;
   /**
    * Android source selection. Optional for legacy ledgers: absence means the
    * historical behavior (both sources allowed whenever captureOptOut=false).

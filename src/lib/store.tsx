@@ -131,6 +131,16 @@ import {
   tombstonesForRemoved,
 } from '@/lib/best-effort-autopost';
 import {
+  learnedStoreAfterConfirmation,
+  learnedStoreAfterRejection,
+  learnedStoreAfterResolution,
+  normalizeLearnedFormatStore,
+  setLearnedFormatCaptureState,
+} from '@/lib/learned-format-capture';
+import { removeLearnedTemplate, emptyLearnedFormatStore, type LearnedFormatStore } from '@/lib/learned-alert-formats';
+import { setAiAlertPrefillEnabled } from '@/lib/ai-alert-reader';
+import { clearAiPrefillQueue, setAiPrefillSink } from '@/lib/ai-alert-prefill-queue';
+import {
   recordStorageFailure,
   storageReadFailureMayRetry,
   type StorageFailure,
@@ -428,6 +438,7 @@ export function migratePersistedState(
   const loadedTransactions = parsed.transactions;
   parsed.ledgerMoney = migrateLegacyLedgerMoney(parsed);
   parsed.reviewTray = normalizeAlertReviewTray(parsed.reviewTray, Date.now());
+  parsed.learnedAlertFormats = normalizeLearnedFormatStore(parsed.learnedAlertFormats);
   parsed.localCaptureQualifications = normalizeLocalCaptureQualifications(
     parsed.localCaptureQualifications,
     Date.now(),
@@ -883,6 +894,9 @@ type Action =
   | { type: 'deleteTransaction'; id: string }
   | { type: 'resolveBestEffort'; id: string; outcome: 'confirm' | 'undo' }
   | { type: 'setBestEffortAutoPost'; enabled: boolean }
+  | { type: 'setLearnedFormats'; store: LearnedFormatStore }
+  | { type: 'setLearnedFormatAutoPost'; enabled: boolean }
+  | { type: 'setAiAlertPrefill'; enabled: boolean }
   | ({
       type: 'importBatch';
       localCaptureQualifications?: LocalCaptureQualificationReceipt[];
@@ -953,6 +967,8 @@ type Action =
       reviewTray: AppState['reviewTray'];
       ledgerMoney: NonNullable<AppState['ledgerMoney']>;
       learnedNotificationPackage?: string;
+      /** The learned formats after this confirmation, when it taught one. */
+      learnedAlertFormats?: LearnedFormatStore;
     }
   | { type: 'setOnboarded' }
   | { type: 'restore'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -1129,6 +1145,9 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
     case 'resolveBestEffort':
       return action.outcome === 'undo';
     case 'setBestEffortAutoPost':
+    case 'setLearnedFormats':
+    case 'setLearnedFormatAutoPost':
+    case 'setAiAlertPrefill':
     case 'setPrivateMode':
     case 'setMonthStartDay':
       return false;
@@ -1205,6 +1224,7 @@ function reduceState(state: AppState, action: Action): AppState {
       }
       setActiveCountry(next.country);
       setBestEffortAutoPostEnabled(next.bestEffortAutoPost);
+      next.learnedAlertFormats = normalizeLearnedFormatStore(next.learnedAlertFormats);
       // The incoming state brings its own accounting currency with it, so any
       // pin held by the state being replaced must not veto its pack. A restore
       // of an SAR backup over an AED ledger is exactly that case.
@@ -1354,6 +1374,7 @@ function reduceState(state: AppState, action: Action): AppState {
         ...state,
         ledgerMoney: action.ledgerMoney,
         reviewTray: action.reviewTray,
+        ...(action.learnedAlertFormats ? { learnedAlertFormats: action.learnedAlertFormats } : {}),
         trustedNotificationPackages: action.learnedNotificationPackage &&
           /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(action.learnedNotificationPackage)
           ? [...new Set([...state.trustedNotificationPackages, action.learnedNotificationPackage])].slice(-64)
@@ -1418,6 +1439,10 @@ function reduceState(state: AppState, action: Action): AppState {
       const edited = applyTransactionEdit(previous, action.patch);
       const transactions = state.transactions.slice();
       transactions[index] = edited;
+      // Correcting the direction or amount of a row a learned format added
+      // means the format read it wrong: stop it, as "Undo" does.
+      const learnedRejected = edited.type !== previous.type || edited.amountFils !== previous.amountFils
+        ? learnedStoreAfterRejection(state.learnedAlertFormats, [previous], Date.now()) : null;
       // The ledger is already newest-first. Replacing one row cannot disturb
       // that order unless its posting date actually changed, so do not walk the
       // complete 10k-20k array merely to prove it is still sorted after a title,
@@ -1425,6 +1450,7 @@ function reduceState(state: AppState, action: Action): AppState {
       return {
         ...state,
         transactions: edited.date !== previous.date ? sortTxs(transactions) : transactions,
+        ...(learnedRejected ? { learnedAlertFormats: learnedRejected } : {}),
       };
     }
     case 'deleteTransaction': {
@@ -1432,15 +1458,21 @@ function reduceState(state: AppState, action: Action): AppState {
       // history re-read of that alert must not bring it back.
       const removed = state.transactions.filter((t) => t.id === action.id);
       const bestEffortUndone = tombstonesForRemoved(state.bestEffortUndone, removed, state.ledgerMoney?.currency);
+      const learnedRejected = learnedStoreAfterRejection(state.learnedAlertFormats, removed, Date.now());
       return {
         ...state,
         transactions: state.transactions.filter((t) => t.id !== action.id),
         ...(bestEffortUndone ? { bestEffortUndone } : {}),
+        ...(learnedRejected ? { learnedAlertFormats: learnedRejected } : {}),
       };
     }
     case 'resolveBestEffort': {
       const row = state.transactions.find((t) => t.id === action.id);
       if (!row?.bestEffort) return state;
+      // A row a learned format added: "Looks right" counts as one more
+      // confirmation of that format; "Undo" stops the format for good.
+      const learnedAlertFormats = learnedStoreAfterResolution(
+        state.learnedAlertFormats, row.bestEffort, action.outcome, Date.now());
       if (action.outcome === 'undo') {
         // Removal and tombstone land in one state write, so no rescan can
         // observe the row gone without its tombstone.
@@ -1449,17 +1481,25 @@ function reduceState(state: AppState, action: Action): AppState {
           transactions: state.transactions.filter((t) => t.id !== action.id),
           bestEffortUndone: tombstonesForRemoved(state.bestEffortUndone, [row], state.ledgerMoney?.currency) ??
             state.bestEffortUndone,
+          ...(learnedAlertFormats ? { learnedAlertFormats } : {}),
         };
       }
       const { bestEffort: _checked, ...confirmed } = row;
       return {
         ...state,
         transactions: state.transactions.map((t) => (t.id === action.id ? confirmed : t)),
+        ...(learnedAlertFormats ? { learnedAlertFormats } : {}),
       };
     }
     case 'setBestEffortAutoPost':
       setBestEffortAutoPostEnabled(action.enabled);
       return { ...state, bestEffortAutoPost: action.enabled };
+    case 'setLearnedFormats':
+      return { ...state, learnedAlertFormats: normalizeLearnedFormatStore(action.store) };
+    case 'setLearnedFormatAutoPost':
+      return { ...state, learnedFormatAutoPost: action.enabled };
+    case 'setAiAlertPrefill':
+      return { ...state, aiAlertPrefill: action.enabled };
     case 'importBatch': {
       const imported = applyMaterializedImportBatch(state, action);
       return action.localCaptureQualifications
@@ -1469,12 +1509,14 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'undoBatch': {
       const ids = new Set(action.ids);
       // Undoing an import also undoes its auto-added rows for good.
-      const bestEffortUndone = tombstonesForRemoved(state.bestEffortUndone,
-        state.transactions.filter((t) => ids.has(t.id)), state.ledgerMoney?.currency);
+      const undone = state.transactions.filter((t) => ids.has(t.id));
+      const bestEffortUndone = tombstonesForRemoved(state.bestEffortUndone, undone, state.ledgerMoney?.currency);
+      const learnedRejected = learnedStoreAfterRejection(state.learnedAlertFormats, undone, Date.now());
       return {
         ...state,
         transactions: state.transactions.filter((t) => !ids.has(t.id)),
         ...(bestEffortUndone ? { bestEffortUndone } : {}),
+        ...(learnedRejected ? { learnedAlertFormats: learnedRejected } : {}),
       };
     }
     case 'upsertBudget': {
@@ -1660,6 +1702,18 @@ function reduceState(state: AppState, action: Action): AppState {
         transactions: action.enabled
           ? state.transactions.map(({ raw: _discard, ...tx }) => tx)
           : state.transactions,
+        // Pending learning drafts (boilerplate words of a waiting alert) go
+        // too; formats already learned stay until the person removes them.
+        ...(action.enabled && state.reviewTray.pending.some((item) => 'learn' in item) ? {
+          reviewTray: {
+            ...state.reviewTray,
+            pending: state.reviewTray.pending.map((item) => {
+              if (!('learn' in item)) return item;
+              const { learn: _draft, ...rest } = item;
+              return rest;
+            }),
+          },
+        } : {}),
       };
     case 'setCaptureOptOut':
       return { ...state, captureOptOut: action.enabled };
@@ -1712,6 +1766,10 @@ function reduceState(state: AppState, action: Action): AppState {
         trialStartTs: state.trialStartTs,
         // A capture preference, like the opt-out above; not ledger data.
         bestEffortAutoPost: state.bestEffortAutoPost,
+        // Preferences too. The learned formats themselves are ledger data
+        // and are erased with it.
+        learnedFormatAutoPost: state.learnedFormatAutoPost,
+        aiAlertPrefill: state.aiAlertPrefill,
         accounts: [SEED_ACCOUNTS[2]],
       };
     case 'blockPersistence':
@@ -1776,6 +1834,12 @@ interface StoreValue {
   /** "Looks right" clears the Auto-added marker; "undo" removes the row for good. */
   resolveBestEffort: (id: string, outcome: 'confirm' | 'undo') => void;
   setBestEffortAutoPost: (enabled: boolean) => Promise<void>;
+  /** Settings → Learned bank formats: forget one learned format, or all of them (id null). */
+  forgetLearnedFormat: (id: string | null) => Promise<void>;
+  /** "Auto-add from learned formats" (default ON). */
+  setLearnedFormatAutoPost: (enabled: boolean) => Promise<void>;
+  /** "Suggest fields with on-device AI" (default ON). */
+  setAiAlertPrefill: (enabled: boolean) => Promise<void>;
   /**
    * Bulk import. `durable` resolves only after SQLCipher has committed the
    * rows; relay callers must await it before acknowledging the server queue.
@@ -2101,6 +2165,26 @@ function applyDeviceMoneyLocale(locale: Parameters<typeof deviceMoneyLocale>[0])
   return key;
 }
 
+/**
+ * Capture pipelines read the learned formats and AI settings from process
+ * mirrors (learned-format-capture.ts, ai-alert-reader.ts), like the
+ * best-effort setting. Refresh them whenever the ledger's copy changes.
+ */
+function syncCaptureMirrors(previous: AppState, next: AppState): void {
+  if (previous.learnedAlertFormats !== next.learnedAlertFormats ||
+    previous.learnedFormatAutoPost !== next.learnedFormatAutoPost ||
+    previous.privateMode !== next.privateMode || previous === EMPTY_STATE) {
+    setLearnedFormatCaptureState({
+      store: next.learnedAlertFormats,
+      autoPost: next.learnedFormatAutoPost,
+      privateMode: next.privateMode,
+    });
+  }
+  if (previous.aiAlertPrefill !== next.aiAlertPrefill || previous === EMPTY_STATE) {
+    setAiAlertPrefillEnabled(next.aiAlertPrefill);
+  }
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const locales = useLocales();
   // Published through MoneyLocaleProvider so compiled Money figures, which
@@ -2133,7 +2217,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (replacesLedger ||
         ((action.type === 'setPrivateMode' || action.type === 'setCaptureOptOut') && action.enabled)) {
       cancelLocalSemanticBackgroundWork();
+      // No on-device AI suggestion outlives an erase, restore, opt-out or Private Mode.
+      clearAiPrefillQueue();
     }
+    syncCaptureMirrors(authoritativeState.current, next);
     authoritativeState.current = next;
     if (Array.isArray(next.transferInternalIds) && (
       next.transferNormalizationVersion === TRANSFER_NORMALIZATION_VERSION ||
@@ -2525,6 +2612,47 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [dispatch, persist]);
 
+  const forgetLearnedFormat = useCallback(async (id: string | null) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const current = authoritativeState.current.learnedAlertFormats ?? emptyLearnedFormatStore();
+    const store = id === null ? emptyLearnedFormatStore() : removeLearnedTemplate(current, id);
+    const next = dispatch({ type: 'setLearnedFormats', store });
+    if (!await persist(next)) {
+      // What Settings shows must match what capture uses and what is stored.
+      dispatch({ type: 'setLearnedFormats', store: current });
+      throw new Error('Learned formats could not be saved');
+    }
+  }, [dispatch, persist]);
+
+  const setLearnedFormatAutoPost = useCallback(async (enabled: boolean) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const previous = authoritativeState.current.learnedFormatAutoPost !== false;
+    const next = dispatch({ type: 'setLearnedFormatAutoPost', enabled });
+    if (!await persist(next)) {
+      dispatch({ type: 'setLearnedFormatAutoPost', enabled: previous });
+      throw new Error('Learned-format preference could not be saved');
+    }
+  }, [dispatch, persist]);
+
+  const setAiAlertPrefill = useCallback(async (enabled: boolean) => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const previous = authoritativeState.current.aiAlertPrefill !== false;
+    const next = dispatch({ type: 'setAiAlertPrefill', enabled });
+    if (!await persist(next)) {
+      dispatch({ type: 'setAiAlertPrefill', enabled: previous });
+      throw new Error('On-device AI preference could not be saved');
+    }
+  }, [dispatch, persist]);
+
   const importBatch = useCallback((
     input: ImportBatchInput,
     qualifications: readonly LocalCaptureDeclineQualificationMapping[] = [],
@@ -2655,6 +2783,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, [dispatch, ensureDurable, persist]);
 
+  // On-device AI suggestions from synchronous capture paths (iOS) arrive
+  // later from a bounded background queue; they can only stage Review items.
+  useEffect(() => {
+    setAiPrefillSink((items) => stageReviewAlerts(items).durable);
+    return () => setAiPrefillSink(null);
+  }, [stageReviewAlerts]);
+
   const dismissReviewAlert = useCallback(async (
     id: string,
     outcome: ReviewResolutionOutcome,
@@ -2699,6 +2834,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!authoritativeState.current.hydrated) {
       throw new ReviewPromotionError('not-found');
     }
+    const reviewed = authoritativeState.current.reviewTray.pending.find((item) => item.id === input.reviewId);
     const plan = planReviewPromotion(
       authoritativeState.current,
       input,
@@ -2707,6 +2843,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       fxQuote,
     );
     if (plan.outcome === 'refused') throw new ReviewPromotionError(plan.reason);
+    // Confirming an item whose format no parser knew teaches that format
+    // (or counts one more confirmation of a learned one). Only the exact
+    // amount the item proposed; the person's direction and day win.
+    const learnedAlertFormats = plan.outcome === 'added' && reviewed && isUniversalReviewAlert(reviewed) &&
+      input.universal
+      ? learnedStoreAfterConfirmation(authoritativeState.current.learnedAlertFormats, reviewed, {
+          direction: input.type === 'income' ? 'credit' : 'debit',
+          amount: input.universal.amount,
+          date: input.date,
+        }, Date.now())
+      : null;
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
@@ -2721,6 +2868,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           reviewTray: plan.reviewTray,
           ledgerMoney: plan.ledgerMoney,
           learnedNotificationPackage: plan.learnedNotificationPackage,
+          ...(learnedAlertFormats ? { learnedAlertFormats } : {}),
         });
     if (!await persist(next)) throw new Error('Encrypted review promotion write failed');
     return plan.outcome;
@@ -3069,6 +3217,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       reviewTray: current.reviewTray,
       captureOptOut: current.captureOptOut,
       bestEffortAutoPost: current.bestEffortAutoPost,
+      learnedFormatAutoPost: current.learnedFormatAutoPost,
+      aiAlertPrefill: current.aiAlertPrefill,
       localCaptureQualifications: current.localCaptureQualifications,
       iosCaptureWarning: current.iosCaptureWarning,
     };
@@ -3194,6 +3344,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteTransaction,
       resolveBestEffort,
       setBestEffortAutoPost,
+      forgetLearnedFormat,
+      setLearnedFormatAutoPost,
+      setAiAlertPrefill,
       importBatch,
       stageReviewAlerts,
       dismissReviewAlert,
@@ -3264,6 +3417,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       deleteTransaction,
       resolveBestEffort,
       setBestEffortAutoPost,
+      forgetLearnedFormat,
+      setLearnedFormatAutoPost,
+      setAiAlertPrefill,
       importBatch,
       stageReviewAlerts,
       dismissReviewAlert,

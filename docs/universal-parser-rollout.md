@@ -269,15 +269,71 @@ Channels: Android SMS inbox and delivery, Android bank-app notifications
 so it stays review-only for unverified formats. None of this is a claim of verified coverage for any bank outside
 AE/SA.
 
+## Learned bank formats (per person, deterministic)
+
+`learned-alert-formats.ts` (pure) and `learned-format-capture.ts` (wiring).
+Order in every capture path: proven parsers and the best-effort policy →
+**learned formats** → AI reading → Review as before.
+
+- **Learning:** a universal Review item for an alert no parser recognised
+  carries a *learning draft* made at capture time (boilerplate literals and
+  slot types only; the tray still keeps no message text). Confirming the item
+  ("Confirm and add") turns the draft into a template, or counts one more
+  confirmation of it, with the person's direction and day. A different amount
+  learns nothing; another day drops the date slot; the opposite direction on a
+  learned format stops it. No draft in Private Mode (and switching Private
+  Mode on drops pending drafts). Senders that are phone numbers are keyed by
+  the format's anchor signature instead.
+- **Matching** (Android SMS/notifications via `parseUnproven`/`parse`, iOS
+  History import, iOS live capture's Review path): one confirmation →
+  pre-filled Review item labelled "Recognised format — confirm"; two
+  consistent confirmations → the row is added with the best-effort marker
+  `learned:template:<direction>` plus the template id ("Learned format —
+  check", confirm or undo; undo also stops the format; "Looks right" counts a
+  confirmation). Auto-adding also needs a pinned ledger, the unchanged
+  `decideBestEffortAutoPost` checks (non-completed wording, future date, a
+  dated rate for foreign money) and the setting "Auto-add from learned
+  formats" (default on; off keeps every match in Review).
+- **Never** for an AE/SA sender, an alert routed to AE/SA (including by its
+  own AED/SAR money), an AE/SA user or an AED/SAR ledger: learning and
+  matching refuse, and on those ledgers a match can only pre-fill Review.
+- **iOS live capture** reads non-Gulf alerts through Review only (it has no
+  worldwide automatic row type), so a learned match there is a pre-filled
+  Review item, never an automatic row.
+- **Settings → Learned bank formats:** masked shapes only, sender, direction,
+  currency, confirmations, status; forget one or all; the auto-add switch.
+- **State:** `learnedAlertFormats` in the encrypted ledger, included in the
+  exported backup and validated on restore (`validateLearnedFormatStore`: a
+  malformed container rejects the backup, tampered templates are dropped).
+  Erasing the ledger erases them; the two switches are preferences.
+
 ## AI reading of unrecognised alerts (optional on-device model)
 
-An optional on-device tagger (pruned multilingual-E5-small, int8 ONNX, ~32.7 MB
-download) can read an alert that **every** rule-based path refused. Contract:
+Two on-device engines can read an alert that **every** rule-based path and the
+learned formats refused, in this order: the phone's own model (Apple
+Foundation Models on iOS 26+ with Apple Intelligence, Gemini Nano through the
+ML Kit GenAI Prompt API on supported Android phones; `ai-alert-platform-reader.ts`),
+then the optional downloadable tagger (pruned multilingual-E5-small, int8
+ONNX, ~32.7 MB). Both only pre-fill Review ("Suggested by on-device AI");
+confirming such an item teaches the format (see above). Contract:
 
-- **Where it runs:** only in `auto-import.ts` `inspectRefused`, after the launch
-  grammar, `parseUnproven`, the universal reader and the refusal pipeline all
-  left the alert `ignored/unrecognized`. Never for a UAE/Saudi sender or route
-  (`ai-alert-reader.ts`, re-checked by the gate).
+- **Where it runs:** Android: `auto-import.ts` `inspectRefused`, inline,
+  after the launch grammar, `parseUnproven`, the learned formats, the universal
+  reader and the refusal pipeline all left the alert `ignored/unrecognized`.
+  iOS live capture and iOS History import parse synchronously, so they hand
+  such alerts to a bounded in-memory queue (`ai-alert-prefill-queue.ts`, at
+  most 8 waiting, text cleared once read, never persisted) that stages the
+  Review item later. Never for a UAE/Saudi sender, route, user or AED/SAR
+  ledger (`ai-alert-reader.ts`, re-checked by the gate).
+- **Phone model limits:** only alerts observed in the last 3 days, at most 12
+  readings per 10 minutes, one request at a time with an 8 s timeout, skipped
+  in Low Power Mode / Battery Saver or when the OS reports the model
+  unavailable. The model returns the phase-2 harness JSON (posting + reason,
+  amount and currency as written, direction, family, merchant, date) under a
+  closed schema (guided generation on Apple; validated in JavaScript for
+  Gemini Nano). Its strings are only located in the text; the direction is kept
+  only when a direction cue in the text agrees, otherwise the person picks it.
+  It never posts. Setting: "Suggest fields with on-device AI" (default on).
 - **What it may do:** open a Review item whose universal event carries the
   model's grounded amount/currency/merchant/direction/date as suggestions the
   person confirms (`EXPO_PUBLIC_WAFRA_AI_ALERT_PREFILL`, on by default but inert
@@ -298,8 +354,10 @@ download) can read an alert that **every** rule-based path refused. Contract:
   after passing on at least 500 labelled **real** messages with ≤ 0.3 % false
   posts and ≥ 98 % fully correct posted rows. Every language is off, and
   capture does not wire the post outcome in this build.
-- **Model delivery:** never bundled. Downloaded only when the person asks,
-  Wi-Fi only unless they explicitly allow mobile data, from the pinned GitHub
+- **Model delivery (tagger):** never bundled. Downloaded only from Settings →
+  On-device alert reader, off by default, Wi-Fi only unless the person turns
+  "Wi-Fi only" off (the connection type comes from the OS; unknown is never
+  treated as Wi-Fi), from the pinned GitHub
   release `parser-ai-tagger-v1` (overridable base URL, same hashes), verified
   by exact size and SHA-256 before every first load, ceiling 45 MB, deletable.
   Model absent → capture behaves exactly as before.
@@ -307,7 +365,8 @@ download) can read an alert that **every** rule-based path refused. Contract:
   `EXPO_PUBLIC_WAFRA_AI_ALERT_VERIFIER`, off, not wired): measured to catch
   injected errors but none of the real rule errors, so it stays off.
 
-Evidence: `docs/test-evidence/2026-09-25-parser-ai-phase2.md`.
+Evidence: `docs/test-evidence/2026-09-25-parser-ai-phase2.md`,
+`docs/test-evidence/2026-09-26-parser-ai-wire.md`.
 
 ## Automatic-import gates
 

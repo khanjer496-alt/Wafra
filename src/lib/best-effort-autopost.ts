@@ -92,8 +92,8 @@ export interface BestEffortInput {
   observedAt?: number;
   /** Network-free dated rate lookup (rates already on this device). */
   fxLookup?: (base: string, quote: string, date: string) => FxQuote | null;
-  /** Code-owned format prefix: 'universal' or 'semantic'. Never source text. */
-  formatPrefix?: 'universal' | 'semantic' | 'ai';
+  /** Code-owned format prefix: 'universal', 'semantic', 'ai' or 'learned'. Never source text. */
+  formatPrefix?: 'universal' | 'semantic' | 'ai' | 'learned';
 }
 
 /**

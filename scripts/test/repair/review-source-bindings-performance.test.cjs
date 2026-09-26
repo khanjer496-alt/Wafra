@@ -27,6 +27,8 @@ const tray = load(read('alert-review-tray.ts'), {
   '@/lib/capture-source-identity': identity,
   '@/lib/generic-review-entry': generic,
   '@/lib/universal-import': { canonicalUniversalSourceKey: identity.canonicalCaptureSourceKey },
+  // Only drafts are validated with it; these fixtures carry none.
+  '@/lib/learned-alert-formats': { validateLearnedTemplate: () => null },
 });
 const source = read('review-source-bindings.ts');
 

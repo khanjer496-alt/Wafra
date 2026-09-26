@@ -31,6 +31,23 @@ struct WafraOnDeviceAIEngineTests {
       check((try? WafraClosedSchema.parse(invalid)) == nil, "rejects invalid schema \(invalid.prefix(40))")
     }
 
+    // The alert-reading schema JavaScript sends (ai-alert-platform-reader.ts).
+    let alertSchema = #"{"name":"WafraBankAlert","fields":[{"name":"posting","choices":["yes","no"]},{"name":"status","choices":["completed","pending","declined","otp","promo","balance","statement","request","future","other"]},{"name":"amount","maxLength":40},{"name":"currency","maxLength":16},{"name":"direction","choices":["out","in","none"]},{"name":"family","choices":["purchase","refund","transfer","salary","fee","withdrawal","card-payment","bill-payment","none"]},{"name":"merchant","maxLength":80},{"name":"date","maxLength":40}]}"#
+    check((try? WafraClosedSchema.parse(alertSchema))?.fields.count == 8, "alert-read schema parses")
+    check(WafraOnDeviceAIEngine.allowedTasks == ["ask-plan", "categorize", "alert-read"], "task whitelist: ask-plan, categorize, alert-read")
+
+    // Device state helpers.
+    check(WafraDeviceState.classify(satisfied: false, wifiOrWired: true, cellular: false, expensive: false) == "none", "offline is none")
+    check(WafraDeviceState.classify(satisfied: true, wifiOrWired: true, cellular: false, expensive: false) == "wifi", "Wi-Fi is wifi")
+    check(WafraDeviceState.classify(satisfied: true, wifiOrWired: true, cellular: false, expensive: true) == "cellular", "an expensive Wi-Fi (hotspot) is not wifi")
+    check(WafraDeviceState.classify(satisfied: true, wifiOrWired: false, cellular: true, expensive: true) == "cellular", "cellular is cellular")
+    check(WafraDeviceState.classify(satisfied: true, wifiOrWired: false, cellular: false, expensive: false) == "unknown", "other interfaces are unknown")
+    let network = await WafraDeviceState.networkType(timeout: 2)
+    check(["wifi", "cellular", "none", "unknown"].contains(network), "live network probe answers with a known value (\(network))")
+    let once = WafraOnce()
+    check(once.claim() && !once.claim(), "one-shot latch")
+    _ = WafraDeviceState.lowPowerMode()
+
     // Request lifecycle: exactly-once resolution, busy, cancel.
     let registry = WafraOnDeviceAIRegistry()
     let first = try? registry.begin("a")

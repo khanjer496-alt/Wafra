@@ -88,7 +88,10 @@ export function aiAlertModelStatus(): AiAlertModelStatus {
  * Returns the resulting status; never throws.
  */
 export function downloadAiAlertModel(options: { networkType: AiAlertNetworkType; allowCellular?: boolean }): Promise<AiAlertModelStatus> {
-  if (options.networkType !== 'wifi' && !(options.allowCellular && options.networkType === 'cellular')) {
+  // 'unknown' (an older native build cannot tell) is never treated as Wi-Fi,
+  // but may download once the person allowed mobile data.
+  if (options.networkType !== 'wifi' &&
+    !(options.allowCellular && (options.networkType === 'cellular' || options.networkType === 'unknown'))) {
     return Promise.resolve({ ...aiAlertModelStatus(), error: 'wifi-required' });
   }
   downloading ??= (async () => {

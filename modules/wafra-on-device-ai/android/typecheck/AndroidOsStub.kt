@@ -9,3 +9,7 @@ object Build {
     const val O: Int = 26
   }
 }
+
+class PowerManager {
+  val isPowerSaveMode: Boolean = false
+}

@@ -32,6 +32,7 @@ import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { reviewTemplateRuleFor, type PromoteReviewAlertInput } from '@/lib/review-promotion';
 import { isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
+import { ReviewProvenance } from '@/components/review-provenance';
 import { UniversalReviewFields, UniversalReviewFacts, isOrdinaryUniversalPosting, reviewMoneyChoices } from '@/components/universal-review-fields';
 import type { UniversalInstrument, UniversalMoney } from '@/lib/universal-types';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
@@ -160,6 +161,11 @@ export default function AddTransactionScreen() {
     rememberedReview?.betweenOwnAccounts ?? false,
   );
   const reviewDirectionKnown = reviewDirection === 'credit' || reviewDirection === 'debit';
+  // Fields a learned format or an on-device model proposed stay editable:
+  // the direction always (a model's weakest field; flipping a learned one
+  // stops that format), and an AI-proposed merchant title.
+  const suggestedFields = genericItem?.suggestedBy === 'learned' || genericItem?.suggestedBy === 'ai';
+  const aiSuggestedTitle = genericItem?.suggestedBy === 'ai';
   const [saving, setSaving] = useState(false);
   const [showValidation, setShowValidation] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
@@ -632,7 +638,7 @@ export default function AddTransactionScreen() {
       {/* A captured alert asks only what Wafra genuinely does not know. If the
           bank already supplied debit/credit direction, do not make the person
           reconfirm it. Manual entries still need the normal type switch. */}
-      {(!reviewItem || !reviewDirectionKnown) ? <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
+      {(!reviewItem || !reviewDirectionKnown || suggestedFields) ? <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
               {(['expense', 'income'] as TransactionType[]).map((t) => {
                 const active = type === t && directionConfirmed;
                 const color = t === 'expense' ? theme.expense : theme.income;
@@ -696,6 +702,7 @@ export default function AddTransactionScreen() {
       {/* Amount */}
       {event && genericItem ? (
         <View style={styles.reviewSummary} testID="generic-review-summary">
+          <ReviewProvenance suggestedBy={genericItem.suggestedBy} detailed />
           <ThemedText type="meta" themeColor="textSecondary">
             {tUi(event.family === 'purchase' ? 'reviewAlertPossiblePurchase'
               : event.family === 'transfer' ? 'reviewAlertPossibleTransfer'
@@ -811,7 +818,7 @@ export default function AddTransactionScreen() {
       ) : null}
 
       {/* Title */}
-      {!reviewItem ? <TextField
+      {!reviewItem || aiSuggestedTitle ? <TextField
         label={tUi(genericItem ? 'genericMerchantTitle' : 'descriptionOptional')}
                 value={title}
                 onChangeText={setTitle}

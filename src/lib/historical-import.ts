@@ -1,4 +1,5 @@
 import { toISODate } from '@/lib/format';
+import { enqueueAiPrefill } from '@/lib/ai-alert-prefill-queue';
 import {
   identifySourceFreeReviewAlert,
   inspectSourceFreeRefusedAlert,
@@ -82,7 +83,22 @@ const inspectHistoricalRefusal = (input: {
       },
     };
   }
-  if (decision.kind === 'ignored') return { kind: 'ignored' };
+  if (decision.kind === 'ignored') {
+    // A recent alert nothing could read may still get on-device AI
+    // suggestions later (bounded background queue; Review only; never AE/SA).
+    const aiIdentity = decision.reason === 'unrecognized' ? appleMessageReviewIdentity(input.record.id) : null;
+    if (aiIdentity) {
+      enqueueAiPrefill({
+        source: input.record.text,
+        sender: input.record.sender?.trim() ?? '',
+        observedAt: input.timestamp,
+        channel: 'shortcut',
+        identity: aiIdentity,
+        expiresAtFloor: input.nowMs + REVIEW_ALERT_TTL_MS,
+      });
+    }
+    return { kind: 'ignored' };
+  }
   const identity = appleMessageReviewIdentity(input.record.id);
   if (!identity) return { kind: 'ignored' };
   const identified = identifySourceFreeReviewAlert(

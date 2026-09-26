@@ -1,6 +1,7 @@
 import type { AppState } from '@/lib/types';
 import { isTransferEvidence, isTransferDecision, isTransferMatch } from '@/lib/transfer-reconciliation';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { LEARNED_TEMPLATE_ID_RE, validateLearnedFormatStore } from '@/lib/learned-alert-formats';
 
 const categoryIds = new Set([
   'groceries', 'dining', 'transport', 'cash-withdrawal', 'utilities', 'telecom',
@@ -52,12 +53,16 @@ const captureInstrument: Check = (value) => record(value) && required(value, {
 }) && optional(value, { bankIdentity: id });
 // Code-owned identifiers only (e.g. `universal:purchase:debit`), never text.
 const bestEffortMarker: Check = (value) => record(value) &&
-  Object.keys(value).every((key) => key === 'v' || key === 'format' || key === 'market') &&
+  Object.keys(value).every((key) => key === 'v' || key === 'format' || key === 'market' || key === 'template') &&
   required(value, {
     v: oneOf(1),
-    format: (v) => typeof v === 'string' && /^(?:universal|semantic|ai):[a-z-]{1,32}:(?:debit|credit)$/.test(v),
+    format: (v) => typeof v === 'string' && /^(?:universal|semantic|ai|learned):[a-z-]{1,32}:(?:debit|credit)$/.test(v),
     market: (v) => typeof v === 'string' && /^[A-Z]{2}$/.test(v),
-  });
+  }) &&
+  // Only a learned row names its template (a code-owned `lf_` hash).
+  (value.template === undefined ||
+    (typeof value.format === 'string' && value.format.startsWith('learned:') &&
+      typeof value.template === 'string' && LEARNED_TEMPLATE_ID_RE.test(value.template)));
 const bestEffortUndoKey: Check = (v) => typeof v === 'string' && v.length > 0 && v.length <= 256;
 const transaction: Check = (value) => {
   if (!record(value) || !required(value, {
@@ -162,6 +167,11 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,
     privateMode: boolean, captureOptOut: boolean, dailySummary: boolean, trialStartTs: nonnegative,
     bestEffortAutoPost: boolean,
+    // A malformed container rejects the backup; individually invalid or
+    // tampered templates (id not matching their shape) are dropped on restore.
+    learnedAlertFormats: (v) => validateLearnedFormatStore(v) !== null,
+    learnedFormatAutoPost: boolean,
+    aiAlertPrefill: boolean,
     bestEffortUndone: (v) => Array.isArray(v) && v.length <= 2000 && v.every(bestEffortUndoKey),
     androidCaptureSources: (v) => record(v) && required(v, { sms: boolean, notifications: boolean }),
     monthStartDay: (v) => integer(v) && (v as number) >= 1 && (v as number) <= 28,

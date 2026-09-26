@@ -6,7 +6,12 @@ package expo.modules.kotlin.modules
 
 class ModuleDefinitionData
 
+class AppContext {
+  val reactContext: android.content.Context? = null
+}
+
 abstract class Module {
+  val appContext: AppContext = AppContext()
   abstract fun definition(): ModuleDefinitionData
 }
 

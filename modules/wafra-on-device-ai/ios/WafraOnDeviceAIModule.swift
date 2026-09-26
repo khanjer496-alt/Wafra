@@ -29,7 +29,7 @@ public class WafraOnDeviceAIModule: Module {
       maxTokens: Int,
       timeoutMs: Int
     ) async throws -> String in
-      guard task == "ask-plan" || task == "categorize" else {
+      guard WafraOnDeviceAIEngine.allowedTasks.contains(task) else {
         throw bridgeException(WafraOnDeviceAIFailure.invalidRequest)
       }
       do {
@@ -54,6 +54,16 @@ public class WafraOnDeviceAIModule: Module {
     // Gemini Nano only; Apple manages its model through Settings.
     AsyncFunction("prepare") { () async -> [String: Any] in
       WafraOnDeviceAIEngine.availability().dictionary
+    }
+
+    // Background model work is skipped in Low Power Mode.
+    AsyncFunction("getPowerState") { () async -> [String: Any] in
+      ["lowPowerMode": WafraDeviceState.lowPowerMode()]
+    }
+
+    // "Wi-Fi only" downloads. Reads the OS path state; sends nothing.
+    AsyncFunction("getNetworkType") { () async -> String in
+      await WafraDeviceState.networkType()
     }
   }
 }

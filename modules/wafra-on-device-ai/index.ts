@@ -1,7 +1,9 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
 /**
- * Platform language models that run on the phone itself:
+ * Platform language models that run on the phone itself (tasks: `ask-plan`,
+ * `categorize`, and `alert-read` — Review suggestions for a bank alert no
+ * parser read, see src/lib/ai-alert-platform-reader.ts):
  * - iOS 26+: Apple Foundation Models (`SystemLanguageModel.default`).
  * - Android 8+ with AICore: Gemini Nano through the ML Kit GenAI Prompt API.
  *
@@ -51,6 +53,17 @@ export interface WafraOnDeviceAINativeModule {
   cancel(requestId: string): Promise<void>;
   /** Android only: asks AICore to fetch Gemini Nano. Never called automatically. */
   prepare(): Promise<WafraOnDeviceAINativeAvailability>;
+  /**
+   * Low Power Mode (iOS ProcessInfo) / Battery Saver (Android PowerManager).
+   * Optional: absent in native builds that predate it.
+   */
+  getPowerState?(): Promise<{ lowPowerMode: boolean }>;
+  /**
+   * The active connection for "Wi-Fi only" downloads: 'wifi' (Wi-Fi or
+   * Ethernet), 'cellular', 'none' or 'unknown'. Reads OS state only; it makes
+   * no request. Optional: absent in native builds that predate it.
+   */
+  getNetworkType?(): Promise<'wifi' | 'cellular' | 'none' | 'unknown'>;
 }
 
 export default requireOptionalNativeModule<WafraOnDeviceAINativeModule>('WafraOnDeviceAI');

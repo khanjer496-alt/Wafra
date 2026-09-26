@@ -221,6 +221,11 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         // E2E-only web font-scale emulation: inert in native and test builds.
         return { E2E_FONT_SCALE: null, scaleTextStyleForE2E: style => style };
       }
+      // Review provenance label ("Recognised format" / "Suggested by on-device
+      // AI"): an opaque presentational child in screen harnesses.
+      if (name === '@/components/review-provenance') {
+        return { ReviewProvenance: () => null };
+      }
       if (name === '@/components/category-suggestion') {
         return { CategorySuggestion: () => null };
       }
@@ -234,7 +239,19 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       }
       if (name === '@/lib/ai-alert-reader') {
         // Default install: no downloaded alert model, so the AI reader is inert.
-        return { aiReviewEventForRefusedAlert: async () => null };
+        return { aiReviewEventForRefusedAlert: async () => null, setAiAlertPrefillEnabled() {} };
+      }
+      // The iOS AI suggestion queue has no sink in harnesses: every job is refused.
+      if (name === '@/lib/ai-alert-prefill-queue') {
+        return { enqueueAiPrefill: () => false, setAiPrefillSink() {}, clearAiPrefillQueue() {} };
+      }
+      // Learned formats are pure and deterministic; with no learned templates
+      // (every harness) they return nothing, exactly as before they existed.
+      if (name === '@/lib/learned-alert-formats') {
+        return require('../build/learned-alert-formats.js');
+      }
+      if (name === '@/lib/learned-format-capture') {
+        return require('../build/learned-format-capture.js');
       }
       if (name === '@/lib/local-semantic-runtime') {
         return {
