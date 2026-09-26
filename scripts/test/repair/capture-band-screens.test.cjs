@@ -134,3 +134,70 @@ test('Capture status: Android shows no iPhone-only links and stacks tiles at lar
   const tiles = byId(h.tree.props.bandContent, 'capture-health-counters');
   assert.ok([tiles.props.style].flat().some((s) => s && s.flexDirection === 'column'));
 });
+
+/* ── Statement import ─────────────────────────────────────────────────── */
+
+function statements({ language = 'en', privateMode = false, params = {}, preview } = {}) {
+  const { createWorkflowHarness } = require('../workflows/workflow-harness.cjs');
+  const h = createWorkflowHarness({ platform: 'ios', language, params, state: { privateMode,
+    ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 }, country: 'AE' } });
+  const deps = h.deps;
+  deps.react.useEffect = () => {};
+  deps['expo-file-system'] = { File: class {} };
+  deps['expo-haptics'] = {};
+  deps['@/lib/capture-executor'] = { createCaptureExecutor: () => ({}) };
+  deps['@/lib/cloud-import'] = { getImportCapabilities: async () => ({}), clearStatementPickerCache: () => {} };
+  deps['@/lib/cloud-import-contract'] = { CloudImportError: class extends Error {} };
+  deps['expo-router'].useLocalSearchParams = () => params;
+  h.local('@/lib/supplement-copy', 'src/lib/supplement-copy.ts');
+  h.local('@/lib/statement-coverage', 'src/lib/statement-coverage.ts');
+  h.local('@/lib/statement-batch', 'src/lib/statement-batch.ts');
+  const supplement = load(path.join(root, 'src/components/supplement-imports.tsx'), deps);
+  deps['@/components/supplement-imports'] = supplement;
+  const copy = deps['@/lib/supplement-copy'].SUPPLEMENT_COPY[language];
+  if (preview) return { copy, tree: supplement.SupplementImports({ preview, frame: (parts) => ({ type: 'Frame', props: parts }) }) };
+  const tree = load(path.join(root, 'src/app/statement-import.tsx'), deps).default();
+  return { h, copy, tree };
+}
+const idOrder = (tree, ids) => { const all = walk(tree).map((n) => n.props?.testID); return ids.map((id) => all.indexOf(id)); };
+
+test('Statement import: sand band with the title, the true privacy line above the choose control; the rest on the sheet', () => {
+  const { tree, copy } = statements();
+  assert.equal(tree.type, 'BandScaffold');
+  assert.equal(tree.props.band, 'settings');
+  const band = tree.props.bandContent;
+  assert.match(text(band), /Add bank statements/);
+  const [privacy, choose] = idOrder(band, ['statement-privacy', 'statement-choose']);
+  assert.ok(privacy >= 0 && choose > privacy, 'the upload disclosure is read before the control');
+  assert.match(text(byId(band, 'statement-privacy')), /Wafra’s import service\. The file is read, then deleted\./);
+  assert.doesNotMatch(text(tree), /read on this phone/i);
+  const control = byId(band, 'statement-choose');
+  assert.equal(control.props.accessibilityRole, 'button');
+  assert.equal(control.props.accessibilityLabel, copy.chooseFile);
+  const sheet = tree.props.children;
+  assert.ok(byId(sheet, 'statement-download-hint'));
+  assert.match(text(byId(sheet, 'statement-date-note')), /04\/09 is 4 September/);
+  assert.equal(byId(band, 'statement-date-note'), undefined);
+  const onboarding = statements({ params: { fromOnboarding: '1' } });
+  assert.match(text(onboarding.tree.props.bandContent), /Bring in your past spending/);
+  assert.ok(walk(onboarding.tree.props.children).some((n) => n.props?.accessibilityLabel === onboarding.copy.later));
+});
+
+test('Statement import: file rows carry a doc tile and a status in the status colour; private mode hides the control', () => {
+  const band = themes.BandPalettes.light.settings;
+  const { tree } = statements({ preview: { files: [
+    { name: 'Statement Jul 2026.pdf', ok: true, detail: '96 rows read' },
+    { name: 'Card Sep 2026.csv', ok: false, detail: 'Could not read this file' },
+  ] } });
+  const sheet = tree.props.sheet;
+  const results = byId(sheet, 'statement-file-results');
+  const failed = walk(results).find((n) => n.props?.accessibilityLabel?.includes('Card Sep 2026.csv'));
+  assert.ok(failed, 'a failed file is always listed');
+  assert.ok(byId(failed, 'statement-file-tile'), 'the document tile');
+  const status = walk(failed).find((n) => n.type === 'Text' && text(n).includes('Could not read'));
+  assert.ok(status);
+  assert.ok(JSON.stringify(status.props.style).includes(band.statusOver), 'a failure reads in the status colour');
+  const locked = statements({ privateMode: true });
+  assert.equal(byId(locked.tree.props.bandContent, 'statement-choose'), undefined);
+  assert.ok(byId(locked.tree.props.children, 'statement-private'));
+});
