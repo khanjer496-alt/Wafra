@@ -28,6 +28,10 @@ test('workflow consumers have real imports for their current localized presentat
    // 2026-09-23 screen polish: imports drop the repeated hero heading and lead with their step indicator.
    assert.ok(names.has('ImportSteps'),`${file}: step indicator import`);
    assert.ok(!names.has('WorkflowHero'),'Imports do not repeat the screen heading in a hero');
+  }else if(file.endsWith('/categorise.tsx')){
+   // Design language E: the sand band carries the count and one line, so no hero.
+   assert.ok(!names.has('WorkflowHero'),'Improve categories puts its count on the band, not in a hero');
+   assert.ok(names.has('BandScaffold')&&names.has('reviewBandCopy'),`${file}: band and copy imports`);
   }else{
    assert.ok(names.has('workflowCopy'),`${file}: copy import`);
    if(file.endsWith('/settings.tsx')){

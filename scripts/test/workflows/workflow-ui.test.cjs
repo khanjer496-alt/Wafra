@@ -137,6 +137,25 @@ test('categorisation displays affected count and applies merchant rule only afte
  stagedSave(staged).props.onPress();
  assert.ok(h.events.some(e=>e[0]==='setMerchantOverride'&&e[1]===merchant.merchant&&e[2]==='dining'&&e[3]===true));
 });
+// Sand band (design language E): the band counts what waits and says what an
+// answer moves; each staged answer names the entries it will move.
+for(const language of ['en','ar'])test(`categorise band counts merchants and each answer shows its moved entries: ${language}`,()=>{
+ const merchant={merchant:'Fixture Market',key:'fixture-market',count:7,totalFils:23456,lastDate:'2026-09-05'};
+ const other={merchant:'Other Shop',key:'other-shop',count:1,totalFils:1000,lastDate:'2026-09-04'};
+ const h=createWorkflowHarness({language,merchantSummary:{merchants:[merchant,other],paymentPurposes:[],rowCount:8,totalFils:24456},states:{0:{['merchant:'+merchant.key]:'dining'}}});
+ const tree=h.renderScreen('categorise'),d=h.deps['@/lib/details-copy'].detailsCopy[language];
+ const band=h.deps['@/lib/review-band-copy'].reviewBandCopy(language);
+ const head=text(walk(tree).find(n=>n.props?.testID==='categorise-band'));
+ assert.ok(head.includes(d.merchants.count(2)));assert.ok(head.includes(band.placeLine(d.entries(8))));
+ const staged=walk(tree).filter(n=>n.props?.testID==='categorise-staged');
+ assert.equal(staged.length,1,'only the answered row carries a staged line');
+ assert.ok(text(staged[0]).includes(band.entriesMoved(d.entries(7))));
+ assert.deepEqual(h.events,[],'rendering stages nothing and writes nothing');
+ // A list with bank-payment nicknames counts names, not merchants.
+ const purpose={sourceTitle:'Fishbasket',billIdentity:'consumer:4036',key:'consumer:4036|fishbasket',count:5,totalFils:5350000,lastDate:'2026-09-05'};
+ const mixed=createWorkflowHarness({language,merchantSummary:{merchants:[merchant],paymentPurposes:[purpose],rowCount:12,totalFils:1}}).renderScreen('categorise');
+ assert.ok(text(walk(mixed).find(n=>n.props?.testID==='categorise-band')).includes(band.namesToPlace(2)));
+});
 test('bank-payment nicknames learn by bill identity and never write a merchant-wide rule',()=>{
  const purpose={sourceTitle:'Fishbasket',billIdentity:'consumer:4036',key:'consumer:4036|fishbasket',count:5,totalFils:5350000,lastDate:'2026-09-05'};
  const opened=createWorkflowHarness({merchantSummary:{merchants:[],paymentPurposes:[purpose],rowCount:5,totalFils:5350000},states:{1:'payment-purpose:'+purpose.key}});

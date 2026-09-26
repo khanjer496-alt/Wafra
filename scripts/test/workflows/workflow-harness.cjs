@@ -107,6 +107,7 @@ function createWorkflowHarness(options={}) {
    h.local('@/lib/review-reasons','src/lib/review-reasons.ts');
    h.local('@/components/universal-review-fields');
   }
+  if(screen==='categorise')h.local('@/lib/review-band-copy','src/lib/review-band-copy.ts');
   if(screen==='feedback'){
    d['@/lib/sms-parser']={STRUCTURAL_TITLES:new Set()};
    d['@/lib/feedback-wire']=load(path.join(root,'src/lib/feedback-wire.ts'),d,{TextEncoder});

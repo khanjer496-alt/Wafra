@@ -430,9 +430,9 @@ assert.match(task7Pro, /entitled \? \([\s\S]*?manageSubscription[\s\S]*?proConti
 
 const task8Routes = [
   ['accuracy', 'accuracyHeader'],
-  ['categorise', 'categoriseHeader'],
   ['feedback', 'feedbackHeader'],
-  // Review moved onto the green band (design language E); asserted below.
+  // Review (green) and Improve categories (sand) moved onto their bands
+  // (design language E); asserted below.
   ['trusted-devices', 'trustedDevicesHeader'],
 ];
 for (const [route, header] of task8Routes) {
@@ -464,6 +464,10 @@ assert.match(task8Categorise, /summary\.paymentPurposes[\s\S]*?kind: 'payment-pu
 for (const count of ['summary.rowCount', 'item.count', 'sortedRows']) {
   assert.ok(task8Categorise.includes(count), `Categorise lost ${count}`);
 }
+// Sand band: the count and one line on the band, Save pinned as the footer.
+assert.match(task8Categorise, /const band = useBand\('settings'\)/);
+assert.match(task8Categorise, /<BandScaffold[\s\S]*?band="settings"[\s\S]*?nav=\{\{ back: true, title: t\('categoriseMerchants'\) \}\}[\s\S]*?footer=\{staged\.length > 0/);
+assert.match(task8Categorise, /bandWords\.entriesMoved\(d\.entries\(item\.count\)\)/, 'each staged answer says how many entries it moves');
 
 const task8Currency = read('src/app/currency.tsx');
 for (const seam of [
