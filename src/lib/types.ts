@@ -745,6 +745,17 @@ export interface AppState {
    * must be re-read; only an explicit backfill-version bump does.
    */
   parserVersion?: number;
+  /**
+   * Recent-window re-read receipt: the PARSER_VERSION whose bounded Android
+   * inbox re-read (capture.ts PARSER_RECOVERY_WINDOW_MS) completed.
+   *
+   * The routine scan starts after lastScanTs, so a message an older parser
+   * sent to Review or refused — and that Review then lost — was never read
+   * again, even by the parser that now reads it. Unlike parserVersion this is
+   * never a full-inbox migration: it re-evaluates only the last two weeks
+   * through the normal import pipeline, once per parser release.
+   */
+  recentRereadParserVersion?: number;
   /** Local saved-SMS repair receipt; separate from full-inbox parserVersion. */
   hydrationReparseKey?: string;
   /**
@@ -945,6 +956,12 @@ export interface ImportBatchInput {
    * partial scan as migration proof permanently strands older messages.
    */
   parserRereadComplete?: boolean;
+  /**
+   * Set only by a collection that re-read the whole recent window for this
+   * parser (see AppState.recentRereadParserVersion); stamped atomically with
+   * the rows that re-read produced.
+   */
+  recentRereadParserVersion?: number;
   /** Applied atomically with this page so its cursor can never outrun its rows. */
   historyImport?: HistoryImportProgress;
   lastScanTs: number;

@@ -1,5 +1,5 @@
 import { isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
-import { normalizeAlertReviewTray, type AlertReviewTrayState } from '@/lib/alert-review-tray';
+import { normalizeAlertReviewTray, type AlertReviewTrayState, type ReviewEntry } from '@/lib/alert-review-tray';
 import { canonicalUniversalSourceKey } from '@/lib/universal-import';
 import type { AppState } from '@/lib/types';
 
@@ -32,6 +32,30 @@ export const collectLegacyReviewSourceKeys = (state: BindingState): string[] =>
     ...state.reviewTray.pending.map((item) => item.sourceKey),
     ...state.reviewTray.tombstones.map((item) => item.sourceKey),
   ].filter(legacySource))].sort();
+
+/**
+ * Review candidates for a Message the ledger already holds, by its exact
+ * source identity (or the legacy `s{exact-time}-{amount}` live key at the same
+ * millisecond). Only the recovery re-read needs this: a routine scan reads
+ * each Message once.
+ */
+export function withoutRecordedReviews(
+  candidates: ReviewEntry[],
+  transactions: BindingState['transactions'],
+): ReviewEntry[] {
+  if (candidates.length === 0) return candidates;
+  const recorded = new Set<string>();
+  const legacyTimes = new Set<number>();
+  for (const row of transactions) {
+    if (typeof row.smsKey !== 'string') continue;
+    recorded.add(canonicalUniversalSourceKey(row.smsKey, row.ts));
+    const legacy = row.smsKey.match(/^s(\d+)-\d+$/);
+    if (legacy) legacyTimes.add(Number(legacy[1]));
+  }
+  return candidates.filter((item) => typeof item.sourceKey !== 'string' || (
+    !recorded.has(canonicalUniversalSourceKey(item.sourceKey, item.observedAt)) &&
+    !legacyTimes.has(item.observedAt)));
+}
 
 const tupleKeys = ['id', 'legacyId', 'legacySourceKey', 'observedAt', 'sourceKey'];
 const binding = (value: unknown): ReviewSourceBinding | null => {

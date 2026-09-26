@@ -357,6 +357,8 @@ export const createCaptureExecutor = ({
       ...plan.batch,
       ...(collected.historicalReread ? { parserRereadComplete: true } : {}),
       ...(collected.historyImport ? { historyImport: collected.historyImport } : {}),
+      ...(collected.recentRereadParserVersion !== undefined
+        ? { recentRereadParserVersion: collected.recentRereadParserVersion } : {}),
     };
 
     if (!hasChanges(plan)) {
@@ -366,7 +368,8 @@ export const createCaptureExecutor = ({
       // privacy cap are intentionally not retained. Relay rows use ACKs.
       if (collected.source === 'sms' &&
         (importBatch.lastScanTs > stateAtPlan.lastScanTs ||
-          importBatch.parserRereadComplete === true || importBatch.historyImport !== undefined)) {
+          importBatch.parserRereadComplete === true || importBatch.historyImport !== undefined ||
+          (importBatch.recentRereadParserVersion ?? 0) > (stateAtPlan.recentRereadParserVersion ?? 0))) {
         // Runtime diagnostics are always active in tester builds. Do not zero
         // this clock when verbose capture tracing is off; that records an
         // epoch-sized fake duration and hides the real save cost.

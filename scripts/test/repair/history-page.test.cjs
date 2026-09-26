@@ -34,7 +34,8 @@ function harness(options = {}) {
       useRef: (value) => ({ current: value }),
     },
     'react-native': native,
-    '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [] },
+    '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [],
+      withoutRecordedReviews: require('../build/review-source-bindings.js').withoutRecordedReviews },
     '@/lib/auto-import': {
       isSmsInboxAccessError: () => false, scanInbox: async () => page,
       buildImportPlan: () => { events.push('plan'); return { batch: { transactions: [] } }; },

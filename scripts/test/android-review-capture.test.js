@@ -723,6 +723,63 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       fabFieldSalary.parsed[0]?.snapshotFils === 2896577,
     JSON.stringify(fabFieldSalary));
 
+  {
+    // The owner's device: an older parser parked this salary in Review, Review
+    // then lost it, and the watermark had already moved past it. v54 reads it
+    // as Salary, but the routine scan starts after lastScanTs and never sees
+    // it again. The one-time recent-window re-read (capture.ts) must add it
+    // exactly once and re-add nothing the ledger already holds.
+    const { buildImportPlan } = require('./build/import-plan.js');
+    const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import.js');
+    const salaryAt = Date.UTC(2026, 8, 26, 2, 47, 36);
+    inboxRows = [
+      { id: 41_001, address: 'ADCB', body: uae, date: salaryAt - 3 * 60 * 60 * 1000 },
+      { id: 41_002, address: 'FAB',
+        body: 'Salary Credit\nAccount XXXX0002\nAED 28500.00\n26/09/2026\nBalance AED 28965.77', date: salaryAt },
+      { id: 41_003, address: 'ADCB', body: uae.replace('50.00', '75.00'), date: salaryAt + 5 * 60 * 60 * 1000 },
+    ];
+    let ids = 0;
+    const commit = (state, batch) => applyMaterializedImportBatch(state,
+      materializeImportBatch(batch, state, (prefix) => `${prefix}-recovery-${ids++}`));
+    // What survived on the phone: both purchases, no salary, cursor past it.
+    const firstScan = await scanInbox(0, {}, undefined, 'en-AE');
+    const survived = firstScan.parsed.filter((row) => row.sourceEventId !== 'a41002');
+    let ledger = commit(baseLedgerState(),
+      buildImportPlan(survived, baseLedgerState(), salaryAt + 5 * 60 * 60 * 1000).batch);
+    ok('recovery fixture: the ledger starts with both purchases and no salary',
+      ledger.transactions.length === 2 && !ledger.transactions.some((t) => t.category === 'salary') &&
+        ledger.lastScanTs === salaryAt + 5 * 60 * 60 * 1000,
+      JSON.stringify(ledger.transactions));
+    const routine = await scanInbox(ledger.lastScanTs + 1, {}, undefined, 'en-AE');
+    ok('recovery fixture: the routine watermark never reads the lost salary again',
+      routine.parsed.length === 0 && routine.reviewCandidates.length === 0, JSON.stringify(routine.parsed));
+
+    const floor = salaryAt + 6 * 60 * 60 * 1000 - 14 * 24 * 60 * 60 * 1000;
+    const reread = await scanInbox(floor, {}, undefined, 'en-AE');
+    const recovery = buildImportPlan(reread.parsed, ledger, reread.newestTs, new Date(salaryAt + 6 * 60 * 60 * 1000),
+      reread.declined);
+    ok('the recent re-read adds the lost salary once and neither purchase again',
+      recovery.txCount === 1 && recovery.batch.transactions[0]?.category === 'salary' &&
+        recovery.batch.transactions[0]?.type === 'income' &&
+        recovery.batch.transactions[0]?.amountFils === 2850000 &&
+        recovery.batch.transactions[0]?.date === '2026-09-26' &&
+        !recovery.batch.updates.some((update) => update.remove),
+      JSON.stringify({ txs: recovery.batch.transactions, updates: recovery.batch.updates }));
+    ledger = commit(ledger, { ...recovery.batch, recentRereadParserVersion: 54 });
+    ok('the re-read receipt lands with its rows and never rewinds the watermark',
+      ledger.recentRereadParserVersion === 54 && ledger.lastScanTs === salaryAt + 5 * 60 * 60 * 1000 &&
+        ledger.transactions.filter((t) => t.category === 'salary').length === 1,
+      JSON.stringify({ receipt: ledger.recentRereadParserVersion, lastScanTs: ledger.lastScanTs }));
+    const again = await scanInbox(floor, {}, undefined, 'en-AE');
+    const second = buildImportPlan(again.parsed, ledger, again.newestTs, new Date(salaryAt + 6 * 60 * 60 * 1000),
+      again.declined);
+    ok('re-reading the same window again posts nothing twice',
+      second.txCount === 0 && !second.batch.updates.some((update) => update.remove),
+      JSON.stringify(second.batch.transactions));
+    const older = commit(ledger, { ...second.batch, recentRereadParserVersion: 53 });
+    ok('an older re-read receipt can never replace a newer one', older.recentRereadParserVersion === 54);
+  }
+
   inboxRows = [
     { address: 'BNPPARIBAS', body: france, date: NOW + 1_000 },
     { address: 'ADCB', body: uae, date: NOW + 2_000 },
