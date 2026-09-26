@@ -2,6 +2,8 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { harness, walk, text } = require('./journal-harness.cjs');
+// Home B leads with Today; the period spending figure is the one inside home-spending-total.
+const periodMoney = (nodes) => walk(nodes.find((node) => node.props.testID === 'home-spending-total')).find((node) => node.type === 'Money');
 
 test('Home puts one spending summary and recent activity before capture controls', () => {
   const h = harness();
@@ -12,7 +14,7 @@ test('Home puts one spending summary and recent activity before capture controls
   }
   assert.ok(section('journal-summary') < section('home-widget-activity'));
   assert.ok(section('home-widget-activity') < section('journal-import-controls'));
-  assert.equal(nodes.find((node) => node.type === 'Money').props.fils, 508700);
+  assert.equal(periodMoney(nodes).props.fils, 508700);
   assert.match(text(h.tree), /View spending breakdown/);
   assert.match(text(nodes.find((node) => node.props.testID === 'home-widget-activity')), /Recent transactions/);
 });
@@ -108,16 +110,16 @@ test('Home places nonurgent upcoming payments after recent activity', () => {
 });
 test('known balances never replace spending or add another summary on Home', () => {
   const h = harness({ knownBalance: 3870000 });
-  assert.equal(walk(h.tree).find((node) => node.type === 'Money').props.fils, 508700);
+  assert.equal(periodMoney(walk(h.tree)).props.fils, 508700);
   assert.doesNotMatch(text(h.tree), /Recorded balances|Net after spending/);
   assert.doesNotMatch(text(h.tree), /6%|on track|safe to spend/i);
 });
 test('zero and unknown account balances do not change the Home spending figure', () => {
   const zero = harness({ knownBalance: 0 });
-  assert.equal(walk(zero.tree).find((node) => node.type === 'Money').props.fils, 508700);
+  assert.equal(periodMoney(walk(zero.tree)).props.fils, 508700);
   assert.doesNotMatch(text(zero.tree), /Recorded balances/);
   const unknown = harness();
-  assert.equal(walk(unknown.tree).find((node) => node.type === 'Money').props.fils, 508700);
+  assert.equal(periodMoney(walk(unknown.tree)).props.fils, 508700);
   assert.doesNotMatch(text(unknown.tree), /Recorded balances/);
 });
 test('Home does not duplicate import shortcuts; explicit capture control remains accessible', () => {

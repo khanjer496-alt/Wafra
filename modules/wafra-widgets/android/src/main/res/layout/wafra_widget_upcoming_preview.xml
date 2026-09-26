@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget-picker preview only (Android 12+). Illustrative sample bills. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="@drawable/wafra_widget_background"
+  android:orientation="vertical"
+  android:padding="16dp">
+
+  <TextView
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:text="@string/wafra_widget_upcoming"
+    android:textAlignment="viewStart"
+    android:textColor="@color/wafra_widget_secondary"
+    android:textSize="13sp"
+    android:textStyle="bold" />
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="4dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <LinearLayout
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:orientation="vertical">
+
+      <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:text="@string/wafra_widget_preview_bill_1"
+        android:textAlignment="viewStart"
+        android:textColor="@color/wafra_widget_text"
+        android:textSize="14sp" />
+
+      <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:text="@string/wafra_widget_preview_date_1"
+        android:textAlignment="viewStart"
+        android:textColor="@color/wafra_widget_secondary"
+        android:textSize="12sp" />
+    </LinearLayout>
+
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="12dp"
+      android:maxLines="1"
+      android:text="@string/wafra_widget_preview_bill_amount_1"
+      android:textColor="@color/wafra_widget_text"
+      android:textSize="14sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="6dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <LinearLayout
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:orientation="vertical">
+
+      <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:text="@string/wafra_widget_preview_bill_2"
+        android:textAlignment="viewStart"
+        android:textColor="@color/wafra_widget_text"
+        android:textSize="14sp" />
+
+      <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:text="@string/wafra_widget_preview_date_2"
+        android:textAlignment="viewStart"
+        android:textColor="@color/wafra_widget_secondary"
+        android:textSize="12sp" />
+    </LinearLayout>
+
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="12dp"
+      android:maxLines="1"
+      android:text="@string/wafra_widget_preview_bill_amount_2"
+      android:textColor="@color/wafra_widget_text"
+      android:textSize="14sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+
+  <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="6dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <LinearLayout
+      android:layout_width="0dp"
+      android:layout_height="wrap_content"
+      android:layout_weight="1"
+      android:orientation="vertical">
+
+      <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:text="@string/wafra_widget_preview_bill_3"
+        android:textAlignment="viewStart"
+        android:textColor="@color/wafra_widget_text"
+        android:textSize="14sp" />
+
+      <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:text="@string/wafra_widget_preview_date_3"
+        android:textAlignment="viewStart"
+        android:textColor="@color/wafra_widget_secondary"
+        android:textSize="12sp" />
+    </LinearLayout>
+
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginStart="12dp"
+      android:maxLines="1"
+      android:text="@string/wafra_widget_preview_bill_amount_3"
+      android:textColor="@color/wafra_widget_text"
+      android:textSize="14sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+</LinearLayout>
