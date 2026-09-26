@@ -56,7 +56,7 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
   };
   const deps = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' }, 'react-native': native,
-    'expo-router': { useLocalSearchParams: () => params, useRouter: () => ({ back: () => events.push(['back']) }) },
+    'expo-router': { useLocalSearchParams: () => params, useRouter: () => ({ back: () => events.push(['back']), push: route => events.push(['route', route]) }) },
     '@/lib/store': { useStore: () => store }, '@/lib/i18n': { getLanguage: () => language },
     '@/lib/markets': load(path.join(root, 'src/lib/markets.ts')),
     // Formatting is a boundary stub here, as with formatAED below; monetary implementation has its own suites.
@@ -67,16 +67,24 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
       isTransferCandidate: require('../build/transfer-reconciliation.js').isTransferCandidate },
     '@/hooks/use-language': { useLanguage: () => language },
     '@/hooks/use-theme': { useTheme: () => ({ cardBorder: '#ccc', primary: '#147', textSecondary: '#555' }) },
-    '@/constants/theme': { Spacing: { one: 4, two: 8, three: 12, four: 16, six: 24 } },
+    '@/constants/theme': { Fonts: { sansSemi: 'Geist-SemiBold' }, Spacing: { one: 4, two: 8, three: 12, four: 16, six: 24 } },
     '@/components/themed-text': { ThemedText: props => jsx('Text', props) },
     '@/components/ui/icon': { Icon: props => jsx('Icon', props) },
     '@/components/ui/controls': { Button: props => jsx('Button', { ...props, accessibilityLabel: props.label, children: props.label }) },
     '@/components/ui/text-field': { TextField: props => jsx('TextInput', props) },
     '@/components/ui/toast': { useToast: () => ({ show: message => events.push(['toast', message]) }) },
     '@/components/ui/bottom-sheet': { BottomSheet: props => props.visible ? jsx('Sheet', props) : null },
-    '@/components/ui/screen-scaffold': { ScreenScaffold: props => jsx('Scaffold', props),
-      useScreenContentInsets: () => ({ contentContainerStyle: {}, contentInset: { top: 12, bottom: 20 }, scrollIndicatorInsets: { top: 12, bottom: 20 } }) },
+    // Design language E: the slate band scaffold renders its band, then the sheet.
+    '@/components/ui/band-scaffold': { BandScaffold: props => jsx('Scaffold', { ...props, children: [props.bandContent, props.children] }),
+      useBandBottomInset: () => 20 },
+    '@/hooks/use-band': { useBand: id => ({ id, band: '#2F6577', onBand: '#F4F1EA', onBandSecondary: '#D6DCD9', sheet: '#F4F1EA',
+      card: '#FBF9F4', rule: '#E3DED2', text: '#16130F', textSecondary: '#57524A', tint: '#2F6577', fill: '#2F6577', onFill: '#F4F1EA' }) },
+    '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
+    // The current money month; the matched-pairs tests below decide membership themselves.
+    '@/lib/period': { currentMonthPeriod: () => ({ mode: 'month', key: '2026-09' }), inPeriod: date => date.startsWith('2026-09') },
   };
+  deps['@/lib/review-band-copy'] = load(path.join(root, 'src/lib/review-band-copy.ts'));
+  deps['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'), deps);
   deps['@/lib/transfer-review-copy'] = load(path.join(root, 'src/lib/transfer-review-copy.ts'), deps);
   deps['@/lib/reference-copy'] = load(path.join(root, 'src/lib/reference-copy.ts'));
   deps['@/lib/transfer-review-presentation'] = load(path.join(root, 'src/lib/transfer-review-presentation.ts'), deps);
@@ -127,7 +135,8 @@ for (const language of ['en', 'ar']) {
     assert.equal(walk(h.render()).filter(n => n.props?.testID === 'transfer-review-entry').length, 0);
     expandGroups(h);
     const tree = h.render();
-    assert.equal(walk(tree).find(n => n.type === 'Scaffold').props.virtualized, true);
+    assert.equal(walk(tree).find(n => n.type === 'Scaffold').props.band, 'accounts');
+    assert.ok(walk(tree).find(n => n.type === 'FlatList'), 'the sheet holds one virtualized list');
     assert.equal(walk(tree).find(n => n.type === 'Scaffold').props.scroll, false);
     assert.equal(walk(tree).filter(n => n.props?.testID === 'transfer-review-entry').length, 2);
     assert.equal(byLabel(tree, h.words.reviewGroup(2)), undefined);
@@ -348,6 +357,7 @@ const pairAssessments = {
   in: { status: 'likely-own', reason: 'amount-time', counterpartId: 'out', candidateIds: ['out'] },
 };
 const pairCopy = language => load(path.join(root, 'src/lib/details-copy.ts')).detailsCopy[language];
+const bandCopy = language => load(path.join(root, 'src/lib/review-band-copy.ts')).reviewBandCopy(language);
 
 for (const language of ['en', 'ar']) {
   test(`${language}: a suggested pair is one card and Match links both legs with their fingerprints`, async () => {
@@ -355,8 +365,13 @@ for (const language of ['en', 'ar']) {
     const words = pairCopy(language);
     const tree = h.render();
     assert.equal(walk(tree).filter(n => n.props?.testID === 'transfer-pair-card').length, 1);
-    assert.ok(text(byId(tree, 'transfer-pair-card')).includes(words.transfers.out));
-    assert.ok(text(byId(tree, 'transfer-pair-card')).includes(words.transfers.in));
+    // Out of <account> / swap / Into <account>, one amount (the legs agree), the date.
+    const band = bandCopy(language);
+    const card = text(byId(tree, 'transfer-pair-card'));
+    for (const part of [band.outOf, 'Synthetic bank', band.into, 'Other bank', 'AED 123.45']) assert.ok(card.includes(part), part);
+    assert.ok(!card.includes(words.transfers.in + ':'), 'equal legs show one amount');
+    // The band counts what is left to check: one suggested pair here.
+    assert.ok(text(byId(tree, 'transfer-review-band')).includes(band.toCheck(1)));
     // The legs are one labelled, focusable element; Match stays outside it.
     const legs = byId(tree, 'transfer-pair-legs');
     assert.equal(legs.props.accessible, true);
@@ -411,4 +426,38 @@ test('card repayments are never offered as a transfer pair', () => {
   const h = createUI({ transactions: pairLegs(), groupDefinitions: [], pending: ['out', 'in'],
     assessments: { out: { ...pairAssessments.out, status: 'likely-card-repayment' }, in: { ...pairAssessments.in, status: 'likely-card-repayment' } } });
   assert.equal(byId(h.render(), 'transfer-pair-card'), undefined);
+});
+
+// "Matched this month" (slate band): only pairs the reconciler confirmed,
+// both legs naming each other, in the current money month. Never a suggestion.
+const confirmedPair = (outId, inId, date) => [row(outId, { date }), row(inId, { type: 'income', accountId: 'other', date })];
+const confirmedAssessments = (outId, inId) => ({
+  [outId]: { status: 'confirmed-own', counterpartId: inId }, [inId]: { status: 'confirmed-own', counterpartId: outId },
+});
+for (const language of ['en', 'ar']) {
+  test(`${language}: matched this month lists confirmed pairs only and links to Transfers`, () => {
+    const h = createUI({ language, groupDefinitions: [],
+      transactions: [...confirmedPair('m-out', 'm-in', '2026-09-03'), ...confirmedPair('old-out', 'old-in', '2026-08-20'), ...pairLegs()],
+      pending: ['out', 'in'],
+      assessments: { ...confirmedAssessments('m-out', 'm-in'), ...confirmedAssessments('old-out', 'old-in'), ...pairAssessments } });
+    const tree = h.render();
+    const section = byId(tree, 'transfer-matched-pairs');
+    assert.ok(text(section).includes(bandCopy(language).matchedThisMonth));
+    const rows = walk(section).filter(node => node.props?.testID === 'transfer-matched-pair');
+    assert.equal(rows.length, 1, 'last month and the open suggestion are not "matched this month"');
+    assert.ok(rows[0].props.accessibilityLabel.includes('2026-09-03'));
+    byId(section, 'transfer-matched-all').props.onPress();
+    assert.deepEqual(h.events, [['route', '/transfers']]);
+  });
+}
+test('a pair whose legs no longer name each other is not shown as matched', () => {
+  const h = createUI({ groupDefinitions: [], transactions: confirmedPair('m-out', 'm-in', '2026-09-03'),
+    assessments: { 'm-out': { status: 'confirmed-own', counterpartId: 'm-in' }, 'm-in': { status: 'confirmed-own', counterpartId: 'elsewhere' } } });
+  assert.equal(byId(h.render(), 'transfer-matched-pairs'), undefined);
+});
+test('pair legs with different amounts show both, never one merged figure', () => {
+  const legs = [row('out'), row('in', { type: 'income', accountId: 'other', amountFils: 12000 })];
+  const h = createUI({ transactions: legs, groupDefinitions: [], pending: ['out', 'in'], assessments: pairAssessments });
+  const card = text(byId(h.render(), 'transfer-pair-card'));
+  assert.ok(card.includes('AED 123.45') && card.includes('AED 120.00'));
 });
