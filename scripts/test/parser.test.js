@@ -1137,9 +1137,10 @@ t('tabby charge-tomorrow preview is skipped (real charge arrives separately)',
     'Payment of AED 49.75 collected successfully.',
     'We have received your payment of AED 49.75. Thank you!',
     'AED 49.75 was charged to your card ending 1234.',
-    'Your payment of AED 49.75 for Noon was successful.',
+    'Your payment of AED 49.75 was successful.',
+    'Payment of AED49.75 collected successfully. Thank you!',
     'AED 49.75 paid for your Noon purchase. 2 of 4 paid.',
-    'Autopay: AED 49.75 was charged to your card ending 1234 for Noon.',
+    'Autopay: AED 49.75 was charged to your card ending 1234.',
     'تم خصم 49.75 درهم من بطاقتك المنتهية بـ 1234',
     'تم استلام دفعتك بقيمة 49.75 درهم. شكرا لك',
   ];
@@ -1179,6 +1180,23 @@ t('tabby charge-tomorrow preview is skipped (real charge arrives separately)',
     // A provider-card purchase whose notification title is the shop.
     'Starbucks Payment of AED 20.00 successful',
     'Merchant: STARBUCKS. Your payment of AED 20.00 was successful.',
+    // A receipt is ignored only when every word is receipt wording: any
+    // shop, person or label ("for Noon" included, which may be an instalment
+    // or a provider-card purchase) keeps it on the Review path.
+    'Your payment of AED 49.75 for Noon was successful.',
+    'Autopay: AED 49.75 was charged to your card ending 1234 for Noon.',
+    'Your payment of AED 20.00 for Starbucks was successful.',
+    'Your payment of AED 20.00 on Careem was successful.',
+    'AED 20.00 was charged to your card ending 4321 by STARBUCKS.',
+    'AED 20.00 was deducted from your card ending 4321 for STARBUCKS.',
+    'AED 20.00 was charged to your card ending 4321 - STARBUCKS DUBAI',
+    'AED 150.00 was charged to your card ending 9876, JARIR BOOKSTORE',
+    'Payment of AED 50.00 received. Sender: Sara Ahmed',
+    'Starbucks Your payment of AED 20.00 was successful.',
+    'Your payment of SAR 150.00 was successful. JARIR BOOKSTORE',
+    'تم خصم 20.00 درهم من بطاقتك لصالح ستاربكس',
+    'دفعتك بقيمة 20.00 درهم لستاربكس تمت بنجاح',
+    'تم خصم 20.00 درهم من بطاقتك المنتهية بـ 4321 - ستاربكس',
   ];
   ok('BNPL: provider restatements of a bank card charge are recognised, English and Arabic',
     typeof isBnplProviderRestatement === 'function' &&

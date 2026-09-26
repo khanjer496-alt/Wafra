@@ -27,8 +27,8 @@
  * recognised RESTATEMENT of a bank card charge — an instalment or payment
  * charged, paid or received for an order; an order split into N payments; an
  * order refund to the card; a "will be charged tomorrow" preview; a plain
- * receipt for the shopper's payment that names no shop, person or other
- * payee ("Payment of AED 49.75 collected", "2 of 4 paid") — is ignored. Anything else a provider sends reaches Review like any other
+ * receipt for the shopper's payment made only of receipt words ("Payment of
+ * AED 49.75 collected", "2 of 4 paid"), naming no shop or person — is ignored. Anything else a provider sends reaches Review like any other
  * unparsed financial alert, where the user decides.
  *
  * The restatement test is deliberately narrow, and anything that names the
@@ -109,6 +109,7 @@ const INSTALMENT_PLAN_RE = new RegExp([
   '\\b(?:\\d+|two|three|four|five|six|eight|twelve)\\s+(?:(?:interest[\\s-]*free|equal|monthly)\\s+)*(?:payments|instal(?:l)?ments)\\b',
   '\\binstal(?:l)?ments?\\b',
   '\\bpayment\\s+\\d+\\s+of\\s+\\d+\\b',
+  '\\b\\d{1,2}\\s+of\\s+\\d{1,2}\\s+(?:paid|payments?|instal(?:l)?ments?)\\b',
   '\\b(?:first|second|third|fourth|last|final|next|upcoming|\\d+(?:st|nd|rd|th))\\s+(?:payment|instal(?:l)?ment)\\b',
   '\\bremaining\\s*:?\\s*\\d+\\s+payments?\\b',
   arabicWord('[وفبل]?(?:ال)?(?:قسط|[أا]قساط)(?:ك|كم|ين)?'),
@@ -152,35 +153,47 @@ const SAME_SENTENCE = '(?:[^.!?؟\\n]|\\.(?=\\d))';
  * paying bank alerts on as a charge to the provider: "Your payment of AED
  * 49.75 was successful", "Payment of AED 49.75 collected", "We have received
  * your payment of AED 49.75", "AED 49.75 was charged to your card ending
- * 1234", "2 of 4 paid". Each form says whose payment it is or that the
- * provider collected it: a bare "Payment of AED 20.00 successful" (a
- * provider-card purchase, often with the shop as the title) is not one. Used
- * only with PAYEE_RE below.
+ * 1234". Only with isBareReceipt below.
  */
 const PAYMENT_RECEIPT_RE = new RegExp([
   `\\byour\\s+payment\\b${SAME_SENTENCE}{0,60}?\\b(?:collected|received|successful(?:ly)?|processed|confirmed|completed)\\b`,
   `\\bpayment\\s+of\\b${SAME_SENTENCE}{0,30}?\\b(?:collected|received)\\b`,
   '\\b(?:received|collected|processed)\\s+your\\s+payment\\b',
   '\\b(?:charged|debited|deducted|collected)\\s+(?:to|from|on)\\s+your\\s+(?:saved\\s+|default\\s+|debit\\s+|credit\\s+|bank\\s+)?card\\b',
-  '\\b\\d{1,2}\\s+of\\s+\\d{1,2}\\s+(?:paid|payments?|instal(?:l)?ments?)\\b',
   `(?:خصم|تحصيل|سحب)${SAME_SENTENCE}{0,40}?من\\s+بطاقت(?:ك|كم)`,
   arabicWord('(?:استلام|استلمنا)') + '\\s+' + arabicWord('دفعت(?:ك|كم)'),
   arabicWord('دفعت(?:ك|كم)') + `${SAME_SENTENCE}{0,40}?(?:بنجاح|ناجح[ةه]?)`,
 ].join('|'), 'iu');
 
 /**
- * A counterparty other than the shopper: "at CARREFOUR", "to Sara", "from
- * Ahmed", "with Starbucks", "@ STARBUCKS", "merchant:", and in Arabic في,
- * لدى and عند (at), إلى (to), من (from) — except "من بطاقتك", from your card.
- * A receipt naming one is a purchase or a transfer: the provider's own
- * money, which reaches Review.
+ * Every word a bare receipt may use. The same wording with a shop, a person,
+ * a merchant label or anything else ("for Starbucks", "Sender: Sara",
+ * "لصالح ستاربكس", a shop as the notification title) can be a provider-card
+ * purchase or a transfer, which no bank alert reports, so any word outside
+ * this list keeps the message on the Review path. Amounts, currencies, card
+ * endings and other numbers are removed before the check.
  */
-const PAYEE_RE = new RegExp([
-  '\\b(?:at|to|from|with)\\s+(?!(?:your|you)\\b)[\\p{L}\\p{N}]',
-  '@\\s*[\\p{L}\\p{N}]',
-  '\\bmerchant\\b',
-  arabicWord('(?:في|إلى|الى|لدى|عند|من)') + '\\s+(?!بطاقت)',
-].join('|'), 'iu');
+const BARE_RECEIPT_WORDS: ReadonlySet<string> = new Set([
+  'payment', 'payments', 'your', 'of', 'has', 'have', 'been', 'was', 'is', 'we', 'successfully',
+  'successful', 'collected', 'received', 'processed', 'confirmed', 'completed', 'charged', 'debited',
+  'deducted', 'paid', 'to', 'from', 'on', 'for', 'with', 'card', 'debit', 'credit', 'bank', 'saved',
+  'default', 'ending', 'in', 'thank', 'thanks', 'you', 'the', 'a', 'an', 'and', 'autopay',
+  'aed', 'sar', 'usd', 'dh', 'dhs', 'sr',
+  'tabby', 'tamara', 'postpay', 'cashew', 'ad',
+  'تم', 'خصم', 'تحصيل', 'سحب', 'من', 'بطاقتك', 'بطاقتكم', 'المنتهية', 'المنتهيه', 'ب', 'استلام',
+  'استلمنا', 'دفعتك', 'دفعتكم', 'بقيمة', 'بقيمه', 'مبلغ', 'بنجاح', 'ناجح', 'ناجحة', 'ناجحه', 'شكرا',
+  'لك', 'لكم', 'درهم', 'ريال', 'د', 'إ', 'ر', 'س', 'تابي', 'تمارا',
+]);
+
+/** A receipt form (PAYMENT_RECEIPT_RE) whose every word is in BARE_RECEIPT_WORDS. */
+function isBareReceipt(value: string): boolean {
+  if (!PAYMENT_RECEIPT_RE.test(value)) return false;
+  const words = value.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  // Numbers (amounts, a card's last digits), a masked card ("xx1234") and an
+  // amount written against its currency ("AED49.75" splits to "aed49", "75").
+  return words.every((word) =>
+    /^(?:x{2,}|aed|sar|usd|dhs?|sr)?\d+(?:aed|sar|usd|dhs?|sr)?$/.test(word) || BARE_RECEIPT_WORDS.has(word));
+}
 
 /**
  * Is this message a BNPL provider RESTATING a charge the paying bank already
@@ -196,5 +209,5 @@ export function isBnplProviderRestatement(sender: string | null | undefined, tex
   if (PROVIDER_OWN_MONEY_RE.test(value)) return false;
   return INSTALMENT_PLAN_RE.test(value) || CHARGE_PREVIEW_RE.test(value) ||
     (ORDER_RE.test(value) && ORDER_PAYMENT_RE.test(value)) ||
-    (PAYMENT_RECEIPT_RE.test(value) && !PAYEE_RE.test(value));
+    isBareReceipt(value);
 }
