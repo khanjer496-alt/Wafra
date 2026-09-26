@@ -17,7 +17,7 @@ import {
   type UniversalReviewAlert,
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
-import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
+import { bodyPrint, statesSingleEventClock, type CaptureChannel } from '@/lib/dedupe';
 import { isBnplProviderRestatement, isBnplProviderSource } from '@/lib/bnpl-providers';
 import {
   nonPostingReason,
@@ -161,6 +161,72 @@ const FOREGROUND_PARSE_YIELD_MS = 16;
 // Some Android providers insert one SMS twice. Collapse only byte-identical,
 // same-sender, consecutive inbox rows delivered less than one second apart.
 const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
+
+/**
+ * The provider's double insert: [sms] directly follows [previous] in the
+ * newest-first inbox with the next lower id, the same sender and text, and
+ * under a second earlier. [sms], the older id, is the copy declined.
+ */
+const isExactProviderDuplicate = (previous: InboxSms | null, sms: InboxSms): boolean =>
+  !!previous &&
+  previous.id === sms.id + 1 &&
+  previous.date >= sms.date &&
+  previous.date - sms.date <= EXACT_PROVIDER_DUPLICATE_MS &&
+  previous.address === sms.address &&
+  previous.body === sms.body;
+
+/**
+ * A carrier can also deliver one SMS twice minutes apart — a retry after a
+ * missed delivery report — and the provider stores both as ordinary rows with
+ * unrelated ids. The adjacent-row rule above never sees them, and the ledger's
+ * event identity (dedupe.ts) deliberately never pairs two SMS rows.
+ * Byte-identical text from one sender is not enough on its own: two genuine
+ * charges of one amount at one shop read identically too. Copies are folded
+ * only inside this window AND only when the body states one transaction clock
+ * to the second (statesSingleEventClock), the premise of the Android re-post
+ * guard: two real charges then differ in their seconds. A balance figure is
+ * not enough, because some banks print a ledger balance that does not move
+ * with each charge. Anything else is left as before.
+ */
+const CARRIER_DUPLICATE_MS = 10 * 60_000;
+
+/**
+ * Indexes of [rows] that are later carrier re-deliveries of an earlier row in
+ * the same list: same sender, byte-identical body stating one clock to the
+ * second, within CARRIER_DUPLICATE_MS of the copy that is kept. The EARLIEST
+ * copy of each cluster is kept, whatever order the rows arrive in, because an
+ * earlier scan most likely stored that one.
+ *
+ * Rows in [excluded] take no part: the older copy of a provider double insert,
+ * which the exact-provider rule declines in favour of the newer id. Otherwise
+ * this rule would keep the older copy and that one the newer, and together
+ * they dropped both. Folding only declines an incoming copy within one scan
+ * and emits no retirement, so it never removes a row the ledger holds.
+ */
+export const carrierRedeliveryIndexes = (
+  rows: readonly { address: string; body: string; date: number }[],
+  excluded: ReadonlySet<number> = new Set(),
+): Set<number> => {
+  const skipped = new Set<number>();
+  const byKey = new Map<string, number[]>();
+  rows.forEach((row, index) => {
+    if (excluded.has(index) || typeof row.body !== 'string' || !statesSingleEventClock(row.body)) return;
+    const key = `${row.address}\u0000${row.body}`;
+    const bucket = byKey.get(key);
+    if (bucket) bucket.push(index);
+    else byKey.set(key, [index]);
+  });
+  for (const indexes of byKey.values()) {
+    if (indexes.length < 2) continue;
+    indexes.sort((a, b) => rows[a].date - rows[b].date || a - b);
+    let keptDate = rows[indexes[0]].date;
+    for (const index of indexes.slice(1)) {
+      if (rows[index].date - keptDate <= CARRIER_DUPLICATE_MS) skipped.add(index);
+      else keptDate = rows[index].date;
+    }
+  }
+  return skipped;
+};
 
 interface ParseYieldState {
   startedAt: number;
@@ -1134,6 +1200,15 @@ export async function scanInbox(
     inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
+    // Decided for the whole page up front, so the carrier fold knows which
+    // copies the exact-provider rule declines and never keeps one of them.
+    const providerCopies = new Set<number>();
+    batch.forEach((sms, index) => {
+      if (isExactProviderDuplicate(index === 0 ? previousInboxSms : batch[index - 1], sms)) {
+        providerCopies.add(index);
+      }
+    });
+    const carrierCopies = carrierRedeliveryIndexes(batch, providerCopies);
     const pageStarted = tracing ? Date.now() : 0;
     let traceCheckpoint = pageStarted;
     for (let i = 0; i < batch.length; i++) {
@@ -1145,16 +1220,8 @@ export async function scanInbox(
       const sourceEventId = `a${sms.id}`;
       if (sms.date > newestTs) newestTs = sms.date;
       inboxBodies.add(bodyPrint(sms.body));
-      const previous = previousInboxSms;
       previousInboxSms = sms;
-      if (
-        previous &&
-        previous.id === sms.id + 1 &&
-        previous.date >= sms.date &&
-        previous.date - sms.date <= EXACT_PROVIDER_DUPLICATE_MS &&
-        previous.address === sms.address &&
-        previous.body === sms.body
-      ) {
+      if (providerCopies.has(i)) {
         declined.push({
           smsTs: sms.date,
           sender: sms.address,
@@ -1162,6 +1229,16 @@ export async function scanInbox(
           reason: 'exact-provider-duplicate',
           sourceEventId,
         });
+        if (parseYieldDue(pageYield, i + 1 < batch.length)) {
+          await yieldToUi();
+          resetParseYieldState(pageYield);
+        }
+        continue;
+      }
+      // A later carrier re-delivery of a copy on this page is declined here
+      // and only here: no `declined` record, because that would ask the plan
+      // to retire a stored row, and this fold must never remove one.
+      if (carrierCopies.has(i)) {
         if (parseYieldDue(pageYield, i + 1 < batch.length)) {
           await yieldToUi();
           resetParseYieldState(pageYield);
@@ -1297,10 +1374,20 @@ export async function scanInbox(
     try {
       const received = await SmsReader.getReceived(sinceMs);
       const deliveryYield = createParseYieldState();
+      const carrierCopies = carrierRedeliveryIndexes(received);
       for (let i = 0; i < received.length; i++) {
         const sms = received[i];
         scannedCount += 1;
         if (sms.date > newestTs) newestTs = sms.date;
+        // The same carrier double delivery, caught by the receiver twice
+        // while the provider kept neither copy.
+        if (carrierCopies.has(i)) {
+          if (parseYieldDue(deliveryYield, i + 1 < received.length)) {
+            await yieldToUi();
+            resetParseYieldState(deliveryYield);
+          }
+          continue;
+        }
         // The inbox pass above almost always found this same message. Its
         // copy carries the provider's timestamp and this one carries the
         // carrier's, which differ by seconds — enough for the fingerprint

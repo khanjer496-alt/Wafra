@@ -58,9 +58,9 @@ object NotificationRepostIdentity {
    * alerts carry identical text and the second would be dropped as a repost.
    * Seconds are what separate a redelivery of one alert from two real ones.
    *
-   * kotlin-regex.test.js pins this source byte-for-byte against the JS copies
-   * (auto-import.ts CARRIER_DUPLICATE_DATETIME_RE, dedupe.ts
-   * CAPTURE_EVENT_CLOCK_RE).
+   * kotlin-regex.test.js pins this source byte-for-byte against the JS copy,
+   * dedupe.ts CAPTURE_EVENT_CLOCK_RE, which the ledger's event identity and
+   * the SMS carrier re-delivery fold in auto-import.ts both use.
    */
   val TRANSACTION_DATETIME_RE =
     Regex("""\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s+\d{1,2}:\d{2}:\d{2}\b""")

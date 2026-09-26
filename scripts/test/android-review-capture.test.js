@@ -1356,6 +1356,82 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         !scan.declined.some((item) => item.sourceEventId === 'a31940'),
       JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
   }
+  // A CARRIER RE-DELIVERY: the same SMS delivered again minutes later, stored
+  // by the provider under an unrelated id. When the body states one clock to
+  // the second, identical copies from one sender inside ten minutes are one
+  // message; the earliest copy is kept and no retirement is emitted. With a
+  // provider double insert in the same cluster, the older id the
+  // exact-provider rule declines takes no part, so exactly one copy survives.
+  {
+    const { buildImportPlan } = require('./build/import-plan.js');
+    const secondsBody = 'Credit Card XX7720 was used for AED25.90 on 14/09/2026 23:52:52 at TEST MERCHANT';
+    const importedRows = (scan) =>
+      buildImportPlan(scan.parsed, baseLedgerState(), NOW + 1_000_000, undefined, scan.declined).batch.transactions;
+    {
+      const { scan, ids } = await identicalScan([
+        { id: 32_000, address: 'FAB', body: secondsBody, date: NOW + 300_000 },
+        { id: 31_990, address: 'FAB', body: secondsBody, date: NOW },
+      ]);
+      ok('a carrier re-delivery five minutes later with a seconds clock is one message, the earliest kept',
+        scan.parsed.length === 1 && ids.has('a31990') && scan.declined.length === 0 &&
+          importedRows(scan).length === 1,
+        JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
+
+      // An earlier scan stored the first delivery; the rescan sees both.
+      inboxRows = [{ id: 31_990, address: 'FAB', body: secondsBody, date: NOW }];
+      const earlier = await scanInbox(0, {}, undefined, 'en-AE');
+      const stored = { ...baseLedgerState(),
+        transactions: buildImportPlan(earlier.parsed, baseLedgerState(), NOW).batch.transactions
+          .map((row, index) => ({ ...row, id: `stored-carrier-${index}` })) };
+      const rescanPlan = buildImportPlan(scan.parsed, stored, NOW + 300_000, undefined, scan.declined);
+      ok('a stored first delivery stays the only row when the re-delivery is scanned',
+        stored.transactions.length === 1 && rescanPlan.batch.transactions.length === 0 &&
+          !rescanPlan.batch.updates.some((update) => update.remove),
+        JSON.stringify(rescanPlan.batch));
+    }
+    {
+      const { scan, ids } = await identicalScan([
+        { id: 32_120, address: 'FAB', body: secondsBody, date: NOW + 310_000 },
+        { id: 32_111, address: 'FAB', body: secondsBody, date: NOW + 10_000 },
+        { id: 32_110, address: 'FAB', body: secondsBody, date: NOW + 9_244 },
+      ]);
+      ok('a provider double insert plus a carrier re-delivery keeps exactly the copy the provider rule keeps',
+        scan.parsed.length === 1 && ids.has('a32111') &&
+          scan.declined.length === 1 && scan.declined[0].sourceEventId === 'a32110' &&
+          scan.declined[0].reason === 'exact-provider-duplicate' && importedRows(scan).length === 1,
+        JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
+    }
+    const keptBoth = [
+      ['a running-balance figure but no seconds clock',
+        `${noToken}. Avl Bal AED 2,345.67`, 'FAB', 'FAB', 300_000],
+      ['a midnight batch stamp', 'Credit Card XX7720 was used for AED25.90 on 14/09/2026 00:00:00 at TEST MERCHANT',
+        'FAB', 'FAB', 300_000],
+      ['an AM/PM clock', 'Credit Card XX7720 was used for AED25.90 on 14/09/2026 11:52:52 PM at TEST MERCHANT',
+        'FAB', 'FAB', 300_000],
+      ['eleven minutes between them', secondsBody, 'FAB', 'FAB', 660_000],
+      ['different senders', secondsBody, 'FAB', 'ADCB', 300_000],
+    ];
+    for (const [label, body, newerSender, olderSender, gap] of keptBoth) {
+      const { scan, ids } = await identicalScan([
+        { id: 32_300, address: newerSender, body, date: NOW + gap },
+        { id: 32_200, address: olderSender, body, date: NOW },
+      ]);
+      ok(`identical copies with ${label} are both kept`,
+        ids.has('a32300') && ids.has('a32200') && scan.declined.length === 0,
+        JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
+    }
+    inboxRows = [];
+    receivedRows = [
+      { address: 'FAB', body: secondsBody, date: NOW + 600_000 },
+      { address: 'FAB', body: secondsBody, date: NOW + 780_000 },
+    ];
+    const buffered = await scanInbox(0, {}, undefined, 'en-AE');
+    const delivered = buffered.parsed.filter((item) => item.channel === 'delivery');
+    ok('the delivery buffer folds a carrier double delivery with a seconds clock, keeping the first',
+      delivered.length === 1 && delivered[0].smsTs === NOW + 600_000,
+      JSON.stringify(delivered));
+    receivedRows = [];
+  }
   {
     inboxRows = [];
     receivedRows = [
