@@ -169,7 +169,7 @@ const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
  * ENDING_DIGITS_RE), plus the Arabic "ending with".
  */
 const MASKED_INSTRUMENT_RE =
-  /(?<![\p{L}\p{N}])(?:[x*•#]{2,}|\.{3,})\s?\d{3,6}(?!\d)|\bending\s+(?:in\s+|with\s+)?(?:no\.?\s*)?\d{3,6}(?!\d)|المنتهي[ةه]?\s+ب/iu;
+  /(?<![\p{L}\p{N}])(?:[x*•#]{2,}|\.{3,})\s?\d{3,6}(?!\d)|\bending\s+(?:in\s+|with\s+)?(?:no\.?\s*)?\d{3,6}(?!\d)|المنتهي[ةه]?\s+بـ?\s*\d{3,6}(?!\d)/iu;
 
 /**
  * The provider's double insert: [sms] directly follows [previous] in the

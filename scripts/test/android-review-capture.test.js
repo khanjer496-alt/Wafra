@@ -713,8 +713,19 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     const unreadBankId = `samsung-messages-hdfc-unread-${suffix}`;
     // "I sent 200 AED to your account", "send 150 AED to my account please":
     // a person's texts, whatever the word for account.
-    const arabicPersonalIds = [`samsung-messages-ar-sent-${suffix}`, `samsung-messages-ar-ask-${suffix}`];
+    const arabicPersonalIds = [`samsung-messages-ar-sent-${suffix}`, `samsung-messages-ar-ask-${suffix}`,
+      `samsung-messages-ar-visa-${suffix}`];
     notificationRows = [{
+      // "The visa that expires tomorrow, its fee is 300 AED": "expires"
+      // (المنتهية) with no card digits after it is not a masked card.
+      id: arabicPersonalIds[2],
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'Sara',
+      text: 'التأشيرة المنتهية بكرة، رسومها 300 درهم',
+      ts: NOW + 5_375,
+      sourceClass: smsAppClass,
+    }, {
       id: arabicPersonalIds[0],
       pkg: 'com.samsung.android.messaging',
       appLabel: 'Messages',
@@ -763,9 +774,10 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_410 &&
           item.sourcePackage === undefined) &&
         !personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_390) &&
-        !personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_380 || item.observedAt === NOW + 5_385) &&
+        !personal.reviewCandidates.some((item) =>
+          item.observedAt === NOW + 5_375 || item.observedAt === NOW + 5_380 || item.observedAt === NOW + 5_385) &&
         personalDiagnostics?.unresolved === 1 &&
-        personalDiagnostics?.acknowledgementPlanned === 4,
+        personalDiagnostics?.acknowledgementPlanned === 5,
       JSON.stringify({ reviews: personal.reviewCandidates, personalDiagnostics }));
     const ackBeforePersonal = acknowledgedNotifications.length;
     await personal.commit();
@@ -2015,7 +2027,7 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     inboxRows = [];
     notificationRows = [
       { id: 'messages-tabby-rcpt-01', pkg: 'com.google.android.apps.messaging', appLabel: 'Messages', title: 'Tabby',
-        text: 'Your payment of AED 49.75 for Noon was successful.', ts: NOW + 45_600, sourceClass: 'messaging-review' },
+        text: 'Your payment of AED 49.75 was successful.', ts: NOW + 45_600, sourceClass: 'messaging-review' },
     ];
     const ackBeforeReceiptLane = acknowledgedNotifications.length;
     const receiptLane = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
