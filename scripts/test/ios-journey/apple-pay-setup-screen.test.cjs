@@ -172,6 +172,11 @@ test('the ink band shows the plain title, one line and an example marked as one;
   }
   assert.ok(sheet.some(n => n.props?.accessibilityLabel === 'Step 1'), 'numbered, not done before the gates');
   assert.ok(sheet.some(n => n.props?.accessibilityLabel === 'Step 2'));
+  // What turning capture on covers is read before the button that turns it on.
+  const off = walk((await screen()).tree().props.children);
+  const scopeAt = off.findIndex(n => n.props?.testID === 'apple-pay-scope');
+  const enableAt = off.findIndex(n => n.props?.testID === 'apple-pay-enable' || (n.type === 'Button' && n.props.label === 'Enable capture on this iPhone'));
+  assert.ok(scopeAt >= 0 && enableAt > scopeAt, `scope ${scopeAt} precedes enable ${enableAt}`);
   // The back control is inert while a step is running.
   const busy = await screen();
   const release = busy.holdRead();

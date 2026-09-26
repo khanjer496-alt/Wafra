@@ -205,6 +205,8 @@ export default function IosApplePaySetup() {
     <View style={styles.sheet}>
       {!supported ? <ThemedText style={{ color: band.text }}>{w.unsupported}</ThemedText> : !available ?
         <ThemedText accessibilityLiveRegion="polite" style={{ color: band.text }}>{loading ? w.checking : error ?? w.update}</ThemedText> : <>
+        {/* What turning it on covers, read before the button that turns it on. */}
+        <ThemedText type="small" testID="apple-pay-scope" style={muted}>{w.scope}</ThemedText>
         {!status?.enabled && <EButton testID="apple-pay-enable" palette={band} label={w.enable} onPress={enable} disabled={busy} />}
         {status?.enabled && !status.entitled && <ThemedText accessibilityRole="alert" style={{ color: band.statusOver }}>{w.inactive}</ThemedText>}
         {flow.active && <>
@@ -249,7 +251,6 @@ export default function IosApplePaySetup() {
             <EButton palette={band} variant="secondary" label={w.review} onPress={() => router.push('/review-alerts')} disabled={busy} />}
         </View>
         {error && <ThemedText accessibilityRole="alert" style={{ color: band.statusOver }}>{error}</ThemedText>}
-        <ThemedText type="meta" style={muted}>{w.scope}</ThemedText>
         <ThemedText type="meta" style={muted}>{w.privacy}</ThemedText>
       </>}
       {supported && <EButton palette={band} variant="quiet" label={w.refresh} onPress={() => { setError(null); void refresh(); }} disabled={busy} />}
