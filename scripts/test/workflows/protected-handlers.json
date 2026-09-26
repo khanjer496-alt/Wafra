@@ -188,27 +188,28 @@
       "sha256": "e967d8cffbbd0dad5ca088f46f62f0885fbdff53a613f2a576f92bc2e473efc2"
     },
     {
-      "file": "src/app/pro.tsx",
+      "file": "src/hooks/use-pro-checkout.ts",
       "name": "buySelectedPlan",
       "sha256": "22bb868b4940d33a966d24b6b98093c9f6d11690226791cb4e91d967deaa4f44",
-      "reviewedChange": "2026-09-19: Wafra's own Pro screen owns checkout again. The protected native action validates legal readiness and storefront availability, refuses without a live store-supplied price, and reports the store's answer literally: a cancellation is silent, a deferred approval and a transaction the pro entitlement has not confirmed each say so instead of granting Pro. A synchronous latch closes on the first tap so a second tap in the same frame cannot start an overlapping checkout, and it is released in a finally so a throwing store call cannot strand the screen."
+      "reviewedChange": "2026-09-19: Wafra's own Pro screen owns checkout again. The protected native action validates legal readiness and storefront availability, refuses without a live store-supplied price, and reports the store's answer literally: a cancellation is silent, a deferred approval and a transaction the pro entitlement has not confirmed each say so instead of granting Pro. A synchronous latch closes on the first tap so a second tap in the same frame cannot start an overlapping checkout, and it is released in a finally so a throwing store call cannot strand the screen. 2026-09-26 design language E: moved verbatim (identical AST fingerprint) from src/app/pro.tsx into src/hooks/use-pro-checkout.ts, which the Pro screen and the in-context Pro sheet over Settings both use, so the sheet charges through this exact path rather than a second copy. Offers, latch, legal/storefront guards and the literal reading of the store's answer are unchanged; covered by repair/pro-sheet.test.cjs and the contracts suite."
     },
     {
-      "file": "src/app/pro.tsx",
+      "file": "src/hooks/use-pro-checkout.ts",
       "name": "restore",
       "sha256": "26acea8a497bcc1699c11441a37a95983f5837fa83ba8d3eccfbf645eec83e4f",
-      "reviewedChange": "2026-09-19: Restore reads the same checkoutReady guard and the same single-flight latch as the purchase action, and retains its explicit no-purchase and unreachable-store states."
+      "reviewedChange": "2026-09-19: Restore reads the same checkoutReady guard and the same single-flight latch as the purchase action, and retains its explicit no-purchase and unreachable-store states. 2026-09-26 design language E: moved verbatim (identical AST fingerprint) from src/app/pro.tsx into src/hooks/use-pro-checkout.ts, which the Pro screen and the in-context Pro sheet over Settings both use, so the sheet charges through this exact path rather than a second copy. Offers, latch, legal/storefront guards and the literal reading of the store's answer are unchanged; covered by repair/pro-sheet.test.cjs and the contracts suite."
     },
     {
-      "file": "src/app/pro.tsx",
+      "file": "src/hooks/use-pro-checkout.ts",
       "name": "manage",
       "sha256": "37b175f86b616dcfdc73de2c6f141c7e0def8b596a31b4b72dd2186fd72a1176",
-      "reviewedChange": "2026-09-19: Subscription management remains an explicit external-link action with the same failure disclosure and loading boundary; it now shares the single-flight latch so it cannot run beside a purchase or restore."
+      "reviewedChange": "2026-09-19: Subscription management remains an explicit external-link action with the same failure disclosure and loading boundary; it now shares the single-flight latch so it cannot run beside a purchase or restore. 2026-09-26 design language E: moved verbatim (identical AST fingerprint) from src/app/pro.tsx into src/hooks/use-pro-checkout.ts, which the Pro screen and the in-context Pro sheet over Settings both use, so the sheet charges through this exact path rather than a second copy. Offers, latch, legal/storefront guards and the literal reading of the store's answer are unchanged; covered by repair/pro-sheet.test.cjs and the contracts suite."
     },
     {
-      "file": "src/app/pro.tsx",
+      "file": "src/hooks/use-pro-checkout.ts",
       "name": "openLegal",
-      "sha256": "7674d415dedbbc3386c9e30f14586870a3b0ac04f670c846b9a475758be943f3"
+      "sha256": "7674d415dedbbc3386c9e30f14586870a3b0ac04f670c846b9a475758be943f3",
+      "reviewedChange": "2026-09-26 design language E: moved verbatim (identical AST fingerprint) from src/app/pro.tsx into src/hooks/use-pro-checkout.ts, which the Pro screen and the in-context Pro sheet over Settings both use, so the sheet charges through this exact path rather than a second copy. Offers, latch, legal/storefront guards and the literal reading of the store's answer are unchanged; covered by repair/pro-sheet.test.cjs and the contracts suite."
     },
     {
       "file": "src/app/trusted-devices.tsx",

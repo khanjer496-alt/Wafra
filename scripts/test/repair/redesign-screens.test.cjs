@@ -43,7 +43,12 @@ test('Pro copy is paired and sells only what Pro gates', () => {
   // of which isProActive/requiresPro actually gate.
   assert.match(pro, /autoCaptureMethod\(\) === 'inboxScan'[\s\S]{0,200}copy\.notificationsTitle[\s\S]{0,200}copy\.historyTitle/);
   assert.match(read('src/lib/purchases.ts'), /export function requiresPro\(method: CaptureMethod\): boolean \{\s*return method !== 'manual';/);
-  assert.match(pro, /accessibilityRole="radio"/);
+  // Design language E: the plan radios are shared with the in-context Pro
+  // sheet, and neither surface may name a saving.
+  const planOptions = read('src/components/pro/pro-plan-options.tsx');
+  assert.match(planOptions, /accessibilityRole="radio"/);
+  assert.doesNotMatch(planOptions + read('src/components/pro/pro-sheet.tsx'), /proSavePercent|SAVE|save\s*\{/i);
+  assert.match(pro, /<ProPlanOptions checkout=\{checkout\}/);
   assert.match(pro, /t\('proOutcomeTitle'\)/);
 });
 

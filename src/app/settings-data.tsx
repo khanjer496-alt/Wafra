@@ -8,9 +8,11 @@
  * Nothing was dropped on the way; the capability inventory test reads both
  * screens together.
  *
- * Erase is the one irreversible action in the app. Its confirmation is a
- * centred dialog rather than a bottom sheet, and the way out is named for
- * what it keeps ("Keep my data"), not "Cancel".
+ * Design language E: the sand band carries the plain title; the sheet holds
+ * the grouped rows. Erase is the one irreversible action in the app. Its
+ * confirmation is a centred alert card on the sheet surface rather than a
+ * bottom sheet, and the way out is named for what it keeps ("Keep my data"),
+ * not "Cancel" — and it is the primary button.
  */
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
@@ -26,24 +28,26 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
 
 import { DiagnosticExportControl } from '@/components/diagnostic-export-control';
-import { SettingsLinkRow } from '@/components/settings-rows';
+import { BandTitle } from '@/components/settings-band/band-title';
+import { SettingsGroupTitle, SettingsLinkRow } from '@/components/settings-rows';
 import { TesterDiagnosticsControl } from '@/components/tester-diagnostics-control';
 import { ThemedText } from '@/components/themed-text';
+import { EButton } from '@/components/ui/band/e-button';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { Block, Row, Section } from '@/components/ui/layout';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
-import { SectionHeader } from '@/components/ui/section-header';
+import { Row } from '@/components/ui/layout';
 import { WafraMark } from '@/components/wafra-logo';
-import { Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { BandLayout, Fonts, ScreenPadding, Spacing, type BandPalette } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { noFormatsReason, unreadFormatCount } from '@/lib/accuracy';
 import { clearBackgroundRelayRows } from '@/lib/background-relay';
@@ -97,7 +101,8 @@ import NotificationReader from '../../modules/notification-reader';
 import SmsReader from '../../modules/sms-reader';
 
 export default function SettingsDataScreen() {
-  const theme = useTheme();
+  // Design language E: Data and help wears Settings' sand band.
+  const band = useBand('settings');
   const router = useRouter();
   const {
     state,
@@ -522,10 +527,7 @@ export default function SettingsDataScreen() {
 
   /* ── Rows ───────────────────────────────────────────────────────────── */
 
-  const header: ScreenHeaderProps = {
-    title: copy.dataAndHelp,
-    back: { label: t('settingsTitle'), onPress: () => router.back() },
-  };
+  const nav: BandNav = { back: true };
 
   const linkRow = (
     title: string,
@@ -533,7 +535,7 @@ export default function SettingsDataScreen() {
     onPress: () => void,
     { last = false, icon }: { last?: boolean; icon?: IconName } = {},
   ) => (
-    <SettingsLinkRow title={title} subtitle={subtitle} onPress={onPress} last={last} icon={icon} />
+    <SettingsLinkRow title={title} subtitle={subtitle} onPress={onPress} last={last} icon={icon} palette={band} />
   );
 
   const publicLinkRow = (
@@ -545,25 +547,27 @@ export default function SettingsDataScreen() {
     return (
       <Row last={last}>
         <View style={styles.rowText}>
-          <ThemedText type="small">{title}</ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary">
+          <ThemedText type="smallBold" style={{ color: band.text }}>{title}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>
             {t('publicLinkUnavailable')}
           </ThemedText>
         </View>
-        <Icon name="alert" size={15} color={theme.warning} />
+        <Icon name="alert" size={15} color={band.statusNear} />
       </Row>
     );
   };
 
   return (
     <React.Fragment>
-      <ScreenScaffold
+      <BandScaffold
+        band="settings"
+        testID="settings-data-screen"
+        nav={nav}
         scrollProps={{ showsVerticalScrollIndicator: false }}
-        headerMode="native"
-        header={header}
-        contentStyle={styles.content}>
-        <Section index={0} testID="settings-data-your-data" style={styles.panel}>
-          <SectionHeader title={copy.yourData} />
+        contentStyle={styles.content}
+        bandContent={<View style={styles.bandBody}><BandTitle title={copy.dataAndHelp} palette={band} /></View>}>
+        <View testID="settings-data-your-data" style={styles.panel}>
+          <SettingsGroupTitle title={copy.yourData} palette={band} />
           {linkRow(t('exportExpensePdf'), copy.exportPdfDetail, () => setReportScopeSheet(true), { icon: 'receipt' })}
           {linkRow(t('exportCsv'), copy.exportCsvDetail, exportCsv, { icon: 'download' })}
           {linkRow(copy.backupTitle, copy.backupDetail, backupJson, { icon: 'upload' })}
@@ -572,29 +576,29 @@ export default function SettingsDataScreen() {
             last: !isSmsCorpusExportAvailable() && !isInternalLaunchDiagnosticsEnabled(),
           })}
           {isSmsCorpusExportAvailable() && (
-            <Block>
-              <Button
+            <View style={styles.tester}>
+              <EButton
+                palette={band}
+                variant="secondary"
                 label={t('personalReviewExportTitle')}
-                wrapLabel
                 icon="download"
-                variant="outline"
                 disabled={personalReviewBusy || state.privateMode}
                 onPress={confirmPersonalReviewExport}
               />
-              <ThemedText type="meta" themeColor="textSecondary" accessibilityLiveRegion="polite">
+              <ThemedText type="meta" style={{ color: band.textSecondary }} accessibilityLiveRegion="polite">
                 {personalReviewBusy
                   ? tf('smsCorpusExportProgress', { count: personalReviewCount })
                   : t(state.privateMode ? 'personalReviewExportPrivateMode' : 'personalReviewExportDetail')}
               </ThemedText>
-            </Block>
+            </View>
           )}
           <DiagnosticExportControl />
           {isInternalLaunchDiagnosticsEnabled() &&
             linkRow(t('launchMetricsInternal'), t('launchMetricsDetail'), exportLaunchMetrics, { last: true, icon: 'code' })}
-        </Section>
+        </View>
 
-        <Section index={1} testID="settings-data-help" style={styles.panel}>
-          <SectionHeader title={copy.helpImprove} />
+        <View testID="settings-data-help" style={styles.panel}>
+          <SettingsGroupTitle title={copy.helpImprove} palette={band} />
           {linkRow(
             t('sortShops'),
             cleanupCounts ? copy.merchantsToPlace(cleanupCounts.place) : t('sortShopsSettingsDetail'),
@@ -613,24 +617,24 @@ export default function SettingsDataScreen() {
             () => router.push('/feedback'),
             { last: true, icon: 'spark' },
           )}
-        </Section>
+        </View>
 
         {Platform.OS === 'ios' && iosSupportsMessageHistory(Platform.Version) && (
-          <Section index={2} style={styles.panel}>
+          <View style={styles.panel}>
             {/* Statements bring in the past on iPhone. Reading old texts through
                 Shortcuts stays available, but only here, as an experiment. */}
-            <SectionHeader title={copy.advanced} />
+            <SettingsGroupTitle title={copy.advanced} palette={band} />
             {linkRow(
               t('iosPastSmsTitle'),
               t('iosPastSmsDetail'),
               () => router.push({ pathname: '/ios-setup', params: { section: 'history' } }),
               { last: true, icon: 'calendar' },
             )}
-          </Section>
+          </View>
         )}
 
-        <Section index={3} testID="settings-data-about" style={styles.panel}>
-          <SectionHeader title={copy.about} />
+        <View testID="settings-data-about" style={styles.panel}>
+          <SettingsGroupTitle title={copy.about} palette={band} />
           {publicLinkRow(t('privacyPolicy'), privacyPolicyUrl)}
           {publicLinkRow(t('termsOfUse'), termsOfUseUrl)}
           {publicLinkRow(t('supportWebsite'), supportUrl, true)}
@@ -639,10 +643,10 @@ export default function SettingsDataScreen() {
               accessibilityRole="alert"
               accessibilityLiveRegion="polite"
               style={styles.publicLinkNotice}>
-              <Icon name="alert" size={16} color={theme.expense} />
+              <Icon name="alert" size={16} color={band.statusOver} />
               <View style={styles.rowText}>
-                <ThemedText type="smallBold">{t('legalLinkFailed')}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">
+                <ThemedText type="smallBold" style={{ color: band.text }}>{t('legalLinkFailed')}</ThemedText>
+                <ThemedText type="meta" style={{ color: band.textSecondary }}>
                   {t('legalLinkFailedBody')}
                 </ThemedText>
               </View>
@@ -662,25 +666,30 @@ export default function SettingsDataScreen() {
             ) : (
               <WafraMark size={34} />
             )}
-            <ThemedText type="default" themeColor="textSecondary">
-              {t('settingsTagline')}
-            </ThemedText>
           </View>
           <TesterDiagnosticsControl />
-        </Section>
+        </View>
 
-        <Section index={4} style={styles.danger}>
-          <SectionHeader title={t('settingsDangerHeader')} />
-          <Button label={t('eraseAll')} variant="danger" icon="trash" onPress={confirmErase} />
+        {/* Twice the gap every other group gets, and nothing routine beside
+            it: Erase is the only control here that cannot be undone. */}
+        <View testID="settings-data-erase" style={styles.danger}>
+          <EButton
+            label={t('eraseAll')}
+            palette={band}
+            icon="trash"
+            // Destructive: the status-over tone, with the text colour the
+            // band's own fill takes, which reads on it in both schemes.
+            color={{ fill: band.statusOver, text: band.onFill }}
+            onPress={confirmErase}
+          />
           <ThemedText
             type="meta"
-            themeColor="textSecondary"
-            style={styles.footer}
+            style={[styles.footer, { color: band.textSecondary }]}
             testID="settings-version-footer">
             {copy.versionFooter(version)}
           </ThemedText>
-        </Section>
-      </ScreenScaffold>
+        </View>
+      </BandScaffold>
 
       <ChoiceSheet
         visible={reportScopeSheet}
@@ -691,6 +700,7 @@ export default function SettingsDataScreen() {
         onSelect={(scope) => void createExpenseReport(scope)}
       />
       <EraseDialog
+        palette={band}
         visible={eraseDialogVisible}
         title={copy.eraseTitle}
         body={eraseDialogBody}
@@ -732,6 +742,11 @@ export default function SettingsDataScreen() {
  * delegated to `Alert.alert`, because react-native-web's Alert is an empty
  * method and an erase that silently does nothing gets tapped twice. Modal's
  * fade is a cross-fade, which is also what Reduce Motion asks for.
+ *
+ * Design language E: a card on the sheet surface, lifted, with the sheet's
+ * 28pt radius. "Keep my data" is the primary (filled) action and comes
+ * first; Erase is the destructive one under it. At the accessibility text
+ * sizes the card scrolls rather than pushing its buttons off screen.
  */
 function EraseDialog({
   visible,
@@ -742,6 +757,7 @@ function EraseDialog({
   onKeep,
   onErase,
   onDismiss,
+  palette,
 }: {
   visible: boolean;
   title: string;
@@ -752,8 +768,10 @@ function EraseDialog({
   onErase: () => void;
   /** iOS only: called once the Modal has fully closed. */
   onDismiss: () => void;
+  palette: BandPalette;
 }) {
   const theme = useTheme();
+  const largeText = useLargeTextLayout();
   return (
     <Modal
       visible={visible}
@@ -765,19 +783,29 @@ function EraseDialog({
       <View style={[styles.scrim, { backgroundColor: theme.scrim }]}>
         <View
           accessibilityViewIsModal
+          accessibilityRole="alert"
           onAccessibilityEscape={onKeep}
           testID="settings-erase-dialog"
-          style={[styles.dialog, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
-          <ThemedText type="subtitle" accessibilityRole="header" style={styles.dialogText}>
-            {title}
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary" style={styles.dialogText}>
-            {body}
-          </ThemedText>
-          <View style={styles.dialogActions}>
-            <Button label={confirmLabel} variant="danger" onPress={onErase} />
-            <Button label={keepLabel} variant="outline" onPress={onKeep} />
-          </View>
+          style={[styles.dialog, { backgroundColor: palette.sheet, borderColor: palette.rule }]}>
+          <ScrollView bounces={false} contentContainerStyle={styles.dialogBody}
+            scrollEnabled={largeText} showsVerticalScrollIndicator={largeText}>
+            <ThemedText accessibilityRole="header" style={[styles.dialogTitle, { color: palette.text }]}>
+              {title}
+            </ThemedText>
+            <ThemedText type="default" style={{ color: palette.textSecondary }}>
+              {body}
+            </ThemedText>
+            <View style={styles.dialogActions}>
+              <EButton palette={palette} label={keepLabel} onPress={onKeep} testID="settings-erase-keep" />
+              <EButton
+                palette={palette}
+                label={confirmLabel}
+                color={{ fill: palette.statusOver, text: palette.onFill }}
+                onPress={onErase}
+                testID="settings-erase-confirm"
+              />
+            </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -785,18 +813,18 @@ function EraseDialog({
 }
 
 const styles = StyleSheet.create({
-  panel: { paddingTop: Spacing.two, gap: Spacing.one },
-  content: {
-    gap: Spacing.three,
-  },
+  content: { gap: Spacing.two },
+  bandBody: { paddingBottom: Spacing.two },
+  panel: { gap: 0 },
   rowText: {
     flex: 1,
-    gap: Spacing.half,
+    minWidth: 0,
+    gap: 2,
   },
+  tester: { gap: Spacing.two, paddingVertical: Spacing.two },
   about: {
     alignItems: 'flex-start',
-    gap: Spacing.two + 2,
-    paddingTop: Spacing.two,
+    paddingTop: Spacing.three,
   },
   founderLogoTap: {
     width: 44,
@@ -808,11 +836,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: Spacing.two,
+    paddingTop: Spacing.two,
   },
-  // Twice the gap every other section gets. Erase is the only control here
+  // Twice the gap every other group gets. Erase is the only control here
   // that cannot be undone, and the distance is the point.
   danger: {
-    paddingTop: Spacing.four,
+    paddingTop: Spacing.five,
     gap: Spacing.two,
   },
   footer: {
@@ -827,16 +856,16 @@ const styles = StyleSheet.create({
   },
   dialog: {
     width: '100%',
-    maxWidth: 360,
-    borderRadius: Radius.sheet,
+    maxWidth: 380,
+    maxHeight: '90%',
+    borderRadius: BandLayout.sheetRadius,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: Spacing.four,
-    gap: Spacing.three,
+    overflow: 'hidden',
   },
-  dialogText: {
-    textAlign: 'center',
-  },
+  dialogBody: { padding: Spacing.four, gap: Spacing.two + 2 },
+  dialogTitle: { fontFamily: Fonts.sansSemi, fontSize: 26, lineHeight: 32, letterSpacing: -0.8 },
   dialogActions: {
     gap: Spacing.two,
+    marginTop: Spacing.two,
   },
 });

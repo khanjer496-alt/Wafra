@@ -3,19 +3,25 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {createWorkflowHarness,walk,text}=require('./workflow-harness.cjs');
 const byLabel=(tree,label)=>walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===label);
 const boundary=(tree,name)=>walk(tree).find(n=>n.type==='Boundary'&&n.props.name===name);
+// Design language E: a settings group is headed by SettingsGroupTitle, which
+// renders a header-role text on the sheet.
+const isHeader=(node,title)=>walk(node).some(n=>n.props?.accessibilityRole==='header'&&text(n)===title);
 const pending=(id='pending',overrides={})=>({id,sourceKey:'test-fixture:'+id,observedAt:Date.now()-60000,expiresAt:Date.now()+86400000,channel:'inbox',parserVersion:1,market:'AE',institution:'emirates-nbd',grammar:'test-purchase',amount:{currency:'AED',minorUnits:'12345',exponent:2},direction:'debit',family:'purchase',rail:null,instrument:{kind:'card',last4:'1234'},...overrides});
 for(const language of ['en','ar'])for(const theme of ['light','dark']){
  test(`settings sections render with actual copy and no writes: ${language}/${theme}`,()=>{
   for(const section of ['preferences','imports','privacy','data','help']){
    const h=createWorkflowHarness({language,theme,params:{section}}),tree=h.renderScreen('settings');
    const t=h.deps['@/lib/i18n'].t;
-   const scaffold=walk(tree).find(n=>n.type==='Scaffold');
-   assert.equal(scaffold.props.header.title,t('settingsTitle'));
+   const scaffold=walk(tree).find(n=>n.type==='BandScaffold');
+   assert.equal(scaffold.props.band,'settings');
+   assert.ok(isHeader(walk(tree).find(n=>n.props?.testID==='settings-title'),t('settingsTitle')),'the plain title is on the band');
    assert.ok(scaffold.props.scrollRef,'continuous Settings supports targeted recovery scrolling');
    assert.ok(walk(tree).some(n=>n.props?.testID==='settings-imports'));
-   assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===t('settingsNotificationsHeader')));
+   assert.ok(isHeader(tree,t('settingsNotificationsHeader')));
    const copy=h.deps['@/lib/settings-copy'].settingsCopy(language);
-   assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===copy.privacyAndSecurity));
+   assert.ok(isHeader(tree,copy.privacyAndSecurity));
+   // The in-context Pro sheet is mounted closed: nothing gated was tapped.
+   assert.equal(boundary(tree,'ProSheet').props.feature,null);
    // Exports, backup, the clean-ups and Erase moved one tap in, and the way
    // there is a real row on the main screen.
    assert.ok(walk(tree).some(n=>n.props?.testID==='settings-data-and-help'));
@@ -72,7 +78,7 @@ test('unknown settings deep-links retain the complete screen without acting on t
  assert.deepEqual(h.events,[]);
  // The danger zone lives on Data and help, and a deep link never reaches it.
  const data=createWorkflowHarness({params:{section:'erase-now'}}),dataTree=data.renderScreen('settings-data');
- assert.ok(walk(dataTree).some(n=>n.type==='SectionHeader'&&n.props.title===data.deps['@/lib/i18n'].t('settingsDangerHeader')));
+ assert.ok(walk(dataTree).some(n=>n.props?.testID==='settings-data-erase'),'Erase stands alone at the bottom of Data and help');
  assert.deepEqual(data.events,[]);
 });
 for(const language of ['en','ar'])test(`Data and help keeps every data row, with honest counts and backup wording: ${language}`,()=>{
@@ -92,6 +98,8 @@ for(const language of ['en','ar'])test(`Data and help keeps every data row, with
  assert.deepEqual(h.events,[]);
  // Erase asks first, in a centred dialog whose way out keeps the data.
  walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===t('eraseAll')).props.onPress();
+ const dialog=walk(tree).find(n=>n.props?.testID==='settings-erase-dialog');
+ assert.ok(dialog,'the erase dialog is drawn by the screen');
  assert.ok(!h.events.some(e=>['unpairDevice','clearAll','setIosCaptureEnabled'].includes(e[0])),'asking to erase erases nothing');
 });
 test('review action preserves source reviewId rather than silently inserting money',()=>{
@@ -221,7 +229,7 @@ for (const language of ['en', 'ar']) test(language + ': notification controls re
     // Locate the direct Section by its localized heading, independently of animations.
     const sections = walk(tree).filter(node => node.type === 'View' && Array.isArray(node.props?.children));
     const group = sections.find(node =>
-      node.props.children.some(child => child?.type === 'SectionHeader' && child.props.title === t('settingsNotificationsHeader')));
+      node.props.children.some(child => child && typeof child === 'object' && isHeader(child, t('settingsNotificationsHeader'))));
     assert.ok(group);
     assert.ok(text(group).includes(t('dailySummarySetting')));
     assert.ok(!text(group).includes(t('messagesPrivacy')));

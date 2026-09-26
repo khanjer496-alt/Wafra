@@ -19,9 +19,10 @@ assert.doesNotMatch(settings, /t\('parserPack'\)|marketChoices|setMarket\(/);
 
 // Imports are the first task section after Pro, and statement import is the
 // first import action rather than being buried among backup/export controls.
-const imports = settings.indexOf("<SectionHeader title={t('settingsImportsHeader')} />");
+// Design language E: groups are headed by SettingsGroupTitle on the sheet.
+const imports = settings.indexOf("<SettingsGroupTitle title={t('settingsImportsHeader')} palette={band} />");
 const statement = settings.indexOf("t('statementImportTitle')", imports);
-const notifications = settings.indexOf("<SectionHeader title={t('settingsNotificationsHeader')} />");
+const notifications = settings.indexOf("<SettingsGroupTitle title={t('settingsNotificationsHeader')} palette={band} />");
 assert.ok(imports > 0 && statement > imports && statement < notifications);
 assert.equal(settings.indexOf("t('statementImportTitle')", statement + 1), -1);
 

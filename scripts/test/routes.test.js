@@ -194,7 +194,9 @@ function sources(dir = SRC) {
     ['SMS capture', /toggleSms/],
     ['iPhone local capture', /setIosAutomaticCapture/],
     ['history recovery', /beginHistoryImport\(\)[\s\S]*confirmIosCaptureRecovery/],
-    ['bank notification import', /gated\(onNotificationAccess\)/],
+    // Design language E: a gated row names its feature; a non-Pro tap opens
+    // the in-context Pro sheet instead of leaving for /pro (pro-gate.ts).
+    ['bank notification import', /gated\('notifications', onNotificationAccess\)/],
     ['saved privacy preference review', /reviewLegacyPrivacyPreference[\s\S]*privacyLegacyReview/],
     ['App Lock', /toggleAppLock/],
     ['retention and security', /privacyRetentionExact[\s\S]*privacySecurityExact/],
@@ -210,7 +212,7 @@ function sources(dir = SRC) {
     ['feedback', /router\.push\('\/feedback'\)/],
     ['public links', /configuredPublicUrl\('privacyPolicyUrl'\)[\s\S]*configuredPublicUrl\('termsOfUseUrl'\)[\s\S]*configuredPublicUrl\('supportUrl'\)/],
     ['founder brand gate', /isFounderUnlockBuild\(\)[\s\S]*onFounderLogoTap\(\)[\s\S]*<WafraMark/],
-    ['destructive erase', /<Button\s+label=\{t\('eraseAll'\)\}\s+variant="danger"/],
+    ['destructive erase', /<EButton\s+label=\{t\('eraseAll'\)\}[\s\S]{0,300}color=\{\{ fill: band\.statusOver, text: band\.onFill \}\}[\s\S]{0,40}onPress=\{confirmErase\}/],
   ];
   const missingSettingsInventory = settingsInventory
     .filter(([, pattern]) => !pattern.test(settings))
@@ -284,18 +286,19 @@ function sources(dir = SRC) {
 
   ok('erase is a destructive button, not a chevron row',
     !/linkRow\(t\('eraseAll'\)/.test(settings) &&
-      /<Button\s+label=\{t\('eraseAll'\)\}\s+variant="danger"/.test(settings));
+      /<EButton\s+label=\{t\('eraseAll'\)\}[\s\S]{0,300}color=\{\{ fill: band\.statusOver, text: band\.onFill \}\}/.test(settings));
 
   // Alone at the end: nothing routine may sit against it. "Sort your shops"
   // was its immediate neighbour.
   ok('erase stands after everything else on the screen',
-    at("t('eraseAll')") > at("t('settingsTagline')") &&
+    at("t('eraseAll')") > at("publicLinkRow(t('supportWebsite')") &&
+      at("t('eraseAll')") > at('<TesterDiagnosticsControl />') &&
       at("t('eraseAll')") > at("t('sortShops')"));
 
   // Every gated() call site carries the lock, or a free user learns which
   // rows are paid by being thrown at the paywall.
   {
-    const gatedCalls = (settings.match(/\bgated\([a-zA-Z]/g) ?? []).length;
+    const gatedCalls = (settings.match(/\bgated\(['a-zA-Z]/g) ?? []).length;
     const marked = (settings.match(/pro: true/g) ?? []).length;
     ok(`every paywalled row is marked as one (${marked} of ${gatedCalls})`,
       gatedCalls > 0 && marked === gatedCalls);
@@ -306,7 +309,7 @@ function sources(dir = SRC) {
   // The navigation also uses privacyHeader; locate the actual section rather
   // than accidentally comparing notification content with its tab label.
   const notificationsAt = at("t('dailySummarySetting')");
-  const privacySectionAt = at("<SectionHeader title={copy.privacyAndSecurity}");
+  const privacySectionAt = at("<SettingsGroupTitle title={copy.privacyAndSecurity}");
   ok('the notification switches are out of the Privacy group and above it',
     notificationsAt >= 0 && privacySectionAt > notificationsAt);
 
@@ -323,7 +326,7 @@ function sources(dir = SRC) {
 
   ok('Trusted devices and family has one Settings row, in Privacy and security',
     (settings.match(/linkRow\(\s*copy\.trustedRow/g) ?? []).length === 1 &&
-      at('copy.trustedRow') > at('<SectionHeader title={copy.privacyAndSecurity}'));
+      at('copy.trustedRow') > at('<SettingsGroupTitle title={copy.privacyAndSecurity}'));
 
   // A toggle row whose label and sub-line are dead text, beside link rows that
   // are tappable edge to edge, is a target the user has to find twice. The
@@ -511,7 +514,9 @@ function sources(dir = SRC) {
   }
 
   {
-    const pro = code(read('app/pro.tsx'));
+    // The checkout moved verbatim into useProCheckout (shared with the Pro
+    // sheet); the screen and the hook are one surface.
+    const pro = code(read('app/pro.tsx') + '\n' + read('hooks/use-pro-checkout.ts'));
     // Superwall owns checkout; native fallback outcomes must still be visible.
     const outcomes = [
       "title: t('purchaseUnavailable')",

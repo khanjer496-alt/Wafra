@@ -41,7 +41,13 @@ const flow = read('src/app/(tabs)/flow.tsx');
 assert.match(flow, /summarizeMonth\(/);
 assert.match(flow, /spendingCategoryRows\(/);
 
-const pro = read('src/app/pro.tsx');
+// Design language E: the checkout moved verbatim into useProCheckout, shared
+// by the Pro screen and the in-context Pro sheet; the plan radios are one
+// shared component. The Pro surface is the three read together.
+const proCheckoutSurface = () => [
+  'src/app/pro.tsx', 'src/hooks/use-pro-checkout.ts', 'src/components/pro/pro-plan-options.tsx',
+].map(read).join('\n');
+const pro = proCheckoutSurface();
 for (const seam of ['useWafraBilling(', 'purchasePro(', 'fetchProOffers(', 'restorePro(', 'subscriptionManagementUrl(']) {
   assert.ok(pro.includes(seam), `Pro lost ${seam}`);
 }
@@ -317,28 +323,30 @@ assert.match(task6CardDetail, /<BottomSheet[^>]*footer=\{footer\}/);
 const task7Settings = code(read('src/app/settings.tsx'));
 // Data and help: exports, backup, the clean-ups, public links and Erase.
 const task7SettingsData = code(read('src/app/settings-data.tsx'));
-const task7Pro = code(read('src/app/pro.tsx'));
+const task7Pro = code(proCheckoutSurface());
 const task7I18n = read('src/lib/i18n.ts');
 const task7PublicLinksPath = path.join(ROOT, 'src/lib/public-links.ts');
 
-assert.match(task7Settings, /const settingsHeader: ScreenHeaderProps = \{[\s\S]*?title: t\('settingsTitle'\)[\s\S]*?back: \{ label: t\('back'\), onPress: \(\) => router\.back\(\) \}/);
-assert.match(task7Settings, /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?header=\{settingsHeader\}/);
-assert.match(task7Pro, /const proHeader: ScreenHeaderProps = \{[\s\S]*?title: t\('wafraPro'\)[\s\S]*?back: \{ label: t\('back'\), onPress: \(\) => router\.back\(\) \}/);
-assert.match(task7Pro, /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?header=\{proHeader\}/);
+// Design language E: Settings and Pro are band screens. The band's nav row
+// holds Back; the plain title is set large on the band.
+assert.match(task7Settings, /const settingsNav: BandNav = \{ back: true \}/);
+assert.match(task7Settings, /<BandScaffold[\s\S]*?band="settings"[\s\S]*?nav=\{settingsNav\}[\s\S]*?<BandTitle title=\{t\('settingsTitle'\)\}/);
+assert.match(task7Pro, /const proNav: BandNav = \{ back: true \}/);
+assert.match(task7Pro, /<BandScaffold[\s\S]*?nav=\{proNav\}[\s\S]*?<BandTitle title=\{t\('wafraPro'\)\}/);
 assert.doesNotMatch(task7Pro, /footer=\{purchaseFooter\}/);
 assert.match(task7Pro, /<View style=\{styles\.actions\}>[\s\S]*?<View style=\{\[styles\.legalLinks/);
 
 const settingsRenderStart = task7Settings.indexOf('<React.Fragment>');
 assert.ok(settingsRenderStart >= 0, 'Settings route-owned Fragment was not found');
 const settingsRender = task7Settings.slice(settingsRenderStart);
-assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 7, 'Settings renders exactly seven compact groups');
+assert.equal((settingsRender.match(/<SettingsGroupTitle title=\{/g) ?? []).length, 5, 'Settings renders exactly five titled groups under the Pro card');
 const settingsGroupMarkers = [
   'testID="settings-pro-card"',
-  "<SectionHeader title={t('settingsImportsHeader')} />",
-  "<SectionHeader title={t('settingsNotificationsHeader')} />",
-  "<SectionHeader title={t('settingsPreferencesHeader')} />",
-  '<SectionHeader title={copy.countryAndCurrency} />',
-  '<SectionHeader title={copy.privacyAndSecurity} />',
+  "<SettingsGroupTitle title={t('settingsImportsHeader')} palette={band} />",
+  "<SettingsGroupTitle title={t('settingsNotificationsHeader')} palette={band} />",
+  "<SettingsGroupTitle title={t('settingsPreferencesHeader')} palette={band} />",
+  '<SettingsGroupTitle title={copy.countryAndCurrency} palette={band} />',
+  '<SettingsGroupTitle title={copy.privacyAndSecurity} palette={band} />',
   "router.push('/settings-data')",
 ];
 let previousSettingsGroup = -1;
@@ -348,21 +356,23 @@ for (const marker of settingsGroupMarkers) {
   previousSettingsGroup = next;
 }
 const settingsDataRender = task7SettingsData.slice(task7SettingsData.indexOf('<React.Fragment>'));
-assert.equal((settingsDataRender.match(/<Section index=\{/g) ?? []).length, 5, 'Data and help renders five groups');
+assert.equal((settingsDataRender.match(/<SettingsGroupTitle title=\{/g) ?? []).length, 4, 'Data and help renders four titled groups');
 let previousDataGroup = -1;
 for (const marker of [
-  '<SectionHeader title={copy.yourData} />',
-  '<SectionHeader title={copy.helpImprove} />',
-  '<SectionHeader title={copy.advanced} />',
-  '<SectionHeader title={copy.about} />',
-  "<SectionHeader title={t('settingsDangerHeader')} />",
+  '<SettingsGroupTitle title={copy.yourData} palette={band} />',
+  '<SettingsGroupTitle title={copy.helpImprove} palette={band} />',
+  '<SettingsGroupTitle title={copy.advanced} palette={band} />',
+  '<SettingsGroupTitle title={copy.about} palette={band} />',
+  // Erase stands alone at the bottom, with distance above it, as the one
+  // destructive row (the board draws no "Danger zone" heading).
+  'testID="settings-data-erase"',
 ]) {
   const next = settingsDataRender.indexOf(marker);
   assert.ok(next > previousDataGroup, `Data and help group order lost ${marker}`);
   previousDataGroup = next;
 }
 assert.doesNotMatch(task7Settings, /StatusFacts|settingsStatusHeader/);
-assert.match(task7Settings, /from '@\/components\/ui\/section-header'/);
+assert.match(task7Settings, /SettingsGroupTitle,[\s\S]*?from '@\/components\/settings-rows'/);
 assert.doesNotMatch(task7Settings, /from '@\/components\/ui\/segmented-control'/);
 assert.match(task7Settings, /visible=\{preferenceSheet === 'appearance'\}[\s\S]*?onSelect=\{setThemePreference\}/);
 assert.doesNotMatch(task7Settings, /<Segmented\b|SectionHeader.*from '@\/components\/ui\/layout'/);

@@ -1,41 +1,30 @@
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { useLanguage } from '@/hooks/use-language';
 import { useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import React from 'react';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
-import {
-  useWafraBilling,
-  type ProPlanOffer,
-  type ProPurchaseOutcome,
-} from '@/components/superwall-billing-context';
+import { ProPlanOptions } from '@/components/pro/pro-plan-options';
+import { BandTitle } from '@/components/settings-band/band-title';
 import { ThemedText } from '@/components/themed-text';
-import { Button } from '@/components/ui/controls';
+import { EButton } from '@/components/ui/band/e-button';
+import { GlyphTile } from '@/components/ui/band/glyph-tile';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { Row, Section } from '@/components/ui/layout';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
-import { Radius, Spacing } from '@/constants/theme';
+import { Row } from '@/components/ui/layout';
+import { Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { useTheme } from '@/hooks/use-theme';
+import { useProCheckout } from '@/hooks/use-pro-checkout';
 import { t, tf } from '@/lib/i18n';
-import { autoCaptureMethod, billingStore, trialDaysLeft, type ProPlan } from '@/lib/purchases';
+import { autoCaptureMethod } from '@/lib/purchases';
 import { proCopy } from '@/lib/pro-copy';
-import { configuredPublicUrl } from '@/lib/public-links';
-import { subscriptionManagementUrl } from '@/lib/billing';
-import { useStore } from '@/lib/store';
 
 type FeatureRow = {
   icon: IconName;
   title: string;
   text: string;
 };
-
-type BillingAction = 'purchase' | 'restore' | 'manage' | null;
-type OfferState = 'loading' | 'ready' | 'unavailable';
-
-/** Yearly first: it is the plan the screen recommends when the store has both. */
-const PLAN_ORDER: ProPlan[] = ['yearly', 'monthly'];
 
 /**
  * Only what Pro gates (see pro-copy.ts). Automatic capture everywhere; on
@@ -61,183 +50,30 @@ function features(copy: ReturnType<typeof proCopy>): FeatureRow[] {
 /**
  * Wafra's own Pro screen owns the subscription purchase.
  *
- * Superwall stays the storefront seam — it supplies the localized product
- * prices, runs the platform checkout sheet, restores purchases and answers for
- * the `pro` entitlement — but the surface a customer reads and taps is this
- * native, localized screen rather than a remote paywall. Every price on it is
- * the string the device's own store returned; a plan the store does not return
- * is shown as unavailable instead of being advertised at a guessed figure.
+ * Design language E: the ink band carries the plain title, what Pro does in
+ * one sentence and where the trial stands; the sheet holds what Pro gates,
+ * the plan radios, what stays free and the store actions. The checkout itself
+ * lives in `useProCheckout`, shared with the in-context Pro sheet over
+ * Settings, so both surfaces charge through exactly one path. Every price on
+ * it is the string the device's own store returned; a plan the store does not
+ * return is shown as unavailable instead of being advertised at a guessed
+ * figure.
  */
 export default function ProScreen() {
   const language = useLanguage();
   const words = workflowCopy(language);
   const copy = proCopy(language);
-  const theme = useTheme();
+  const band = useBand('home');
   // At the accessibility sizes each row's icon sits above its text, so a long
   // word ("subscriptions") has the full width instead of breaking beside it.
   const largeText = useLargeTextLayout();
   const router = useRouter();
-  const { state } = useStore();
-  const billing = useWafraBilling();
-  const [billingAction, setBillingAction] = useState<BillingAction>(null);
-  const [offers, setOffers] = useState<ProPlanOffer[]>([]);
-  const [offerState, setOfferState] = useState<OfferState>('loading');
-  const [selectedPlan, setSelectedPlan] = useState<ProPlan>('yearly');
-  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
-  const offerRequest = useRef(0);
-  // `billingAction` is React state, so it is not visible to a second tap that
-  // lands in the same frame. A money action needs a guard that closes on the
-  // first call, not on the next render.
-  const actionLatch = useRef(false);
-  const trial = trialDaysLeft(state);
-  const entitled = state.pro || state.founderPro;
-  const privacyPolicyUrl = configuredPublicUrl('privacyPolicyUrl');
-  const termsOfUseUrl = configuredPublicUrl('termsOfUseUrl');
-  const legalReady = privacyPolicyUrl !== null && termsOfUseUrl !== null;
-  const store = billingStore();
-  const checkoutReady = billing.available && billing.configured;
-  const proHeader: ScreenHeaderProps = {
-    title: t('wafraPro'),
-    back: { label: t('back'), onPress: () => router.back() },
-  };
-
-  // Read through a ref so a new billing snapshot (a status refresh, a customer
-  // info event) cannot restart a price fetch that is already in flight.
-  const billingRef = useRef(billing);
-  billingRef.current = billing;
-
-  const loadOffers = useCallback(async () => {
-    if (entitled || !checkoutReady) {
-      setOfferState('unavailable');
-      return;
-    }
-    const request = ++offerRequest.current;
-    setOfferState('loading');
-    // Drop what the last fetch returned before asking again. A price left on
-    // screen while its refresh is in flight is a price the CTA could still
-    // charge, and the storefront it came from may no longer be this one.
-    setOffers([]);
-    const loaded = await billingRef.current.fetchProOffers();
-    if (request !== offerRequest.current) return;
-    setOffers(loaded);
-    setOfferState(loaded.length > 0 ? 'ready' : 'unavailable');
-    setSelectedPlan((current) =>
-      loaded.some((offer) => offer.plan === current) ? current : loaded[0]?.plan ?? current);
-  }, [checkoutReady, entitled]);
-
-  useEffect(() => {
-    void loadOffers();
-    return () => { offerRequest.current += 1; };
-  }, [loadOffers]);
-
-  const selectedOffer = offerState === 'ready'
-    ? offers.find((offer) => offer.plan === selectedPlan) ?? null
-    : null;
-  const missingPlans = PLAN_ORDER.filter(
-    (plan) => !offers.some((offer) => offer.plan === plan));
-
-  /**
-   * The one action that can charge money. It refuses before the store is asked
-   * when the required legal links or the storefront itself are missing, and it
-   * reports the store's answer literally: a cancellation is not a failure, a
-   * deferred approval is not a purchase, and a completed transaction that the
-   * `pro` entitlement has not confirmed says so rather than claiming Pro.
-   */
-  const buySelectedPlan = useCallback(async () => {
-    if (actionLatch.current) return;
-    setNotice(null);
-    if (!legalReady) {
-      setNotice({ title: t('purchaseUnavailable'), body: t('purchaseLegalMissingBody') });
-      return;
-    }
-    if (!checkoutReady) {
-      setNotice({
-        title: t('purchaseUnavailable'),
-        body: billing.configurationError ? t('purchaseFailedBody') : t('playOnlyBody'),
-      });
-      return;
-    }
-    if (!selectedOffer) {
-      setNotice({ title: t('priceUnavailable'), body: t('priceUnavailableBody') });
-      return;
-    }
-    actionLatch.current = true;
-    setBillingAction('purchase');
-    let outcome: ProPurchaseOutcome;
-    try {
-      outcome = await billing.purchasePro(selectedOffer.productId);
-    } finally {
-      actionLatch.current = false;
-      setBillingAction(null);
-    }
-    if (outcome === 'cancelled') return;
-    if (outcome === 'purchased') {
-      setNotice({ title: t('proPurchaseSuccessTitle'), body: t('proPurchaseSuccessBody') });
-      return;
-    }
-    if (outcome === 'pending') {
-      setNotice({ title: t('purchasePendingTitle'), body: t('purchasePendingBody') });
-      return;
-    }
-    if (outcome === 'unavailable') {
-      setNotice({ title: t('purchaseUnavailable'), body: t('playOnlyBody') });
-      return;
-    }
-    setNotice({ title: t('purchaseFailed'), body: t('purchaseFailedBody') });
-  }, [billing, checkoutReady, legalReady, selectedOffer]);
-
-  const restore = async () => {
-    if (actionLatch.current) return;
-    setNotice(null);
-    if (!checkoutReady) {
-      setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
-      return;
-    }
-    actionLatch.current = true;
-    setBillingAction('restore');
-    let restored: boolean | null;
-    try {
-      restored = await billing.restorePro();
-    } finally {
-      actionLatch.current = false;
-      setBillingAction(null);
-    }
-    if (restored === null) {
-      setNotice({ title: t('restoreFailed'), body: t('restoreFailedBody') });
-    } else if (!restored) {
-      setNotice({ title: t('noPurchaseFound'), body: t('noPurchaseFoundBody') });
-    } else {
-      setNotice({ title: t('proRestoreSuccessTitle'), body: t('proRestoreSuccessBody') });
-    }
-  };
-
-  const manage = async () => {
-    if (actionLatch.current) return;
-    setNotice(null);
-    actionLatch.current = true;
-    setBillingAction('manage');
-    const url = await subscriptionManagementUrl();
-    try {
-      if (!url || !(await Linking.canOpenURL(url))) {
-        setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
-        return;
-      }
-      await Linking.openURL(url);
-    } catch {
-      setNotice({ title: t('manageSubscriptionFailed'), body: t('manageSubscriptionFailedBody') });
-    } finally {
-      actionLatch.current = false;
-      setBillingAction(null);
-    }
-  };
-
-  const openLegal = async (url: string) => {
-    try {
-      await Linking.openURL(url);
-    } catch {
-      setNotice({ title: t('legalLinkFailed'), body: t('legalLinkFailedBody') });
-    }
-  };
+  const checkout = useProCheckout();
+  const {
+    state, billingAction, selectedPlan, selectedOffer, notice, trial, entitled,
+    privacyPolicyUrl, termsOfUseUrl, buySelectedPlan, restore, manage, openLegal,
+  } = checkout;
+  const proNav: BandNav = { back: true };
 
   const publicLinkRow = (
     title: string,
@@ -251,7 +87,7 @@ export default function ProScreen() {
         hitSlop={8}
         onPress={() => void openLegal(url)}
         style={styles.legalLink}>
-        <ThemedText type="meta" style={{ color: theme.primary }}>
+        <ThemedText type="smallBold" style={{ color: band.tint }}>
           {title}
         </ThemedText>
       </Pressable>
@@ -259,217 +95,81 @@ export default function ProScreen() {
     return (
       <Row last={last}>
         <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
-          <ThemedText type="small">{title}</ThemedText>
-          <ThemedText type="meta" themeColor="textTertiary">
+          <ThemedText type="small" style={{ color: band.text }}>{title}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>
             {t('publicLinkUnavailable')}
           </ThemedText>
         </View>
-        <Icon name="alert" size={15} color={theme.warning} />
+        <Icon name="alert" size={15} color={band.statusNear} />
       </Row>
     );
   };
 
-  const planRow = (offer: ProPlanOffer) => {
-    const selected = offer.plan === selectedPlan;
-    const label = offer.plan === 'yearly' ? t('yearly') : t('monthly');
-    const period = offer.plan === 'yearly' ? t('perYear') : t('perMonth');
-    return (
-      <Pressable
-        key={offer.productId}
-        accessibilityRole="radio"
-        accessibilityState={{ selected }}
-        accessibilityLabel={`${label} · ${offer.priceString} ${period}`}
-        testID={`pro-plan-${offer.plan}`}
-        onPress={() => setSelectedPlan(offer.plan)}
-        style={[
-          styles.planRow,
-          largeText && styles.planRowWrap,
-          {
-            borderColor: selected ? theme.primary : theme.controlBorder,
-            borderWidth: selected ? 2 : 1,
-            backgroundColor: selected ? theme.primarySoft : theme.backgroundElement,
-          },
-        ]}>
-        <View
-          style={[
-            styles.planMark,
-            { borderColor: selected ? theme.primary : theme.controlBorder },
-          ]}>
-          {selected && <View style={[styles.planDot, { backgroundColor: theme.primary }]} />}
-        </View>
-        <ThemedText type="smallBold" style={styles.featureText}>{label}</ThemedText>
-        <View style={[styles.planPrice, largeText && styles.planPriceStacked]}>
-          <ThemedText type="smallBold" tabular>{offer.priceString}</ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary">{period}</ThemedText>
-        </View>
-      </Pressable>
-    );
-  };
-
-  /**
-   * A plan the store did not return. It is drawn rather than dropped: a
-   * catalogue missing one SKU is a storefront or configuration fault, and
-   * silently showing a single plan hides it from the only person who can see
-   * it happen. The row carries no price and cannot be selected.
-   */
-  const unavailablePlanRow = (plan: ProPlan) => (
-    <View
-      key={`unavailable-${plan}`}
-      accessibilityRole="summary"
-      style={[
-        styles.planRow,
-        largeText && styles.planRowWrap,
-        { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
-      ]}>
-      <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
-        <ThemedText type="smallBold">{plan === 'yearly' ? t('yearly') : t('monthly')}</ThemedText>
-        <ThemedText type="meta" themeColor="textTertiary">{t('priceUnavailable')}</ThemedText>
-      </View>
-      <Icon name="alert" size={16} color={theme.warning} />
-    </View>
-  );
-
-  const retryPrices = (
-    <Pressable accessibilityRole="button" onPress={() => void loadOffers()} hitSlop={8}>
-      <ThemedText type="micro" style={{ color: theme.primary }}>{t('retryPrices')}</ThemedText>
-    </Pressable>
-  );
+  const status = entitled
+    ? t('proActiveThanks')
+    : trial > 0
+      ? tf('proTrialActiveBody', { left: trial, s: trial === 1 ? '' : 's' })
+      : t('proTrialEndedBody');
 
   return (
-    <ScreenScaffold
-      headerMode="native"
-      header={proHeader}
+    <BandScaffold
+      band="home"
+      testID="pro-screen"
+      nav={proNav}
       contentStyle={styles.content}
-      scrollProps={{ showsVerticalScrollIndicator: false }}>
-      <Section index={0} style={styles.hero}>
-        <ThemedText type="title" accessibilityRole="header">{t('proOutcomeTitle')}</ThemedText>
-        <ThemedText type="small" themeColor="textSecondary">{words.proBody}</ThemedText>
-        <ThemedText type="default" themeColor="textSecondary">
-          {entitled
-            ? t('proActiveThanks')
-            : trial > 0
-              ? tf('proTrialActiveBody', { left: trial, s: trial === 1 ? '' : 's' })
-              : t('proTrialEndedBody')}
-        </ThemedText>
-        {!entitled && trial > 0 && (
-          <View
-            style={[
-              styles.statusPill,
-              { backgroundColor: theme.primarySoft, borderColor: theme.primaryBorder },
-            ]}>
-            <View style={[styles.statusDot, { backgroundColor: theme.primary }]} />
-            <ThemedText type="nano" style={{ color: theme.primary }}>
-              {tf('settingsTrialDays', { count: trial, s: trial === 1 ? '' : 's' })}
-            </ThemedText>
-          </View>
-        )}
-      </Section>
-
-      <Section
-        index={1}
-        style={styles.featuresCard}>
-        <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionLabel}>
+      scrollProps={{ showsVerticalScrollIndicator: false }}
+      bandContent={(
+        <View style={styles.bandBody} testID="pro-band">
+          <BandTitle title={t('wafraPro')} body={t('proOutcomeTitle')} palette={band} />
+          <ThemedText type="small" style={{ color: band.onBandSecondary }}>{status}</ThemedText>
+        </View>
+      )}>
+      <View style={styles.section} testID="pro-benefits">
+        <ThemedText type="heading" accessibilityRole="header" style={{ color: band.text }}>
           {t('proBenefitsTitle')}
         </ThemedText>
         {features(copy).map((feature, index, rows) => (
-          <Row key={feature.title} last={index === rows.length - 1}>
-            <View style={[styles.featureIcon, { backgroundColor: theme.primarySoft }]}>
-              <Icon name={feature.icon} size={18} color={theme.primary} />
-            </View>
+          <View key={feature.title}
+            style={[styles.featureRow, largeText && styles.featureRowStacked,
+              index < rows.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: band.rule }]}>
+            <GlyphTile icon={feature.icon} palette={band} size={40} />
             <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
-              <ThemedText type="small">{feature.title}</ThemedText>
-              <ThemedText type="meta" themeColor="textSecondary">{feature.text}</ThemedText>
+              <ThemedText type="smallBold" style={{ color: band.text }}>{feature.title}</ThemedText>
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>{feature.text}</ThemedText>
             </View>
-          </Row>
+          </View>
         ))}
-      </Section>
+        <ThemedText type="meta" style={{ color: band.textSecondary }}>{words.proBody}</ThemedText>
+      </View>
 
       {!entitled && (
-        <Section index={2} style={styles.plans}>
-          <ThemedText type="meta" themeColor="textTertiary">{t('proChoosePlan')}</ThemedText>
-          {offerState === 'loading' ? (
-            <ThemedText type="small" themeColor="textSecondary">{t('priceLoading')}</ThemedText>
-          ) : offerState === 'ready' ? (
-            <>
-              {PLAN_ORDER.map((plan) => {
-                const offer = offers.find((candidate) => candidate.plan === plan);
-                return offer ? planRow(offer) : unavailablePlanRow(plan);
-              })}
-              {missingPlans.length > 0 && (
-                <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
-                  <ThemedText type="meta" themeColor="textTertiary">
-                    {t('priceUnavailableBody')}
-                  </ThemedText>
-                  {retryPrices}
-                </View>
-              )}
-              {selectedOffer && (
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {tf(
-                    selectedPlan === 'yearly' ? 'proChargeTimingYear' : 'proChargeTimingMonth',
-                    { price: selectedOffer.priceString },
-                  )}
-                </ThemedText>
-              )}
-              <ThemedText type="meta" themeColor="textTertiary">
-                {store === 'appStore'
-                  ? t('subscriptionRenewalTermsIos')
-                  : store === 'play'
-                    ? t('subscriptionRenewalTermsAndroid')
-                    : t('proStoreConfirmsPrice')}
-              </ThemedText>
-            </>
-          ) : (
-            <View
-              style={[
-                styles.freeNote,
-                largeText && styles.freeNoteLarge,
-                { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
-              ]}>
-              <View style={styles.featureIcon}>
-                <Icon name="alert" size={19} color={theme.warning} />
-              </View>
-              <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
-                <ThemedText type="small">
-                  {checkoutReady ? t('priceUnavailable') : t('playOnlyTitle')}
-                </ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {checkoutReady ? t('priceUnavailableBody') : t('playOnlyBody')}
-                </ThemedText>
-                {checkoutReady && retryPrices}
-              </View>
-            </View>
-          )}
-        </Section>
+        <View style={styles.section} testID="pro-plans">
+          <ThemedText type="heading" accessibilityRole="header" style={{ color: band.text }}>
+            {t('proChoosePlan')}
+          </ThemedText>
+          <ProPlanOptions checkout={checkout} palette={band} />
+        </View>
       )}
 
-      <Section index={3}>
-        <View
-          style={[
-            styles.freeNote,
-            largeText && styles.freeNoteLarge,
-            { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement },
-          ]}>
-          <View style={styles.featureIcon}>
-            <Icon name="check" size={19} color={theme.income} />
-          </View>
-          <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
-            <ThemedText type="small">{copy.freeTitle}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">{copy.freeText}</ThemedText>
-            <Pressable accessibilityRole="button" onPress={() => router.push('/import-sms')} hitSlop={8}>
-              <ThemedText type="micro" style={{ color: theme.primary }}>{t('pasteBankMessage')}</ThemedText>
-            </Pressable>
-          </View>
+      <View style={[styles.freeNote, largeText && styles.featureRowStacked, { borderColor: band.rule, backgroundColor: band.card }]}
+        testID="pro-free">
+        <GlyphTile icon="check" palette={band} size={40} />
+        <View style={[styles.featureText, largeText && styles.featureTextStacked]}>
+          <ThemedText type="smallBold" style={{ color: band.text }}>{copy.freeTitle}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.freeText}</ThemedText>
+          <Pressable accessibilityRole="button" onPress={() => router.push('/import-sms')} hitSlop={8} style={styles.inlineAction}>
+            <ThemedText type="smallBold" style={{ color: band.tint }}>{t('pasteBankMessage')}</ThemedText>
+          </Pressable>
         </View>
-      </Section>
+      </View>
 
       {notice && (
         <View
           accessibilityRole="alert"
           accessibilityLiveRegion="polite"
-          style={[styles.notice, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
-          <ThemedText type="smallBold">{notice.title}</ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary">{notice.body}</ThemedText>
+          style={[styles.notice, { borderColor: band.rule, backgroundColor: band.card }]}>
+          <ThemedText type="smallBold" style={{ color: band.text }}>{notice.title}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{notice.body}</ThemedText>
         </View>
       )}
 
@@ -477,18 +177,21 @@ export default function ProScreen() {
         {entitled ? (
           <>
             {!state.founderPro && Platform.OS !== 'web' && (
-              <Button
-                variant="outline"
+              <EButton
+                palette={band}
+                variant="secondary"
                 label={t('manageSubscription')}
                 disabled={billingAction !== null}
                 onPress={manage}
               />
             )}
-            <Button variant="ghost" label={t('proContinue')} onPress={() => router.back()} />
+            <EButton palette={band} variant="quiet" label={t('proContinue')} onPress={() => router.back()} />
           </>
         ) : (
           <>
-            <Button
+            <EButton
+              palette={band}
+              testID="pro-buy"
               label={billingAction === 'purchase'
                 ? t('purchaseInProgress')
                 : selectedOffer
@@ -500,8 +203,9 @@ export default function ProScreen() {
               disabled={billingAction !== null}
               onPress={() => void buySelectedPlan()}
             />
-            <Button
-              variant="ghost"
+            <EButton
+              palette={band}
+              variant="quiet"
               label={t('restorePurchase')}
               disabled={billingAction !== null}
               onPress={() => void restore()}
@@ -510,81 +214,40 @@ export default function ProScreen() {
         )}
       </View>
 
-      <View style={[styles.legalLinks, { borderColor: theme.cardBorder }]}>
+      <View style={[styles.legalLinks, { borderColor: band.rule }]}>
         {publicLinkRow(t('privacyPolicy'), privacyPolicyUrl)}
         {publicLinkRow(t('termsOfUse'), termsOfUseUrl, true)}
       </View>
-    </ScreenScaffold>
+    </BandScaffold>
   );
 }
 
 const styles = StyleSheet.create({
   content: { gap: Spacing.four },
-  hero: { alignItems: 'flex-start', gap: Spacing.two, paddingTop: Spacing.two },
-  featuresCard: { gap: Spacing.one },
-  sectionLabel: { marginBottom: Spacing.two },
-  featureIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: Radius.tile,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  featureText: { flex: 1, gap: 3 },
+  bandBody: { gap: 12, paddingBottom: Spacing.two },
+  section: { gap: Spacing.two },
+  featureRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 12 },
+  featureRowStacked: { flexWrap: 'wrap' },
+  featureText: { flex: 1, minWidth: 0, gap: 3 },
   featureTextStacked: { flexBasis: '100%' },
-  plans: { gap: Spacing.two },
-  planMark: {
-    width: 22,
-    height: 22,
-    borderRadius: Radius.full,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  planDot: { width: 10, height: 10, borderRadius: Radius.full },
-  planPrice: { alignItems: 'flex-end', gap: 2 },
-  // The price drops under the plan name at the accessibility sizes.
-  planRowWrap: { flexWrap: 'wrap' },
-  planPriceStacked: { flexBasis: '100%', alignItems: 'flex-start', paddingStart: 22 + Spacing.three },
-  planRow: {
-    minHeight: 64,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    borderRadius: Radius.sheet,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-  },
-  statusPill: {
-    minHeight: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.full,
-    paddingHorizontal: Spacing.three,
-  },
-  statusDot: { width: 7, height: 7, borderRadius: Radius.full },
-  // Icon above the text and a tighter inset at the accessibility sizes, so a
-  // long word has the card's full width.
-  freeNoteLarge: { flexWrap: 'wrap', padding: Spacing.three },
   freeNote: {
     flexDirection: 'row',
-    gap: Spacing.three,
-    padding: Spacing.four,
-    borderRadius: Radius.sheet,
+    gap: 14,
+    padding: 16,
+    borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
   },
+  inlineAction: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   notice: {
     gap: Spacing.one,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.sheet,
+    borderRadius: 16,
     padding: Spacing.three,
   },
   actions: { gap: Spacing.two },
   legalLinks: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.sheet,
+    borderRadius: 16,
     overflow: 'hidden',
     marginBottom: Spacing.four,
   },
