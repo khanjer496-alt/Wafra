@@ -103,9 +103,9 @@ test('first-run copy is paired and the SMS explainer is truthful', () => {
   const gate = read('src/components/onboarding-gate.tsx');
   assert.match(gate, /else setSmsExplainerVisible\(true\)/);
   assert.match(gate, /onContinue=\{\(\) => \{\s*setSmsExplainerVisible\(false\);\s*void runSetupAction\(startScan\);/);
-  assert.match(gate, /visible=\{pendingRestore !== null\}[\s\S]{0,900}setRestoreFailed\(restoreBackup\(content\) \? null : 'invalid'\)/);
+  assert.match(gate, /visible=\{pendingRestore !== null\}[\s\S]{0,900}const restored = restoreBackup\(content\);\s*setRestoreFailed\(restored \? null : 'invalid'\);/);
   // A file that could not be read is not called "not a Wafra backup".
-  assert.match(gate, /restoreFailed === 'read' \? firstRunCopy\.restoreReadFailed : t\('notAWafraBackup'\)/);
+  assert.match(gate, /restoreFailed === 'read' \? firstRunCopy\.restoreReadFailed : restoreFailed \? t\('notAWafraBackup'\) : null/);
   // Back from the explainer closes it rather than leaving it set behind.
   assert.match(gate, /onBack=\{smsExplainerVisible \? \(\) => setSmsExplainerVisible\(false\) : goBack\}/);
   // The checklist reads the setup screen's readiness rule, latest refresh only.

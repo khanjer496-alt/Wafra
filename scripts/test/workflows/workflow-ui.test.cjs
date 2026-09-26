@@ -150,23 +150,23 @@ test('bank-payment nicknames learn by bill identity and never write a merchant-w
  assert.ok(h.events.some(e=>e[0]==='setBillAlias'&&e[1]==='Fishbasket'&&e[2]==='consumer:4036'&&e[3]==='Fishbasket'&&e[4]==='utilities'&&e[5]===true));
  assert.ok(!h.events.some(e=>e[0]==='setMerchantOverride'));
 });
-for(const language of ['en','ar'])test(`onboarding shows an inline labeled example without adding money: ${language}`,()=>{
- // states[10] is the gate's `resumeReady`, by hook order. Inserting a useState
+for(const language of ['en','ar'])test(`onboarding welcome shows a labeled example pattern without adding money: ${language}`,()=>{
+ // states[6] is the gate's `resumeReady`, by hook order. Inserting a useState
  // above it in onboarding-gate.tsx moves this index; the screen renders its
  // loading branch instead of Welcome when it is wrong.
- const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{10:true}}),tree=h.renderScreen('onboarding');
- const t=h.deps['@/lib/i18n'].t;
- assert.ok(text(tree).replace(/\s+/g,' ').includes(t('onboardHeadline').replace(/\s+/g,' ')));assert.ok(!text(tree).includes('42,500'));
- const example=walk(tree).find(n=>n.props?.testID==='onboarding-market-money-scene');
- assert.ok(example,'the real regional money scene is embedded on welcome');
- for(const bank of ['Emirates NBD','FAB','ADCB'])assert.ok(text(example).includes(bank),bank);
- assert.ok(text(example).includes('AED 120.00'));
- assert.ok(text(example).includes(t('onboardSceneAlertsToPicture')));
- assert.ok(!walk(example).some(n=>n.props?.onPress),'the poster scene is display-only');
- assert.ok(byLabel(tree,t('onboardChooseStart')),'setup remains available beside the visual story');
- assert.ok(!walk(tree).some(n=>n.props?.testID==='setup-illustration'));
+ const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{6:true}}),tree=h.renderScreen('onboarding');
+ const words=h.deps['@/lib/onboarding-e-copy'].onboardingECopy(language);
+ assert.ok(text(tree).includes(words.welcomeHeadline));
+ const example=walk(tree).find(n=>n.props?.testID==='onboarding-example-pattern');
+ assert.ok(example,'the example pattern is embedded on welcome');
+ const mosaic=walk(example).find(n=>n.type==='PatternMosaic');
+ assert.equal(mosaic.props.accessibilityLabel,words.exampleLabel,'it is spoken as an example, not as the person\'s pattern');
+ assert.ok(text(example).includes(words.exampleLabel),'and labelled as one on screen');
+ assert.ok(!walk(example).some(n=>n.props?.onPress),'the example is display-only');
+ assert.ok(byLabel(tree,words.getStarted),'Get started is the one primary action');
+ assert.ok(!walk(tree).some(n=>n.props?.testID==='onboarding-language-switch'),'no language button on the first page');
  assert.equal(h.state.transactions.length,0);assert.equal(h.state.accounts.length,0);
- assert.deepEqual(h.events,[],'rendering sample and setup controls performs no writes or setup actions');
+ assert.deepEqual(h.events,[],'rendering welcome performs no writes or setup actions');
 });
 test('import progress labels only the supplied current step',()=>{
  const h=createWorkflowHarness(),{ImportSteps}=h.deps['@/components/workflows/workflow-surfaces'];

@@ -97,9 +97,11 @@ ok('capacity, expiry and currency-skip notices are localized and counted, never 
     /reviewExpiresInDays\(item, Date\.now\(\)\)/.test(route) &&
     /accessibilityLiveRegion="polite"/.test(route));
 
+// Design language E: "I'll add by hand" sits beside every automatic source on
+// the first-payment step, and says there is no message access.
 ok('SMS access is visibly optional and the no-access path is explicit',
-  /<StartOption automatic=\{false\}/.test(onboarding) &&
-    /onboardManualChoice/.test(onboarding) &&
+  /<SourceRow palette=\{stepBand\} icon="plus" title=\{words\.addByHand\} body=\{words\.addByHandBody\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(onboarding) &&
+    /addByHandBody: 'No message access\./.test(read('src/lib/onboarding-e-copy.ts')) &&
     /continueManually/.test(onboarding) &&
     /onboardManualChoiceBody:[\s\S]{0,180}No SMS access/.test(copy) &&
     /onboardManualChoiceIosBody:[\s\S]{0,180}No Messages access/.test(copy) &&

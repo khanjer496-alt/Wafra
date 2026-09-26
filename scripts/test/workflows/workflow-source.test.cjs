@@ -19,8 +19,9 @@ test('workflow consumers have real imports for their current localized presentat
  const files=['settings','import-sms','ios-setup','feedback','review-alerts','categorise','pro','trusted-devices'].map(n=>`src/app/${n}.tsx`).concat('src/components/onboarding-gate.tsx');
  for(const file of files){const sf=source(file),names=new Set();for(const n of sf.statements)if(ts.isImportDeclaration(n)&&n.importClause?.namedBindings&&ts.isNamedImports(n.importClause.namedBindings))for(const element of n.importClause.namedBindings.elements)names.add(element.name.text);
   if(file.endsWith('/onboarding-gate.tsx')){
-   for(const name of ['WelcomeMoneyScene','t','useLanguage','useMotionPreference'])assert.ok(names.has(name),`${file}: ${name} import`);
-   assert.ok(!names.has('SetupIllustration')&&!names.has('workflowCopy'),'Welcome uses its inline example and current translated copy');
+   // Design language E: the steps are their own modules with their own copy.
+   for(const name of ['WelcomeStep','NameStep','GoalsStep','WatchStep','RemindersStep','PatternStep','PaywallStep','onboardingECopy','t','useLanguage','useEMotion'])assert.ok(names.has(name),`${file}: ${name} import`);
+   assert.ok(!names.has('SetupIllustration')&&!names.has('workflowCopy'),'Welcome uses its example pattern and current translated copy');
   }else if(file.endsWith('/ios-setup.tsx')){
    for(const name of ['SetupHeader','SetupShell','ChecklistRow','AutomationGuide','iosSetupJourneyCopy','t','useLanguage'])assert.ok(names.has(name),`${file}: ${name} import`);
    assert.ok(!names.has('WorkflowHero')&&!names.has('workflowCopy'),'iOS setup has one heading before its actionable checklist');
@@ -60,49 +61,47 @@ const onboardingAction=(name,inputs,transitionAllowed=true)=>{
  assert.equal(transitionChecks,1,`shipping ${name} checks the transition guard exactly once`);
 };
 test('main onboarding Back actions follow the integrated journey',()=>{
+ // Design language E: welcome, name (1), goals (2), watch (3), reminders (4),
+ // first payment (5: capture on Android, live on iPhone, complete for its
+ // result), then the pattern and the paywall. Each Back saves the stage the
+ // earlier step owns, so a relaunch resumes where the person now is.
  const cases=[
-  ['capture','preview','preview'],['preview','intention','intention'],['intention','alerts','alerts'],
-  ['alerts','tracking','tracking'],['tracking','focus','focus'],['focus','welcome','welcome'],
-  ['complete','capture','capture'],
+  ['android','paywall','pattern',null],['android','pattern','complete',null],
+  ['android','complete','capture','capture'],['android','capture','reminders','alerts'],
+  ['ios','live','reminders','alerts'],['ios','complete','live','capture'],
+  ['android','reminders','watch','tracking'],['android','watch','goals','focus'],
+  ['android','goals','name','welcome'],['android','name','welcome','welcome'],
  ];
-  for(const[activeStep,expected,journey]of cases){
-   const events=[];
-   onboardingAction('goBack',{Platform:{OS:'android'},activeStep,params:{},previewMode:false,setStep:step=>events.push(['step',step]),
-   saveJourney:stage=>events.push(['journey',stage]),saveLiveStep:()=>events.push(['journey','capture']),preferredName:'Naser',
+ for(const[os,activeStep,expected,journey]of cases){
+  const events=[];
+  onboardingAction('goBack',{Platform:{OS:os},activeStep,params:{},previewMode:false,setStep:step=>events.push(['step',step]),
+   saveJourney:stage=>events.push(['journey',stage]),preferredName:'Naser',
    setNameDraft:value=>events.push(['nameDraft',value]),setNameSaveFailed:value=>events.push(['nameFailed',value]),
-   setCollectingName:value=>events.push(['collectName',value]),router:{setParams:()=>assert.fail('no callback should be cleared')}});
-  const expectedEvents=[['step',expected],['journey',journey]];
-  if(activeStep==='focus') expectedEvents.push(['nameDraft','Naser'],['nameFailed',false],['collectName',true]);
-  assert.deepEqual(events,expectedEvents,activeStep);
+   router:{setParams:()=>assert.fail('no callback should be cleared')}});
+  const expectedEvents=[['step',expected]];
+  if(journey)expectedEvents.push(['journey',journey]);
+  if(activeStep==='goals')expectedEvents.push(['nameDraft','Naser'],['nameFailed',false]);
+  assert.deepEqual(events,expectedEvents,`${os} ${activeStep}`);
  }
  const events=[];
  onboardingAction('goBack',{Platform:{OS:'android'},activeStep:'complete',params:{onboarding:'complete'},previewMode:false,setStep:step=>events.push(['step',step]),
-  saveJourney:stage=>events.push(['journey',stage]),saveLiveStep:()=>events.push(['journey','capture']),preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},setCollectingName:()=>{},
+  saveJourney:stage=>events.push(['journey',stage]),preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},
   router:{setParams:params=>events.push(['params',Object.keys(params),params.onboarding])}});
  assert.deepEqual(events,[['step','capture'],['journey','capture'],['params',['onboarding'],undefined]]);
- // iPhone setup is statements (capture) then new transactions (live); both
- // persist as the capture stage, and completion steps back to live.
- for(const[activeStep,expected]of[['complete','live'],['live','capture'],['capture','preview']]){
-  const ios=[];
-  onboardingAction('goBack',{Platform:{OS:'ios'},activeStep,params:{},previewMode:false,setStep:step=>ios.push(['step',step]),
-   saveJourney:stage=>ios.push(['journey',stage]),saveLiveStep:()=>ios.push(['journey','capture','statement-step-done']),preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},setCollectingName:()=>{},
-   router:{setParams:()=>assert.fail('no callback should be cleared')}});
-  // Back to live keeps the statement step behind the user across a relaunch.
-  assert.deepEqual(ios,[['step',expected],expected==='live'?['journey','capture','statement-step-done']:['journey',expected==='preview'?'preview':'capture']],`ios ${activeStep}`);
- }
 });
 test('obsolete optional goals and budget wizard handlers are absent from the shipping gate',()=>{
  const text=fs.readFileSync(path.join(root,'src/components/onboarding-gate.tsx'),'utf8');
- assert.doesNotMatch(text,/activeStep === 'goals'|activeStep === 'budget'|finishPreferences|onboardPersonalizeOptional/);
- assert.match(text,/activeStep === 'intention'/);
- assert.match(text,/IntentionChooser/);
+ assert.doesNotMatch(text,/activeStep === 'budget'|finishPreferences|onboardPersonalizeOptional|setOnboardingPlan/);
+ // Goals are wafraGoals (no money); the only budgets are limits the person dialled.
+ assert.match(text,/setGoals\(goalsDraft\)/);
+ assert.match(text,/watchBudgetChanges\(watchDraft, state\.budgets\)/);
 });
 test('blocked onboarding Back transitions preserve the integrated journey',()=>{
- for(const activeStep of ['capture','preview','intention','tracking','focus','complete','welcome']){
+ for(const activeStep of ['paywall','pattern','complete','capture','live','reminders','watch','goals','name','welcome']){
   const events=[];
-  onboardingAction('goBack',{activeStep,params:activeStep==='complete'?{onboarding:'complete'}:{},previewMode:false,
+  onboardingAction('goBack',{Platform:{OS:'android'},activeStep,params:activeStep==='complete'?{onboarding:'complete'}:{},previewMode:false,
    setStep:step=>events.push(['step',step]),saveJourney:stage=>events.push(['journey',stage]),
-   saveLiveStep:()=>events.push(['journey','capture']),preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},setCollectingName:()=>{},
+   preferredName:null,setNameDraft:()=>{},setNameSaveFailed:()=>{},
    router:{setParams:params=>events.push(['params',params])}},false);
   assert.deepEqual(events,[],`${activeStep}: a blocked press cannot navigate, persist progress or clear the callback`);
  }
