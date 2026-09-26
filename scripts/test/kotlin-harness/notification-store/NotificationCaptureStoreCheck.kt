@@ -125,6 +125,19 @@ fun main() {
     check("the healed row is no longer review-only",
       NotificationCaptureStore.read(c, 0L).first { it.ts == t0 }.reviewOnly, false)
   }
+  run {
+    // A review-only pick is checked against receipts but leaves none: when it
+    // was the NEW charge, that charge's own notification is still captured
+    // (JS flags the Review card as a possible repeat). A pick repeating a
+    // charge already captured is still refused as a re-post.
+    val c = enabledContext()
+    check("a review-only pick of a new charge is appended",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", alert, t0, reviewOnly = true), "appended")
+    check("the charge's own notification is not refused as a re-post of the pick",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", alert, t0 + 60_000), "appended")
+    check("a later review-only pick of that captured charge is a re-post",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", alert, t0 + 120_000, reviewOnly = true), "repost")
+  }
   println(if (bad == 0) "STORE ALL OK" else "STORE FAILURES $bad")
   System.exit(if (bad == 0) 0 else 1)
 }

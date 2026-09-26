@@ -91,7 +91,9 @@ charge already imported rather than the new one, so the row is queued
 review-only: it goes to Review, marked as a possible repeat, and never
 auto-imports, even from a curated bank. The native re-post guard still
 applies to it, so a pick that repeats a seconds-clock charge from the last
-30 minutes is not queued at all. The `conversationAmbiguous` admission
+30 minutes is not queued at all; the pick itself records no re-post receipt,
+so when it is the new charge, that charge's own notification is still
+captured normally. The `conversationAmbiguous` admission
 counter records how often this fallback runs.
 
 ## HSBC UAE qualification

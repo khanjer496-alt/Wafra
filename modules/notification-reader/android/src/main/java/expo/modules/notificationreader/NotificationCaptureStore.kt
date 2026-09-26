@@ -102,11 +102,15 @@ object NotificationCaptureStore {
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return "cleared-through"
     val eventIdentity = repostReceipt(pkg, title, text, ts)
+    // A review-only row is checked against receipts but never leaves one: its
+    // text may be an older charge, or a new one whose own notification must
+    // still be captured normally rather than refused as a re-post of it.
+    val receipt = eventIdentity.takeIf { !reviewOnly }
     if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) {
       // A shade sweep re-reading a posting that was already imported. Its
       // receipt may predate this identity format (or have failed to
       // persist); re-arm it so a re-post of the same alert is still caught.
-      eventIdentity?.let { ensureRecentContent(prefs, it) }
+      receipt?.let { ensureRecentContent(prefs, it) }
       return "acknowledged"
     }
     val current = readAll(context).filter { it.ts >= System.currentTimeMillis() - RETENTION_MS }
@@ -114,7 +118,7 @@ object NotificationCaptureStore {
     if (samePostedNotification >= 0) {
       val prior = current[samePostedNotification]
       if (prior.title == title && prior.text == text) {
-        eventIdentity?.let { ensureRecentContent(prefs, it) }
+        receipt?.let { ensureRecentContent(prefs, it) }
         return "duplicate"
       }
       // A newer app version may learn how an OEM actually exposes the visible
@@ -124,7 +128,7 @@ object NotificationCaptureStore {
       val repaired = current.toMutableList()
       repaired[samePostedNotification] = prior.copy(title = title, text = text, reviewOnly = reviewOnly)
       writeAll(context, repaired.sortedBy { it.ts }.takeLast(MAX_ROWS))
-      eventIdentity?.let { recordRecentContent(prefs, it) }
+      receipt?.let { recordRecentContent(prefs, it) }
       return "repaired"
     }
     // The re-post guard, which has to outlive the queue row itself: by the time
@@ -143,7 +147,7 @@ object NotificationCaptureStore {
       reviewOnly = reviewOnly,
     )).sortedBy { it.ts }.takeLast(MAX_ROWS)
     writeAll(context, next)
-    if (eventIdentity != null) recordRecentContent(prefs, eventIdentity)
+    if (receipt != null) recordRecentContent(prefs, receipt)
     return "appended"
   }
 

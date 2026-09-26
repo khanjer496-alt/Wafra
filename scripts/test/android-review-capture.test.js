@@ -78,12 +78,16 @@ ok('a re-posted bank notification is one posting, not a second charge',
     // drained, so comparing against the queue alone would see nothing.
     notificationStore.indexOf('return "repost"') <
       notificationStore.indexOf('writeAll(context, next)') &&
-    notificationStore.includes('if (eventIdentity != null) recordRecentContent(prefs, eventIdentity)') &&
+    notificationStore.includes('if (receipt != null) recordRecentContent(prefs, receipt)') &&
     // Every path that admits or re-sees a posting records its receipt: a
     // repaired row, and a shade sweep re-reading a queued or acknowledged one.
-    notificationStore.includes('eventIdentity?.let { recordRecentContent(prefs, it) }\n      return "repaired"') &&
-    /eventIdentity\?\.let \{ ensureRecentContent\(prefs, it\) \}\s*return "acknowledged"/.test(notificationStore) &&
-    /eventIdentity\?\.let \{ ensureRecentContent\(prefs, it\) \}\s*return "duplicate"/.test(notificationStore),
+    // A review-only row (an ambiguous-history pick) is checked but records
+    // none, so the new charge's own notification is not refused as its repost.
+    notificationStore.includes('val receipt = eventIdentity.takeIf { !reviewOnly }') &&
+    notificationStore.includes('receipt?.let { recordRecentContent(prefs, it) }\n      return "repaired"') &&
+    /receipt\?\.let \{ ensureRecentContent\(prefs, it\) \}\s*return "acknowledged"/.test(notificationStore) &&
+    /receipt\?\.let \{ ensureRecentContent\(prefs, it\) \}\s*return "duplicate"/.test(notificationStore) &&
+    !/eventIdentity\?\.let \{ (?:record|ensure)RecentContent/.test(notificationStore),
   JSON.stringify({ notificationStore: notificationStore.length }));
 ok('retained re-post receipts stay ciphertext and are erased with the queue',
   // The class invariant is that SharedPreferences holds only opaque ids, IVs
