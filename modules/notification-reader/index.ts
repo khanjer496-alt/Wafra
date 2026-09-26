@@ -59,6 +59,12 @@ export interface CapturedNotification {
    * row to Review only, with no learnable package identity.
    */
   sourceClass: 'trusted-bank' | 'play-finance' | 'financial-candidate' | 'messaging-review';
+  /**
+   * Native chose this text from a notification history whose newest entry it
+   * could not identify, so it may restate an older charge. Review only, never
+   * auto-imported. Absent on rows from older builds.
+   */
+  reviewOnly?: boolean;
 }
 
 interface NotificationReaderModule {

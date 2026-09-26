@@ -146,12 +146,26 @@ ok('a summary is skipped only beside a visible child, and history is read as the
   const newestBranch = notificationListener.slice(newestAt, ambiguousAt);
   const ambiguousBranch = notificationListener.slice(ambiguousAt, silentAt);
   const directHistory = /addText\(extras\.(?:get|getCharSequenceArray)\(Notification\.EXTRA_(?:TEXT_LINES|MESSAGES|HISTORIC_MESSAGES)\)\)/g;
-  ok('an ambiguous history falls back to main\'s candidates instead of dropping the alert',
+  ok('an ambiguous history falls back to main\'s candidates, queued review-only, instead of dropping the alert',
     gateAt >= 0 && newestAt > gateAt && ambiguousAt > newestAt && silentAt > ambiguousAt &&
       // Outside the curated-bank block: review-first apps get it too.
       gateAt > notificationListener.indexOf('.forEach { key -> addText(extras.get(key)) }\n      }') &&
       /recordAdmission\("conversationFallback", adcb\)\s*addText\(history\.text\)/.test(newestBranch) &&
       ambiguousBranch.includes('recordAdmission("conversationAmbiguous", adcb)') &&
+      // The pick can be an older, already-imported charge: it is queued
+      // review-only, so JS never auto-posts it (see the scanInbox case).
+      ambiguousBranch.includes('historyAmbiguous = true') &&
+      (notificationListener.match(/historyAmbiguous = true/g) ?? []).length === 1 &&
+      /var historyAmbiguous = false\s*if \(textCandidates\.none \{ MONEY_RE\.containsMatchIn\(it\) \}\) \{/
+        .test(notificationListener) &&
+      /NotificationCaptureStore\.append\([\s\S]{0,200}reviewOnly = historyAmbiguous,\s*\)/.test(notificationListener) &&
+      // The flag survives the encrypted queue and reaches JS.
+      notificationStore.includes('val reviewOnly: Boolean = false,') &&
+      notificationStore.includes('.apply { if (row.reviewOnly) put("reviewOnly", true) }') &&
+      notificationStore.includes('reviewOnly = value.optBoolean("reviewOnly", false),') &&
+      notificationStore.includes('prior.copy(title = title, text = text, reviewOnly = reviewOnly)') &&
+      fs.readFileSync(path.join(notificationRoot, 'NotificationReaderModule.kt'), 'utf8')
+        .includes('"reviewOnly" to row.reviewOnly,') &&
       ambiguousBranch.includes('addText(extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES))') &&
       ambiguousBranch.includes('addText(extras.get(Notification.EXTRA_MESSAGES))') &&
       ambiguousBranch.includes('addText(extras.get(Notification.EXTRA_HISTORIC_MESSAGES))') &&
@@ -827,6 +841,54 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       unresolvedRetry.parsed.length === 0 && unresolvedRetry.reviewCandidates.length === 1 &&
       acknowledgedNotifications.length === ackBeforeAmbiguousTrusted + 1,
     JSON.stringify({ firstUnresolvedAttempt, secondUnresolvedAttempt }));
+
+  {
+    // An in-place InboxStyle update whose newest line native cannot identify
+    // is queued review-only (BankNotificationListenerService, History.Ambiguous).
+    // The chosen line can be an OLDER charge that was already imported: here
+    // the first posting's line, re-read 5 minutes later with no seconds clock
+    // for any duplicate check to key on. Even from a curated bank it reaches
+    // Review and never auto-posts; an ordinary row with the same text still
+    // posts, so the flag is what makes the difference.
+    const older = 'Purchase of AED 1,250.00 at ELECTRONICS STORE with Debit Card ending 1234';
+    const newer = 'Purchase of AED 12.00 at CAFE with Debit Card ending 1234';
+    notificationRows = [{
+      id: 'hsbc-history-first-01', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE', text: older, ts: NOW + 5_960,
+    }];
+    const first = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+    await first.commit();
+    const ackBefore = acknowledgedNotifications.length;
+    notificationRows = [
+      { id: 'hsbc-history-ambig-01', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE', text: older,
+        ts: NOW + 5_960 + 5 * 60_000, reviewOnly: true },
+      { id: 'hsbc-history-ambig-02', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE', text: newer,
+        ts: NOW + 5_960 + 20 * 60_000, reviewOnly: true },
+    ];
+    const ambiguous = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+    const ambiguousDiagnostics = getAndroidNotificationImportDiagnostics();
+    ok('a curated-bank row read from an ambiguous notification history goes to Review, never the ledger',
+      first.parsed.length === 1 && first.parsed[0]?.amountFils === 125000 &&
+        ambiguous.parsed.length === 0 && ambiguous.reviewCandidates.length === 2 &&
+        ambiguous.reviewCandidates.every((row) => row.sourceClass === 'trusted-bank' &&
+          row.sourcePackage === 'ae.hsbc.hsbcuae') &&
+        ambiguousDiagnostics?.autoParsed === 0 && ambiguousDiagnostics?.review === 2 &&
+        acknowledgedNotifications.length === ackBefore,
+      JSON.stringify({ first: first.parsed, ambiguous, ambiguousDiagnostics }));
+    await ambiguous.commit();
+    ok('review-only history rows are acknowledged at the Review commit boundary',
+      acknowledgedNotifications.includes('hsbc-history-ambig-01') &&
+        acknowledgedNotifications.includes('hsbc-history-ambig-02'),
+      JSON.stringify(acknowledgedNotifications.slice(ackBefore)));
+    notificationRows = [
+      { id: 'hsbc-history-plain-01', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE', text: newer,
+        ts: NOW + 5_960 + 21 * 60_000, reviewOnly: false },
+    ];
+    const plain = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+    ok('the same curated-bank text without the review-only flag still auto-posts',
+      plain.parsed.length === 1 && plain.parsed[0]?.amountFils === 1200 && plain.reviewCandidates.length === 0,
+      JSON.stringify(plain));
+    await plain.commit();
+  }
 
   const hsbcTitle = 'Your credit card transaction is approved';
   const hsbcPurchase = 'Your Credit Card ending with *** 1234 has been used for AED 42.00 on 11/09/2026 17:10:20 at SAMPLE RESTAURANT. Your available limit is AED 5,000.00.';

@@ -143,6 +143,7 @@ class BankNotificationListenerService : NotificationListenerService() {
       }
       // Every package gets this fallback: an unknown app's row still needs the
       // money gate below and a verified parse, and is Review-first otherwise.
+      var historyAmbiguous = false
       if (textCandidates.none { MONEY_RE.containsMatchIn(it) }) {
         when (history) {
           is NotificationTextSurfaces.History.Newest -> {
@@ -154,13 +155,16 @@ class BankNotificationListenerService : NotificationListenerService() {
             // is this posting (untimed InboxStyle lines, or a tie at the
             // newest timestamp) — e.g. an in-place update whose collapsed
             // text is only "2 new transactions". Dropping the notification
-            // lost the new charge, so read the history exactly as origin/main
-            // did: every line and message is an ordinary candidate and the
-            // longest amount-bearing one wins below. It can pick an older
-            // charge, as main could; the queue's re-post guard and the app's
-            // duplicate checks still apply, and an unknown app stays
-            // Review-first.
+            // lost the new charge, so read the history as origin/main did:
+            // every line and message is an ordinary candidate and the longest
+            // amount-bearing one wins below. That can be an older charge that
+            // was already imported, and without a seconds clock neither the
+            // re-post guard nor the app's duplicate checks recognise it
+            // minutes later. So the row is queued review-only: it reaches
+            // Review for the user to confirm and never auto-imports, even
+            // from a curated bank.
             recordAdmission("conversationAmbiguous", adcb)
+            historyAmbiguous = true
             addText(extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES))
             addText(extras.get(Notification.EXTRA_MESSAGES))
             addText(extras.get(Notification.EXTRA_HISTORIC_MESSAGES))
@@ -287,6 +291,7 @@ class BankNotificationListenerService : NotificationListenerService() {
         title = title,
         text = text,
         ts = sbn.postTime,
+        reviewOnly = historyAmbiguous,
       )
       if (appendResult != "appended" && appendResult != "repaired") {
         recordAdmission(appendResult, adcb)

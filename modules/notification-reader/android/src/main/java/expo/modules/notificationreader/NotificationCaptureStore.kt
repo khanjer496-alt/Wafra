@@ -25,6 +25,13 @@ data class CapturedBankNotification(
   val title: String,
   val text: String,
   val ts: Long,
+  /**
+   * The text was chosen from a notification history whose newest entry could
+   * not be identified, so it may restate an older, already-captured charge.
+   * JS sends such a row to Review whatever its source class; it never
+   * auto-imports.
+   */
+  val reviewOnly: Boolean = false,
 )
 
 /**
@@ -80,7 +87,14 @@ object NotificationCaptureStore {
   private const val MAX_RECENT_CONTENT = 200
 
   @Synchronized
-  fun append(context: Context, pkg: String, title: String, text: String, ts: Long): String {
+  fun append(
+    context: Context,
+    pkg: String,
+    title: String,
+    text: String,
+    ts: Long,
+    reviewOnly: Boolean = false,
+  ): String {
     // Recheck while holding the queue lock: an opt-out racing a callback must
     // never leave a candidate behind after the opt-out's clear completes.
     if (!NotificationCapturePolicy.isEnabled(context)) return "policy"
@@ -108,7 +122,7 @@ object NotificationCaptureStore {
       // shade re-sweep must HEAL the retained encrypted row rather than append
       // a second copy while the broken one remains stuck for seven days.
       val repaired = current.toMutableList()
-      repaired[samePostedNotification] = prior.copy(title = title, text = text)
+      repaired[samePostedNotification] = prior.copy(title = title, text = text, reviewOnly = reviewOnly)
       writeAll(context, repaired.sortedBy { it.ts }.takeLast(MAX_ROWS))
       eventIdentity?.let { recordRecentContent(prefs, it) }
       return "repaired"
@@ -126,6 +140,7 @@ object NotificationCaptureStore {
       title = title,
       text = text,
       ts = ts,
+      reviewOnly = reviewOnly,
     )).sortedBy { it.ts }.takeLast(MAX_ROWS)
     writeAll(context, next)
     if (eventIdentity != null) recordRecentContent(prefs, eventIdentity)
@@ -496,6 +511,9 @@ object NotificationCaptureStore {
       .put("title", row.title)
       .put("text", row.text)
       .put("ts", row.ts)
+      // Written only when set, so an ordinary row's payload is unchanged and
+      // a row from an older build reads back as not review-only.
+      .apply { if (row.reviewOnly) put("reviewOnly", true) }
       .toString().toByteArray(Charsets.UTF_8)
     return JSONObject()
       .put("v", VERSION)
@@ -538,6 +556,7 @@ object NotificationCaptureStore {
         title = value.getString("title"),
         text = value.getString("text"),
         ts = value.getLong("ts"),
+        reviewOnly = value.optBoolean("reviewOnly", false),
       )
     } catch (_: JSONException) {
       null

@@ -77,7 +77,9 @@ carries an amount. Then the one entry that is identifiably the newest is used.
 When two or more entries carry an amount and nothing says which is new
 (untimed lines, or a tie at the newest timestamp), the alert is not dropped:
 the lines and messages become ordinary candidates, as in earlier builds, and
-the longest amount-bearing one is used, which can be an older charge. The
+the longest amount-bearing one is used. That can be an older charge that was
+already imported, so the row is queued review-only: it goes to Review for the
+user to confirm and never auto-imports, even from a curated bank. The
 `conversationAmbiguous` admission counter records how often that happens.
 
 ## HSBC UAE qualification

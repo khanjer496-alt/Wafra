@@ -1452,7 +1452,9 @@ export async function scanInbox(
             : nativeSourceClass;
         const learned = !messagingRow && !bnplSender && sourceClass === 'financial-candidate' &&
           learnedPackages.has(n.pkg);
-        const autoAuthorized = !bnplSender &&
+        // A row native read from an ambiguous notification history may be an
+        // older charge already imported, so no source can auto-post it.
+        const autoAuthorized = !bnplSender && n.reviewOnly !== true &&
           (sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned);
         // Green semantic generalization needs independently verified installed-
         // app identity. A user-learned package may still use an exact Gold
