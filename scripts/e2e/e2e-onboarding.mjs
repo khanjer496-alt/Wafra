@@ -11,7 +11,7 @@ const load = require('../universal-test/load-ts.cjs').createLoader();
 const { onboardingECopy } = load('@/lib/onboarding-e-copy');
 const BASE = process.env.BASE ?? 'http://localhost:8151';
 assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(new URL(BASE).hostname));
-const OUT = process.env.OUT ?? '/private/tmp/wafra-onboarding-e-final';
+const OUT = process.env.OUT ?? '/tmp/wafra-onboarding-e2e';
 const CHROMIUM = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium';
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch(existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {});
