@@ -263,9 +263,10 @@ export default function TransactionsScreen() {
   // is not painted as income it never was.
   const internal = internalTransferIdsForState(state);
   const corroborating = corroboratingTransferIdsForState(state);
-  // Separation must describe the same snapshot as `internal`: it reuses the
-  // reconciliation cached per stored transfer receipt, and stays empty while
-  // a history import only has a provisional receipt.
+  // Separation reuses the reconciliation cached per stored transfer receipt
+  // and stays empty while a history import only has a provisional receipt.
+  // Unlike `internal` it may lag one ledger change behind: it recomputes after
+  // interactions settle and holds its last answer during a running import.
   const { separateTransferIds, reviewTransferIds } = useSeparateTransferIds(state);
 
   const accountById = useMemo(
