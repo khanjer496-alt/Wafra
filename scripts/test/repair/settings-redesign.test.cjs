@@ -129,7 +129,7 @@ test('Customize Home keeps accessible reorder buttons, fixed rows and a Done act
   const source = require('node:fs').readFileSync(path.join(root, 'src/app/home-customize.tsx'), 'utf8');
   assert.match(source, /accessibilityLabel=\{`\$\{t\('moveUp'\)\} \$\{title\}`\}/);
   assert.match(source, /accessibilityLabel=\{`\$\{t\('moveDown'\)\} \$\{title\}`\}/);
-  assert.match(source, /actions: \[\{ label: copy\.done, onPress: router\.back \}\]/);
+  assert.match(source, /actions: \[\{ icon: 'check', label: copy\.done, onPress: router\.back, testID: 'home-customize-done' \}\]/);
   assert.match(source, /testID="home-customize-fixed"[\s\S]*copy\.moneyOverviewTitle[\s\S]*copy\.captureTitle/);
   assert.doesNotMatch(source, /homeCustomizeFixed/);
 });
