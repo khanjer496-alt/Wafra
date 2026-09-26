@@ -1159,7 +1159,10 @@ function ktSources(dir) {
   // The other half of the same contract, in capture.ts: a zero watermark is
   // what turns the next scan into a full-history re-read.
   ok('a zero watermark reads the whole inbox, not just what is new',
-    /state\.lastScanTs <= 0\s*\?\s*0\s*:\s*state\.lastScanTs \+ 1/.test(read('src/lib/capture.ts')));
+    // (A parser release may reach back over the recent window instead, but
+    // only ever further back than lastScanTs + 1, never past zero's full read.)
+    /state\.lastScanTs <= 0\s*\?\s*0\s*:\s*(?:recentRereadDue\s*\?\s*Math\.min\(state\.lastScanTs \+ 1, recoveryFloor\)\s*:\s*)?state\.lastScanTs \+ 1/
+      .test(read('src/lib/capture.ts')));
   ok('the foreground watch re-runs when the ledger is wiped',
     /if \(!state\.hydrated\) return;/.test(hook) &&
       /Platform\.OS !== 'ios' && !state\.onboarded/.test(hook) &&
@@ -1635,10 +1638,12 @@ function ktSources(dir) {
   // who should be asked whether their new total counts transfers.
   //
   // 5 since periodComparison, which powers the "vs last month" line on Home.
+  // 7 since comparableSpend (the Compare headline) and dailySpendForMonth (the
+  // Spending calendar); both take live and internal and pass both through.
   const an = read('src/lib/analytics.ts');
   const calls = an.match(/isSpending\([^)]*\)/g) ?? [];
   ok('every analytics rollup applies both exclusions',
-    calls.length === 5 && calls.every((c) => c === 'isSpending(t, live, internal)'),
+    calls.length === 7 && calls.every((c) => c === 'isSpending(t, live, internal)'),
     calls.join(' | '));
 
   // The one insight that names a single row rather than a total. It sits on

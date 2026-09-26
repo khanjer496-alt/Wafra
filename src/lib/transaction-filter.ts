@@ -27,12 +27,14 @@ type TransactionFilterOptions = {
   /** Confirmed transfer records have a separate browsing surface. Their
    * existing financial contribution still belongs in the matching total. */
   separateTransferIds?: ReadonlySet<string>;
+  /** Separated records the reconciler queued for an ownership decision. */
+  reviewTransferIds?: ReadonlySet<string>;
 };
 type TransactionFilterProjection = {
   filtered: Transaction[];
   totalShown: number;
   excluded: { transfers: number; movements: number; hidden: number };
-  separatedTransfers: { count: number; incomeFils: number; expenseFils: number };
+  separatedTransfers: { count: number; reviewCount: number; incomeFils: number; expenseFils: number };
   days: { date: string; totalFils: number; data: Transaction[] }[];
 };
 
@@ -114,7 +116,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
   else if (filters.datePreset === 'custom') { dateFrom = filters.dateFrom; dateTo = filters.dateTo; }
   const filtered: Transaction[] = []; const byDay = new Map<string, { date: string; totalFils: number; data: Transaction[] }>();
   let totalShown = 0; let transfers = 0; let movements = 0; let hidden = 0;
-  const separatedTransfers = { count: 0, incomeFils: 0, expenseFils: 0 };
+  const separatedTransfers = { count: 0, reviewCount: 0, incomeFils: 0, expenseFils: 0 };
   const ordered = index.ordered(filters.sort);
   const ascending = filters.sort === 'oldest';
   const canStopAtDateBoundary = ascending || (filters.sort === 'newest' && index.newestDateOrdered);
@@ -149,8 +151,12 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
     const contribution = row.type === 'expense' ? -part : part;
     totalShown += contribution;
-    if (options.separateTransferIds?.has(row.id)) {
+    // A row on a hidden (archived) account stays in this list and in the
+    // hidden count below, as it does everywhere else; only rows that belong to
+    // a live account or already count in totals move to Transfers.
+    if (options.separateTransferIds?.has(row.id) && (counts || options.live.has(row.accountId))) {
       separatedTransfers.count++;
+      if (options.reviewTransferIds?.has(row.id)) separatedTransfers.reviewCount++;
       if (row.type === 'income') separatedTransfers.incomeFils += part;
       else separatedTransfers.expenseFils += part;
       continue;

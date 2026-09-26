@@ -182,6 +182,7 @@ import {
   type TransactionType,
   type StatementCoverageEntry,
 } from '@/lib/types';
+import { clearWidgetSnapshot } from '../../modules/wafra-widgets';
 
 export type { ImportBatchInput } from '@/lib/types';
 
@@ -3097,6 +3098,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const afterErase = async () => {
       await captureCleanup?.();
       await cleanupGeneratedExports({ eraseAll: true });
+      // Widgets hold a copy of a few figures; erasing the ledger erases those too.
+      clearWidgetSnapshot();
     };
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);

@@ -1,5 +1,15 @@
 # Local semantic runtime (on-device E5)
 
+> **Status (26 September 2026): removed from the app.** The owner confirmed
+> the E5 encoder is no longer used, so `onnxruntime-react-native`, its
+> `onnxruntime-gradle9-compat` config plugin, the ONNX extensions flag and the
+> unused on-device alert-tagger runtime (`ai-alert-model.native.ts`) are gone
+> from the build. That removes the ONNX native libraries from every APK and
+> iOS build. `local-semantic-runtime.native.ts` now fails closed like the web
+> stub and only deletes the `local-ai/` folder older installs downloaded;
+> `LOCAL_SEMANTIC_E5_ENABLED` is permanently `false`. The history below is kept
+> as a record; re-enabling E5 would mean restoring the runtime from git history.
+
 > **Status (24 September 2026): OFF by default.** Shipping builds no longer
 > download, verify or start the E5 encoder on install, launch, an Ask question
 > or a Review alert. The evaluation found almost no useful output for a ~37 MB
@@ -90,7 +100,7 @@ the classifier for broader coverage or automatic posting. See
 | `src/lib/local-semantic-scheduler.ts` | Bounded, cancellable native inference queue with interactive priority. |
 | `src/lib/universal-template-certification.ts` | Deterministic gold/green certification that decides automatic vs Review for universally parsed events. Not model-driven. |
 | `src/lib/universal-confidence.ts` | Deterministic evidence-completeness score used by certification. Not a model probability. |
-| `plugins/onnxruntime-gradle9-compat` | Binds the `VersionNumber` class Gradle 9 removed so `onnxruntime-react-native@1.24.3` configures under Expo SDK 55. |
+| `plugins/onnxruntime-gradle9-compat` | Removed 2026-09-26 with the ONNX Runtime. |
 
 ## Artifacts
 

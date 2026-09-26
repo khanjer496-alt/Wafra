@@ -11,6 +11,7 @@ import { LimitSheet } from '@/components/limit-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { SpendingOverview, spendingCopy, type CategoryFilter } from '@/components/spending/spending-overview';
 import { SpendingTrends } from '@/components/spending/spending-trends';
+import { SpendingCalendar } from '@/components/spending/spending-calendar';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { Button } from '@/components/ui/controls';
@@ -24,16 +25,16 @@ import { TextField } from '@/components/ui/text-field';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { categoryMovers, categoryTrend, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
+import { categoryMovers, categoryTrend, comparableSpend, dailySpendForMonth, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
 import { assistantCopy } from '@/lib/assistant-copy';
-import { categoryLabel } from '@/lib/categories';
-import { formatAED, formatCompactAED, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
+import { categoryLabel, isFixedCommitment } from '@/lib/categories';
+import { formatAED, formatCompactAED, ledgerTypicalMinor, monthKey, monthLabel, shiftMonthKey } from '@/lib/format';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { tapped } from '@/lib/haptics';
 import { summarizeMonth } from '@/lib/insights';
 import { internalTransferIdsForState, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
 import { ledgerCurrencyCode } from '@/lib/markets';
-import { comparablePreviousPeriod, inPeriod, periodLabel } from '@/lib/period';
+import { comparablePreviousPeriod, inPeriod, isCurrentMonth, periodLabel, previousPeriod } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { spendingCategoryRows } from '@/lib/reference-presentation';
 import { useStoreSelector } from '@/lib/store';
@@ -42,6 +43,7 @@ import { t, tf } from '@/lib/i18n';
 import { merchantSpendingHref } from '@/lib/merchant-spending';
 import type { CategoryId, Transaction } from '@/lib/types';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { duplicateTransactionIds, isListedExternalTransfer } from '@/lib/transfer-activity';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 
 type ViewMode = 'categories' | 'activity' | 'trends';
@@ -84,13 +86,21 @@ export default function FlowScreen() {
     setTrendWindowEndKey(null);
     setView(params.view);
   }, [params.view]);
-  useEffect(() => { setFilter('all'); }, [period]);
+  const [calendarDay, setCalendarDay] = useState<string | null>(null);
+  useEffect(() => { setFilter('all'); setCalendarDay(null); }, [period]);
 
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = internalTransferIdsForState(state);
-  const hasTransferSpending = useMemo(() => view === 'activity' && state.transactions.some(transaction =>
-    isTransferCandidate(transaction) && isSpending(transaction, live, internal) && inPeriod(transaction.date, period)),
-  [view, state.transactions, live, internal, period]);
+  // Transfers that still count as spending but are listed on the Transfers
+  // screen instead of here. The test is row-local (no transfer graph on a tab)
+  // and matches getTransferActivity membership exactly for spending rows.
+  const hasTransferSpending = useMemo(() => {
+    if (view !== 'activity') return false;
+    const duplicates = duplicateTransactionIds(state.transactions);
+    return state.transactions.some(transaction => inPeriod(transaction.date, period) &&
+      isTransferCandidate(transaction) && isSpending(transaction, live, internal) &&
+      isListedExternalTransfer(transaction, duplicates));
+  }, [view, state.transactions, live, internal, period]);
   const summary = useMemo(() => summarizeMonth(state.transactions, period, live, internal), [state.transactions, period, live, internal]);
   const foreign = useMemo(() => view === 'categories'
     ? summarizeForeignActivity(
@@ -165,6 +175,7 @@ export default function FlowScreen() {
     let previousDate: string | null = null;
     let newestFirst = true;
     let seenInPeriod = false;
+    let duplicates: ReadonlySet<string> | undefined;
     for (const tx of state.transactions) {
       if (newestFirst && previousDate !== null && tx.date > previousDate) newestFirst = false;
       previousDate = tx.date;
@@ -174,7 +185,12 @@ export default function FlowScreen() {
         continue;
       }
       seenInPeriod = true;
-      if (isTransferCandidate(tx) || !isSpending(tx, live, internal)) continue;
+      if (!isSpending(tx, live, internal)) continue;
+      if (isTransferCandidate(tx)) {
+        if (!duplicates) duplicates = duplicateTransactionIds(state.transactions);
+        if (isListedExternalTransfer(tx, duplicates)) continue;
+      }
+      if (calendarDay !== null && tx.date !== calendarDay) continue;
       if (needle) {
         const haystack = `${tx.title} ${accountById.get(tx.accountId)?.name ?? ''}`.toLocaleLowerCase();
         if (!haystack.includes(needle)) continue;
@@ -183,8 +199,21 @@ export default function FlowScreen() {
       if (!needle && out.length >= ACTIVITY_PREVIEW_LIMIT) break;
     }
     return out;
-  }, [view, state.transactions, live, internal, period, appliedQuery, accountById]);
+  }, [view, state.transactions, live, internal, period, appliedQuery, accountById, calendarDay]);
   const activity = sortedActivity;
+  // The calendar counts exactly the rows the list below keeps: transfer
+  // candidates drop out only when the Transfers screen lists them.
+  const calendarDays = useMemo(() => {
+    if (view !== 'activity' || period.mode !== 'month') return [];
+    let duplicates: ReturnType<typeof duplicateTransactionIds> | undefined;
+    return dailySpendForMonth(state.transactions, period.key, live, internal, (transaction) => {
+      if (!isTransferCandidate(transaction)) return true;
+      duplicates ??= duplicateTransactionIds(state.transactions);
+      return !isListedExternalTransfer(transaction, duplicates);
+    });
+  },
+  [view, period, state.transactions, live, internal]);
+  const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const analysis = useMemo(() => {
     if (view !== 'trends') return null;
     const keys = Array.from({ length: 6 }, (_, i) => shiftMonthKey(trendWindowAnchorKey, i - 5));
@@ -204,7 +233,12 @@ export default function FlowScreen() {
     const comparable = comparablePreviousPeriod(period, new Date(), state.transactions);
     return { months: [...buckets.values()],
       merchants: topMerchants(state.transactions, period, 8, live, internal),
-      movers: categoryMovers(state.transactions, period, 5, live, internal),
+      // Fixed costs leave the rows as well as the headline, so the two never disagree.
+      movers: categoryMovers(state.transactions, period, 10, live, internal)
+        .filter((mover) => !isFixedCommitment(mover.category)).slice(0, 6),
+      comparison: comparableSpend(state.transactions, period, live, internal),
+      previousName: (() => { const previous = previousPeriod(period); return previous ? periodLabel(previous) : null; })(),
+      partial: isCurrentMonth(period, new Date()),
       weekdays: dayOfWeekSpend(state.transactions, period, live, internal),
       comparisonLabel: comparable ? periodLabel(comparable) : null };
   }, [view, trendWindowAnchorKey, state.transactions, period, live, internal]);
@@ -252,6 +286,7 @@ export default function FlowScreen() {
         <View style={styles.trendsToolbar}>
           <PeriodPill onPress={() => setPeriodOpen(true)} />
         </View>
+        <SpendingCalendar days={calendarDays} todayISO={todayISO} selected={calendarDay} onSelect={setCalendarDay} />
         <TextField label={w.search} placeholder={w.searchHint} value={query} onChangeText={setQuery} autoCorrect={false} />
         {hasTransferSpending && <View style={styles.transferNote}>
           <ThemedText type="meta" themeColor="textSecondary">{transferWords.activityCountsNote}</ThemedText>
@@ -272,7 +307,8 @@ export default function FlowScreen() {
               onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
           </View>
         </View>
-        <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)}
+        <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)} currentName={periodLabel(period)}
+          noiseFloorFils={ledgerTypicalMinor(50)}
           onMonth={(monthKey) => {
             if (monthKey === key) return;
             setTrendWindowEndKey((anchor) => anchor ?? trendWindowAnchorKey);

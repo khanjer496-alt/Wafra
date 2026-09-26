@@ -70,6 +70,7 @@ const transaction: Check = (value) => {
     note: text, ts: nonnegative, source: oneOf('sms', 'manual'), smsKey: text,
     notificationObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
     messageObservationId: (v) => typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v),
+    captureEventIdentity: (v) => typeof v === 'string' && /^e1:[0-9a-f]{16}:(?:[0-9a-f]{16}|-)$/.test(v),
     viaPush: boolean, walletBound: oneOf(true), captureInstrument, cardPaymentSide: oneOf('debit', 'receipt'),
     statementImportId: (v) => typeof v === 'string' && /^[a-f0-9]{32}$/.test(v),
     bestEffort: bestEffortMarker,
@@ -157,6 +158,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     trustedNotificationPackages: arrayOf((v) => typeof v === 'string' && v.length <= 255 &&
       /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(v)),
     notSubscriptions: arrayOf(text), lastScanTs: nonnegative, parserVersion: nonnegative,
+    recentRereadParserVersion: nonnegative,
     hydrationFinalizeVersion: nonnegative, bnplCategoryRepairVersion: nonnegative,
     transferNormalizationVersion: nonnegative, transferInternalIds: arrayOf(id),
     onboarded: boolean, userName: text, appLock: boolean, pro: boolean, founderPro: boolean,

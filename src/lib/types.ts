@@ -185,6 +185,15 @@ export interface Transaction {
   /** Local notification queue receipt, never a bank-event/deduplication identity. */
   notificationObservationId?: string;
   /**
+   * Opaque digest of the bank event the alert text stated to the second
+   * (dedupe.ts captureEventIdentity: bank, card, direction, amount, explicit
+   * clock with seconds, remaining money figures). Lets a re-posted bank-app
+   * notification, or the SMS about it, be recognised as the same event
+   * whenever it arrives. Absent on rows whose alert stated no such clock and
+   * on every row imported before it existed.
+   */
+  captureEventIdentity?: string;
+  /**
    * An Apple Pay (Wallet) row the user confirmed ("Already recorded") is the
    * same purchase as a bank Message, whose identity it now carries. It stays
    * in the ten-minute possible-duplicate net for that purchase's other alerts
@@ -745,6 +754,17 @@ export interface AppState {
    * must be re-read; only an explicit backfill-version bump does.
    */
   parserVersion?: number;
+  /**
+   * Recent-window re-read receipt: the PARSER_VERSION whose bounded Android
+   * inbox re-read (capture.ts PARSER_RECOVERY_WINDOW_MS) completed.
+   *
+   * The routine scan starts after lastScanTs, so a message an older parser
+   * sent to Review or refused — and that Review then lost — was never read
+   * again, even by the parser that now reads it. Unlike parserVersion this is
+   * never a full-inbox migration: it re-evaluates only the last two weeks
+   * through the normal import pipeline, once per parser release.
+   */
+  recentRereadParserVersion?: number;
   /** Local saved-SMS repair receipt; separate from full-inbox parserVersion. */
   hydrationReparseKey?: string;
   /**
@@ -945,6 +965,12 @@ export interface ImportBatchInput {
    * partial scan as migration proof permanently strands older messages.
    */
   parserRereadComplete?: boolean;
+  /**
+   * Set only by a collection that re-read the whole recent window for this
+   * parser (see AppState.recentRereadParserVersion); stamped atomically with
+   * the rows that re-read produced.
+   */
+  recentRereadParserVersion?: number;
   /** Applied atomically with this page so its cursor can never outrun its rows. */
   historyImport?: HistoryImportProgress;
   lastScanTs: number;

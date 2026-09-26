@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="wafra_widget_today_name">اليوم</string>
+  <string name="wafra_widget_today_description">ما أنفقته اليوم وخلال آخر ٧ أيام.</string>
+  <string name="wafra_widget_upcoming_name">القادم</string>
+  <string name="wafra_widget_upcoming_description">فواتيرك الثلاث القادمة ومواعيد استحقاقها.</string>
+  <string name="wafra_widget_today">اليوم</string>
+  <string name="wafra_widget_upcoming">القادم</string>
+  <string name="wafra_widget_left_in_budgets">المتبقي في الميزانيات %1$s</string>
+  <string name="wafra_widget_last_7_days">الإنفاق خلال آخر ٧ أيام</string>
+  <string name="wafra_widget_amount_hidden">المبلغ مخفي</string>
+  <string name="wafra_widget_no_bills">لا توجد فواتير قادمة</string>
+  <string name="wafra_widget_open_to_update">افتح وفرة للتحديث</string>
+  <string name="wafra_widget_no_payments">لا دفعات بعد</string>
+  <string name="wafra_widget_preview_count">3 دفعات</string>
+  <string name="wafra_widget_preview_bill_1">الإيجار</string>
+  <string name="wafra_widget_preview_date_1">الاثنين 28 سبتمبر</string>
+  <string name="wafra_widget_preview_bill_2">باقة الجوال</string>
+  <string name="wafra_widget_preview_date_2">الخميس 1 أكتوبر</string>
+  <string name="wafra_widget_preview_bill_3">الكهرباء</string>
+  <string name="wafra_widget_preview_date_3">السبت 3 أكتوبر</string>
+  <plurals name="wafra_widget_payments">
+    <item quantity="zero">لا دفعات</item>
+    <item quantity="one">دفعة واحدة</item>
+    <item quantity="two">دفعتان</item>
+    <item quantity="few">%d دفعات</item>
+    <item quantity="many">%d دفعة</item>
+    <item quantity="other">%d دفعة</item>
+  </plurals>
+</resources>

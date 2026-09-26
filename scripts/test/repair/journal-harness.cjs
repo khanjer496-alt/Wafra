@@ -80,8 +80,10 @@ function harness(options = {}) {
     '@/hooks/use-theme': { useTheme: () => theme },
     '@/hooks/use-auto-import': { useAutoImport: () => ({ captureState: options.captureState ?? 'waiting-for-alert',
       needsPermission: options.needsPermission ?? false, runAutoImport: async () => { events.push(['scan']); } }) },
-    '@/lib/categories': { getCategory: (category) => category, categoryLabel: (category) => category },
-    '@/lib/format': { formatAmount: amount, clockTime: () => '', shortDate: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short' }) },
+    '@/lib/categories': { getCategory: (category) => category, categoryLabel: (category) => category, isFixedCommitment: (category) => category === 'rent' || category === 'business' },
+    '@/lib/format': { formatAmount: amount, clockTime: () => '', monthKey: (d) => String(d instanceof Date ? d.toISOString() : d).slice(0, 7),
+      monthStartISO: (key) => `${key}-01`, monthEndISO: (key) => { const [y, m] = key.split('-').map(Number); return `${key}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`; },
+      shortDate: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short' }) },
     '@/lib/markets': { ledgerCurrencyCode: () => 'AED', ledgerCurrencyDisplay: () => 'AED' },
     '@/lib/i18n': { t, hasArabicScript: (s) => /[\u0600-\u06ff]/.test(s), tf: (key, values) => key === 'balanceCoverage' ? `${values.known} of ${values.total} account balances recorded` : key === 'historyImportLiveProgress' ? `${values.scanned} read · ${values.found} found` : `${key} ${values.count ?? ''}` },
     '@/lib/dashboard-projection': { projectDashboard: (request) => {
@@ -111,6 +113,12 @@ function harness(options = {}) {
   dependencies['@react-native-async-storage/async-storage'] = { getItem: async () => null, setItem: async () => {} };
   dependencies['@/lib/home-widget-preferences'] = load(path.join(root, 'src/lib/home-widget-preferences.ts'));
   dependencies['@/lib/home-widgets'] = load(path.join(root, 'src/lib/home-widgets.ts'), dependencies);
+  dependencies['@/lib/home-today'] = load(path.join(root, 'src/lib/home-today.ts'), dependencies);
+  dependencies['@/lib/widget-snapshot'] = load(path.join(root, 'src/lib/widget-snapshot.ts'), dependencies);
+  dependencies['../../modules/wafra-widgets'] = { setWidgetSnapshot() {}, clearWidgetSnapshot() {} };
+  dependencies['@/components/ui/grow-bar'] = { GrowBar: (p) => ({ type: 'View', props: { style: [p.style, p.axis === 'width' ? { width: `${p.size}%` } : { height: p.size }] } }) };
+  dependencies['@/lib/account-freshness'] = load(path.join(root, 'src/lib/account-freshness.ts'), dependencies);
+  dependencies['@/lib/splits'] = dependencies['@/lib/splits'] ?? load(path.join(root, 'src/lib/splits.ts'), dependencies);
   if (options.render) {
     const svg = { __esModule: true, default: 'svg', Circle: 'circle', Line: 'line', Path: 'path', Rect: 'rect' };
     dependencies['react-native-svg'] = svg;
@@ -121,6 +129,7 @@ function harness(options = {}) {
     dependencies['@/lib/categories'] = {
       getCategory: (id) => ({ id, type: 'expense', icon: ({dining:'dining', shopping:'bag', entertainment:'play', transport:'car'})[id] ?? 'receipt' }),
       categoryLabel: (meta) => typeof meta === 'string' ? meta : ({dining:'Dining',shopping:'Shopping',entertainment:'Entertainment',transport:'Transport'})[meta.id] ?? meta.id,
+      isFixedCommitment: (category) => category === 'rent' || category === 'business',
     };
     const { CategoryAvatar } = load(path.join(root, 'src/components/ui/category-avatar.tsx'), dependencies);
     dependencies['@/components/ui/merchant-avatar'] = { MerchantAvatar: (props) => CategoryAvatar(props) };

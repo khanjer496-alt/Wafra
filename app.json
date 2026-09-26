@@ -19,6 +19,7 @@
     "ios": {
       "icon": "./assets/wafra.icon",
       "bundleIdentifier": "app.wafra.ios",
+      "appleTeamId": "UV7YN4GQ66",
       "buildNumber": "1",
       "supportsTablet": false,
       "infoPlist": {
@@ -29,6 +30,11 @@
           "remote-notification"
         ],
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.app.wafra.ios"
+        ]
       },
       "privacyManifests": {
         "NSPrivacyTracking": false,
@@ -193,7 +199,7 @@
           }
         }
       ],
-      "./plugins/onnxruntime-gradle9-compat"
+      "@bacons/apple-targets"
     ],
     "experiments": {
       "typedRoutes": true,

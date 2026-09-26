@@ -37,6 +37,7 @@ function createHarness(options = {}) {
     ledgerNiceMinor:fils=>Math.max(10_000,Math.round(fils/10_000)*10_000),
     ledgerCurrencyLabel:()=>lang==='ar'?'د.إ':'AED',
     getMonthStartDay:()=>1,
+    monthStartISO: (key) => `${key}-01`, monthEndISO:key=>{const [y,m]=key.split('-').map(Number);return `${key}-${String(new Date(Date.UTC(y,m,0)).getUTCDate()).padStart(2,'0')}`;},
     monthKey:d=>String(d instanceof Date?d.toISOString():d).slice(0,7),
     monthLabel:(k,short=false)=>new Date(k+'-01T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:short?'short':'long',year:'numeric'}),
     shiftMonthKey:(k,n)=>{const d=new Date(k+'-01T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+n);return d.toISOString().slice(0,7)},
@@ -51,7 +52,8 @@ function createHarness(options = {}) {
   const period=options.period??{mode:'month',key:'2026-09'};
   const periodModule={inPeriod:(date,p)=>typeof p==='string'?date.slice(0,7)===p:p.mode==='month'?date.slice(0,7)===p.key:true,
     periodLabel:p=>p.mode==='month'?format.monthLabel(p.key,true):'This year',toPeriod:p=>typeof p==='string'?{mode:'month',key:p}:p,
-    comparablePreviousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null};
+    comparablePreviousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null,
+    previousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null,isCurrentMonth:p=>typeof p==='object'&&p.mode==='month'&&p.key==='2026-09'};
   const accounts=[
     {id:'enbd',name:'Emirates NBD',kind:'bank',bankName:'Emirates NBD',last4:'4821',openingFils:0,snapshotKind:'balance',snapshotFils:2500000,snapshotTs:1788681600000,color:'#166CA2'},
     {id:'adcb',name:'ADCB',kind:'bank',bankName:'ADCB',last4:'8310',openingFils:0,snapshotKind:'balance',snapshotFils:1700000,snapshotTs:1788681600000,color:'#BD364C'},
@@ -113,11 +115,17 @@ function createHarness(options = {}) {
   };
   const animated={View:'View'};const fade={delay(){return this},duration(){return this}};
   deps['react-native-reanimated']={__esModule:true,default:animated,FadeInDown:fade,ReduceMotion:{System:'system'},
-    useAnimatedStyle:f=>f(),useSharedValue:v=>({value:v}),withSpring:v=>v,withTiming:v=>v,Easing:{bezier:()=>null},interpolate:(v,a,b)=>b[0]+(v-a[0])/(a[1]-a[0])*(b[1]-b[0])};
+    useAnimatedStyle:f=>f(),useSharedValue:v=>({value:v}),withSpring:v=>v,withTiming:v=>v,withDelay:(_d,v)=>v,Easing:{bezier:()=>null},interpolate:(v,a,b)=>b[0]+(v-a[0])/(a[1]-a[0])*(b[1]-b[0])};
   deps['react-native-svg']={__esModule:true,default:'svg',Circle:'circle',Line:'line',Path:'path',Rect:'rect',Defs:'defs',LinearGradient:'linearGradient',Stop:'stop'};
   const local=(name,filename)=>deps[name]=load(path.join(root,filename??name.replace('@/', 'src/')+'.tsx'),deps,{Date:Clock});
   deps['@react-native-async-storage/async-storage']={getItem:async()=>null,setItem:async()=>{}};
   local('@/lib/home-widget-preferences','src/lib/home-widget-preferences.ts');
+  local('@/lib/home-today','src/lib/home-today.ts');
+  local('@/lib/widget-snapshot','src/lib/widget-snapshot.ts');
+  deps['../../modules/wafra-widgets']={setWidgetSnapshot(){},clearWidgetSnapshot(){}};
+  // The final size, as Reduce Motion shows it.
+  deps['@/components/ui/grow-bar']={GrowBar:p=>jsx('View',{style:[p.style,p.axis==='width'?{width:`${p.size}%`}:{height:p.size}]})};
+  local('@/lib/account-freshness','src/lib/account-freshness.ts');
   local('@/lib/home-widgets','src/lib/home-widgets.ts');
   local('@/lib/reference-copy','src/lib/reference-copy.ts');
   local('@/lib/currency-metadata','src/lib/currency-metadata.ts');
@@ -136,7 +144,8 @@ function createHarness(options = {}) {
   local('@/lib/merchant-spending-copy','src/lib/merchant-spending-copy.ts');
   deps['@/lib/subscriptions']={detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
     fixedCommitments:()=>[],billCommitments:()=>[],otherCommitments:()=>[],daysUntilNext:s=>Math.round((Date.parse(s.nextExpectedISO)-Date.parse('2026-09-06'))/86400000),
-    recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId)};
+    recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId),
+    peekSubscriptionDetection:()=>null,subscriptionDetectionRunning:()=>false};
   local('@/lib/transaction-filter','src/lib/transaction-filter.ts');
   local('@/lib/insights','src/lib/insights.ts');local('@/lib/analytics','src/lib/analytics.ts');local('@/lib/reference-presentation','src/lib/reference-presentation.ts');
   const summary=deps['@/lib/insights'].summarizeMonth(state.transactions,period,new Set(state.accounts.map(a=>a.id)),new Set());
@@ -169,7 +178,7 @@ function createHarness(options = {}) {
   local('@/components/money-picture-progress');
   local('@/components/transfer-review-notice');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
-  local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');
+  local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');
   local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');
   deps['react-native-safe-area-context']={useSafeAreaInsets:()=>({top:0,bottom:10,left:0,right:0})};
   deps['@/components/ui/tab-bar-metrics']={useTabBarMetrics:()=>({measuredHeight:78,setMeasuredHeight(){}})};

@@ -33,12 +33,12 @@ import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
 import { netWorthBreakdown } from '@/lib/balances';
+import { accountFreshness } from '@/lib/account-freshness';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import {
   formatAmount,
   parseAmountWithMoneySpec,
   shortDate,
-  toISODate,
 } from '@/lib/format';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import type { Account, AccountKind } from '@/lib/types';
@@ -260,11 +260,12 @@ export default function WalletScreen() {
     const caption = figureFils === null ? t('noBalanceYet')
       : figureKind === 'owed' ? t('owed')
         : account.snapshotKind === 'balance' ? t('perBankSms') : t('trackedManually');
+    const reported = !due && account.snapshotTs ? accountFreshness(account.snapshotTs, now, language) : null;
     const freshness = due ? `${language === 'ar' ? 'الاستحقاق' : 'Due'} ${shortDate(due.due.dueDate)}`
-      : account.snapshotTs ? `${language === 'ar' ? 'آخر تحديث' : 'Updated'} ${shortDate(toISODate(new Date(account.snapshotTs)))}` : '';
-    return { account, figureFils, caption, freshness };
+      : reported?.label ?? '';
+    return { account, figureFils, caption, freshness, quiet: reported?.quiet ?? false };
   // Captions also follow language; unrelated store metadata must not rescan rows.
-  }), [activeSources, balances.balanceByAccountId, dueByAccountId, dueAccountIds, language]);
+  }), [activeSources, balances.balanceByAccountId, dueByAccountId, dueAccountIds, language, now]);
 
   const openingFils = openingText.trim() === ''
     ? 0

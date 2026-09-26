@@ -129,12 +129,40 @@ export const reconcilePaymentFlows = (transactions: Transaction[]): Transaction[
     row.paymentFlowSide === 'receipt' && row.isTransfer !== true &&
     !row.userEdited && !row.transferDecision && eventTime(row) !== null);
 
+  // Index the receipts by (category, provider) once. Filtering every receipt
+  // for every ordinary purchase normalised the same few hundred titles
+  // millions of times — about a third of a live capture's JS time on a 15k-row
+  // ledger. The groups keep receiptRows order, so each parent sees exactly the
+  // candidates, in exactly the order, the full filter produced.
+  const providerKeys = new Map<string, string>();
+  const providerKeyOf = (title: string): string => {
+    let key = providerKeys.get(title);
+    if (key === undefined) {
+      key = providerKey(title);
+      providerKeys.set(title, key);
+    }
+    return key;
+  };
+  const receiptsByCategory = new Map<Transaction['category'], Map<string, Transaction[]>>();
+  for (const row of receiptRows) {
+    let byProvider = receiptsByCategory.get(row.category);
+    if (!byProvider) {
+      byProvider = new Map();
+      receiptsByCategory.set(row.category, byProvider);
+    }
+    const key = providerKeyOf(row.title);
+    const group = byProvider.get(key);
+    if (group) group.push(row);
+    else byProvider.set(key, [row]);
+  }
+
   for (const parent of ordinary) {
+    const byProvider = receiptsByCategory.get(parent.category);
+    const sameProvider = byProvider?.get(providerKeyOf(parent.title));
+    if (!sameProvider) continue;
     const parentTime = eventTime(parent)!;
-    const candidates = receiptRows.filter(row =>
+    const candidates = sameProvider.filter(row =>
       !removed.has(row.id) &&
-      row.category === parent.category &&
-      providerKey(row.title) === providerKey(parent.title) &&
       Math.abs(eventTime(row)! - parentTime) <= COMPOUND_BILL_WINDOW_MS &&
       row.amountFils > 0 && row.amountFils < parent.amountFils);
     // Bill bundles are intentionally bounded. Exhaustive subset search over a

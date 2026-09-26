@@ -34,7 +34,18 @@ export function malformedLocalMoneyTokens(
   let scanner = scanners.get(key);
   if (!scanner) {
     const currency = `(?:${key})`;
-    const number = String.raw`(?:\d[\d.,]*|\.\d[\d.,]*)(?:[ \u00a0\u2009\u202f]+\d[\d.,]*)*(?:[eE][+-]?\d+)?`;
+    // A space-separated digit group continues the figure ("28 500.00"), with
+    // ONE exception: a field-list alert flattened onto one line reads
+    // "AED 28500.00 26/09/2026 Balance AED …", and swallowing the day made the
+    // complete token look malformed, refusing a valid amount. Only that shape
+    // — a whole four-digit-year date field followed by the balance field — is
+    // cut off. A date anywhere else ("payment of AED 1,200.00 26/09/2026 for
+    // credit card …", "First instalment AED 50.00 26/10/2026") keeps the
+    // pre-v54 reading: the token stays malformed and the alert is refused.
+    const dateField = String.raw`(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{1,2}\.\d{1,2}\.\d{4})(?!\d)` +
+      String.raw`(?=[    ]+(?:bal(?:ance)?|avl|avail(?:able)?)\b)`;
+    const dateGroup = `(?!${dateField})`;
+    const number = String.raw`(?:\d[\d.,]*|\.\d[\d.,]*)(?:[ \u00a0\u2009\u202f]+${dateGroup}\d[\d.,]*)*(?:[eE][+-]?\d+)?`;
     scanner = {
       prefix: new RegExp(String.raw`(?<![\p{L}])${localMoneyPrefixPattern(currencyAliases)}(?![\p{L}])\s*(${number})`, 'giu'),
       suffix: new RegExp(String.raw`(${number})\s*${currency}(?![\p{L}])`, 'giu'),

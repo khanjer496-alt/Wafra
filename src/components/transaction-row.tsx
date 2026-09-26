@@ -12,7 +12,7 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
 import { t } from '@/lib/i18n';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
-import { isTransfer as isLedgerTransfer, isUnassignedIncome, UNASSIGNED_TRANSACTION_ACCOUNT_ID } from '@/lib/ledger';
+import { isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, UNASSIGNED_TRANSACTION_ACCOUNT_ID } from '@/lib/ledger';
 import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 
@@ -67,7 +67,9 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   // Two sibling targets, not a link nested inside a button: the merchant
   // identity opens its summary; the exact amount and Details keep the original
   // transaction action. No ledger scan or store subscription belongs in a row.
-  if (merchantLinks && onPress && transaction.title.trim() && !isTransfer && !pending) {
+  // Cash withdrawals and other money movements are not merchant spending, so
+  // their summary would always read zero.
+  if (merchantLinks && onPress && transaction.title.trim() && !isTransfer && !pending && !isMoneyMovementOnly(transaction)) {
     const merchantWords = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
     const merchantLabel = isIncome ? merchantWords.incomeDetails : merchantWords.merchantDetails;
     return <View style={[styles.row, styles.splitRow, largeText && styles.splitRowLarge]} testID="merchant-transaction-row">

@@ -93,6 +93,8 @@ function harness() {
   // figure-fitting rule is pure and compiled for real.
   deps['@/lib/e2e-font-scale'] = { E2E_FONT_SCALE: null, scaleTextStyleForE2E: style => style };
   deps['@/lib/large-text-figure'] = compile('src/lib/large-text-figure.ts', false);
+  // Bars render at their final size, as Reduce Motion shows them.
+  deps['@/components/ui/grow-bar'] = { GrowBar: (p) => ({ type: 'View', props: { style: [p.style, p.axis === 'width' ? { width: `${p.size}%` } : { height: p.size }] } }) };
   deps['@/components/ui/money'] = compile('src/components/ui/money.tsx');
   const { ReferenceHomeSummary } = compile('src/components/reference-home-summary.tsx');
   const renderNode = (node, position) => {

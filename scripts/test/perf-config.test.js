@@ -1150,7 +1150,8 @@ function bodyOf(source, header) {
 
   ok('Android recurring detection yields the full-ledger scan instead of merely delaying one blocking turn',
     /function\* subscriptionDetectionWorker/.test(subscriptions) &&
-      /SUBSCRIPTION_DETECTION_SLICE_MS\s*=\s*2/.test(subscriptions) &&
+      Number(/SUBSCRIPTION_DETECTION_SLICE_MS\s*=\s*(\d+)/.exec(subscriptions)?.[1] ?? Infinity) <= 8 &&
+      Number(/SUBSCRIPTION_DETECTION_YIELD_MS\s*=\s*(\d+)/.exec(subscriptions)?.[1] ?? 0) >= 4 &&
       /Date\.now\(\) - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS/.test(subscriptions) &&
       /waitForForegroundHistoryIdle\(SUBSCRIPTION_DETECTION_YIELD_MS\)/.test(subscriptions),
     'a delayed synchronous detectSubscriptions call still freezes JS after the tab paints; the scan itself must be cooperative');
@@ -1167,9 +1168,18 @@ function bodyOf(source, header) {
       /needsRecurrenceNow/.test(bills) &&
       /agendaView === 'cards'/.test(bills) &&
       /subscriptionDetectionInFlight/.test(subscriptions) &&
-      /if \(existing\) return existing\.promise/.test(subscriptions) &&
+      /if \(existing\) \{[\s\S]*?return existing\.promise/.test(subscriptions) &&
       /callers simply ignore the eventual value/.test(read('src/lib/subscriptions.ts')),
     'one immutable ledger snapshot must own one cooperative recurrence job; focus changes may ignore the result but must not cancel/restart the underlying scan');
+
+  ok('Bills, reminders and Ask share one recurrence job and Bills paints a finished one at once',
+    /function sameMembers\(/.test(subscriptions) &&
+      /sameMembers\(entry\.liveAccounts, liveAccounts\)/.test(subscriptions) &&
+      /sameMembers\(entry\.internalTransfers, internalTransfers\)/.test(subscriptions) &&
+      /flight\.superseded && waiters\.every\(\(waiter\) => waiter\(\)\)/.test(subscriptions) &&
+      /peekSubscriptionDetection\(state\.transactions/.test(bills) &&
+      /subscriptionDetectionRunning\(transactions/.test(bills),
+    'identity-only keys let every caller start its own 15k-row scan, and orphaned scans of replaced ledgers kept running; Subscriptions stayed empty on the phone');
 
   ok('default Upcoming does not start recurrence in the navigation-critical window',
     /else delay = setTimeout\(startProjection, UPCOMING_RECURRENCE_IDLE_MS\)/.test(bills) &&

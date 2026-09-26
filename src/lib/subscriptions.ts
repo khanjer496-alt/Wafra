@@ -259,15 +259,37 @@ type SubscriptionDetectionKey = {
 };
 
 type SubscriptionDetectionCacheEntry = SubscriptionDetectionKey & { value: Subscription[] };
-type SubscriptionDetectionInFlight = SubscriptionDetectionKey & { promise: Promise<Subscription[]> };
+type SubscriptionDetectionInFlight = SubscriptionDetectionKey & {
+  promise: Promise<Subscription[] | null>;
+  /** Every caller's cancellation probe; the default one never cancels. */
+  waiters: (() => boolean)[];
+  /** A newer ledger snapshot has started its own projection since. */
+  superseded: boolean;
+};
 
 // A single-entry cache let an unrelated caller evict Bills' projection, so
 // switching tabs could restart a 15k-row scan even though the ledger had not
-// changed. Keep a tiny identity-keyed LRU instead. Store snapshots are immutable,
-// so these references are an exact semantic key and need no O(n) fingerprint.
+// changed. Keep a tiny LRU instead. Store snapshots are immutable, so the
+// transaction/dismissal array references are an exact semantic key and need no
+// O(n) fingerprint.
 const SUBSCRIPTION_CACHE_MAX = 4;
 let subscriptionDetectionCache: SubscriptionDetectionCacheEntry[] = [];
 let subscriptionDetectionInFlight: SubscriptionDetectionInFlight[] = [];
+
+/**
+ * The detector reads the live/internal sets only through membership, so two
+ * sets with the same members give the same answer. Comparing members (after
+ * the free identity check) is what lets Bills, reminders and Ask share one job:
+ * each builds its own Set for the same ledger, and a capture that re-stamps an
+ * identical transfer receipt mints a new one. An identity-only key made every
+ * such caller start its own full-ledger scan beside the others.
+ */
+function sameMembers(a?: Set<string>, b?: Set<string>): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
+}
 
 function sameDetectionKey(
   entry: SubscriptionDetectionKey,
@@ -280,8 +302,8 @@ function sameDetectionKey(
   return entry.transactions === transactions &&
     entry.notSubscriptions === notSubscriptions &&
     entry.todayKey === todayKey &&
-    entry.liveAccounts === liveAccounts &&
-    entry.internalTransfers === internalTransfers;
+    sameMembers(entry.liveAccounts, liveAccounts) &&
+    sameMembers(entry.internalTransfers, internalTransfers);
 }
 
 function cachedSubscriptionDetection(
@@ -319,6 +341,40 @@ function cacheSubscriptionDetection(
   });
   if (subscriptionDetectionCache.length > SUBSCRIPTION_CACHE_MAX) subscriptionDetectionCache.shift();
   return value;
+}
+
+/**
+ * The finished projection for exactly this input, if one is cached; never
+ * starts work. Lets a screen that mounts after another caller (reminders, a
+ * previous visit) finished the scan paint that answer on its first frame.
+ */
+export function peekSubscriptionDetection(
+  transactions: Transaction[],
+  notSubscriptions: string[] = [],
+  today: Date = new Date(),
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+): Subscription[] | null {
+  return cachedSubscriptionDetection(
+    transactions,
+    notSubscriptions,
+    toISODate(today),
+    liveAccounts,
+    internalTransfers,
+  );
+}
+
+/** Whether a cooperative projection for exactly this input is already running. */
+export function subscriptionDetectionRunning(
+  transactions: Transaction[],
+  notSubscriptions: string[] = [],
+  today: Date = new Date(),
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+): boolean {
+  const todayKey = toISODate(today);
+  return subscriptionDetectionInFlight.some((entry) =>
+    sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
 }
 
 /**
@@ -622,11 +678,15 @@ export function detectSubscriptions(
   );
 }
 
-// 120 Hz leaves ~8.3 ms for the entire frame. Keep recurrence maintenance to
-// roughly a quarter of that budget so rendering/input still have headroom on
-// large ledgers while the cooperative worker is active.
-const SUBSCRIPTION_DETECTION_SLICE_MS = 2;
-const SUBSCRIPTION_DETECTION_YIELD_MS = 16;
+// A slice is measured on the device's own clock, so these are phone
+// milliseconds. The previous 2 ms slice + 16 ms timer spent ~90% of the job's
+// wall time asleep: a 15k-row ledger needs ~110 ms of Hermes CPU, which became
+// ~55 slices and 1-7 s of wall time on a busy phone, long enough for the next
+// capture to replace the ledger before Bills ever received an answer. Six
+// milliseconds still leaves most of a 120 Hz frame to input and rendering, and
+// the short yield returns the thread to them on every slice.
+const SUBSCRIPTION_DETECTION_SLICE_MS = 6;
+const SUBSCRIPTION_DETECTION_YIELD_MS = 8;
 
 /**
  * Same answer as detectSubscriptions(), but never intentionally monopolises a
@@ -653,7 +713,19 @@ export function detectSubscriptionsCooperatively(
 
   const existing = subscriptionDetectionInFlight.find((entry) =>
     sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
-  if (existing) return existing.promise.then((value) => cancelled() ? null : value);
+  if (existing) {
+    existing.waiters.push(cancelled);
+    return existing.promise.then((value) => value === null || cancelled() ? null : value);
+  }
+
+  // A projection for an older snapshot that nobody is waiting for any more is
+  // pure waste: every capture used to leave one running beside the new one, so
+  // Bills and reminders ended up time-slicing several full-ledger scans of
+  // ledgers that no longer existed. A job keeps running while ANY caller still
+  // wants it (a tab merely losing focus on an unchanged ledger still joins it
+  // on return); it stops only once a newer snapshot exists and every one of
+  // its callers has cancelled.
+  for (const entry of subscriptionDetectionInFlight) entry.superseded = true;
 
   const worker = subscriptionDetectionWorker(
     transactions,
@@ -662,12 +734,28 @@ export function detectSubscriptionsCooperatively(
     liveAccounts,
     internalTransfers,
   );
+  const waiters: (() => boolean)[] = [cancelled];
+  const flight: SubscriptionDetectionInFlight = {
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+    // Assigned below, before any caller can observe the entry.
+    promise: null as unknown as Promise<Subscription[] | null>,
+    waiters,
+    superseded: false,
+  };
 
   // One shared projection per immutable ledger snapshot. A tab losing focus no
   // longer aborts the underlying worker and makes the next visit start from row
   // zero; callers simply ignore the eventual value when their own view is gone.
-  const promise = new Promise<Subscription[]>((resolve) => {
+  const promise = new Promise<Subscription[] | null>((resolve) => {
     const runSlice = () => {
+      if (flight.superseded && waiters.every((waiter) => waiter())) {
+        resolve(null);
+        return;
+      }
       const startedAt = Date.now();
       let step = worker.next();
       while (!step.done && Date.now() - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS) {
@@ -690,16 +778,10 @@ export function detectSubscriptionsCooperatively(
   }).finally(() => {
     subscriptionDetectionInFlight = subscriptionDetectionInFlight.filter((entry) => entry.promise !== promise);
   });
+  flight.promise = promise;
 
-  subscriptionDetectionInFlight.push({
-    transactions,
-    notSubscriptions,
-    todayKey,
-    liveAccounts,
-    internalTransfers,
-    promise,
-  });
-  return promise.then((value) => cancelled() ? null : value);
+  subscriptionDetectionInFlight.push(flight);
+  return promise.then((value) => value === null || cancelled() ? null : value);
 }
 
 /** Monthly-equivalent total of what is still charging (stopped ones cost nothing). */

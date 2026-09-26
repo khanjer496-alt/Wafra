@@ -17,6 +17,8 @@ export interface AccountDisplayRow {
   figureFils: number | null;
   caption: string;
   freshness: string;
+  /** No bank alert for two weeks: the figure is the latest known, not current. */
+  quiet?: boolean;
 }
 
 export function AccountGroups({ rows, onOpen, onManage }: {
@@ -55,7 +57,7 @@ export function AccountGroups({ rows, onOpen, onManage }: {
               {row.figureFils === null ? <ThemedText type="smallBold" themeColor="textTertiary">—</ThemedText>
                 : <Money fils={row.figureFils} type="smallBold" prefix={false} />}
             </View>
-            <ThemedText type="meta" themeColor="textSecondary">
+            <ThemedText type="meta" themeColor={row.quiet ? 'warning' : 'textSecondary'}>
               {row.account.last4 ? `•• ${row.account.last4} · ` : ''}
               {row.account.snapshotKind === 'balance' && row.freshness ? row.freshness : row.caption}
               {row.account.cardType === 'credit' && row.freshness ? ` · ${row.freshness}` : ''}

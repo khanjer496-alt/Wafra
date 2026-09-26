@@ -1,6 +1,6 @@
 # Wafra Privacy Policy
 
-_Last updated: 15 September 2026_
+_Last updated: 24 September 2026_
 
 Wafra ("the app") is a personal money manager for Android and iOS published by
 **Nasidaapps LLC** ("Wafra", "we", "us").
@@ -12,13 +12,16 @@ territories must still be confirmed before release.
 
 - **Android:** bank SMS and optional bank-app notifications are parsed on the
   device. They are not sent to Wafra's relay.
-- **iPhone with automatic capture enabled:** a personal Apple automation passes
-  new Messages only from bank senders the user selects to Wafra on that iPhone.
-  A protected local queue holds each one only until Wafra can run the same
-  financial parser used by the Android app.
-  Unsupported content is discarded; successfully processed raw text and sender
-  are deleted after durable local processing. Pending records expire after 30
-  days. This local path uploads no Message content.
+- **iPhone with automatic capture enabled:** Apple's Sender picker lists only
+  Contacts, so Wafra's setup guide leaves Sender empty. The personal Apple
+  automation therefore passes every new Message that contains a space, from
+  any sender, to Wafra on that iPhone, not only bank alerts. A protected local
+  queue holds each one only until Wafra can run the same financial parser used
+  by the Android app. Wafra keeps only structured results from supported bank
+  alerts and discards everything else on the iPhone; processed raw text and
+  sender are deleted after durable local processing. Pending records expire
+  after 30 days. This local path uploads no Message content. Optional bank-app
+  notification (iOS 27) and Apple Pay automations use the same protected queue.
 - **Privacy is built in:** local capture and encrypted native ledger storage
   do not require a separate mode. A local-only preference saved in an older
   version remains in effect until explicitly reviewed in Settings → Privacy
@@ -36,9 +39,10 @@ territories must still be confirmed before release.
 - **Zero message access is always available:** leave Android SMS permission off
   or leave iPhone automatic capture unconfigured and use manual entry/imports.
 - Wafra cannot sign in to a bank, reply to a message, approve a transaction or
-  move money. Automatic capture may hold raw Message content briefly in the
-  protected local queue described below; only supported structured financial
-  activity can enter the ledger, and no Message content is uploaded.
+  move money. Automatic capture may hold raw Message content in the protected
+  local queue described below until it is processed (at most 30 days); only
+  supported structured financial activity can enter the ledger, and no Message
+  content is uploaded.
 
 ## Message-access choices
 
@@ -52,13 +56,15 @@ remains available for users who prefer manual entry.
 
 On iPhone, leaving automatic capture unconfigured gives Wafra no Messages
 access. If the user enables Wafra Local Capture, Apple's personal automation
-can pass a newly received Message from a bank sender the user selects to Wafra
-on that iPhone. The raw body and sender can therefore remain briefly
-in Wafra's protected local queue until the app classifies the record. They are
-not uploaded, logged, used for analytics or written to the ledger. Unsupported
-content is discarded after classification. A record the app has not yet
-processed expires after 30 days and is physically removed on the next queue
-access; iOS does not promise an exact background cleanup time.
+passes each newly received Message that contains a space to Wafra on that
+iPhone, whoever sent it, including personal conversations. The raw body and
+sender therefore remain in Wafra's protected local queue until the app next
+runs and classifies the record. They are not uploaded, logged, used for
+analytics or written to the ledger. Content that is not a supported bank alert
+is discarded after classification. A record the app has not yet processed
+expires 30 days after the Message's date (or after it arrived, when Apple
+supplies no date) and is physically removed on the next queue access; iOS does
+not promise an exact background cleanup time.
 
 ## Android bank-alert access
 
@@ -81,27 +87,49 @@ Wafra places candidate bank-app alerts in a bounded, short-lived queue encrypted
 with Android Keystore. The app deletes each queued alert after durable local
 classification. This is off until the user enables it.
 
+Android's notification access is device-wide, so Wafra sees each posted
+notification and classifies it in memory before storing anything.
+Notifications from chat apps such as WhatsApp, Telegram or Signal are never
+stored or used. Notifications from SMS apps, including the default SMS app,
+are ignored while Wafra has SMS permission, because the SMS path already reads
+the same messages. Without SMS permission, an SMS app's notification that looks
+financial may enter the encrypted queue and is shown only in Review. It is
+never imported automatically, and approving it does not make Wafra trust that
+app.
+
 ## iPhone automatic capture
 
 Apple does not give third-party apps access to the SMS inbox. Wafra therefore
 uses a personal automation that the user creates in Apple's Shortcuts app:
 
-1. The user chooses **Message**, explicitly selects a bank sender, selects
-   **Run Immediately**, and passes the complete **Received Message** to
-   **Wafra Local Capture**. Apple requires an explicit sender or phrase; Wafra
-   does not use an empty **Any Sender** trigger.
-2. The Shortcut passes the Message's sender, body, Apple identifier and date to
-   Wafra's background App Intent on the same iPhone. The identifier is reduced
-   to a stable opaque value before storage.
-3. Wafra stores the record in an app-private, backup-excluded queue protected
-   by iOS complete-until-first-authentication file protection. No network action
-   exists in this Shortcut.
+1. The user chooses **Message**, leaves **Sender** empty, types a single space
+   in **Message Contains**, selects **Run Immediately**, and runs Wafra's
+   capture Shortcut with the **Received Message**. Apple requires a sender or
+   a phrase, its Sender picker lists only Contacts, and bank SMS IDs are not
+   Contacts. The automation therefore runs for every new Message that contains
+   a space, whoever sent it: in effect an **Any Sender** trigger.
+2. The Shortcut passes the Message's sender and text to Wafra's background App
+   Intent on the same iPhone. When Apple provides them, it also passes the
+   Message's date and a SHA-256 hash of Apple's Message identifier, computed
+   inside the Shortcut. Otherwise Wafra assigns a random identifier and uses
+   the time the Message arrived. If Apple provides no sender, Wafra records a
+   fixed placeholder instead.
+3. Wafra writes each record to an app-private, backup-excluded queue protected
+   by iOS complete-until-first-authentication file protection before it decides
+   whether the Message is a bank alert. Text over 16 KiB (UTF-8) is refused
+   rather than shortened, Messages dated more than 30 days before they arrive
+   are not stored, and the queue holds at most 2,000 records and 8 MiB in
+   total. No network action exists in this Shortcut.
 4. When iOS next permits Wafra to run, the app uses its local financial parser.
-   Supported transactions enter the encrypted ledger or review flow;
-   promotions, OTPs and unsupported content do not.
+   Supported transactions enter the encrypted ledger or Review; promotions,
+   OTPs, personal messages and other unsupported content do not.
 5. After the result is durably handled, Wafra deletes the raw queued record.
-   Records not yet handled expire after 30 days and are removed on a later queue
-   access.
+   The queue's index then keeps only that record's opaque identifier and a
+   SHA-256 digest of the deleted record, so the same record delivered again is
+   recognised instead of queued twice. Each entry is removed on a queue access
+   more than 30 days after processing, and the index holds at most 10,000.
+   Records not yet handled expire 30 days after their date and are removed on
+   a later queue access.
 
 The automation can stage a new Message while Wafra is closed, but Apple controls
 when personal automations and background App Intents run. Wafra therefore does
@@ -114,6 +142,60 @@ until it is deleted or its token is retired. The current local Shortcut contains
 no relay URL or credential. A saved local-only preference blocks relay
 processing in the app but does not disable local automatic capture. An old
 automation must still be removed or have its token retired.
+
+### Bank-app notifications (iOS 27 or later)
+
+The user can separately create an Apple **Notification** automation in
+Shortcuts that selects a bank or payment app and runs Wafra's notification
+Shortcut or its **Capture bank notification** action. Wafra cannot inspect
+other apps' notifications, read old notifications or create the automation;
+it receives only the text the user's automation passes.
+
+- Wafra stores that text verbatim in the same protected, backup-excluded queue
+  with a random identifier and the time it arrived. It is not told which app
+  posted the notification. Text over 16 KiB (UTF-8) is refused rather than
+  shortened.
+- The app processes the text locally with the same parser. A supported
+  transaction from an identifiable bank can enter the encrypted ledger; an
+  alert Wafra cannot confirm may go to Review; other text is discarded.
+- The raw text is deleted after durable processing, and unprocessed text
+  expires 30 days after it arrived. The queue's index keeps the identifier and
+  digest as described above, and a saved transaction keeps the opaque
+  identifier so the same queued notification is not added twice.
+- Running the Shortcut with Wafra's setup-check phrase records only the time of
+  the check.
+- Nothing from this capture path is uploaded.
+
+### Apple Pay purchases (iOS 17 or later)
+
+The user can separately create an Apple Wallet **Transaction** automation for
+the cards they choose and run Wafra's Apple Pay Shortcut or its **Capture Apple
+Pay purchase** action. Wafra's action accepts only the transaction's
+**Amount** (a decimal amount with its currency code) and **Merchant** name.
+
+- Wafra stores the amount, currency and merchant name (up to 96 characters)
+  with a random identifier and the time it arrived in the same protected
+  queue. It does not receive the card number, card name, Wallet history or
+  payment status. Refunds and other non-positive amounts are not captured.
+- If the amount or currency is missing or any field is invalid, nothing is
+  queued; Wafra records only the time an incomplete event arrived.
+- Each captured purchase goes to Review. Nothing enters the ledger until the
+  user chooses an account and adds it.
+- The queued record is deleted once its Review item is saved; until then it
+  expires 30 days after it arrived. The queue's index keeps the identifier and
+  digest as described above.
+- Nothing from this capture path is uploaded.
+
+### When Review is full
+
+Review holds a limited number of items. If Review has no room for a possible
+money movement captured on iPhone by any of these paths, Wafra leaves that
+record in the protected queue instead of discarding it and can process it once
+Review has room. Held records still count toward the queue's 2,000-record and
+8 MiB limits and still expire 30 days after their date. A record that arrives
+while the queue is full is refused, and an expired record is deleted; in both
+cases Wafra keeps only a count, not the content, so the app can show a capture
+warning.
 
 ## iPhone message-history import
 
@@ -283,6 +365,14 @@ or training a server-side model. Ordinary user feedback is not sent to a
 third-party AI. A tester may separately and explicitly authorize GitHub Actions
 and Anthropic Claude to process the redacted parser templates described above.
 
+Buy-now-pay-later providers restate instalments that the paying bank has
+already alerted on. Wafra therefore ignores, on the device, SMS and iPhone
+Messages whose sender ID it recognises as Tabby, Tamara, Postpay or Cashew,
+and Android notifications from the Tabby and Tamara consumer apps. They are
+not stored as transactions or sent to Review; the paying bank's own alert is
+the record Wafra uses. Bank alerts that merely mention a provider are
+processed normally.
+
 ## Security and retention
 
 Network traffic to the iPhone relay uses HTTPS. Queued structured rows use
@@ -308,7 +398,8 @@ must be added for the affected storefront before distribution there.
 The user can:
 
 - decline Android SMS or notification access;
-- leave iPhone automatic capture unconfigured;
+- leave iPhone automatic capture (Messages, bank-app notifications and Apple
+  Pay) unconfigured, or delete those automations in Shortcuts;
 - choose whether to install or run the iPhone history Shortcut, choose its date
   range, review the results and cancel before saving;
 - decline or revoke bank-email forwarding and trusted-device sharing;

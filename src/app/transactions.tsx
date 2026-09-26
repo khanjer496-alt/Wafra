@@ -31,16 +31,18 @@ import {
   corroboratingTransferIdsForState,
   internalTransferIdsForState,
   liveAccountIds,
+  transferReconciliationForState,
   UNASSIGNED_INCOME_ACCOUNT_ID,
 } from '@/lib/ledger';
 import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
 import { getTransferActivity } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { reconcileTransfers } from '@/lib/transfer-reconciliation';
 import { useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
+
+const NO_IDS: ReadonlySet<string> = new Set();
 
 const DEFAULT_FILTERS: Filters = {
   type: null,
@@ -61,40 +63,64 @@ interface DaySection {
 
 const transactionKey = (transaction: Transaction) => transaction.id;
 
-/**
- * Rows the Transfers screen owns, found by a full transfer reconciliation
- * (100–300 ms on a phone at 15k rows). Remembered per ledger so reopening the
- * screen is instant; once the screen is showing, a ledger change recomputes
- * after interactions settle and keeps the previous answer meanwhile, instead
- * of freezing the list on every edit, capture or history-import page.
- */
-let separateTransferCache: { transactions: Transaction[]; accounts: Account[]; ids: ReadonlySet<string> } | null = null;
+type TransferSeparationState = Parameters<typeof transferReconciliationForState>[0];
 
-function computeSeparateTransferIds(transactions: Transaction[], accounts: Account[]): ReadonlySet<string> {
-  if (separateTransferCache?.transactions === transactions && separateTransferCache.accounts === accounts) {
-    return separateTransferCache.ids;
-  }
-  const ids = new Set(getTransferActivity(transactions, accounts, reconcileTransfers(transactions, accounts))
-    .map(item => item.transaction.id));
-  separateTransferCache = { transactions, accounts, ids };
-  return ids;
+interface TransferSeparation {
+  separateTransferIds: ReadonlySet<string>;
+  reviewTransferIds: ReadonlySet<string>;
 }
 
-function useSeparateTransferIds(
-  transactions: Transaction[], accounts: Account[], importing: boolean,
-): ReadonlySet<string> {
-  const [ids, setIds] = useState(() => computeSeparateTransferIds(transactions, accounts));
+const NO_SEPARATION: TransferSeparation = { separateTransferIds: NO_IDS, reviewTransferIds: NO_IDS };
+
+/**
+ * Rows the Transfers screen owns, and which of those the reconciler queued for
+ * review. The reconciliation itself is cached per stored transfer receipt
+ * (transferReconciliationForState); the activity walk on top of it is
+ * remembered per ledger so reopening the screen is instant. Once the screen
+ * is showing, a ledger change recomputes after interactions settle and keeps
+ * the previous answer meanwhile, instead of freezing the list on every edit,
+ * capture or history-import page.
+ */
+let separateTransferCache: {
+  transactions: Transaction[]; accounts: Account[]; reconciliation: unknown; value: TransferSeparation;
+} | null = null;
+
+function computeSeparateTransferIds(state: TransferSeparationState): TransferSeparation {
+  const reconciliation = transferReconciliationForState(state);
+  if (!reconciliation) return NO_SEPARATION;
+  const { transactions, accounts } = state;
+  if (separateTransferCache?.transactions === transactions && separateTransferCache.accounts === accounts &&
+    separateTransferCache.reconciliation === reconciliation) {
+    return separateTransferCache.value;
+  }
+  const records = getTransferActivity(transactions, accounts, reconciliation);
+  const value: TransferSeparation = {
+    separateTransferIds: new Set(records.map(item => item.transaction.id)),
+    reviewTransferIds: new Set(records.filter(item => item.needsReview).map(item => item.transaction.id)),
+  };
+  separateTransferCache = { transactions, accounts, reconciliation, value };
+  return value;
+}
+
+function useSeparateTransferIds(state: TransferSeparationState): TransferSeparation {
+  const { transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport } = state;
+  const [separation, setSeparation] = useState(() => computeSeparateTransferIds(state));
+  const importing = historyImport?.status === 'running';
   useEffect(() => {
     // A running history import replaces its page within moments; the page
     // that ends the run (complete, paused or failed) triggers the recompute.
     if (importing) return;
     let cancelled = false;
     const task = InteractionManager.runAfterInteractions(() => {
-      if (!cancelled) setIds(computeSeparateTransferIds(transactions, accounts));
+      if (!cancelled) {
+        setSeparation(computeSeparateTransferIds({
+          transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport,
+        }));
+      }
     });
     return () => { cancelled = true; task.cancel(); };
-  }, [transactions, accounts, importing]);
-  return ids;
+  }, [transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport, importing]);
+  return separation;
 }
 
 export default function TransactionsScreen() {
@@ -237,8 +263,11 @@ export default function TransactionsScreen() {
   // is not painted as income it never was.
   const internal = internalTransferIdsForState(state);
   const corroborating = corroboratingTransferIdsForState(state);
-  const separateTransferIds = useSeparateTransferIds(state.transactions, state.accounts,
-    state.historyImport?.status === 'running');
+  // Separation reuses the reconciliation cached per stored transfer receipt
+  // and stays empty while a history import only has a provisional receipt.
+  // Unlike `internal` it may lag one ledger change behind: it recomputes after
+  // interactions settle and holds its last answer during a running import.
+  const { separateTransferIds, reviewTransferIds } = useSeparateTransferIds(state);
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
@@ -268,8 +297,9 @@ export default function TransactionsScreen() {
 
   const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly,
     bestEffortOnly: autoAddedActive, currentKey, period,
-    live: liveAccounts, internal, corroborating, separateTransferIds }),
-  [appliedQuery, merchantFilter, smsOnly, autoAddedActive, currentKey, period, liveAccounts, internal, corroborating, separateTransferIds]);
+    live: liveAccounts, internal, corroborating, separateTransferIds, reviewTransferIds }),
+  [appliedQuery, merchantFilter, smsOnly, autoAddedActive, currentKey, period, liveAccounts, internal, corroborating,
+    separateTransferIds, reviewTransferIds]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded, separatedTransfers } = projection;
@@ -492,7 +522,8 @@ export default function TransactionsScreen() {
             </View>}
               {separatedTransfers.count > 0 && <View testID="transactions-separated-transfers" style={styles.transferNotice}>
                 <ThemedText type="meta" themeColor="textSecondary">{transferWords.separated(separatedTransfers.count)}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">{transferWords.reviewNote}</ThemedText>
+                {separatedTransfers.reviewCount > 0 &&
+                  <ThemedText type="meta" themeColor="textSecondary">{transferWords.reviewNote}</ThemedText>}
                 {transferContributes && <>
                   <View style={styles.summaryValue}>
                     <ThemedText type="meta" themeColor="textSecondary">{transferWords.transferIncome}</ThemedText>

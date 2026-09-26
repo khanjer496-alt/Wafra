@@ -382,7 +382,7 @@ class NotificationReaderModule : Module() {
       // Listener connect and explicit sweepVisible() retain the recovery path
       // for visible notifications without putting it on every resume/read.
       NotificationCaptureStore.read(context, sinceMs.toLong()).mapNotNull { row ->
-        val sourceClass = TrustedBankNotificationPackages.sourceClass(
+        val sourceClass = TrustedBankNotificationPackages.queuedSourceClass(
           context,
           row.pkg,
           "${row.title} ${row.text}".trim(),

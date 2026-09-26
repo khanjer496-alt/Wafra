@@ -298,32 +298,56 @@ export const createCaptureExecutor = ({
     if (captureStopped(activeLedger, collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
     }
-    // This is deliberately after the final pre-import await. importBatch
-    // dispatches synchronously below, so a stale plan can never stamp a
-    // restored ledger as having completed a historical parser migration.
-    const stateAtPlan = activeLedger.getState();
+    let stateAtPlan = activeLedger.getState();
     if (!stateAtPlan.hydrated) return { kind: 'not-hydrated' };
     // Runtime diagnostics are always on for Android tester builds, independently
     // of the verbose capture trace flag. Starting this clock at zero when trace
     // was disabled produced epoch-sized "capture-plan" durations and hid the
     // real operation that could be blocking the JS thread.
-    const planStarted = Date.now();
-    captureTrace('plan:start', collected.parsed.length);
-    const planned = dependencies.planRows(
-      collected.parsed,
-      stateAtPlan,
-      collected.newestTs,
-      new Date(),
-      collected.declined,
-    );
-    recordRuntimeOperation('capture-plan', Date.now() - planStarted);
+    let planMs = 0;
+    const planAgainst = (ledgerState: AppState): ImportPlan => {
+      const planStarted = Date.now();
+      captureTrace('plan:start', collected.parsed.length);
+      const result = dependencies.planRows(
+        collected.parsed,
+        ledgerState,
+        collected.newestTs,
+        new Date(),
+        collected.declined,
+      );
+      planMs = Date.now() - planStarted;
+      recordRuntimeOperation('capture-plan', planMs);
+      return result;
+    };
+    let planned = planAgainst(stateAtPlan);
+    // Planning and applying a batch each walk the whole ledger. Run in one JS
+    // turn they were the longest freeze of a capture on a 15k-row phone, so
+    // input and rendering get a turn between them. The plan that is applied is
+    // still exactly the plan for the ledger it is applied to: importBatch
+    // dispatches synchronously below, and if anything replaced the ledger
+    // during this yield (an edit, another import, a restore) the batch is
+    // re-planned against the new snapshot in that same final turn. A stale plan
+    // therefore still cannot stamp a restored ledger as having completed a
+    // historical parser migration.
+    if (hasChanges(planned) || (planned.walletNearMatches?.length ?? 0) > 0) {
+      await yieldForegroundTurn();
+      if (captureStopped(activeLedger, collected.source)) {
+        return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+      }
+      const current = activeLedger.getState();
+      if (!current.hydrated) return { kind: 'not-hydrated' };
+      if (current !== stateAtPlan) {
+        stateAtPlan = current;
+        planned = planAgainst(current);
+      }
+    }
     // Possible Apple Pay duplicates were withheld from the batch. Stage them in
     // this same turn so the importBatch below (and its cursor) persist with
     // them, and settle before any commit/ACK below.
     const nearMatches = stageNearMatches(activeLedger, planned);
     const plan = nearMatches.plan;
     reviewAlerts += nearMatches.admitted;
-    captureTrace('plan:done', plan.txCount + plan.healedCount, tracing ? Date.now() - planStarted : 0);
+    captureTrace('plan:done', plan.txCount + plan.healedCount, tracing ? planMs : 0);
     // The parser version is a durable migration receipt. Only the collection
     // that actually started at the beginning of the Android inbox may carry
     // it into the atomic ledger write. A routine scan can finish after an old
@@ -333,6 +357,8 @@ export const createCaptureExecutor = ({
       ...plan.batch,
       ...(collected.historicalReread ? { parserRereadComplete: true } : {}),
       ...(collected.historyImport ? { historyImport: collected.historyImport } : {}),
+      ...(collected.recentRereadParserVersion !== undefined
+        ? { recentRereadParserVersion: collected.recentRereadParserVersion } : {}),
     };
 
     if (!hasChanges(plan)) {
@@ -342,7 +368,8 @@ export const createCaptureExecutor = ({
       // privacy cap are intentionally not retained. Relay rows use ACKs.
       if (collected.source === 'sms' &&
         (importBatch.lastScanTs > stateAtPlan.lastScanTs ||
-          importBatch.parserRereadComplete === true || importBatch.historyImport !== undefined)) {
+          importBatch.parserRereadComplete === true || importBatch.historyImport !== undefined ||
+          (importBatch.recentRereadParserVersion ?? 0) > (stateAtPlan.recentRereadParserVersion ?? 0))) {
         // Runtime diagnostics are always active in tester builds. Do not zero
         // this clock when verbose capture tracing is off; that records an
         // epoch-sized fake duration and hides the real save cost.

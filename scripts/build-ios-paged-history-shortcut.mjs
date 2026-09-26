@@ -219,7 +219,9 @@ function buildPagedGraph({ columnar, rows = false, windowed = false, overlapProb
     alert('History paused safely', text(`${prefix}\ufffc`, { [`{${prefix.length}, 1}`]: output(reason) }));
     open('wafra://ios-setup?section=history'); stop();
   });
-  const before = get('before', output(dictionary, 'Dictionary'));
+  // The value is unused, but the emitted Get Value action (and its UUID) is
+  // part of the shipped graph; keep the call so the artifact is unchanged.
+  get('before', output(dictionary, 'Dictionary'));
   const limit = get('limit', output(dictionary, 'Dictionary'));
   // Never ask Shortcuts to parse Wafra's ISO cursor string. iOS 26 has
   // produced both unresolved parameters and empty Detect Dates results for

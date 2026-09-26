@@ -55,8 +55,10 @@ import {
   daysUntilNext,
   fixedCommitments,
   otherCommitments,
+  peekSubscriptionDetection,
   recurringPaymentAccount,
   stoppedSubscriptions,
+  subscriptionDetectionRunning,
   trueSubscriptions,
   type Subscription,
 } from '@/lib/subscriptions';
@@ -321,21 +323,45 @@ export default function BillsScreen() {
   // The last result stays on screen while a changed ledger is re-analysed.
   // Resetting it to null on every capture or pull-to-refresh emptied
   // Subscriptions/Utilities until the job finished, then refilled them.
-  const recurringFresh = androidRecurringResult !== null &&
+  // Another caller (the reminder sync, Ask, an earlier visit to this tab) may
+  // already have finished the scan for exactly this ledger. The shared cache
+  // answers without starting work, so the first frame shows it instead of an
+  // empty Subscriptions list and a four-second idle wait for a job whose
+  // result already exists.
+  const cachedRecurring = useMemo(
+    () => Platform.OS === 'android'
+      ? peekSubscriptionDetection(state.transactions, state.notSubscriptions, recurrenceToday, liveAccounts, internal)
+      : null,
+    [state.transactions, state.notSubscriptions, recurrenceToday, liveAccounts, internal],
+  );
+  const recurringFresh = cachedRecurring !== null || (androidRecurringResult !== null &&
     androidRecurringResult.transactions === state.transactions &&
     androidRecurringResult.notSubscriptions === state.notSubscriptions &&
     androidRecurringResult.today === recurrenceToday &&
     androidRecurringResult.liveAccounts === liveAccounts &&
-    androidRecurringResult.internal === internal;
-  const hasRecurringResult = androidRecurringResult !== null;
+    androidRecurringResult.internal === internal);
+  const hasRecurringResult = androidRecurringResult !== null || cachedRecurring !== null;
+  // Keep a result found in the shared cache as this screen's last answer, so a
+  // later capture refreshes it in place (stale rows stay visible, the refresh
+  // starts at once) instead of emptying the lists and waiting for the idle
+  // grace as if the tab had never had an answer.
+  useFocusEffect(useCallback(() => {
+    if (!cachedRecurring || androidRecurringResult?.value === cachedRecurring) return;
+    startTransition(() => setAndroidRecurringResult({
+      value: cachedRecurring, transactions: state.transactions, notSubscriptions: state.notSubscriptions,
+      today: recurrenceToday, liveAccounts, internal,
+    }));
+  }, [cachedRecurring, androidRecurringResult, state.transactions, state.notSubscriptions, recurrenceToday,
+    liveAccounts, internal]));
   // A previous result may predate a "Not a subscription" choice; never show a
   // merchant the user has just dismissed while the refresh runs.
   const androidRecurring = useMemo(() => {
+    if (cachedRecurring) return cachedRecurring;
     if (!androidRecurringResult) return null;
     if (androidRecurringResult.notSubscriptions === state.notSubscriptions) return androidRecurringResult.value;
     const dismissed = new Set(state.notSubscriptions.map((title) => title.trim().toLowerCase()));
     return androidRecurringResult.value.filter((sub) => !dismissed.has(sub.title.trim().toLowerCase()));
-  }, [androidRecurringResult, state.notSubscriptions]);
+  }, [cachedRecurring, androidRecurringResult, state.notSubscriptions]);
 
   // useFocusEffect rather than useIsFocused: focus changes no longer re-render
   // the whole screen just to start or cancel this job.
@@ -377,8 +403,10 @@ export default function BillsScreen() {
     // The first analysis on Upcoming waits for an idle grace period. Refreshing
     // an existing result runs in the cooperative worker's small slices, so it
     // starts straight away instead of showing stale rows for seconds.
+    // Joining a scan another caller already started costs no extra work.
     const needsRecurrenceNow = hasRecurringResult ||
-      agendaView === 'subscriptions' || agendaView === 'utilities' || agendaView === 'all';
+      agendaView === 'subscriptions' || agendaView === 'utilities' || agendaView === 'all' ||
+      subscriptionDetectionRunning(transactions, notSubscriptions, recurrenceToday, liveAccounts, internal);
     if (needsRecurrenceNow) startProjection();
     else delay = setTimeout(startProjection, UPCOMING_RECURRENCE_IDLE_MS);
 
