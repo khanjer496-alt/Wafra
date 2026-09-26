@@ -93,10 +93,14 @@ Notifications from known chat apps, such as WhatsApp, Telegram or Signal, are
 never stored or used. Notifications from SMS apps, including the default SMS
 app, are ignored while Wafra has SMS permission, because the SMS path already
 reads the same messages. Without SMS permission, an SMS app's notification that
-looks financial may enter the encrypted queue. If it reads as a bank alert it
-is shown only in Review; otherwise it is deleted from the queue when the app
-next processes it. It is never imported automatically, and approving it does
-not make Wafra trust that app.
+looks financial may enter the encrypted queue. If it reads as a transaction it
+is shown only in Review, where a personal message that happens to describe one
+can also appear for the user to dismiss; the Review card holds the extracted
+details, not the message text. If Wafra cannot read it, it is deleted from the
+queue when the app next processes it, unless it still looks like a bank alert,
+in which case it stays encrypted in the queue for up to seven days so a later
+version of the app can read it. It is never imported automatically, and
+approving it does not make Wafra trust that app.
 
 ## iPhone automatic capture
 

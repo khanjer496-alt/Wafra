@@ -1738,10 +1738,13 @@ export async function scanInbox(
         }
         // Without READ_SMS an SMS app's notification can be anyone's text,
         // and one the parser cannot resolve is treated as personal ("Can you
-        // transfer AED 500 tonight?"). It is acknowledged now, as ignored,
-        // instead of being retained in the encrypted queue for a future
-        // parser the way an unresolved bank-app row is.
-        if (!handled && messagingRow) {
+        // transfer AED 500 tonight?"). It is acknowledged now, as ignored.
+        // Only a row that still reads as a bank alert — money plus bank
+        // context such as a card or account, or a recognised bank sender as
+        // the conversation title — is retained in the encrypted queue for a
+        // future parser, the way an unresolved bank-app row is.
+        if (!handled && messagingRow &&
+            !(hasBankAlertMoneyHint(source) && hasGenericBankAlertContext(source, n.title))) {
           if (notificationImportStats) notificationImportStats.ignored += 1;
           handled = true;
         }

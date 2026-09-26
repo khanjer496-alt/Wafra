@@ -54,11 +54,17 @@ trusted package and never auto-imported.
   including a preinstalled one with no Play installer (for example Samsung
   Messages), is admitted only while READ_SMS is not granted, and only when the
   text carries financial context and a money marker. A row that reads as a
-  bank alert goes to **Review only**. The Review card carries no package
-  identity, so approving it never teaches Wafra to trust the SMS app, and later
-  alerts from it still go to Review. A row the parser cannot resolve is treated
-  as a personal message and is acknowledged (deleted from the queue) in the
-  same scan instead of being kept for a future parser.
+  transaction goes to **Review only**. That can include a personal text that
+  happens to describe one ("I paid AED 120.00 at Carrefour, transfer half to
+  my account"), which the user dismisses there. The Review card holds the
+  structured facts, not the message text, and carries no package identity, so
+  approving it never teaches Wafra to trust the SMS app, and later alerts from
+  it still go to Review. A row the parser cannot resolve is treated as a
+  personal message and is acknowledged (deleted from the queue) in the same
+  scan. The exception is a row that still reads as a bank alert (money plus a
+  card, an account or a bank sender ID as the conversation title). It is kept
+  encrypted, like an unresolved bank-app row, for up to seven days so a later
+  parser can read it.
 
 The listener rejects OTP/security prompts before persistence. A bounded,
 seven-day queue stores candidates under an AndroidKeyStore key and acknowledges
@@ -112,7 +118,9 @@ evidence after installing the new build.
    confirm no further capture and that queued candidates are erased on opt-out.
 5. With READ_SMS denied, receive a real bank SMS: its Messages notification
    must reach Review only, and approving it must not make a later bank SMS
-   auto-import. A personal text with an amount must leave no Review card.
+   auto-import. A personal text that only mentions money ("Can you transfer
+   AED 500 tonight?") must leave no Review card; one that reads like a
+   transaction may appear in Review and must dismiss without adding anything.
    Grant READ_SMS and confirm Messages notifications create nothing new.
 
 This design can discover new bank/finance apps without an app update, but parser

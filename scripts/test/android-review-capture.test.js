@@ -699,13 +699,23 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
   // the parser cannot resolve is treated as personal: acknowledged out of the
   // encrypted queue in the same scan, never retained for a future parser the
   // way an unresolved bank-app row is. A bank SMS beside it still reaches
-  // Review.
+  // Review, and an unreadable row that still reads as a bank alert (money
+  // and an account, from a bank sender ID) is retained like a bank-app row.
   reactNative.PermissionsAndroid.check = async () => false;
   for (const smsAppClass of ['messaging-review', 'financial-candidate']) {
     const suffix = smsAppClass === 'messaging-review' ? 'mr' : 'fc';
     const personalId = `samsung-messages-personal-${suffix}`;
     const bankId = `samsung-messages-bank-sms-${suffix}`;
+    const unreadBankId = `samsung-messages-hdfc-unread-${suffix}`;
     notificationRows = [{
+      id: unreadBankId,
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'AD-HDFCBK',
+      text: 'Rs.500.00 debited from a/c **1234 on 20-09-26 to VPA x@ybl',
+      ts: NOW + 5_390,
+      sourceClass: smsAppClass,
+    }, {
       id: personalId,
       pkg: 'com.samsung.android.messaging',
       appLabel: 'Messages',
@@ -729,7 +739,8 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         !personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_400) &&
         personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_410 &&
           item.sourcePackage === undefined) &&
-        personalDiagnostics?.unresolved === 0 &&
+        !personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_390) &&
+        personalDiagnostics?.unresolved === 1 &&
         personalDiagnostics?.acknowledgementPlanned === 2,
       JSON.stringify({ reviews: personal.reviewCandidates, personalDiagnostics }));
     const ackBeforePersonal = acknowledgedNotifications.length;
@@ -737,6 +748,9 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     ok(`without READ_SMS, an unresolvable SMS-app row (${smsAppClass}) is acknowledged with the reviewed bank SMS`,
       acknowledgedNotifications.slice(ackBeforePersonal).includes(personalId) &&
         acknowledgedNotifications.slice(ackBeforePersonal).includes(bankId),
+      JSON.stringify(acknowledgedNotifications.slice(ackBeforePersonal)));
+    ok(`without READ_SMS, an unreadable SMS-app row that reads as a bank alert (${smsAppClass}) stays queued`,
+      !acknowledgedNotifications.slice(ackBeforePersonal).includes(unreadBankId),
       JSON.stringify(acknowledgedNotifications.slice(ackBeforePersonal)));
   }
   reactNative.PermissionsAndroid.check = originalSmsCheck;
