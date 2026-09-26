@@ -1,8 +1,8 @@
 'use strict';
 /**
- * The downloaded E5 encoder is OFF by default: nothing downloads or starts it
- * on install, launch, a question or a Review alert. Research builds opt in
- * with EXPO_PUBLIC_WAFRA_LOCAL_E5=1.
+ * The downloaded E5 encoder and its ONNX Runtime are removed: nothing
+ * downloads or starts it on install, launch, a question or a Review alert,
+ * whatever the build environment says.
  */
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -13,13 +13,32 @@ const load = require('./load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
 const flagsFile = path.join(root, 'src/lib/local-semantic-flags.ts');
 
-test('the E5 flag is off unless the build explicitly sets EXPO_PUBLIC_WAFRA_LOCAL_E5=1', () => {
-  assert.equal(load(flagsFile, {}, { process: { env: {} } }).LOCAL_SEMANTIC_E5_ENABLED, false);
-  assert.equal(load(flagsFile, {}, { process: { env: { EXPO_PUBLIC_WAFRA_LOCAL_E5: '0' } } }).LOCAL_SEMANTIC_E5_ENABLED, false);
-  assert.equal(load(flagsFile, {}, { process: { env: { EXPO_PUBLIC_WAFRA_LOCAL_E5: 'true' } } }).LOCAL_SEMANTIC_E5_ENABLED, false);
-  assert.equal(load(flagsFile, {}, { process: { env: { EXPO_PUBLIC_WAFRA_LOCAL_E5: '1' } } }).LOCAL_SEMANTIC_E5_ENABLED, true);
-  // Expo inlines EXPO_PUBLIC_* only for this literal member access.
-  assert.match(fs.readFileSync(flagsFile, 'utf8'), /process\.env\.EXPO_PUBLIC_WAFRA_LOCAL_E5 === '1'/);
+test('the E5 flag is permanently off, even when a build sets EXPO_PUBLIC_WAFRA_LOCAL_E5=1', () => {
+  for (const env of [{}, { EXPO_PUBLIC_WAFRA_LOCAL_E5: '0' }, { EXPO_PUBLIC_WAFRA_LOCAL_E5: '1' }]) {
+    assert.equal(load(flagsFile, {}, { process: { env } }).LOCAL_SEMANTIC_E5_ENABLED, false);
+  }
+  assert.doesNotMatch(fs.readFileSync(flagsFile, 'utf8'), /process\.env/);
+});
+
+test('the app ships no ONNX Runtime and the native E5 runtime fails closed', async () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  assert.equal(pkg.dependencies['onnxruntime-react-native'], undefined);
+  assert.equal(pkg.onnxruntimeExtensionsEnabled, undefined);
+  assert.equal(fs.existsSync(path.join(root, 'plugins/onnxruntime-gradle9-compat')), false);
+  assert.equal(fs.existsSync(path.join(root, 'src/lib/ai-alert-model.native.ts')), false);
+  const nativeRuntime = fs.readFileSync(path.join(root, 'src/lib/local-semantic-runtime.native.ts'), 'utf8');
+  assert.doesNotMatch(nativeRuntime, /onnxruntime-react-native'\)|from 'onnxruntime|@huggingface\/tokenizers/);
+  let deleted = 0;
+  const runtime = load(path.join(root, 'src/lib/local-semantic-runtime.native.ts'), {
+    'expo-file-system': {
+      Paths: { document: 'doc' },
+      Directory: class { constructor() { this.exists = true; } delete() { deleted += 1; } },
+    },
+  });
+  await assert.rejects(runtime.getLocalSemanticEncoder(), /local-semantic-runtime:removed/);
+  assert.equal(runtime.localSemanticRuntimeStatus().state, 'not-downloaded');
+  runtime.purgeLocalSemanticArtifacts();
+  assert.equal(deleted, 1, 'old downloads are still reclaimed');
 });
 
 test('Ask never starts the E5 download when the flag is off, even with the model not downloaded', async () => {

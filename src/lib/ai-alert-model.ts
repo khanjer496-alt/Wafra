@@ -1,7 +1,8 @@
 /**
- * Web/Node stub of the on-device alert tagger (React Native resolves
- * ai-alert-model.native.ts). It never has a model, so every caller behaves
- * exactly as it did before the AI reader existed.
+ * The on-device alert tagger on every platform. Its ONNX runtime was removed
+ * with the rest of the ONNX work (docs/local-semantic-runtime.md), so it never
+ * has a model and every caller behaves exactly as it did before the AI reader
+ * existed.
  */
 import type { AiAlertPrediction } from '@/lib/ai-alert-extractor';
 import {
