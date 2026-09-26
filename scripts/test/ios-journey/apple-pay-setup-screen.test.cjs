@@ -35,15 +35,18 @@ async function screen({ version = '17.0', nativePresent = true, capability = tru
   };
   const component = load(path.join(root, 'src/app/ios-apple-pay-setup.tsx'), {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
-    'react-native': { Platform: { OS: 'ios', Version: version }, View: 'View', ScrollView: 'ScrollView', StyleSheet: { create: styles => styles },
+    'react-native': { Platform: { OS: 'ios', Version: version }, View: 'View', StyleSheet: { create: styles => styles, hairlineWidth: 1 },
       Linking: { openURL: async url => urls.push(url) }, AppState: { addEventListener: (_, fn) => { listeners.push(fn); return { remove() {} }; } } },
     'expo-router': { Stack: { Screen: 'Screen' }, useRouter: () => ({ dismissTo: route => routes.push(route), push: route => routes.push(route), setParams() {} }), useLocalSearchParams: () => ({ fromOnboarding: '1', shortcutResult: 'success' }) },
     'expo-sharing': { isAvailableAsync: async () => true, shareAsync: async (uri, options) => shares.push({ uri, options }) },
-    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
-    '@/components/onboarding/setup-shell': { SetupHeader: 'Header', SetupShell: 'Shell' },
-    '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/controls': { Button: 'Button' },
-    '@/constants/theme': { MaxContentWidth: 640, ScreenPadding: 24, Spacing: { two: 8, three: 12 } },
-    '@/hooks/use-language': { useLanguage: () => 'en' }, '@/hooks/use-theme': { useTheme: () => ({ background: '#fff' }) },
+    // The ink band renders its band content, then the sheet; E buttons are the screen's buttons.
+    '@/components/ui/band-scaffold': { BandScaffold: p => ({ type: 'BandScaffold', props: { ...p, children: [p.bandContent, p.children] } }) },
+    '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/band/e-button': { EButton: 'Button' },
+    '@/constants/theme': { Fonts: { sansSemi: 'Geist-SemiBold' } },
+    '@/hooks/use-band': { useBand: id => ({ id, band: 'band', onBand: 'on', onBandSecondary: 'on2', tile: 'tile', bandRule: 'rule',
+      text: 'text', textSecondary: 'text2', rule: 'rule', fill: 'fill', onFill: 'onFill', statusOk: 'ok', statusOver: 'over' }) },
+    '@/hooks/use-language': { useLanguage: () => 'en' }, '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
+    '@/lib/capture-band-copy': load(path.join(root, 'src/lib/capture-band-copy.ts')),
     '@/lib/capture': { getIosCaptureNativeModule: () => nativePresent ? native : null, subscribeIosCaptureStatusRefresh: () => () => {} },
     '@/lib/ios-capture-health': health, '@/lib/ios-apple-pay-setup': helper,
     '@/lib/details-copy': load(path.join(root, 'src/lib/details-copy.ts')),
@@ -55,7 +58,7 @@ async function screen({ version = '17.0', nativePresent = true, capability = tru
   const render = () => { cursor = 0; tree = component(); for (const effect of effects.splice(0)) effect(); };
   const flush = async () => { for (let i = 0; i < 6; i++) { await new Promise(r => setImmediate(r)); render(); } };
   render(); await flush();
-  return { events, urls, shares, routes, flush, saved: () => progress,
+  return { events, urls, shares, routes, flush, saved: () => progress, tree: () => tree,
     text: () => walk(tree).filter(n => n.type === 'Text').map(n => n.props.children).join(' '),
     button: label => walk(tree).find(n => n.type === 'Button' && n.props.label === label)?.props,
     async foreground(patch = {}) { status = { ...status, ...patch }; for (const fn of listeners) fn('active'); await flush(); },
@@ -147,4 +150,37 @@ test('setting up Apple Pay keeps a finished SMS setup recorded until Apple Pay i
   assert.equal(h.saved().futureCaptureSource, 'apple-pay');
   assert.equal(h.saved().futureAutomationConfirmed, true);
   assert.equal(h.saved().parkedSources.message.automationConfirmed, true, 'SMS progress is parked, not erased');
+});
+
+test('the ink band shows the plain title, one line and an example marked as one; steps and gates stay on the sheet', async () => {
+  const h = await screen({ enabled: true });
+  const scaffold = h.tree();
+  assert.equal(scaffold.type, 'BandScaffold');
+  assert.equal(scaffold.props.band, 'home');
+  const band = walk(scaffold.props.bandContent);
+  const example = band.find(n => n.props?.testID === 'apple-pay-example');
+  assert.ok(example, 'the example sits on the band');
+  assert.match(example.props.accessibilityLabel, /^Example only\..*waits in Review/);
+  const bandText = band.filter(n => n.type === 'Text').map(n => n.props.children).join(' ');
+  assert.match(bandText, /Apple Pay purchases/);
+  assert.match(bandText, /goes to Review/);
+  assert.match(bandText, /Example/);
+  assert.doesNotMatch(bandText, /•|\d{4}/, 'no card identity is shown');
+  const sheet = walk(scaffold.props.children);
+  for (const id of ['apple-pay-step-install', 'apple-pay-step-check', 'apple-pay-step-automation']) {
+    assert.ok(sheet.some(n => n.props?.testID === id), id);
+  }
+  assert.ok(sheet.some(n => n.props?.accessibilityLabel === 'Step 1'), 'numbered, not done before the gates');
+  assert.ok(sheet.some(n => n.props?.accessibilityLabel === 'Step 2'));
+  // The back control is inert while a step is running.
+  const busy = await screen();
+  const release = busy.holdRead();
+  busy.button('Enable capture on this iPhone').onPress();
+  await new Promise(r => setImmediate(r));
+  await busy.flush();
+  busy.tree().props.nav.back();
+  assert.deepEqual(busy.routes, [], 'no navigation while busy');
+  release(); await busy.flush();
+  busy.tree().props.nav.back();
+  assert.equal(busy.routes[0].pathname, '/ios-setup');
 });
