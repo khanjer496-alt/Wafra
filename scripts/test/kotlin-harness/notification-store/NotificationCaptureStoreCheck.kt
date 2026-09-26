@@ -108,6 +108,23 @@ fun main() {
     check("clearing erases the receipts with the queue",
       NotificationCaptureStore.append(c, pkg, "ADCB", alert, System.currentTimeMillis() + 1_000), "appended")
   }
+  run {
+    // A pick from an ambiguous notification history is queued review-only.
+    // The flag survives the encrypted queue, an ordinary row (written without
+    // the key, like a row from an older build) reads back false, and healing
+    // the same posting takes the new extraction's flag.
+    val c = enabledContext()
+    val noSeconds = alert.replace("17:38:39", "17:38")
+    check("a review-only row is appended",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", noSeconds, t0, reviewOnly = true), "appended")
+    NotificationCaptureStore.append(c, pkg, "ADCBAlert", noSeconds.replace("AED290.00", "AED12.00"), t0 + 5_000)
+    check("the review-only flag survives the encrypted queue",
+      NotificationCaptureStore.read(c, 0L).sortedBy { it.ts }.map { it.reviewOnly }, listOf(true, false))
+    check("healing the same posting takes the new extraction's flag",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", alert, t0, reviewOnly = false), "repaired")
+    check("the healed row is no longer review-only",
+      NotificationCaptureStore.read(c, 0L).first { it.ts == t0 }.reviewOnly, false)
+  }
   println(if (bad == 0) "STORE ALL OK" else "STORE FAILURES $bad")
   System.exit(if (bad == 0) 0 else 1)
 }

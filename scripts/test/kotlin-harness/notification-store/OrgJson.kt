@@ -113,6 +113,7 @@ class JSONObject() {
   fun optString(key: String): String = values[key]?.toString() ?: ""
   fun optLong(key: String, fallback: Long): Long = (values[key] as? Number)?.toLong() ?: fallback
   fun optInt(key: String): Int = (values[key] as? Number)?.toInt() ?: 0
+  fun optBoolean(key: String, fallback: Boolean): Boolean = values[key] as? Boolean ?: fallback
   override fun toString() = values.entries.joinToString(",", "{", "}") { quote(it.key) + ":" + quote(it.value) }
 }
 
