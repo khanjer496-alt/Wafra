@@ -1,15 +1,16 @@
 import * as LocalAuthentication from 'expo-local-authentication';
+import { StatusBar } from 'expo-status-bar';
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { AppState, Linking, Platform, StyleSheet, View } from 'react-native';
+import { AppState, Linking, Platform, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BiometricGlyph, useBiometricKind } from '@/components/biometric-glyph';
+import { useBiometricKind } from '@/components/biometric-glyph';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Button } from '@/components/ui/controls';
-import { WafraMark } from '@/components/wafra-logo';
-import { Radius, ScreenPadding, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { EButton } from '@/components/ui/band/e-button';
+import { YourPattern } from '@/components/ui/your-pattern';
+import { Fonts, ScreenPadding, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useStore } from '@/lib/store';
 import { t } from '@/lib/i18n';
 import { settingsCopy } from '@/lib/settings-copy';
@@ -22,6 +23,9 @@ const PrivacyGateContext = createContext(true);
 export function usePrivacyGateCleared(): boolean {
   return useContext(PrivacyGateContext);
 }
+
+/** The gap between the lock screen's pattern tiles. */
+const PATTERN_GAP = 5;
 
 /** Short trips out of the app — a permission sheet, the share card — do not re-lock. */
 const RELOCK_GRACE_MS = 20_000;
@@ -38,10 +42,19 @@ const RELOCK_GRACE_MS = 20_000;
  *
  * The copy says the balances stay HIDDEN, not "encrypted until you unlock":
  * the ledger's encryption key is not bound to this lock.
+ *
+ * Design language E: the lock is a full ink screen with the person's own
+ * pattern (one of the four places it may appear — it is drawn from their
+ * onboarding answers and never carries money), the plain "Wafra is locked",
+ * one sentence, and the one unlock button in cream on ink.
  */
 export function LockGate({ children }: { children: React.ReactNode }) {
-  const theme = useTheme();
+  const band = useBand('home');
+  const largeText = useLargeTextLayout();
+  const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  // The pattern's six columns fit the screen's width at any size.
+  const patternTile = Math.max(24, Math.min(largeText ? 34 : 44, Math.floor((width - ScreenPadding * 2 - PATTERN_GAP * 5) / 6)));
   const { state } = useStore();
   const copy = settingsCopy(state.language);
   // Asked only while App Lock is on; the lock screen is the only reader here.
@@ -139,72 +152,64 @@ export function LockGate({ children }: { children: React.ReactNode }) {
         {children}
       </View>
       {lockRequired ? (
-      <ThemedView accessibilityViewIsModal style={[StyleSheet.absoluteFillObject, styles.root]}>
-        <View style={styles.centre}>
-          <WafraMark size={46} />
-          <ThemedText type="subtitle" accessibilityRole="header" style={styles.centreText}>
+      <View
+        accessibilityViewIsModal
+        testID="lock-screen"
+        style={[StyleSheet.absoluteFillObject, styles.root, {
+          backgroundColor: band.band,
+          paddingTop: insets.top,
+          paddingBottom: Spacing.four + insets.bottom,
+        }]}>
+        <StatusBar style={band.statusBar} />
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={styles.centre}
+          scrollEnabled={largeText}
+          showsVerticalScrollIndicator={false}>
+          <YourPattern tile={patternTile} gap={PATTERN_GAP} />
+          <ThemedText accessibilityRole="header"
+            style={[styles.title, largeText && styles.titleLarge, { color: band.onBand }]}>
             {copy.lockedTitle}
           </ThemedText>
-          <ThemedText type="default" themeColor="textSecondary" style={styles.copy}>
+          <ThemedText type="default" style={[styles.copy, { color: band.onBandSecondary }]}>
             {copy.lockedBody}
           </ThemedText>
-        </View>
+        </ScrollView>
 
         {biometric === 'unavailable' ? (
-          <View
-            style={[
-              styles.sheet,
-              {
-                backgroundColor: theme.backgroundElement,
-                borderTopColor: theme.cardBorder,
-                paddingBottom: Spacing.four + insets.bottom,
-              },
-            ]}>
-            <View style={[styles.grab, { backgroundColor: theme.cardBorderStrong }]} />
-            <ThemedText type="small">{t('phoneHasNoLock')}</ThemedText>
-            <ThemedText type="meta" themeColor="textTertiary" style={styles.centreText}>
+          <View style={styles.actions}>
+            <ThemedText type="smallBold" style={[styles.centreText, { color: band.onBand }]}>{t('phoneHasNoLock')}</ThemedText>
+            <ThemedText type="meta" style={[styles.centreText, { color: band.onBandSecondary }]}>
               {t('setPhoneLockBody')}
             </ThemedText>
-            <Button
+            <EButton
+              palette={band}
               label={t('openPhoneSettings')}
-              variant="outline"
+              color={{ fill: band.onBand, text: band.band }}
               onPress={() => Linking.openSettings().catch(() => {})}
-              style={styles.fullButton}
+              testID="lock-open-settings"
             />
           </View>
         ) : (
-          <View
-            style={[
-              styles.sheet,
-              {
-                backgroundColor: theme.backgroundElement,
-                borderTopColor: theme.cardBorder,
-                paddingBottom: Spacing.four + insets.bottom,
-              },
-            ]}>
-            <View style={[styles.grab, { backgroundColor: theme.cardBorderStrong }]} />
-            <View
-              accessible={false}
-              importantForAccessibility="no-hide-descendants"
-              style={[styles.sensor, { backgroundColor: theme.primarySoft }]}>
-              <BiometricGlyph kind={biometricKind} size={30} color={theme.primary} />
-            </View>
+          <View style={styles.actions}>
             {biometric === 'failed' ? (
-              <ThemedText type="small" accessibilityLiveRegion="polite" style={styles.centreText}>
+              <ThemedText type="smallBold" accessibilityLiveRegion="polite" style={[styles.centreText, { color: band.onBand }]}>
                 {copy.lockedRetry}
               </ThemedText>
             ) : null}
-            <ThemedText type="meta" themeColor="textSecondary" style={styles.centreText}>
+            <ThemedText type="meta" style={[styles.centreText, { color: band.onBandSecondary }]}>
               {copy.lockedFallback}
             </ThemedText>
-            <Button
+            <EButton
+              palette={band}
               label={copy.unlockWith[biometricKind ?? 'passcode']}
+              color={{ fill: band.onBand, text: band.band }}
               onPress={tryUnlock}
-              style={styles.fullButton}
+              testID="lock-unlock"
             />
           </View>
         )}
-      </ThemedView>
+      </View>
       ) : null}
     </View>
     </PrivacyGateContext.Provider>
@@ -219,51 +224,40 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     opacity: 0,
   },
+  flex: { flex: 1 },
   root: {
     flex: 1,
-    justifyContent: 'space-between',
+    paddingHorizontal: ScreenPadding,
   },
   centre: {
-    // Roughly the upper 60%: the reading half of the screen.
-    flex: 1,
+    // The reading half of the screen; the button sits where the thumb is.
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.three - 4,
-    paddingHorizontal: ScreenPadding,
+    gap: Spacing.three,
+    paddingVertical: Spacing.four,
   },
+  title: {
+    fontFamily: Fonts.sansSemi,
+    fontSize: 30,
+    lineHeight: 36,
+    letterSpacing: -0.9,
+    textAlign: 'center',
+    marginTop: Spacing.three,
+  },
+  titleLarge: { fontSize: 26, lineHeight: 34, letterSpacing: -0.4 },
   copy: {
     textAlign: 'center',
-    maxWidth: 300,
-    paddingTop: Spacing.two,
+    maxWidth: 320,
   },
-  sheet: {
-    alignItems: 'center',
-    gap: Spacing.two + 2,
-    borderTopWidth: 1,
-    borderTopLeftRadius: Radius.bottomSheet + 2,
-    borderTopRightRadius: Radius.bottomSheet + 2,
-    paddingHorizontal: ScreenPadding,
-    paddingTop: Spacing.three - 4,
-  },
-  grab: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    marginBottom: Spacing.three,
-  },
-  sensor: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.two,
+  actions: {
+    gap: Spacing.two,
+    alignItems: 'stretch',
+    width: '100%',
+    maxWidth: 480,
+    alignSelf: 'center',
   },
   centreText: {
     textAlign: 'center',
-  },
-  fullButton: {
-    alignSelf: 'stretch',
-    marginTop: Spacing.three - 2,
   },
 });
