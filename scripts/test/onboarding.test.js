@@ -1029,7 +1029,8 @@ eq('balance-coverage copy resolves every placeholder',
     /netWorthBreakdown\(state\)/.test(walletSource) &&
       /balances\.balanceByAccountId/.test(walletSource));
   ok('Wallet prints a dash, not AED 0, when nothing is knowable',
-    /p\.knownBalanceCount > 0\s*\? formatAmount\(p\.balanceFils\) : '—'/.test(
+    // The band figure only when a balance is known; otherwise a drawn dash.
+    /p\.knownBalanceCount > 0\s*\?\s*<BandFigure[\s\S]*?fils=\{p\.balanceFils\}[\s\S]*?:\s*<View[\s\S]*?>—<\/ThemedText>/.test(
       walletOverviewSource,
     ));
   ok('Wallet replaces net worth with a focused recorded-balances summary',

@@ -21,7 +21,6 @@ import {
 } from '@/components/bills/bills-segment-control';
 import { BillsTimeline } from '@/components/bills/bills-timeline';
 import { PaymentAgenda } from '@/components/bills/payment-agenda';
-import { Money } from '@/components/ui/money';
 import { paymentGroupFor, type PaymentAgendaItem, type PaymentGroup } from '@/lib/reference-presentation';
 import { ThemedText } from '@/components/themed-text';
 import { CategoryChips } from '@/components/ui/category-chips';
@@ -30,10 +29,12 @@ import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
+import { BandFigure } from '@/components/ui/band/band-figure';
+import { EButton } from '@/components/ui/band/e-button';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
@@ -50,6 +51,7 @@ import {
   toISODate,
 } from '@/lib/format';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
+import { openAgendaSummary } from '@/lib/money-places-band';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { measureRuntimeOperation, recordRuntimeOperation } from '@/lib/runtime-performance';
 import {
@@ -298,12 +300,16 @@ export default function BillsScreen() {
   // The subscription just marked cancelled, until undone or replaced.
   const [cancelNotice, setCancelNotice] = useState<string | null>(null);
 
-  const billsHeader: ScreenHeaderProps = {
+  // Design language E: Bills wears the ochre band (ink text in light, light
+  // text on the deepened ochre in dark — both from the band tokens).
+  const band = useBand('bills');
+  const billsNav: BandNav = {
     title: t('billsTitle'),
     actions: [{
       label: t('newReminder'),
       icon: 'plus',
       onPress: () => setAdderVisible(true),
+      testID: 'bills-add',
     }],
   };
 
@@ -536,7 +542,6 @@ export default function BillsScreen() {
   );
   const includePaidAgenda = agendaView !== 'upcoming';
   const summary = useMemo(() => {
-    const openItems = visibleAgendaItems.filter((item) => !item.paid);
     const label = agendaView === 'upcoming'
       ? w.next30Total
       : groupFilter === 'subscriptions'
@@ -546,17 +551,14 @@ export default function BillsScreen() {
           : groupFilter === 'cards'
             ? t('billsCardsTotal')
             : t('billsAllTotal');
-    return {
-      label,
-      totalFils: openItems.reduce((sum, item) => sum + item.amountFils, 0),
-      count: openItems.length,
-      estimated: openItems.filter((item) => item.estimated).length,
-    };
+    // Paid rows are history in All; only what is still open is "due".
+    return { label, ...openAgendaSummary(visibleAgendaItems) };
   }, [agendaView, groupFilter, visibleAgendaItems, w.next30Total]);
-  const timelineItems = useMemo(
-    () => windowed.filter((item) => item.daysLeft >= 0).map(({ id, title, dateISO }) => ({ id, title, dateISO })),
-    [windowed],
-  );
+  // "7 payments · 1 is an estimate" under the band figure.
+  const summaryQualifier = [
+    w.paymentsCount(summary.count),
+    summary.estimated > 0 ? w.estimatesCount(summary.estimated) : null,
+  ].filter(Boolean).join(' · ');
   const subscriptionItems = useMemo(
     () => windowed.filter((item) => paymentGroupFor(item) === 'subscriptions'),
     [windowed],
@@ -740,7 +742,7 @@ export default function BillsScreen() {
   const renderStoppedRow = (sub: Subscription, i: number) => (
     <View key={sub.title} testID={`bills-stopped-${sub.title.trim().toLowerCase()}`}
       style={[styles.row, largeText && styles.rowLarge,
-        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }]}>
+        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
       <Pressable accessibilityRole="button"
         accessibilityLabel={`${sub.title}. ${w.likelyStopped}. ${tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })}`}
         onPress={() => setDetail(sub)}
@@ -756,8 +758,8 @@ export default function BillsScreen() {
       <Pressable accessibilityRole="button" accessibilityLabel={`${w.markCancelled}: ${sub.title}`}
         testID={`bills-mark-cancelled-${sub.title.trim().toLowerCase()}`}
         onPress={() => onMarkCancelled(sub)}
-        style={({ pressed }) => [styles.pill, { borderColor: theme.controlBorder,
-          backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+        style={({ pressed }) => [styles.pill, { borderColor: band.rule,
+          backgroundColor: band.card, opacity: pressed ? 0.75 : 1 }]}>
         <ThemedText type="smallBold">{w.markCancelled}</ThemedText>
       </Pressable>
     </View>
@@ -780,61 +782,44 @@ export default function BillsScreen() {
 
   return (
     <>
-      <ScreenScaffold
+      <BandScaffold
+        band="bills"
         tabbed
-        headerMode="inline"
-        header={billsHeader}
-        refreshControl={
-          <CaptureRefreshControl tintColor={theme.primary} />
-        }
-        contentStyle={largeText && styles.headerLarge}
-        scrollProps={{ showsVerticalScrollIndicator: false }}>
-        <BillsSegmentControl segment={agendaView} onChange={setAgendaView} />
-        {agendaView === 'all' && <BillsGroupFilter value={groupFilter} onChange={setGroupFilter} />}
-        <View
-          accessible
-          accessibilityLabel={`${summary.label}. ${tf('billsSummaryPayments', {
-            count: summary.count,
-            s: summary.count === 1 ? '' : 's',
-          })}`}
-          style={[styles.summary, { borderColor: theme.cardBorder }]}>
-          <ThemedText type="micro" themeColor="textSecondary" style={styles.summaryLabel}>
-            {summary.label}
-          </ThemedText>
-          <Money fils={summary.totalFils} type="display" decimals fitInset={Spacing.three * 2 + 2} />
-          <View style={styles.summaryMeta}>
-            <ThemedText type="meta" themeColor="textSecondary">
-              {tf('billsSummaryPayments', {
-                count: summary.count,
-                s: summary.count === 1 ? '' : 's',
-              })}
-            </ThemedText>
-            {summary.estimated > 0 && <>
-              <ThemedText type="meta" themeColor="textTertiary">·</ThemedText>
-              <ThemedText type="meta" style={{ color: theme.gold }}>
-                {tf('billsSummaryEstimated', { count: summary.estimated })}
-              </ThemedText>
-            </>}
+        testID="bills-screen"
+        nav={billsNav}
+        refreshControl={<CaptureRefreshControl />}
+        contentStyle={largeText ? styles.headerLarge : undefined}
+        scrollProps={{ showsVerticalScrollIndicator: false }}
+        bandContent={(
+          <View style={styles.bandBody}>
+            <BillsSegmentControl segment={agendaView} onChange={setAgendaView} palette={band} />
+            <BandFigure
+              testID="bills-summary"
+              label={summary.label}
+              fils={summary.totalFils}
+              decimals
+              qualifier={summaryQualifier}
+              palette={band} />
+            {agendaView === 'upcoming' && <BillsTimeline items={windowed} todayISO={todayISO} palette={band} />}
           </View>
-        </View>
+        )}>
         {/* Only while it is still cancelled: Still paying, or a new charge, ends it. */}
         {cancelNotice && cancelled?.[cancelNotice.trim().toLowerCase()] && (
           <View accessibilityLiveRegion="polite" testID="bills-cancel-notice"
-            style={[styles.notice, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+            style={[styles.notice, { borderColor: band.rule, backgroundColor: band.card }]}>
             <ThemedText type="small" style={styles.rowInfo}>{w.markedCancelled(cancelNotice)}</ThemedText>
             <Pressable accessibilityRole="button" accessibilityLabel={`${w.undo}: ${cancelNotice}`}
               onPress={() => undoCancelled(cancelNotice)} style={styles.noticeAction}>
-              <ThemedText type="linkPrimary">{w.undo}</ThemedText>
+              <ThemedText type="smallBold" style={{ color: band.tint }}>{w.undo}</ThemedText>
             </Pressable>
           </View>
         )}
         {agendaView === 'upcoming' ? <>
-          <BillsTimeline items={timelineItems} todayISO={todayISO} />
           {(subscriptionItems.length > 0 || stopped.length > 0) && <View style={styles.block} testID="bills-subscriptions">
             <View style={styles.blockHeader} accessible accessibilityRole="header"
               accessibilityLabel={w.subscriptionsTotalA11y(formatAED(monthlySubscriptionsFils))}>
-              <ThemedText type="heading" style={styles.rowInfo}>{w.subscriptions}</ThemedText>
-              <ThemedText type="smallBold" themeColor="textSecondary" tabular>
+              <ThemedText type="heading" style={styles.blockTitle}>{w.subscriptions}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" tabular>
                 {w.perMonth(formatAED(monthlySubscriptionsFils))}
               </ThemedText>
             </View>
@@ -846,13 +831,14 @@ export default function BillsScreen() {
               renderMeta={renderAgendaMeta}
               onOpen={onOpenAgendaItem} />}
             {stopped.slice(0, stoppedLimit).map(renderStoppedRow)}
-            {stopped.length > stoppedLimit && <Button
+            {stopped.length > stoppedLimit && <EButton
+              palette={band}
+              variant="quiet"
               label={tf('showMoreRecurring', { count: stopped.length - stoppedLimit })}
-              variant="ghost"
               onPress={() => setStoppedLimit((limit) => limit + RECURRING_PAGE_SIZE)} />}
           </View>}
           <View style={styles.block} testID="bills-and-cards">
-            <ThemedText type="heading" accessibilityRole="header">{w.billsAndCards}</ThemedText>
+            <ThemedText type="heading" accessibilityRole="header" style={styles.blockTitle}>{w.billsAndCards}</ThemedText>
             <PaymentAgenda
               items={billAndCardItems}
               accounts={state.accounts}
@@ -861,6 +847,7 @@ export default function BillsScreen() {
               onOpen={onOpenAgendaItem} />
           </View>
         </> : <>
+          <BillsGroupFilter value={groupFilter} onChange={setGroupFilter} palette={band} />
           <PaymentAgenda
             items={visibleAgendaItems}
             accounts={state.accounts}
@@ -868,33 +855,36 @@ export default function BillsScreen() {
             group={selectedAgendaGroup}
             renderMeta={renderAgendaMeta}
             onOpen={onOpenAgendaItem} />
-          {groupFilter === 'everything' && otherRepeats.length > 0 && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
-            <ThemedText type="heading">{words.unscheduled}</ThemedText>
+          {groupFilter === 'everything' && otherRepeats.length > 0 && <View style={[styles.referenceGroup, { borderColor: band.rule, backgroundColor: band.card }]}>
+            <ThemedText type="heading" accessibilityRole="header">{words.unscheduled}</ThemedText>
             {otherRepeats.slice(0, otherLimit).map(renderRecurringRow)}
-            {otherRepeats.length > otherLimit && <Button
+            {otherRepeats.length > otherLimit && <EButton
+              palette={band}
+              variant="quiet"
               label={tf('showMoreRecurring', { count: otherRepeats.length - otherLimit })}
-              variant="ghost"
               onPress={() => setOtherLimit((limit) => limit + RECURRING_PAGE_SIZE)} />}
           </View>}
           {(groupFilter === 'everything' || groupFilter === 'subscriptions') && stopped.length > 0 && <>
-            <Button label={showStopped ? words.fewer : words.more} variant="ghost" onPress={() => setShowStopped(!showStopped)} />
-            {showStopped && <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
-              <ThemedText type="heading">{words.stopped}</ThemedText>
+            <EButton palette={band} variant="quiet" label={showStopped ? words.fewer : words.more}
+              onPress={() => setShowStopped(!showStopped)} />
+            {showStopped && <View style={[styles.referenceGroup, { borderColor: band.rule, backgroundColor: band.card }]}>
+              <ThemedText type="heading" accessibilityRole="header">{words.stopped}</ThemedText>
               {stopped.slice(0, stoppedLimit).map(renderRecurringRow)}
-              {stopped.length > stoppedLimit && <Button
+              {stopped.length > stoppedLimit && <EButton
+                palette={band}
+                variant="quiet"
                 label={tf('showMoreRecurring', { count: stopped.length - stoppedLimit })}
-                variant="ghost"
                 onPress={() => setStoppedLimit((limit) => limit + RECURRING_PAGE_SIZE)} />}
             </View>}
           </>}
           {(groupFilter === 'everything' || groupFilter === 'subscriptions') && cancelledList.length > 0 &&
-            <View style={[styles.referenceGroup, { borderColor: theme.cardBorder, backgroundColor: theme.card }]} testID="bills-cancelled">
-              <ThemedText type="heading">{w.cancelledByYou}</ThemedText>
+            <View style={[styles.referenceGroup, { borderColor: band.rule, backgroundColor: band.card }]} testID="bills-cancelled">
+              <ThemedText type="heading" accessibilityRole="header">{w.cancelledByYou}</ThemedText>
               {cancelledList.map((sub, i) => {
                 const on = cancelled?.[sub.title.trim().toLowerCase()];
                 return (
                   <View key={sub.title} style={[styles.row, largeText && styles.rowLarge,
-                    i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }]}>
+                    i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
                     <Pressable accessibilityRole="button" accessibilityLabel={`${sub.title}. ${w.cancelledByYou}`}
                       onPress={() => setDetail(sub)} style={[styles.recurringIdentity, largeText && styles.rowIdentityLarge]}>
                       <MerchantAvatar title={sub.title} category={sub.category} size={32} />
@@ -906,8 +896,8 @@ export default function BillsScreen() {
                     <Pressable accessibilityRole="button" accessibilityLabel={w.stillPayingA11y(sub.title)}
                       testID={`bills-still-paying-${sub.title.trim().toLowerCase()}`}
                       onPress={() => undoCancelled(sub.title)}
-                      style={({ pressed }) => [styles.pill, { borderColor: theme.controlBorder,
-                        backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
+                      style={({ pressed }) => [styles.pill, { borderColor: band.rule,
+                        backgroundColor: band.sheet, opacity: pressed ? 0.75 : 1 }]}>
                       <ThemedText type="smallBold">{w.stillPaying}</ThemedText>
                     </Pressable>
                   </View>
@@ -915,7 +905,7 @@ export default function BillsScreen() {
               })}
             </View>}
         </>}
-      </ScreenScaffold>
+      </BandScaffold>
 
       {/* One detail sheet for recurring charges and reminders alike (also
           Home's). Bills hands it the actions that commit through the
@@ -925,13 +915,14 @@ export default function BillsScreen() {
           subscription={detail}
           onClose={() => setDetail(null)}
           footer={(
-            <View style={[styles.detailActions, largeText && styles.detailStack]}>
+            <View style={styles.detailActions}>
               {!trackedTitles.has(detail.title.toLowerCase()) &&
                 detail.status !== 'stopped' &&
                 !isCancelledByUser(detail, cancelled) &&
                 remindable(detail) && (
-                  <Button
-                    inline={!largeText}
+                  <EButton
+                    palette={band}
+                    testID="bill-detail-remind"
                     label={t('remindMe')}
                     onPress={() => {
                       addBill(billFromSubscription(detail));
@@ -940,7 +931,6 @@ export default function BillsScreen() {
                   />
                 )}
               <Button
-                inline={!largeText}
                 variant="ghost"
                 labelColor={theme.expense}
                 label={t('notASubscription')}
@@ -961,10 +951,11 @@ export default function BillsScreen() {
           bill={selectedReminder}
           onClose={() => setSelectedReminderId(null)}
           footer={(
-            <View style={[styles.detailActions, largeText && styles.detailStack]}>
+            <View style={styles.detailActions}>
               {selectedReminder.status !== 'paid' && (
-                <Button
-                  inline={!largeText}
+                <EButton
+                  palette={band}
+                  testID="bill-detail-mark-paid"
                   label={t('markPaid')}
                   onPress={() => {
                     const reminder = selectedReminder;
@@ -974,7 +965,6 @@ export default function BillsScreen() {
                 />
               )}
               <Button
-                inline={!largeText}
                 variant="ghost"
                 labelColor={theme.expense}
                 label={t('delete')}
@@ -1085,19 +1075,15 @@ export default function BillsScreen() {
 }
 
 const styles = StyleSheet.create({
-  summary: {
-    borderWidth: 1,
-    borderRadius: Radius.sheet,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
-    gap: Spacing.one,
-  },
-  summaryLabel: { textTransform: 'uppercase', letterSpacing: 0.8 },
-  summaryMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: Spacing.two },
-  referenceGroup: { borderWidth: 1, borderRadius: 16, padding: 14, gap: 6 },
+  bandBody: { gap: Spacing.three },
+  referenceGroup: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, padding: 14, gap: 6 },
   headerLarge: { alignItems: 'stretch' },
   block: { gap: Spacing.one },
-  blockHeader: { minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
+  blockHeader: {
+    minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between',
+    gap: Spacing.two, paddingTop: Spacing.two,
+  },
+  blockTitle: { flexShrink: 1 },
   notice: {
     flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingStart: Spacing.three,
     borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet,
@@ -1165,9 +1151,6 @@ const styles = StyleSheet.create({
   inputRowLarge: { flexDirection: 'column' },
   fieldColumn: { flex: 1 },
   dayField: { flex: 0.6 },
-  detailStack: { flexDirection: 'column', alignItems: 'stretch' },
-  detailActions: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-  },
+  // One primary E button, then the quiet destructive choice under it.
+  detailActions: { flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one },
 });

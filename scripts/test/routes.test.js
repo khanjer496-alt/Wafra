@@ -265,7 +265,7 @@ function sources(dir = SRC) {
 
   const cards = fs.readFileSync(path.join(SRC, 'app/cards.tsx'), 'utf8');
   ok('Payment cards names stored instruments and keeps their details accessible',
-    /const cardsHeader: ScreenHeaderProps = \{[\s\S]{0,180}title: t\('cardsTitle'\)/.test(cards) &&
+    /const cardsNav: BandNav = \{[\s\S]{0,180}title: t\('cardsTitle'\)/.test(cards) &&
       /activeCards\.map/.test(cards) && /setDetail\(card\)/.test(cards) &&
       /<CardDetailSheet[\s\S]*?account=\{detail\}/.test(cards));
 

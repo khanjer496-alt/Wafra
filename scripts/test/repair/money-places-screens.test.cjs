@@ -74,6 +74,18 @@ test('a quiet account offers Update balance and Hide inline', () => {
   assert.equal(byId(tree, 'wallet-update-balance-enbd'), undefined);
 });
 
+test('a credit card on its ink card says its figure is owed, and a quiet one can still be hidden', () => {
+  const h = createHarness();
+  const tree = h.render('wallet');
+  assert.match(text(byId(tree, 'wallet-card-credit')), /· owed ·/);
+  const quiet = createHarness({ state: { cardDues: [] } });
+  quiet.state.accounts = quiet.state.accounts.map((a) => a.id === 'credit' ? { ...a, snapshotTs: QUIET_TS } : a);
+  const quietTree = quiet.render('wallet');
+  assert.ok(byId(quietTree, 'wallet-quiet-line'));
+  press(byId(quietTree, 'wallet-hide-credit'));
+  assert.deepEqual(JSON.parse(JSON.stringify(quiet.events.filter((e) => e[0] === 'editAccount'))), [['editAccount', 'credit', { archived: true }]]);
+});
+
 test('Add activity lists statement import, add by hand and paste, each to an existing screen', () => {
   const h = createHarness({ platform: 'ios' });
   const tree = h.render('wallet');
@@ -91,7 +103,10 @@ function renderAccount(h, params) {
 test('account detail shows the reported balance, who reported it, and recorded in/out — no chart', () => {
   const h = createHarness();
   const tree = renderAccount(h, { id: 'enbd' });
-  assert.match(text(byId(tree, 'account-detail-balance')), /Latest balance[\s\S]*25,000[\s\S]*Bank alert/);
+  // Design language E: the balance is the slate band's figure, with who
+  // reported it and when on the line under it.
+  assert.match(text(byId(tree, 'account-detail-balance')), /Latest balance[\s\S]*25,000/);
+  assert.match(text(byId(tree, 'account-detail-freshness')), /Bank alert/);
   const flow = text(byId(tree, 'account-detail-flow'));
   assert.match(flow, /Recorded in this month/);
   assert.match(flow, /Recorded out this month/);
@@ -106,7 +121,7 @@ test('a balance the user set reads "Set by you", never "Bank alert"', () => {
   const ts = Date.parse('2026-09-15T08:00:00Z');
   h.state.accounts = h.state.accounts.map((a) => a.id === 'enbd' ? { ...a, snapshotTs: ts, manualSnapshotTs: ts } : a);
   const tree = renderAccount(h, { id: 'enbd' });
-  const balance = text(byId(tree, 'account-detail-balance'));
+  const balance = text(byId(tree, 'account-detail-freshness'));
   assert.match(balance, /Set by you/);
   assert.doesNotMatch(balance, /Bank alert/);
 });
@@ -173,7 +188,8 @@ test('the goal screen shows saved against target, says no money moves, and inven
   const hero = text(byId(tree, 'goal-progress'));
   assert.match(hero, /64%/);
   assert.match(hero, /AED 3,200.00 of AED 5,000.00/);
-  assert.match(hero, /AED 1,800.00 to go/);
+  // What is left is the sheet's figure under "Left to save": the target minus what is saved.
+  assert.match(text(byId(tree, 'goal-left')), /Left to save[\s\S]*1,800/);
   assert.match(text(byId(tree, 'goal-no-money-moves')), /No money moves between your accounts/);
   assert.doesNotMatch(text(tree), /reaches it by|behind|a month|on track|Contributions/i);
   assert.match(text(tree), /Add money[\s\S]*Edit goal/);
@@ -247,17 +263,19 @@ test('the 30-day timeline speaks its pins and leaves out anything beyond the win
   const tree = billsWith([{ ...netflix, nextExpectedISO: '2026-09-20' }, { ...spotifyUp, nextExpectedISO: '2026-11-30' }]).render('bills');
   const label = byId(tree, 'bills-timeline').props.accessibilityLabel;
   // The harness's monthly bills fell due on 7 and 8 Sep; their next due dates
-  // (7 and 8 Oct) are inside the window, so they are pinned too.
-  assert.match(label, /^3 payments in the next 30 days: Netflix, 20 Sept; Etisalat, 7 Oct; DEWA, 8 Oct$/);
-  assert.match(label, /Netflix/);
+  // (7 and 8 Oct) are inside the window, so they are pinned too. Each pin is
+  // spoken with its amount; an estimate says so.
+  assert.match(label, /^Next 30 days: Netflix in 5 days About AED 15.49, Etisalat in 22 days AED 200.00, DEWA in 23 days AED 320.00$/);
   assert.doesNotMatch(label, /Spotify/);
-  // DEWA on day 23 of 30 is centred; nothing is anchored past an edge.
-  const anchors = walk(byId(tree, 'bills-timeline')).map((n) => n.props?.testID).filter((id) => /^bills-timeline-pin-/.test(id ?? ''));
-  assert.deepEqual(anchors, ['bills-timeline-pin-center', 'bills-timeline-pin-center', 'bills-timeline-pin-center']);
+  // Merchant-logo pins, drawn where their day falls on the strip.
+  const pins = walk(byId(tree, 'bills-timeline')).filter((n) => n.type === 'View' && typeof n.key === 'string');
+  assert.equal(pins.length, 3);
+  // A payment due today pins at the start; nothing due leaves the strip out and says so.
   const today = billsWith([{ ...netflix, nextExpectedISO: '2026-09-15' }]).render('bills');
-  const first = walk(byId(today, 'bills-timeline')).find((n) => n.props?.testID === 'bills-timeline-pin-start');
-  assert.ok(first, 'a pin due today hangs its label inward from the start edge');
-  assert.equal(first.props.style.find((part) => part && 'marginStart' in part).marginStart, -5, 'its dot still sits on today');
+  assert.match(byId(today, 'bills-timeline').props.accessibilityLabel, /Netflix today/);
+  const empty = createHarness({ platform: 'ios', empty: true }).render('bills');
+  assert.equal(byId(empty, 'bills-timeline'), undefined);
+  assert.match(text(byId(empty, 'bills-timeline-empty')), /Nothing due in the next 30 days/);
 });
 
 function renderBillSheet(h, props) {

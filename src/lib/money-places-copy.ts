@@ -133,6 +133,23 @@ export const moneyPlacesCopy = {
     saveBill: 'Save bill',
     dayNotInMonth: (date: string) => `That day does not exist in the month this yearly bill falls in (${date}).`,
     detectedCannotEdit: 'Wafra made this reminder from a detected charge and may update it from your bank notices, so it cannot be edited here. Delete it and add your own to change it.',
+    // Design language E: bands and sheets
+    billsViews: 'Bills view',
+    paymentsCount: (n: number) => n === 1 ? '1 payment' : `${n} payments`,
+    estimatesCount: (n: number) => n === 1 ? '1 is an estimate' : `${n} are estimates`,
+    about: 'About',
+    lastSixMonths: 'Last 6 months',
+    cardsApart: (n: number) => n === 1 ? '1 card, shown on its own' : `${n} cards, shown on their own`,
+    details: 'Details',
+    detailsA11y: (card: string) => `Details for ${card}`,
+    noBalanceFigure: 'No balance yet',
+    savedWord: 'saved',
+    leftToSave: 'Left to save',
+    recordAmount: (amount: string) => `Record ${amount}`,
+    settlesIt: 'Clears the statement',
+    asBankStated: 'As your bank stated',
+    typeIt: 'Type it',
+    cardsCount: (n: number) => n === 1 ? '1 card' : `${n} cards`,
   },
   ar: {
     updateBalance: 'تحديث الرصيد',
@@ -251,6 +268,26 @@ export const moneyPlacesCopy = {
     saveBill: 'حفظ الفاتورة',
     dayNotInMonth: (date: string) => `هذا اليوم غير موجود في شهر هذه الفاتورة السنوية (${date}).`,
     detectedCannotEdit: 'أنشأت وفرة هذا التذكير من عملية مكتشفة وقد تحدّثه من إشعارات بنكك، لذا لا يمكن تعديله هنا. احذفه وأضف تذكيرك الخاص لتغييره.',
+    billsViews: 'عرض الفواتير',
+    paymentsCount: (n: number) => n === 1 ? 'دفعة واحدة' : n === 2 ? 'دفعتان'
+      : n >= 3 && n <= 10 ? `${n} دفعات` : `${n} دفعة`,
+    estimatesCount: (n: number) => n === 1 ? 'واحدة منها تقديرية' : n === 2 ? 'اثنتان منها تقديريتان'
+      : `${n} منها تقديرية`,
+    about: 'حوالي',
+    lastSixMonths: 'آخر 6 أشهر',
+    cardsApart: (n: number) => n === 1 ? 'بطاقة واحدة تظهر منفصلة' : n === 2 ? 'بطاقتان تظهران منفصلتين'
+      : n >= 3 && n <= 10 ? `${n} بطاقات تظهر منفصلة` : `${n} بطاقة تظهر منفصلة`,
+    details: 'التفاصيل',
+    detailsA11y: (card: string) => `تفاصيل ${card}`,
+    noBalanceFigure: 'لا يوجد رصيد بعد',
+    savedWord: 'مُدّخر',
+    leftToSave: 'المتبقي للادخار',
+    recordAmount: (amount: string) => `تسجيل ${amount}`,
+    settlesIt: 'لا يبقى شيء في الكشف',
+    asBankStated: 'كما ذكره بنكك',
+    typeIt: 'اكتبه',
+    cardsCount: (n: number) => n === 1 ? 'بطاقة واحدة' : n === 2 ? 'بطاقتان'
+      : n >= 3 && n <= 10 ? `${n} بطاقات` : `${n} بطاقة`,
   },
 } as const;
 

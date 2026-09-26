@@ -9,15 +9,16 @@ import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { BandScaffold } from '@/components/ui/band-scaffold';
+import { BandFigure } from '@/components/ui/band/band-figure';
+import { EButton } from '@/components/ui/band/e-button';
 import { TextField } from '@/components/ui/text-field';
-import { Radius, Spacing } from '@/constants/theme';
+import { Fonts, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
-import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { useTheme } from '@/hooks/use-theme';
 import { formatAED, formatAmountForInput, parseAmountWithMoneySpec } from '@/lib/format';
 import { goalProgress } from '@/lib/money-places';
+import { goalRingGeometry } from '@/lib/money-places-band';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { t } from '@/lib/i18n';
@@ -27,8 +28,8 @@ const goalIcon = (emoji: string): IconName => (GOAL_ICONS as string[]).includes(
 /** Zero is a real "saved so far". */
 const ZERO = /^\s*0+(?:[.,٫]0*)?\s*$/;
 
-const RING = 148;
-const STROKE = 12;
+const RING = 190;
+const STROKE = 20;
 
 /**
  * One savings goal: how much is set aside against the target, and the two
@@ -47,9 +48,9 @@ export default function GoalRoute() {
 
 function GoalScreen({ goalId }: { goalId: string }) {
   const router = useRouter();
-  const theme = useTheme();
+  // Goals are money set aside by hand: the green flow band, the ring in mint.
+  const band = useBand('flow');
   const language = useLanguage();
-  const large = useLargeTextLayout();
   const w = moneyPlacesWords(language);
   const state = useStoreSelector(({ state: s }) => ({ goals: s.goals, ledgerMoney: s.ledgerMoney }));
   const { editGoal, deleteGoal } = useStoreActions();
@@ -62,22 +63,17 @@ function GoalScreen({ goalId }: { goalId: string }) {
   const [targetText, setTargetText] = useState('');
   const [savedText, setSavedText] = useState('');
 
-  const header: ScreenHeaderProps = {
-    title: goal?.title ?? w.goalTitle,
-    back: { label: t('back'), onPress: () => router.back() },
-  };
-
   if (!goal) {
     return (
-      <ScreenScaffold headerMode="native" header={header} contentStyle={styles.content}>
+      <BandScaffold band="flow" testID="goal-screen" nav={{ back: () => router.back(), title: w.goalTitle }}
+        contentStyle={styles.content}>
         <ThemedText type="default" themeColor="textSecondary">{w.goalMissing}</ThemedText>
-      </ScreenScaffold>
+      </BandScaffold>
     );
   }
 
   const progress = goalProgress(goal);
-  const radius = (RING - STROKE) / 2;
-  const circumference = 2 * Math.PI * radius;
+  const ring = goalRingGeometry(RING, STROKE, progress.ratio);
 
   const money = state.ledgerMoney;
   const targetFils = money ? parseAmountWithMoneySpec(targetText, money) : null;
@@ -98,54 +94,64 @@ function GoalScreen({ goalId }: { goalId: string }) {
 
   return (
     <>
-      <ScreenScaffold headerMode="native" header={header} contentStyle={styles.content}
-        scrollProps={{ showsVerticalScrollIndicator: false }}>
-        <View style={styles.hero} testID="goal-progress" accessible
-          accessibilityLabel={`${goal.title}. ${w.progressA11y(progress.percent)}. ${w.savedOf(formatAED(goal.savedFils), formatAED(goal.targetFils))}`}>
-          <View style={styles.ring}>
-            <Svg width={RING} height={RING}>
-              <Circle cx={RING / 2} cy={RING / 2} r={radius} stroke={theme.track} strokeWidth={STROKE} fill="none" />
-              {progress.ratio > 0 && (
-                <Circle
-                  cx={RING / 2}
-                  cy={RING / 2}
-                  r={radius}
-                  stroke={progress.reached ? theme.income : theme.primary}
-                  strokeWidth={STROKE}
-                  strokeLinecap="round"
-                  fill="none"
-                  strokeDasharray={`${circumference} ${circumference}`}
-                  strokeDashoffset={circumference * (1 - progress.ratio)}
-                  transform={`rotate(-90 ${RING / 2} ${RING / 2})`}
-                />
-              )}
-            </Svg>
-            <View style={styles.ringLabel} pointerEvents="none">
-              <ThemedText type="amount" tabular>{`${progress.percent}%`}</ThemedText>
+      <BandScaffold
+        band="flow"
+        testID="goal-screen"
+        nav={{ back: () => router.back(),
+          actions: [{ label: w.editGoal, icon: 'sliders', onPress: openEdit, testID: 'goal-edit-action' }] }}
+        contentStyle={styles.content}
+        scrollProps={{ showsVerticalScrollIndicator: false }}
+        bandContent={(
+          <View style={styles.hero} testID="goal-progress">
+            {/* The ring speaks its percent; the name below stays the screen's header. */}
+            <View style={styles.ring} accessible accessibilityRole="image"
+              accessibilityLabel={`${w.progressA11y(progress.percent)}. ${w.savedOf(formatAED(goal.savedFils), formatAED(goal.targetFils))}`}>
+              <Svg width={RING} height={RING}>
+                <Circle cx={RING / 2} cy={RING / 2} r={ring.radius} stroke={band.bandRule} strokeWidth={STROKE} fill="none" />
+                {ring.drawn && (
+                  <Circle
+                    cx={RING / 2}
+                    cy={RING / 2}
+                    r={ring.radius}
+                    stroke={band.accent}
+                    strokeWidth={STROKE}
+                    strokeLinecap="round"
+                    fill="none"
+                    strokeDasharray={`${ring.circumference} ${ring.circumference}`}
+                    strokeDashoffset={ring.dashOffset}
+                    transform={`rotate(-90 ${RING / 2} ${RING / 2})`}
+                  />
+                )}
+              </Svg>
+              <View style={styles.ringLabel} pointerEvents="none">
+                <ThemedText tabular maxFontSizeMultiplier={1.2} style={[styles.percent, { color: band.onBand }]}>{`${progress.percent}%`}</ThemedText>
+                <ThemedText type="meta" maxFontSizeMultiplier={1.4} style={{ color: band.onBandSecondary }}>{w.savedWord}</ThemedText>
+              </View>
             </View>
+            <View style={styles.titleRow}>
+              <Icon name={goalIcon(goal.emoji)} size={20} color={band.onBand} />
+              <ThemedText accessibilityRole="header" maxFontSizeMultiplier={1.6} style={[styles.goalName, { color: band.onBand }]}>{goal.title}</ThemedText>
+            </View>
+            <ThemedText type="default" tabular style={[styles.center, { color: band.onBandSecondary }]}>
+              {w.savedOf(formatAED(goal.savedFils), formatAED(goal.targetFils))}
+            </ThemedText>
           </View>
-          <View style={styles.titleRow}>
-            <Icon name={goalIcon(goal.emoji)} size={16} color={theme.textSecondary} />
-            <ThemedText type="subtitle">{goal.title}</ThemedText>
-          </View>
-          <ThemedText type="small" themeColor="textSecondary" tabular>
-            {w.savedOf(formatAED(goal.savedFils), formatAED(goal.targetFils))}
-          </ThemedText>
-          <ThemedText type="meta" themeColor={progress.reached ? 'income' : 'textSecondary'}>
-            {progress.reached ? w.reached : w.toGo(formatAED(progress.leftFils))}
-          </ThemedText>
+        )}>
+        <EButton palette={band} label={w.addMoney} icon="plus" onPress={() => setAdding(true)} testID="goal-add-money" />
+        <ThemedText type="meta" themeColor="textSecondary" testID="goal-no-money-moves">{w.noMoneyMoves}</ThemedText>
+
+        <View style={styles.section} testID="goal-left">
+          <ThemedText type="heading" accessibilityRole="header">{progress.reached ? w.reached : w.leftToSave}</ThemedText>
+          {progress.reached
+            ? <ThemedText type="small" style={{ color: band.statusOk }}>{w.savedOf(formatAED(goal.savedFils), formatAED(goal.targetFils))}</ThemedText>
+            : <BandFigure fils={progress.leftFils} palette={band} size="large" color={band.text} secondaryColor={band.textSecondary} />}
         </View>
 
-        <View style={[styles.actions, large && styles.stack]}>
-          <Button inline={!large} label={w.addMoney} icon="plus" onPress={() => setAdding(true)} />
-          <Button inline={!large} variant="outline" label={w.editGoal} onPress={openEdit} />
+        <View style={styles.actions}>
+          <EButton palette={band} variant="secondary" label={w.editGoal} onPress={openEdit} testID="goal-edit" />
+          <Button variant="ghost" labelColor={band.statusOver} label={w.deleteGoal} onPress={() => setDeleting(true)} />
         </View>
-        <View style={[styles.note, { borderColor: theme.cardBorder }]} testID="goal-no-money-moves">
-          <Icon name="wallet" size={16} color={theme.textSecondary} />
-          <ThemedText type="meta" themeColor="textSecondary" style={styles.grow}>{w.noMoneyMoves}</ThemedText>
-        </View>
-        <Button variant="ghost" labelColor={theme.expense} label={w.deleteGoal} onPress={() => setDeleting(true)} />
-      </ScreenScaffold>
+      </BandScaffold>
 
       {adding && (
         <AmountSheet
@@ -158,7 +164,7 @@ function GoalScreen({ goalId }: { goalId: string }) {
         />
       )}
       <BottomSheet visible={editing} onClose={() => setEditing(false)} title={w.editGoal}
-        footer={<Button label={w.save} onPress={saveEdit} disabled={!editValid} />}>
+        footer={<EButton palette={band} label={w.save} onPress={saveEdit} disabled={!editValid} testID="goal-save" />}>
         <TextField label={w.goalName} value={title} onChangeText={setTitle} placeholder={w.goalName} />
         <TextField numeric label={w.goalTarget} value={targetText} onChangeText={setTargetText} placeholder={w.goalTarget}
           leading={<ThemedText type="smallBold" themeColor="textSecondary">{money?.currency ?? '—'}</ThemedText>} />
@@ -186,15 +192,13 @@ function GoalScreen({ goalId }: { goalId: string }) {
 
 const styles = StyleSheet.create({
   content: { gap: Spacing.three },
-  hero: { alignItems: 'center', gap: Spacing.one, paddingVertical: Spacing.three },
+  hero: { alignItems: 'center', gap: Spacing.one, paddingBottom: Spacing.two },
   ring: { width: RING, height: RING, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.two },
   ringLabel: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one + 2 },
-  actions: { flexDirection: 'row', gap: Spacing.two },
-  stack: { flexDirection: 'column' },
-  note: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two, padding: Spacing.three,
-    borderRadius: Radius.sheet, borderWidth: StyleSheet.hairlineWidth,
-  },
-  grow: { flex: 1, minWidth: 0 },
+  percent: { fontFamily: Fonts.sansSemi, fontSize: 40, lineHeight: 46, letterSpacing: -1.5 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: Spacing.two },
+  goalName: { fontFamily: Fonts.sansSemi, fontSize: 30, lineHeight: 36, letterSpacing: -1, textAlign: 'center', flexShrink: 1 },
+  center: { textAlign: 'center' },
+  section: { gap: Spacing.one, paddingTop: Spacing.two },
+  actions: { gap: Spacing.one, paddingTop: Spacing.two },
 });

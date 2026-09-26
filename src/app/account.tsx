@@ -11,15 +11,16 @@ import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { Money } from '@/components/ui/money';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
+import { BandFigure } from '@/components/ui/band/band-figure';
+import { EButton } from '@/components/ui/band/e-button';
+import { StatTile } from '@/components/ui/band/stat-tile';
 import { TextField } from '@/components/ui/text-field';
 import { AccountTile } from '@/components/ui/tile';
-import { Radius, Spacing } from '@/constants/theme';
+import { Fonts, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { useTheme } from '@/hooks/use-theme';
 import { useToday } from '@/hooks/use-today';
 import { accountSnapshotFreshness } from '@/lib/account-freshness';
 import { reliableBalanceFils } from '@/lib/balances';
@@ -54,7 +55,8 @@ export default function AccountRoute() {
 
 function AccountScreen({ accountId, askBalance }: { accountId: string; askBalance: boolean }) {
   const router = useRouter();
-  const theme = useTheme();
+  // A detail screen takes its parent's band: Accounts' slate.
+  const band = useBand('accounts');
   const language = useLanguage();
   const large = useLargeTextLayout();
   const w = moneyPlacesWords(language);
@@ -108,17 +110,17 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
   );
   const openEntry = useCallback((transaction: Transaction) => setEntry(transaction), []);
 
-  const header: ScreenHeaderProps = {
-    title: account?.name ?? w.accountTitle,
-    back: { label: t('back'), onPress: () => router.back() },
-    actions: account ? [{ label: w.manage, icon: 'sliders', onPress: () => setManaging(true) }] : [],
+  // The account's name is the band's headline; the nav row keeps back and Manage.
+  const nav: BandNav = {
+    back: () => router.back(),
+    actions: account ? [{ label: w.manage, icon: 'sliders', onPress: () => setManaging(true), testID: 'account-manage' }] : [],
   };
 
   if (!account) {
     return (
-      <ScreenScaffold headerMode="native" header={header} contentStyle={styles.content}>
+      <BandScaffold band="accounts" testID="account-screen" nav={{ ...nav, title: w.accountTitle }} contentStyle={styles.content}>
         <ThemedText type="default" themeColor="textSecondary">{w.accountMissing}</ThemedText>
-      </ScreenScaffold>
+      </BandScaffold>
     );
   }
 
@@ -158,61 +160,69 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
 
   return (
     <>
-      <ScreenScaffold headerMode="native" header={header} contentStyle={styles.content}
-        scrollProps={{ showsVerticalScrollIndicator: false }}>
-        <View style={styles.identity} testID="account-detail-header">
-          <AccountTile account={account} size={46} />
-          <View style={styles.grow}>
-            <ThemedText type="subtitle">{account.name}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">{identity}</ThemedText>
-          </View>
-        </View>
-
-        <View style={[styles.balance, { borderColor: theme.cardBorder }]} testID="account-detail-balance"
-          accessible accessibilityLabel={[w.latestBalance,
-            balanceFils === null ? w.noBalanceYet : formatAED(balanceFils),
-            freshness?.label ?? (handKept ? w.trackedByHand : '')].filter(Boolean).join('. ')}>
-          <ThemedText type="small" themeColor="textSecondary">{w.latestBalance}</ThemedText>
-          {balanceFils === null
-            ? <ThemedText type="amount" themeColor="textTertiary">—</ThemedText>
-            : <Money fils={balanceFils} type="amount" />}
-          <ThemedText type="meta" themeColor={freshness?.quiet ? 'warning' : 'textSecondary'}>
-            {freshness?.label ?? (handKept ? w.trackedByHand : w.noBalanceYet)}
-          </ThemedText>
-        </View>
-
-        <View style={[styles.flow, large && styles.stack]} testID="account-detail-flow">
-          <View style={[styles.flowCell, { borderColor: theme.cardBorder }]}>
-            <ThemedText type="meta" themeColor="textSecondary">{w.recordedIn}</ThemedText>
-            <Money fils={flow.inFils} type="smallBold" sign={flow.inFils > 0 ? 'plus' : 'none'} />
-          </View>
-          <View style={[styles.flowCell, { borderColor: theme.cardBorder }]}>
-            <ThemedText type="meta" themeColor="textSecondary">{w.recordedOut}</ThemedText>
-            <Money fils={flow.outFils} type="smallBold" sign={flow.outFils > 0 ? 'minus' : 'none'} />
-          </View>
-        </View>
-        <ThemedText type="meta" themeColor="textTertiary">{w.recordedNote}</ThemedText>
-
-        {isAccountDetailTarget(account) && (
-          <View style={[styles.correction, { borderColor: theme.cardBorder }]} testID="account-set-balance">
-            <View style={styles.grow}>
-              <ThemedText type="smallBold">{w.balanceWrong}</ThemedText>
-              <ThemedText type="meta" themeColor="textSecondary">{w.setBalanceBody}</ThemedText>
+      <BandScaffold
+        band="accounts"
+        testID="account-screen"
+        nav={nav}
+        contentStyle={styles.content}
+        scrollProps={{ showsVerticalScrollIndicator: false }}
+        bandContent={(
+          <View style={styles.bandBody}>
+            <View style={styles.identity} testID="account-detail-header">
+              <AccountTile account={account} size={52} />
+              <View style={styles.grow}>
+                <ThemedText type="heading" accessibilityRole="header" style={{ color: band.onBand }}>{account.name}</ThemedText>
+                <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{identity}</ThemedText>
+              </View>
             </View>
-            <Button inline={!large} variant="outline" label={w.setTodaysBalance} onPress={openBalance} />
+
+            {balanceFils === null
+              ? <View testID="account-detail-balance" accessible accessibilityRole="text"
+                  accessibilityLabel={[w.latestBalance, w.noBalanceYet].join('. ')} style={styles.noBalance}>
+                  <ThemedText type="small" style={{ color: band.onBandSecondary }}>{w.latestBalance}</ThemedText>
+                  <ThemedText maxFontSizeMultiplier={1.5} style={[styles.dash, { color: band.onBand }]}>—</ThemedText>
+                  <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{w.noBalanceYet}</ThemedText>
+                </View>
+              : <View style={styles.balance}>
+                  <BandFigure testID="account-detail-balance" label={w.latestBalance} fils={balanceFils} decimals
+                    palette={band} size="hero" />
+                  {/* Who reported it and when. A quiet figure (no new one for two
+                      weeks) reads bold: it is the latest known, not current. */}
+                  {freshness || handKept ? <ThemedText testID="account-detail-freshness"
+                    type={freshness?.quiet ? 'smallBold' : 'meta'}
+                    style={{ color: freshness?.quiet ? band.onBand : band.onBandSecondary }}>
+                    {freshness?.label ?? w.trackedByHand}
+                  </ThemedText> : null}
+                </View>}
+
+            <View style={[styles.flow, large && styles.stack]} testID="account-detail-flow">
+              <StatTile palette={band} label={w.recordedIn} testID="account-detail-in"
+                accessibilityLabel={`${w.recordedIn}, ${formatAED(flow.inFils)}`}
+                style={large && styles.tileStacked}>
+                <BandFigure fils={flow.inFils} sign={flow.inFils > 0 ? 'plus' : 'none'} palette={band} size="medium"
+                  fitInset={large ? 28 : 200} />
+              </StatTile>
+              <StatTile palette={band} label={w.recordedOut} testID="account-detail-out"
+                accessibilityLabel={`${w.recordedOut}, ${formatAED(flow.outFils)}`}
+                style={large && styles.tileStacked}>
+                <BandFigure fils={flow.outFils} sign={flow.outFils > 0 ? 'minus' : 'none'} palette={band} size="medium"
+                  fitInset={large ? 28 : 200} />
+              </StatTile>
+            </View>
           </View>
-        )}
+        )}>
+        <ThemedText type="meta" themeColor="textSecondary">{w.recordedNote}</ThemedText>
 
         <View style={styles.section} testID="account-recent">
           <View style={styles.sectionHead}>
-            <ThemedText type="smallBold" accessibilityRole="header" style={styles.grow}>{w.recent}</ThemedText>
+            <ThemedText type="heading" accessibilityRole="header" style={styles.grow}>{w.recent}</ThemedText>
             {recent.length > 0 && (
               <Pressable accessibilityRole="link" accessibilityLabel={w.seeAllA11y(account.name)}
                 testID="account-see-all"
                 onPress={() => router.push(`/transactions?account=${encodeURIComponent(account.id)}`)}
                 style={styles.seeAll}>
-                <ThemedText type="linkPrimary">{w.seeAll}</ThemedText>
-                <Icon name="chevron-right" size={16} color={theme.primary} />
+                <ThemedText type="smallBold" style={{ color: band.tint }}>{w.seeAll}</ThemedText>
+                <Icon name="chevron-right" size={16} color={band.tint} />
               </Pressable>
             )}
           </View>
@@ -222,10 +232,21 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
               <TransactionRow key={transaction.id} transaction={transaction} account={account} onPress={openEntry} />
             ))}
         </View>
-      </ScreenScaffold>
+
+        {isAccountDetailTarget(account) && (
+          <Pressable accessibilityRole="button" testID="account-set-balance"
+            accessibilityLabel={`${w.balanceWrong} ${w.setTodaysBalance}`} accessibilityHint={w.setBalanceBody}
+            onPress={openBalance}
+            style={({ pressed }) => [styles.correction, large && styles.stack,
+              { borderColor: band.rule, backgroundColor: band.card, opacity: pressed ? 0.8 : 1 }]}>
+            <ThemedText type="small" style={styles.grow}>{w.balanceWrong}</ThemedText>
+            <ThemedText type="smallBold" style={{ color: band.tint }}>{w.setTodaysBalance}</ThemedText>
+          </Pressable>
+        )}
+      </BandScaffold>
 
       <BottomSheet visible={balanceOpen} onClose={() => setBalanceOpen(false)} title={w.setTodaysBalance}
-        footer={<Button label={w.save} onPress={saveBalance} disabled={!balanceValid} />}>
+        footer={<EButton palette={band} label={w.save} onPress={saveBalance} disabled={!balanceValid} testID="account-balance-save" />}>
         <ThemedText type="subtitle" accessibilityRole="header">{w.setBalanceQuestion(account.name)}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">{w.setBalanceBody}</ThemedText>
         {!state.ledgerMoney && (
@@ -297,18 +318,18 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
 
 const styles = StyleSheet.create({
   content: { gap: Spacing.three },
-  identity: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  bandBody: { gap: 20 },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   grow: { flex: 1, minWidth: 0, gap: Spacing.half },
-  balance: { gap: Spacing.one, paddingVertical: Spacing.three, borderBottomWidth: StyleSheet.hairlineWidth },
-  flow: { flexDirection: 'row', gap: Spacing.two },
-  stack: { flexDirection: 'column' },
-  flowCell: {
-    flex: 1, gap: Spacing.one, padding: Spacing.three, borderRadius: Radius.sheet,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
+  balance: { gap: Spacing.one },
+  noBalance: { gap: 4 },
+  dash: { fontFamily: Fonts.sansSemi, fontSize: 56, lineHeight: 62 },
+  flow: { flexDirection: 'row', gap: 10 },
+  stack: { flexDirection: 'column', alignItems: 'stretch' },
+  tileStacked: { flexBasis: 'auto', flexGrow: 0, alignSelf: 'stretch' },
   correction: {
-    flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two,
-    paddingVertical: Spacing.three, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two, minHeight: 56,
+    paddingVertical: 14, paddingHorizontal: 16, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth, marginTop: Spacing.two,
   },
   section: { gap: Spacing.one },
   sectionHead: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },

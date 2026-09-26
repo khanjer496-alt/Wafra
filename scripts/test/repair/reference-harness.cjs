@@ -233,6 +233,11 @@ function createHarness(options = {}) {
   native.PanResponder={create:()=>({panHandlers:{}})};
   local('@/components/ui/band/dial-limit');
   local('@/components/add-band-field');
+  // Bills and Accounts in language E: the band pieces they use, their pure
+  // layout figures and the band's own copy run from source.
+  local('@/lib/money-places-band','src/lib/money-places-band.ts');
+  for(const name of ['pin-timeline'])local(`@/components/ui/band/${name}`);
+  local('@/components/money-places/key-value-rows');local('@/components/bills/bill-history-tiles');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
   local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');
   local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/bills/bills-timeline');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');

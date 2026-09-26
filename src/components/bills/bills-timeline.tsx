@@ -1,105 +1,48 @@
-import React, { useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import Animated, { FadeInUp } from 'react-native-reanimated';
+import React, { useMemo } from 'react';
 
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { PinTimeline } from '@/components/ui/band/pin-timeline';
+import type { BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
-import { useScreenEntering } from '@/hooks/use-screen-entering';
-import { useTheme } from '@/hooks/use-theme';
-import { shiftISO, shortDate } from '@/lib/format';
-import { timelineLabelAnchor, timelinePins, type TimelineInput } from '@/lib/money-places';
+import { useLedgerMoney } from '@/hooks/use-ledger-money';
+import { formatAED } from '@/lib/format';
+import { formatMinorUnits } from '@/lib/ledger-money';
+import { billsTimelinePins } from '@/lib/money-places-band';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
+import type { PaymentAgendaItem } from '@/lib/reference-presentation';
 
 const WINDOW_DAYS = 30;
-/** A label needs roughly this share of the strip to itself, or its pin goes unlabelled. */
-const LABEL_GAP = 0.2;
-const LANE_HEIGHT = 18;
-/** Pin box width: the widest a label may be. */
-const PIN_WIDTH = 88;
-const DOT = 10;
 
 /**
- * The next 30 days as one strip, with a pin on each day something falls due.
+ * The next 30 days on the Bills band: a baseline with a merchant-logo pin on
+ * each day something falls due (design language E's PinTimeline).
  *
- * A picture of the window its segment names, nothing more: overdue items and
- * anything later stay in the list below. Pins rise into place 100 ms apart on
- * iOS; on Android and with Reduce Motion or a screen reader they are simply
- * there (useScreenEntering), and money figures never move.
+ * A picture of the window its segment names, nothing more: what is already
+ * late and anything later stay in the list on the sheet. Every payment is
+ * spoken in date order with its amount (an estimate says "about"), even when
+ * only the first eight pins fit.
  */
-export function BillsTimeline({ items, todayISO }: { items: readonly TimelineInput[]; todayISO: string }) {
-  const theme = useTheme();
-  const language = useLanguage();
-  const w = moneyPlacesWords(language);
-  const enter = useScreenEntering();
-  const pins = useMemo(() => timelinePins(items, todayISO, WINDOW_DAYS), [items, todayISO]);
-  const [stripWidth, setStripWidth] = useState(0);
-  const lanes = Math.max(1, ...pins.map((pin) => pin.lane + 1));
-  // Label the first pin of each crowded stretch; the rest stay dots and are
-  // still spoken in the summary label below.
-  let lastLabelled = -1;
-  const labelled = new Set<string>();
-  for (const pin of pins) {
-    if (pin.lane > 0) continue;
-    if (lastLabelled < 0 || pin.position - lastLabelled >= LABEL_GAP) {
-      labelled.add(pin.id);
-      lastLabelled = pin.position;
-    }
+export function BillsTimeline({ items, todayISO, palette }: {
+  items: readonly PaymentAgendaItem[];
+  todayISO: string;
+  palette: BandPalette;
+}) {
+  const w = moneyPlacesWords(useLanguage());
+  const moneySpec = useLedgerMoney();
+  const pins = useMemo(() => billsTimelinePins(items, todayISO, WINDOW_DAYS), [items, todayISO]);
+  const timelinePins = useMemo(() => pins.map((pin) => {
+    const amount = moneySpec
+      ? `${moneySpec.currency} ${formatMinorUnits(Math.round(pin.amountFils), moneySpec)}`
+      : formatAED(pin.amountFils);
+    return {
+      key: pin.key, dayOffset: pin.dayOffset, title: pin.title, category: pin.category,
+      spokenAmount: pin.estimated ? `${w.about} ${amount}` : amount,
+    };
+  }), [pins, moneySpec, w]);
+  if (timelinePins.length === 0) {
+    return <ThemedText type="meta" testID="bills-timeline-empty" style={{ color: palette.onBandSecondary }}>
+      {w.nothingIn30Days}
+    </ThemedText>;
   }
-  const spoken = pins.length === 0
-    ? w.nothingIn30Days
-    : `${w.timelineA11y(pins.length)}: ${pins.map((pin) => w.pinA11y(pin.title, shortDate(pin.dateISO))).join('; ')}`;
-  const ticks = [0, 10, 20, 30];
-
-  return (
-    <View style={styles.root} testID="bills-timeline" accessible accessibilityRole="summary" accessibilityLabel={spoken}>
-      <View style={[styles.pins, { height: lanes * LANE_HEIGHT + 22 }]} importantForAccessibility="no-hide-descendants"
-        onLayout={(event) => setStripWidth(event.nativeEvent.layout.width)}>
-        {pins.map((pin, index) => {
-          // The dot sits exactly on its day; near an edge the label runs
-          // inward from it instead of spilling past the strip.
-          const anchor = timelineLabelAnchor(pin.position, stripWidth, PIN_WIDTH);
-          const place = anchor === 'start'
-            ? { start: `${pin.position * 100}%` as const, marginStart: -DOT / 2, alignItems: 'flex-start' as const }
-            : anchor === 'end'
-              ? { end: `${(1 - pin.position) * 100}%` as const, marginEnd: -DOT / 2, alignItems: 'flex-end' as const }
-              : { start: `${pin.position * 100}%` as const, marginStart: -PIN_WIDTH / 2, alignItems: 'center' as const };
-          return (
-            <Animated.View
-              key={pin.id}
-              testID={`bills-timeline-pin-${anchor}`}
-              entering={enter(FadeInUp.delay(index * 100).springify().damping(24).stiffness(260))}
-              style={[styles.pin, place, { bottom: pin.lane * LANE_HEIGHT }]}>
-              {labelled.has(pin.id) && (
-                <ThemedText type="nano" themeColor="textSecondary" numberOfLines={1}
-                  style={[styles.pinLabel, anchor === 'center' && styles.pinLabelCentered]}>
-                  {pin.title}
-                </ThemedText>
-              )}
-              <View style={[styles.dot, { backgroundColor: pin.day === 0 ? theme.warning : theme.primary }]} />
-            </Animated.View>
-          );
-        })}
-      </View>
-      <View style={[styles.track, { backgroundColor: theme.track }]} />
-      <View style={styles.axis} importantForAccessibility="no-hide-descendants">
-        {ticks.map((day) => (
-          <ThemedText key={day} type="nano" themeColor="textTertiary" tabular>
-            {day === 0 ? w.today : shortDate(shiftISO(todayISO, day))}
-          </ThemedText>
-        ))}
-      </View>
-    </View>
-  );
+  return <PinTimeline testID="bills-timeline" palette={palette} days={WINDOW_DAYS} pins={timelinePins} />;
 }
-
-const styles = StyleSheet.create({
-  root: { gap: Spacing.one, paddingVertical: Spacing.two },
-  pins: { position: 'relative', marginHorizontal: Spacing.two },
-  pin: { position: 'absolute', width: PIN_WIDTH },
-  pinLabel: { maxWidth: PIN_WIDTH },
-  pinLabelCentered: { textAlign: 'center' },
-  dot: { width: DOT, height: DOT, borderRadius: DOT / 2, marginTop: 2 },
-  track: { height: 2, borderRadius: 1, marginHorizontal: Spacing.two },
-  axis: { flexDirection: 'row', justifyContent: 'space-between' },
-});

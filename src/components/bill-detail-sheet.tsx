@@ -1,17 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { BillHistoryTiles } from '@/components/bills/bill-history-tiles';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
+import { KeyValueRows } from '@/components/money-places/key-value-rows';
 import { ThemedText } from '@/components/themed-text';
+import { BandFigure } from '@/components/ui/band/band-figure';
+import { EButton } from '@/components/ui/band/e-button';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
-import { HistoryStrip } from '@/components/ui/charts';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
-import { LabelTable } from '@/components/ui/layout';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
-import { Money } from '@/components/ui/money';
 import { TextField } from '@/components/ui/text-field';
-import { Radius, Spacing } from '@/constants/theme';
+import { Radius, Spacing, type BandPalette } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
@@ -59,6 +61,26 @@ interface BillDetailSheetProps {
 }
 
 /**
+ * The sheet's one figure, in the band figure's type (Geist SemiBold, tabular
+ * digits) set in the sheet's text colours. An estimate carries "≈" and is
+ * spoken as "About …".
+ */
+function SheetFigure({ fils, estimated, aboutWord, palette, testID }: {
+  fils: number;
+  estimated: boolean;
+  aboutWord: string;
+  palette: BandPalette;
+  testID?: string;
+}) {
+  return <View testID={testID} style={styles.amountLine}>
+    {estimated && <ThemedText type="heading" accessibilityLabel={aboutWord}
+      style={{ color: palette.textSecondary }}>≈</ThemedText>}
+    <BandFigure fils={fils} palette={palette} size="large" color={palette.text} secondaryColor={palette.textSecondary}
+      fitInset={estimated ? 32 : 0} style={styles.figure} />
+  </View>;
+}
+
+/**
  * One bill: a detected recurring charge, or a reminder the user keeps.
  *
  * Home and Bills open this same sheet. For a recurring charge the history is
@@ -70,6 +92,9 @@ interface BillDetailSheetProps {
  */
 export function BillDetailSheet({ subscription = null, bill = null, onClose, footer }: BillDetailSheetProps) {
   const theme = useTheme();
+  // Bills' sheet: its figure, bars, links and primary button take the ochre
+  // band's sheet tokens (ink fill on ochre's light scheme, ochre on dark).
+  const band = useBand('bills');
   const language = useLanguage();
   const large = useLargeTextLayout();
   const w = moneyPlacesWords(language);
@@ -174,7 +199,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
   };
 
   const noticeView = notice && (
-    <View accessibilityLiveRegion="polite" style={[styles.notice, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+    <View accessibilityLiveRegion="polite" style={[styles.notice, { borderColor: band.rule, backgroundColor: band.card }]}>
       <ThemedText type="smallBold">{notice.title}</ThemedText>
       <ThemedText type="meta" themeColor="textSecondary">{notice.body}</ThemedText>
     </View>
@@ -208,7 +233,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
     const defaultFooter = (
       <View style={styles.actions}>
         {!stopped && subscription.cadence !== 'as-needed' && (
-          <Button label={t('remindDayBefore')} onPress={remindMe} />
+          <EButton palette={band} label={t('remindDayBefore')} onPress={remindMe} testID="bill-detail-remind-day-before" />
         )}
         <Button variant="ghost" labelColor={theme.expense} label={t('notRecurring')} onPress={() => setConfirming('not-recurring')} />
       </View>
@@ -217,9 +242,9 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
     return (
       <BottomSheet visible onClose={onClose} title={t('recurringDetected')} footer={footer ?? defaultFooter}>
         <View style={styles.head} testID="bill-detail-head">
-          <MerchantAvatar title={subscription.title} category={subscription.category} size={42} />
+          <MerchantAvatar title={subscription.title} category={subscription.category} size={48} />
           <View style={styles.headText}>
-            <ThemedText type="heading">{subscription.title}</ThemedText>
+            <ThemedText type="heading" accessibilityRole="header">{subscription.title}</ThemedText>
             <ThemedText type="meta" themeColor="textSecondary">
               {stopped
                 ? tf('stoppedLastCharged', { date: shortDate(subscription.lastChargedISO) })
@@ -235,15 +260,13 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
         </View>
 
         <View style={styles.hero} testID="bill-detail-amount">
-          <View style={styles.amountLine}>
-            {estimated && <ThemedText type="subtitle" themeColor="textSecondary">≈</ThemedText>}
-            <Money fils={estimated ? subscription.avgAmountFils : subscription.lastAmountFils} type="sheetAmount" />
-          </View>
+          <SheetFigure fils={estimated ? subscription.avgAmountFils : subscription.lastAmountFils}
+            estimated={estimated} aboutWord={w.about} palette={band} />
           <ThemedText type="meta" themeColor="textSecondary">
             {estimated ? w.estimateFrom(sampled) : t('recurringLastCharge')}
           </ThemedText>
           {subscription.priceIncreased && (
-            <ThemedText type="meta" style={{ color: theme.warning }} testID="bill-detail-price-up">
+            <ThemedText type="meta" style={{ color: band.statusNear }} testID="bill-detail-price-up">
               {`${w.wasPrice(formatAED(subscription.priorTypicalFils))} · ${w.priceWentUp}`}
             </ThemedText>
           )}
@@ -252,59 +275,49 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
         {data && (
           <>
             <View style={styles.history}>
-              <HistoryStrip months={data.history} />
+              <BillHistoryTiles testID="bill-detail-history" months={data.history} palette={band} label={w.lastSixMonths} />
               {verdict && <ThemedText type="default" themeColor="textSecondary">{verdict}</ThemedText>}
             </View>
 
-            {data.firstISO && (
-              <View style={[styles.factRow, large && styles.stack]}>
-                <View style={styles.fact}>
-                  <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
-                    {subscription.category === 'loan'
-                      ? t('payingFor')
-                      : subscription.group === 'subscription' ? t('subscribedFor') : t('trackingSince')}
-                  </ThemedText>
-                  <ThemedText type="smallBold">{subscribedFor(data.firstISO)}</ThemedText>
-                  <ThemedText type="micro" themeColor="textSecondary">{tf('walletSince', { date: shortDate(data.firstISO) })}</ThemedText>
-                </View>
-                <View style={styles.fact}>
-                  <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>
-                    {subscription.group === 'subscription' ? t('charges') : t('payments')}
-                  </ThemedText>
-                  <ThemedText type="smallBold" tabular>{data.txs.length}</ThemedText>
-                </View>
-                <View style={styles.fact}>
-                  <ThemedText type="micro" themeColor="textSecondary" style={styles.factLabel}>{t('totalPaid')}</ThemedText>
-                  <ThemedText type="smallBold" tabular>{formatAED(data.totalFils, { decimals: false })}</ThemedText>
-                </View>
-              </View>
-            )}
-
-            <LabelTable
+            <KeyValueRows
+              palette={band}
+              testID="bill-detail-facts"
               rows={[
+                ...(data.firstISO ? [{
+                  key: 'since',
+                  label: subscription.category === 'loan'
+                    ? t('payingFor')
+                    : subscription.group === 'subscription' ? t('subscribedFor') : t('trackingSince'),
+                  value: `${subscribedFor(data.firstISO)} · ${tf('walletSince', { date: shortDate(data.firstISO) })}`,
+                }, {
+                  key: 'count',
+                  label: subscription.group === 'subscription' ? t('charges') : t('payments'),
+                  value: String(data.txs.length),
+                }, {
+                  key: 'total',
+                  label: t('totalPaid'),
+                  value: formatAED(data.totalFils, { decimals: false }),
+                }] : []),
                 {
+                  key: 'paid-with',
                   label: t('paidWith'),
-                  value: (
-                    <ThemedText type="small">
-                      {[
-                        data.accounts.map((account) => account.name).join(', ') || t('unknownAccount'),
-                        data.unknownInstrumentCount > 0 && data.accounts.length > 0
-                          ? tf('paymentInstrumentMissingCount', {
-                              count: data.unknownInstrumentCount,
-                              s: data.unknownInstrumentCount === 1 ? '' : 's',
-                            })
-                          : '',
-                      ].filter(Boolean).join(' · ')}
-                    </ThemedText>
-                  ),
+                  value: [
+                    data.accounts.map((account) => account.name).join(', ') || t('unknownAccount'),
+                    data.unknownInstrumentCount > 0 && data.accounts.length > 0
+                      ? tf('paymentInstrumentMissingCount', {
+                          count: data.unknownInstrumentCount,
+                          s: data.unknownInstrumentCount === 1 ? '' : 's',
+                        })
+                      : '',
+                  ].filter(Boolean).join(' · '),
                 },
-                { label: t('category'), value: <ThemedText type="small">{categoryLabel(getCategory(subscription.category))}</ThemedText> },
+                { key: 'category', label: t('category'), value: categoryLabel(getCategory(subscription.category)) },
               ]}
             />
 
             {data.txs.length > 0 && (
               <View style={styles.historyBlock}>
-                <ThemedText type="micro" themeColor="textSecondary">
+                <ThemedText type="heading" accessibilityRole="header" style={styles.sectionTitle}>
                   {subscription.group === 'subscription' ? t('history') : t('paymentHistory')}
                 </ThemedText>
                 <View testID="subscription-history-scroll">
@@ -313,14 +326,14 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
                     const offMedian = data.medianFils > 0 && transaction.amountFils > data.medianFils * 1.1;
                     return (
                       <View key={transaction.id} style={[styles.historyRow, large && styles.stack,
-                        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }]}>
+                        i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
                         <View style={styles.headText}>
                           <ThemedText type="small">{fullDateTime(transaction)}</ThemedText>
                           <ThemedText type="micro" themeColor="textSecondary" numberOfLines={2}>
                             {account?.name ?? t('paymentInstrumentNotStated')}
                           </ThemedText>
                         </View>
-                        <ThemedText type="smallBold" tabular style={offMedian ? { color: theme.warning } : undefined}>
+                        <ThemedText type="smallBold" tabular style={offMedian ? { color: band.statusNear } : undefined}>
                           {formatAED(transaction.amountFils, { decimals: false })}
                         </ThemedText>
                       </View>
@@ -343,15 +356,16 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
         )}
 
         {cancellable && (cancelled && cancelledOn ? (
-          <View style={[styles.cancelled, { borderColor: theme.cardBorder }]} testID="bill-detail-cancelled">
+          <View style={[styles.cancelled, { borderColor: band.rule }]} testID="bill-detail-cancelled">
             <ThemedText type="small" themeColor="textSecondary" style={styles.headText}>
               {w.cancelledOn(shortDate(cancelledOn))}
             </ThemedText>
-            <Button inline variant="outline" label={w.stillPaying}
-              onPress={() => setSubscriptionCancelled(subscription.title, null)} />
+            <EButton palette={band} variant="secondary" label={w.stillPaying} testID="bill-detail-still-paying"
+              style={styles.inlineButton} onPress={() => setSubscriptionCancelled(subscription.title, null)} />
           </View>
         ) : (
-          <Button variant="outline" label={w.markCancelled} onPress={() => setConfirming('cancelled')} />
+          <EButton palette={band} variant="secondary" label={w.markCancelled} testID="bill-detail-mark-cancelled"
+            onPress={() => setConfirming('cancelled')} />
         ))}
 
         {noticeView}
@@ -421,31 +435,30 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
   return (
     <BottomSheet visible onClose={onClose} title={w.billTitle} footer={footer}>
       <View style={styles.head} testID="bill-detail-head">
-        <MerchantAvatar title={reminder.title} category={reminder.category} size={42} />
+        <MerchantAvatar title={reminder.title} category={reminder.category} size={48} />
         <View style={styles.headText}>
-          <ThemedText type="heading">{reminder.title}</ThemedText>
+          <ThemedText type="heading" accessibilityRole="header">{reminder.title}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary">
             {`${categoryLabel(getCategory(reminder.category))} · ${status}`}
           </ThemedText>
         </View>
       </View>
       <View style={styles.hero} testID="bill-detail-amount">
-        <Money fils={reminder.amountFils} type="sheetAmount" />
-        <ThemedText type="meta" style={{ color: row.status === 'overdue' ? theme.expense : theme.textSecondary }}>
+        <SheetFigure fils={reminder.amountFils} estimated={false} aboutWord={w.about} palette={band} />
+        <ThemedText type="meta" style={{ color: row.status === 'overdue' ? band.statusOver : band.textSecondary }}>
           {`${w.dueOn(shortDate(row.dueISO))} · ${daysPhrase(row.daysLeft)}`}
         </ThemedText>
       </View>
-      <LabelTable
+      <KeyValueRows
+        palette={band}
+        testID="bill-detail-facts"
         rows={[
           {
+            key: 'due-day',
             label: w.dueDayLabel,
-            value: (
-              <ThemedText type="small">
-                {reminder.yearlyOnISO ? shortDate(reminder.yearlyOnISO) : w.dueDayEachMonth(reminder.dueDay)}
-              </ThemedText>
-            ),
+            value: reminder.yearlyOnISO ? shortDate(reminder.yearlyOnISO) : w.dueDayEachMonth(reminder.dueDay),
           },
-          { label: t('category'), value: <ThemedText type="small">{categoryLabel(getCategory(reminder.category))}</ThemedText> },
+          { key: 'category', label: t('category'), value: categoryLabel(getCategory(reminder.category)) },
         ]}
       />
       <ThemedText type="meta" themeColor="textTertiary">{w.billReminder}</ThemedText>
@@ -458,17 +471,19 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
               leading={<ThemedText type="smallBold" themeColor="textSecondary">{money?.currency ?? '—'}</ThemedText>} />
             <TextField numeric label={w.billDueDay} value={dayText} onChangeText={setDayText} placeholder="1-31" />
             {dayRefused && reminder.yearlyOnISO && (
-              <ThemedText type="meta" accessibilityLiveRegion="polite" style={{ color: theme.expense }}>
+              <ThemedText type="meta" accessibilityLiveRegion="polite" style={{ color: band.statusOver }}>
                 {w.dayNotInMonth(shortDate(reminder.yearlyOnISO))}
               </ThemedText>
             )}
             <View style={[styles.actionsRow, large && styles.stack]}>
-              <Button inline={!large} label={w.saveBill} disabled={!draftValid} onPress={saveEdit} />
-              <Button inline={!large} variant="outline" label={t('cancel')} onPress={() => setEditing(false)} />
+              <EButton palette={band} label={w.saveBill} disabled={!draftValid} onPress={saveEdit}
+                testID="bill-detail-save" style={!large && styles.rowButton} />
+              <EButton palette={band} variant="secondary" label={t('cancel')} onPress={() => setEditing(false)}
+                testID="bill-detail-cancel-edit" style={!large && styles.rowButton} />
             </View>
           </View>
         ) : (
-          <Button variant="outline" label={w.editBill} onPress={openEdit} />
+          <EButton palette={band} label={w.editBill} onPress={openEdit} testID="bill-detail-edit-button" />
         )
       ) : (
         <ThemedText type="meta" themeColor="textSecondary">{w.detectedCannotEdit}</ThemedText>
@@ -481,15 +496,14 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.three - 2 },
   headText: { flex: 1, minWidth: 0, gap: Spacing.half },
   hero: { gap: Spacing.one },
-  amountLine: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.one },
+  amountLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexWrap: 'wrap' },
+  figure: { flexShrink: 1 },
   history: { gap: Spacing.three - 4 },
-  factRow: { flexDirection: 'row', gap: Spacing.three, alignItems: 'flex-start' },
-  fact: { flex: 1, gap: 2 },
-  // The caption sits above the figure and must reserve the taller of the
-  // three, or the column that wraps drops out of line with its neighbours.
-  factLabel: { minHeight: 28 },
   stack: { flexDirection: 'column', alignItems: 'stretch' },
   historyBlock: { gap: Spacing.one },
+  sectionTitle: { paddingTop: Spacing.two },
+  inlineButton: { alignSelf: 'auto', minWidth: 140 },
+  rowButton: { flex: 1, alignSelf: 'auto' },
   historyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: Spacing.two },
   historyMore: { paddingVertical: Spacing.two },
   cancelled: {

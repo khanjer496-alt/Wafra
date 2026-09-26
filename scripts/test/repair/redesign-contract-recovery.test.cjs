@@ -38,13 +38,13 @@ for(const language of ['en','ar']) {
  test(`${language}: unknown balance differs from an exact known zero`,()=>{
   const make=known=>{
    const h=createHarness({language});
-   return h.deps['@/components/wallet/balance-overview'].BalanceOverview({theme:h.theme,largeText:true,balanceCoverageText:'Coverage fixture',balanceFils:0,knownBalanceCount:known,duesTotalFils:0,cashOutTotalFils:0,cashOutCardPaymentsFils:0,cashOutAccountOutflowFils:0,currencies:[],currenciesTotalFils:0,activeSourceCount:1,onOpenBills(){},onOpenCurrency(){},onAddAccount(){}});
+   return h.deps['@/components/wallet/balance-overview'].BalanceOverview({palette:h.deps['@/hooks/use-band'].useBand('accounts'),language,sourceNote:'Source fixture',creditCardCount:0,largeText:true,balanceCoverageText:'Coverage fixture',balanceFils:0,knownBalanceCount:known,activeSourceCount:1,onAddAccount(){}});
   };
   assert.match(text(make(0)),/—/);assert.doesNotMatch(text(make(1)),/—/);assert.match(text(make(1)),/0\.00/);
  });
  test(`${language}: balance overview stays focused on recorded account balances`,()=>{
   const h=createHarness({language,largeText:true});
-  const tree=h.deps['@/components/wallet/balance-overview'].BalanceOverview({theme:h.theme,largeText:true,balanceCoverageText:'Coverage fixture',balanceFils:125,knownBalanceCount:1,activeSourceCount:1,onAddAccount(){}});
+  const tree=h.deps['@/components/wallet/balance-overview'].BalanceOverview({palette:h.deps['@/hooks/use-band'].useBand('accounts'),language,sourceNote:'Source fixture',creditCardCount:1,largeText:true,balanceCoverageText:'Coverage fixture',balanceFils:125,knownBalanceCount:1,activeSourceCount:1,onAddAccount(){}});
   assert.equal(walk(tree).filter(n=>n.props.onPress).length,0,'an existing account should not expose unrelated dues/cash-flow navigation inside the balance hero');
   assert.match(text(tree),/1\.25/);
   assert.match(text(tree),/Coverage fixture/);
