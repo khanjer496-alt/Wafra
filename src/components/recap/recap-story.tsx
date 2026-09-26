@@ -1,10 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
-  FadeIn,
-  FadeInDown,
   FadeInLeft,
   FadeInRight,
   FadeInUp,
@@ -16,33 +15,27 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
+import { BandFigure } from '@/components/ui/band/band-figure';
+import { EButton } from '@/components/ui/band/e-button';
+import { StatTile } from '@/components/ui/band/stat-tile';
+import { BAND_GUTTER, BandIconButton } from '@/components/ui/band-scaffold';
 import { BankAvatar } from '@/components/ui/bank-avatar';
-import { useCategoricalPalette } from '@/components/ui/charts';
-import { Icon } from '@/components/ui/icon';
-import { MerchantAvatar } from '@/components/ui/merchant-avatar';
-import { WafraMark } from '@/components/wafra-logo';
-import { EASE, Fonts, Motion, Radius, Spacing } from '@/constants/theme';
-import { useLanguage } from '@/hooks/use-language';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
-import { useTheme } from '@/hooks/use-theme';
 import { GrowBar } from '@/components/ui/grow-bar';
+import { MerchantAvatar } from '@/components/ui/merchant-avatar';
+import { YourPattern } from '@/components/ui/your-pattern';
+import { EASE, Fonts, Motion, bandPalette, type BandId, type BandPalette } from '@/constants/theme';
+import { useBandScheme } from '@/hooks/use-band';
+import { useLanguage } from '@/hooks/use-language';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { monthLabel, shiftMonthKey, shortDate, weekdayName } from '@/lib/format';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
-import { figureFontMultiplier } from '@/lib/large-text-figure';
 import { tapped } from '@/lib/haptics';
-import { isRTL } from '@/lib/i18n';
-import { recapCopy as copy } from '@/lib/recap-copy';
+import { alignEnd, isRTL } from '@/lib/i18n';
+import { recapWords, type RecapWords } from '@/lib/recap-copy';
 import { RECAP_TIME_BUCKETS, type RecapSnapshot } from '@/lib/recap';
 
 const STORY_MS = 7_000;
-const TIME_BAR_HEIGHT = 72;
-
-/** Match Wafra's app-wide policy: screen readers suppress motion too. */
-function useRecapEntering() {
-  const reducedMotion = useReducedMotion();
-  return <T,>(animation: T): T | undefined => reducedMotion ? undefined : animation;
-}
-
 
 /**
  * Larger Text caps for the story's display type, following the iOS ramp
@@ -53,536 +46,518 @@ const STORY_TITLE_MAX = 1.75;
 const STORY_TITLE_SMALL_MAX = 2;
 const STORY_NUMERAL_MAX = 1.5;
 
-function HeroMoney({ fils, moneySpec, color }: { fils: number; moneySpec: LedgerMoneySpec; color?: string }) {
-  const amount = formatMinorUnits(Math.abs(fils), moneySpec);
-  const amountSize = amount.length >= 11
-    ? styles.heroAmountTight
-    : amount.length >= 8
-      ? styles.heroAmountMedium
-      : undefined;
-  const { width, fontScale } = useWindowDimensions();
-  const size = (amountSize ?? styles.heroAmount).fontSize ?? 52;
-  // Never truncated: shrinks toward the story width, never under 60% of the
-  // size Larger Text asked for, and wraps past that.
-  const fit = figureFontMultiplier(amount.length + (fils < 0 ? 1 : 0), size, STORY_TITLE_MAX, width - 48, fontScale);
-  return <View style={styles.heroMoney} accessible accessibilityLabel={`${moneySpec.currency} ${formatMinorUnits(Math.abs(fils), moneySpec)}`}>
-    <ThemedText type="meta" themeColor="textSecondary" style={styles.heroCurrency}>{moneySpec.currency}</ThemedText>
-    <ThemedText tabular maxFontSizeMultiplier={fit ?? STORY_TITLE_MAX} style={[styles.heroAmount, amountSize, color ? { color } : undefined]}>
-      {fils < 0 ? '−' : ''}{amount}
-    </ThemedText>
-  </View>;
+/** Strength of the band's text colour per category rank on the share bar. */
+const RANK_OPACITY = [0.92, 0.7, 0.5, 0.36, 0.28] as const;
+const REST_OPACITY = 0.16;
+
+type SceneKey = 'cover' | 'where' | 'category' | 'account' | 'rhythm' | 'highlight' | 'final';
+
+/**
+ * The band each card wears. The cover is the ink of Home (where the recap
+ * opens from, and the only other place the personal pattern is drawn); "where
+ * and when" is Spending's clay; the rest take the tab their subject lives in.
+ */
+export const RECAP_SCENE_BANDS: Record<SceneKey, BandId> = {
+  cover: 'home',
+  where: 'spending',
+  category: 'bills',
+  account: 'accounts',
+  rhythm: 'flow',
+  highlight: 'spending',
+  final: 'home',
+};
+
+/**
+ * The cards a snapshot has, in story order. A card is only there when the
+ * period has what it shows: no invented merchant, account or time of day.
+ */
+export function recapScenes(snapshot: RecapSnapshot): SceneKey[] {
+  const scenes: SceneKey[] = ['cover'];
+  if (snapshot.topMerchants.length > 0) scenes.push('where');
+  if (snapshot.topCategories.length > 0) scenes.push('category');
+  if (snapshot.mostUsedAccount) scenes.push('account');
+  if (snapshot.spendingCount > 0) scenes.push('rhythm');
+  if (snapshot.descriptor.kind === 'year' || snapshot.largestPurchase) scenes.push('highlight');
+  scenes.push('final');
+  return scenes;
 }
 
-function MoneyText({ fils, moneySpec }: { fils: number; moneySpec: LedgerMoneySpec }) {
-  return <ThemedText type="smallBold" tabular>{moneySpec.currency} {formatMinorUnits(Math.abs(fils), moneySpec)}</ThemedText>;
-}
-
-function Rule({ color }: { color: string }) {
-  return <View style={[styles.rule, { backgroundColor: color }]} />;
-}
-
-function IntroMark() {
-  const theme = useTheme();
+/** Match Wafra's app-wide policy: screen readers suppress motion too. */
+function useRecapEntering() {
   const reducedMotion = useReducedMotion();
-  const reveal = useSharedValue(reducedMotion ? 1 : 0);
-  useEffect(() => {
-    if (reducedMotion) {
-      reveal.value = 1;
-      return;
-    }
-    reveal.value = withTiming(1, { duration: Motion.sectionEnter, easing: Easing.bezier(...EASE) });
-    return () => cancelAnimation(reveal);
-  }, [reducedMotion, reveal]);
-  const motion = useAnimatedStyle(() => ({
-    opacity: reveal.value,
-    transform: [{ translateY: (1 - reveal.value) * 12 }, { scale: 0.94 + reveal.value * 0.06 }],
-  }));
-  return <Animated.View style={[styles.introMark, motion]}>
-    <WafraMark size={58} />
-    <View style={[styles.introMarkRule, { backgroundColor: theme.primary }]} />
-  </Animated.View>;
+  return <T,>(animation: T): T | undefined => reducedMotion ? undefined : animation;
 }
 
-function LedgerBackdrop({ variant = 0 }: { variant?: number }) {
-  const theme = useTheme();
-  return <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-    <View style={[styles.ledgerMargin, { backgroundColor: theme.primary }]} />
-    {Array.from({ length: 6 }, (_, i) => (
-      <View key={i} style={[styles.ledgerRule, { top: `${18 + i * 13}%` as `${number}%`, backgroundColor: theme.cardBorder }]} />
-    ))}
-    {/* A 3.5%-opacity watermark numeral: decoration, so it does not grow. */}
-    <ThemedText accessible={false} allowFontScaling={false} style={[styles.pageIndex, { color: theme.text }]}>
-      {String(variant + 1).padStart(2, '0')}
-    </ThemedText>
-  </View>;
+const moneyLabel = (fils: number, moneySpec: LedgerMoneySpec) =>
+  `${moneySpec.currency} ${fils < 0 ? '−' : ''}${formatMinorUnits(Math.abs(fils), moneySpec)}`;
+
+type SceneProps = { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec; palette: BandPalette; w: RecapWords; compact: boolean };
+
+/** A row amount on a band: Geist Mono like every row amount in the app. */
+function MoneyText({ fils, moneySpec, color }: { fils: number; moneySpec: LedgerMoneySpec; color: string }) {
+  return <ThemedText type="smallBold" tabular style={{ color }}>{moneyLabel(fils, moneySpec)}</ThemedText>;
 }
 
-function IntroScene({ snapshot }: { snapshot: RecapSnapshot }) {
-  const language = useLanguage();
-  const w = copy[language === 'ar' ? 'ar' : 'en'];
+/** The small plain label over a card's headline: what the card shows. */
+function CardLabel({ text, palette }: { text: string; palette: BandPalette }) {
+  return <ThemedText type="small" style={{ color: palette.onBandSecondary }}>{text}</ThemedText>;
+}
+
+/** A count in a stat tile: Geist SemiBold, tabular digits. */
+function CountTile({ label, value, palette, stacked, testID }: {
+  label: string; value: number | string; palette: BandPalette; stacked: boolean; testID?: string;
+}) {
+  return <StatTile palette={palette} label={label} testID={testID} accessibilityLabel={`${label}, ${value}`}
+    style={stacked && styles.tileStacked}>
+    <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} numberOfLines={2}
+      style={[styles.tileCount, { color: palette.onBand }]}>{value}</ThemedText>
+  </StatTile>;
+}
+
+/** An amount in a stat tile, fitted to the tile's width. */
+function MoneyTile({ label, fils, meta, moneySpec, palette, stacked, testID }: {
+  label: string; fils: number; meta?: string; moneySpec: LedgerMoneySpec; palette: BandPalette; stacked: boolean; testID?: string;
+}) {
+  const { width } = useWindowDimensions();
+  // BandFigure fits to (width - 40 - fitInset): leave it one tile's inner width.
+  const tileInner = stacked ? width - BAND_GUTTER * 2 - 28 : (width - BAND_GUTTER * 2 - 10) / 2 - 28;
+  return <StatTile palette={palette} label={label} meta={meta} testID={testID} style={stacked && styles.tileStacked}
+    accessibilityLabel={[label, moneyLabel(fils, moneySpec), meta].filter(Boolean).join(', ')}>
+    <BandFigure fils={fils} moneySpec={moneySpec} palette={palette} size="medium" fitInset={Math.max(0, width - 40 - tileInner)} />
+  </StatTile>;
+}
+
+function TileRow({ children, stacked, testID }: { children: React.ReactNode; stacked: boolean; testID?: string }) {
+  return <View testID={testID} style={[styles.tileRow, stacked && styles.tileRowStacked]}>{children}</View>;
+}
+
+function CoverScene({ snapshot, moneySpec, palette, w, compact, name }: SceneProps & { name: string | null }) {
   const enter = useRecapEntering();
-  return <View style={styles.sceneIntro}>
-    <Animated.View entering={enter(FadeIn.duration(Motion.sectionEnter))}>
-      <IntroMark />
-    </Animated.View>
-    <Animated.View entering={enter(FadeInUp.delay(80).duration(420))} style={styles.introCopy}>
-      <ThemedText type="micro" themeColor="textTertiary">{w.recap} · {snapshot.descriptor.label}</ThemedText>
-      <ThemedText maxFontSizeMultiplier={STORY_TITLE_MAX} style={styles.storyTitle}>{snapshot.descriptor.kind === 'year' ? w.yearIntro : w.monthIntro}</ThemedText>
-      <ThemedText type="default" themeColor="textSecondary">{w.introBody}</ThemedText>
-    </Animated.View>
-    <Animated.View entering={enter(FadeInUp.delay(180).duration(360))} style={styles.introFooter}>
-      <View style={styles.introFooterRule} />
-      <ThemedText type="meta" themeColor="textTertiary">{shortDate(snapshot.from)} — {shortDate(snapshot.to)}</ThemedText>
-    </Animated.View>
-  </View>;
-}
-
-function SpendScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec }) {
-  const language = useLanguage();
-  const w = copy[language === 'ar' ? 'ar' : 'en'];
-  const theme = useTheme();
+  const large = useLargeTextLayout();
   const change = snapshot.spendChangePercent;
-  const enter = useRecapEntering();
   const descriptor = snapshot.descriptor;
   const previousLabel = descriptor.kind === 'month'
     ? monthLabel(shiftMonthKey(descriptor.key, -1))
     : String(descriptor.year - 1);
-  return <View style={styles.sceneSpread}>
-    <Animated.View entering={enter(FadeInDown.duration(380))} style={styles.sceneHeading}>
-      <ThemedText type="default" themeColor="textSecondary">{w.spent}</ThemedText>
-      <HeroMoney fils={snapshot.totalSpendFils} moneySpec={moneySpec} />
-      {change !== null && <View testID="recap-spend-change" style={[styles.changeChip, { backgroundColor: change <= 0 ? theme.primarySoft : theme.expenseSoftBg }]}>
-        <Icon name={change <= 0 ? 'arrow-down-right' : 'arrow-up-right'} size={15} color={change <= 0 ? theme.income : theme.expense} />
-        <ThemedText type="meta" style={{ color: change <= 0 ? theme.income : theme.expense }}>
-          {Math.abs(change)}% {change <= 0 ? w.lessThan(previousLabel) : w.moreThan(previousLabel)}
-        </ThemedText>
-      </View>}
+  // The comparison is only there when the previous period had spending.
+  const line = change === null ? w.spent
+    : change === 0 ? w.spentSame(previousLabel)
+      : change < 0 ? w.spentLess(Math.abs(change), previousLabel)
+        : w.spentMore(change, previousLabel);
+  return <View testID="recap-cover" style={styles.scene}>
+    <YourPattern tile={compact || large ? 24 : 32} gap={4} testID="recap-cover-pattern" />
+    <View style={styles.heading}>
+      <ThemedText accessibilityRole="header" maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX}
+        style={[styles.coverTitle, { color: palette.onBand }]}>{w.coverTitle(name, descriptor.label)}</ThemedText>
+      <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{shortDate(snapshot.from)} — {shortDate(snapshot.to)}</ThemedText>
+    </View>
+    <Animated.View entering={enter(FadeInUp.delay(100).duration(420))} style={styles.coverFigure}>
+      <BandFigure testID="recap-spend-total" fils={snapshot.totalSpendFils} moneySpec={moneySpec} palette={palette} size="hero" />
+      <ThemedText testID={change !== null ? 'recap-spend-change' : undefined} maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX}
+        style={[styles.coverLine, compact && styles.coverLineCompact, { color: palette.onBand }]}>{line}</ThemedText>
     </Animated.View>
-    <View style={styles.metricRail} testID="recap-spend-counts">
-      <Metric value={String(snapshot.spendingCount)} label={w.paymentsNoun(snapshot.spendingCount)} delay={80} />
-      <Metric value={String(snapshot.merchantCount)} label={w.merchantsNoun(snapshot.merchantCount)} delay={120} />
-    </View>
-    <View style={[styles.metricRail, styles.pushBottom]}>
-      <Metric currency={moneySpec.currency} value={formatMinorUnits(snapshot.totalIncomeFils, moneySpec)} label={w.income} delay={160} />
-      <Metric currency={moneySpec.currency} value={`${snapshot.netFils < 0 ? '−' : ''}${formatMinorUnits(Math.abs(snapshot.netFils), moneySpec)}`} label={w.net} delay={200} />
-    </View>
-  </View>;
-}
-
-function Metric({ value, label, currency, delay = 0 }: { value: string; label: string; currency?: string; delay?: number }) {
-  const enter = useRecapEntering();
-  const { width, fontScale } = useWindowDimensions();
-  return <Animated.View entering={enter(FadeInUp.delay(delay).duration(360))}
-    accessible accessibilityLabel={`${label}. ${currency ? `${currency} ` : ''}${value}`}
-    style={[styles.metric, { minWidth: Math.min(140 * Math.max(fontScale, 1), width - Spacing.four * 2) }]}>
-    {currency ? <ThemedText type="meta" themeColor="textSecondary">{currency}</ThemedText> : null}
-    <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={[styles.metricValue, value.length > 9 && styles.metricValueTight]} tabular>{value}</ThemedText>
-    <ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>
-  </Animated.View>;
-}
-
-function CategoryScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec }) {
-  const language = useLanguage();
-  const w = copy[language === 'ar' ? 'ar' : 'en'];
-  const palette = useCategoricalPalette();
-  const enter = useRecapEntering();
-  const top = snapshot.topCategories[0];
-  return <View style={styles.sceneSpread}>
-    <View style={styles.sceneHeading}>
-      <ThemedText type="micro" themeColor="textTertiary">{w.categories}</ThemedText>
-      {top && <View style={styles.categoryHeadline}>
-        <ThemedText maxFontSizeMultiplier={STORY_NUMERAL_MAX} style={styles.categoryPercent} tabular>{top.percent}%</ThemedText>
-        <View style={styles.categoryHeadlineCopy}>
-          <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={styles.storyTitleSmall}>{top.label}</ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary">{w.topCategory}</ThemedText>
-        </View>
-      </View>}
-    </View>
-    <Animated.View entering={enter(FadeIn.delay(80).duration(420))} style={styles.categoryStack}>
-      {snapshot.topCategories.map((row, index) => (
-        <View key={row.category} style={[styles.categorySegment, {
-          flex: Math.max(1, row.percent),
-          backgroundColor: palette[index % palette.length],
-        }]} />
-      ))}
-    </Animated.View>
-    <View style={[styles.categoryList, styles.pushBottom]}>
-      {snapshot.topCategories.slice(0, 4).map((row, index) =>
-        <Animated.View key={row.category} entering={enter(FadeInUp.delay(100 + index * 45).duration(320))} style={styles.categoryRow}>
-          <View style={[styles.rankDot, { backgroundColor: palette[index % palette.length] }]} />
-          <ThemedText type="smallBold" style={styles.flex}>{row.label}</ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary" tabular>{row.percent}%</ThemedText>
-          <MoneyText fils={row.spendFils} moneySpec={moneySpec} />
-        </Animated.View>)}
+    <View style={[styles.tiles, styles.pushBottom]}>
+      <TileRow stacked={large} testID="recap-spend-counts">
+        <CountTile palette={palette} stacked={large} label={w.payments} value={snapshot.spendingCount} />
+        <CountTile palette={palette} stacked={large} label={w.merchants} value={snapshot.merchantCount} />
+      </TileRow>
+      <TileRow stacked={large} testID="recap-money-in-net">
+        <MoneyTile palette={palette} moneySpec={moneySpec} stacked={large} label={w.moneyIn} fils={snapshot.totalIncomeFils} />
+        <MoneyTile palette={palette} moneySpec={moneySpec} stacked={large} label={w.net} fils={snapshot.netFils} />
+      </TileRow>
     </View>
   </View>;
 }
 
 /** Four time-of-day bars. Counts, never money; payments without a clock time are left out. */
-function TimeOfDay({ snapshot }: { snapshot: RecapSnapshot }) {
-  const language = useLanguage();
-  const w = copy[language === 'ar' ? 'ar' : 'en'];
-  const theme = useTheme();
+function TimeOfDay({ snapshot, palette, w, compact }: Omit<SceneProps, 'moneySpec'>) {
+  const large = useLargeTextLayout();
+  const barHeight = large ? 88 : compact ? 110 : 150;
   const max = Math.max(1, ...RECAP_TIME_BUCKETS.map((bucket) => snapshot.timeOfDay[bucket]));
   const leaders = RECAP_TIME_BUCKETS.filter((bucket) => snapshot.timeOfDay[bucket] === max);
-  // A tie has no single "most"; the caption then states only the base.
+  // A tie has no single "most"; the headline then says only what the bars show.
   const top = leaders.length === 1 ? leaders[0] : null;
   return <View testID="recap-time-of-day" style={styles.timeBlock}>
-    <ThemedText type="smallBold">{w.timeTitle}</ThemedText>
+    <ThemedText accessibilityRole="header" maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX}
+      style={[styles.cardHeadline, { color: palette.onBand }]}>{top ? w.timeHeadline(w[top]) : w.timeTitle}</ThemedText>
     <View style={styles.timeBars}>
       {RECAP_TIME_BUCKETS.map((bucket, index) => {
         const count = snapshot.timeOfDay[bucket];
         const lead = count === max && count > 0;
-        return <View key={bucket} style={styles.timeColumn} accessible accessibilityRole="image"
+        return <View key={bucket} testID={`recap-time-${bucket}`} style={styles.timeColumn} accessible accessibilityRole="image"
           accessibilityLabel={w.timeBar(w[bucket], count)}>
-          <ThemedText type="meta" tabular themeColor={lead ? 'text' : 'textSecondary'}>{count}</ThemedText>
-          <View style={styles.timeTrack}>
-            <GrowBar axis="height" size={count > 0 ? Math.max(4, (count / max) * TIME_BAR_HEIGHT) : 0} delay={index * 40}
-              style={[styles.timeBar, { backgroundColor: lead ? theme.primary : theme.track }]} />
+          <ThemedText type="meta" style={[styles.tabularSans, { color: lead ? palette.onBand : palette.onBandSecondary }]}>{count}</ThemedText>
+          <View style={[styles.timeTrack, { height: barHeight }]}>
+            <GrowBar axis="height" size={count > 0 ? Math.max(6, (count / max) * barHeight) : 3} delay={index * 50}
+              style={[styles.timeBar, { backgroundColor: lead ? palette.accent : palette.bandMark }]} />
           </View>
-          <ThemedText type="nano" themeColor={lead ? 'text' : 'textTertiary'} numberOfLines={1}>{w[bucket]}</ThemedText>
+          <ThemedText type="meta" numberOfLines={large ? 2 : 1} adjustsFontSizeToFit={!large} minimumFontScale={0.8}
+            style={[styles.timeLabel, { color: lead ? palette.onBand : palette.onBandSecondary }]}>{w[bucket]}</ThemedText>
         </View>;
       })}
     </View>
-    <ThemedText type="meta" themeColor="textSecondary">
-      {w.timeCaption(top ? w[top] : null, top ? snapshot.timeOfDay[top] : 0, snapshot.timedCount)}
+    <ThemedText testID="recap-time-caption" type="meta" style={{ color: palette.onBandSecondary }}>
+      {w.timedBase(snapshot.timedCount)}
     </ThemedText>
   </View>;
 }
 
-function MerchantScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec }) {
-  const language = useLanguage();
-  const w = copy[language === 'ar' ? 'ar' : 'en'];
-  const top = snapshot.topMerchants[0];
+/** Where and when: the merchant most was spent at, then the time of day payments happened. */
+function WhereWhenScene({ snapshot, moneySpec, palette, w, compact }: SceneProps) {
   const enter = useRecapEntering();
+  const large = useLargeTextLayout();
+  const top = snapshot.topMerchants[0];
   if (!top) return null;
   const timed = snapshot.timedCount > 0;
-  return <View style={styles.sceneSpread}>
-    <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{w.merchant}</ThemedText></View>
-    <Animated.View entering={enter(FadeInUp.duration(430))} style={[styles.merchantFeature, timed && styles.merchantFeatureCompact]}>
+  const meta = `${w.paymentsCount(top.count)} · ${moneyLabel(top.spendFils, moneySpec)}`;
+  return <View testID="recap-where-when" style={styles.scene}>
+    <Animated.View testID="recap-top-merchant" entering={enter(FadeInUp.duration(420))} accessible accessibilityRole="text"
+      accessibilityLabel={`${w.merchant}: ${top.title}. ${meta}`} style={styles.merchantFeature}>
       <View style={styles.merchantIdentity}>
-        <MerchantAvatar title={top.title} category={top.category} size={timed ? 56 : 74} />
-        <ThemedText maxFontSizeMultiplier={timed ? STORY_TITLE_SMALL_MAX : STORY_TITLE_MAX}
-          style={[styles.storyTitle, timed && styles.storyTitleSmall, styles.flex]} numberOfLines={2}>{top.title}</ThemedText>
+        <MerchantAvatar title={top.title} category={top.category} size={compact || large ? 52 : 64} />
+        <View style={styles.flex}>
+          <CardLabel text={w.merchant} palette={palette} />
+          <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} numberOfLines={2}
+            style={[styles.cardTitle, { color: palette.onBand }]}>{top.title}</ThemedText>
+        </View>
       </View>
-      <View style={styles.merchantFeatureMeta}>
-        <MoneyText fils={top.spendFils} moneySpec={moneySpec} />
-        <ThemedText type="meta" themeColor="textSecondary">{w.paymentsCount(top.count)}</ThemedText>
-      </View>
+      <ThemedText type="default" style={{ color: palette.onBand }}>{meta}</ThemedText>
     </Animated.View>
-    {timed && <Animated.View entering={enter(FadeIn.delay(100).duration(420))}><TimeOfDay snapshot={snapshot} /></Animated.View>}
-    <View style={[styles.merchantList, styles.pushBottom]}>
+    {timed ? <TimeOfDay snapshot={snapshot} palette={palette} w={w} compact={compact} /> : null}
+    {/* The runners-up stay while there is room; the time of day comes first. */}
+    {!(timed && large) && snapshot.topMerchants.length > 1 ? <View testID="recap-runners-up" style={[styles.merchantList, styles.pushBottom]}>
       {snapshot.topMerchants.slice(1, 3).map((merchant, index) =>
-        <Animated.View key={merchant.key} entering={enter(FadeInUp.delay(120 + index * 70).duration(360))}
-          style={[styles.merchantRow, timed && styles.merchantRowCompact]}>
-          <ThemedText style={styles.runnerRank} themeColor="textTertiary">0{index + 2}</ThemedText>
-          <MerchantAvatar title={merchant.title} category={merchant.category} size={timed ? 32 : 42} />
+        <Animated.View key={merchant.key} entering={enter(FadeInUp.delay(120 + index * 50).duration(320))}
+          style={[styles.merchantRow, { borderTopColor: palette.bandRule }]}>
+          <ThemedText type="smallBold" style={[styles.runnerRank, styles.tabularSans, { color: palette.onBandSecondary }]}>{index + 2}</ThemedText>
+          <MerchantAvatar title={merchant.title} category={merchant.category} size={timed || compact ? 32 : 40} />
           <View style={styles.flex}>
-            <ThemedText type="smallBold" numberOfLines={1}>{merchant.title}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">{w.paymentsCount(merchant.count)}</ThemedText>
+            <ThemedText type="smallBold" numberOfLines={1} style={{ color: palette.onBand }}>{merchant.title}</ThemedText>
+            <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{w.paymentsCount(merchant.count)}</ThemedText>
           </View>
-          <MoneyText fils={merchant.spendFils} moneySpec={moneySpec} />
+          <MoneyText fils={merchant.spendFils} moneySpec={moneySpec} color={palette.onBand} />
+        </Animated.View>)}
+    </View> : null}
+  </View>;
+}
+
+function CategoryScene({ snapshot, moneySpec, palette, w }: SceneProps) {
+  const enter = useRecapEntering();
+  const top = snapshot.topCategories[0];
+  const rows = snapshot.topCategories;
+  // Percents are of the whole period's spending; what the top five leave is drawn faint, not spread over them.
+  const rest = Math.max(0, 100 - rows.reduce((sum, row) => sum + row.percent, 0));
+  return <View testID="recap-categories" style={styles.scene}>
+    <View style={styles.heading}>
+      <CardLabel text={w.categories} palette={palette} />
+      {top && <View style={styles.categoryHeadline}>
+        <ThemedText maxFontSizeMultiplier={STORY_NUMERAL_MAX} style={[styles.categoryPercent, { color: palette.onBand }]}>{top.percent}%</ThemedText>
+        <View style={styles.categoryHeadlineCopy}>
+          <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={[styles.cardTitle, { color: palette.onBand }]}>{top.label}</ThemedText>
+          <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{w.topCategory}</ThemedText>
+        </View>
+      </View>}
+    </View>
+    <Animated.View testID="recap-category-share" entering={enter(FadeInUp.delay(80).duration(420))} accessible accessibilityRole="image"
+      accessibilityLabel={`${w.categoryShares}: ${rows.map((row) => `${row.label} ${row.percent}%`).join(', ')}`}
+      style={styles.shareStack}>
+      {rows.map((row, index) => <View key={row.category} style={[styles.shareSegment, {
+        flex: Math.max(1, row.percent), backgroundColor: palette.onBand, opacity: RANK_OPACITY[index] ?? REST_OPACITY,
+      }]} />)}
+      {rest > 0 ? <View style={[styles.shareSegment, { flex: rest, backgroundColor: palette.onBand, opacity: REST_OPACITY }]} /> : null}
+    </Animated.View>
+    <View style={[styles.categoryList, styles.pushBottom]}>
+      {rows.slice(0, 4).map((row, index) =>
+        <Animated.View key={row.category} entering={enter(FadeInUp.delay(100 + index * 50).duration(320))}
+          style={[styles.categoryRow, { borderTopColor: palette.bandRule }]}>
+          <View style={[styles.rankSquare, { backgroundColor: palette.onBand, opacity: RANK_OPACITY[index] ?? REST_OPACITY }]} />
+          <ThemedText type="smallBold" style={[styles.flex, { color: palette.onBand }]}>{row.label}</ThemedText>
+          <ThemedText type="meta" tabular style={{ color: palette.onBandSecondary }}>{row.percent}%</ThemedText>
+          <MoneyText fils={row.spendFils} moneySpec={moneySpec} color={palette.onBand} />
         </Animated.View>)}
     </View>
   </View>;
 }
 
-function AccountScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec }) {
-  const language = useLanguage();
-  const w = copy[language === 'ar' ? 'ar' : 'en'];
-  const theme = useTheme();
-  const row = snapshot.mostUsedAccount;
+function AccountScene({ snapshot, moneySpec, palette, w, compact }: SceneProps) {
   const enter = useRecapEntering();
+  const large = useLargeTextLayout();
+  const row = snapshot.mostUsedAccount;
   if (!row) return null;
   const isCard = row.account.kind === 'card' || !!row.account.cardType;
-  return <View style={styles.sceneSpread}>
-    <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{isCard ? w.account : w.accountFallback}</ThemedText></View>
-    <Animated.View entering={enter(FadeInUp.duration(460))} style={styles.accountFeature}>
-      <BankAvatar account={row.account} size={68} />
-      <View style={styles.accountIdentity}>
-        <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={styles.storyTitleSmall} numberOfLines={2}>{row.label}</ThemedText>
-        {row.account.last4 && <ThemedText type="meta" themeColor="textTertiary" tabular>•••• {row.account.last4}</ThemedText>}
-      </View>
-      <View style={[styles.accountRule, { backgroundColor: theme.cardBorderStrong }]} />
+  return <View testID="recap-account" style={styles.scene}>
+    <Animated.View entering={enter(FadeInUp.duration(420))} style={styles.heading}>
+      <CardLabel text={isCard ? w.account : w.accountFallback} palette={palette} />
+      <BankAvatar account={row.account} size={compact || large ? 52 : 64} />
+      <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} numberOfLines={2}
+        style={[styles.cardTitle, { color: palette.onBand }]}>{row.label}</ThemedText>
+      {row.account.last4 && <ThemedText type="meta" tabular style={{ color: palette.onBandSecondary }}>•••• {row.account.last4}</ThemedText>}
     </Animated.View>
-    <View style={[styles.metricRail, styles.pushBottom]}>
-      <Metric value={String(row.count)} label={`${w.used} · ${w.visits}`} delay={100} />
-      <Metric currency={moneySpec.currency} value={formatMinorUnits(row.spendFils, moneySpec)} label={w.spent.toLowerCase()} delay={160} />
-    </View>
+    <TileRow stacked={large} testID="recap-account-tiles">
+      <CountTile palette={palette} stacked={large} label={w.payments} value={row.count} />
+      <MoneyTile palette={palette} moneySpec={moneySpec} stacked={large} label={w.spentLabel} fils={row.spendFils} />
+    </TileRow>
   </View>;
 }
 
-function RhythmScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec }) {
-  const language = useLanguage();
-  const w = copy[language === 'ar' ? 'ar' : 'en'];
-  const theme = useTheme();
+function RhythmScene({ snapshot, moneySpec, palette, w }: SceneProps) {
   const enter = useRecapEntering();
-  return <View style={styles.sceneSpread}>
-    <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{w.rhythm}</ThemedText>
-      {snapshot.busiestWeekday && <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={styles.storyTitleSmall}>{weekdayName(snapshot.busiestWeekday.day)} <ThemedText themeColor="textSecondary">{w.busiest}</ThemedText></ThemedText>}
+  const large = useLargeTextLayout();
+  const busiest = snapshot.busiestWeekday;
+  const headline = busiest ? w.busiest(weekdayName(busiest.day)) : null;
+  // The time-of-day card already names the busiest time when it is there.
+  const showFavorite = snapshot.favoriteTime && !(snapshot.topMerchants.length > 0 && snapshot.timedCount > 0);
+  return <View testID="recap-rhythm" style={styles.scene}>
+    <View style={styles.heading}>
+      <CardLabel text={w.rhythm} palette={palette} />
+      {headline && <ThemedText accessibilityRole="header" maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX}
+        style={[styles.cardHeadline, { color: palette.onBand }]}>{headline}</ThemedText>}
     </View>
-    <View style={styles.dayTape}>
-        {Array.from({ length: 7 }, (_, i) => {
-          const active = snapshot.busiestWeekday?.day === i;
-          return <Animated.View key={i} entering={enter(FadeIn.delay(i * 40).duration(260))}
-            style={[styles.dayCell, { borderBottomColor: active ? theme.primary : theme.cardBorder }]}>
-            <ThemedText type={active ? 'smallBold' : 'meta'} themeColor={active ? 'text' : 'textTertiary'}>
-              {weekdayName(i).slice(0, 2)}
-            </ThemedText>
-          </Animated.View>;
-        })}
+    <View testID="recap-weekdays" accessible accessibilityRole="image" accessibilityLabel={headline ? `${w.weekdays}: ${headline}` : w.weekdays}
+      style={[styles.dayTape, large && styles.dayTapeWrap]}>
+      {Array.from({ length: 7 }, (_, i) => {
+        const active = busiest?.day === i;
+        return <Animated.View key={i} entering={enter(FadeInUp.delay(i * 50).duration(320))}
+          style={[styles.dayCell, large && styles.dayCellLarge, { backgroundColor: active ? palette.accent : palette.tile }]}>
+          <ThemedText type={active ? 'smallBold' : 'meta'} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}
+            style={{ color: active ? palette.onAccent : palette.onBandSecondary }}>{w.dayShort(i)}</ThemedText>
+        </Animated.View>;
+      })}
     </View>
-    <View style={[styles.metricGrid, styles.pushBottom]}>
-      <View style={styles.metricGridItem}><ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={styles.metricValue} tabular>{snapshot.noSpendDays}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.noSpend}</ThemedText></View>
-      <View style={styles.metricGridItem}><MoneyText fils={snapshot.averagePurchaseFils} moneySpec={moneySpec} /><ThemedText type="meta" themeColor="textSecondary">{w.average}</ThemedText></View>
-      {snapshot.favoriteTime && !(snapshot.topMerchants.length > 0 && snapshot.timedCount > 0) && <View style={[styles.metricGridItem, styles.metricWide]}>
-        <View style={[styles.timeMarker, { backgroundColor: theme.goldSoft }]}><Icon name="sun" size={18} color={theme.warning} /></View>
-        <View><ThemedText type="smallBold">{w[snapshot.favoriteTime.bucket]}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.favoriteTime}</ThemedText></View>
-      </View>}
+    <View style={[styles.tiles, styles.pushBottom]}>
+      <TileRow stacked={large}>
+        <CountTile palette={palette} stacked={large} label={w.noSpend} value={snapshot.noSpendDays} />
+        <MoneyTile palette={palette} moneySpec={moneySpec} stacked={large} label={w.average} fils={snapshot.averagePurchaseFils} />
+      </TileRow>
+      {showFavorite && snapshot.favoriteTime ? <CountTile testID="recap-favorite-time" palette={palette} stacked
+        label={w.favoriteTime} value={w[snapshot.favoriteTime.bucket]} /> : null}
     </View>
   </View>;
 }
 
-function HighlightScene({ snapshot, moneySpec }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec }) {
-  const language = useLanguage();
-  const w = copy[language === 'ar' ? 'ar' : 'en'];
-  const theme = useTheme();
+function HighlightScene({ snapshot, moneySpec, palette, w, compact }: SceneProps) {
+  const large = useLargeTextLayout();
   const enter = useRecapEntering();
   if (snapshot.descriptor.kind === 'year' && snapshot.monthlySeries.length) {
+    const barHeight = large ? 96 : compact ? 120 : 154;
     const max = Math.max(1, ...snapshot.monthlySeries.map((m) => m.spendFils));
     const high = snapshot.monthlySeries.reduce((a, b) => b.spendFils > a.spendFils ? b : a);
     const nonZero = snapshot.monthlySeries.filter((m) => m.spendFils > 0);
     const low = nonZero.length ? nonZero.reduce((a, b) => b.spendFils < a.spendFils ? b : a) : null;
-    return <View style={styles.sceneSpread}>
-      <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{w.monthly}</ThemedText>
-        <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} style={styles.storyTitleSmall}>{snapshot.descriptor.label}</ThemedText></View>
-      <View style={styles.yearBars}>
+    return <View testID="recap-highlight" style={styles.scene}>
+      <View style={styles.heading}>
+        <CardLabel text={w.monthly} palette={palette} />
+        <ThemedText accessibilityRole="header" maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX}
+          style={[styles.cardTitle, { color: palette.onBand }]}>{snapshot.descriptor.label}</ThemedText>
+      </View>
+      <View testID="recap-year-bars" accessible accessibilityRole="image"
+        accessibilityLabel={`${w.monthly}: ${snapshot.monthlySeries.map((month) => `${month.label} ${moneyLabel(month.spendFils, moneySpec)}`).join(', ')}`}
+        style={styles.yearBars}>
         {snapshot.monthlySeries.map((month, index) => <View key={month.key} style={styles.yearColumn}>
-          <View style={styles.yearBarTrack}>
-            <Animated.View entering={enter(FadeInUp.delay(index * 34).duration(360))}
-              style={[styles.yearBar, { height: Math.max(4, (month.spendFils / max) * 154), backgroundColor: month.key === high.key ? theme.primary : theme.track }]} />
+          <View style={[styles.yearBarTrack, { height: barHeight }]}>
+            <GrowBar axis="height" delay={index * 50} size={month.spendFils > 0 ? Math.max(4, (month.spendFils / max) * barHeight) : 2}
+              style={[styles.yearBar, { backgroundColor: month.key === high.key ? palette.accent : palette.bandMark }]} />
           </View>
-          <ThemedText type="nano" themeColor={month.key === high.key ? 'text' : 'textTertiary'}>{month.label.slice(0, 1)}</ThemedText>
+          <ThemedText type="nano" style={{ color: month.key === high.key ? palette.onBand : palette.onBandSecondary }}>{month.label.slice(0, 1)}</ThemedText>
         </View>)}
       </View>
-      <View style={[styles.metricRail, styles.pushBottom]}>
-        <View style={styles.metric}><ThemedText type="smallBold">{high.label}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.highest}</ThemedText><MoneyText fils={high.spendFils} moneySpec={moneySpec} /></View>
-        {low && <View style={styles.metric}><ThemedText type="smallBold">{low.label}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{w.quietest}</ThemedText><MoneyText fils={low.spendFils} moneySpec={moneySpec} /></View>}
-      </View>
+      <TileRow stacked={large}>
+        <MoneyTile palette={palette} moneySpec={moneySpec} stacked={large} label={w.highest} meta={high.label} fils={high.spendFils} />
+        {low ? <MoneyTile palette={palette} moneySpec={moneySpec} stacked={large} label={w.quietest} meta={low.label} fils={low.spendFils} /> : null}
+      </TileRow>
     </View>;
   }
   const purchase = snapshot.largestPurchase;
   if (!purchase) return null;
-  return <View style={styles.sceneSpread}>
-    <View style={styles.sceneHeading}><ThemedText type="micro" themeColor="textTertiary">{w.biggest}</ThemedText></View>
-    <Animated.View entering={enter(FadeInUp.duration(430))} style={styles.bigPurchase}>
+  return <View testID="recap-highlight" style={styles.scene}>
+    <CardLabel text={w.biggest} palette={palette} />
+    <Animated.View entering={enter(FadeInUp.duration(420))} style={styles.bigPurchase}>
       <View style={styles.bigPurchaseTop}>
-        <MerchantAvatar title={purchase.title} category={purchase.category} size={72} />
-        <ThemedText type="meta" themeColor="textTertiary">{shortDate(purchase.date)}</ThemedText>
+        <MerchantAvatar title={purchase.title} category={purchase.category} size={compact || large ? 56 : 72} />
+        <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{shortDate(purchase.date)}</ThemedText>
       </View>
-      <ThemedText maxFontSizeMultiplier={STORY_TITLE_MAX} style={styles.storyTitle} numberOfLines={2}>{purchase.title}</ThemedText>
-      <HeroMoney fils={purchase.amountFils} moneySpec={moneySpec} />
+      <ThemedText maxFontSizeMultiplier={STORY_TITLE_MAX} numberOfLines={2}
+        style={[styles.cardTitle, { color: palette.onBand }]}>{purchase.title}</ThemedText>
+      <BandFigure fils={purchase.amountFils} moneySpec={moneySpec} palette={palette} size="hero" />
     </Animated.View>
   </View>;
 }
 
-function FinaleScene({ snapshot, moneySpec, onDone }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec; onDone: () => void }) {
-  const language = useLanguage();
-  const w = copy[language === 'ar' ? 'ar' : 'en'];
-  const theme = useTheme();
+function FinaleScene({ snapshot, moneySpec, palette, w, onDone }: SceneProps & { onDone: () => void }) {
   const enter = useRecapEntering();
-  return <View style={styles.sceneSpread}>
-    <View style={styles.sceneHeading}>
-      <ThemedText type="micro" themeColor="textTertiary">{w.finale}</ThemedText>
-      <ThemedText maxFontSizeMultiplier={STORY_TITLE_MAX} style={styles.storyTitle}>{snapshot.descriptor.label}</ThemedText>
-      <ThemedText type="default" themeColor="textSecondary">{w.wrapped}</ThemedText>
+  const facts: [string, string][] = [
+    [w.spentLabel, moneyLabel(snapshot.totalSpendFils, moneySpec)],
+    [w.payments, String(snapshot.spendingCount)],
+    [w.merchants, String(snapshot.merchantCount)],
+    [w.noSpend, String(snapshot.noSpendDays)],
+  ];
+  if (snapshot.topCategories[0]) facts.push([w.categories, snapshot.topCategories[0].label]);
+  return <View testID="recap-final" style={styles.scene}>
+    <View style={styles.heading}>
+      <CardLabel text={w.finale} palette={palette} />
+      <ThemedText accessibilityRole="header" maxFontSizeMultiplier={STORY_TITLE_MAX}
+        style={[styles.coverTitleLarge, { color: palette.onBand }]}>{snapshot.descriptor.label}</ThemedText>
+      <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{shortDate(snapshot.from)} — {shortDate(snapshot.to)}</ThemedText>
     </View>
-    <Animated.View entering={enter(FadeInUp.delay(80).duration(420))} style={[styles.finalBoard, styles.pushBottom, { borderColor: theme.cardBorderStrong }]}>
-      <FinalFact label={w.spent} value={`${moneySpec.currency} ${formatMinorUnits(snapshot.totalSpendFils, moneySpec)}`} />
-      <Rule color={theme.cardBorder} />
-      <FinalFact label={w.transactions} value={String(snapshot.spendingCount)} />
-      <Rule color={theme.cardBorder} />
-      <FinalFact label={w.merchants} value={String(snapshot.merchantCount)} />
-      <Rule color={theme.cardBorder} />
-      <FinalFact label={w.noSpend} value={String(snapshot.noSpendDays)} />
-      {snapshot.topCategories[0] && <><Rule color={theme.cardBorder} /><FinalFact label={w.categories} value={snapshot.topCategories[0].label} /></>}
+    <Animated.View entering={enter(FadeInUp.delay(80).duration(420))} style={[styles.finalBoard, styles.pushBottom]}>
+      {facts.map(([label, value], index) => <View key={label} accessible accessibilityRole="text" accessibilityLabel={`${label}, ${value}`}
+        style={[styles.finalFact, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.bandRule }]}>
+        <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{label}</ThemedText>
+        <ThemedText type="smallBold" tabular style={[styles.finalValue, { color: palette.onBand, textAlign: alignEnd() }]}>{value}</ThemedText>
+      </View>)}
     </Animated.View>
-    <Pressable accessibilityRole="button" onPress={onDone} style={({ pressed }) => [styles.doneButton, { backgroundColor: theme.primary, opacity: pressed ? 0.82 : 1 }]}>
-      <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>{w.done}</ThemedText>
-    </Pressable>
+    <EButton testID="recap-done" palette={palette} label={w.done} onPress={onDone}
+      color={{ fill: palette.onBand, text: palette.band }} />
   </View>;
 }
 
-function FinalFact({ label, value }: { label: string; value: string }) {
-  return <View style={styles.finalFact}><ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>
-    <ThemedText type="smallBold" tabular style={styles.finalValue}>{value}</ThemedText></View>;
-}
-
-export function RecapStory({ snapshot, moneySpec, onClose }: { snapshot: RecapSnapshot; moneySpec: LedgerMoneySpec; onClose: () => void }) {
-  const theme = useTheme();
+export function RecapStory({ snapshot, moneySpec, name = null, onClose }: {
+  snapshot: RecapSnapshot;
+  moneySpec: LedgerMoneySpec;
+  /** The person's own name for the cover; null when the ledger has none. */
+  name?: string | null;
+  onClose: () => void;
+}) {
   const language = useLanguage();
-  const w = copy[language === 'ar' ? 'ar' : 'en'];
+  const w = recapWords(language);
+  const scheme = useBandScheme();
   const insets = useSafeAreaInsets();
   const reducedMotion = useReducedMotion();
   const { width, height } = useWindowDimensions();
   const [index, setIndex] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
   const progress = useSharedValue(reducedMotion ? 1 : 0);
-  const slides = useMemo(() => {
-    const story = [
-      <IntroScene key="intro" snapshot={snapshot} />,
-      <SpendScene key="spend" snapshot={snapshot} moneySpec={moneySpec} />,
-    ];
-    if (snapshot.topCategories.length > 0) {
-      story.push(<CategoryScene key="category" snapshot={snapshot} moneySpec={moneySpec} />);
-    }
-    if (snapshot.topMerchants.length > 0) {
-      story.push(<MerchantScene key="merchant" snapshot={snapshot} moneySpec={moneySpec} />);
-    }
-    if (snapshot.mostUsedAccount) {
-      story.push(<AccountScene key="account" snapshot={snapshot} moneySpec={moneySpec} />);
-    }
-    if (snapshot.spendingCount > 0) {
-      story.push(<RhythmScene key="rhythm" snapshot={snapshot} moneySpec={moneySpec} />);
-    }
-    if (snapshot.descriptor.kind === 'year' || snapshot.largestPurchase) {
-      story.push(<HighlightScene key="highlight" snapshot={snapshot} moneySpec={moneySpec} />);
-    }
-    story.push(<FinaleScene key="final" snapshot={snapshot} moneySpec={moneySpec} onDone={onClose} />);
-    return story;
-  }, [moneySpec, onClose, snapshot]);
+  const scenes = useMemo(() => recapScenes(snapshot), [snapshot]);
+  const current = scenes[Math.min(index, scenes.length - 1)]!;
+  const palette = bandPalette(RECAP_SCENE_BANDS[current], scheme);
+  const compact = height < 740;
 
   const next = useCallback(() => {
     setDirection(1);
-    setIndex((current) => current >= slides.length - 1 ? current : current + 1);
-  }, [slides.length]);
+    setIndex((at) => at >= scenes.length - 1 ? at : at + 1);
+  }, [scenes.length]);
   const previous = useCallback(() => {
     setDirection(-1);
-    setIndex((current) => Math.max(0, current - 1));
+    setIndex((at) => Math.max(0, at - 1));
   }, []);
 
   useEffect(() => {
     cancelAnimation(progress);
     progress.value = reducedMotion ? 1 : 0;
-    if (reducedMotion || index >= slides.length - 1) return;
+    if (reducedMotion || index >= scenes.length - 1) return;
     progress.value = withTiming(1, { duration: STORY_MS, easing: Easing.bezier(...EASE) }, (finished) => {
       if (finished) runOnJS(next)();
     });
     return () => cancelAnimation(progress);
-  }, [index, next, progress, reducedMotion, slides.length]);
+  }, [index, next, progress, reducedMotion, scenes.length]);
 
   const activeProgress = useAnimatedStyle(() => ({ transform: [{ scaleX: progress.value }] }));
+  // Bands never move: the colour cross-fades between cards (instant under Reduce Motion).
+  const bandColor = palette.band;
+  const bandStyle = useAnimatedStyle(() => ({
+    backgroundColor: withTiming(bandColor, { duration: Motion.change }),
+  }), [bandColor]);
   const navigate = (event: { nativeEvent: { locationX: number } }) => {
     void tapped();
     if (event.nativeEvent.locationX < width * 0.34) previous();
     else next();
   };
-  const compact = height < 740;
   const slideEntering = reducedMotion
     ? undefined
     : (direction > 0 ? FadeInRight : FadeInLeft).duration(260);
 
-  return <View style={[styles.root, { backgroundColor: theme.background, paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 12) }]}>
-    <LedgerBackdrop variant={index} />
+  const props: SceneProps = { snapshot, moneySpec, palette, w, compact };
+  const scene = current === 'cover' ? <CoverScene {...props} name={name} />
+    : current === 'where' ? <WhereWhenScene {...props} />
+      : current === 'category' ? <CategoryScene {...props} />
+        : current === 'account' ? <AccountScene {...props} />
+          : current === 'rhythm' ? <RhythmScene {...props} />
+            : current === 'highlight' ? <HighlightScene {...props} />
+              : <FinaleScene {...props} onDone={onClose} />;
+
+  return <Animated.View testID="recap-story" style={[styles.root, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 12) }, bandStyle]}>
+    <StatusBar style={palette.statusBar} />
     <View style={styles.topChrome}>
       <View style={styles.progressRow} accessible={false}>
-        {slides.map((_, i) => <View key={i} style={[styles.progressTrack, { backgroundColor: theme.track }]}>
-          {i < index && <View style={[StyleSheet.absoluteFillObject, styles.progressFill, { backgroundColor: theme.primary }]} />}
+        {scenes.map((key, i) => <View key={key} style={[styles.progressTrack, { backgroundColor: palette.bandRule }]}>
+          {i < index && <View style={[StyleSheet.absoluteFillObject, styles.progressFill, { backgroundColor: palette.onBand }]} />}
           {i === index && <Animated.View style={[StyleSheet.absoluteFillObject, styles.progressFill, {
-            backgroundColor: theme.primary,
+            backgroundColor: palette.onBand,
             transformOrigin: isRTL() ? 'right center' : 'left center',
           }, activeProgress]} />}
         </View>)}
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel={w.close} hitSlop={8} onPress={onClose}
-        style={({ pressed }) => [styles.close, { borderColor: theme.cardBorderStrong, opacity: pressed ? 0.6 : 1 }]}>
-        <Icon name="close" size={20} color={theme.text} />
-      </Pressable>
+      <View style={styles.closeRow}>
+        <BandIconButton palette={palette} action={{ icon: 'close', label: w.close, onPress: onClose, testID: 'recap-close' }} />
+      </View>
     </View>
-    <Pressable accessibilityRole="button" accessibilityLabel={`${w.recap}, ${index + 1} / ${slides.length}`}
+    <Pressable accessibilityRole="button" accessibilityLabel={w.position(index + 1, scenes.length)}
       onPress={navigate} style={styles.touchArea}>
       <Animated.View key={`${snapshot.descriptor.id}:${index}`} entering={slideEntering}
         style={[styles.slide, compact && styles.slideCompact]}>
-        {slides[index]}
+        {scene}
       </Animated.View>
     </Pressable>
-  </View>;
+  </Animated.View>;
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, overflow: 'hidden' },
-  topChrome: { paddingHorizontal: Spacing.four, paddingTop: Spacing.two, gap: 12, zIndex: 3 },
+  topChrome: { paddingHorizontal: BAND_GUTTER, paddingTop: 8, gap: 8, zIndex: 3 },
   progressRow: { flexDirection: 'row', gap: 4, height: 3 },
-  progressTrack: { flex: 1, height: 2, borderRadius: 1, overflow: 'hidden' },
-  progressFill: { borderRadius: 1 },
-  close: { width: 40, height: 40, borderRadius: Radius.full, borderWidth: 1, alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-end' },
+  progressTrack: { flex: 1, height: 3, borderRadius: 2, overflow: 'hidden' },
+  progressFill: { borderRadius: 2 },
+  closeRow: { flexDirection: 'row', justifyContent: 'flex-end' },
   touchArea: { flex: 1 },
-  slide: { flex: 1, paddingHorizontal: Spacing.four, paddingBottom: Spacing.three },
-  slideCompact: { paddingBottom: Spacing.two },
-  sceneIntro: { flex: 1, paddingTop: Spacing.four, paddingBottom: Spacing.four },
-  introMark: { alignSelf: 'flex-start', gap: 14 },
-  introMarkRule: { width: 64, height: 3, borderRadius: 2 },
-  introCopy: { marginTop: 48, gap: 12, maxWidth: 340 },
-  introFooter: { marginTop: 'auto', gap: 12 },
-  introFooterRule: { width: 42, height: 1, backgroundColor: 'rgba(127,127,127,0.38)' },
-  sceneSpread: { flex: 1, paddingTop: 20, paddingBottom: Spacing.two, gap: 28 },
-  sceneHeading: { gap: 10 },
+  slide: { flex: 1, paddingHorizontal: BAND_GUTTER, paddingBottom: 16 },
+  slideCompact: { paddingBottom: 8 },
+  scene: { flex: 1, paddingTop: 4, paddingBottom: 8, gap: 22 },
+  heading: { gap: 8 },
   pushBottom: { marginTop: 'auto' },
-  storyTitle: { fontFamily: Fonts.sansSemi, fontSize: 40, lineHeight: 45, letterSpacing: -1.25 },
-  storyTitleSmall: { fontFamily: Fonts.sansSemi, fontSize: 30, lineHeight: 36, letterSpacing: -0.8 },
-  heroMoney: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 8 },
-  heroCurrency: { fontFamily: Fonts.sansMedium, fontSize: 14 },
-  heroAmount: { fontFamily: Fonts.monoSemi, fontSize: 52, lineHeight: 58, letterSpacing: -1.45 },
-  heroAmountMedium: { fontSize: 47, lineHeight: 53, letterSpacing: -1.15 },
-  heroAmountTight: { fontSize: 41, lineHeight: 47, letterSpacing: -0.9 },
-  changeChip: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', minHeight: 34, paddingHorizontal: 10, borderRadius: Radius.chip },
-  metricRail: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.four },
-  metric: { minWidth: 0, flex: 1, gap: 6 },
-  metricValue: { fontFamily: Fonts.monoSemi, fontSize: 27, lineHeight: 33, letterSpacing: -0.5 },
-  metricValueTight: { fontSize: 23, lineHeight: 29, letterSpacing: -0.35 },
-  categoryHeadline: { flexDirection: 'row', alignItems: 'flex-end', gap: 14 },
-  categoryHeadlineCopy: { flex: 1, gap: 3, paddingBottom: 4 },
-  categoryPercent: { fontFamily: Fonts.monoSemi, fontSize: 60, lineHeight: 62, letterSpacing: -2 },
-  categoryStack: { minHeight: 16, flexDirection: 'row', gap: 2, overflow: 'hidden', borderRadius: 3 },
-  categorySegment: { minWidth: 2, borderRadius: 2 },
-  categoryList: { gap: 0 },
-  categoryRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  rankDot: { width: 8, height: 8, borderRadius: 4 },
   flex: { flex: 1, minWidth: 0 },
-  merchantFeature: { gap: 14, paddingTop: Spacing.two },
-  merchantFeatureCompact: { gap: 10, paddingTop: 0 },
+  tabularSans: { fontVariant: ['tabular-nums'] },
+  coverTitle: { fontFamily: Fonts.sansSemi, fontSize: 22, lineHeight: 28, letterSpacing: -0.4 },
+  coverTitleLarge: { fontFamily: Fonts.sansSemi, fontSize: 40, lineHeight: 46, letterSpacing: -1.2 },
+  coverFigure: { gap: 6 },
+  coverLine: { fontFamily: Fonts.sansSemi, fontSize: 26, lineHeight: 31, letterSpacing: -0.6 },
+  coverLineCompact: { fontSize: 22, lineHeight: 27 },
+  cardTitle: { fontFamily: Fonts.sansSemi, fontSize: 30, lineHeight: 36, letterSpacing: -0.8 },
+  cardHeadline: { fontFamily: Fonts.sansSemi, fontSize: 26, lineHeight: 31, letterSpacing: -0.6 },
+  tiles: { gap: 10 },
+  tileRow: { flexDirection: 'row', gap: 10 },
+  tileRowStacked: { flexDirection: 'column' },
+  tileStacked: { flex: 0, flexBasis: 'auto', flexGrow: 0, alignSelf: 'stretch' },
+  tileCount: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], fontSize: 30, lineHeight: 36, letterSpacing: -0.8 },
+  merchantFeature: { gap: 10 },
   merchantIdentity: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  merchantFeatureMeta: { flexDirection: 'row', alignItems: 'baseline', gap: Spacing.three },
-  merchantList: { gap: 4 },
-  merchantRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  merchantRowCompact: { minHeight: 48 },
-  timeBlock: { gap: 10 },
+  merchantList: { gap: 0 },
+  merchantRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 6 },
+  runnerRank: { minWidth: 18 },
+  timeBlock: { gap: 12 },
   timeBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
   timeColumn: { flex: 1, alignItems: 'center', gap: 6, minWidth: 0 },
-  timeTrack: { height: TIME_BAR_HEIGHT, alignSelf: 'stretch', justifyContent: 'flex-end', alignItems: 'center' },
-  timeBar: { width: '72%', maxWidth: 44, borderTopLeftRadius: 4, borderTopRightRadius: 4 },
-  runnerRank: { width: 26, fontFamily: Fonts.monoMedium, fontSize: 16, lineHeight: 20 },
-  accountFeature: { paddingTop: Spacing.two, gap: Spacing.three },
-  accountIdentity: { gap: 5 },
-  accountRule: { height: StyleSheet.hairlineWidth, width: '100%', marginTop: Spacing.two },
-  dayTape: { flexDirection: 'row', gap: 5, paddingTop: 4 },
-  dayCell: { flex: 1, minHeight: 58, alignItems: 'center', justifyContent: 'center', borderBottomWidth: 2 },
-  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three },
-  metricGridItem: { flexGrow: 1, flexBasis: '40%', minHeight: 88, gap: 6, justifyContent: 'center' },
-  metricWide: { flexBasis: '100%', flexDirection: 'row', alignItems: 'center', gap: 10 },
-  timeMarker: { width: 36, height: 36, borderRadius: Radius.tile, alignItems: 'center', justifyContent: 'center' },
-  bigPurchase: { flex: 1, justifyContent: 'center', gap: Spacing.three, paddingBottom: Spacing.four },
+  timeTrack: { alignSelf: 'stretch', justifyContent: 'flex-end', alignItems: 'stretch' },
+  timeBar: { borderRadius: 12 },
+  timeLabel: { textAlign: 'center' },
+  categoryHeadline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', gap: 14 },
+  categoryHeadlineCopy: { flex: 1, minWidth: 140, gap: 3, paddingBottom: 4 },
+  categoryPercent: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], fontSize: 60, lineHeight: 64, letterSpacing: -2 },
+  shareStack: { height: 18, flexDirection: 'row', gap: 2, overflow: 'hidden', borderRadius: 6 },
+  shareSegment: { minWidth: 2 },
+  categoryList: { gap: 0 },
+  categoryRow: { minHeight: 52, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, borderTopWidth: StyleSheet.hairlineWidth, paddingVertical: 6 },
+  rankSquare: { width: 12, height: 12, borderRadius: 3 },
+  dayTape: { flexDirection: 'row', gap: 5 },
+  dayTapeWrap: { flexWrap: 'wrap' },
+  dayCell: { flex: 1, minHeight: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
+  dayCellLarge: { flexBasis: '22%', flexGrow: 1 },
+  bigPurchase: { flex: 1, justifyContent: 'center', gap: 16, paddingBottom: 24 },
   bigPurchaseTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  yearBars: { height: 190, flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
+  yearBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   yearColumn: { flex: 1, alignItems: 'center', gap: 6 },
-  yearBarTrack: { height: 154, alignSelf: 'stretch', justifyContent: 'flex-end', alignItems: 'center' },
-  yearBar: { width: '68%', maxWidth: 18, borderTopLeftRadius: 3, borderTopRightRadius: 3 },
-  finalBoard: { borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: 4 },
-  finalFact: { minHeight: 58, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 8 },
-  finalValue: { flexShrink: 1, textAlign: 'right' },
-  rule: { height: StyleSheet.hairlineWidth, width: '100%' },
-  doneButton: { minHeight: 52, borderRadius: Radius.control, alignItems: 'center', justifyContent: 'center', marginTop: Spacing.three },
-  ledgerMargin: { position: 'absolute', top: 0, bottom: 0, left: 9, width: StyleSheet.hairlineWidth, opacity: 0.12 },
-  ledgerRule: { position: 'absolute', left: Spacing.four, right: Spacing.four, height: StyleSheet.hairlineWidth, opacity: 0.32 },
-  pageIndex: { position: 'absolute', right: 12, bottom: 18, fontFamily: Fonts.monoSemi, fontSize: 88, lineHeight: 92, letterSpacing: -4, opacity: 0.035 },
+  yearBarTrack: { alignSelf: 'stretch', justifyContent: 'flex-end', alignItems: 'stretch' },
+  yearBar: { borderRadius: 4 },
+  finalBoard: { paddingVertical: 4 },
+  finalFact: { minHeight: 52, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 8 },
+  finalValue: { flexShrink: 1 },
 });

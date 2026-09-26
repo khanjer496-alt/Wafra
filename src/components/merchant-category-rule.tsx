@@ -3,18 +3,18 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
-import { CategoryAvatar } from '@/components/ui/category-avatar';
+import { GlyphTile } from '@/components/ui/band/glyph-tile';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Icon } from '@/components/ui/icon';
+import { Fonts, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
-import { useTheme } from '@/hooks/use-theme';
 import { categoryLabel, EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/categories';
 import { detailsWords } from '@/lib/details-copy';
 import { t, tf } from '@/lib/i18n';
 import { merchantRuleSummary } from '@/lib/merchant-insights';
 import { merchantSpendingKey } from '@/lib/merchant-spending';
+import { spendingDetailsCopy } from '@/lib/spending-details-copy';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 
@@ -32,9 +32,15 @@ const MIN_RULE_KEY_LENGTH = 3;
  * reducer's own predicate (merchantRuleSummary), so it is the number of rows
  * the rewrite changes.
  */
-export function MerchantCategoryRule({ merchant, kind }: { merchant: string; kind: 'expense' | 'income' }) {
-  const theme = useTheme(); const language = useLanguage();
+export function MerchantCategoryRule({ merchant, kind, palette }: {
+  merchant: string;
+  kind: 'expense' | 'income';
+  /** The screen's band: the row is a card on its sheet, "Change" in its tint. */
+  palette: BandPalette;
+}) {
+  const language = useLanguage();
   const d = detailsWords(language);
+  const words = spendingDetailsCopy(language);
   const lang = language === 'ar' ? 'ar' : 'en';
   const { state, setMerchantOverride } = useStore();
   const [open, setOpen] = useState(false);
@@ -55,16 +61,16 @@ export function MerchantCategoryRule({ merchant, kind }: { merchant: string; kin
     <Pressable testID="merchant-category-rule" accessibilityRole="button"
       accessibilityLabel={`${title}. ${body}`} accessibilityHint={d.merchant.ruleAction}
       onPress={() => setOpen(true)}
-      style={({ pressed }) => [styles.row, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-      <CategoryAvatar category={rule.category ?? 'other'} size={32} />
+      style={({ pressed }) => [styles.row, { borderColor: palette.rule, backgroundColor: palette.card, opacity: pressed ? 0.8 : 1 }]}>
+      <GlyphTile category={rule.category ?? 'other'} palette={palette} size={36} />
       <View style={styles.copy}>
-        <ThemedText type="smallBold">{title}</ThemedText>
-        <ThemedText type="meta" themeColor="textSecondary">{body}</ThemedText>
+        <ThemedText type="smallBold" style={{ color: palette.text }}>{title}</ThemedText>
+        <ThemedText type="meta" style={{ color: palette.textSecondary }}>{body}</ThemedText>
       </View>
-      <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+      <ThemedText type="smallBold" style={[styles.change, { color: palette.tint }]}>{words.change}</ThemedText>
     </Pressable>
     <BottomSheet visible={open} onClose={() => setOpen(false)} title={d.merchant.ruleTitle} subtitle={merchant}
-      testID="merchant-category-rule-sheet">
+      palette={palette} testID="merchant-category-rule-sheet">
       <CategoryChips categories={kind === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES} selected={rule.category}
         onToggle={choose} layout="wrap" />
     </BottomSheet>
@@ -83,6 +89,8 @@ export function MerchantCategoryRule({ merchant, kind }: { merchant: string; kin
 }
 
 const styles = StyleSheet.create({
-  row: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderRadius: 12 },
-  copy: { flex: 1, minWidth: 0, gap: 2 },
+  row: { minHeight: 64, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 12, paddingVertical: 12,
+    paddingHorizontal: 16, borderWidth: 1, borderRadius: 18 },
+  copy: { flex: 1, minWidth: 160, gap: 2 },
+  change: { fontFamily: Fonts.sansSemi },
 });

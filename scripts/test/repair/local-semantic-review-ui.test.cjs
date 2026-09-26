@@ -15,14 +15,14 @@ function harness() {
   const advisor = createLocalReviewAdvisor(() => new Promise(resolve => { finish = resolve; }));
   const event = { family: 'unknown', decision: 'review', status: 'posted', direction: 'debit', issues: [],
     amount: { ...missing(), evidence: 'explicit', value: { currency: 'AED', minorUnits: '4500', exponent: 2 } },
-    merchant: missing(), balance: missing(), creditLimit: missing(), minimumDue: missing(), statementTotal: missing() };
+    merchant: missing(), instrument: missing(), balance: missing(), creditLimit: missing(), minimumDue: missing(), statementTotal: missing() };
   const item = { kind: 'universal', id: 'review_test_id_0001', sourceKey: 'source_test_key_01', observedAt: Date.now(), expiresAt: Date.now() + 60000, event };
   const state = { language: 'en', reviewTray: { pending: [item] }, transactions: [] };
   const navigation = [];
   const jsx = (type, props = {}) => typeof type === 'function' ? type(props) : { type, props };
   const wrap = type => props => jsx(type, props);
   const deps = {
-    react: { useMemo: fn => fn(), useState: initial => [initial, () => {}], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
+    react: { useMemo: fn => fn(), useRef: current => ({ current }), useEffect() {}, useState: initial => [initial, () => {}], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { View: 'View', Pressable: 'Pressable', StyleSheet: { create: s => s, hairlineWidth: 1 },
       FlatList: props => jsx('FlatList', { ...props, children: [props.ListHeaderComponent,
@@ -32,9 +32,15 @@ function harness() {
     '@/components/themed-text': { ThemedText: wrap('Text') },
     '@/components/ui/confirm-sheet': { ConfirmSheet: () => null },
     '@/components/ui/icon': { Icon: wrap('Icon') },
-    '@/components/ui/screen-scaffold': { ScreenScaffold: wrap('Screen'), useScreenContentInsets: () => ({}) },
+    // Design language E: the band scaffold renders its band content then the sheet.
+    '@/components/ui/band-scaffold': { BandScaffold: props => jsx('Screen', { ...props, children: [props.bandContent, props.children] }),
+      useBandBottomInset: () => 0 },
+    '@/components/ui/band/e-button': { EButton: props => jsx('Pressable', { ...props, accessibilityLabel: props.label, children: props.label }) },
+    '@/hooks/use-band': { useBand: () => ({}) },
+    '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
+    '@/lib/transactions-copy': load(path.join(root, 'src/lib/transactions-copy.ts'), { '@/lib/transaction-source': {} }),
     '@/components/ui/toast': { useToast: () => ({ show() {} }) },
-    '@/constants/theme': { Radius: { full: 100 }, Spacing: { half: 2, two: 8, three: 12, six: 24 } },
+    '@/constants/theme': { Fonts: { sansSemi: 'Geist-SemiBold' }, Radius: { full: 100, control: 12 }, Spacing: { half: 2, one: 4, two: 8, three: 12, six: 24 } },
     '@/hooks/use-theme': { useTheme: () => ({}) },
     '@/hooks/use-language': { useLanguage: () => 'en' },
     '@/lib/format': { shortDate: value => value, toISODate: value => value.toISOString().slice(0, 10) },

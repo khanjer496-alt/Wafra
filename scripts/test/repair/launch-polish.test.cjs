@@ -17,6 +17,12 @@ function scaffoldHarness(language, platform) {
   h.deps['@/hooks/use-keyboard-height'] = { useKeyboardHeight: () => 300 };
   h.deps['@/hooks/use-tab-bar-clearance'] = { useTabBarClearance: () => 78 };
   h.local('@/components/ui/screen-scaffold');
+  // Ask Wafra sits on the band scaffold: its real ScrollView carries the
+  // screen's scroll props.
+  h.deps['expo-status-bar'] = { StatusBar: props => h.jsx('StatusBar', props) };
+  h.deps['@/hooks/use-reduced-motion'] = { useReducedMotion: () => true, useMotionPreference: () => ({ ready: true, reducedMotion: true }) };
+  h.local('@/lib/band-copy', 'src/lib/band-copy.ts');
+  h.local('@/components/ui/band-scaffold');
   return h;
 }
 

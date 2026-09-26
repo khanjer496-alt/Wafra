@@ -6,13 +6,13 @@ import { ActivityIndicator, AppState, Platform, Pressable, StyleSheet, View } fr
 
 import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
-import { Button } from '@/components/ui/controls';
+import { EButton } from '@/components/ui/band/e-button';
 import { Icon } from '@/components/ui/icon';
-import { Block } from '@/components/ui/layout';
 import { TextField } from '@/components/ui/text-field';
-import { Radius, Spacing } from '@/constants/theme';
+import { Fonts, Radius, Spacing, type BandPalette } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
-import { useTheme } from '@/hooks/use-theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { createCaptureExecutor } from '@/lib/capture-executor';
 import {
   clearStatementPickerCache,
@@ -94,17 +94,32 @@ export interface SupplementImportsPreview {
   files?: FileResult[];
 }
 
+/** The two parts of the importer, for a screen that puts one on its band. */
+export interface SupplementImportsParts {
+  /** The plain line, the upload disclosure and the choose-file control. */
+  band: React.ReactNode;
+  /** Files, results, the password step, what to download and the date note. */
+  sheet: React.ReactNode;
+}
+
 export interface SupplementImportsProps {
   /** First-run setup: a footer to move on, with or without a statement. */
   onboarding?: { onContinue(): void };
   preview?: SupplementImportsPreview;
+  /**
+   * Statement import frames the importer on the sand band: the choose-file
+   * control goes on the band, the rest on the sheet. Without it both parts
+   * stack on whatever sheet embeds the importer.
+   */
+  frame?: (parts: SupplementImportsParts) => React.ReactElement;
 }
 
-export function SupplementImports({ onboarding, preview }: SupplementImportsProps = {}) {
+export function SupplementImports({ onboarding, preview, frame }: SupplementImportsProps = {}) {
   const router = useRouter();
   const language = useLanguage();
   const copy = SUPPLEMENT_COPY[language];
-  const theme = useTheme();
+  const band = useBand('settings');
+  const largeText = useLargeTextLayout();
   const {
     state,
     getStateSnapshot,
@@ -677,83 +692,82 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
   const shownFiles = filesOpen ? fileResults : failedFiles;
   const numbers = summary
     ? [
-        { key: 'added', value: summary.added, label: copy.resultAdded, tone: theme.primary },
-        { key: 'review', value: summary.review, label: copy.resultReview, tone: summary.review > 0 ? theme.warning : theme.text },
-        { key: 'skipped', value: summary.skipped, label: copy.resultSkipped, tone: theme.textSecondary },
+        { key: 'added', value: summary.added, label: copy.resultAdded, tone: band.statusOk },
+        { key: 'review', value: summary.review, label: copy.resultReview, tone: summary.review > 0 ? band.statusNear : band.text },
+        { key: 'skipped', value: summary.skipped, label: copy.resultSkipped, tone: band.textSecondary },
       ]
     : [];
+  const framed = frame !== undefined;
+  // The band part sits on the sand band when a screen frames it, on the
+  // sheet when it is embedded (past bank texts, the setup preview).
+  const ink = framed ? { text: band.onBand, secondary: band.onBandSecondary, rule: band.onBandSecondary }
+    : { text: band.text, secondary: band.textSecondary, rule: band.rule };
+  // The true privacy line, shown before the control that acts on it: files go
+  // to Wafra's import service, are read there, then deleted.
+  const disclosure = (
+    <View style={styles.lineRow} testID="statement-privacy">
+      <Icon name="lock" size={15} color={ink.secondary} />
+      <ThemedText type="meta" style={[styles.grow, { color: ink.secondary }]}>
+        {copy.uploadDisclosure}
+      </ThemedText>
+    </View>
+  );
+  const chooseLabel = busy === 'connect' || busy === 'capabilities' ? copy.connecting
+    : reading ? copy.uploading : fileResults.length > 0 ? copy.chooseStatements : copy.chooseFile;
+  const chooseDisabled = loadingConfig || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney;
 
-  return (
-    <View style={styles.root}>
+  const bandPart = (
+    <View style={styles.bandPart} testID="statement-band">
       {/* First-run setup already said this one step earlier. */}
-      {!onboarding && <ThemedText type="default" themeColor="textSecondary">{copy.intro}</ThemedText>}
-
-      {locked ? (
-        <Block>
-          <View style={styles.cardHead}>
-            <Icon name="lock" size={20} color={theme.warning} />
-            <ThemedText type="small" style={styles.cardCopy}>{copy.privateTitle}</ThemedText>
-          </View>
-          <ThemedText type="meta" themeColor="textTertiary">{copy.privateBody}</ThemedText>
-          <Button label={copy.reviewPrivacy} variant="outline" onPress={() => router.push('/settings?section=privacy')} />
-        </Block>
-      ) : (
+      {!onboarding && <ThemedText type="default" style={{ color: ink.text }}>{copy.intro}</ThemedText>}
+      {!locked && (
         <>
-          {/* What to download, before the button that asks for it. */}
-          <View
-            testID="statement-download-hint"
-            style={[styles.hint, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
-            <ThemedText type="smallBold" accessibilityRole="header">{copy.downloadTitle}</ThemedText>
-            {[copy.downloadStep, Platform.OS === 'android' ? copy.findStepAndroid : copy.findStepIos].map((line, index) => (
-              <View key={line} style={styles.hintRow} accessible accessibilityLabel={`${index + 1}. ${line}`}>
-                <View style={[styles.hintNumber, { backgroundColor: theme.primarySoft }]}>
-                  <ThemedText type="micro" themeColor="primary" tabular>{index + 1}</ThemedText>
-                </View>
-                <ThemedText type="small" style={styles.cardCopy}>{line}</ThemedText>
-              </View>
-            ))}
-          </View>
-
+          {/* Why the control below is off until a ledger currency is chosen. */}
           {!state.ledgerMoney && (
-            <View style={styles.currencyPrompt}>
-              <View style={styles.cardCopy}>
-                <ThemedText type="small">{t('ledgerCurrencyTitle')}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">{t('ledgerCurrencyBody')}</ThemedText>
-              </View>
-              <Button
-                variant="outline"
+            <View style={styles.section} testID="statement-currency-prompt">
+              <ThemedText type="smallBold" style={{ color: ink.text }}>{t('ledgerCurrencyTitle')}</ThemedText>
+              <ThemedText type="meta" style={{ color: ink.secondary }}>{t('ledgerCurrencyBody')}</ThemedText>
+              <EButton
+                palette={band}
+                variant="secondary"
                 label={t('chooseLedgerCurrency')}
                 onPress={() => setCurrencySheetVisible(true)}
                 disabled={busy !== null}
               />
             </View>
           )}
+          {disclosure}
+          <Pressable
+            testID="statement-choose"
+            accessibilityRole="button"
+            accessibilityLabel={chooseLabel}
+            accessibilityHint={copy.formats}
+            accessibilityState={{ disabled: chooseDisabled, busy: busy !== null }}
+            onPress={() => void chooseFile()}
+            disabled={loadingConfig || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney}
+            style={({ pressed }) => [styles.choose, { borderColor: ink.rule, opacity: chooseDisabled ? 0.5 : pressed ? 0.7 : 1 }]}>
+            {busy !== null ? <ActivityIndicator color={ink.text} /> : <Icon name="upload" size={22} color={ink.text} strokeWidth={2} />}
+            <ThemedText type="smallBold" style={[styles.chooseLabel, { color: ink.text }]}>{chooseLabel}</ThemedText>
+          </Pressable>
+          <ThemedText type="meta" style={[styles.center, { color: ink.secondary }]}>{copy.formats}</ThemedText>
+        </>
+      )}
+    </View>
+  );
 
-          <View style={styles.chooser}>
-            <View style={styles.disclosure}>
-              <Icon name="lock" size={15} color={theme.textSecondary} />
-              <ThemedText type="meta" themeColor="textSecondary" style={styles.messageText}>
-                {copy.uploadDisclosure}
-              </ThemedText>
-            </View>
-            <View style={styles.disclosure} testID="statement-date-note">
-              <Icon name="calendar" size={15} color={theme.textSecondary} />
-              <ThemedText type="meta" themeColor="textSecondary" style={styles.messageText}>
-                {statementDateNote(state.country, language)}
-              </ThemedText>
-            </View>
-            <Button
-              icon="upload"
-              label={busy === 'connect' || busy === 'capabilities' ? copy.connecting
-                : reading ? copy.uploading : fileResults.length > 0 ? copy.chooseStatements : copy.chooseFile}
-              onPress={() => void chooseFile()}
-              disabled={loadingConfig || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney}
-            />
-            <ThemedText type="meta" themeColor="textTertiary" style={styles.center}>
-              {copy.formats}
-            </ThemedText>
+  const sheetPart = (
+    <View style={styles.root}>
+      {locked ? (
+        <View style={styles.section} testID="statement-private">
+          <View style={styles.lineRow}>
+            <Icon name="lock" size={18} color={band.statusNear} />
+            <ThemedText type="smallBold" style={[styles.grow, { color: band.text }]}>{copy.privateTitle}</ThemedText>
           </View>
-
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.privateBody}</ThemedText>
+          <EButton palette={band} variant="secondary" label={copy.reviewPrivacy} onPress={() => router.push('/settings?section=privacy')} />
+        </View>
+      ) : (
+        <>
           {reading && (
             <View
               testID="statement-progress"
@@ -761,29 +775,29 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
               accessibilityRole="progressbar"
               accessibilityLabel={status ?? copy.uploading}
               accessibilityValue={progress ? { min: 0, max: progress.total, now: progress.index } : undefined}
-              style={[styles.progressCard, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
-              <View style={styles.cardHead}>
-                <ActivityIndicator color={theme.primary} />
-                <ThemedText type="small" style={styles.cardCopy}>
+              style={styles.section}>
+              <View style={styles.lineRow}>
+                <ActivityIndicator color={band.tint} />
+                <ThemedText type="smallBold" style={[styles.grow, { color: band.text }]}>
                   {progress ? interpolate(copy.progressLabel, progress) : copy.uploading}
                 </ThemedText>
               </View>
               {progress && (
-                <View style={[styles.track, { backgroundColor: theme.track }]}>
+                <View style={[styles.track, { backgroundColor: band.glyphGround }]}>
                   <View style={[styles.fill, {
-                    backgroundColor: theme.primary,
+                    backgroundColor: band.tint,
                     width: `${Math.round((progress.index / progress.total) * 100)}%`,
                   }]} />
                 </View>
               )}
               {/* The bar already says "2 of 3"; the status line adds only waits and filing. */}
               {status && status !== interpolate(copy.uploadingProgress, progress ?? { index: 0, total: 0 })
-                ? <ThemedText type="meta" themeColor="textSecondary">{status}</ThemedText> : null}
+                ? <ThemedText type="meta" style={{ color: band.textSecondary }}>{status}</ThemedText> : null}
             </View>
           )}
 
           {reading && liveFiles.length > 1 && (
-            <View testID="statement-file-status" style={styles.results}>
+            <View testID="statement-file-status" style={styles.files}>
               {liveFiles.map((file, index) => {
                 const statusText = file.status === 'waiting'
                   ? copy.fileStatusWaiting
@@ -791,32 +805,17 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
                     ? copy.fileStatusReading
                     : file.detail ?? '';
                 return (
-                  <View
+                  <FileRow
                     key={`${index}:${file.name}`}
-                    style={styles.resultRow}
-                    accessible
-                    accessibilityLabel={interpolate(copy.fileStatusLabel, { name: file.name, status: statusText })}>
-                    {file.status === 'reading' ? (
-                      <ActivityIndicator size="small" color={theme.primary} />
-                    ) : (
-                      <Icon
-                        name={file.status === 'done' ? 'check'
-                          : file.status === 'locked' ? 'lock'
-                            : file.status === 'failed' ? 'alert' : 'receipt'}
-                        size={15}
-                        color={file.status === 'done' ? theme.primary
-                          : file.status === 'failed' ? theme.expense : theme.textTertiary}
-                      />
-                    )}
-                    <View style={styles.cardCopy}>
-                      <ThemedText type="meta" numberOfLines={1}>{file.name}</ThemedText>
-                      <ThemedText
-                        type="meta"
-                        themeColor={file.status === 'failed' ? 'expense' : 'textSecondary'}>
-                        {statusText}
-                      </ThemedText>
-                    </View>
-                  </View>
+                    palette={band}
+                    name={file.name}
+                    status={statusText}
+                    tone={file.status === 'done' ? 'ok' : file.status === 'failed' ? 'over'
+                      : file.status === 'locked' ? 'near' : 'quiet'}
+                    busy={file.status === 'reading'}
+                    last={index === liveFiles.length - 1}
+                    accessibilityLabel={interpolate(copy.fileStatusLabel, { name: file.name, status: statusText })}
+                  />
                 );
               })}
             </View>
@@ -829,51 +828,40 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
               accessibilityRole="summary"
               accessibilityLiveRegion="polite"
               accessibilityLabel={interpolate(copy.summaryLabel, summary)}
-              style={[styles.summary, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
-              {numbers.map((item, index) => (
-                <React.Fragment key={item.key}>
-                  {index > 0 && <View style={[styles.summaryDivider, { backgroundColor: theme.cardBorder }]} />}
-                  <View style={styles.summaryCell}>
-                    <ThemedText type="title" tabular style={{ color: item.tone }}>{item.value}</ThemedText>
-                    <ThemedText type="meta" themeColor="textSecondary" style={styles.center}>{item.label}</ThemedText>
-                  </View>
-                </React.Fragment>
+              style={styles.summary}>
+              {numbers.map((item) => (
+                <View key={item.key} style={styles.summaryCell}>
+                  <ThemedText tabular style={[styles.summaryFigure, { color: item.tone }]}>{item.value}</ThemedText>
+                  <ThemedText type="meta" style={{ color: band.textSecondary }}>{item.label}</ThemedText>
+                </View>
               ))}
             </View>
           )}
 
           {!reading && status && (!summary || error) ? (
-            <View style={[styles.message, { backgroundColor: theme.primarySoft, borderColor: theme.primaryBorder }]}>
-              <Icon name="check" size={17} color={theme.primary} />
-              <ThemedText type="meta" style={styles.messageText}>{status}</ThemedText>
+            <View style={styles.lineRow} accessibilityLiveRegion="polite">
+              <Icon name="check" size={17} color={band.statusOk} />
+              <ThemedText type="meta" style={[styles.grow, { color: band.text }]}>{status}</ThemedText>
             </View>
           ) : null}
 
           {fileResults.length > 0 && !reading && (
-            <View style={styles.results}>
+            <View style={styles.files} testID="statement-file-results">
               {shownFiles.map((result, index) => (
-                <View
+                <FileRow
                   key={`${index}:${result.name}`}
-                  style={styles.resultRow}
-                  accessible
+                  palette={band}
+                  name={result.name}
+                  status={result.detail}
+                  tone={result.ok ? 'ok' : 'over'}
+                  last={index === shownFiles.length - 1}
                   accessibilityLabel={`${result.ok ? copy.resultOkLabel : copy.resultFailedLabel}: ${result.name}. ${result.detail}`}
-                >
-                  <Icon
-                    name={result.ok ? 'check' : 'alert'}
-                    size={15}
-                    color={result.ok ? theme.primary : theme.expense}
-                  />
-                  <View style={styles.cardCopy}>
-                    <ThemedText type="meta" numberOfLines={1}>{result.name}</ThemedText>
-                    <ThemedText type="meta" themeColor={result.ok ? 'textTertiary' : 'expense'}>
-                      {result.detail}
-                    </ThemedText>
-                  </View>
-                </View>
+                />
               ))}
               {fileResults.length > failedFiles.length && (
-                <Button
-                  variant="ghost"
+                <EButton
+                  palette={band}
+                  variant="quiet"
                   label={filesOpen ? copy.hideFiles : interpolate(copy.showFiles, { count: fileResults.length })}
                   onPress={() => setFilesOpen((value) => !value)}
                 />
@@ -882,15 +870,13 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
           )}
 
           {pendingPdf && (
-            <Block style={styles.passwordCard}>
-              <View style={styles.cardHead}>
-                <View style={[styles.iconWell, { backgroundColor: theme.primarySoft }]}>
-                  <Icon name="lock" size={20} color={theme.primary} />
-                </View>
-                <View style={styles.cardCopy}>
-                  <ThemedText type="small">{copy.passwordTitle}</ThemedText>
-                  <ThemedText type="meta" numberOfLines={1}>{pendingPdf.asset.name}</ThemedText>
-                  <ThemedText type="meta" themeColor="textTertiary">
+            <View style={styles.section} testID="statement-password">
+              <View style={styles.lineRow}>
+                <FileTile palette={band} icon="lock" />
+                <View style={styles.grow}>
+                  <ThemedText type="smallBold" style={{ color: band.text }}>{copy.passwordTitle}</ThemedText>
+                  <ThemedText type="meta" numberOfLines={1} style={{ color: band.text }}>{pendingPdf.asset.name}</ThemedText>
+                  <ThemedText type="meta" style={{ color: band.textSecondary }}>
                     {pendingPdfs.length > 1
                       ? interpolate(copy.passwordQueueBody, { count: pendingPdfs.length })
                       : copy.passwordBody}
@@ -907,48 +893,68 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
                 autoCorrect={false}
                 textContentType="password"
               />
-              <View style={styles.actions}>
-                <Button inline label={copy.passwordCancel} variant="outline" onPress={cancelProtectedPdf} disabled={busy !== null} />
-                <Button inline label={busy === 'statement' ? copy.uploading : copy.passwordRetry}
-                  onPress={() => void retryProtectedPdf()} disabled={!pdfPassword || busy !== null} />
+              <View style={[styles.actions, largeText && styles.actionsStacked]}>
+                <EButton palette={band} variant="secondary" label={copy.passwordCancel} onPress={cancelProtectedPdf}
+                  disabled={busy !== null} style={!largeText && styles.action} />
+                <EButton palette={band} label={busy === 'statement' ? copy.uploading : copy.passwordRetry}
+                  onPress={() => void retryProtectedPdf()} disabled={!pdfPassword || busy !== null} style={!largeText && styles.action} />
               </View>
-            </Block>
+            </View>
           )}
 
           {error && (
-            <View
-              accessibilityRole="alert"
-              accessibilityLiveRegion="polite"
-              style={[styles.message, { backgroundColor: theme.expenseSoftBg, borderColor: theme.expenseSoftBorder }]}>
-              <Icon name="alert" size={17} color={theme.expense} />
-              <ThemedText type="meta" style={[styles.messageText, { color: theme.expense }]}>{error}</ThemedText>
+            <View accessibilityRole="alert" accessibilityLiveRegion="polite" style={styles.lineRow}>
+              <Icon name="alert" size={17} color={band.statusOver} />
+              <ThemedText type="meta" style={[styles.grow, { color: band.statusOver }]}>{error}</ThemedText>
             </View>
           )}
           {cfg && !capabilities && busy === null && !loadingConfig && error && (
-            <Button variant="outline" label={copy.retry} onPress={() => void loadCapabilities(cfg)} />
+            <EButton palette={band} variant="secondary" label={copy.retry} onPress={() => void loadCapabilities(cfg)} />
           )}
 
-          {coverage.length > 0 && (
-            <Block style={styles.coverageCard}>
-              <View style={styles.cardHead}>
-                <View style={[styles.iconWell, { backgroundColor: theme.backgroundSelected }]}>
-                  <Icon name="calendar" size={20} color={theme.text} />
+          {/* What to download: the statement the button above asks for. */}
+          <View testID="statement-download-hint" style={styles.section}>
+            <ThemedText type="smallBold" accessibilityRole="header" style={[styles.sectionTitle, { color: band.text }]}>
+              {copy.downloadTitle}
+            </ThemedText>
+            {[copy.downloadStep, Platform.OS === 'android' ? copy.findStepAndroid : copy.findStepIos].map((line, index) => (
+              <View key={line} style={styles.hintRow} accessible accessibilityLabel={`${index + 1}. ${line}`}>
+                <View style={[styles.hintNumber, { borderColor: band.text }]}>
+                  <ThemedText type="micro" style={{ color: band.text }}>{index + 1}</ThemedText>
                 </View>
-                <ThemedText type="small" style={styles.cardCopy}>{copy.coverageTitle}</ThemedText>
+                <ThemedText type="small" style={[styles.grow, { color: band.text }]}>{line}</ThemedText>
               </View>
+            ))}
+          </View>
+
+          {/* How dates in the file are read (the upload disclosure itself sits above the choose control). */}
+          <View style={styles.section}>
+            <View style={styles.lineRow} testID="statement-date-note">
+              <Icon name="calendar" size={15} color={band.textSecondary} />
+              <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>
+                {statementDateNote(state.country, language)}
+              </ThemedText>
+            </View>
+          </View>
+
+          {coverage.length > 0 && (
+            <View style={styles.section} testID="statement-coverage">
+              <ThemedText type="smallBold" accessibilityRole="header" style={[styles.sectionTitle, { color: band.text }]}>
+                {copy.coverageTitle}
+              </ThemedText>
               {coverage.map((item) => {
                 const shownMissing = item.missing.slice(0, 4);
                 const more = item.missing.length - shownMissing.length;
                 return (
-                  <View key={item.sourceKey} style={[styles.coverageRow, { borderTopColor: theme.cardBorder }]}>
+                  <View key={item.sourceKey} style={[styles.coverageRow, { borderTopColor: band.rule }]}>
                     <View style={styles.coverageHead}>
-                      <ThemedText type="smallBold" style={styles.coverageLabel}>
+                      <ThemedText type="smallBold" style={[styles.coverageLabel, { color: band.text }]}>
                         {item.sourceKey === 'bank-statements' ? copy.coverageUnidentifiedLabel : item.label}
                       </ThemedText>
-                      <ThemedText type="meta" themeColor="textSecondary" tabular>{item.range}</ThemedText>
+                      <ThemedText type="meta" tabular style={{ color: band.textSecondary }}>{item.range}</ThemedText>
                     </View>
                     {/* A statement that names no account cannot prove there are no gaps. */}
-                    <ThemedText type="meta" themeColor={item.identified && item.missing.length ? 'expense' : 'textTertiary'}>
+                    <ThemedText type="meta" style={{ color: item.identified && item.missing.length ? band.statusOver : band.textSecondary }}>
                       {!item.identified
                         ? copy.coverageUnknown
                         : item.missing.length
@@ -960,7 +966,7 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
                   </View>
                 );
               })}
-            </Block>
+            </View>
           )}
 
           <Pressable
@@ -969,16 +975,16 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
             accessibilityState={{ expanded: detailsOpen }}
             onPress={() => setDetailsOpen((value) => !value)}
             style={({ pressed }) => [styles.howLink, { opacity: pressed ? 0.6 : 1 }]}>
-            <ThemedText type="linkPrimary">{copy.howItWorks}</ThemedText>
-            <Icon name={detailsOpen ? 'chevron-down' : 'chevron-right'} size={14} color={theme.primary} />
+            <ThemedText type="smallBold" style={{ color: band.tint }}>{copy.howItWorks}</ThemedText>
+            <Icon name={detailsOpen ? 'chevron-down' : 'chevron-right'} size={14} color={band.tint} />
           </Pressable>
           {detailsOpen && (
-            <View style={[styles.privacy, { borderTopColor: theme.cardBorder }]} testID="statement-how-it-works">
-              <ThemedText type="small">{copy.privacyTitle}</ThemedText>
-              <ThemedText type="meta" themeColor="textTertiary">{copy.privacyBody}</ThemedText>
-              <ThemedText type="meta" themeColor="textTertiary">{copy.statementBody}</ThemedText>
+            <View style={[styles.privacy, { borderTopColor: band.rule }]} testID="statement-how-it-works">
+              <ThemedText type="small" style={{ color: band.text }}>{copy.privacyTitle}</ThemedText>
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.privacyBody}</ThemedText>
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.statementBody}</ThemedText>
               {capabilities && (
-                <ThemedText type="nano" themeColor="textTertiary" tabular>
+                <ThemedText type="nano" tabular style={{ color: band.textSecondary }}>
                   {interpolate(copy.statementLimits, {
                     pdfMb, csvMb, pages: capabilities.pdf.maxPages, rows: capabilities.pdf.maxRows,
                   })}
@@ -991,9 +997,10 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
 
       {onboarding && (
         <View style={styles.onboardingFooter}>
-          <Button
+          <EButton
+            palette={band}
             label={summary ? copy.continue : copy.later}
-            variant={summary ? 'filled' : 'ghost'}
+            variant={summary ? 'primary' : 'quiet'}
             onPress={onboarding.onContinue}
             disabled={busy !== null}
           />
@@ -1007,72 +1014,105 @@ export function SupplementImports({ onboarding, preview }: SupplementImportsProp
       />
     </View>
   );
+
+  if (frame) return frame({ band: bandPart, sheet: sheetPart });
+  return (
+    <View style={styles.root}>
+      {bandPart}
+      {sheetPart}
+    </View>
+  );
+}
+
+/** The statement's document tile: a small card with a rule, the glyph in the secondary ink. */
+function FileTile({ palette, icon = 'receipt' }: { palette: BandPalette; icon?: 'receipt' | 'lock' }) {
+  return (
+    <View testID="statement-file-tile" style={[styles.fileTile, { backgroundColor: palette.card, borderColor: palette.rule }]}>
+      <Icon name={icon} size={20} color={palette.textSecondary} strokeWidth={1.8} />
+    </View>
+  );
+}
+
+/**
+ * One picked file: the document tile, its name, and its status in the
+ * status colour (added in green, a failure in red, locked in amber, waiting
+ * and reading in the secondary ink).
+ */
+function FileRow({ palette, name, status, tone, busy = false, last, accessibilityLabel }: {
+  palette: BandPalette;
+  name: string;
+  status: string;
+  tone: 'ok' | 'near' | 'over' | 'quiet';
+  busy?: boolean;
+  last: boolean;
+  accessibilityLabel: string;
+}) {
+  const color = tone === 'ok' ? palette.statusOk : tone === 'near' ? palette.statusNear
+    : tone === 'over' ? palette.statusOver : palette.textSecondary;
+  return (
+    <View
+      style={[styles.fileRow, !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: palette.rule }]}
+      accessible
+      accessibilityLabel={accessibilityLabel}>
+      <FileTile palette={palette} />
+      <View style={styles.grow}>
+        <ThemedText type="smallBold" numberOfLines={1} style={{ color: palette.text }}>{name}</ThemedText>
+        <View style={styles.fileStatus}>
+          {busy ? <ActivityIndicator size="small" color={palette.textSecondary} /> : null}
+          <ThemedText type="meta" style={[styles.grow, { color }]}>{status}</ThemedText>
+        </View>
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-  root: { gap: Spacing.three },
-  hint: {
-    borderWidth: 1,
-    borderRadius: Radius.sheet,
-    padding: Spacing.three,
-    gap: Spacing.two + Spacing.one,
+  root: { gap: Spacing.four },
+  bandPart: { gap: Spacing.two + Spacing.one },
+  choose: {
+    minHeight: 96,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: 22,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.three,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.two + 2,
   },
+  chooseLabel: { fontSize: 16, lineHeight: 22, textAlign: 'center', flexShrink: 1 },
+  center: { textAlign: 'center' },
+  section: { gap: Spacing.two + 2 },
+  sectionTitle: { fontSize: 17, lineHeight: 24 },
+  lineRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two + 2 },
+  grow: { flex: 1, minWidth: 0, gap: Spacing.half },
   hintRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two + Spacing.one },
   hintNumber: {
     width: 24,
     height: 24,
     borderRadius: Radius.full,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 1,
   },
-  chooser: { gap: Spacing.two + Spacing.one, paddingVertical: Spacing.one },
-  center: { textAlign: 'center' },
-  currencyPrompt: { gap: Spacing.two },
-  passwordCard: { gap: Spacing.three },
-  coverageCard: { gap: Spacing.two },
-  progressCard: {
-    borderWidth: 1,
-    borderRadius: Radius.control,
-    padding: Spacing.three,
-    gap: Spacing.two + Spacing.one,
-  },
   track: { height: 6, borderRadius: Radius.full, overflow: 'hidden' },
   fill: { height: 6, borderRadius: Radius.full },
-  summary: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    borderWidth: 1,
-    borderRadius: Radius.sheet,
-    paddingVertical: Spacing.three,
-  },
-  summaryCell: { flex: 1, alignItems: 'center', gap: Spacing.half, paddingHorizontal: Spacing.one },
-  summaryDivider: { width: StyleSheet.hairlineWidth },
-  cardHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two + 2 },
-  cardCopy: { flex: 1, gap: Spacing.half },
-  iconWell: {
-    width: 42,
-    height: 42,
-    borderRadius: Radius.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  summary: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.three },
+  summaryCell: { flexGrow: 1, flexBasis: 80, gap: Spacing.half },
+  summaryFigure: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], fontSize: 30, lineHeight: 36, letterSpacing: -1 },
+  files: { gap: 0 },
+  fileRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, paddingVertical: 13 },
+  fileTile: { width: 40, height: 48, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  fileStatus: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   actions: { flexDirection: 'row', gap: Spacing.two },
-  disclosure: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
-  results: { gap: Spacing.two },
-  resultRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
+  actionsStacked: { flexDirection: 'column' },
+  action: { flex: 1 },
   coverageRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.two, gap: Spacing.half },
   coverageHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: Spacing.two, flexWrap: 'wrap' },
   coverageLabel: { flexShrink: 1 },
-  message: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.two,
-    borderWidth: 1,
-    borderRadius: Radius.control,
-    padding: Spacing.three,
-  },
-  messageText: { flex: 1 },
   howLink: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.one, alignSelf: 'flex-start' },
   privacy: {
     gap: Spacing.two,

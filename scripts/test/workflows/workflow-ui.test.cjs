@@ -29,7 +29,8 @@ for(const language of ['en','ar'])for(const theme of ['light','dark']){
   }
  });
  test(`review separates unconfirmed entries: ${language}/${theme}`,()=>{
-  const h=createWorkflowHarness({language,theme,state:{reviewTray:{pending:[pending(),pending('expired',{expiresAt:Date.now()-1,amount:{currency:'AED',minorUnits:'99999',exponent:2}})]}}});
+  // State slot 2 is Review's one-at-a-time mode (the default); these read the list.
+  const h=createWorkflowHarness({language,theme,states:{2:false},state:{reviewTray:{pending:[pending(),pending('expired',{expiresAt:Date.now()-1,amount:{currency:'AED',minorUnits:'99999',exponent:2}})]}}});
   const tree=h.renderScreen('review-alerts'),words=h.deps['@/components/workflows/workflow-copy'].workflowCopy(language);
   assert.ok(text(tree).includes(words.reviewBody));assert.ok(text(tree).includes('123.45'));assert.ok(!text(tree).includes('999.99'));
   assert.deepEqual(h.events,[]);
@@ -104,15 +105,15 @@ for(const language of ['en','ar'])test(`Data and help keeps every data row, with
  assert.ok(!h.events.some(e=>['unpairDevice','clearAll','setIosCaptureEnabled'].includes(e[0])),'asking to erase erases nothing');
 });
 test('review action preserves source reviewId rather than silently inserting money',()=>{
- const h=createWorkflowHarness({state:{reviewTray:{pending:[pending('source-identity')]}}}),tree=h.renderScreen('review-alerts');
+ const h=createWorkflowHarness({states:{2:false},state:{reviewTray:{pending:[pending('source-identity')]}}}),tree=h.renderScreen('review-alerts');
  const button=walk(tree).find(n=>n.props?.accessibilityLabel?.startsWith(h.deps['@/lib/i18n'].t('reviewAlertReview'))&&n.props.onPress);
  button.props.onPress();assert.deepEqual(JSON.parse(JSON.stringify(h.events)),[['route',{pathname:'/add-transaction',params:{reviewId:'source-identity'}}]]);
 });
 test('dismiss requests confirmation; confirmation alone calls retained dismissal handler',async()=>{
- const item=pending('review-to-dismiss'),h=createWorkflowHarness({state:{reviewTray:{pending:[item]}}}),tree=h.renderScreen('review-alerts');
+ const item=pending('review-to-dismiss'),h=createWorkflowHarness({states:{2:false},state:{reviewTray:{pending:[item]}}}),tree=h.renderScreen('review-alerts');
  walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel?.startsWith(h.deps['@/lib/i18n'].t('dismiss')+'.')).props.onPress();
  assert.deepEqual(h.events,[['state',0,item]]);assert.equal(boundary(tree,'ConfirmSheet').props.visible,false);
- const confirmed=createWorkflowHarness({state:{reviewTray:{pending:[item]}},states:{0:item}}),next=confirmed.renderScreen('review-alerts');
+ const confirmed=createWorkflowHarness({state:{reviewTray:{pending:[item]}},states:{0:item,2:false}}),next=confirmed.renderScreen('review-alerts');
  const sheet=boundary(next,'ConfirmSheet');assert.equal(sheet.props.visible,true);assert.equal(sheet.props.destructive,true);
  sheet.props.onConfirm();await Promise.resolve();await Promise.resolve();
  assert.ok(confirmed.events.some(e=>e[0]==='dismissReviewAlert'&&e[1]===item.id&&e[2]==='dismissed'));
@@ -144,6 +145,25 @@ test('categorisation displays affected count and applies merchant rule only afte
  assert.ok(text(walk(staged).find(n=>n.props?.testID==='categorise-save')).includes(h.deps['@/lib/details-copy'].detailsCopy.en.categorise.save(1)));
  stagedSave(staged).props.onPress();
  assert.ok(h.events.some(e=>e[0]==='setMerchantOverride'&&e[1]===merchant.merchant&&e[2]==='dining'&&e[3]===true));
+});
+// Sand band (design language E): the band counts what waits and says what an
+// answer moves; each staged answer names the entries it will move.
+for(const language of ['en','ar'])test(`categorise band counts merchants and each answer shows its moved entries: ${language}`,()=>{
+ const merchant={merchant:'Fixture Market',key:'fixture-market',count:7,totalFils:23456,lastDate:'2026-09-05'};
+ const other={merchant:'Other Shop',key:'other-shop',count:1,totalFils:1000,lastDate:'2026-09-04'};
+ const h=createWorkflowHarness({language,merchantSummary:{merchants:[merchant,other],paymentPurposes:[],rowCount:8,totalFils:24456},states:{0:{['merchant:'+merchant.key]:'dining'}}});
+ const tree=h.renderScreen('categorise'),d=h.deps['@/lib/details-copy'].detailsCopy[language];
+ const band=h.deps['@/lib/review-band-copy'].reviewBandCopy(language);
+ const head=text(walk(tree).find(n=>n.props?.testID==='categorise-band'));
+ assert.ok(head.includes(d.merchants.count(2)));assert.ok(head.includes(band.placeLine(d.entries(8))));
+ const staged=walk(tree).filter(n=>n.props?.testID==='categorise-staged');
+ assert.equal(staged.length,1,'only the answered row carries a staged line');
+ assert.ok(text(staged[0]).includes(band.entriesMoved(d.entries(7))));
+ assert.deepEqual(h.events,[],'rendering stages nothing and writes nothing');
+ // A list with bank-payment nicknames counts names, not merchants.
+ const purpose={sourceTitle:'Fishbasket',billIdentity:'consumer:4036',key:'consumer:4036|fishbasket',count:5,totalFils:5350000,lastDate:'2026-09-05'};
+ const mixed=createWorkflowHarness({language,merchantSummary:{merchants:[merchant],paymentPurposes:[purpose],rowCount:12,totalFils:1}}).renderScreen('categorise');
+ assert.ok(text(walk(mixed).find(n=>n.props?.testID==='categorise-band')).includes(band.namesToPlace(2)));
 });
 test('bank-payment nicknames learn by bill identity and never write a merchant-wide rule',()=>{
  const purpose={sourceTitle:'Fishbasket',billIdentity:'consumer:4036',key:'consumer:4036|fishbasket',count:5,totalFils:5350000,lastDate:'2026-09-05'};

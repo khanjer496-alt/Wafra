@@ -10,15 +10,17 @@ import { StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { GrowBar } from '@/components/ui/grow-bar';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
-import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { Spacing, type BandPalette } from '@/constants/theme';
 import { assistantScreenCopy } from '@/lib/assistant-screen-copy';
 import { categoryLabel } from '@/lib/categories';
 import { structuralTitleLabel } from '@/lib/i18n';
-import { formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
 import type { AssistantMonthTotal, AssistantPaymentRow } from '@/lib/wafra-assistant';
 
-const CHART_HEIGHT = 72;
+/** Tallest bar, in points. */
+const CHART_HEIGHT = 80;
+/** Longest value drawn above a bar ("12,345"); longer ones are only spoken. */
+const MAX_VALUE_CHARS = 6;
 
 function shortDate(iso: string, language: 'en' | 'ar'): string {
   const [year, month, day] = iso.split('-').map(Number);
@@ -42,15 +44,25 @@ function monthLabel(key: string, language: 'en' | 'ar'): string {
   }
 }
 
-export function AssistantPaymentRows({ payments, money, language }: {
+/**
+ * The whole-unit value drawn above a bar, or '' when it would not fit a
+ * column or would round to a misleading "0" over a visible bar.
+ */
+export function monthBarValue(totalFils: number, money: LedgerMoneySpec): string {
+  if (totalFils <= 0 || Math.round(totalFils / 10 ** money.exponent) === 0) return '';
+  const value = formatMinorUnits(totalFils, money, { decimals: false });
+  return value.length <= MAX_VALUE_CHARS ? value : '';
+}
+
+export function AssistantPaymentRows({ payments, money, language, palette }: {
   payments: AssistantPaymentRow[];
   money: LedgerMoneySpec;
   language: 'en' | 'ar';
+  palette: BandPalette;
 }) {
-  const theme = useTheme();
   const copy = assistantScreenCopy(language);
   return (
-    <View testID="assistant-payment-rows" style={[styles.rows, { borderColor: theme.cardBorder }]}>
+    <View testID="assistant-payment-rows" style={[styles.rows, { borderColor: palette.rule }]}>
       {payments.map((payment, index) => {
         const title = structuralTitleLabel(payment.title, language);
         const when = payment.daysLeft < 0
@@ -63,13 +75,13 @@ export function AssistantPaymentRows({ payments, money, language }: {
             key={`${payment.title}-${payment.dateISO}-${index}`}
             accessible
             accessibilityLabel={`${title}, ${detail}, ${amount}`}
-            style={[styles.row, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.cardBorder }]}>
+            style={[styles.row, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.rule }]}>
             <MerchantAvatar title={payment.title} category={payment.category} size={32} />
             <View style={styles.rowText}>
-              <ThemedText type="small" numberOfLines={1}>{title}</ThemedText>
-              <ThemedText type="meta" themeColor="textSecondary" numberOfLines={1}>{detail}</ThemedText>
+              <ThemedText type="small" numberOfLines={1} style={{ color: palette.text }}>{title}</ThemedText>
+              <ThemedText type="meta" numberOfLines={1} style={{ color: palette.textSecondary }}>{detail}</ThemedText>
             </View>
-            <ThemedText type="smallBold" tabular>{amount}</ThemedText>
+            <ThemedText type="smallBold" tabular style={{ color: palette.text }}>{amount}</ThemedText>
           </View>
         );
       })}
@@ -77,14 +89,23 @@ export function AssistantPaymentRows({ payments, money, language }: {
   );
 }
 
-export function AssistantMonthChart({ series, highlight, money, language }: {
+/**
+ * A bar per recorded month, oldest first, on the sheet: the month the answer
+ * names in the band's tint, every other month in the sheet's rule tone, the
+ * whole-unit value above each bar and the short month under it. Bars grow
+ * from the baseline 50ms apart on first appearance and stay still under
+ * Reduce Motion (GrowBar). At the accessibility text sizes the values above
+ * the bars step aside; each column's spoken label always carries its amount.
+ */
+export function AssistantMonthChart({ series, highlight, money, language, palette, largeText = false }: {
   series: AssistantMonthTotal[];
   /** The month the answer names. No bar is emphasised when it is absent. */
   highlight?: string;
   money: LedgerMoneySpec;
   language: 'en' | 'ar';
+  palette: BandPalette;
+  largeText?: boolean;
 }) {
-  const theme = useTheme();
   const copy = assistantScreenCopy(language);
   const largest = series.reduce((max, month) => Math.max(max, month.totalFils), 0);
   if (series.length < 2 || largest <= 0) return null;
@@ -96,15 +117,19 @@ export function AssistantMonthChart({ series, highlight, money, language }: {
         const named = highlight !== undefined && month.month === highlight;
         return (
           <View key={month.month} style={styles.column} accessible accessibilityLabel={`${label} ${month.month.slice(0, 4)}, ${amount}`}>
+            {!largeText ? <ThemedText type="nano" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}
+              style={[styles.value, { color: named ? palette.text : palette.textSecondary }]}>
+              {monthBarValue(month.totalFils, money)}
+            </ThemedText> : null}
             <View style={styles.barTrack}>
               <GrowBar
                 axis="height"
                 size={Math.max(3, Math.round((month.totalFils / largest) * CHART_HEIGHT))}
-                delay={index * 40}
-                style={[styles.bar, { backgroundColor: named ? theme.primary : theme.primaryBorder }]}
+                delay={index * 50}
+                style={[styles.bar, { backgroundColor: named ? palette.tint : palette.rule }]}
               />
             </View>
-            <ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>
+            <ThemedText type="meta" numberOfLines={1} style={{ color: named ? palette.text : palette.textSecondary }}>{label}</ThemedText>
           </View>
         );
       })}
@@ -117,7 +142,8 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two + 2, paddingVertical: Spacing.two + 2 },
   rowText: { flex: 1, minWidth: 0, gap: 2 },
   chart: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.two, paddingTop: Spacing.two },
-  column: { flex: 1, alignItems: 'center', gap: Spacing.one },
+  column: { flex: 1, minWidth: 0, alignItems: 'center', gap: Spacing.one },
+  value: { fontVariant: ['tabular-nums'], textAlign: 'center', alignSelf: 'stretch' },
   barTrack: { height: CHART_HEIGHT, width: '100%', justifyContent: 'flex-end', alignItems: 'center' },
-  bar: { width: '70%', borderRadius: 4 },
+  bar: { width: '100%', borderRadius: 6 },
 });

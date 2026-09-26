@@ -1,61 +1,46 @@
 import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { AppState, Platform, StyleSheet, View } from 'react-native';
 
+import { BandCount } from '@/components/capture/band-count';
+import { SheetLinkRow, SheetSectionTitle } from '@/components/capture/sheet-link-row';
 import { ThemedText } from '@/components/themed-text';
-import { Button } from '@/components/ui/controls';
-import { Icon, type IconName } from '@/components/ui/icon';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
-import { Radius, Spacing } from '@/constants/theme';
+import { BandScaffold } from '@/components/ui/band-scaffold';
+import { EButton } from '@/components/ui/band/e-button';
+import { GlyphTile } from '@/components/ui/band/glyph-tile';
+import { StatTile, statTileColors } from '@/components/ui/band/stat-tile';
+import { BankAvatar } from '@/components/ui/bank-avatar';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
-import { useTheme } from '@/hooks/use-theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { getIosCaptureNativeModule, subscribeIosCaptureStatusRefresh } from '@/lib/capture';
+import { handledTimeParts } from '@/lib/capture-band';
+import { captureBandCopy } from '@/lib/capture-band-copy';
 import { banksSeenInAlerts, captureHealthStatus, capturedThisMonth } from '@/lib/capture-health-summary';
 import { detailsWords } from '@/lib/details-copy';
-import { t } from '@/lib/i18n';
-import { formatCaptureReceipt, iosCaptureHealthCopy, readIosCaptureHealth, type IosCaptureHealth } from '@/lib/ios-capture-health';
+import { iosCaptureHealthCopy, readIosCaptureHealth, type IosCaptureHealth } from '@/lib/ios-capture-health';
 import { useStore } from '@/lib/store';
+import type { Account } from '@/lib/types';
 
 type Load = { state: 'loading' } | { state: 'ready'; health: IosCaptureHealth | null };
 
-function Counter({ value, label, testID }: { value: string; label: string; testID: string }) {
-  const theme = useTheme();
-  return <View testID={testID} accessible accessibilityLabel={`${value} ${label}`}
-    style={[styles.counter, { borderColor: theme.cardBorder }]}>
-    <ThemedText type="title" tabular>{value}</ThemedText>
-    <ThemedText type="meta" themeColor="textSecondary">{label}</ThemedText>
-  </View>;
-}
-
-function LinkRow({ title, body, icon, onPress, testID }: {
-  title: string; body?: string; icon: IconName; onPress: () => void; testID: string;
-}) {
-  const theme = useTheme();
-  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={body ? `${title}. ${body}` : title}
-    onPress={onPress}
-    style={({ pressed }) => [styles.linkRow, { borderTopColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-    <Icon name={icon} size={18} color={theme.textSecondary} />
-    <View style={styles.grow}>
-      <ThemedText type="smallBold">{title}</ThemedText>
-      {body ? <ThemedText type="meta" themeColor="textSecondary">{body}</ThemedText> : null}
-    </View>
-    <Icon name="chevron-right" size={16} color={theme.textTertiary} />
-  </Pressable>;
-}
-
 /**
- * Automatic capture, on one page: whether the queue is being processed, what
- * is waiting, what was added, and where to go when something is missing.
- * Every figure comes from the native queue receipt or the ledger; nothing here
- * is estimated, and there is no per-sender switch because the automation has
- * none (it hands Wafra every message).
+ * Automatic capture, on the green band: whether the queue is being
+ * processed and when it last was (the band's figure), what is waiting and
+ * what was added (stat tiles), then on the sheet the banks already read and
+ * where to go when something is missing. Every figure comes from the native
+ * queue receipt or the ledger; nothing here is estimated, and there is no
+ * per-sender switch because the automation has none (it hands Wafra every
+ * message). "Working" is decided only from the recency of the last handled
+ * receipt (`captureHealthStatus`).
  */
 export default function CaptureHealthScreen() {
   const router = useRouter();
-  const theme = useTheme();
   const language = useLanguage();
+  const band = useBand('flow');
+  const largeText = useLargeTextLayout();
   const d = detailsWords(language);
+  const words = captureBandCopy(language);
   const healthCopy = iosCaptureHealthCopy(language);
   const { state } = useStore();
   const ios = Platform.OS === 'ios';
@@ -95,6 +80,10 @@ export default function CaptureHealthScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.transactions, state.monthStartDay]);
   const banks = useMemo(() => banksSeenInAlerts(state.accounts, state.transactions), [state.accounts, state.transactions]);
+  // The logo tile needs the account the name came from (first live match).
+  const bankAccounts = useMemo(() => banks.map((name): Account | null => state.accounts.find((account) => !account.archived
+    && account.bankName?.trim().toLowerCase() === name.toLowerCase()) ?? null),
+  [banks, state.accounts]);
 
   const headline = !ios ? d.capture.notIphone
     : load.state === 'loading' ? healthCopy.unknown
@@ -102,78 +91,99 @@ export default function CaptureHealthScreen() {
     : status.kind === 'quiet' ? d.capture.quiet
     : status.kind === 'never' ? d.capture.never
     : healthCopy[status.kind];
-  const detail = status.kind === 'working' || status.kind === 'quiet'
-    ? d.capture.lastHandled(formatCaptureReceipt(status.lastHandledAt, language))
-    : status.kind === 'never' ? d.capture.neverBody : null;
-  const tone = status.kind === 'working' ? theme.income
-    : status.kind === 'attention' || status.kind === 'paused' ? theme.warning
-    : theme.textTertiary;
+  const handledAt = status.kind === 'working' || status.kind === 'quiet' ? status.lastHandledAt : null;
+  const handled = handledTimeParts(handledAt, now, language, words);
+  const detail = status.kind === 'never' ? d.capture.neverBody : null;
+  // Mint only for the good news; full-strength cream when something needs a
+  // look (amber would not show on the green band); muted otherwise. The
+  // headline always says which, so the dot is never the only signal.
+  const dot = status.kind === 'working' ? band.accent
+    : status.kind === 'attention' || status.kind === 'paused' ? band.onBand
+    : band.onBandSecondary;
+  const tile = statTileColors(band, 'band');
+  const queue = health ? String(health.pending) : '—';
 
-  const header: ScreenHeaderProps = {
-    title: d.capture.title,
-    back: { label: t('back'), onPress: () => router.canGoBack() ? router.back() : router.replace('/settings') },
-  };
+  const bandContent = <View style={styles.bandBlock}>
+    <View testID="capture-health-status" style={styles.status} accessible accessibilityRole="text" accessibilityLiveRegion="polite"
+      accessibilityLabel={[headline, handled ? `${words.lastHandledLabel}, ${handled.day} ${handled.time}` : null, detail,
+        status.kind === 'quiet' ? d.capture.quietBody : null].filter(Boolean).join('. ')}>
+      <View style={styles.statusLine}>
+        <View style={[styles.dot, { backgroundColor: dot }]} />
+        <ThemedText type="smallBold" style={[styles.statusText, { color: band.onBand }]}>{headline}</ThemedText>
+      </View>
+      {handled ? <View testID="capture-health-last-handled" style={styles.figure}>
+        <ThemedText type="small" style={{ color: band.onBandSecondary }}>{words.lastHandledLabel}</ThemedText>
+        <BandCount value={handled.time} size="hero" color={band.onBand} />
+        <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{handled.day}</ThemedText>
+      </View> : null}
+      {detail ? <ThemedText type="small" style={{ color: band.onBandSecondary }}>{detail}</ThemedText> : null}
+      {status.kind === 'quiet' ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{d.capture.quietBody}</ThemedText> : null}
+    </View>
+    <View testID="capture-health-counters" style={[styles.tiles, largeText && styles.tilesStacked]}>
+      <StatTile testID="capture-health-queue" palette={band} label={d.capture.queue} style={styles.tile}
+        accessibilityLabel={`${queue} ${d.capture.queue}`}>
+        <BandCount value={queue} color={tile.fg} />
+      </StatTile>
+      <StatTile testID="capture-health-review" palette={band} label={words.inReview} style={styles.tile}
+        accessibilityLabel={`${reviewWaiting} ${d.capture.review}. ${d.capture.openReview}`}
+        onPress={() => router.push('/review-alerts')}>
+        <BandCount value={String(reviewWaiting)} color={tile.fg} />
+      </StatTile>
+      <StatTile testID="capture-health-added" palette={band} label={words.addedThisMonth} style={styles.tile}
+        accessibilityLabel={`${added} ${d.capture.added}`}>
+        <BandCount value={String(added)} color={tile.fg} />
+      </StatTile>
+    </View>
+  </View>;
 
   return (
-    <ScreenScaffold headerMode="native" header={header} testID="capture-health"
+    <BandScaffold band="flow" testID="capture-health"
+      nav={{ back: () => router.canGoBack() ? router.back() : router.replace('/settings'), title: d.capture.title }}
+      bandContent={bandContent}
       scrollProps={{ showsVerticalScrollIndicator: false }}>
-      <View testID="capture-health-status" style={styles.hero} accessibilityLiveRegion="polite">
-        <View style={styles.statusLine}>
-          <View style={[styles.dot, { backgroundColor: tone }]} />
-          <ThemedText type="subtitle">{headline}</ThemedText>
-        </View>
-        {detail ? <ThemedText type="small" themeColor="textSecondary">{detail}</ThemedText> : null}
-        {status.kind === 'quiet' ? <ThemedText type="meta" themeColor="textSecondary">{d.capture.quietBody}</ThemedText> : null}
-      </View>
-
-      <View style={styles.counters}>
-        <Counter testID="capture-health-added" value={String(added)} label={d.capture.added} />
-        <Pressable accessibilityRole="button" accessibilityLabel={`${reviewWaiting} ${d.capture.review}. ${d.capture.openReview}`}
-          onPress={() => router.push('/review-alerts')} style={styles.counterPress}>
-          <Counter testID="capture-health-review" value={String(reviewWaiting)} label={d.capture.review} />
-        </Pressable>
-        <Counter testID="capture-health-queue" value={health ? String(health.pending) : '—'} label={d.capture.queue} />
-      </View>
-
       <View testID="capture-health-banks" style={styles.section}>
-        <ThemedText type="smallBold" accessibilityRole="header">{d.capture.banksTitle}</ThemedText>
-        {banks.length > 0 ? banks.map((name) => (
-          <View key={name} style={[styles.bankRow, { borderTopColor: theme.cardBorder }]}>
-            <Icon name="bank" size={18} color={theme.textSecondary} />
-            <ThemedText type="small" style={styles.grow}>{name}</ThemedText>
-          </View>
-        )) : <ThemedText type="small" themeColor="textSecondary">{d.capture.banksEmpty}</ThemedText>}
-        {ios ? <ThemedText type="meta" themeColor="textTertiary">{d.capture.banksNote}</ThemedText> : null}
+        <SheetSectionTitle title={d.capture.banksTitle} palette={band} />
+        {banks.length > 0 ? <View style={styles.bankList}>
+          {bankAccounts.map((account, index) => <View key={banks[index]} style={styles.bankRow} accessible accessibilityRole="text"
+            accessibilityLabel={banks[index]}>
+            {account ? <BankAvatar account={account} size={44} /> : <GlyphTile icon="bank" palette={band} size={44} />}
+            <ThemedText type="small" style={[styles.grow, { color: band.text }]}>{banks[index]}</ThemedText>
+          </View>)}
+        </View> : <ThemedText type="small" style={{ color: band.textSecondary }}>{d.capture.banksEmpty}</ThemedText>}
+        {ios ? <ThemedText type="meta" style={{ color: band.textSecondary }}>{d.capture.banksNote}</ThemedText> : null}
       </View>
 
       <View style={styles.section}>
-        <ThemedText type="smallBold" accessibilityRole="header">{d.capture.alsoTitle}</ThemedText>
-        {ios ? <LinkRow testID="capture-health-apple-pay" icon="phone" title={d.capture.applePay} body={d.capture.applePayBody}
-          onPress={() => router.push('/ios-apple-pay-setup')} /> : null}
-        <LinkRow testID="capture-health-statements" icon="upload" title={d.capture.statements} body={d.capture.statementsBody}
-          onPress={() => router.push('/statement-import')} />
+        <SheetSectionTitle title={d.capture.alsoTitle} palette={band} />
+        {ios ? <SheetLinkRow testID="capture-health-apple-pay" icon="phone" palette={band} title={d.capture.applePay}
+          body={d.capture.applePayBody} onPress={() => router.push('/ios-apple-pay-setup')} /> : null}
+        <SheetLinkRow testID="capture-health-statements" icon="upload" palette={band} title={d.capture.statements}
+          body={d.capture.statementsBody} onPress={() => router.push('/statement-import')} last />
       </View>
 
       {ios ? <View style={styles.section}>
-        <ThemedText type="smallBold" accessibilityRole="header">{d.capture.troubleTitle}</ThemedText>
-        <LinkRow testID="capture-health-setup" icon="sliders" title={d.capture.trouble}
-          onPress={() => router.push('/ios-setup')} />
-        <ThemedText type="meta" themeColor="textTertiary">{healthCopy.explanation}</ThemedText>
-        <Button label={d.capture.refresh} variant="ghost" onPress={() => void refresh()} />
+        <SheetSectionTitle title={d.capture.troubleTitle} palette={band} />
+        <SheetLinkRow testID="capture-health-setup" icon="sliders" palette={band} title={d.capture.trouble}
+          onPress={() => router.push('/ios-setup')} last />
+        <ThemedText type="meta" style={{ color: band.textSecondary }}>{healthCopy.explanation}</ThemedText>
+        <EButton testID="capture-health-refresh" palette={band} variant="quiet" label={d.capture.refresh} onPress={() => void refresh()} />
       </View> : null}
-    </ScreenScaffold>
+    </BandScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  hero: { gap: Spacing.two, paddingBottom: Spacing.four },
-  statusLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  dot: { width: 10, height: 10, borderRadius: Radius.full },
-  counters: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, paddingBottom: Spacing.four },
-  counter: { flexGrow: 1, flexBasis: 96, minHeight: 88, gap: Spacing.one, padding: Spacing.three, borderWidth: 1, borderRadius: Radius.control },
-  counterPress: { flexGrow: 1, flexBasis: 96 },
-  section: { gap: Spacing.two, paddingBottom: Spacing.four },
-  bankRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, borderTopWidth: StyleSheet.hairlineWidth },
-  linkRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: Spacing.three, paddingVertical: Spacing.two, borderTopWidth: StyleSheet.hairlineWidth },
-  grow: { flex: 1, minWidth: 0, gap: 2 },
+  bandBlock: { gap: 18, paddingTop: 8 },
+  status: { gap: 12 },
+  statusLine: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  statusText: { fontSize: 16, lineHeight: 22, flexShrink: 1 },
+  dot: { width: 14, height: 14, borderRadius: 7 },
+  figure: { gap: 2, alignItems: 'flex-start' },
+  tiles: { flexDirection: 'row', gap: 8 },
+  tilesStacked: { flexDirection: 'column' },
+  tile: { minHeight: 96 },
+  section: { gap: 10, paddingBottom: 20 },
+  bankList: { gap: 4 },
+  bankRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  grow: { flex: 1, minWidth: 0 },
 });

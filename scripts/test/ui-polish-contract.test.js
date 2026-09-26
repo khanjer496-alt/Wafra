@@ -448,9 +448,8 @@ assert.match(task7Pro, /entitled \? \([\s\S]*?manageSubscription[\s\S]*?proConti
 
 const task8Routes = [
   ['accuracy', 'accuracyHeader'],
-  ['categorise', 'categoriseHeader'],
-  ['currency', 'currencyHeader'],
-  ['review-alerts', 'reviewAlertsHeader'],
+  // Categorise, Currency, Review, Feedback and Trusted devices moved onto their
+  // bands (design language E); each band screen is asserted where it is restyled.
 ];
 // Design language E: Feedback (green) and Trusted devices (slate) are band
 // screens; the band's nav row holds Back and the plain title sits on the band.
@@ -488,29 +487,35 @@ assert.match(task8Categorise, /summary\.paymentPurposes[\s\S]*?kind: 'payment-pu
 for (const count of ['summary.rowCount', 'item.count', 'sortedRows']) {
   assert.ok(task8Categorise.includes(count), `Categorise lost ${count}`);
 }
+// Sand band: the count and one line on the band, Save pinned as the footer.
+assert.match(task8Categorise, /const band = useBand\('settings'\)/);
+assert.match(task8Categorise, /<BandScaffold[\s\S]*?band="settings"[\s\S]*?nav=\{\{ back: true, title: t\('categoriseMerchants'\) \}\}[\s\S]*?footer=\{staged\.length > 0/);
+assert.match(task8Categorise, /bandWords\.entriesMoved\(d\.entries\(item\.count\)\)/, 'each staged answer says how many entries it moves');
 
 const task8Currency = read('src/app/currency.tsx');
 for (const seam of [
   'summarizeForeignActivity(', 'inPeriod(transaction.date, period)', 'ledgerCurrency,',
   'visibleGroups', 'visibleTransactions', 'normalizedQuery', 'liveAccountIds(', 'internalTransferIdsForState(',
-  '<PeriodSheet', '<EntryDetailSheet', '<MerchantAvatar', '<Money',
+  '<PeriodSheet', '<EntryDetailSheet', '<MerchantAvatar', '<BandFigure', 'fxRowSource(item)',
 ]) assert.ok(task8Currency.includes(seam), `Currency lost ${seam}`);
-assert.match(task8Currency, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/,
+// Design language E: a Spending detail on the clay band, the sheet owning the virtualized list.
+assert.match(task8Currency, /<BandScaffold[\s\S]*?band="spending"[\s\S]*?scroll=\{false\}/,
   'Foreign spending virtualizes its transaction history instead of mounting the whole ledger in a ScrollView');
 assert.match(task8Currency, /<FlatList[\s\S]*?ListHeaderComponent=\{listHeader\}/);
-assert.match(task8Currency, /contentContainerStyle=\{\[listInsets\.contentContainerStyle, styles\.listContent\]\}/);
+assert.match(task8Currency, /contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}\]\}/);
 assert.match(task8Currency, /removeClippedSubviews=\{Platform\.OS === 'android'\}/);
 assert.doesNotMatch(task8Currency, /visibleTransactions\.map|summary\.transactions\.map/,
   'hundreds of foreign charges must not be mounted eagerly');
 assert.match(task8Currency, /const INITIAL_CURRENCY_ROWS = 5/);
 assert.match(task8Currency, /summary\.groups\.slice\(0, INITIAL_CURRENCY_ROWS\)/);
-assert.match(task8Currency, /const percent = summary\.totalLocalFils > 0[\s\S]*?group\.localFils \/ summary\.totalLocalFils/);
+assert.match(task8Currency, /const shareOf = [\s\S]*?totalLocalFils > 0[\s\S]*?group\.localFils \/ totalLocalFils/);
 assert.match(task8Currency, /styles\.currencyTrack[\s\S]*?styles\.currencyFill/,
   'currency impact stays a restrained Ledger & Light progress treatment rather than decorative cards');
 assert.match(task8Currency, /setSelectedCurrency\(\(current\) => current === currency \? null : currency\)/);
 assert.match(task8Currency, /transaction\.originalCurrency\?\.toUpperCase\(\) !== selectedCurrency/);
 const currencyHierarchy = task8Currency.match(
-  /<Money[\s\S]*?<SectionHeader title=\{t\('currencyBreakdown'[\s\S]*?<SectionHeader title=\{t\('foreignRecent'[\s\S]*?<TextField/,
+  /<BandFigure[\s\S]*?<SectionHeader title=\{t\('currencyBreakdown'[\s\S]*?<SectionHeader title=\{t\('foreignRecent'[\s\S]*?<TextField/,
+
 )?.[0] ?? '';
 assert.ok(currencyHierarchy.length > 0,
   'Currency hierarchy remains total → currencies → transactions/search');
@@ -536,9 +541,12 @@ assert.match(task8Feedback, /isParserResearchBuild\(\)[\s\S]{0,500}router\.push\
 assert.match(task8Feedback, /fontFamily: Fonts\.mono[\s\S]*?textAlign: 'left'[\s\S]*?writingDirection: 'ltr'/);
 
 const task8Review = read('src/app/review-alerts.tsx');
-assert.match(task8Review, /useScreenContentInsets\(\{ hasFooter: false \}\)/);
-assert.match(task8Review, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"[\s\S]*?header=\{reviewAlertsHeader\}/);
-assert.match(task8Review, /<FlatList[\s\S]*?contentContainerStyle=\{\[listInsets\.contentContainerStyle,[\s\S]*?contentInset=\{listInsets\.contentInset\}[\s\S]*?scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}[\s\S]*?contentInsetAdjustmentBehavior="automatic"/);
+// Green band: one card at a time scrolls with its band; the full list keeps
+// its own virtualized scroll on the sheet and clears the home indicator.
+assert.match(task8Review, /const band = useBand\('flow'\)/);
+assert.match(task8Review, /const listBottom = useBandBottomInset\(\)/);
+assert.match(task8Review, /<BandScaffold[\s\S]*?band="flow"[\s\S]*?scroll=\{stepMode\}[\s\S]*?nav=\{\{ back: true,/);
+assert.match(task8Review, /<FlatList[\s\S]*?contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}[\s\S]*?scrollIndicatorInsets=\{\{ top: 0, bottom: listBottom \}\}/);
 assert.match(task8Review, /item\.expiresAt > now/);
 assert.match(task8Review, /minorUnits\.padStart\(exponent \+ 1, '0'\)/);
 assert.match(task8Review, /pathname: '\/add-transaction', params: \{ reviewId: item\.id \}/);

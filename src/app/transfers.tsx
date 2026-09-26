@@ -5,18 +5,19 @@ import { Keyboard, Platform, Pressable, SectionList, StyleSheet, View } from 're
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
+import { TransferPairAccounts } from '@/components/transfer-pair-accounts';
 import { ActionIconButton } from '@/components/ui/action-icon-button';
+import { BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { PeriodPill } from '@/components/ui/period-pill';
-import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { TextField } from '@/components/ui/text-field';
-import { Spacing } from '@/constants/theme';
+import { Fonts, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
-import { useTheme } from '@/hooks/use-theme';
 import { detailsWords } from '@/lib/details-copy';
 import { formatAED, friendlyDate, shortDate, toISODate } from '@/lib/format';
 import { t } from '@/lib/i18n';
@@ -36,7 +37,7 @@ const MATCHED_PREVIEW = 5;
 
 export default function TransfersScreen() {
   const router = useRouter();
-  const theme = useTheme();
+  const band = useBand('accounts');
   const language = useLanguage();
   const words = transferActivityCopy(language);
   const d = detailsWords(language);
@@ -44,7 +45,7 @@ export default function TransfersScreen() {
   const moneySpec = useLedgerMoney();
   const { state } = useStore();
   const { period } = usePeriod();
-  const insets = useScreenContentInsets({ hasFooter: false });
+  const listBottom = useBandBottomInset();
   const [scope, setScope] = useState<Scope>('all');
   const [query, setQuery] = useState('');
   const search = useDeferredValue(query.trim().toLocaleLowerCase());
@@ -97,24 +98,26 @@ export default function TransfersScreen() {
   const count = sections.reduce((sum, day) => sum + day.data.length, 0);
 
   return <>
-    <ScreenScaffold scroll={false} virtualized headerMode="native"
-      header={{ title: words.title, back: { label: t('back', language), onPress: () => {
-        if (router.canGoBack()) router.back(); else router.replace('/wallet');
-      } } }}>
+    <BandScaffold band="accounts" scroll={false} testID="transfers-screen" contentStyle={styles.sheet}
+      nav={{ back: () => { if (router.canGoBack()) router.back(); else router.replace('/wallet'); } }}
+      bandContent={<View testID="transfers-band" style={styles.bandIntro}>
+        <ThemedText accessibilityRole="header" style={[styles.bandHeadline, { color: band.onBand }]}>{words.title}</ThemedText>
+        {/* The band stays put over the list, so at large text the line moves onto the sheet. */}
+        {!large ? <ThemedText type="small" style={{ color: band.onBandSecondary }}>{words.intro}</ThemedText> : null}
+      </View>}>
       <SectionList
         testID="transfer-history"
         sections={sections}
         keyExtractor={item => item.transaction.id}
         stickySectionHeadersEnabled={false}
-        contentContainerStyle={[insets.contentContainerStyle, styles.content]}
-        contentInset={insets.contentInset}
-        scrollIndicatorInsets={insets.scrollIndicatorInsets}
-        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[styles.content, { paddingBottom: listBottom }]}
+        scrollIndicatorInsets={{ top: 0, bottom: listBottom }}
+        contentInsetAdjustmentBehavior="never"
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         initialNumToRender={14} maxToRenderPerBatch={10} windowSize={9}
         ListHeaderComponent={<View style={styles.controls}>
-          <ThemedText type="small" themeColor="textSecondary">{words.intro}</ThemedText>
+          {large ? <ThemedText type="small" style={{ color: band.textSecondary }}>{words.intro}</ThemedText> : null}
           <View style={styles.context}>
             <ThemedText type="meta" themeColor="textSecondary" accessibilityLiveRegion="polite">{words.records(count)}</ThemedText>
             <PeriodPill onPress={() => setPeriodOpen(true)} />
@@ -122,7 +125,7 @@ export default function TransfersScreen() {
           <TextField label={words.search} value={query} onChangeText={setQuery}
             inputMode="search" returnKeyType="search" placeholder={words.searchPlaceholder}
             onSubmitEditing={() => Keyboard.dismiss()}
-            leading={<Icon name="search" size={17} color={theme.textSecondary} />}
+            leading={<Icon name="search" size={17} color={band.textSecondary} />}
             trailing={query ? <ActionIconButton icon="close" label={t('clearSearch', language)}
               variant="plain" onPress={() => setQuery('')} /> : undefined} />
           <SegmentedControl<Scope> label={words.title} value={scope} onChange={setScope}
@@ -131,28 +134,29 @@ export default function TransfersScreen() {
           {suggestedPairs > 0 ? <Pressable testID="transfer-pairs-link" accessibilityRole="button"
             accessibilityLabel={d.transfers.pairsLink(suggestedPairs)}
             onPress={() => router.push('/review-transfers')} style={styles.reviewAction}>
-            <ThemedText type="linkPrimary" themeColor="primary">{d.transfers.pairsLink(suggestedPairs)}</ThemedText>
-            <Icon name="arrow-up-right" size={16} color={theme.primary} />
+            <ThemedText type="linkPrimary" style={{ color: band.tint }}>{d.transfers.pairsLink(suggestedPairs)}</ThemedText>
+            <Icon name="arrow-up-right" size={16} color={band.tint} />
           </Pressable> : null}
           {matched.length > 0 ? <View testID="transfer-matched-pairs" style={styles.matched}>
             <ThemedText type="smallBold" accessibilityRole="header">{d.transfers.matchedTitle}</ThemedText>
             {(showAllMatched ? matched : matched.slice(0, MATCHED_PREVIEW)).map(pair => {
-              const label = `${accountName(pair.out.accountId)} → ${accountName(pair.in.accountId)}`;
               return <Pressable key={pair.key} testID="transfer-matched-pair" accessibilityRole="button"
                 accessibilityLabel={`${words.viewDetails}: ${d.transfers.pairA11y(accountName(pair.out.accountId), accountName(pair.in.accountId), moneyLabel(pair.out.amountFils))}. ${shortDate(pair.out.date)}`}
                 onPress={() => { Keyboard.dismiss(); setSelectedId(pair.out.id); }}
-                style={({ pressed }) => [styles.matchedRow, { borderTopColor: theme.cardBorder, opacity: pressed ? 0.7 : 1 }]}>
-                <Icon name="repeat" size={18} color={theme.textSecondary} />
-                <View style={styles.grow}>
-                  <ThemedText type="smallBold" numberOfLines={2}>{label}</ThemedText>
-                  <ThemedText type="meta" themeColor="textSecondary">{shortDate(pair.out.date)}</ThemedText>
+                style={({ pressed }) => [styles.matchedRow, large && styles.matchedRowStacked, { borderTopColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
+                <View style={large ? styles.stretch : styles.grow}>
+                  <TransferPairAccounts outAccount={accountName(pair.out.accountId)} inAccount={accountName(pair.in.accountId)}
+                    palette={band} stacked={large} />
                 </View>
-                <Money fils={pair.out.amountFils} type="smallBold" decimals />
+                <View style={[styles.matchedFigure, large && styles.matchedFigureStacked]}>
+                  <Money fils={pair.out.amountFils} type="smallBold" decimals />
+                  <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDate(pair.out.date)}</ThemedText>
+                </View>
               </Pressable>;
             })}
             {matched.length > MATCHED_PREVIEW ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: showAllMatched }}
               onPress={() => setShowAllMatched(value => !value)} style={styles.reviewAction}>
-              <ThemedText type="linkPrimary" themeColor="primary">{showAllMatched ? d.transfers.showFewer : d.transfers.showAll(matched.length)}</ThemedText>
+              <ThemedText type="linkPrimary" style={{ color: band.tint }}>{showAllMatched ? d.transfers.showFewer : d.transfers.showAll(matched.length)}</ThemedText>
             </Pressable> : null}
           </View> : null}
         </View>}
@@ -166,11 +170,11 @@ export default function TransfersScreen() {
           const amountLabel = moneySpec
             ? `${moneySpec.currency} ${formatMinorUnits(tx.amountFils, moneySpec, { decimals: true })}`
             : formatAED(tx.amountFils, { decimals: true });
-          return <View style={[styles.entry, { borderBottomColor: theme.cardBorder }]} testID={`transfer-record-${tx.id}`}>
+          return <View style={[styles.entry, { borderBottomColor: band.rule }]} testID={`transfer-record-${tx.id}`}>
             <Pressable accessibilityRole="button" accessibilityLabel={`${words.viewDetails}: ${tx.title}. ${direction}. ${t(tx.type === 'income' ? 'plusWord' : 'minusWord', language)} ${amountLabel}. ${accountLabel}. ${status}`}
               onPress={() => { Keyboard.dismiss(); setSelectedId(tx.id); }}
               style={({ pressed }) => [styles.entryButton, { opacity: pressed ? 0.7 : 1 }]}>
-              <Icon name={tx.type === 'income' ? 'arrow-down-right' : 'arrow-up-right'} size={20} color={theme.textSecondary} />
+              <Icon name={tx.type === 'income' ? 'arrow-down-right' : 'arrow-up-right'} size={20} color={band.textSecondary} />
               <View style={styles.grow}>
                 <View style={[styles.headline, large && styles.stack]}>
                   <ThemedText type="smallBold" style={styles.grow}>{tx.title}</ThemedText>
@@ -179,20 +183,20 @@ export default function TransfersScreen() {
                 <ThemedText type="meta" themeColor="textSecondary">
                   {direction} · {accountLabel}
                 </ThemedText>
-                <ThemedText type="meta" themeColor={item.needsReview ? 'warning' : 'textSecondary'}>{status}</ThemedText>
+                <ThemedText type="meta" style={{ color: item.needsReview ? band.statusNear : band.textSecondary }}>{status}</ThemedText>
               </View>
-              <Icon name="chevron-right" size={15} color={theme.textTertiary} />
+              <Icon name="chevron-right" size={15} color={band.textSecondary} />
             </Pressable>
             {item.needsReview && <Pressable accessibilityRole="button" accessibilityLabel={`${words.review}: ${tx.title}. ${amountLabel}. ${accountLabel}`}
               onPress={() => router.push({ pathname: '/review-transfers', params: { transactionId: tx.id } })}
-              style={styles.reviewAction}><ThemedText type="linkPrimary" themeColor="primary">{words.review}</ThemedText>
-              <Icon name="arrow-up-right" size={16} color={theme.primary} /></Pressable>}
+              style={styles.reviewAction}><ThemedText type="linkPrimary" style={{ color: band.tint }}>{words.review}</ThemedText>
+              <Icon name="arrow-up-right" size={16} color={band.tint} /></Pressable>}
           </View>;
         }}
-        ListEmptyComponent={<View style={styles.empty}><Icon name="repeat" size={30} color={theme.textSecondary} />
+        ListEmptyComponent={<View style={styles.empty}><Icon name="repeat" size={30} color={band.textSecondary} />
           <ThemedText type="heading">{words.empty}</ThemedText><ThemedText type="small" themeColor="textSecondary" style={styles.emptyCopy}>{words.emptyBody}</ThemedText></View>}
       />
-    </ScreenScaffold>
+    </BandScaffold>
     <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
     <EntryDetailSheet transaction={selected?.transaction ?? null} transferAssessment={selected?.assessment}
       showMerchantLink={false} onClose={() => setSelectedId(null)} />
@@ -200,6 +204,10 @@ export default function TransfersScreen() {
 }
 
 const styles = StyleSheet.create({
+  bandIntro: { gap: Spacing.two },
+  // The band's headline: Geist SemiBold, never Geist Mono.
+  bandHeadline: { fontFamily: Fonts.sansSemi, fontSize: 34, lineHeight: 40, letterSpacing: -1.2 },
+  sheet: { paddingTop: Spacing.two },
   content: { gap: 0 }, controls: { gap: Spacing.three, paddingBottom: Spacing.two },
   context: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
   day: { paddingTop: Spacing.four, paddingBottom: Spacing.two },
@@ -209,7 +217,11 @@ const styles = StyleSheet.create({
   headline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
   stack: { flexDirection: 'column', alignItems: 'flex-start' },
   matched: { gap: 0, paddingTop: Spacing.two },
-  matchedRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
+  matchedRow: { minHeight: 60, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.three, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
+  matchedFigure: { alignItems: 'flex-end', gap: 2 },
+  matchedRowStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  matchedFigureStacked: { alignItems: 'flex-start' },
+  stretch: { alignSelf: 'stretch' },
   reviewAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, alignSelf: 'flex-start', marginStart: 28 },
   empty: { alignItems: 'center', paddingVertical: Spacing.five, gap: Spacing.three },
   emptyCopy: { textAlign: 'center' },

@@ -55,14 +55,15 @@ ok('a review-only cash event defaults to the cash-withdrawal category',
 ok('review amounts stay exact instead of crossing floating point',
   /minorUnits\.padStart/.test(route) &&
     !/Number\(minorUnits\)|parseFloat\(minorUnits\)|parseInt\(minorUnits\)/.test(route));
-ok('review list follows native safe-area and scalable-list conventions',
-  /<ScreenScaffold[\s\S]*scroll=\{false\}[\s\S]*virtualized[\s\S]*headerMode="native"/.test(route) &&
-    /useScreenContentInsets\(\{ hasFooter: false \}\)/.test(route) &&
+// Design language E: the green band scaffold owns the safe areas; the full
+// list is still one virtualized FlatList that clears the home indicator.
+ok('review list follows the band safe-area and scalable-list conventions',
+  /<BandScaffold[\s\S]*band="flow"[\s\S]*scroll=\{stepMode\}/.test(route) &&
+    /useBandBottomInset\(\)/.test(route) &&
     /<FlatList/.test(route) && /keyExtractor=/.test(route) &&
-    /contentContainerStyle=\{\[listInsets\.contentContainerStyle,/.test(route) &&
-    /contentInset=\{listInsets\.contentInset\}/.test(route) &&
-    /scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}/.test(route) &&
-    /contentInsetAdjustmentBehavior="automatic"/.test(route));
+    /contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}/.test(route) &&
+    /scrollIndicatorInsets=\{\{ top: 0, bottom: listBottom \}\}/.test(route) &&
+    /contentInsetAdjustmentBehavior="never"/.test(route));
 ok('dismissal is an accessible 44-point confirmed action',
   /accessibilityRole="button"/.test(route) &&
     /accessibilityLabel=/.test(route) &&

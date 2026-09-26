@@ -37,6 +37,10 @@ const tx = (over = {}) => ({
 });
 const live = new Set(['card', 'bank']);
 const none = new Set();
+/** The clay band's palette, by token name, for the merchant page's pieces. */
+const palette = { band: 'clay', onBand: 'cream', onBandSecondary: 'cream2', bandMark: 'mark', bandRule: 'bandRule',
+  sheet: 'sheet', card: 'card', rule: 'rule', text: 'ink', textSecondary: 'ink2', tint: 'clayTint' };
+
 
 /* ── copy ─────────────────────────────────────────────────────────────── */
 
@@ -348,14 +352,15 @@ function componentHarness(file, { state = {}, store = {}, language = 'en' } = {}
     'react-native': { View: 'View', Pressable: 'Pressable', StyleSheet: { create: (s) => s } },
     '@/components/themed-text': { ThemedText: boundary('Text') },
     '@/components/ui/bottom-sheet': { BottomSheet: (props) => props.visible ? { type: 'Sheet', props } : null },
-    '@/components/ui/category-avatar': { CategoryAvatar: boundary('CategoryAvatar') },
+    '@/components/ui/band/glyph-tile': { GlyphTile: boundary('GlyphTile') },
+    '@/constants/theme': { Fonts: {} },
+    '@/lib/spending-details-copy': load(path.join(root, 'src/lib/spending-details-copy.ts')),
     '@/components/ui/category-chips': { CategoryChips: boundary('CategoryChips') },
     '@/components/ui/choice-sheet': { ChoiceSheet: boundary('ChoiceSheet') },
     '@/components/ui/confirm-sheet': { ConfirmSheet: boundary('ConfirmSheet') },
     '@/components/ui/icon': { Icon: boundary('Icon') },
     '@/components/ui/grow-bar': { GrowBar: boundary('GrowBar') },
     '@/hooks/use-language': { useLanguage: () => language },
-    '@/hooks/use-theme': { useTheme: () => ({ primary: 'primary', income: 'income', track: 'track', cardBorder: 'rule' }) },
     '@/lib/categories': common['@/lib/categories'],
     '@/lib/details-copy': copy,
     '@/lib/format': format,
@@ -381,7 +386,7 @@ test('Always <category>: shows the saved rule and moves existing entries only th
     tx({ title: 'Cafe', category: 'other' }), tx({ title: 'Cafe', category: 'other' }), tx({ title: 'Cafe', category: 'dining' }),
   ];
   const h = componentHarness('src/components/merchant-category-rule.tsx', { state: { transactions, merchantOverrides: {} } });
-  const render = () => { h.reset(); return h.module.MerchantCategoryRule({ merchant: 'Cafe', kind: 'expense' }); };
+  const render = () => { h.reset(); return h.module.MerchantCategoryRule({ merchant: 'Cafe', kind: 'expense', palette }); };
   let tree = render();
   const en = copy.detailsCopy.en;
   const row = h.walk(tree).find((node) => node.props?.testID === 'merchant-category-rule');
@@ -402,16 +407,20 @@ test('Always <category>: shows the saved rule and moves existing entries only th
   const saved = componentHarness('src/components/merchant-category-rule.tsx',
     { state: { transactions, merchantOverrides: { 'expense:cafe': 'dining' } } });
   saved.reset();
-  const savedTree = saved.module.MerchantCategoryRule({ merchant: 'Cafe', kind: 'expense' });
+  const savedTree = saved.module.MerchantCategoryRule({ merchant: 'Cafe', kind: 'expense', palette });
   assert.ok(saved.text(savedTree).includes(en.merchant.always('Dining')));
+  // Language E: a card on the sheet with the category's one-tone glyph and "Change" in the band tint.
+  const savedRow = saved.walk(savedTree).find((node) => node.props?.testID === 'merchant-category-rule');
+  assert.equal(saved.walk(savedRow).find((node) => node.type === 'GlyphTile').props.category, 'dining');
+  assert.ok(saved.text(savedRow).includes('Change'));
   saved.reset();
-  assert.equal(saved.module.MerchantCategoryRule({ merchant: 'AB', kind: 'expense' }), null, 'too short a name for a rule');
+  assert.equal(saved.module.MerchantCategoryRule({ merchant: 'AB', kind: 'expense', palette }), null, 'too short a name for a rule');
 });
 
 test('Always <category>: a choice that moves nothing is a plain future-only confirmation', () => {
   const transactions = [tx({ title: 'Cafe', category: 'dining' })];
   const h = componentHarness('src/components/merchant-category-rule.tsx', { state: { transactions, merchantOverrides: {} } });
-  const render = () => { h.reset(); return h.module.MerchantCategoryRule({ merchant: 'Cafe', kind: 'expense' }); };
+  const render = () => { h.reset(); return h.module.MerchantCategoryRule({ merchant: 'Cafe', kind: 'expense', palette }); };
   h.walk(render()).find((node) => node.props?.testID === 'merchant-category-rule').props.onPress();
   h.walk(render()).find((node) => node.type === 'CategoryChips').props.onToggle('dining');
   const confirm = h.walk(render()).find((node) => node.type === 'ConfirmSheet');
@@ -426,12 +435,17 @@ test('month bars draw empty months as a baseline and label bars with the real am
   const ledger = [tx({ title: 'Cafe', amountFils: 500, date: '2026-04-03' }), tx({ title: 'Cafe', amountFils: 250, date: '2026-06-03' })];
   h.reset();
   const tree = h.module.MerchantMonthBars({ transactions: ledger, merchant: 'Cafe', period: { mode: 'year', year: 2026 },
-    live, internal: none, kind: 'expense' });
+    live, internal: none, kind: 'expense', palette });
   const columns = h.walk(tree).filter((node) => node.props?.accessibilityRole === 'image');
   assert.ok(columns.length >= 3);
   assert.equal(h.walk(columns[0]).filter((node) => node.type === 'GrowBar').length, 1, 'April has a bar');
   assert.equal(h.walk(columns[1]).filter((node) => node.type === 'GrowBar').length, 0, 'May is an empty baseline');
   assert.match(columns[1].props.accessibilityLabel, /0 payments/);
+  // On the clay band: the selected months near-cream, the rest the band's mark tone, empty months its rule.
+  const bar = h.walk(columns[0]).find((node) => node.type === 'GrowBar');
+  assert.equal(bar.props.style[1].backgroundColor, palette.onBand);
+  assert.equal(h.walk(columns[1]).find((node) => node.type === 'View' && node.props.style?.[1]?.backgroundColor)
+    .props.style[1].backgroundColor, palette.bandRule);
   h.reset();
-  assert.equal(h.module.MerchantMonthBars({ transactions: [], merchant: 'Cafe', period: { mode: 'all' }, live, internal: none, kind: 'expense' }), null);
+  assert.equal(h.module.MerchantMonthBars({ transactions: [], merchant: 'Cafe', period: { mode: 'all' }, live, internal: none, kind: 'expense', palette }), null);
 });
