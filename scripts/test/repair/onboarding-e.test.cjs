@@ -109,7 +109,7 @@ test('trial copy promises no reminder and states what happens when it ends', () 
 test('reminders name only what Wafra sends; the daily summary time matches SUMMARY_HOUR', () => {
   assert.match(read('src/lib/notifications.ts'), /export const SUMMARY_HOUR = 21;/);
   assert.match(ONBOARDING_E_COPY.en.remindDailyWhen, /9 pm/);
-  assert.match(ONBOARDING_E_COPY.ar.remindDailyWhen, /٩ مساءً/);
+  assert.match(ONBOARDING_E_COPY.ar.remindDailyWhen, /9 مساءً/);
   const reminders = read('src/lib/reminders.ts');
   assert.match(reminders, /\[-1, t\('tomorrow'\)\], \[0, todayWord\]/, 'bills: the day before and on the day');
   assert.match(reminders, /\[-3, tf\('inDaysPhrase', \{ days: 3 \}\)\],\s*\[0, todayWord\]/, 'cards: three days before and on the day');
