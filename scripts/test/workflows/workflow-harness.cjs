@@ -162,6 +162,24 @@ function createWorkflowHarness(options={}) {
    h.local('@/lib/ios-shortcut-setup-copy','src/lib/ios-shortcut-setup-copy.ts');
    h.local('@/lib/onboarding-copy','src/lib/onboarding-copy.ts');
    d['@/components/ui/grow-bar']={GrowBar:p=>jsx('GrowBar',p)};
+   // Design language E: the journey rules, copy and every step run from
+   // source; drawn-only pieces (pattern, dial, limit bar) and billing are boundaries.
+   h.local('@/lib/types','src/lib/types.ts');
+   h.local('@/lib/onboarding-e','src/lib/onboarding-e.ts');
+   h.local('@/lib/onboarding-e-copy','src/lib/onboarding-e-copy.ts');
+   h.local('@/lib/band-copy','src/lib/band-copy.ts');
+   h.local('@/lib/pattern','src/lib/pattern.ts');
+   Object.assign(d['@/lib/purchases'],{billingStore:()=>'play'});
+   Object.assign(d['react-native-reanimated'],{ZoomIn:d['react-native-reanimated'].FadeInDown,useAnimatedProps:f=>f()});
+   Object.assign(d['react-native-reanimated'].Easing,{bezier:()=>value=>value});
+   d['react-native-safe-area-context'].useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});
+   d['@/components/ui/pattern-mosaic']={PatternMosaic:p=>jsx('PatternMosaic',p)};
+   d['@/components/ui/band/dial-limit']={DialLimit:p=>jsx('DialLimit',p)};
+   d['@/components/ui/band/status-bar']={StatusBar:p=>jsx('LimitBar',p)};
+   d['@/components/superwall-billing-context']={useWafraBilling:()=>({available:false,configured:false,configurationError:null,
+    fetchProOffers:async()=>[],purchasePro:async()=>'unavailable',restorePro:async()=>null})};
+   h.local('@/components/ui/band/e-button');
+   for(const name of ['e-motion','e-frame','e-welcome','e-name','e-goals','e-watch','e-reminders','e-first-payment','e-pattern','e-paywall','e-handoff'])h.local('@/components/onboarding/'+name);
    for(const name of ['capture-checklist','ready-summary','sms-explainer'])h.local('@/components/onboarding/'+name);
   }
   const file=screen==='onboarding'?'src/components/onboarding-gate.tsx':`src/app/${screen}.tsx`;

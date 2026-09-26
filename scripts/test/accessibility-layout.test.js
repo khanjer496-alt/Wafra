@@ -24,6 +24,13 @@ const navigationE2e = source('scripts/e2e/e2e-navigation.mjs');
 const themeTokens = source('src/constants/theme.ts');
 const themeHook = source('src/hooks/use-theme.ts');
 const onboardingGate = source('src/components/onboarding-gate.tsx');
+// Design language E (2026-09-26): each step is its own file beside the gate.
+const onboardingStepFiles = fs.readdirSync(path.join(__dirname, '../../src/components/onboarding'))
+  .filter((name) => /^e-.*\.tsx$/.test(name))
+  .map((name) => `src/components/onboarding/${name}`);
+const onboardingFrame = source('src/components/onboarding/e-frame.tsx');
+const onboardingSteps = onboardingStepFiles.map(source).join('\n');
+const eButton = source('src/components/ui/band/e-button.tsx');
 const onboardingExample = source('src/components/onboarding/money-preview.tsx');
 const controls = source('src/components/ui/controls.tsx');
 const addTransaction = source('src/app/add-transaction.tsx');
@@ -96,38 +103,45 @@ const declaredStyleValue = (sourceText, style, property) => {
   if (!match) return NaN;
   return match[1] ? spacingValues[match[1]] : Number(match[2]);
 };
-// Normal onboarding is a one-screen composition (flexGrow + marginTop:auto
-// actions). 2026-09-25: it always scrolls instead of clipping — an iPhone SE
+// Every onboarding step is a one-screen composition (flexGrow + marginTop:auto
+// footer). 2026-09-25: it always scrolls instead of clipping — an iPhone SE
 // at the largest non-accessibility text size overflowed with scrolling off —
 // and only bounces at accessibility sizes, so a fitting screen stays still.
+// Design language E: one frame (e-frame.tsx) owns that scroll for every step,
+// and its footer scrolls with the content rather than pinning over it.
 ok('onboarding keeps a one-screen composition but scrolls instead of clipping at any text size',
-  /useLargeTextLayout/.test(onboardingGate) &&
-  /<Animated\.ScrollView[\s\S]*?contentContainerStyle=\{styles\.welcomeBody\}/.test(onboardingGate) &&
-    /<ScrollView key=\{activeStep\}[\s\S]*?contentContainerStyle=\{styles\.scrollContent\}/.test(onboardingGate) &&
-    !/scrollEnabled=/.test(onboardingGate) &&
-    (onboardingGate.match(/bounces=\{largeText\}\s*alwaysBounceVertical=\{false\}/g) ?? []).length === 2 &&
-    /welcomeBody: \{[\s\S]*?flexGrow: 1/.test(onboardingGate) &&
-    /scrollContent: \{ flexGrow: 1/.test(onboardingGate) &&
-    /questionActions: \{ marginTop: 'auto'/.test(onboardingGate) &&
+  /useLargeTextLayout/.test(onboardingFrame) &&
+    /<ScrollView[\s\S]{0,120}bounces=\{largeText\} alwaysBounceVertical=\{false\}[\s\S]{0,120}contentContainerStyle=\{styles\.scroll\}/.test(onboardingFrame) &&
+    ![onboardingGate, onboardingSteps].some((code) => /scrollEnabled=/.test(code)) &&
+    /scroll: \{ flexGrow: 1/.test(onboardingFrame) &&
+    /footer: \{ marginTop: 'auto'/.test(onboardingFrame) &&
+    onboardingStepFiles.filter((file) => /-(welcome|name|goals|watch|reminders|pattern|paywall)\.tsx$/.test(file))
+      .every((file) => /<EStepFrame\b/.test(source(file))) &&
     /<BottomSheet/.test(onboardingGate));
 ok('onboarding text and its sample can grow without truncation or a scale ceiling',
-  [onboardingGate, onboardingExample].every((code) =>
+  [onboardingGate, onboardingSteps, onboardingExample].every((code) =>
     !/numberOfLines|maxFontSizeMultiplier|adjustsFontSizeToFit|minimumFontScale/.test(code)));
-const onboardingButtons = onboardingGate.match(/<Button\b[^>]*>/g) ?? [];
-ok('every shared onboarding button permits its localized label to wrap',
-  onboardingButtons.length > 0 && onboardingButtons.every((button) => /\bwrapLabel\b/.test(button)));
+ok('every onboarding button permits its localized label to wrap',
+  !/<Button\b/.test(onboardingGate + onboardingSteps) &&
+    /<EButton\b/.test(onboardingGate) &&
+    /styles\.label, \{ color: fg \}/.test(eButton) && /label: \{[^}]*flexShrink: 1/.test(eButton) &&
+    !/numberOfLines/.test(eButton));
 ok('onboarding action targets retain native accessibility size floors',
-  declaredStyleValue(onboardingGate, 'startOption', 'minHeight') >= 48 &&
-    declaredStyleValue(onboardingGate, 'nameBack', 'minHeight') >= 44 &&
-    declaredStyleValue(onboardingGate, 'nameInput', 'minHeight') >= 48 &&
-    declaredStyleValue(onboardingGate, 'nameSkip', 'minHeight') >= 48 &&
-    declaredStyleValue(onboardingGate, 'back', 'minHeight') >= 44 &&
+  /minHeight: BandLayout\.buttonHeight/.test(eButton) &&
+    declaredStyleValue(onboardingFrame, 'textAction', 'minHeight') >= 48 &&
+    declaredStyleValue(onboardingFrame, 'iconButton', 'width') >= 44 &&
+    declaredStyleValue(onboardingFrame, 'iconButton', 'height') >= 44 &&
+    declaredStyleValue(source('src/components/onboarding/e-name.tsx'), 'input', 'minHeight') >= 48 &&
+    declaredStyleValue(source('src/components/onboarding/e-name.tsx'), 'row', 'minHeight') >= 44 &&
+    declaredStyleValue(source('src/components/onboarding/e-goals.tsx'), 'pill', 'minHeight') >= 48 &&
+    declaredStyleValue(source('src/components/onboarding/e-first-payment.tsx'), 'source', 'minHeight') >= 48 &&
     declaredStyleValue(onboardingExample, 'action', 'minHeight') >= 48 &&
     declaredStyleValue(controls, 'button', 'minHeight') >= 48);
 ok('name personalization exposes a labelled optional input and skip action to assistive technology',
-  /testID="onboarding-name-input"[\s\S]{0,260}accessibilityLabel=\{t\('onboardNamePlaceholder'\)\}/.test(onboardingGate) &&
-    /accessibilityRole="button"[\s\S]{0,180}accessibilityLabel=\{t\('onboardNameSkip'\)\}/.test(onboardingGate) &&
-    /onboardNamePrivacy/.test(onboardingGate));
+  /testID="onboarding-name-input"[\s\S]{0,260}accessibilityLabel=\{words\.namePlaceholder\}/.test(source('src/components/onboarding/e-name.tsx')) &&
+    /<ETextAction palette=\{band\} label=\{t\('onboardNameSkip'\)\}/.test(source('src/components/onboarding/e-name.tsx')) &&
+    /accessibilityRole="button" accessibilityLabel=\{label\}/.test(onboardingFrame) &&
+    /onboardNamePrivacy/.test(source('src/components/onboarding/e-name.tsx')));
 ok('selected tabs have contrasting fills and labels; input boundaries retain control tokens',
   tokenValues('inverseSurface').every((color,index)=>contrast(color,tokenValues('backgroundSelected')[index])>=3) &&
   /theme\.inverseSurface/.test(billsSegments) && /theme\.inverseText/.test(billsSegments) &&

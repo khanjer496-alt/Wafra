@@ -20,20 +20,24 @@ test('fresh iPhone installs do not claim Daily Summary before notification conse
   );
 });
 
-test('iPhone completion explains notifications before the native visible-permission ask', () => {
+// Design language E: the Reminders step (4 of 5) explains what Wafra sends
+// before the explicit "Allow notifications" tap that may show the system ask.
+test('the Reminders step explains notifications before the native visible-permission ask', () => {
   const onboarding = read('src/components/onboarding-gate.tsx');
+  const step = read('src/components/onboarding/e-reminders.tsx');
   const notifications = read('src/lib/notifications.ts');
-  const copy = read('src/lib/i18n.ts');
 
-  assert.match(onboarding, /Platform\.OS === 'ios' && !notificationDecisionMade\.current/);
-  assert.match(onboarding, /onboardNotificationsTitle/);
-  assert.match(onboarding, /onboardNotificationsEnable/);
-  assert.match(onboarding, /onboardNotificationsNotNow/);
-  assert.match(onboarding, /requestVisibleNotificationPermission\(\)/);
-  assert.match(onboarding, /setDailySummary\(granted\)/);
+  assert.match(step, /words\.remindersTitle/);
+  assert.match(step, /words\.remindBillsWhen/);
+  assert.match(step, /words\.remindCardsWhen/);
+  assert.match(step, /label=\{words\.allowNotifications\} onPress=\{onAllow\}/);
+  assert.match(step, /label=\{words\.notNow\} onPress=\{onNotNow\}/);
+  assert.match(onboarding, /onAllow=\{\(\) => void runSetupAction\(\(\) => finishNotificationChoice\(true\)\)\}/);
+  assert.match(onboarding, /const finishNotificationChoice = async \(enable: boolean\) => \{[\s\S]{0,160}if \(enable && !previewMode\) \{\s*granted = await requestVisibleNotificationPermission\(\)/);
+  // The daily summary turns on only when notifications were really allowed.
+  assert.match(onboarding, /const daily = granted && dailySummaryDraft;\s*setDailySummary\(daily\);/);
   assert.match(notifications, /allowAlert:\s*true/);
   assert.match(notifications, /allowSound:\s*true/);
-  assert.match(copy, /Stay ahead of your money/);
 });
 
 test('notification consent remains separate from the local Shortcut capture setup', () => {

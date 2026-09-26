@@ -17,6 +17,8 @@ const actionNames = ['startScan', 'connectAndroidNotifications', 'finishAndroidC
 const declarations = new Map();
 let overlayExpression;
 let backDisabledExpression;
+// Design language E: the completion screen is the `completeStep` element,
+// titled by `completeTitle`/`completeBody`; Back is disabled by `backDisabled`.
 const completionFragments = new Map();
 function collect(node) {
   if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && actionNames.includes(node.name.text)) {
@@ -27,16 +29,13 @@ function collect(node) {
     assert.equal(overlayExpression, undefined, 'One actual render condition owns the overlay');
     overlayExpression = node.initializer.getText(ast);
   }
-  if (ts.isJsxElement(node)) {
-    const attributes = node.openingElement.attributes.getText(ast);
-    const content = node.getText(ast);
-    if (attributes.includes('styles.captureActions') && content.includes('openWafra')) completionFragments.set('actions', content);
-    if (attributes.includes('styles.questionTitle') && content.includes('automaticCompletion')) completionFragments.set('title', content);
-    if (attributes.includes('styles.questionBodyCopy') && content.includes('automaticCompletion')) completionFragments.set('body', content);
+  if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+      ['completeTitle', 'completeBody', 'completeStep'].includes(node.name.text)) {
+    assert.ok(!completionFragments.has(node.name.text), `One shipping ${node.name.text}`);
+    completionFragments.set(node.name.text, node.initializer.getText(ast));
   }
-  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === 'BackHeader') {
-    const disabled = node.attributes.properties.find(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText(ast) === 'disabled');
-    if (disabled?.initializer && ts.isJsxExpression(disabled.initializer)) backDisabledExpression = disabled.initializer.expression.getText(ast);
+  if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'backDisabled') {
+    backDisabledExpression = node.initializer.getText(ast);
   }
   ts.forEachChild(node, collect);
 }
@@ -44,7 +43,7 @@ collect(ast);
 for (const name of actionNames) assert.ok(declarations.has(name), `Shipping action exists: ${name}`);
 assert.ok(overlayExpression, 'Actual onboarding visibility expression exists');
 assert.ok(backDisabledExpression, 'Actual back navigation has a disabled condition');
-assert.equal(completionFragments.size, 3, 'Actual completion title, body and actions are rendered');
+assert.equal(completionFragments.size, 3, 'Actual completion title, body and screen are rendered');
 const program = ts.transpileModule(
   `${[...declarations.values()].join('\n')}\n({ ${actionNames.join(', ')} });`,
   { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } },
@@ -75,7 +74,12 @@ function actions(options = {}) {
     GROWTH_PLACEMENTS: { onboarding: 'onboarding_main', postImportPro: 'post_import_pro' },
     trackGrowthEvent() {},
     saveJourney(stage) { record('journey', stage); },
-    saveLiveStep() { record('journey', 'capture'); record('statement-step-done'); },
+    // Design language E: each capture choice records the alert answer it implies.
+    recordCaptureChoice(choice) { ui.alerts = choice; record('capture-choice', choice); },
+    iosSetupLaunched: { current: false },
+    resumeAtResult: { current: false },
+    setHandoff(value) { record('handoff', value); },
+    patternInputFromState: () => ({}),
     beginStepTransition() { record('transition'); return options.transitionAllowed ?? true; },
     onboardingLandingPath: focus => focus === 'spending' ? '/flow' : focus === 'bills' ? '/bills' : '/',
     setupBusyRef: { current: false },
@@ -102,6 +106,7 @@ function actions(options = {}) {
     setResult(value) { ui.result = clone(value); record('result', value); },
     setCompletionOutcome(value) { ui.outcome = value; record('outcome', value); },
     setStep(value) { ui.step = value; record('step', value); },
+    get activeStep() { return ui.step; },
     setShortcutCleanup(value) { ui.cleanup = value; record('cleanup', value); },
     async setCaptureOptOut(value) {
       record('capture-write-start', value);
@@ -145,7 +150,15 @@ function actions(options = {}) {
   const handlers = vm.runInNewContext(program, context, { filename: sourcePath });
   Object.assign(context, handlers, {
     exports: {},
-    View: 'View', Button: 'Button', ThemedText: 'Text',
+    View: 'View', ThemedText: 'Text', EStepFrame: 'EStepFrame', EHeadline: 'EHeadline', EBody: 'EBody',
+    EButton: 'EButton', ETextAction: 'ETextAction', ArrivedCard: 'ArrivedCard', ResultStrip: 'ResultStrip',
+    ReadySummary: 'ReadySummary', Linking: { openSettings: async () => {} },
+    stepBand: {}, bandButtonColor: () => ({}), onClose: undefined, revealAfterSetup: false,
+    words: { continue: 'continue', addByHand: 'addByHand', manualTitle: 'manualTitle', waitingTitle: 'waitingTitle',
+      waitingBody: 'waitingBody', workingTitle: () => 'workingTitle' },
+    preferredName: null, firstPayment: null, discoveredResult: null, readySummary: null, lang: 'en',
+    importsStillReading: false, showHistoryGapOffer: false, selectedAlerts: null, legacyFocus: null, legacyTracking: null,
+    onboardingNoAutomaticCapture: () => false, showPattern() { record('showPattern'); }, openStatementImport() {},
     styles: new Proxy({}, { get: () => ({}) }), night: new Proxy({}, { get: () => 'color' }),
     t: key => key,
     goBack() { record('goBack'); },
@@ -166,9 +179,12 @@ function actions(options = {}) {
     androidNotificationReady: { get: () => ui.androidNotificationReady },
     awaitingNotificationAccess: { get: () => ui.awaitingNotificationAccess },
     failedCompletion: { get: () => ui.step === 'complete' && ui.outcome === 'failed' },
+    backDisabled: { get: () => ui.busy || ui.finishing || false },
   });
   const isOverlayVisible = () => vm.runInNewContext(overlayExpression, context, { filename: sourcePath });
-  const renderProgram = ts.transpileModule(`() => [${[...completionFragments.values()].join(',\n')}];`, {
+  const renderProgram = ts.transpileModule(`() => { const completeTitle = ${completionFragments.get('completeTitle')};
+    const completeBody = ${completionFragments.get('completeBody')};
+    return ${completionFragments.get('completeStep')}; };`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
     fileName: 'actual-completion-fragments.tsx',
   }).outputText;
@@ -375,10 +391,10 @@ test('unavailable Android SMS bridge reports setup failure until the user explic
   assert.equal(calls(h, 'committed').length, 0);
   assert.equal(calls(h, 'route').length, 0);
   remainsEmpty(h);
-  const buttons = walk(h.renderCompletion()).filter(node => node.type === 'Button');
-  assert.deepEqual(buttons.map(node => node.props.label), ['onboardRetrySetup', 'onboardManualChoice'],
+  const buttons = actionsOf(h.renderCompletion());
+  assert.deepEqual(buttons.map(node => node.props.label), ['onboardRetrySetup', 'addByHand'],
     'Failure offers setup retry and explicit manual consent, without completion or entry promotion');
-  buttons.find(node => node.props.label === 'onboardManualChoice').props.onPress();
+  buttons.find(node => node.props.label === 'addByHand').props.onPress();
   await flush();
   assert.equal(h.ui.outcome, 'manual');
   assert.equal(h.ledger.captureOptOut, true, 'The rendered manual action persists the explicit choice');
@@ -410,8 +426,8 @@ for (const platform of ['ios', 'android']) {
       '/statement-import?fromOnboarding=1&statementSession=test-statement-session',
     ]]);
     assert.deepEqual(calls(h, 'journey'), [['journey', 'capture']]);
-    // Opening the importer marks the statement step done for a relaunch.
-    assert.equal(calls(h, 'statement-step-done').length, 1);
+    // Choosing statements answers the alert question as "not sure" (a gap to fill).
+    assert.deepEqual(calls(h, 'capture-choice'), [['capture-choice', 'statements']]);
     assert.equal(h.ledger.captureOptOut, true);
     assert.equal(calls(h, 'capture-write-start').length, 0);
     assert.equal(calls(h, 'requestSmsPermission').length, 0);
@@ -530,7 +546,7 @@ test('the real overlay stays visible through a failed completion save and its re
   assert.ok(failed, 'The real render condition admits the failure surface');
   assert.match(text(failed), /onboardFinishSaveFailedTitle/);
   assert.match(text(failed), /onboardFinishSaveFailedBody/);
-  const buttons = walk(failed).filter(node => node.type === 'Button');
+  const buttons = actionsOf(failed);
   assert.equal(buttons.length, 1, 'Failure exposes one save retry rather than restarting capture');
   assert.equal(buttons[0].props.label, 'storageRecoveryRetry');
   assert.equal(buttons[0].props.disabled, false);
@@ -588,7 +604,7 @@ test('automatic capture final-save failure retains the overlay and rendered Retr
   const failure = h.renderCompletion();
   assert.match(text(failure), /onboardFinishSaveFailedTitle/);
   assert.match(text(failure), /onboardFinishSaveFailedBody/);
-  const buttons = walk(failure).filter(node => node.type === 'Button');
+  const buttons = actionsOf(failure);
   assert.equal(buttons.length, 1);
   assert.equal(buttons[0].props.label, 'storageRecoveryRetry');
   assert.equal(buttons[0].props.disabled, false);
@@ -645,13 +661,16 @@ function preview(language) {
 }
 function walk(node, out = []) {
   if (Array.isArray(node)) node.forEach(child => walk(child, out));
-  else if (node && typeof node === 'object') { out.push(node); walk(node.props?.children, out); }
+  else if (node && typeof node === 'object') { out.push(node); walk(node.props?.children, out); walk(node.props?.footer, out); }
   return out;
 }
 function text(node) {
   if (Array.isArray(node)) return node.map(text).join(' ');
-  return node && typeof node === 'object' ? text(node.props?.children) : typeof node === 'string' ? node : '';
+  return node && typeof node === 'object' ? [text(node.props?.children), text(node.props?.footer)].join(' ')
+    : typeof node === 'string' ? node : '';
 }
+/** The rendered actions: the E buttons and the quiet text actions. */
+const actionsOf = tree => walk(tree).filter(node => node.type === 'EButton' || node.type === 'ETextAction');
 for (const language of ['en', 'ar']) {
   test(`sample interaction remains local and labeled before and after reveal/reset: ${language}`, () => {
     const h = preview(language);

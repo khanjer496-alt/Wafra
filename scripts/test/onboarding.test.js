@@ -467,6 +467,13 @@ const gateSource = fs.readFileSync(
   path.join(__dirname, '../../src/components/onboarding-gate.tsx'),
   'utf8',
 );
+// Design language E (2026-09-26): the steps are their own modules; the gate
+// keeps every action, the resume, the overlay and the capture machinery.
+const stepSource = (name) => fs.readFileSync(
+  path.join(__dirname, `../../src/components/onboarding/${name}.tsx`),
+  'utf8',
+);
+const eLibSource = fs.readFileSync(path.join(__dirname, '../../src/lib/onboarding-e.ts'), 'utf8');
 const storeSource = fs.readFileSync(path.join(__dirname, '../../src/lib/store.tsx'), 'utf8');
 const settingsSource = fs.readFileSync(path.join(__dirname, '../../src/app/settings.tsx'), 'utf8');
 const i18nSource = fs.readFileSync(path.join(__dirname, '../../src/lib/i18n.ts'), 'utf8');
@@ -488,17 +495,20 @@ const onboardingBankExamplesSource = fs.readFileSync(
   'utf8',
 );
 
+// 2026-09-26, design language E: five numbered steps (name, goals, watch,
+// reminders, first payment), then the pattern and the paywall. The old
+// money-plan wizard (PLAN_STEPS, budget presets) stays gone; the goals here
+// are `wafraGoals`, which hold no money, and a watched limit is only what the
+// person dialled.
 ok(
   'first-run personalization is one integrated journey without the optional goals/budget wizard',
-  gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'alerts', 'intention', 'preview']") &&
-    gateSource.includes('<FocusChooser value={selectedFocus} onChange={chooseFocus}') &&
-    gateSource.includes('<TrackingChooser value={selectedTracking} onChange={chooseTracking}') &&
-    gateSource.includes('<AlertDeliveryChooser value={selectedAlerts} onChange={chooseAlerts}') &&
-    gateSource.includes('<IntentionChooser value={selectedIntention} onChange={chooseIntention}') &&
+  /case 'name':[\s\S]{0,40}<NameStep[\s\S]*case 'goals':[\s\S]{0,40}<GoalsStep[\s\S]*case 'watch':[\s\S]{0,40}<WatchStep[\s\S]*case 'reminders':[\s\S]{0,40}<RemindersStep[\s\S]*case 'capture':\s*case 'live':[\s\S]*case 'pattern':[\s\S]{0,40}<PatternStep[\s\S]*case 'paywall':[\s\S]{0,40}<PaywallStep/.test(gateSource) &&
+    /export const ONBOARDING_E_TOTAL_STEPS = 5;/.test(eLibSource) &&
     !gateSource.includes('PLAN_STEPS') &&
-    !gateSource.includes("activeStep === 'goals'") &&
     !gateSource.includes("activeStep === 'budget'") &&
-    !gateSource.includes('onboardPersonalizeOptional'),
+    !gateSource.includes('onboardPersonalizeOptional') &&
+    !gateSource.includes('setOnboardingPlan') &&
+    /setGoals\(goalsDraft\)/.test(gateSource),
 );
 /* The statement offer has to follow the answer, and has to stay out of the way
  * of the two screens that are already recovery surfaces. Stacking it on top of
@@ -507,18 +517,23 @@ ok(
   'the completion statement offer follows the alert answer and yields to recovery states',
   /const showHistoryGapOffer = activeStep === 'complete' &&[\s\S]{0,400}onboardingHistoryGap\(selectedAlerts\)/.test(gateSource) &&
     /onboardingHistoryGap\(selectedAlerts\) &&\s*!failedCompletion &&\s*!finishSaveFailed &&\s*!smsDenied/.test(gateSource) &&
-    /\{showHistoryGapOffer && \(/.test(gateSource) &&
-    /await openWafra\(false, '\/statement-import'\)/.test(gateSource),
+    /\{showHistoryGapOffer \? <View/.test(gateSource) &&
+    // The offer opens the in-onboarding importer and keeps the result stage,
+    // so the person comes back to their result, the pattern and the paywall.
+    /onboarding_history_gap_import_opened[\s\S]{0,260}openStatementImport\(\);/.test(gateSource) &&
+    /const fromResult = activeStep === 'complete';[\s\S]{0,120}saveJourney\(fromResult \? 'complete' : 'capture'\)/.test(gateSource),
 );
 ok(
-  'a back step from the intention question returns to the alert question',
-  /activeStep === 'intention'\) \{\s*setStep\('alerts'\);/.test(gateSource) &&
-    /activeStep === 'alerts'\) \{\s*setStep\('tracking'\);/.test(gateSource),
+  'each Back step returns to the step before it and saves that stage',
+  /activeStep === 'live' \|\| activeStep === 'capture'\) \{\s*setStep\('reminders'\);\s*saveJourney\('alerts'\);/.test(gateSource) &&
+    /activeStep === 'reminders'\) \{\s*setStep\('watch'\);\s*saveJourney\('tracking'\);/.test(gateSource) &&
+    /activeStep === 'watch'\) \{\s*setStep\('goals'\);\s*saveJourney\('focus'\);/.test(gateSource) &&
+    /activeStep === 'goals'\) \{\s*setStep\('name'\);\s*saveJourney\('welcome'\);/.test(gateSource),
 );
 ok(
   'the alert answer is durable, so an interrupted setup resumes with it',
   /setAlerts\(state\.onboardingProfile\.alerts \?\? null\)/.test(gateSource) &&
-    /alerts: nextAlerts,/.test(gateSource) &&
+    /alerts: alertsRef\.current \?\? alerts \?\? current\?\.alerts \?\? null,/.test(gateSource) &&
     /const selectedAlerts = alerts \?\? state\.onboardingProfile\?\.alerts \?\? null/.test(gateSource),
 );
 /* iOS has no completion screen in the gate — setup exits straight into the
@@ -537,7 +552,18 @@ ok(
     .test(iosSource) &&
     !/\/statement-import' as const/.test(iosSource) &&
     /exitToRoot\(finishDestination\(\)\)/.test(iosSource) &&
-    /activeStep === 'capture' && Platform\.OS === 'ios'[\s\S]{0,700}onPress: openStatementImport/.test(gateSource),
+    // Design language E: statements sit beside live capture on step 5.
+    /icon="upload" title=\{words\.importStatements\}[\s\S]{0,160}onPress=\{openStatementImport\}/.test(gateSource),
+);
+// iPhone setup finishes onboarding itself. The gate that launched it shows
+// the result, the pattern and the paywall once over Home, writing nothing.
+ok(
+  'after iPhone setup finishes, the reveal and paywall show once without a second completion',
+  /iosSetupLaunched\.current = true;[\s\S]{0,200}router\.push\('\/ios-setup\?fromOnboarding=1'\)/.test(gateSource) &&
+    /if \(!state\.onboarded \|\| !iosSetupLaunched\.current \|\| previewMode\) return;[\s\S]{0,120}iosSetupLaunched\.current = false;[\s\S]{0,200}setRevealAfterSetup\(true\)/.test(gateSource) &&
+    /const finishJourney = \(\) => \{\s*if \(revealAfterSetup\) \{\s*setRevealAfterSetup\(false\);\s*setHandoff\(patternInputFromState\(state\)\);\s*return;\s*\}/.test(gateSource) &&
+    /const openWafra = async[\s\S]{0,300}iosSetupLaunched\.current = false;/.test(gateSource) &&
+    /const continueManually = async \(\) => \{[\s\S]{0,120}iosSetupLaunched\.current = false;/.test(gateSource),
 );
 
 /* Settings is where an already-onboarded user finds this, so the question and
@@ -566,31 +592,32 @@ ok(
   /settingsCountryTitle/.test(settingsSource) &&
     !/onboardCountrySheetTitle|OnboardingCountryConfirm/.test(settingsSource),
 );
+// Design language E: the country and the ledger currency are two compact
+// confirm rows on the Name step — the device's guess until corrected, each
+// "Change" opening the existing sheet. Never one merged control.
 ok(
-  'the country a person confirms reaches every onboarding scene, not just the first',
-  /<WelcomeMoneyScene marketId=\{state\.marketId\} country=\{selectedCountry\}/.test(gateSource) &&
-    /<FocusChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
-    /<TrackingChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
-    /<IntentionChooser[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
-    /<PersonalizedProductPreview[^\n]*country=\{selectedCountry\}/.test(gateSource) &&
-    /<CaptureMarketScene marketId=\{state\.marketId\} country=\{selectedCountry\}/.test(gateSource),
+  'the country and the currency are confirmed on the Name step as two separate rows',
+  /country=\{shownCountry\} suggestedCountry=\{deviceRegion\} onCountry=\{chooseCountry\}/.test(gateSource) &&
+    /currency=\{shownCurrency\} onCurrency=\{chooseCurrency\}/.test(gateSource) &&
+    /testID="onboarding-country-confirm"/.test(stepSource('e-name')) &&
+    /testID="onboarding-currency-confirm"/.test(stepSource('e-name')) &&
+    /<CountryPickerSheet/.test(stepSource('e-name')) && /<LedgerCurrencySheet/.test(stepSource('e-name')),
 );
 ok(
-  'the scenes resolve one device Region, shared with the control that corrects it',
-  /export const onboardingDeviceRegion/.test(aliveScenesSource) &&
-    /const previewRegion = \(country\?: string \| null\): string \| null => country \?\? deviceRegion\(\)/
-      .test(aliveScenesSource) &&
-    aliveScenesSource.split('deviceRegion()').length - 1 === 1 &&
-    /onboardingDeviceRegion/.test(gateSource),
+  'the device Region is read once and only as a guess the person can correct',
+  /function deviceCountry\(\): string \| null \{[\s\S]{0,120}normalizeOnboardingCountry\(getLocales\(\)\[0\]\?\.regionCode\)/.test(gateSource) &&
+    /const deviceRegion = useMemo\(deviceCountry, \[\]\)/.test(gateSource) &&
+    /const shownCountry = selectedCountry \?\? deviceRegion/.test(gateSource),
 );
 ok(
-  'the country control reports what is drawn and is durable without rewinding setup',
-  /const drawnRegionId = useMemo\([\s\S]{0,200}onboardingBankRegion\(state\.marketId, selectedCountry \?\? onboardingDeviceRegion\(\)\)/
-    .test(gateSource) &&
-    /resolved=\{drawnRegionId\}/.test(gateSource) &&
-    /saveJourney\(\s*state\.onboardingProfile\?\.stage \?\? 'welcome',/.test(gateSource) &&
+  'the country control is durable without rewinding setup',
+  /const chooseCountry = \(id: string\) => \{[\s\S]{0,500}stage: current\?\.stage \?\? 'welcome',[\s\S]{0,200}country: next,/.test(gateSource) &&
     /setCountry\(normalizeOnboardingCountry\(state\.onboardingProfile\.country\)\)/.test(gateSource) &&
-    /country: nextCountry,/.test(gateSource),
+    /country: country \?\? normalizeOnboardingCountry\(current\?\.country\) \?\? null,/.test(gateSource),
+);
+ok(
+  'a chosen currency is the ledger\'s, written like Settings writes it, and never in the preview',
+  /const chooseCurrency = \(code: string\) => \{\s*if \(previewMode\) \{\s*setCurrencyDraft\(code\);\s*return;\s*\}[\s\S]{0,200}if \(setLedgerMoney\(code\) && code !== shownCurrency\) \{[\s\S]{0,160}limitMinor: 0/.test(gateSource),
 );
 ok(
   'the alert scene states what Wafra can reach rather than naming a bank',
@@ -613,14 +640,15 @@ eq('Settings explains onboarding replay is read-only',
   i18n.t('settingsViewOnboardingDetail', 'en'),
   'Replay the welcome flow without changing your data or settings');
 ok(
-  'name personalization morphs inside Welcome instead of becoming a progress step of its own',
-  gateSource.includes('testID="onboarding-name-input"') &&
-    gateSource.includes('testID="onboarding-name-preview"') &&
-    /onboardChooseStart[\s\S]*?openNamePersonalization/.test(gateSource) &&
-    /onboardNameSkip/.test(gateSource) &&
+  // Design language E: the name is step 1 of 5, and the first tile of the pattern.
+  'name personalization is step 1, saved on this device before the journey moves on',
+  stepSource('e-name').includes('testID="onboarding-name-input"') &&
+    stepSource('e-name').includes('testID="onboarding-name-preview"') &&
+    /<EStepFrame palette=\{band\} step=\{1\}/.test(stepSource('e-name')) &&
+    /<WelcomeStep onStart=\{openName\}/.test(gateSource) &&
+    /onboardNameSkip/.test(stepSource('e-name')) &&
     /setUserName\(nextName\)[\s\S]*?saveJourney\('focus'\)[\s\S]*?ensureDurable\(\)/.test(gateSource) &&
-    gateSource.includes("const JOURNEY_STEPS: readonly Step[] = ['focus', 'tracking', 'alerts', 'intention', 'preview']") &&
-    !/JOURNEY_STEPS[^\n]*name/.test(gateSource),
+    /case 'name': return 1;/.test(eLibSource),
 );
 ok(
   'Home greeting uses the durable onboarding name while preserving the skipped-name fallback',
@@ -629,8 +657,8 @@ ok(
 );
 ok(
   'saved preferred name personalizes later onboarding without touching financial data',
-  /onboardFocusTitleNamed/.test(gateSource) &&
-    /onboardPersonalizedTitleNamed/.test(gateSource) &&
+  /words\.workingTitle\(preferredName\)/.test(gateSource) &&
+    /name=\{preferredName\}/.test(gateSource) &&
     /case 'setUserName'[\s\S]{0,260}normalizePreferredName/.test(storeSource) &&
     !/setUserName[\s\S]{0,120}(?:addTransaction|importBatch|upsertBudget|addGoal)/.test(gateSource),
 );
@@ -645,12 +673,18 @@ ok(
     /buildDeferredOnboardingPlan\([\s\S]*?state\.ledgerMoney\?\.currency,[\s\S]*?onboardingIncomeBasis\(state\.transactions\)/.test(storeSource),
 );
 ok(
-  'welcome uses real Wafra identity and market-aware bank examples without ledger writes',
-  /<WelcomeMoneyScene marketId=\{state\.marketId\} country=\{selectedCountry\} reducedMotion=\{reducedMotion\}/.test(gateSource) &&
+  // Design language E: Welcome draws Wafra's mark and an example pattern,
+  // labelled and spoken as an example, and writes nothing. The regional
+  // scenes remain for setup-preview and the setup shell.
+  'welcome uses real Wafra identity and an example pattern without ledger writes',
+  /<LogoDraw size=\{38\} color=\{band\.accent\} \/>/.test(stepSource('e-welcome')) &&
+    /<PatternMosaic key=\{replay\} tiles=\{tiles\} tile=\{tile\} animate accessibilityLabel=\{words\.exampleLabel\} \/>/.test(stepSource('e-welcome')) &&
+    !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(stepSource('e-welcome')) &&
+    // No language button on the first page (owner decision, 2026-09-25).
+    !/setUiLanguage|I18nManager|onboarding-language-switch/.test(gateSource + stepSource('e-welcome')) &&
     /WafraMark/.test(aliveScenesSource) &&
     /onboardingBankRegion/.test(aliveScenesSource) &&
     /verifiedLogoUrl/.test(aliveScenesSource) &&
-    /activeStep === 'welcome'[\s\S]*?<WelcomeMoneyScene[\s\S]*?onboardChooseStart/.test(gateSource) &&
     /US:[\s\S]*GB:[\s\S]*FR:[\s\S]*DE:[\s\S]*IN:[\s\S]*QA:[\s\S]*KW:/.test(onboardingBankExamplesSource) &&
     !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(aliveScenesSource) &&
     !/Gmail|Excel|fake contact/i.test(aliveScenesSource),
@@ -666,28 +700,32 @@ ok(
     !/function MessageParse|function Token/.test(aliveScenesSource),
 );
 ok(
-  'successful completion keeps Wafra identity and editorial result strips instead of a generic success card',
-  /failedCompletion \|\| smsDenied[\s\S]{0,220}<Icon name="alert"[\s\S]{0,220}<WafraMark size=\{42\}/.test(gateSource) &&
-    /resultCard:[\s\S]{0,420}borderTopWidth:[\s\S]{0,120}borderBottomWidth:/.test(gateSource) &&
-    !/resultCard:[\s\S]{0,420}backgroundColor: night\.primarySoft/.test(gateSource),
+  // Design language E: the result is an editorial strip of real counts and,
+  // when one exists, the real payment that arrived — never a success badge.
+  'successful completion shows real results as strips and the arrived payment, not a generic success card',
+  /<ResultStrip palette=\{stepBand\} cells=\{\[/.test(gateSource) &&
+    /strip: \{ flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1/.test(stepSource('e-first-payment')) &&
+    /automaticCompletion && firstPayment && !failedCompletion && !smsDenied && !finishSaveFailed/.test(gateSource) &&
+    /<ArrivedCard palette=\{stepBand\} transaction=\{firstPayment\.arrived\}/.test(gateSource),
 );
 ok(
   'Android capture exposes SMS, bank-app notifications, statement import, either automatic source, both, or manual',
-  /onPress=\{\(\) => void runSetupAction\(startScan\)\}/.test(gateSource) &&
+  /onPress=\{\(\) => void openSmsSource\(\)\}/.test(gateSource) &&
+    /const openSmsSource = async[\s\S]{0,260}await runSetupAction\(startScan\)/.test(gateSource) &&
     /onPress=\{\(\) => void runSetupAction\(connectAndroidNotifications\)\}/.test(gateSource) &&
     /onPress=\{openStatementImport\}/.test(gateSource) &&
-    /onboardStatementChoice/.test(gateSource) &&
-    /finishAndroidCapture/.test(gateSource) &&
+    /words\.importStatements/.test(gateSource) &&
+    /onPress=\{\(\) => void runSetupAction\(finishAndroidCapture\)\}/.test(gateSource) &&
     /onboardCaptureContinueBoth/.test(gateSource) &&
     /onboardCaptureContinueOne/.test(gateSource) &&
     /onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource),
 );
 ok(
   'web preview offers manual tracking without a nonfunctional automatic choice',
-  /Platform\.OS === 'android' \?/.test(gateSource) &&
-    /activeStep === 'capture' && Platform\.OS !== 'ios'/.test(gateSource) &&
-    /<StartOption automatic=\{false\} disabled=\{setupBusy \|\| transitioning\} onPress=\{\(\) => void runSetupAction\(continueManually\)\}/.test(gateSource) &&
-    /Platform\.OS === 'web' \? 'onboardManualChoiceWebBody'/.test(gateSource),
+  /\{Platform\.OS === 'android' \? <>/.test(gateSource) &&
+    /\{Platform\.OS !== 'web' && !previewMode \? <SourceRow palette=\{stepBand\} icon="upload"/.test(gateSource) &&
+    /<SourceRow palette=\{stepBand\} icon="plus" title=\{words\.addByHand\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(gateSource) &&
+    /Platform\.OS === 'android' \? words\.captureBodyAndroid : words\.captureBodyWeb/.test(gateSource),
 );
 ok(
   'Android notification capture is a first-class source while neither automatic source is visually recommended',
@@ -756,14 +794,17 @@ ok(
 // and a "How it works" disclosure carry everything else.
 const introStepSource = fs.readFileSync(path.join(__dirname, '../../src/components/onboarding/setup-intro-step.tsx'), 'utf8');
 ok(
-  'iOS setup offers statements, then live capture, each with one primary action and details behind How it works',
-  /label: t\('onboardPastAction'\),[\s\S]{0,80}onPress: openStatementImport/.test(gateSource) &&
-    /label: t\('onboardLater'\),[\s\S]{0,200}setStep\('live'\)/.test(gateSource) &&
-    /label: t\('onboardLiveAction'\),[\s\S]{0,160}runSetupAction\(beginCapture\)/.test(gateSource) &&
-    /label: t\('onboardNotNow'\),[\s\S]{0,80}runSetupAction\(continueManually\)/.test(gateSource) &&
-    /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardPastHowTitle[\s\S]*?onboardCaptureLearnMoreTitle/.test(gateSource) &&
-    (gateSource.match(/howLabel=\{t\('onboardHowItWorks'\)\}/g) ?? []).length === 2 &&
-    // One filled primary, one ghost way past, one disclosure: nothing else.
+  // Design language E: iPhone step 5 is live capture (the evidence checklist
+  // and one Set up), with statements and "by hand" as the honest ways past
+  // it and the privacy details behind How it works. The intro step component
+  // stays for the setup preview.
+  'iOS setup offers live capture with one primary action, statements and by-hand beside it, details behind How it works',
+  /label=\{t\('onboardLiveAction'\)\}\s*onPress=\{\(\) => void runSetupAction\(beginCapture\)\}/.test(gateSource) &&
+    /icon="upload" title=\{words\.importStatements\}[\s\S]{0,160}onPress=\{openStatementImport\}/.test(gateSource) &&
+    /icon="plus" title=\{words\.addByHand\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(gateSource) &&
+    /<BottomSheet[\s\S]*?visible=\{learnMoreVisible\}[\s\S]*?onboardCaptureLearnMoreTitle[\s\S]*?onboardCaptureLearnMorePrivacy/.test(gateSource) &&
+    /label=\{t\('onboardHowItWorks'\)\}\s*onPress=\{\(\) => setLearnMoreVisible\(true\)\}/.test(gateSource) &&
+    // The setup preview's intro step keeps its one primary and one ghost.
     (introStepSource.match(/<Button\b/g) ?? []).length === 2 &&
     /variant="ghost"/.test(introStepSource) &&
     /accessibilityLabel=\{howLabel\}/.test(introStepSource) &&
@@ -817,27 +858,28 @@ ok(
   /if \(!state\.hydrated\s*\|\|/.test(gateSource) &&
     /resumeReady/.test(gateSource) &&
     /loadingLedger/.test(gateSource) &&
-    /onboardStepOf|progressbar/.test(gateSource) &&
-    /JOURNEY_STEPS\.includes\(activeStep\)/.test(gateSource) &&
+    /accessibilityRole="progressbar"/.test(stepSource('e-frame')) &&
+    /words\.stepOf\(step, ONBOARDING_E_TOTAL_STEPS\)/.test(stepSource('e-frame')) &&
     !/PLAN_STEPS|personalizing/.test(gateSource),
 );
+// Design language E: every answer visibly changes something real — the
+// pattern, Home's order, a budget, the reminders — and the result, the
+// pattern and the paywall follow the first payment.
 ok(
-  'value flows through personal intention into preview and contextual capture trust',
-  /activeStep === 'focus'[\s\S]*?activeStep === 'tracking'[\s\S]*?activeStep === 'intention'[\s\S]*?activeStep === 'preview'[\s\S]*?activeStep === 'capture'/.test(gateSource) &&
-    /activeStep === 'preview'[\s\S]*?onPress=\{showCapture\}/.test(gateSource) &&
-    !/activeStep === 'privacy'/.test(gateSource) &&
-    /testID="onboarding-context-trust"/.test(gateSource) &&
-    /discoveredResult && discoveredResult\.tx > 0[\s\S]*?onboardProPreviewAction/.test(gateSource) &&
-    /GROWTH_PLACEMENTS\.postImportPro/.test(gateSource),
+  'each answer changes something real, and the first payment leads to the pattern and the paywall',
+  /const patternTiles = useMemo\(\(\) => buildPattern\(patternInput\), \[patternInput\]\)/.test(gateSource) &&
+    /<GoalsStep goals=\{goalsDraft\}[\s\S]{0,200}tiles=\{patternTiles\}/.test(gateSource) &&
+    /const showPattern = \(\) => \{[\s\S]{0,300}onboarding_value_previewed[\s\S]{0,200}setStep\('pattern'\)/.test(gateSource) &&
+    /onPress=\{showPattern\}/.test(gateSource) &&
+    /continueLabel=\{showPaywall \? words\.oneLastThing : words\.openWafra\}/.test(gateSource) &&
+    /testID="onboarding-context-trust"/.test(stepSource('e-first-payment')) &&
+    /<TrustLine palette=\{stepBand\}/.test(gateSource),
 );
 ok(
-  'tracking choice changes a real product scene instead of collecting a dead survey answer',
-  /<TrackingChooser value=\{selectedTracking\} onChange=\{chooseTracking\} marketId=\{state\.marketId\}/.test(gateSource) &&
-    /id: 'bank-apps'/.test(aliveScenesSource) &&
-    /id: 'spreadsheet'/.test(aliveScenesSource) &&
-    /id: 'finance-app'/.test(aliveScenesSource) &&
-    /id: 'none'/.test(aliveScenesSource) &&
-    /onboardTrackingOneView/.test(aliveScenesSource),
+  'the pattern carries no money and matches what Home will draw',
+  !/amount|Fils|Minor/.test(stepSource('e-pattern').replace(/\/\*[\s\S]*?\*\//g, '')) &&
+    /const live = patternInputFromState\(\{/.test(gateSource) &&
+    /setHandoff\(patternInputFromState\(state\)\)/.test(gateSource),
 );
 ok(
   'Android source setup persists readiness before explicit final completion',
@@ -847,16 +889,18 @@ ok(
 );
 ok(
   'funnel instrumentation is provider-neutral and covers the important first-run decisions',
-  ['onboarding_started', 'onboarding_focus_selected', 'onboarding_tracking_selected',
+  // Design language E: goals are the "focus" decision and the alert answer
+  // is recorded from the capture choice; there is no tracking question.
+  ['onboarding_started', 'onboarding_focus_selected', 'onboarding_alerts_selected',
     'onboarding_value_previewed', 'onboarding_privacy_seen', 'capture_setup_started',
     'capture_permission_granted', 'capture_permission_denied', 'manual_tracking_selected',
     'onboarding_completed'].every((event) => gateSource.includes(`'${event}'`)),
 );
 ok(
   'manual completion keeps the gate visible through a failed durable save',
-  /const showOverlay\s*=[\s\S]{0,240}\(!state\.onboarded \|\| finishing \|\| previewMode\)/.test(gateSource) &&
+  /const showOverlay\s*=[\s\S]{0,240}\(!state\.onboarded \|\| finishing \|\| previewMode \|\| revealAfterSetup\)/.test(gateSource) &&
     /const openWafra = async[\s\S]*?setFinishing\(true\)[\s\S]*?await ensureDurable\(\)[\s\S]*?setFinishing\(false\)[\s\S]*?catch[\s\S]*?setFinishSaveFailed\(true\)/.test(gateSource) &&
-    /finishSaveFailed \? <Button[\s\S]{0,220}openWafra\(requestedFirstEntry\.current, requestedDestination\.current\)/.test(gateSource),
+    /finishSaveFailed \? <EButton[\s\S]{0,220}openWafra\(requestedFirstEntry\.current, requestedDestination\.current\)/.test(gateSource),
 );
 ok(
   'completion copy distinguishes automatic, manual and failed outcomes while SMS denial stays inline',

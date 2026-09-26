@@ -63,21 +63,18 @@ for(const language of ['en','ar']) {
   const deferred=walk(C({title:'Fixture',status:'skipped',statusLabel:'Skipped',expanded:false,onPress(){}})).find(n=>n.props.onPress);
   assert.equal(deferred.props.accessibilityValue.text,'Skipped');
  });
- test(`${language}: welcome money scene is display-only and never writes the ledger`,()=>{
-  // Name personalization plus focus/tracking/intention now sit ahead of
-  // resumeReady; slot 8 represents the hydrated/resume-ready gate in this
-  // source-executed harness.
-  // states[10] is the gate's `resumeReady`, by hook order — see workflow-ui.test.cjs.
-  const h=createWorkflowHarness({language,state:{onboarded:false,marketId:'AE'},states:{10:true}}),tree=h.renderScreen('onboarding'),t=h.deps['@/lib/i18n'].t;
-  const scene=walk(tree).find(n=>n.props.testID==='onboarding-market-money-scene');assert.ok(scene);
-  assert.ok(walk(tree).some(n=>n.props.accessibilityLabel===t('onboardChooseStart')));
-  // Region-aware examples come from the market pack, not an invented partner list.
-  for(const bank of ['Emirates NBD','FAB','ADCB'])assert.ok(text(scene).includes(bank),bank);
-  assert.match(text(scene),/120\.00/);
-  assert.match(text(scene),/7,062\.00/);
-  assert.ok(text(scene).includes(t('onboardSceneAlertsToPicture')));
-  // Nothing inside the scene is pressable, so the example cannot reach the store.
-  assert.ok(!walk(scene).some(n=>n.props.onPress));
+ test(`${language}: welcome example pattern is display-only and never writes the ledger`,()=>{
+  // Design language E: Welcome shows an example pattern (labelled and spoken
+  // as an example) instead of the regional money scene.
+  // states[6] is the gate's `resumeReady`, by hook order — see workflow-ui.test.cjs.
+  const h=createWorkflowHarness({language,state:{onboarded:false,marketId:'AE'},states:{6:true}}),tree=h.renderScreen('onboarding');
+  const words=h.deps['@/lib/onboarding-e-copy'].onboardingECopy(language);
+  const example=walk(tree).find(n=>n.props.testID==='onboarding-example-pattern');assert.ok(example);
+  assert.ok(walk(tree).some(n=>n.props.accessibilityLabel===words.getStarted));
+  assert.ok(text(example).includes(words.exampleLabel));
+  // The example carries no money and nothing in it is pressable.
+  assert.ok(!/\d[\d,]*\.\d\d/.test(text(example)));
+  assert.ok(!walk(example).some(n=>n.props.onPress));
   assert.deepEqual(h.events,[]);
  });
 }

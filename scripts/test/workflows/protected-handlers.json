@@ -279,44 +279,44 @@
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "connectAndroidNotifications",
-      "sha256": "e21c59a212affa08ac488687faffbead4e683ddbaba83dd3b0fff650663f81e1",
-      "reviewedChange": "2026-09-17: Android bank-app notification setup is now an explicit onboarding source. It persists source choice before opening system Notification access and never claims ready until system access is observed."
+      "sha256": "389251782506987515e975bafd0f94c8d91147bf23e52b0b38af660db193f8cb",
+      "reviewedChange": "2026-09-26 (design language E): when SMS is not also on, choosing bank-app notifications records the alert answer \"notifications\" and saves the capture stage (no alert-delivery question any more), so the history-gap offer and Settings statement row stay true. Permission, persistence and readiness order unchanged. Covered by onboarding-e.test.cjs and onboarding-actions.test.cjs. 2026-09-17: Android bank-app notification setup is now an explicit onboarding source. It persists source choice before opening system Notification access and never claims ready until system access is observed."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "finishAndroidCapture",
-      "sha256": "25cdb9ce36795aa812497fb146570fbfc6c9ac6a6fe5f4eb421069daa26459da",
-      "reviewedChange": "2026-09-17: Replace the deleted optional goals/budget save with the explicit Android source-selection completion boundary. At least one source must be ready, exact SMS/notification choices are persisted, then the completion checkpoint is saved."
+      "sha256": "e6d50569d65e8ed96eec9c26fc0ec430fe8544662f682103df9d7aed329e1112",
+      "reviewedChange": "2026-09-26 (design language E): records the alert answer from the ready sources (\"sms\" when SMS is on, else \"notifications\") before saving completion. Source persistence and completion order unchanged. Covered by onboarding-e.test.cjs and onboarding-actions.test.cjs. 2026-09-17: Replace the deleted optional goals/budget save with the explicit Android source-selection completion boundary. At least one source must be ready, exact SMS/notification choices are persisted, then the completion checkpoint is saved."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "startScan",
-      "sha256": "9fc318b4f6664ab1fe53a4a7c8c32ed349346ebf269abdf15311a069c49a8160",
-      "reviewedChange": "2026-09-18: SMS onboarding still persists the SMS source and history checkpoint, and now explicitly asks for RECEIVE_SMS plus visible notification permission so live purchase alerts work while Wafra is backgrounded. Either refusal keeps READ_SMS catch-up usable and is repaired later through an explicit Enable action."
+      "sha256": "5c7508983e282567c62b10fbeb611d1f8c57fbbad2b961290baed9b135ae268f",
+      "reviewedChange": "2026-09-26 (design language E): after the SMS source and history checkpoint are persisted, records the alert answer \"sms\" and saves the capture stage before the existing durable checkpoint. Funnel payloads carry the legacy focus/tracking (null for new users). Permission order unchanged. Covered by onboarding-e.test.cjs and onboarding-actions.test.cjs. 2026-09-18: SMS onboarding still persists the SMS source and history checkpoint, and now explicitly asks for RECEIVE_SMS plus visible notification permission so live purchase alerts work while Wafra is backgrounded. Either refusal keeps READ_SMS catch-up usable and is repaired later through an explicit Enable action."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "beginCapture",
-      "sha256": "dfc5779a1a5b70061f66f869892c15c81c210a3fcdba465b6f07256f8f81fabe",
-      "reviewedChange": "2026-09-10: Capture setup keeps serialized native handoff behavior, records source-free funnel state, and still requires explicit manual choice when capture is unavailable."
+      "sha256": "e4d5248f2866021b607ffa7e93727ce7c063fe656ed9d4119bc19e014f161077",
+      "reviewedChange": "2026-09-26 (design language E): after the durable opt-in, saves the capture stage (the alert answer is recorded from the source Shortcuts setup saved, once it returns) and marks that this gate launched Shortcuts setup, so when setup finishes onboarding the gate shows the result, pattern and paywall once without a second completion write. Covered by onboarding-extreme-navigation.test.cjs. 2026-09-10: Capture setup keeps serialized native handoff behavior, records source-free funnel state, and still requires explicit manual choice when capture is unavailable."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "continueManually",
-      "sha256": "8f95198864cac7091c23e8c9510cd16ec0cbd52622bff7f80637d61f30877cc4",
-      "reviewedChange": "2026-09-25: iOS manual onboarding revokes the relay only when a Shortcut carries it (isLegacyShortcutCaptureActive). The statement step now precedes live capture and pairs a relay for uploads alone; revoking that relay stranded queued statement rows and warned about a Shortcut that was never installed. Strict read failure still reports uncertain cleanup. 2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; durable manual completion behavior is unchanged."
+      "sha256": "96826d636e7dbe073274cee3bb676b913340910bc70bf48cd7272bcd53a7e33b",
+      "reviewedChange": "2026-09-26 (design language E): \"I'll add by hand\" records the alert answer \"neither\" (nothing reaches Wafra on its own) after the durable opt-out and clears the Shortcuts-setup launch marker. Relay revocation and failure handling unchanged. Covered by onboarding-e.test.cjs, onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs. 2026-09-25: iOS manual onboarding revokes the relay only when a Shortcut carries it (isLegacyShortcutCaptureActive). The statement step now precedes live capture and pairs a relay for uploads alone; revoking that relay stranded queued statement rows and warned about a Shortcut that was never installed. Strict read failure still reports uncertain cleanup. 2026-09-17: Manual onboarding explicitly disables both durable Android sources and the native source/lease configuration before global opt-out; durable manual completion behavior is unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "goBack",
-      "sha256": "c3930dcb352e657715a8b9858a7a5ea0ccd2a0c37cf6a2cab071a7c8d39dbd4f",
-      "reviewedChange": "2026-09-25 (b): Back from completion to live capture on iPhone records that the statement step is behind the user (saveLiveStep, a no-op flag on Android), so a relaunch resumes at live capture. 2026-09-25: iPhone setup after the questionnaire is statements (capture) then new transactions (live). Back from live returns to the statement step and completion steps back to live on iOS; both persist the capture stage. Android and web Back are unchanged (complete → capture). 2026-09-19: Back follows the integrated welcome → name → focus → tracking → alerts → intention → preview → capture journey; returning from Focus reopens the in-Welcome name personalization, and completion callback cleanup is unchanged."
+      "sha256": "a4dd0d1d85f07c3e337a7f414df463ac450e8d3a1df60c475b7157a19ea976a4",
+      "reviewedChange": "2026-09-26 (design language E): Back follows welcome → name → goals → watch → reminders → first payment (capture on Android, live on iPhone) → result → pattern → paywall, saving the stage each earlier step owns (goals focus, watch tracking, reminders alerts). The statement step no longer precedes live capture on iPhone, so saveLiveStep is gone. Completion-callback cleanup unchanged. Covered by workflow-source.test.cjs and onboarding-extreme-navigation.test.cjs. 2026-09-25 (b): Back from completion to live capture on iPhone records that the statement step is behind the user (saveLiveStep, a no-op flag on Android), so a relaunch resumes at live capture. 2026-09-25: iPhone setup after the questionnaire is statements (capture) then new transactions (live). Back from live returns to the statement step and completion steps back to live on iOS; both persist the capture stage. Android and web Back are unchanged (complete → capture). 2026-09-19: Back follows the integrated welcome → name → focus → tracking → alerts → intention → preview → capture journey; returning from Focus reopens the in-Welcome name personalization, and completion callback cleanup is unchanged."
     },
     {
       "file": "src/components/onboarding-gate.tsx",
       "name": "openWafra",
-      "sha256": "d5fd65446fe8a51dd42dc07102b6c5af02545cec556b9b09cd246291cb69b43b",
-      "reviewedChange": "2026-09-19: The completion destination widens from the Pro route alone to the OnboardingExit union, so a ledger whose bank does not text can be sent to /statement-import. Destination is still only ever carried, never chosen here, and completion still waits for persistence. Covered by onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs."
+      "sha256": "e228bba06d031142c021ec33fb9d53df167a05e167d5414dd2dcd80c4e2c9784",
+      "reviewedChange": "2026-09-26 (design language E): the iPhone notification offer moved to the Reminders step, so completion no longer pauses for it; it clears the Shortcuts-setup marker and, when landing on Home, hands the pattern to Home's header (presentation only). Durable completion before navigation unchanged. Covered by onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs. 2026-09-19: The completion destination widens from the Pro route alone to the OnboardingExit union, so a ledger whose bank does not text can be sent to /statement-import. Destination is still only ever carried, never chosen here, and completion still waits for persistence. Covered by onboarding-actions.test.cjs and onboarding-extreme-navigation.test.cjs."
     },
     {
       "file": "src/app/review-alerts.tsx",
