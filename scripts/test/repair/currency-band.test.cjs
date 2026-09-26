@@ -96,6 +96,11 @@ test('each charge names its original amount and how it was converted', () => {
   assert.ok(lines.some((line) => line.includes('reference rate for that date')));
   assert.ok(lines.some((line) => line.includes('approximate rate for now')), 'a fallback rate is never presented as exact');
   assert.ok(rows.every((row) => /rate/.test(row.props.accessibilityLabel)));
+  // The amount the charge was made in is the bold figure; the ledger amount sits under it.
+  const eur = rows[list.props.data.findIndex((tx) => tx.id === 'a')];
+  assert.match(textOf(byId(eur, 'currency-row-original')), /89\.00/);
+  assert.match(textOf(byId(eur, 'currency-row-original')), /EUR|€/);
+  assert.match(textOf(byId(eur, 'currency-row-local')), /359\.20/);
   // The ledger-currency row and the qualified rate-source footer close the sheet.
   assert.ok(byId(list.props.ListFooterComponent, 'currency-ledger-row'));
   assert.ok(byId(list.props.ListFooterComponent, 'currency-fx-footer'));

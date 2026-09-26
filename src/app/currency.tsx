@@ -25,7 +25,8 @@ import { fxRowSource, summarizeForeignActivity, type CurrencyActivity } from '@/
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { ledgerStateHasMoney } from '@/lib/ledger-money';
 import { ledgerCurrencyCode } from '@/lib/markets';
-import { t, tf } from '@/lib/i18n';
+import { alignEnd, t, tf } from '@/lib/i18n';
+
 import { inPeriod, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { spendingDetailsCopy } from '@/lib/spending-details-copy';
@@ -214,17 +215,18 @@ export default function CurrencyScreen() {
         <MerchantAvatar title={item.title} category={item.category} size={40} />
         <View style={styles.transactionCopy}>
           <ThemedText type="smallBold" style={{ color: band.text }}>{item.title}</ThemedText>
-          <ThemedText type="meta" style={{ color: band.textSecondary }}>
-            <ThemedText type="meta" tabular style={{ color: band.textSecondary }}>{original}</ThemedText>
-            {original ? ` · ${rate}` : rate}
-          </ThemedText>
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{rate}</ThemedText>
           <ThemedText type="meta" style={{ color: band.textSecondary }}>
             {[category, shortDate(item.date), accountCaption].filter(Boolean).join(' · ')}
           </ThemedText>
         </View>
-        <ThemedText type="smallBold" tabular style={[styles.transactionAmount, { color: band.text }, largeText && styles.transactionAmountLarge]}>
-          {local}
-        </ThemedText>
+        {/* The amount the charge was made in leads; the ledger amount it became sits under it. */}
+        <View style={[styles.transactionAmounts, largeText && styles.transactionAmountsLarge]}>
+          <ThemedText type="smallBold" tabular testID="currency-row-original"
+            style={[{ color: band.text }, !largeText && { textAlign: alignEnd() }]}>{original || local}</ThemedText>
+          {original ? <ThemedText type="meta" tabular testID="currency-row-local"
+            style={[{ color: band.textSecondary }, !largeText && { textAlign: alignEnd() }]}>{local}</ThemedText> : null}
+        </View>
       </Pressable>
     );
   }, [accountById, lang, largeText, band, words]);
@@ -450,8 +452,8 @@ const styles = StyleSheet.create({
   },
   transactionRowLarge: { flexWrap: 'wrap', alignItems: 'flex-start' },
   transactionCopy: { flex: 1, minWidth: 130, gap: 2 },
-  transactionAmount: { flexShrink: 0, textAlign: 'right' },
-  transactionAmountLarge: { width: '100%', textAlign: 'auto', paddingStart: 52 },
+  transactionAmounts: { flexShrink: 0, alignItems: 'flex-end', gap: 2 },
+  transactionAmountsLarge: { width: '100%', alignItems: 'flex-start', paddingStart: 52 },
   empty: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 22,

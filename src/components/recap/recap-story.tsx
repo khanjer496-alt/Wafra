@@ -31,7 +31,7 @@ import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { monthLabel, shiftMonthKey, shortDate, weekdayName } from '@/lib/format';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { tapped } from '@/lib/haptics';
-import { isRTL } from '@/lib/i18n';
+import { alignEnd, isRTL } from '@/lib/i18n';
 import { recapWords, type RecapWords } from '@/lib/recap-copy';
 import { RECAP_TIME_BUCKETS, type RecapSnapshot } from '@/lib/recap';
 
@@ -403,7 +403,7 @@ function FinaleScene({ snapshot, moneySpec, palette, w, onDone }: SceneProps & {
       {facts.map(([label, value], index) => <View key={label} accessible accessibilityRole="text" accessibilityLabel={`${label}, ${value}`}
         style={[styles.finalFact, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.bandRule }]}>
         <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{label}</ThemedText>
-        <ThemedText type="smallBold" tabular style={[styles.finalValue, { color: palette.onBand }]}>{value}</ThemedText>
+        <ThemedText type="smallBold" tabular style={[styles.finalValue, { color: palette.onBand, textAlign: alignEnd() }]}>{value}</ThemedText>
       </View>)}
     </Animated.View>
     <EButton testID="recap-done" palette={palette} label={w.done} onPress={onDone}
@@ -559,5 +559,5 @@ const styles = StyleSheet.create({
   yearBar: { borderRadius: 4 },
   finalBoard: { paddingVertical: 4 },
   finalFact: { minHeight: 52, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 8 },
-  finalValue: { flexShrink: 1, textAlign: 'right' },
+  finalValue: { flexShrink: 1 },
 });

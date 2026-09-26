@@ -4,6 +4,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { RecapStory } from '@/components/recap/recap-story';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { marketCurrencyCode } from '@/lib/markets';
+import { normalizePreferredName } from '@/lib/onboarding';
 import { primaryRecapDescriptor, projectRecap, recapDescriptor, type RecapKind } from '@/lib/recap';
 import { markRecapViewed } from '@/lib/recap-view-state';
 import { useStore } from '@/lib/store';
@@ -20,7 +21,8 @@ export default function RecapScreen() {
   const snapshot = useMemo(() => projectRecap(state, descriptor), [descriptor, state]);
   const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId))!;
   // "there" is the placeholder greeting name, never the person's own.
-  const name = state.userName && state.userName.trim() && state.userName !== 'there' ? state.userName.trim() : null;
+  // The same cleaning onboarding applied when it saved it (whitespace, control characters, length).
+  const name = state.userName && state.userName.trim() !== 'there' ? normalizePreferredName(state.userName) : null;
 
   useEffect(() => {
     void markRecapViewed(descriptor.id);
