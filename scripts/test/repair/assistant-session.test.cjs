@@ -177,9 +177,11 @@ function sessionHarness(options = {}) {
     return render();
   }
   const find = predicate => walk(tree).find(predicate);
-  const button = label => find(node => node.type === 'Button' && node.props.label === label);
+  // Answer actions are the screen's own pills: real buttons named by their label.
+  const button = label => find(node => node.props?.accessibilityRole === 'button' && node.props.accessibilityLabel === label);
   // The evidence action carries its transaction count ("See 3 transactions").
-  const evidenceButton = () => find(node => node.type === 'Button' && /^See \d+ transactions?$/.test(node.props.label ?? ''));
+  const evidenceButton = () => find(node => node.props?.accessibilityRole === 'button' &&
+    /^See \d+ transactions?$/.test(node.props.accessibilityLabel ?? ''));
   const turns = () => walk(tree).filter(node => node.props?.testID === 'assistant-turn');
   return {
     render, flushFrames, calls, haptics, turns, find, button, evidenceButton,
@@ -293,7 +295,7 @@ test('Private Mode keeps unknown Ask Wafra language fully local', async () => us
   h.render();
   await h.submitAsync('gimme the money burn rn');
   assert.deepEqual(h.calls.map(call => call.kind), ['ask']);
-  const scaffold = h.find(node => node.type === 'Scaffold');
+  const scaffold = h.find(node => node.type === 'BandScaffold');
   assert.match(text(scaffold.props.footer), /On-device/);
 }));
 
@@ -621,4 +623,39 @@ test('card obligation payment and remaining follow-ups retain the selected card'
     assert.equal(result.tool, 'obligation-status', question);
     assert.equal(result.accountId, 'card-a', question);
   }
+}));
+
+test('Ask Wafra wears the ink band: the question on the band, the answer and its actions on the sheet', async () => usingAsync({ state: fixture }, async h => {
+  const themes = load(path.join(root, 'src/constants/theme.ts'), { '@/global.css': {}, 'react-native': { Platform: { select: x => x.android } } });
+  const ink = themes.BandPalettes.light.home;
+  const flat = style => Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
+  h.render();
+  let scaffold = h.find(node => node.type === 'BandScaffold');
+  assert.equal(scaffold.props.band, 'home');
+  assert.equal(scaffold.props.nav.title, 'Ask Wafra');
+  assert.equal(typeof scaffold.props.nav.close, 'function');
+  assert.equal(scaffold.props.nav.actions.length, 0, 'New chat appears only once there is a conversation');
+  // Before a question the band names what the screen is for; the on-phone
+  // badge keeps its exact spoken claim.
+  const badge = walk(scaffold.props.bandContent).find(node => node.props?.testID === 'assistant-local-badge');
+  assert.equal(badge.props.accessibilityLabel, 'Answers are calculated on this phone from your recorded transactions.');
+  assert.match(text(scaffold.props.bandContent), /Understand your transactions/);
+
+  await h.submitAsync('How much did I spend?');
+  scaffold = h.find(node => node.type === 'BandScaffold');
+  assert.deepEqual([...scaffold.props.nav.actions].map(action => action.label), ['New chat']);
+  const bubble = walk(scaffold.props.bandContent).find(node => node.props?.testID === 'assistant-band-question');
+  assert.equal(flat(bubble.props.style).backgroundColor, ink.tile, 'the question sits in the band tone');
+  assert.match(text(bubble), /How much did I spend\?/);
+  assert.doesNotMatch(text(h.turns()[0]), /How much did I spend\?/, 'the latest question is not repeated on the sheet');
+  const evidence = h.evidenceButton();
+  assert.equal(flat(evidence.props.style({ pressed: false })).backgroundColor, ink.fill, 'the first action is the filled pill');
+
+  await h.submitAsync('How much did I spend at Store?');
+  const [first, second] = h.turns();
+  // Once the band can scroll away behind earlier answers, each question keeps
+  // its bubble beside its answer (also for screen readers).
+  assert.match(text(first), /How much did I spend\?/, 'an earlier question keeps its bubble beside its answer');
+  assert.match(text(second), /How much did I spend at Store\?/);
+  assert.match(text(h.find(node => node.props?.testID === 'assistant-band-question')), /How much did I spend at Store\?/);
 }));
