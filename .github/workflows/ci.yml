@@ -171,7 +171,9 @@ jobs:
   # suite is about, one level up.
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # The full screen sweep reaches onboarding after ~25 minutes on a cold runner.
+    # Keep every scenario enabled and give the final journey time to complete.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 

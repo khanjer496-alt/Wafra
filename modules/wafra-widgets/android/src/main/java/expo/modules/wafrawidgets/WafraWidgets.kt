@@ -125,6 +125,7 @@ internal object WafraWidgets {
   private fun renderToday(context: Context, snapshot: WidgetSnapshot?, now: Long, todayISO: String): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.wafra_widget_today)
     attachLaunch(context, views)
+    applyLanguageDirection(context, views, snapshot?.language)
     val res = resourcesFor(context, snapshot?.language)
     views.setTextViewText(R.id.wafra_today_label, res.getString(R.string.wafra_widget_today))
 
@@ -192,6 +193,7 @@ internal object WafraWidgets {
   private fun renderUpcoming(context: Context, snapshot: WidgetSnapshot?, now: Long, todayISO: String): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.wafra_widget_upcoming)
     attachLaunch(context, views)
+    applyLanguageDirection(context, views, snapshot?.language)
     val res = resourcesFor(context, snapshot?.language)
     views.setTextViewText(R.id.wafra_upcoming_label, res.getString(R.string.wafra_widget_upcoming))
 
@@ -260,6 +262,16 @@ internal object WafraWidgets {
     Canvas(output).drawBitmap(source, 0f, 0f, paint)
     source.recycle()
     return output
+  }
+
+  /** Follow Wafra's chosen language even when the launcher uses another one. */
+  private fun applyLanguageDirection(context: Context, views: RemoteViews, language: String?) {
+    val direction = when (language) {
+      "ar" -> View.LAYOUT_DIRECTION_RTL
+      "en" -> View.LAYOUT_DIRECTION_LTR
+      else -> context.resources.configuration.layoutDirection
+    }
+    views.setInt(R.id.wafra_widget_root, "setLayoutDirection", direction)
   }
 
   private fun attachLaunch(context: Context, views: RemoteViews) {

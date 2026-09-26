@@ -3,15 +3,16 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { chromium } from 'playwright';
 const require = createRequire(import.meta.url);
 const { STATE_KEY, createWebSeed } = require('./universal-review-fixtures.cjs');
 const load = require('../universal-test/load-ts.cjs').createLoader();
 const { onboardingECopy } = load('@/lib/onboarding-e-copy');
-const BASE = process.env.BASE ?? 'http://localhost:8151';
+const BASE = process.env.BASE ?? 'http://localhost:8126';
 assert.ok(['localhost', '127.0.0.1', '[::1]'].includes(new URL(BASE).hostname));
-const OUT = process.env.OUT ?? '/tmp/wafra-onboarding-e2e';
+const OUT = process.env.OUT ?? path.join(tmpdir(), 'wafra-onboarding-e2e');
 const CHROMIUM = process.env.CHROMIUM_PATH ?? '/opt/pw-browsers/chromium';
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch(existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {});

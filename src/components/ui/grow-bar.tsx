@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Platform, type StyleProp, type ViewStyle } from 'react-native';
+import { Platform, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, {
   Easing,
   ReduceMotion,
@@ -26,25 +26,31 @@ import { useMotionPreference } from '@/hooks/use-reduced-motion';
 const FIRST = { duration: 420, easing: Easing.bezier(0.2, 0.8, 0.2, 1), reduceMotion: ReduceMotion.System } as const;
 const CHANGE = { damping: 24, stiffness: 260, mass: 0.9, overshootClamping: true, reduceMotion: ReduceMotion.System } as const;
 
-export function GrowBar({ size, axis, delay = 0, style }: {
+interface GrowBarProps {
   size: number;
   axis: 'width' | 'height';
   delay?: number;
   style?: StyleProp<ViewStyle>;
-}) {
+}
+
+export function GrowBar(props: GrowBarProps) {
   const motion = useMotionPreference();
-  // Android keeps its measured motion bypass (bars now sit in every limit row).
-  const reducedMotion = motion.reducedMotion || Platform.OS === 'android';
-  const { ready } = motion;
+  // A bypass must bypass the animation engine itself. Updating a shared
+  // value in an effect left Android's bar at its initial zero size until
+  // remount, even though its amount label had already updated.
+  if (Platform.OS === 'android' || motion.reducedMotion) {
+    const dimension: ViewStyle = props.axis === 'width' ? { width: `${props.size}%` } : { height: props.size };
+    return <View style={[props.style, dimension]} />;
+  }
+  return <AnimatedGrowBar {...props} ready={motion.ready} />;
+}
+
+/** Keep animation hooks in their own component so switching to static is immediate. */
+function AnimatedGrowBar({ size, axis, delay = 0, style, ready }: GrowBarProps & { ready: boolean }) {
   const shown = useRef(false);
-  const value = useSharedValue(reducedMotion ? size : 0);
+  const value = useSharedValue(0);
 
   useEffect(() => {
-    if (reducedMotion) {
-      shown.current = true;
-      value.value = size;
-      return;
-    }
     // Hold still until the screen-reader state is known (see use-reduced-motion).
     if (!ready) return;
     if (!shown.current) {
@@ -53,7 +59,7 @@ export function GrowBar({ size, axis, delay = 0, style }: {
       return;
     }
     value.value = withSpring(size, CHANGE);
-  }, [delay, ready, reducedMotion, size, value]);
+  }, [delay, ready, size, value]);
 
   const animated = useAnimatedStyle(() =>
     axis === 'width' ? { width: `${value.value}%` } : { height: value.value });
