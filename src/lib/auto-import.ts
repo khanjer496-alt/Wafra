@@ -1071,6 +1071,11 @@ export async function scanInbox(
     skipUniversalFallback = false,
     /** Only for alerts NO parser read (`!p`); never for a parsed row under review. */
     aiEligible = false,
+    /**
+     * A bank-app row native read from an ambiguous notification history: it
+     * may repeat a charge already recorded, so its Review item asks first.
+     */
+    possibleReplay = false,
   ): Promise<SourceFreeRefusedAlertDecision> => {
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
@@ -1133,6 +1138,7 @@ export async function scanInbox(
         sourcePackage: pushSource.packageName,
         sourceClass: pushSource.sourceClass,
       } : {}),
+      ...(possibleReplay && channel === 'push' ? { attentionReason: 'possible-notification-replay' as const } : {}),
       // Discovery is now even when this full scan finds an old Message.
       // Keep event time and its stable identity; only review retention moves.
       expiresAt: Math.max(identified.expiresAt, reviewDiscoveredAt + REVIEW_ALERT_TTL_MS),
@@ -1716,7 +1722,7 @@ export async function scanInbox(
         let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
           ? await inspectRefused(
               source, n.ts, sender, 'push', worldwide, undefined, pushSource,
-              reviewFallback, skipKnownLaunchUniversal,
+              reviewFallback, skipKnownLaunchUniversal, false, n.reviewOnly === true,
             )
           : null;
         const reviewed = refusal?.kind === 'review';
@@ -1743,6 +1749,7 @@ export async function scanInbox(
             reviewFallback,
             skipKnownLaunchUniversal,
             true,
+            n.reviewOnly === true,
           );
         }
         if (refusal?.kind === 'review') {

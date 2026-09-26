@@ -836,6 +836,7 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       unresolvedTrusted.reviewCandidates[0]?.kind === 'universal' &&
       unresolvedTrusted.reviewCandidates[0]?.sourcePackage === 'ae.hsbc.hsbcuae' &&
       unresolvedTrusted.reviewCandidates[0]?.sourceClass === 'trusted-bank' &&
+      unresolvedTrusted.reviewCandidates[0]?.attentionReason === undefined &&
       trustedReviewDiagnostics?.review === 1 &&
       trustedReviewDiagnostics?.unresolved === 0 &&
       trustedReviewDiagnostics?.unresolvedParserMiss === 0 &&
@@ -884,7 +885,9 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       first.parsed.length === 1 && first.parsed[0]?.amountFils === 125000 &&
         ambiguous.parsed.length === 0 && ambiguous.reviewCandidates.length === 2 &&
         ambiguous.reviewCandidates.every((row) => row.sourceClass === 'trusted-bank' &&
-          row.sourcePackage === 'ae.hsbc.hsbcuae') &&
+          row.sourcePackage === 'ae.hsbc.hsbcuae' &&
+          // It may repeat a charge already recorded, so the card asks first.
+          row.attentionReason === 'possible-notification-replay') &&
         ambiguousDiagnostics?.autoParsed === 0 && ambiguousDiagnostics?.review === 2 &&
         acknowledgedNotifications.length === ackBefore,
       JSON.stringify({ first: first.parsed, ambiguous, ambiguousDiagnostics }));
