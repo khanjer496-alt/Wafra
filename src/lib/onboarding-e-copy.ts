@@ -124,7 +124,10 @@ const en = {
   },
   trialToday: 'Today',
   trialTodayBody: 'Automatic capture is on. No card needed.',
-  trialEnd: (days: number) => days === 1 ? 'Within a day' : `In ${days} days`,
+  /** For someone who chose to add by hand, or has not set capture up yet. */
+  trialTodayBodyOff: 'Automatic capture is yours to turn on. No card needed.',
+  /** trialDaysLeft rounds up, so the end is "within", never an exact count. */
+  trialEnd: (days: number) => days === 1 ? 'Within a day' : `Within ${days} days`,
   trialEndBody: 'Automatic capture pauses. Nothing is charged, and your ledger stays.',
   continuePro: 'Continue with Pro',
   planYearly: 'Yearly',
@@ -221,8 +224,9 @@ const ar: OnboardingECopy = {
   },
   trialToday: 'اليوم',
   trialTodayBody: 'الالتقاط التلقائي يعمل. دون بطاقة.',
+  trialTodayBodyOff: 'يمكنك تفعيل الالتقاط التلقائي متى شئت. دون بطاقة.',
   trialEnd: (days: number) => days === 1 ? 'خلال يوم'
-    : `بعد ${arabicCount(days, { one: 'يوم', two: 'يومين', few: 'أيام', many: 'يوماً', hundreds: 'يوم' })}`,
+    : `خلال ${arabicCount(days, { one: 'يوم', two: 'يومين', few: 'أيام', many: 'يوماً', hundreds: 'يوم' })}`,
   trialEndBody: 'يتوقف الالتقاط التلقائي مؤقتاً. لا يُخصم أي مبلغ، ويبقى سجلك كما هو.',
   continuePro: 'المتابعة مع Pro',
   planYearly: 'سنوي',

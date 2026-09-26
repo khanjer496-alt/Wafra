@@ -322,6 +322,23 @@ export function watchedProgress<T extends CapturedRow>(
   return { category: pick.category, spentMinor: spent, limitMinor: pick.limitFils };
 }
 
+/**
+ * iPhone: Shortcuts setup (ios-setup) decides the source and finishes
+ * onboarding itself, so the answer is read from what it recorded once it
+ * returns: turned off → 'neither'; the Messages automation → 'sms'; the
+ * bank-app notification automation → 'notifications'; Apple Pay alone (or
+ * nothing recorded) says nothing about how the bank reaches them → 'unsure'.
+ */
+export function alertsAnswerForIosSetup(
+  captureOptOut: boolean,
+  source: 'message' | 'notification' | 'apple-pay' | null | undefined,
+): OnboardingAlertDelivery {
+  if (captureOptOut) return 'neither';
+  if (source === 'message') return 'sms';
+  if (source === 'notification') return 'notifications';
+  return 'unsure';
+}
+
 /* ── Paywall trial honesty ───────────────────────────────────────────────
  *
  * The trial is Wafra's own: TRIAL_DAYS from first launch, no card, no store
