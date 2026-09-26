@@ -1,3 +1,4 @@
+import { aiReviewEventForRefusedAlert } from '@/lib/ai-alert-reader';
 import { AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -607,12 +608,13 @@ export function parsedFinancialCandidateReview(
 function universalEventReviewCandidate(
   event: UniversalBankEvent,
   observedAt: number,
+  channel: CaptureChannel = 'push',
 ): SourceFreeReviewCandidate | null {
   const prepared = prepareUniversalReviewAlert({
     id: 'capture_probe_id_0001',
     sourceKey: 'capture_probe_key_001',
     observedAt,
-    channel: 'push',
+    channel,
     event,
   });
   if (!prepared) return null;
@@ -929,6 +931,8 @@ export async function scanInbox(
     },
     parsedFallback?: SourceFreeReviewCandidate | null,
     skipUniversalFallback = false,
+    /** Only for alerts NO parser read (`!p`); never for a parsed row under review. */
+    aiEligible = false,
   ): Promise<SourceFreeRefusedAlertDecision> => {
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
@@ -941,6 +945,17 @@ export async function scanInbox(
     });
     if (decision.kind === 'ignored' && decision.reason === 'unrecognized' && parsedFallback) {
       decision = { kind: 'review', candidate: parsedFallback };
+    }
+    // AI reading (ai-alert-reader.ts): only for an alert every proven path and
+    // the refusal pipeline left unrecognised, only when the person downloaded
+    // the model, never for AE/SA senders. It can only add a Review item with
+    // suggested fields; with no model it resolves null and nothing changes.
+    if (aiEligible && !parsedFallback && !skipUniversalFallback &&
+      decision.kind === 'ignored' && decision.reason === 'unrecognized') {
+      const aiEvent = await aiReviewEventForRefusedAlert(body, sender, ts);
+      let aiCandidate: SourceFreeReviewCandidate | null = null;
+      try { aiCandidate = aiEvent ? universalEventReviewCandidate(aiEvent, ts, channel) : null; } catch { aiCandidate = null; }
+      if (aiCandidate) decision = { kind: 'review', candidate: aiCandidate };
     }
     // Counted, not classified: a text already set aside that reads as an
     // offer (the same wording test the bank-app path uses to skip them) and
@@ -1162,6 +1177,10 @@ export async function scanInbox(
           'inbox',
           worldwide,
           sourceEventId,
+          undefined,
+          undefined,
+          false,
+          true,
         );
       }
       // The native inbox query is already asynchronous; the expensive part is
@@ -1240,7 +1259,7 @@ export async function scanInbox(
               channel: 'delivery',
             });
           } else if (!p) {
-            await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide);
+            await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide, undefined, undefined, undefined, false, true);
           }
         }
         if (parseYieldDue(deliveryYield, i + 1 < received.length)) {
@@ -1505,6 +1524,7 @@ export async function scanInbox(
             pushSource,
             reviewFallback,
             skipKnownLaunchUniversal,
+            true,
           );
         }
         if (refusal?.kind === 'review') {

@@ -65,7 +65,7 @@ const bestEffortMarker: Check = (value) => record(value) &&
   Object.keys(value).every((key) => key === 'v' || key === 'format' || key === 'market') &&
   required(value, {
     v: oneOf(1),
-    format: (v) => typeof v === 'string' && /^(?:universal|semantic):[a-z-]{1,32}:(?:debit|credit)$/.test(v),
+    format: (v) => typeof v === 'string' && /^(?:universal|semantic|ai):[a-z-]{1,32}:(?:debit|credit)$/.test(v),
     market: (v) => typeof v === 'string' && /^[A-Z]{2}$/.test(v),
   });
 const bestEffortUndoKey: Check = (v) => typeof v === 'string' && v.length > 0 && v.length <= 256;

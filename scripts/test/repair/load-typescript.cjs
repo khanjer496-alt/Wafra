@@ -233,6 +233,10 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           '@/lib/wafra-assistant': require('../build/wafra-assistant.js'),
         });
       }
+      if (name === '@/lib/ai-alert-reader') {
+        // Default install: no downloaded alert model, so the AI reader is inert.
+        return { aiReviewEventForRefusedAlert: async () => null };
+      }
       if (name === '@/lib/local-semantic-runtime') {
         return {
           localSemanticRuntimeStatus: () => ({ state: 'not-downloaded', modelVersion: 'test', error: null, retryAfter: null,
