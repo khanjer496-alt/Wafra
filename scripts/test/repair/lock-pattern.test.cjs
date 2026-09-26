@@ -26,15 +26,15 @@ test('the full pattern does carry the initial and the watched categories', () =>
   assert.equal(full.filter((tile) => tile.kind === 'glyph' && tile.category).length, 2);
 });
 
-test('the lock pattern has no letter, no glyph and no category anywhere', () => {
+test('the lock pattern keeps the category icons but never the initial', () => {
   const locked = redactPatternTiles(full);
   for (const tile of locked) {
     assert.notEqual(tile.kind, 'letter');
-    assert.notEqual(tile.kind, 'glyph');
     assert.equal(tile.letter, undefined, tile.key);
-    assert.equal(tile.category, undefined, tile.key);
   }
-  assert.doesNotMatch(JSON.stringify(locked), /Sara|"S"|dining|groceries/);
+  assert.doesNotMatch(JSON.stringify(locked), /Sara|"S"/);
+  // Owner decision 2026-09-26: the watched-category icons stay on the lock screen.
+  assert.equal(locked.filter((tile) => tile.kind === 'glyph' && tile.category).length, 2);
 });
 
 test('every cell stays where it was, in its own colour', () => {
@@ -44,7 +44,6 @@ test('every cell stays where it was, in its own colour', () => {
     const out = locked[index];
     assert.deepEqual([out.col, out.row, out.order], [tile.col, tile.row, tile.order]);
     if (tile.kind === 'letter') assert.deepEqual([out.kind, out.color], ['square', tile.color]);
-    else if (tile.kind === 'glyph') assert.deepEqual([out.kind, out.color], ['circle', tile.mark ?? tile.color]);
     else assert.equal(out, tile, 'plain shapes pass through untouched');
   });
   assert.equal(new Set(locked.map((tile) => tile.key)).size, locked.length, 'keys stay unique');

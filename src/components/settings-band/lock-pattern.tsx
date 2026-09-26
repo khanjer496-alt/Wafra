@@ -7,8 +7,8 @@ import { redactPatternTiles } from '@/lib/pattern-redact';
 type Props = Omit<React.ComponentProps<typeof PatternMosaic>, 'tiles'>;
 
 /**
- * The person's pattern as the lock screen shows it: same cells and colours,
- * no initial and no category glyphs (pattern-redact.ts). Subscribes only to
+ * The person's pattern as the lock screen shows it: same cells, colours and
+ * category icons, without the initial (pattern-redact.ts). Subscribes only to
  * the pattern's inputs, like YourPattern, never to money.
  */
 export function LockPattern(props: Props) {
