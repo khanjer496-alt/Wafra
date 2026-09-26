@@ -360,8 +360,21 @@ in `reference-harness.cjs` and `journal-harness.cjs`.
 
 ## Completed review refinements — 27 September 2026
 
-- Home's default sheet order is due payments, coming up, activity, Ask, then insights. Monthly Spending/Income/Net remains available below; saved custom Home ordering is preserved. Activity carries its selected period, and projected bill/subscription amounts are marked estimated.
+- Home's default sheet order is due payments, coming up, activity, Ask, then insights. The selected period and Spending/Income/Net now lead the ink band above Today and the compact daily breakdown (following the owner's device feedback); saved custom Home ordering is preserved. Activity carries its selected period, and projected bill/subscription amounts are marked estimated.
 - Every monetary graph exposes exact amounts, currency and its dates without a tap. Merchant and bill history, Ask monthly answers, limit history and annual recap use readable labelled rows where narrow columns cannot fit. Limit reference markers and status meanings remain intact.
 - The Widgets screen previews Today and Coming up from the same snapshot as native widgets. Thirty-three recurring-service logo identities map to bundled artwork on iOS/Android; unknown or older identities retain a fallback. No logo network request is needed.
 - A small Today widget shows the exact seven-day total instead of an unreadable seven-bar strip. The Widgets screen provides every dated daily value in a full-width chart. Hidden, incomplete or unsafe totals remain unavailable. Lock Screen/StandBy amount redaction remains unchanged.
 - Web controls expose checked/selected/pressed states explicitly alongside native accessibility state. Pending onboarding transitions keep their actions disabled until they can execute.
+
+## Device-feedback refinements — 27 September 2026
+
+- Home keeps the chosen period explicit above its total. The last-seven-days chart is separately dated, uses short weekdays, exact values and equal-width tracks; full dates are not repeated in each row. Android's header Ask action replaces the duplicate sheet row.
+- Spending retains one selected-period total above Categories, Compare and Calendar. Custom date ranges have daily details; periods longer than 42 days page by calendar month without changing the selected-period total. A selected day shows its full amount, while calendar shading continues to describe everyday spending with its fixed-cost legend.
+- Bills' upcoming preview groups real dates into scrollable payment tiles. Each logo has its own tile with name and exact amount; nearby dates cannot overlap logos.
+- Widgets use the complete 30-day recurring projection shared with Bills, including detected subscriptions. Cooperative analysis preserves a previous valid snapshot during incomplete imports; privacy clears invalidate pending work.
+
+- Below recent transactions, Transfers, Ask, insights and capture status use the same rounded sheet surfaces and glyph tiles. Insights have a readable headline and explicit period; capture and customization remain distinct working actions. Thin legacy divider-only rows are removed.
+
+## Whole-Home customization — 27 September 2026
+
+The owner requested control beyond the five lower sections. Greeting, spending overview, Today/budget figures, weekly spending and capture status now join payments, transactions, Ask and insights in one persisted order. Every content block can move or hide; only navigation and important setup/recovery warnings stay available. Financial blocks moved below other content adopt the sheet palette without changing their ledger calculations. Legacy five-section layouts preserve their order and hidden choices. The editor shows an ordered preview, reset, saving state and recoverable save failures; Home subscribes to durable changes.

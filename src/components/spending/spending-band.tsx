@@ -22,7 +22,7 @@ import { compareDirection } from '@/lib/spending-compare';
  * the three biggest named, "+N more"). The rows that add up to the figure are
  * on the sheet below.
  */
-export function SpendingCategoriesBand({ palette, label, totalFils, paceLabel, rows }: {
+export function SpendingCategoriesBand({ palette, label, totalFils, paceLabel, rows, showFigure = true }: {
   palette: BandPalette;
   /** "Spent this month", or "Spent in Aug 2026" for another period. */
   label: string;
@@ -30,14 +30,16 @@ export function SpendingCategoriesBand({ palette, label, totalFils, paceLabel, r
   /** "Day 25 of 30" for the running money month only. */
   paceLabel: string | null;
   rows: readonly SpendingCategoryRow[];
+  /** The parent keeps the same total above every Spending view. */
+  showFigure?: boolean;
 }) {
   const language = useLanguage();
   const w = spendingTrendsCopy[language === 'ar' ? 'ar' : 'en'];
   return <View style={styles.block} testID="spending-hero">
-    <View style={styles.figure}>
+    {showFigure ? <View style={styles.figure}>
       <BandFigure testID="spending-total" label={label} fils={totalFils} palette={palette} />
       {paceLabel ? <ThemedText type="meta" testID="spending-pace" style={{ color: palette.onBandSecondary }}>{paceLabel}</ThemedText> : null}
-    </View>
+    </View> : null}
     <ShareBar testID="spending-share-bar" palette={palette} label={w.spending}
       segments={rows.map((row) => ({ key: row.category, label: categoryLabel(row.category, language), value: row.spentFils }))} />
   </View>;

@@ -780,6 +780,20 @@ for (const [name, enter] of [
   for (const [name, key] of [['home', 'Home'], ['flow', 'Spending'], ['bills', 'Bills'], ['wallet', 'Accounts']]) {
     await tapTab(page, key);
     await page.waitForTimeout(700);
+    if (name === 'bills') {
+      // Payment previews intentionally scroll horizontally. Bring every tile
+      // into view and verify its complete text, just like the filter strip.
+      for (const tile of await page.locator('[data-testid^="bills-timeline-payment-"]').all()) {
+        await tile.scrollIntoViewIfNeeded();
+        const fits = await tile.evaluate(node => {
+          const r = node.getBoundingClientRect();
+          return r.left >= -1 && r.right <= innerWidth + 1 && [...node.querySelectorAll('*')]
+            .filter(n => n.children.length === 0 && n.textContent.trim())
+            .every(n => { const t = n.getBoundingClientRect(); return n.scrollWidth <= n.clientWidth + 1 && t.left >= r.left - 1 && t.right <= r.right + 1; });
+        });
+        if (!fits) overflow.push('bills: payment tile cannot be fully revealed');
+      }
+    }
     overflow.push(...(await clippedText(page, name)));
   }
   await tapKey(page, 'Home', 5000);

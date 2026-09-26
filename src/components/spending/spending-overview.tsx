@@ -68,7 +68,7 @@ export function SpendingOverview(p: Props) {
           .map(({ key, label }) => {
             const on = p.filter === key;
             return <Pressable key={key} accessibilityRole="button" accessibilityLabel={label}
-              accessibilityState={{ selected: on }} onPress={() => p.onFilter(key)}
+              accessibilityState={{ selected: on }} aria-pressed={on} onPress={() => p.onFilter(key)}
               style={({ pressed }) => [styles.filter, {
                 backgroundColor: on ? band.text : band.card, borderColor: on ? band.text : band.rule, opacity: pressed ? 0.8 : 1,
               }]}>

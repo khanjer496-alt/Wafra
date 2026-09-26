@@ -168,7 +168,11 @@ const money = (s) => {
 };
 
 /** The scheme the app is actually painting in, read off the page fill. */
-const paintedScheme = (page) => page.evaluate(() => {
+const paintedScheme = async (page) => {
+  // Home's configurable overview can place the theme-bearing sheet below the
+  // first viewport. Expose that real surface before measuring its paint.
+  if (new URL(page.url()).pathname === '/') await page.getByTestId('home-screen-sheet').scrollIntoViewIfNeeded();
+  return page.evaluate(() => {
   // E bands intentionally stay dark or coloured in light mode. Read the
   // current cream/dark detail sheet, not an arbitrary point on the band.
   for (const sheet of [...document.querySelectorAll('[data-testid$="-sheet"]')].reverse()) {
@@ -183,7 +187,8 @@ const paintedScheme = (page) => page.evaluate(() => {
     return (red + green + blue) / 3 > 128 ? 'light' : 'dark';
   }
   throw new Error('No exposed band sheet to verify the painted theme');
-});
+  });
+};
 
 // The dev container ships Chromium at a fixed path; a CI runner installs it
 // where Playwright expects. Use the pinned path only when it is really there,

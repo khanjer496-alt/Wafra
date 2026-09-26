@@ -53,8 +53,9 @@ test('Home keeps accounts out of its hero and exposes one Add and one Settings a
     // iPhone keeps its header "+"; Android moves Add to one floating button.
     assert.equal(headerAdd.length + fab.length, 1, platform);
     assert.equal(fab.length, platform === 'android' ? 1 : 0, platform);
-    const ask = nodeById(tree, 'home-ask-chip');
-    assert.equal(!!ask, platform === 'android', `${platform}: Ask chip only on Android`);
+    const ask = nodeById(tree, 'home-widget-assistant');
+    assert.ok(ask, `${platform}: Ask is one configurable content section`);
+    assert.equal(nodeById(tree, 'home-ask-chip'), undefined, 'no unhideable duplicate Ask chip');
     if (ask) { ask.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/assistant']); }
     (headerAdd[0] ?? fab[0]).props.onPress();
     assert.deepEqual(h.events.at(-1), ['route', '/add-transaction']);

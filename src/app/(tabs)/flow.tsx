@@ -14,6 +14,7 @@ import { SpendingTrends } from '@/components/spending/spending-trends';
 import { SpendingCalendar } from '@/components/spending/spending-calendar';
 import { SpendingCategoriesBand, SpendingCompareBand } from '@/components/spending/spending-band';
 import { BandScaffold } from '@/components/ui/band-scaffold';
+import { BandFigure } from '@/components/ui/band/band-figure';
 import { BandSegmented } from '@/components/ui/band/band-segmented';
 import { EButton } from '@/components/ui/band/e-button';
 import { GlyphTile } from '@/components/ui/band/glyph-tile';
@@ -26,7 +27,7 @@ import { TextField } from '@/components/ui/text-field';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { categoryMovers, categoryTrend, comparableSpend, dailySpendForMonth, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
+import { categoryMovers, categoryTrend, comparableSpend, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
 import { assistantCopy } from '@/lib/assistant-copy';
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { categoryLabel, isFixedCommitment } from '@/lib/categories';
@@ -36,10 +37,11 @@ import { tapped } from '@/lib/haptics';
 import { summarizeMonth } from '@/lib/insights';
 import { internalTransferIdsForState, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
 import { ledgerCurrencyCode } from '@/lib/markets';
-import { comparablePreviousPeriod, inPeriod, isCurrentMonth, periodLabel, previousPeriod } from '@/lib/period';
+import { comparablePreviousPeriod, inPeriod, isCurrentMonth, periodLabel, periodRange, previousPeriod } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { periodDayProgress } from '@/lib/period-pace';
 import { spendingTrendsCopy } from '@/lib/reference-copy';
+import { spendingDailyView } from '@/lib/spending-daily';
 import { spendingCategoryRows } from '@/lib/reference-presentation';
 import { useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
@@ -67,7 +69,7 @@ export default function FlowScreen() {
   // Design language E: Spending wears the clay band in both schemes.
   const band = useBand('spending'); const language = useLanguage(); const router = useRouter();
   const largeText = useLargeTextLayout();
-  const params = useLocalSearchParams<{ view?: string }>();
+  const params = useLocalSearchParams<{ view?: string; filter?: string }>();
   // Only what Spending draws. Import progress changes only the status-only
   // object, and only when the status itself does.
   const state = useStoreSelector(({ state: s }) => ({
@@ -82,7 +84,8 @@ export default function FlowScreen() {
   const words = everydayBandCopy(language);
   const transferWords = transferActivityCopy(language);
   const [view, setView] = useState<ViewMode>(viewFromParam(params.view) ?? 'categories');
-  const [filter, setFilter] = useState<CategoryFilter>('all');
+  const requestedFilter: CategoryFilter = period.mode === 'month' && (params.filter === 'limited' || params.filter === 'unlimited') ? params.filter : 'all';
+  const [filter, setFilter] = useState<CategoryFilter>(requestedFilter);
   const [query, setQuery] = useState('');
   const appliedQuery = useDeferredValue(query);
   const [periodOpen, setPeriodOpen] = useState(false);
@@ -101,7 +104,8 @@ export default function FlowScreen() {
     setView(next);
   }, [params.view]);
   const [calendarDay, setCalendarDay] = useState<string | null>(null);
-  useEffect(() => { setFilter('all'); setCalendarDay(null); }, [period]);
+  const [calendarMonth, setCalendarMonth] = useState<string | undefined>(undefined);
+  useEffect(() => { setFilter(requestedFilter); setCalendarDay(null); setCalendarMonth(undefined); }, [period, requestedFilter]);
 
   const live = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = internalTransferIdsForState(state);
@@ -178,6 +182,20 @@ export default function FlowScreen() {
         ? w.aboveAverage(categoryAverageDeltaPercent)
         : w.belowAverage(Math.abs(categoryAverageDeltaPercent));
 
+  // The calendar counts exactly the rows the list below keeps: transfer
+  // candidates drop out only when the Transfers screen lists them.
+  const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  const dailyView = useMemo(() => {
+    if (view !== 'calendar') return null;
+    let duplicates: ReturnType<typeof duplicateTransactionIds> | undefined;
+    return spendingDailyView(state.transactions, period, live, internal, (transaction) => {
+      if (!isTransferCandidate(transaction)) return true;
+      duplicates ??= duplicateTransactionIds(state.transactions);
+      return !isListedExternalTransfer(transaction, duplicates);
+    }, { todayISO, monthKey: calendarMonth });
+  }, [view, period, state.transactions, live, internal, todayISO, calendarMonth]);
+  const calendarDays = dailyView?.days ?? [];
+
   // Detailed analysis and activity sorting run only in the view that needs them.
   // Store order is newest-first: stop after leaving this period rather than
   // copying years of spending just to paint eight preview rows.
@@ -199,6 +217,7 @@ export default function FlowScreen() {
         continue;
       }
       seenInPeriod = true;
+      if (dailyView?.paged && calendarDay === null && (tx.date < dailyView.from || tx.date > dailyView.to)) continue;
       if (!isSpending(tx, live, internal)) continue;
       if (isTransferCandidate(tx)) {
         if (!duplicates) duplicates = duplicateTransactionIds(state.transactions);
@@ -213,21 +232,8 @@ export default function FlowScreen() {
       if (!needle && out.length >= ACTIVITY_PREVIEW_LIMIT) break;
     }
     return out;
-  }, [view, state.transactions, live, internal, period, appliedQuery, accountById, calendarDay]);
+  }, [view, state.transactions, live, internal, period, appliedQuery, accountById, calendarDay, dailyView]);
   const activity = sortedActivity;
-  // The calendar counts exactly the rows the list below keeps: transfer
-  // candidates drop out only when the Transfers screen lists them.
-  const calendarDays = useMemo(() => {
-    if (view !== 'calendar' || period.mode !== 'month') return [];
-    let duplicates: ReturnType<typeof duplicateTransactionIds> | undefined;
-    return dailySpendForMonth(state.transactions, period.key, live, internal, (transaction) => {
-      if (!isTransferCandidate(transaction)) return true;
-      duplicates ??= duplicateTransactionIds(state.transactions);
-      return !isListedExternalTransfer(transaction, duplicates);
-    });
-  },
-  [view, period, state.transactions, live, internal]);
-  const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const analysis = useMemo(() => {
     if (view !== 'compare') return null;
     const keys = Array.from({ length: 6 }, (_, i) => shiftMonthKey(trendWindowAnchorKey, i - 5));
@@ -268,10 +274,19 @@ export default function FlowScreen() {
   const dayHeading = calendarDay
     ? new Date(`${calendarDay}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB',
       { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
-    : words.calendarRecent;
+    : dailyView?.paged ? `${words.calendarRecent} · ${monthLabel(dailyView.monthKey, true)}` : words.calendarRecent;
   const trendsWords = spendingTrendsCopy[language === 'ar' ? 'ar' : 'en'];
 
   const bandContent = <View style={styles.band}>
+    <View style={styles.periodSummary} testID="spending-period-summary">
+      <Pressable testID="spending-period" accessibilityRole="button" accessibilityLabel={words.choosePeriod(currentPeriodName)}
+        onPress={() => setPeriodOpen(true)} style={[styles.periodChip, { backgroundColor: band.tile }]}>
+        <ThemedText type="smallBold" style={{ color: band.onBand }}>{currentPeriodName}</ThemedText>
+        <Icon name="chevron-down" size={16} color={band.onBand} />
+      </Pressable>
+      {periodRange(period) ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{periodRange(period)}</ThemedText> : null}
+      <BandFigure testID="spending-total" palette={band} label={words.totalSpent} fils={summary.expenseFils} />
+    </View>
     <BandSegmented palette={band} label={words.spendingViews} value={view} onChange={setViewMode} testID="spending-views"
       segments={[
         { value: 'categories', label: w.categories, testID: 'spending-view-categories' },
@@ -279,19 +294,35 @@ export default function FlowScreen() {
         { value: 'calendar', label: w.calendar, testID: 'spending-view-calendar' },
       ]} />
     {view === 'categories' && <SpendingCategoriesBand palette={band} label={spentLabel} totalFils={summary.expenseFils}
-      paceLabel={pace ? words.dayOf(pace.day, pace.of) : null} rows={rows} />}
+      paceLabel={null} rows={rows} showFigure={false} />}
     {view === 'compare' && analysis && <SpendingCompareBand palette={band} comparison={analysis.comparison}
       otherName={analysis.previousName ?? analysis.comparisonLabel} partial={analysis.partial} paceDay={pace?.day ?? null}
       noiseFloorFils={ledgerTypicalMinor(50)} />}
-    {view === 'calendar' && <SpendingCalendar palette={band} periodLabel={currentPeriodName} days={calendarDays}
-      todayISO={todayISO} selected={calendarDay} onSelect={setCalendarDay} />}
+    {view === 'calendar' && <View style={styles.dailyBlock}>
+      {dailyView?.paged ? <View style={styles.dailyPager} testID="spending-daily-pager">
+        <Pressable testID="spending-daily-previous" accessibilityRole="button"
+          accessibilityLabel={words.previousMonth} disabled={!dailyView.previousMonthKey} accessibilityState={{ disabled: !dailyView.previousMonthKey }}
+          onPress={() => { if (dailyView.previousMonthKey) { setCalendarMonth(dailyView.previousMonthKey); setCalendarDay(null); } }}
+          style={[styles.pagerAction, { opacity: dailyView.previousMonthKey ? 1 : 0.35 }]}>
+          <Icon name="chevron-left" size={20} color={band.onBand} />
+        </Pressable>
+        <ThemedText type="smallBold" style={{ color: band.onBand }}>{monthLabel(dailyView.monthKey, true)}</ThemedText>
+        <Pressable testID="spending-daily-next" accessibilityRole="button"
+          accessibilityLabel={words.nextMonth} disabled={!dailyView.nextMonthKey} accessibilityState={{ disabled: !dailyView.nextMonthKey }}
+          onPress={() => { if (dailyView.nextMonthKey) { setCalendarMonth(dailyView.nextMonthKey); setCalendarDay(null); } }}
+          style={[styles.pagerAction, { opacity: dailyView.nextMonthKey ? 1 : 0.35 }]}>
+          <Icon name="chevron-right" size={20} color={band.onBand} />
+        </Pressable>
+      </View> : null}
+      <SpendingCalendar palette={band} periodLabel={currentPeriodName} days={calendarDays}
+        todayISO={todayISO} selected={calendarDay} onSelect={setCalendarDay} />
+    </View>}
   </View>;
 
   return <>
     <BandScaffold band="spending" tabbed testID="reference-spending-screen" contentStyle={styles.sheet}
       nav={{ title: t('tabFlow'), actions: [
         { icon: 'search', label: w.search, onPress: () => setViewMode('calendar'), testID: 'spending-search' },
-        { icon: 'filter', label: words.choosePeriod(currentPeriodName), onPress: () => setPeriodOpen(true), testID: 'spending-period' },
       ] }}
       refreshControl={<CaptureRefreshControl />}
       bandContent={bandContent}>
@@ -489,6 +520,11 @@ export default function FlowScreen() {
   </>;
 }
 const styles = StyleSheet.create({
+  periodSummary: { gap: 8 },
+  dailyBlock: { gap: 8 },
+  dailyPager: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  pagerAction: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  periodChip: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 22, flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 8, maxWidth: '100%', flexWrap: 'wrap' },
   band: { gap: 18 },
   sheet: { gap: 16 },
   sectionTitle: { fontSize: 17, lineHeight: 24 },

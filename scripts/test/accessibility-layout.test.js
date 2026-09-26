@@ -204,7 +204,7 @@ ok('Bills card actions live in the card sheet as one labelled button',
     /<EButton palette=\{band\} label=\{w\.recordPayment\}/.test(cardDetail) &&
     /<EButton[\s\S]{0,120}label=\{t\('markPaid'\)\}/.test(bills));
 ok('Bills manual reminder rows open one labelled detail target',
-  /setSelectedReminderId\(\(item\.repeatOf \?\? item\.id\)\.slice\(5\)\)/.test(bills) && /onPress=\{\(\) => onOpen\(item\)\}/.test(paymentAgenda) &&
+  /setSelectedBill\(\{ id: \(item\.repeatOf \?\? item\.id\)\.slice\(5\), dueISO: item\.dateISO \}\)/.test(bills) && /onPress=\{\(\) => onOpen\(item\)\}/.test(paymentAgenda) &&
     /accessibilityRole="button"/.test(bills) &&
     /accessibilityLabel=/.test(bills) &&
     !/onLongPress=\{\(\) => onLongPressBill/.test(bills));

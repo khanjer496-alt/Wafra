@@ -131,7 +131,8 @@ export function onboardingEResumeStep(
  * the overview. Sections no goal names keep their current relative order,
  * after the promoted ones. No goals leaves the order exactly as it was.
  */
-export const GOAL_HOME_SECTIONS: Record<GoalId, readonly HomeWidgetId[]> = {
+export type GoalHomeSectionId = Extract<HomeWidgetId, 'due' | 'upcoming' | 'activity' | 'assistant' | 'insight'>;
+export const GOAL_HOME_SECTIONS: Record<GoalId, readonly GoalHomeSectionId[]> = {
   bills: ['due', 'upcoming'],
   subscriptions: ['upcoming'],
   'spend-less': ['insight'],
@@ -159,7 +160,7 @@ export function homeOrderForGoals(
 }
 
 /** The section the chosen goals put at the top of Home, for the Goals step's hint. */
-export function firstHomeSectionForGoals(goals: readonly GoalId[]): HomeWidgetId | null {
+export function firstHomeSectionForGoals(goals: readonly GoalId[]): GoalHomeSectionId | null {
   for (const goal of GOAL_HOME_PRECEDENCE) {
     if (goals.includes(goal)) return GOAL_HOME_SECTIONS[goal][0] ?? null;
   }

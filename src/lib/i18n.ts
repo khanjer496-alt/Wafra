@@ -3815,7 +3815,7 @@ const S = {
   homeWidgetUpcomingTitle: { en: 'Upcoming payments', ar: 'الدفعات القادمة' },
   homeWidgetUpcomingDetail: { en: 'Payments expected soon.', ar: 'الدفعات المتوقعة قريباً.' },
   homeCustomizeTitle: { en: 'Customize Home', ar: 'تخصيص الرئيسية' },
-  homeCustomizeBody: { en: 'Choose what appears below your money overview and put the most useful sections first.', ar: 'اختر ما يظهر أسفل ملخص أموالك ورتّب الأقسام الأكثر فائدة أولاً.' },
+  homeCustomizeBody: { en: 'Choose which Home sections appear and arrange the whole page in your order.', ar: 'اختر أقسام الرئيسية التي تظهر ورتّب الصفحة كاملة كما يناسبك.' },
   homeCustomizeDetail: { en: 'Choose and reorder Home sections', ar: 'اختر أقسام الرئيسية ورتّبها' },
   moveUp: { en: 'Move up', ar: 'نقل للأعلى' },
   moveDown: { en: 'Move down', ar: 'نقل للأسفل' },

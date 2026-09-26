@@ -356,6 +356,20 @@ function cardPaymentsOf(state: CardState, ids: Set<string>): Transaction[] {
 }
 
 /**
+ * Recorded activity on exactly one card, with the same payment confirmations
+ * collapsed as Statements. This is a display projection only: it neither
+ * allocates payments nor changes persisted evidence. Non-payment transfers
+ * and movements remain browsable.
+ */
+export function cardActivityRows(state: CardState, accountId: string): Transaction[] {
+  const ids = new Set([accountId]);
+  const creditIds = new Set(state.accounts.filter(a => a.id === accountId && a.cardType === 'credit').map(a => a.id));
+  const canonicalIds = new Set(cardPaymentsOf(state, ids).map(row => row.id));
+  return state.transactions.filter(row => row.accountId === accountId &&
+    (!isCardPayment(row, ids, creditIds) || canonicalIds.has(row.id)));
+}
+
+/**
  * Every distinct payment toward a credit card.
  *
  * A card settlement can be observed twice: once when money leaves the bank

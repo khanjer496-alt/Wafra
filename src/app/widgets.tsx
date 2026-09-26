@@ -15,14 +15,17 @@ import { BandPalettes } from '@/constants/theme';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { marketCurrencyCode } from '@/lib/markets';
 import { useStore } from '@/lib/store';
-import { widgetSnapshotForLedger } from '@/lib/widget-ledger';
+import { toISODate } from '@/lib/format';
+import { prepareWidgetSnapshot, requestWidgetSnapshotSync } from '@/lib/widget-sync';
+import type { WidgetSnapshot } from '@/lib/widget-snapshot';
+import { useResumeClock } from '@/hooks/use-today';
 import { markWidgetsHintDone } from '@/lib/widgets-hint';
 import { widgetsCopy } from '@/lib/widgets-copy';
 import { canPinWidgets, pinWidget, type PinnableWidget } from '../../modules/wafra-widgets';
 
 /**
  * Widgets, on Home's ink band: what the two real widgets show right now,
- * drawn from the same snapshot Home hands them (`widgetSnapshotForLedger`),
+ * drawn from the same snapshot Home hands them (`prepareWidgetSnapshot`),
  * and how to add them.
  *
  * iOS offers no API to add a widget, so iOS gets Apple's own three steps and
@@ -38,8 +41,10 @@ export default function WidgetsScreen() {
   const scheme = useBandScheme();
   const words = widgetsCopy(language);
   const platform: 'ios' | 'android' = Platform.OS === 'ios' ? 'ios' : 'android';
-  const { state } = useStore();
-  const [now] = useState(() => new Date());
+  const { state, getStateSnapshot, getStateGeneration } = useStore();
+  const now = useResumeClock();
+  const [prepared, setPrepared] = useState<{ value: WidgetSnapshot | null; generation: number } | null>(null);
+  const [preparing, setPreparing] = useState(true);
   const [pinFailed, setPinFailed] = useState(false);
   const [pinning, setPinning] = useState<PinnableWidget | null>(null);
   const alive = useRef(true);
@@ -50,22 +55,46 @@ export default function WidgetsScreen() {
     return () => { alive.current = false; };
   }, []);
 
-  const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId));
-  const snapshot = useMemo(() => moneySpec
-    ? widgetSnapshotForLedger({ state, now, moneySpec, language: language === 'ar' ? 'ar' : 'en' })
-    : null, [state, now, moneySpec, language]);
+  const moneySpec = useMemo(() => state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId)),
+    [state.ledgerMoney, state.marketId]);
+  const generation = getStateGeneration();
+  const allowed = state.hydrated && state.onboarded && !state.privateMode;
+  const snapshot = allowed && prepared?.generation === generation && prepared.value?.todayISO === toISODate(now) ? prepared.value : null;
+  useEffect(() => {
+    let cancelled = false;
+    const current = () => !cancelled && generation === getStateGeneration() && !getStateSnapshot().privateMode;
+    if (!allowed || !moneySpec) {
+      setPrepared(null); setPreparing(false);
+      return () => { cancelled = true; };
+    }
+    setPreparing(true);
+    void prepareWidgetSnapshot({ state, now, moneySpec, language: language === 'ar' ? 'ar' : 'en' }, () => !current())
+      .then(value => {
+        if (!current()) return;
+        // Pending import/detection leaves the last valid summary in place.
+        if (value !== undefined) setPrepared({ value, generation });
+        setPreparing(value === undefined);
+      }).catch(() => { if (current()) setPreparing(false); });
+    return () => { cancelled = true; };
+  }, [state, now, moneySpec, language, generation, allowed, getStateGeneration, getStateSnapshot]);
   // Asked once: the launcher does not change while this screen is open.
   const pinnable = useMemo(() => canPinWidgets(), []);
   const showSteps = platform === 'ios' || !pinnable || pinFailed;
 
   const pin = (kind: PinnableWidget) => {
-    if (pinning) return;
+    if (pinning || preparing || !snapshot || !moneySpec) return;
     setPinning(kind);
-    void pinWidget(kind).then((ok) => {
-      if (!alive.current) return;
-      setPinning(null);
-      if (!ok) setPinFailed(true);
-    });
+    const current = () => alive.current && generation === getStateGeneration() && !getStateSnapshot().privateMode;
+    // The initial launcher render must receive the full prepared snapshot,
+    // even when this screen was entered directly before Home ever mounted.
+    const job = requestWidgetSnapshotSync({ state: getStateSnapshot(), now: new Date(), moneySpec,
+      language: language === 'ar' ? 'ar' : 'en' }, current);
+    void job.done.then(async outcome => {
+      if (!current()) return;
+      const ok = outcome === 'written' && await pinWidget(kind);
+      if (current()) setPinFailed(!ok);
+    }).catch(() => { if (current()) setPinFailed(true); })
+      .finally(() => { if (alive.current) setPinning(null); });
   };
 
   const palettes = BandPalettes[scheme];
@@ -88,6 +117,8 @@ export default function WidgetsScreen() {
         <BandTitle testID="widgets-title" title={words.title} body={words.body(platform)} palette={band} />
       </View>}
       scrollProps={{ showsVerticalScrollIndicator: false }}>
+      {allowed && preparing ? <ThemedText testID="widgets-preparing" accessibilityLiveRegion="polite"
+        type="small" style={{ color: band.textSecondary }}>{state.historyImport && state.historyImport.status !== 'complete' ? words.importPending : words.preparing}</ThemedText> : null}
       {widgets.map((widget) => <View key={widget.kind} testID={`widgets-section-${widget.kind}`} style={styles.section}>
         <View style={styles.heading}>
           <SheetSectionTitle title={widget.name} palette={band} />
@@ -98,7 +129,7 @@ export default function WidgetsScreen() {
         {widget.kind === 'today' ? <WidgetHistory snapshot={snapshot} palette={band} words={words} /> : null}
         {platform === 'android' && pinnable ? <EButton testID={`widgets-pin-${widget.kind}`} palette={band}
           label={words.add} accessibilityHint={words.addNamed(widget.name)}
-          busy={pinning === widget.kind} disabled={pinning !== null && pinning !== widget.kind}
+          busy={pinning === widget.kind} disabled={preparing || !snapshot || (pinning !== null && pinning !== widget.kind)}
           onPress={() => pin(widget.kind)} /> : null}
       </View>)}
 

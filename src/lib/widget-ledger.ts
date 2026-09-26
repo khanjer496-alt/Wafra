@@ -1,32 +1,26 @@
 import { isFixedCommitment } from '@/lib/categories';
-import { projectDashboard } from '@/lib/dashboard-projection';
-import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
+import { billsForMonth } from '@/lib/bills';
+import { openDues } from '@/lib/cards';
+import { monthEndISO, monthKey, monthStartISO, toISODate } from '@/lib/format';
 import { summarizeHomeToday, type HomeToday } from '@/lib/home-today';
-import { isSpending, liveAccountIds } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import type { LedgerMoneySpec } from '@/lib/ledger-money';
-import type { Outgoing } from '@/lib/leaving-soon';
 import { inPeriod } from '@/lib/period';
 import { allocationsOf } from '@/lib/splits';
+import { activeSubscriptions, billCommitments, daysUntilNext, fixedCommitments, trueSubscriptions, withoutCancelled, type Subscription } from '@/lib/subscriptions';
+import { futureAnnualBillAgendaItems } from '@/lib/upcoming-bills';
+import { upcomingWindowItems, type AgendaRecurrence } from '@/lib/upcoming-window';
+import type { PaymentAgendaItem } from '@/lib/reference-presentation';
 import type { AppState, Budget, Transaction } from '@/lib/types';
-import { buildWidgetSnapshot, type WidgetSnapshot, type WidgetSnapshotInput } from '@/lib/widget-snapshot';
+import { buildWidgetSnapshot, WIDGET_UPCOMING_DAYS, type WidgetSnapshot, type WidgetSnapshotInput } from '@/lib/widget-snapshot';
 
 /**
  * The inputs Home hands the native widgets, in one place, so the widget sync
  * on Home and the previews on the Widgets screen can never describe two
  * different ledgers. Nothing here formats or invents a figure: it only
- * chooses which of Home's own projections go into `buildWidgetSnapshot`.
+ * combines the live-month Today projection with Bills' complete upcoming window.
+ * Recurrence detection is supplied by the cooperative caller, never run in render.
  */
-
-/** Home's upcoming payments as the snapshot takes them. Card statements are exact; bills and subscriptions are projections. */
-export function widgetUpcomingInput(items: readonly Outgoing[]): WidgetSnapshotInput['upcoming'] {
-  return items.map((item) => ({
-    title: item.title,
-    amountFils: item.amountFils,
-    dateISO: item.dateISO,
-    overdue: item.overdue,
-    estimated: item.kind !== 'card',
-  }));
-}
 
 /**
  * Today, the week and budget pace for the live month, whatever period Home is
@@ -57,41 +51,70 @@ export function widgetMonthToday(input: {
   });
 }
 
-/**
- * The snapshot the widgets hold right now for this ledger, or null when the
- * app writes none (not loaded, not onboarded, or private mode, which clears
- * it so the widgets ask to open Wafra).
- */
-export function widgetSnapshotForLedger(input: {
+export interface WidgetLedgerInput {
   state: AppState;
   now: Date;
   moneySpec: LedgerMoneySpec;
   language: 'en' | 'ar';
-}): WidgetSnapshot | null {
+}
+
+/** The same dated obligations and recurrence rules as Bills' Next 30 days. */
+export function widgetUpcomingForLedger(state: AppState, now: Date, detected: readonly Subscription[]): WidgetSnapshotInput['upcoming'] {
+  const live = liveAccountIds(state.accounts);
+  const internal = internalTransferIdsForState(state);
+  const subs = withoutCancelled(activeSubscriptions(trueSubscriptions([...detected])), state.cancelledSubscriptions);
+  const fixed = billCommitments(activeSubscriptions(fixedCommitments([...detected])));
+  const recurring = [...subs, ...fixed];
+  const recurringById = new Map(recurring.map(sub => [`sub-${sub.title.trim().toLowerCase()}`, sub]));
+  const billById = new Map(state.bills.map(bill => [bill.id, bill]));
+  const names = new Map(state.accounts.map(account => [account.id, account.name]));
+  const items: PaymentAgendaItem[] = openDues(state, now).map(({ due, daysLeft, remainingFils }) => ({
+    id: `card-${due.id}`, kind: 'card', category: 'other', title: names.get(due.accountId) ?? '',
+    dateISO: due.dueDate, daysLeft, amountFils: remainingFils, estimated: false, paid: false,
+  }));
+  for (const { bill, status, dueISO, daysLeft } of billsForMonth(state.bills, state.transactions, now, live, internal)) {
+    items.push({ id: `bill-${bill.id}`, kind: 'bill', category: bill.category, title: bill.title,
+      dateISO: dueISO, daysLeft, amountFils: bill.amountFils, estimated: false, paid: status === 'paid' });
+  }
+  items.push(...futureAnnualBillAgendaItems(state.bills, state.transactions, now, live, internal, WIDGET_UPCOMING_DAYS));
+  const manualTitles = new Set(state.bills.map(bill => bill.title.trim().toLowerCase()));
+  for (const sub of recurring) {
+    if (sub.cadence === 'as-needed' || manualTitles.has(sub.title.trim().toLowerCase())) continue;
+    items.push({ id: `sub-${sub.title.trim().toLowerCase()}`, kind: 'recurring', category: sub.category, title: sub.title,
+      dateISO: sub.nextExpectedISO, daysLeft: daysUntilNext(sub, now), amountFils: sub.lastAmountFils,
+      estimated: sub.status !== 'stopped' && !sub.paymentHistory, paid: false });
+  }
+  const recurrenceOf = (item: PaymentAgendaItem): AgendaRecurrence | null => {
+    if (item.kind === 'bill') {
+      const bill = billById.get(item.id.slice(5));
+      if (!bill) return null;
+      return { cadence: bill.yearlyOnISO ? 'yearly' : 'monthly',
+        anchorDay: bill.yearlyOnISO ? Number(bill.yearlyOnISO.slice(8, 10)) : bill.dueDay,
+        isPaid: date => bill.paidMonths.includes(monthKey(date)) };
+    }
+    const cadence = recurringById.get(item.id)?.cadence;
+    return cadence === 'weekly' || cadence === 'monthly' || cadence === 'yearly' ? { cadence } : null;
+  };
+  const todayISO = toISODate(now);
+  return upcomingWindowItems(items, recurrenceOf, todayISO, WIDGET_UPCOMING_DAYS)
+    // Coming up is future-facing: Bills also lists overdue/expected-earlier
+    // rows, which must not consume the widget's three upcoming slots.
+    .filter(item => !item.paid && item.dateISO >= todayISO)
+    .sort((a, b) => a.dateISO.localeCompare(b.dateISO) || a.id.localeCompare(b.id))
+    .map(item => ({ title: item.title, amountFils: item.amountFils, dateISO: item.dateISO, estimated: item.estimated }));
+}
+
+/** Pure formatting after the cooperative caller has finished recurrence detection. */
+export function widgetSnapshotForLedger(input: WidgetLedgerInput, detectedSubscriptions: readonly Subscription[]): WidgetSnapshot | null {
   const { state, now } = input;
   if (!state.hydrated || !state.onboarded || state.privateMode) return null;
-  const dashboard = projectDashboard({
-    state,
-    period: { mode: 'month', key: monthKey(now) },
-    now,
-    surface: 'home',
-    includeInsights: false,
-    includeCleanupPrompts: false,
-  });
   const today = widgetMonthToday({
-    transactions: state.transactions,
-    budgets: state.budgets,
-    now,
-    liveAccounts: liveAccountIds(state.accounts),
-    internalIds: dashboard.internalTransactionIds,
+    transactions: state.transactions, budgets: state.budgets, now,
+    liveAccounts: liveAccountIds(state.accounts), internalIds: internalTransferIdsForState(state),
   });
   return buildWidgetSnapshot({
-    today,
-    currency: input.moneySpec.currency,
-    exponent: input.moneySpec.exponent,
-    now,
-    upcoming: widgetUpcomingInput(dashboard.upcoming.items),
-    hideAmounts: false,
-    language: input.language,
+    today, currency: input.moneySpec.currency, exponent: input.moneySpec.exponent, now,
+    upcoming: widgetUpcomingForLedger(state, now, detectedSubscriptions),
+    hideAmounts: false, language: input.language,
   });
 }

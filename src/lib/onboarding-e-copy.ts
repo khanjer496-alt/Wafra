@@ -16,7 +16,7 @@
  * - Nothing names a bank or claims which banks Wafra can read.
  */
 import { arabicCount } from '@/lib/settings-copy';
-import type { HomeWidgetId } from '@/lib/home-widget-preferences';
+import type { GoalHomeSectionId } from '@/lib/onboarding-e';
 import type { GoalId } from '@/lib/types';
 
 type Lang = 'en' | 'ar';
@@ -70,7 +70,7 @@ const en = {
     insight: 'Your spending insight goes to the top of your Home.',
     activity: 'Your latest activity goes to the top of your Home.',
     assistant: 'Ask Wafra goes to the top of your Home.',
-  } satisfies Record<HomeWidgetId, string>,
+  } satisfies Record<GoalHomeSectionId, string>,
   // 4 · Watch
   watchTitle: 'Anything to keep an eye on?',
   watchBody: 'Pick a category, then turn the dial to a monthly limit.',

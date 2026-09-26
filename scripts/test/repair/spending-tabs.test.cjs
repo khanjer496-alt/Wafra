@@ -35,13 +35,25 @@ test('Spending tabs are Categories, Compare and Calendar; old view links still o
   assert.ok(byId(unknown, 'spending-categories'));
 });
 
-test('Categories shows "day X of Y" only for the running month', () => {
-  const current = createHarness().render('flow');
-  assert.equal(text(byId(current, 'spending-pace')), 'Day 6 of 30');
-  const past = createHarness({ period: { mode: 'month', key: '2026-08' } }).render('flow');
-  assert.equal(byId(past, 'spending-pace'), undefined);
-  const arabic = createHarness({ language: 'ar' }).render('flow');
-  assert.match(text(byId(arabic, 'spending-pace')), /اليوم 6 من 30/);
+test('selected period and total remain visible across all Spending views without repeating day progress', () => {
+  for (const period of [{mode:'month',key:'2026-09'}, {mode:'range',from:'2026-09-01',to:'2026-09-06'}, {mode:'year',year:2026}, {mode:'all'}]) {
+    for (const language of ['en','ar']) {
+      const totals = [];
+      const periods = [];
+      for (const view of ['categories','compare','calendar']) {
+        const tree = createHarness({period,language,params:{view}}).render('flow');
+        const total = byId(tree, 'spending-total');
+        assert.ok(total, `${period.mode} ${view} keeps its total`);
+        assert.equal(walk(tree).filter(n=>n.props?.testID==='spending-total').length,1);
+        totals.push(total.props.accessibilityLabel);
+        periods.push(text(byId(tree,'spending-period')));
+        assert.equal(byId(tree,'spending-pace'),undefined);
+        if(view==='calendar') assert.ok(byId(tree,'spending-calendar'),'all filter modes have daily details');
+      }
+      assert.equal(new Set(totals).size,1,'switching views preserves the financial headline');
+      assert.equal(new Set(periods).size,1,'switching views preserves visible date context');
+    }
+  }
 });
 
 test('periodDayProgress counts inside the money month, salary-day starts included', () => {

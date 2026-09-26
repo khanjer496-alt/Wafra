@@ -53,7 +53,7 @@ function createHarness(options = {}) {
     Platform:{OS:platform,select:x=>x[platform]??x.default},AppState:{addEventListener:()=>({remove(){}})},InteractionManager:{runAfterInteractions:task=>{task();return{cancel(){}};}},Alert:{alert:m=>events.push(['alert',m])},useWindowDimensions:()=>({width:options.width??390,fontScale:options.largeText?1.3:1})};
   const period=options.period??{mode:'month',key:'2026-09'};
   const periodModule={inPeriod:(date,p)=>typeof p==='string'?date.slice(0,7)===p:p.mode==='month'?date.slice(0,7)===p.key:true,
-    periodLabel:p=>p.mode==='month'?format.monthLabel(p.key,true):'This year',toPeriod:p=>typeof p==='string'?{mode:'month',key:p}:p,
+    periodRange:()=>'',periodLabel:p=>p.mode==='month'?format.monthLabel(p.key,true):p.mode==='year'?String(p.year):p.mode==='range'?`${format.shortDate(p.from)} – ${format.shortDate(p.to)}`:'All time',toPeriod:p=>typeof p==='string'?{mode:'month',key:p}:p,
     comparablePreviousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null,
     previousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null,isCurrentMonth:p=>typeof p==='object'&&p.mode==='month'&&p.key==='2026-09'};
   const accounts=[
@@ -139,6 +139,7 @@ function createHarness(options = {}) {
   deps['@/components/home-add-button']={HomeAddButton:p=>jsx('HomeAddButton',p)};
   deps['@/lib/capture-pause-state']={loadCapturePauseSnooze:async()=>options.snoozedAtMs??null,saveCapturePauseSnooze:async at=>{events.push(['snooze',at]);}};
   local('@/lib/widget-snapshot','src/lib/widget-snapshot.ts');
+  deps['@/lib/widget-sync']={requestWidgetSnapshotSync:()=>({cancel(){},done:Promise.resolve('written')}),invalidateWidgetSnapshotSync:async()=> 'cleared'};
   deps['../../modules/wafra-widgets']={setWidgetSnapshot(){},clearWidgetSnapshot(){}};
   // Widget inputs Home shares with the Widgets screen run from source over
   // this harness's ledger (loaded on first use); the hint is a boundary.
@@ -182,11 +183,13 @@ function createHarness(options = {}) {
     subscriptionsMonthlyEquivalent:(subs,c)=>subs.filter(sub=>sub.group==='subscription'&&sub.status==='active'&&!deps['@/lib/subscriptions'].isCancelledByUser(sub,c)).reduce((sum,sub)=>sum+sub.monthlyEquivalentFils,0),
     peekSubscriptionDetection:()=>null,subscriptionDetectionRunning:()=>false};
   local('@/lib/transaction-filter','src/lib/transaction-filter.ts');
+  local('@/lib/spending-daily','src/lib/spending-daily.ts');
   local('@/lib/insights','src/lib/insights.ts');local('@/lib/analytics','src/lib/analytics.ts');local('@/lib/reference-presentation','src/lib/reference-presentation.ts');local('@/lib/upcoming-window','src/lib/upcoming-window.ts');
   const summary=deps['@/lib/insights'].summarizeMonth(state.transactions,period,new Set(state.accounts.map(a=>a.id)),new Set());
   deps['@/lib/cards']={openDues:()=>state.cardDues.map(due=>({due,daysLeft:4,remainingFils:due.totalDueFils,status:'upcoming',minimumKnown:true})),recentlySettledDues:()=>[],
     reissueSuggestions:()=>[],isInactiveAccount:(_s,a)=>!!a.archived,cardFigure:(_s,a)=>({kind:a.cardType==='credit'?'owed':a.snapshotFils===undefined&&a.kind!=='cash'?'unknown':'balance',fils:a.snapshotFils??(a.kind==='cash'?a.openingFils:null)})};
   deps['@/lib/bills']={billsForMonth:()=>state.bills.map(bill=>({bill,status:'upcoming',daysLeft:bill.dueDay-6,dueISO:`2026-09-${String(bill.dueDay).padStart(2,'0')}`}))};
+  local('@/lib/upcoming-bills','src/lib/upcoming-bills.ts');
   deps['@/lib/leaving-soon']={daysPhrase:n=>lang==='ar'?`خلال ${n} أيام`:`In ${n} days`};
   deps['@/lib/dashboard-projection']={projectDashboard:()=>({hero:{...summary,netFils:summary.incomeFils-summary.expenseFils},live:true,
     activityRows:state.transactions.filter(tx=>tx.date.slice(0,7)==='2026-09').slice(0,4),accountById:new Map(state.accounts.map(a=>[a.id,a])),internalTransactionIds:new Set(),

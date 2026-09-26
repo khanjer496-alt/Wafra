@@ -12,6 +12,9 @@ export const everydayBandCopyTables = {
     spendingViews: 'Spending views',
     /** The band's period action, spoken with the period it shows. */
     choosePeriod: (period: string) => `Choose period, ${period}`,
+    totalSpent: 'Total spent',
+    previousMonth: 'Previous month',
+    nextMonth: 'Next month',
     spentThisMonth: 'Spent this month',
     spentIn: (period: string) => `Spent in ${period}`,
     /** The running money month: "Day 25 of 30". */
@@ -33,6 +36,7 @@ export const everydayBandCopyTables = {
     /** Calendar band. */
     calendarKey: 'Brighter tile, more spent',
     calendarRecent: 'Recent spending',
+    calendarSelectDay: 'Choose a day to see its total and payments.',
     calendarGrid: (period: string) => `Spending by day, ${period}`,
     /** Add's band. */
     amountLabel: 'Amount',
@@ -46,6 +50,9 @@ export const everydayBandCopyTables = {
   ar: {
     spendingViews: 'طرق عرض الإنفاق',
     choosePeriod: (period: string) => `اختيار الفترة، ${period}`,
+    totalSpent: 'إجمالي الإنفاق',
+    previousMonth: 'الشهر السابق',
+    nextMonth: 'الشهر التالي',
     spentThisMonth: 'الإنفاق هذا الشهر',
     spentIn: (period: string) => `الإنفاق في ${period}`,
     dayOf: (day: number, of: number) => `اليوم ${day} من ${of}`,
@@ -62,6 +69,7 @@ export const everydayBandCopyTables = {
     fixedLeftOut: 'دون الإيجار والتكاليف الثابتة',
     calendarKey: 'كلما كان المربع أفتح كان الإنفاق أكبر',
     calendarRecent: 'أحدث المصروفات',
+    calendarSelectDay: 'اختر يوماً لعرض إجمالي إنفاقه وعملياته.',
     calendarGrid: (period: string) => `الإنفاق اليومي، ${period}`,
     amountLabel: 'المبلغ',
     suggested: 'مقترح',

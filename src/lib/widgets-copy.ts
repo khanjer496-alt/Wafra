@@ -23,6 +23,8 @@ function arabicPayments(count: number): string {
 export const widgetsCopyTables = {
   en: {
     title: 'Widgets',
+    preparing: 'Updating widget figures…',
+    importPending: 'Widgets will update when the import finishes.',
     body: (platform: Platform): string => platform === 'ios'
       ? 'Today’s spending and your next bills on your Home Screen, from the figures on this phone.'
       : 'Today’s spending and your next bills on your home screen, from the figures on this phone.',
@@ -80,6 +82,8 @@ export const widgetsCopyTables = {
   },
   ar: {
     title: 'الأدوات',
+    preparing: 'جارٍ تحديث أرقام الأدوات…',
+    importPending: 'ستُحدّث الأدوات عند اكتمال الاستيراد.',
     body: (_platform: Platform) => 'إنفاق اليوم وفواتيرك القادمة على الشاشة الرئيسية، من الأرقام المحفوظة على هذا الهاتف.',
     todayName: 'اليوم',
     todayAbout: 'ما أنفقته اليوم وخلال آخر 7 أيام، والمتبقي في الميزانيات.',

@@ -21,14 +21,14 @@ test('Accounts keeps the Available balances headline and never merges a net figu
   assert.doesNotMatch(all, /after card balances|Left after that|net worth/i);
 });
 
-test('a bank account row opens its detail screen, and a card keeps its statement sheet', () => {
+test('a bank account row opens its detail screen, and a card opens its activity', () => {
   const h = createHarness();
   const tree = h.render('wallet');
   const rows = walk(tree).filter((node) => node.type === 'Pressable' && /^Emirates NBD\./.test(node.props?.accessibilityLabel ?? ''));
   press(rows[0]);
   const card = walk(tree).find((node) => node.type === 'Pressable' && /^NBD credit card\./.test(node.props?.accessibilityLabel ?? ''));
   press(card);
-  assert.deepEqual(h.events.filter((e) => e[0] === 'route').map((e) => e[1]), ['/account?id=enbd', '/cards?card=credit']);
+  assert.deepEqual(h.events.filter((e) => e[0] === 'route').map((e) => e[1]), ['/account?id=enbd', '/card?id=credit']);
 });
 
 test('a card with an open statement says Mark paid, offers the stated minimum, and labels captured spending', () => {

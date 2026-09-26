@@ -100,19 +100,19 @@ assert.match(subscriptionDetail, /remindable\(detail\)[\s\S]*?addBill\(billFromS
 assert.match(subscriptionDetail, /const sub = detail;[\s\S]*?setDetail\(null\);[\s\S]*?onDismissSub\(sub\)/);
 
 const manualRows=agenda;
-assert.match(interactionBills,/setSelectedReminderId\(\(item\.repeatOf \?\? item\.id\)\.slice\(5\)\)/);
+assert.match(interactionBills,/setSelectedBill\(\{ id: \(item\.repeatOf \?\? item\.id\)\.slice\(5\), dueISO: item\.dateISO \}\)/);
 assert.match(manualRows,/accessibilityRole="button"/);
 assert.match(manualRows,/accessibilityLabel=/);
 assert.doesNotMatch(manualRows,/onLongPress|t\('markPaid'\)/);
-assert.match(interactionBills, /const \[selectedReminderId, setSelectedReminderId\] = useState<string \| null>\(null\)/);
-assert.match(interactionBills, /const selectedReminder = useMemo\([\s\S]*?rows\.find\([\s\S]*?bill\.id === selectedReminderId/);
+assert.match(interactionBills, /const \[selectedBill, setSelectedBill\] = useState<\{ id: string; dueISO: string \} \| null>\(null\)/);
+assert.match(interactionBills, /const selectedReminder = useMemo\([\s\S]*?billForAgendaOccurrence\(state\.bills, state\.transactions, selectedBill, now, liveAccounts, internal\)/);
 const manualDetail = interactionBills.match(
   /\{selectedReminder && \([\s\S]*?(?=\n\s*<BottomSheet[\s\n]*visible=\{adderVisible\})/,
 )?.[0] ?? '';
 assert.ok(manualDetail.length > 0, 'manual reminder detail was not found');
 assert.match(manualDetail, /<BillDetailSheet[\s\S]*?footer=\{\([\s\S]*?t\('markPaid'\)[\s\S]*?t\('delete'\)/);
-assert.match(manualDetail, /const reminder = selectedReminder;[\s\S]*?setSelectedReminderId\(null\);[\s\S]*?onPay\(reminder\.bill\.id\)/);
-assert.match(manualDetail, /const reminder = selectedReminder;[\s\S]*?setSelectedReminderId\(null\);[\s\S]*?onLongPressBill\(reminder\.bill\.id/);
+assert.match(manualDetail, /const reminder = selectedReminder;[\s\S]*?setSelectedBill\(null\);[\s\S]*?onPay\(reminder\.bill\.id, reminder\.dueISO\)/);
+assert.match(manualDetail, /const reminder = selectedReminder;[\s\S]*?setSelectedBill\(null\);[\s\S]*?onLongPressBill\(reminder\.bill\.id/);
 
 const cardDetailSheet = code(read('src/components/card-detail-sheet.tsx'));
 assert.match(cardDetailSheet, /footer\?: React\.ReactNode/);
@@ -269,7 +269,7 @@ const task6Wallet = read('src/app/(tabs)/wallet.tsx');
 assert.match(task6Wallet, /const walletNav: BandNav = \{/);
 assert.match(task6Wallet, /title: t\('walletTitle'\)[\s\S]*?label: t\('settingsTitle'\)[\s\S]*?icon: 'sliders'[\s\S]*?label: t\('newAccount'\)[\s\S]*?icon: 'plus'/);
 assert.match(task6Wallet, /<BandScaffold[\s\S]*?band="accounts"[\s\S]*?tabbed[\s\S]*?nav=\{walletNav\}/);
-assert.match(task6Wallet, /const openAccount = \(account: Account\)[\s\S]*?router\.push\(`\/cards\?card=\$\{account\.id\}`\)[\s\S]*?router\.push\(`\/account\?id=\$\{encodeURIComponent\(account\.id\)\}`\)[\s\S]*?setOptionsFor\(account\)/);
+assert.match(task6Wallet, /const openAccount = \(account: Account\)[\s\S]*?router\.push\(`\/card\?id=\$\{encodeURIComponent\(account\.id\)\}`\)[\s\S]*?router\.push\(`\/account\?id=\$\{encodeURIComponent\(account\.id\)\}`\)[\s\S]*?setOptionsFor\(account\)/);
 assert.match(task6Wallet, /<AccountGroups[\s\S]*?onManage=\{setOptionsFor\}/);
 assert.match(task6Wallet, /accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/);
 

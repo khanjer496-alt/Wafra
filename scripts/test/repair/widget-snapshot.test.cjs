@@ -5,8 +5,9 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
 
-const logos = load(path.join(__dirname, '../../../src/lib/widget-logo.ts'));
-const { buildWidgetSnapshot, WIDGET_SNAPSHOT_VERSION } = load(path.join(__dirname, '../../../src/lib/widget-snapshot.ts'), { '@/lib/widget-logo': logos });
+const real = require('../../universal-test/load-ts.cjs').createLoader();
+const logos = real('@/lib/widget-logo');
+const { buildWidgetSnapshot, WIDGET_SNAPSHOT_VERSION } = load(path.join(__dirname, '../../../src/lib/widget-snapshot.ts'), { '@/lib/widget-logo': logos, '@/lib/format': real('@/lib/format') });
 const today = {
   todayFils: 5237, todayCount: 2, weekFils: 52877,
   week: [4200, 11800, 3600, 6400, 9500, 12140, 5237].map((fils, i) => ({ dateISO: `2026-09-${19 + i}`, weekday: (6 + i) % 7, fils, today: i === 6 })),
@@ -36,9 +37,9 @@ test('the snapshot carries only summary figures, marked sensitive', () => {
   assert.equal(s.todayISO, '2026-09-25');
 });
 
-test('bills: overdue items skipped, at most three, in the order Home already shows', () => {
+test('bills: overdue items skipped, at most three in upcoming date order', () => {
   const s = buildWidgetSnapshot(base);
-  assert.deepEqual([...s.bills.map(b => b.title)], ['Netflix', 'Electricity', 'Visa ••4821']);
+  assert.deepEqual([...s.bills.map(b => b.title)], ['Netflix', 'Electricity', 'Spotify']);
   assert.deepEqual(Object.keys(s.bills[0]).sort(), ['amountMinor', 'dueISO', 'estimated', 'logoId', 'title']);
 });
 

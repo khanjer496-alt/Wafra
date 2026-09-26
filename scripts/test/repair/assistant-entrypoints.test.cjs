@@ -20,14 +20,16 @@ for (const theme of ['light', 'dark']) {
     assert.ok(entry.props.accessibilityLabel);
     assert.ok(entry.props.accessibilityHint);
     const style = Object.assign({}, ...entry.props.style({ pressed: false }));
-    assert.ok(style.minHeight >= 48, 'the compact entry keeps a full touch target');
+    assert.ok(style.minHeight >= 44, 'the header action keeps a full touch target');
+    assert.equal(walkHome(h.tree).filter(node => node.props?.testID === 'home-widget-assistant').length, 1, 'Home has one customizable Ask entry');
+    assert.equal(walkHome(h.tree).some(node => node.props?.testID === 'home-ask-chip'), false, 'no duplicate fixed shortcut');
     entry.props.onPress();
     assert.deepEqual(h.events, [['route', '/assistant']]);
   });
 
   for (const language of ['en', 'ar']) for (const view of ['categories', 'trends']) {
     test(`${language}/${theme}/${view}: localized Explain action preserves the question and spending period`, () => {
-      const period = { mode: 'range', start: '2026-08-15', end: '2026-09-05' };
+      const period = { mode: 'range', from: '2026-08-15', to: '2026-09-05' };
       const h = createHarness({ language, theme, period, params: { view } });
       const action = actionIn(h.render('flow'), 'spending-ask-wafra');
       const label = language === 'ar' ? 'اشرح هذا' : 'Explain this';

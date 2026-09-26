@@ -42,11 +42,12 @@ for (const language of ['en', 'ar']) for (const largeText of [false, true]) {
   test(`weekly values keep minor-unit precision, zero, dates and large amounts (${language}, large=${largeText})`, () => {
     const { h, tree, days, bars, spec } = renderWeek({ language, largeText, values: [0, 1, 999, 12345, 987654321, 100, 250] });
     assert.ok(text(tree).includes('AED'));
+    for (const day of [days[0], days.at(-1)]) assert.ok(text(tree).includes(h.deps['@/lib/format'].shortDate(day.key)), 'shared date range stays visible');
     for (const day of days) {
       const row = byId(tree, `week-value-${day.key}`);
       assert.ok(text(row).includes(h.deps['@/lib/ledger-money'].formatMinorUnits(day.fils, spec)));
-      assert.ok(text(row).includes(h.deps['@/lib/format'].shortDate(day.key)));
-      assert.ok(text(row).includes(day.spokenLabel));
+      assert.ok(text(row).includes(day.label), 'short day stays paired with its exact amount');
+      assert.ok(row, 'every day retains a visible amount row');
     }
     assert.ok(bars.every(bar => bar.axis === 'width'));
     assert.equal(bars[0].size, 0, 'zero must not look like positive activity');
