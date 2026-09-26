@@ -134,7 +134,7 @@ assert.match(activeAccountRows,/onPress=\{\(\) => onOpen\(row\.account\)\}/);
 assert.match(activeAccountRows,/onPress=\{\(\) => onManage\(row\.account\)\}/);
 assert.match(activeAccountRows,/accessibilityLabel=\{`\$\{row\.account\.name\}[\s\S]*?row\.figureFils/);
 const inactiveAccountRows = interactionWallet.match(
-  /inactiveAccounts\.map\([\s\S]*?(?=\n\s*<SectionHeader[\s\S]{0,80}goalsHeader)/,
+  /inactiveAccounts\.map\([\s\S]*?(?=testID="wallet-goals")/,
 )?.[0] ?? '';
 assert.ok(inactiveAccountRows.length > 0, 'inactive Wallet source rows were not found');
 assert.match(inactiveAccountRows, /accessibilityRole="button"/);
@@ -228,9 +228,10 @@ assert.match(trends,/backgroundColor: theme\.expenseGraphic/);
 
 const task5Bills = read('src/app/(tabs)/bills.tsx');
 const task5Segments = read('src/components/bills/bills-segment-control.tsx');
-assert.match(task5Bills, /const billsHeader: ScreenHeaderProps = \{/);
+// Design language E: the ochre band's nav row replaces the inline header.
+assert.match(task5Bills, /const billsNav: BandNav = \{/);
 assert.match(task5Bills, /title: t\('billsTitle'\)[\s\S]*?label: t\('newReminder'\)[\s\S]*?icon: 'plus'/);
-assert.match(task5Bills, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/);
+assert.match(task5Bills, /<BandScaffold[\s\S]*?band="bills"[\s\S]*?tabbed[\s\S]*?nav=\{billsNav\}/);
 assert.equal((task5Bills.match(/<ScrollView/g) ?? []).length, 0, 'Bills history shares the BottomSheet scroller');
 // Charge history lives in the one shared bill detail sheet now.
 const task5BillSheet = read('src/components/bill-detail-sheet.tsx');
@@ -239,9 +240,13 @@ assert.match(task5BillSheet, /data\.txs\.slice\(0, 36\)/);
 assert.match(task5BillSheet, /<MerchantSpendingLink merchant=\{subscription\.title\}/);
 assert.match(task5BillSheet, /testID="subscription-history-scroll"/);
 assert.match(task5Bills,/<BillsSegmentControl[\s\S]*?segment=\{agendaView\}[\s\S]*?onChange=\{setAgendaView\}/);
-assert.match(task5Segments,/role="tablist"/);
+// The views are the band's tablist; the filter chips keep a 44pt hit area.
+const task5BandSegmented = read('src/components/ui/band/band-segmented.tsx');
+assert.match(task5Segments,/<BandSegmented/);
+assert.match(task5BandSegmented,/role="tablist"/);
 assert.match(task5Segments,/accessibilityState=\{\{ selected:/);
-assert.ok(Number(task5Segments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
+assert.ok(Number(task5BandSegmented.match(/segment:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=44);
+assert.match(task5Segments,/hitSlop=\{3\}/);
 assert.doesNotMatch(task5Segments,/numberOfLines/);
 // Next 30 days / All, and the payment types as filters inside All.
 for (const label of ['w.next30Days', 'w.allBills', 'w.everything', 'agenda.subscriptions', 'agenda.utilities', 'agenda.cards']) assert.ok(task5Segments.includes(label), label);
@@ -250,24 +255,24 @@ assert.doesNotMatch(task5Bills, /<TextInput/);
 assert.match(task5Bills, /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/);
 
 const task6Wallet = read('src/app/(tabs)/wallet.tsx');
-assert.match(task6Wallet, /const walletHeader: ScreenHeaderProps = \{/);
+assert.match(task6Wallet, /const walletNav: BandNav = \{/);
 assert.match(task6Wallet, /title: t\('walletTitle'\)[\s\S]*?label: t\('settingsTitle'\)[\s\S]*?icon: 'sliders'[\s\S]*?label: t\('newAccount'\)[\s\S]*?icon: 'plus'/);
-assert.match(task6Wallet, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{walletHeader\}/);
+assert.match(task6Wallet, /<BandScaffold[\s\S]*?band="accounts"[\s\S]*?tabbed[\s\S]*?nav=\{walletNav\}/);
 assert.match(task6Wallet, /const openAccount = \(account: Account\)[\s\S]*?router\.push\(`\/cards\?card=\$\{account\.id\}`\)[\s\S]*?router\.push\(`\/account\?id=\$\{encodeURIComponent\(account\.id\)\}`\)[\s\S]*?setOptionsFor\(account\)/);
 assert.match(task6Wallet, /<AccountGroups[\s\S]*?onManage=\{setOptionsFor\}/);
 assert.match(task6Wallet, /accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/);
 
 const task6Balance = read('src/components/wallet/balance-overview.tsx');
 const headlineAmount = task6Balance.match(
-  /<View style=\{\[styles\.money[\s\S]*?(?=\n\s*\{p\.activeSourceCount === 0)/,
+  /\{p\.knownBalanceCount > 0[\s\S]*?(?=\n\s*\{p\.activeSourceCount === 0)/,
 )?.[0] ?? '';
 assert.ok(headlineAmount.length > 0, 'Wallet headline amount block was not found');
 assert.doesNotMatch(headlineAmount, /numberOfLines=\{1\}|adjustsFontSizeToFit|minimumFontScale/);
 
 const task6Cards = read('src/app/cards.tsx');
-assert.match(task6Cards, /const cardsHeader: ScreenHeaderProps = \{/);
-assert.match(task6Cards, /title: t\('cardsTitle'\)[\s\S]*?back: \{ label: t\('back'\), onPress: \(\) => router\.back\(\) \}/);
-assert.match(task6Cards, /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?header=\{cardsHeader\}/);
+assert.match(task6Cards, /const cardsNav: BandNav = \{/);
+assert.match(task6Cards, /title: t\('cardsTitle'\)[\s\S]*?back: \(\) => router\.back\(\)/);
+assert.match(task6Cards, /<BandScaffold[\s\S]*?band="accounts"[\s\S]*?nav=\{cardsNav\}/);
 assert.match(task6Cards, /useLocalSearchParams<\{ card\?: string \}>/);
 assert.match(task6Cards, /useLargeTextLayout\(\)/);
 assert.match(task6Cards, /numberOfLines=\{largeText \? undefined : 1\}/);
@@ -288,17 +293,19 @@ const billableDetail = billableDetailStart >= 0 && billableDetailEnd > billableD
   ? task6CardDetail.slice(billableDetailStart, billableDetailEnd)
   : '';
 assert.ok(billableDetail.length > 0, 'billable CardDetail presentation block was not found');
+// Design language E: the card (identity + statement balance) first, then the
+// due line and Record a payment, then statements, then payments made.
 for (const [before, after] of [
-  ['styles.summary', "title={t('statements')}"],
-  ["title={t('statements')}", 'styles.head'],
-  ['styles.head', "title={t('paymentsMade')}"],
+  ['styles.inkCard', 'styles.summary'],
+  ['styles.summary', "{t('statements')}"],
+  ["{t('statements')}", "{t('paymentsMade')}"],
 ]) {
   assert.ok(
     billableDetail.indexOf(before) >= 0 && billableDetail.indexOf(before) < billableDetail.indexOf(after),
     `CardDetail order keeps ${before} before ${after}`,
   );
 }
-assert.match(task6CardDetail, /!data\.billable && \([\s\S]*?styles\.head[\s\S]*?debitHasNoStatement/);
+assert.match(task6CardDetail, /!data\.billable && \([\s\S]*?\{identity\}[\s\S]*?debitHasNoStatement/);
 assert.doesNotMatch(task6CardDetail, /type="subtitle" numberOfLines=\{1\}/);
 assert.match(task6CardDetail, /<BottomSheet[^>]*footer=\{footer\}/);
 

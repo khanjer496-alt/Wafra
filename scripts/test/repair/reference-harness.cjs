@@ -220,6 +220,12 @@ function createHarness(options = {}) {
   deps['@/components/ui/band-scaffold']={BandScaffold:p=>jsx('BandScaffold',{...p,children:[p.bandContent,p.children]})};
   deps['@/components/ui/your-pattern']={YourPattern:p=>jsx('YourPattern',p)};
   local('@/components/ui/band/band-figure');local('@/components/ui/band/stat-tile');local('@/components/ui/band/week-tiles');
+  // Bills and Accounts in language E: the band pieces they use, their pure
+  // layout figures and the band's own copy run from source.
+  local('@/lib/band-copy','src/lib/band-copy.ts');local('@/lib/limit-status','src/lib/limit-status.ts');
+  local('@/lib/money-places-band','src/lib/money-places-band.ts');
+  for(const name of ['band-segmented','band-chip','e-button','pin-timeline','status-bar'])local(`@/components/ui/band/${name}`);
+  local('@/components/money-places/key-value-rows');local('@/components/bills/bill-history-tiles');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
   local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');
   local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/bills/bills-timeline');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');

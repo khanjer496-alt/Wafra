@@ -63,8 +63,11 @@ ok('Home stacks its hero breakdown for large text', /largeText && styles\.splitL
 ok('Flow stacks summary and category rows for large text', /large && styles\.stack/.test(spendingOverview) && /<SpendingOverview/.test(flow));
 ok('Bills reflows its header and segments for large text',
   /<BillsSegmentControl/.test(bills) && /<ScrollView[\s\S]*?horizontal/.test(billsSegments) && !/numberOfLines/.test(billsSegments));
+// Design language E: the headline is the slate band's BandFigure (which puts
+// the currency on its own line at large text) and its chips stack.
 ok('Wallet stacks its recorded-balance headline at accessibility text sizes',
-  /styles\.money, p\.largeText && styles\.stack/.test(walletOverview) &&
+  /<BandFigure/.test(walletOverview) &&
+    /styles\.chips, p\.largeText && styles\.stack/.test(walletOverview) &&
     /stack: \{ flexDirection: 'column', alignItems: 'flex-start' \}/.test(walletOverview));
 ok('Bills uses the shared accessible sheet contract',
   /<BottomSheet/.test(bills) && !/<Modal/.test(bills) && /accessibilityLabel=\{t\('reminderName/.test(bills));
@@ -130,7 +133,9 @@ ok('name personalization exposes a labelled optional input and skip action to as
     /onboardNamePrivacy/.test(onboardingGate));
 ok('selected tabs have contrasting fills and labels; input boundaries retain control tokens',
   tokenValues('inverseSurface').every((color,index)=>contrast(color,tokenValues('backgroundSelected')[index])>=3) &&
-  /theme\.inverseSurface/.test(billsSegments) && /theme\.inverseText/.test(billsSegments) &&
+  // Bills' views are the band's tablist (its pill contrast is tested with the
+  // band palette); the filter chips inside All fill the selected one.
+  /<BandSegmented/.test(billsSegments) && /palette\.fill/.test(billsSegments) && /palette\.onFill/.test(billsSegments) &&
   /const borderColor = accountInvalid \? theme\.expense : selected \? selected\.color : theme\.controlBorder/.test(addTransaction) &&
   /transferChoice[\s\S]{0,100}theme\.controlBorder/.test(addTransaction));
 
@@ -179,8 +184,8 @@ ok('Bills recurring rows have one labelled primary target',
     /accessibilityLabel=/.test(recurringAccessibilityBlock));
 ok('Bills card actions live in the card sheet as one labelled button',
   /<CardDetailSheet[\s\S]{0,200}account=\{cardDetail\}/.test(bills) &&
-    /<Button label=\{w\.recordPayment\}/.test(cardDetail) &&
-    /<Button[\s\S]{0,120}label=\{t\('markPaid'\)\}/.test(bills));
+    /<EButton palette=\{band\} label=\{w\.recordPayment\}/.test(cardDetail) &&
+    /<EButton[\s\S]{0,120}label=\{t\('markPaid'\)\}/.test(bills));
 ok('Bills manual reminder rows open one labelled detail target',
   /setSelectedReminderId\(\(item\.repeatOf \?\? item\.id\)\.slice\(5\)\)/.test(bills) && /onPress=\{\(\) => onOpen\(item\)\}/.test(paymentAgenda) &&
     /accessibilityRole="button"/.test(bills) &&
@@ -235,44 +240,54 @@ ok('shared charts consume the semantic data-visualization palette',
   /import \{[^}]*\bDataViz\b[^}]*\} from '@\/constants\/theme'/.test(charts) &&
     /from '@\/components\/ui\/data-viz'/.test(charts));
 
-ok('Bills uses one scaffold scroller with an inline typed header',
-  /const billsHeader: ScreenHeaderProps = \{/.test(bills) &&
-    /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/.test(bills) &&
+ok('Bills uses one band scaffold scroller with a typed nav row',
+  /const billsNav: BandNav = \{/.test(bills) &&
+    /<BandScaffold[\s\S]*?band="bills"[\s\S]*?tabbed[\s\S]*?nav=\{billsNav\}/.test(bills) &&
     (bills.match(/<ScrollView/g) ?? []).length === 0 &&
     /testID="subscription-history-scroll"/.test(source('src/components/bill-detail-sheet.tsx')));
+const bandSegmented = source('src/components/ui/band/band-segmented.tsx');
 ok('Bills uses canonical labelled control and selection semantics',
- /<BillsSegmentControl/.test(bills) && /accessibilityLabel=\{t\('billsTitle'\)\}/.test(billsSegments) && /role="tablist"/.test(billsSegments) && /accessibilityState=\{\{ selected:/.test(billsSegments));
-ok('Bills agenda tabs retain 48 point targets',Number(billsSegments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
+ /<BillsSegmentControl/.test(bills) && /<BandSegmented/.test(billsSegments) && /label=\{w\.billsViews\}/.test(billsSegments) &&
+   /role="tablist"/.test(bandSegmented) && /accessibilityState=\{\{ selected: active \}\}/.test(bandSegmented) &&
+   /accessibilityState=\{\{ selected: active \}\}/.test(billsSegments));
+// The band's segments are 44pt pills inside a 4pt track (52pt of track per row).
+ok('Bills agenda tabs retain 44 point targets',
+  Number(bandSegmented.match(/segment:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=44);
 ok('Bills reminder entry exposes three labelled shared fields and a disabled Save footer',
   (bills.match(/<TextField/g) ?? []).length === 3 &&
     !/<TextInput/.test(bills) &&
     /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/.test(bills));
 
-ok('Wallet uses the typed inline scaffold header and labels its remaining disclosure',
-  /const walletHeader: ScreenHeaderProps = \{/.test(wallet) &&
-    /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{walletHeader\}/.test(wallet) &&
+ok('Wallet uses the typed band nav row and labels its remaining disclosure',
+  /const walletNav: BandNav = \{/.test(wallet) &&
+    /<BandScaffold[\s\S]*?band="accounts"[\s\S]*?tabbed[\s\S]*?nav=\{walletNav\}/.test(wallet) &&
     !/detailsLabel|expanded: details/.test(walletOverview) &&
     /accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/.test(wallet));
-ok('Wallet starts its iOS inset scroller at the visible content origin',
-  /const walletInsets = useScreenContentInsets\(\{ tabbed: true \}\)/.test(wallet) &&
-    /scrollProps=\{\{[\s\S]{0,240}contentOffset: Platform\.OS === 'ios'[\s\S]{0,120}\{ x: 0, y: -walletInsets\.contentInset\.top \}[\s\S]{0,120}: undefined[\s\S]{0,240}showsVerticalScrollIndicator: false/.test(wallet));
+// BandScaffold's scroller never adjusts content insets (the band covers the
+// status bar), so Wallet no longer offsets its first frame by an inset.
+ok('Wallet starts its scroller at the visible content origin',
+  !/contentOffset:/.test(wallet) && !/useScreenContentInsets/.test(wallet) &&
+    /contentInsetAdjustmentBehavior="never"/.test(source('src/components/ui/band-scaffold.tsx')) &&
+    /scrollProps=\{\{ showsVerticalScrollIndicator: false \}\}/.test(wallet));
 const balanceHeadline = walletOverview.match(
-  /<View style=\{\[styles\.money[\s\S]*?(?=\n\s*\{p\.activeSourceCount === 0)/,
+  /\{p\.knownBalanceCount > 0[\s\S]*?(?=\n\s*\{p\.activeSourceCount === 0)/,
 )?.[0] ?? '';
 ok('Wallet headline amount wraps instead of shrinking at accessibility sizes',
   balanceHeadline.length > 0 &&
     !/numberOfLines=\{1\}|adjustsFontSizeToFit|minimumFontScale/.test(balanceHeadline));
-ok('Cards uses a typed native header and wraps card identity at large text sizes',
-  /const cardsHeader: ScreenHeaderProps = \{/.test(cards) &&
-    /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?header=\{cardsHeader\}/.test(cards) &&
+ok('Cards uses a typed band nav row and wraps card identity at large text sizes',
+  /const cardsNav: BandNav = \{/.test(cards) &&
+    /<BandScaffold[\s\S]*?band="accounts"[\s\S]*?nav=\{cardsNav\}/.test(cards) &&
     /useLargeTextLayout\(\)/.test(cards) &&
     /numberOfLines=\{largeText \? undefined : 1\}/.test(cards));
 ok('Cards inactive disclosure is labelled, expanded, and preserves platform touch floors',
   /accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/.test(cards) &&
     /disclosureAction: \{[\s\S]*?minWidth: 44[\s\S]*?minHeight: 44/.test(cards) &&
     /androidDisclosureAction: \{ minWidth: 48, minHeight: 48 \}/.test(cards));
-ok('Card detail presents billable obligations before identity and payment history',
-  /\{data\.billable && \([\s\S]*?styles\.summary[\s\S]*?title=\{t\('statements'\)\}[\s\S]*?styles\.head[\s\S]*?title=\{t\('paymentsMade'\)\}/.test(cardDetail) &&
+// Design language E: the statement balance sits on the ink card under the
+// card's name, then the due line and Record a payment, then the history.
+ok('Card detail presents billable obligations on the card before payment history',
+  /\{data\.billable && \([\s\S]*?styles\.inkCard[\s\S]*?testID="card-statement-hero"[\s\S]*?styles\.summary[\s\S]*?\{t\('statements'\)\}[\s\S]*?\{t\('paymentsMade'\)\}/.test(cardDetail) &&
     !/type="subtitle" numberOfLines=\{1\}/.test(cardDetail));
 ok('Limit editor delegates keyboard scrolling to the shared labelled sheet and field',
   /<BottomSheet/.test(limitSheet) && /<TextField[\s\S]*?label=\{t\('monthlyLimit'\)\}/.test(limitSheet) &&
