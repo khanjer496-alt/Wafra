@@ -11,13 +11,16 @@ import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Button, Toggle } from '@/components/ui/controls';
+import { Toggle } from '@/components/ui/controls';
+import { BandFigure } from '@/components/ui/band/band-figure';
+import { EButton } from '@/components/ui/band/e-button';
 import { Icon } from '@/components/ui/icon';
 import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { TextField } from '@/components/ui/text-field';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { BandLayout, Fonts, Radius, Spacing, type BandId } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
@@ -48,6 +51,12 @@ interface EntryDetailSheetProps {
   /** Current ledger assessment for transfer-history presentation, never a saved decision. */
   transferAssessment?: TransferAssessment;
   initialMode?: EntryDetailMode;
+  /**
+   * The band of the screen it opens over (design language E): the sheet is
+   * that screen's sheet, lifted, and its Done button takes the band colour.
+   * Transactions and Home are ink.
+   */
+  band?: BandId;
 }
 
 /**
@@ -57,9 +66,10 @@ interface EntryDetailSheetProps {
  * row — "what actually was this?" — was answered by six input boxes. Reading
  * comes first now; editing is one tap away.
  */
-export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment, initialMode = 'read' }: EntryDetailSheetProps) {
+export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment, initialMode = 'read', band: bandId = 'home' }: EntryDetailSheetProps) {
   const router = useRouter();
   const theme = useTheme();
+  const band = useBand(bandId);
   const language = useLanguage();
   const extra = entryDetailCopy[language === 'ar' ? 'ar' : 'en'];
   const largeText = useLargeTextLayout();
@@ -328,52 +338,78 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       testID="entry-detail-sheet"
       onClose={onClose}
       title={categoryPicking ? t('category') : editing ? t('editEntry') : t('entryDetail')}
+      palette={band}
       footer={categoryPicking ? (
           <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-            <Button inline={!largeText} wrapLabel variant="outline" label={t('cancel')} onPress={cancelCategory} />
-            <Button inline={!largeText} wrapLabel label={extra.done} onPress={commitCategory} />
+            <EButton palette={band} variant="secondary" label={t('cancel')} onPress={cancelCategory} style={styles.action} />
+            <EButton palette={band} label={extra.done} onPress={commitCategory} style={styles.action} />
           </View>
       ) : editing ? (
           <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-            <Button inline={!largeText} wrapLabel label={t('saveChanges')} onPress={save} disabled={!canSave} />
-            <Button inline={!largeText} wrapLabel variant="outline" label={t('cancel')} onPress={() => setEditing(false)} />
+            <EButton palette={band} label={t('saveChanges')} onPress={save} disabled={!canSave} style={styles.action} />
+            <EButton palette={band} variant="secondary" label={t('cancel')} onPress={() => setEditing(false)} style={styles.action} />
           </View>
       ) : (
-          <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-            <Button inline={!largeText} wrapLabel label={t('editEntry')} onPress={() => setEditing(true)} />
-            <Button
-              inline={!largeText}
-              wrapLabel
-              variant="ghost"
-              labelColor={theme.expense}
-              label={t('delete')}
-              onPress={() => setConfirmingDelete(true)}
-            />
+          <View style={styles.footerStack}>
+            {/* Reading an entry ends with Done; changing it is one step aside. */}
+            <EButton palette={band} label={extra.done} onPress={onClose} testID="entry-detail-done" />
+            <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
+              <EButton palette={band} variant="secondary" label={t('editEntry')} onPress={() => setEditing(true)} style={styles.action} />
+              <EButton palette={{ ...band, tint: band.statusOver }} variant="quiet" label={t('delete')}
+                onPress={() => setConfirmingDelete(true)} style={styles.action} />
+            </View>
           </View>
       )}>
-      <View style={[styles.head, editing && styles.editHead, { borderColor: theme.cardBorder }]}>
-        {!editing && <MerchantAvatar title={transaction.title} category={transaction.category} size={52} />}
-        <ThemedText type={editing ? "smallBold" : "heading"} style={editing ? styles.editHeadTitle : styles.headTitle}>
-          {transaction.title}
-        </ThemedText>
-        {!editing && <ThemedText type="meta" themeColor="textTertiary" style={styles.headDate}>
-          {friendlyDate(transaction.date, toISODate(new Date()))}
-        </ThemedText>}
-        {/* Decimals on. This sheet exists to answer "what exactly was this",
-            and it sat above an edit field showing 72.73 while itself reading
-            −73. Lists round; the place you go to check does not. */}
+      {editing ? <View style={[styles.head, styles.editHead, { borderColor: band.rule }]}>
+        <ThemedText type="smallBold" style={styles.editHeadTitle}>{transaction.title}</ThemedText>
         <Money
           fils={transaction.amountFils}
-          type={editing ? "smallBold" : "sheetAmount"}
+          type="smallBold"
           sign={income ? 'plus' : 'minus'}
           prefix
           decimals
-          color={income && !pendingTransfer && !confirmedTransfer ? theme.income : theme.text}
-          style={editing ? styles.editHeadAmount : styles.headAmount}
+          color={income && !pendingTransfer && !confirmedTransfer ? theme.income : band.text}
+          style={styles.editHeadAmount}
         />
-        {!editing && fxLine ? <ThemedText type="meta" themeColor="textSecondary" tabular testID="entry-fx-line" style={styles.fxLine}>
+      </View> : <View style={styles.head} testID="entry-detail-head">
+        <MerchantAvatar title={transaction.title} category={transaction.category} size={64} />
+        <ThemedText type="heading" style={styles.headTitle}>{transaction.title}</ThemedText>
+        {/* Decimals on. This sheet exists to answer "what exactly was this",
+            and it sat above an edit field showing 72.73 while itself reading
+            −73. Lists round; the place you go to check does not. */}
+        <BandFigure testID="entry-detail-amount" fils={transaction.amountFils} sign={income ? 'plus' : 'minus'} decimals
+          palette={band} size="hero" fitInset={8}
+          color={income && !pendingTransfer && !confirmedTransfer ? theme.income : band.text}
+          secondaryColor={band.textSecondary} style={styles.headAmount} />
+        <ThemedText type="meta" style={[styles.headDate, { color: band.textSecondary }]}>
+          {friendlyDate(transaction.date, toISODate(new Date()))}
+        </ThemedText>
+        {fxLine ? <ThemedText type="meta" tabular testID="entry-fx-line" style={[styles.fxLine, { color: band.textSecondary }]}>
           {fxLine}</ThemedText> : null}
-      </View>
+      </View>}
+
+      {/* What it was, as chips: its category (opens the picker) and, where a
+          transfer is possible, Mark as transfer (asks first). */}
+      {!editing && !categoryPicking ? <View style={styles.chips} testID="entry-detail-chips">
+        {confirmedTransfer || pendingTransfer ? <View accessible accessibilityRole="text" style={[styles.chip, { backgroundColor: band.card, borderColor: band.rule }]}>
+          <Icon name="repeat" size={16} color={band.text} />
+          <ThemedText type="small" style={{ color: band.text }}>{pendingTransfer ? transferWords.ownershipUnknown
+            : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel')}</ThemedText>
+        </View> : <Pressable accessibilityRole="button" testID="entry-category-chip"
+          accessibilityLabel={`${t('category')}: ${categoryLabel(meta)}`}
+          onPress={() => { setPickedCategory(transaction.category); setCategoryPicking(true); }}
+          style={({ pressed }) => [styles.chip, { backgroundColor: band.fill, borderColor: band.fill, opacity: pressed ? 0.8 : 1 }]}>
+          <Icon name={meta.icon} size={16} color={band.onFill} />
+          <ThemedText type="smallBold" style={{ color: band.onFill }}>{categoryLabel(meta)}</ThemedText>
+        </Pressable>}
+        {canMarkTransfer ? <Pressable accessibilityRole="button" testID="entry-mark-transfer"
+          accessibilityLabel={extra.markTransfer}
+          onPress={() => setConfirmingTransfer(true)}
+          style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
+          <Icon name="repeat" size={16} color={band.text} />
+          <ThemedText type="small" style={{ color: band.text }}>{extra.markTransfer}</ThemedText>
+        </Pressable> : null}
+      </View> : null}
 
       {categoryPicking ? (
         <View style={styles.field} testID="entry-category-picker">
@@ -386,7 +422,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       {(confirmedOwnTransfer || pendingTransfer) && (
         <View
           testID={confirmedOwnTransfer ? 'own-transfer-explainer' : 'pending-transfer-explainer'}
-          style={[styles.transferMeaning, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+          style={[styles.transferMeaning, { borderColor: band.rule, backgroundColor: band.card }]}>
           <ThemedText type="smallBold">
             {confirmedOwnTransfer ? transferWords.confirmedOwn : transferWords.ownershipUnknown}
           </ThemedText>
@@ -399,13 +435,13 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       {!editing && transaction.bestEffort && (
         <View
           testID="best-effort-check"
-          style={[styles.transferMeaning, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+          style={[styles.transferMeaning, { borderColor: band.rule, backgroundColor: band.card }]}>
           <ThemedText type="smallBold">{t('autoAddedCheck')}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">{t('autoAddedExplain')}</ThemedText>
           <View style={[styles.actions, largeText && styles.actionsLarge]}>
-            <Button inline={!largeText} wrapLabel label={t('autoAddedLooksRight')}
+            <EButton palette={band} label={t('autoAddedLooksRight')} style={styles.action}
               onPress={() => resolveBestEffort(transaction.id, 'confirm')} />
-            <Button inline={!largeText} wrapLabel variant="outline" label={t('autoAddedUndo')}
+            <EButton palette={band} variant="secondary" label={t('autoAddedUndo')} style={styles.action}
               onPress={() => setConfirmingUndo(true)} />
           </View>
           <ThemedText type="meta" themeColor="textTertiary">{t('autoAddedUndoHint')}</ThemedText>
@@ -414,13 +450,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
 
       {transferReview && <View style={styles.field} testID="entry-transfer-review">
         {pendingTransfer && <ThemedText type="small" themeColor="textSecondary">{transferWords.noticeBody}</ThemedText>}
-        <Button variant="outline" wrapLabel label={transferWords.title} onPress={() => {
+        <EButton palette={band} variant="secondary" label={transferWords.title} onPress={() => {
           onClose();
           router.push({ pathname: '/review-transfers', params: { transactionId: transaction.id } });
         }} />
       </View>}
-      {!editing && canMarkTransfer && <Button variant="outline" wrapLabel icon="repeat" label={extra.markTransfer}
-        onPress={() => setConfirmingTransfer(true)} />}
       {!editing && showMerchantLink && !confirmedTransfer && !pendingTransfer && transaction.title.trim() &&
         <MerchantSpendingLink merchant={transaction.title} type={transaction.type} onClose={onClose} />}
       {isUnassignedIncome(transaction) && <ThemedText type="small" themeColor="textSecondary" testID="income-account-review">
@@ -549,21 +583,6 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         <>
           <LabelTable
             rows={[
-              {
-                label: t('category'),
-                value: confirmedTransfer || pendingTransfer ? (
-                  <ThemedText type="small">{pendingTransfer ? transferWords.ownershipUnknown
-                    : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel')}</ThemedText>
-                ) : (
-                  <ThemedText
-                    type="small"
-                    accessibilityRole="button"
-                    onPress={() => { setPickedCategory(transaction.category); setCategoryPicking(true); }}
-                    style={{ color: theme.primary }}>
-                    {categoryLabel(meta)}
-                  </ThemedText>
-                ),
-              },
               {
                 label: t('account'),
                 value: <ThemedText type="small">{account ? accountDisplayName(account) : t('unassigned')}</ThemedText>,
@@ -767,13 +786,13 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
 const styles = StyleSheet.create({
   head: {
     flexDirection: 'column',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 4,
     alignItems: 'center',
     gap: 4,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  editHead: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.two, paddingHorizontal: 0, paddingVertical: Spacing.two },
+  editHead: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.two, paddingHorizontal: 0,
+    paddingVertical: Spacing.two, alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   editHeadTitle: { flexShrink: 1 },
   editHeadAmount: { alignSelf: 'center' },
   headTitle: {
@@ -785,8 +804,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   headAmount: {
+    alignItems: 'center',
     alignSelf: 'center',
-    marginTop: 8,
+    marginTop: 2,
+  },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: Spacing.two },
+  chip: {
+    minHeight: BandLayout.chipHeight, borderRadius: BandLayout.chipHeight / 2, paddingHorizontal: 14,
+    flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1,
   },
   fxLine: { textAlign: 'center' },
   field: {
@@ -833,6 +858,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.two + 2,
   },
+  // Side by side the two buttons share the row; stacked they take its width.
+  action: { flexGrow: 1, flexBasis: 0, alignSelf: 'auto' },
+  footerStack: { gap: Spacing.two },
   raw: {
     fontSize: 12.5,
     lineHeight: 18,

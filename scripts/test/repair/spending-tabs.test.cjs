@@ -37,7 +37,7 @@ test('Spending tabs are Categories, Compare and Calendar; old view links still o
 
 test('Categories shows "day X of Y" only for the running month', () => {
   const current = createHarness().render('flow');
-  assert.equal(text(byId(current, 'spending-pace')), 'day 6 of 30');
+  assert.equal(text(byId(current, 'spending-pace')), 'Day 6 of 30');
   const past = createHarness({ period: { mode: 'month', key: '2026-08' } }).render('flow');
   assert.equal(byId(past, 'spending-pace'), undefined);
   const arabic = createHarness({ language: 'ar' }).render('flow');

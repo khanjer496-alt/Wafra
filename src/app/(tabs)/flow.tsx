@@ -12,21 +12,23 @@ import { PeriodSheet } from '@/components/period-sheet';
 import { SpendingOverview, spendingCopy, type CategoryFilter } from '@/components/spending/spending-overview';
 import { SpendingTrends } from '@/components/spending/spending-trends';
 import { SpendingCalendar } from '@/components/spending/spending-calendar';
+import { SpendingCategoriesBand, SpendingCompareBand } from '@/components/spending/spending-band';
+import { BandScaffold } from '@/components/ui/band-scaffold';
+import { BandSegmented } from '@/components/ui/band/band-segmented';
+import { EButton } from '@/components/ui/band/e-button';
+import { GlyphTile } from '@/components/ui/band/glyph-tile';
+import { LimitStatusBar } from '@/components/ui/band/status-bar';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
-import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
-import { PeriodPill } from '@/components/ui/period-pill';
-import { SegmentedControl } from '@/components/ui/segmented-control';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { useTheme } from '@/hooks/use-theme';
 import { categoryMovers, categoryTrend, comparableSpend, dailySpendForMonth, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
 import { assistantCopy } from '@/lib/assistant-copy';
+import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { categoryLabel, isFixedCommitment } from '@/lib/categories';
 import { formatAED, formatCompactAED, ledgerTypicalMinor, monthEndISO, monthKey, monthLabel, monthStartISO, shiftMonthKey } from '@/lib/format';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
@@ -37,6 +39,7 @@ import { ledgerCurrencyCode } from '@/lib/markets';
 import { comparablePreviousPeriod, inPeriod, isCurrentMonth, periodLabel, previousPeriod } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { periodDayProgress } from '@/lib/period-pace';
+import { spendingTrendsCopy } from '@/lib/reference-copy';
 import { spendingCategoryRows } from '@/lib/reference-presentation';
 import { useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
@@ -60,7 +63,8 @@ const ACTIVITY_PREVIEW_LIMIT = 8;
 const shortMonthLabel = (key: string) => monthLabel(key, true).replace(/\s+\d{4}$/, '');
 
 export default function FlowScreen() {
-  const theme = useTheme(); const language = useLanguage(); const router = useRouter();
+  // Design language E: Spending wears the clay band in both schemes.
+  const band = useBand('spending'); const language = useLanguage(); const router = useRouter();
   const largeText = useLargeTextLayout();
   const params = useLocalSearchParams<{ view?: string }>();
   // Only what Spending draws. Import progress changes only the status-only
@@ -74,6 +78,7 @@ export default function FlowScreen() {
   }));
   const { period, setPeriod } = usePeriod();
   const w = spendingCopy[language === 'ar' ? 'ar' : 'en'];
+  const words = everydayBandCopy(language);
   const transferWords = transferActivityCopy(language);
   const [view, setView] = useState<ViewMode>(viewFromParam(params.view) ?? 'categories');
   const [filter, setFilter] = useState<CategoryFilter>('all');
@@ -230,26 +235,49 @@ export default function FlowScreen() {
       comparisonLabel: comparable ? periodLabel(comparable) : null };
   }, [view, trendWindowAnchorKey, state.transactions, period, live, internal]);
 
-  const flowHeader: ScreenHeaderProps = { title: t('tabFlow'), actions: [{ icon: 'search', label: w.search, onPress: () => setViewMode('calendar') }] };
-  // "day 12 of 30" only while the selected money month is running. The
+  // "Day 12 of 30" only while the selected money month is running. The
   // period's own first/last day (salary-day aware), never the calendar month.
   const pace = period.mode === 'month' && isCurrentMonth(period, new Date())
     ? periodDayProgress(monthStartISO(period.key), monthEndISO(period.key), todayISO) : null;
+  const currentPeriodName = periodLabel(period);
+  const spentLabel = pace ? words.spentThisMonth : words.spentIn(currentPeriodName);
+  const openAssistant = () => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } });
+  const selectedDay = calendarDay ? calendarDays.find((day) => day.dateISO === calendarDay) ?? null : null;
+  const dayHeading = calendarDay
+    ? new Date(`${calendarDay}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB',
+      { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
+    : words.calendarRecent;
+  const trendsWords = spendingTrendsCopy[language === 'ar' ? 'ar' : 'en'];
+
+  const bandContent = <View style={styles.band}>
+    <BandSegmented palette={band} label={words.spendingViews} value={view} onChange={setViewMode} testID="spending-views"
+      segments={[
+        { value: 'categories', label: w.categories, testID: 'spending-view-categories' },
+        { value: 'compare', label: w.compare, testID: 'spending-view-compare' },
+        { value: 'calendar', label: w.calendar, testID: 'spending-view-calendar' },
+      ]} />
+    {view === 'categories' && <SpendingCategoriesBand palette={band} label={spentLabel} totalFils={summary.expenseFils}
+      paceLabel={pace ? words.dayOf(pace.day, pace.of) : null} rows={rows} />}
+    {view === 'compare' && analysis && <SpendingCompareBand palette={band} comparison={analysis.comparison}
+      otherName={analysis.previousName ?? analysis.comparisonLabel} partial={analysis.partial} paceDay={pace?.day ?? null}
+      noiseFloorFils={ledgerTypicalMinor(50)} />}
+    {view === 'calendar' && <SpendingCalendar palette={band} periodLabel={currentPeriodName} days={calendarDays}
+      todayISO={todayISO} selected={calendarDay} onSelect={setCalendarDay} />}
+  </View>;
 
   return <>
-    <ScreenScaffold tabbed headerMode="inline" testID="reference-spending-screen"
-      header={flowHeader}
-      refreshControl={<CaptureRefreshControl tintColor={theme.primary} />}>
-      <SegmentedControl value={view} onChange={setViewMode} label={t('tabFlow')} segments={[
-        { value: 'categories', label: w.categories }, { value: 'compare', label: w.compare }, { value: 'calendar', label: w.calendar },
-      ]} />
-      {view === 'categories' && <SpendingOverview periodLabel={periodLabel(period)} totalFils={summary.expenseFils}
+    <BandScaffold band="spending" tabbed testID="reference-spending-screen" contentStyle={styles.sheet}
+      nav={{ title: t('tabFlow'), actions: [
+        { icon: 'search', label: w.search, onPress: () => setViewMode('calendar'), testID: 'spending-search' },
+        { icon: 'filter', label: words.choosePeriod(currentPeriodName), onPress: () => setPeriodOpen(true), testID: 'spending-period' },
+      ] }}
+      refreshControl={<CaptureRefreshControl />}
+      bandContent={bandContent}>
+      {view === 'categories' && <SpendingOverview totalFils={summary.expenseFils}
         rows={rows} monthScoped={period.mode === 'month'} filter={filter} onFilter={setFilter}
-        paceLabel={pace ? w.dayOf(pace.day, pace.of) : null}
-        onPeriod={() => setPeriodOpen(true)} onCategory={openCategory} onNewLimit={() => setLimitFor('new')}
+        onCategory={openCategory} onNewLimit={() => setLimitFor('new')}
         assistantSlot={<View testID="spending-ask-wafra" style={styles.assistantAction}>
-          <Button label={w.explain} variant="ghost" icon="spark"
-            onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
+          <EButton palette={band} variant="quiet" icon="spark" label={w.explain} onPress={openAssistant} style={styles.quiet} />
         </View>} />}
       {view === 'categories' && <MerchantSpendingLink />}
       {view === 'categories' && foreign && foreign.transactions.length > 0 && (
@@ -258,10 +286,10 @@ export default function FlowScreen() {
           accessibilityRole="button"
           accessibilityLabel={`${t('foreignSpending')}. ${formatAED(foreign.totalLocalFils)}`}
           onPress={() => router.push('/currency')}
-          style={[styles.foreignEntry, largeText && styles.foreignEntryStacked, { borderColor: theme.cardBorder }]}>
+          style={[styles.foreignEntry, largeText && styles.foreignEntryStacked, { borderColor: band.rule }]}>
           <View style={styles.foreignCopy}>
             <ThemedText type="smallBold">{t('foreignSpending')}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>
               {tf('foreignActivityCaption', {
                 count: foreign.transactions.length,
                 s: foreign.transactions.length === 1 ? '' : 's',
@@ -271,36 +299,38 @@ export default function FlowScreen() {
             </ThemedText>
           </View>
           <ThemedText type="smallBold" tabular style={largeText && styles.foreignAmountStacked}>{formatAED(foreign.totalLocalFils)}</ThemedText>
-          {largeText ? null : <Icon name="chevron-right" size={16} color={theme.textSecondary} />}
+          {largeText ? null : <Icon name="chevron-right" size={16} color={band.textSecondary} />}
         </Pressable>
       )}
       {view === 'calendar' && <View style={styles.activity} testID="spending-activity">
-        <View style={styles.trendsToolbar}>
-          <PeriodPill onPress={() => setPeriodOpen(true)} />
+        <View style={[styles.dayHeading, largeText && styles.stack]}>
+          <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionTitle} testID="spending-day-heading">{dayHeading}</ThemedText>
+          {selectedDay ? <View testID="spending-day-total"><Money fils={selectedDay.fils + selectedDay.fixedFils} type="smallBold" /></View> : null}
         </View>
-        <SpendingCalendar days={calendarDays} todayISO={todayISO} selected={calendarDay} onSelect={setCalendarDay} />
+        {calendarDay ? <Pressable accessibilityRole="button" onPress={() => setCalendarDay(null)} style={styles.clearDay}
+          testID="spending-day-clear">
+          <ThemedText type="meta" style={{ color: band.tint }}>{trendsWords.calendarAll}</ThemedText>
+        </Pressable> : null}
         <TextField label={w.search} placeholder={w.searchHint} value={query} onChangeText={setQuery} autoCorrect={false} />
         {hasTransferSpending && <View style={styles.transferNote}>
-          <ThemedText type="meta" themeColor="textSecondary">{transferWords.activityCountsNote}</ThemedText>
-          <Button label={transferWords.viewAll} variant="ghost" icon="repeat" onPress={() => router.push('/transfers')} />
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{transferWords.activityCountsNote}</ThemedText>
+          <EButton palette={band} variant="quiet" icon="repeat" label={transferWords.viewAll} onPress={() => router.push('/transfers')} style={styles.quiet} />
         </View>}
-        <View style={[styles.group, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        <View style={[styles.group, { borderColor: band.rule }]}>
           {activity.slice(0, ACTIVITY_PREVIEW_LIMIT).map((tx) => <TransactionRow key={tx.id} transaction={tx}
             account={accountById.get(tx.accountId)} onPress={setEntry} internal={internal.has(tx.id)} />)}
-          {activity.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noResults}</ThemedText>}
+          {activity.length === 0 && <ThemedText type="meta" style={[styles.empty, { color: band.textSecondary }]}>{w.noResults}</ThemedText>}
         </View>
-        <Button label={w.allActivity} variant="outline" onPress={() => router.push(`/transactions?type=expense${query.trim() ? `&q=${encodeURIComponent(query.trim())}` : ''}`)} />
+        <EButton palette={band} variant="secondary" label={w.allActivity}
+          onPress={() => router.push(`/transactions?type=expense${query.trim() ? `&q=${encodeURIComponent(query.trim())}` : ''}`)} />
       </View>}
       {view === 'compare' && analysis && <>
-        <View style={styles.trendsToolbar}>
-          <PeriodPill onPress={() => setPeriodOpen(true)} />
-          <View testID="spending-ask-wafra" style={styles.trendsToolbarAction}>
-            <Button label={w.explain} variant="ghost" icon="spark" style={styles.trendsToolbarButton}
-              onPress={() => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } })} />
-          </View>
+        <View testID="spending-ask-wafra" style={styles.assistantAction}>
+          <EButton palette={band} variant="quiet" icon="spark" label={w.explain} onPress={openAssistant} style={styles.quiet} />
         </View>
-        <SpendingTrends {...analysis} selectedKey={key} periodLabel={periodLabel(period)} currentName={periodLabel(period)}
-          noiseFloorFils={ledgerTypicalMinor(50)}
+        <SpendingTrends months={analysis.months} merchants={analysis.merchants} movers={analysis.movers}
+          weekdays={analysis.weekdays} comparisonLabel={analysis.comparisonLabel} previousName={analysis.previousName}
+          selectedKey={key} periodLabel={currentPeriodName} currentName={currentPeriodName}
           onMonth={(monthKey) => {
             if (monthKey === key) return;
             setTrendWindowEndKey((anchor) => anchor ?? trendWindowAnchorKey);
@@ -309,41 +339,40 @@ export default function FlowScreen() {
           onMerchant={(merchant) => router.push(merchantSpendingHref(merchant))}
           onCategory={openCategory} />
       </>}
-    </ScreenScaffold>
+    </BandScaffold>
     <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} onApply={() => setTrendWindowEndKey(null)} />
-    <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
+    <EntryDetailSheet transaction={entry} band="spending" onClose={() => setEntry(null)} />
     <BottomSheet
       visible={category !== null}
       onClose={closeCategory}
+      palette={band}
       title={category ? categoryLabel(category, language) : ''}
-      subtitle={periodLabel(period)}
+      subtitle={currentPeriodName}
       closeVariant="plain"
-      headerLeading={category ? (
-        <View style={[styles.categoryHeaderIcon, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
-          <CategoryAvatar category={category} size={32} />
-        </View>
-      ) : undefined}>
+      headerLeading={category ? <GlyphTile category={category} palette={band} size={40} /> : undefined}>
       {category && <View style={styles.categoryDetail}>
         <View style={styles.categoryHero}>
           <Money fils={categorySpentFils} type="amount" />
           <View style={styles.categoryHeroMeta}>
-            <ThemedText type="meta" themeColor="textSecondary">
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>
               {categorySharePercent}% {w.share}
             </ThemedText>
             {categoryMonthDeltaPercent != null && categoryPreviousMonth ? (
-              <ThemedText type="meta" themeColor="textSecondary">
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>
                 {categoryMonthDeltaPercent > 0 ? '↑ ' : categoryMonthDeltaPercent < 0 ? '↓ ' : ''}
                 {Math.abs(categoryMonthDeltaPercent)}% {w.vs} {shortMonthLabel(categoryPreviousMonth.key)}
               </ThemedText>
             ) : null}
           </View>
-          <View style={[styles.categoryLimitPill, { borderColor: theme.cardBorder, backgroundColor: theme.card }]}>
-            <ThemedText type="meta" themeColor="textSecondary">
+          <View style={[styles.categoryLimitPill, { borderColor: band.rule, backgroundColor: band.card }]}>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>
               {selectedCategory?.limitFils != null
                 ? `${formatAED(selectedCategory.limitFils)} · ${t('monthlyLimit')}`
                 : w.noLimit}
             </ThemedText>
           </View>
+          {selectedCategory?.limitFils != null ? <LimitStatusBar spentMinor={categorySpentFils}
+            limitMinor={selectedCategory.limitFils} palette={band} testID="category-limit-bar" /> : null}
         </View>
         <View style={styles.categoryHistory} testID="category-history">
           <View style={[styles.categoryHistoryHeader, largeText && styles.categoryHistoryHeaderStacked]}>
@@ -355,12 +384,12 @@ export default function FlowScreen() {
                 onPress={() => { tapped(); setPeriod({ mode: 'month', key: categoryLatestKey }); }}
                 hitSlop={6}
                 style={({ pressed }) => [styles.categoryLatestButton, {
-                  backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
-                  borderColor: theme.cardBorder,
+                  backgroundColor: pressed ? band.card : 'transparent',
+                  borderColor: band.rule,
                 }]}>
-                <ThemedText type="meta" style={{ color: theme.primary }}>{w.latest}</ThemedText>
+                <ThemedText type="meta" style={{ color: band.tint }}>{w.latest}</ThemedText>
               </Pressable> : null}
-              <ThemedText type="meta" themeColor="textSecondary" style={styles.shrinkText}>
+              <ThemedText type="meta" style={[styles.shrinkText, { color: band.textSecondary }]}>
                 {w.average} {formatAED(categoryHistoryAverage)}
               </ThemedText>
             </View>
@@ -376,12 +405,12 @@ export default function FlowScreen() {
                 accessibilityState={{ selected }}
                 onPress={() => { tapped(); setPeriod({ mode: 'month', key: month.key }); }}
                 style={({ pressed }) => [styles.categoryHistoryItem, {
-                  backgroundColor: selected ? theme.backgroundSelected : pressed ? theme.card : 'transparent',
+                  backgroundColor: selected ? band.card : pressed ? band.card : 'transparent',
                 }]}>
                 <ThemedText type={selected ? 'smallBold' : 'small'}>{monthLabel(month.key)}</ThemedText>
                 <Money fils={month.fils} type={selected ? 'smallBold' : 'small'} />
-                <View style={[styles.categoryHistoryTrack, { backgroundColor: theme.track }]}>
-                  <View style={{ height: '100%', borderRadius: 3, backgroundColor: theme.primary, opacity: selected ? 1 : 0.5,
+                <View style={[styles.categoryHistoryTrack, { backgroundColor: band.rule }]}>
+                  <View style={{ height: '100%', borderRadius: 3, backgroundColor: band.tint, opacity: selected ? 1 : 0.5,
                     width: `${month.fils <= 0 ? 0 : Math.max(2, month.fils / categoryHistoryMax * 100)}%` }} />
                 </View>
               </Pressable>;
@@ -397,7 +426,7 @@ export default function FlowScreen() {
                 hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
                 pressRetentionOffset={12}
                 style={({ pressed }) => [styles.categoryBarColumn, {
-                  backgroundColor: selected ? theme.backgroundSelected : pressed ? theme.card : 'transparent',
+                  backgroundColor: selected ? band.card : 'transparent',
                   opacity: pressed ? 0.82 : 1,
                 }]}>
                 <View style={styles.categoryBarPlot}>
@@ -406,20 +435,19 @@ export default function FlowScreen() {
                   </View>
                   <View style={[styles.categoryBar, {
                     height: barHeight,
-                    backgroundColor: theme.primary,
-                    opacity: selected ? 1 : 0.34,
+                    backgroundColor: selected ? band.tint : band.rule,
                   }]} />
                 </View>
-                <ThemedText type="micro" themeColor={selected ? 'text' : 'textSecondary'}>
+                <ThemedText type="micro" style={{ color: selected ? band.text : band.textSecondary }}>
                   {shortMonthLabel(month.key)}
                 </ThemedText>
               </Pressable>;
             })}
           </View>}
         </View>
-        <View testID="category-ask-wafra" style={[styles.categoryInsight, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
+        <View testID="category-ask-wafra" style={[styles.categoryInsight, { backgroundColor: band.card, borderColor: band.rule }]}>
           <View style={styles.categoryInsightCopy}>
-            <Icon name="spark" size={16} color={theme.primary} />
+            <Icon name="spark" size={16} color={band.tint} />
             <ThemedText type="meta" style={styles.categoryInsightText}>{categoryInsight}</ThemedText>
           </View>
           <Button label={w.askWafra} variant="ghost" onPress={() => {
@@ -428,9 +456,10 @@ export default function FlowScreen() {
             router.push({ pathname: '/assistant', params: { question } });
           }} style={styles.categoryAskButton} />
         </View>
-        <Button label={w.details} onPress={() => { const id = category; closeCategory(); router.push(`/transactions?type=expense&category=${id}`); }} />
-        {period.mode === 'month' && <Button label={selectedCategory?.limitFils != null ? w.manage : w.setLimit} variant="ghost"
-          style={styles.categorySecondaryAction}
+        <EButton palette={band} label={w.details} testID="category-details"
+          onPress={() => { const id = category; closeCategory(); router.push(`/transactions?type=expense&category=${id}`); }} />
+        {period.mode === 'month' && <EButton palette={band} variant="quiet" testID="category-limit"
+          label={selectedCategory?.limitFils != null ? w.manage : w.setLimit}
           onPress={() => { setLimitFor(category); closeCategory(); }} />}
       </View>}
     </BottomSheet>
@@ -438,10 +467,12 @@ export default function FlowScreen() {
   </>;
 }
 const styles = StyleSheet.create({
+  band: { gap: 18 },
+  sheet: { gap: 16 },
+  sectionTitle: { fontSize: 17, lineHeight: 24 },
   assistantAction: { alignSelf: 'flex-start', maxWidth: '100%' },
-  trendsToolbar: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  trendsToolbarAction: { alignSelf: 'flex-start', maxWidth: '100%' },
-  trendsToolbarButton: { minHeight: 44, maxWidth: '100%', paddingHorizontal: 12 },
+  quiet: { alignSelf: 'flex-start', minHeight: 44, paddingHorizontal: 0, paddingVertical: 6 },
+  stack: { flexDirection: 'column', alignItems: 'flex-start' },
   foreignEntry: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 12,
     borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 10 },
   foreignCopy: { flex: 1, minWidth: 0, gap: 2 },
@@ -449,10 +480,12 @@ const styles = StyleSheet.create({
   // disclosure chevron goes, so the caption has the row's full width.
   foreignEntryStacked: { flexWrap: 'wrap' },
   foreignAmountStacked: { flexBasis: '100%' },
-  activity: { gap: 16 }, group: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 0 },
+  activity: { gap: 14 },
+  dayHeading: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
+  clearDay: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start', marginTop: -8 },
+  group: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 0 },
   transferNote: { gap: 4 },
   empty: { paddingVertical: 24 },
-  categoryHeaderIcon: { width: 40, height: 40, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
   categoryDetail: { gap: 14 },
   categoryHero: { gap: 8, paddingTop: 2 },
   categoryHeroMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, alignItems: 'center' },
@@ -470,10 +503,9 @@ const styles = StyleSheet.create({
   categoryBarColumn: { flex: 1, minWidth: 44, minHeight: 128, borderRadius: 10, alignItems: 'center', justifyContent: 'flex-end', gap: 5, paddingHorizontal: 2, paddingVertical: 3 },
   categoryBarPlot: { height: 98, alignItems: 'center', justifyContent: 'flex-end' },
   categoryBarValueSlot: { height: 20, alignItems: 'center', justifyContent: 'center' },
-  categoryBar: { width: 24, borderTopLeftRadius: 7, borderTopRightRadius: 7, borderBottomLeftRadius: 4, borderBottomRightRadius: 4 },
+  categoryBar: { width: 24, borderRadius: 7 },
   categoryInsight: { gap: 4, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 14, paddingVertical: 10 },
   categoryInsightCopy: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   categoryInsightText: { flex: 1, minWidth: 0 },
   categoryAskButton: { alignSelf: 'flex-start', minHeight: 40, paddingHorizontal: 0, paddingVertical: 6 },
-  categorySecondaryAction: { alignSelf: 'flex-start', minHeight: 40, paddingHorizontal: 2, paddingVertical: 6 },
 });

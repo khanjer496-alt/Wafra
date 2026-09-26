@@ -4,10 +4,14 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
-import { Button } from '@/components/ui/controls';
+import { DialLimit } from '@/components/ui/band/dial-limit';
+import { EButton } from '@/components/ui/band/e-button';
+import { GlyphTile } from '@/components/ui/band/glyph-tile';
+import { LimitStatusBar } from '@/components/ui/band/status-bar';
 import { SectionHeader } from '@/components/ui/period-pill';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
@@ -18,6 +22,7 @@ import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/perio
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 import { alignEnd, t, tf } from '@/lib/i18n';
+import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { limitSheetCopy } from '@/lib/reference-copy';
 import { usualMonthlyMinor } from '@/lib/reference-presentation';
 
@@ -43,7 +48,11 @@ interface LimitSheetProps {
  */
 export function LimitSheet({ category, open, monthKey: key, onClose }: LimitSheetProps) {
   const theme = useTheme();
-  const words = limitSheetCopy[useLanguage() === 'ar' ? 'ar' : 'en'];
+  // Limits belong to Spending: the clay band's sheet, lifted.
+  const band = useBand('spending');
+  const language = useLanguage();
+  const words = limitSheetCopy[language === 'ar' ? 'ar' : 'en'];
+  const bandWords = everydayBandCopy(language);
   const { state, upsertBudget, deleteBudget, setLedgerMoney } = useStore();
 
   const [picked, setPicked] = useState<CategoryId | null>(category);
@@ -226,12 +235,9 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   // Steppers move the limit by a currency-sized step (25 in AED/USD terms,
   // 2,500 for JPY), never below one step.
   const step = ledgerTypicalMinor(25);
-  const stepLabel = formatAED(step, { decimals: false });
-  const stepBy = (direction: 1 | -1) => {
-    const base = limitFils ?? 0;
-    const next = direction > 0 ? base + step : Math.max(step, base - step);
-    setText(formatAmountForInput(next));
-  };
+  // The dial and its ± steppers move by that step and never set a limit
+  // below one step (zero is "no limit", which is Remove, not a value).
+  const setFromDial = (next: number) => setText(formatAmountForInput(Math.max(step, next)));
   // The last three full months and this month, against the limit line.
   const bars = picked ? [...lastMonths.map((month) => ({ ...month, current: false })), { key, fils: spent, current: true }] : [];
   const barMax = Math.max(1, limitFils ?? 0, ...bars.map((bar) => bar.fils));
@@ -257,27 +263,19 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     <BottomSheet
       visible={open}
       onClose={onClose}
-      title={
-        picked
-          ? tf('categoryLimit', { category: categoryLabel(getCategory(picked)) })
-          : t('newLimitTitle')
-      }
+      palette={band}
+      headerLeading={picked ? <GlyphTile category={picked} palette={band} size={44} /> : undefined}
+      title={picked ? categoryLabel(getCategory(picked)) : t('newLimitTitle')}
+      subtitle={picked ? bandWords.monthlyLimit : undefined}
+      testID="limit-sheet"
       footer={(
         <View style={styles.actions}>
           {existing ? (
-            <Button
-              inline
-              label={t('remove')}
-              variant="danger"
-              onPress={removeExisting}
-            />
+            <EButton palette={{ ...band, tint: band.statusOver }} variant="quiet" label={t('remove')}
+              onPress={removeExisting} style={styles.action} testID="limit-remove" />
           ) : null}
-          <Button
-            inline
-            label={t('saveLimit')}
-            disabled={!picked || !limitFils}
-            onPress={save}
-          />
+          <EButton palette={band} label={t('saveLimit')} disabled={!picked || !limitFils}
+            onPress={save} style={styles.action} testID="limit-save" />
         </View>
       )}>
             {!category && (
@@ -291,11 +289,11 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                       style={[
                         styles.chip,
                         {
-                          backgroundColor: on ? theme.text : 'transparent',
-                          borderColor: on ? theme.text : theme.cardBorder,
+                          backgroundColor: on ? band.fill : band.card,
+                          borderColor: on ? band.fill : band.rule,
                         },
                       ]}>
-                      <ThemedText type="meta" style={{ color: on ? theme.background : theme.text }}>
+                      <ThemedText type="meta" style={{ color: on ? band.onFill : band.text }}>
                         {categoryLabel(c)}
                       </ThemedText>
                     </Pressable>
@@ -313,7 +311,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                   <ThemedText
                     type="smallBold"
                     tabular
-                    style={{ color: over ? theme.expense : theme.text }}>
+                    style={{ color: over ? band.statusOver : band.text }}>
                     {formatAED(shownTotalFils, { decimals: false })}
                     <ThemedText type="meta" themeColor="textTertiary" tabular>
                       {'  / '}
@@ -321,16 +319,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                     </ThemedText>
                   </ThemedText>
                 </View>
-                <View style={[styles.track, { backgroundColor: theme.track }]}>
-                  <View
-                    style={{
-                      width: `${Math.max(2, Math.min(100, ratio * 100))}%`,
-                      height: '100%',
-                      backgroundColor: over ? theme.expenseGraphic : theme.primary,
-                      borderRadius: 4,
-                    }}
-                  />
-                </View>
+                <LimitStatusBar spentMinor={spent} limitMinor={limitFils} palette={band} testID="limit-status-bar" />
                 <ThemedText type="meta" themeColor="textTertiary">
                   {over
                     ? tf('limitOverBy', { amount: formatAED(spent - limitFils, { decimals: false }) })
@@ -354,34 +343,24 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                   <ThemedText type="smallBold" themeColor="textSecondary">›</ThemedText>
                 </Pressable>
               )}
+              {state.ledgerMoney && picked ? <DialLimit testID="limit-dial" palette={band} moneySpec={state.ledgerMoney}
+                label={categoryLabel(getCategory(picked))} valueMinor={limitFils ?? 0} stepMinor={step}
+                onChange={setFromDial} /> : null}
+              {/* The dial snaps to the step; an exact figure is typed here. */}
               <TextField
                 numeric
-                label={t('monthlyLimit')}
+                label={state.ledgerMoney ? bandWords.exactLimit : t('monthlyLimit')}
                 value={text}
                 onChangeText={setText}
                 placeholder="0"
                 placeholderTextColor={theme.textTertiary}
-                selectionColor={theme.primary}
+                selectionColor={band.tint}
                 leading={(
                 <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
                   {state.ledgerMoney?.currency ?? '—'}
                 </ThemedText>
                 )}
-                style={styles.amountInput}
               />
-              {state.ledgerMoney ? <View style={styles.steppers}>
-                {([-1, 1] as const).map((direction) => <Pressable key={direction} testID={direction < 0 ? 'limit-step-down' : 'limit-step-up'}
-                  accessibilityRole="button" accessibilityLabel={direction < 0 ? words.lower(stepLabel) : words.raise(stepLabel)}
-                  disabled={direction < 0 && (!limitFils || limitFils <= step)}
-                  onPress={() => stepBy(direction)}
-                  style={({ pressed }) => [styles.stepper, {
-                    borderColor: theme.cardBorder,
-                    backgroundColor: pressed ? theme.backgroundSelected : 'transparent',
-                    opacity: direction < 0 && (!limitFils || limitFils <= step) ? 0.45 : 1,
-                  }]}>
-                  <ThemedText type="smallBold" tabular>{direction < 0 ? '−' : '+'}{stepLabel}</ThemedText>
-                </Pressable>)}
-              </View> : null}
             </View>
 
             {picked && threeMonthAverage > 0 && (
@@ -389,13 +368,14 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                 <SectionHeader title={words.lastMonths} />
                 <View style={styles.bars}>
                   {limitFils ? <View pointerEvents="none" testID="limit-line"
-                    style={[styles.limitLine, { bottom: 22 + Math.round((limitFils / barMax) * BAR_HEIGHT), borderColor: theme.textSecondary }]} /> : null}
+                    style={[styles.limitLine, { bottom: 22 + Math.round((limitFils / barMax) * BAR_HEIGHT), borderColor: band.tint }]} /> : null}
                   {bars.map((bar) => <View key={bar.key} style={styles.barColumn} accessible accessibilityRole="text"
                     accessibilityLabel={words.month(bar.current ? `${monthLabel(bar.key)} ${words.thisMonth}` : monthLabel(bar.key), formatAED(bar.fils, { decimals: false }))}>
                     <View style={[styles.bar, {
                       height: Math.max(3, Math.round((bar.fils / barMax) * BAR_HEIGHT)),
-                      backgroundColor: limitFils && bar.fils > limitFils ? theme.expenseGraphic : theme.primary,
-                      opacity: bar.current ? 1 : 0.6,
+                      // Past months in the rule tone, this month in the band tint;
+                      // a month over the limit reads as over, whichever it is.
+                      backgroundColor: limitFils && bar.fils > limitFils ? band.statusOver : bar.current ? band.tint : band.rule,
                     }]} />
                     <ThemedText type="micro" themeColor={bar.current ? 'text' : 'textSecondary'} numberOfLines={1}>
                       {monthLabel(bar.key, true).split(' ')[0]}
@@ -414,11 +394,12 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                   <Pressable
                     key={`${s.fils}-${s.note}`}
                     onPress={() => setText(formatAmountForInput(s.fils))}
+                    accessibilityRole="button"
                     style={[
                       styles.chip,
                       {
-                        backgroundColor: s.highlight ? theme.primarySoft : 'transparent',
-                        borderColor: s.highlight ? theme.primaryBorder : theme.cardBorder,
+                        backgroundColor: band.card,
+                        borderColor: s.highlight ? band.tint : band.rule,
                       },
                     ]}>
                     <ThemedText type="meta" tabular>
@@ -510,7 +491,6 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     justifyContent: 'space-between',
   },
-  track: { height: 8, borderRadius: 4, overflow: 'hidden' },
   amountBlock: { marginTop: Spacing.four, gap: Spacing.two },
   currencyChoice: {
     minHeight: 56,
@@ -524,14 +504,7 @@ const styles = StyleSheet.create({
   },
   currencyChoiceCopy: { flex: 1, minWidth: 0, gap: 2 },
   aed: { fontSize: 15 },
-  amountInput: {
-    fontSize: 34,
-    lineHeight: 40,
-    letterSpacing: -0.7,
-  },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.three },
-  steppers: { flexDirection: 'row', gap: Spacing.two },
-  stepper: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: Radius.full, alignItems: 'center', justifyContent: 'center' },
   history: { marginTop: Spacing.four, gap: Spacing.two },
   bars: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.three, height: BAR_HEIGHT + 22, position: 'relative' },
   barColumn: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', gap: 4, height: '100%' },
@@ -546,5 +519,6 @@ const styles = StyleSheet.create({
   },
   whereName: { flex: 1 },
   whereFigure: { minWidth: 62 },
-  actions: { flexDirection: 'row', gap: Spacing.two },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  action: { flexGrow: 1, flexBasis: 0, alignSelf: 'auto', minWidth: 140 },
 });

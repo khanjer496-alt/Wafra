@@ -30,7 +30,9 @@ for (const language of ['en', 'ar']) {
       assert.equal(input.props.accessibilityLabel, t('searchMerchants'));
       assert.equal(input.props.placeholder, t('transactionSearchPlaceholder'));
       assert.notEqual(input.props.placeholder, t('searchMerchants'));
-      assert.ok(text(h.tree).includes(t('transactionSearchLabel')));
+      // On the band the pill's placeholder names what it matches and the label
+      // is spoken; on the sheet (large text) the field keeps its visible label.
+      if (largeText) assert.ok(text(h.tree).includes(t('transactionSearchLabel')));
       input.props.onChangeText('Noon');
       assert.ok(h.events.some(e => e[0] === 'state' && e[2] === 'Noon'));
       input.props.onSubmitEditing();
@@ -55,7 +57,11 @@ for (const language of ['en', 'ar']) {
       const t = h.deps['@/lib/i18n'].t;
       assert.equal(tree.props.testID, 'entry-detail-sheet');
       assert.ok(tree.props.footer);
-      assert.equal(style(tree.props.footer).flexDirection, largeText ? 'column' : 'row');
+      // Design language E: Done closes a read; Edit and Delete sit beside each
+      // other under it (stacked at the accessibility sizes).
+      assert.ok(labelled(tree.props.footer, h.deps['@/lib/reference-copy'].entryDetailCopy[language].done));
+      const actions = walk(tree.props.footer).find(n => n.props?.testID === 'entry-detail-actions');
+      assert.equal(style(actions).flexDirection, largeText ? 'column' : 'row');
       assert.ok(labelled(tree.props.footer, t('editEntry')));
       assert.ok(labelled(tree.props.footer, t('delete')));
       assert.equal(labelled(tree.props.children, t('delete')), undefined);

@@ -230,7 +230,7 @@ ok('Flow trend months expose cashflow descriptions and selected state',
 ok('Flow retains selected month context and large-text list',
  /accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)[\s\S]*?monthFigures\(selected\)/.test(spendingTrends) && /!showAllTrendLabels &&[\s\S]*?p\.months\.map/.test(spendingTrends));
 ok('Flow uses shared shell and Stats redirects into Trends',
- /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"/.test(flow) && /<Redirect href="\/flow\?view=trends"/.test(stats));
+ /<BandScaffold band="spending" tabbed/.test(flow) && /<Redirect href="\/flow\?view=trends"/.test(stats));
 ok('shared charts consume the semantic data-visualization palette',
   /import \{[^}]*\bDataViz\b[^}]*\} from '@\/constants\/theme'/.test(charts) &&
     /from '@\/components\/ui\/data-viz'/.test(charts));
@@ -275,7 +275,7 @@ ok('Card detail presents billable obligations before identity and payment histor
   /\{data\.billable && \([\s\S]*?styles\.summary[\s\S]*?title=\{t\('statements'\)\}[\s\S]*?styles\.head[\s\S]*?title=\{t\('paymentsMade'\)\}/.test(cardDetail) &&
     !/type="subtitle" numberOfLines=\{1\}/.test(cardDetail));
 ok('Limit editor delegates keyboard scrolling to the shared labelled sheet and field',
-  /<BottomSheet/.test(limitSheet) && /<TextField[\s\S]*?label=\{t\('monthlyLimit'\)\}/.test(limitSheet) &&
+  /<BottomSheet/.test(limitSheet) && /<TextField[\s\S]*?label=\{state\.ledgerMoney \? bandWords\.exactLimit : t\('monthlyLimit'\)\}/.test(limitSheet) &&
     !/<Modal/.test(limitSheet) && !/<ScrollView/.test(limitSheet) && !/useKeyboardHeight/.test(limitSheet));
 
 /* ── Larger Text (docs/design/2026-09-25-large-text-audit.md) ─────────── */
@@ -308,7 +308,8 @@ ok('The font-scale emulation only exists in the seeded web E2E export',
   /Platform\.OS !== 'web' \|\| process\.env\.EXPO_PUBLIC_WAFRA_E2E_DEMO !== '1'\) return null/.test(fontScaleHarness) &&
     /E2E_FONT_SCALE === null\s*\? composed/.test(themedText));
 ok('Transactions scroll the search controls with the list at the accessibility sizes',
-  /\{largeText \? null : searchControls\}/.test(source('src/app/transactions.tsx')) &&
+  /bandContent=\{onBand \? searchControls : undefined\}/.test(source('src/app/transactions.tsx')) &&
+    /const onBand = !largeText;/.test(source('src/app/transactions.tsx')) &&
     /\{scrollingSearchControls\}/.test(source('src/app/transactions.tsx')));
 {
   // Behaviour of the figure fit, from the compiled module when the suite has

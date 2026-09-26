@@ -12,6 +12,11 @@ import {
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { BandTextField } from '@/components/add-band-field';
+import { BandScaffold } from '@/components/ui/band-scaffold';
+import { BandChip } from '@/components/ui/band/band-chip';
+import { BandSegmented } from '@/components/ui/band/band-segmented';
+import { EButton } from '@/components/ui/band/e-button';
 import { Icon } from '@/components/ui/icon';
 import { AmountKeypad, KeypadAmountDisplay } from '@/components/ui/amount-keypad';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
@@ -23,6 +28,7 @@ import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
 import { useToast } from '@/components/ui/toast';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { applyKeypadKey, keypadDisplay, keypadMinorUnits, keypadTextFromMinor, type KeypadKey } from '@/lib/amount-keypad';
@@ -36,6 +42,7 @@ import { cachedReferenceQuote, convertWithReferenceQuote, loadReferenceQuote, qu
 import { displayNumberConventions, formatMinorUnits, formatMinorUnitsForInput, ledgerMoneySpec } from '@/lib/ledger-money';
 import { motionAndroidCopy } from '@/lib/motion-android-copy';
 import { categoryAdvisor } from '@/lib/on-device-category';
+import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { reviewTemplateRuleFor, type PromoteReviewAlertInput } from '@/lib/review-promotion';
 import { isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
@@ -99,6 +106,8 @@ function defaultReviewTitle(item: ReviewAlert): string {
 
 export default function AddTransactionScreen() {
   const theme = useTheme();
+  // Design language E: adding is a capture flow and wears the green band.
+  const band = useBand('flow');
   const router = useRouter();
   const toast = useToast();
   const params = useLocalSearchParams<{ reviewId?: string | string[] }>();
@@ -786,47 +795,120 @@ export default function AddTransactionScreen() {
     );
   }
 
+  // Manual entry in design language E: the green band holds what is being
+  // written (Expense / Income, the amount as it is keyed, the merchant and
+  // the suggested categories); the sheet holds the detail chips and keypad.
+  // A captured alert keeps its review on the sheet.
+  const bandWords = everydayBandCopy(state.language);
+  const arabic = state.language === 'ar';
+  const entryCurrency = foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '—';
+  const manualBand = reviewItem ? undefined : <View style={styles.band}>
+    <BandSegmented palette={band} label={bandWords.entryType} value={type} onChange={switchType} testID="add-type"
+      segments={[{ value: 'expense', label: tUi('expenseLabel'), testID: 'add-type-expense' },
+        { value: 'income', label: tUi('incomeLabel'), testID: 'add-type-income' }]} />
+    {typingAmount ? null : <View style={styles.bandAmount}>
+      <ThemedText type="small" style={{ color: band.onBandSecondary }}>{bandWords.amountLabel}</ThemedText>
+      <KeypadAmountDisplay
+        // The same ref the typed field uses, so the protected
+        // focusFirstInvalid() reaches the amount in either mode.
+        ref={amountRef}
+        testID="amount-display"
+        palette={band}
+        currency={entryCurrency}
+        text={amountShown}
+        empty={keypadText === ''}
+        fadeKey={keyFade}
+        animate={!reducedMotion}
+        invalid={amountInvalid}
+        spokenLabel={keypadText === '' ? copy.amountEmptySpoken
+          : copy.amountSpoken(foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '', amountShown)}
+        errorText={amountInvalid ? (foreignSpec
+          ? tfUi('amountInCurrency', { currency: foreignSpec.currency }) : tUi('amountInLedgerCurrency')) : undefined}
+      />
+    </View>}
+    <View style={styles.amountTools}>
+      {state.ledgerMoney ? (
+        <Pressable
+          testID="spend-currency-trigger"
+          accessibilityRole="button"
+          accessibilityLabel={`${tUi('spendCurrencyTitle')}: ${foreignSpec?.currency ?? state.ledgerMoney.currency}`}
+          accessibilityHint={tUi('spendCurrencyHint')}
+          onPress={() => setSpendSheetVisible(true)}
+          style={({ pressed }) => [styles.bandPill, {
+            backgroundColor: foreignSpec ? band.selected : band.tile, opacity: pressed ? 0.75 : 1,
+          }]}>
+          <ThemedText type="smallBold" style={{ color: foreignSpec ? band.onSelected : band.onBand }}>
+            {foreignSpec?.currency ?? state.ledgerMoney.currency}</ThemedText>
+          <Icon name="chevron-down" size={16} color={foreignSpec ? band.onSelected : band.onBand} />
+        </Pressable>
+      ) : <View />}
+      <Pressable
+        testID="amount-mode-toggle"
+        accessibilityRole="button"
+        accessibilityLabel={typingAmount ? copy.keypadUseKeypad : copy.keypadTypeInstead}
+        onPress={switchAmountMode}
+        style={styles.modeToggle}>
+        <ThemedText type="small" style={[styles.underline, { color: band.onBand }]}>
+          {typingAmount ? copy.keypadUseKeypad : copy.keypadTypeInstead}
+        </ThemedText>
+      </Pressable>
+    </View>
+    {state.ledgerMoney && foreignSpec ? (
+      <ThemedText testID="foreign-manual-note" type="meta" style={{ color: band.onBandSecondary }}>
+        {tfUi('foreignManualNote', { ledger: state.ledgerMoney.currency, currency: foreignSpec.currency })}
+      </ThemedText>
+    ) : null}
+    <BandTextField
+      palette={band}
+      testID="add-merchant-field"
+      label={tUi('descriptionOptional')}
+      accessibilityLabel={tUi('descriptionOptionalA11y')}
+      value={title}
+      onChangeText={setTitle}
+      placeholder={type === 'expense' ? tUi('expenseExample') : tUi('incomeExample')}
+      arabic={arabic}
+    />
+    {suggestedCategories.length > 0 ? <View style={styles.suggestRow}>
+      <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{bandWords.suggested}</ThemedText>
+      <ScrollView {...CHIP_SCROLL} testID="suggested-categories"
+        accessibilityLabel={copy.suggestedCategories} contentContainerStyle={styles.chipScroll}>
+        {suggestedCategories.map((id) => {
+          const meta = getCategory(id);
+          return <BandChip key={id} testID={`suggested-category-${id}`} palette={band} icon={meta.icon}
+            label={categoryLabel(meta)} selected={category === id}
+            accessibilityHint={copy.suggestedCategorySpoken(categoryLabel(meta))}
+            onPress={() => { tapped(); setCategory(id); }} />;
+        })}
+      </ScrollView>
+    </View> : null}
+  </View>;
+
   return (
     <>
-    <ScreenScaffold
+    <BandScaffold
+      band="flow"
       keyboardAware
-      headerMode="inline"
-      header={{
+      testID="add-transaction-screen"
+      nav={{
+        close: () => router.back(),
         title: tUi(reviewItem ? 'genericReviewTitle' : 'newTransaction'),
-        back: { label: tUi('close'), icon: 'close', onPress: () => router.back() },
       }}
       scrollProps={{ keyboardShouldPersistTaps: 'handled' }}
       contentStyle={styles.content}
+      bandContent={manualBand}
       footer={(
-        <View
-          style={[
-            styles.footer,
-            { borderTopColor: theme.cardBorder, backgroundColor: theme.background },
-          ]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : 'saveTransaction')}
-            accessibilityState={{ disabled: saving || reviewRouteInvalid, busy: saving }}
-            onPress={onSavePress}
-            disabled={saving || reviewRouteInvalid}
-            style={[
-              styles.saveBtn,
-              {
-                backgroundColor: theme.primary,
-                opacity: saving || reviewRouteInvalid ? 0.4 : 1,
-              },
-            ]}>
-            <Icon name="check" size={20} color={theme.onPrimary} strokeWidth={2.6} />
-            <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-              {tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
-            </ThemedText>
-          </Pressable>
-        </View>
+        <EButton
+          palette={band}
+          label={tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
+          onPress={onSavePress}
+          disabled={saving || reviewRouteInvalid}
+          testID="add-save"
+        />
       )}>
       {/* A captured alert asks only what Wafra genuinely does not know. If the
           bank already supplied debit/credit direction, do not make the person
-          reconfirm it. Manual entries still need the normal type switch. */}
-      {(!reviewItem || !reviewDirectionKnown) ? <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
+          reconfirm it. A manual entry chooses its type on the band. */}
+      {(reviewItem && !reviewDirectionKnown) ? <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
               {(['expense', 'income'] as TransactionType[]).map((t) => {
                 const active = type === t && directionConfirmed;
                 const color = t === 'expense' ? theme.expense : theme.income;
@@ -976,95 +1058,7 @@ export default function AddTransactionScreen() {
           )}
           style={[styles.amountInput, { color: theme.text, fontFamily: state.language === 'ar' ? Fonts.arabicBold : Fonts.sansSemi }]}
         />
-      ) : (
-        <KeypadAmountDisplay
-          // The same ref the typed field uses, so the protected
-          // focusFirstInvalid() reaches the amount in either mode.
-          ref={amountRef}
-          testID="amount-display"
-          currency={foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '—'}
-          text={amountShown}
-          empty={keypadText === ''}
-          fadeKey={keyFade}
-          animate={!reducedMotion}
-          invalid={amountInvalid}
-          spokenLabel={keypadText === '' ? copy.amountEmptySpoken
-            : copy.amountSpoken(foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '', amountShown)}
-          errorText={amountInvalid ? (foreignSpec
-            ? tfUi('amountInCurrency', { currency: foreignSpec.currency }) : tUi('amountInLedgerCurrency')) : undefined}
-        />
-      )}
-      {!reviewItem ? (
-        <View style={styles.amountTools}>
-          {state.ledgerMoney ? (
-            <Pressable
-              testID="spend-currency-trigger"
-              accessibilityRole="button"
-              accessibilityLabel={`${tUi('spendCurrencyTitle')}: ${foreignSpec?.currency ?? state.ledgerMoney.currency}`}
-              accessibilityHint={tUi('spendCurrencyHint')}
-              onPress={() => setSpendSheetVisible(true)}
-              style={({ pressed }) => [styles.chip, {
-                borderColor: foreignSpec ? theme.primary : theme.controlBorder,
-                backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
-              }]}>
-              <ThemedText type="smallBold">{foreignSpec?.currency ?? state.ledgerMoney.currency}</ThemedText>
-              <Icon name="chevron-down" size={16} color={theme.textSecondary} />
-            </Pressable>
-          ) : <View />}
-          <Pressable
-            testID="amount-mode-toggle"
-            accessibilityRole="button"
-            accessibilityLabel={typingAmount ? copy.keypadUseKeypad : copy.keypadTypeInstead}
-            onPress={switchAmountMode}
-            style={styles.modeToggle}>
-            <ThemedText type="small" style={{ color: theme.primary }}>
-              {typingAmount ? copy.keypadUseKeypad : copy.keypadTypeInstead}
-            </ThemedText>
-          </Pressable>
-        </View>
       ) : null}
-      {!reviewItem && state.ledgerMoney && foreignSpec ? (
-        <ThemedText testID="foreign-manual-note" type="meta" themeColor="textSecondary">
-          {tfUi('foreignManualNote', { ledger: state.ledgerMoney.currency, currency: foreignSpec.currency })}
-        </ThemedText>
-      ) : null}
-
-      {/* Title */}
-      {!reviewItem ? <TextField
-        label={tUi(genericItem ? 'genericMerchantTitle' : 'descriptionOptional')}
-                value={title}
-                onChangeText={setTitle}
-                accessibilityLabel={tUi(genericItem ? 'genericMerchantTitle' : 'descriptionOptionalA11y')}
-                maxLength={genericItem ? 80 : undefined}
-                invalid={!!genericItem && (title.length > 80 || (showValidation && !title.trim()))}
-                errorText={genericItem && title.length > 80 ? tUi('genericShortenTitle') : undefined}
-                placeholder={type === 'expense' ? tUi('expenseExample') : tUi('incomeExample')}
-              /> : null}
-      {!reviewItem && suggestedCategories.length > 0 ? (
-        <ScrollView {...CHIP_SCROLL} testID="suggested-categories"
-          accessibilityLabel={copy.suggestedCategories} contentContainerStyle={styles.chipScroll}>
-          {suggestedCategories.map((id) => {
-            const active = category === id;
-            const meta = getCategory(id);
-            return (
-              <Pressable key={id} testID={`suggested-category-${id}`} accessibilityRole="button"
-                accessibilityLabel={copy.suggestedCategorySpoken(categoryLabel(meta))}
-                accessibilityState={{ selected: active }}
-                onPress={() => { tapped(); setCategory(id); }}
-                style={({ pressed }) => [styles.chip, {
-                  borderColor: active ? theme.inverseSurface : theme.controlBorder,
-                  backgroundColor: active ? theme.inverseSurface : pressed ? theme.backgroundSelected : 'transparent',
-                }]}>
-                <Icon name={meta.icon} size={16} color={active ? theme.inverseText : theme.textSecondary} />
-                <ThemedText type="small" style={{ color: active ? theme.inverseText : theme.text }}>
-                  {categoryLabel(meta)}
-                </ThemedText>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      ) : null}
-
       {/* Category grid */}
       {reviewFamily === 'transfer' && (
               <Pressable
@@ -1104,8 +1098,8 @@ export default function AddTransactionScreen() {
             accessibilityState={{ expanded: categoryPickerOpen }}
             onPress={() => setCategoryPickerOpen(true)}
             style={({ pressed }) => [styles.chip, {
-              borderColor: categoryInvalid ? theme.expense : theme.controlBorder,
-              backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+              borderColor: categoryInvalid ? theme.expense : band.rule,
+              backgroundColor: pressed ? band.rule : band.card,
             }]}>
             {category && <Icon name={getCategory(category).icon} size={16} color={theme.textSecondary} />}
             <ThemedText type="small" numberOfLines={1}>
@@ -1123,8 +1117,8 @@ export default function AddTransactionScreen() {
             accessibilityState={{ expanded: datePickerOpen }}
             onPress={() => setDatePickerOpen(true)}
             style={({ pressed }) => [styles.chip, {
-              borderColor: theme.controlBorder,
-              backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+              borderColor: band.rule,
+              backgroundColor: pressed ? band.rule : band.card,
             }]}>
             <Icon name="calendar" size={16} color={theme.textSecondary} />
             <ThemedText type="small" numberOfLines={1}>{dateLabels[dayOffset] ?? dateLabels[0]}</ThemedText>
@@ -1171,6 +1165,7 @@ export default function AddTransactionScreen() {
 
       {!reviewItem && !typingAmount ? (
         <AmountKeypad
+          palette={band}
           exponent={entrySpec?.exponent ?? 2}
           decimalMark={conventions.decimal}
           disabled={!entrySpec}
@@ -1180,7 +1175,7 @@ export default function AddTransactionScreen() {
       ) : null}
 
 
-    </ScreenScaffold>
+    </BandScaffold>
     <LedgerCurrencySheet
       visible={currencySheetVisible}
       value={state.ledgerMoney?.currency ?? null}
@@ -1275,6 +1270,11 @@ const styles = StyleSheet.create({
   content: {
     gap: Spacing.three + 4,
   },
+  band: { gap: 16 },
+  bandAmount: { gap: 2 },
+  bandPill: { minHeight: 44, borderRadius: 22, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  underline: { textDecorationLine: 'underline' },
+  suggestRow: { gap: 8 },
   segment: {
     flexDirection: 'row',
     borderRadius: 26,

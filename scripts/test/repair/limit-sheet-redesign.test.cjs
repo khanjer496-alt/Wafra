@@ -28,17 +28,32 @@ test('limit sheet shows three full months and this month against the limit line,
   assert.match(text(byId(history, 'limit-usual')), /Your usual is about AED 4,840\.\s+This limit is below what you usually spend\./);
 });
 
-test('steppers move the limit by a currency-sized step and never below one step', () => {
+test('the dial and its steppers move the limit by a currency-sized step and never below one step', () => {
   const h = sheet({ states: { [TEXT]: '1500' } });
-  byId(h.tree, 'limit-step-up').props.onPress();
+  const dial = byId(h.tree, 'limit-dial');
+  assert.equal(walk(dial).find((node) => node.props?.accessibilityRole === 'adjustable').props.accessibilityValue.text, 'AED 1,500');
+  byId(h.tree, 'limit-dial-raise').props.onPress();
   assert.deepEqual(h.events.at(-1), ['state', TEXT, '1525']);
-  byId(h.tree, 'limit-step-down').props.onPress();
+  byId(h.tree, 'limit-dial-lower').props.onPress();
   assert.deepEqual(h.events.at(-1), ['state', TEXT, '1475']);
-  assert.match(byId(h.tree, 'limit-step-up').props.accessibilityLabel, /Raise by AED 25/);
+  assert.match(byId(h.tree, 'limit-dial-raise').props.accessibilityLabel, /Raise by AED 25/);
+  // Swipe up/down on the adjustable dial does the same.
+  walk(dial).find((node) => node.props?.accessibilityRole === 'adjustable')
+    .props.onAccessibilityAction({ nativeEvent: { actionName: 'increment' } });
+  assert.deepEqual(h.events.at(-1), ['state', TEXT, '1525']);
+  const lowest = sheet({ states: { [TEXT]: '25' } });
+  lowest.events.length = 0;
+  byId(lowest.tree, 'limit-dial-lower').props.onPress();
+  assert.equal(lowest.events.some((event) => event[0] === 'state' && event[1] === TEXT && event[2] === '0'), false,
+    'lowering never sets a zero limit');
   const empty = sheet({ states: { [TEXT]: '' } });
-  assert.equal(byId(empty.tree, 'limit-step-down').props.disabled, true);
-  byId(empty.tree, 'limit-step-up').props.onPress();
+  empty.events.length = 0;
+  byId(empty.tree, 'limit-dial-lower').props.onPress();
+  assert.equal(empty.events.some((event) => event[0] === 'state' && event[1] === TEXT), false);
+  byId(empty.tree, 'limit-dial-raise').props.onPress();
   assert.deepEqual(empty.events.at(-1), ['state', TEXT, '25']);
+  // An exact figure the step cannot reach is still typed.
+  assert.ok(walk(h.tree).some((node) => node.type === 'TextInput' && node.props.value === '1500'));
 });
 
 test('a roomy limit says so; no history means no chart', () => {

@@ -152,27 +152,30 @@ assert.match(task3Home, /function Hero[\s\S]*?<PeriodPill onPress=\{onChangePeri
 assert.match(task3Home, /<Hero[\s\S]*?onChangePeriod=\{\(\) => setPeriodSheetOpen\(true\)\}/);
 
 const task3Transactions = read('src/app/transactions.tsx');
-assert.match(task3Transactions, /useScreenContentInsets\(\{ hasFooter: false \}\)/);
-assert.match(task3Transactions, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/);
-assert.match(task3Transactions, /header=\{\{[\s\S]*?back:[\s\S]*?actions:/);
+// Design language E: an ink band (nav, search, type chips) over a sheet that
+// holds the virtualized list; the sheet clears the home indicator itself.
+assert.match(task3Transactions, /const listBottom = useBandBottomInset\(\)/);
+assert.match(task3Transactions, /<BandScaffold[\s\S]*?band="home"[\s\S]*?scroll=\{false\}/);
+assert.match(task3Transactions, /nav=\{\{[\s\S]*?back: true[\s\S]*?actions:/);
 assert.match(task3Transactions, /<SectionList[\s\S]*?ListHeaderComponent=/);
-assert.match(task3Transactions, /contentContainerStyle=\{\[listInsets\.contentContainerStyle, styles\.listContent\]\}/);
+assert.match(task3Transactions, /contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}\]\}/);
 assert.match(task3Transactions, /listContent: \{ gap: 0 \}/);
-assert.match(task3Transactions, /contentInset=\{listInsets\.contentInset\}/);
-assert.match(task3Transactions, /scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}/);
-assert.match(task3Transactions, /contentInsetAdjustmentBehavior="automatic"/);
+assert.match(task3Transactions, /scrollIndicatorInsets=\{\{ top: 0, bottom: listBottom \}\}/);
+assert.match(task3Transactions, /<BandSearchField[\s\S]*?label=\{tr\('searchMerchants'\)\}[\s\S]*?clearLabel=\{tr\('clearSearch'\)\}/);
 assert.match(task3Transactions, /<TextField[\s\S]*?label=\{tr\('transactionSearchLabel'\)\}[\s\S]*?accessibilityLabel=\{tr\('searchMerchants'\)\}/);
 assert.match(task3Transactions, /<ActionIconButton[\s\S]*?label=\{tr\('clearSearch'\)\}[\s\S]*?variant="plain"/);
 assert.match(task3Transactions, /const clearFilters[\s\S]*?setSmsOnly\(false\)/);
 
 const task3Add = read('src/app/add-transaction.tsx');
-assert.match(task3Add, /<ScreenScaffold[\s\S]*?keyboardAware[\s\S]*?headerMode="inline"/);
+// Design language E: Add is a green band (type, amount, merchant, suggested
+// categories) over a sheet holding the detail chips and keypad.
+assert.match(task3Add, /<BandScaffold[\s\S]*?band="flow"[\s\S]*?keyboardAware[\s\S]*?bandContent=\{manualBand\}/);
 assert.match(task3Add, /scrollProps=\{\{ keyboardShouldPersistTaps: 'handled' \}\}/);
 assert.match(task3Add, /footer=\{/);
-assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 2,
-  'Manual Add keeps labelled amount/title fields while alert review avoids redundant editable fields');
-assert.match(task3Add, /!reviewItem \? <TextField[\s\S]*?descriptionOptional/,
-  'captured-alert review does not ask the user to rewrite a title Wafra already has');
+assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 1,
+  'Manual Add keeps a labelled typed-amount field');
+assert.match(task3Add, /const manualBand = reviewItem \? undefined[\s\S]*?<BandTextField[\s\S]*?label=\{tUi\('descriptionOptional'\)\}/,
+  'captured-alert review does not ask the user to rewrite a title Wafra already has; a manual entry labels its merchant field');
 assert.match(task3Add, /const focusFirstInvalid = \(\) => \{/);
 assert.match(task3Add, /const onSavePress = \(\) => \{[\s\S]*?setShowValidation\(true\)[\s\S]*?focusFirstInvalid\(\)/);
 assert.match(task3Add, /disabled=\{saving \|\| reviewRouteInvalid\}/);
@@ -188,8 +191,9 @@ assert.match(task3Scaffold, /keyboardAware && Platform\.OS !== 'ios'[\s\S]*?keyb
 assert.match(task3Scaffold, /scrollIndicatorInsets:[\s\S]*?bottom:[\s\S]*?keyboardHeight/);
 
 const task4Flow = read('src/app/(tabs)/flow.tsx');
-assert.match(task4Flow, /const flowHeader: ScreenHeaderProps = \{/);
-assert.match(task4Flow, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{flowHeader\}/);
+// Design language E: Spending is a clay band (the one figure) over a sheet.
+assert.match(task4Flow, /<BandScaffold band="spending" tabbed[\s\S]*?nav=\{\{ title: t\('tabFlow'\)/);
+assert.match(task4Flow, /bandContent=\{bandContent\}/);
 assert.match(task4Flow, /summarizeMonth\(/);
 assert.match(task4Flow, /spendingCategoryRows\(/);
 assert.match(task4Flow, /router\.push\(`\/transactions\?type=expense&category=\$\{id\}`\)/);
@@ -211,14 +215,15 @@ assert.doesNotMatch(read('src/lib/categories.ts'), /CATEGORY_RAMP|rampColor|onRa
 const overview=read('src/components/spending/spending-overview.tsx');
 const trends=read('src/components/spending/spending-trends.tsx');
 assert.match(overview,/accessibilityLabel=\{`\$\{categoryLabel[\s\S]*?row\.spentFils[\s\S]*?row\.limitFils/);
-assert.match(overview,/function categoryPaletteIndex\(/,
-  'Spending list gives tail categories a stable visible accent instead of the donut neutral');
-assert.match(overview,/segmentColors\.get\(row\.category\) \?\?[\s\S]*?palette\[categoryPaletteIndex\(row\.category, palette\.length\)\]/,
-  'categories collapsed into the share bar\'s Other segment still use readable categorical ink in the list');
-assert.doesNotMatch(overview,/const sliceColor = (?:segmentColors|donutColors)\.get\(row\.category\) \?\? neutral/,
-  'dark-mode tail rows must never reuse the near-background donut neutral');
-assert.match(overview,/trackColor=\{scheme === 'dark' \? theme\.cardBorderStrong : theme\.track\}/,
-  'thin category progress tracks keep enough dark-mode contrast');
+// Design language E: colour in the list means limit status only. Every
+// category glyph sits on the one glyph ground in the text colour, and the
+// only bar on a row is its limit bar.
+assert.match(overview,/<GlyphTile category=\{row\.category\} palette=\{band\}/,
+  'category rows use the one-tone glyph tile, never a category hue');
+assert.doesNotMatch(overview,/useCategoricalPalette|categoryPaletteIndex|sliceColor/,
+  'no categorical palette on Spending rows');
+assert.match(overview,/<LimitStatusBar spentMinor=\{row\.spentFils\} limitMinor=\{row\.limitFils\}/,
+  'a row with a limit carries the status-coloured limit bar');
 assert.match(trends,/accessibilityLabel=\{monthDescription\(month\)\}/);
 assert.match(trends,/accessibilityState=\{\{ selected: month\.key === p\.selectedKey \}\}/);
 assert.match(trends,/accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)/);

@@ -6,6 +6,8 @@ import { ReduceMotion } from 'react-native-reanimated';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import type { IconName } from '@/components/ui/icon.types';
+import { BandPalettes, type BandId } from '@/constants/theme';
+import { useBandScheme } from '@/hooks/use-band';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { isRTL } from '@/lib/i18n';
@@ -19,6 +21,12 @@ export interface SwipeAction {
   label: string;
   icon: IconName;
   destructive?: boolean;
+  /**
+   * Design language E: the action wears a band's colour (Category ochre,
+   * Transfer slate, Delete clay on Transactions). Without one, the plain
+   * surface, or clay for a destructive action.
+   */
+  band?: BandId;
   onPress: () => void;
 }
 
@@ -33,19 +41,24 @@ export interface SwipeAction {
  */
 export function SwipeRow({ actions, children, testID }: { actions: readonly SwipeAction[]; children: React.ReactNode; testID?: string }) {
   const theme = useTheme();
+  const scheme = useBandScheme();
   const { reducedMotion } = useMotionPreference();
   const methods = useRef<SwipeableMethods | null>(null);
   if (actions.length === 0) return <>{children}</>;
   const renderActions = () => <View style={styles.actions}>
-    {actions.map((action) => <Pressable key={action.name} testID={`swipe-action-${action.name}`}
-      accessibilityRole="button" accessibilityLabel={action.label}
-      onPress={() => { methods.current?.close(); action.onPress(); }}
-      style={({ pressed }) => [styles.action, {
-        backgroundColor: action.destructive ? theme.expenseGraphic : pressed ? theme.backgroundSelected : theme.backgroundElement,
-      }]}>
-      <Icon name={action.icon} size={18} color={action.destructive ? theme.onPrimary : theme.text} />
-      <ThemedText type="meta" style={{ color: action.destructive ? theme.onPrimary : theme.text }}>{action.label}</ThemedText>
-    </Pressable>)}
+    {actions.map((action) => {
+      const tone = action.band ?? (action.destructive ? 'spending' : null);
+      const palette = tone ? BandPalettes[scheme][tone] : null;
+      const fill = palette ? palette.band : theme.backgroundElement;
+      const ink = palette ? palette.onBand : theme.text;
+      return <Pressable key={action.name} testID={`swipe-action-${action.name}`}
+        accessibilityRole="button" accessibilityLabel={action.label}
+        onPress={() => { methods.current?.close(); action.onPress(); }}
+        style={({ pressed }) => [styles.action, { backgroundColor: fill, opacity: pressed ? 0.8 : 1 }]}>
+        <Icon name={action.icon} size={18} color={ink} />
+        <ThemedText type="meta" style={[styles.label, { color: ink }]}>{action.label}</ThemedText>
+      </Pressable>;
+    })}
   </View>;
   // Actions sit at the trailing edge: right in English, left in Arabic.
   const rtl = isRTL();
@@ -61,4 +74,5 @@ export function SwipeRow({ actions, children, testID }: { actions: readonly Swip
 const styles = StyleSheet.create({
   actions: { flexDirection: 'row', alignItems: 'stretch' },
   action: { width: 76, minHeight: 44, alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 4 },
+  label: { fontSize: 12, lineHeight: 16, textAlign: 'center' },
 });

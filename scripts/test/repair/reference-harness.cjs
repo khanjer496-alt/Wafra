@@ -217,9 +217,22 @@ function createHarness(options = {}) {
   // both; the pattern is its own subscribed component (pattern.test.cjs).
   deps['@/hooks/use-band']={useBand:(id)=>themes.BandPalettes[options.theme??'light'][id],useBandScheme:()=>options.theme??'light'};
   deps['@/hooks/use-theme'].ThemeScope={Provider:'ThemeScope'};
-  deps['@/components/ui/band-scaffold']={BandScaffold:p=>jsx('BandScaffold',{...p,children:[p.bandContent,p.children]})};
+  deps['@/components/ui/band-scaffold']={BandScaffold:p=>jsx('BandScaffold',{...p,children:[p.bandContent,p.children]}),useBandBottomInset:()=>10,BAND_GUTTER:20};
   deps['@/components/ui/your-pattern']={YourPattern:p=>jsx('YourPattern',p)};
   local('@/components/ui/band/band-figure');local('@/components/ui/band/stat-tile');local('@/components/ui/band/week-tiles');
+  // The everyday screens in language E (Spending, Transactions, Add, the
+  // entry, filter and limit sheets): their band pieces and pure helpers run
+  // from source.
+  local('@/lib/band-copy','src/lib/band-copy.ts');local('@/lib/limit-status','src/lib/limit-status.ts');
+  local('@/lib/everyday-band-copy','src/lib/everyday-band-copy.ts');
+  local('@/lib/spending-compare','src/lib/spending-compare.ts');local('@/lib/spending-calendar-tiles','src/lib/spending-calendar-tiles.ts');
+  local('@/components/ui/band/band-segmented');local('@/components/ui/band/band-chip');local('@/components/ui/band/share-bar');
+  local('@/components/ui/band/glyph-tile');local('@/components/ui/band/status-bar');local('@/components/ui/band/e-button');
+  local('@/components/spending/spending-band');
+  // The limit dial's drag is native; its steppers and adjustable actions run.
+  native.PanResponder={create:()=>({panHandlers:{}})};
+  local('@/components/ui/band/dial-limit');
+  local('@/components/add-band-field');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
   local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');
   local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/bills/bills-timeline');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');

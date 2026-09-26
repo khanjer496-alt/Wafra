@@ -53,7 +53,14 @@ function harness() {
     // summary under test is the sheet half of reference-home-summary.
     '@/components/ui/band/band-figure': { BandFigure: 'BandFigure' },
     '@/components/ui/band/stat-tile': { StatTile: 'StatTile', statTileColors: () => ({}) },
-    '@/components/ui/band/week-tiles': { WeekTiles: 'WeekTiles' }, '@/constants/theme': { Fonts: {}, Spacing: { two: 8 },
+    '@/components/ui/band/week-tiles': { WeekTiles: 'WeekTiles' },
+    // Spending's sheet pieces in language E: the tiles and bars carry no money
+    // text of their own; the rows' Money and spoken labels are under test.
+    '@/components/ui/band/e-button': { EButton: 'EButton' }, '@/components/ui/band/glyph-tile': { GlyphTile: 'GlyphTile' },
+    '@/components/ui/band/status-bar': { LimitStatusBar: 'LimitStatusBar', limitStatusColor: () => 'status' },
+    '@/hooks/use-band': { useBand: () => ({ text: 'ink', textSecondary: 'gray', rule: 'rule', card: 'card', sheet: 'sheet', tint: 'clay', statusOver: 'red' }) },
+    '@/lib/everyday-band-copy': local('everyday-band-copy'), '@/lib/limit-status': local('limit-status'),
+    '@/constants/theme': { Fonts: {}, Spacing: { two: 8 },
       DataViz: { light: { neutral: '#E3DED2' }, dark: { neutral: '#3B362E' } } },
     '@/hooks/use-theme': { useTheme: () => theme }, '@/lib/reference-copy': local('reference-copy'),
     '@/hooks/use-language': { useLanguage: () => i18n.getLanguage() },

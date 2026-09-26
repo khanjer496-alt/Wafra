@@ -4,7 +4,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
-import { Fonts, Motion, Radius, Spacing } from '@/constants/theme';
+import { Fonts, Motion, Radius, Spacing, type BandPalette } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { keypadHasDecimal, type KeypadDigit, type KeypadKey } from '@/lib/amount-keypad';
 import { keyed } from '@/lib/haptics';
@@ -19,6 +19,8 @@ interface AmountKeypadProps {
   decimalMark: string;
   disabled?: boolean;
   testID?: string;
+  /** Design language E: keys are cards on this band's sheet. */
+  palette?: BandPalette;
 }
 
 const ROWS: readonly (readonly KeypadDigit[])[] = [
@@ -52,8 +54,12 @@ export function AmountKeypad({
   decimalMark,
   disabled = false,
   testID = 'amount-keypad',
+  palette,
 }: AmountKeypadProps) {
   const theme = useTheme();
+  const keyFill = palette?.card ?? theme.backgroundElement;
+  const keyPressed = palette?.rule ?? theme.backgroundSelected;
+  const keyInk = palette?.text ?? theme.text;
   const press = (key: KeypadKey) => {
     if (disabled) return;
     keyed();
@@ -61,14 +67,14 @@ export function AmountKeypad({
   };
   const keyStyle = ({ pressed }: { pressed: boolean }) => [
     styles.key,
-    { backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+    { backgroundColor: pressed ? keyPressed : keyFill,
       opacity: disabled ? 0.4 : 1 },
   ];
   const digit = (value: KeypadDigit) => (
     <Pressable key={value} testID={`${testID}-${value}`} accessibilityRole="button"
       accessibilityLabel={value} accessibilityState={{ disabled }} disabled={disabled}
       onPress={() => press(value)} style={keyStyle}>
-      <ThemedText style={styles.keyText}>{value}</ThemedText>
+      <ThemedText style={[styles.keyText, { color: keyInk }]}>{value}</ThemedText>
     </Pressable>
   );
   return (
@@ -81,14 +87,14 @@ export function AmountKeypad({
           <Pressable testID={`${testID}-decimal`} accessibilityRole="button"
             accessibilityLabel={labels.decimal} accessibilityState={{ disabled }} disabled={disabled}
             onPress={() => press('decimal')} style={keyStyle}>
-            <ThemedText style={styles.keyText}>{decimalMark}</ThemedText>
+            <ThemedText style={[styles.keyText, { color: keyInk }]}>{decimalMark}</ThemedText>
           </Pressable>
         ) : <View style={styles.key} importantForAccessibility="no" />}
         {digit('0')}
         <Pressable testID={`${testID}-backspace`} accessibilityRole="button"
           accessibilityLabel={labels.backspace} accessibilityState={{ disabled }} disabled={disabled}
           onPress={() => press('backspace')} style={keyStyle}>
-          <BackspaceGlyph color={theme.text} />
+          <BackspaceGlyph color={keyInk} />
         </Pressable>
       </View>
     </View>
@@ -110,6 +116,11 @@ interface KeypadAmountDisplayProps {
   spokenLabel: string;
   errorText?: string;
   testID?: string;
+  /**
+   * Design language E: the figure is the band's one figure — light text in
+   * Geist SemiBold with tabular digits (never Geist Mono), set on this band.
+   */
+  palette?: BandPalette;
 }
 
 /** What a form can do with the display: move assistive focus to it. */
@@ -136,6 +147,7 @@ export const KeypadAmountDisplay = forwardRef<KeypadAmountDisplayHandle, KeypadA
   spokenLabel,
   errorText,
   testID = 'amount-display',
+  palette,
 }, ref) {
   const theme = useTheme();
   const figureRef = useRef<View>(null);
@@ -145,31 +157,37 @@ export const KeypadAmountDisplay = forwardRef<KeypadAmountDisplayHandle, KeypadA
       if (node !== null) AccessibilityInfo.setAccessibilityFocus(node);
     },
   }), []);
-  const color = empty ? theme.textTertiary : theme.text;
+  const color = palette ? (empty ? palette.onBandSecondary : palette.onBand) : empty ? theme.textTertiary : theme.text;
   // Step the size down as the figure grows so twelve digits and their group
   // marks still fit one line on a 360pt phone.
-  const size = text.length > 12 ? { fontSize: 32, lineHeight: 40 }
-    : text.length > 8 ? { fontSize: 40, lineHeight: 50 } : null;
+  const size = palette
+    ? text.length > 12 ? { fontSize: 34, lineHeight: 42 } : text.length > 8 ? { fontSize: 46, lineHeight: 54 } : { fontSize: 64, lineHeight: 72 }
+    : text.length > 12 ? { fontSize: 32, lineHeight: 40 }
+      : text.length > 8 ? { fontSize: 40, lineHeight: 50 } : null;
+  const onBand = palette ? styles.figureOnBand : null;
   const head = empty ? text : text.slice(0, -1);
   const tail = empty ? '' : text.slice(-1);
   return (
-    <View style={styles.displayWrap}>
+    <View style={[styles.displayWrap, palette && styles.displayWrapOnBand]}>
       <View ref={figureRef} testID={testID} accessible accessibilityRole="text" accessibilityLabel={spokenLabel}
         accessibilityLiveRegion="polite"
-        style={[styles.display, { borderBottomColor: invalid ? theme.expense : 'transparent' }]}>
-        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.displayCurrency}>{currency}</ThemedText>
+        style={[styles.display, palette && styles.displayOnBand,
+          { borderBottomColor: invalid ? (palette ? palette.onBand : theme.expense) : 'transparent' }]}>
+        <ThemedText type="smallBold" themeColor="textSecondary"
+          style={[styles.displayCurrency, palette && { color: palette.onBandSecondary }]}>{currency}</ThemedText>
         <View style={styles.figure}>
-          <ThemedText tabular style={[styles.figureText, size, { color }]}>{head}</ThemedText>
+          <ThemedText tabular style={[styles.figureText, size, onBand, { color }]}>{head}</ThemedText>
           {tail ? (
             <Animated.View key={fadeKey}
               entering={animate && fadeKey > 0 ? FadeIn.duration(Motion.keyFade) : undefined}>
-              <ThemedText tabular style={[styles.figureText, size, { color }]}>{tail}</ThemedText>
+              <ThemedText tabular style={[styles.figureText, size, onBand, { color }]}>{tail}</ThemedText>
             </Animated.View>
           ) : null}
         </View>
       </View>
       {errorText ? (
-        <ThemedText type="meta" themeColor="expense" accessibilityLiveRegion="polite" style={styles.displayError}>
+        <ThemedText type="meta" themeColor="expense" accessibilityLiveRegion="polite"
+          style={[styles.displayError, palette && { color: palette.onBand }]}>
           {errorText}
         </ThemedText>
       ) : null}
@@ -189,6 +207,10 @@ const styles = StyleSheet.create({
   },
   keyText: { fontFamily: Fonts.sansMedium, fontSize: 24, lineHeight: 30 },
   displayWrap: { gap: Spacing.one, alignItems: 'center' },
+  // On a band the figure starts at the reading edge, like every band figure.
+  displayWrapOnBand: { alignItems: 'flex-start' },
+  displayOnBand: { justifyContent: 'flex-start', alignSelf: 'flex-start' },
+  figureOnBand: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], letterSpacing: -2 },
   display: {
     flexDirection: 'row',
     alignItems: 'baseline',

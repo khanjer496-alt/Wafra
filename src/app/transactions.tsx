@@ -8,6 +8,7 @@ import {
   ScrollView,
   SectionList,
   StyleSheet,
+  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -21,10 +22,12 @@ import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Chip } from '@/components/ui/controls';
 import { ActionIconButton } from '@/components/ui/action-icon-button';
 import { TransactionFilterSheet } from '@/components/transaction-filter-sheet';
+import { BAND_GUTTER, BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold';
+import { BandChip } from '@/components/ui/band/band-chip';
 import { Icon } from '@/components/ui/icon';
-import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
-import { Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Fonts, Radius, Spacing, type BandPalette } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -88,6 +91,42 @@ interface DaySection {
 const transactionKey = (transaction: Transaction) => transaction.id;
 
 /**
+ * The search field set on the ink band: a 48pt pill in the band's own tone,
+ * light text, the search glyph at its start and a clear control at its end.
+ * The label is spoken; the placeholder names what it matches.
+ */
+function BandSearchField({ palette, value, onChangeText, label, placeholder, clearLabel, arabic }: {
+  palette: BandPalette;
+  value: string;
+  onChangeText: (value: string) => void;
+  label: string;
+  placeholder: string;
+  clearLabel: string;
+  arabic: boolean;
+}) {
+  return <View style={[styles.bandSearch, { backgroundColor: palette.tile }]}>
+    <Icon name="search" size={18} color={palette.onBandSecondary} strokeWidth={2} />
+    <TextInput
+      accessibilityLabel={label}
+      value={value}
+      onChangeText={onChangeText}
+      inputMode="search"
+      returnKeyType="search"
+      placeholder={placeholder}
+      placeholderTextColor={palette.onBandSecondary}
+      selectionColor={palette.onBand}
+      onSubmitEditing={() => Keyboard.dismiss()}
+      style={[styles.bandSearchInput, { color: palette.onBand, fontFamily: arabic ? Fonts.arabic : Fonts.sans,
+        textAlign: arabic ? 'right' : 'left' }]}
+    />
+    {value.length > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={clearLabel} hitSlop={8}
+      onPress={() => onChangeText('')} style={styles.bandSearchClear}>
+      <Icon name="close" size={16} color={palette.onBand} strokeWidth={2.2} />
+    </Pressable> : null}
+  </View>;
+}
+
+/**
  * Rows the Transfers screen owns, and transfer legs still waiting for their
  * other side, found by a full transfer reconciliation (100–300 ms on a phone
  * at 15k rows). Remembered per ledger so reopening the screen is instant; once
@@ -131,6 +170,8 @@ function useTransferScope(
 
 export default function TransactionsScreen() {
   const theme = useTheme();
+  // Design language E: Transactions is a Home detail and wears the ink band.
+  const band = useBand('home');
   const largeText = useLargeTextLayout();
   const { width, fontScale } = useWindowDimensions();
   // Give the search field the full width before its placeholder gets clipped.
@@ -254,7 +295,7 @@ export default function TransactionsScreen() {
       : { ...current, accountId: accountFromLink, datePreset: 'all' });
   }, [accountFromLink]);
   const pendingFilterFrame = useRef<number | null>(null);
-  const listInsets = useScreenContentInsets({ hasFooter: false });
+  const listBottom = useBandBottomInset();
 
   useEffect(() => () => {
     if (pendingFilterFrame.current !== null) cancelAnimationFrame(pendingFilterFrame.current);
@@ -319,10 +360,11 @@ export default function TransactionsScreen() {
   // Rows keep one stable action builder; the router object itself may not be stable.
   const routerRef = useRef(router);
   routerRef.current = router;
-  const accountLabelFor = (id: string) => {
+  // Stable, because the memoized list header names the account filter.
+  const accountLabelFor = useCallback((id: string) => {
     const account = accountById.get(id);
     return account ? accountDisplayName(account) : tr('incomeAccountReview');
-  };
+  }, [accountById, tr]);
   // One stable handler for the whole list. An inline `() => setEditing(item)`
   // is a new function per row per render, which defeats TransactionRow's memo
   // and re-renders every visible row on each keystroke in the search field.
@@ -341,18 +383,18 @@ export default function TransactionsScreen() {
     const candidate = isTransferCandidate(tx);
     const actions: SwipeAction[] = [];
     if (!confirmedTransfer && !candidate) {
-      actions.push({ name: 'category', label: words.category, icon: 'receipt',
+      actions.push({ name: 'category', label: words.category, icon: 'receipt', band: 'bills',
         onPress: () => { Keyboard.dismiss(); setEntryMode('category'); setEditing(tx); } });
     }
     if (!confirmedTransfer) {
-      actions.push({ name: 'transfer', label: words.transfer, icon: 'repeat',
+      actions.push({ name: 'transfer', label: words.transfer, icon: 'repeat', band: 'accounts',
         onPress: () => {
           Keyboard.dismiss();
           if (candidate) routerRef.current.push({ pathname: '/review-transfers', params: { transactionId: tx.id } });
           else { setEntryMode('transfer'); setEditing(tx); }
         } });
     }
-    actions.push({ name: 'delete', label: words.delete, icon: 'trash', destructive: true,
+    actions.push({ name: 'delete', label: words.delete, icon: 'trash', destructive: true, band: 'spending',
       onPress: () => { Keyboard.dismiss(); setDeleting(tx); } });
     return actions;
   }, [internal, words]);
@@ -380,10 +422,9 @@ export default function TransactionsScreen() {
     ({ item, index }: { item: Transaction; index: number }) => {
       const { actions, spoken, onAction } = actionsFor(item);
       return (
-        <View
-          style={index > 0 ? [styles.rowDivider, { borderTopColor: theme.cardBorder }] : undefined}>
-          <SwipeRow actions={actions} testID={`transaction-swipe-${item.id}`}>
-            <View style={{ backgroundColor: theme.background }}>
+        <SwipeRow actions={actions} testID={`transaction-swipe-${item.id}`}>
+          <View style={[styles.rowSurface, { backgroundColor: band.sheet }]}>
+            <View style={index > 0 ? [styles.rowDivider, { borderTopColor: band.rule }] : undefined}>
               <TransactionRow
                 transaction={item}
                 account={accountById.get(item.accountId)}
@@ -393,11 +434,11 @@ export default function TransactionsScreen() {
                 onAccessibilityAction={onAction}
               />
             </View>
-          </SwipeRow>
-        </View>
+          </View>
+        </SwipeRow>
       );
     },
-    [accountById, openEntry, theme.cardBorder, theme.background, internal, actionsFor],
+    [accountById, openEntry, band.rule, band.sheet, internal, actionsFor],
   );
 
   const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly,
@@ -446,91 +487,86 @@ export default function TransactionsScreen() {
     pendingFilterFrame.current = requestAnimationFrame(commit);
   }, []);
 
-  // At the accessibility text sizes the search field, filter button and
-  // transfers link fill most of a phone screen on their own. Pinned above the
-  // list they left the results a 44pt strip to scroll in, so there they
-  // scroll away with the list as its first cell.
+  // At the default sizes the search field, filter button and type chips sit
+  // on the ink band above the sheet. At the accessibility text sizes they fill
+  // most of a phone screen on their own: pinned there they left the results a
+  // 44pt strip to scroll in, so there they move onto the sheet and scroll away
+  // with the list as its first cell.
+  const onBand = !largeText;
+  const filterActive = activeFilterCount > 0;
+  const filterButton = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={tr('filtersButton')}
+      accessibilityState={{ selected: filterActive }}
+      hitSlop={6}
+      testID="transactions-filter-button"
+      onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
+      style={({ pressed }) => [
+        styles.filterBtn,
+        (largeText || narrowSearch) && styles.filterBtnStacked,
+        {
+          backgroundColor: filterActive
+            ? (onBand ? band.selected : band.fill)
+            : (onBand ? band.tile : band.card),
+          borderColor: onBand || filterActive ? 'transparent' : band.rule,
+          opacity: pressed ? 0.72 : 1,
+        },
+      ]}>
+      <Icon
+        name="filter"
+        size={18}
+        color={filterActive ? (onBand ? band.onSelected : band.onFill) : (onBand ? band.onBand : band.text)}
+      />
+    </Pressable>
+  );
+  const typeChip = (chip: TypeChip) => <View key={chip} testID={`transactions-chip-${chip}`}>
+    {onBand
+      ? <BandChip palette={band} label={words[chip]} selected={chipOf(filters) === chip}
+        onPress={() => setFilters((current) => withChip(current, chip))} />
+      : <Chip label={words[chip]} active={chipOf(filters) === chip}
+        onPress={() => setFilters((current) => withChip(current, chip))} />}
+  </View>;
   const searchControls = (
-    <View style={[styles.searchContainer, largeText && styles.searchContainerInList]} accessibilityState={{ busy: resultsPending }}>
-              <View testID="transaction-search-toolbar" style={[styles.searchToolbar, largeText && styles.searchToolbarLarge, narrowSearch && styles.searchToolbarLarge]}>
-                <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
-                  <TextField
-                    label={tr('transactionSearchLabel')}
-                    accessibilityLabel={tr('searchMerchants')}
-                    value={query}
-                    onChangeText={setQuery}
-                    inputMode="search"
-                    returnKeyType="search"
-                    placeholder={tr('transactionSearchPlaceholder')}
-                    onSubmitEditing={() => Keyboard.dismiss()}
-                    leading={<Icon name="search" size={17} color={theme.textSecondary} />}
-                    trailing={query.length > 0 ? (
-                      <ActionIconButton
-                        icon="close"
-                        label={tr('clearSearch')}
-                        variant="plain"
-                        onPress={() => setQuery('')}
-                      />
-                    ) : undefined}
-                  />
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={tr('filtersButton')}
-                  accessibilityState={{ selected: activeFilterCount > 0 }}
-                  hitSlop={6}
-                  onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
-                  style={({ pressed }) => [
-                    styles.filterBtn,
-                    (largeText || narrowSearch) && styles.filterBtnStacked,
-                    {
-                      backgroundColor: activeFilterCount > 0
-                        ? theme.primary
-                        : theme.backgroundSelected,
-                      opacity: pressed ? 0.72 : 1,
-                    },
-                  ]}>
-                  <Icon
-                    name="filter"
-                    size={17}
-                    color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
-                  />
-                </Pressable>
-              </View>
-          {/* At the accessibility text sizes the chips wrap onto lines rather
-              than scrolling most of them off screen sideways. */}
-          {largeText ? <View style={[styles.typeChips, styles.typeChipsWrap]}
-            accessibilityLabel={words.types} testID="transactions-type-chips">
-            {TYPE_CHIPS.map((chip) => <View key={chip} testID={`transactions-chip-${chip}`}>
-              <Chip label={words[chip]} active={chipOf(filters) === chip}
-                onPress={() => setFilters((current) => withChip(current, chip))} />
-            </View>)}
-          </View> : <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeChips}
-            accessibilityLabel={words.types} testID="transactions-type-chips">
-            {TYPE_CHIPS.map((chip) => <View key={chip} testID={`transactions-chip-${chip}`}>
-              <Chip label={words[chip]} active={chipOf(filters) === chip}
-                onPress={() => setFilters((current) => withChip(current, chip))} />
-            </View>)}
-          </ScrollView>}
-          {filters.accountId ? <View style={styles.chipRow}>
-            <Pressable testID="transactions-account-filter" accessibilityRole="button"
-              accessibilityLabel={`${tr('clearFilter')}: ${words.accountFilter(accountLabelFor(filters.accountId))}`}
-              onPress={() => setFilters((current) => ({ ...current, accountId: null }))}
-              style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-              <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
-                {words.accountFilter(accountLabelFor(filters.accountId))}
-              </ThemedText>
-              <Icon name="close" size={13} color={theme.primary} />
-            </Pressable>
-          </View> : null}
-          <Pressable accessibilityRole="button" onPress={() => router.push('/transfers')}
-            style={styles.transferLink} testID="transactions-transfers-link">
-            <Icon name="repeat" size={17} color={theme.primary} />
-            <ThemedText type="linkPrimary" themeColor="primary">{transferWords.viewAll}</ThemedText>
-            <Icon name="chevron-right" size={16} color={theme.primary} />
-          </Pressable>
-          {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite">{tr('filterUpdating')}</ThemedText>}
+    <View style={[styles.searchContainer, !onBand && styles.searchContainerInList]} accessibilityState={{ busy: resultsPending }}>
+      <View testID="transaction-search-toolbar" style={[styles.searchToolbar, (largeText || narrowSearch) && styles.searchToolbarLarge]}>
+        <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
+          {onBand ? <BandSearchField palette={band} value={query} onChangeText={setQuery}
+            label={tr('searchMerchants')} placeholder={tr('transactionSearchPlaceholder')}
+            clearLabel={tr('clearSearch')} arabic={language === 'ar'} /> : <TextField
+            label={tr('transactionSearchLabel')}
+            accessibilityLabel={tr('searchMerchants')}
+            value={query}
+            onChangeText={setQuery}
+            inputMode="search"
+            returnKeyType="search"
+            placeholder={tr('transactionSearchPlaceholder')}
+            onSubmitEditing={() => Keyboard.dismiss()}
+            leading={<Icon name="search" size={17} color={theme.textSecondary} />}
+            trailing={query.length > 0 ? (
+              <ActionIconButton
+                icon="close"
+                label={tr('clearSearch')}
+                variant="plain"
+                onPress={() => setQuery('')}
+              />
+            ) : undefined}
+          />}
         </View>
+        {filterButton}
+      </View>
+      {/* At the accessibility text sizes the chips wrap onto lines rather
+          than scrolling most of them off screen sideways. */}
+      {largeText ? <View style={[styles.typeChips, styles.typeChipsWrap]}
+        accessibilityLabel={words.types} testID="transactions-type-chips">
+        {TYPE_CHIPS.map(typeChip)}
+      </View> : <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeChips}
+        keyboardShouldPersistTaps="handled" accessibilityLabel={words.types} testID="transactions-type-chips">
+        {TYPE_CHIPS.map(typeChip)}
+      </ScrollView>}
+      {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite"
+        style={{ color: onBand ? band.onBandSecondary : band.textSecondary }}>{tr('filterUpdating')}</ThemedText>}
+    </View>
   );
   const scrollingSearchControls = largeText ? searchControls : null;
 
@@ -540,13 +576,23 @@ export default function TransactionsScreen() {
           sections={sections}
           keyExtractor={transactionKey}
           stickySectionHeadersEnabled={false}
-          contentContainerStyle={[listInsets.contentContainerStyle, styles.listContent]}
-          contentInset={listInsets.contentInset}
-          scrollIndicatorInsets={listInsets.scrollIndicatorInsets}
-          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={[styles.listContent, { paddingBottom: listBottom }]}
+          scrollIndicatorInsets={{ top: 0, bottom: listBottom }}
+          contentInsetAdjustmentBehavior="never"
           ListHeaderComponent={(
             <View style={styles.controls}>
               {scrollingSearchControls}
+              {filters.accountId ? <View style={styles.chipRow}>
+                <Pressable testID="transactions-account-filter" accessibilityRole="button"
+                  accessibilityLabel={`${tr('clearFilter')}: ${words.accountFilter(accountLabelFor(filters.accountId))}`}
+                  onPress={() => setFilters((current) => ({ ...current, accountId: null }))}
+                  style={[styles.merchantChip, { backgroundColor: band.card, borderColor: band.rule }]}>
+                  <ThemedText type="small" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>
+                    {words.accountFilter(accountLabelFor(filters.accountId))}
+                  </ThemedText>
+                  <Icon name="close" size={13} color={band.text} />
+                </Pressable>
+              </View> : null}
 
 
               {/* The restrictions that came from the link that opened this screen.
@@ -559,11 +605,11 @@ export default function TransactionsScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`${tr('clearFilter')}: ${merchantFilter}`}
                       onPress={() => setMerchantFilter(null)}
-                      style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                      <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
+                      style={[styles.merchantChip, { backgroundColor: band.card, borderColor: band.rule }]}>
+                      <ThemedText type="small" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>
                         {merchantFilter}
                       </ThemedText>
-                      <Icon name="close" size={13} color={theme.primary} />
+                      <Icon name="close" size={13} color={band.text} />
                     </Pressable>
                   )}
                   {smsOnly && (
@@ -571,11 +617,11 @@ export default function TransactionsScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`${tr('clearFilter')}: ${tr('smsImportsOnly')}`}
                       onPress={() => setSmsOnly(false)}
-                      style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                      <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
+                      style={[styles.merchantChip, { backgroundColor: band.card, borderColor: band.rule }]}>
+                      <ThemedText type="small" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>
                         {tr('smsImportsOnly')}
                       </ThemedText>
-                      <Icon name="close" size={13} color={theme.primary} />
+                      <Icon name="close" size={13} color={band.text} />
                     </Pressable>
                   )}
                   {autoAddedCount > 0 && (autoAddedActive ? (
@@ -584,11 +630,11 @@ export default function TransactionsScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`${tr('clearFilter')}: ${tr('autoAddedFilter')}`}
                       onPress={() => setAutoAddedOnly(false)}
-                      style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                      <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
+                      style={[styles.merchantChip, { backgroundColor: band.card, borderColor: band.rule }]}>
+                      <ThemedText type="small" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>
                         {tr('autoAddedFilter')}
                       </ThemedText>
-                      <Icon name="close" size={13} color={theme.primary} />
+                      <Icon name="close" size={13} color={band.text} />
                     </Pressable>
                   ) : (
                     <Pressable
@@ -668,6 +714,12 @@ export default function TransactionsScreen() {
                   <ThemedText type="meta" themeColor="textSecondary">{transferWords.countsNote}</ThemedText>
                 </>}
               </View>}
+              <Pressable accessibilityRole="button" onPress={() => routerRef.current.push('/transfers')}
+                style={styles.transferLink} testID="transactions-transfers-link">
+                <Icon name="repeat" size={17} color={band.tint} />
+                <ThemedText type="small" style={{ color: band.tint, fontFamily: Fonts.sansSemi }}>{transferWords.viewAll}</ThemedText>
+                <Icon name="chevron-right" size={16} color={band.tint} />
+              </Pressable>
               {(excluded.transfers > 0 || excluded.movements > 0 || excluded.hidden > 0) && (
                 <ThemedText testID="transactions-exclusions" type="meta" themeColor="textSecondary">
               {excluded.transfers > 0
@@ -699,7 +751,7 @@ export default function TransactionsScreen() {
           keyboardShouldPersistTaps="handled"
           renderSectionHeader={({ section }) => (
             <View style={[styles.sectionHeader, largeText && styles.sectionHeaderLarge]}>
-              <ThemedText type="micro" themeColor="textSecondary">
+              <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionTitle}>
                 {section.title}
               </ThemedText>
               {sections.length > 1 && section.data.length > 1 && <View testID="transaction-day-total"
@@ -708,7 +760,7 @@ export default function TransactionsScreen() {
               <ThemedText
                 type="small"
                 tabular
-                style={{ color: section.totalFils >= 0 ? theme.income : theme.textSecondary }}>
+                style={{ color: section.totalFils >= 0 ? theme.income : band.textSecondary }}>
                 {section.totalFils >= 0 ? '+' : '−'}
                 {formatAED(Math.abs(section.totalFils), { decimals: false })}
               </ThemedText>
@@ -718,7 +770,7 @@ export default function TransactionsScreen() {
           renderItem={renderRow}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
+              <View style={[styles.emptyIcon, { backgroundColor: band.glyphGround }]}>
                 <Icon name={separatedTransfers.count > 0 ? 'repeat' : 'search'} size={24} color={theme.textSecondary} strokeWidth={1.7} />
               </View>
               <ThemedText type="small" themeColor="textSecondary">
@@ -728,28 +780,30 @@ export default function TransactionsScreen() {
           }
         />
         </GestureHandlerRootView>
-  ), [sections, listInsets, largeText, merchantFilter, smsOnly, autoAddedCount, autoAddedActive, theme, tr, trf, filtered.length,
-    filters.datePreset, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
-    separatedTransfers, transferContributes, transferWords, scrollingSearchControls]);
+  ), [sections, listBottom, band, largeText, merchantFilter, smsOnly, autoAddedCount, autoAddedActive, theme, tr, trf, filtered.length,
+    filters.datePreset, filters.accountId, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
+    separatedTransfers, transferContributes, transferWords, scrollingSearchControls, words, accountLabelFor]);
 
   return (
     <>
-      <ScreenScaffold
+      <BandScaffold
+        band="home"
         scroll={false}
-        virtualized
-        headerMode="native"
-        header={{
+        testID="transactions-screen"
+        contentStyle={styles.sheetContent}
+        nav={{
+          back: true,
           title: tr('transactionsTitle'),
-          back: { label: tr('back'), onPress: () => router.back() },
           actions: [{
             label: tr('addTransactionTitle'),
             icon: 'plus',
             onPress: () => router.push('/add-transaction'),
+            testID: 'transactions-add',
           }],
-        }}>
-        {largeText ? null : searchControls}
+        }}
+        bandContent={onBand ? searchControls : undefined}>
         {transactionResults}
-      </ScreenScaffold>
+      </BandScaffold>
 
       {sheetVisible && <TransactionFilterSheet initialFilters={filters} resetFilters={DEFAULT_FILTERS}
         accounts={state.accounts} hasUnassignedIncome={hasUnassignedIncome} index={filterIndex} options={filterOptions}
@@ -773,24 +827,32 @@ export default function TransactionsScreen() {
 const styles = StyleSheet.create({
   transferNotice: { gap: Spacing.one },
   transferLink: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, alignSelf: 'flex-start' },
+  // The sheet holds the list edge to edge, so a swiped row's actions reach the
+  // screen edge; header, section and row cells carry the gutter themselves.
+  sheetContent: { paddingHorizontal: 0, paddingTop: Spacing.two },
   // Screen sections have a gap; virtualized header/row/footer cells must not.
   listContent: { gap: 0 },
-  searchContainer: { paddingHorizontal: ScreenPadding, paddingVertical: Spacing.two, gap: Spacing.one },
-  // The list content already carries the screen padding.
-  searchContainerInList: { paddingHorizontal: 0 },
+  searchContainer: { gap: 12 },
+  // On the sheet at large text: the list header already carries the gutter.
+  searchContainerInList: { paddingTop: Spacing.two },
+  bandSearch: { minHeight: 48, borderRadius: 24, flexDirection: 'row', alignItems: 'center', gap: 10, paddingStart: 16, paddingEnd: 6 },
+  bandSearchInput: { flex: 1, minWidth: 0, fontSize: 17, minHeight: 48, paddingVertical: 10 },
+  bandSearchClear: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   filterBtnStacked: { alignSelf: 'flex-end' },
   filterBtn: {
     width: 48,
     height: 48,
-    borderRadius: Radius.control,
+    borderRadius: 24,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   controls: {
     gap: Spacing.two,
     paddingBottom: Spacing.one,
+    paddingHorizontal: BAND_GUTTER,
   },
-  searchToolbar: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.two },
+  searchToolbar: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   searchToolbarLarge: { flexDirection: 'column', alignItems: 'stretch' },
   searchField: { flex: 1, minWidth: 0 },
   searchFieldLarge: { width: '100%' },
@@ -808,6 +870,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 44,
+    borderWidth: StyleSheet.hairlineWidth,
     gap: 6,
     paddingHorizontal: Spacing.two + 2,
     paddingVertical: Spacing.one + 1,
@@ -823,7 +886,9 @@ const styles = StyleSheet.create({
   },
   compactTransferNote: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexWrap: 'wrap' },
   sectionHeaderLarge: { flexDirection: 'column', alignItems: 'flex-start' },
+  sectionTitle: { fontSize: 16, lineHeight: 22 },
   sectionHeader: {
+    paddingHorizontal: BAND_GUTTER,
     flexWrap: 'wrap',
     gap: Spacing.two,
     flexDirection: 'row',
@@ -832,6 +897,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     paddingBottom: Spacing.one,
   },
+  rowSurface: { paddingHorizontal: BAND_GUTTER },
   rowDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
   },
