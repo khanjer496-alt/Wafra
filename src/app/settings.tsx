@@ -74,6 +74,7 @@ import {
   requestSmsDeliveryPermission,
   requestSmsPermission,
 } from '@/lib/auto-import';
+import { APP_LOCK_AUTH_OPTIONS, deviceLockLevel, unlockOutcome } from '@/lib/app-lock';
 import { tapped } from '@/lib/haptics';
 import { resolvedAndroidCaptureSources } from '@/lib/android-capture-sources';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
@@ -102,6 +103,7 @@ import { detailsWords } from '@/lib/details-copy';
 import { settingsCopy } from '@/lib/settings-copy';
 import { settingsECopy } from '@/lib/settings-e-copy';
 import { settingsSectionScrollY } from '@/lib/settings-layout';
+import { widgetsCopy } from '@/lib/widgets-copy';
 import {
   iosCaptureManageIntent,
   iosCaptureSwitchIntent,
@@ -175,6 +177,7 @@ export default function SettingsScreen() {
   } = useAutoImport(false, true);
   const [smsGranted, setSmsGranted] = useState(false);
   const copy = settingsCopy(state.language);
+  const widgetWords = widgetsCopy(state.language);
   const biometricKind = useBiometricKind();
   const { section } = useLocalSearchParams<{ section?: string; onboarding?: string }>();
   const scrollRef = useRef<ScrollView>(null);
@@ -287,9 +290,16 @@ export default function SettingsScreen() {
       Alert.alert(t('notAvailable'), t('appLockPhoneOnly'));
       return;
     }
-    const hasHardware = await LocalAuthentication.hasHardwareAsync();
-    const enrolled = await LocalAuthentication.isEnrolledAsync();
-    if (!hasHardware || !enrolled) {
+    // Any owner authentication will do — a passcode-only phone included. The
+    // gate accepts the passcode (app-lock.ts), so refusing to turn the lock
+    // on without biometrics would only be inconsistent.
+    let level: ReturnType<typeof deviceLockLevel> = 'passcode';
+    try {
+      level = deviceLockLevel(await LocalAuthentication.getEnrolledLevelAsync());
+    } catch {
+      level = 'passcode';
+    }
+    if (level === 'none') {
       Alert.alert(
         t('noScreenLock'),
         t('noScreenLockBody'),
@@ -298,8 +308,11 @@ export default function SettingsScreen() {
     }
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: t('confirmAppLock'),
+      ...APP_LOCK_AUTH_OPTIONS,
     });
-    if (result.success) setAppLock(true);
+    const outcome = unlockOutcome(result);
+    if (outcome === 'unlocked') setAppLock(true);
+    else if (outcome === 'unavailable') Alert.alert(t('noScreenLock'), t('noScreenLockBody'));
   };
 
   // Older versions offered a global local-only opt-out. Preserve that saved
@@ -1094,6 +1107,13 @@ export default function SettingsScreen() {
             t('homeCustomizeDetail'),
             () => router.push('/home-customize'),
             { icon: 'sliders', last: Platform.OS === 'web' },
+          )}
+          {/* Home Screen widgets exist on iOS and Android only. */}
+          {Platform.OS !== 'web' && linkRow(
+            widgetWords.settingsTitle,
+            widgetWords.settingsDetail(Platform.OS === 'ios' ? 'ios' : 'android'),
+            () => router.push('/widgets'),
+            { icon: 'home', testID: 'settings-widgets' },
           )}
           {Platform.OS !== 'web' && linkRow(
             t('settingsViewOnboarding'),

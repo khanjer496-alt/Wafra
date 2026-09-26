@@ -182,6 +182,25 @@ test('eligible group freezes count, sum, account and masked counterparty before 
   assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
 });
 
+test('save submits the latest preview choice explicitly, including a changed choice', async () => {
+  // The production transform misbound a default parameter that shared the
+  // body-local `selection` name. Source execution alone did not catch it.
+  const source = require('node:fs').readFileSync(path.join(root, 'src/app/review-transfers.tsx'), 'utf8');
+  assert.match(source, /const save = async \(target: Selection \| null, oneTap = false\)/);
+  assert.match(source, /onPress=\{\(\) => void save\(selection\)\}/);
+  const h = createUI();
+  openEntry(h);
+  byId(h.render(), 'transfer-choice-own').props.onPress();
+  byId(h.render(), 'transfer-choice-external').props.onPress();
+  byLabel(h.render(), h.words.confirm).props.onPress();
+  await flush();
+  const resolved = h.events.filter(event => event[0] === 'resolve');
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0][1].ownership, 'external');
+  assert.deepEqual(resolved[0][1].ids, ['one']);
+  assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
+});
+
 test('changed ledger fingerprints block confirmation and preserve the original preview', () => {
   const h = createUI();
   openEntry(h);

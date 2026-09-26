@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -31,7 +31,7 @@ import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { monthLabel, shiftMonthKey, shortDate, weekdayName } from '@/lib/format';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { tapped } from '@/lib/haptics';
-import { alignEnd, isRTL } from '@/lib/i18n';
+import { alignEnd, isRTL, t } from '@/lib/i18n';
 import { recapWords, type RecapWords } from '@/lib/recap-copy';
 import { RECAP_TIME_BUCKETS, type RecapSnapshot } from '@/lib/recap';
 
@@ -339,26 +339,30 @@ function HighlightScene({ snapshot, moneySpec, palette, w, compact }: SceneProps
   const large = useLargeTextLayout();
   const enter = useRecapEntering();
   if (snapshot.descriptor.kind === 'year' && snapshot.monthlySeries.length) {
-    const barHeight = large ? 96 : compact ? 120 : 154;
     const max = Math.max(1, ...snapshot.monthlySeries.map((m) => m.spendFils));
     const high = snapshot.monthlySeries.reduce((a, b) => b.spendFils > a.spendFils ? b : a);
     const nonZero = snapshot.monthlySeries.filter((m) => m.spendFils > 0);
     const low = nonZero.length ? nonZero.reduce((a, b) => b.spendFils < a.spendFils ? b : a) : null;
-    return <View testID="recap-highlight" style={styles.scene}>
+    return <View testID="recap-highlight" style={[styles.scene, styles.readingSlide]}>
       <View style={styles.heading}>
         <CardLabel text={w.monthly} palette={palette} />
         <ThemedText accessibilityRole="header" maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX}
           style={[styles.cardTitle, { color: palette.onBand }]}>{snapshot.descriptor.label}</ThemedText>
       </View>
-      <View testID="recap-year-bars" accessible accessibilityRole="image"
-        accessibilityLabel={`${w.monthly}: ${snapshot.monthlySeries.map((month) => `${month.label} ${moneyLabel(month.spendFils, moneySpec)}`).join(', ')}`}
-        style={styles.yearBars}>
-        {snapshot.monthlySeries.map((month, index) => <View key={month.key} style={styles.yearColumn}>
-          <View style={[styles.yearBarTrack, { height: barHeight }]}>
-            <GrowBar axis="height" delay={index * 50} size={month.spendFils > 0 ? Math.max(4, (month.spendFils / max) * barHeight) : 2}
+      <View testID="recap-year-bars" style={styles.yearBars}>
+        {snapshot.monthlySeries.map((month, index) => <View key={month.key} testID={`recap-year-month-${month.key}`}
+          style={styles.yearColumn} accessible accessibilityRole="image"
+          accessibilityLabel={`${monthLabel(month.key)}, ${moneyLabel(month.spendFils, moneySpec)}`}>
+          <View style={[styles.yearLabel, large && styles.yearLabelStacked]}>
+            <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{monthLabel(month.key)}</ThemedText>
+            <ThemedText type="meta" tabular style={[styles.yearAmount, { color: palette.onBand }]}>
+              {moneyLabel(month.spendFils, moneySpec)}
+            </ThemedText>
+          </View>
+          <View style={[styles.yearBarTrack, { backgroundColor: palette.tile }]}>
+            <GrowBar axis="width" delay={index * 50} size={Math.max(0, month.spendFils) / max * 100}
               style={[styles.yearBar, { backgroundColor: month.key === high.key ? palette.accent : palette.bandMark }]} />
           </View>
-          <ThemedText type="nano" style={{ color: month.key === high.key ? palette.onBand : palette.onBandSecondary }}>{month.label.slice(0, 1)}</ThemedText>
         </View>)}
       </View>
       <TileRow stacked={large}>
@@ -431,6 +435,8 @@ export function RecapStory({ snapshot, moneySpec, name = null, onClose }: {
   const current = scenes[Math.min(index, scenes.length - 1)]!;
   const palette = bandPalette(RECAP_SCENE_BANDS[current], scheme);
   const compact = height < 740;
+  // Twelve exact monthly values need time to read and may need scrolling.
+  const readingYear = current === 'highlight' && snapshot.descriptor.kind === 'year';
 
   const next = useCallback(() => {
     setDirection(1);
@@ -443,13 +449,13 @@ export function RecapStory({ snapshot, moneySpec, name = null, onClose }: {
 
   useEffect(() => {
     cancelAnimation(progress);
-    progress.value = reducedMotion ? 1 : 0;
-    if (reducedMotion || index >= scenes.length - 1) return;
+    progress.value = reducedMotion || readingYear ? 1 : 0;
+    if (reducedMotion || readingYear || index >= scenes.length - 1) return;
     progress.value = withTiming(1, { duration: STORY_MS, easing: Easing.bezier(...EASE) }, (finished) => {
       if (finished) runOnJS(next)();
     });
     return () => cancelAnimation(progress);
-  }, [index, next, progress, reducedMotion, scenes.length]);
+  }, [index, next, progress, readingYear, reducedMotion, scenes.length]);
 
   const activeProgress = useAnimatedStyle(() => ({ transform: [{ scaleX: progress.value }] }));
   // Bands never move: the colour cross-fades between cards (instant under Reduce Motion).
@@ -487,17 +493,28 @@ export function RecapStory({ snapshot, moneySpec, name = null, onClose }: {
           }, activeProgress]} />}
         </View>)}
       </View>
-      <View style={styles.closeRow}>
+      <View style={[styles.closeRow, readingYear && styles.readingNav]}>
+        {readingYear ? <BandIconButton palette={palette} action={{ icon: 'chevron-left', label: t('back'), onPress: previous, testID: 'recap-year-previous' }} /> : null}
         <BandIconButton palette={palette} action={{ icon: 'close', label: w.close, onPress: onClose, testID: 'recap-close' }} />
       </View>
     </View>
-    <Pressable accessibilityRole="button" accessibilityLabel={w.position(index + 1, scenes.length)}
+    {readingYear ? <View style={styles.touchArea}>
+      <ScrollView testID="recap-year-scroll" contentContainerStyle={styles.yearScroll}
+        accessibilityLabel={w.position(index + 1, scenes.length)}>
+        <Animated.View key={`${snapshot.descriptor.id}:${index}`} entering={slideEntering}
+          style={[styles.slide, styles.readingSlide]}>{scene}</Animated.View>
+      </ScrollView>
+      <View style={styles.readingFooter}>
+        <EButton testID="recap-year-next" palette={palette} label={t('continueWord')} onPress={next}
+          color={{ fill: palette.onBand, text: palette.band }} />
+      </View>
+    </View> : <Pressable accessibilityRole="button" accessibilityLabel={w.position(index + 1, scenes.length)}
       onPress={navigate} style={styles.touchArea}>
       <Animated.View key={`${snapshot.descriptor.id}:${index}`} entering={slideEntering}
         style={[styles.slide, compact && styles.slideCompact]}>
         {scene}
       </Animated.View>
-    </Pressable>
+    </Pressable>}
   </Animated.View>;
 }
 
@@ -553,10 +570,17 @@ const styles = StyleSheet.create({
   dayCellLarge: { flexBasis: '22%', flexGrow: 1 },
   bigPurchase: { flex: 1, justifyContent: 'center', gap: 16, paddingBottom: 24 },
   bigPurchaseTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  yearBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
-  yearColumn: { flex: 1, alignItems: 'center', gap: 6 },
-  yearBarTrack: { alignSelf: 'stretch', justifyContent: 'flex-end', alignItems: 'stretch' },
-  yearBar: { borderRadius: 4 },
+  yearScroll: { flexGrow: 1 },
+  readingSlide: { flex: 0 },
+  readingNav: { justifyContent: 'space-between' },
+  readingFooter: { paddingHorizontal: BAND_GUTTER, paddingTop: 8, paddingBottom: 8 },
+  yearBars: { gap: 14 },
+  yearColumn: { gap: 6 },
+  yearLabel: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 },
+  yearLabelStacked: { flexDirection: 'column', alignItems: 'flex-start' },
+  yearAmount: { writingDirection: 'ltr', flexShrink: 1 },
+  yearBarTrack: { height: 8, width: '100%', borderRadius: 4 },
+  yearBar: { height: 8, borderRadius: 4 },
   finalBoard: { paddingVertical: 4 },
   finalFact: { minHeight: 52, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 8 },
   finalValue: { flexShrink: 1 },

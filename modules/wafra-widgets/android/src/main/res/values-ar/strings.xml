@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+  <string name="wafra_widget_last_7_total">آخر 7 أيام</string>
   <string name="wafra_widget_today_name">اليوم</string>
   <string name="wafra_widget_today_description">ما أنفقته اليوم وخلال آخر ٧ أيام.</string>
   <string name="wafra_widget_upcoming_name">القادم</string>

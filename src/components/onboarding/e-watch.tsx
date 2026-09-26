@@ -71,7 +71,7 @@ export function WatchStep({ draft, active, onToggle, onActivate, onLimit, moneyS
         const picked = draft.some((item) => item.category === category);
         const label = categoryLabel(category, lang);
         return <Pressable key={category} accessibilityRole="checkbox" accessibilityLabel={label}
-          accessibilityState={{ checked: picked, disabled }} disabled={disabled} testID={`onboarding-watch-${category}`}
+          accessibilityState={{ checked: picked, disabled }} aria-checked={picked} disabled={disabled} testID={`onboarding-watch-${category}`}
           onPress={() => { tapped(); onToggle(category); }}
           style={({ pressed }) => [styles.tile, largeText && styles.tileLarge, {
             // Light: the board's card on sand. Dark: the band's own tone, since

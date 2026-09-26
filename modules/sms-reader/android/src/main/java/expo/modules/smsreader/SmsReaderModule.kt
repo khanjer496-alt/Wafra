@@ -203,15 +203,41 @@ class SmsReaderModule : Module() {
     // Older releases buffered full delivery bodies in ordinary preferences.
     // The receiver no longer writes them; purge that archive on every module
     // load even when SMS permission is off and the user never starts a scan.
+    //
+    // Best effort, never fatal. OnCreate runs while the React host is starting,
+    // so a throw here took the whole app down at launch — on a phone whose
+    // preferences commit failed once (full storage, an OEM I/O hiccup) every
+    // relaunch crashed the same way, which is strictly worse for the user than
+    // one more launch with the old buffer present. A failure is recorded as a
+    // source-free flag for diagnostics and retried: by getReceived and
+    // clearCaptured (which still refuse to proceed without it) and on the next
+    // module load.
     OnCreate {
+      startupCleanupContextMissing = false
       val context = appContext.reactContext
-        ?: throw IllegalStateException("SMS reader context is unavailable")
-      if (!clearLegacyDeliveryBuffer(context)) {
-        throw IllegalStateException("Legacy SMS delivery buffer could not be erased")
+      if (context == null) {
+        startupCleanupContextMissing = true
+        return@OnCreate
       }
-      if (!clearStaleCorpusFiles(context)) {
-        throw IllegalStateException("A stale SMS corpus file could not be erased")
+      legacyDeliveryBufferCleanupPending = try {
+        !clearLegacyDeliveryBuffer(context)
+      } catch (_: Exception) {
+        true
       }
+      staleCorpusCleanupPending = try {
+        !clearStaleCorpusFiles(context)
+      } catch (_: Exception) {
+        true
+      }
+    }
+
+    /** Source-free: whether the last startup cleanup left anything behind. */
+    Function("getStartupCleanupDiagnostics") {
+      mapOf(
+        "contextMissing" to startupCleanupContextMissing,
+        "legacyDeliveryBufferPending" to legacyDeliveryBufferCleanupPending,
+        "staleCorpusPending" to staleCorpusCleanupPending,
+      )
     }
 
     AsyncFunction("getInboxSms") {
@@ -350,9 +376,16 @@ class SmsReaderModule : Module() {
     }
   }
 
-  private fun clearLegacyDeliveryBuffer(context: Context): Boolean =
-    context.getSharedPreferences(SmsDeliveryReceiver.PREFS, Context.MODE_PRIVATE)
+  @Volatile private var startupCleanupContextMissing = false
+  @Volatile private var legacyDeliveryBufferCleanupPending = false
+  @Volatile private var staleCorpusCleanupPending = false
+
+  private fun clearLegacyDeliveryBuffer(context: Context): Boolean {
+    val cleared = context.getSharedPreferences(SmsDeliveryReceiver.PREFS, Context.MODE_PRIVATE)
       .edit().clear().commit()
+    if (cleared) legacyDeliveryBufferCleanupPending = false
+    return cleared
+  }
 
   /**
    * The share target needs the cache file after shareAsync starts, so it is

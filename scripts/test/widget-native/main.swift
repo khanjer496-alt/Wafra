@@ -52,13 +52,13 @@ check(WafraInitial.of("الكهرباء") == "ا", "Arabic initial")
 check(WafraInitial.of("") == nil, "empty title")
 
 // Snapshot decoding and money parts.
-func snapshot(hidden: Bool, extra: String = "") -> WafraSnapshot? {
+func snapshot(hidden: Bool, extra: String = "", billLogo: String = "", week: String = "[100,200,0,null,500,600,2400]") -> WafraSnapshot? {
   let generated = Int64(now.timeIntervalSince1970 * 1000)
   let json = """
   {"version":1,"generatedAt":\(generated),"language":"en","todayISO":"2026-09-28","currency":"AED",
    "exponent":2,"amountsSensitive":true,"hidden":\(hidden),"todayMinor":2400,"todayCount":3,
-   "last7Minor":[100,200,0,null,500,600,2400],"leftInBudgetsMinor":36000,"perDayMinor":1200,
-   "budgetsOver":0,"bills":[{"title":"DEWA","amountMinor":45000,"estimated":true,"dueISO":"2026-09-29"},
+   "last7Minor":\(week),"leftInBudgetsMinor":36000,"perDayMinor":1200,
+   "budgetsOver":0,"bills":[{"title":"DEWA",\(billLogo)"amountMinor":45000,"estimated":true,"dueISO":"2026-09-29"},
    {"title":"ADCB","amountMinor":120000,"estimated":false,"dueISO":"2026-10-05"}]\(extra)}
   """
   return WafraSnapshot.decode(json.data(using: .utf8)!)
@@ -86,6 +86,14 @@ if let hidden = snapshot(hidden: true) {
 check(en.leftInBudgets == "left in budgets" && en.amountLeadsBudgetLine, "English line reads amount first")
 check(!ar.leftInBudgets.isEmpty && !ar.amountLeadsBudgetLine, "Arabic line reads words first")
 check(!ar.amountHidden.isEmpty && en.amountHidden == "Amount hidden", "hidden amount is spoken")
+
+check(snapshot(hidden: false)?.weekTotalMinor == nil, "partial week never has a guessed total")
+check(snapshot(hidden: false, week: "[1,2,3,4,5,6,7]")?.weekTotalMinor == 28, "seven-day total retains minor units exactly")
+check(snapshot(hidden: true, week: "[1,2,3,4,5,6,7]")?.weekTotalMinor == nil, "hidden week has no total")
+check(snapshot(hidden: false, week: "[9007199254740991,1,0,0,0,0,0]")?.weekTotalMinor == nil, "unsafe week total is hidden")
+check(snapshot(hidden: false, billLogo: "\"logoId\":\"dewa\",")?.bills.first?.logoId == "dewa", "bundled logo id decodes")
+check(snapshot(hidden: false, billLogo: "\"logoId\":\"../../dewa\",")?.bills.first?.logoId == nil, "paths cannot select a logo")
+check(snapshot(hidden: false)?.bills.first?.logoId == nil, "older snapshots retain fallback")
 
 if failures == 0 {
   print("widget logic: all checks passed")

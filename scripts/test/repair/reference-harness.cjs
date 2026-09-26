@@ -140,6 +140,14 @@ function createHarness(options = {}) {
   deps['@/lib/capture-pause-state']={loadCapturePauseSnooze:async()=>options.snoozedAtMs??null,saveCapturePauseSnooze:async at=>{events.push(['snooze',at]);}};
   local('@/lib/widget-snapshot','src/lib/widget-snapshot.ts');
   deps['../../modules/wafra-widgets']={setWidgetSnapshot(){},clearWidgetSnapshot(){}};
+  // Widget inputs Home shares with the Widgets screen run from source over
+  // this harness's ledger (loaded on first use); the hint is a boundary.
+  Object.defineProperty(deps,'@/lib/widget-ledger',{enumerable:true,configurable:true,get(){
+    const real=load(path.join(root,'src/lib/widget-ledger.ts'),deps);
+    Object.defineProperty(deps,'@/lib/widget-ledger',{value:real,enumerable:true,configurable:true,writable:true});
+    return real;
+  }});
+  deps['@/components/widgets/widgets-hint']={WidgetsHint:p=>jsx('WidgetsHint',p)};
   // The final size, as Reduce Motion shows it.
   deps['@/components/ui/grow-bar']={GrowBar:p=>jsx('View',{style:[p.style,p.axis==='width'?{width:`${p.size}%`}:{height:p.size}]})};
   local('@/lib/account-freshness','src/lib/account-freshness.ts');

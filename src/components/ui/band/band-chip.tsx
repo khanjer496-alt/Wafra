@@ -30,7 +30,7 @@ export function BandChip({ label, selected = false, onPress, icon, palette, test
     return <View testID={testID} accessible accessibilityRole="text" accessibilityLabel={label} style={[styles.chip, surface]}>{body}</View>;
   }
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={accessibilityHint}
-    accessibilityState={{ selected }} onPress={onPress} hitSlop={3}
+    accessibilityState={{ selected }} aria-pressed={selected} onPress={onPress} hitSlop={3}
     style={({ pressed }) => [styles.chip, surface, { opacity: pressed ? 0.75 : 1 }]}>
     {body}
   </Pressable>;

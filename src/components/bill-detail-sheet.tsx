@@ -190,8 +190,17 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
       setNotice({ title: t('notifsAreOff'), body: t('notifsForBill') });
       return;
     }
-    await syncPaymentReminders(state);
-    // Subscriptions are scheduled one day out (reminders.ts).
+    try {
+      await syncPaymentReminders(state);
+    } catch {
+      // The OS refused to schedule (storage full, a revoked permission, an
+      // alarm limit). Saying "Reminder set" here would be a promise nothing
+      // keeps, so say it plainly instead.
+      setNotice({ title: t('reminderFailed'), body: t('reminderFailedBody') });
+      return;
+    }
+    // Subscriptions are scheduled one day out, with the body "renews
+    // tomorrow". Two days was never scheduled by anything.
     setNotice({
       title: t('reminderSet'),
       body: tf('reminderDayBeforeBody', { date: shortDate(subscription?.nextExpectedISO ?? todayISO) }),

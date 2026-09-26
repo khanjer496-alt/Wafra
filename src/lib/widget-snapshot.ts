@@ -1,3 +1,4 @@
+import { widgetLogoIdFor, type WidgetLogoId } from '@/lib/widget-logo';
 import type { HomeToday } from '@/lib/home-today';
 
 /**
@@ -16,6 +17,8 @@ import type { HomeToday } from '@/lib/home-today';
 export const WIDGET_SNAPSHOT_VERSION = 1;
 
 export interface WidgetBill {
+  /** Optional, bundled artwork id. Older snapshots safely fall back to an initial. */
+  logoId?: WidgetLogoId | null;
   title: string;
   /** Minor units of the ledger currency; null when amounts are hidden. */
   amountMinor: number | null;
@@ -83,6 +86,7 @@ export function buildWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot 
       .slice(0, 3)
       .map((item) => ({
         title: item.title,
+        logoId: widgetLogoIdFor(item.title),
         amountMinor: money(item.amountFils),
         estimated: item.estimated ?? false,
         dueISO: item.dateISO,

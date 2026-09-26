@@ -7,6 +7,7 @@ import java.text.NumberFormat
 import java.util.Locale
 
 internal data class WidgetBill(
+  val logoId: String?,
   val title: String,
   val amountMinor: Long?,
   val estimated: Boolean,
@@ -47,7 +48,19 @@ internal data class WidgetSnapshot(
     return "$currency ${format.format(BigDecimal.valueOf(minor, exponent))}"
   }
 
+  fun weekTotalMinor(): Long? {
+    if (hidden || last7Minor.size != 7) return null
+    var total = 0L
+    for (value in last7Minor) {
+      if (value == null) return null
+      total = try { Math.addExact(total, value) } catch (_: ArithmeticException) { return null }
+      if (total !in -9_007_199_254_740_991L..9_007_199_254_740_991L) return null
+    }
+    return total
+  }
+
   companion object {
+    val LOGO_IDS = setOf("amazon", "netflix", "spotify", "youtube", "apple", "google", "claude", "github", "notion", "discord", "telegram", "dropbox", "osn", "anghami", "audible", "shahid", "chatgpt", "crunchyroll", "disney", "deezer", "playstation", "xbox", "zoom", "du", "etisalat", "dewa", "sewa", "careem", "talabat", "deliveroo", "noon", "uber", "vercel")
     const val DASH = "—"
     const val MAX_AGE_MS = 36L * 60L * 60L * 1000L
     private const val FUTURE_SKEW_MS = 60L * 60L * 1000L
@@ -84,6 +97,7 @@ internal data class WidgetSnapshot(
             if (!ISO_DATE.matches(dueISO)) continue
             bills.add(
               WidgetBill(
+                logoId = item.optString("logoId", "").takeIf { it in LOGO_IDS },
                 title = item.optString("title", "").trim(),
                 amountMinor = integerOrNull(item, "amountMinor"),
                 estimated = item.optBoolean("estimated", false),

@@ -5145,8 +5145,10 @@ eq('analytics: the category trend follows the split too',
         transactions: [{ id: 'd', type: 'expense', amountFils: 45000, category: 'utilities', accountId: 'a', title: 'DEWA Bill', date: '2026-02-14' }],
       }), febNow).length === 0);
 
-    ok('reminders: a due date already gone is not scheduled',
-      remind.buildPaymentReminders(remState({ bills: [mkRemBill('Salik', 5)] }), febNow).length === 0);
+    // Feb 5 is gone; next month's 4th/5th are inside the 30-day window.
+    eq('reminders: a due date already gone is not scheduled, next month\'s is',
+      remind.buildPaymentReminders(remState({ bills: [mkRemBill('Salik', 5)] }), febNow)
+        .map((r) => r.dateISO), ['2026-03-04', '2026-03-05']);
 
     const cardRem = remind.buildPaymentReminders(remState({
       accounts: [{ id: 'cc', name: 'FAB Credit Card', kind: 'card', cardType: 'credit', openingFils: 0, color: '#fff' }],
@@ -5176,10 +5178,12 @@ eq('analytics: the category trend follows the split too',
     eq('reminders: precomputed recurrence produces the same notification plan',
       precomputedSubRem.map((r) => ({ kind: r.kind, dateISO: r.dateISO, title: r.title, body: r.body })),
       subRem.map((r) => ({ kind: r.kind, dateISO: r.dateISO, title: r.title, body: r.body })));
+    // The bill itself (due 5 March) is reminded; the detected subscription for
+    // the same merchant is not reminded on top of it.
     ok('reminders: a merchant already tracked as a bill is not reminded twice',
       remind.buildPaymentReminders(
         remState({ transactions: subTxs, bills: [mkRemBill('Netflix', 5)] }), febNow,
-      ).length === 0);
+      ).every((r) => r.kind === 'bill'));
 
     const manyRem = remind.buildPaymentReminders(
       remState({ bills: Array.from({ length: 40 }, (_, i) => mkRemBill(`B${i}`, 28)) }), febNow, 24);
@@ -5333,14 +5337,22 @@ eq('analytics: the category trend follows the split too',
         salaryRow('late').dueISO === '2026-07-20' && salaryRow('late').daysLeft === 10,
         JSON.stringify(salaryRow('late') && [salaryRow('late').dueISO, salaryRow('late').daysLeft]));
 
-      // Only 'late' is still ahead, and it is reminded on the pair of days
-      // either side of the date the Bills screen prints — not on the 19th/20th
-      // of June, which is where the raw calendar month would have put it.
+      // In this money month only 'late' is still ahead, and it is reminded on
+      // the pair of days either side of the date the Bills screen prints — not
+      // on the 19th/20th of June, which is where the raw calendar month would
+      // have put it. The NEXT money month (25 Jul – 24 Aug) is projected too:
+      // 'early' falls on 30 July there, inside the 30-day window, while next
+      // month's 'late' (20 Aug) is beyond it.
       const salaryReminders = remind.buildPaymentReminders(
         { accounts: [], transactions: [], cardDues: [], bills: salaryBills, notSubscriptions: [] },
         salaryNow);
       eq('salary month: reminders land either side of the date Bills shows',
-        salaryReminders.map((r) => r.dateISO), ['2026-07-19', '2026-07-20']);
+        salaryReminders.map((r) => [r.id, r.dateISO]), [
+          ['bill-late-2026-07-20--1', '2026-07-19'],
+          ['bill-late-2026-07-20-0', '2026-07-20'],
+          ['bill-early-2026-07-30--1', '2026-07-29'],
+          ['bill-early-2026-07-30-0', '2026-07-30'],
+        ]);
     } finally {
       fmt.setMonthStartDay(1);
     }

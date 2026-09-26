@@ -11,8 +11,8 @@ const results = []; const errors = []; const browser = await chromium.launch();
 const minor = value => {
   const text = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
     .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/٬/g, ',').replace(/٫/g, '.');
-  const match = text.match(/\d[\d,]*(?:\.\d+)?/); assert.ok(match, `Missing money: ${text}`);
-  return Math.round(Number(match[0].replace(/,/g, '')) * 100);
+  const match = text.match(/(?:\bAED\s*|^\s*)(\d[\d,]*(?:\.\d+)?)/); assert.ok(match, `Missing money: ${text}`);
+  return Math.round(Number(match[1].replace(/,/g, '')) * 100);
 };
 async function seed(page, language) {
   await page.goto(base, { waitUntil: 'networkidle' });
@@ -81,7 +81,7 @@ try {
       await page.getByRole('tab', { name: language === 'ar' ? 'كل الحركات' : 'All activity', exact: true }).click();
       await page.getByText(language === 'ar' ? 'غير مشمولة في إجمالي الإنفاق' : 'Not included in spending totals', { exact: true }).first().waitFor({ state: 'visible' });
       assert.equal(minor(await page.getByTestId('merchant-total-spent').innerText()), 3501, 'Viewing transfers does not inflate spending');
-      await page.getByTestId('merchant-period').click();
+      await page.getByTestId('merchant-detail').getByTestId('merchant-period').click();
 
       const dialog = page.locator('[role="dialog"]:visible').last();
       await dialog.getByRole('button', { name: language === 'ar' ? 'كل الفترات' : 'All time', exact: true }).click();

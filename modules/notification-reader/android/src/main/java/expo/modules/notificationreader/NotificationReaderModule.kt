@@ -64,11 +64,18 @@ class NotificationReaderModule : Module() {
     // Upgrade cleanup cannot depend on Notification access still being
     // enabled or on the user starting a scan. Loading the app/module removes
     // the former plaintext preference before any JS interaction.
+    //
+    // Never fatal: a throw here crashed the app at launch. A failed erase is
+    // recorded (legacyCleanupPending in getDiagnostics) and retried by every
+    // queue operation, which still refuses to run until it succeeds.
     OnCreate {
-      val context = appContext.reactContext
-        ?: throw IllegalStateException("Notification reader context is unavailable")
-      NotificationCaptureStore.purgeLegacyPlaintext(context)
       activeModule = this@NotificationReaderModule
+      val context = appContext.reactContext
+      if (context == null) {
+        NotificationCaptureStore.recordStartupCleanupSkipped()
+        return@OnCreate
+      }
+      NotificationCaptureStore.purgeLegacyPlaintextAtStartup(context)
     }
 
     OnDestroy {
@@ -189,6 +196,7 @@ class NotificationReaderModule : Module() {
         "queuedVisibleMatchCount" to 0,
         "admissionCounts" to emptyMap<String, Int>(),
         "adcbAdmissionCounts" to emptyMap<String, Int>(),
+        "legacyCleanupPending" to NotificationCaptureStore.legacyCleanupPending,
       )
       val available = TrustedBankNotificationPackages.CAPTURE_ENABLED
       val systemAccess = available && hasSystemAccess(context)
@@ -220,6 +228,7 @@ class NotificationReaderModule : Module() {
         "queuedVisibleMatchCount" to queuedVisibleMatches,
         "admissionCounts" to (admission["admissionCounts"] ?: emptyMap<String, Int>()),
         "adcbAdmissionCounts" to (admission["adcbAdmissionCounts"] ?: emptyMap<String, Int>()),
+        "legacyCleanupPending" to NotificationCaptureStore.legacyCleanupPending,
       )
     }
 

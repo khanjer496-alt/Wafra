@@ -251,6 +251,8 @@ export default function RootLayout() {
                 a Stack.Screen for a deleted file is exactly the fileless-name
                 bug described above. */}
             <Stack.Screen name="ios-setup" options={{ animation: 'slide_from_right' }} />
+            {/* Home Screen widgets: previews and how to add them (Settings, Home's hint). */}
+            <Stack.Screen name="widgets" options={{ animation: 'slide_from_right' }} />
             {/* Reachable only from a hand-typed deep link; it must still look
                 like the app rather than like a crash. */}
             <Stack.Screen name="+not-found" options={{ animation: 'fade' }} />

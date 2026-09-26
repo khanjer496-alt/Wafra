@@ -1553,7 +1553,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       case 'paywall':
         return <PaywallStep tiles={patternTiles} watchedCategory={watchedLabel} remindersOn={remindersOn}
           trialDays={trialDaysLeft(state)} captureOn={captureOn} onFinish={finishJourney} onBack={goBack} onClose={onClose}
-          preview={previewMode} finishing={setupBusy || finishing} />;
+          preview={previewMode} finishing={setupBusy || finishing || transitioning} />;
     }
   };
 

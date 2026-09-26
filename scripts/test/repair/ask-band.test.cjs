@@ -34,7 +34,8 @@ test('month bars: the named month in the band tint, the others in the rule tone,
   assert.equal(bars.length, 3);
   assert.deepEqual(bars.map((bar) => bar.props.delay), [0, 50, 100], 'bars grow from the baseline 50ms apart');
   assert.deepEqual(bars.map((bar) => flat(bar.props.style).backgroundColor), [palette.rule, palette.rule, palette.tint]);
-  assert.equal(bars[2].props.size, 80, 'the largest month fills the chart');
+  assert.equal(bars[2].props.axis, 'width');
+  assert.equal(bars[2].props.size, 100, 'the largest month fills the chart');
   assert.ok(bars[1].props.size < bars[0].props.size);
   assert.match(text(tree), /905/);
   assert.match(text(tree), /1,004/);
@@ -44,13 +45,13 @@ test('month bars: the named month in the band tint, the others in the rule tone,
   void h;
 });
 
-test('month bars: no emphasis without a named month, and values step aside at large text', () => {
+test('month bars: no emphasis without a named month, and exact values remain visible at large text', () => {
   const { module, palette } = extras();
   const plain = module.AssistantMonthChart({ series, money: AED, language: 'en', palette });
   assert.ok(walk(plain).filter((node) => node.type === 'GrowBar')
     .every((bar) => flat(bar.props.style).backgroundColor === palette.rule));
   const large = module.AssistantMonthChart({ series, highlight: '2026-09', money: AED, language: 'en', palette, largeText: true });
-  assert.doesNotMatch(text(large), /1,004/, 'the figure above the bar steps aside');
+  assert.match(text(large), /1,004/, 'the exact figure remains visible above the bar');
   assert.ok(walk(large).some((node) => /AED 1,004/.test(node.props?.accessibilityLabel ?? '')), 'but is still spoken');
 });
 
@@ -60,14 +61,14 @@ test('month bars: nothing is drawn for fewer than two months or no spending', ()
   assert.equal(module.AssistantMonthChart({ series: series.map((month) => ({ ...month, totalFils: 0 })), money: AED, language: 'en', palette }), null);
 });
 
-test('monthBarValue draws whole units and leaves a figure too long for a column to the spoken label', () => {
+test('monthBarValue retains minor units, zero and long values', () => {
   const { module } = extras();
   assert.equal(module.monthBarValue(100_400, AED), '1,004');
-  assert.equal(module.monthBarValue(0, AED), '');
-  assert.equal(module.monthBarValue(40, AED), '', 'a month under half a unit never reads "0" over its bar');
-  assert.equal(module.monthBarValue(40, { currency: 'KWD', exponent: 3 }), '');
-  assert.equal(module.monthBarValue(1_500, { currency: 'KWD', exponent: 3 }), '2');
-  assert.equal(module.monthBarValue(123_456_700, AED), '', 'never a clipped "1,234,5…"');
+  assert.equal(module.monthBarValue(0, AED), '0');
+  assert.equal(module.monthBarValue(40, AED), '0.40');
+  assert.equal(module.monthBarValue(40, { currency: 'KWD', exponent: 3 }), '0.040');
+  assert.equal(module.monthBarValue(1_500, { currency: 'KWD', exponent: 3 }), '1.500');
+  assert.equal(module.monthBarValue(123_456_700, AED), '1,234,567');
 });
 
 test('payment rows take the sheet rule and text tones in dark mode', () => {

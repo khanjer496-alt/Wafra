@@ -7,7 +7,6 @@ import { Fonts, type BandPalette } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLedgerMoney, useMoneyLocaleKey } from '@/hooks/use-ledger-money';
 import { formatAmount } from '@/lib/format';
-import { figureFontMultiplier } from '@/lib/large-text-figure';
 import { currencyDisplayLabel, currencyPlacement, formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 
@@ -68,8 +67,8 @@ export interface BandFigureProps {
  * SemiBold with tabular digits and a demoted currency, then an optional
  * qualifier. Formats exactly like Money (ledger minor units, device number
  * conventions, currency placement) and speaks "label, CUR amount. qualifier".
- * At the accessibility text sizes the figure shrinks toward its width (never
- * below 60% of the requested size) and the currency takes its own line.
+ * Exact figures fit the available band width at every text size. Currency takes
+ * its own line when the pair cannot fit; no amount is clipped or abbreviated.
  */
 export function BandFigure({
   label, fils, moneySpec, sign = 'none', decimals, qualifier, palette, size = 'hero',
@@ -87,23 +86,34 @@ export function BandFigure({
   const metrics = SIZES[size];
   const fg = color ?? palette.onBand;
   const fg2 = secondaryColor ?? palette.onBandSecondary;
-  const multiplier = figureFontMultiplier(amount.length, metrics.fontSize, metrics.cap, width - 40 - fitInset, fontScale);
+  const availableWidth = Math.max(1, width - 40 - fitInset - 4);
+  // Geist tabular digits fit inside this conservative advance, including the
+  // sign/separators. Fit the BASE size too: a font multiplier cannot shrink
+  // 56pt text at the default system scale, which clipped million-size values.
+  const amountEm = Math.max(1, amount.length) * 0.64;
+  const fittedSize = Math.min(metrics.fontSize, availableWidth / amountEm);
+  const multiplier = Math.max(1, Math.min(metrics.cap, fontScale, availableWidth / (amountEm * fittedSize)));
+  const textScale = Math.min(Math.max(1, fontScale), multiplier);
+  const prefixWidth = currencyLabel.length * metrics.prefix * Math.max(1, fontScale) * 0.7;
+  const stacked = large || amountEm * fittedSize * textScale + prefixWidth + 6 > availableWidth;
+  const fitRatio = fittedSize / metrics.fontSize;
   const figureStyle: TextStyle[] = [styles.figure, {
-    fontSize: metrics.fontSize, lineHeight: metrics.lineHeight, letterSpacing: metrics.letterSpacing, color: fg,
+    fontSize: fittedSize, lineHeight: metrics.lineHeight * fitRatio, letterSpacing: metrics.letterSpacing * fitRatio, color: fg,
   }];
   const prefixStyle: TextStyle = { fontSize: metrics.prefix, lineHeight: Math.round(metrics.prefix * 1.25), color: fg2 };
   const spoken = [label, `${currency} ${amount}`].filter(Boolean).join(', ') + (qualifier ? `. ${qualifier}` : '');
 
-  const figure = rolling
+  // Own the currency layout here for both static and rolling figures. A
+  // rolling amount gets the identical fitted metrics and an isolated LTR row.
+  const digits = rolling
     ? <RollingMoney fils={fils} moneySpec={spec ?? undefined} sign={sign} decimals={decimals} type="amount"
-        figureStyle={figureStyle} prefixStyle={[styles.prefix, prefixStyle]} maxFontSizeMultiplier={multiplier} prefix />
-    : <View style={[styles.inline, large && styles.stacked, !placement.spaced && styles.tight]}>
-        {placement.position === 'after' ? null
-          : <ThemedText style={[styles.prefix, prefixStyle]}>{currencyLabel}</ThemedText>}
-        <ThemedText tabular maxFontSizeMultiplier={multiplier} style={figureStyle}>{amount}</ThemedText>
-        {placement.position === 'after'
-          ? <ThemedText style={[styles.prefix, prefixStyle]}>{currencyLabel}</ThemedText> : null}
-      </View>;
+        figureStyle={figureStyle} maxFontSizeMultiplier={multiplier} prefix={false} style={styles.digits} />
+    : <ThemedText tabular maxFontSizeMultiplier={multiplier} style={figureStyle}>{amount}</ThemedText>;
+  const prefix = <ThemedText style={[styles.prefix, prefixStyle]}>{currencyLabel}</ThemedText>;
+  const figure = <View style={[styles.inline, stacked && styles.stacked, !placement.spaced && styles.tight]}>
+    {placement.position === 'after' ? digits : prefix}
+    {placement.position === 'after' ? prefix : digits}
+  </View>;
 
   return <View testID={testID} accessible accessibilityRole="text" accessibilityLabel={spoken} style={[styles.root, style]}>
     {label ? <ThemedText type="small" style={{ color: fg2 }}>{label}</ThemedText> : null}
@@ -113,10 +123,11 @@ export function BandFigure({
 }
 
 const styles = StyleSheet.create({
-  root: { gap: 4, alignItems: 'flex-start' },
-  inline: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 6 },
+  root: { gap: 4, alignItems: 'flex-start', maxWidth: '100%' },
+  inline: { flexDirection: 'row', direction: 'ltr', flexWrap: 'wrap', alignItems: 'baseline', gap: 6, maxWidth: '100%' },
+  digits: { direction: 'ltr', maxWidth: '100%' },
   stacked: { flexDirection: 'column', alignItems: 'flex-start', gap: 0 },
   tight: { gap: 1 },
-  figure: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], flexShrink: 0, maxWidth: '100%' },
+  figure: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], flexShrink: 0, maxWidth: '100%', writingDirection: 'ltr' },
   prefix: { fontFamily: Fonts.sansMedium },
 });

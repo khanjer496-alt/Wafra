@@ -1,6 +1,6 @@
 import * as LocalAuthentication from 'expo-local-authentication';
 import { StatusBar } from 'expo-status-bar';
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, Platform, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,6 +11,7 @@ import { LockPattern } from '@/components/settings-band/lock-pattern';
 import { Fonts, ScreenPadding, Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { APP_LOCK_AUTH_OPTIONS, deviceLockLevel, unlockOutcome } from '@/lib/app-lock';
 import { useStore } from '@/lib/store';
 import { t } from '@/lib/i18n';
 import { settingsCopy } from '@/lib/settings-copy';
@@ -62,25 +63,47 @@ export function LockGate({ children }: { children: React.ReactNode }) {
   const [unlocked, setUnlocked] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [biometric, setBiometric] = useState<BiometricState>('prompting');
+  const unavailableRef = useRef(false);
+  unavailableRef.current = biometric === 'unavailable';
+  // The OS prompt itself moves the app out of 'active' (iOS: inactive under
+  // the passcode sheet; Android < 11: a separate credential activity). Those
+  // transitions are the unlock in progress, not the user leaving — without
+  // this a passcode typed slower than the re-lock grace would prompt again.
+  const authenticatingRef = useRef(false);
 
   const lockRequired = state.hydrated && state.appLock && Platform.OS !== 'web' && !unlocked;
 
   const tryUnlock = useCallback(async () => {
     try {
-      // `authenticateAsync` throws on a device with nothing enrolled, so the
-      // third state has to be checked rather than inferred from a failure.
-      const [hasHardware, enrolled] = await Promise.all([
-        LocalAuthentication.hasHardwareAsync(),
-        LocalAuthentication.isEnrolledAsync(),
-      ]);
-      if (!hasHardware || !enrolled) {
+      // The question is whether the phone has ANY owner authentication, not
+      // whether biometrics are enrolled. Asking the biometric question locked
+      // out everyone who removed Face ID or fingerprints but kept a passcode
+      // (see app-lock.ts). If the level cannot be read, let the OS prompt
+      // decide rather than declaring the phone unlockable.
+      let level: ReturnType<typeof deviceLockLevel> = 'passcode';
+      try {
+        level = deviceLockLevel(await LocalAuthentication.getEnrolledLevelAsync());
+      } catch {
+        level = 'passcode';
+      }
+      if (level === 'none') {
         setBiometric('unavailable');
         return;
       }
       setBiometric('prompting');
-      const result = await LocalAuthentication.authenticateAsync({ promptMessage: t('unlockWafra') });
-      if (result.success) setUnlocked(true);
-      else setBiometric('failed');
+      authenticatingRef.current = true;
+      let result: LocalAuthentication.LocalAuthenticationResult;
+      try {
+        result = await LocalAuthentication.authenticateAsync({
+          promptMessage: t('unlockWafra'),
+          ...APP_LOCK_AUTH_OPTIONS,
+        });
+      } finally {
+        authenticatingRef.current = false;
+      }
+      const outcome = unlockOutcome(result);
+      if (outcome === 'unlocked') setUnlocked(true);
+      else setBiometric(outcome);
     } catch {
       setBiometric('failed');
     } finally {
@@ -106,8 +129,17 @@ export function LockGate({ children }: { children: React.ReactNode }) {
     if (!state.appLock || Platform.OS === 'web') return;
     let leftAt = 0;
     const sub = AppState.addEventListener('change', (next) => {
+      if (authenticatingRef.current) return;
       if (next === 'background' || next === 'inactive') {
         leftAt = leftAt || Date.now();
+        return;
+      }
+      // Back from the phone's Settings with the "no screen lock" sheet up:
+      // the user may have just set a passcode, so ask again instead of
+      // leaving them on a sheet with no unlock button.
+      if (next === 'active' && unavailableRef.current) {
+        leftAt = 0;
+        setAttempted(false);
         return;
       }
       if (next === 'active' && leftAt) {

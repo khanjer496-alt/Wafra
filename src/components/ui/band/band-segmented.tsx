@@ -36,7 +36,7 @@ export function BandSegmented<T extends string>({ segments, value, onChange, lab
     {segments.map((segment) => {
       const active = segment.value === value;
       return <Pressable key={segment.value} testID={segment.testID} accessibilityRole="tab" accessibilityLabel={segment.label}
-        accessibilityHint={segment.accessibilityHint} accessibilityState={{ selected: active }}
+        accessibilityHint={segment.accessibilityHint} accessibilityState={{ selected: active }} aria-selected={active}
         onPress={() => { if (!active) tapped(); onChange(segment.value); }}
         style={[styles.segment, { backgroundColor: active ? palette.selected : 'transparent' }]}>
         <ThemedText type="smallBold" style={[styles.label, { color: active ? palette.onSelected : palette.onBand }]}>

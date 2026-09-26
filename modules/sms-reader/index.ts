@@ -55,6 +55,14 @@ interface SmsReaderModule {
    */
   setInstantAlerts?(enabled: boolean): boolean;
   getInstantAlerts?(): boolean;
+  /** Source-free: whether module-load cleanup failed and is still pending. */
+  getStartupCleanupDiagnostics?(): SmsStartupCleanupDiagnostics;
+}
+
+export interface SmsStartupCleanupDiagnostics {
+  contextMissing: boolean;
+  legacyDeliveryBufferPending: boolean;
+  staleCorpusPending: boolean;
 }
 
 /** Null on iOS/web and in environments without the native module (e.g. Expo Go). */

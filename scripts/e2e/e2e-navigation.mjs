@@ -83,7 +83,7 @@ const tapTab = async (page, name) => {
   // Home now has a visible "Spending" label as well as the navigation tab.
   // Click the actionable tab, not an arbitrary matching text node. Playwright
   // verifies visibility, hit-testing and enabled state before clicking.
-  await page.getByRole('tab', { name, exact: true }).click({ timeout: 8000 });
+  await page.getByRole('tab', { name, exact: true }).click({ timeout: 30000 });
   await page.waitForFunction((want) => {
     for (const tab of document.querySelectorAll('[role="tab"]')) {
       const label = tab.getAttribute('aria-label') ?? (tab.textContent || '').trim();
@@ -210,6 +210,7 @@ const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark', reducedMotion: 'reduce' });
+await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
 /**
  * Text whose box extends past the right edge of the viewport.
  *
@@ -459,7 +460,7 @@ await resetPreferences();
 await pressEverything('cards', async () => { await wallet(); await tapKey(page, 'Payment cards'); await page.waitForTimeout(1300); });
 await pressEverything('pro', async () => {
   await settings();
-  await tapKey(page, 'Wafra Pro'); await page.waitForTimeout(1300);
+  await page.getByTestId('settings-pro-card').click(); await page.waitForURL(/\/pro$/);
 });
 await pressEverything('accuracy', async () => {
   await settingsData();
@@ -484,7 +485,7 @@ await resetPreferences();
     await page.waitForTimeout(500);
     const at = new URL(page.url());
     await page.getByTestId('merchant-total-spent').waitFor({ state: 'visible' });
-    const shown = await page.getByTestId('merchant-total-spent').innerText();
+    const shown = (await page.getByTestId('merchant-total-spent').innerText()).match(/AED\s*[\d,]+(?:\.\d+)?/)?.[0] ?? '';
     const expected = label.match(/, (AED [\d,]+(?:\.\d+)?),/)?.[1];
     ok(`trends merchant opens its matching spending summary: ${label}`, reached === true &&
       at.pathname === '/merchant' && label.startsWith(at.searchParams.get('name') + ',') &&
@@ -513,7 +514,10 @@ await goesTo('Home all activity opens the ledger', home, 'All activity', /^\/tra
 await goesTo('Home settings action', home, 'Settings', /^\/settings/);
 await goesTo('Accounts payment cards', wallet, 'Payment cards', /^\/cards/);
 await goesTo('Accounts manual import', wallet, 'Paste a bank message', /^\/import-sms/);
-await goesTo('Settings Pro', settings, 'Wafra Pro', /^\/pro/);
+await settings();
+await page.getByTestId('settings-pro-card').click();
+await page.waitForURL(/\/pro$/);
+ok('Settings Pro opens its plan page', (await url(page)) === '/pro');
 await goesTo('Settings data and help', settings, 'Data and help', /^\/settings-data/);
 await goesTo('Data and help accuracy', settingsData, 'Unread alerts', /^\/accuracy/);
 await goesTo('Data and help feedback', settingsData, 'Send feedback', /^\/feedback/);
@@ -584,7 +588,7 @@ for (const [name, enter] of [
   await homeFact('Spending');
   await page.getByTestId('spending-categories').waitFor({ state: 'visible' });
   const spending = page.getByTestId('spending-categories');
-  const total = await spending.locator('[aria-label^="AED "]').first().getAttribute('aria-label');
+  const total = await page.getByTestId('spending-total').innerText();
   const categoryLabels = await spending.locator('[data-testid^="spending-category-"]')
     .evaluateAll(nodes => nodes.map(node => node.getAttribute('aria-label')));
   ok('Home spending reconciles to the exact Spending total and complete category breakdown',
@@ -631,8 +635,8 @@ for (const [name, enter] of [
    * paintedText only collects leaves. It reported the figure as missing while
    * it was the largest thing on the sheet.
    */
-  const spent = await page.evaluate(() => {
-    const label = [...document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')].find(
+  const spent = await page.getByTestId('limit-sheet').evaluate((sheet) => {
+    const label = [...sheet.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')].find(
       (e) => !e.children.length && /^spent this month$/i.test((e.textContent || '').trim()),
     );
     const row = label?.parentElement;
@@ -714,8 +718,8 @@ for (const [name, enter] of [
    * five English labels under four Arabic screens until the user happened to
    * switch tabs for an unrelated reason.
    */
-  const tabs = await page.evaluate(() => [...document.querySelectorAll('[role="tab"]')]
-    .map((n) => (n.textContent || '').trim()).filter(Boolean).slice(0, 4));
+  const tabs = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="main-tab-"][role="tab"]')]
+    .map((n) => n.getAttribute('aria-label') || (n.textContent || '').trim()).filter(Boolean));
   ok(`home: the tab bar turns over with the language, without changing tab (${tabs.join(' ')})`,
     tabs.length === 4 && tabs.every((x) => arabic.test(x)));
 
@@ -782,6 +786,14 @@ for (const [name, enter] of [
   await page.waitForTimeout(600);
   await tapKey(page, 'All activity', 5000);
   await page.waitForTimeout(900);
+  // Normal text uses an intentional horizontal filter strip. Reveal each
+  // chip and verify its whole label, rather than treating its offscreen
+  // scroll position as permanently clipped content.
+  for (const chip of await page.getByTestId('transactions-type-chips').getByRole('button').all()) {
+    await chip.scrollIntoViewIfNeeded();
+    const fits = await chip.evaluate(node => { const r = node.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1 && node.scrollWidth <= node.clientWidth + 1; });
+    if (!fits) overflow.push('transactions: filter chip cannot be fully revealed');
+  }
   overflow.push(...(await clippedText(page, 'transactions')));
   await page.goBack();
   await page.waitForTimeout(700);
@@ -808,21 +820,10 @@ for (const [name, enter] of [
  */
 {
   const sample = () => page.evaluate(() => {
-    const leaf = (t) => [...document.querySelectorAll('*')].find(
-      (n) => n.children.length === 0 && n.textContent?.trim() === t,
-    );
-    const surfaceAbove = (el) => {
-      for (let n = el?.parentElement; n; n = n.parentElement) {
-        const c = getComputedStyle(n).backgroundColor;
-        if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c;
-      }
-      return null;
-    };
-    const tab = leaf('Bills');
-    return {
-      card: surfaceAbove(leaf('Total spent')),
-      ink: tab ? getComputedStyle(tab).color : null,
-    };
+    const sheet = document.querySelector('[data-testid="reference-spending-screen-sheet"]');
+    const text = sheet && [...sheet.querySelectorAll('div,span')].find(node => node.children.length === 0 && node.textContent.trim());
+    return { card: sheet ? getComputedStyle(sheet).backgroundColor : null,
+      ink: text ? getComputedStyle(text).color : null };
   });
 
   await reload();

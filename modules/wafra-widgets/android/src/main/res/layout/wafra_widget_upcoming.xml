@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Live "Coming up" widget on Bills' ochre band: up to three bills from the
-     snapshot, each with its merchant tile (initial on the band's own tone),
+     snapshot, each with its bundled merchant logo (initial fallback),
      due word and amount. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
   android:id="@+id/wafra_widget_root"
@@ -47,6 +47,15 @@
       android:layout_height="28dp"
       android:background="@drawable/wafra_widget_tile"
       android:importantForAccessibility="noHideDescendants">
+
+      <ImageView
+        android:id="@+id/wafra_bill_logo_1"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:layout_gravity="center"
+        android:scaleType="fitCenter"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
 
       <TextView
         android:id="@+id/wafra_bill_tile_1"
@@ -124,6 +133,15 @@
       android:background="@drawable/wafra_widget_tile"
       android:importantForAccessibility="noHideDescendants">
 
+      <ImageView
+        android:id="@+id/wafra_bill_logo_2"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:layout_gravity="center"
+        android:scaleType="fitCenter"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
+
       <TextView
         android:id="@+id/wafra_bill_tile_2"
         android:layout_width="match_parent"
@@ -199,6 +217,15 @@
       android:layout_height="28dp"
       android:background="@drawable/wafra_widget_tile"
       android:importantForAccessibility="noHideDescendants">
+
+      <ImageView
+        android:id="@+id/wafra_bill_logo_3"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:layout_gravity="center"
+        android:scaleType="fitCenter"
+        android:importantForAccessibility="no"
+        android:visibility="gone" />
 
       <TextView
         android:id="@+id/wafra_bill_tile_3"

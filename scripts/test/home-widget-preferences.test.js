@@ -24,7 +24,7 @@ const {
     order: ['activity', 'activity', 'made-up', 'assistant'],
     hidden: ['due', 'due', 'unknown'],
   });
-  assert.deepEqual(repaired.order, ['activity', 'assistant', 'due', 'insight', 'upcoming']);
+  assert.deepEqual(repaired.order, ['activity', 'assistant', 'due', 'upcoming', 'insight']);
   assert.deepEqual(repaired.hidden, ['due']);
 }
 
@@ -37,19 +37,20 @@ const {
 
 {
   const start = defaultHomeWidgetPreferences();
-  const moved = moveHomeWidget(start, 'assistant', -1);
-  assert.deepEqual(moved.order.slice(0, 2), ['assistant', 'due']);
-  assert.deepEqual(start.order.slice(0, 2), ['due', 'assistant'], 'reordering must be immutable');
+  const moved = moveHomeWidget(start, 'upcoming', -1);
+  assert.deepEqual(moved.order.slice(0, 2), ['upcoming', 'due']);
+  assert.deepEqual(start.order.slice(0, 2), ['due', 'upcoming'], 'reordering must be immutable');
   assert.deepEqual(moveHomeWidget(start, 'due', -1), start, 'moving past the first item is a no-op');
-  assert.deepEqual(moveHomeWidget(start, 'upcoming', 1), start, 'moving past the last item is a no-op');
+  assert.deepEqual(moveHomeWidget(start, 'insight', 1), start, 'moving past the last item is a no-op');
 }
 
 {
   const defaults = defaultHomeWidgetPreferences();
   assert.ok(defaults.order.indexOf('due') < defaults.order.indexOf('assistant'), 'unconfigured Home must prioritize due payments');
+  assert.deepEqual(defaults.order.slice(0, 3), ['due', 'upcoming', 'activity'], 'E Home starts with payments and activity');
   for (const saved of [
     { order: ['assistant', 'insight', 'due', 'activity', 'upcoming'], hidden: [] },
-    { order: ['upcoming', 'activity', 'assistant', 'due', 'insight'], hidden: ['assistant', 'due'] },
+    { order: ['upcoming', 'activity', 'assistant', 'due', 'insight'], hidden: ['upcoming', 'due'] },
   ]) {
     assert.deepEqual(normalizeHomeWidgetPreferences(saved), saved, 'saved order and hidden widgets must not be migrated to the new default');
   }

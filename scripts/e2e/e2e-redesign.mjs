@@ -51,7 +51,7 @@ await check('Home renders the implemented reference layout', async () => {
   await screenshot('home-dark');
 });
 await check('Four bottom tabs are present and actionable', async () => {
-  for (const [name,id] of [['Spending','spending-categories'],['Bills','payment-agenda'],['Accounts','account-groups'],['Home','reference-home-summary']]) {
+  for (const [name,id] of [['Spending','spending-categories'],['Bills','bills-screen'],['Accounts','account-groups'],['Home','reference-home-summary']]) {
     await page.getByRole('tab', { name, exact: true }).click();
     await exists(id);
   }
@@ -64,7 +64,7 @@ await check('Categories, Compare and Calendar stay inside Spending', async () =>
 });
 await check('Every spending category shows its share of total spending', async () => {
   await go('/flow');
-  const shares = page.locator('[data-testid^="spending-share-"]');
+  const shares = page.getByTestId('spending-categories').locator('[data-testid^="spending-share-"]');
   assert.ok(await shares.count() > 0);
   for (const share of await shares.all()) {
     assert.match(await share.innerText(), /(?:<)?\d+(?:\.\d+)?%\s+of spending/);
@@ -72,11 +72,14 @@ await check('Every spending category shows its share of total spending', async (
 });
 await check('Bills filters subscriptions and utilities while preserving due-date sections', async () => {
   await go('/bills');
+  await exists('bills-screen');
+  // Upcoming contains separate subscription and bill/card agendas. All owns one.
+  await page.getByRole('tab', { name: 'All', exact: true }).click();
   const agenda = page.getByTestId('payment-agenda');
   await exists('payment-agenda');
   const sectionOrder = ['overdue', 'expected-earlier', 'soon', 'later', 'paid'];
   const visiblePayments = async () => {
-    const sections = agenda.locator('[data-testid^="bills-"]');
+    const sections = agenda.locator(sectionOrder.map(key => `[data-testid="bills-${key}"]`).join(','));
     const keys = await sections.evaluateAll(nodes => nodes.map(node => node.getAttribute('data-testid').replace('bills-', '')));
     assert.ok(keys.length > 0, 'The selected payment family must have populated due-date sections');
     assert.ok(keys.every((key, index) => sectionOrder.includes(key) &&
@@ -94,7 +97,7 @@ await check('Bills filters subscriptions and utilities while preserving due-date
   const selectFamily = async (name) => {
     const filter = page.getByTestId(`bills-filter-${name}`);
     await filter.click();
-    assert.equal(await filter.getAttribute('aria-selected'), 'true');
+    assert.equal(await filter.getAttribute('aria-pressed'), 'true');
     return visiblePayments();
   };
   const subscriptions = await selectFamily('subscriptions');
@@ -118,6 +121,7 @@ await check('Spending search responds to input and recovers', async () => {
   await input.fill('definitely-no-such-merchant-qa');
   await page.getByText('No matching expenses', { exact: true }).waitFor({ state: 'visible' });
   await input.fill('');
+  await page.waitForFunction(() => document.querySelectorAll('[data-testid="spending-activity"] [role="button"]').length > 1);
   assert.ok(await page.getByTestId('spending-activity').getByRole('button').count() > 1);
 });
 await check('A category opens history and its expense-filtered transaction ledger', async () => {
@@ -146,7 +150,7 @@ await check('The old Stats route opens Spending trends', async () => {
 });
 for (const mode of ['dark','light']) {
   await page.emulateMedia({ colorScheme: mode });
-  for (const [name,path,id] of [['home','/','reference-home-summary'],['spending','/flow','spending-categories'],['bills','/bills','payment-agenda'],['accounts','/wallet','account-groups']]) {
+  for (const [name,path,id] of [['home','/','reference-home-summary'],['spending','/flow','spending-categories'],['bills','/bills','bills-screen'],['accounts','/wallet','account-groups']]) {
     await check(`${name} ${mode} renders without page overflow`, async () => {
       await go(path); await exists(id); await noPageOverflow(); await screenshot(name + '-' + mode);
     });

@@ -114,3 +114,92 @@ export const isUsableCaptureSourceIdentity = (key?: string, observedAt?: number)
   return shape.validAndroid && Number.isSafeInteger(observedAt) && observedAt! >= 0 &&
     Number.isFinite(new Date(observedAt!).getTime()) && captureSourceTimeMatches(key, observedAt!);
 };
+
+/**
+ * The event clock an alert states for itself, to the SECOND, as epoch ms.
+ *
+ * A bank notification's own identity is (package, post time), and a bank app
+ * that re-posts one alert — FCM redelivery, a background sync, the app
+ * refreshing its shade entry — gives the same text a new post time. ADCB was
+ * seen posting one card alert three times minutes apart, and the copies became
+ * separate ledger rows dated by post time. The text, not the post time, is the
+ * identity of the event: "… on 25/09/2026 17:38:39 …" names one instant, and
+ * two genuinely identical purchases name two (15:23:32 and 15:39:32).
+ *
+ * Deliberately narrow, because this becomes an identity:
+ *  - Seconds are required. At minute precision a terminal double-tap produces
+ *    two identical texts, and the second charge would be folded away.
+ *  - The date part must agree with the date the parser already chose, in
+ *    either numeric order, so this never re-decides DD/MM vs MM/DD.
+ *  - Exactly one distinct clock. Two different clocks in one alert (a
+ *    transaction time and a processing time) is not an identity.
+ *  - Midnight/end-of-day batch stamps are not event instants.
+ *
+ * It is evidence, never a key on its own: dedupe pairs two alerts by it only
+ * together with the same money, direction, card and merchant.
+ *
+ * The wall-clock digits are read in the device's zone. Every copy of the same
+ * text reads the same instant, which is all identity needs; callers decide
+ * separately whether that instant is plausible enough to DISPLAY.
+ */
+const NUMERIC_TEXT_CLOCK_RE =
+  /(?<![\d/.:-])(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2})(?:[ \t]*,)?[ \t]+(?:at[ \t]+)?(\d{1,2}):(\d{2}):(\d{2})(?:[ \t]*([AaPp])\.?[Mm]\.?)?(?![\d:])/g;
+const ISO_TEXT_CLOCK_RE =
+  /(?<![\d/.:-])(\d{4})-(\d{1,2})-(\d{1,2})(?:[ \t]+|T)(\d{1,2}):(\d{2}):(\d{2})(?:[ \t]*([AaPp])\.?[Mm]\.?)?(?![\d:])/g;
+
+const localClock = (
+  year: number, month: number, day: number,
+  hour: number, minute: number, second: number,
+): number | null => {
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || second > 59) return null;
+  const at = new Date(year, month - 1, day, hour, minute, second, 0);
+  if (at.getFullYear() !== year || at.getMonth() !== month - 1 || at.getDate() !== day ||
+    at.getHours() !== hour || at.getMinutes() !== minute || at.getSeconds() !== second) return null;
+  const ms = at.getTime();
+  return Number.isSafeInteger(ms) && ms >= 0 ? ms : null;
+};
+
+const clockHour = (raw: string, meridiem: string | undefined): number | null => {
+  const hour = Number(raw);
+  if (!meridiem) return hour;
+  if (hour < 1 || hour > 12) return null;
+  const pm = meridiem.toLowerCase() === 'p';
+  return pm ? (hour === 12 ? 12 : hour + 12) : (hour === 12 ? 0 : hour);
+};
+
+export function alertTextClock(source: string | undefined, isoDate: string | null | undefined): number | null {
+  if (typeof source !== 'string' || !source || typeof isoDate !== 'string') return null;
+  const day = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!day) return null;
+  const wantYear = Number(day[1]);
+  const wantMonth = Number(day[2]);
+  const wantDay = Number(day[3]);
+  const clocks = new Set<number>();
+  const consider = (year: number, month: number, dayOfMonth: number, time: RegExpMatchArray): boolean => {
+    if (year !== wantYear || month !== wantMonth || dayOfMonth !== wantDay) return false;
+    const hour = clockHour(time[4], time[7]);
+    if (hour === null) return false;
+    const minute = Number(time[5]);
+    const second = Number(time[6]);
+    // 00:00:00 and 23:59:59 are what batch-posted rows (subscriptions,
+    // standing orders, fees) are stamped with, not an event instant: two
+    // different charges share them. Leave those to the arrival-time rules.
+    if ((hour === 0 && minute === 0 && second === 0) || (hour === 23 && minute === 59 && second === 59)) return false;
+    const at = localClock(year, month, dayOfMonth, hour, minute, second);
+    if (at === null) return false;
+    clocks.add(at);
+    return true;
+  };
+  for (const match of source.matchAll(NUMERIC_TEXT_CLOCK_RE)) {
+    const year = match[3].length === 2 ? 2000 + Number(match[3]) : Number(match[3]);
+    const first = Number(match[1]);
+    const second = Number(match[2]);
+    // Day-first is the launch grammar's default; month-first counts only when
+    // it is the reading the parser itself chose for this alert's date.
+    if (!consider(year, second, first, match)) consider(year, first, second, match);
+  }
+  for (const match of source.matchAll(ISO_TEXT_CLOCK_RE)) {
+    consider(Number(match[1]), Number(match[2]), Number(match[3]), match);
+  }
+  return clocks.size === 1 ? [...clocks][0] : null;
+}

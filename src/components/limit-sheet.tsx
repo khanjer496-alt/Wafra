@@ -366,24 +366,30 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
             {picked && threeMonthAverage > 0 && (
               <View style={styles.history} testID="limit-history">
                 <SectionHeader title={words.lastMonths} />
+                {limitFils ? <ThemedText type="meta" tabular maxFontSizeMultiplier={1.5} testID="limit-history-reference">
+                  {words.limitLine}: {formatAED(limitFils)}
+                </ThemedText> : null}
                 <View style={styles.bars}>
-                  {limitFils ? <View pointerEvents="none" testID="limit-line"
-                    style={[styles.limitLine, { bottom: 22 + Math.round((limitFils / barMax) * BAR_HEIGHT), borderColor: band.tint }]} /> : null}
                   {bars.map((bar) => <View key={bar.key} style={styles.barColumn} accessible accessibilityRole="text"
-                    accessibilityLabel={words.month(bar.current ? `${monthLabel(bar.key)} ${words.thisMonth}` : monthLabel(bar.key), formatAED(bar.fils, { decimals: false }))}>
-                    <View style={[styles.bar, {
-                      height: Math.max(3, Math.round((bar.fils / barMax) * BAR_HEIGHT)),
-                      // Past months in the rule tone, this month in the band tint;
-                      // a month over the limit reads as over, whichever it is.
-                      backgroundColor: limitFils && bar.fils > limitFils ? band.statusOver : bar.current ? band.tint : band.rule,
-                    }]} />
-                    <ThemedText type="micro" themeColor={bar.current ? 'text' : 'textSecondary'} numberOfLines={1}>
-                      {monthLabel(bar.key, true).split(' ')[0]}
-                    </ThemedText>
+                    accessibilityLabel={words.month(bar.current ? `${monthLabel(bar.key)} ${words.thisMonth}` : monthLabel(bar.key), formatAED(bar.fils))}>
+                    <View style={styles.historyHeading}>
+                      <ThemedText type="meta" themeColor={bar.current ? 'text' : 'textSecondary'}>
+                        {monthLabel(bar.key)}{bar.current ? ` · ${words.thisMonth}` : ''}
+                      </ThemedText>
+                      <ThemedText type="meta" tabular maxFontSizeMultiplier={1.5} style={styles.historyValue}>{formatAED(bar.fils)}</ThemedText>
+                    </View>
+                    <View style={[styles.historyTrack, { backgroundColor: band.card }]}>
+                      <View style={[styles.bar, {
+                        width: `${Math.max(0, bar.fils) / barMax * 100}%`,
+                        backgroundColor: limitFils && bar.fils > limitFils ? band.statusOver : bar.current ? band.tint : band.rule,
+                      }]} />
+                      {limitFils ? <View pointerEvents="none" testID="limit-line"
+                        style={[styles.limitLine, { start: `${limitFils / barMax * 100}%`, borderColor: band.tint }]} /> : null}
+                    </View>
                   </View>)}
                 </View>
                 <ThemedText type="meta" themeColor="textSecondary" testID="limit-usual">
-                  {words.usual(formatAED(threeMonthAverage, { decimals: false }))}{usualAdvice ? ` ${usualAdvice}` : ''}
+                  {words.usual(formatAED(threeMonthAverage))}{usualAdvice ? ` ${usualAdvice}` : ''}
                 </ThemedText>
               </View>
             )}
@@ -466,9 +472,6 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   );
 }
 
-/** Plot height of the monthly bars, in points. */
-const BAR_HEIGHT = 72;
-
 /**
  * Suggestions land on a round number — nobody budgets AED 1,247. The step is
  * AED 100 (unchanged), ¥10,000 for JPY, KWD 10 for KWD: see ledgerNiceMinor.
@@ -506,10 +509,13 @@ const styles = StyleSheet.create({
   aed: { fontSize: 15 },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.three },
   history: { marginTop: Spacing.four, gap: Spacing.two },
-  bars: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.three, height: BAR_HEIGHT + 22, position: 'relative' },
-  barColumn: { flex: 1, alignItems: 'center', justifyContent: 'flex-end', gap: 4, height: '100%' },
-  bar: { width: '70%', borderTopLeftRadius: 5, borderTopRightRadius: 5 },
-  limitLine: { position: 'absolute', left: 0, right: 0, borderTopWidth: 1, borderStyle: 'dashed' },
+  bars: { gap: 14 },
+  barColumn: { gap: 6 },
+  historyHeading: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 },
+  historyValue: { writingDirection: 'ltr', flexShrink: 1 },
+  historyTrack: { height: 8, width: '100%', position: 'relative', borderRadius: 4 },
+  bar: { height: 8, borderRadius: 4 },
+  limitLine: { position: 'absolute', top: -3, bottom: -3, borderStartWidth: 1, borderStyle: 'dashed' },
   where: { marginTop: Spacing.five },
   whereRow: {
     flexDirection: 'row',

@@ -281,6 +281,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
     const nextViaPush = patch.viaPush === undefined ? tx.viaPush : patch.viaPush || undefined;
     if (
       (patch.ts === undefined || patch.ts === tx.ts) &&
+      (patch.textClock === undefined || patch.textClock === tx.textClock) &&
       (patch.smsKey === undefined || patch.smsKey === tx.smsKey) &&
       (patch.captureInstrument === undefined ||
         JSON.stringify(patch.captureInstrument) === JSON.stringify(tx.captureInstrument)) &&
@@ -292,6 +293,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
     const identified: Transaction = { ...tx };
     if (patch.walletBound === true) identified.walletBound = true;
     if (patch.ts !== undefined) identified.ts = patch.ts;
+    if (patch.textClock !== undefined) identified.textClock = patch.textClock;
     if (patch.smsKey !== undefined) identified.smsKey = patch.smsKey;
     if (patch.captureInstrument !== undefined) identified.captureInstrument = patch.captureInstrument;
     if (patch.viaPush !== undefined) identified.viaPush = nextViaPush;
@@ -304,6 +306,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.isTransfer !== undefined) next.isTransfer = patch.isTransfer;
   if (patch.accountId !== undefined) next.accountId = patch.accountId;
   if (patch.ts !== undefined) next.ts = patch.ts;
+  if (patch.textClock !== undefined) next.textClock = patch.textClock;
   if (patch.smsKey !== undefined) next.smsKey = patch.smsKey;
   if (patch.captureInstrument !== undefined) next.captureInstrument = patch.captureInstrument;
   if (patch.viaPush !== undefined) next.viaPush = patch.viaPush || undefined;

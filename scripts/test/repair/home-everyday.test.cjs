@@ -112,7 +112,7 @@ test('the transfer notice appears only for a non-empty review queue and opens th
   assert.deepEqual(h.events.at(-1), ['route', '/review-transfers']);
 });
 
-test('Arabic week row uses full weekday names when they fit, and always speaks them', () => {
+test('Arabic week shows full weekday names in its readable exact-value layout', () => {
   // Full names need about 61pt a column (الخميس in Noto Kufi); a 390pt phone
   // gives ~44pt, so full names start at 430pt.
   const wide = createHarness({ language: 'ar', width: 430 }).render('home');
@@ -121,7 +121,7 @@ test('Arabic week row uses full weekday names when they fit, and always speaks t
   assert.match(week.props.accessibilityLabel, /الأحد|السبت/);
   const narrow = createHarness({ language: 'ar', width: 390 }).render('home');
   const narrowWeek = byId(narrow, 'home-week');
-  assert.doesNotMatch(text(narrowWeek), /السبت/);
+  assert.match(text(narrowWeek), /السبت/, 'narrow exact-value rows have room for full dates');
   assert.match(narrowWeek.props.accessibilityLabel, /السبت/);
   const english = createHarness({ width: 390 }).render('home');
   assert.match(byId(english, 'home-week').props.accessibilityLabel, /Saturday/);

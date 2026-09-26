@@ -54,7 +54,7 @@ example of everything below.
 
 | Band id | Colour (light / dark) | Screens |
 |---|---|---|
-| `home` | ink `#16130F` / `#0B0A08` | Home, Transactions, TxDetail, Filter, Ask, ApplePay, CustomizeHome, Lock |
+| `home` | ink `#16130F` / `#0B0A08` | Home, Transactions, TxDetail, Filter, Ask, ApplePay, CustomizeHome, Lock, Widgets |
 | `spending` | clay `#A4432F` / `#6E2B1E` | Spending (the `flow` tab), Merchant, Merchants, Currencies, Limit |
 | `bills` | ochre `#E2B45A` / `#5E4719` | Bills, BillDetail |
 | `accounts` | slate `#2F6577` / `#1B3F4A` | Accounts (the `wallet` tab), AccountDetail, Card, CardPayment, Transfers, Trusted |
@@ -173,7 +173,7 @@ Also exported: `BandHeader` and `BandSheetCap` (compose a band as a
 Label, the amount in Geist SemiBold tabular digits with a demoted currency, an
 optional qualifier. Formats exactly like `Money` (minor units, device
 conventions, currency placement); speaks "label, CUR amount. qualifier";
-shrinks toward its width at large text and puts the currency on its own line.
+fits the amount at normal and large text sizes, putting currency on its own line when the pair cannot fit.
 `rolling` rolls only changed digits (Home's Today), static under Reduce Motion
 and on Android. Sizes: `hero` 56, `large` 32, `medium` 22.
 
@@ -224,8 +224,9 @@ rest; spoken as one image. Shares only, never amounts.
 
 ### `WeekTiles` — `week-tiles.tsx`
 
-Day bars from real values: today in mint, others in `bandMark`, whole-unit
-values above each bar (they step aside at large text), bars grow 50ms apart.
+Day bars from real values: today in mint, others in `bandMark`, exact currency
+amounts above each bar. Long values and large text switch to labelled horizontal
+rows; zeros and fractional units stay visible. Bars grow 50ms apart.
 
 ```tsx
 <WeekTiles palette={band} moneySpec={moneySpec} accessibilityLabel={weekSpoken}
@@ -355,3 +356,12 @@ the Home harness suites (`journal-ui`, `home-refresh`, `reference-redesign`, …
 Harness stubs: `@/hooks/use-band`, `@/components/ui/band-scaffold` (renders
 `bandContent` then `children`), `@/components/ui/your-pattern` are registered
 in `reference-harness.cjs` and `journal-harness.cjs`.
+
+
+## Completed review refinements — 27 September 2026
+
+- Home's default sheet order is due payments, coming up, activity, Ask, then insights. Monthly Spending/Income/Net remains available below; saved custom Home ordering is preserved. Activity carries its selected period, and projected bill/subscription amounts are marked estimated.
+- Every monetary graph exposes exact amounts, currency and its dates without a tap. Merchant and bill history, Ask monthly answers, limit history and annual recap use readable labelled rows where narrow columns cannot fit. Limit reference markers and status meanings remain intact.
+- The Widgets screen previews Today and Coming up from the same snapshot as native widgets. Thirty-three recurring-service logo identities map to bundled artwork on iOS/Android; unknown or older identities retain a fallback. No logo network request is needed.
+- A small Today widget shows the exact seven-day total instead of an unreadable seven-bar strip. The Widgets screen provides every dated daily value in a full-width chart. Hidden, incomplete or unsafe totals remain unavailable. Lock Screen/StandBy amount redaction remains unchanged.
+- Web controls expose checked/selected/pressed states explicitly alongside native accessibility state. Pending onboarding transitions keep their actions disabled until they can execute.

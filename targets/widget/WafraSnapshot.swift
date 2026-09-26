@@ -29,7 +29,18 @@ enum WafraLanguage: String {
   }
 }
 
+/// Only these bundled identities may name an asset; JSON never supplies a file path or URL.
+enum WafraLogo {
+  static let ids: Set<String> = ["amazon", "netflix", "spotify", "youtube", "apple", "google", "claude", "github", "notion", "discord", "telegram", "dropbox", "osn", "anghami", "audible", "shahid", "chatgpt", "crunchyroll", "disney", "deezer", "playstation", "xbox", "zoom", "du", "etisalat", "dewa", "sewa", "careem", "talabat", "deliveroo", "noon", "uber", "vercel"]
+  static let monochrome: Set<String> = ["apple", "github", "notion", "uber", "vercel"]
+  static func validated(_ value: String?) -> String? {
+    guard let value, ids.contains(value) else { return nil }
+    return value
+  }
+}
+
 struct WafraBill: Hashable {
+  let logoId: String?
   let title: String
   let amountMinor: Int64?
   let estimated: Bool
@@ -56,6 +67,19 @@ struct WafraSnapshot {
   /// Screen widget draws a budget-used gauge; until then it shows the count.
   let budgetTotalMinor: Int64?
   let bills: [WafraBill]
+
+  /// Exact seven-day total; partial/hidden/overflowed data cannot invent a total.
+  var weekTotalMinor: Int64? {
+    guard !hidden, last7Minor.count == 7 else { return nil }
+    var total: Int64 = 0
+    for amount in last7Minor {
+      guard let amount else { return nil }
+      let next = total.addingReportingOverflow(amount)
+      guard !next.overflow, (-9_007_199_254_740_991...9_007_199_254_740_991).contains(next.partialValue) else { return nil }
+      total = next.partialValue
+    }
+    return total
+  }
 
   /// Young enough to draw at `date`.
   func isFresh(at date: Date) -> Bool {
@@ -126,17 +150,19 @@ private struct Tolerant<T: Decodable>: Decodable {
 }
 
 private struct RawBill: Decodable {
+  let logoId: String?
   let title: String?
   let amountMinor: Double?
   let estimated: Bool?
   let dueISO: String?
 
   enum CodingKeys: String, CodingKey {
-    case title, amountMinor, estimated, dueISO
+    case title, amountMinor, estimated, dueISO, logoId
   }
 
   init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
+    logoId = try? c.decodeIfPresent(String.self, forKey: .logoId)
     title = try? c.decodeIfPresent(String.self, forKey: .title)
     amountMinor = (try? c.decodeIfPresent(LenientNumber.self, forKey: .amountMinor))?.value
     estimated = try? c.decodeIfPresent(Bool.self, forKey: .estimated)
@@ -214,6 +240,7 @@ private struct RawSnapshot: Decodable {
         let due = WafraDates.parse(dueISO)
       else { return nil }
       return WafraBill(
+        logoId: WafraLogo.validated(bill.logoId),
         title: title,
         amountMinor: amount(bill.amountMinor),
         estimated: bill.estimated ?? false,
@@ -402,6 +429,7 @@ struct WafraStrings {
 
   private func pick(_ en: String, _ ar: String) -> String { language == .ar ? ar : en }
 
+  var last7Total: String { pick("Last 7 days", "آخر 7 أيام") }
   var today: String { pick("Today", "اليوم") }
   var tomorrow: String { pick("Tomorrow", "غداً") }
   var comingUp: String { pick("Coming up", "القادم") }

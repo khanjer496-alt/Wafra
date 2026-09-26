@@ -5,14 +5,14 @@ const { harness, walk, text } = require('./journal-harness.cjs');
 // Home B leads with Today; the period spending figure is the one inside home-spending-total.
 const periodMoney = (nodes) => walk(nodes.find((node) => node.props.testID === 'home-spending-total')).find((node) => node.type === 'Money');
 
-test('Home puts one spending summary and recent activity before capture controls', () => {
+test('Home leads with activity and keeps one period summary before capture controls', () => {
   const h = harness();
   const nodes = walk(h.tree);
   const section = (id) => nodes.findIndex((node) => node.props.testID === id);
   for (const id of ['journal-summary', 'home-widget-activity', 'journal-import-controls']) {
     assert.notEqual(section(id), -1, `${id} is rendered`);
   }
-  assert.ok(section('journal-summary') < section('home-widget-activity'));
+  assert.ok(section('home-widget-activity') < section('journal-summary'));
   assert.ok(section('home-widget-activity') < section('journal-import-controls'));
   assert.equal(periodMoney(nodes).props.fils, 508700);
   assert.match(text(h.tree), /View spending breakdown/);
@@ -127,17 +127,17 @@ test('Arabic and larger text render the same controls without English journal he
   assert.ok(walk(h.tree).some((node) => node.props.testID === 'journal-import-controls'));
 });
 
-test('Home places nonurgent upcoming payments after recent activity', () => {
+test('E Home places coming-up payments before activity and the monthly summary', () => {
   const nodes = walk(harness().tree);
   const at = (id) => nodes.findIndex((node) => node.props.testID === id);
   for (const id of ['journal-summary', 'home-widget-activity', 'home-widget-upcoming']) {
     assert.notEqual(at(id), -1, `${id} is rendered`);
   }
-  assert.ok(at('journal-summary') < at('home-widget-activity'));
+  assert.ok(at('home-widget-activity') < at('journal-summary'));
   assert.equal(at('reference-quick-actions'), -1);
   assert.equal(at('reference-month-cards'), -1);
   assert.equal(at('home-widget-due'), -1, 'the nonurgent fixture has no due-now payment');
-  assert.ok(at('home-widget-activity') < at('home-widget-upcoming'));
+  assert.ok(at('home-widget-upcoming') < at('home-widget-activity'));
 });
 test('known balances never replace spending or add another summary on Home', () => {
   const h = harness({ knownBalance: 3870000 });
@@ -160,4 +160,23 @@ test('Home does not duplicate import shortcuts; explicit capture control remains
     assert.equal(walk(h.tree).filter((n) => n.props.testID === 'reference-quick-actions').length, 0);
     assert.deepEqual(h.events, []);
   }
+});
+
+test('Home activity keeps its selected period visible before the lower monthly summary', () => {
+  const nodes = walk(harness().tree);
+  const scope = nodes.find(node => node.props.testID === 'home-activity-period');
+  assert.match(text(scope), /September 2026/);
+  assert.ok(nodes.indexOf(scope) < nodes.findIndex(node => node.props.testID === 'journal-summary'));
+});
+
+test('projected Home bills keep an explicit estimate and exact denominated amount', () => {
+  const nodes = walk(harness().tree);
+  const upcoming = nodes.find(node => node.props.testID === 'home-widget-upcoming');
+  const rows = walk(upcoming);
+  assert.match(text(upcoming), /≈/);
+  assert.ok(rows.some(node => node.type === 'Pressable' && /Estimated/.test(node.props.accessibilityLabel ?? '')));
+  const amount = rows.find(node => node.type === 'Money');
+  assert.equal(amount.props.fils, 38000);
+  assert.equal(amount.props.moneySpec.currency, 'AED');
+  assert.equal(amount.props.decimals, true);
 });

@@ -344,7 +344,9 @@ export default function ReviewTransfersScreen() {
     setNeedsDurability(false);
   };
 
-  const save = async (target: Selection | null = selection, oneTap = false) => {
+  // Pass the current preview explicitly. A default named `selection` plus the
+  // body-local binding below was misbound by the production web transform.
+  const save = async (target: Selection | null, oneTap = false) => {
     const selection = target;
     if (!selection || selection.ownership === undefined || saving.current || (!oneTap && stale)) return;
     // A retry does not enter the resolver again. Check its post-decision
@@ -508,7 +510,7 @@ export default function ReviewTransfersScreen() {
       testID="transfer-review-confirmation" onClose={closeReview} dismissible={!busy && (!needsDurability || stale)}
       footer={<View style={styles.actions}>
         {!selection.readOnly && <Button wrapLabel label={busy ? words.saving : needsDurability ? words.retrySave : selection.undo ? words.undo : selection.ownership === 'own' && selection.counterpart?.linkable ? words.linkOwn : words.confirm}
-          disabled={busy || stale || selection.ownership === undefined} onPress={() => void save()} />
+          disabled={busy || stale || selection.ownership === undefined} onPress={() => void save(selection)} />
         }
         <Button variant="ghost" label={selection.readOnly || selection.undo || needsDurability ? words.cancel : words.keepSeparate} disabled={busy || (needsDurability && !stale)} onPress={closeReview} />
       </View>}>

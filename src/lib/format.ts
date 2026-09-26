@@ -418,14 +418,28 @@ export function transactionTime(tx: { ts?: number; smsKey?: string }): Date | nu
 }
 
 /** "18 Jul 2026, 14:32" — the full stamp, for a detail view. */
-export function fullDateTime(tx: { date: string; ts?: number; smsKey?: string }): string {
+type DisplayClock = { ts?: number; smsKey?: string; textClock?: number; viaPush?: boolean };
+
+/**
+ * The clock to SHOW. A bank-app notification is posted — and sometimes
+ * re-posted — after the purchase, so its post time (`ts`, which matching
+ * rules rely on) can read minutes late. When the alert's own text stated the
+ * instant to the second, that is when it happened. Display only.
+ */
+export function displayTransactionTime(tx: DisplayClock): Date | null {
+  if (tx.viaPush === true && typeof tx.textClock === 'number' && Number.isSafeInteger(tx.textClock) &&
+    tx.textClock >= 0) return new Date(tx.textClock);
+  return transactionTime(tx);
+}
+
+export function fullDateTime(tx: { date: string } & DisplayClock): string {
   const day = new Date(`${tx.date}T12:00:00`);
   const stamp = day.toLocaleDateString(getLanguage() === 'ar' ? 'ar-AE' : 'en-GB', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
   });
-  const at = transactionTime(tx);
+  const at = displayTransactionTime(tx);
   if (!at) return stamp;
   const hh = String(at.getHours()).padStart(2, '0');
   const mm = String(at.getMinutes()).padStart(2, '0');
@@ -433,8 +447,8 @@ export function fullDateTime(tx: { date: string; ts?: number; smsKey?: string })
 }
 
 /** "14:32", or empty when the row carries no clock. */
-export function clockTime(tx: { ts?: number; smsKey?: string }): string {
-  const at = transactionTime(tx);
+export function clockTime(tx: DisplayClock): string {
+  const at = displayTransactionTime(tx);
   if (!at) return '';
   return `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
 }

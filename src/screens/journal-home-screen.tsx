@@ -13,6 +13,7 @@ import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { BillDetailSheet } from '@/components/bill-detail-sheet';
 import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { Icon } from '@/components/ui/icon';
+import { Money } from '@/components/ui/money';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { ReferenceHomeBand, ReferenceHomeSummary } from '@/components/reference-home-summary';
 import { HOME_ADD_BUTTON_CLEARANCE, HomeAddButton } from '@/components/home-add-button';
@@ -21,6 +22,7 @@ import { TransferReviewNotice } from '@/components/transfer-review-notice';
 import { RecapLogoTrigger } from '@/components/recap/recap-logo-trigger';
 import { BandScaffold } from '@/components/ui/band-scaffold';
 import { YourPattern } from '@/components/ui/your-pattern';
+import { WidgetsHint } from '@/components/widgets/widgets-hint';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
 import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import';
@@ -33,18 +35,19 @@ import type { Insight } from '@/lib/insights';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
-import { formatAmount, monthEndISO, monthKey, monthStartISO } from '@/lib/format';
+import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
-import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { formatMoneyText, ledgerMoneySpec } from '@/lib/ledger-money';
 import { isSpending, liveAccountIds, transferReconciliationForState } from '@/lib/ledger';
 import { hasRecordsBefore, liveCaptureTimes, pendingTransferSummary, summarizeHomeToday, type PendingTransferSummary } from '@/lib/home-today';
 import { detectCapturePause } from '@/lib/capture-pause';
 import { loadCapturePauseSnooze, saveCapturePauseSnooze } from '@/lib/capture-pause-state';
 import { isLiveCapture } from '@/lib/transaction-source';
-import { homeSummaryCopy } from '@/lib/reference-copy';
+import { homeSummaryCopy, paymentAgendaCopy } from '@/lib/reference-copy';
 import { buildWidgetSnapshot } from '@/lib/widget-snapshot';
+import { widgetMonthToday, widgetUpcomingInput } from '@/lib/widget-ledger';
 import { clearWidgetSnapshot, setWidgetSnapshot } from '../../modules/wafra-widgets';
 import { allocationsOf } from '@/lib/splits';
 import { isFixedCommitment } from '@/lib/categories';
@@ -70,7 +73,7 @@ import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 /** Presentation-only vocabulary; every amount still comes from the shared ledger. */
 const copy = {
   en: { journal: 'Your money, in view', month: 'THIS PERIOD', activity: 'Recent transactions',
-    add: 'Add an entry', breakdown: 'View spending', upcoming: 'Upcoming',
+    add: 'Add an entry', breakdown: 'View spending', upcoming: 'Coming up',
     import: 'Bank alerts', paused: 'History import paused', resume: 'Resume',
     more: 'View all payments', accounts: 'Your accounts',
     income: 'Money in', spent: 'Spent', netNote: 'Income minus spending · not your bank balance',
@@ -157,6 +160,7 @@ export default function JournalHomeScreen() {
   const [captureSnoozedAt, setCaptureSnoozedAt] = useState<number | null>(null);
   const [budgetSheetOpen, setBudgetSheetOpen] = useState(false);
   const summaryWords = homeSummaryCopy[language === 'ar' ? 'ar' : 'en'];
+  const paymentWords = paymentAgendaCopy[language === 'ar' ? 'ar' : 'en'];
   // The clock is refreshed on every foreground resume for greeting/review
   // freshness, but Home's money projections are day-based. Keep the derived
   // day key above every effect that depends on it so recap discovery and the
@@ -317,20 +321,13 @@ export default function JournalHomeScreen() {
   const widgetToday = useMemo(() => {
     const currentKey = monthKey(now);
     if (period.mode === 'month' && period.key === currentKey) return homeToday;
-    const live = liveAccounts as Set<string>;
-    const internal = dashboard.internalTransactionIds as Set<string>;
-    const current = { mode: 'month', key: currentKey } as const;
-    return summarizeHomeToday({
+    // The same live-month summary the Widgets screen previews.
+    return widgetMonthToday({
       transactions: state.transactions,
       budgets: state.budgets,
       now,
-      isSpending: (transaction) => isSpending(transaction, live, internal),
-      inBudgetPeriod: (dateISO) => inPeriod(dateISO, current),
-      budgetPeriodStartISO: monthStartISO(currentKey),
-      budgetPeriodEndISO: monthEndISO(currentKey),
-      allocations: allocationsOf,
-      isFixedCommitment,
-      averageWindow: null,
+      liveAccounts,
+      internalIds: dashboard.internalTransactionIds,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [homeToday, state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
@@ -345,8 +342,7 @@ export default function JournalHomeScreen() {
         exponent: moneySpec.exponent,
         now: new Date(),
         // Card statements are exact; bills and subscriptions are projections.
-        upcoming: payments.map((item) => ({ title: item.title, amountFils: item.amountFils, dateISO: item.dateISO,
-          overdue: item.overdue, estimated: item.kind !== 'card' })),
+        upcoming: widgetUpcomingInput(payments),
         hideAmounts: false,
         language: language === 'ar' ? 'ar' : 'en',
       })));
@@ -646,15 +642,21 @@ export default function JournalHomeScreen() {
       return <View key={id} style={styles.section} testID={`home-widget-${id}`}>
         <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{id === 'due' ? t('homeWidgetDueTitle') : words.upcoming}</ThemedText>
           <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" accessibilityLabel={words.more} style={styles.smallAction}><Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
-        <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{due.slice(0, 2).map(item => <Pressable key={item.id} accessibilityRole="button" onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
+        <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{due.slice(0, 2).map(item => <Pressable key={item.id} accessibilityRole="button"
+          accessibilityLabel={`${item.title}. ${daysPhrase(item.daysLeft)}. ${item.kind !== 'card' ? `${paymentWords.estimate} ` : ''}${formatMoneyText(item.amountFils, moneySpec, { decimals: true })}`}
+          onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
           {/* Every payee row keeps its logo tile; the category glyph is only the fallback. */}
-          <MerchantAvatar title={item.title} category={item.subscription?.category ?? 'other'} size={36} />
+          <MerchantAvatar title={item.title} category={item.subscription?.category ?? 'other'} size={40} />
           <View style={styles.grow}><ThemedText type="smallBold">{item.title}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{daysPhrase(item.daysLeft)}</ThemedText></View>
-          <ThemedText type="smallBold" tabular style={largeText && styles.paymentAmountStacked}>{formatAmount(item.amountFils)}</ThemedText></Pressable>)}</View>
+          <View style={[styles.paymentMoney, largeText && styles.paymentAmountStacked]}>
+            {item.kind !== 'card' ? <ThemedText type="meta" style={{ color: band.textSecondary }}>≈</ThemedText> : null}
+            <Money fils={item.amountFils} moneySpec={moneySpec} type="smallBold" decimals color={band.text} />
+          </View></Pressable>)}</View>
       </View>;
     }
     return <View key={id} style={styles.section} testID="home-widget-activity">
-      <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.activity}</ThemedText>
+      <View style={styles.sectionHeading}><View style={styles.activityHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.activity}</ThemedText>
+        <ThemedText testID="home-activity-period" type="meta" style={{ color: band.textSecondary }}>{periodLabel(period)}</ThemedText></View>
         <Pressable onPress={() => router.push('/transactions')} accessibilityRole="button" style={styles.smallAction}><Icon name="search" size={18} color={theme.text} /><ThemedText type="meta">{t('allActivity')}</ThemedText></Pressable></View>
       <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{dashboard.activityRows.slice(0, 5).map(transaction =>
         <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />)}</View>
@@ -709,13 +711,12 @@ export default function JournalHomeScreen() {
         {/* Notices that change how the band's figures read come first on the sheet. */}
         {captureStoppedNotice}
         {transferNotice}
-        {/* The period's reconciled figures: spending, income and net. */}
-        <ReferenceHomeSummary {...summaryProps} />
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}
         {moneyPicture
           ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
           : history ? <HistoryReadingStatus progress={history} onResume={retryHistory} /> : null}
+
 
         {captureSetUp && !hasLiveCapture && !history ? <View testID="home-capture-ready" accessible accessibilityRole="text"
           accessibilityLabel={`${Platform.OS === 'android' ? summaryWords.readyAndroid : summaryWords.readyIos}. ${summaryWords.readyBody}`}
@@ -745,7 +746,16 @@ export default function JournalHomeScreen() {
           </View>
         </View> : null}
 
+        {/* E Home leads with upcoming payments and activity. Saved custom
+            widget order is respected; monthly totals remain available below. */}
         {homeWidgets.order.map(renderWidget)}
+        <View style={[styles.periodSummary, { borderTopColor: band.rule }]}>
+          <ReferenceHomeSummary {...summaryProps} />
+        </View>
+        {/* One dismissable pointer to the Widgets screen, after a week of capture. */}
+        <WidgetsHint hydrated={state.hydrated} onboarded={state.onboarded} captureSetUp={captureSetUp}
+          captureStopped={captureStopped} firstDays={moneyPicture !== null || history !== null || offerPast}
+          transactions={state.transactions} now={now} palette={band} />
 
         <View style={[styles.captureFooter, { borderTopColor: theme.cardBorder }]} testID="journal-import-controls">
           <Pressable accessibilityRole="button" accessibilityLabel={`${words.import}. ${captureLabel}`}
@@ -790,10 +800,11 @@ const styles = StyleSheet.create({
   // not squeezed into breaking mid-word beside the figure.
   paymentAmountStacked: { flexBasis: '100%' },
   section: { paddingTop: 2, paddingBottom: 0 },
+  activityHeading: { flex: 1, minWidth: 0, gap: 4 },
   sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 2 },
-  sectionTitle: { fontSize: 17, lineHeight: 24 },
+  sectionTitle: { fontSize: 20, lineHeight: 26 },
   smallAction: { minHeight: 48, minWidth: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
-  cardGroup: { borderTopWidth: 1, overflow: 'hidden' },
+  cardGroup: { overflow: 'hidden' },
   dateLabel: { flexDirection: 'row', gap: 8, alignItems: 'center', paddingTop: 12, paddingBottom: 0 },
   dateDot: { height: 4, width: 4, borderRadius: 2 },
   dateRule: { height: StyleSheet.hairlineWidth, flex: 1 },
@@ -801,6 +812,8 @@ const styles = StyleSheet.create({
   paymentRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, minHeight: 74, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   paymentDate: { width: 38, height: 38, borderWidth: 0, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   paymentAmount: { flexShrink: 1 },
+  paymentMoney: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 4, marginStart: 'auto' },
+  periodSummary: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 24 },
   inlineAction: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start' },
   captureFooter: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 14, marginTop: 16, paddingBottom: 16 },
   captureRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 },

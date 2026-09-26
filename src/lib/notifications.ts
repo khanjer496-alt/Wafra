@@ -18,6 +18,11 @@ import { t } from '@/lib/i18n';
 import { historyImportIncomplete } from '@/lib/history-import';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { buildPaymentReminders, MAX_REMINDERS } from '@/lib/reminders';
+import {
+  applyReminderPlan,
+  createLatestWinsRunner,
+  type ReminderSchedulerApi,
+} from '@/lib/reminder-schedule';
 import { recordRuntimeOperation } from '@/lib/runtime-performance';
 import { detectSubscriptionsCooperatively, type Subscription } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
@@ -29,6 +34,20 @@ const SUMMARY_CHANNEL_ID = 'daily-summary';
 const SUMMARY_ID = 'wafra-daily-summary';
 
 let handlerConfigured = false;
+
+// A summary can be requested by Home, onboarding, Settings or the reminder
+// sync. Keep its consent generation separate from the payment-reminder run.
+// Only OS mutations are queued: disabling must not wait for an older
+// permission lookup or channel setup before it can cancel the current digest.
+let summaryGeneration = 0;
+let summaryMutation: Promise<void> = Promise.resolve();
+function mutateSummary(generation: number, action: () => Promise<void>): Promise<void> {
+  const next = summaryMutation.catch(() => {}).then(async () => {
+    if (generation === summaryGeneration) await action();
+  });
+  summaryMutation = next;
+  return next;
+}
 
 function configureHandler() {
   if (handlerConfigured) return;
@@ -152,16 +171,52 @@ export async function requestSilentCapturePermission(): Promise<boolean> {
   return notificationsAllowed(asked);
 }
 
+/** The OS half of `applyReminderPlan`: expo-notifications, keyed by identifier. */
+const reminderScheduler: ReminderSchedulerApi = {
+  getAllScheduled: () => Notifications.getAllScheduledNotificationsAsync(),
+  cancel: (identifier) => Notifications.cancelScheduledNotificationAsync(identifier),
+  schedule: async (identifier, n) => {
+    await Notifications.scheduleNotificationAsync({
+      identifier,
+      content: { title: n.title, body: n.body },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: n.date,
+        channelId: Platform.OS === 'android' ? CHANNEL_ID : undefined,
+      },
+    });
+  },
+};
+
+/** One sync at a time; the newest request wins. See reminder-schedule.ts. */
+const runReminderSync = createLatestWinsRunner(
+  ({ state, now, summaryGenerationAtRequest }: { state: AppState; now: Date; summaryGenerationAtRequest: number }, isCurrent: () => boolean) =>
+    syncPaymentRemindersNow(state, now, isCurrent, summaryGenerationAtRequest),
+);
+
 /**
- * Rebuilds all scheduled payment reminders from current state. Idempotent:
- * cancels everything and re-schedules the next ~30 days of bill due dates,
- * card pay-by dates, and subscription renewals.
+ * Rebuilds the scheduled payment reminders from current state: the next ~30
+ * days of bill due dates, card pay-by dates, and subscription renewals.
+ *
+ * Idempotent and safe to call from anywhere, concurrently: calls are
+ * serialised with the newest state winning, and every reminder has a stable
+ * identifier so re-scheduling replaces rather than stacks. Only reminders are
+ * cancelled — the nightly summary is left in place.
  *
  * The plan — dates, titles, bodies, ordering and the cap — comes from
- * `buildPaymentReminders`. This loop only speaks to the OS.
+ * `buildPaymentReminders`. This file only speaks to the OS.
  */
-export async function syncPaymentReminders(state: AppState, now: Date = new Date()): Promise<void> {
-  if (Platform.OS === 'web') return;
+export function syncPaymentReminders(state: AppState, now: Date = new Date()): Promise<void> {
+  if (Platform.OS === 'web') return Promise.resolve();
+  return runReminderSync({ state, now, summaryGenerationAtRequest: summaryGeneration });
+}
+
+async function syncPaymentRemindersNow(
+  state: AppState,
+  now: Date,
+  isCurrent: () => boolean,
+  summaryGenerationAtRequest: number,
+): Promise<void> {
   const historyBusy = Platform.OS === 'android' && historyImportIncomplete(state.historyImport);
   configureHandler();
   // Not `perms.granted` — see notificationsAllowed. An iOS device that went
@@ -205,20 +260,19 @@ export async function syncPaymentReminders(state: AppState, now: Date = new Date
     }
   }
 
-  await Notifications.cancelAllScheduledNotificationsAsync();
+  if (!isCurrent()) return;
 
-  for (const n of buildPaymentReminders(state, now, MAX_REMINDERS, detectedSubscriptions)) {
-    await Notifications.scheduleNotificationAsync({
-      content: { title: n.title, body: n.body },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: n.date,
-        channelId: Platform.OS === 'android' ? CHANNEL_ID : undefined,
-      },
-    });
-  }
+  const plan = buildPaymentReminders(state, now, MAX_REMINDERS, detectedSubscriptions);
+  if ((await applyReminderPlan(reminderScheduler, plan, isCurrent)) === 'superseded') return;
 
-  if (!historyBusy) await syncDailySummary(state, now);
+  // The summary is no longer collateral damage of a reminder rebuild, so while
+  // a history import is busy the one already scheduled simply stays. When the
+  // toggle is off, make sure none is left behind.
+  // A direct Settings cancellation (or newer summary) supersedes the
+  // summary work of a reminder request that was queued before it.
+  if (!isCurrent() || summaryGenerationAtRequest !== summaryGeneration) return;
+  if (!state.dailySummary) await cancelDailySummary();
+  else if (!historyBusy) await syncDailySummary(state, now);
 }
 
 /** The hour the day's summary is posted. Late enough to be the whole day. */
@@ -235,17 +289,17 @@ export const SUMMARY_HOUR = 21;
  * last time the app ran an import, so a charge that arrives after the last
  * scan of the day is in tomorrow's summary, not tonight's.
  *
- * Cancelled and rebuilt rather than updated, for the same reason
- * `syncPaymentReminders` does it: there is no way to ask expo-notifications
- * whether a given notification is still pending and still says the right
- * thing, and two summaries for one evening is a worse failure than one that is
- * a few minutes stale.
+ * Replaced under one fixed identifier rather than updated, for the same reason
+ * payment reminders are: scheduling again under the same identifier swaps the
+ * pending notification atomically, so there can never be two summaries for
+ * one evening.
  */
 export async function syncDailySummary(state: AppState, now: Date = new Date()): Promise<void> {
   if (Platform.OS === 'web') return;
-  if (!state.dailySummary) return;
+  if (!state.dailySummary) return cancelDailySummary();
+  const generation = ++summaryGeneration;
   configureHandler();
-  if (!notificationsAllowed(await Notifications.getPermissionsAsync())) return;
+  if (!notificationsAllowed(await Notifications.getPermissionsAsync()) || generation !== summaryGeneration) return;
 
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync(SUMMARY_CHANNEL_ID, {
@@ -254,6 +308,7 @@ export async function syncDailySummary(state: AppState, now: Date = new Date()):
     });
   }
 
+  if (generation !== summaryGeneration) return;
   const at = new Date(now);
   at.setHours(SUMMARY_HOUR, 0, 0, 0);
   // Past nine already: there is nothing left to schedule for today, and
@@ -262,21 +317,30 @@ export async function syncDailySummary(state: AppState, now: Date = new Date()):
   if (at.getTime() <= now.getTime()) return;
 
   const summary = buildDailySummary(state, toISODate(now));
-  if (!summary) return;
+  // Nothing spent today (for instance the only charge was deleted): a summary
+  // scheduled earlier with that charge in it must not still fire tonight. A
+  // reminder rebuild used to clear it as a side effect; now this does.
+  if (!summary) {
+    await mutateSummary(generation, () => Notifications.cancelScheduledNotificationAsync(SUMMARY_ID).catch(() => {}));
+    return;
+  }
 
-  await Notifications.scheduleNotificationAsync({
-    identifier: SUMMARY_ID,
-    content: { title: summary.title, body: summary.body },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DATE,
-      date: at,
-      channelId: Platform.OS === 'android' ? SUMMARY_CHANNEL_ID : undefined,
-    },
+  await mutateSummary(generation, async () => {
+    await Notifications.scheduleNotificationAsync({
+      identifier: SUMMARY_ID,
+      content: { title: summary.title, body: summary.body },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        date: at,
+        channelId: Platform.OS === 'android' ? SUMMARY_CHANNEL_ID : undefined,
+      },
+    });
   });
 }
 
 /** Drop tonight's summary — the toggle going off has to take effect now. */
 export async function cancelDailySummary(): Promise<void> {
   if (Platform.OS === 'web') return;
-  await Notifications.cancelScheduledNotificationAsync(SUMMARY_ID).catch(() => {});
+  const generation = ++summaryGeneration;
+  await mutateSummary(generation, () => Notifications.cancelScheduledNotificationAsync(SUMMARY_ID).catch(() => {}));
 }

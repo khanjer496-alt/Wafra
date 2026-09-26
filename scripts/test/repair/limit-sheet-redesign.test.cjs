@@ -25,7 +25,7 @@ test('limit sheet shows three full months and this month against the limit line,
   assert.match(bars[3].props.accessibilityLabel, /September 2026 so far, AED 620/);
   assert.ok(byId(history, 'limit-line'), 'the limit is drawn as a line');
   // The usual is the existing complete-three-month average, not this month.
-  assert.match(text(byId(history, 'limit-usual')), /Your usual is about AED 4,840\.\s+This limit is below what you usually spend\./);
+  assert.match(text(byId(history, 'limit-usual')), /Your usual is about AED 4,840(?:\.00)?\.\s+This limit is below what you usually spend\./);
 });
 
 test('the dial and its steppers move the limit by a currency-sized step and never below one step', () => {
@@ -84,7 +84,7 @@ test('a ledger that began last month shows that month as the usual, with no 3-mo
   const transactions = [...withHistoryFrom(base, '2026-08-01'),
     { id: 'first', title: 'Cafe', amountFils: 1_000, category: 'other', date: '2026-07-20', type: 'expense', accountId: 'enbd', source: 'sms' }];
   const h = sheet({ states: { [TEXT]: '1500' }, state: { transactions } });
-  assert.match(text(byId(h.tree, 'limit-usual')), /Your usual is about AED 4,960\.\s+This limit is below what you usually spend\./);
+  assert.match(text(byId(h.tree, 'limit-usual')), /Your usual is about AED 4,960(?:\.00)?\.\s+This limit is below what you usually spend\./);
   assert.doesNotMatch(text(h.tree), /your 3-month average/);
   // History from this month only: no complete month, so no usual and no advice.
   const fresh = sheet({ states: { [TEXT]: '1500' }, state: { transactions: withHistoryFrom(base, '2026-08-02') } });

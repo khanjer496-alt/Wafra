@@ -42,6 +42,8 @@ export interface BandAction {
 export interface BandNav {
   /** A back chevron. `true` pops the route; a function replaces that. */
   back?: boolean | (() => void);
+  /** A pending protected action may temporarily prevent leaving the screen. */
+  backDisabled?: boolean;
   /** A close cross instead of back, for modal flows. */
   close?: () => void;
   /** Short screen name beside the back control. Headlines belong in the band. */
@@ -116,7 +118,8 @@ export function BandNavRow({ nav, palette }: { nav: BandNav; palette: BandPalett
   const largeText = useLargeTextLayout();
   const onBack = typeof nav.back === 'function' ? nav.back : nav.back ? () => router.back() : undefined;
   const lead = onBack ? <Pressable testID="band-back" accessibilityRole="button" accessibilityLabel={words.back}
-    onPress={onBack} style={({ pressed }) => [styles.navControl, { opacity: pressed ? 0.6 : 1 }]}>
+    disabled={nav.backDisabled} accessibilityState={{ disabled: nav.backDisabled === true }}
+    onPress={onBack} style={({ pressed }) => [styles.navControl, { opacity: nav.backDisabled ? 0.45 : pressed ? 0.6 : 1 }]}>
     <Icon name="chevron-left" size={24} color={palette.onBand} strokeWidth={2.2} />
   </Pressable> : nav.close ? <Pressable testID="band-close" accessibilityRole="button" accessibilityLabel={words.close}
     onPress={nav.close} style={({ pressed }) => [styles.navControl, { opacity: pressed ? 0.6 : 1 }]}>

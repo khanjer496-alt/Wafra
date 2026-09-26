@@ -178,6 +178,17 @@ export interface Transaction {
    * fingerprint, which has always had the timestamp baked into it.
    */
   ts?: number;
+  /**
+   * The second-precision event clock the alert TEXT stated (epoch ms), when it
+   * stated exactly one — see capture-source-identity.ts alertTextClock.
+   *
+   * Unlike `ts`, which may be a provider/post time bound into an SMS source
+   * identity, this is the event's own identity: every re-post of one bank
+   * notification carries the same value, and two genuine identical purchases
+   * carry two. Absent on rows captured before it existed and on alerts that
+   * state no seconds; nothing may be inferred from its absence.
+   */
+  textClock?: number;
   /** Where this entry came from. Undefined = manual (pre-v2 data). */
   source?: 'sms' | 'manual';
   /**
@@ -196,6 +207,15 @@ export interface Transaction {
   viaPush?: boolean;
   /** Local notification queue receipt, never a bank-event/deduplication identity. */
   notificationObservationId?: string;
+  /**
+   * Opaque digest of the bank event the alert text stated to the second
+   * (dedupe.ts captureEventIdentity: bank, card, direction, amount, explicit
+   * clock with seconds, remaining money figures). Lets a re-posted bank-app
+   * notification, or the SMS about it, be recognised as the same event
+   * whenever it arrives. Absent on rows whose alert stated no such clock and
+   * on every row imported before it existed.
+   */
+  captureEventIdentity?: string;
   /**
    * An Apple Pay (Wallet) row the user confirmed ("Already recorded") is the
    * same purchase as a bank Message, whose identity it now carries. It stays
@@ -940,6 +960,8 @@ export interface TxHealUpdate {
   accountId?: string;
   /** Replace the push clock/fingerprint with the bank SMS identity. */
   ts?: number;
+  /** The replacing alert's own stated event clock; identity-only, like ts. */
+  textClock?: number;
   smsKey?: string;
   viaPush?: boolean;
   /** Set by the strict Wallet binding: identity-only, like smsKey/ts. */

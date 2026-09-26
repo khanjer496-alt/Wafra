@@ -1000,6 +1000,11 @@ const S = {
   percentPaid: { en: '{percent}% paid', ar: 'دُفع {percent}٪' },
   paymentsMade: { en: 'Payments made', ar: 'الدفعات المسددة' },
   reminderSet: { en: 'Reminder set', ar: 'تم ضبط التذكير' },
+  reminderFailed: { en: 'Reminder not set', ar: 'لم يُضبط التذكير' },
+  reminderFailedBody: {
+    en: 'Your phone didn’t accept the reminder. Try again in a moment.',
+    ar: 'لم يقبل هاتفك التذكير. حاول مرة أخرى بعد قليل.',
+  },
   cardReminderBody: { en: 'You will be reminded three days before {date}, and again on the day.', ar: 'سنذكّرك قبل {date} بثلاثة أيام، ومرة أخرى في يوم الاستحقاق.' },
   fileCardPaymentBody: { en: 'Files a {amount} payment to {name} today.', ar: 'يسجّل دفعة بقيمة {amount} إلى {name} اليوم.' },
   paidOfTotal: { en: 'Paid {paid} of {total}', ar: 'دُفع {paid} من {total}' },

@@ -219,12 +219,20 @@ struct WafraTodayView: View {
     .widgetURL(WafraShared.appURL)
   }
 
-  // Week bars from real figures at the top; the one figure that matters sits
-  // low on the band, as in the Home header.
+  // A readable exact seven-day total replaces the unlabeled miniature graph.
   private func content(_ snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand) -> some View {
     VStack(alignment: .leading, spacing: 0) {
-      WafraWeekBars(snapshot: snapshot, band: band)
-        .frame(height: 22)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(strings.last7Total)
+          .font(.caption)
+          .foregroundColor(band.onBandSecondary)
+        Text(WafraMoney.format(snapshot.weekTotalMinor, in: snapshot))
+          .font(.caption.weight(.semibold).monospacedDigit())
+          .foregroundColor(band.onBand)
+          .lineLimit(2)
+          .wafraAmount(snapshot)
+          .modifier(HiddenAmountLabel(label: snapshot.weekTotalMinor == nil ? strings.amountHidden : nil))
+      }
       Spacer(minLength: 6)
       VStack(alignment: .leading, spacing: 0) {
         Text(strings.today)
@@ -347,51 +355,6 @@ struct WafraLeftLine: View {
   }
 }
 
-/// Seven days ending today, oldest first; today in mint. The bar heights
-/// reveal relative spending, so they are redacted with the amounts.
-struct WafraWeekBars: View {
-  let snapshot: WafraSnapshot
-  let band: WafraBand
-
-  var body: some View {
-    let days = snapshot.last7Minor
-    let known = days.compactMap { $0 }.map { max(0, $0) }
-    let peak = known.max() ?? 0
-    GeometryReader { proxy in
-      HStack(alignment: .bottom, spacing: 4) {
-        ForEach(0..<7, id: \.self) { index in
-          let value = index < days.count ? days[index] : nil
-          let isToday = index == 6
-          RoundedRectangle(cornerRadius: 2, style: .continuous)
-            .fill(isToday ? band.accent : band.mark)
-            .frame(height: barHeight(value, peak: peak, full: proxy.size.height))
-            .frame(maxWidth: .infinity)
-            .modifier(AccentableIf(isToday))
-        }
-      }
-      .frame(maxHeight: .infinity, alignment: .bottom)
-    }
-    .wafraAmount(snapshot)
-    .accessibilityHidden(true)
-  }
-
-  private func barHeight(_ value: Int64?, peak: Int64, full: CGFloat) -> CGFloat {
-    let floor: CGFloat = 2
-    guard let value, value > 0, peak > 0 else { return floor }
-    let ratio = CGFloat(Double(value) / Double(peak))
-    return max(floor, full * ratio)
-  }
-}
-
-private struct AccentableIf: ViewModifier {
-  let enabled: Bool
-  init(_ enabled: Bool) { self.enabled = enabled }
-
-  func body(content: Content) -> some View {
-    content.widgetAccentable(enabled)
-  }
-}
-
 // MARK: - Coming up (systemMedium, ochre band)
 
 struct WafraComingUpView: View {
@@ -446,7 +409,7 @@ struct WafraComingUpView: View {
     VStack(alignment: .leading, spacing: 6) {
       ForEach(bills, id: \.self) { bill in
         HStack(spacing: 10) {
-          WafraMerchantTile(title: bill.title, band: band)
+          WafraMerchantTile(title: bill.title, logoId: bill.logoId, band: band)
           VStack(alignment: .leading, spacing: 0) {
             Text(bill.title)
               .font(.footnote.weight(.semibold))
@@ -479,18 +442,25 @@ struct WafraComingUpView: View {
   }
 }
 
-/// The bill's merchant tile: its initial on the band's own tone (the widget
-/// has no logo images; the snapshot carries titles only). A title with no
-/// letter shows a plain calendar glyph.
+/// Offline bundled logo when the snapshot carries an allowlisted identity.
+/// Older/unknown identities keep their initial, or a calendar for masked cards.
 struct WafraMerchantTile: View {
   let title: String
+  let logoId: String?
   let band: WafraBand
 
   var body: some View {
     ZStack {
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .fill(band.tile)
-      if let initial = WafraInitial.of(title) {
+      if let id = WafraLogo.validated(logoId) {
+        Image("wafra_logo_" + id)
+          .renderingMode(WafraLogo.monochrome.contains(id) ? .template : .original)
+          .resizable()
+          .scaledToFit()
+          .frame(width: 22, height: 22)
+          .foregroundColor(band.onBand)
+      } else if let initial = WafraInitial.of(title) {
         Text(initial)
           .font(.system(size: 14, weight: .bold))
           .foregroundColor(band.onBand)

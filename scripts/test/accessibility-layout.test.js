@@ -249,8 +249,8 @@ ok('Spending categories provide localized spending and limit equivalents',
  /accessibilityLabel=\{`\$\{categoryLabel\(row\.category, language\)\}[\s\S]*?row\.spentFils[\s\S]*?row\.limitFils/.test(spendingOverview));
 ok('Flow trend months expose cashflow descriptions and selected state',
  /accessibilityLabel=\{monthDescription\(month\)\}/.test(spendingTrends) && /accessibilityState=\{\{ selected: month\.key === p\.selectedKey \}\}/.test(spendingTrends));
-ok('Flow retains selected month context and large-text list',
- /accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)[\s\S]*?monthFigures\(selected\)/.test(spendingTrends) && /!showAllTrendLabels &&[\s\S]*?p\.months\.map/.test(spendingTrends));
+ok('Flow retains selected month context and always-visible exact figures',
+ /accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)[\s\S]*?monthFigures\(selected\)/.test(spendingTrends) && /testID="cashflow-month-details"[\s\S]*?p\.months\.map/.test(spendingTrends));
 ok('Flow uses shared shell and Stats redirects into Trends',
  /<BandScaffold band="spending" tabbed/.test(flow) && /<Redirect href="\/flow\?view=trends"/.test(stats));
 ok('shared charts consume the semantic data-visualization palette',

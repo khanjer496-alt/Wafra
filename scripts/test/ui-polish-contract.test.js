@@ -233,7 +233,7 @@ assert.match(overview,/<LimitStatusBar spentMinor=\{row\.spentFils\} limitMinor=
 assert.match(trends,/accessibilityLabel=\{monthDescription\(month\)\}/);
 assert.match(trends,/accessibilityState=\{\{ selected: month\.key === p\.selectedKey \}\}/);
 assert.match(trends,/accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)/);
-assert.match(trends,/!showAllTrendLabels &&[\s\S]*?p\.months\.map/);
+assert.match(trends,/testID="cashflow-month-details"[\s\S]*?p\.months\.map/);
 assert.match(trends,/backgroundColor: theme\.primary/);
 assert.match(trends,/backgroundColor: theme\.expenseGraphic/);
 
@@ -447,13 +447,15 @@ assert.match(task7Pro, /if \(!legalReady\)[\s\S]*?purchaseLegalMissingBody/);
 assert.match(task7Pro, /entitled \? \([\s\S]*?manageSubscription[\s\S]*?proContinue[\s\S]*?: \([\s\S]*?buySelectedPlan\(\)[\s\S]*?restorePurchase/);
 
 const task8Routes = [
-  ['accuracy', 'accuracyHeader'],
-  // Categorise, Currency, Review, Feedback and Trusted devices moved onto their
-  // bands (design language E); each band screen is asserted where it is restyled.
+  // Accuracy, Categorise, Currency, Review, Feedback and Trusted devices moved
+  // onto their bands (design language E); each band screen is asserted where
+  // it is restyled.
 ];
-// Design language E: Feedback (green) and Trusted devices (slate) are band
-// screens; the band's nav row holds Back and the plain title sits on the band.
-for (const [route, band, nav] of [['feedback', 'flow', 'feedbackNav'], ['trusted-devices', 'accounts', 'trustedNav']]) {
+// Design language E: Feedback (green), Trusted devices (slate) and Improve
+// accuracy (sand) are band screens; the band's nav row holds Back and the
+// plain title sits on the band.
+for (const [route, band, nav] of [['feedback', 'flow', 'feedbackNav'], ['trusted-devices', 'accounts', 'trustedNav'],
+  ['accuracy', 'settings', 'accuracyNav']]) {
   const source = read(`src/app/${route}.tsx`);
   assert.match(source, new RegExp(`const ${nav}: BandNav = \\{ back: true`), `${route} lacks its band back control`);
   assert.match(source, new RegExp(`<BandScaffold[\\s\\S]*?band="${band}"[\\s\\S]*?nav=\\{${nav}\\}`), `${route} is not on its band`);

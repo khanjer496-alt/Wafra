@@ -253,3 +253,11 @@ test('PatternMosaic: one image called "Your pattern", a 6 × 2 grid, still under
   const arabic = setup({ language: 'ar', motion: 'reduced' });
   assert.equal(arabic.ui('@/components/ui/pattern-mosaic').PatternMosaic({ tiles }).props.accessibilityLabel, 'نمطك');
 });
+
+test('a protected pending action exposes Back as disabled to touch and screen readers', () => {
+  const s = setup();
+  const tree = scaffoldTree(s, { nav: { back: true, backDisabled: true } });
+  const back = walk(tree).find(node => node.props?.testID === 'band-back');
+  assert.equal(back.props.disabled, true);
+  assert.equal(back.props.accessibilityState.disabled, true);
+});

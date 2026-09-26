@@ -144,7 +144,10 @@ async function screen(t, options = {}) {
     'react-native': platform, '@/lib/i18n': copy,
     '@/components/themed-text': { ThemedText: 'Text' },
     '@/components/ui/controls': { Button: 'Button', Chip: 'Chip' },
-    '@/constants/theme': { Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
+    '@/components/ui/band/e-button': { EButton: 'Button' },
+    '@/components/ui/band-scaffold': { BandScaffold: 'BandScaffold' },
+    '@/hooks/use-band': { useBand: () => ({}) },
+    '@/constants/theme': { Spacing: {}, Radius: {}, Fonts: { sansSemi: 'Geist' }, ScreenPadding: 20, MaxContentWidth: 600 },
   };
   const Details = source('src/components/ios-message-setup/details-sheet.tsx', {
     ...ui, '@/components/ui/bottom-sheet': { BottomSheet: 'BottomSheet' },
@@ -193,7 +196,11 @@ async function screen(t, options = {}) {
       result.push(node);
       if (node.type === 'DetailsSheet') return visit(Details(node.props));
       if (node.type === 'ChecklistRow' && !node.props.expanded) return;
+      if (node.type === 'BandScaffold') {
+        visit(node.props.bandContent); visit(node.props.nav?.leading); visit(node.props.nav?.trailing);
+      }
       visit(node.props.children);
+      if (node.type === 'BandScaffold') visit(node.props.footer);
     };
     visit(tree); return result;
   };
@@ -201,6 +208,8 @@ async function screen(t, options = {}) {
     const label = copy.t(key), nodes = all();
     const item = nodes.find(node => node.type === 'Button' && node.props.label === label);
     if (item) return item.props;
+    const band = nodes.find(node => node.type === 'BandScaffold')?.props;
+    if (band?.nav?.back && label === copy.t('back')) return { label, disabled: band.nav.backDisabled, onPress: band.nav.back };
     const header = nodes.find(node => node.type === 'ScreenHeader')?.props;
     return [header?.back, ...(header?.actions ?? [])].find(action => action?.label === label);
   };

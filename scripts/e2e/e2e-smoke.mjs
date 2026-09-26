@@ -125,34 +125,6 @@ const tapTab = async (page, label) => {
  * assertions further down do sums on what they find.
  */
 
-/** Every leaf text run that is actually painted, with its box and colour. */
-const paintedText = (page) => page.evaluate(() => {
-  const out = [];
-  const seen = new Set();
-  for (const el of document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')) {
-    if (el.children.length) continue;
-    const s = (el.textContent || '').trim();
-    if (!s) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) continue;
-    if (r.bottom < 0 || r.top > window.innerHeight) continue;
-    const cx = Math.min(Math.max(r.x + r.width / 2, 0), window.innerWidth - 1);
-    const cy = Math.min(Math.max(r.y + r.height / 2, 0), window.innerHeight - 1);
-    const top = document.elementFromPoint(cx, cy);
-    if (!(top && (el.contains(top) || top.contains(el)))) continue;
-    const key = `${Math.round(r.y)}|${Math.round(r.x)}|${s}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({
-      t: s,
-      x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
-      // numberOfLines truncation shows as an ellipsis; overflow shows as a
-      // scrollWidth wider than the box. Both mean a figure the user cannot read.
-      clipped: el.scrollWidth > el.clientWidth + 1 || /…/.test(s),
-    });
-  }
-  return out;
-});
 
 /**
  * Text drawn on top of other text, within one screen.
@@ -197,14 +169,20 @@ const money = (s) => {
 
 /** The scheme the app is actually painting in, read off the page fill. */
 const paintedScheme = (page) => page.evaluate(() => {
-  let n = document.elementFromPoint(6, 300), bg = '';
-  while (n) {
-    const c = getComputedStyle(n).backgroundColor;
-    if (c && c !== 'rgba(0, 0, 0, 0)') { bg = c; break; }
-    n = n.parentElement;
+  // E bands intentionally stay dark or coloured in light mode. Read the
+  // current cream/dark detail sheet, not an arbitrary point on the band.
+  for (const sheet of [...document.querySelectorAll('[data-testid$="-sheet"]')].reverse()) {
+    const r = sheet.getBoundingClientRect();
+    const topEdge = Math.max(0, r.top), bottomEdge = Math.min(innerHeight, r.bottom);
+    if (r.width < 20 || bottomEdge - topEdge < 20) continue;
+    const top = document.elementFromPoint(Math.min(innerWidth - 2, r.x + r.width / 2), (topEdge + bottomEdge) / 2);
+    if (!top || !(sheet.contains(top) || top === sheet)) continue;
+    const bg = getComputedStyle(sheet).backgroundColor;
+    if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') continue;
+    const [red, green, blue] = bg.match(/\d+/g).map(Number);
+    return (red + green + blue) / 3 > 128 ? 'light' : 'dark';
   }
-  const [r, g, b] = (bg.match(/\d+/g) || [0, 0, 0]).map(Number);
-  return (r + g + b) / 3 > 128 ? 'light' : 'dark';
+  throw new Error('No exposed band sheet to verify the painted theme');
 });
 
 // The dev container ships Chromium at a fixed path; a CI runner installs it
@@ -215,6 +193,7 @@ const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark' });
+await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 let aborted = null;
@@ -242,7 +221,10 @@ const homePayments = await page.evaluate(() => {
     .filter(node => (node.textContent || '').trim()) // exclude empty section chevrons
     .map(node => {
       const leaves = [...node.querySelectorAll('div,span')].filter(n => !n.children.length && n.textContent.trim());
-      return { fields: leaves.map(n => n.textContent.trim()),
+      const text = leaves.map(n => n.textContent.trim());
+      // Money now paints its currency and exact digits separately; keep
+      // that complete visible amount together, including an estimate mark.
+      return { fields: [text[0], text[1], text.slice(2).join(' ')],
         clipped: leaves.some(n => n.scrollWidth > n.clientWidth + 1 || /…/.test(n.textContent)),
         today: [now.getFullYear(), now.getMonth(), now.getDate()] };
     });
@@ -258,7 +240,7 @@ const paymentDayOffset = (phrase) => {
 ok(`home: every payment exposes a readable date and exact amount (${homePayments.length} rows)`,
   homePayments.length > 0 && homePayments.every(({ fields, clipped }) =>
     fields.length === 3 && fields[0] && Number.isFinite(paymentDayOffset(fields[1])) &&
-    /^[\d,]+(?:\.\d{1,2})?$/.test(fields[2]) && !clipped));
+    /^(?:≈\s*)?AED\s*[\d,]+(?:\.\d{1,2})?$/.test(fields[2].replace(/[\u200e\u200f]/g, '')) && !clipped));
 
 // Entry detail sheet.
 //
@@ -370,12 +352,16 @@ ok('Spending shows category limits with their spending', !!(await visibleText(pa
 }
 await tapText(page,'Compare',800);
 ok('Compare keeps the six-month cashflow',!!(await visibleText(page,/Income & spending/i)));
-const months=await page.locator('[data-testid="spending-trends"] [role="button"][aria-label]').evaluateAll(nodes=>nodes
+const months=await page.locator('[data-testid="spending-trends"] [data-testid^="cashflow-month-"][role="button"][aria-label]').evaluateAll(nodes=>nodes
   .map(n=>({label:n.getAttribute('aria-label'),selected:n.getAttribute('aria-selected'),text:n.textContent}))
   .filter(n=>/Income:.*Spending:|No recorded activity/.test(n.label)));
 ok('All six months expose readable cashflow or no-data',months.length===6);
 ok('Exactly one month is selected',months.filter(m=>m.selected==='true').length===1);
-ok('Compare includes merchant and change analysis',!!(await visibleText(page,'Top merchants'))&&!!(await visibleText(page,'What changed')));
+ok('Compare includes merchant and change analysis', !!(await visibleText(page, 'Top merchants')) &&
+  await page.getByTestId('spending-compare').locator('[data-testid^="spending-mover-"]').count() > 0);
+const monthDetails = await page.getByTestId('cashflow-month-details').getByRole('button').all();
+ok('All six months also show their exact values as readable rows', monthDetails.length === 6 &&
+  (await Promise.all(monthDetails.map(row => row.getAttribute('aria-label')))).every(label => months.some(month => month.label === label)));
 await tapText(page,'Categories',700);
 await tapLabel(page,/^Transport\. AED /,800);
 await tapText(page,'Edit monthly limit',800);
@@ -388,8 +374,8 @@ await tapLabel(page,'Close',500);
 await tapTab(page, 'Bills');
 ok('Bills has Next 30 days and All views',!!(await visibleText(page,'Next 30 days'))&&!!(await visibleText(page,'All')));
 const agenda=page.locator('[data-testid="payment-agenda"]');
-await agenda.waitFor({state:'visible'});
-ok('Agenda states that marking paid only updates Wafra and sends no payment',/Marking something paid only updates Wafra\. No payment is sent\./.test(await agenda.innerText()));
+await agenda.first().waitFor({state:'visible'});
+ok('Agenda states that marking paid only updates Wafra and sends no payment',/Marking something paid only updates Wafra\. No payment is sent\./.test((await agenda.allTextContents()).join(' ')));
 await tapText(page,'All',600);
 const rows=await agenda.locator('[role="button"][aria-label]').evaluateAll(nodes=>nodes.map(n=>({label:n.getAttribute('aria-label'),text:n.textContent})));
 ok('Chronological agenda contains named obligations',rows.length>0 && rows.every(n=>/AED [\d,]+/.test(n.label)));
@@ -421,9 +407,9 @@ ok('Predicted recurring charges remain identified as estimates',rows.some(n=>/Es
 // a correct lifetime total must include the rows the user can reach by scrolling.
 await tapText(page, /^Netflix$/, 1400);
 {
-  const t = await paintedText(page);
-  const label = t.find((x) => /^total paid$/i.test(x.t));
-  const total = label && t.find((x) => x.y > label.y && x.y < label.y + 40 && /^AED/.test(x.t));
+  const totalRow = page.getByTestId('bill-detail-facts').getByLabel(/^Total paid, /);
+  await totalRow.scrollIntoViewIfNeeded();
+  const total = { t: (await totalRow.innerText()).match(/AED\s+[\d,]+(?:\.\d+)?/)?.[0] };
   const chargeTexts = await page.evaluate(() => {
     const scroller = document.querySelector('[data-testid="subscription-history-scroll"]');
     if (!scroller) return [];
@@ -552,7 +538,7 @@ await tapText(page, 'Wafra Pro', 1400);
   if (hits.length) console.log(hits.slice(0, 4));
 }
 ok('paywall renders plans', !!(await visibleText(page, /GET WAFRA PRO/i)));
-ok('paywall shows the remaining trial', !!(await visibleText(page, /Free trial · \d day/)));
+ok('paywall shows the remaining trial', !!(await visibleText(page, /Automatic capture is included for \d+ more days?\./)));
 
 // ── Hidden-unlock defense: repeated VERSION taps must not grant Pro ──
 //
@@ -561,11 +547,11 @@ ok('paywall shows the remaining trial', !!(await visibleText(page, /Free trial �
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 await tapLabel(page, 'Settings', 1400);
-const about = await visibleText(page, 'Know where it goes');
-if (about) await about.scrollIntoViewIfNeeded();
+await tapText(page, 'Data and help', 1200);
+const mark = page.getByTestId('settings-version-footer');
+await mark.scrollIntoViewIfNeeded();
 await page.waitForTimeout(400);
-const mark = await visibleText(page, /^Wafra\s+\d/);
-ok('the version label is exposed for the old seven-tap trigger', !!mark);
+ok('the version label is exposed for the old seven-tap trigger', await mark.isVisible() && /^Wafra\s+\d/.test(await mark.innerText()));
 if (!mark) throw new Error('No exposed Wafra version label for hidden-unlock regression');
 for (let i = 0; i < 7; i++) {
   await mark.click({ timeout: 4000 });

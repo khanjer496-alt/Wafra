@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Live "Today" widget on Home's ink band. Week bars from real figures at the
+<!-- Live "Today" widget on Home's ink band. An exact seven-day total at the
      top; the one figure that matters sits low on the band. Every value is set
      from the snapshot at render time; the XML text is only the empty state
      shown before the first render. -->
@@ -11,13 +11,31 @@
   android:orientation="vertical"
   android:padding="16dp">
 
-  <ImageView
-    android:id="@+id/wafra_today_bars"
+  <LinearLayout
+    android:id="@+id/wafra_today_week"
     android:layout_width="match_parent"
-    android:layout_height="24dp"
-    android:contentDescription="@string/wafra_widget_last_7_days"
-    android:scaleType="fitXY"
-    android:visibility="gone" />
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:visibility="gone">
+    <TextView
+      android:id="@+id/wafra_today_week_label"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:text="@string/wafra_widget_last_7_total"
+      android:textAlignment="viewStart"
+      android:textColor="@color/wafra_widget_today_secondary"
+      android:textSize="12sp" />
+    <TextView
+      android:id="@+id/wafra_today_week_amount"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:fontFamily="sans-serif-medium"
+      android:fontFeatureSettings="tnum"
+      android:maxLines="2"
+      android:textAlignment="viewStart"
+      android:textColor="@color/wafra_widget_today_text"
+      android:textSize="13sp" />
+  </LinearLayout>
 
   <LinearLayout
     android:layout_width="match_parent"

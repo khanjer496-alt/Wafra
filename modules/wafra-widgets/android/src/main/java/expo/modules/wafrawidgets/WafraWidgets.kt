@@ -9,9 +9,11 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.RectF
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.RelativeSizeSpan
@@ -47,6 +49,43 @@ internal object WafraWidgets {
   private val BILL_AMOUNTS = intArrayOf(R.id.wafra_bill_amount_1, R.id.wafra_bill_amount_2, R.id.wafra_bill_amount_3)
   private val BILL_TILES = intArrayOf(R.id.wafra_bill_tile_1, R.id.wafra_bill_tile_2, R.id.wafra_bill_tile_3)
   private val BILL_GLYPHS = intArrayOf(R.id.wafra_bill_glyph_1, R.id.wafra_bill_glyph_2, R.id.wafra_bill_glyph_3)
+  private val BILL_LOGOS = intArrayOf(R.id.wafra_bill_logo_1, R.id.wafra_bill_logo_2, R.id.wafra_bill_logo_3)
+  private val LOGO_DRAWABLES = mapOf(
+    "amazon" to R.drawable.wafra_logo_amazon,
+    "netflix" to R.drawable.wafra_logo_netflix,
+    "spotify" to R.drawable.wafra_logo_spotify,
+    "youtube" to R.drawable.wafra_logo_youtube,
+    "apple" to R.drawable.wafra_logo_apple,
+    "google" to R.drawable.wafra_logo_google,
+    "claude" to R.drawable.wafra_logo_claude,
+    "github" to R.drawable.wafra_logo_github,
+    "notion" to R.drawable.wafra_logo_notion,
+    "discord" to R.drawable.wafra_logo_discord,
+    "telegram" to R.drawable.wafra_logo_telegram,
+    "dropbox" to R.drawable.wafra_logo_dropbox,
+    "osn" to R.drawable.wafra_logo_osn,
+    "anghami" to R.drawable.wafra_logo_anghami,
+    "audible" to R.drawable.wafra_logo_audible,
+    "shahid" to R.drawable.wafra_logo_shahid,
+    "chatgpt" to R.drawable.wafra_logo_chatgpt,
+    "crunchyroll" to R.drawable.wafra_logo_crunchyroll,
+    "disney" to R.drawable.wafra_logo_disney,
+    "deezer" to R.drawable.wafra_logo_deezer,
+    "playstation" to R.drawable.wafra_logo_playstation,
+    "xbox" to R.drawable.wafra_logo_xbox,
+    "zoom" to R.drawable.wafra_logo_zoom,
+    "du" to R.drawable.wafra_logo_du,
+    "etisalat" to R.drawable.wafra_logo_etisalat,
+    "dewa" to R.drawable.wafra_logo_dewa,
+    "sewa" to R.drawable.wafra_logo_sewa,
+    "careem" to R.drawable.wafra_logo_careem,
+    "talabat" to R.drawable.wafra_logo_talabat,
+    "deliveroo" to R.drawable.wafra_logo_deliveroo,
+    "noon" to R.drawable.wafra_logo_noon,
+    "uber" to R.drawable.wafra_logo_uber,
+    "vercel" to R.drawable.wafra_logo_vercel,
+  )
+  private val MONOCHROME_LOGOS = setOf("apple", "github", "notion", "uber", "vercel")
   private const val DAY_MS = 24L * 60L * 60L * 1000L
 
   fun isRefreshAction(action: String?): Boolean = action != null && action in REFRESH_ACTIONS
@@ -92,7 +131,7 @@ internal object WafraWidgets {
     // A snapshot from an earlier day would present yesterday's spending as today's.
     val usable = snapshot != null && snapshot.isFresh(now) && snapshot.todayISO == todayISO
     if (snapshot == null || !usable) {
-      views.setViewVisibility(R.id.wafra_today_bars, View.GONE)
+      views.setViewVisibility(R.id.wafra_today_week, View.GONE)
       views.setViewVisibility(R.id.wafra_today_content, View.GONE)
       views.setViewVisibility(R.id.wafra_today_empty, View.VISIBLE)
       views.setTextViewText(R.id.wafra_today_empty, res.getString(R.string.wafra_widget_open_to_update))
@@ -108,13 +147,12 @@ internal object WafraWidgets {
       if (amount == WidgetSnapshot.DASH) res.getString(R.string.wafra_widget_amount_hidden) else amount,
     )
 
-    if (snapshot.last7Minor.size == 7) {
-      views.setViewVisibility(R.id.wafra_today_bars, View.VISIBLE)
-      views.setImageViewBitmap(R.id.wafra_today_bars, barsBitmap(context, snapshot.last7Minor, snapshot.hidden))
-      views.setContentDescription(R.id.wafra_today_bars, res.getString(R.string.wafra_widget_last_7_days))
-    } else {
-      views.setViewVisibility(R.id.wafra_today_bars, View.INVISIBLE)
-    }
+    views.setViewVisibility(R.id.wafra_today_week, View.VISIBLE)
+    views.setTextViewText(R.id.wafra_today_week_label, res.getString(R.string.wafra_widget_last_7_total))
+    val weekAmount = snapshot.formatMinor(snapshot.weekTotalMinor())
+    views.setTextViewText(R.id.wafra_today_week_amount, isolate(weekAmount, snapshot.language))
+    views.setContentDescription(R.id.wafra_today_week_amount,
+      if (weekAmount == WidgetSnapshot.DASH) res.getString(R.string.wafra_widget_amount_hidden) else weekAmount)
 
     // One line under the figure: what is left in budgets when they are set,
     // otherwise today's payment count.
@@ -179,10 +217,19 @@ internal object WafraWidgets {
     for ((i, bill) in bills.withIndex()) {
       views.setViewVisibility(BILL_ROWS[i], View.VISIBLE)
       views.setTextViewText(BILL_TITLES[i], bill.title.ifEmpty { WidgetSnapshot.DASH })
-      // Merchant tile: the title's initial; a title with no letter (a masked
-      // card) shows a plain calendar glyph rather than a digit.
+      // JSON can select only a compiled resource; never a URI or arbitrary path.
+      val logo = LOGO_DRAWABLES[bill.logoId]
       val initial = initialOf(bill.title)
-      if (initial != null) {
+      views.setViewVisibility(BILL_LOGOS[i], if (logo != null) View.VISIBLE else View.GONE)
+      if (logo != null) {
+        if (bill.logoId in MONOCHROME_LOGOS) {
+          views.setImageViewBitmap(BILL_LOGOS[i], tintedLogo(context, logo))
+        } else {
+          views.setImageViewResource(BILL_LOGOS[i], logo)
+        }
+        views.setViewVisibility(BILL_TILES[i], View.GONE)
+        views.setViewVisibility(BILL_GLYPHS[i], View.GONE)
+      } else if (initial != null) {
         views.setTextViewText(BILL_TILES[i], initial)
         views.setViewVisibility(BILL_TILES[i], View.VISIBLE)
         views.setViewVisibility(BILL_GLYPHS[i], View.GONE)
@@ -201,6 +248,18 @@ internal object WafraWidgets {
       )
     }
     return views
+  }
+
+  /** Tint only reviewed single-ink marks; multicolor brands keep their bundled pixels. */
+  private fun tintedLogo(context: Context, resource: Int): Bitmap {
+    val source = BitmapFactory.decodeResource(context.resources, resource)
+    val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+      colorFilter = PorterDuffColorFilter(context.getColor(R.color.wafra_widget_upcoming_text), PorterDuff.Mode.SRC_IN)
+    }
+    Canvas(output).drawBitmap(source, 0f, 0f, paint)
+    source.recycle()
+    return output
   }
 
   private fun attachLaunch(context: Context, views: RemoteViews) {
@@ -284,43 +343,6 @@ internal object WafraWidgets {
     calendar.get(Calendar.MONTH) + 1,
     calendar.get(Calendar.DAY_OF_MONTH),
   )
-
-  /**
-   * Seven bars, oldest first, today in the accent colour. Heights are relative
-   * to the week's largest day; hidden or unknown days draw as a flat stub, so
-   * the chart never implies a figure the snapshot does not carry.
-   */
-  private fun barsBitmap(context: Context, values: List<Long?>, hidden: Boolean): Bitmap {
-    val density = context.resources.displayMetrics.density
-    // Drawn at the 24dp strip's height across a typical 2x2 width; the
-    // ImageView stretches it to the widget's width.
-    val width = Math.max(1, Math.round(140f * density))
-    val height = Math.max(1, Math.round(24f * density))
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(bitmap)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    val track = context.getColor(R.color.wafra_widget_today_mark)
-    val accent = context.getColor(R.color.wafra_widget_today_accent)
-    val rtl = context.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_RTL
-
-    val amounts = values.map { if (hidden) 0L else Math.max(0L, it ?: 0L) }
-    val max = amounts.maxOrNull() ?: 0L
-    val count = amounts.size
-    val gap = 6f * density
-    val barWidth = (width - gap * (count - 1)) / count
-    val radius = Math.min(barWidth / 2f, 3f * density)
-    val minHeight = 3f * density
-
-    for (i in 0 until count) {
-      val share = if (max > 0L) amounts[i].toDouble() / max.toDouble() else 0.0
-      val barHeight = Math.max(minHeight, (height * share).toFloat())
-      val slot = if (rtl) count - 1 - i else i
-      val left = slot * (barWidth + gap)
-      paint.color = if (i == count - 1) accent else track
-      canvas.drawRoundRect(RectF(left, height - barHeight, left + barWidth, height.toFloat()), radius, radius, paint)
-    }
-    return bitmap
-  }
 
   /**
    * Re-render at the next local midnight (so "Today" never carries yesterday's

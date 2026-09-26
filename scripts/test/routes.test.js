@@ -273,9 +273,9 @@ function sources(dir = SRC) {
 
   const flow=fs.readFileSync(path.join(SRC,'app/(tabs)/flow.tsx'),'utf8');
   const trends=fs.readFileSync(path.join(SRC,'components/spending/spending-trends.tsx'),'utf8');
-  ok('large text moves six-month figures into a wrapping readable list',
+  ok('six-month figures stay visible in a wrapping readable list at every text size',
     /<SpendingTrends/.test(flow) && /useWindowDimensions\(\)/.test(trends) &&
-    /!showAllTrendLabels &&/.test(trends) && /cashflow-month-details/.test(trends) &&
+    !/!showAllTrendLabels &&/.test(trends) && /cashflow-month-details/.test(trends) &&
     /p\.months\.map/.test(trends) && /flexWrap: 'wrap'/.test(trends));
   ok('Arabic labels retain their language face and amounts stay tabular',
     /<ThemedText[^>]*>\{w\.income\}<\/ThemedText>[\s\S]*?<Money/.test(trends) &&

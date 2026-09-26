@@ -129,6 +129,15 @@ function harness(options = {}) {
   dependencies['@/components/limit-sheet'] = { LimitSheet: (props) => jsx('Sheet', { ...props, name: 'LimitSheet' }) };
   dependencies['@/lib/widget-snapshot'] = load(path.join(root, 'src/lib/widget-snapshot.ts'), dependencies);
   dependencies['../../modules/wafra-widgets'] = { setWidgetSnapshot() {}, clearWidgetSnapshot() {} };
+  // Widget inputs Home shares with the Widgets screen run from source, over
+  // this harness's own ledger stubs (loaded on first use, once they exist).
+  // The widgets hint is a boundary; widgets-screen.test.cjs renders it.
+  Object.defineProperty(dependencies, '@/lib/widget-ledger', { enumerable: true, configurable: true, get() {
+    const real = load(path.join(root, 'src/lib/widget-ledger.ts'), dependencies);
+    Object.defineProperty(dependencies, '@/lib/widget-ledger', { value: real, enumerable: true, configurable: true, writable: true });
+    return real;
+  } });
+  dependencies['@/components/widgets/widgets-hint'] = { WidgetsHint: (props) => jsx('WidgetsHint', props) };
   dependencies['@/components/ui/grow-bar'] = { GrowBar: (p) => ({ type: 'View', props: { style: [p.style, p.axis === 'width' ? { width: `${p.size}%` } : { height: p.size }] } }) };
   dependencies['@/lib/account-freshness'] = load(path.join(root, 'src/lib/account-freshness.ts'), dependencies);
   dependencies['@/lib/splits'] = dependencies['@/lib/splits'] ?? load(path.join(root, 'src/lib/splits.ts'), dependencies);

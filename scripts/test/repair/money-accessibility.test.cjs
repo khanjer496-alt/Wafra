@@ -59,8 +59,8 @@ test('Spending trend month selection is exposed to web as well as native accessi
   const months = walk(h.render('flow')).filter((node) =>
     node.props?.accessibilityRole === 'button' &&
     /Income:.*Spending:|No recorded activity/.test(node.props?.accessibilityLabel ?? ''));
-  assert.equal(months.length, 6);
-  assert.equal(months.filter((node) => node.props['aria-selected'] === true).length, 1);
+  assert.equal(months.length, 12, 'six bar controls and six always-visible exact month rows');
+  assert.equal(months.filter((node) => node.props['aria-selected'] === true).length, 2);
   for (const node of months) {
     assert.equal(node.props['aria-selected'], node.props.accessibilityState.selected);
   }

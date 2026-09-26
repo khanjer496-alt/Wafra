@@ -17,11 +17,6 @@ import { structuralTitleLabel } from '@/lib/i18n';
 import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
 import type { AssistantMonthTotal, AssistantPaymentRow } from '@/lib/wafra-assistant';
 
-/** Tallest bar, in points. */
-const CHART_HEIGHT = 80;
-/** Longest value drawn above a bar ("12,345"); longer ones are only spoken. */
-const MAX_VALUE_CHARS = 6;
-
 function shortDate(iso: string, language: 'en' | 'ar'): string {
   const [year, month, day] = iso.split('-').map(Number);
   if (!year || !month || !day) return iso;
@@ -44,14 +39,9 @@ function monthLabel(key: string, language: 'en' | 'ar'): string {
   }
 }
 
-/**
- * The whole-unit value drawn above a bar, or '' when it would not fit a
- * column or would round to a misleading "0" over a visible bar.
- */
+/** Exact value for a visible monthly row, including zero and minor units. */
 export function monthBarValue(totalFils: number, money: LedgerMoneySpec): string {
-  if (totalFils <= 0 || Math.round(totalFils / 10 ** money.exponent) === 0) return '';
-  const value = formatMinorUnits(totalFils, money, { decimals: false });
-  return value.length <= MAX_VALUE_CHARS ? value : '';
+  return formatMinorUnits(totalFils, money);
 }
 
 export function AssistantPaymentRows({ payments, money, language, palette }: {
@@ -89,14 +79,7 @@ export function AssistantPaymentRows({ payments, money, language, palette }: {
   );
 }
 
-/**
- * A bar per recorded month, oldest first, on the sheet: the month the answer
- * names in the band's tint, every other month in the sheet's rule tone, the
- * whole-unit value above each bar and the short month under it. Bars grow
- * from the baseline 50ms apart on first appearance and stay still under
- * Reduce Motion (GrowBar). At the accessibility text sizes the values above
- * the bars step aside; each column's spoken label always carries its amount.
- */
+/** Exact monthly values stay visible at every text size, above equal-width tracks. */
 export function AssistantMonthChart({ series, highlight, money, language, palette, largeText = false }: {
   series: AssistantMonthTotal[];
   /** The month the answer names. No bar is emphasised when it is absent. */
@@ -112,24 +95,19 @@ export function AssistantMonthChart({ series, highlight, money, language, palett
   return (
     <View testID="assistant-month-chart" accessibilityLabel={copy.monthlyChartLabel} style={styles.chart}>
       {series.map((month, index) => {
-        const amount = formatMoneyText(month.totalFils, money, { decimals: false });
+        const amount = formatMoneyText(month.totalFils, money);
         const label = monthLabel(month.month, language);
         const named = highlight !== undefined && month.month === highlight;
         return (
           <View key={month.month} style={styles.column} accessible accessibilityLabel={`${label} ${month.month.slice(0, 4)}, ${amount}`}>
-            {!largeText ? <ThemedText type="nano" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}
-              style={[styles.value, { color: named ? palette.text : palette.textSecondary }]}>
-              {monthBarValue(month.totalFils, money)}
-            </ThemedText> : null}
-            <View style={styles.barTrack}>
-              <GrowBar
-                axis="height"
-                size={Math.max(3, Math.round((month.totalFils / largest) * CHART_HEIGHT))}
-                delay={index * 50}
-                style={[styles.bar, { backgroundColor: named ? palette.tint : palette.rule }]}
-              />
+            <View style={[styles.chartHeading, largeText && styles.chartHeadingStacked]}>
+              <ThemedText type="meta" style={{ color: named ? palette.text : palette.textSecondary }}>{label} {month.month.slice(0, 4)}</ThemedText>
+              <ThemedText type="meta" tabular maxFontSizeMultiplier={1.5} style={[styles.value, { color: palette.text }]}>{amount}</ThemedText>
             </View>
-            <ThemedText type="meta" numberOfLines={1} style={{ color: named ? palette.text : palette.textSecondary }}>{label}</ThemedText>
+            <View style={styles.barTrack}>
+              <GrowBar axis="width" size={Math.max(0, month.totalFils) / largest * 100} delay={index * 50}
+                style={[styles.bar, { backgroundColor: named ? palette.tint : palette.rule }]} />
+            </View>
           </View>
         );
       })}
@@ -141,9 +119,11 @@ const styles = StyleSheet.create({
   rows: { borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two + 2, paddingVertical: Spacing.two + 2 },
   rowText: { flex: 1, minWidth: 0, gap: 2 },
-  chart: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.two, paddingTop: Spacing.two },
-  column: { flex: 1, minWidth: 0, alignItems: 'center', gap: Spacing.one },
-  value: { fontVariant: ['tabular-nums'], textAlign: 'center', alignSelf: 'stretch' },
-  barTrack: { height: CHART_HEIGHT, width: '100%', justifyContent: 'flex-end', alignItems: 'center' },
-  bar: { width: '100%', borderRadius: 6 },
+  chart: { gap: 14, paddingTop: Spacing.two },
+  column: { gap: 6 },
+  chartHeading: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 6 },
+  chartHeadingStacked: { flexDirection: 'column', alignItems: 'flex-start' },
+  value: { fontVariant: ['tabular-nums'], writingDirection: 'ltr', flexShrink: 1 },
+  barTrack: { height: 8, width: '100%', borderRadius: 4 },
+  bar: { height: 8, borderRadius: 4 },
 });

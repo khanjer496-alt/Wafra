@@ -173,7 +173,15 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
       setNotice({ title: t('notifsAreOff'), body: t('notifsForCardDue') });
       return;
     }
-    await syncPaymentReminders(state);
+    try {
+      await syncPaymentReminders(state);
+    } catch {
+      // The OS refused to schedule (storage full, a revoked permission, an
+      // alarm limit). Saying "Reminder set" here would be a promise nothing
+      // keeps, so say it plainly instead.
+      setNotice({ title: t('reminderFailed'), body: t('reminderFailedBody') });
+      return;
+    }
     // The scheduler puts card dues at three days out and again on the day
     // (reminders.ts). Promising two days was a number nothing produced.
     setNotice({

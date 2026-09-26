@@ -48,6 +48,11 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return { ...dependencies[name], useMoneyLocaleKey: () => '' };
       }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      // Widget snapshots resolve only bundled, allowlisted logo ids. Execute
+      // the pure resolver for screen harnesses that load the real snapshot.
+      if (name === '@/lib/widget-logo') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/widget-logo.ts'));
+      }
       // Pure selection helpers used by screens; always the real source.
       if (name === '@/lib/store-selection') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/store-selection.ts'));

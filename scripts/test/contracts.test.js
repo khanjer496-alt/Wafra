@@ -189,6 +189,15 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       nativeModule.includes('InstantAlert.clear(context)') &&
       read('modules/sms-reader/android/src/main/java/expo/modules/smsreader/InstantAlert.kt')
         .includes('cancelAll()'));
+  const smsOnCreate = nativeModule.slice(nativeModule.indexOf('OnCreate {'),
+    nativeModule.indexOf('Function("getStartupCleanupDiagnostics")'));
+  ok('a failed legacy SMS cleanup never crashes startup and is recorded for diagnostics',
+    smsOnCreate.length > 0 && !smsOnCreate.includes('throw') &&
+      smsOnCreate.includes('legacyDeliveryBufferCleanupPending = try') &&
+      smsOnCreate.includes('staleCorpusCleanupPending = try') &&
+      smsOnCreate.includes('return@OnCreate') &&
+      /AsyncFunction\("getReceived"\)[\s\S]*?if \(!clearLegacyDeliveryBuffer\(context\)\) \{\s*throw/.test(nativeModule) &&
+      code(read('src/lib/android-tester-diagnostics.ts')).includes('getStartupCleanupDiagnostics?.()'));
   ok('incoming SMS permission is requested only for the optional instant banner',
     /requestSmsPermission\(\)[\s\S]*PermissionsAndroid\.request\(PermissionsAndroid\.PERMISSIONS\.READ_SMS\)/
       .test(scanner) &&
@@ -274,11 +283,19 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     store.indexOf('val secretKey = key()') < store.indexOf('for (index in 0 until envelopes.length())') &&
       store.includes('catch (_: AEADBadTagException)') &&
       !/private fun decrypt[\s\S]*?catch \(_: Exception\)/.test(store));
+  const notificationOnCreate = nativeModule.slice(nativeModule.indexOf('OnCreate {'),
+    nativeModule.indexOf('OnDestroy {'));
+  ok('a failed legacy notification erase never crashes startup but still gates the queue',
+    !notificationOnCreate.includes('throw') &&
+      notificationOnCreate.includes('NotificationCaptureStore.purgeLegacyPlaintextAtStartup(context)') &&
+      /fun purgeLegacyPlaintextAtStartup[\s\S]*?catch \(_: Exception\)[\s\S]*?legacyCleanupPending = true/.test(store) &&
+      nativeModule.includes('"legacyCleanupPending" to NotificationCaptureStore.legacyCleanupPending') &&
+      (store.match(/^    purgeLegacyPlaintext\(context\)$/gm) || []).length >= 5);
   ok('the old plaintext notification preference is erased instead of migrated',
     store.includes('LEGACY_PREFS') && store.includes('legacy.edit().clear().commit()') &&
       store.includes('Legacy notification queue could not be erased') &&
       nativeModule.includes('OnCreate {') &&
-      nativeModule.includes('NotificationCaptureStore.purgeLegacyPlaintext(context)'));
+      nativeModule.includes('NotificationCaptureStore.purgeLegacyPlaintextAtStartup(context)'));
   ok('notification capture exposes separate read, acknowledge and erase operations',
     nativeModule.includes('AsyncFunction("getCaptured")') &&
       nativeModule.includes('AsyncFunction("ackCaptured")') &&

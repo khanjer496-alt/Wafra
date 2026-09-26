@@ -80,6 +80,7 @@ export function BillsGroupFilter({ value, onChange, palette }: {
             accessibilityRole="button"
             accessibilityLabel={labels[option]}
             accessibilityState={{ selected: active }}
+            aria-pressed={active}
             testID={`bills-filter-${option}`}
             hitSlop={3}
             onPress={() => {

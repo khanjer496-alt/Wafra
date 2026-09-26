@@ -3,8 +3,19 @@ import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
-import { Radius, Spacing } from '@/constants/theme';
+import { Radius, Spacing, type BandPalette } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+
+/** Optional E palette keeps older guide previews compatible. */
+function useSetupTheme(palette?: BandPalette) {
+  const theme = useTheme();
+  return palette ? { ...theme, background: palette.sheet, card: palette.card, cardBorder: palette.rule,
+    primary: palette.tint, primarySoft: palette.statusOkSoft, primaryBorder: palette.rule,
+    text: palette.text, textSecondary: palette.textSecondary, textTertiary: palette.textSecondary,
+    track: palette.rule, backgroundSelected: palette.glyphGround,
+    expense: palette.statusOver, expenseSoftBg: palette.statusOverSoft, expenseSoftBorder: palette.statusOver } : theme;
+}
 
 /**
  * Presentational pieces of the guided iPhone setup. They draw state they are
@@ -13,6 +24,7 @@ import { useTheme } from '@/hooks/use-theme';
  */
 
 export interface StepProgressProps {
+  palette?: BandPalette;
   /** 1-based index of the current step; `total + 1` means every step is done. */
   current: number;
   labels: readonly string[];
@@ -21,8 +33,9 @@ export interface StepProgressProps {
 }
 
 /** Numbered progress for a short guided flow. One announcement, not three. */
-export function StepProgress({ current, labels, template }: StepProgressProps) {
-  const theme = useTheme();
+export function StepProgress({ current, labels, template, palette }: StepProgressProps) {
+  const theme = useSetupTheme(palette);
+  const largeText = useLargeTextLayout();
   const total = labels.length;
   const shown = Math.min(Math.max(current, 1), total);
   const label = `${template.replace('{step}', String(shown)).replace('{total}', String(total))}: ${labels[shown - 1]}`;
@@ -33,23 +46,22 @@ export function StepProgress({ current, labels, template }: StepProgressProps) {
       accessibilityRole="progressbar"
       accessibilityLabel={label}
       accessibilityValue={{ min: 1, max: total, now: shown }}
-      style={styles.progress}>
+      style={[styles.progress, largeText && { flexDirection: 'column' }]}>
       {labels.map((item, index) => {
         const done = index + 1 < current;
         const active = index + 1 === current;
         return (
-          <View key={item} style={styles.progressItem}>
+          <View key={item} style={[styles.progressItem, largeText && { flex: undefined }]}>
             <View style={[styles.progressBar, {
               backgroundColor: done || active ? theme.primary : theme.track,
             }]} />
             <View style={styles.progressLabelLine}>
               {done
                 ? <Icon name="check" size={12} color={theme.primary} />
-                : <ThemedText type="micro" themeColor={active ? 'primary' : 'textTertiary'} tabular>
+                : <ThemedText type="micro" style={{ color: active ? theme.primary : theme.textTertiary }} tabular>
                   {index + 1}
                 </ThemedText>}
-              <ThemedText type="micro" themeColor={active ? 'text' : 'textTertiary'}
-                style={styles.progressLabel}>
+              <ThemedText type="micro" style={[styles.progressLabel, { color: active ? theme.text : theme.textTertiary }]}>
                 {item}
               </ThemedText>
             </View>
@@ -61,8 +73,8 @@ export function StepProgress({ current, labels, template }: StepProgressProps) {
 }
 
 /** Apple's own on-screen words, in the order they are tapped. */
-export function GuideChips({ labels, spokenPrefix }: { labels: readonly string[]; spokenPrefix?: string }) {
-  const theme = useTheme();
+export function GuideChips({ labels, spokenPrefix, palette }: { labels: readonly string[]; spokenPrefix?: string; palette?: BandPalette }) {
+  const theme = useSetupTheme(palette);
   if (labels.length === 0) return null;
   const spoken = `${spokenPrefix ? `${spokenPrefix}: ` : ''}${labels.join(', ')}`;
   return (
@@ -72,7 +84,7 @@ export function GuideChips({ labels, spokenPrefix }: { labels: readonly string[]
           {/* Icon mirrors directional chevrons for Arabic itself. */}
           {index > 0 && <Icon name="chevron-right" size={14} color={theme.textTertiary} />}
           <View style={[styles.chip, { backgroundColor: theme.backgroundSelected, borderColor: theme.cardBorder }]}>
-            <ThemedText type="smallBold" style={styles.chipText}>{label}</ThemedText>
+            <ThemedText type="smallBold" style={[styles.chipText, { color: theme.text }]}>{label}</ThemedText>
           </View>
         </View>
       ))}
@@ -81,14 +93,15 @@ export function GuideChips({ labels, spokenPrefix }: { labels: readonly string[]
 }
 
 export interface SetupResultProps {
+  palette?: BandPalette;
   tone: 'pass' | 'fail' | 'info';
   title: string;
   body?: string;
 }
 
 /** A test result that reads as pass or fail before a word is read. */
-export function SetupResult({ tone, title, body }: SetupResultProps) {
-  const theme = useTheme();
+export function SetupResult({ tone, title, body, palette }: SetupResultProps) {
+  const theme = useSetupTheme(palette);
   const colors = tone === 'pass'
     ? { bg: theme.primarySoft, border: theme.primaryBorder, fg: theme.primary, icon: 'check' as const }
     : tone === 'fail'
@@ -107,13 +120,14 @@ export function SetupResult({ tone, title, body }: SetupResultProps) {
       </View>
       <View style={styles.resultCopy}>
         <ThemedText type="smallBold" style={{ color: colors.fg }}>{title}</ThemedText>
-        {body ? <ThemedText type="small" themeColor="textSecondary">{body}</ThemedText> : null}
+        {body ? <ThemedText type="small" style={{ color: theme.textSecondary }}>{body}</ThemedText> : null}
       </View>
     </View>
   );
 }
 
 export interface SetupStepProps {
+  palette?: BandPalette;
   /** Short visible marker such as "1" or "3.2". */
   badge: string;
   /** What VoiceOver reads for the badge, e.g. "Screen 2 of 5". Defaults to the badge. */
@@ -128,21 +142,21 @@ export interface SetupStepProps {
 }
 
 /** One step, one sentence, one primary action (passed as children). */
-export function SetupStep({ badge, badgeLabel, title, body, chips, chipsPrefix, result, testID, children }: SetupStepProps) {
-  const theme = useTheme();
+export function SetupStep({ badge, badgeLabel, title, body, chips, chipsPrefix, result, testID, children, palette }: SetupStepProps) {
+  const theme = useSetupTheme(palette);
   return (
     <View testID={testID ?? 'setup-step'} style={[styles.card, { backgroundColor: theme.card, borderColor: theme.cardBorder }]}>
       <View style={styles.head}>
         <View style={[styles.badge, { backgroundColor: theme.primarySoft }]}
           accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          <ThemedText type="smallBold" themeColor="primary" tabular>{badge}</ThemedText>
+          <ThemedText type="smallBold" style={{ color: theme.primary }} tabular>{badge}</ThemedText>
         </View>
         <ThemedText type="heading" accessibilityRole="header" accessibilityLabel={`${badgeLabel ?? badge}. ${title}`}
-          style={styles.title}>{title}</ThemedText>
+          style={[styles.title, { color: theme.text }]}>{title}</ThemedText>
       </View>
-      {body ? <ThemedText type="default" themeColor="textSecondary">{body}</ThemedText> : null}
-      {chips && chips.length > 0 ? <GuideChips labels={chips} spokenPrefix={chipsPrefix} /> : null}
-      {result ? <SetupResult {...result} /> : null}
+      {body ? <ThemedText type="default" style={{ color: theme.textSecondary }}>{body}</ThemedText> : null}
+      {chips && chips.length > 0 ? <GuideChips palette={palette} labels={chips} spokenPrefix={chipsPrefix} /> : null}
+      {result ? <SetupResult {...result} palette={palette} /> : null}
       {children ? <View style={styles.actions}>{children}</View> : null}
     </View>
   );

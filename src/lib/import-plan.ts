@@ -1,4 +1,4 @@
-import { canonicalCaptureSourceKey, isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
+import { alertTextClock, canonicalCaptureSourceKey, isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
 import { cardAccountName, colorForHint, estimatedMinimumFils } from '@/lib/cards';
 import {
   bankBrandForName,
@@ -11,12 +11,14 @@ import {
 import { singleKnownBank } from '@/lib/known-banks';
 import {
   bodyPrint,
+  captureEventIdentity,
   compatibleCaptureInstrument,
   duplicateGuard,
   fromDifferentStatementUploads,
   isApplePayWalletRow,
   isStatementCaptureSource,
   mergeCaptureInstrument,
+  sameMerchantCapture,
   statementUploadOf,
   type CaptureChannel,
   type DuplicateCandidate,
@@ -521,11 +523,18 @@ function buildImportPlanInMarket(
       protectedEditedPushIndex = index;
     }
     const incomingInstrument = captureInstrumentOf(p);
+    const incomingClock = textClockOf(p);
     let best: Transaction | undefined;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const row of protectedEditedPushIndex.get(editedPushKey(date, p.amountFils, p.type)) ?? []) {
       if (protectedEditedPushConsumed.has(row.id)) continue;
       if (!compatibleCaptureInstrument(row.captureInstrument, incomingInstrument)) continue;
+      // A user's category/account edit does not erase the alert's evidence.
+      // Different stated instants are different purchases, even when their
+      // notifications and SMS arrive inside the same two-minute window.
+      if (Number.isSafeInteger(row.textClock) && incomingClock !== undefined &&
+        row.textClock !== incomingClock) continue;
+      if (row.titleEdited !== true && !sameMerchantCapture(row.title, p.merchant)) continue;
       const distance = Math.abs(row.ts! - p.smsTs!);
       if (distance > 120_000 || distance >= bestDistance) continue;
       best = row;
@@ -868,10 +877,18 @@ function buildImportPlanInMarket(
       ...(clearTransferEvidence ? { clearTransferEvidence: true as const } : {}),
       smsKey,
       ts: p.smsTs,
+      ...(textClockOf(p) !== undefined ? { textClock: textClockOf(p) } : {}),
       viaPush: false,
       ...(p.card ? { captureInstrument: mergeCaptureInstrument(
             captureInstrumentOf(p), prior.captureInstrument) } : {}),
     });
+  };
+  // Text time is evidence/display only; delivery ts and source keys stay intact.
+  const textClocks = new Map<ScannedSms, number | null>();
+  const textClockOf = (p: ScannedSms): number | undefined => {
+    if (p.kind !== 'transaction' || isStatementCaptureSource(p.captureSource)) return undefined;
+    if (!textClocks.has(p)) textClocks.set(p, alertTextClock(p.raw, p.date));
+    return textClocks.get(p) ?? undefined;
   };
   const smsKeyOf = (p: ScannedSms): string | undefined =>
     p.sourceEventId
@@ -1617,14 +1634,25 @@ function buildImportPlanInMarket(
     const sourceCorrectionPrior = exactPrior ? undefined : legacyTransferSourcePrior(p);
     const stablePrior = exactPrior ?? sameStatementUploadOrNone(stableLocalPrior(p), p) ?? sourceCorrectionPrior;
     const prior = stablePrior;
+    // The event the alert text itself stated (clock to the second, money,
+    // card): lets a re-posted bank-app notification, or the SMS about it, be
+    // matched however long after the first copy it was delivered. Statement
+    // rows carry no source text and keep their own one-to-one matcher.
+    const textClock = textClockOf(p);
+    const eventIdentity = isStatementCaptureSource(p.captureSource) ? undefined : captureEventIdentity({
+      raw: p.raw, amountFils: p.amountFils, type: p.type, currency: p.currency,
+      captureInstrument: captureInstrumentOf(p),
+    });
     const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
+      ...(textClock !== undefined ? { textClock } : {}),
       captureSource: p.captureSource,
       ...statementFactsOf(p),
       ...(liveMessageObservation(p) ? { liveObservation: true } : {}),
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
+      ...(eventIdentity ? { eventIdentity } : {}),
     };
     const protectedEditedPush = exactPrior ? undefined : protectedEditedPushFor(p, date);
     if (protectedEditedPush && smsKey) {
@@ -1770,6 +1798,7 @@ function buildImportPlanInMarket(
           type: p.type,
           ...(accountForMatchedPrior(priorById().get(supersededId)) ? { accountId } : {}),
           ts: p.smsTs,
+          ...(textClock !== undefined ? { textClock } : {}),
           smsKey,
           viaPush: false,
           ...(p.card ? { captureInstrument: mergeCaptureInstrument(
@@ -1847,11 +1876,13 @@ function buildImportPlanInMarket(
       title: p.merchant,
       date,
       ts: p.smsTs,
+      ...(textClock !== undefined ? { textClock } : {}),
       source: 'sms',
       captureInstrument: captureInstrumentOf(p),
       ...(p.bestEffort ? { bestEffort: p.bestEffort } : {}),
       smsKey,
       viaPush: p.channel === 'push' || undefined,
+      ...(eventIdentity ? { captureEventIdentity: eventIdentity } : {}),
       ...(p.channel === 'push' && p.captureSource === undefined && p.sourceEventId === undefined &&
         typeof p.notificationObservationId === 'string' &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p.notificationObservationId)

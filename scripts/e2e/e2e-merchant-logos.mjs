@@ -97,7 +97,7 @@ try {
       await dialog.getByTestId(identity).waitFor({ state: 'visible' });
       await decoded(dialog);
       const size = await dialog.getByTestId(identity).boundingBox();
-      assert.equal(size.width, 52); assert.equal(size.height, 52);
+      assert.equal(size.width, 64); assert.equal(size.height, 64);
     });
     await page.screenshot({ path: path.join(out, `detail-${mode}.png`) });
     await page.keyboard.press('Escape');
@@ -113,7 +113,7 @@ try {
 
     await page.getByRole('tab', { name: 'Bills', exact: true }).click();
     const agenda = page.getByTestId('payment-agenda');
-    await agenda.waitFor({ state: 'visible' });
+    await agenda.first().waitFor({ state: 'visible' });
     await check(`Bills ${mode}: payment agenda has logos`, () => decoded(agenda));
     await page.getByRole('tab', { name: 'All', exact: true }).click();
     await check(`Bills ${mode}: newly added subscription logo decodes`, async () => {

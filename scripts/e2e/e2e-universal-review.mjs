@@ -283,7 +283,11 @@ try {
     const saved = await waitForLedger(page, 1, 0);
     assert.equal(saved.transactions[0].amountFils, 2786);
     assert.equal(saved.transactions[0].title, 'こもれび文具');
-    assert.equal(saved.transactions[0].date, new Date(fixture.review.observedAt).toISOString().slice(0, 10));
+    const observedLocalDay = await page.evaluate(timestamp => {
+      const date = new Date(timestamp);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    }, fixture.review.observedAt);
+    assert.equal(saved.transactions[0].date, observedLocalDay);
     assert.equal(saved.ledgerMoney.currency, 'JPY');
     assert.equal(saved.ledgerMoney.exponent, 0);
     await page.reload({ waitUntil: 'networkidle' });

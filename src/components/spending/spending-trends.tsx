@@ -69,8 +69,8 @@ export function SpendingTrends(p: Props) {
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const { width, fontScale } = useWindowDimensions();
-  // Six labels must fit at the actual width and text size. When they cannot,
-  // every month remains available in a wrapping detail list, not hidden.
+  // Keep compact chart labels only when they fit. The visible detail list
+  // below always names every month and both exact amounts.
   const showAllTrendLabels = !large && (Math.min(width, 800) - 146) / 6 >= (lang === 'ar' ? 58 : 32) * fontScale;
   const w = copy[lang === 'ar' ? 'ar' : 'en']; const [patterns, setPatterns] = useState(false);
   const max = Math.max(1, ...p.months.flatMap((m) => [m.incomeFils, m.expenseFils]));
@@ -121,18 +121,13 @@ export function SpendingTrends(p: Props) {
                   {m.deltaFils > 0 ? '+' : '−'}{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
               </View>
               {([[p.currentName ?? p.periodLabel, m.currentFils, band.tint], [p.previousName ?? p.comparisonLabel ?? '', m.previousFils, band.rule]] as const).map(([label, fils, color], index) =>
-                large ? <View key={index} style={styles.compareBarStack}>
-                  <View style={styles.compareBarHead}>
-                    <ThemedText type="micro" style={{ color: band.textSecondary }}>{label}</ThemedText>
-                    <Money fils={fils} type="meta" prefix={false} />
+                <View key={index} style={styles.compareBarStack}>
+                  <View style={[styles.compareBarHead, large && styles.stackColumn]}>
+                    <ThemedText type="meta" style={{ color: band.textSecondary }}>{label}</ThemedText>
+                    <Money fils={fils} type="meta" />
                   </View>
                   <GrowBar axis="width" delay={index * 50} size={fils / scale * 100}
                     style={{ height: 10, borderRadius: 5, backgroundColor: color }} />
-                </View> : <View key={index} style={styles.compareBarRow}>
-                  <ThemedText type="meta" style={[styles.compareBarLabel, { color: band.textSecondary }]} numberOfLines={1}>{label}</ThemedText>
-                  <View style={styles.compareTrack}><GrowBar axis="width" delay={index * 50} size={fils / scale * 100}
-                    style={{ height: 10, borderRadius: 5, backgroundColor: color }} /></View>
-                  <View style={styles.compareAmount}><Money fils={fils} type="meta" prefix={false} /></View>
                 </View>)}
             </Pressable>;
           })}
@@ -161,8 +156,8 @@ export function SpendingTrends(p: Props) {
           <View style={styles.chart}>
             {p.months.map((month) => {
               const isSelected = month.key === p.selectedKey;
-              const inH = Math.max(month.incomeFils > 0 ? 3 : 0, month.incomeFils / max * 100);
-              const outH = Math.max(month.expenseFils > 0 ? 3 : 0, month.expenseFils / max * 100);
+              const inH = Math.max(0, month.incomeFils / max * 100);
+              const outH = Math.max(0, month.expenseFils / max * 100);
               return <Pressable key={month.key} accessibilityRole="button"
                 testID={`cashflow-month-${month.key}`}
                 aria-selected={isSelected}
@@ -226,7 +221,8 @@ export function SpendingTrends(p: Props) {
             color={selected.incomeFils - selected.expenseFils < 0 ? theme.expense : theme.income} />
         </View>
       </View>}
-      {!showAllTrendLabels && <View style={styles.monthDetails} testID="cashflow-month-details">
+      {/* Exact values stay visible for every month, including wide layouts. */}
+      <View style={styles.monthDetails} testID="cashflow-month-details">
         {p.months.map((month) => <Pressable key={month.key} testID={`cashflow-detail-${month.key}`}
           accessibilityRole="button" accessibilityLabel={monthDescription(month)}
           aria-selected={month.key === p.selectedKey}
@@ -237,7 +233,7 @@ export function SpendingTrends(p: Props) {
           <ThemedText type="smallBold">{monthLabel(month.key)}</ThemedText>
           {monthFigures(month)}
         </Pressable>)}
-      </View>}
+      </View>
       <ThemedText type="meta" themeColor="textTertiary">{w.partial}</ThemedText>
     </View>
 
@@ -262,10 +258,13 @@ export function SpendingTrends(p: Props) {
       <ThemedText type="smallBold">{w.patterns}</ThemedText><Icon name={patterns ? 'chevron-down' : 'chevron-right'} size={18} color={theme.textSecondary} />
     </Pressable>
     {patterns && <View style={[styles.panel, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
+      <ThemedText type="meta" themeColor="textSecondary">{p.periodLabel}</ThemedText>
       {p.weekdays.map((fils, day) => <View key={day} style={styles.weekday} accessible accessibilityLabel={`${weekdayShort(day)}, ${moneyLabel(fils)}`}>
-        <ThemedText type="meta" style={[styles.weekdayName, large && styles.weekdayNameLarge]}>{weekdayShort(day)}</ThemedText>
+        <View style={[styles.compareBarHead, large && styles.stackColumn]}>
+          <ThemedText type="meta">{weekdayShort(day)}</ThemedText>
+          <Money fils={fils} type="meta" />
+        </View>
         <View style={[styles.weekdayTrack, { backgroundColor: theme.track }]}><View style={{ height: 6, borderRadius: 3, width: `${fils / weekdayMax * 100}%`, backgroundColor: theme.primary }} /></View>
-        <Money fils={fils} type="meta" />
       </View>)}
       <ThemedText type="meta" themeColor="textSecondary">{w.patternsNote}</ThemedText>
     </View>}
@@ -314,18 +313,12 @@ const styles = StyleSheet.create({
   compareGroup: { gap: 2, paddingTop: 10 },
   compareRow: { paddingVertical: 12, gap: 6 },
   compareTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  compareBarRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  compareBarLabel: { width: 72 },
-  compareTrack: { flex: 1, minWidth: 40 },
-  // Fixed width so both bars in a row share one pixel scale, whatever the amounts.
-  compareAmount: { width: 88, alignItems: 'flex-end' },
-  // Larger Text: the name takes its own line under the avatar, and each
-  // bar's label and amount sit on a line above a full-width bar (the fixed
-  // 72/88pt columns cannot hold text at 3.1x).
+  // Both periods share the full track width. Labels wrap above the bars,
+  // so an unusually large amount never changes their relative scale.
   compareTopLarge: { flexWrap: 'wrap' },
   compareNameLarge: { flexBasis: '100%' },
   compareBarStack: { gap: 4 },
   compareBarHead: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 },
   empty: { paddingVertical: 20 }, disclosure: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 48 },
-  weekday: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }, weekdayName: { width: 42 }, weekdayNameLarge: { width: 'auto', flexBasis: '100%' }, weekdayTrack: { flex: 1, minWidth: 40, height: 6, borderRadius: 3 },
+  weekday: { gap: 6 }, weekdayTrack: { width: '100%', height: 6, borderRadius: 3 },
 });

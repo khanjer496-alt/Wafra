@@ -3,13 +3,14 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
-import { Radius, Spacing } from '@/constants/theme';
+import { Radius, Spacing, type BandPalette } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { tapped } from '@/lib/haptics';
 import { t, type StringKey } from '@/lib/i18n';
 import type { IosMessageSetupStatus } from '@/lib/ios-message-onboarding';
 
 export interface ChecklistRowProps {
+  palette?: BandPalette;
   title: string;
   detail?: string;
   status: IosMessageSetupStatus;
@@ -35,8 +36,13 @@ export const ChecklistRow = ({
   expanded,
   onPress,
   children,
+  palette,
 }: ChecklistRowProps) => {
-  const theme = useTheme();
+  const legacyTheme = useTheme();
+  const theme = palette ? { ...legacyTheme, card: palette.card, cardBorder: palette.rule,
+    primaryBorder: palette.rule, primary: palette.tint, onPrimary: palette.sheet,
+    primarySoft: palette.statusOkSoft, backgroundSelected: palette.glyphGround,
+    text: palette.text, textSecondary: palette.textSecondary, textTertiary: palette.textSecondary } : legacyTheme;
   const complete = status === 'complete';
   const skipped = status === 'skipped';
   const statusKey = STATUS_KEYS[status];
@@ -86,11 +92,11 @@ export const ChecklistRow = ({
           )}
         </View>
         <View style={styles.copy}>
-          <ThemedText type="smallBold">
+          <ThemedText type="smallBold" style={{ color: theme.text }}>
             {title}
           </ThemedText>
           {detail && (
-            <ThemedText type="meta" themeColor="textSecondary">{detail}</ThemedText>
+            <ThemedText type="meta" style={{ color: theme.textSecondary }}>{detail}</ThemedText>
           )}
         </View>
         <Icon

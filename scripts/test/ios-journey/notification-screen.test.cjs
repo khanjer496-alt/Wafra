@@ -9,7 +9,7 @@ const progressApi = load(path.join(root, 'src/lib/ios-message-onboarding.ts'), {
   './ios-history-setup': { isIosHistoryShortcutInstalled: async () => false },
 });
 const walk = n => !n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(walk) : [n, ...walk(n.props?.children)];
-async function screen({ version = '27.0', capability = true, enabled = false, proof = null, received = null, entitled = true, bundled = false } = {}) {
+async function screen({ version = '27.0', capability = true, enabled = false, proof = null, received = null, entitled = true, bundled = false, language = 'en', scheme = 'light' } = {}) {
   const slots = [], effects = [], urls = [], clipboard = [], shares = [], events = [], routes = [];
   let cursor = 0, generation = 1;
   let status = { enabled, entitled, pending: 0, dropped: 0, corrupt: false,
@@ -28,6 +28,7 @@ async function screen({ version = '27.0', capability = true, enabled = false, pr
     ...(bundled ? { getNotificationShortcutURL: async () => 'file:///app/WafraLiveCaptureResources.bundle/Wafra%20Notifications%20v1.shortcut' } : {}),
     getCaptureStatus: async () => { events.push('read-status'); return status; },
     setCaptureEnabled: async value => { events.push(`enabled:${value}`); status = { ...status, enabled: value }; } };
+  const palette = load(path.join(root, 'src/constants/theme.ts'), { '@/global.css': {}, 'react-native': { Platform: { select: choices => choices.default } } }).bandPalette('flow', scheme);
   const health = load(path.join(root, 'src/lib/ios-capture-health.ts'));
   const setup = load(path.join(root, 'src/lib/ios-capture-setup.ts'), {
     'react-native': { Platform: { OS: 'ios', Version: version }, Linking: {} },
@@ -36,16 +37,23 @@ async function screen({ version = '27.0', capability = true, enabled = false, pr
   const copy = load(path.join(root, 'src/lib/ios-notification-copy.ts'));
   const component = load(path.join(root, 'src/app/ios-notification-setup.tsx'), {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
-    'react-native': { Platform: { OS: 'ios', Version: version }, View: 'View', ScrollView: 'ScrollView',
+    'react-native': { Platform: { OS: 'ios', Version: version }, View: 'View', ScrollView: 'ScrollView', StyleSheet: { create: value => value, hairlineWidth: 1 },
       Linking: { openURL: async url => urls.push(url) }, AppState: { addEventListener: (_, fn) => { listeners.push(fn); return { remove() {} }; } } },
     'expo-router': { Stack: { Screen: 'Screen' }, useRouter: () => ({ dismissTo: route => routes.push(route), setParams: () => {} }), useLocalSearchParams: () => ({ fromOnboarding: '1' }) },
     'expo-clipboard': { setStringAsync: async text => clipboard.push(text) },
     'expo-sharing': { isAvailableAsync: async () => true, shareAsync: async uri => shares.push(uri) },
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
-    '@/components/onboarding/setup-shell': { SetupHeader: 'Header', SetupShell: 'Shell' },
+    '@/components/ui/band-scaffold': { BandScaffold: props => jsx('BandScaffold', { ...props, children: [props.bandContent, props.children, props.footer] }) },
+    '@/components/ui/band/e-button': { EButton: 'Button' },
+    '@/components/ios-message-setup/setup-step': {
+      SetupStep: props => jsx('SetupStep', { ...props, children: [jsx('Text', {children: props.title}), props.result && jsx('Text', {children: props.result.title}), props.children] }),
+      SetupResult: props => jsx('Text', {children: props.title}),
+    },
+    '@/hooks/use-band': { useBand: () => palette },
+    '@/lib/ios-setup-band-copy': load(path.join(root, 'src/lib/ios-setup-band-copy.ts')),
     '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/controls': { Button: 'Button' },
-    '@/constants/theme': { MaxContentWidth: 640, ScreenPadding: 24, Spacing: { two: 8, three: 12 } },
-    '@/hooks/use-language': { useLanguage: () => 'en' }, '@/hooks/use-theme': { useTheme: () => ({ background: '#fff' }) },
+    '@/constants/theme': { Fonts: { sansSemi: 'Geist-SemiBold' }, MaxContentWidth: 640, ScreenPadding: 24, Spacing: { two: 8, three: 12 } },
+    '@/hooks/use-language': { useLanguage: () => language }, '@/hooks/use-theme': { useTheme: () => ({ background: '#fff' }) },
     '@/lib/capture': { getIosCaptureNativeModule: () => native, subscribeIosCaptureStatusRefresh: () => () => {} },
     '@/lib/alert-review-tray': { REVIEW_ALERT_CAP: 50, isIosNotificationReview: () => true, isCurrencyConflictReview: () => false },
     '@/lib/ios-capture-health': health, '@/lib/ios-capture-setup': setup, '@/lib/ios-notification-copy': copy,
@@ -58,7 +66,7 @@ async function screen({ version = '27.0', capability = true, enabled = false, pr
   const render = () => { cursor = 0; tree = component(); for (const effect of effects.splice(0)) effect(); };
   const flush = async () => { for (let i = 0; i < 5; i++) { await new Promise(r => setImmediate(r)); render(); } };
   render(); await flush();
-  return { events, urls, routes, clipboard, shares, flush,
+  return { events, urls, routes, clipboard, shares, flush, tree: () => tree, palette,
     text: () => walk(tree).filter(n => n.type === 'Text').map(n => n.props.children).join(' '),
     button: label => walk(tree).find(n => n.type === 'Button' && n.props.label === label)?.props,
     async foreground(patch = {}) { status = { ...status, ...patch }; for (const fn of listeners) fn('active'); await flush(); },
@@ -126,3 +134,21 @@ test('the bundled path shares only the fixed local Shortcut and runs its no-inpu
   s.button('Build the Shortcut manually').onPress(); await s.flush();
   assert.ok(s.button('Copy setup check text'));
 });
+
+for (const language of ['en', 'ar']) for (const scheme of ['light', 'dark']) {
+  test(`notification design E exposes separate shortcut, automation and receipt states (${language}, ${scheme})`, async () => {
+    const s = await screen({ enabled: true, proof: Date.now(), language, scheme });
+    const nodes = walk(s.tree());
+    assert.equal(nodes.find(n => n.type === 'BandScaffold').props.band, 'flow');
+    assert.equal(s.tree().props.testID, 'onboarding-setup-shell');
+    assert.ok(nodes.some(n => n.props.testID === 'notification-shortcut-step'));
+    assert.ok(nodes.some(n => n.props.testID === 'notification-automation-step'));
+    assert.ok(nodes.some(n => n.props.testID === 'notification-delivery'));
+    const words = load(path.join(root, 'src/lib/ios-notification-copy.ts')).iosNotificationCopy(language);
+    assert.ok(s.text().includes(words.waitingNotification));
+    assert.ok(s.text().includes(words.checked));
+    assert.ok(!s.text().includes(words.received));
+    assert.equal(s.button(words.confirm).disabled, false);
+    assert.ok(nodes.filter(n => n.type === 'Button').every(n => n.props.palette === s.palette));
+  });
+}

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+  <string name="wafra_widget_last_7_total">Last 7 days</string>
   <string name="wafra_widget_today_name">Today</string>
   <string name="wafra_widget_today_description">What you spent today and over the last 7 days.</string>
   <string name="wafra_widget_upcoming_name">Coming up</string>
@@ -13,6 +14,7 @@
   <string name="wafra_widget_no_bills">No upcoming bills</string>
   <string name="wafra_widget_open_to_update">Open Wafra to update</string>
   <string name="wafra_widget_no_payments">No payments yet</string>
+  <string name="wafra_widget_preview_week_amount" translatable="false">USD 542.10</string>
   <!-- Widget-picker preview samples (illustrative, never user data). -->
   <string name="wafra_widget_preview_amount" translatable="false">USD 86.40</string>
   <string name="wafra_widget_preview_count">3 payments</string>

@@ -5,7 +5,8 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
 
-const { buildWidgetSnapshot, WIDGET_SNAPSHOT_VERSION } = load(path.join(__dirname, '../../../src/lib/widget-snapshot.ts'), {});
+const logos = load(path.join(__dirname, '../../../src/lib/widget-logo.ts'));
+const { buildWidgetSnapshot, WIDGET_SNAPSHOT_VERSION } = load(path.join(__dirname, '../../../src/lib/widget-snapshot.ts'), { '@/lib/widget-logo': logos });
 const today = {
   todayFils: 5237, todayCount: 2, weekFils: 52877,
   week: [4200, 11800, 3600, 6400, 9500, 12140, 5237].map((fils, i) => ({ dateISO: `2026-09-${19 + i}`, weekday: (6 + i) % 7, fils, today: i === 6 })),
@@ -38,7 +39,7 @@ test('the snapshot carries only summary figures, marked sensitive', () => {
 test('bills: overdue items skipped, at most three, in the order Home already shows', () => {
   const s = buildWidgetSnapshot(base);
   assert.deepEqual([...s.bills.map(b => b.title)], ['Netflix', 'Electricity', 'Visa ••4821']);
-  assert.deepEqual(Object.keys(s.bills[0]).sort(), ['amountMinor', 'dueISO', 'estimated', 'title']);
+  assert.deepEqual(Object.keys(s.bills[0]).sort(), ['amountMinor', 'dueISO', 'estimated', 'logoId', 'title']);
 });
 
 test('hidden amounts are null everywhere, never zero', () => {
@@ -57,4 +58,16 @@ test('no budgets means no pace figures', () => {
   assert.equal(s.leftInBudgetsMinor, null);
   assert.equal(s.perDayMinor, null);
   assert.equal(s.budgetsOver, 0);
+});
+
+test('only exact bundled identities enter the widget snapshot; no paths or network hints', () => {
+  const s = buildWidgetSnapshot(base);
+  assert.equal(s.bills[0].logoId, 'netflix');
+  assert.equal(s.bills[1].logoId, null);
+  for (const value of ['Cafe near Netflix', 'netflix.com/other', '../netflix', 'https://netflix.com', 'Netflix\u200e']) {
+    assert.equal(logos.widgetLogoIdFor(value), null, value);
+  }
+  assert.equal(logos.widgetLogoIdFor('نتفليكس'), 'netflix');
+  assert.equal(logos.widgetLogoIdFor('Apple.com/bill'), 'apple');
+  assert.equal(logos.isWidgetLogoId('../../apple'), false);
 });

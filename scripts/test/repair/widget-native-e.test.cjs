@@ -88,7 +88,7 @@ test('iOS keeps Lock Screen and StandBy redaction, deep links and tinted legibil
     const next = swiftViews.indexOf('\nstruct ', start + 1);
     return swiftViews.slice(start, next < 0 ? undefined : next);
   };
-  const redactions = { WafraBandFigure: 1, WafraTodayLine: 2, WafraWeekBars: 1, WafraComingUpView: 1, WafraLeftLine: 1, WafraLockScreenView: 2 };
+  const redactions = { WafraBandFigure: 1, WafraTodayLine: 2, WafraTodayView: 1, WafraComingUpView: 1, WafraLeftLine: 1, WafraLockScreenView: 2 };
   for (const [name, count] of Object.entries(redactions)) {
     const found = (structBody(name).match(/\.wafraAmount\(snapshot\)/g) || []).length;
     assert.ok(found >= count, `${name} redacts every amount it draws (${found} of ${count})`);
@@ -131,12 +131,12 @@ test('every Android resource the layouts and Kotlin name exists', () => {
   const defined = { color: new Set(), string: new Set(), plurals: new Set(), drawable: new Set(), layout: new Set(), xml: new Set(), id: new Set() };
   for (const dir of fs.readdirSync(resDir)) {
     for (const file of fs.readdirSync(path.join(resDir, dir))) {
-      const text = fs.readFileSync(path.join(resDir, dir, file), 'utf8');
+      const text = file.endsWith('.xml') ? fs.readFileSync(path.join(resDir, dir, file), 'utf8') : '';
       const type = dir.split('-')[0];
       if (type === 'values') {
         for (const m of text.matchAll(/<(color|string|plurals) name="(\w+)"/g)) defined[m[1]].add(m[2]);
       } else if (defined[type]) {
-        defined[type].add(file.replace(/\.xml$/, ''));
+        defined[type].add(file.replace(/\.(xml|png)$/, ''));
       }
       for (const m of text.matchAll(/@\+id\/(\w+)/g)) defined.id.add(m[1]);
       // Tag balance: a cheap well-formedness check (aapt2 does the full one).
@@ -148,7 +148,7 @@ test('every Android resource the layouts and Kotlin name exists', () => {
   const missing = [];
   for (const dir of fs.readdirSync(resDir)) {
     for (const file of fs.readdirSync(path.join(resDir, dir))) {
-      const text = fs.readFileSync(path.join(resDir, dir, file), 'utf8');
+      const text = file.endsWith('.xml') ? fs.readFileSync(path.join(resDir, dir, file), 'utf8') : '';
       for (const m of text.matchAll(/@(color|string|drawable|layout|xml)\/(\w+)/g)) {
         if (!defined[m[1]].has(m[2])) missing.push(`${dir}/${file}: @${m[1]}/${m[2]}`);
       }
@@ -199,4 +199,22 @@ test('the widget Foundation logic compiles and passes on macOS', { skip: os.plat
   const run = spawnSync(out, [], { encoding: 'utf8' });
   assert.equal(run.status, 0, run.stdout + run.stderr);
   assert.match(run.stdout, /all checks passed/);
+});
+
+test('native logo allowlists have exactly the bundled JS identities and identical artwork bytes', () => {
+  const crypto = require('node:crypto');
+  const logos = load(path.join(root, 'src/lib/widget-logo.ts'));
+  const digest = file => crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');
+  const kotlin = read(`${kotlinDir}/WidgetSnapshot.kt`);
+  for (const id of logos.WIDGET_LOGO_IDS) {
+    assert.ok(swiftSnapshot.includes(`"${id}"`));
+    assert.ok(kotlin.includes(`"${id}"`));
+    const original = digest(`assets/merchants/${id}.png`);
+    assert.equal(digest(`targets/widget/Assets.xcassets/wafra_logo_${id}.imageset/${id}.png`), original);
+    assert.equal(digest(`${androidRes}/drawable-nodpi/wafra_logo_${id}.png`), original);
+  }
+  assert.match(swiftSnapshot, /WafraLogo.validated\(bill.logoId\)/);
+  assert.match(kotlin, /takeIf \{ it in LOGO_IDS \}/);
+  assert.doesNotMatch(swiftViews, /WafraWeekBars/);
+  assert.match(swiftViews, /snapshot.weekTotalMinor/);
 });

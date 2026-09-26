@@ -572,7 +572,8 @@ try {
         assert.match(answer, /1 Aug(?:ust)?\s*[–-]\s*31 Aug(?:ust)?|Aug(?:ust)? 2026|2026-08/);
         if (source === 'home' || source === 'flow') assert.ok(answer.includes(money(PREVIOUS_TOTAL)), answer);
         else {
-          assert.ok(answer.includes(JSON.stringify(MERCHANT)), 'context prompt preserves the complete quoted name');
+          assert.ok((await screen(page).getByTestId('assistant-band-question').innerText()).includes(JSON.stringify(MERCHANT)), 'context prompt preserves the complete quoted name');
+          assert.ok(answer.includes(MERCHANT), 'answer preserves the complete merchant identity');
           assert.ok(answer.includes('3.33'), answer);
           await screen(page).getByTestId('assistant-input').fill('draft follow-up');
           await page.setViewportSize({ width: 320, height: 844 });

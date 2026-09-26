@@ -141,7 +141,10 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/components/ui/layout': { Block: 'Block' },
       '@/components/ui/screen-header': { ScreenHeader: 'ScreenHeader' },
       '@/components/onboarding/setup-shell': { SetupShell: 'SetupShell', SetupHeader: 'ScreenHeader' },
-      '@/constants/theme': { Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
+      '@/constants/theme': { Fonts: { sansSemi: 'Geist-SemiBold' }, Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
+      '@/components/ui/band-scaffold': { BandScaffold: 'BandScaffold' },
+      '@/components/ui/band/e-button': { EButton: 'Button' },
+      '@/hooks/use-band': { useBand: () => ({}) },
       '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
       '@/components/workflows/workflow-copy': execute('src/lib/workflow-copy.ts'),
       '@/components/workflows/workflow-surfaces': { WorkflowHero: 'WorkflowHero' },
@@ -197,7 +200,12 @@ module.exports = async ({ execute, ok, eq, translated }) => {
         result.push(node);
         if (node.type === 'DetailsSheet') { visit(details(node.props)); return; }
         if (node.type === 'ChecklistRow' && !node.props.expanded) return;
+        if (node.type === 'BandScaffold') {
+          visit(node.props.bandContent);
+          visit(node.props.nav?.trailing);
+        }
         visit(node.props?.children);
+        if (node.type === 'BandScaffold') visit(node.props.footer);
       };
       visit(tree);
       return result;
@@ -208,6 +216,10 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       const rendered = nodes.find((node) => (node.type === 'Button' && node.props.label === label) ||
         (node.type === 'Pressable' && node.props.accessibilityLabel === label));
       if (rendered) return rendered;
+      const band = nodes.find(node => node.type === 'BandScaffold');
+      if (label === translated('back', 'en') && typeof band?.props.nav?.back === 'function') {
+        return { type: 'Button', props: { label, onPress: band.props.nav.back } };
+      }
       const header = nodes.find((node) => node.type === 'ScreenHeader');
       const action = [header?.props.back, ...(header?.props.actions ?? [])].find((item) => item?.label === label);
       return action ? { type: 'Button', props: action } : undefined;

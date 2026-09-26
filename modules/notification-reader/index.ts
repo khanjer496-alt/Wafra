@@ -14,6 +14,8 @@ export interface NotificationReaderDiagnostics {
   queuedVisibleMatchCount: number;
   admissionCounts: Record<string, number>;
   adcbAdmissionCounts: Record<string, number>;
+  /** The retired plaintext queue could not be erased at startup; retried on every queue operation. Absent on older binaries. */
+  legacyCleanupPending?: boolean;
 }
 
 export interface ProcessExitDiagnostic {

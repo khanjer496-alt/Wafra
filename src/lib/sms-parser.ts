@@ -413,8 +413,16 @@ export interface ParsedCard {
  * income, not dropped or booked as expenses. A date directly after the amount
  * no longer makes a flattened field list's amount token look malformed.
  * Future captures only; PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 55: Emirates NBD's card due reminder ("Total Amt - AED …; Min Amt - AED …")
+ * is a card statement due with its total, minimum and deadline. The dash
+ * label matched neither figure, so the reminder was refused and the due never
+ * reached Bills. A field list's posting-date field may state a two-digit
+ * year (FAB sends "26/09/26" as often as "26/09/2026"); it was left undated
+ * and filed on the day it was read. Future captures plus the bounded recent re-read;
+ * PARSER_BACKFILL_VERSION remains 49.
  */
-export const PARSER_VERSION = 54;
+export const PARSER_VERSION = 55;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -1898,7 +1906,8 @@ function ensureCurrencyPatterns(): void {
   FIRST_LOCAL_AMOUNT_RE = new RegExp(`(?<![A-Za-z])(?:${PREFIX})\\s*${FIGURE}`, 'i');
   FIELD_LIST_DATE_RE = new RegExp(
     `^(?:${PREFIX})\\s*${FIGURE}(?:[^\\S\\n]*\\n[^\\S\\n]*|[^\\S\\n]+)` +
-      `(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4})(?!\\d)(?![/.-]\\d)` +
+      // FAB states the same field with a two-digit year as often as four.
+      `(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4}|\\d{2})(?!\\d)(?![/.-]\\d)` +
       `(?=[^\\S\\n]*(?:\\n|$)|[^\\S\\n]+(?:bal(?:ance)?|avl|avail(?:able)?)\\b)`,
     'i');
   // The trailing guard covers Arabic too: without it "50 دار" would read its
@@ -1909,7 +1918,7 @@ function ensureCurrencyPatterns(): void {
   // figure. Without it that block had no minimum, and a statement with no
   // minimum raises no reminder for the payment the user actually has to make.
   MIN_DUE_RE = new RegExp(
-    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)\\s*(?:of|:|is)?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)\\s*(?:of|:|is|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   // "Closing balance" and "statement balance" are what a statement calls its
   // total. Without them the branch fell through to first-amount extraction and
   // recorded the MINIMUM as the statement total — AED 425 owed on a AED 8,500
@@ -1933,9 +1942,13 @@ function ensureCurrencyPatterns(): void {
     // "minimum payment for credit card bill" cannot masquerade as a total.
     `|(?:^|[.!?;\\n]\\s*)(?:your\\s+)?(?:credit|covered)\\s+card\\s+bill` +
     `|closing\\s+balance|statement\\s+balance|new\\s+balance|statement\\s+amount` +
+    // Emirates NBD's due reminder writes "Total Amt - AED 2,345.67; Min Amt -
+    // AED 117.28". The bare abbreviation is a total only with that dash
+    // label, so a purchase that merely mentions a "total amt" is untouched.
+    `|total\\s+amt(?=\\s*[-\u2013]\\s)` +
     `|(?<!\\bmin\\s)(?<!\\bmin\\.\\s)(?<!\\bminimum\\s)amount\\s+due)`;
   TOTAL_DUE_RE = new RegExp(
-    `${TOTAL_DUE_LABEL}\\s*(?:is|:)?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    `${TOTAL_DUE_LABEL}\\s*(?:is|:|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   CARD_PAYMENT_DUE_TOTAL_RE = new RegExp(
     `\\bcard\\b[^.\\n]{0,96}?\\bpayment\\s+is\\s+due\\s+on\\s+` +
     `\\d{1,2}[-\\s]+[A-Za-z]{3,9}(?:[-\\s]+\\d{2,4})?\\s+is\\s+` +

@@ -52,7 +52,7 @@ export function GoalsStep({ goals, onToggle, onContinue, onBack, onClose, tiles,
     <View style={styles.list} testID="onboarding-goal-options">
       {SHOWN.filter((goal) => GOAL_IDS.includes(goal)).map((goal) => {
         const selected = goals.includes(goal);
-        return <Pressable key={goal} accessibilityRole="checkbox" accessibilityState={{ checked: selected, disabled }}
+        return <Pressable key={goal} accessibilityRole="checkbox" accessibilityState={{ checked: selected, disabled }} aria-checked={selected}
           accessibilityLabel={words.goals[goal]} disabled={disabled} testID={`onboarding-goal-${goal}`}
           onPress={() => { tapped(); onToggle(goal); }}
           style={({ pressed }) => [styles.pill, {

@@ -16,9 +16,9 @@ const results = [];
 const minor = value => {
   const normalized = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
     .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/٬/g, ',').replace(/٫/g, '.');
-  const number = normalized.match(/\d[\d,]*(?:\.\d+)?/);
+  const number = normalized.match(/(?:\bAED\s*|^\s*)(\d[\d,]*(?:\.\d+)?)/);
   assert.ok(number, `Missing displayed amount: ${normalized}`);
-  return Math.round(Number(number[0].replaceAll(',', '')) * 100);
+  return Math.round(Number(number[1].replaceAll(',', '')) * 100);
 };
 // Native-stack screens stay mounted. Scroll clear of the floating tab bar,
 // then hit-test so a matching income row behind the current screen cannot win.

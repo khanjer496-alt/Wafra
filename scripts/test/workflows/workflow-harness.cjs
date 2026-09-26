@@ -69,6 +69,7 @@ function createWorkflowHarness(options={}) {
  d['@/components/diagnostic-export-control']={DiagnosticExportControl:()=>null};
  d['@/components/tester-diagnostics-control']={TesterDiagnosticsControl:()=>null};
  d['@/lib/ledger-export']={buildLedgerCsv:()=>''};
+ d['@/lib/app-lock']=require('../build/app-lock.js');
  d['@/lib/sms-corpus-export']={isSmsCorpusExportAvailable:()=>false,sharePersonalDataForReview:record('sharePersonalDataForReview')};
  d['@/lib/share-text']={readBackupPickerCopy:async()=>null,shareText:record('shareText'),shareTextFile:record('shareTextFile')};
  d['@/lib/accuracy']={unreadFormatCount:()=>0,noFormatsReason:()=>null};
@@ -105,6 +106,7 @@ function createWorkflowHarness(options={}) {
  // the layout figures and the new copy run from source. The Pro sheet is a
  // boundary here (its own suite renders it); its open feature is a prop.
  h.local('@/lib/settings-e-copy','src/lib/settings-e-copy.ts');
+ h.local('@/lib/widgets-copy','src/lib/widgets-copy.ts');
  h.local('@/lib/pro-gate','src/lib/pro-gate.ts');
  h.local('@/lib/settings-layout','src/lib/settings-layout.ts');
  h.local('@/components/settings-band/band-title');

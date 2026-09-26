@@ -273,5 +273,5 @@ const styles = StyleSheet.create({
   radioDot: { width: 10, height: 10, borderRadius: 5 },
   notice: { borderRadius: 16, padding: 14, gap: 4 },
   legal: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
-  legalLink: { minHeight: 44, justifyContent: 'center' },
+  legalLink: { minHeight: 44, maxWidth: '100%', flexShrink: 1, justifyContent: 'center' },
 });

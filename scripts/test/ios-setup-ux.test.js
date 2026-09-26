@@ -68,7 +68,6 @@ const settingsScreen = read('src/app/settings.tsx') + read('src/app/settings-dat
 const storageRecovery = read('src/components/storage-recovery.tsx');
 const controller = read('src/lib/ios-capture-setup.ts');
 const protocol = read('src/lib/ios-local-capture-protocol.ts');
-const controls = read('src/components/ui/controls.tsx');
 const checklistRowPath = path.join(
   ROOT,
   'src/components/ios-message-setup/checklist-row.tsx',
@@ -293,14 +292,16 @@ ok('iOS local setup: controller has only local native, Linking and fixed-file sh
     /getCaptureStatus/.test(controller) &&
     /setCaptureEnabled/.test(controller));
 
-ok('iOS message setup: sentence-length actions wrap',
-  (screen.match(/<Button\b[\s\S]*?\/>/g) || []).every((button) => /wrapLabel/.test(button)) &&
-    /wrapLabel = true[\s\S]{0,1600}numberOfLines=\{wrapLabel \? undefined : 1\}/.test(controls));
-ok('iOS local setup: shared actions retain the 48pt minimum target',
-  /minHeight:\s*48/.test(controls));
-ok('iOS local setup: the whole screen scrolls and respects both safe edges',
-  /<SafeAreaView[\s\S]{0,120}edges=\{\['top', 'bottom'\]\}/.test(screen) &&
-    /<ScrollView[\s\S]{0,180}contentInsetAdjustmentBehavior="automatic"/.test(screen));
+const bandButton = read('src/components/ui/band/e-button.tsx');
+const bandScaffold = read('src/components/ui/band-scaffold.tsx');
+ok('iOS message setup: sentence-length E actions wrap',
+  /<EButton\b/.test(screen) && !/numberOfLines/.test(bandButton) && /flexShrink:\s*1/.test(bandButton));
+ok('iOS local setup: shared E actions retain their minimum target',
+  /minHeight:\s*BandLayout.buttonHeight/.test(bandButton) && /buttonHeight:\s*56/.test(read('src/constants/theme.ts')));
+ok('iOS local setup: the shared band scaffold owns scrolling and safe edges',
+  /<BandScaffold\b/.test(screen) && !/scroll=\{false\}/.test(screen) &&
+  /scroll = true/.test(bandScaffold) && /useSafeAreaInsets/.test(bandScaffold) &&
+  /insets\.top/.test(bandScaffold) && /insets\.bottom/.test(bandScaffold));
 ok('iOS local setup: large Dynamic Type changes layout instead of clipping',
   /useLargeTextLayout/.test(screen) &&
     /const largeText = useLargeTextLayout\(\)/.test(screen) &&

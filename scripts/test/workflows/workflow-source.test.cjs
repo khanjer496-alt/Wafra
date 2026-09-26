@@ -23,7 +23,7 @@ test('workflow consumers have real imports for their current localized presentat
    for(const name of ['WelcomeStep','NameStep','GoalsStep','WatchStep','RemindersStep','PatternStep','PaywallStep','onboardingECopy','t','useLanguage','useEMotion'])assert.ok(names.has(name),`${file}: ${name} import`);
    assert.ok(!names.has('SetupIllustration')&&!names.has('workflowCopy'),'Welcome uses its example pattern and current translated copy');
   }else if(file.endsWith('/ios-setup.tsx')){
-   for(const name of ['SetupHeader','SetupShell','ChecklistRow','AutomationGuide','iosSetupJourneyCopy','t','useLanguage'])assert.ok(names.has(name),`${file}: ${name} import`);
+   for(const name of ['BandScaffold','EButton','ChecklistRow','AutomationGuide','iosSetupJourneyCopy','t','useLanguage'])assert.ok(names.has(name),`${file}: ${name} import`);
    assert.ok(!names.has('WorkflowHero')&&!names.has('workflowCopy'),'iOS setup has one heading before its actionable checklist');
   }else if(file.endsWith('/import-sms.tsx')){
    // 2026-09-23 screen polish: imports drop the repeated hero heading and lead with their step indicator.
