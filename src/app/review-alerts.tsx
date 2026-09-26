@@ -400,6 +400,15 @@ export default function ReviewAlertsScreen() {
   // Each new card starts at the top, with its "1 of N" in view.
   const currentId = current?.id;
   useEffect(() => { scrollRef.current?.scrollTo?.({ y: 0, animated: false }); }, [currentId]);
+  // Hold whatever card is shown by its id (the first one included), and keep
+  // the index on its position: a newer capture landing on top then shifts
+  // the queue under it without swapping the card, and answering it falls
+  // through to the item that took its place.
+  useEffect(() => {
+    if (!currentId) return;
+    if (shownId !== currentId) setShownId(currentId);
+    if (stepIndex !== step) setStepIndex(step);
+  }, [currentId, shownId, step, stepIndex]);
 
   // Deferred native records stay queued; the banner only explains the wait
   // while a Review lane is actually full, and clears once there is room.
@@ -475,9 +484,9 @@ export default function ReviewAlertsScreen() {
             style={[styles.figure, { color: band.onBand }]}>{d.review.position(step + 1, pending.length)}</ThemedText>
           {pending.length > 1 ? <View style={styles.stepArrows}>
             <StepArrow palette={band} label={d.review.previous} disabled={step === 0}
-              icon={language === 'ar' ? 'chevron-right' : 'chevron-left'} onPress={() => goTo(Math.max(0, step - 1))} />
+              icon="chevron-left" onPress={() => goTo(Math.max(0, step - 1))} />
             <StepArrow palette={band} label={d.review.next} disabled={step >= pending.length - 1}
-              icon={language === 'ar' ? 'chevron-left' : 'chevron-right'} onPress={() => goTo(Math.min(pending.length - 1, step + 1))} />
+              icon="chevron-right" onPress={() => goTo(Math.min(pending.length - 1, step + 1))} />
           </View> : null}
         </View>
       ) : (

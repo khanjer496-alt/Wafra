@@ -344,4 +344,46 @@ for (const language of ['en', 'ar']) {
     const gone = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } }, states: { 3: 1, 4: 'answered-elsewhere' } });
     assert.ok(text(byId(gone.renderScreen('review-alerts'), 'review-step-position')).includes(words.position(2, 2)));
   });
+  test(`${language}: the first card stays under the thumb when a newer capture arrives`, () => {
+    const purchase = pending('purchase', { amount: field(money()) });
+    const balance = pending('balance', { balance: field(money('99900')) });
+    balance.observedAt = purchase.observedAt - 1000;
+    const tray = { pending: [purchase, balance] };
+    const h = createWorkflowHarness({ language, state: { reviewTray: tray } });
+    const words = h.deps['@/lib/details-copy'].detailsCopy[language].review;
+    // Stateful hooks with effects run after each render, until nothing changes.
+    const slots = []; let cursor = 0; let effects = [];
+    h.deps.react.useState = (initial) => {
+      const index = cursor++;
+      if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
+      return [slots[index], (value) => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }];
+    };
+    h.deps.react.useEffect = (effect) => { effects.push(effect); };
+    const render = () => {
+      for (let pass = 0; pass < 6; pass++) {
+        cursor = 0; effects = [];
+        const before = JSON.stringify(slots);
+        const tree = h.renderScreen('review-alerts');
+        effects.forEach((effect) => effect());
+        if (JSON.stringify(slots) === before) return tree;
+      }
+      throw new Error('the screen never settles');
+    };
+    // Card one is on screen without anyone having pressed Previous or Next.
+    let tree = render();
+    assert.ok(text(byId(tree, 'review-step-position')).includes(words.position(1, 2)));
+    assert.ok(text(byId(tree, 'review-step-card')).includes('AED 123.45'));
+    // A newer capture lands on top of the queue while it is showing.
+    const newer = { ...pending('purchase', { amount: field(money('777')) }), id: 'synthetic-newer', sourceKey: 'synthetic-source-newer',
+      observedAt: purchase.observedAt + 1000 };
+    tray.pending = [newer, purchase, balance];
+    tree = render();
+    assert.ok(text(byId(tree, 'review-step-card')).includes('AED 123.45'), 'the card on screen is not swapped');
+    assert.ok(text(byId(tree, 'review-step-position')).includes(words.position(2, 3)));
+    // Answering it falls through to the item that took its place, not back to the newest.
+    tray.pending = [newer, balance];
+    tree = render();
+    assert.ok(text(byId(tree, 'review-step-position')).includes(words.position(2, 2)));
+    assert.ok(text(byId(tree, 'review-step-card')).includes('999.00'));
+  });
 }

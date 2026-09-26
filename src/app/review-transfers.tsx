@@ -478,7 +478,7 @@ export default function ReviewTransfersScreen() {
             <View style={styles.groupHeading}>
               <Icon name="bank" size={18} color={band.textSecondary} />
               <ThemedText type="smallBold" style={styles.flexText}>{item.group.summary.account}</ThemedText>
-              {!focusedId && <Icon name={expanded.has(item.group.id) ? 'chevron-down' : language === 'ar' ? 'chevron-left' : 'chevron-right'} size={16} color={band.textSecondary} />}
+              {!focusedId && <Icon name={expanded.has(item.group.id) ? 'chevron-down' : 'chevron-right'} size={16} color={band.textSecondary} />}
             </View>
             <ThemedText type="meta" themeColor="textSecondary">{item.group.summary.counterparty}</ThemedText>
             {(filter === 'reviewed' || item.group.status.startsWith('likely-')) && <ThemedText type="meta" themeColor="textSecondary">{statusLabel(item.group.status, words)}</ThemedText>}
