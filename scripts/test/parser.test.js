@@ -1170,6 +1170,15 @@ t('tabby charge-tomorrow preview is skipped (real charge arrives separately)',
     'AED 35.00 was charged to your card at CARREFOUR.',
     'Your payment of AED 75.00 to Sara was successful.',
     'تم خصم 35.00 درهم من بطاقتك في كارفور',
+    'تم خصم 20.00 درهم من بطاقتك لدى ستاربكس',
+    'تم خصم 20.00 درهم من بطاقتك عند ستاربكس',
+    'Sara paid you AED 50.00. Payment received successfully.',
+    'Your payment of AED 20.00 with Starbucks was successful.',
+    'Your payment of AED 20.00 @ STARBUCKS was successful.',
+    'Payment of SAR 150.00 for JARIR BOOKSTORE completed.',
+    // A provider-card purchase whose notification title is the shop.
+    'Starbucks Payment of AED 20.00 successful',
+    'Merchant: STARBUCKS. Your payment of AED 20.00 was successful.',
   ];
   ok('BNPL: provider restatements of a bank card charge are recognised, English and Arabic',
     typeof isBnplProviderRestatement === 'function' &&

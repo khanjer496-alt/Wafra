@@ -89,7 +89,7 @@ const PROVIDER_OWN_MONEY_RE = new RegExp([
   '\\btop(?:ped)?[\\s-]*up\\b',
   '\\bcash\\s*back\\b',
   '\\byou(?:\\s+have)?\\s+(?:sent|received)\\b',
-  '\\bsent\\s+you\\b',
+  '\\b(?:sent|paid)\\s+you\\b',
   '\\btransfer(?:red|s)?\\b',
   'تابي\\s*كاش',
   'بطاق[ةه]\\s+(?:تابي|تمارا)',
@@ -149,14 +149,17 @@ const SAME_SENTENCE = '(?:[^.!?؟\\n]|\\.(?=\\d))';
 
 /**
  * A plain receipt for the shopper's own payment to the provider, which the
- * paying bank alerts on as a charge to the provider: "Payment of AED 49.75
- * collected successfully", "We have received your payment of AED 49.75",
- * "AED 49.75 was charged to your card ending 1234", "2 of 4 paid". Used only
- * with PAYEE_RE below: a payment AT a shop, TO a person or FROM someone is
- * the provider's own money (a card purchase, a transfer), never a receipt.
+ * paying bank alerts on as a charge to the provider: "Your payment of AED
+ * 49.75 was successful", "Payment of AED 49.75 collected", "We have received
+ * your payment of AED 49.75", "AED 49.75 was charged to your card ending
+ * 1234", "2 of 4 paid". Each form says whose payment it is or that the
+ * provider collected it: a bare "Payment of AED 20.00 successful" (a
+ * provider-card purchase, often with the shop as the title) is not one. Used
+ * only with PAYEE_RE below.
  */
 const PAYMENT_RECEIPT_RE = new RegExp([
-  `\\bpayment\\b${SAME_SENTENCE}{0,60}?\\b(?:collected|received|successful(?:ly)?|processed|confirmed|completed)\\b`,
+  `\\byour\\s+payment\\b${SAME_SENTENCE}{0,60}?\\b(?:collected|received|successful(?:ly)?|processed|confirmed|completed)\\b`,
+  `\\bpayment\\s+of\\b${SAME_SENTENCE}{0,30}?\\b(?:collected|received)\\b`,
   '\\b(?:received|collected|processed)\\s+your\\s+payment\\b',
   '\\b(?:charged|debited|deducted|collected)\\s+(?:to|from|on)\\s+your\\s+(?:saved\\s+|default\\s+|debit\\s+|credit\\s+|bank\\s+)?card\\b',
   '\\b\\d{1,2}\\s+of\\s+\\d{1,2}\\s+(?:paid|payments?|instal(?:l)?ments?)\\b',
@@ -165,10 +168,18 @@ const PAYMENT_RECEIPT_RE = new RegExp([
   arabicWord('دفعت(?:ك|كم)') + `${SAME_SENTENCE}{0,40}?(?:بنجاح|ناجح[ةه]?)`,
 ].join('|'), 'iu');
 
-/** A counterparty other than the shopper: "at CARREFOUR", "to Sara", "from Ahmed". */
+/**
+ * A counterparty other than the shopper: "at CARREFOUR", "to Sara", "from
+ * Ahmed", "with Starbucks", "@ STARBUCKS", "merchant:", and in Arabic في,
+ * لدى and عند (at), إلى (to), من (from) — except "من بطاقتك", from your card.
+ * A receipt naming one is a purchase or a transfer: the provider's own
+ * money, which reaches Review.
+ */
 const PAYEE_RE = new RegExp([
-  '\\b(?:at|to|from)\\s+(?!(?:your|you)\\b)[\\p{L}\\p{N}]',
-  arabicWord('(?:في|إلى|الى)') + '\\s+(?!بطاقت)',
+  '\\b(?:at|to|from|with)\\s+(?!(?:your|you)\\b)[\\p{L}\\p{N}]',
+  '@\\s*[\\p{L}\\p{N}]',
+  '\\bmerchant\\b',
+  arabicWord('(?:في|إلى|الى|لدى|عند|من)') + '\\s+(?!بطاقت)',
 ].join('|'), 'iu');
 
 /**
