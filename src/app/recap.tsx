@@ -19,10 +19,12 @@ export default function RecapScreen() {
   }, [params.kind, params.value]);
   const snapshot = useMemo(() => projectRecap(state, descriptor), [descriptor, state]);
   const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId))!;
+  // "there" is the placeholder greeting name, never the person's own.
+  const name = state.userName && state.userName.trim() && state.userName !== 'there' ? state.userName.trim() : null;
 
   useEffect(() => {
     void markRecapViewed(descriptor.id);
   }, [descriptor.id]);
 
-  return <RecapStory snapshot={snapshot} moneySpec={moneySpec} onClose={() => router.back()} />;
+  return <RecapStory snapshot={snapshot} moneySpec={moneySpec} name={name} onClose={() => router.back()} />;
 }

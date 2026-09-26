@@ -164,8 +164,11 @@ ok('the W mark, not a fake brand asset, owns the recap entry',
     fs.readFileSync(path.join(root, 'src/components/recap/recap-logo-trigger.tsx'), 'utf8')));
 ok('the shared Home summary keeps its old dependency surface',
   !/recap-logo-trigger/.test(summarySource) && /brandMark\?: React\.ReactNode/.test(summarySource));
-ok('story visuals reuse Wafra merchant, bank and category primitives',
-  ['MerchantAvatar', 'BankAvatar', 'useCategoricalPalette', 'WafraMark'].every((name) => storySource.includes(name)));
+ok('story visuals reuse Wafra merchant, bank and band primitives',
+  ['MerchantAvatar', 'BankAvatar', 'BandFigure', 'StatTile', 'YourPattern'].every((name) => storySource.includes(name)));
+ok('the recap cover is the only recap card with the personal pattern',
+  (storySource.match(/<YourPattern\b/g) ?? []).length === 1 && /function CoverScene[\s\S]*?<YourPattern/.test(storySource));
+ok('no category wears a hue of its own in the recap', !/useCategoricalPalette/.test(storySource));
 ok('recap deliberately avoids decorative gradient UI', !/LinearGradient|RadialGradient/.test(storySource));
 ok('full recap analytics live behind the dedicated route',
   /projectRecap\(state, descriptor\)/.test(routeSource));
