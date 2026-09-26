@@ -25,7 +25,6 @@ const en = {
     capture: 'Automatic capture is part of Pro',
     notifications: 'Bank-app notifications are part of Pro',
   } satisfies Record<ProGatedFeature, string>,
-  proSheetContinue: 'Continue',
   proSheetNotNow: 'Not now',
   /** Opens the full Pro screen (restore, management, every detail). */
   proSheetMore: 'All Pro details',
@@ -55,7 +54,6 @@ const ar: SettingsECopy = {
     capture: 'الالتقاط التلقائي جزء من برو',
     notifications: 'إشعارات تطبيقات البنوك جزء من برو',
   },
-  proSheetContinue: 'متابعة',
   proSheetNotNow: 'ليس الآن',
   proSheetMore: 'كل تفاصيل برو',
 

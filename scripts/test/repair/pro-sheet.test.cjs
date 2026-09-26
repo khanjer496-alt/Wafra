@@ -62,10 +62,14 @@ const OFFERS = [
   { plan: 'monthly', productId: 'fixture.monthly', priceString: 'STORE-M 2' },
 ];
 
-function sheetHarness({ language = 'en', feature = 'capture', offers = OFFERS, legal = false, platform = 'ios' } = {}) {
-  // useProCheckout's five states come first in the sheet body:
-  // billingAction, offers, offerState, selectedPlan, notice.
-  const h = createWorkflowHarness({ language, platform, state: { pro: false, founderPro: false }, states: { 1: offers, 2: offers.length ? 'ready' : 'unavailable' } });
+function sheetHarness({ language = 'en', feature = 'capture', offers = OFFERS, legal = false, platform = 'ios', billingAction = null } = {}) {
+  // State slots: the sheet's previous feature (0) and open session (1), then
+  // useProCheckout's billingAction (2), offers (3), offerState (4),
+  // selectedPlan (5) and notice (6). An open sheet is rendered as the session
+  // that opening started.
+  const states = { 2: billingAction, 3: offers, 4: offers.length ? 'ready' : 'unavailable' };
+  if (feature) Object.assign(states, { 0: feature, 1: { feature, id: 1 } });
+  const h = createWorkflowHarness({ language, platform, state: { pro: false, founderPro: false }, states });
   const d = h.deps;
   const purchases = [];
   h.local('@/lib/purchases', 'src/lib/purchases.ts');
@@ -78,7 +82,7 @@ function sheetHarness({ language = 'en', feature = 'capture', offers = OFFERS, l
     purchasePro: async (productId) => { purchases.push(productId); return 'cancelled'; },
     restorePro: async () => null,
   }) };
-  d['@/components/ui/bottom-sheet'] = { BottomSheet: (p) => (p.visible ? h.jsx('BottomSheet', p) : null) };
+  d['@/components/ui/bottom-sheet'] = { BottomSheet: (p) => (p.visible ? h.jsx('BottomSheet', { ...p, children: [p.children, p.footer] }) : null) };
   h.local('@/hooks/use-pro-checkout', 'src/hooks/use-pro-checkout.ts');
   h.local('@/components/pro/pro-plan-options');
   const sheet = load(path.join(root, 'src/components/pro/pro-sheet.tsx'), d);
@@ -134,6 +138,32 @@ test('buying from the sheet refuses without legal links and otherwise goes throu
   walk(ready.tree).find((n) => n.props?.testID === 'pro-sheet-buy').props.onPress();
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(ready.purchases, ['fixture.yearly']);
+});
+
+test('while a purchase runs the sheet cannot be dismissed or left', () => {
+  const { tree, closes, h } = sheetHarness({ billingAction: 'purchase' });
+  const sheet = walk(tree).find((n) => n.type === 'BottomSheet');
+  assert.equal(sheet.props.dismissible, false, 'no backdrop, drag, close button or back');
+  for (const id of ['pro-sheet-buy', 'pro-sheet-restore', 'pro-sheet-not-now', 'pro-sheet-more']) {
+    const control = walk(tree).find((n) => n.props?.testID === id);
+    assert.equal(control.props.disabled, true, id);
+  }
+  assert.deepEqual(closes, []);
+  assert.ok(!h.events.some((e) => e[0] === 'route'));
+  const idle = sheetHarness();
+  assert.notEqual(walk(idle.tree).find((n) => n.type === 'BottomSheet').props.dismissible, false);
+});
+
+test('Restore sits in the sheet and goes through the shared checkout', async () => {
+  const { tree, t } = sheetHarness();
+  const restore = walk(tree).find((n) => n.props?.testID === 'pro-sheet-restore');
+  assert.equal(restore.props.accessibilityLabel, t('restorePurchase'));
+  assert.match(read('src/components/pro/pro-sheet.tsx'), /onPress=\{\(\) => void restore\(\)\}/);
+});
+
+test('with no store price the button asks for Pro plainly', () => {
+  const { tree, t } = sheetHarness({ offers: [] });
+  assert.equal(walk(tree).find((n) => n.props?.testID === 'pro-sheet-buy').props.accessibilityLabel, t('getPro'));
 });
 
 test('Not now closes the sheet and charges nothing', () => {
