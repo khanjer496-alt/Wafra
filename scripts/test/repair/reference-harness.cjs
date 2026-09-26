@@ -136,7 +136,8 @@ function createHarness(options = {}) {
   local('@/lib/merchant-spending-copy','src/lib/merchant-spending-copy.ts');
   deps['@/lib/subscriptions']={detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
     fixedCommitments:()=>[],billCommitments:()=>[],otherCommitments:()=>[],daysUntilNext:s=>Math.round((Date.parse(s.nextExpectedISO)-Date.parse('2026-09-06'))/86400000),
-    recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId)};
+    recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId),
+    peekSubscriptionDetection:()=>null,subscriptionDetectionRunning:()=>false};
   local('@/lib/transaction-filter','src/lib/transaction-filter.ts');
   local('@/lib/insights','src/lib/insights.ts');local('@/lib/analytics','src/lib/analytics.ts');local('@/lib/reference-presentation','src/lib/reference-presentation.ts');
   const summary=deps['@/lib/insights'].summarizeMonth(state.transactions,period,new Set(state.accounts.map(a=>a.id)),new Set());

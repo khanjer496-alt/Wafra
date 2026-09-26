@@ -18,7 +18,8 @@ test('tab projections reuse immutable ledger work instead of rescanning on every
   assert.match(subscriptions, /subscriptionDetectionCache\.findIndex\(\(entry\) =>/);
   assert.match(subscriptions, /sameDetectionKey\(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers\)/);
   assert.match(subscriptions, /entry\.transactions === transactions/);
-  assert.match(subscriptions, /entry\.liveAccounts === liveAccounts/);
+  // Equal live/internal membership is the same question, whichever Set built it.
+  assert.match(subscriptions, /sameMembers\(entry\.liveAccounts, liveAccounts\)/);
   assert.match(balances, /netWorthBreakdownCache\?\.accounts === state\.accounts/);
   assert.match(balances, /netWorthBreakdownCache\.transactions === state\.transactions/);
   const cards = read('src/lib/cards.ts');
