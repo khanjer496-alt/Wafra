@@ -686,6 +686,15 @@ const CREDIT_WORDS = new RegExp(
   'i',
 );
 /**
+ * "credit transaction of/amount" — see creditTransactionOnly in parseSmsInner.
+ * The /g copy exists only for blank(); .test() uses the non-global one.
+ * The purchase-evidence list is what keeps a CARD's "Credit transaction of
+ * AED 350.00 at NOON.COM on card …" a purchase.
+ */
+const CREDIT_TRANSACTION_RE = /\bcredit\s{1,3}transaction\s+(?:of|amount)\b/i;
+const CREDIT_TRANSACTION_ALL_RE = /\bcredit\s{1,3}transaction\s+(?:of|amount)\b/gi;
+const CREDIT_TRANSACTION_PURCHASE_RE = /\b(?:card|visa|mastercard|merchant|pos)\b|\bat\s+[^\d\s]/i;
+/**
  * Direction settled by the CLAUSE that says WHERE the money went. These beat
  * the word lists outright: "Your salary of AED 10,000 has been paid into your
  * account" carries both "salary" and "paid", and letting the two lists race
@@ -1734,6 +1743,7 @@ let PLAIN_BALANCE_RE = /x^/;
 let CARD_PAYMENT_RE = /x^/;
 let CARD_RECEIPT_DATE_RE = /x^/;
 let FIELD_LIST_DATE_RE = /x^/;
+let FIRST_LOCAL_AMOUNT_RE = /x^/;
 let DEBIT_WORDS = /x^/;
 let PAYMENT_FOR_RE = /x^/;
 let FX_PREFIX_RE = /x^/;
@@ -1879,10 +1889,17 @@ function ensureCurrencyPatterns(): void {
   // not as part of the amount. Require whitespace after label punctuation:
   // without it, "AED.99" loses its decimal and inflates 99 fils to AED 99.
   AED_AMOUNT_RE = new RegExp(`${PREFIX}\\s*(${FIGURE})`, 'gi');
-  // See fieldListPostingDate: the date field directly after the amount field.
+  // See fieldListPostingDate: the date field directly after the MOVEMENT
+  // amount field. FIRST_LOCAL_AMOUNT_RE finds that field (a field list states
+  // the movement before the balance); FIELD_LIST_DATE_RE is anchored to it and
+  // requires the date to END its field — line end, end of text, or the
+  // balance field of a list flattened onto one line — so a date that runs on
+  // into prose ("AED 250.00 01/12/2028 at …") is not a field.
+  FIRST_LOCAL_AMOUNT_RE = new RegExp(`(?<![A-Za-z])(?:${PREFIX})\\s*${FIGURE}`, 'i');
   FIELD_LIST_DATE_RE = new RegExp(
-    `(?:^|\\s)(?:${PREFIX})\\s*${FIGURE}[^\\S\\n]*\\n?[^\\S\\n]*` +
-      `(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4})(?!\\d)(?![/.-]\\d)`,
+    `^(?:${PREFIX})\\s*${FIGURE}(?:[^\\S\\n]*\\n[^\\S\\n]*|[^\\S\\n]+)` +
+      `(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4})(?!\\d)(?![/.-]\\d)` +
+      `(?=[^\\S\\n]*(?:\\n|$)|[^\\S\\n]+(?:bal(?:ance)?|avl|avail(?:able)?)\\b)`,
     'i');
   // The trailing guard covers Arabic too: without it "50 دار" would read its
   // first two letters as the currency symbol and invent an amount.
@@ -2073,12 +2090,12 @@ function ensureCurrencyPatterns(): void {
   // isBillDue requires !hasDebit — so the reminder became a posted expense for
   // money the user had not yet sent. Same failure the `payment(?!\s+due)`
   // guard beside it exists to prevent, one word later.
-  // "transaction of" is a debit only when nothing says which way: "A CREDIT
-  // transaction of AED 18,000.00 has been processed on your account ...
-  // Description: SALARY" is money arriving, and the bare noun booked a salary
-  // as an AED 18,000 expense titled "Account debit".
+  // "transaction of" stays a debit word even after "credit": "Visa Credit
+  // transaction of AED 350.00 at NOON.COM on card …" is a CARD purchase. The
+  // account-side "A credit transaction of … Description: SALARY" is handled at
+  // the call site (see creditTransactionOnly), not by weakening this list.
   DEBIT_WORDS = new RegExp(
-    `purchase|debit(?:ed)?|deducted|spent|\\bpaid\\b|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|\\bused\\b|utilis(?:e|ed)|utiliz(?:e|ed)|swiped|tapped|transacted|(?<!\\bcredit\\s{1,3})transaction\\s+(?:of|amount)|cash\\s+advance|charged|(?:via|using|through)\\s+(?:your\\s+)?(?:credit|debit|covered|charge|prepaid)\\s+card` +
+    `purchase|debit(?:ed)?|deducted|spent|\\bpaid\\b|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|\\bused\\b|utilis(?:e|ed)|utiliz(?:e|ed)|swiped|tapped|transacted|transaction\\s+(?:of|amount)|cash\\s+advance|charged|(?:via|using|through)\\s+(?:your\\s+)?(?:credit|debit|covered|charge|prepaid)\\s+card` +
       // "AED 500 has been TRANSFERRED from your account to MOHAMMED ALI" named
       // no verb either list knew — only the opposite-direction phrase
       // "transferred to your" was listed — so an outgoing transfer returned
@@ -4955,15 +4972,31 @@ function sourceBackedReceiptDate(
  * DATE_RE needs a lead-in word ("on", "value date"), so this family arrived
  * with date null and was filed on the day it happened to be imported — a
  * history import put every month's salary on one day. Only the field that
- * DIRECTLY follows the local amount field (next line, or next token when the
- * list is flattened onto one line) counts, with a four-digit year; a date
- * anywhere else in the body is not read by this rule. Posting date only: the
- * reminder/statement branches never consult it.
+ * DIRECTLY follows the MOVEMENT amount field — the first local figure, and
+ * not one labelled as a balance — counts: next line, or next token when the
+ * list is flattened onto one line, with a four-digit year, ending its field.
+ * A date after an instalment, a balance or any later figure is not read by
+ * this rule, nor is one later than the day the alert arrived. Posting date
+ * only: the reminder/statement branches never consult it.
  */
-function fieldListPostingDate(raw: string): string | null {
+function fieldListPostingDate(raw: string, options?: ParseOptions): string | null {
   ensureCurrencyPatterns();
-  const m = raw.match(FIELD_LIST_DATE_RE);
-  return m ? numericDate(m[1], m[2], m[3]) : null;
+  const first = raw.match(FIRST_LOCAL_AMOUNT_RE);
+  if (!first || first.index === undefined) return null;
+  // The first figure is the movement only when it is not itself the balance.
+  if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, first.index - 56), first.index))) return null;
+  const m = raw.slice(first.index).match(FIELD_LIST_DATE_RE);
+  const date = m ? numericDate(m[1], m[2], m[3]) : null;
+  if (!date) return null;
+  // A posting date cannot be later than the day the alert arrived. Same clock
+  // rule as sourceBackedReceiptDate: the source's received time at the fixed
+  // Gulf offset (UTC+4, the later of the launch markets), never Date.now().
+  const observedAt = options?.observedAt;
+  if (typeof observedAt === 'number' && Number.isFinite(observedAt)) {
+    const received = new Date(observedAt + 4 * 60 * 60 * 1000);
+    if (Number.isFinite(received.getTime()) && date > received.toISOString().slice(0, 10)) return null;
+  }
+  return date;
 }
 
 function extractDate(raw: string): string | null {
@@ -5277,7 +5310,7 @@ function parseSmsInner(
   // that clause is the answer, and those branches read `statedDate`.
   const statedDate = extractDate(raw);
   const postingText = blank(raw, DUE_DATE_FOOTER_RE);
-  const date = extractDate(postingText) ?? fieldListPostingDate(postingText);
+  const date = extractDate(postingText) ?? fieldListPostingDate(postingText, options);
   const snapshot = extractSnapshot(raw);
   const snapshotFils = snapshot?.fils ?? null;
   let snapshotKind = snapshot?.kind ?? null;
@@ -6288,7 +6321,18 @@ function parseSmsInner(
     blank(maskMerchantNames(prose), HYPOTHETICAL_PAYMENT_RE),
     PAYMENT_INSTRUCTION_RE,
   );
-  const hasDebit = DEBIT_WORDS.test(stated);
+  // "A CREDIT transaction of AED 18,000.00 has been processed on your account
+  // … Description: SALARY" is money arriving, yet DEBIT_WORDS' bare
+  // "transaction of" booked it as an AED 18,000 expense titled "Account
+  // debit". The phrase is exempted only when NOTHING else in the body is
+  // purchase evidence — no card, merchant, POS or "at <payee>" — so "Visa
+  // Credit transaction of AED 350.00 at NOON.COM on card …" and "Credit
+  // Transaction Amount … Merchant … Card …" stay the card purchases they are.
+  // Any other debit word still counts.
+  const creditTransactionOnly =
+    CREDIT_TRANSACTION_RE.test(stated) && !CREDIT_TRANSACTION_PURCHASE_RE.test(prose) &&
+    !DEBIT_WORDS.test(blank(stated, CREDIT_TRANSACTION_ALL_RE));
+  const hasDebit = !creditTransactionOnly && DEBIT_WORDS.test(stated);
   const hasCredit = CREDIT_WORDS.test(stated);
   // Carrier-billed store purchases ("App Store & Google Play bill") are
   // receipts, never utility bills — treating them as dues produced garbage

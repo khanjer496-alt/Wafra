@@ -792,6 +792,42 @@ t('an OTP for a credit transaction is not posted',
 t('a statement total followed by a date line is still a statement, not income',
   'Your Credit Card statement: Total due AED 1,000.00\n25/10/2026\nMinimum due AED 100.00',
   { kind: 'cardStatement', amountFils: 100000 });
+// Review regressions of the first v54 cut, pinned to the pre-v54 (9ce2b7a)
+// reading. (1) The date-after-amount acceptance is scoped to a flattened field
+// list (date field, then the balance field); a date between a receipt's amount
+// and its wording must not turn a card-payment receipt into an expense.
+t('card-payment receipt with a date after the amount is not an expense (was null pre-v54)',
+  'We have received your payment of AED 1,200.00 26/09/2026 for credit card XXXX1234', null);
+t('"Payment of … <date> received towards your credit card" is not an expense (was null pre-v54)',
+  'Payment of AED 1,200.00 26/09/2026 received towards your credit card XXXX1234', null);
+t('the undated receipt is still a card payment',
+  'We have received your payment of AED 1,200.00 for credit card XXXX1234',
+  { kind: 'cardPayment', amountFils: 120000, transfer: true });
+t('the undated "Payment of … received towards" is still a card payment',
+  'Payment of AED 1,200.00 received towards your credit card XXXX1234',
+  { kind: 'cardPayment', amountFils: 120000, transfer: true });
+// (2) "credit transaction of" is income only with no purchase evidence.
+t('"Credit Transaction Amount … Merchant … Card" is a card purchase, not income',
+  'Credit Transaction Amount AED 350.00 Merchant NOON.COM Card XXXX1234',
+  { kind: 'transaction', type: 'expense', amountFils: 35000, merchant: 'Card purchase' });
+t('"Visa Credit transaction of … at NOON.COM on card" is a card purchase, not income',
+  'Visa Credit transaction of AED 350.00 at NOON.COM on card XXXX1234. Avl limit AED 9,650.00',
+  { kind: 'transaction', type: 'expense', amountFils: 35000, merchant: 'Noon' });
+// (3) The field-list posting date is only the date field right after the
+// MOVEMENT amount, never after an instalment or a balance, never in prose.
+t('an instalment conversion with a dated instalment figure stays refused (was null pre-v54)',
+  'AED 250.00 purchase at IKEA card 1234 converted to installments. First instalment AED 50.00 26/10/2026', null);
+t('a date running on from the amount into prose is not a posting date (was null pre-v54)',
+  'Purchase of AED 250.00 01/12/2028 at NOON.COM with card XXXX1234', null);
+t('a date after the balance figure is not the posting date',
+  'Purchase of AED 250.00 at NOON.COM with card XXXX1234. Bal AED 5,000.00 26/09/2026',
+  { kind: 'transaction', type: 'expense', amountFils: 25000, merchant: 'Noon', date: null });
+t('a field-list date later than the day the alert arrived is not its posting date',
+  OWNER_SALARY, { type: 'income', amountFils: 2850000, merchant: 'Salary', date: null },
+  { sender: 'FAB', observedAt: Date.parse('2026-09-20T08:00:00Z') });
+t('a field-list date on the day the alert arrived (UAE time) is its posting date',
+  OWNER_SALARY, { type: 'income', amountFils: 2850000, merchant: 'Salary', date: '2026-09-26' },
+  { sender: 'FAB', observedAt: Date.parse('2026-09-25T21:30:00Z') });
 
 t('bare "daily limit" mention is NOT a snapshot source of truth',
   'Purchase of AED 200.00 at CARREFOUR with Debit Card ending 1234. Daily limit AED 5,000 applies',

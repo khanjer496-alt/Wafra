@@ -706,7 +706,10 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
   inboxRows = [{
     address: 'FAB',
     body: 'Salary Credit\nAccount XXXX0002\nAED 28500.00\n26/09/2026\nBalance AED 28965.77',
-    date: NOW + 259_204_750,
+    // Received on the day it states: a field-list date later than the
+    // received day is refused as a posting date, so the fixture's synthetic
+    // NOW (August) cannot carry a September salary.
+    date: Date.UTC(2026, 8, 26, 6, 0, 0),
   }];
   const fabFieldSalary = await scanInbox(0, {}, undefined, 'en-AE');
   ok('a FAB field-list salary credit posts as Salary income on its stated date, not Review',
