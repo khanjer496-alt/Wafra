@@ -176,6 +176,7 @@ export default function IosApplePaySetup() {
   const muted = { color: band.textSecondary };
   const bandContent = <View style={styles.bandBlock}>
     <ThemedText accessibilityRole="header" style={[styles.bandTitle, { color: band.onBand }]}>{w.title}</ThemedText>
+    <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{w.subtitle}</ThemedText>
     {ready ? <ThemedText type="default" style={{ color: band.onBandSecondary }}>{w.intro}</ThemedText> : null}
     {/* Marked as an example: no card identity is captured, and a real
         purchase goes to Review for the person to add. */}
@@ -250,7 +251,6 @@ export default function IosApplePaySetup() {
         {error && <ThemedText accessibilityRole="alert" style={{ color: band.statusOver }}>{error}</ThemedText>}
         <ThemedText type="meta" style={muted}>{w.scope}</ThemedText>
         <ThemedText type="meta" style={muted}>{w.privacy}</ThemedText>
-        <ThemedText type="meta" style={muted}>{w.subtitle}</ThemedText>
       </>}
       {supported && <EButton palette={band} variant="quiet" label={w.refresh} onPress={() => { setError(null); void refresh(); }} disabled={busy} />}
     </View>

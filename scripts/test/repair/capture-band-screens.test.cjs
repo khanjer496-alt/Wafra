@@ -118,7 +118,11 @@ test('Capture status: no receipt means no figure, and Working is never claimed',
     const band = h.tree.props.bandContent;
     assert.doesNotMatch(byId(band, 'capture-health-status').props.accessibilityLabel, /^Working/);
     const handled = byId(band, 'capture-health-last-handled');
-    if (status?.lastHandledAt) assert.ok(handled, 'a quiet queue still shows when it last ran');
+    if (status?.lastHandledAt) {
+      assert.ok(handled, 'a quiet queue still shows when it last ran');
+      assert.match(byId(band, 'capture-health-status').props.accessibilityLabel, /^No recent activity\. .*Nothing has been handled for a while/,
+        'the quiet explanation is spoken too');
+    }
     else assert.equal(handled, undefined);
     if (!status) assert.equal(walk(byId(band, 'capture-health-queue')).find((n) => n.type === 'BandCount').props.value, '—');
   }
@@ -137,10 +141,10 @@ test('Capture status: Android shows no iPhone-only links and stacks tiles at lar
 
 /* ── Statement import ─────────────────────────────────────────────────── */
 
-function statements({ language = 'en', privateMode = false, params = {}, preview } = {}) {
+function statements({ language = 'en', privateMode = false, params = {}, preview, ledgerMoney = { schemaVersion: 2, currency: 'AED', exponent: 2 } } = {}) {
   const { createWorkflowHarness } = require('../workflows/workflow-harness.cjs');
   const h = createWorkflowHarness({ platform: 'ios', language, params, state: { privateMode,
-    ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 }, country: 'AE' } });
+    ledgerMoney, country: 'AE' } });
   const deps = h.deps;
   deps.react.useEffect = () => {};
   deps['expo-file-system'] = { File: class {} };
@@ -178,6 +182,11 @@ test('Statement import: sand band with the title, the true privacy line above th
   assert.ok(byId(sheet, 'statement-download-hint'));
   assert.match(text(byId(sheet, 'statement-date-note')), /04\/09 is 4 September/);
   assert.equal(byId(band, 'statement-date-note'), undefined);
+  // Without a ledger currency the control is off, and the band says why first.
+  const noCurrency = statements({ ledgerMoney: null });
+  const [prompt, off] = idOrder(noCurrency.tree.props.bandContent, ['statement-currency-prompt', 'statement-choose']);
+  assert.ok(prompt >= 0 && off > prompt);
+  assert.equal(byId(noCurrency.tree.props.bandContent, 'statement-choose').props.disabled, true);
   const onboarding = statements({ params: { fromOnboarding: '1' } });
   assert.match(text(onboarding.tree.props.bandContent), /Bring in your past spending/);
   assert.ok(walk(onboarding.tree.props.children).some((n) => n.props?.accessibilityLabel === onboarding.copy.later));

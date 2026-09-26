@@ -94,17 +94,19 @@ export default function CaptureHealthScreen() {
   const handledAt = status.kind === 'working' || status.kind === 'quiet' ? status.lastHandledAt : null;
   const handled = handledTimeParts(handledAt, now, language, words);
   const detail = status.kind === 'never' ? d.capture.neverBody : null;
-  // Mint only for the good news; amber when something needs a look.
+  // Mint only for the good news; full-strength cream when something needs a
+  // look (amber would not show on the green band); muted otherwise. The
+  // headline always says which, so the dot is never the only signal.
   const dot = status.kind === 'working' ? band.accent
-    : status.kind === 'attention' || status.kind === 'paused' ? band.statusNear
+    : status.kind === 'attention' || status.kind === 'paused' ? band.onBand
     : band.onBandSecondary;
   const tile = statTileColors(band, 'band');
   const queue = health ? String(health.pending) : '—';
 
   const bandContent = <View style={styles.bandBlock}>
     <View testID="capture-health-status" style={styles.status} accessible accessibilityRole="text" accessibilityLiveRegion="polite"
-      accessibilityLabel={[headline, handled ? `${words.lastHandledLabel}, ${handled.day} ${handled.time}` : null, detail]
-        .filter(Boolean).join('. ')}>
+      accessibilityLabel={[headline, handled ? `${words.lastHandledLabel}, ${handled.day} ${handled.time}` : null, detail,
+        status.kind === 'quiet' ? d.capture.quietBody : null].filter(Boolean).join('. ')}>
       <View style={styles.statusLine}>
         <View style={[styles.dot, { backgroundColor: dot }]} />
         <ThemedText type="smallBold" style={[styles.statusText, { color: band.onBand }]}>{headline}</ThemedText>

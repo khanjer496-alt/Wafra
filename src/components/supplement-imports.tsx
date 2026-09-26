@@ -722,6 +722,20 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
       {!onboarding && <ThemedText type="default" style={{ color: ink.text }}>{copy.intro}</ThemedText>}
       {!locked && (
         <>
+          {/* Why the control below is off until a ledger currency is chosen. */}
+          {!state.ledgerMoney && (
+            <View style={styles.section} testID="statement-currency-prompt">
+              <ThemedText type="smallBold" style={{ color: ink.text }}>{t('ledgerCurrencyTitle')}</ThemedText>
+              <ThemedText type="meta" style={{ color: ink.secondary }}>{t('ledgerCurrencyBody')}</ThemedText>
+              <EButton
+                palette={band}
+                variant="secondary"
+                label={t('chooseLedgerCurrency')}
+                onPress={() => setCurrencySheetVisible(true)}
+                disabled={busy !== null}
+              />
+            </View>
+          )}
           {disclosure}
           <Pressable
             testID="statement-choose"
@@ -754,20 +768,6 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
         </View>
       ) : (
         <>
-          {!state.ledgerMoney && (
-            <View style={styles.section}>
-              <ThemedText type="smallBold" style={{ color: band.text }}>{t('ledgerCurrencyTitle')}</ThemedText>
-              <ThemedText type="meta" style={{ color: band.textSecondary }}>{t('ledgerCurrencyBody')}</ThemedText>
-              <EButton
-                palette={band}
-                variant="secondary"
-                label={t('chooseLedgerCurrency')}
-                onPress={() => setCurrencySheetVisible(true)}
-                disabled={busy !== null}
-              />
-            </View>
-          )}
-
           {reading && (
             <View
               testID="statement-progress"
