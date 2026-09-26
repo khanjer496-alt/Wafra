@@ -1,7 +1,7 @@
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState, useSyncExternalStore } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { FlatList, Pressable, StyleSheet, View, type ScrollView } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold';
@@ -102,6 +102,11 @@ function headlineAmount(item: ReviewEntry): { amount: string; fact: StringKey | 
     amount: fact?.[1].value ? universalMoneyLabel(fact[1].value) : t('genericAmountNeedsReview'),
     fact: fact?.[0] ?? null,
   };
+}
+
+/** The step card's name: the merchant the alert stated, else what kind of alert it is. */
+function cardTitle(item: ReviewEntry): string {
+  return reviewMerchant(item) ?? (isUniversalReviewAlert(item) ? t('genericReviewTitle') : t(FAMILY_COPY[item.family].label));
 }
 
 /** Where the capture came from, as the card's small print. No message text is stored to quote. */
@@ -318,7 +323,7 @@ function StepCard({ item, palette }: { item: ReviewEntry; palette: BandPalette }
   const universal = isUniversalReviewAlert(item);
   const informational = universal && !isOrdinaryUniversalPosting(item.event);
   const instrument = instrumentLabel(universal ? item.event.instrument.value : item.instrument);
-  const title = merchant ?? (universal ? t('genericReviewTitle') : t(FAMILY_COPY[item.family].label));
+  const title = cardTitle(item);
   const date = shortDate(toISODate(new Date(item.observedAt)));
   const meta = [sourceLabel(item), universal ? t('genericUnverifiedIssuer') : institutionLabel(item.institution), instrument, date]
     .filter(Boolean).join(' · ');
@@ -332,9 +337,10 @@ function StepCard({ item, palette }: { item: ReviewEntry; palette: BandPalette }
       </View>
     </View>
     <View style={styles.cardFigure}>
-      <ThemedText testID="review-step-amount" style={[styles.cardAmount, { color: palette.text }]}>{amount}</ThemedText>
+      <ThemedText testID="review-step-amount" tabular style={[styles.cardAmount, { color: palette.text }]}>{amount}</ThemedText>
       <ThemedText type="meta" style={{ color: palette.textSecondary }}>
-        {fact && fact !== 'genericAmount' ? `${t(fact)} · ${d.review.original}` : d.review.original}
+        {/* "In the alert's currency" only under an amount the alert stated. */}
+        {!universal || fact ? (fact && fact !== 'genericAmount' ? `${t(fact)} · ${d.review.original}` : d.review.original) : null}
       </ThemedText>
     </View>
     <View style={[styles.reasonTile, { backgroundColor: warned ? palette.statusNearSoft : palette.glyphGround }]}>
@@ -373,6 +379,10 @@ export default function ReviewAlertsScreen() {
   // One at a time is the default way in; the full list stays one tap away.
   const [stepping, setStepping] = useState(true);
   const [stepIndex, setStepIndex] = useState(0);
+  // The item on screen by id, so a newer capture arriving (newest first) or
+  // one expiring never swaps the card under the person's thumb.
+  const [shownId, setShownId] = useState<string | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const listBottom = useBandBottomInset();
   const now = Date.now();
   const pending = useMemo(
@@ -382,9 +392,14 @@ export default function ReviewAlertsScreen() {
     [state.reviewTray.pending, now],
   );
   // An answered item leaves the queue; the index then already points at the next one.
-  const step = pending.length > 0 ? Math.min(stepIndex, pending.length - 1) : 0;
+  const shownAt = shownId ? pending.findIndex((item) => item.id === shownId) : -1;
+  const step = shownAt >= 0 ? shownAt : pending.length > 0 ? Math.min(stepIndex, pending.length - 1) : 0;
+  const goTo = (index: number) => { setStepIndex(index); setShownId(pending[index]?.id ?? null); };
   const stepMode = stepping && pending.length > 0;
   const current = stepMode ? pending[step] : null;
+  // Each new card starts at the top, with its "1 of N" in view.
+  const currentId = current?.id;
+  useEffect(() => { scrollRef.current?.scrollTo?.({ y: 0, animated: false }); }, [currentId]);
 
   // Deferred native records stay queued; the banner only explains the wait
   // while a Review lane is actually full, and clears once there is room.
@@ -445,7 +460,7 @@ export default function ReviewAlertsScreen() {
   const modeToggle = pending.length > 1 ? (
     <EButton testID="review-mode-toggle" variant="quiet" palette={band}
       label={stepMode ? d.review.showList : d.review.oneByOne}
-      onPress={() => { setStepIndex(0); setStepping(!stepMode); }} />
+      onPress={() => { goTo(0); setStepping(!stepMode); }} />
   ) : null;
   const privacy = <ThemedText type="meta" style={[styles.privacyCopy, { color: band.textSecondary }]}>{t('reviewAlertsPrivacy')}</ThemedText>;
 
@@ -460,19 +475,20 @@ export default function ReviewAlertsScreen() {
             style={[styles.figure, { color: band.onBand }]}>{d.review.position(step + 1, pending.length)}</ThemedText>
           {pending.length > 1 ? <View style={styles.stepArrows}>
             <StepArrow palette={band} label={d.review.previous} disabled={step === 0}
-              icon={language === 'ar' ? 'chevron-right' : 'chevron-left'} onPress={() => setStepIndex(Math.max(0, step - 1))} />
+              icon={language === 'ar' ? 'chevron-right' : 'chevron-left'} onPress={() => goTo(Math.max(0, step - 1))} />
             <StepArrow palette={band} label={d.review.next} disabled={step >= pending.length - 1}
-              icon={language === 'ar' ? 'chevron-left' : 'chevron-right'} onPress={() => setStepIndex(Math.min(pending.length - 1, step + 1))} />
+              icon={language === 'ar' ? 'chevron-left' : 'chevron-right'} onPress={() => goTo(Math.min(pending.length - 1, step + 1))} />
           </View> : null}
         </View>
       ) : (
         <ThemedText accessibilityLiveRegion="polite" style={[styles.bandHeadline, { color: band.onBand }]}>{countLine}</ThemedText>
       )}
-      <ThemedText type="small" style={{ color: band.onBandSecondary }}>{stepMode ? countLine : words.reviewBody}</ThemedText>
+      {/* The list's band stays put, so at large text its explanation moves onto the sheet. */}
+      {stepMode || !largeText ? <ThemedText type="small" style={{ color: band.onBandSecondary }}>{stepMode ? countLine : words.reviewBody}</ThemedText> : null}
     </View>
     {current ? (
       // Two band-tone cards peek from behind the current one while more wait.
-      <View testID="review-stack" style={[styles.stack, behind > 0 && !largeText && { paddingBottom: behind * 12 }]}>
+      <View testID="review-stack" style={[styles.stack, behind > 0 && !largeText && { marginBottom: behind * 12 }]}>
         {!largeText && behind >= 2 ? <View testID="review-stack-peek" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
           style={[styles.peek, styles.peekFar, { backgroundColor: band.bandRule }]} /> : null}
         {!largeText && behind >= 1 ? <View testID="review-stack-peek" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
@@ -484,15 +500,17 @@ export default function ReviewAlertsScreen() {
 
   const currentBusy = current ? busyId === current.id : false;
   const informationalCurrent = !!current && isUniversalReviewAlert(current) && !isOrdinaryUniversalPosting(current.event);
+  // EButton speaks its label; the hint carries which item it answers (the card above says it too).
+  const currentIdentity = current ? `${cardTitle(current)}, ${headlineAmount(current).amount}` : '';
   const stepSheet = current ? <View style={styles.stepSheet}>
     <View style={[styles.answers, largeText && styles.answersStacked]}>
       <EButton testID="review-step-dismiss" variant="secondary" palette={band} style={!largeText && styles.answer}
         label={reviewIsPurchase(current) ? d.review.notPurchase : t('dismiss')}
-        accessibilityHint={t('reviewAlertDismissBody')} disabled={currentBusy}
+        accessibilityHint={`${currentIdentity}. ${t('reviewAlertDismissBody')}`} disabled={currentBusy}
         onPress={() => { tapped(); setTarget(current); }} />
       <EButton testID="review-alert-open" palette={band} style={!largeText && styles.answer}
         label={informationalCurrent ? t('genericReviewDetails') : d.review.looksRight}
-        accessibilityHint={informationalCurrent ? undefined : d.review.looksRightHint} disabled={currentBusy}
+        accessibilityHint={currentIdentity} disabled={currentBusy}
         onPress={() => { tapped(); openAdd(current); }} />
     </View>
     {!informationalCurrent ? <ThemedText type="meta" style={[styles.answerHint, { color: band.textSecondary }]}>{d.review.looksRightHint}</ThemedText> : null}
@@ -507,6 +525,7 @@ export default function ReviewAlertsScreen() {
         band="flow"
         // One card scrolls with its band; the list keeps its own virtualized scroll.
         scroll={stepMode}
+        scrollRef={scrollRef}
         testID="review-alerts-screen"
         contentStyle={!stepMode && styles.listSheet}
         nav={{ back: true, title: transactionsWords(language).review }}
@@ -519,7 +538,10 @@ export default function ReviewAlertsScreen() {
           contentContainerStyle={[styles.listContent, { paddingBottom: listBottom }, pending.length === 0 && styles.emptyContent]}
           scrollIndicatorInsets={{ top: 0, bottom: listBottom }}
           contentInsetAdjustmentBehavior="never"
-          ListHeaderComponent={notices || modeToggle ? <View style={styles.listHeader}>{notices}{modeToggle}</View> : null}
+          ListHeaderComponent={notices || modeToggle || (largeText && pending.length > 0) ? <View style={styles.listHeader}>
+            {largeText && pending.length > 0 ? <ThemedText type="small" style={{ color: band.textSecondary }}>{words.reviewBody}</ThemedText> : null}
+            {notices}{modeToggle}
+          </View> : null}
           ListFooterComponent={privacy}
           ListEmptyComponent={
             <View style={styles.empty}>

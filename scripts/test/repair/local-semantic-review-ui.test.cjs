@@ -22,7 +22,7 @@ function harness() {
   const jsx = (type, props = {}) => typeof type === 'function' ? type(props) : { type, props };
   const wrap = type => props => jsx(type, props);
   const deps = {
-    react: { useMemo: fn => fn(), useState: initial => [initial, () => {}], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
+    react: { useMemo: fn => fn(), useRef: current => ({ current }), useEffect() {}, useState: initial => [initial, () => {}], useSyncExternalStore: (_subscribe, snapshot) => snapshot() },
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { View: 'View', Pressable: 'Pressable', StyleSheet: { create: s => s, hairlineWidth: 1 },
       FlatList: props => jsx('FlatList', { ...props, children: [props.ListHeaderComponent,

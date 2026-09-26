@@ -143,12 +143,12 @@ export default function TransfersScreen() {
               return <Pressable key={pair.key} testID="transfer-matched-pair" accessibilityRole="button"
                 accessibilityLabel={`${words.viewDetails}: ${d.transfers.pairA11y(accountName(pair.out.accountId), accountName(pair.in.accountId), moneyLabel(pair.out.amountFils))}. ${shortDate(pair.out.date)}`}
                 onPress={() => { Keyboard.dismiss(); setSelectedId(pair.out.id); }}
-                style={({ pressed }) => [styles.matchedRow, { borderTopColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
-                <View style={styles.grow}>
+                style={({ pressed }) => [styles.matchedRow, large && styles.matchedRowStacked, { borderTopColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
+                <View style={large ? styles.stretch : styles.grow}>
                   <TransferPairAccounts outAccount={accountName(pair.out.accountId)} inAccount={accountName(pair.in.accountId)}
                     palette={band} stacked={large} />
                 </View>
-                <View style={styles.matchedFigure}>
+                <View style={[styles.matchedFigure, large && styles.matchedFigureStacked]}>
                   <Money fils={pair.out.amountFils} type="smallBold" decimals />
                   <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDate(pair.out.date)}</ThemedText>
                 </View>
@@ -219,6 +219,9 @@ const styles = StyleSheet.create({
   matched: { gap: 0, paddingTop: Spacing.two },
   matchedRow: { minHeight: 60, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.three, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
   matchedFigure: { alignItems: 'flex-end', gap: 2 },
+  matchedRowStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  matchedFigureStacked: { alignItems: 'flex-start' },
+  stretch: { alignSelf: 'stretch' },
   reviewAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, alignSelf: 'flex-start', marginStart: 28 },
   empty: { alignItems: 'center', paddingVertical: Spacing.five, gap: Spacing.three },
   emptyCopy: { textAlign: 'center' },

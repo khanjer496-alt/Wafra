@@ -41,7 +41,7 @@ test('counted phrases read naturally in both languages', () => {
   assert.equal(ar.toCheck(2), 'للمراجعة: 2');
   assert.equal(ar.namesToPlace(11), 'أسماء تحتاج تصنيفاً: 11');
   // The entries count arrives already pluralised (detailsCopy.entries).
-  assert.match(en.placeLine('7 entries'), /move their 7 entries/);
+  assert.equal(en.placeLine('1 entry'), 'No category yet. Answers move 1 entry and apply to future ones.');
   assert.match(ar.placeLine('7 عمليات'), /7 عمليات/);
   assert.equal(en.entriesMoved('1 entry'), '1 entry will move');
 });

@@ -109,7 +109,7 @@ function PairPill({ label, primary, disabled, onPress, palette, testID }: {
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} disabled={disabled}
     accessibilityState={{ disabled }} onPress={onPress}
     style={({ pressed }) => [styles.pill, { backgroundColor: primary ? palette.fill : palette.rule, opacity: disabled ? 0.45 : pressed ? 0.8 : 1 }]}>
-    <ThemedText type="smallBold" style={{ color: primary ? palette.onFill : palette.text }}>{label}</ThemedText>
+    <ThemedText type="smallBold" style={[styles.pillLabel, { color: primary ? palette.onFill : palette.text }]}>{label}</ThemedText>
   </Pressable>;
 }
 
@@ -126,10 +126,11 @@ function PairCard({ pair, outAccount, inAccount, busy, onMatch, onSeparate, pale
   // (an `accessible` card would swallow them).
   return <View testID="transfer-pair-card" style={[styles.pairCard, { borderColor: palette.rule, backgroundColor: palette.card }]}>
     <View testID="transfer-pair-legs" style={styles.pairLegs} accessible accessibilityRole="text"
-      accessibilityLabel={`${d.transfers.pairA11y(outAccount, inAccount, amount)}. ${fullDateTime(pair.out)}`}>
+      accessibilityLabel={[d.transfers.pairA11y(outAccount, inAccount, amount), fullDateTime(pair.out),
+        pair.in.amountFils !== pair.out.amountFils ? `${d.transfers.in}: ${incoming}` : null].filter(Boolean).join('. ')}>
       <TransferPairAccounts outAccount={outAccount} inAccount={inAccount} palette={palette} stacked={stacked} />
       <View style={styles.pairFigure}>
-        <ThemedText style={[styles.pairAmount, { color: palette.text }]}>{amount}</ThemedText>
+        <ThemedText tabular style={[styles.pairAmount, { color: palette.text }]}>{amount}</ThemedText>
         <ThemedText type="meta" style={{ color: palette.textSecondary }}>{fullDateTime(pair.out)}</ThemedText>
       </View>
       {/* A pair whose legs differ in amount says so; the two are never merged. */}
@@ -395,8 +396,8 @@ export default function ReviewTransfersScreen() {
   };
 
   const matchedSection = matched.length > 0 ? <View testID="transfer-matched-pairs" style={styles.matched}>
-    <View style={styles.matchedHead}>
-      <ThemedText type="smallBold" accessibilityRole="header" style={[styles.flexText, { color: band.text }]}>{bandWords.matchedThisMonth}</ThemedText>
+    <View style={styles.matchedHead} accessible accessibilityRole="header" accessibilityLabel={`${bandWords.matchedThisMonth}, ${matched.length}`}>
+      <ThemedText type="smallBold" style={[styles.flexText, { color: band.text }]}>{bandWords.matchedThisMonth}</ThemedText>
       <ThemedText type="smallBold" style={{ color: band.textSecondary }}>{matched.length}</ThemedText>
     </View>
     {matched.slice(0, MATCHED_PREVIEW).map(pair => {
@@ -405,11 +406,11 @@ export default function ReviewTransfersScreen() {
       const amount = formatAED(pair.out.amountFils, { decimals: true });
       return <View key={pair.key} testID="transfer-matched-pair" accessible accessibilityRole="text"
         accessibilityLabel={`${d.transfers.pairA11y(outAccount, inAccount, amount)}. ${shortDate(pair.out.date)}`}
-        style={[styles.matchedRow, { borderTopColor: band.rule }]}>
-        <View style={styles.flexText}>
+        style={[styles.matchedRow, largeText && styles.matchedRowStacked, { borderTopColor: band.rule }]}>
+        <View style={largeText ? styles.stretch : styles.flexText}>
           <TransferPairAccounts outAccount={outAccount} inAccount={inAccount} palette={band} stacked={largeText} />
         </View>
-        <View style={styles.matchedFigure}>
+        <View style={[styles.matchedFigure, largeText && styles.matchedFigureStacked]}>
           <ThemedText type="smallBold" tabular style={{ color: band.text }}>{amount}</ThemedText>
           <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDate(pair.out.date)}</ThemedText>
         </View>
@@ -563,12 +564,16 @@ const styles = StyleSheet.create({
   pairFigure: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.two },
   pairAmount: { fontFamily: Fonts.sansSemi, fontSize: 26, lineHeight: 32, letterSpacing: -1, fontVariant: ['tabular-nums'] },
   pairActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  pill: { minHeight: 44, borderRadius: 22, paddingHorizontal: 18, justifyContent: 'center', alignItems: 'center' },
+  pill: { minHeight: 44, maxWidth: '100%', flexShrink: 1, borderRadius: 22, paddingHorizontal: 18, paddingVertical: 8, justifyContent: 'center', alignItems: 'center' },
+  pillLabel: { textAlign: 'center' },
   matched: { paddingTop: Spacing.four },
   matchedHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingBottom: Spacing.two },
   matchedRow: { minHeight: 60, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.three,
     paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
   matchedFigure: { alignItems: 'flex-end', gap: 2 },
+  matchedRowStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  matchedFigureStacked: { alignItems: 'flex-start' },
+  stretch: { alignSelf: 'stretch' },
   matchedLink: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   filter: { minHeight: 48, justifyContent: 'center', paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, borderBottomWidth: 2 },

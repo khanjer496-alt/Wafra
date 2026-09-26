@@ -332,5 +332,16 @@ for (const language of ['en', 'ar']) {
     assert.ok(!text(byId(secondTree, 'review-step-dismiss')).includes(words.notPurchase), 'a balance update is dismissed, not called "not a purchase"');
     assert.ok(text(secondCard).includes(h.deps['@/lib/details-copy'].detailsCopy[language].review.why['not-a-payment']));
     assert.equal(walk(secondTree).filter(node => node.props?.testID === 'review-stack-peek').length, 0, 'nothing waits behind the last item');
+    // The card on screen is held by id (state slot 4): a newer capture arriving
+    // at the top moves its position, never the card under the person's thumb.
+    const newer = { ...pending('purchase', { amount: field(money('777')) }), id: 'synthetic-newer', sourceKey: 'synthetic-source-newer',
+      observedAt: purchase.observedAt + 1000 };
+    const held = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance, newer] } }, states: { 3: 0, 4: purchase.id } });
+    const heldTree = held.renderScreen('review-alerts');
+    assert.ok(text(byId(heldTree, 'review-step-position')).includes(words.position(2, 3)));
+    assert.ok(text(byId(heldTree, 'review-step-card')).includes('AED 123.45'));
+    // Once the held item leaves the queue the same position shows the next one.
+    const gone = createWorkflowHarness({ language, state: { reviewTray: { pending: [purchase, balance] } }, states: { 3: 1, 4: 'answered-elsewhere' } });
+    assert.ok(text(byId(gone.renderScreen('review-alerts'), 'review-step-position')).includes(words.position(2, 2)));
   });
 }

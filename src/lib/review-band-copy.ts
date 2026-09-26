@@ -19,7 +19,7 @@ export const reviewBandCopyTables = {
     /** Improve categories when bank-payment nicknames wait too: they are not merchants. */
     namesToPlace: (n: number) => n === 1 ? '1 name to place' : `${n} names to place`,
     /** The one line under the count. `entries` is already counted ("7 entries"). */
-    placeLine: (entries: string) => `Wafra couldn’t place these yet. Your answers move their ${entries} and apply to future ones.`,
+    placeLine: (entries: string) => `No category yet. Answers move ${entries} and apply to future ones.`,
     /** A row's staged answer, spoken on the chip that holds it. */
     entriesMoved: (entries: string) => `${entries} will move`,
   },
@@ -29,7 +29,7 @@ export const reviewBandCopyTables = {
     into: 'إلى',
     matchedThisMonth: 'مطابقة هذا الشهر',
     namesToPlace: (n: number) => `أسماء تحتاج تصنيفاً: ${n}`,
-    placeLine: (entries: string) => `لم يتمكن وفرة من تصنيفها بعد. تنقل إجاباتك ${entries} وتنطبق على القادمة أيضاً.`,
+    placeLine: (entries: string) => `بلا تصنيف بعد. تنقل الإجابات ${entries} وتنطبق على القادمة أيضاً.`,
     entriesMoved: (entries: string) => `ستُنقل ${entries}`,
   },
 } as const;
