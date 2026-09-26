@@ -10,11 +10,34 @@
  * "order split into 4 payments" notice booked the whole order on top of the
  * four card charges.
  *
- * So a message whose SOURCE is a BNPL provider is not a ledger event at all,
- * whatever it says. The gate is the provider's IDENTITY, never its wording —
- * provider copy changes and is not in the corpus; the sender is what says who
- * is talking. A bank alert that merely NAMES Tabby (the charge above, an EPP
- * offer, a refund) is untouched, as is any shop called "Tabby Tailoring".
+ * So a BNPL provider is never a TRUSTED source: nothing it sends posts
+ * automatically, and approving one of its messages in Review never teaches
+ * Wafra to trust its app. That is decided by the provider's IDENTITY, never
+ * its wording — provider copy changes and is not in the corpus; the sender is
+ * what says who is talking. A bank alert that merely NAMES Tabby (the charge
+ * above, an EPP offer, a refund) is untouched, as is any shop called "Tabby
+ * Tailoring".
+ *
+ * The wording decides only what happens to a provider's message: ignore it,
+ * or show it in Review. The same brands also move money no bank ever alerts
+ * on. Tabby Cash (UAE, July 2026) is a stored-value account inside the
+ * app.tabby.client app, with its own Cash Card and person-to-person
+ * transfers; the Tamara Card pays cashback into a Tamara Wallet. Ignoring
+ * everything a provider sends dropped those movements without trace. Only a
+ * recognised RESTATEMENT of a bank card charge — an instalment or payment
+ * charged, paid or received for an order; an order split into N payments; an
+ * order refund to the card; a "will be charged tomorrow" preview — is
+ * ignored. Anything else a provider sends reaches Review like any other
+ * unparsed financial alert, where the user decides.
+ *
+ * The restatement test is deliberately narrow, and anything that names the
+ * provider's own account, card, wallet, balance, a transfer, a top-up or
+ * cashback is never a restatement: a miss costs one Review card the user can
+ * dismiss, while a false match would silently drop real money. It is
+ * reachable only through the provider identity (isBnplProviderRestatement
+ * takes the sender); the same words from any other source are never judged
+ * by it. The bodies it was written against are illustrative, not verified
+ * Tabby/Tamara templates.
  *
  * Android packages are exact ids verified on Google Play (developer "Tabby",
  * developer "TAMARA FZE"). The providers' merchant apps (app.tabby.cashier,
@@ -43,4 +66,95 @@ export function isBnplProviderSource(sender?: string | null): boolean {
   if (!value || value.length > 200) return false;
   if (BNPL_PROVIDER_PACKAGES.has(value.split(/\s+/)[0])) return true;
   return BNPL_PROVIDER_SENDER_RE.test(value.replace(/[\s._-]/g, ''));
+}
+
+// `\b` cannot see Arabic letters, so Arabic words are bounded explicitly. The
+// optional leading letters are the attached conjunctions and prepositions
+// (و ف ب ل) and the article.
+const AR_LETTER = '\\u0621-\\u064A';
+const arabicWord = (body: string): string => `(?<![${AR_LETTER}])${body}(?![${AR_LETTER}])`;
+
+/**
+ * The provider's own money, which has no bank alert behind it: Tabby Cash,
+ * a provider card or wallet, a balance, a transfer between people, a top-up,
+ * cashback. Any of these keeps a message on the Review path, even when it
+ * also names an order ("paid for your Noon order from your Tabby Cash").
+ */
+const PROVIDER_OWN_MONEY_RE = new RegExp([
+  '\\b(?:tabby|tamara)\\s*(?:cash|card|wallet|balance|account|credit)\\b',
+  '\\bcash\\s*card\\b',
+  '\\bwallet\\b',
+  '\\b(?:your|new|available|current|wallet|account|cash)\\s+balance\\b',
+  '\\btop(?:ped)?[\\s-]*up\\b',
+  '\\bcash\\s*back\\b',
+  '\\byou(?:\\s+have)?\\s+(?:sent|received)\\b',
+  '\\bsent\\s+you\\b',
+  '\\btransfer(?:red|s)?\\b',
+  'تابي\\s*كاش',
+  'بطاق[ةه]\\s+(?:تابي|تمارا)',
+  'محفظ',
+  'رصيد',
+  'كاش\\s*باك',
+  'استرداد\\s+نقدي',
+  'تحويل',
+  'حوال[ةه]',
+  arabicWord('(?:استلمت|أرسلت|ارسلت)'),
+  arabicWord('[وف]?(?:إيداع|ايداع)'),
+].join('|'), 'iu');
+
+/** A plan of instalments, or one instalment of it. */
+const INSTALMENT_PLAN_RE = new RegExp([
+  '\\bsplit\\s+(?:in(?:to)?\\s+)?(?:\\d+|two|three|four|six)\\b',
+  '\\b(?:\\d+|two|three|four|five|six|eight|twelve)\\s+(?:(?:interest[\\s-]*free|equal|monthly)\\s+)*(?:payments|instal(?:l)?ments)\\b',
+  '\\binstal(?:l)?ments?\\b',
+  '\\bpayment\\s+\\d+\\s+of\\s+\\d+\\b',
+  '\\b(?:first|second|third|fourth|last|final|next|upcoming|\\d+(?:st|nd|rd|th))\\s+(?:payment|instal(?:l)?ment)\\b',
+  '\\bremaining\\s*:?\\s*\\d+\\s+payments?\\b',
+  arabicWord('[وفبل]?(?:ال)?(?:قسط|[أا]قساط)(?:ك|كم|ين)?'),
+  arabicWord('[وفبل]?(?:ال)?دفعات(?:ك|كم)?'),
+  arabicWord('[وفبل]?(?:ال)?(?:تقسيم|مقسم)'),
+  'الدفع[ةه]\\s+(?:الأولى|الاولى|الثانية|الثالثة|الرابعة|الأخيرة|الاخيرة|القادمة|التالية)',
+].join('|'), 'iu');
+
+/**
+ * The shopper's own order: "your Noon order", "your order of/from/at …",
+ * "order #…", and in Arabic "طلبك" (your order), "طلبية" or "طلب رقم". A
+ * bare "طلب" is not enough — it also means a request, as in a request for
+ * money between people.
+ */
+const ORDER_RE = new RegExp([
+  "\\byour\\s+(?:[\\p{L}\\p{N}&'’.-]+\\s+){0,3}orders?\\b",
+  '\\borders?\\s*(?:(?:of|from|at|with|no|number|id|ref)\\b|#)',
+  arabicWord('[وفبل]{0,2}طلب(?:ك|كم|اتك|اتكم)'),
+  arabicWord('[وفبل]{0,2}(?:ال)?طلبي(?:ة|ه|تك|تكم)'),
+  arabicWord('(?:ال)?طلب') + '\\s+رقم',
+].join('|'), 'iu');
+
+/** A payment moving for that order: charged, paid, received, refunded, due. */
+const ORDER_PAYMENT_RE = new RegExp([
+  '\\b(?:paid|pay|payments?|charged?|received|debited|deducted|collected|processed|refund(?:ed)?|due)\\b',
+  'خصم', 'دفع', 'سداد', 'استلام', 'استلمنا', 'استرداد', 'استرجاع', 'تحصيل', 'مستحق',
+].join('|'), 'iu');
+
+/** The day-before notice of a charge the bank will alert on when it happens. */
+const CHARGE_PREVIEW_RE = new RegExp([
+  '\\bwill\\s+be\\s+(?:automatically\\s+|auto[\\s-]*)?(?:charged|debited|collected|deducted)\\b',
+  '\\bdue\\s+(?:tomorrow|today|on)\\b',
+  'سيتم\\s+(?:خصم|تحصيل|سحب)',
+].join('|'), 'iu');
+
+/**
+ * Is this message a BNPL provider RESTATING a charge the paying bank already
+ * alerted on (see the header)? Only then may it be ignored. False for every
+ * non-provider sender, whatever the text says, and false for anything that
+ * names the provider's own money — that goes to Review instead.
+ */
+export function isBnplProviderRestatement(sender: string | null | undefined, text: string): boolean {
+  if (!isBnplProviderSource(sender) || typeof text !== 'string') return false;
+  // Arabic tatweel and short vowels never change a word; drop them so the
+  // word boundaries above see the letters.
+  const value = text.normalize('NFKC').replace(/[ـً-ْ]/g, '');
+  if (PROVIDER_OWN_MONEY_RE.test(value)) return false;
+  return INSTALMENT_PLAN_RE.test(value) || CHARGE_PREVIEW_RE.test(value) ||
+    (ORDER_RE.test(value) && ORDER_PAYMENT_RE.test(value));
 }

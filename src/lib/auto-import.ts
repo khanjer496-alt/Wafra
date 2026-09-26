@@ -18,10 +18,11 @@ import {
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
-import { isBnplProviderSource } from '@/lib/bnpl-providers';
+import { isBnplProviderRestatement, isBnplProviderSource } from '@/lib/bnpl-providers';
 import {
   nonPostingReason,
   parseForeignAwaitingRate,
+  parseSms,
   PARSER_VERSION,
   type NonPostingReason,
   type ParsedSms,
@@ -764,9 +765,15 @@ export function inspectSourceFreeRefusedAlert(input: {
   /** Known launch-bank package identity makes worldwide fallback unnecessary. */
   skipUniversalFallback?: boolean;
 }): SourceFreeRefusedAlertDecision {
-  // BNPL provider restatement (see bnpl-providers.ts): the bank's
-  // card alert is the transaction, so this source never earns a Review card.
-  if (isBnplProviderSource(input.sender)) return { kind: 'ignored', reason: 'non-financial' };
+  // BNPL provider sources (bnpl-providers.ts). A restatement of a bank card
+  // charge is ignored: the bank's own alert is the transaction, so it never
+  // earns a Review card. Anything else a provider sends (Tabby Cash, the
+  // Tamara Card/Wallet) has no bank alert behind it and takes the ordinary
+  // Review path below; the parsers refuse the provider, so it never posts.
+  if (isBnplProviderRestatement(input.sender, input.source)) {
+    return { kind: 'ignored', reason: 'non-financial' };
+  }
+  const bnplProvider = isBnplProviderSource(input.sender);
   const reason = nonPostingReason(input.source);
   if (reason) return { kind: 'declined', reason };
   // A generic amount detector can read "Get AED 50 cashback on your next
@@ -785,6 +792,21 @@ export function inspectSourceFreeRefusedAlert(input: {
   // rate converts it at promotion. It is never dropped, even when the
   // worldwide fallback below is skipped or cannot read the template.
   const launchMarket = detectLaunchMarketFromAlert(input.source, input.sender);
+  // A provider message the review inspectors cannot read may still be one the
+  // regional grammar reads — "You received AED 500.00 from Ahmed" into Tabby
+  // Cash. parseSms refuses a provider sender outright, so read the text as if
+  // it had none and offer only its structured facts in Review: the proposal an
+  // unconfirmed Android app's parsed notification gets, never a posting.
+  const providerParsedReview = (): SourceFreeRefusedAlertDecision | null => {
+    if (!bnplProvider || !launchMarket) return null;
+    const parsed = withMarketPackForParsing(launchMarket, () => parseSms(input.source, undefined, {
+      observedAt: input.observedAt,
+    }));
+    if (!parsed || parsed.kind !== 'transaction') return null;
+    const { raw: _raw, ...facts } = parsed;
+    const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
+    return candidate ? { kind: 'review', candidate: { ...candidate, channel: input.channel } } : null;
+  };
   const awaitingRate = launchMarket
     ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(input.source, undefined, {
         sender: input.sender, observedAt: input.observedAt,
@@ -835,7 +857,7 @@ export function inspectSourceFreeRefusedAlert(input: {
       channel: input.channel,
       event,
     }) : null;
-    if (!universal) return { kind: 'ignored', reason: 'unrecognized' };
+    if (!universal) return providerParsedReview() ?? { kind: 'ignored', reason: 'unrecognized' };
     const { id: _id, sourceKey: _sourceKey, ...candidate } = universal;
     return { kind: 'review', candidate };
   }
@@ -1403,6 +1425,14 @@ export async function scanInbox(
           continue;
         }
         const source = `${n.title} ${n.text}`.trim();
+        // BNPL provider identity (bnpl-providers.ts): the provider's own app,
+        // or — on the Messages-app lane — the SMS sender ID the conversation
+        // title shows, since the package there is the SMS app's. A provider is
+        // never trusted: it cannot auto-post, whatever native classed its app
+        // as, and it cannot be learned, even if an older build learned it.
+        const bnplSender = isBnplProviderSource(n.pkg)
+          ? n.pkg
+          : messagingRow && isBnplProviderSource(n.title) ? n.title.trim() : null;
         const skipKnownLaunchUniversal =
           knownLaunchBank && !KNOWN_BANK_UNIVERSAL_INFO_HINT.test(source);
         // Unknown Play apps enter native capture only after financial-context and
@@ -1412,7 +1442,7 @@ export async function scanInbox(
         // establish issuer trust. It still cannot authorize money by itself:
         // worldwide automatic import additionally requires a certified template.
         // Truly ambiguous apps remain review-first.
-        const verifiedSender = nativeSourceClass === 'financial-candidate' && !messagingRow
+        const verifiedSender = nativeSourceClass === 'financial-candidate' && !messagingRow && !bnplSender
           ? verifiedFinancialAppSender(n.appLabel ?? '')
           : null;
         const sourceClass = nativeSourceClass === 'messaging-review'
@@ -1420,20 +1450,27 @@ export async function scanInbox(
           : nativeSourceClass === 'financial-candidate' && verifiedSender
             ? 'play-finance' as const
             : nativeSourceClass;
-        const learned = !messagingRow && sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
-        const autoAuthorized = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned;
+        const learned = !messagingRow && !bnplSender && sourceClass === 'financial-candidate' &&
+          learnedPackages.has(n.pkg);
+        const autoAuthorized = !bnplSender &&
+          (sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned);
         // Green semantic generalization needs independently verified installed-
         // app identity. A user-learned package may still use an exact Gold
         // certified template, but cannot generalize beyond what was confirmed.
         const semanticGeneralizationAuthorized = sourceClass === 'trusted-bank' ||
           (sourceClass === 'play-finance' && !!verifiedSender && hasUniversalInstitutionSender(verifiedSender));
-        const sender = trustedBankNotificationSender(n.pkg) ?? verifiedSender ??
+        // A provider is parsed and inspected under its own identity, so every
+        // parser refuses to post it and the refusal inspector applies the
+        // provider policy; an unlearned candidate otherwise has no sender.
+        const sender = bnplSender ?? trustedBankNotificationSender(n.pkg) ?? verifiedSender ??
           (learned ? `${n.pkg} ${n.title}` : '');
-        // A BNPL provider app is gated on its PACKAGE: an unlearned candidate
-        // is parsed with no sender at all, so the parser cannot see it.
-        if (isPromotionalBankPush(source) || isBnplProviderSource(n.pkg)) {
+        // Offers, and a provider restating a charge the bank alerts on, are
+        // settled here as ignored. A provider's other messages continue to
+        // the Review path below exactly as any unparsed financial alert.
+        const promotion = isPromotionalBankPush(source);
+        if (promotion || isBnplProviderRestatement(bnplSender, source)) {
           if (notificationImportStats) notificationImportStats.ignored += 1;
-          promotionsSkipped += 1;
+          if (promotion) promotionsSkipped += 1;
           notificationIds.add(n.id);
           if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
             await yieldToUi();
@@ -1558,8 +1595,9 @@ export async function scanInbox(
           ? parsedCandidate
           : null;
         // A messaging row carries no package identity into Review, so
-        // confirming it can never teach Wafra to trust the Messages app.
-        const pushSource = messagingRow ? undefined : { packageName: n.pkg, sourceClass } as const;
+        // confirming it can never teach Wafra to trust the Messages app —
+        // nor, from a BNPL provider's app, to trust the provider.
+        const pushSource = messagingRow || bnplSender ? undefined : { packageName: n.pkg, sourceClass } as const;
         const parsedCandidateFallback = p && !autoAuthorized
           ? parsedFinancialCandidateReview(p, n.ts)
           : null;

@@ -7,6 +7,7 @@ const {
   isDeclinedMessage,
   nonPostingReason,
   isBnplProviderSource,
+  isBnplProviderRestatement,
 } = require('./build/sms-parser');
 
 let pass = 0, fail = 0;
@@ -1114,6 +1115,73 @@ t('tabby charge-tomorrow preview is skipped (real charge arrives separately)',
       'co.tamara.merchant', 'com.example.tabby', ''].every((s) => !isBnplProviderSource(s)) &&
       !isBnplProviderSource(undefined),
     'a sender that only contains a provider name was treated as the provider');
+
+  // WHAT a provider says still matters for one decision: ignore it, or show
+  // it in Review. Tabby Cash (a stored-value account with its own Cash Card
+  // and person-to-person transfers, launched in the UAE in July 2026) and the
+  // Tamara Card/Wallet move money that NO bank alert will ever report, so only
+  // a recognised RESTATEMENT of a bank card charge may be dropped. The wording
+  // test is reachable only through the provider's identity: the same body
+  // from a bank, a shop or an unknown sender is never judged by it.
+  const restatements = [
+    ...providerBodies,
+    'Your Noon order for AED 49.75 is due tomorrow and will be charged to your default card. Pay it now at https://s.tabby.ai/s3b4DC',
+    'Your order from Namshi of AED 360.00 has been split into 3 interest-free payments of AED 120.00.',
+    'Your 2nd instalment of AED 49.75 for your Noon order was paid. 2 installments left.',
+    'Your next payment of AED 49.75 will be charged tomorrow to your card ending 1234.',
+    'تم تقسيم طلبك من نون بقيمة 199.00 درهم على 4 دفعات. تم خصم الدفعة الأولى 49.75 درهم من بطاقتك.',
+    'تم استرداد 49.75 درهم لطلبك من نون إلى بطاقتك المنتهية بـ 1234',
+    'سيتم خصم القسط القادم بقيمة 49.75 درهم من بطاقتك غدا',
+  ];
+  const providerOwnMoney = [
+    'You spent AED 35.00 at CARREFOUR with your Tabby Cash Card ending 1234.',
+    'You received AED 500.00 from Ahmed. Your Tabby Cash balance is AED 812.40.',
+    'You sent AED 100.00 to Sara. Your Tabby Cash balance is AED 712.40.',
+    'AED 200.00 has been added to your Tabby Cash account.',
+    'You earned AED 3.50 cashback on your Cash Card purchase at CARREFOUR.',
+    'Your payment of AED 49.75 for your Noon order was paid from your Tabby Cash balance.',
+    'You paid AED 120.00 for your Namshi order with your Tabby Cash Card ending 1234.',
+    'You paid SAR 120.00 at JARIR with your Tamara Card ending 5678.',
+    'SAR 15.00 cashback has been added to your Tamara Wallet.',
+    'You spent AED 96.50 at SAMPLE PIZZA RESTAURANT. Your Tabby Card limit is now AED 1,846.50.',
+    'دفعت 35.00 درهم في كارفور باستخدام بطاقة تابي كاش المنتهية بـ 1234',
+    'استلمت 500.00 درهم من أحمد. رصيدك في تابي كاش 812.40 درهم',
+    // Tabby Cash copy that happens not to name the account: no order of the
+    // shopper's, no instalment plan, no charge preview — so not a restatement.
+    'Payment successful: AED 35.00 paid at CARREFOUR with card ending 1234.',
+    'AED 35.00 paid at AMAZON.AE for order 123 with card ending 1234.',
+    'You paid AED 50.00 to Sara.',
+    // "طلب" is also a request: "Ahmed's request for AED 50 was paid".
+    'تم دفع طلب أحمد بقيمة 50.00 درهم',
+  ];
+  ok('BNPL: provider restatements of a bank card charge are recognised, English and Arabic',
+    typeof isBnplProviderRestatement === 'function' &&
+      ['Tabby', 'AD-Tabby', 'Tamara', 'postpay', 'Cashew', 'app.tabby.client', 'co.tamara.user']
+        .every((sender) => restatements.every((body) => isBnplProviderRestatement(sender, body))),
+    typeof isBnplProviderRestatement === 'function'
+      ? JSON.stringify(restatements.filter((body) => !isBnplProviderRestatement('Tabby', body)))
+      : 'isBnplProviderRestatement is not exported');
+  ok("BNPL: the provider's own money (Tabby Cash, Cash Card, transfers, Tamara Card/Wallet) is never a restatement",
+    typeof isBnplProviderRestatement === 'function' &&
+      ['Tabby', 'AD-Tabby', 'Tamara', 'app.tabby.client', 'co.tamara.user']
+        .every((sender) => providerOwnMoney.every((body) => !isBnplProviderRestatement(sender, body))),
+    typeof isBnplProviderRestatement === 'function'
+      ? JSON.stringify(providerOwnMoney.filter((body) => isBnplProviderRestatement('Tabby', body)))
+      : 'isBnplProviderRestatement is not exported');
+  ok('BNPL: restatement wording is never judged without the provider identity',
+    typeof isBnplProviderRestatement === 'function' &&
+      ['', 'ADCB', 'TabbyTailoring', 'com.google.android.apps.messaging', 'app.tabby.cashier', undefined]
+        .every((sender) => restatements.every((body) => !isBnplProviderRestatement(sender, body))),
+    'a non-provider sender was judged by provider wording');
+  // Whatever it says, a provider source still never auto-posts: parseSms
+  // refuses it, and the capture lanes decide between ignoring and Review.
+  for (const body of providerOwnMoney) {
+    t(`BNPL provider own-money message never auto-posts: ${body.slice(0, 40)}`, body, null, { sender: 'Tabby' });
+  }
+  // ...while the same text with no sender reads exactly as it did before.
+  t('BNPL: a Tabby Cash Card spend with no sender parses as before',
+    'You spent AED 35.00 at CARREFOUR with your Tabby Cash Card ending 1234.',
+    { kind: 'transaction', type: 'expense', amountFils: 3500, merchant: 'Carrefour' });
 }
 
 t('instalment conversion offer is skipped',

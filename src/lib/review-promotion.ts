@@ -8,6 +8,7 @@ import { categorySupportsType } from '@/lib/categories';
 import { ledgerMoneySpec, migrateLegacyLedgerMoney, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { toISODate, transactionTime } from '@/lib/format';
 import { isApplePayWalletRow } from '@/lib/dedupe';
+import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import {
   isUniversalReviewAlert,
   prepareUniversalReviewAlert,
@@ -281,10 +282,14 @@ export const planReviewPromotion = (
     return { outcome: 'refused', reason: 'source-changed' };
   }
   const separatePurchaseConfirmed = separate !== undefined;
+  // A BNPL provider app is never learned (bnpl-providers.ts). Current capture
+  // gives its Review cards no package, but a card an older build queued may
+  // still carry one: confirming it records the money and trusts nothing.
   const learnedNotificationPackage = item.channel === 'push' &&
     item.sourceClass === 'financial-candidate' &&
     typeof item.sourcePackage === 'string' &&
-    /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(item.sourcePackage)
+    /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(item.sourcePackage) &&
+    !isBnplProviderSource(item.sourcePackage)
     ? item.sourcePackage
     : undefined;
 

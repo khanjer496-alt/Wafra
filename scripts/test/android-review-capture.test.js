@@ -1557,10 +1557,11 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
   // BNPL PROVIDER SOURCES. The bank's card charge to Tabby/Tamara is the one
   // real outflow; the provider's own SMS or app notification restates it
   // under the SHOP's name, which dedupe can never pair with "Tabby". Such a
-  // source must neither post nor raise a Review card inviting the user to add
-  // it — and a learned (previously approved) provider package must not start
-  // auto-posting either. Bodies are illustrative, not verified provider copy:
-  // the gate is the sender/package identity.
+  // restatement must neither post nor raise a Review card inviting the user
+  // to add it — and a learned (previously approved) provider package must not
+  // start auto-posting either. Bodies are illustrative, not verified provider
+  // copy: the gate is the sender/package identity, and the wording only
+  // separates a restatement from the provider's own money (below).
   markets.setLedgerCurrency(null);
   markets.setActiveMarket('AE');
   notificationsEnabled = true;
@@ -1631,6 +1632,131 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       lookalike.reviewCandidates[0]?.sourcePackage === 'com.example.tabbytailoring',
     JSON.stringify(lookalike));
   await lookalike.commit();
+
+  // THE PROVIDER'S OWN MONEY. Tabby Cash (launched in the UAE in July 2026)
+  // is a stored-value account in the same app.tabby.client package, with a
+  // Cash Card and person-to-person transfers; no bank alert ever reports those
+  // movements. The provider's app is still never trusted — nothing it says
+  // auto-posts, whatever its native class and even after an earlier approval
+  // — but its own money reaches Review like any other unparsed financial
+  // alert instead of being counted as ignored and acknowledged away.
+  const tabbyCashSpend = 'You spent AED 35.00 at CARREFOUR with your Tabby Cash Card ending 1234.';
+  const tabbyCashIncoming = 'You received AED 500.00 from Ahmed. Your Tabby Cash balance is AED 812.40.';
+  const reviewMoney = (item) => item.kind === 'universal'
+    ? `${item.event.direction}:${item.event.amount.value?.minorUnits}`
+    : `${item.direction}:${item.amount?.minorUnits}`;
+  for (const [label, learnedPackages, sourceClass] of [
+    ['unlearned', [], undefined],
+    ['previously learned', ['app.tabby.client', 'co.tamara.user'], undefined],
+    ['Play-finance classified', [], 'play-finance'],
+  ]) {
+    const suffix = label.replace(/[^a-z]/g, '').slice(0, 10);
+    const spendId = `tabby-cash-spend-${suffix}`;
+    const incomingId = `tabby-cash-in-${suffix}`;
+    notificationRows = [
+      { id: spendId, pkg: 'app.tabby.client', appLabel: 'Tabby', title: 'Tabby Cash',
+        text: tabbyCashSpend, ts: NOW + 42_000, ...(sourceClass ? { sourceClass } : {}) },
+      { id: incomingId, pkg: 'app.tabby.client', appLabel: 'Tabby', title: 'Money received',
+        text: tabbyCashIncoming, ts: NOW + 42_100, ...(sourceClass ? { sourceClass } : {}) },
+    ];
+    const cash = await scanInbox(0, {}, undefined, 'en-AE', {
+      notificationOnly: true, learnedNotificationPackages: learnedPackages,
+    });
+    const cashDiagnostics = getAndroidNotificationImportDiagnostics();
+    const monies = cash.reviewCandidates.map(reviewMoney).sort();
+    ok(`a Tabby Cash card spend and an incoming Tabby Cash transfer (${label}) reach Review, never the ledger`,
+      cash.parsed.length === 0 && cash.reviewCandidates.length === 2 &&
+        JSON.stringify(monies) === JSON.stringify(['credit:50000', 'debit:3500']),
+      JSON.stringify({ parsed: cash.parsed, reviews: cash.reviewCandidates }));
+    ok(`a Tabby Cash Review card (${label}) carries no package identity Review could learn to trust`,
+      cash.reviewCandidates.length === 2 &&
+        cash.reviewCandidates.every((item) => item.sourcePackage === undefined && item.sourceClass === undefined),
+      JSON.stringify(cash.reviewCandidates));
+    ok(`Tabby Cash pushes (${label}) are counted as Review, not ignored or auto-parsed`,
+      cashDiagnostics?.review === 2 && cashDiagnostics?.ignored === 0 &&
+        cashDiagnostics?.autoParsed === 0 && cashDiagnostics?.unresolved === 0,
+      JSON.stringify(cashDiagnostics));
+    const ackBeforeCash = acknowledgedNotifications.length;
+    await cash.commit();
+    ok(`Tabby Cash pushes (${label}) leave the queue only because Review now holds them`,
+      acknowledgedNotifications.slice(ackBeforeCash).includes(spendId) &&
+        acknowledgedNotifications.slice(ackBeforeCash).includes(incomingId),
+      JSON.stringify(acknowledgedNotifications.slice(ackBeforeCash)));
+  }
+
+  // The same split on the SMS lanes: a Tabby SMS restating a card charge is
+  // ignored (above), while a Tabby Cash movement from the Tabby sender ID is
+  // Review-only.
+  notificationsEnabled = false;
+  inboxRows = [
+    { id: 9501, address: 'Tabby', date: NOW + 43_000, body: tabbyCashSpend },
+    { id: 9502, address: 'AD-Tabby', date: NOW + 43_100, body: tabbyCashIncoming },
+    { id: 9503, address: 'Tabby', date: NOW + 43_200,
+      body: 'Your order of AED 199.00 at Noon is split into 4 payments. First payment of AED 49.75 paid.' },
+  ];
+  receivedRows = [];
+  const cashSms = await scanInbox(0, {}, undefined, 'en-AE');
+  ok('a Tabby Cash SMS reaches Review only; the restatement beside it is still ignored',
+    cashSms.parsed.length === 0 &&
+      JSON.stringify(cashSms.reviewCandidates.map(reviewMoney).sort()) ===
+        JSON.stringify(['credit:50000', 'debit:3500']) &&
+      !cashSms.reviewCandidates.some((item) => item.observedAt === NOW + 43_200) &&
+      cashSms.declined.every((row) => row.smsTs !== NOW + 43_200),
+    JSON.stringify({ parsed: cashSms.parsed, reviews: cashSms.reviewCandidates, declined: cashSms.declined }));
+  inboxRows = [];
+  notificationsEnabled = true;
+
+  // THE MESSAGES-APP LANE. Without READ_SMS a Tabby SMS reaches Wafra only as
+  // the SMS app's notification, whose TITLE is the sender ID. The package is
+  // Google/Samsung Messages, so the provider identity is the title: a
+  // restatement (including the whole-order "split into 4 payments") is
+  // ignored and acknowledged exactly as from the SMS inbox, and a Tabby Cash
+  // movement goes to Review with no learnable identity.
+  reactNative.PermissionsAndroid.check = async () => false;
+  for (const smsAppClass of ['messaging-review', 'financial-candidate']) {
+    const suffix = smsAppClass === 'messaging-review' ? 'mr' : 'fc';
+    const restatementIds = [`messages-tabby-split-${suffix}`, `messages-adtabby-chg-${suffix}`,
+      `messages-tamara-rfd-${suffix}`];
+    const cashId = `messages-tabby-cash-${suffix}`;
+    notificationRows = [{
+      id: restatementIds[0], pkg: 'com.google.android.apps.messaging', appLabel: 'Messages', title: 'Tabby',
+      text: 'Your order of AED 199.00 at Noon is split into 4 payments. First payment of AED 49.75 charged to your card ending 1234.',
+      ts: NOW + 44_000, sourceClass: smsAppClass,
+    }, {
+      id: restatementIds[1], pkg: 'com.google.android.apps.messaging', appLabel: 'Messages', title: 'AD-Tabby',
+      text: 'AED 49.75 charged to your card ending 1234 for your Noon order. Remaining: 2 payments.',
+      ts: NOW + 44_100, sourceClass: smsAppClass,
+    }, {
+      id: restatementIds[2], pkg: 'com.samsung.android.messaging', appLabel: 'Messages', title: 'Tamara',
+      text: 'Refund of AED 49.75 for your Noon order has been processed to your card ending 1234.',
+      ts: NOW + 44_200, sourceClass: smsAppClass,
+    }, {
+      id: cashId, pkg: 'com.google.android.apps.messaging', appLabel: 'Messages', title: 'Tabby',
+      text: tabbyCashSpend, ts: NOW + 44_300, sourceClass: smsAppClass,
+    }];
+    const lane = await scanInbox(0, {}, undefined, 'en-AE', {
+      notificationOnly: true, learnedNotificationPackages: ['com.google.android.apps.messaging'],
+    });
+    const laneDiagnostics = getAndroidNotificationImportDiagnostics();
+    ok(`without READ_SMS, a Tabby/Tamara restatement via the Messages app (${smsAppClass}) is ignored, not reviewed`,
+      lane.parsed.length === 0 &&
+        !lane.reviewCandidates.some((item) => item.observedAt >= NOW + 44_000 && item.observedAt <= NOW + 44_200) &&
+        laneDiagnostics?.ignored === 3 && laneDiagnostics?.unresolved === 0,
+      JSON.stringify({ reviews: lane.reviewCandidates, laneDiagnostics }));
+    const cashReview = lane.reviewCandidates.find((item) => item.observedAt === NOW + 44_300);
+    ok(`without READ_SMS, a Tabby Cash SMS via the Messages app (${smsAppClass}) reaches Review only`,
+      lane.parsed.length === 0 && lane.reviewCandidates.length === 1 && !!cashReview &&
+        reviewMoney(cashReview) === 'debit:3500' &&
+        cashReview.sourcePackage === undefined && cashReview.sourceClass === undefined &&
+        laneDiagnostics?.review === 1,
+      JSON.stringify({ reviews: lane.reviewCandidates, laneDiagnostics }));
+    const ackBeforeLane = acknowledgedNotifications.length;
+    await lane.commit();
+    ok(`without READ_SMS, the Messages-app provider rows (${smsAppClass}) are all settled and acknowledged`,
+      [...restatementIds, cashId].every((id) => acknowledgedNotifications.slice(ackBeforeLane).includes(id)),
+      JSON.stringify(acknowledgedNotifications.slice(ackBeforeLane)));
+  }
+  reactNative.PermissionsAndroid.check = originalSmsCheck;
   notificationRows = [];
   notificationsEnabled = false;
 

@@ -12,7 +12,7 @@ import { localMoneyPrefixPattern, malformedLocalMoneyTokens } from '@/lib/bank-a
 import { convertMinorUnits, currencyExponent, originalMoneyFields, type MinorExponent } from '@/lib/fx';
 import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
 import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
-import { isBnplProviderSource } from '@/lib/bnpl-providers';
+import { isBnplProviderRestatement, isBnplProviderSource } from '@/lib/bnpl-providers';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
  *
@@ -629,7 +629,7 @@ export function bankProfileForSender(sender?: string): BankProfile | null {
 
 // BNPL provider identity lives in its own pure registry; re-exported so the
 // parser's callers and tests reach it from here too.
-export { isBnplProviderSource };
+export { isBnplProviderRestatement, isBnplProviderSource };
 
 /** Optional, per-call context. Everything here is additive: omit it and nothing changes. */
 export interface ParseOptions {
@@ -637,7 +637,9 @@ export interface ParseOptions {
    * SMS sender ID ("ADIB", "RAKBANK", "Mashreq") or the notification package
    * name a bank app posted under ("ae.wio.personal"). Used to disambiguate,
    * with ONE exception that decides: a BNPL provider source
-   * (`isBnplProviderSource`) is never a transaction — its bank's card alert is.
+   * (`isBnplProviderSource`) never parses here, so it can never post by
+   * itself. The capture lanes then ignore its restatement of a bank card
+   * charge and send anything else it says to Review (bnpl-providers.ts).
    */
   sender?: string;
   /** Original source received timestamp in milliseconds, never the import time. */
@@ -6992,9 +6994,11 @@ export function parseSms(
   overrides?: Record<string, CategoryId>,
   options?: ParseOptions,
 ): ParsedSms | null {
-  // A BNPL provider restating an instalment its bank already alerted on; see
-  // bnpl-providers.ts. Every kind, both directions: the provider's refund
-  // notice duplicates the bank's refund credit exactly as its charge does.
+  // A BNPL provider is never a trusted source (bnpl-providers.ts): nothing it
+  // sends posts automatically. Every kind, both directions — its refund notice
+  // duplicates the bank's refund credit exactly as its charge does. Whether
+  // the message is then ignored as a restatement or shown in Review (Tabby
+  // Cash, the Tamara Card/Wallet) is the capture lanes' decision, not a parse.
   if (isBnplProviderSource(options?.sender)) return null;
   let parsed = parseSmsInner(message, overrides, options);
   if (!parsed) {
