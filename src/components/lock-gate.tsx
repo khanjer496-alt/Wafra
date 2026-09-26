@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useBiometricKind } from '@/components/biometric-glyph';
 import { ThemedText } from '@/components/themed-text';
 import { EButton } from '@/components/ui/band/e-button';
-import { YourPattern } from '@/components/ui/your-pattern';
+import { LockPattern } from '@/components/settings-band/lock-pattern';
 import { Fonts, ScreenPadding, Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -166,7 +166,7 @@ export function LockGate({ children }: { children: React.ReactNode }) {
           contentContainerStyle={styles.centre}
           scrollEnabled={largeText}
           showsVerticalScrollIndicator={false}>
-          <YourPattern tile={patternTile} gap={PATTERN_GAP} />
+          <LockPattern tile={patternTile} gap={PATTERN_GAP} testID="lock-pattern" />
           <ThemedText accessibilityRole="header"
             style={[styles.title, largeText && styles.titleLarge, { color: band.onBand }]}>
             {copy.lockedTitle}
