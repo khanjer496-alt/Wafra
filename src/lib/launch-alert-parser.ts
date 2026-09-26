@@ -520,6 +520,10 @@ export const createLaunchAlertSession = ({
     observedAt?: number,
   ): ParsedSms | null => {
     if (!bestEffort.enabled) return null;
+    // Same rule as parse(): an SMS from a BNPL provider's sender ID reaches
+    // this path (it is no launch-bank sender) and must not post as an
+    // "unverified format" either.
+    if (isBnplProviderSource(sender)) return null;
     if (!hasBankAlertMoneyHint(source)) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
     const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;

@@ -1660,6 +1660,24 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     ok('the launch session never posts a BNPL provider source, on either parser path',
       leaked.length === 0 && bankRow?.merchant === 'Tabby' && bankRow?.amountFils === 4975,
       JSON.stringify({ leaked, bankRow }));
+
+    // The unproven-format path (Android SMS from a non-launch sender, iOS
+    // History from a worldwide issuer) is the one a BNPL sender actually
+    // takes. On a non-Gulf ledger with best-effort posting on it posted a
+    // provider's message as a marked expense.
+    const unprovenBody = 'You spent USD 35.00 at TARGET with your card ending 1234.';
+    const unprovenSession = () => createLaunchAlertSession({
+      overrides: {}, pinnedCurrency: 'USD', activeMarket: 'AE', bestEffort: { enabled: true, country: 'US' },
+    });
+    const control = unprovenSession();
+    const controlRow = control.parseUnproven(unprovenBody, 'UNKNOWNBANK', control.inspect(unprovenBody, 'UNKNOWNBANK'), NOW);
+    const unprovenLeaks = ['Tabby', 'AD-Tabby', 'Tamara', 'app.tabby.client', 'co.tamara.user'].filter((sender) => {
+      const session = unprovenSession();
+      return session.parseUnproven(unprovenBody, sender, session.inspect(unprovenBody, sender), NOW) !== null;
+    });
+    ok('the unproven-format path never posts a BNPL provider source either',
+      controlRow?.amountFils === 3500 && !!controlRow?.bestEffort && unprovenLeaks.length === 0,
+      JSON.stringify({ controlRow, unprovenLeaks }));
   }
 
   reactNative.Platform.OS = 'ios';
