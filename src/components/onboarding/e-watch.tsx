@@ -118,10 +118,12 @@ export function WatchStep({ draft, active, onToggle, onActivate, onLimit, moneyS
 const styles = StyleSheet.create({
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   tile: {
-    flexBasis: '31%', flexGrow: 1, minHeight: 88, borderRadius: 20, padding: 12,
+    // Two across, so a long category name ("Entertainment", Arabic labels)
+    // never breaks mid-word; one across at the accessibility sizes.
+    flexBasis: '47%', flexGrow: 1, minHeight: 80, borderRadius: 20, padding: 12,
     justifyContent: 'space-between', gap: 8,
   },
-  tileLarge: { flexBasis: '47%' },
+  tileLarge: { flexBasis: '100%' },
   dialBlock: { gap: 12, alignItems: 'center', paddingTop: 4 },
   usual: { fontSize: 15, lineHeight: 22, textAlign: 'center' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

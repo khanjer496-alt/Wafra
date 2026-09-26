@@ -44,7 +44,10 @@ export function GoalsStep({ goals, onToggle, onContinue, onBack, onClose, tiles,
       disabled={disabled} testID="onboarding-goals-continue" />}>
     <View style={[styles.head, largeText && styles.headStacked]}>
       <View style={styles.headline}><EHeadline palette={band} size={42}>{words.goalsTitle}</EHeadline></View>
-      <PatternMosaic tiles={tiles} tile={largeText ? 22 : 18} animate testID="onboarding-goals-pattern" />
+      {/* On a sheet-coloured card: the goal shapes include the band's own green. */}
+      <View style={[styles.patternCard, { backgroundColor: band.sheet }]}>
+        <PatternMosaic tiles={tiles} tile={largeText ? 22 : 18} animate testID="onboarding-goals-pattern" />
+      </View>
     </View>
     <View style={styles.list} testID="onboarding-goal-options">
       {SHOWN.filter((goal) => GOAL_IDS.includes(goal)).map((goal) => {
@@ -72,6 +75,7 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 },
   headStacked: { flexDirection: 'column', alignItems: 'flex-start' },
   headline: { flex: 1, minWidth: 0 },
+  patternCard: { padding: 8, borderRadius: 14 },
   list: { gap: 10 },
   pill: {
     minHeight: 60, borderRadius: 30, borderWidth: 1.5, paddingHorizontal: 20, paddingVertical: 12,
