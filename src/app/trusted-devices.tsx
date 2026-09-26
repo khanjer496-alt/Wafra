@@ -1,4 +1,17 @@
-import { WorkflowHero } from '@/components/workflows/workflow-surfaces';
+/**
+ * Trusted devices, in design language E.
+ *
+ * The slate band (Accounts' colour: this is about where money arrives) holds
+ * the one figure that matters here — while an invite is live, how long it
+ * stays valid, set large; otherwise the plain title and the platform's
+ * relay-only truth. The sheet holds the devices, the invite's privacy line and
+ * its share action, and vault deletion. Every relay action (pair, join,
+ * invite, rename, revoke, delete) is unchanged and fingerprinted.
+ *
+ * Wording stays relay-only: a phone that joins receives new items relayed
+ * after it joins; nothing older is copied, and local iPhone Message captures
+ * never leave the iPhone.
+ */
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import * as Device from 'expo-device';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -12,18 +25,20 @@ import {
   View,
 } from 'react-native';
 
+import { BandTitle } from '@/components/settings-band/band-title';
+import { SettingsGroupTitle } from '@/components/settings-rows';
 import { ThemedText } from '@/components/themed-text';
+import { EButton } from '@/components/ui/band/e-button';
+import { GlyphTile } from '@/components/ui/band/glyph-tile';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
-import { Block, Section, SectionHeader } from '@/components/ui/layout';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
-import { Radius, Spacing } from '@/constants/theme';
+import { Fonts, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
-import { useTheme } from '@/hooks/use-theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { committed, failed, tapped } from '@/lib/haptics';
 import { t, tf, type Lang } from '@/lib/i18n';
 import {
@@ -40,6 +55,8 @@ import {
   revokeTrustedDevice,
   type RelayConfig,
 } from '@/lib/relay';
+import { settingsECopy } from '@/lib/settings-e-copy';
+import { inviteCountdown } from '@/lib/settings-layout';
 import { openShortcutsApp, shortcutCleanupApplies } from '@/lib/shortcut-cleanup';
 import { useStore } from '@/lib/store';
 import {
@@ -121,7 +138,9 @@ export default function TrustedDevicesScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ relay?: string; invite?: string }>();
   const language = useLanguage();
-  const theme = useTheme();
+  // Design language E: Trusted devices wears the slate band.
+  const band = useBand('accounts');
+  const largeText = useLargeTextLayout();
   const { state } = useStore();
   const suggestedName = useMemo(() => defaultDeviceName(language), [language]);
 
@@ -417,122 +436,148 @@ export default function TrustedDevicesScreen() {
    */
   const noticeBlock = notice ? (
     <View accessibilityLiveRegion="polite">
-      <Block tone="expense" style={styles.noticeRow}>
-        <Icon name="alert" size={16} color={theme.expense} />
+      <View style={[styles.noticeRow, { backgroundColor: band.statusOverSoft }]}>
+        <Icon name="alert" size={16} color={band.statusOver} />
         <View style={styles.flex}>
-          <ThemedText type="smallBold" style={{ color: theme.expense }}>
+          <ThemedText type="smallBold" style={{ color: band.statusOver }}>
             {notice.title}
           </ThemedText>
-          <ThemedText type="meta" themeColor="textSecondary">
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>
             {notice.body}
           </ThemedText>
         </View>
-      </Block>
+      </View>
     </View>
   ) : null;
 
   const removeIsSelf = selected?.isCurrent === true;
   const removedName = selected?.name ?? t('trustedUnnamed', language);
   const words = workflowCopy(language);
-  const trustedDevicesHeader: ScreenHeaderProps = {
-    title: t('trustedTitle', language),
-    back: { label: t('back', language), onPress: () => router.back() },
-  };
+  const eWords = settingsECopy(language);
+  const inviteLive = !!config && owner && !!invite;
+  // While an invite is live its countdown is the band's figure and the
+  // screen's name moves to the nav row; otherwise the name is the headline.
+  const trustedNav: BandNav = { back: true, title: inviteLive ? t('trustedTitle', language) : undefined };
+  const countdown = inviteCountdown(secondsLeft);
+  const platformTruth = Platform.OS === 'android'
+    ? t('trustedAndroidTruth', language)
+    : t('trustedIosTruth', language);
 
   return (
     <>
-      <ScreenScaffold
-        headerMode="native"
-        header={trustedDevicesHeader}
+      <BandScaffold
+        band="accounts"
+        testID="trusted-devices-screen"
+        nav={trustedNav}
         contentStyle={styles.content}
         scrollProps={{ showsVerticalScrollIndicator: false }}
         refreshControl={config ? (
             <RefreshControl
               refreshing={refreshing}
-              tintColor={theme.primary}
               onRefresh={() => {
                 setRefreshing(true);
                 void load(false);
               }}
             />
-          ) : undefined}>
-          <Section index={0}>
-            <WorkflowHero title={words.devicesTitle} body={words.devicesBody} icon="phone" />
-            <Block style={styles.platformNote}>
-              <View style={[styles.truthBand, { borderTopColor: theme.cardBorder }]}>
-                <Icon name="check" size={15} color={theme.primary} />
-                <ThemedText type="meta" themeColor="textSecondary" style={styles.flex}>
-                  {Platform.OS === 'android'
-                    ? t('trustedAndroidTruth', language)
-                    : t('trustedIosTruth', language)}
-                </ThemedText>
-              </View>
-            </Block>
-          </Section>
-
-          {noticeBlock && <Section index={1}>{noticeBlock}</Section>}
+          ) : undefined}
+        bandContent={inviteLive ? (
+          <View style={styles.bandBody}>
+            {/* The countdown is the hero: how long the one-use invite stays
+                valid. It is announced once as a sentence, not re-read every
+                second. */}
+            <View
+              testID="trusted-invite-countdown"
+              accessible
+              accessibilityLabel={secondsLeft > 0
+                ? tf('trustedInviteCountdown', {
+                    minutes: countdown.minutes,
+                    seconds: countdown.seconds,
+                  }, language)
+                : t('trustedInviteExpired', language)}
+              style={styles.inviteHero}>
+              <ThemedText type="default" style={{ color: band.onBandSecondary }}>
+                {secondsLeft > 0 ? eWords.inviteExpiresIn : eWords.inviteExpired}
+              </ThemedText>
+              <ThemedText
+                type="display"
+                maxFontSizeMultiplier={1.4}
+                adjustsFontSizeToFit
+                numberOfLines={1}
+                style={[styles.countdown, largeText && styles.countdownLarge,
+                  { color: secondsLeft > 0 ? band.onBand : band.onBandSecondary }]}>
+                {countdown.text}
+              </ThemedText>
+            </View>
+            <ThemedText type="default" style={{ color: band.onBandSecondary }}>
+              {t('trustedRelayOnly', language)}
+            </ThemedText>
+          </View>
+        ) : (
+          <View style={styles.bandBody}>
+            <BandTitle title={t('trustedTitle', language)} body={platformTruth} palette={band} testID="trusted-title" />
+          </View>
+        )}>
+          {noticeBlock}
 
           {isPreview && (
-            <Section index={1}>
-              <Block style={[styles.notice, { backgroundColor: theme.primarySoft, borderColor: theme.primaryBorder }]}>
-                <View style={styles.noticeTitle}>
-                  <ThemedText type="micro" style={{ color: theme.primary }}>
-                    {t('trustedPreview', language)}
-                  </ThemedText>
-                  <ThemedText type="nano" style={{ color: theme.primary }}>
-                    {t('trustedDisabled', language)}
-                  </ThemedText>
-                </View>
-                <ThemedText type="meta" themeColor="textSecondary">
-                  {t('trustedPreviewBody', language)}
-                </ThemedText>
-              </Block>
-            </Section>
+            <View style={[styles.card, { backgroundColor: band.card, borderColor: band.rule }]}>
+              <ThemedText type="smallBold" style={{ color: band.text }}>
+                {eWords.trustedSample}
+              </ThemedText>
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>
+                {t('trustedPreviewBody', language)}
+              </ThemedText>
+            </View>
           )}
 
           {!config && !loading && !isPreview && (
-            <Section index={1}>
-              <SectionHeader title={t('trustedStartHeader', language)} />
+            <View style={styles.section}>
+              <SettingsGroupTitle title={eWords.trustedStart} palette={band} />
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>{words.devicesBody}</ThemedText>
               {privateModeBlocksRelay && (
-                <Block style={styles.privateNotice}>
-                  <Icon name="lock" size={17} color={theme.warning} />
-                  <ThemedText type="meta" themeColor="textSecondary" style={styles.flex}>
+                <View style={[styles.privateNotice, { backgroundColor: band.statusNearSoft }]}>
+                  <Icon name="lock" size={17} color={band.statusNear} />
+                  <ThemedText type="meta" style={[styles.flex, { color: band.text }]}>
                     {t('trustedPrivateModeBody', language)}
                   </ThemedText>
-                </Block>
+                </View>
               )}
-              {privateModeBlocksRelay && <Button
+              {privateModeBlocksRelay && <EButton
+                palette={band}
+                variant="secondary"
                 label={t('privacyLegacyReview', language)}
-                variant="outline"
                 onPress={() => router.push('/settings?section=privacy')}
               />}
               <View style={styles.actions}>
-                <Button
+                <EButton
+                  palette={band}
                   label={busy ? t('trustedConnecting', language) : t('trustedCreateVault', language)}
                   icon="lock"
                   disabled={busy || privateModeBlocksRelay}
                   onPress={() => void createVault()}
                 />
-                <Button
+                <EButton
+                  palette={band}
                   label={t('trustedJoinVault', language)}
-                  variant="outline"
+                  variant="secondary"
                   icon="download"
                   disabled={busy || privateModeBlocksRelay}
                   onPress={() => setJoinVisible(true)}
                 />
               </View>
-              <ThemedText type="meta" themeColor="textTertiary">
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>
                 {t('trustedStartBody', language)}
               </ThemedText>
-            </Section>
+            </View>
           )}
 
           {(config || isPreview) && (
-            <Section index={2}>
-              <SectionHeader
-                title={t('trustedDevicesHeader', language)}
+            <View style={styles.section} testID="trusted-devices-list">
+              <SettingsGroupTitle
+                title={eWords.trustedDevices}
+                palette={band}
                 trailing={
-                  <ThemedText type="micro" themeColor="textTertiary" tabular>
+                  <ThemedText type="meta" tabular style={{ color: band.textSecondary }}>
                     {shownDevices.length}/{MAX_TRUSTED_DEVICES}
                   </ThemedText>
                 }
@@ -542,18 +587,18 @@ export default function TrustedDevicesScreen() {
                   accessibilityRole="button"
                   accessibilityLabel={t('trustedRetry', language)}
                   onPress={() => void load()}>
-                  <View style={[styles.offline, { borderColor: theme.expenseSoftBorder, backgroundColor: theme.expenseSoftBg }]}>
-                    <Icon name="alert" size={15} color={theme.expense} />
-                    <ThemedText type="meta" style={{ color: theme.expense, flex: 1 }}>
+                  <View style={[styles.offline, { backgroundColor: band.statusOverSoft }]}>
+                    <Icon name="alert" size={15} color={band.statusOver} />
+                    <ThemedText type="meta" style={{ color: band.statusOver, flex: 1 }}>
                       {t('trustedOfflineBody', language)}
                     </ThemedText>
-                    <ThemedText type="nano" style={{ color: theme.expense }}>
+                    <ThemedText type="smallBold" style={{ color: band.statusOver }}>
                       {t('trustedRetry', language)}
                     </ThemedText>
                   </View>
                 </Pressable>
               )}
-              <View style={[styles.deviceList, { borderColor: theme.cardBorder }]}>
+              <View>
                 {shownDevices.map((device, index) => (
                   <Pressable
                     key={device.id}
@@ -563,106 +608,78 @@ export default function TrustedDevicesScreen() {
                     onPress={() => openDevice(device)}
                     style={({ pressed }) => [
                       styles.deviceRow,
-                      index > 0 && { borderTopColor: theme.cardBorder, borderTopWidth: StyleSheet.hairlineWidth },
-                      pressed && !isPreview && { transform: [{ scale: 0.99 }] },
+                      index < shownDevices.length - 1 && { borderBottomColor: band.rule, borderBottomWidth: StyleSheet.hairlineWidth },
+                      pressed && !isPreview && { opacity: 0.7 },
                     ]}>
-                    <View style={[styles.deviceAvatar, { backgroundColor: device.isCurrent ? theme.primarySoft : theme.backgroundSelected }]}>
-                      <Icon name="phone" size={18} color={device.isCurrent ? theme.primary : theme.textSecondary} />
-                    </View>
+                    <GlyphTile icon="phone" palette={band} size={40} />
                     <View style={styles.deviceCopy}>
-                      <View style={styles.deviceTitleRow}>
-                        <ThemedText type="smallBold" numberOfLines={1} style={styles.flex}>
+                      <View style={[styles.deviceTitleRow, largeText && styles.deviceTitleStacked]}>
+                        <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1} style={[styles.flex, { color: band.text }]}>
                           {device.name ?? t('trustedUnnamed', language)}
                         </ThemedText>
                         {device.isCurrent && (
-                          <View style={[styles.badge, { backgroundColor: theme.primarySoft }]}>
-                            <ThemedText type="nano" style={{ color: theme.primary }}>
-                              {t('trustedThisDevice', language)}
+                          <View style={[styles.badge, { backgroundColor: band.glyphGround }]}>
+                            <ThemedText type="meta" style={{ color: band.text }}>
+                              {eWords.trustedThisDevice}
                             </ThemedText>
                           </View>
                         )}
                       </View>
-                      <ThemedText type="meta" themeColor="textTertiary">
+                      <ThemedText type="meta" style={{ color: band.textSecondary }}>
                         {t(device.role === 'owner' ? 'trustedRoleOwner' : 'trustedRoleMember', language)} · {relativeSeen(device.lastSeenAt, language)}
                       </ThemedText>
                     </View>
-                    {!isPreview && <Icon name="chevron-right" size={15} color={theme.textTertiary} />}
+                    {!isPreview && <Icon name="chevron-right" size={18} strokeWidth={2} color={band.textSecondary} />}
                   </Pressable>
                 ))}
               </View>
-            </Section>
+            </View>
           )}
 
           {config && owner && (
-            <Section index={3}>
-              <SectionHeader title={t('trustedInviteHeader', language)} />
+            <View style={styles.section} testID="trusted-invite">
+              <SettingsGroupTitle title={eWords.trustedInvite} palette={band} />
               {!invite ? (
-                <Button
+                <EButton
+                  palette={band}
                   label={t('trustedInviteAction', language)}
                   icon="plus"
                   disabled={busy || devices.length >= MAX_TRUSTED_DEVICES || offline}
                   onPress={() => void makeInvite()}
                 />
               ) : (
-                <Block style={styles.inviteCard}>
-                  {/* The countdown is the hero: how long the one-use invite
-                      stays valid. It is announced once as a sentence, not
-                      re-read every second. */}
-                  <View
-                    testID="trusted-invite-countdown"
-                    accessible
-                    accessibilityLabel={secondsLeft > 0
-                      ? tf('trustedInviteCountdown', {
-                          minutes: Math.floor(secondsLeft / 60),
-                          seconds: String(secondsLeft % 60).padStart(2, '0'),
-                        }, language)
-                      : t('trustedInviteExpired', language)}
-                    style={styles.inviteHero}>
-                    <ThemedText type="smallBold">{t('trustedInviteReady', language)}</ThemedText>
-                    <ThemedText
-                      type="display"
-                      tabular
-                      style={{ color: secondsLeft > 0 ? theme.text : theme.textTertiary }}>
-                      {Math.floor(secondsLeft / 60)}:{String(secondsLeft % 60).padStart(2, '0')}
-                    </ThemedText>
-                    <ThemedText type="meta" themeColor="textSecondary">
-                      {secondsLeft > 0
-                        ? t('trustedInviteUntilExpiry', language)
-                        : t('trustedInviteExpired', language)}
-                    </ThemedText>
-                  </View>
-                  <ThemedText type="meta" themeColor="textSecondary">
-                    {t('trustedRelayOnly', language)}
-                  </ThemedText>
-                  <ThemedText type="meta" themeColor="textSecondary">
+                <>
+                  <ThemedText type="meta" style={{ color: band.textSecondary }}>
                     {t('trustedInvitePrivacy', language)}
                   </ThemedText>
-                  <Button
+                  <EButton
+                    palette={band}
                     label={secondsLeft > 0 ? t('trustedShareInvite', language) : t('trustedNewInvite', language)}
                     icon={secondsLeft > 0 ? 'upload' : 'repeat'}
                     onPress={secondsLeft > 0 ? () => void shareInvite() : () => void makeInvite()}
                   />
-                </Block>
+                </>
               )}
-            </Section>
+            </View>
           )}
 
           {config && owner && (
-            <Section index={4} style={styles.dangerSection}>
-              <SectionHeader title={t('trustedVaultHeader', language)} />
-              <ThemedText type="meta" themeColor="textTertiary">
+            <View style={[styles.section, styles.dangerSection]}>
+              <SettingsGroupTitle title={eWords.trustedVault} palette={band} />
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>
                 {t('trustedVaultBody', language)}
               </ThemedText>
-              <Button
+              <EButton
+                palette={band}
                 label={t('trustedDeleteVaultAction', language)}
-                variant="danger"
+                color={{ fill: band.statusOver, text: band.onFill }}
                 icon="trash"
                 disabled={busy || offline}
                 onPress={confirmDeleteVault}
               />
-            </Section>
+            </View>
           )}
-      </ScreenScaffold>
+      </BandScaffold>
 
       <BottomSheet
         visible={joinVisible}
@@ -670,8 +687,9 @@ export default function TrustedDevicesScreen() {
           setNotice(null);
           setJoinVisible(false);
         }}
-        title={t('trustedJoinSheetTitle', language)}>
-        <ThemedText type="default" themeColor="textSecondary">
+        title={t('trustedJoinSheetTitle', language)}
+        palette={band}>
+        <ThemedText type="default" style={{ color: band.textSecondary }}>
           {t('trustedJoinSheetBody', language)}
         </ThemedText>
         <TextField
@@ -695,7 +713,8 @@ export default function TrustedDevicesScreen() {
           style={styles.codeInput}
         />
         {noticeBlock}
-        <Button
+        <EButton
+          palette={band}
           label={busy ? t('trustedJoining', language) : t('trustedJoinAction', language)}
           disabled={busy || !joinCode.trim() || !validTrustedDeviceName(joinName)}
           onPress={() => void join()}
@@ -705,16 +724,15 @@ export default function TrustedDevicesScreen() {
       <BottomSheet
         visible={!!selected}
         onClose={closeSelected}
-        title={t('trustedManageDevice', language)}>
+        title={t('trustedManageDevice', language)}
+        palette={band}>
         {selected && (
           <>
             <View style={styles.selectedHero}>
-              <View style={[styles.selectedIcon, { backgroundColor: theme.primarySoft }]}>
-                <Icon name="phone" size={23} color={theme.primary} />
-              </View>
+              <GlyphTile icon="phone" palette={band} size={48} />
               <View style={styles.flex}>
-                <ThemedText type="subtitle">{selected.name ?? t('trustedUnnamed', language)}</ThemedText>
-                <ThemedText type="meta" themeColor="textTertiary">
+                <ThemedText type="subtitle" style={{ color: band.text }}>{selected.name ?? t('trustedUnnamed', language)}</ThemedText>
+                <ThemedText type="meta" style={{ color: band.textSecondary }}>
                   {t(selected.role === 'owner' ? 'trustedRoleOwner' : 'trustedRoleMember', language)} · {relativeSeen(selected.lastSeenAt, language)}
                 </ThemedText>
               </View>
@@ -729,25 +747,27 @@ export default function TrustedDevicesScreen() {
                   autoCapitalize="words"
                   accessibilityLabel={t('trustedDeviceName', language)}
                 />
-                <Button
+                <EButton
+                  palette={band}
                   label={t('save', language)}
-                  variant="outline"
+                  variant="secondary"
                   disabled={busy || !validTrustedDeviceName(rename) || rename.trim() === (selected.name ?? '')}
                   onPress={() => void saveName()}
                 />
               </View>
             )}
             {ownerIsProtected ? (
-              <Block style={[styles.protected, { backgroundColor: theme.primarySoft, borderColor: theme.primaryBorder }]}>
-                <Icon name="lock" size={16} color={theme.primary} />
-                <ThemedText type="meta" themeColor="textSecondary" style={styles.flex}>
+              <View style={[styles.protected, { backgroundColor: band.glyphGround }]}>
+                <Icon name="lock" size={16} color={band.text} />
+                <ThemedText type="meta" style={[styles.flex, { color: band.text }]}>
                   {t('trustedOwnerProtectedBody', language)}
                 </ThemedText>
-              </Block>
+              </View>
             ) : canManageSelected ? (
-              <Button
+              <EButton
+                palette={band}
                 label={selected.isCurrent ? t('trustedLeaveAction', language) : t('trustedRemoveAction', language)}
-                variant="danger"
+                color={{ fill: band.statusOver, text: band.onFill }}
                 icon="trash"
                 disabled={busy}
                 onPress={removeSelected}
@@ -812,29 +832,25 @@ export default function TrustedDevicesScreen() {
 }
 
 const styles = StyleSheet.create({
-  platformNote: { marginTop: 12 },
-  content: { gap: Spacing.four + 2 },
-  flex: { flex: 1 },
-  hero: { gap: Spacing.three },
-  heroTop: { flexDirection: 'row', alignItems: 'center', width: 202, alignSelf: 'center', marginBottom: Spacing.one },
-  heroIcon: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  linkLine: { height: 1, flex: 1 },
-  truthBand: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.three },
-  notice: { gap: Spacing.two },
-  noticeTitle: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: Spacing.two },
-  privateNotice: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two, marginBottom: Spacing.three },
-  noticeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
-  actions: { gap: Spacing.two, marginBottom: Spacing.two },
-  offline: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, borderWidth: 1, borderRadius: Radius.control, padding: Spacing.three, marginBottom: Spacing.two },
-  deviceList: { borderWidth: 1, borderRadius: Radius.sheet, overflow: 'hidden' },
-  deviceRow: { minHeight: 74, paddingHorizontal: Spacing.three, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: Spacing.three - 2 },
-  deviceAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  deviceCopy: { flex: 1, gap: Spacing.half },
+  content: { gap: Spacing.four },
+  flex: { flex: 1, minWidth: 0 },
+  bandBody: { gap: 12, paddingBottom: Spacing.two },
+  inviteHero: { gap: 2 },
+  // The band's figure: Geist SemiBold with tabular digits, never Geist Mono.
+  countdown: { fontFamily: Fonts.sansSemi, fontSize: 84, lineHeight: 92, letterSpacing: -3, fontVariant: ['tabular-nums'] },
+  countdownLarge: { fontSize: 64, lineHeight: 72, letterSpacing: -2 },
+  section: { gap: Spacing.two },
+  card: { gap: Spacing.one, padding: Spacing.three, borderRadius: 18, borderWidth: StyleSheet.hairlineWidth },
+  privateNotice: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two, padding: Spacing.three, borderRadius: 16 },
+  noticeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two, padding: Spacing.three, borderRadius: 16 },
+  actions: { gap: Spacing.two },
+  offline: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, borderRadius: 14, padding: Spacing.three, minHeight: 48 },
+  deviceRow: { minHeight: 68, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  deviceCopy: { flex: 1, minWidth: 0, gap: Spacing.half },
   deviceTitleRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  badge: { borderRadius: Radius.chip, paddingHorizontal: 6, paddingVertical: 3 },
-  inviteCard: { gap: Spacing.three },
-  inviteHero: { alignItems: 'center', gap: Spacing.one, paddingVertical: Spacing.two },
-  dangerSection: { gap: Spacing.two },
+  deviceTitleStacked: { flexDirection: 'column', alignItems: 'flex-start' },
+  badge: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  dangerSection: { paddingTop: Spacing.three },
   field: { gap: Spacing.two },
   codeInput: {
     minHeight: 96,
@@ -846,6 +862,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   selectedHero: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
-  selectedIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  protected: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two },
+  protected: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two, padding: Spacing.three, borderRadius: 16 },
 });

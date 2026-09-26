@@ -41,6 +41,9 @@ test('workflow consumers have real imports for their current localized presentat
     assert.match(fs.readFileSync(path.join(root,file),'utf8'),/testID="review-alerts-intro"/);
    }else if(file.endsWith('/pro.tsx')){
     assert.ok(!names.has('WorkflowHero'),'Pro does not repeat its page heading in a hero');
+   }else if(file.endsWith('/trusted-devices.tsx')||file.endsWith('/feedback.tsx')){
+    // Design language E: the band carries the plain title; no hero repeats it.
+    assert.ok(names.has('BandScaffold')&&!names.has('WorkflowHero'),`${file}: band screen without a repeated hero`);
    }else assert.ok(names.has('WorkflowHero'),`${file}: surface import`);
   }
  }

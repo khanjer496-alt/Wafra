@@ -8,72 +8,67 @@
  * with my account".
  *
  * So this says the small true thing instead, in the app's own voice, and puts
- * the two ways out where a thumb already is. It should be unreachable: every
- * link the app generates is an `AppRoute` (see `@/lib/routes`), and `tsc`
- * rejects a destination with no screen behind it. This is the net under that.
+ * the way out where a thumb already is. It should be unreachable: every link
+ * the app generates is an `AppRoute` (see `@/lib/routes`), and `tsc` rejects a
+ * destination with no screen behind it. This is the net under that.
+ *
+ * Design language E: a plain sand screen — "Page not found", one line, one
+ * button back to Home. No stamp, no mono eyebrow, no illustration.
  */
 import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { Button } from '@/components/ui/controls';
-import { Icon } from '@/components/ui/icon';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import { Radius, Spacing } from '@/constants/theme';
+import { EButton } from '@/components/ui/band/e-button';
+import { BAND_GUTTER } from '@/components/ui/band-scaffold';
+import { Fonts, MaxContentWidth, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
-import { useTheme } from '@/hooks/use-theme';
-import { t } from '@/lib/i18n';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { settingsECopy } from '@/lib/settings-e-copy';
 
 export default function NotFoundScreen() {
-  const theme = useTheme();
   const router = useRouter();
-  // The language is read as a value, not just used through t(): the compiler
-  // memoises this component on what it can see going in, and the module-level
-  // language is not one of those things.
-  const language = useLanguage();
+  const band = useBand('settings');
+  const insets = useSafeAreaInsets();
+  const largeText = useLargeTextLayout();
+  // The language is read as a value: the compiler memoises this component on
+  // what it can see going in, and the module-level language is not one of
+  // those things.
+  const words = settingsECopy(useLanguage());
 
   return (
-    <ScreenScaffold scroll={false} contentStyle={styles.body}>
-      <View style={[styles.glyph, { borderColor: theme.cardBorderStrong }]}>
-        <Icon name="search" size={22} color={theme.textTertiary} />
+    <View testID="not-found-screen" style={[styles.root, {
+      backgroundColor: band.band,
+      paddingTop: insets.top + Spacing.five,
+      paddingBottom: insets.bottom + Spacing.four,
+    }]}>
+      <StatusBar style={band.statusBar} />
+      <ScrollView style={styles.flex} contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+        <ThemedText accessibilityRole="header"
+          style={[styles.title, largeText && styles.titleLarge, { color: band.onBand }]}>
+          {words.notFoundTitle}
+        </ThemedText>
+        <ThemedText type="default" style={[styles.copy, { color: band.onBand }]}>
+          {words.notFoundBody}
+        </ThemedText>
+      </ScrollView>
+      <View style={styles.footer}>
+        <EButton palette={band} label={words.notFoundHome} onPress={() => router.replace('/')} testID="not-found-home" />
       </View>
-
-      <ThemedText type="heading">{t('notFoundTitle', language)}</ThemedText>
-      <ThemedText type="default" themeColor="textSecondary" style={styles.copy}>
-        {t('notFoundBody', language)}
-      </ThemedText>
-
-      <View style={styles.actions}>
-        <Button inline label={t('goHome', language)} onPress={() => router.replace('/')} />
-        {router.canGoBack() ? (
-          <Button inline variant="outline" label={t('back', language)} onPress={() => router.back()} />
-        ) : null}
-      </View>
-    </ScreenScaffold>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  body: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    gap: Spacing.two,
-  },
-  glyph: {
-    width: 46,
-    height: 46,
-    borderRadius: Radius.control,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: Spacing.three,
-  },
-  copy: { maxWidth: 320 },
-  actions: {
-    flexDirection: 'row',
-    gap: Spacing.two + 2,
-    marginTop: Spacing.four,
-  },
+  root: { flex: 1, paddingHorizontal: BAND_GUTTER },
+  flex: { flex: 1 },
+  body: { gap: Spacing.three, width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
+  title: { fontFamily: Fonts.sansSemi, fontSize: 44, lineHeight: 48, letterSpacing: -1.6 },
+  titleLarge: { fontSize: 32, lineHeight: 40, letterSpacing: -0.6 },
+  copy: { fontSize: 17, lineHeight: 26, maxWidth: 360 },
+  footer: { width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center' },
 });

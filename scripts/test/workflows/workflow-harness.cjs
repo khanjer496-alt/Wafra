@@ -101,6 +101,14 @@ function createWorkflowHarness(options={}) {
  h.local('@/lib/settings-status','src/lib/settings-status.ts');
  d['@/components/biometric-glyph']={useBiometricKind:()=>options.biometricKind??null,BiometricGlyph:p=>jsx('BiometricGlyph',p)};
  h.local('@/components/settings-rows');
+ // Design language E (settings side): the band title, the Pro gate rules,
+ // the layout figures and the new copy run from source. The Pro sheet is a
+ // boundary here (its own suite renders it); its open feature is a prop.
+ h.local('@/lib/settings-e-copy','src/lib/settings-e-copy.ts');
+ h.local('@/lib/pro-gate','src/lib/pro-gate.ts');
+ h.local('@/lib/settings-layout','src/lib/settings-layout.ts');
+ h.local('@/components/settings-band/band-title');
+ d['@/components/pro/pro-sheet']={ProSheet:p=>jsx('Boundary',{...p,name:'ProSheet'})};
  function renderScreen(screen,props={}){
   if(screen==='review-alerts'){
    h.local('@/lib/review-alert-copy','src/lib/review-alert-copy.ts');
@@ -126,6 +134,9 @@ function createWorkflowHarness(options={}) {
     presentProPaywall:async()=>{},restorePro:async()=>null,
    })};
    store.setPro=record('setPro');
+   // The shared checkout and plan radios run from source, over the stubbed store.
+   h.local('@/hooks/use-pro-checkout','src/hooks/use-pro-checkout.ts');
+   h.local('@/components/pro/pro-plan-options');
   }
   if(screen==='trusted-devices')h.local('@/lib/trusted-device-contract','src/lib/trusted-device-contract.ts');
   if(screen==='ios-setup'){

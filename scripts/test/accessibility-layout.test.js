@@ -184,7 +184,10 @@ ok('virtualized screens can consume the same insets without nested scrolling',
     /virtualized/.test(scaffold) && /virtualized \? undefined : contentInsets/.test(scaffold));
 ok('tabbed footer clearance is not dropped',
   /tabBarClearance \+ footerClearance/.test(scaffold));
-ok('Not Found is the first scaffold adoption', /<ScreenScaffold/.test(notFound));
+// Design language E: Not Found is a plain sand screen that owns its own safe
+// area and content width, and scrolls rather than clipping at large text.
+ok('Not Found owns its safe area, width and large-text scrolling',
+  /useSafeAreaInsets/.test(notFound) && /MaxContentWidth/.test(notFound) && /<ScrollView/.test(notFound));
 
 // The recurring row is its own memoised component (RecurringRow) so Bills
 // re-renders do not redraw every row; check the row it actually renders.

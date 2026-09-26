@@ -34,7 +34,14 @@ import {
 } from 'react-native';
 
 import { BiometricGlyph, useBiometricKind } from '@/components/biometric-glyph';
-import { SettingsIconTile, SettingsLinkRow, SettingsSwitchRow } from '@/components/settings-rows';
+import { ProSheet } from '@/components/pro/pro-sheet';
+import { BandTitle } from '@/components/settings-band/band-title';
+import {
+  SettingsGroupTitle,
+  SettingsIconTile,
+  SettingsLinkRow,
+  SettingsSwitchRow,
+} from '@/components/settings-rows';
 import { ThemedText } from '@/components/themed-text';
 import { CountryPickerSheet, countryPickerName } from '@/components/country-picker-sheet';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
@@ -42,14 +49,12 @@ import { COUNTRY_UNKNOWN } from '@/lib/country';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Button } from '@/components/ui/controls';
+import { EButton } from '@/components/ui/band/e-button';
 import { Icon, type IconName } from '@/components/ui/icon';
-import { Block, Row, Section } from '@/components/ui/layout';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
-import { SectionHeader } from '@/components/ui/section-header';
-import { Radius, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { Block } from '@/components/ui/layout';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
+import { bandPalette, Fonts, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useAutoImport } from '@/hooks/use-auto-import';
 import {
@@ -95,6 +100,14 @@ import { useStore } from '@/lib/store';
 import { ledgerStateHasMoney } from '@/lib/ledger-money';
 import { detailsWords } from '@/lib/details-copy';
 import { settingsCopy } from '@/lib/settings-copy';
+import { settingsECopy } from '@/lib/settings-e-copy';
+import { settingsSectionScrollY } from '@/lib/settings-layout';
+import {
+  iosCaptureManageIntent,
+  iosCaptureSwitchIntent,
+  proGateFor,
+  type ProGatedFeature,
+} from '@/lib/pro-gate';
 import { androidSmsAddedThisMonth, captureLastHandledLabel } from '@/lib/settings-status';
 import type { ThemePreference } from '@/lib/theme-preference';
 import NotificationReader from '../../modules/notification-reader';
@@ -117,7 +130,8 @@ const LANGUAGE_NAMES = { en: 'English', ar: 'العربية' } as const;
 const LANGUAGE_GLYPH = 'ع';
 
 export default function SettingsScreen() {
-  const theme = useTheme();
+  // Design language E: Settings wears the sand band.
+  const band = useBand('settings');
   const largeText = useLargeTextLayout();
   const router = useRouter();
   const {
@@ -165,13 +179,18 @@ export default function SettingsScreen() {
   const { section } = useLocalSearchParams<{ section?: string; onboarding?: string }>();
   const scrollRef = useRef<ScrollView>(null);
   const importsOffset = useRef<number | null>(null);
+  // The end of the band content inside the band's column; with the Capture
+  // group's offset inside the sheet it places a recovery link's scroll.
+  const bandContentBottom = useRef<number | null>(null);
   const contentHeight = useRef(0);
   const recoveredSection = useRef<string | null>(null);
   const [privacyDetailsVisible, setPrivacyDetailsVisible] = useState(section === 'privacy');
   const scrollToRequestedSection = useCallback(() => {
     if (section !== 'imports' || recoveredSection.current === section ||
-      importsOffset.current === null || contentHeight.current <= importsOffset.current || !scrollRef.current) return;
-    scrollRef.current.scrollTo({ y: Math.max(0, importsOffset.current - Spacing.three), animated: false });
+      importsOffset.current === null || bandContentBottom.current === null || !scrollRef.current) return;
+    const target = settingsSectionScrollY(bandContentBottom.current, importsOffset.current);
+    if (contentHeight.current <= target) return;
+    scrollRef.current.scrollTo({ y: target, animated: false });
     recoveredSection.current = section;
   }, [section]);
   useEffect(() => {
@@ -244,10 +263,17 @@ export default function SettingsScreen() {
   /* ── Pro gating ─────────────────────────────────────────────────────── */
 
   const proActive = isProActive(state);
+  /**
+   * The Pro sheet over Settings, open on the gated feature that was tapped.
+   * A gated control used to leave Settings for the full-screen /pro route;
+   * now the same checkout comes to the control (pro-gate.ts decides).
+   */
+  const [proSheet, setProSheet] = useState<ProGatedFeature | null>(null);
 
-  const gated = (fn: () => void) => () => {
-    if (proActive) fn();
-    else router.push('/pro');
+  const gated = (feature: ProGatedFeature, fn: () => void) => () => {
+    const blocked = proGateFor(proActive, feature);
+    if (blocked) setProSheet(blocked);
+    else fn();
   };
 
   /* ── Privacy ────────────────────────────────────────────────────────── */
@@ -678,10 +704,11 @@ export default function SettingsScreen() {
 
   /* ── Rows ───────────────────────────────────────────────────────────── */
 
-  const settingsHeader: ScreenHeaderProps = {
-    title: t('settingsTitle'),
-    back: { label: t('back'), onPress: () => router.back() },
-  };
+  const settingsNav: BandNav = { back: true };
+  const eWords = settingsECopy(state.language);
+  // The Pro card is the one dark surface on the sand band: the ink band's own
+  // colours, with the mint accent on its action.
+  const proInk = bandPalette('home', band.scheme);
 
   /**
    * A row that opens something — a screen, or a picker sheet. The chevron is
@@ -710,6 +737,7 @@ export default function SettingsScreen() {
       locked={pro && !proActive}
       lockLabel={t('wafraPro')}
       testID={testID}
+      palette={band}
     />
   );
 
@@ -733,6 +761,7 @@ export default function SettingsScreen() {
       onChange={onChange}
       last={last}
       icon={icon}
+      palette={band}
     />
   );
   const iosCaptureSwitchRow = (
@@ -745,15 +774,17 @@ export default function SettingsScreen() {
       subtitle={subtitle}
       value={value}
       icon="mail"
+      palette={band}
       testID="settings-automatic-capture"
       onTextPress={onManage}
       onChange={(enabled) => {
-        if (enabled && captureState === 'queue-warning') {
+        const intent = iosCaptureSwitchIntent(enabled, captureState);
+        if (intent === 'recover') {
           confirmIosCaptureRecovery();
           return;
         }
-        if (enabled && captureState === 'paused') {
-          router.push('/pro');
+        if (intent === 'pro') {
+          setProSheet('capture');
           return;
         }
         void setIosAutomaticCapture(enabled);
@@ -806,50 +837,56 @@ export default function SettingsScreen() {
         ? copy.proTrialBody(trial)
         : t('trialEndedBanner');
   const proTitle = !state.founderPro && !state.pro && trial > 0 ? copy.proTrialTitle : copy.proTitle;
+  const proActionLabel = state.founderPro || state.pro ? eWords.proDetails : eWords.seePlans;
 
   return (
     <React.Fragment>
-      <ScreenScaffold
+      <BandScaffold
+        band="settings"
+        testID="settings-screen"
+        nav={settingsNav}
         scrollRef={scrollRef}
         scrollProps={{ showsVerticalScrollIndicator: false, onContentSizeChange: (_width, height) => {
           contentHeight.current = height;
           scrollToRequestedSection();
         } }}
-        headerMode="native"
-        header={settingsHeader}
-        contentStyle={styles.content}>
-        <Section index={0}>
-          <Pressable
-            testID="settings-pro-card"
-            accessibilityRole="button"
-            accessibilityLabel={`${proTitle} · ${proSubtitle}`}
-            onPress={() => {
-              tapped();
-              router.push('/pro');
-            }}
-            style={({ pressed }) => [
-              styles.proCard,
-              largeText && styles.proRowLarge,
-              { backgroundColor: theme.inverseSurface, opacity: pressed ? 0.9 : 1 },
-            ]}>
-            <View style={[styles.proBadge, { backgroundColor: theme.primary }]}>
-              <Icon name="diamond" size={20} color={theme.onPrimary} />
-            </View>
-            <View style={styles.rowText}>
-              <ThemedText type="smallBold" style={{ color: theme.inverseText }}>{proTitle}</ThemedText>
-              <ThemedText type="meta" style={{ color: theme.inverseText, opacity: 0.8 }}>
-                {proSubtitle}
-              </ThemedText>
-            </View>
-            <Icon name="chevron-right" size={15} color={theme.inverseText} />
-          </Pressable>
-        </Section>
-
-        <Section index={1} testID="settings-imports" onLayout={({ nativeEvent }) => {
+        contentStyle={styles.content}
+        bandContent={(
+          <View style={styles.bandBody} testID="settings-band-body" onLayout={({ nativeEvent }) => {
+            bandContentBottom.current = nativeEvent.layout.y + nativeEvent.layout.height;
+            scrollToRequestedSection();
+          }}>
+            <BandTitle title={t('settingsTitle')} palette={band} testID="settings-title" />
+            <Pressable
+              testID="settings-pro-card"
+              accessibilityRole="button"
+              accessibilityLabel={`${proTitle} · ${proSubtitle} · ${proActionLabel}`}
+              onPress={() => {
+                tapped();
+                router.push('/pro');
+              }}
+              style={({ pressed }) => [
+                styles.proCard,
+                largeText && styles.proCardStacked,
+                { backgroundColor: proInk.band, opacity: pressed ? 0.9 : 1 },
+              ]}>
+              <View style={styles.proText}>
+                <ThemedText type="smallBold" style={[styles.proTitle, { color: proInk.onBand }]}>{proTitle}</ThemedText>
+                <ThemedText type="meta" style={{ color: proInk.onBandSecondary }}>
+                  {proSubtitle}
+                </ThemedText>
+              </View>
+              <View style={[styles.proAction, { backgroundColor: proInk.accent }]}>
+                <ThemedText type="smallBold" style={{ color: proInk.onAccent }}>{proActionLabel}</ThemedText>
+              </View>
+            </Pressable>
+          </View>
+        )}>
+        <View testID="settings-imports" onLayout={({ nativeEvent }) => {
           importsOffset.current = nativeEvent.layout.y;
           scrollToRequestedSection();
         }} style={styles.settingsPanel}>
-          <SectionHeader title={t('settingsImportsHeader')} />
+          <SettingsGroupTitle title={t('settingsImportsHeader')} palette={band} />
           {isSmsScanningAvailable() &&
             switchRow(
               t('readBankSms'),
@@ -860,10 +897,10 @@ export default function SettingsScreen() {
               'mail',
             )}
           {state.historyImport && state.historyImport.status !== 'complete' ? (
-            <Block style={styles.historyImportSettings}>
+            <View style={[styles.historyImportSettings, { backgroundColor: band.card, borderColor: band.rule }]}>
               <View style={styles.historyImportSettingsCopy}>
-                <ThemedText type="smallBold">{t('historyImportSettingsTitle')}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">
+                <ThemedText type="smallBold" style={{ color: band.text }}>{t('historyImportSettingsTitle')}</ThemedText>
+                <ThemedText type="meta" style={{ color: band.textSecondary }}>
                   {state.historyImport.status === 'failed'
                     ? t(state.historyImport.error === 'inbox-access'
                         ? 'historyImportAccessBody'
@@ -875,9 +912,9 @@ export default function SettingsScreen() {
                 </ThemedText>
               </View>
               {state.historyImport.status === 'failed' ? (
-                <Button
-                  inline
-                  variant="outline"
+                <EButton
+                  palette={band}
+                  variant="secondary"
                   label={t(state.historyImport.error === 'inbox-access'
                     ? 'openPhoneSettings'
                     : 'retryHistoryImport')}
@@ -886,7 +923,7 @@ export default function SettingsScreen() {
                     : beginHistoryImport())}
                 />
               ) : null}
-            </Block>
+            </View>
           ) : null}
           {Platform.OS === 'ios' && captureAvailable &&
             iosCaptureSwitchRow(
@@ -903,16 +940,16 @@ export default function SettingsScreen() {
                   : iosCaptureCopy,
               iosCaptureEnabled,
               () => {
-                if (captureState === 'paused') {
-                  router.push('/pro');
+                const intent = iosCaptureManageIntent(captureState, state.captureOptOut);
+                if (intent === 'pro') {
+                  setProSheet('capture');
                   return;
                 }
-                if (captureState === 'queue-warning') {
+                if (intent === 'recover') {
                   confirmIosCaptureRecovery();
                   return;
                 }
-                if (state.captureOptOut || captureState === 'off' ||
-                  captureState === 'needs-automation') {
+                if (intent === 'enable') {
                   void setIosAutomaticCapture(true);
                   return;
                 }
@@ -924,26 +961,26 @@ export default function SettingsScreen() {
               { icon: 'mail', testID: 'settings-capture-status' })}
           {Platform.OS === 'ios' && captureAvailable &&
             captureState === 'queue-warning' && (
-              <Block style={styles.historyImportSettings}>
+              <View style={[styles.historyImportSettings, { backgroundColor: band.card, borderColor: band.rule }]}>
                 <View style={styles.historyImportSettingsCopy}>
-                  <ThemedText type="smallBold">{t('captureIosRecoveryAction')}</ThemedText>
-                  <ThemedText type="meta" themeColor="textSecondary">
+                  <ThemedText type="smallBold" style={{ color: band.text }}>{t('captureIosRecoveryAction')}</ThemedText>
+                  <ThemedText type="meta" style={{ color: band.textSecondary }}>
                     {t('captureIosRecoveryBody')}
                   </ThemedText>
                 </View>
-                <Button
-                  inline
-                  variant="outline"
+                <EButton
+                  palette={band}
+                  variant="secondary"
                   label={t('captureIosRecoveryAction')}
                   onPress={confirmIosCaptureRecovery}
                 />
-              </Block>
+              </View>
             )}
           {notifAvailable &&
             linkRow(
               t('bankAppNotifsTitle'),
               notifEnabled ? t('bankPushOn') : copy.optionalOff,
-              gated(onNotificationAccess),
+              gated('notifications', onNotificationAccess),
               { pro: true, icon: 'bank' },
             )}
           {linkRow(
@@ -989,10 +1026,10 @@ export default function SettingsScreen() {
             () => router.push('/ios-setup'),
             { icon: 'phone', last: true },
           )}
-        </Section>
+        </View>
 
-        <Section index={2} style={styles.settingsPanel}>
-          <SectionHeader title={t('settingsNotificationsHeader')} />
+        <View style={styles.settingsPanel}>
+          <SettingsGroupTitle title={t('settingsNotificationsHeader')} palette={band} />
           {switchRow(
             t('dailySummarySetting'),
             state.dailySummary && notificationDeliveryEnabled ? t('dailySummaryOn') : t('dailySummaryOff'),
@@ -1029,10 +1066,10 @@ export default function SettingsScreen() {
               true,
               'bolt',
             )}
-        </Section>
+        </View>
 
-        <Section index={3} style={styles.settingsPanel}>
-          <SectionHeader title={t('settingsPreferencesHeader')} />
+        <View style={styles.settingsPanel}>
+          <SettingsGroupTitle title={t('settingsPreferencesHeader')} palette={band} />
           {linkRow(
             copy.theme,
             null,
@@ -1047,7 +1084,7 @@ export default function SettingsScreen() {
           {linkRow(t('language'), null, () => setPreferenceSheet('language'), {
             // No globe in the house icon set; the Arabic letter is the
             // language control's glyph in both languages.
-            glyph: <ThemedText type="smallBold" themeColor="primary">{LANGUAGE_GLYPH}</ThemedText>,
+            glyph: <ThemedText type="smallBold" style={{ color: band.text }}>{LANGUAGE_GLYPH}</ThemedText>,
             value: languagePreference === 'system'
               ? `${t('themeSystem')} · ${LANGUAGE_NAMES[language]}`
               : LANGUAGE_NAMES[language],
@@ -1064,10 +1101,10 @@ export default function SettingsScreen() {
             () => router.setParams({ onboarding: 'preview' }),
             { icon: 'play', last: true },
           )}
-        </Section>
+        </View>
 
-        <Section index={4} testID="settings-region" style={styles.settingsPanel}>
-          <SectionHeader title={copy.countryAndCurrency} />
+        <View testID="settings-region" style={styles.settingsPanel}>
+          <SettingsGroupTitle title={copy.countryAndCurrency} palette={band} />
           {linkRow(
             t('settingsCountryTitle'),
             // An unknown country asks to be set rather than reading as a choice.
@@ -1078,35 +1115,37 @@ export default function SettingsScreen() {
             { icon: 'plane' },
           )}
           {ledgerCurrencyLocked ? (
-            <Row
-              last
+            <View
+              accessible
+              style={styles.fixedRow}
               accessibilityLabel={`${t('ledgerCurrencyTitle')}: ${state.ledgerMoney?.currency ?? ledgerCurrencyDisplay()}`}>
-              <SettingsIconTile icon="cash" />
+              <SettingsIconTile icon="cash" palette={band} />
               <View style={styles.rowText}>
-                <ThemedText type="small">{t('ledgerCurrencyTitle')}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">
+                <ThemedText type="smallBold" style={[styles.rowTitle, { color: band.text }]}>{t('ledgerCurrencyTitle')}</ThemedText>
+                <ThemedText type="meta" style={{ color: band.textSecondary }}>
                   {(state.ledgerMoney?.currency ?? ledgerCurrencyDisplay()) + ' · ' + t('ledgerCurrencyPermanentHint')}
                 </ThemedText>
               </View>
-              <Icon name="lock" size={13} color={theme.textTertiary} />
-            </Row>
+              <Icon name="lock" size={14} color={band.textSecondary} />
+            </View>
           ) : linkRow(
             t('ledgerCurrencyTitle'),
             state.ledgerMoney?.currency ?? t('chooseLedgerCurrency'),
             () => setCurrencySheetVisible(true),
             { last: true, icon: 'cash' },
           )}
-        </Section>
+        </View>
 
-        <Section index={5} testID="settings-privacy" style={styles.settingsPanel}>
-          <SectionHeader title={copy.privacyAndSecurity} />
+        <View testID="settings-privacy" style={styles.settingsPanel}>
+          <SettingsGroupTitle title={copy.privacyAndSecurity} palette={band} />
           <SettingsSwitchRow
             title={lockTitle}
             subtitle={t('appLockDetail')}
             value={state.appLock}
             onChange={toggleAppLock}
             testID="settings-app-lock"
-            glyph={<BiometricGlyph kind={biometricKind} size={17} color={theme.primary} />}
+            palette={band}
+            glyph={<BiometricGlyph kind={biometricKind} size={18} color={band.text} />}
           />
           {Platform.OS !== 'web' && linkRow(
             copy.trustedRow,
@@ -1116,36 +1155,36 @@ export default function SettingsScreen() {
           )}
           {linkRow(t('messagesPrivacy'), t('privacyBuiltInDetail'), () => setPrivacyDetailsVisible(true), { last: true, icon: 'lock' })}
           {(legacyChargeAlertsAvailable || relay === undefined) && (
-            <Block style={styles.privacyCopy}>
-              <Icon name="alert" size={16} color={theme.warning} />
-              <ThemedText type="small" themeColor="warning" style={styles.privacyCopyText}>
+            <View style={[styles.privacyCopy, { backgroundColor: band.statusNearSoft }]}>
+              <Icon name="alert" size={16} color={band.statusNear} />
+              <ThemedText type="small" style={[styles.privacyCopyText, { color: band.statusNear }]}>
                 {t('legacyCapturePrivacyWarning')}
               </ThemedText>
-            </Block>
+            </View>
           )}
-        </Section>
+        </View>
 
-        <Section index={6} style={styles.settingsPanel}>
+        <View style={styles.settingsPanel}>
           {linkRow(
             copy.dataAndHelp,
             copy.dataAndHelpDetail,
             () => router.push('/settings-data'),
             { last: true, icon: 'download', testID: 'settings-data-and-help' },
           )}
-        </Section>
-      </ScreenScaffold>
+        </View>
+      </BandScaffold>
 
       <BottomSheet visible={privacyDetailsVisible} onClose={() => setPrivacyDetailsVisible(false)}
-        title={t('messagesPrivacy')}>
+        title={t('messagesPrivacy')} palette={band}>
         <View style={{ gap: Spacing.three }}>
-          <ThemedText themeColor="textSecondary">{t('privacyBuiltInBody')}</ThemedText>
-          <ThemedText themeColor="textSecondary">{t('privacyRetentionExact')}</ThemedText>
-          <ThemedText themeColor="textSecondary">{t('privacySecurityExact')}</ThemedText>
-          <ThemedText themeColor="textSecondary">{t('privacyLogosBody')}</ThemedText>
+          <ThemedText style={{ color: band.textSecondary }}>{t('privacyBuiltInBody')}</ThemedText>
+          <ThemedText style={{ color: band.textSecondary }}>{t('privacyRetentionExact')}</ThemedText>
+          <ThemedText style={{ color: band.textSecondary }}>{t('privacySecurityExact')}</ThemedText>
+          <ThemedText style={{ color: band.textSecondary }}>{t('privacyLogosBody')}</ThemedText>
           {state.privateMode && <Block>
-            <ThemedText type="smallBold">{t('privacyLegacyTitle')}</ThemedText>
-            <ThemedText themeColor="textSecondary">{t('privacyLegacyBody')}</ThemedText>
-            <Button label={t('privacyLegacyReview')} variant="outline" onPress={reviewLegacyPrivacyPreference} />
+            <ThemedText type="smallBold" style={{ color: band.text }}>{t('privacyLegacyTitle')}</ThemedText>
+            <ThemedText style={{ color: band.textSecondary }}>{t('privacyLegacyBody')}</ThemedText>
+            <EButton palette={band} label={t('privacyLegacyReview')} variant="secondary" onPress={reviewLegacyPrivacyPreference} />
           </Block>}
         </View>
       </BottomSheet>
@@ -1194,6 +1233,7 @@ export default function SettingsScreen() {
         onClose={() => setCurrencySheetVisible(false)}
         onSelect={setLedgerMoney}
       />
+      <ProSheet feature={proSheet} onClose={() => setProSheet(null)} />
       {confirmation && (
         <ConfirmSheet
           visible
@@ -1211,34 +1251,36 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  // The rows already carry rules. A second border above every section heading
-  // boxed the label in and made a single preference occupy an entire panel.
-  settingsPanel: { paddingTop: Spacing.two, gap: Spacing.one },
-  content: {
-    gap: Spacing.three,
-  },
+  content: { gap: Spacing.two },
+  bandBody: { gap: 14, paddingBottom: Spacing.two },
+  // The rows carry their own rules; a group is its title and its rows.
+  settingsPanel: { gap: 0 },
   proCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three - 2,
+    gap: Spacing.three,
     padding: Spacing.three,
-    borderRadius: Radius.sheet + 4,
+    borderRadius: 22,
     minHeight: 76,
   },
-  proBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: Radius.control,
+  // At the accessibility sizes the action takes its own line under the text.
+  proCardStacked: { flexDirection: 'column', alignItems: 'flex-start' },
+  proText: { flex: 1, minWidth: 0, gap: 2, alignSelf: 'stretch' },
+  proTitle: { fontFamily: Fonts.sansSemi, fontSize: 16, lineHeight: 22 },
+  proAction: {
+    minHeight: 44,
+    borderRadius: 22,
+    paddingHorizontal: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  proRowLarge: {
-    alignItems: 'flex-start',
-  },
   rowText: {
     flex: 1,
-    gap: Spacing.half,
+    minWidth: 0,
+    gap: 2,
   },
+  rowTitle: { fontFamily: Fonts.sansSemi, fontSize: 16, lineHeight: 22 },
+  fixedRow: { flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 60, paddingVertical: Spacing.two },
   // The four styles for the 28-day salary-month grid are gone, and the
   // board's "Your month · From payday" row is deliberately not built: the
   // grid was removed from Settings AND onboarding at the owner's request
@@ -1248,15 +1290,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: 16,
+    marginTop: Spacing.two,
   },
   privacyCopyText: {
     flex: 1,
     lineHeight: 18,
   },
   historyImportSettings: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: Spacing.two,
+    padding: Spacing.three,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginVertical: Spacing.two,
   },
-  historyImportSettingsCopy: { flex: 1, gap: Spacing.half },
+  historyImportSettingsCopy: { gap: Spacing.half },
 });

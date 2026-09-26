@@ -17,8 +17,11 @@
  * button that is never drawn. See routes.test.js, which pins this repo-wide.
  * The answers this screen gives are drawn inline (`notice`) and the one
  * question it asks goes through ConfirmSheet.
+ *
+ * Design language E: the green band holds the plain title and the optional
+ * topic chips; the sheet holds the message, the exact outbound report ("What
+ * we'll send", truthful to the last field) and Send.
  */
-import { WorkflowHero } from '@/components/workflows/workflow-surfaces';
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import Constants from 'expo-constants';
 import { useRouter, type Href } from 'expo-router';
@@ -30,16 +33,15 @@ import {
   View,
 } from 'react-native';
 
+import { BandTitle } from '@/components/settings-band/band-title';
+import { SettingsGroupTitle, SettingsLinkRow } from '@/components/settings-rows';
 import { ThemedText } from '@/components/themed-text';
+import { EButton } from '@/components/ui/band/e-button';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Button } from '@/components/ui/controls';
-import { Icon } from '@/components/ui/icon';
-import { Block, Row, Section, SectionHeader } from '@/components/ui/layout';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { TextField } from '@/components/ui/text-field';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { BandLayout, Fonts, Spacing, type BandPalette } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import {
   buildFeedbackPayload,
   FEEDBACK_MESSAGE_MAX,
@@ -55,6 +57,7 @@ import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { isParserResearchBuild } from '@/lib/parser-research-source';
+import { settingsECopy } from '@/lib/settings-e-copy';
 import { useStore } from '@/lib/store';
 
 /**
@@ -122,7 +125,8 @@ const EMPTY_LEDGER: Parameters<typeof buildFeedbackPayload>[0]['ledger'] = {
 };
 
 export default function FeedbackScreen() {
-  const theme = useTheme();
+  // Design language E: Feedback is a flow, so it wears the green band.
+  const band = useBand('flow');
   const router = useRouter();
   const { state } = useStore();
 
@@ -178,77 +182,65 @@ export default function FeedbackScreen() {
   };
 
   const words = workflowCopy(language);
-  const feedbackHeader: ScreenHeaderProps = {
-    title: t('sendFeedback'),
-    back: { label: t('back'), onPress: () => router.back() },
-  };
+  const eWords = settingsECopy(language);
+  const feedbackNav: BandNav = { back: true };
 
   return (
     <>
-      <ScreenScaffold
+      <BandScaffold
+        band="flow"
+        testID="feedback-screen"
         keyboardAware
-        headerMode="native"
-        header={feedbackHeader}
+        nav={feedbackNav}
         contentStyle={styles.content}
-        scrollProps={{ keyboardShouldPersistTaps: 'handled', showsVerticalScrollIndicator: false }}>
-          <WorkflowHero title={words.feedbackTitle} body={words.feedbackBody} icon="mail" />
-
-          {isParserResearchBuild() && (
-            <Section index={1} style={styles.group}>
-              <SectionHeader title={t('feedbackParserHeader')} />
-              <Row
-                onPress={() => router.push('/parser-research' as Href)}
-                last
-                accessibilityLabel={t('feedbackParserTitle')}>
-                <View style={styles.parserIcon}>
-                  <Icon name="code" size={19} color={theme.primary} />
-                </View>
-                <View style={styles.rowText}>
-                  <ThemedText type="small">{t('feedbackParserTitle')}</ThemedText>
-                  <ThemedText type="meta" themeColor="textTertiary">
-                    {t('feedbackParserDetail')}
-                  </ThemedText>
-                </View>
-                <Icon name="chevron-right" size={15} color={theme.textTertiary} />
-              </Row>
-            </Section>
-          )}
-
-          <Section index={2} style={styles.group}>
-            <SectionHeader title={chipCopy.typeHeader}
-              trailing={<ThemedText type="meta" themeColor="textSecondary">{chipCopy.typeOptional}</ThemedText>} />
-            <View style={styles.chips} testID="feedback-topic-chips" accessibilityRole="radiogroup">
+        scrollProps={{ keyboardShouldPersistTaps: 'handled', showsVerticalScrollIndicator: false }}
+        bandContent={(
+          <View style={styles.bandBody}>
+            <BandTitle title={t('sendFeedback')} palette={band} testID="feedback-title" />
+            <View style={styles.typeHead}>
+              <ThemedText type="smallBold" style={{ color: band.onBand }}>{chipCopy.typeHeader}</ThemedText>
+              <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{chipCopy.typeOptional}</ThemedText>
+            </View>
+            <View style={styles.chips} testID="feedback-topic-chips" accessibilityRole="radiogroup"
+              accessibilityLabel={chipCopy.typeHeader}>
               {FEEDBACK_TOPICS.map((value) => {
                 const selected = topic === value;
                 return (
-                  <Pressable
+                  <TopicChip
                     key={value}
                     testID={`feedback-topic-${value}`}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected }}
-                    accessibilityLabel={chipCopy.topic[value]}
+                    palette={band}
+                    label={chipCopy.topic[value]}
+                    selected={selected}
                     onPress={() => {
                       tapped();
                       // Tapping the chosen chip again clears the choice: the type is optional.
                       setTopic(selected ? null : value);
                       setNotice(null);
                     }}
-                    style={({ pressed }) => [styles.chip, {
-                      borderColor: selected ? theme.primary : theme.controlBorder,
-                      backgroundColor: selected ? theme.primarySoft : theme.backgroundElement,
-                      opacity: pressed ? 0.8 : 1,
-                    }]}>
-                    <ThemedText type="small" themeColor={selected ? 'primary' : 'text'}>
-                      {chipCopy.topic[value]}
-                    </ThemedText>
-                  </Pressable>
+                  />
                 );
               })}
             </View>
-          </Section>
+          </View>
+        )}>
+          {isParserResearchBuild() && (
+            <View style={styles.group}>
+              <SettingsGroupTitle title={eWords.feedbackParser} palette={band} />
+              <SettingsLinkRow
+                palette={band}
+                title={t('feedbackParserTitle')}
+                subtitle={t('feedbackParserDetail')}
+                icon="code"
+                last
+                onPress={() => router.push('/parser-research' as Href)}
+              />
+            </View>
+          )}
 
-          <Section index={2} style={styles.group}>
-            <SectionHeader title={t('feedbackWriteHeader')} />
+          <View style={styles.group}>
+            <SettingsGroupTitle title={eWords.feedbackMessage} palette={band} />
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{words.feedbackBody}</ThemedText>
             <TextField
               label={t('feedbackInputA11y')}
               accessibilityLabel={t('feedbackInputA11y')}
@@ -265,55 +257,54 @@ export default function FeedbackScreen() {
               style={styles.textarea}
             />
             <View style={styles.metaRow}>
-              <ThemedText type="meta" themeColor="textTertiary" style={styles.metaGrow}>
+              <ThemedText type="meta" style={[styles.metaGrow, { color: band.textSecondary }]}>
                 {t('feedbackDigitsMasked')}
               </ThemedText>
-              <ThemedText type="meta" themeColor="textTertiary">
+              <ThemedText type="meta" tabular style={{ color: band.textSecondary }}>
                 {tf('feedbackChars', { used: message.length, max: FEEDBACK_MESSAGE_MAX })}
               </ThemedText>
             </View>
-          </Section>
-
-
+          </View>
 
           {/* Show the exact outbound preview before the confirmation action. */}
-          <Section index={3} style={styles.group}>
-            <SectionHeader title={t('feedbackPreviewHeader')} />
-            <ThemedText type="meta" themeColor="textTertiary">
+          <View style={styles.group} testID="feedback-what-we-send">
+            <SettingsGroupTitle title={eWords.feedbackWhatWeSend} palette={band} />
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>
               {t('feedbackPreviewNote')}
             </ThemedText>
-            <Block>
+            <View style={[styles.previewCard, { backgroundColor: band.card, borderColor: band.rule }]}>
               {/* Always left-aligned and LTR-read, in the mono face: this is a
                   machine-readable report whose indentation is load-bearing, and
                   mirroring it under RTL would shred the card diagnostic's
                   columns without making a single line easier to read. */}
-              <ThemedText type="code" themeColor="textSecondary" style={styles.preview}>
+              <ThemedText type="code" style={[styles.preview, { color: band.textSecondary }]}>
                 {preview}
               </ThemedText>
-            </Block>
-          </Section>
-          <Section index={4} style={styles.group}>
-            <Button
+            </View>
+          </View>
+          <View style={styles.group}>
+            <EButton
+              palette={band}
               label={sending ? t('feedbackSending') : t('feedbackSend')}
               icon="upload"
               disabled={!ready}
               onPress={() => setConfirming(true)}
             />
             {!ready && !sending ? (
-              <ThemedText type="meta" themeColor="textTertiary">
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>
                 {t('feedbackNeedsMessage')}
               </ThemedText>
             ) : null}
             {notice && (
-              <Block>
-                <ThemedText type="small">{notice.title}</ThemedText>
-                <ThemedText type="meta" themeColor="textSecondary">
+              <View accessibilityLiveRegion="polite" style={[styles.previewCard, { backgroundColor: band.card, borderColor: band.rule }]}>
+                <ThemedText type="smallBold" style={{ color: band.text }}>{notice.title}</ThemedText>
+                <ThemedText type="meta" style={{ color: band.textSecondary }}>
                   {notice.body}
                 </ThemedText>
-              </Block>
+              </View>
             )}
-          </Section>
-      </ScreenScaffold>
+          </View>
+      </BandScaffold>
 
       <ConfirmSheet
         visible={confirming}
@@ -327,12 +318,43 @@ export default function FeedbackScreen() {
   );
 }
 
+/**
+ * One topic on the band: a 38pt chip in the band's own tone (BandChip's
+ * look) that is a radio, because exactly one topic — or none — is chosen.
+ * Tapping the chosen one again clears it.
+ */
+function TopicChip({ label, selected, onPress, palette, testID }: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  palette: BandPalette;
+  testID?: string;
+}) {
+  const fg = selected ? palette.onSelected : palette.onBand;
+  return (
+    <Pressable testID={testID} accessibilityRole="radio" accessibilityLabel={label}
+      accessibilityState={{ checked: selected, selected }} onPress={onPress} hitSlop={3}
+      style={({ pressed }) => [styles.chip, { backgroundColor: selected ? palette.selected : palette.tile, opacity: pressed ? 0.75 : 1 }]}>
+      <ThemedText type={selected ? 'smallBold' : 'small'} style={{ color: fg }}>{label}</ThemedText>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  content: {
-    gap: Spacing.four + 2,
+  chip: {
+    minHeight: BandLayout.chipHeight,
+    borderRadius: BandLayout.chipHeight / 2,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
+  content: {
+    gap: Spacing.four,
+  },
+  bandBody: { gap: 14, paddingBottom: Spacing.two },
+  typeHead: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', columnGap: Spacing.two },
   group: {
-    gap: Spacing.two + 2,
+    gap: Spacing.two,
   },
   textarea: {
     minHeight: 120,
@@ -345,13 +367,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: Spacing.two,
   },
-  chip: {
-    minHeight: 44,
-    justifyContent: 'center',
-    paddingHorizontal: Spacing.three,
-    borderRadius: Radius.full,
-    borderWidth: 1,
-  },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -360,15 +375,11 @@ const styles = StyleSheet.create({
   metaGrow: {
     flex: 1,
   },
-  rowText: {
-    flex: 1,
-    gap: Spacing.half,
-  },
-  parserIcon: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
+  previewCard: {
+    gap: Spacing.one,
+    padding: Spacing.three,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   preview: {
     fontFamily: Fonts.mono,

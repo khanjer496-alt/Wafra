@@ -32,6 +32,11 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 // Settings is two screens since the redesign: the main list and Data and help
 // (exports, backup, erase). Every Settings contract reads both together.
 const settingsSurface = () => read('src/app/settings.tsx') + '\n' + read('src/app/settings-data.tsx');
+// Pro is one checkout surface since design language E: the screen, the
+// checkout it shares verbatim with the in-context Pro sheet, and the shared
+// plan radios. Every Pro contract reads the three together.
+const proSurface = () => ['src/app/pro.tsx', 'src/hooks/use-pro-checkout.ts', 'src/components/pro/pro-plan-options.tsx']
+  .map(read).join('\n');
 /**
  * Source with its comments removed.
  *
@@ -372,7 +377,7 @@ function ktSources(dir) {
  * prices beside it. Founder access is isolated to explicitly enabled native
  * test builds and never changes the store receipt. */
 {
-  const pro = fs.readFileSync(path.join(ROOT, 'src/app/pro.tsx'), 'utf8');
+  const pro = proSurface();
 
   ok('the paywall gives away no free unlock',
     !/onLongPress/.test(pro) && !/setPro\(next\)/.test(pro));
@@ -1470,7 +1475,7 @@ function ktSources(dir) {
       /٣٠ يوماً/.test(iosAccuracyCopy));
 
   const purchases = read('src/lib/purchases.ts');
-  const proScreen = read('src/app/pro.tsx');
+  const proScreen = proSurface();
   const proIosCopy = copy.match(
     /featAutoTrackingIosText:\s*\{[^\n]*\}/,
   )?.[0] || '';
@@ -2012,7 +2017,7 @@ ok('the spoken label agrees with the sign on screen',
 /* ── a store that cannot be reached is not a customer who never paid ─── */
 {
   const provider = read('src/components/superwall-billing-provider.native.tsx');
-  const pro = read('src/app/pro.tsx');
+  const pro = proSurface();
   const strings = read('src/lib/i18n.ts');
 
   ok('restorePro keeps failure distinct from no active purchase',

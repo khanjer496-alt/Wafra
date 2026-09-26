@@ -377,9 +377,12 @@ check('hasArabicScript leaves a figure alone', !i18n.hasArabicScript('AED 12,000
   for (const gone of ['This page moved on', 'Nothing lives at that link', 'Go home', 'label="Back"']) {
     check(`+not-found no longer hardcodes ${JSON.stringify(gone)}`, !src.includes(gone));
   }
-  for (const key of ['notFoundTitle', 'notFoundBody', 'goHome', 'back']) {
-    check(`+not-found asks for ${key}`, new RegExp(`t\\('${key}'`).test(src));
-    check(`${key} is really translated`, i18n.t(key, 'ar') !== i18n.t(key, 'en') && i18n.hasArabicScript(i18n.t(key, 'ar')));
+  // Design language E: the screen's three strings live in settings-e-copy
+  // (one plain line and one way home); each is really translated.
+  const { SETTINGS_E_COPY } = require('./repair/load-typescript.cjs')(path.join(__dirname, '../../src/lib/settings-e-copy.ts'));
+  for (const key of ['notFoundTitle', 'notFoundBody', 'notFoundHome']) {
+    check(`+not-found asks for ${key}`, new RegExp(`words\\.${key}\\b`).test(src));
+    check(`${key} is really translated`, SETTINGS_E_COPY.ar[key] !== SETTINGS_E_COPY.en[key] && i18n.hasArabicScript(SETTINGS_E_COPY.ar[key]));
   }
 }
 
