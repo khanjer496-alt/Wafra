@@ -3,10 +3,12 @@ import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
-import { Button, Chip } from '@/components/ui/controls';
+import { Chip } from '@/components/ui/controls';
+import { EButton } from '@/components/ui/band/e-button';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { Icon } from '@/components/ui/icon';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { EXPENSE_CATEGORIES } from '@/lib/categories';
@@ -37,7 +39,8 @@ export interface TransactionFilterSheetProps {
 function FilterSection({ title, summary, children }: { title: string; summary: string; children: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false);
   const theme = useTheme();
-  return <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: theme.cardBorder }}>
+  const band = useBand('home');
+  return <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: band.rule }}>
     <Pressable accessibilityRole="button" accessibilityLabel={title + ': ' + summary}
       accessibilityState={{ expanded }} onPress={() => setExpanded(value => !value)}
       style={{ minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 }}>
@@ -55,6 +58,8 @@ function FilterSection({ title, summary, children }: { title: string; summary: s
  * the modal. Close discards the draft; Show results applies it once. */
 export function TransactionFilterSheet({ initialFilters, resetFilters, accounts, hasUnassignedIncome, index, options, sourceKinds, onClose, onApply }: TransactionFilterSheetProps) {
   const theme = useTheme();
+  // Opens over Transactions: the ink band's sheet, lifted.
+  const band = useBand('home');
   const language = useLanguage();
   const words = transactionsWords(language);
   const tr = useCallback((key: StringKey) => t(key, language), [language]);
@@ -97,14 +102,18 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
         title={tr('filtersTitle')}
         onClose={onClose}
         testID="transaction-filter-sheet"
-        footer={<View style={styles.sheetActions}>
-          <Button inline variant="outline" label={tr('reset')} onPress={clearFilters} />
-          <Button inline wrapLabel disabled={resultsPending}
-            label={trf('showResults', { count: filtered.length, s: filtered.length === 1 ? '' : 's' })}
-            onPress={() => onApply(filters, resetScope)} />
-        </View>}>
+        palette={band}
+        footer={<EButton palette={band} disabled={resultsPending} testID="transaction-filter-apply"
+          label={trf('showResults', { count: filtered.length, s: filtered.length === 1 ? '' : 's' })}
+          onPress={() => onApply(filters, resetScope)} />}>
+        {/* Reset clears the draft, including the restrictions the screen was
+            opened with; nothing changes until Show is pressed. */}
+        <Pressable accessibilityRole="button" accessibilityLabel={tr('reset')} onPress={clearFilters}
+          testID="transaction-filter-reset" hitSlop={4} style={styles.reset}>
+          <ThemedText type="smallBold" style={{ color: band.statusOver }}>{tr('reset')}</ThemedText>
+        </Pressable>
         <View style={styles.filterGroup}>
-          <ThemedText type="micro" themeColor="textSecondary">
+          <ThemedText type="smallBold" style={{ color: band.textSecondary }}>
             {tr('typeFilter')}
           </ThemedText>
           <View style={styles.chipRow}>
@@ -128,7 +137,7 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
         </View>
 
         <View style={styles.filterGroup}>
-          <ThemedText type="micro" themeColor="textSecondary">
+          <ThemedText type="smallBold" style={{ color: band.textSecondary }}>
             {tr('periodFilter')}
           </ThemedText>
           <View style={styles.chipRow}>
@@ -385,9 +394,5 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     paddingBottom: Spacing.one,
   },
-  sheetActions: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    marginTop: Spacing.one,
-  }
+  reset: { alignSelf: 'flex-end', minHeight: 44, justifyContent: 'center', marginTop: -Spacing.two, marginBottom: -Spacing.two }
 });
