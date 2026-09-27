@@ -18,6 +18,10 @@ const { widgetsCopyTables, widgetsCopy } = load(path.join(root, 'src/lib/widgets
 const preview = load(path.join(root, 'src/lib/widget-preview.ts'));
 const logoApi = load(path.join(root, 'src/lib/widget-logo.ts'));
 const real = require('../../universal-test/load-ts.cjs').createLoader();
+const { widgetHistoryBlocksUpdate } = load(path.join(root, 'src/lib/widget-sync.ts'), {
+  '@/lib/ledger': real('@/lib/ledger'), '@/lib/subscriptions': real('@/lib/subscriptions'), '@/lib/widget-ledger': real('@/lib/widget-ledger'),
+  '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {} },
+});
 const hint = load(path.join(root, 'src/lib/widgets-hint.ts'), {
   '@react-native-async-storage/async-storage': { __esModule: true, default: { getItem: async () => null, setItem: async () => {} } },
 });
@@ -193,8 +197,9 @@ async function screen({ platform = 'ios', pinnable = false, pinResult = true, la
     '@/lib/ledger-money': { ledgerMoneySpec: (currency) => ({ currency, exponent: 2 }) },
     '@/lib/markets': { marketCurrencyCode: () => 'AED' },
     '@/lib/store': { useStore: () => ({ state, getStateSnapshot, getStateGeneration }) },
-    '@/lib/widget-sync': { requestWidgetSnapshotSync: () => ({ cancel() {}, done: syncPromise ?? Promise.resolve('written') }),
+    '@/lib/widget-sync': { widgetHistoryBlocksUpdate, requestWidgetSnapshotSync: () => ({ cancel() {}, done: syncPromise ?? Promise.resolve('written') }),
       prepareWidgetSnapshot: async (input) => {
+      if (widgetHistoryBlocksUpdate(input.state.historyImport)) return undefined;
       const value = ledger ? ledger.widgetSnapshotForLedger(input) : fixtureSnapshot({ language: input.language, ...snapshotOverride });
       snapshots.push(value);
       return value;
@@ -474,4 +479,18 @@ test('Android pin waits for the complete widget snapshot write before opening th
   assert.equal(s.events.some(e => e[0] === 'pin'), false);
   resolve('written'); await s.flush();
   assert.deepEqual(s.events.filter(e => e[0] === 'pin'), [['pin', 'upcoming']]);
+});
+
+test('preview import notice and pin availability share the untouched-import guard in both languages', async () => {
+  const untouched = { status: 'paused', scanned: 0, found: 0, cursor: null };
+  for (const language of ['en', 'ar']) {
+    const ready = await screen({ platform: 'android', pinnable: true, language, state: ledgerState({ historyImport: untouched }) });
+    assert.equal(ready.find('widgets-preparing'), undefined);
+    assert.equal(ready.find('widgets-pin-upcoming').props.disabled, false);
+    for (const historyImport of [{ ...untouched, status: 'running' }, { ...untouched, status: 'failed' }, { ...untouched, scanned: 1 }]) {
+      const pending = await screen({ platform: 'android', pinnable: true, language, state: ledgerState({ historyImport }) });
+      assert.equal(pending.text(pending.find('widgets-preparing')), widgetsCopy(language).importPending);
+      assert.equal(pending.find('widgets-pin-upcoming').props.disabled, true);
+    }
+  }
 });

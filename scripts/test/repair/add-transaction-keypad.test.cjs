@@ -132,3 +132,37 @@ test('the Add form offers no Transfer type', () => {
     .map((node) => node.props.accessibilityLabel);
   assert.equal(labels.length, 2);
 });
+
+test('saving does not reorder suggested categories while Add is closing; a new entry uses the saved history', () => {
+  const h = harness();
+  const date = new Date().toISOString().slice(0, 10);
+  const row = (id, category) => ({ id, category, date, type: 'expense', amountFils: 999, accountId: 'cash' });
+  h.state.transactions = [row('entertainment-2', 'entertainment'), row('entertainment-1', 'entertainment'), row('groceries-1', 'groceries')];
+  const suggestions = (tree) => walk(byId(tree, 'suggested-categories'))
+    .map((node) => node.props?.testID).filter((id) => id?.startsWith('suggested-category-'));
+  const originalOrder = suggestions(h.render());
+  assert.deepEqual(originalOrder, ['suggested-category-entertainment', 'suggested-category-groceries']);
+  h.store.addTransaction = (input) => {
+    h.state.transactions = [{ ...input, id: 'saved-groceries' }, ...h.state.transactions];
+  };
+  h.press('2', '2');
+  h.save();
+  assert.ok(h.events.some((event) => event[0] === 'back'), 'save closes the entry');
+  assert.deepEqual(suggestions(h.render()), originalOrder,
+    'the mounted entry must not reorder native chip children in the same batch as navigation removal');
+  const next = harness();
+  next.state.transactions = h.state.transactions;
+  assert.deepEqual(suggestions(next.render()), ['suggested-category-groceries', 'suggested-category-entertainment'],
+    'the next entry ranks categories from the updated ledger');
+});
+
+test('an entry mounted during cold hydration takes its suggestion history from the loaded ledger', () => {
+  const h = harness();
+  h.state.hydrated = false;
+  h.state.transactions = [];
+  assert.equal(byId(h.render(), 'suggested-categories'), undefined);
+  h.state.hydrated = true;
+  h.state.transactions = [{ id: 'loaded', type: 'expense', category: 'entertainment',
+    date: new Date().toISOString().slice(0, 10), amountFils: 999, accountId: 'cash' }];
+  assert.ok(byId(h.render(), 'suggested-category-entertainment'));
+});

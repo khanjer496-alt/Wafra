@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const load = require('../../universal-test/load-ts.cjs').createLoader();
 const path = require('node:path');
-const { createWidgetSnapshotSync, prepareWidgetSnapshot } = require('./load-typescript.cjs')(path.resolve(__dirname, '../../../src/lib/widget-sync.ts'), {
+const { createWidgetSnapshotSync, prepareWidgetSnapshot, widgetHistoryBlocksUpdate } = require('./load-typescript.cjs')(path.resolve(__dirname, '../../../src/lib/widget-sync.ts'), {
   '@/lib/ledger': load('@/lib/ledger'), '@/lib/subscriptions': load('@/lib/subscriptions'), '@/lib/widget-ledger': load('@/lib/widget-ledger'),
   '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {} },
 });
@@ -93,4 +93,47 @@ test('failed analysis retains prior native state; failed writes do not poison a 
   const writes = createWidgetSnapshotSync({ prepare: async () => sample, write: async () => { throw Error('synthetic'); }, clear: () => operations.push('clear') });
   assert.equal(await writes.request(input).done, 'failed'); assert.equal(await writes.clear(), 'cleared');
   assert.deepEqual(operations, ['clear']);
+});
+
+test('history guard allows only an untouched paused import, keeping active, failed and partial jobs blocked', async () => {
+  const untouched = { status: 'paused', scanned: 0, found: 0, cursor: null, error: null };
+  const allowed = [null, { ...untouched, status: 'complete' }, untouched];
+  const blocked = [{ ...untouched, status: 'running' }, { ...untouched, status: 'failed' },
+    { ...untouched, scanned: 1 }, { ...untouched, found: 1 },
+    { ...untouched, cursor: { beforeDateMs: 1, beforeId: 1 } },
+    { status: 'paused' }, { ...untouched, scanned: '0' }, { ...untouched, cursor: undefined }];
+  for (const progress of allowed) {
+    assert.equal(widgetHistoryBlocksUpdate(progress), false, JSON.stringify(progress));
+    let scanned = false;
+    const snapshot = await prepareWidgetSnapshot({ ...input, state: { ...state, historyImport: progress } }, () => false,
+      async () => { scanned = true; return []; });
+    assert.equal(scanned, true); assert.ok(snapshot);
+  }
+  for (const progress of blocked) {
+    assert.equal(widgetHistoryBlocksUpdate(progress), true, JSON.stringify(progress));
+    let scanned = false;
+    assert.equal(await prepareWidgetSnapshot({ ...input, state: { ...state, historyImport: progress } }, () => false,
+      async () => { scanned = true; return []; }), undefined);
+    assert.equal(scanned, false);
+  }
+});
+test('untouched paused native fixture publishes Spotify renewal and manual Netflix with exact USD values', async () => {
+  const fixture = { ...state, marketId: 'AE', ledgerMoney: { schemaVersion: 2, currency: 'USD', exponent: 2 },
+    accounts: [{ id: 'qa-cash', name: 'QACash', kind: 'cash', openingFils: 0 }],
+    transactions: [
+      { id: 'groceries', title: 'Groceries', date: '2026-09-27', amountFils: 1234, category: 'groceries' },
+      { id: 'spotify-sep', title: 'Spotify', date: '2026-09-26', amountFils: 999, category: 'entertainment' },
+      { id: 'spotify-aug', title: 'Spotify', date: '2026-08-27', amountFils: 999, category: 'entertainment' },
+    ].map(row => ({ ...row, accountId: 'qa-cash', type: 'expense', source: 'manual', userEdited: true, titleEdited: true })),
+    bills: [{ id: 'netflix', title: 'Netflix', amountFils: 999, category: 'entertainment', dueDay: 28, paidMonths: [] }],
+    historyImport: { status: 'paused', scanned: 0, found: 0, cursor: null, error: null },
+  };
+  const writes = [];
+  const sync = createWidgetSnapshotSync({ write: json => writes.push(JSON.parse(json)), clear() {} });
+  assert.equal(await sync.request({ ...input, state: fixture, moneySpec: fixture.ledgerMoney }).done, 'written');
+  assert.equal(writes.length, 1); assert.equal(writes[0].currency, 'USD');
+  assert.equal(writes[0].todayMinor, 1234);
+  assert.deepEqual(writes[0].bills.map(b => [b.title, b.dueISO, b.amountMinor, b.estimated]), [
+    ['Netflix', '2026-09-28', 999, false], ['Spotify', '2026-10-26', 999, true],
+  ]);
 });

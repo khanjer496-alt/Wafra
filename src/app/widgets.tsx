@@ -16,7 +16,7 @@ import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { marketCurrencyCode } from '@/lib/markets';
 import { useStore } from '@/lib/store';
 import { toISODate } from '@/lib/format';
-import { prepareWidgetSnapshot, requestWidgetSnapshotSync } from '@/lib/widget-sync';
+import { prepareWidgetSnapshot, requestWidgetSnapshotSync, widgetHistoryBlocksUpdate } from '@/lib/widget-sync';
 import type { WidgetSnapshot } from '@/lib/widget-snapshot';
 import { useResumeClock } from '@/hooks/use-today';
 import { markWidgetsHintDone } from '@/lib/widgets-hint';
@@ -118,7 +118,7 @@ export default function WidgetsScreen() {
       </View>}
       scrollProps={{ showsVerticalScrollIndicator: false }}>
       {allowed && preparing ? <ThemedText testID="widgets-preparing" accessibilityLiveRegion="polite"
-        type="small" style={{ color: band.textSecondary }}>{state.historyImport && state.historyImport.status !== 'complete' ? words.importPending : words.preparing}</ThemedText> : null}
+        type="small" style={{ color: band.textSecondary }}>{widgetHistoryBlocksUpdate(state.historyImport) ? words.importPending : words.preparing}</ThemedText> : null}
       {widgets.map((widget) => <View key={widget.kind} testID={`widgets-section-${widget.kind}`} style={styles.section}>
         <View style={styles.heading}>
           <SheetSectionTitle title={widget.name} palette={band} />

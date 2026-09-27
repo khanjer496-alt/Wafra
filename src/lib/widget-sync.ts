@@ -1,11 +1,19 @@
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { detectSubscriptionsCooperatively } from '@/lib/subscriptions';
 import { widgetSnapshotForLedger, type WidgetLedgerInput } from '@/lib/widget-ledger';
+import type { AppState } from '@/lib/types';
 import type { WidgetSnapshot } from '@/lib/widget-snapshot';
 import { clearWidgetSnapshot, setWidgetSnapshot } from '../../modules/wafra-widgets';
 
 export function widgetSnapshotAllowed(input: WidgetLedgerInput): boolean {
   return input.state.hydrated && input.state.onboarded && !input.state.privateMode;
+}
+
+/** A queued import has not changed the ledger until its first page is scanned. */
+export function widgetHistoryBlocksUpdate(progress: AppState['historyImport']): boolean {
+  if (!progress || progress.status === 'complete') return false;
+  return !(progress.status === 'paused' && progress.scanned === 0 &&
+    progress.found === 0 && progress.cursor === null);
 }
 
 /** Undefined means analysis is pending/cancelled, never "no upcoming bills". */
@@ -18,7 +26,7 @@ export async function prepareWidgetSnapshot(
   if (!widgetSnapshotAllowed(input)) return null;
   // A partial import is not evidence that a subscription stopped. Keep the
   // last valid native summary (whose own staleness limit still applies).
-  if (input.state.historyImport && input.state.historyImport.status !== 'complete') return undefined;
+  if (widgetHistoryBlocksUpdate(input.state.historyImport)) return undefined;
   const { state, now } = input;
   const detected = await detect(state.transactions, state.notSubscriptions, now,
     liveAccountIds(state.accounts), internalTransferIdsForState(state), cancelled);
