@@ -249,11 +249,16 @@ test('search presentation cache is build-local and respects every row-specific c
     },
   });
   const repeated = Array.from({ length: 1000 }, (_, i) => Object.freeze(row('NFC - (G-PAY)- SHOP 123 DUBAI AE', {
-    id: `format-${i}`, category: 'shopping', amountFils: i + 1,
+    id: `format-${i}`, category: ['shopping', 'dining', 'groceries', 'transport', 'other'][i % 5], amountFils: i + 1,
   })));
   const first = filter.createTransactionFilterIndex(repeated, 'en');
-  assert.equal(calls, 1, 'repeated formatting is computed once for this build');
+  assert.equal(calls, 1, 'identical merchant formatting is computed once even across ordinary expense categories');
   assert.equal(first.ordered('newest').length, repeated.length);
+  const categories = require('../build/categories.js');
+  for (const indexed of first.ordered('newest')) {
+    assert.ok(indexed.search.includes(categories.getCategory(indexed.row.category).label.toLowerCase()),
+      'each row retains its own searchable category');
+  }
   const cases = [
     {}, { type: 'income' }, { userEdited: true }, { titleEdited: true },
     { source: 'manual', captureSource: undefined },

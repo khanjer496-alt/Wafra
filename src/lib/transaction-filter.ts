@@ -105,7 +105,11 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
     }
     const title = row.title.toLowerCase();
     const cacheable = row.transferEvidence === undefined && row.transferDecision === undefined;
-    const key = cacheable ? [row.type, row.category, row.source, !!row.smsKey,
+    // Display meaning distinguishes salary/business and unclassified income;
+    // ordinary spending categories only affect the separately indexed label.
+    const displayCategory = row.category === 'salary' || row.category === 'business'
+      ? row.category : row.type === 'income' && row.category === 'other' ? 'other' : '';
+    const key = cacheable ? [row.type, displayCategory, row.source, !!row.smsKey,
       row.captureSource, row.isTransfer === true, row.cardPaymentSide, row.paymentFlowSide,
       row.userEdited === true, row.titleEdited === true].join('|') : '';
     const variants = cacheable ? displays.get(row.title) : undefined;
