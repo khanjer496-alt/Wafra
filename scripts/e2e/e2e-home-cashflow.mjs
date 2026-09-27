@@ -62,6 +62,13 @@ try {
           const weekBox = await page.getByTestId('home-week').boundingBox();
           const totalBox = await outgoing.boundingBox();
           assert.ok(totalBox.y < weekBox.y, 'selected total is above daily spending');
+          const days = page.locator('[data-testid^="week-value-"]');
+          assert.equal(await days.count(), 7, 'the entire week is present');
+          for (const day of await days.all()) {
+            const box = await day.boundingBox();
+            assert.ok(box && box.x >= weekBox.x - 1 && box.x + box.width <= weekBox.x + weekBox.width + 1,
+              'every day, including the weekend, fits inside the chart');
+          }
           for (const row of [incoming, outgoing, net]) {
             await row.scrollIntoViewIfNeeded();
             const clipped = await row.evaluate(node => [...node.querySelectorAll('*')]

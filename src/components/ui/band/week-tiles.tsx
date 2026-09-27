@@ -80,7 +80,7 @@ export function WeekTiles({ days, palette, moneySpec, height = 70, accessibility
             </View>
             <ThemedText type="meta" tabular maxFontSizeMultiplier={amountScale} style={[styles.value, styles.detailAmount, { color, width: stackedDetails ? undefined : amountWidth }]}>{values[index]}</ThemedText>
           </View>
-        </View> : <View key={day.key} style={styles.day} testID={`week-value-${day.key}`}>
+        </View> : <View key={day.key} style={[styles.day, { width: columnWidth }]} testID={`week-value-${day.key}`}>
           <ThemedText type="nano" tabular style={[styles.value, { color }]}>{values[index]}</ThemedText>
           <View style={[styles.track, { height }]}>
             <GrowBar axis="height" delay={index * 50} size={ratio * height}
@@ -106,7 +106,9 @@ const styles = StyleSheet.create({
   horizontalTrack: { flex: 1, minWidth: 32, height: 6, borderRadius: 3 },
   horizontalBar: { height: 6, borderRadius: 3 },
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: 7 },
-  day: { flex: 1, minWidth: 0, alignItems: 'center', gap: 6 },
+  // Use the same measured width as the fit check. Native relayout otherwise
+  // expanded these flex columns beyond the container and clipped the weekend.
+  day: { minWidth: 0, alignItems: 'center', gap: 6 },
   value: { textTransform: 'none', letterSpacing: 0, writingDirection: 'ltr', flexShrink: 1 },
   track: { width: '100%', justifyContent: 'flex-end' },
   bar: { width: '100%', borderRadius: 8 },

@@ -57,3 +57,11 @@ The subsequent interaction run completed 2,416 tests: 2,415 passed and one uncha
 CI's earlier navigation run had 110 passes and one first-heading reachability miss on Data and help, while all subsequent controls on that page worked. The test now waits up to four seconds for the same heading hit-test, preserving all 111 assertions and logging geometry on timeout. A targeted browser check verifies transient covering content clears, while permanent covers and missing headings still fail. A readiness race is the working explanation; the exact CI miss did not reproduce locally.
 
 The complete navigation rerun passed all 111 checks with zero page errors, including Data and help readiness, full control sweeps, RTL, payment-tile fit, and live theme changes. The Android original fixture is restored for successor installer testing.
+
+## Native weekly chart width follow-up
+
+While the successor compiled, build 350 showed only Monday through Friday in the compact weekly chart. The native hierarchy measured a 970px chart but approximately 192px per day, placing Saturday and Sunday outside it. The source already calculated a measured per-day width for deciding whether figures fit, but left actual compact widths to flex sizing. Compact columns now use that same measured width explicitly. Long figures and larger text retain the existing horizontal layout.
+
+The standalone layout model using the bundled Yoga engine did not reproduce the native overflow, so the precise incremental renderer cause is not claimed. The width constraint is a candidate correction until verified in an installer. A regression failed before the change, then 24 focused graph/Home tests passed. The browser Home suite additionally checks all seven day bounds. Native evidence is `50-home-settings` and `59-home-hidden-reordered` under `/private/tmp/wafra-apk350-device-qa/`. The iOS build from the preceding source was canceled before upload so the next archive can include this correction.
+
+The chart candidate passed all eight cashflow/budget browser cases, the five-case 218-assertion whole-Home suite, type checking, lint, and independent review. Build 350 also passed native Home hide/reorder, hardware Back, cold-relaunch persistence and Reset; the financial fixture remained unchanged. The chart itself still needs verification in the corrected APK.

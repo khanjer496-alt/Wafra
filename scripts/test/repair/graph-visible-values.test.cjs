@@ -66,6 +66,22 @@ for (const spec of [{ schemaVersion: 2, currency: 'JPY', exponent: 0 }, { schema
   });
 }
 
+test('all seven compact day columns stay within the measured native chart width', () => {
+  for (const width of [320, 352.727, 390, 800]) {
+    const { tree, days, bars } = renderWeek({ width, values: [0, 0, 0, 0, 0, 999, 1234] });
+    assert.ok(bars.every(bar => bar.axis === 'height'), 'ordinary daily amounts fit compact columns');
+    const widths = days.map(day => {
+      const raw = byId(tree, `week-value-${day.key}`).props.style;
+      const style = Object.assign({}, ...(Array.isArray(raw) ? raw.flat(Infinity) : [raw]));
+      assert.equal(typeof style.width, 'number', 'native columns have an explicit measured width');
+      assert.ok(style.width > 0);
+      return style.width;
+    });
+    assert.ok(widths.reduce((total, value) => total + value, 0) + (days.length - 1) * 7 <= width + .001,
+      'Saturday and Sunday cannot extend beyond the chart container');
+  }
+});
+
 for (const language of ['en', 'ar']) for (const largeText of [false, true]) {
   test(`year recap shows every exact month value and waits for explicit navigation (${language}, large=${largeText})`, () => {
     const h = createHarness({ language, largeText });
