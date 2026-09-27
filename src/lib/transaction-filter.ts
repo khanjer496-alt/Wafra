@@ -4,6 +4,7 @@ import { countsInTotals, isMoneyMovementOnly } from '@/lib/ledger';
 import type { Period } from '@/lib/period';
 import { amountInCategories, touchesCategories } from '@/lib/splits';
 import { transactionSource, type TransactionSourceKind } from '@/lib/transaction-source';
+import { transactionPresentation } from '@/lib/transaction-presentation';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 
 export type DatePreset = 'selected' | 'all' | 'month' | 'lastMonth' | '3months' | 'custom';
@@ -92,6 +93,9 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
   /** Account id → searchable name (name, bank, last four). Optional. */
   accountNames?: ReadonlyMap<string, string>) {
   const labels = new Map<CategoryId, string>();
+  // Only this index build owns these strings. Repeated merchant rows reuse
+  // their scalar presentation; evidence-bearing rows always run independently.
+  const displays = new Map<string, Map<string, string>>();
   const entries: IndexedTransaction[] = rows.map(row => {
     let category = labels.get(row.category);
     if (category === undefined) {
@@ -100,8 +104,26 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
       labels.set(row.category, category);
     }
     const title = row.title.toLowerCase();
+    const cacheable = row.transferEvidence === undefined && row.transferDecision === undefined;
+    // Display meaning distinguishes salary/business and unclassified income;
+    // ordinary spending categories only affect the separately indexed label.
+    const displayCategory = row.category === 'salary' || row.category === 'business'
+      ? row.category : row.type === 'income' && row.category === 'other' ? 'other' : '';
+    const key = cacheable ? [row.type, displayCategory, row.source, !!row.smsKey,
+      row.captureSource, row.isTransfer === true, row.cardPaymentSide, row.paymentFlowSide,
+      row.userEdited === true, row.titleEdited === true].join('|') : '';
+    const variants = cacheable ? displays.get(row.title) : undefined;
+    let display = variants?.get(key);
+    if (display === undefined) {
+      const presentation = transactionPresentation(row, language);
+      display = [presentation.title, presentation.tag].filter(Boolean).join(' ').toLowerCase();
+      if (cacheable) {
+        if (variants) variants.set(key, display);
+        else displays.set(row.title, new Map([[key, display]]));
+      }
+    }
     const account = accountNames?.get(row.accountId);
-    return { row, merchantKey: title.trim(), search: title + '\u0000' + category + (account ? '\u0000' + account.toLowerCase() : ''),
+    return { row, merchantKey: title.trim(), search: title + '\u0000' + display + '\u0000' + category + (account ? '\u0000' + account.toLowerCase() : ''),
       month: monthKey(row.date) };
   });
   // Sorting changes no filter result and is needed at most once per ledger.

@@ -421,8 +421,14 @@ export interface ParsedCard {
  * year (FAB sends "26/09/26" as often as "26/09/2026"); it was left undated
  * and filed on the day it was read. Future captures plus the bounded recent re-read;
  * PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 56: bank-channel words such as Personal Internet Banking no longer classify
+ * account debits as Telecom. Explicit completed transfers through that channel
+ * retain transfer semantics without inventing own-account ownership. Future
+ * captures and source-backed rereads only; missing notification text is never
+ * reconstructed from amounts. PARSER_BACKFILL_VERSION remains 49.
  */
-export const PARSER_VERSION = 55;
+export const PARSER_VERSION = 56;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -3522,6 +3528,9 @@ function categoryOf(
   // Card-brand and processor labels do not describe the payee's business.
   // Keep the source descriptor otherwise: existing acquirers truncate names
   // before a meaningful suffix, and direct-debit/rent clauses carry event facts.
+  // The bank's delivery/channel vocabulary is not the merchant's business.
+  // In particular Internet Banking must never turn an account debit into Telecom.
+  text = text.replace(/\b(?:(?:personal|business|corporate)\s+)?(?:internet|online|mobile|digital|telephone)\s+banking\b/gi, ' ');
   text = text.replace(/\betisalat(?=\s+(?:(?:credit|debit|covered)\s+)?card\s+(?:ending\b|no\.?\b|number\b|[Xx*\d]))/gi, ' ')
     .replace(/\bpaypal\s*\*\s*/gi, ' ');
   const merchantText = normalizeArabic(merchant ?? text);
@@ -6510,6 +6519,15 @@ function parseSmsInner(
   // but calling them "Card purchase" was wrong twice over, and a row that
   // reads "Transfer to Khalid Rashid" needs no category at all.
   let structuralMerchant = false;
+  const channelTransfer = !isBillDue && type === 'expense' &&
+    /\b(?:debited|deducted)\b/i.test(prose) &&
+    /\b(?:for|towards)\s+(?:an?\s+)?(?:funds?\s+)?transfer\s+(?:through|via|using)\s+(?:(?:personal|business|corporate)\s+)?(?:internet|online|mobile|digital)\s+banking\b/i.test(prose) &&
+    !FEE_RE.test(prose);
+  if (channelTransfer) {
+    merchant = 'Outgoing transfer';
+    structuralMerchant = true;
+    transferHint = true;
+  }
   if (isIncomingCreditReversal) {
     merchant = 'Credit reversal';
     structuralMerchant = true;

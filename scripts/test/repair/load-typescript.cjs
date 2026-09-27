@@ -48,6 +48,13 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return { ...dependencies[name], useMoneyLocaleKey: () => '' };
       }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      // Display labels execute from current source; accounting predicates stay real.
+      if (name === '@/lib/transaction-presentation') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/transaction-presentation.ts'), {
+          '@/lib/ledger': require('../build/ledger.js'),
+          '@/lib/transfer-reconciliation': require('../build/transfer-reconciliation.js'),
+        });
+      }
       // Widget snapshots resolve only bundled, allowlisted logo ids. Execute
       // the pure resolver for screen harnesses that load the real snapshot.
       if (name === '@/lib/widget-logo') {

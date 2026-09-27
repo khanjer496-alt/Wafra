@@ -68,7 +68,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          transfer-reconciliation-types transfer-reconciliation transfer-activity transfer-evidence transfer-review-copy \
          insights seed subscriptions cards cash-flow payment-flow ledger-import launch-alert-parser analytics growth-funnel period purchases country-names country markets known-banks i18n system-language balances \
          brand-marks leaving-soon accounts heal bnpl-category-repair accuracy onboarding onboarding-bank-examples reminders reminder-schedule app-lock auto-import android-capture-sources \
-         history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-source transaction-filter capture-trace \
+         history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-source transaction-presentation transaction-filter capture-trace \
          launch-performance launch-benchmark runtime-performance dashboard-projection \
          relay-protocol trusted-device-contract cloud-import-contract statement-coverage statement-batch reimbursement-report fx fx-rates \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \

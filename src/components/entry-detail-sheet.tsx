@@ -33,6 +33,7 @@ import { useStore } from '@/lib/store';
 import { overrideAppliesTo } from '@/lib/uncategorised';
 import { entryDetailCopy } from '@/lib/reference-copy';
 import { transactionSource } from '@/lib/transaction-source';
+import { maskLedgerIdentifiers, transactionPresentation, transactionPresentationWords } from '@/lib/transaction-presentation';
 import { billAliasAppliesTo } from '@/lib/bill-alias';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
@@ -175,6 +176,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   if (!transaction) return null;
 
   const meta = getCategory(transaction.category);
+  const sourceKind = transactionSource(transaction);
   const transferReview = isTransferCandidate(transaction) || transferAssessment !== undefined;
   const transferWords = transferReviewCopy();
   const ownership = transferAssessment?.status === 'confirmed-own' ? 'own'
@@ -182,6 +184,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       : transferOwnership(transaction);
   const confirmedTransfer = ownership === 'own' || isLedgerTransfer(transaction);
   const confirmedOwnTransfer = ownership === 'own';
+  const presentation = transactionPresentation(transaction, language, confirmedOwnTransfer);
+  const presentationWords = transactionPresentationWords(language);
   const pendingTransfer = !confirmedTransfer && isTransferCandidate(transaction) && ownership === 'unknown';
   const account = state.accounts.find((a) => a.id === transaction.accountId);
   const income = transaction.type === 'income';
@@ -189,7 +193,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
 
   const amountFils = parseAmountToFils(amountText);
   const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(dateText);
-  const stamp = transaction ? fullDateTime(transaction) : '';
+  // PDF/CSV relay clocks are synthetic. Show the recorded date, not a fake time.
+  const stamp = fullDateTime(sourceKind === 'statement' ? { date: transaction.date } : transaction);
   const canSave = !!amountFils && !!title.trim() && dateValid;
 
   const save = () => {
@@ -304,7 +309,6 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   // cosmetic: which channel a row came from is the first thing anyone asks
   // when a charge looks wrong, and the wrong answer sends them looking for a
   // message their bank never sent.
-  const sourceKind = transactionSource(transaction);
   const sourceLabel = sourceKind === 'notification' ? t('bankNotificationSource')
     : sourceKind === 'bank-text' ? t('bankSmsSource')
       : sourceKind === 'apple-pay' ? extra.applePay
@@ -361,11 +365,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           </View>
       )}>
       {editing ? <View style={[styles.head, styles.editHead, { borderColor: band.rule }]}>
-        <ThemedText type="smallBold" style={styles.editHeadTitle}>{transaction.title}</ThemedText>
+        <ThemedText type="smallBold" style={styles.editHeadTitle}>{presentation.title}</ThemedText>
         <Money
           fils={transaction.amountFils}
           type="smallBold"
-          sign={income ? 'plus' : 'minus'}
+          sign={presentation.sign}
           prefix
           decimals
           color={income && !pendingTransfer && !confirmedTransfer ? theme.income : band.text}
@@ -373,11 +377,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         />
       </View> : <View style={styles.head} testID="entry-detail-head">
         <MerchantAvatar title={transaction.title} category={transaction.category} size={64} />
-        <ThemedText type="heading" style={styles.headTitle}>{transaction.title}</ThemedText>
+        <ThemedText type="heading" style={styles.headTitle}>{presentation.title}</ThemedText>
         {/* Decimals on. This sheet exists to answer "what exactly was this",
             and it sat above an edit field showing 72.73 while itself reading
-            −73. Lists round; the place you go to check does not. */}
-        <BandFigure testID="entry-detail-amount" fils={transaction.amountFils} sign={income ? 'plus' : 'minus'} decimals
+            −73. Both the list and details now retain the exact minor units. */}
+        <BandFigure testID="entry-detail-amount" fils={transaction.amountFils} sign={presentation.sign} decimals
           palette={band} size="hero" fitInset={8}
           color={income && !pendingTransfer && !confirmedTransfer ? theme.income : band.text}
           secondaryColor={band.textSecondary} style={styles.headAmount} />
@@ -393,7 +397,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       {!editing && !categoryPicking ? <View style={styles.chips} testID="entry-detail-chips">
         {confirmedTransfer || pendingTransfer ? <View accessible accessibilityRole="text" style={[styles.chip, { backgroundColor: band.card, borderColor: band.rule }]}>
           <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={{ color: band.text }}>{pendingTransfer ? transferWords.ownershipUnknown
+          <ThemedText type="small" style={{ color: band.text }}>{presentation.repayment ? presentation.tag : pendingTransfer ? transferWords.ownershipUnknown
             : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel')}</ThemedText>
         </View> : <Pressable accessibilityRole="button" testID="entry-category-chip"
           accessibilityLabel={`${t('category')}: ${categoryLabel(meta)}`}
@@ -418,6 +422,12 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         </View>
       ) : null}
       {!categoryPicking && <>
+
+      {!editing && presentation.explanation ? <View testID="entry-purpose-explainer"
+        style={[styles.transferMeaning, { borderColor: band.rule, backgroundColor: band.card }]}>
+        <ThemedText type="smallBold">{presentation.note}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">{presentation.explanation}</ThemedText>
+      </View> : null}
 
       {(confirmedOwnTransfer || pendingTransfer) && (
         <View
@@ -455,8 +465,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           router.push({ pathname: '/review-transfers', params: { transactionId: transaction.id } });
         }} />
       </View>}
-      {!editing && showMerchantLink && !confirmedTransfer && !pendingTransfer && !isMoneyMovementOnly(transaction) && transaction.title.trim() &&
-        <MerchantSpendingLink merchant={transaction.title} type={transaction.type} onClose={onClose} />}
+      {!editing && showMerchantLink && !presentation.purposeUnclear && !confirmedTransfer && !pendingTransfer && !isMoneyMovementOnly(transaction) && transaction.title.trim() &&
+        <MerchantSpendingLink merchant={transaction.title} displayName={presentation.title} type={transaction.type} onClose={onClose} />}
       {isUnassignedIncome(transaction) && <ThemedText type="small" themeColor="textSecondary" testID="income-account-review">
         {t('incomeAccountReviewBody')}</ThemedText>}
 
@@ -591,6 +601,14 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                 label: t('source'),
                 value: <ThemedText type="small">{sourceLabel}</ThemedText>,
               },
+              ...(presentation.recordedDescription ? [{
+                label: presentationWords.recordedDescription,
+                value: <ThemedText testID="entry-recorded-description" type="small" themeColor="textSecondary">{presentation.recordedDescription}</ThemedText>,
+              }] : []),
+              ...(presentation.tag && !confirmedTransfer && !pendingTransfer ? [{
+                label: presentationWords.kind,
+                value: <ThemedText type="small">{presentation.tag}</ThemedText>,
+              }] : []),
               {
                 label: t('transactionDateLabel'),
                 value: <ThemedText type="small">{stamp}</ThemedText>,
@@ -601,7 +619,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                       label: t('retainedBankMessage'),
                       value: (
                         <ThemedText type="default" themeColor="textSecondary" style={styles.raw}>
-                          “{transaction.raw}”
+                          “{maskLedgerIdentifiers(transaction.raw)}”
                         </ThemedText>
                       ),
                     },
@@ -628,7 +646,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           visible
           onClose={() => setConfirmingUndo(false)}
           question={t('autoAddedUndoConfirm')}
-          body={`${transaction.title} · ${formatAmount(transaction.amountFils)}. ${t('autoAddedUndoHint')}`}
+          body={`${presentation.title} · ${formatAmount(transaction.amountFils)}. ${t('autoAddedUndoHint')}`}
           confirmLabel={t('autoAddedUndo')}
           destructive
           onConfirm={() => { resolveBestEffort(transaction.id, 'undo'); onClose(); }}
@@ -639,7 +657,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           visible
           onClose={() => { setConfirmingTransfer(false); if (initialMode === 'transfer') onClose(); }}
           question={extra.markTransferQuestion}
-          body={`${transaction.title} · ${formatAmount(transaction.amountFils)}. ${extra.markTransferBody}`}
+          body={`${presentation.title} · ${formatAmount(transaction.amountFils)}. ${extra.markTransferBody}`}
           confirmLabel={extra.markTransfer}
           onConfirm={markAsTransfer}
         />
@@ -649,7 +667,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           visible
           onClose={() => setConfirmingDelete(false)}
           question={t('deleteThisEntry')}
-          body={`${transaction.title} · ${formatAmount(transaction.amountFils)}`}
+          body={`${presentation.title} · ${formatAmount(transaction.amountFils)}`}
           confirmLabel={t('delete')}
           destructive
           onConfirm={removeEntry}

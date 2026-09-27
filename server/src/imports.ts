@@ -447,11 +447,37 @@ type StatementSettlement = Pick<StatementParsedRow,
   'kind' | 'type' | 'merchant' | 'card' | 'transferHint' | 'categoryGuess' | 'categoryDeliberate'
 > & { cardPaymentSide?: 'debit' | 'receipt' };
 
+/** HSBC's terse repayment description names the card, not a merchant.
+ * Compare full labelled header digits ephemerally; last-four equality alone
+ * could mistake a different card for this one. Never persist this number.
+ */
+function hsbcStatementRepaymentCard(text: string): string | undefined {
+  const header = normalizeDigits(text).normalize('NFKC').split(/\n/).slice(0, 80).join('\n');
+  if (!/\bHSBC\b/i.test(header)) return undefined;
+  const cards = new Set([...header.matchAll(
+    /\b(?:credit\s+card\s+(?:number|no\.?)|number\s+card\s+credit)\b[^A-Za-z0-9]{0,96}((?:\d[ \t-]*){15}\d)(?!\d)/gi,
+  )].map((match) => match[1].replace(/[ \t-]/g, '')));
+  return cards.size === 1 ? [...cards][0] : undefined;
+}
+
+
+/** An exact source-labelled HSBC card match, shared by money and meaning guards. */
+function isHsbcStatementRepayment(
+  description: string,
+  source: ParsedSms['card'],
+  headerCard: string | undefined,
+): boolean {
+  if (!headerCard || source?.kind !== 'credit' || source.last4 !== headerCard.slice(-4)) return false;
+  const match = /^\s*TO\s+((?:\d[ \t-]*){15}\d)\s*$/i.exec(normalizeDigits(description).normalize('NFKC'));
+  return match?.[1].replace(/[ \t-]/g, '') === headerCard;
+}
+
 function statementCardSettlement(
   description: string,
   type: 'expense' | 'income',
   cardEvidence: boolean,
   source: ParsedSms['card'],
+  hsbcRepaymentCard?: string,
 ): StatementSettlement | null {
   const text = normalizeDigits(description).normalize('NFKC');
   if (CARD_SETTLEMENT_EXCLUSION.test(text)) return null;
@@ -463,7 +489,9 @@ function statementCardSettlement(
   if (!cardEvidence && type === 'expense' && ACCOUNT_SIDE_CARD_SETTLEMENT.test(text)) {
     return { kind: 'transaction', type, merchant: 'Card payment', card: source, ...transfer };
   }
-  if (cardEvidence && type === 'income' && CARD_SIDE_SETTLEMENT.test(text) && !PAYMENT_COMPANY.test(text)) {
+  const toThisHsbcCard = isHsbcStatementRepayment(text, source, hsbcRepaymentCard);
+  if (cardEvidence && type === 'income' &&
+      (toThisHsbcCard || CARD_SIDE_SETTLEMENT.test(text)) && !PAYMENT_COMPANY.test(text)) {
     // A card statement's own number is a credit card's: debit cards receive
     // no payments. An account-labelled number is not a card at all.
     const last4 = source && (source.kind === 'credit' || source.kind === 'unknown') ? source.last4 : null;
@@ -1638,6 +1666,7 @@ export function parseStatementLines(
   let rejectedRows = 0;
   const sourceInstrument = identity.card ?? statementInstrument(text) ?? statementHeaderInstrument(text);
   const bankHint = identity.bankHint ?? statementBankHint(text);
+  const hsbcRepaymentCard = hsbcStatementRepaymentCard(text);
   const rawLines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
   const cardStatement = isCardStatement(text);
   // Refusing a bare sign needs less proof than reading every plain figure as
@@ -1680,7 +1709,7 @@ export function parseStatementLines(
       currency === 'AED' ? 'AE' : currency === 'SAR' ? 'SA' : null,
     );
     const reference = referenceFromDescription(merchant);
-    const settlement = statementCardSettlement(merchant, type, cardEvidence, sourceInstrument);
+    const settlement = statementCardSettlement(merchant, type, cardEvidence, sourceInstrument, hsbcRepaymentCard);
     if (settlement) {
       rows.push({
         amountFils, currency, date,
@@ -1777,9 +1806,15 @@ export function parseStatementLines(
       // DR` and `SPINNEYS JLT 120.00 27,890.00 DR` read their SECOND figure as
       // a currency marker under `[A-Z]{3}`, which switched this guard off and
       // imported the running balance as the amount.
-      const balanceLabelled = classifyMoneyToken(descriptionWords.at(-1) ?? '', currency)?.kind === 'unsigned' &&
-        statementCurrency(descriptionWords.at(-2) ?? '') === null;
       const credit = direction === 'CR' || direction === 'CREDIT';
+      // In a zero-decimal currency a card's digits also look like unsigned
+      // money. Exempt only the exact, source-labelled repayment description;
+      // arbitrary numeric merchants and running balances remain ambiguous.
+      const exactRepayment = credit && cardEvidence &&
+        isHsbcStatementRepayment(merchant, sourceInstrument, hsbcRepaymentCard);
+      const balanceLabelled = !exactRepayment &&
+        classifyMoneyToken(descriptionWords.at(-1) ?? '', currency)?.kind === 'unsigned' &&
+        statementCurrency(descriptionWords.at(-2) ?? '') === null;
       if (
         (!explicitCurrency || explicitCurrency === currency) && date && !balanceLabelled &&
         amountFils !== null && merchant

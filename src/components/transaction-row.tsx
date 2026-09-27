@@ -14,6 +14,7 @@ import { t } from '@/lib/i18n';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
 import { isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, UNASSIGNED_TRANSACTION_ACCOUNT_ID } from '@/lib/ledger';
 import { transactionSource } from '@/lib/transaction-source';
+import { transactionPresentation } from '@/lib/transaction-presentation';
 import { transactionsWords } from '@/lib/transactions-copy';
 import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
@@ -45,9 +46,12 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   const largeText = useLargeTextLayout();
   const words = transactionsWords(language);
   const meta = getCategory(transaction.category);
-  const clock = clockTime(transaction);
+  const sourceKind = transactionSource(transaction);
+  // A statement's relay timestamp is an import identity, not a purchase time.
+  const clock = sourceKind === 'statement' ? '' : clockTime(transaction);
   const ownership = transferOwnership(transaction);
   const ownTransfer = internal === true || ownership === 'own';
+  const presentation = transactionPresentation(transaction, language, ownTransfer);
   const isTransfer = isLedgerTransfer(transaction) || internal === true;
   const pending = !internal && isTransferCandidate(transaction) && ownership === 'unknown';
   const isIncome = transaction.type === 'income' && !isTransfer && !pending;
@@ -57,31 +61,33 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   // What a transfer means stays spelled out; the tag under the amount is short.
   const meaning = pending ? transferReviewCopy(language).ownershipUnknown
     : ownTransfer ? transferReviewCopy(language).confirmedOwn : null;
-  const where = meaning ?? (isTransfer ? t('transferLabel', language)
+  const where = presentation.tag ?? meaning ?? (isTransfer ? t('transferLabel', language)
     : transaction.paymentFlowSide === 'receipt' && transaction.category === 'other'
       ? t('registeredBillPayment', language)
       : categoryLabel(meta, language));
-  const tag = isTransfer || pending ? words.transferTag : where;
-  const source = words.source[transactionSource(transaction)];
+  const tag = presentation.tag ?? (isTransfer || pending ? words.transferTag : where);
+  const source = words.source[sourceKind];
   const meaningTestID = ownTransfer ? 'own-transfer-meaning' : pending ? 'pending-transfer-meaning' : undefined;
   const accountReview = isUnassignedIncome(transaction) || transaction.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID
     ? t('incomeAccountReview', language) : null;
   const accountLabel = accountReview ?? account?.name;
-  const accountShort = !accountReview && account?.last4 ? `••${account.last4}` : null;
+  const accountShort = !accountReview && account?.last4
+    ? [account.bankName, `••${account.last4}`].filter(Boolean).join(' · ') : null;
   const detailLine = meaning ?? [clock, source, accountShort].filter(Boolean).join(' · ');
   const autoAdded = transaction.bestEffort ? t('autoAddedCheck', language) : null;
-  const label = [transaction.title, autoAdded, where, accountLabel, clock, source,
-    `${arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: false })} ${ledgerCurrencyCode()}`]
+  const label = [presentation.title, autoAdded, where, presentation.note, accountLabel, clock, source,
+    `${presentation.repayment ? '' : arrived ? t('plusWord', language) : t('minusWord', language)} ${formatAmount(transaction.amountFils, { decimals: true })} ${ledgerCurrencyCode()}`]
     .filter(Boolean).join(', ');
   const a11yActions = accessibilityActions && accessibilityActions.length > 0 && onAccessibilityAction
     ? { accessibilityActions: [...accessibilityActions],
       onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => onAccessibilityAction(event.nativeEvent.actionName) }
     : {};
   const amountText = <ThemedText type="smallBold" tabular style={[styles.amount, { color: isIncome ? theme.income : theme.text }]}>
-    {arrived ? '+' : '−'}{formatAmount(transaction.amountFils, { decimals: false })}
+    {presentation.repayment ? '' : arrived ? '+' : '−'}{formatAmount(transaction.amountFils, { decimals: true })}
   </ThemedText>;
   const secondary = <>
     <ThemedText testID={meaningTestID} type="meta" themeColor="textSecondary" style={styles.metadata}>{detailLine}</ThemedText>
+    {presentation.note ? <ThemedText testID="transaction-purpose-note" type="meta" themeColor="textSecondary" style={styles.metadata}>{presentation.note}</ThemedText> : null}
     {accountReview ? <ThemedText type="meta" style={styles.metadata} themeColor="textSecondary">{accountReview}</ThemedText> : null}
     {autoAdded ? <ThemedText testID="best-effort-marker" type="meta" style={[styles.metadata, { color: theme.warning }]}>{autoAdded}</ThemedText> : null}
   </>;
@@ -91,11 +97,11 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
   // transaction action. No ledger scan or store subscription belongs in a row.
   // Cash withdrawals and other money movements are not merchant spending, so
   // their summary would always read zero.
-  if (merchantLinks && onPress && transaction.title.trim() && !isTransfer && !pending && !isMoneyMovementOnly(transaction)) {
+  if (merchantLinks && onPress && transaction.title.trim() && !presentation.purposeUnclear && !isTransfer && !pending && !isMoneyMovementOnly(transaction)) {
     const merchantWords = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
     const merchantLabel = isIncome ? merchantWords.incomeDetails : merchantWords.merchantDetails;
     return <View style={[styles.row, styles.splitRow, largeText && styles.splitRowLarge]} testID="merchant-transaction-row">
-      <Pressable accessibilityRole="button" accessibilityLabel={[`${merchantLabel}: ${transaction.title}`, accountReview, autoAdded].filter(Boolean).join('. ')}
+      <Pressable accessibilityRole="button" accessibilityLabel={[`${merchantLabel}: ${presentation.title}`, accountReview, autoAdded].filter(Boolean).join('. ')}
         testID="transaction-merchant-link"
         onPress={() => router.navigate(`/merchant?name=${encodeURIComponent(transaction.title.trim())}${isIncome ? '&type=income' : ''}`)}
         android_ripple={{ color: theme.backgroundSelected }}
@@ -103,7 +109,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
           pressed && { backgroundColor: theme.backgroundSelected }]}>
         <MerchantAvatar title={transaction.title} category={transaction.category} size={36} />
         <View style={styles.content}>
-          <ThemedText type="smallBold">{transaction.title}</ThemedText>
+          <ThemedText type="smallBold">{presentation.title}</ThemedText>
           {secondary}
         </View>
       </Pressable>
@@ -126,7 +132,7 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
     <MerchantAvatar title={transaction.title} category={transaction.category} size={36} />
     <View style={[styles.headline, largeText && styles.headlineLarge]}>
       <View style={[styles.content, styles.merchant, largeText && styles.merchantLarge]}>
-        <ThemedText type="smallBold">{transaction.title}</ThemedText>
+        <ThemedText type="smallBold">{presentation.title}</ThemedText>
         {secondary}
       </View>
       <View style={[styles.amountColumn, largeText && styles.amountColumnLarge]}>
