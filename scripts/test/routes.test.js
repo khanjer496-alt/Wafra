@@ -63,7 +63,7 @@ ok('card and review routes retain their serializable IDs',
   ));
 
 ok('Wallet opens cards by serializable account ID on a normal row press',
-  /const openAccount = \(account: Account\)[\s\S]{0,240}router\.push\(`\/cards\?card=\$\{account\.id\}`\)/.test(
+  /const openAccount = \(account: Account\)[\s\S]{0,240}router\.push\(`\/card\?id=\$\{encodeURIComponent\(account\.id\)\}`\)/.test(
     fs.readFileSync(path.join(SRC, 'app/(tabs)/wallet.tsx'), 'utf8'),
   ));
 
