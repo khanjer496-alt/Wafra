@@ -3,6 +3,7 @@ import { Platform, StyleSheet, Text, View, type StyleProp, type ViewStyle } from
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withSpring } from 'react-native-reanimated';
 
 import { Icon } from '@/components/ui/icon';
+import { WafraMark } from '@/components/wafra-logo';
 import { Fonts, MotionSpring, PatternPalette, type PatternColor } from '@/constants/theme';
 import { useBandScheme } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
@@ -10,7 +11,7 @@ import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { bandCopy } from '@/lib/band-copy';
 import { getCategory } from '@/lib/categories';
 import { hasArabicScript } from '@/lib/i18n';
-import { PATTERN_COLUMNS, PATTERN_ROWS, patternSize, type PatternTile } from '@/lib/pattern';
+import { PATTERN_COLUMNS, PATTERN_ROWS, compactPattern, patternSize, type PatternTile } from '@/lib/pattern';
 
 /** The boards' tile and gap at full size. */
 const BASE_TILE = 52;
@@ -18,11 +19,16 @@ const BASE_GAP = 6;
 /** Reveal stagger between tiles on the first appearance. */
 const STAGGER_MS = 70;
 
-function Shape({ tile, size, fill, mark }: { tile: PatternTile; size: number; fill: Record<PatternColor, string>; mark: Record<PatternColor, string> }) {
+function Shape({ tile, size, fill, mark, compact }: { tile: PatternTile; size: number; fill: Record<PatternColor, string>; mark: Record<PatternColor, string>; compact: boolean }) {
   const color = fill[tile.color];
   const rotate = tile.rotation ? { transform: [{ rotate: `${tile.rotation}deg` }] } : null;
   switch (tile.kind) {
     case 'square':
+      if (compact && tile.group === 'name') {
+        return <View style={[styles.center, { width: size, height: size, borderRadius: size * 10 / 52, backgroundColor: color }]}>
+          <WafraMark size={size * 0.8} color={mark.cream} />
+        </View>;
+      }
       return <View style={{ width: size, height: size, borderRadius: size * 10 / 52, backgroundColor: color }} />;
     case 'circle':
       return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color }} />;
@@ -89,11 +95,13 @@ function PopIn({ order, animate, children }: { order: number; animate: boolean; 
  * Reduce Motion, a screen reader and Android all show as a still picture.
  * The grid mirrors under RTL with the rest of the layout.
  */
-export function PatternMosaic({ tiles, tile = BASE_TILE, gap, animate = false, scheme, accessibilityLabel, style, testID }: {
+export function PatternMosaic({ tiles, tile = BASE_TILE, gap, compact = false, animate = false, scheme, accessibilityLabel, style, testID }: {
   tiles: readonly PatternTile[];
   /** Tile edge in points. */
   tile?: number;
   gap?: number;
+  /** Home's dense arrangement for profiles with missing answers. */
+  compact?: boolean;
   animate?: boolean;
   scheme?: 'light' | 'dark';
   accessibilityLabel?: string;
@@ -104,16 +112,17 @@ export function PatternMosaic({ tiles, tile = BASE_TILE, gap, animate = false, s
   const words = bandCopy(useLanguage());
   const palette = PatternPalette[resolved];
   const spacing = gap ?? Math.max(2, Math.round((tile * BASE_GAP) / BASE_TILE));
-  const size = patternSize(tile, spacing);
-  const byCell = new Map(tiles.map((item) => [`${item.col}:${item.row}`, item]));
+  const layout = compact ? compactPattern(tiles) : { tiles, columns: PATTERN_COLUMNS, rows: PATTERN_ROWS };
+  const size = patternSize(tile, spacing, layout.columns, layout.rows);
+  const byCell = new Map(layout.tiles.map((item) => [`${item.col}:${item.row}`, item]));
   return <View testID={testID} accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel ?? words.pattern}
     style={[{ width: size.width, height: size.height, gap: spacing }, style]}>
-    {Array.from({ length: PATTERN_ROWS }, (_row, row) => <View key={row} style={[styles.row, { gap: spacing }]}>
-      {Array.from({ length: PATTERN_COLUMNS }, (_col, col) => {
+    {Array.from({ length: layout.rows }, (_row, row) => <View key={row} style={[styles.row, { gap: spacing }]}>
+      {Array.from({ length: layout.columns }, (_col, col) => {
         const item = byCell.get(`${col}:${row}`);
         return <View key={col} style={{ width: tile, height: tile }}>
           {item ? <PopIn order={item.order} animate={animate}>
-            <Shape tile={item} size={tile} fill={palette.fill} mark={palette.mark} />
+            <Shape tile={item} size={tile} fill={palette.fill} mark={palette.mark} compact={compact} />
           </PopIn> : null}
         </View>;
       })}

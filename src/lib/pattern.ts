@@ -161,10 +161,21 @@ export function patternInputFromState(state: PatternStateFields): PatternInput {
   };
 }
 
-/** The mosaic's size for a tile size and gap, in points. */
-export function patternSize(tile: number, gap: number): { width: number; height: number } {
+/** Home packs existing answers into balanced rows; it never fills in answers. */
+export function compactPattern(tiles: readonly PatternTile[]) {
+  const columns = tiles.length <= PATTERN_COLUMNS ? tiles.length : Math.ceil(tiles.length / PATTERN_ROWS);
   return {
-    width: PATTERN_COLUMNS * tile + (PATTERN_COLUMNS - 1) * gap,
-    height: PATTERN_ROWS * tile + (PATTERN_ROWS - 1) * gap,
+    columns,
+    rows: columns ? Math.ceil(tiles.length / columns) : 0,
+    tiles: [...tiles].sort((a, b) => a.row - b.row || a.col - b.col)
+      .map((item, index) => ({ ...item, col: index % columns, row: Math.floor(index / columns) })),
+  };
+}
+
+/** The mosaic's size for a tile size and gap, in points. */
+export function patternSize(tile: number, gap: number, columns = PATTERN_COLUMNS, rows = PATTERN_ROWS): { width: number; height: number } {
+  return {
+    width: columns * tile + Math.max(0, columns - 1) * gap,
+    height: rows * tile + Math.max(0, rows - 1) * gap,
   };
 }

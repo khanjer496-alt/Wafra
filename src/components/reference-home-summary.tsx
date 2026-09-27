@@ -157,7 +157,7 @@ export function ReferenceHomeBand(p: BandProps) {
   ) : p.pattern;
   return <View style={styles.band} testID="home-band">
     <View style={styles.header}>
-      <View style={styles.patternSlot}>{pattern}</View>
+      <View style={[styles.patternSlot, styles.headerPatternSlot]}>{pattern}</View>
       <View style={styles.actions}>
         {p.brandMark}
         {p.onAsk ? <Pressable testID="home-ask-chip" accessibilityRole="button" accessibilityLabel={w.ask} accessibilityHint={w.askHint}
@@ -254,6 +254,7 @@ const styles = StyleSheet.create({
   band: { gap: 18 },
   header: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
   patternSlot: { flexShrink: 1, minWidth: 0, paddingTop: 4 },
+  headerPatternSlot: { alignSelf: 'center', paddingTop: 0 },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', marginStart: 'auto' },
   askChip: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, borderRadius: 22 },
   round: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },

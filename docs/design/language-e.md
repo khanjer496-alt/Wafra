@@ -304,6 +304,12 @@ order; a missing answer leaves its cell empty. Tiles carry palette tokens only.
 watched = categories with a monthly limit in a fixed order, so saving a limit
 never redraws the pattern; never their amounts).
 
+Home uses `compactPattern` to close gaps between existing tiles for incomplete
+profiles: up to six tiles form one row, larger patterns use two balanced rows.
+It preserves all recorded choices and the complete 12-cell composition. A
+nameless tile uses the original Wafra mark in Home's compact presentation.
+Onboarding and the other fixed-grid surfaces retain their original positions.
+
 ### `PatternMosaic` — `src/components/ui/pattern-mosaic.tsx`
 
 Draws tiles (Views + the category `Icon`), scalable with `tile`/`gap`, one

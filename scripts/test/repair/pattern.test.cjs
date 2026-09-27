@@ -151,3 +151,28 @@ test('saving a limit never redraws the pattern (the reducer moves the edited bud
     'the fixture really does reorder');
   assert.deepEqual(pattern.buildPattern(pattern.patternInputFromState(edited)), before);
 });
+
+test('Home packs the legacy five-tile pattern without reserving seven empty cells', () => {
+  const tiles = pattern.buildPattern({ reminders: { bills: true, cards: true, dailySummary: true } });
+  const before = JSON.stringify(tiles);
+  const layout = pattern.compactPattern(tiles);
+  assert.equal(layout.columns, 5);
+  assert.equal(layout.rows, 1);
+  assert.equal(layout.tiles.length, 5, 'no invented goals or watched categories');
+  assert.deepEqual(layout.tiles.map(t => [t.col, t.row]), [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]]);
+  assert.deepEqual(layout.tiles.map(({ col, row, ...t }) => t).sort((a, b) => a.key.localeCompare(b.key)),
+    tiles.map(({ col, row, ...t }) => t).sort((a, b) => a.key.localeCompare(b.key)));
+  assert.equal(JSON.stringify(tiles), before, 'onboarding keeps its original fixed-cell composition');
+});
+
+test('compact patterns stay balanced and bounded from one to twelve tiles', () => {
+  const all = pattern.buildPattern({ name: 'نورة', goals: ALL_GOALS, watched: ['dining', 'groceries'],
+    reminders: { bills: true, cards: true, dailySummary: true } });
+  for (let count = 1; count <= 12; count++) {
+    const layout = pattern.compactPattern(all.slice(0, count));
+    assert.ok(layout.columns <= 6 && layout.rows <= 2);
+    assert.equal(layout.tiles.length, count);
+    assert.deepEqual(layout.tiles.map(t => t.row * layout.columns + t.col), Array.from({ length: count }, (_, i) => i));
+  }
+  assert.deepEqual(cells(pattern.compactPattern(all).tiles), cells(all), 'full profiles preserve the approved board');
+});

@@ -757,7 +757,7 @@ export default function JournalHomeScreen() {
   </View>);
   const renderSection = (id: HomeWidgetId, onBand = false) => {
     const props = { ...sectionProps, band: onBand ? band : sheetPalette, figureInset: onBand ? 0 : 32,
-      pattern: id === 'greeting' && !greetingInToolbar ? <YourPattern tile={24} gap={3} /> : undefined };
+      pattern: id === 'greeting' && !greetingInToolbar ? <YourPattern compact testID="home-personal-pattern" tile={24} gap={3} /> : undefined };
     const content = id === 'greeting' ? <ReferenceHomeGreeting {...props} />
       : id === 'overview' ? <ReferenceHomeSummary {...props} onBand={onBand} />
       : id === 'today' ? <ReferenceHomeToday {...props} />
@@ -775,7 +775,7 @@ export default function JournalHomeScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={band.onBand} />}
       bandContent={state.hydrated ? <ReferenceHomeBand {...sectionProps}
         sections={layout.band.map(id => renderSection(id, true))}
-        pattern={greetingInToolbar ? <YourPattern tile={24} gap={3} /> : undefined}
+        pattern={greetingInToolbar ? <YourPattern compact testID="home-personal-pattern" tile={24} gap={3} /> : undefined}
         today={homeToday}
         onToday={() => router.push('/transactions')}
         hideHeaderAdd={Platform.OS === 'android'}
