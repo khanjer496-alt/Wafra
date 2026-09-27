@@ -467,7 +467,11 @@ function isHsbcStatementRepayment(
   source: ParsedSms['card'],
   headerCard: string | undefined,
 ): boolean {
-  if (!headerCard || source?.kind !== 'credit' || source.last4 !== headerCard.slice(-4)) return false;
+  // The full, explicitly credit-card-labelled HSBC header is stronger than an
+  // older generic-card reader's unknown kind (for example at a line break).
+  // Never override an explicitly account/debit-labelled source.
+  if (!headerCard || (source?.kind !== 'credit' && source?.kind !== 'unknown') ||
+      source.last4 !== headerCard.slice(-4)) return false;
   const match = /^\s*TO\s+((?:\d[ \t-]*){15}\d)\s*$/i.exec(normalizeDigits(description).normalize('NFKC'));
   return match?.[1].replace(/[ \t-]/g, '') === headerCard;
 }

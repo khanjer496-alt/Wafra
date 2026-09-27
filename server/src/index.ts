@@ -1036,6 +1036,15 @@ async function statementImportIdFor(baseKey: string): Promise<string> {
   return [...digest.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/** One corrected delivery after the settlement-parser upgrade.
+ * File identity and row clocks remain unchanged, so the client can heal rather
+ * than duplicate existing entries. Do not tie this to unrelated SMS releases.
+ * Bumping again requires stable-row and repeat-import compatibility tests.
+ */
+function statementReplayKey(baseKey: string, rowIndex: number): string {
+  return `${baseKey}:settlement-v1:${rowIndex}`;
+}
+
 const DAY_MS = 86_400_000;
 
 function rowReceiptTimes(rows: { date?: string | null }[], nowMs: number): string[] {
@@ -2165,7 +2174,7 @@ export default {
           row: {
             ...withoutRaw(extracted.rows[index]), captureSource: 'pdf', receivedAt: receivedAt[index], statementImportId,
           },
-          replayKey: `${baseKey}:${index}`, receiptTtlSeconds: 72 * 60 * 60,
+          replayKey: statementReplayKey(baseKey, index), receiptTtlSeconds: 72 * 60 * 60,
         })),
         targets,
       );
@@ -2255,7 +2264,7 @@ export default {
         env, device,
         parsed.rows.map((row, index) => ({
           row: { ...withoutRaw(row), captureSource: 'csv', receivedAt: receivedAt[index], statementImportId },
-          replayKey: `${baseKey}:${index}`, receiptTtlSeconds: 72 * 60 * 60,
+          replayKey: statementReplayKey(baseKey, index), receiptTtlSeconds: 72 * 60 * 60,
         })),
         targets,
       );
@@ -2778,7 +2787,7 @@ export default {
             receivedAt: receivedAt[rowIndex],
             statementImportId,
           },
-          `${baseKey}:${rowIndex}`,
+          statementReplayKey(baseKey, rowIndex),
           72 * 60 * 60,
           { sourceScope: 'supplemental' },
           targets,
@@ -2832,7 +2841,7 @@ export default {
             receivedAt: receivedAt[rowIndex],
             statementImportId,
           },
-          `${baseKey}:${rowIndex}`,
+          statementReplayKey(baseKey, rowIndex),
           72 * 60 * 60,
           { sourceScope: 'supplemental' },
           targets,

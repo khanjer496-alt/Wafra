@@ -2024,6 +2024,75 @@ const CARD_PAYMENT_DEBIT =
       saPdf.status === 202 && saPdfRows.length === 1 && saPdfRows[0].currency === 'SAR');
   }
 
+  {
+    const { parseStatementLines } = require('./build/imports');
+    const text = 'HSBC Credit Card Statement\nCredit Card Number 4111 1111 1111 1111\n' +
+      'Transaction Date Description Amount\n04-Feb-26 TO 4111 1111 1111 1111 123.45 CR';
+    for (const kind of ['credit', 'unknown', 'debit', 'account']) {
+      const parsed = parseStatementLines(text, 'AED', { card: { kind, last4: '1111' }, bankHint: 'HSBC' });
+      ok(`HSBC header proof: ${kind} source keeps the appropriate settlement boundary`,
+        (parsed.rows[0]?.kind === 'cardPayment') === (kind === 'credit' || kind === 'unknown'));
+    }
+  }
+
+  // The old 72-hour receipt must not block a repaired reading of the same
+  // statement. Only delivery eligibility changes; file and row IDs must not.
+  for (const format of ['pdf', 'csv']) {
+    const env = { DB: makeDb() };
+    const me = await pairDevice(env);
+    const unrelated = await pairDevice(env);
+    const statement = format === 'pdf' ? tinyPdf([
+      'HSBC Credit Card Statement', 'Credit Card Number 4111 1111 1111 1111',
+      '04-Feb-26 TO 4111 1111 1111 1111 123.45 CR', '05-Feb-26 LOCAL SHOP 67.89 DR',
+    ]) : 'Date,Description,Debit,Credit,Credit Card Number\n' +
+      '2026-02-04,PAYMENT RECEIVED - THANK YOU,,123.45,1111\n' +
+      '2026-02-05,LOCAL SHOP,67.89,,1111';
+    const bytes = typeof statement === 'string' ? enc.encode(statement) : statement;
+    const digest = b64encode(await webcrypto.subtle.digest('SHA-256', bytes));
+    const baseKey = await keyedFingerprint(me.adminToken, `${format}:${digest}`);
+    for (let i = 0; i < 2; i++) env.DB.handle.prepare(
+      'INSERT INTO ingest_receipts (device_id, replay_key, created_at, expires_at) VALUES (?, ?, unixepoch(), unixepoch() + 259200)',
+    ).run(me.deviceId, `${baseKey}:${i}:${me.deviceId}`);
+    const send = () => call(env, 'POST', `/v1/import/${format}`, {
+      token: me.adminToken, headers: { 'content-type': format === 'pdf' ? 'application/pdf' : 'text/csv' }, body: statement,
+    });
+    const response = await send(); const outcome = await response.json();
+    const rows = await drainOpened(env, me);
+    ok(`${format} upgrade: old delivery receipts do not block corrected rows`,
+      response.status === 202 && outcome.alreadyProcessed === false && rows.length === 2);
+    const idBytes = new Uint8Array(await webcrypto.subtle.digest('SHA-256', enc.encode(`statement-file:${baseKey}`)));
+    const stableId = [...idBytes.slice(0, 16)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    ok(`${format} upgrade: stable file identity does not change with delivery revision`,
+      rows.length === 2 && rows.every(row => row.statementImportId === stableId));
+    ok(`${format} upgrade: exact repayment is a settlement receipt, not income`,
+      rows.some(row => row.amountFils === 12345 && row.kind === 'cardPayment' && row.cardPaymentSide === 'receipt' && row.transferHint), JSON.stringify(rows.map(row => ({kind:row.kind,type:row.type,card:row.card,amountFils:row.amountFils,merchant:row.merchant}))));
+    ok(`${format} upgrade: unrelated devices never receive this statement`, (await drainOpened(env, unrelated)).length === 0);
+    if (rows.length === 2) {
+      const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import');
+      const { isIncome, isSpending } = require('./build/ledger');
+      const fresh = { ...LEDGER, privateMode: true, marketId: 'AE', ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 } };
+      let sequence = 0;
+      const save = (plan, state) => applyMaterializedImportBatch(state,
+        materializeImportBatch(plan.batch, state, prefix => `${format}-${prefix}-${++sequence}`));
+      const original = save(importOnPhone(rows, fresh), fresh);
+      const old = { ...original, transactions: original.transactions.map(row => row.amountFils === 12345
+        ? { ...row, title: 'TO 4111 1111 1111 1111', isTransfer: false, cardPaymentSide: undefined } : row) };
+      const repair = importOnPhone(rows, old); const repaired = save(repair, old);
+      const payment = repaired.transactions.find(row => row.amountFils === 12345);
+      ok(`${format} upgrade: saved receipt is repaired without adding duplicate money`,
+        repair.txCount === 0 && repaired.transactions.length === 2 && payment?.cardPaymentSide === 'receipt' && !isIncome(payment) && !isSpending(payment));
+      ok(`${format} upgrade: transaction IDs and source keys remain stable`,
+        repaired.transactions.every(row => original.transactions.some(prior => prior.id === row.id && prior.smsKey === row.smsKey)));
+      const protectedState = { ...old, transactions: old.transactions.map(row => ({ ...row, userEdited: true })) };
+      ok(`${format} upgrade: manual corrections remain protected`, importOnPhone(rows, protectedState).batch.updates.length === 0);
+    }
+    const repeat = await send();
+    ok(`${format} upgrade: the corrected revision is still idempotent`,
+      repeat.status === 202 && (await repeat.json()).alreadyProcessed === true && (await drainOpened(env, me)).length === 0);
+    ok(`${format} upgrade: no source text or full card digits are persisted`,
+      !dumpDb(env.DB).includes('4111 1111 1111 1111') && rows.every(row => row.raw === undefined));
+  }
+
   /* ══════ A multi-row statement must arrive as many rows, not as one ══════
    *
    * THE DEFECT THIS SECTION EXISTS FOR. Every multi-row import path computed
