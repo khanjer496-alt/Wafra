@@ -67,6 +67,21 @@ const locate = (page, key) => page.evaluate((want) => {
   return null;
 }, key);
 
+/**
+ * Whether this aria-label or exact text is on top, polled like tapKey. One
+ * look right after a navigation can land while the pushed screen is still
+ * sliding in over the old one, and read a real section as missing.
+ */
+async function reachable(page, key, timeout = 4000) {
+  const deadline = Date.now() + timeout;
+  for (;;) {
+    const hit = await locate(page, key);
+    if (hit) return hit;
+    if (Date.now() > deadline) return null;
+    await page.waitForTimeout(200);
+  }
+}
+
 /** Click whatever carries this aria-label or exact text and is on top. */
 async function tapKey(page, key, timeout = 4000) {
   const deadline = Date.now() + timeout;
@@ -416,7 +431,7 @@ await pressEverything('transactions', async () => { await home(); await tapKey(p
 // section is present, then sweep the complete scroll range of both.
 await settings();
 for (const section of ['Capture', 'Notifications', 'Appearance', 'Country and currency', 'Privacy and security']) {
-  ok(`settings: ${section} section is reachable`, !!(await locate(page, section)));
+  ok(`settings: ${section} section is reachable`, !!(await reachable(page, section)));
 }
 const settingsSweep = await pressEverything('settings', settings, { fullScroll: true });
 for (const control of [
@@ -427,7 +442,7 @@ for (const control of [
 }
 await settingsData();
 for (const section of ['Your data', 'Help Wafra get better', 'About', 'Danger zone']) {
-  ok(`data and help: ${section} section is reachable`, !!(await locate(page, section)));
+  ok(`data and help: ${section} section is reachable`, !!(await reachable(page, section)));
 }
 const dataSweep = await pressEverything('data and help', settingsData,
   { skip: ['Erase all data'], fullScroll: true });
