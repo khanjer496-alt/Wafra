@@ -1486,13 +1486,13 @@ const DECLINE_SMS = [{
   ok('two real same-amount charges on one day are two rows', plan.txCount === 2, plan.txCount);
 }
 
-/* ── statement rows reconcile with live captures by money facts, not title ──
+/* ── statement rows reconcile with compatible merchant and money facts ──
  *
  * A statement names the acquirer descriptor and usually has only a posting
  * date; the live alert names the friendly merchant and has the actual clock.
  * Treating those strings/timestamps as identity produced two rows for one
  * charge. The safe universal boundary is explicit PDF/CSV provenance + same
- * resolved account + direction + amount/date, consumed one-for-one.
+ * resolved account + direction + amount/date + compatible merchant, one-for-one.
  */
 {
   const { duplicateGuard } = require('./build/dedupe.js');
@@ -1551,8 +1551,15 @@ const DECLINE_SMS = [{
       ...firstStatement, title: 'NETWORK DESCRIPTOR B', ts: midnight + 1,
       smsKey: `s${midnight + 1}-3215`,
     };
-    ok('statement dedupe: two statement rows consume two equal live charges one-for-one',
-      repeated.has(firstStatement) && repeated.has(secondStatement));
+    ok('statement dedupe: unrelated descriptors do not consume equal-value live charges',
+      !repeated.has(firstStatement) && !repeated.has(secondStatement));
+    const sameMerchant = duplicateGuard([
+      live, { ...live, id: 'live-repeat', ts: liveTs + 3_600_000, smsKey: `s${liveTs + 3_600_000}-3215` },
+    ]);
+    ok('statement dedupe: two matching merchant rows consume equal live charges one-for-one',
+      sameMerchant.has({ ...firstStatement, title: 'PAYPAL *ENDURANCEIN' }) &&
+      sameMerchant.has({ ...secondStatement, title: 'PAYPAL *ENDURANCEIN' }) &&
+      !sameMerchant.has({ ...secondStatement, title: 'PAYPAL *ENDURANCEIN', ts: midnight + 2, smsKey: `s${midnight + 2}-3215` }));
   }
 
   {

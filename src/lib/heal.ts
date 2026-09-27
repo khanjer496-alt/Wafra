@@ -210,6 +210,15 @@ export function healPatch(
     }
   }
 
+  // An exact re-read can remove a category inferred from the bank's channel,
+  // but cannot infer a payment's purpose from its amount or generic title alone.
+  if (prior.title === 'Account debit' && prior.category === 'telecom' &&
+      p.kind === 'transaction' && p.merchant === 'Account debit' && p.type === 'expense' &&
+      p.categoryGuess === 'other' && !p.categoryPinned && !p.transferHint &&
+      p.raw && /\b(?:internet|online|mobile|digital|telephone)\s+banking\b/i.test(p.raw)) {
+    patch.category = 'other';
+  }
+
   // Keep the raw message on rows the parser still cannot read, so the accuracy
   // report has something to show. Only when it is still low-confidence AFTER
   // everything above, and only if it is not already stored.
@@ -221,7 +230,7 @@ export function healPatch(
     typeAfter === 'expense' &&
     !p.transferHint &&
     !transferAfter &&
-    (titleAfter === 'Card purchase' ||
+    (titleAfter === 'Card purchase' || (titleAfter === 'Account debit' && catAfter === 'other') ||
       (catAfter === 'other' && !p.categoryDeliberate && !STRUCTURAL_TITLES.has(titleAfter)));
   if (stillLow) {
     // A best-effort row (or reading) never keeps message text.

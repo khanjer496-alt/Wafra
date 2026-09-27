@@ -477,9 +477,18 @@ function buildImportPlanInMarket(
     }
     return guardCache;
   };
+  // A source-stated bank name is independent of the ledger currency/market.
+  // The old active-pack lookup discarded HSBC in SAR ledgers and every named
+  // bank outside the launch packs, so the same receipt could not heal/reconcile.
+  // This is explicit structured evidence only; an unknown sender is not a bank.
+  const bankFromHint = (p: ScannedSms): ReturnType<typeof bankFromName> => {
+    const name = p.bankHint?.trim();
+    if (!name || name.length > 120 || /[\u0000-\u001f\u007f]/.test(name)) return null;
+    return bankBrandForName(name) ?? { name, color: colorForHint(p.card?.last4 ?? '0000') };
+  };
   const captureInstrumentOf = (p: ScannedSms): CaptureInstrument | undefined => {
     if (!p.card) return undefined;
-    const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
+    const bank = bankFromHint(p) ?? bankFromSender(p.sender);
     return {
       last4: p.card.last4,
       kind: p.card.kind,
@@ -493,7 +502,7 @@ function buildImportPlanInMarket(
   const statementFactsOf = (p: ScannedSms): Pick<DuplicateCandidate, 'statementImportId' | 'statementBank'> => {
     const statementImportId = statementUploadOf(p);
     if (!statementImportId) return {};
-    const bank = p.bankHint ? bankFromName(p.bankHint) : null;
+    const bank = bankFromHint(p);
     return { statementImportId, ...(bank ? { statementBank: bankIdentityForName(bank.name) } : {}) };
   };
   /**
@@ -779,6 +788,46 @@ function buildImportPlanInMarket(
     });
     return candidates.length === 1 ? candidates[0] : undefined;
   };
+  const consumedLegacyStatementPayments = new Set<string>();
+  /** A statement receipt can correct one old, explicitly named card payment.
+   * Never use this exception for an ordinary expense, an ownership decision,
+   * another date/amount/card, or ambiguous equal payments. Keep the live id.
+   */
+  const legacyStatementPaymentPrior = (p: ScannedSms, accountId: string): Transaction | undefined => {
+    const instrument = captureInstrumentOf(p);
+    if (!isStatementCaptureSource(p.captureSource) || p.kind !== 'cardPayment' ||
+        p.cardPaymentSide !== 'receipt' || !p.transferHint || !p.date ||
+        instrument?.kind !== 'credit' || !instrument.bankIdentity) return undefined;
+    const candidates = (transferRepairCandidates().get(
+      transferRepairKey(accountId, 'expense', p.amountFils, p.date),
+    ) ?? []).filter((row) => !consumedLegacyStatementPayments.has(row.id) &&
+      row.isTransfer === true && row.category === 'other' &&
+      row.cardPaymentSide === undefined && row.paymentFlowSide === undefined &&
+      row.originalCurrency === undefined && row.fxSource === undefined &&
+      row.captureInstrument?.kind === 'credit' &&
+      row.captureInstrument.bankIdentity === instrument.bankIdentity &&
+      row.captureInstrument.last4 === instrument.last4 &&
+      /^card(?:\s*•\s*\d{4})?\s+payment$/i.test(row.title.trim()));
+    return candidates.length === 1 ? candidates[0] : undefined;
+  };
+  /** Reverse arrival: a later legacy alert must not undo a statement receipt. */
+  const statementPaymentReceiptPrior = (p: ScannedSms, accountId: string): Transaction | undefined => {
+    const instrument = captureInstrumentOf(p);
+    if (isStatementCaptureSource(p.captureSource) || p.kind !== 'transaction' ||
+        p.type !== 'expense' || !p.transferHint || !p.date || p.paymentFlowSide ||
+        instrument?.kind !== 'credit' || !instrument.bankIdentity ||
+        !/^card(?:\s*•\s*\d{4})?\s+payment$/i.test(p.merchant.trim())) return undefined;
+    const candidates = (transferRepairCandidates().get(
+      transferRepairKey(accountId, 'income', p.amountFils, p.date),
+    ) ?? []).filter((row) => !consumedLegacyStatementPayments.has(row.id) &&
+      isStatementCaptureSource(row.captureSource) && row.isTransfer === true &&
+      row.cardPaymentSide === 'receipt' && row.category === 'other' &&
+      row.originalCurrency === undefined && row.fxSource === undefined &&
+      row.captureInstrument?.kind === 'credit' &&
+      row.captureInstrument.bankIdentity === instrument.bankIdentity &&
+      row.captureInstrument.last4 === instrument.last4);
+    return candidates.length === 1 ? candidates[0] : undefined;
+  };
   const updates: TxHealUpdate[] = [];
   const healFromReparse = (
     smsKey: string | undefined,
@@ -1041,7 +1090,7 @@ function buildImportPlanInMarket(
           return { accountId: hinted, confident: true };
         }
         if (createMissing) {
-          const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ??
+          const bank = bankFromHint(p) ??
             bankFromName(evidence.sourceBank) ?? bankFromSender(p.sender);
           const bankName = bank?.name ?? evidence.sourceBank;
           const idx = newAccounts.length;
@@ -1081,7 +1130,7 @@ function buildImportPlanInMarket(
       // parsed fees, receipts and salaries. Keep a stable unresolved reference
       // until real source evidence or the user identifies an account.
       const priorAccount = ambiguousFallbackAccountId ? accountAtRef(ambiguousFallbackAccountId) : undefined;
-      const issuer = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
+      const issuer = bankFromHint(p) ?? bankFromSender(p.sender);
       // A sender identifies an issuer, not one of the user's cards. Preserve
       // user choices and compatible old assignments; repair only a provable
       // cross-bank fallback. New unidentified events get no invented account.
@@ -1105,7 +1154,7 @@ function buildImportPlanInMarket(
     // real cards sharing their last four digits at different banks — one user
     // holds a Liv card and an ENBD card both ending 8575, and payments were
     // settling against the wrong one.
-    const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
+    const bank = bankFromHint(p) ?? bankFromSender(p.sender);
     const scoped = hintKey(bank?.name, last4, kind);
     const noteType = (ref: string) => {
       if (kind === 'account' || kind === 'unknown') return;
@@ -1434,7 +1483,7 @@ function buildImportPlanInMarket(
       }
       if (!p.date) continue;
       if (p.date < staleDueCutoff) continue;
-      const statementBank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
+      const statementBank = bankFromHint(p) ?? bankFromSender(p.sender);
       const bankOnlyCandidates = !p.card && statementBank
         ? accountCandidates.filter(
             ({ ref, account }) =>
@@ -1566,6 +1615,14 @@ function buildImportPlanInMarket(
           cardPaymentSide,
           stablePrior,
         );
+        continue;
+      }
+      const legacyStatementPayment = resolution.confident
+        ? legacyStatementPaymentPrior(p, accountId) : undefined;
+      if (legacyStatementPayment) {
+        consumedLegacyStatementPayments.add(legacyStatementPayment.id);
+        healFromReparse(undefined, p, accountId, cardPaymentSide, legacyStatementPayment);
+        guard().consume(legacyStatementPayment.id);
         continue;
       }
       // A card payment lands as income into the card account.
@@ -1723,6 +1780,12 @@ function buildImportPlanInMarket(
       continue;
     }
     const duplicate = guard();
+    const statementReceipt = resolution.confident ? statementPaymentReceiptPrior(p, accountId) : undefined;
+    if (statementReceipt) {
+      consumedLegacyStatementPayments.add(statementReceipt.id);
+      duplicate.consume(statementReceipt.id);
+      continue;
+    }
     const statementPrior = !exactPrior && !stablePrior && resolution.confident
       ? statementTransferPrior(p, accountId)
       : undefined;
@@ -1858,6 +1921,7 @@ function buildImportPlanInMarket(
       !p.transferHint &&
       p.type === 'expense' &&
       (p.merchant === 'Card purchase' ||
+        (p.merchant === 'Account debit' && p.categoryGuess === 'other') ||
         (p.categoryGuess === 'other' &&
           !p.categoryDeliberate &&
           !STRUCTURAL_TITLES.has(p.merchant)));

@@ -803,34 +803,52 @@ export function duplicateGuard(
   const sameDescriptor = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
   /**
    * Whether a statement descriptor and an alert title can name one merchant:
-   * one shares a word of four or more letters with the other ("PAYPAL
+   * normalized merchant words agree in order ("PAYPAL
    * *ENDURANCEIN" / "Endurancein", "CARREFOUR HYPER 1234" / "Carrefour").
-   * Money and a day alone are not an identity when the statement names no
+   * Money and a day alone are not an identity, even when the statement names an
    * account: "NOON.COM 50.00" and "Carrefour 50.00" are two purchases.
    */
   const descriptorOverlap = (a: string, b: string): boolean => {
-    const words = (value: string) => new Set(value.toLowerCase().normalize('NFKC')
-      .split(/[^\p{L}\p{N}]+/u).filter((word) => word.length >= 4 && /\p{L}/u.test(word)));
+    // Compare the merchant phrase, not any shared word: Dubai/Company/Pay
+    // occur on unrelated rows, and "Urban Company" is not "Urban Restaurant".
+    const words = (value: string) => value.toLowerCase().normalize('NFKC')
+      .replace(/^(?:nfc|iap)\s*-\s*\(g-pay\)\s*-\s*/i, '')
+      .replace(/^(?:paypal|gpay|pos)\s*\*\s*/i, '')
+      .replace(/\burbanclap\b/g, 'urban company')
+      .split(/[^\p{L}\p{N}]+/u).filter(Boolean);
     const left = words(a);
     const right = words(b);
-    for (const word of left) if (right.has(word)) return true;
-    const flatLeft = [...left].join(' ');
-    const flatRight = [...right].join(' ');
-    return [...left].some((word) => flatRight.includes(word)) || [...right].some((word) => flatLeft.includes(word));
+    const [short, long] = left.length <= right.length ? [left, right] : [right, left];
+    if (short.length === 0 || !short.some((word) => /\p{L}/u.test(word)) ||
+        !short.every((word, index) => word === long[index])) return false;
+    // A day-level statement has no precise clock to support arbitrary prefix
+    // matching: Amazon Cafe and Amazon are different businesses. Only bounded
+    // branch/legal/location metadata may extend an otherwise equal phrase.
+    // Unknown extensions stay separate rather than silently deleting a charge.
+    return long.slice(short.length).every((word) =>
+      /^\d+$/.test(word) ||
+      /^(?:br|branch|site|no|llc|ltd|limited|fze|fzco|hyper|hypermarket|ae|uae|dubai|sharjah|ajman|abu|dhabi)$/.test(word));
   };
+  const settlementTitle = (value: string) => /^card(?:\s*•\s*\d{4})?\s+payment$/i.test(value.trim());
+  const statementDescriptorsAgree = (a: string, b: string): boolean =>
+    sameDescriptor(a, b) || (settlementTitle(a) && settlementTitle(b)) ||
+    (!GENERIC_CAPTURE_TITLES.has(a.trim().toLowerCase()) &&
+      !GENERIC_CAPTURE_TITLES.has(b.trim().toLowerCase()) && descriptorOverlap(a, b));
   const statementPairMatch = (c: DuplicateCandidate): SeenStatementPairEvent | undefined => {
     const incomingStatement = isStatementCaptureSource(c.captureSource);
     const open = statementPairNear(c.date).filter((row) =>
       !row.consumed && row.type === c.type &&
       compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument));
     // 1. Statement <-> live capture on the SAME resolved account. Provenance
-    // is the permission to relax title/time; a bounded posting drift is allowed.
+    // permits bounded posting drift, never a contradiction in merchant identity.
     if (c.accountId) {
       const matches = open.filter((row) =>
         !!row.accountId &&
         row.accountId === c.accountId &&
         isStatementCaptureSource(row.captureSource) !== incomingStatement &&
         Math.abs(row.amountFils - c.amountFils) <= 1 &&
+        banksCompatible(bankOf(row), bankOf(c)) &&
+        statementDescriptorsAgree(row.title, c.title) &&
         sameOrAdjacentDate(row.date, c.date));
       if (matches.length) {
         matches.sort((a, b) => {
@@ -856,7 +874,7 @@ export function duplicateGuard(
         row.amountFils === c.amountFils &&
         row.date === c.date &&
         banksCompatible(bankOf(row), bankOf(c)) &&
-        (!unlabelled || sameDescriptor(row.title, c.title)));
+        (unlabelled ? sameDescriptor(row.title, c.title) : statementDescriptorsAgree(row.title, c.title)));
       if (match) return match;
     }
     // 3. A statement that could not name its account <-> a live capture on any
@@ -871,7 +889,7 @@ export function duplicateGuard(
       row.amountFils === c.amountFils &&
       row.date === c.date &&
       banksCompatible(bankOf(row), bankOf(c)) &&
-      (descriptorOverlap(row.title, c.title) || sameDescriptor(row.title, c.title)));
+      statementDescriptorsAgree(row.title, c.title));
     return matches[0];
   };
   /** Opposite alerts for one card payment: bank-account debit + card receipt. */

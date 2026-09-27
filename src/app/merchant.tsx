@@ -25,6 +25,7 @@ import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { countsInTotals, internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { projectMerchantSpending } from '@/lib/merchant-spending';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
+import { transactionPresentation } from '@/lib/transaction-presentation';
 import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
@@ -78,6 +79,8 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
   const data = useMemo(() => matches.slice(0, RECENT_TRANSACTION_LIMIT), [matches]);
   const openEntry = useCallback((tx: Transaction) => setEntry(tx), []);
   const category = sharedCategory(primaryRows);
+  const representative = summary.activity[0];
+  const displayName = representative ? transactionPresentation(representative, language).title : merchant;
   const lang = language === 'ar' ? 'ar' : 'en';
   const range = periodRange(period);
   const countLabel = income ? w.incomeCount : w.purchases;
@@ -89,7 +92,7 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
       <MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={56} />
       <View style={styles.identityCopy}>
         <ThemedText type="title" accessibilityRole="header" numberOfLines={large ? undefined : 2}
-          style={[styles.name, { color: band.onBand }]}>{merchant || pickLabel}</ThemedText>
+          style={[styles.name, { color: band.onBand }]}>{displayName || pickLabel}</ThemedText>
         {/* A category only when every row shares it; mixed rows name none. */}
         {category ? <ThemedText type="small" style={{ color: band.onBandSecondary }}>{categoryLabel(category, lang)}</ThemedText> : null}
       </View>

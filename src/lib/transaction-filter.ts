@@ -4,6 +4,7 @@ import { countsInTotals, isMoneyMovementOnly } from '@/lib/ledger';
 import type { Period } from '@/lib/period';
 import { amountInCategories, touchesCategories } from '@/lib/splits';
 import { transactionSource, type TransactionSourceKind } from '@/lib/transaction-source';
+import { transactionPresentation } from '@/lib/transaction-presentation';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 
 export type DatePreset = 'selected' | 'all' | 'month' | 'lastMonth' | '3months' | 'custom';
@@ -100,8 +101,10 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
       labels.set(row.category, category);
     }
     const title = row.title.toLowerCase();
+    const presentation = transactionPresentation(row, language);
+    const display = [presentation.title, presentation.tag].filter(Boolean).join(' ').toLowerCase();
     const account = accountNames?.get(row.accountId);
-    return { row, merchantKey: title.trim(), search: title + '\u0000' + category + (account ? '\u0000' + account.toLowerCase() : ''),
+    return { row, merchantKey: title.trim(), search: title + '\u0000' + display + '\u0000' + category + (account ? '\u0000' + account.toLowerCase() : ''),
       month: monthKey(row.date) };
   });
   // Sorting changes no filter result and is needed at most once per ledger.
