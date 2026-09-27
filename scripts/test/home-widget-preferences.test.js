@@ -9,6 +9,7 @@ const {
   moveHomeWidget,
   normalizeHomeWidgetPreferences,
   setHomeWidgetVisible,
+  splitHomeWidgetLayout,
 } = require('./build/home-widget-preferences');
 
 {
@@ -24,7 +25,7 @@ const {
     order: ['activity', 'activity', 'made-up', 'assistant'],
     hidden: ['due', 'due', 'unknown'],
   });
-  assert.deepEqual(repaired.order, ['activity', 'assistant', 'due', 'upcoming', 'insight']);
+  assert.deepEqual(repaired.order, ['greeting', 'overview', 'today', 'week', 'activity', 'assistant', 'due', 'upcoming', 'insight', 'capture']);
   assert.deepEqual(repaired.hidden, ['due']);
 }
 
@@ -38,21 +39,21 @@ const {
 {
   const start = defaultHomeWidgetPreferences();
   const moved = moveHomeWidget(start, 'upcoming', -1);
-  assert.deepEqual(moved.order.slice(0, 2), ['upcoming', 'due']);
-  assert.deepEqual(start.order.slice(0, 2), ['due', 'upcoming'], 'reordering must be immutable');
-  assert.deepEqual(moveHomeWidget(start, 'due', -1), start, 'moving past the first item is a no-op');
-  assert.deepEqual(moveHomeWidget(start, 'insight', 1), start, 'moving past the last item is a no-op');
+  assert.deepEqual(moved.order.slice(4, 6), ['upcoming', 'due']);
+  assert.deepEqual(start.order.slice(4, 6), ['due', 'upcoming'], 'reordering must be immutable');
+  assert.deepEqual(moveHomeWidget(start, 'greeting', -1), start, 'moving past the first item is a no-op');
+  assert.deepEqual(moveHomeWidget(start, 'capture', 1), start, 'moving past the last item is a no-op');
 }
 
 {
   const defaults = defaultHomeWidgetPreferences();
   assert.ok(defaults.order.indexOf('due') < defaults.order.indexOf('assistant'), 'unconfigured Home must prioritize due payments');
-  assert.deepEqual(defaults.order.slice(0, 3), ['due', 'upcoming', 'activity'], 'E Home starts with payments and activity');
+  assert.deepEqual(defaults.order, ['greeting', 'overview', 'today', 'week', 'due', 'upcoming', 'activity', 'assistant', 'insight', 'capture'], 'the default includes the entire Home');
   for (const saved of [
     { order: ['assistant', 'insight', 'due', 'activity', 'upcoming'], hidden: [] },
     { order: ['upcoming', 'activity', 'assistant', 'due', 'insight'], hidden: ['upcoming', 'due'] },
   ]) {
-    assert.deepEqual(normalizeHomeWidgetPreferences(saved), saved, 'saved order and hidden widgets must not be migrated to the new default');
+    assert.deepEqual(normalizeHomeWidgetPreferences(saved), { order: ['greeting', 'overview', 'today', 'week', ...saved.order, 'capture'], hidden: saved.hidden }, 'legacy choices stay intact between newly configurable content');
   }
 }
 
@@ -68,11 +69,11 @@ const {
 
 {
   const customize = fs.readFileSync(path.resolve(__dirname, '../../src/app/home-customize.tsx'), 'utf8');
-  const home = fs.readFileSync(path.resolve(__dirname, '../../src/screens/ledger-home-screen.tsx'), 'utf8');
+  const home = fs.readFileSync(path.resolve(__dirname, '../../src/screens/journal-home-screen.tsx'), 'utf8');
   assert.match(customize, /useLargeTextLayout\(\)/, 'Customize Home must reflow for accessibility text sizes');
   assert.match(customize, /width: 48, height: 48/, 'reorder controls must retain platform touch floors');
-  assert.match(home, /MoneyOverview|<Hero/, 'the money overview must remain outside customizable widget ordering');
-  assert.match(home, /capture|Capture/i, 'automatic capture must remain a fixed Home surface');
+  assert.match(home, /splitHomeWidgetLayout/, 'Home follows the same visible section order as the editor');
+  assert.deepEqual(splitHomeWidgetLayout({ order: [...DEFAULT_HOME_WIDGETS.order], hidden: [...DEFAULT_HOME_WIDGETS.order] }), { band: [], sheet: [] }, 'all content can be hidden; toolbar and Customize stay outside');
 }
 
 console.log('✓ Home widget preferences, ordering and accessibility hardening');

@@ -112,7 +112,7 @@ test('the transfer notice appears only for a non-empty review queue and opens th
   assert.deepEqual(h.events.at(-1), ['route', '/review-transfers']);
 });
 
-test('Arabic week shows full weekday names in its readable exact-value layout', () => {
+test('Arabic week keeps concise visible days and full spoken names', () => {
   // Full names need about 61pt a column (الخميس in Noto Kufi); a 390pt phone
   // gives ~44pt, so full names start at 430pt.
   const wide = createHarness({ language: 'ar', width: 430 }).render('home');
@@ -121,7 +121,8 @@ test('Arabic week shows full weekday names in its readable exact-value layout', 
   assert.match(week.props.accessibilityLabel, /الأحد|السبت/);
   const narrow = createHarness({ language: 'ar', width: 390 }).render('home');
   const narrowWeek = byId(narrow, 'home-week');
-  assert.match(text(narrowWeek), /السبت/, 'narrow exact-value rows have room for full dates');
+  assert.doesNotMatch(text(narrowWeek), /السبت/, 'narrow rows avoid repeating full dates and weekday names');
+  assert.match(text(narrowWeek), /1,800/, 'exact daily values remain visible');
   assert.match(narrowWeek.props.accessibilityLabel, /السبت/);
   const english = createHarness({ width: 390 }).render('home');
   assert.match(byId(english, 'home-week').props.accessibilityLabel, /Saturday/);
@@ -145,4 +146,27 @@ test('home-today helpers: pending transfer totals, capture times and earlier rec
   assert.equal(times.length, 2, 'rows older than the window are not read');
   assert.equal(times[0], 123);
   assert.equal(times[1], new Date(2026, 8, 4, 12).getTime(), 'a row without a clock counts at local noon');
+});
+
+test('Left in budgets opens budgeted categories from every Home placement', () => {
+  for (const language of ['en', 'ar']) {
+    const h = createHarness({ language });
+    const tile = byId(h.render('home'), 'home-left-to-spend');
+    assert.equal(tile.props.accessibilityRole, 'button');
+    assert.ok(tile.props.accessibilityHint);
+    tile.props.onPress();
+    assert.deepEqual(h.events.at(-1), ['route', '/flow?view=categories&filter=limited']);
+    const f = createHarness({ language, params: { view: 'categories', filter: 'limited' } });
+    const tree = f.render('flow');
+    assert.ok(byId(tree, 'spending-category-dining'), 'budgeted category remains');
+    assert.equal(byId(tree, 'spending-category-other'), undefined, 'unbudgeted category is filtered out');
+  }
+});
+
+
+test('budget deep link never empties non-month spending when date scope changes', () => {
+  for (const period of [{mode:'all'}, {mode:'year',year:2026}, {mode:'range',from:'2026-09-01',to:'2026-09-06'}]) {
+    const h=createHarness({period,params:{view:'categories',filter:'limited'}});
+    assert.ok(byId(h.render('flow'),'spending-category-other'),'non-month periods keep their unbudgeted spending');
+  }
 });

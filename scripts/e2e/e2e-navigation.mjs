@@ -67,19 +67,29 @@ const locate = (page, key) => page.evaluate((want) => {
   return null;
 }, key);
 
-/**
- * Whether this aria-label or exact text is on top, polled like tapKey. One
- * look right after a navigation can land while the pushed screen is still
- * sliding in over the old one, and read a real section as missing.
- */
-async function reachable(page, key, timeout = 4000) {
+/** A route URL can update before its first heading is hit-testable on a cold runner. */
+async function waitForReachable(page, key, timeout = 4000) {
   const deadline = Date.now() + timeout;
   for (;;) {
     const hit = await locate(page, key);
     if (hit) return hit;
-    if (Date.now() > deadline) return null;
-    await page.waitForTimeout(200);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await page.waitForTimeout(Math.min(100, remaining));
   }
+  // Keep evidence when the real condition never becomes true; missing or
+  // covered content must still fail rather than turn into an accepted retry.
+  const matches = await page.evaluate(want => [...document.querySelectorAll('*')]
+    .filter(el => el.getAttribute?.('aria-label') === want ||
+      (el.textContent || '').trim() === want && !(el.firstElementChild && (el.firstElementChild.textContent || '').trim() === want))
+    .map(el => {
+      const r = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return { tag: el.tagName, role: el.getAttribute('role'), x: r.x, y: r.y, width: r.width, height: r.height,
+        display: style.display, visibility: style.visibility };
+    }), key);
+  console.log(`  → heading readiness timed out: ${JSON.stringify({ path: new URL(page.url()).pathname, key, matches })}`);
+  return null;
 }
 
 /** Click whatever carries this aria-label or exact text and is on top. */
@@ -431,7 +441,7 @@ await pressEverything('transactions', async () => { await home(); await tapKey(p
 // section is present, then sweep the complete scroll range of both.
 await settings();
 for (const section of ['Capture', 'Notifications', 'Appearance', 'Country and currency', 'Privacy and security']) {
-  ok(`settings: ${section} section is reachable`, !!(await reachable(page, section)));
+  ok(`settings: ${section} section is reachable`, !!(await waitForReachable(page, section)));
 }
 const settingsSweep = await pressEverything('settings', settings, { fullScroll: true });
 for (const control of [
@@ -442,7 +452,7 @@ for (const control of [
 }
 await settingsData();
 for (const section of ['Your data', 'Help Wafra get better', 'About', 'Danger zone']) {
-  ok(`data and help: ${section} section is reachable`, !!(await reachable(page, section)));
+  ok(`data and help: ${section} section is reachable`, !!(await waitForReachable(page, section)));
 }
 const dataSweep = await pressEverything('data and help', settingsData,
   { skip: ['Erase all data'], fullScroll: true });
@@ -795,6 +805,20 @@ for (const [name, enter] of [
   for (const [name, key] of [['home', 'Home'], ['flow', 'Spending'], ['bills', 'Bills'], ['wallet', 'Accounts']]) {
     await tapTab(page, key);
     await page.waitForTimeout(700);
+    if (name === 'bills') {
+      // Payment previews intentionally scroll horizontally. Bring every tile
+      // into view and verify its complete text, just like the filter strip.
+      for (const tile of await page.locator('[data-testid^="bills-timeline-payment-"]').all()) {
+        await tile.scrollIntoViewIfNeeded();
+        const fits = await tile.evaluate(node => {
+          const r = node.getBoundingClientRect();
+          return r.left >= -1 && r.right <= innerWidth + 1 && [...node.querySelectorAll('*')]
+            .filter(n => n.children.length === 0 && n.textContent.trim())
+            .every(n => { const t = n.getBoundingClientRect(); return n.scrollWidth <= n.clientWidth + 1 && t.left >= r.left - 1 && t.right <= r.right + 1; });
+        });
+        if (!fits) overflow.push('bills: payment tile cannot be fully revealed');
+      }
+    }
     overflow.push(...(await clippedText(page, name)));
   }
   await tapKey(page, 'Home', 5000);

@@ -45,24 +45,25 @@ test('Compare direction: the like-for-like delta, with a noise floor for "about 
   assert.equal(compareDirection({ currentFils: 0, previousFils: 0, deltaFils: 0 }, 0), 'same');
 });
 
-test('Categories: the band holds the period total, Day X of Y and the one-tone share bar', () => {
+test('Categories: the band holds the selected period, total and one-tone share bar', () => {
   const h = createHarness();
   const tree = h.render('flow');
   const scaffold = walk(tree).find((node) => node.type === 'BandScaffold');
   assert.equal(scaffold.props.band, 'spending');
   assert.equal(scaffold.props.tabbed, true);
   assert.equal(scaffold.props.nav.title, 'Spending');
-  assert.deepEqual([...scaffold.props.nav.actions.map((a) => a.testID)], ['spending-search', 'spending-period']);
-  assert.match(scaffold.props.nav.actions[1].label, /^Choose period, Sept? 2026$/);
+  assert.deepEqual([...scaffold.props.nav.actions.map((a) => a.testID)], ['spending-search']);
+  assert.match(byId(tree, 'spending-period').props.accessibilityLabel, /^Choose period, Sept? 2026$/);
   const band = scaffold.props.bandContent;
   const total = byId(band, 'spending-total');
-  assert.match(total.props.accessibilityLabel, /^Spent this month, AED 5,360\.00$/);
-  assert.equal(text(byId(band, 'spending-pace')), 'Day 6 of 30');
+  assert.match(total.props.accessibilityLabel, /^Total spent, AED 5,360\.00$/);
+  assert.equal(byId(band, 'spending-pace'), undefined, 'day progress is not repeated above the daily details');
   assert.ok(byId(band, 'spending-share-bar'));
   // A past month names itself instead of "this month", with no pace.
   const past = walk(createHarness({ period: { mode: 'month', key: '2026-08' } }).render('flow'))
     .find((node) => node.type === 'BandScaffold').props.bandContent;
-  assert.match(byId(past, 'spending-total').props.accessibilityLabel, /^Spent in Aug 2026, AED /);
+  assert.match(byId(past, 'spending-total').props.accessibilityLabel, /^Total spent, AED /);
+  assert.match(text(byId(past, 'spending-period')), /Aug 2026/);
   assert.equal(byId(past, 'spending-pace'), undefined);
 });
 

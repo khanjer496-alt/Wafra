@@ -323,9 +323,15 @@ export default function AddTransactionScreen() {
     }, SUGGESTION_DEBOUNCE_MS);
     return () => { current = false; clearTimeout(timer); };
   }, [adviceLanguage, manualEntry, merchantOverrides, titleForAdvice, type]);
-  // The categories this person actually used most for this direction in the
-  // last 90 days: data, not a guess, and computed once per direction.
-  const transactions = state.transactions;
+  // Rank the last 90 days from this entry's opening ledger. Saving changes
+  // frequency ranks while router.back() removes this screen; reordering the
+  // same native ScrollView children in that batch can tear down Android Fabric.
+  // A new entry gets the latest ledger; direction changes still rerank here.
+  const suggestionHistory = useRef<typeof state.transactions | null>(null);
+  if (suggestionHistory.current === null && state.hydrated) {
+    suggestionHistory.current = state.transactions;
+  }
+  const transactions = suggestionHistory.current ?? state.transactions;
   const usualCategories = useMemo(() => {
     if (!manualEntry) return [] as CategoryId[];
     const since = new Date();

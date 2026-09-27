@@ -128,6 +128,7 @@ function harness(options = {}) {
   dependencies['@/components/home-add-button'] = { HOME_ADD_BUTTON_CLEARANCE, HomeAddButton: (props) => jsx('HomeAddButton', props) };
   dependencies['@/components/limit-sheet'] = { LimitSheet: (props) => jsx('Sheet', { ...props, name: 'LimitSheet' }) };
   dependencies['@/lib/widget-snapshot'] = load(path.join(root, 'src/lib/widget-snapshot.ts'), dependencies);
+  dependencies['@/lib/widget-sync'] = { requestWidgetSnapshotSync: () => ({cancel() {}, done: Promise.resolve('written')}), invalidateWidgetSnapshotSync: async () => 'cleared' };
   dependencies['../../modules/wafra-widgets'] = { setWidgetSnapshot() {}, clearWidgetSnapshot() {} };
   // Widget inputs Home shares with the Widgets screen run from source, over
   // this harness's own ledger stubs (loaded on first use, once they exist).

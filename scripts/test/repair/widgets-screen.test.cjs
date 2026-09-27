@@ -13,12 +13,15 @@ const load = require('./load-typescript.cjs');
 
 const root = path.resolve(__dirname, '../../..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
-const build = (name) => require(path.join(__dirname, '../build', `${name}.js`));
 const theme = load(path.join(root, 'src/constants/theme.ts'), { '@/global.css': {}, 'react-native': { Platform: { select: (x) => x.ios ?? x.default } } });
 const { widgetsCopyTables, widgetsCopy } = load(path.join(root, 'src/lib/widgets-copy.ts'));
 const preview = load(path.join(root, 'src/lib/widget-preview.ts'));
 const logoApi = load(path.join(root, 'src/lib/widget-logo.ts'));
-const snapshotApi = load(path.join(root, 'src/lib/widget-snapshot.ts'), { '@/lib/widget-logo': logoApi });
+const real = require('../../universal-test/load-ts.cjs').createLoader();
+const { widgetHistoryBlocksUpdate } = load(path.join(root, 'src/lib/widget-sync.ts'), {
+  '@/lib/ledger': real('@/lib/ledger'), '@/lib/subscriptions': real('@/lib/subscriptions'), '@/lib/widget-ledger': real('@/lib/widget-ledger'),
+  '../../modules/wafra-widgets': { setWidgetSnapshot() {}, clearWidgetSnapshot() {} },
+});
 const hint = load(path.join(root, 'src/lib/widgets-hint.ts'), {
   '@react-native-async-storage/async-storage': { __esModule: true, default: { getItem: async () => null, setItem: async () => {} } },
 });
@@ -26,21 +29,13 @@ const ARABIC = /[؀-ۿ]/;
 
 // ── The real ledger → snapshot path (the one Home's widget sync uses) ──────
 function realWidgetLedger() {
-  const deps = {};
-  const lazy = (name, make) => Object.defineProperty(deps, name, { enumerable: true, configurable: true, get() {
-    const value = make();
-    Object.defineProperty(deps, name, { value, enumerable: true, configurable: true });
-    return value;
-  } });
-  for (const name of ['categories', 'format', 'ledger', 'period', 'splits']) lazy(`@/lib/${name}`, () => build(name));
-  lazy('@/lib/home-today', () => load(path.join(root, 'src/lib/home-today.ts'), deps));
-  lazy('@/lib/widget-snapshot', () => snapshotApi);
-  lazy('@/lib/dashboard-projection', () => load(path.join(root, 'src/lib/dashboard-projection.ts'), {
-    '@/lib/accuracy': build('accuracy'), '@/lib/analytics': build('analytics'), '@/lib/cash-flow': build('cash-flow'),
-    '@/lib/fx-summary': build('fx-summary'), '@/lib/insights': build('insights'), '@/lib/leaving-soon': build('leaving-soon'),
-    '@/lib/ledger': build('ledger'), '@/lib/transfer-activity': build('transfer-activity'), '@/lib/transfer-reconciliation': build('transfer-reconciliation'), '@/lib/period': build('period'), '@/lib/uncategorised': build('uncategorised'),
-  }));
-  return load(path.join(root, 'src/lib/widget-ledger.ts'), deps);
+  const ledger = real('@/lib/ledger');
+  return { widgetSnapshotForLedger(input) {
+    const state = input.state;
+    const detected = real('@/lib/subscriptions').detectSubscriptions(state.transactions, state.notSubscriptions, input.now,
+      ledger.liveAccountIds(state.accounts), ledger.internalTransferIdsForState(state));
+    return real('@/lib/widget-ledger').widgetSnapshotForLedger(input, detected);
+  } };
 }
 
 const NOW = new Date(2026, 8, 26, 12, 0, 0); // Saturday 26 September 2026
@@ -72,7 +67,7 @@ test('the snapshot the Widgets screen previews is the one built from the ledger,
   assert.equal(snapshot.last7Minor[5], 1100, 'yesterday is the day before today');
   assert.equal(snapshot.leftInBudgetsMinor, null, 'no budgets, no budget line');
   assert.deepEqual(snapshot.bills.map((bill) => [bill.title, bill.amountMinor, bill.dueISO, bill.estimated]),
-    [['DEWA', 38000, '2026-09-29', true]], 'a bill is a projection, so it is estimated');
+    [['DEWA', 38000, '2026-09-29', false]], 'manual bill amount matches Bills; only inferred renewals are estimated');
   assert.equal(snapshot.hidden, false);
   assert.equal(snapshot.amountsSensitive, true, 'the Lock Screen and StandBy still redact');
 });
@@ -84,12 +79,11 @@ test('no snapshot is previewed when the app writes none (private mode, not onboa
   }
 });
 
-test('Home hands the widgets the same inputs through the shared helpers', () => {
+test('Home delegates widgets to the cooperative full-ledger producer, independent of its short payment list', () => {
   const home = read('src/screens/journal-home-screen.tsx');
-  assert.match(home, /upcoming: widgetUpcomingInput\(payments\)/);
-  assert.match(home, /return widgetMonthToday\(\{/);
-  assert.match(home, /if \(state\.privateMode\) \{ clearWidgetSnapshot\(\); return; \}/, 'private mode still clears the widgets');
-  assert.match(home, /hideAmounts: false/);
+  assert.match(home, /requestWidgetSnapshotSync\(/);
+  assert.match(home, /invalidateWidgetSnapshotSync\(/);
+  assert.doesNotMatch(home, /upcoming: widgetUpcomingInput\(payments\)/);
 });
 
 // ── Pure preview rules mirror the native widgets ───────────────────────────
@@ -161,7 +155,7 @@ const walk = (node) => !node || typeof node !== 'object' ? [] : Array.isArray(no
 const strings = (node) => !node ? [] : typeof node === 'string' ? [node] : typeof node !== 'object' ? []
   : Array.isArray(node) ? node.flatMap(strings) : strings(node.props?.children);
 
-async function screen({ platform = 'ios', pinnable = false, pinResult = true, language = 'en', state = ledgerState(), realLedger = false, scheme = 'light', snapshotOverride } = {}) {
+async function screen({ platform = 'ios', pinnable = false, pinResult = true, language = 'en', state = ledgerState(), realLedger = false, scheme = 'light', snapshotOverride, syncPromise } = {}) {
   const slots = [], effects = [], events = [];
   let cursor = 0;
   const slot = (create) => slots[cursor++] ?? (slots[cursor - 1] = create());
@@ -175,6 +169,8 @@ async function screen({ platform = 'ios', pinnable = false, pinResult = true, la
   const runtime = { jsx, jsxs: jsx, Fragment: 'Fragment' };
   const native = { Platform: { OS: platform }, StyleSheet: { create: (x) => x, hairlineWidth: 1 }, View: 'View' };
   const snapshots = [];
+  const getStateSnapshot = () => state;
+  const getStateGeneration = () => 1;
   const ledger = realLedger ? realWidgetLedger() : null;
   const previews = load(path.join(root, 'src/components/widgets/widget-previews.tsx'), {
     react, 'react/jsx-runtime': runtime, 'react-native': native,
@@ -195,11 +191,15 @@ async function screen({ platform = 'ios', pinnable = false, pinResult = true, la
     '@/components/widgets/widget-history': { WidgetHistory: 'WidgetHistory' },
     '@/hooks/use-band': { useBand: (id) => theme.BandPalettes[scheme][id], useBandScheme: () => scheme },
     '@/hooks/use-language': { useLanguage: () => language },
+    '@/hooks/use-today': { useResumeClock: () => NOW },
+    '@/lib/format': real('@/lib/format'),
     '@/constants/theme': theme,
     '@/lib/ledger-money': { ledgerMoneySpec: (currency) => ({ currency, exponent: 2 }) },
     '@/lib/markets': { marketCurrencyCode: () => 'AED' },
-    '@/lib/store': { useStore: () => ({ state }) },
-    '@/lib/widget-ledger': { widgetSnapshotForLedger: (input) => {
+    '@/lib/store': { useStore: () => ({ state, getStateSnapshot, getStateGeneration }) },
+    '@/lib/widget-sync': { widgetHistoryBlocksUpdate, requestWidgetSnapshotSync: () => ({ cancel() {}, done: syncPromise ?? Promise.resolve('written') }),
+      prepareWidgetSnapshot: async (input) => {
+      if (widgetHistoryBlocksUpdate(input.state.historyImport)) return undefined;
       const value = ledger ? ledger.widgetSnapshotForLedger(input) : fixtureSnapshot({ language: input.language, ...snapshotOverride });
       snapshots.push(value);
       return value;
@@ -233,7 +233,7 @@ test('previews draw the snapshot’s own figures in the widgets’ bands', async
   const upcomingText = s.text(upcoming);
   assert.match(upcomingText, /DEWA/);
   assert.match(upcomingText, /Tuesday/);
-  assert.match(upcomingText, /≈ AED 380\.00/);
+  assert.match(upcomingText, /AED 380\.00/);
   // Every figure on the screen is one the snapshot carries.
   const figures = s.text().match(/\d[\d,]*\.\d{2}/g) ?? [];
   const allowed = new Set([snapshot.todayMinor, preview.widgetWeekTotal(snapshot), ...snapshot.bills.map((b) => b.amountMinor)]
@@ -468,5 +468,29 @@ test('subscription preview logos match native allowlisted snapshot identities wi
     const withoutLogo = await screen({ snapshotOverride: { bills: [{ ...bill, logoId }] } });
     assert.equal(walk(withoutLogo.find('widgets-preview-upcoming')).filter(n => n.type === 'Image').length, 0);
     assert.ok(withoutLogo.text(withoutLogo.find('widgets-preview-upcoming')).includes('Netflix'));
+  }
+});
+
+test('Android pin waits for the complete widget snapshot write before opening the launcher', async () => {
+  let resolve;
+  const syncPromise = new Promise(done => { resolve = done; });
+  const s = await screen({ platform: 'android', pinnable: true, syncPromise });
+  s.find('widgets-pin-upcoming').props.onPress(); await s.flush();
+  assert.equal(s.events.some(e => e[0] === 'pin'), false);
+  resolve('written'); await s.flush();
+  assert.deepEqual(s.events.filter(e => e[0] === 'pin'), [['pin', 'upcoming']]);
+});
+
+test('preview import notice and pin availability share the untouched-import guard in both languages', async () => {
+  const untouched = { status: 'paused', scanned: 0, found: 0, cursor: null };
+  for (const language of ['en', 'ar']) {
+    const ready = await screen({ platform: 'android', pinnable: true, language, state: ledgerState({ historyImport: untouched }) });
+    assert.equal(ready.find('widgets-preparing'), undefined);
+    assert.equal(ready.find('widgets-pin-upcoming').props.disabled, false);
+    for (const historyImport of [{ ...untouched, status: 'running' }, { ...untouched, status: 'failed' }, { ...untouched, scanned: 1 }]) {
+      const pending = await screen({ platform: 'android', pinnable: true, language, state: ledgerState({ historyImport }) });
+      assert.equal(pending.text(pending.find('widgets-preparing')), widgetsCopy(language).importPending);
+      assert.equal(pending.find('widgets-pin-upcoming').props.disabled, true);
+    }
   }
 });

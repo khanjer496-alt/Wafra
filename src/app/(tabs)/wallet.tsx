@@ -377,7 +377,7 @@ export default function WalletScreen() {
   // tap away there (header) and here (the sliders beside each row).
   const openAccount = (account: Account) => {
     if (account.kind === 'card' || account.cardType) {
-      router.push(`/cards?card=${account.id}`);
+      router.push(`/card?id=${encodeURIComponent(account.id)}`);
       return;
     }
     if (isAccountDetailTarget(account)) {

@@ -2,19 +2,25 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { harness, walk, text } = require('./journal-harness.cjs');
-// Home B leads with Today; the period spending figure is the one inside home-spending-total.
-const periodMoney = (nodes) => walk(nodes.find((node) => node.props.testID === 'home-spending-total')).find((node) => node.type === 'Money');
+// The same exact selected-period amount is visible and spoken above daily spending.
+const periodMinor = (nodes) => {
+  const amount=nodes.find(node=>node.props.testID==='home-spending-total');
+  const match=amount.props.accessibilityLabel.match(/AED ([\d,]+(?:\.\d+)?)/);
+  assert.ok(match);
+  assert.ok(text(amount).includes(match[1]),'visible amount matches the spoken amount');
+  return Math.round(Number(match[1].replace(/,/g,''))*100);
+};
 
-test('Home leads with activity and keeps one period summary before capture controls', () => {
+test('Home leads with one selected-period summary before daily spending and activity', () => {
   const h = harness();
   const nodes = walk(h.tree);
   const section = (id) => nodes.findIndex((node) => node.props.testID === id);
   for (const id of ['journal-summary', 'home-widget-activity', 'journal-import-controls']) {
     assert.notEqual(section(id), -1, `${id} is rendered`);
   }
-  assert.ok(section('home-widget-activity') < section('journal-summary'));
+  assert.ok(section('journal-summary') < section('home-week') && section('home-week') < section('home-widget-activity'));
   assert.ok(section('home-widget-activity') < section('journal-import-controls'));
-  assert.equal(periodMoney(nodes).props.fils, 508700);
+  assert.equal(periodMinor(nodes), 508700);
   assert.match(text(h.tree), /View spending breakdown/);
   assert.match(text(nodes.find((node) => node.props.testID === 'home-widget-activity')), /Recent transactions/);
 });
@@ -127,13 +133,13 @@ test('Arabic and larger text render the same controls without English journal he
   assert.ok(walk(h.tree).some((node) => node.props.testID === 'journal-import-controls'));
 });
 
-test('E Home places coming-up payments before activity and the monthly summary', () => {
+test('E Home keeps the period summary above coming-up payments and activity', () => {
   const nodes = walk(harness().tree);
   const at = (id) => nodes.findIndex((node) => node.props.testID === id);
   for (const id of ['journal-summary', 'home-widget-activity', 'home-widget-upcoming']) {
     assert.notEqual(at(id), -1, `${id} is rendered`);
   }
-  assert.ok(at('home-widget-activity') < at('journal-summary'));
+  assert.ok(at('journal-summary') < at('home-widget-upcoming'));
   assert.equal(at('reference-quick-actions'), -1);
   assert.equal(at('reference-month-cards'), -1);
   assert.equal(at('home-widget-due'), -1, 'the nonurgent fixture has no due-now payment');
@@ -141,16 +147,16 @@ test('E Home places coming-up payments before activity and the monthly summary',
 });
 test('known balances never replace spending or add another summary on Home', () => {
   const h = harness({ knownBalance: 3870000 });
-  assert.equal(periodMoney(walk(h.tree)).props.fils, 508700);
+  assert.equal(periodMinor(walk(h.tree)), 508700);
   assert.doesNotMatch(text(h.tree), /Recorded balances|Net after spending/);
   assert.doesNotMatch(text(h.tree), /6%|on track|safe to spend/i);
 });
 test('zero and unknown account balances do not change the Home spending figure', () => {
   const zero = harness({ knownBalance: 0 });
-  assert.equal(periodMoney(walk(zero.tree)).props.fils, 508700);
+  assert.equal(periodMinor(walk(zero.tree)), 508700);
   assert.doesNotMatch(text(zero.tree), /Recorded balances/);
   const unknown = harness();
-  assert.equal(periodMoney(walk(unknown.tree)).props.fils, 508700);
+  assert.equal(periodMinor(walk(unknown.tree)), 508700);
   assert.doesNotMatch(text(unknown.tree), /Recorded balances/);
 });
 test('Home does not duplicate import shortcuts; explicit capture control remains accessible', () => {
@@ -162,11 +168,11 @@ test('Home does not duplicate import shortcuts; explicit capture control remains
   }
 });
 
-test('Home activity keeps its selected period visible before the lower monthly summary', () => {
+test('Home activity keeps its selected period visible below the primary summary', () => {
   const nodes = walk(harness().tree);
   const scope = nodes.find(node => node.props.testID === 'home-activity-period');
   assert.match(text(scope), /September 2026/);
-  assert.ok(nodes.indexOf(scope) < nodes.findIndex(node => node.props.testID === 'journal-summary'));
+  assert.ok(nodes.indexOf(scope) > nodes.findIndex(node => node.props.testID === 'journal-summary'));
 });
 
 test('projected Home bills keep an explicit estimate and exact denominated amount', () => {

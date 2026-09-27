@@ -1,3 +1,4 @@
+import { shiftISO, toISODate } from '@/lib/format';
 import { widgetLogoIdFor, type WidgetLogoId } from '@/lib/widget-logo';
 import type { HomeToday } from '@/lib/home-today';
 
@@ -11,10 +12,11 @@ import type { HomeToday } from '@/lib/home-today';
  * `amountsSensitive` tells the native widget to apply its platform's redaction
  * (SwiftUI `.privacySensitive()`); `hidden` removes amounts entirely when the
  * user turns widget amounts off.
- * Bill titles are the ones Home already shows (a card may appear as its masked
+ * Bill titles are the ones Bills already shows (a card may appear as its masked
  * last four digits); no transaction text and no full account number is written.
  */
 export const WIDGET_SNAPSHOT_VERSION = 1;
+export const WIDGET_UPCOMING_DAYS = 30;
 
 export interface WidgetBill {
   /** Optional, bundled artwork id. Older snapshots safely fall back to an initial. */
@@ -56,7 +58,7 @@ export interface WidgetSnapshotInput {
   currency: string;
   exponent: number;
   now: Date;
-  upcoming: readonly { title: string; amountFils: number; dateISO: string; estimated?: boolean; overdue?: boolean }[];
+  upcoming: readonly { title: string; amountFils: number; dateISO: string; estimated?: boolean; overdue?: boolean; paid?: boolean }[];
   /** The user turned widget amounts off entirely. */
   hideAmounts: boolean;
   language: 'en' | 'ar';
@@ -66,11 +68,13 @@ export function buildWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot 
   const hidden = input.hideAmounts;
   const money = (value: number): number | null => (hidden ? null : value);
   const budget = input.today.budget;
+  const todayISO = toISODate(input.now);
+  const endISO = shiftISO(todayISO, WIDGET_UPCOMING_DAYS);
   return {
     version: WIDGET_SNAPSHOT_VERSION,
     generatedAt: input.now.getTime(),
     language: input.language,
-    todayISO: input.today.week[input.today.week.length - 1]?.dateISO ?? '',
+    todayISO,
     currency: input.currency,
     exponent: input.exponent,
     amountsSensitive: true,
@@ -82,7 +86,8 @@ export function buildWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot 
     perDayMinor: budget ? money(budget.perDayFils) : null,
     budgetsOver: budget?.overCount ?? 0,
     bills: input.upcoming
-      .filter((item) => !item.overdue)
+      .filter((item) => !item.overdue && !item.paid && item.dateISO >= todayISO && item.dateISO <= endISO)
+      .sort((a, b) => a.dateISO.localeCompare(b.dateISO))
       .slice(0, 3)
       .map((item) => ({
         title: item.title,

@@ -73,6 +73,7 @@ import {
   type Subscription,
 } from '@/lib/subscriptions';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
+import { billForAgendaOccurrence, futureAnnualBillAgendaItems } from '@/lib/upcoming-bills';
 import { upcomingWindowItems, type AgendaRecurrence } from '@/lib/upcoming-window';
 import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, Bill, CategoryId, Transaction } from '@/lib/types';
@@ -266,7 +267,6 @@ export default function BillsScreen() {
    */
 
   const now = useToday();
-  const key = monthKey(now);
   const todayISO = toISODate(now);
   // Recurrence is day-based. Reusing the same Date for the whole day prevents
   // every Android foreground/resume from invalidating a full-ledger projection.
@@ -280,7 +280,7 @@ export default function BillsScreen() {
   const [cardDetail, setCardDetail] = useState<Account | null>(null);
   // Inside All: the payment types that used to be their own tabs.
   const [groupFilter, setGroupFilter] = useState<BillsGroupFilterValue>('everything');
-  const [selectedReminderId, setSelectedReminderId] = useState<string | null>(null);
+  const [selectedBill, setSelectedBill] = useState<{ id: string; dueISO: string } | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [showStopped, setShowStopped] = useState(false);
   const [adderVisible, setAdderVisible] = useState(false);
@@ -451,8 +451,8 @@ export default function BillsScreen() {
     [state.bills, state.transactions, now, liveAccounts, internal],
   );
   const selectedReminder = useMemo(
-    () => rows.find(({ bill }) => bill.id === selectedReminderId) ?? null,
-    [rows, selectedReminderId],
+    () => billForAgendaOccurrence(state.bills, state.transactions, selectedBill, now, liveAccounts, internal),
+    [state.bills, state.transactions, selectedBill, now, liveAccounts, internal],
   );
   const detected = useMemo(
     () => Platform.OS === 'android'
@@ -554,8 +554,9 @@ export default function BillsScreen() {
       const cadence = subByAgendaId.get(item.id)?.cadence;
       return cadence === 'weekly' || cadence === 'monthly' || cadence === 'yearly' ? { cadence } : null;
     };
-    return upcomingWindowItems(agendaItems, recurrenceOf, todayISO, UPCOMING_WINDOW_DAYS);
-  }, [agendaItems, state.bills, subByAgendaId, todayISO]);
+    const futureAnnual = futureAnnualBillAgendaItems(state.bills, state.transactions, now, liveAccounts, internal, UPCOMING_WINDOW_DAYS);
+    return upcomingWindowItems([...agendaItems, ...futureAnnual], recurrenceOf, todayISO, UPCOMING_WINDOW_DAYS);
+  }, [agendaItems, state.bills, state.transactions, subByAgendaId, todayISO, now, liveAccounts, internal]);
   const selectedAgendaGroup = useMemo<PaymentGroup | undefined>(() => {
     if (agendaView !== 'all' || groupFilter === 'everything') return undefined;
     return groupFilter;
@@ -656,7 +657,7 @@ export default function BillsScreen() {
     setAdderVisible(false);
   };
 
-  const onPay = (billId: string) => {
+  const onPay = (billId: string, dueISO: string) => {
     const bill = state.bills.find((b) => b.id === billId);
     if (!bill) return;
     // `state.accounts[0]` is the raw, UNFILTERED list, so index 0 can be an
@@ -675,7 +676,7 @@ export default function BillsScreen() {
       body: tf('billRecordsExpense', { amount: formatAED(bill.amountFils, { decimals: false }) }),
       confirmLabel: t('markPaid'),
       onConfirm: () =>
-        markBillPaid(billId, key, {
+        markBillPaid(billId, monthKey(dueISO), {
           type: 'expense',
           amountFils: bill.amountFils,
           category: bill.category,
@@ -742,7 +743,7 @@ export default function BillsScreen() {
       const id = item.id.slice(5);
       const due = state.cardDues.find((due) => due.id === id);
       if (due) openCardDetail(state.accounts.find((a) => a.id === due.accountId) ?? null);
-    } else if (item.kind === 'bill') setSelectedReminderId((item.repeatOf ?? item.id).slice(5));
+    } else if (item.kind === 'bill') setSelectedBill({ id: (item.repeatOf ?? item.id).slice(5), dueISO: item.dateISO });
     else {
       const id = item.repeatOf ?? item.id;
       const sub = detected.find((sub) => `sub-${sub.title.trim().toLowerCase()}` === id);
@@ -977,7 +978,7 @@ export default function BillsScreen() {
       {selectedReminder && (
         <BillDetailSheet
           bill={selectedReminder}
-          onClose={() => setSelectedReminderId(null)}
+          onClose={() => setSelectedBill(null)}
           footer={(
             <View style={styles.detailActions}>
               {selectedReminder.status !== 'paid' && (
@@ -987,8 +988,8 @@ export default function BillsScreen() {
                   label={t('markPaid')}
                   onPress={() => {
                     const reminder = selectedReminder;
-                    setSelectedReminderId(null);
-                    onPay(reminder.bill.id);
+                    setSelectedBill(null);
+                    onPay(reminder.bill.id, reminder.dueISO);
                   }}
                 />
               )}
@@ -998,7 +999,7 @@ export default function BillsScreen() {
                 label={t('delete')}
                 onPress={() => {
                   const reminder = selectedReminder;
-                  setSelectedReminderId(null);
+                  setSelectedBill(null);
                   onLongPressBill(reminder.bill.id, reminder.bill.title);
                 }}
               />

@@ -32,6 +32,8 @@ const ARABIC = /[؀-ۿ]/;
 /** Source without its comments, for assertions about code. */
 const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const DEFAULT = ['due', 'assistant', 'insight', 'activity', 'upcoming'];
+const TOP = ['greeting', 'overview', 'today', 'week'];
+const EXPANDED_DEFAULT = [...TOP, ...DEFAULT, 'capture'];
 
 /* ── copy ─────────────────────────────────────────────────────────────── */
 
@@ -125,24 +127,26 @@ test('reminders name only what Wafra sends; the daily summary time matches SUMMA
 
 test('goals reorder Home through the Customize Home preference', () => {
   const base = { order: [...DEFAULT], hidden: [] };
-  assert.deepEqual(e.homeOrderForGoals(['bills'], base).order, ['due', 'upcoming', 'assistant', 'insight', 'activity']);
-  assert.deepEqual(e.homeOrderForGoals(['subscriptions'], base).order, ['upcoming', 'due', 'assistant', 'insight', 'activity']);
-  assert.deepEqual(e.homeOrderForGoals(['spend-less'], base).order, ['insight', 'due', 'assistant', 'activity', 'upcoming']);
-  assert.deepEqual(e.homeOrderForGoals(['salary'], base).order, ['activity', 'insight', 'due', 'assistant', 'upcoming']);
-  assert.deepEqual(e.homeOrderForGoals(['cash-cards'], base).order, ['activity', 'due', 'assistant', 'insight', 'upcoming']);
+  assert.deepEqual(e.homeOrderForGoals(['bills'], base).order, ['due', 'upcoming', ...TOP, 'assistant', 'insight', 'activity', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['subscriptions'], base).order, ['upcoming', ...TOP, 'due', 'assistant', 'insight', 'activity', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['spend-less'], base).order, ['insight', ...TOP, 'due', 'assistant', 'activity', 'upcoming', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['salary'], base).order, ['activity', 'insight', ...TOP, 'due', 'assistant', 'upcoming', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['cash-cards'], base).order, ['activity', 'due', ...TOP, 'assistant', 'insight', 'upcoming', 'capture']);
   assert.deepEqual(e.homeOrderForGoals(['salary', 'bills'], base).order,
-    ['due', 'upcoming', 'activity', 'insight', 'assistant'], 'precedence, not tap order: bills before salary');
+    ['due', 'upcoming', 'activity', 'insight', ...TOP, 'assistant', 'capture'], 'precedence, not tap order: bills before salary');
   assert.deepEqual(e.homeOrderForGoals(['bills', 'salary'], base), e.homeOrderForGoals(['salary', 'bills'], base));
 });
 
 test('goals never hide a section and no goals leaves the order alone', () => {
   const custom = { order: ['activity', 'assistant', 'upcoming', 'insight', 'due'], hidden: ['assistant'] };
-  assert.deepEqual(e.homeOrderForGoals([], custom), custom);
-  assert.deepEqual(e.homeOrderForGoals(['nonsense'], custom), custom);
+  assert.deepEqual(e.homeOrderForGoals([], custom), { order: [...TOP, ...custom.order, 'capture'], hidden: custom.hidden });
+  assert.deepEqual(e.homeOrderForGoals(['nonsense'], custom), { order: [...TOP, ...custom.order, 'capture'], hidden: custom.hidden });
+  const expanded = { order: [...EXPANDED_DEFAULT].reverse(), hidden: ['greeting', 'today'] };
+  assert.deepEqual(e.homeOrderForGoals([], expanded), expanded, 'existing whole-Home choices remain unchanged');
   const next = e.homeOrderForGoals(['bills'], custom);
   assert.deepEqual(next.hidden, ['assistant']);
-  assert.deepEqual(next.order, ['due', 'upcoming', 'activity', 'assistant', 'insight']);
-  assert.deepEqual([...next.order].sort(), [...DEFAULT].sort(), 'the same five sections, each once');
+  assert.deepEqual(next.order, ['due', 'upcoming', ...TOP, 'activity', 'assistant', 'insight', 'capture']);
+  assert.deepEqual([...next.order].sort(), [...EXPANDED_DEFAULT].sort(), 'all ten sections, each once');
   // A preference the reader would normalise is normalised first.
   assert.deepEqual(e.homeOrderForGoals(['bills'], { order: ['bogus'], hidden: 'x' }).order.slice(0, 2), ['due', 'upcoming']);
 });

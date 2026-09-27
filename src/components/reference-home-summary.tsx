@@ -44,10 +44,17 @@ type Props = {
    * the running month, where budgets apply.
    */
   onSetBudget?: () => void;
+  onBudgets?: () => void;
   /** Capture appears stopped: Left in budgets may be too high until it resumes. */
   captureStopped?: boolean;
   /** The screen's band palette; the sheet's controls take its card surface. */
   band?: BandPalette;
+  /** Place the period summary directly on Home's ink band. */
+  onBand?: boolean;
+  /** Extra inset when a financial block is placed in a sheet card. */
+  figureInset?: number;
+  /** Name the average/budget period when its overview is hidden or farther down. */
+  showPeriodContext?: boolean;
 };
 
 type BandProps = Props & {
@@ -55,10 +62,12 @@ type BandProps = Props & {
   band: BandPalette;
   /** The person's pattern, drawn at the head of the band. */
   pattern?: React.ReactNode;
+  /** Ordered editable content; the toolbar remains reachable. */
+  sections?: React.ReactNode;
 };
 
 /** Today | Left in budgets as band tiles, then the last seven days as bars. Amounts are the shared ledger figures. */
-function TodayTiles({ p, today }: { p: BandProps; today: HomeToday }) {
+function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToday; part?: 'today' | 'week' | 'both' }) {
   const w = copy[p.language === 'ar' ? 'ar' : 'en'];
   const { width, fontScale } = useWindowDimensions();
   const currency = p.moneySpec.currency;
@@ -78,8 +87,8 @@ function TodayTiles({ p, today }: { p: BandProps; today: HomeToday }) {
   const rightLabel = budget || offerBudget ? w.leftToSpend : w.dailyAverage;
   const rightFils = budget ? budget.leftFils : average?.fils ?? 0;
   const rightMeta = budget
-    ? [`${shown(budget.perDayFils)} ${w.perDay}`, budget.overCount > 0 ? w.budgetsOver(budget.overCount) : w.daysLeft(budget.daysLeft)].join(' · ')
-    : `${w.overDays(average?.days ?? 0)}, ${w.excludingFixed}`;
+    ? [`${shown(budget.perDayFils)} ${w.perDay}`, budget.overCount > 0 ? w.budgetsOver(budget.overCount) : w.daysLeft(budget.daysLeft), p.showPeriodContext ? p.periodLabel : null].filter(Boolean).join(' · ')
+    : `${p.showPeriodContext ? `${p.periodLabel} · ` : ''}${w.overDays(average?.days ?? 0)}, ${w.excludingFixed}`;
   const rightWarning = budget !== null && budget.overCount > 0;
   const caveat = budget !== null && p.captureStopped === true;
   const accent = statTileColors(p.band, 'accent');
@@ -89,13 +98,13 @@ function TodayTiles({ p, today }: { p: BandProps; today: HomeToday }) {
   const fullWeekdays = p.language === 'ar' && !p.largeText && width / Math.max(fontScale, 1) >= 430;
   const weekSpoken = `${w.weekTotal} ${money(today.weekFils)}. ` +
     today.week.map(day => `${w.weekdayFull(day.weekday)} ${money(day.fils)}`).join(', ');
-  return <View style={styles.todayBlock} testID="home-today">
-    <View style={[styles.tiles, p.largeText && styles.stack]}>
+  return <View style={styles.todayBlock} testID={part === 'week' ? 'home-week-block' : 'home-today'}>
+    {part !== 'week' ? <View style={[styles.tiles, p.largeText && styles.stack]}>
       <StatTile palette={p.band} tone="band" label={w.today} meta={countLabel} onPress={p.onToday} testID="home-today-total"
         accessibilityLabel={`${w.today}, ${money(today.todayFils)}. ${countLabel}`} accessibilityHint={w.opensActivity}
         style={p.largeText && styles.tileStacked}>
         {/* A new capture rolls only the digits that changed; static under Reduce Motion or a screen reader. */}
-        <BandFigure fils={today.todayFils} moneySpec={p.moneySpec} palette={p.band} size="large" rolling fitInset={p.largeText ? 28 : 200} />
+        <BandFigure fils={today.todayFils} moneySpec={p.moneySpec} palette={p.band} size="medium" rolling fitInset={(p.largeText ? 28 : 200) + (p.figureInset ?? 0)} />
       </StatTile>
       {offerBudget ? <StatTile palette={p.band} tone="accent" label={w.leftToSpend} testID="home-left-to-spend"
         style={p.largeText && styles.tileStacked}>
@@ -108,21 +117,22 @@ function TodayTiles({ p, today }: { p: BandProps; today: HomeToday }) {
           <ThemedText type="smallBold" style={[styles.underline, { color: accent.fg }]}>{w.setBudget}</ThemedText>
         </Pressable>
       </StatTile> : showRight ? <StatTile palette={p.band} tone="accent" label={rightLabel} testID="home-left-to-spend"
+        onPress={budget ? p.onBudgets : undefined} accessibilityHint={budget ? w.opensBudgets : undefined}
         meta={rightMeta} metaTone={rightWarning ? 'strong' : 'normal'}
         accessibilityLabel={[`${rightLabel}, ${money(rightFils)}. ${rightMeta}`, caveat ? w.mayBeHigh : null].filter(Boolean).join('. ')}
         style={p.largeText && styles.tileStacked}>
-        <BandFigure fils={rightFils} moneySpec={p.moneySpec} palette={p.band} size="large" color={accent.fg}
-          secondaryColor={accent.fgSecondary} fitInset={p.largeText ? 28 : 200} />
+        <BandFigure fils={rightFils} moneySpec={p.moneySpec} palette={p.band} size="medium" color={accent.fg}
+          secondaryColor={accent.fgSecondary} fitInset={(p.largeText ? 28 : 200) + (p.figureInset ?? 0)} />
         {caveat ? <ThemedText type="smallBold" style={{ color: accent.fg }} testID="home-left-caveat">{w.mayBeHigh}</ThemedText> : null}
       </StatTile> : null}
-    </View>
-    <View style={styles.weekHead}>
+    </View> : null}
+    {part !== 'today' ? <><View style={styles.weekHead}>
       <ThemedText type="smallBold" style={{ color: p.band.onBand }}>{w.thisWeek}</ThemedText>
       <ThemedText type="meta" style={{ color: p.band.onBandSecondary }}>{shown(today.weekFils)}</ThemedText>
     </View>
     <WeekTiles testID="home-week" palette={p.band} moneySpec={p.moneySpec} height={70} accessibilityLabel={weekSpoken}
       days={today.week.map(day => ({ key: day.dateISO, label: fullWeekdays ? w.weekdayFull(day.weekday) : w.weekday(day.weekday),
-        spokenLabel: w.weekdayFull(day.weekday), fils: day.fils, today: day.today }))} />
+        spokenLabel: w.weekdayFull(day.weekday), fils: day.fils, today: day.today }))} /></> : null}
   </View>;
 }
 
@@ -166,55 +176,76 @@ export function ReferenceHomeBand(p: BandProps) {
         </Pressable>
       </View>
     </View>
-    <View style={styles.greeting}>
-      <ThemedText type="title" accessibilityRole="header" style={[styles.greetingText, { color: band.onBand }]}>{p.greeting}</ThemedText>
-      <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{p.dateLabel}</ThemedText>
-    </View>
-    {p.today ? <TodayTiles p={p} today={p.today} /> : null}
+    {p.sections !== undefined ? p.sections : <>
+      <ReferenceHomeGreeting {...p} pattern={undefined} />
+      <ReferenceHomeSummary {...p} onBand />
+      {p.today ? <TodayTiles p={p} today={p.today} /> : null}
+    </>}
   </View>;
+}
+
+/** Independent Home blocks retain the same live figures wherever placed. */
+export function ReferenceHomeGreeting(p: BandProps) {
+  return <View style={styles.greeting}>
+    {p.pattern ? <View style={styles.patternSlot}>{p.pattern}</View> : null}
+    <ThemedText type="title" accessibilityRole="header" style={[styles.greetingText, { color: p.band.onBand }]}>{p.greeting}</ThemedText>
+    <ThemedText type="meta" style={{ color: p.band.onBandSecondary }}>{p.dateLabel}</ThemedText>
+  </View>;
+}
+export function ReferenceHomeToday(p: BandProps) {
+  return p.today ? <TodayTiles p={p} today={p.today} part="today" /> : null;
+}
+export function ReferenceHomeWeek(p: BandProps) {
+  return p.today ? <TodayTiles p={p} today={p.today} part="week" /> : null;
 }
 
 /** One period, three reconciled figures, on Home's sheet. Account balances belong in Accounts. */
 export function ReferenceHomeSummary(p: Props) {
   const w = copy[p.language === 'ar' ? 'ar' : 'en'];
+  const { width } = useWindowDimensions();
+  const stackMetrics = p.largeText || width - 40 - (p.figureInset ?? 0) < 256;
+  const fg = p.onBand && p.band ? p.band.onBand : p.theme.text;
+  const secondary = p.onBand && p.band ? p.band.onBandSecondary : p.theme.textSecondary;
+  const positive = p.onBand && p.band ? p.band.accent : p.theme.income;
+  const rule = p.onBand && p.band ? p.band.bandMark : p.theme.cardBorder;
   const netSign = p.netFils < 0 ? '−' : p.netFils > 0 ? '+' : '';
-  const netColor = p.netFils < 0 ? p.theme.expense : p.netFils > 0 ? p.theme.income : p.theme.text;
+  const netColor = p.netFils < 0 ? (p.onBand ? fg : p.theme.expense) : p.netFils > 0 ? positive : fg;
   const currency = p.moneySpec.currency;
   return <View style={styles.root} testID="reference-home-summary">
     <View style={styles.summary} testID="journal-summary">
       <View style={styles.summaryTop}>
-        <ThemedText type="smallBold" style={styles.sectionTitle}>{w.moneyOut}</ThemedText>
+        <ThemedText type="smallBold" style={[styles.sectionTitle, { color: secondary }]}>{w.totalSpent}</ThemedText>
         <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod}
-          style={[styles.period, { backgroundColor: p.band?.card ?? p.theme.backgroundSelected }]}>
-          <ThemedText type="meta">{p.periodLabel}</ThemedText>
-          <Icon name="chevron-down" size={14} color={p.theme.textSecondary} />
+          style={[styles.period, { backgroundColor: p.onBand && p.band ? p.band.tile : p.band?.card ?? p.theme.backgroundSelected }]}>
+          <ThemedText type="meta" style={{ color: fg }}>{p.periodLabel}</ThemedText>
+          <Icon name="chevron-down" size={14} color={secondary} />
         </Pressable>
       </View>
       <Pressable accessibilityRole="button" onPress={p.onSpending} testID="home-spending-total"
         accessibilityLabel={`${w.moneyOut}, ${currency} ${formatMinorUnits(Math.round(p.expenseFils), p.moneySpec)}. ${w.viewSpending}`}
         style={styles.spending}>
-        <Money fils={p.expenseFils} moneySpec={p.moneySpec} type="title" />
-        <View style={styles.link}><ThemedText type="meta" style={{ color: p.theme.primary }}>{w.viewSpending}</ThemedText>
-          <Icon name="arrow-up-right" size={16} color={p.theme.primary} /></View>
+        {p.band ? <BandFigure fils={p.expenseFils} moneySpec={p.moneySpec} palette={p.band} size="large" color={fg} secondaryColor={secondary} fitInset={p.figureInset ?? 0} /> : <Money fils={p.expenseFils} moneySpec={p.moneySpec} type="title" color={fg} />}
+        <View style={styles.link}><ThemedText type="meta" style={{ color: positive }}>{w.viewSpending}</ThemedText>
+          <Icon name="arrow-up-right" size={16} color={positive} /></View>
       </Pressable>
-      <View style={[styles.metrics, { borderColor: p.theme.cardBorder }, p.largeText && styles.stack]}>
+      <View style={[styles.metrics, { borderColor: rule }, stackMetrics && styles.stack]}>
       <Pressable accessibilityRole="button" onPress={p.onIncome} testID="home-income-summary"
         accessibilityLabel={`${w.moneyIn}, ${currency} ${formatMinorUnits(Math.round(p.incomeFils), p.moneySpec)}`}
-        style={[styles.metric, p.largeText && styles.metricStacked]}>
-        <View style={styles.link}><Icon name="arrow-down-right" size={16} color={p.theme.income} />
-          <ThemedText type="small" themeColor="textSecondary">{w.moneyIn}</ThemedText></View>
-        <Money fils={p.incomeFils} moneySpec={p.moneySpec} type="smallBold" color={p.theme.income} />
+        style={[styles.metric, stackMetrics && styles.metricStacked]}>
+        <View style={styles.link}><Icon name="arrow-down-right" size={16} color={positive} />
+          <ThemedText type="meta" style={{ color: secondary }}>{w.moneyIn}</ThemedText></View>
+        {p.band ? <BandFigure fils={p.incomeFils} moneySpec={p.moneySpec} palette={p.band} size="medium" color={positive} secondaryColor={secondary} fitInset={(stackMetrics ? 0 : 180) + (p.figureInset ?? 0)} /> : <Money fils={p.incomeFils} moneySpec={p.moneySpec} type="smallBold" color={positive} />}
       </Pressable>
       <View testID="home-net-summary" accessible accessibilityRole="text"
         accessibilityLabel={`${w.netLabel}, ${currency} ${netSign}${formatMinorUnits(Math.round(Math.abs(p.netFils)), p.moneySpec)}`}
-        style={[styles.metric, p.largeText && styles.metricStacked]}>
-        <ThemedText type="small" themeColor="textSecondary">{w.netLabel}</ThemedText>
-        <Money fils={p.netFils} moneySpec={p.moneySpec} type="smallBold" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />
+        style={[styles.metric, stackMetrics && styles.metricStacked]}>
+        <ThemedText type="meta" style={{ color: secondary }}>{w.netLabel}</ThemedText>
+        {p.band ? <BandFigure fils={p.netFils} moneySpec={p.moneySpec} palette={p.band} size="medium" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} secondaryColor={secondary} fitInset={(stackMetrics ? 0 : 180) + (p.figureInset ?? 0)} /> : <Money fils={p.netFils} moneySpec={p.moneySpec} type="smallBold" sign={p.netFils === 0 ? 'none' : 'auto'} color={netColor} />}
       </View>
       </View>
-      {p.incomeFils === 0 && <ThemedText type="meta" themeColor="textSecondary" testID="home-no-income-note">
+      {p.incomeFils === 0 && <ThemedText type="meta" style={{ color: secondary }} testID="home-no-income-note">
         {w.noIncome}</ThemedText>}
-      <ThemedText type="meta" themeColor="textSecondary">{w.cashflowNote}</ThemedText>
+      <ThemedText type="meta" style={{ color: secondary }}>{w.cashflowNote}</ThemedText>
     </View>
   </View>;
 }

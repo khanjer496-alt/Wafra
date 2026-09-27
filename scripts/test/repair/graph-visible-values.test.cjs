@@ -42,11 +42,12 @@ for (const language of ['en', 'ar']) for (const largeText of [false, true]) {
   test(`weekly values keep minor-unit precision, zero, dates and large amounts (${language}, large=${largeText})`, () => {
     const { h, tree, days, bars, spec } = renderWeek({ language, largeText, values: [0, 1, 999, 12345, 987654321, 100, 250] });
     assert.ok(text(tree).includes('AED'));
+    for (const day of [days[0], days.at(-1)]) assert.ok(text(tree).includes(h.deps['@/lib/format'].shortDate(day.key)), 'shared date range stays visible');
     for (const day of days) {
       const row = byId(tree, `week-value-${day.key}`);
       assert.ok(text(row).includes(h.deps['@/lib/ledger-money'].formatMinorUnits(day.fils, spec)));
-      assert.ok(text(row).includes(h.deps['@/lib/format'].shortDate(day.key)));
-      assert.ok(text(row).includes(day.spokenLabel));
+      assert.ok(text(row).includes(day.label), 'short day stays paired with its exact amount');
+      assert.ok(row, 'every day retains a visible amount row');
     }
     assert.ok(bars.every(bar => bar.axis === 'width'));
     assert.equal(bars[0].size, 0, 'zero must not look like positive activity');
@@ -64,6 +65,22 @@ for (const spec of [{ schemaVersion: 2, currency: 'JPY', exponent: 0 }, { schema
     assert.equal(bars[2].size, 70);
   });
 }
+
+test('all seven compact day columns stay within the measured native chart width', () => {
+  for (const width of [320, 352.727, 390, 800]) {
+    const { tree, days, bars } = renderWeek({ width, values: [0, 0, 0, 0, 0, 999, 1234] });
+    assert.ok(bars.every(bar => bar.axis === 'height'), 'ordinary daily amounts fit compact columns');
+    const widths = days.map(day => {
+      const raw = byId(tree, `week-value-${day.key}`).props.style;
+      const style = Object.assign({}, ...(Array.isArray(raw) ? raw.flat(Infinity) : [raw]));
+      assert.equal(typeof style.width, 'number', 'native columns have an explicit measured width');
+      assert.ok(style.width > 0);
+      return style.width;
+    });
+    assert.ok(widths.reduce((total, value) => total + value, 0) + (days.length - 1) * 7 <= width + .001,
+      'Saturday and Sunday cannot extend beyond the chart container');
+  }
+});
 
 for (const language of ['en', 'ar']) for (const largeText of [false, true]) {
   test(`year recap shows every exact month value and waits for explicit navigation (${language}, large=${largeText})`, () => {

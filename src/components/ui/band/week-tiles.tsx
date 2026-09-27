@@ -51,6 +51,11 @@ export function WeekTiles({ days, palette, moneySpec, height = 70, accessibility
   // A conservative fit check avoids shrinking exact figures into tiny text.
   // onLayout uses this component's width, including split-screen / card insets.
   const horizontal = large || values.some(value => value.length * 7 * fontScale > columnWidth);
+  const longestValue = Math.max(1, ...values.map(value => value.length));
+  const amountScale = Math.max(1, Math.min(fontScale, (availableWidth || 280) / (longestValue * 8)));
+  const amountWidth = Math.max(64, longestValue * 8 * amountScale);
+  const labelWidth = Math.max(32, ...days.map(day => day.label.length * 8 * fontScale));
+  const stackedDetails = large || labelWidth + amountWidth + 72 > availableWidth;
   const dateLabel = (day: WeekTileDay) => /^\d{4}-\d{2}-\d{2}$/.test(day.key) ? shortDate(day.key) : '';
   const first = days[0]; const last = days.at(-1);
   return <View testID={testID} accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel}
@@ -67,17 +72,15 @@ export function WeekTiles({ days, palette, moneySpec, height = 70, accessibility
         // Zero has no filled bar; all non-zero values share the same scale.
         const ratio = Math.max(0, day.fils) / max;
         return horizontal ? <View key={day.key} style={styles.detail} testID={`week-value-${day.key}`}>
-          <View style={[styles.heading, large && styles.stacked]}>
-            <ThemedText type="meta" style={[day.today && styles.today, { color }]}>
-              {day.spokenLabel}{dateLabel(day) ? ` · ${dateLabel(day)}` : ''}
-            </ThemedText>
-            <ThemedText type="meta" tabular style={[styles.value, { color }]}>{values[index]}</ThemedText>
+          <View style={[styles.detailLine, stackedDetails && styles.stacked]}>
+            <ThemedText type="meta" style={[styles.shortDay, day.today && styles.today, { color, width: stackedDetails ? undefined : labelWidth }]}>{day.label}</ThemedText>
+            <View style={[styles.horizontalTrack, stackedDetails && styles.largeTrack, { backgroundColor: palette.tile }]}>
+              <GrowBar axis="width" delay={index * 50} size={ratio * 100}
+                style={[styles.horizontalBar, { backgroundColor: day.today ? palette.accent : palette.bandMark }]} />
+            </View>
+            <ThemedText type="meta" tabular maxFontSizeMultiplier={amountScale} style={[styles.value, styles.detailAmount, { color, width: stackedDetails ? undefined : amountWidth }]}>{values[index]}</ThemedText>
           </View>
-          <View style={[styles.horizontalTrack, { backgroundColor: palette.tile }]}>
-            <GrowBar axis="width" delay={index * 50} size={ratio * 100}
-              style={[styles.horizontalBar, { backgroundColor: day.today ? palette.accent : palette.bandMark }]} />
-          </View>
-        </View> : <View key={day.key} style={styles.day} testID={`week-value-${day.key}`}>
+        </View> : <View key={day.key} style={[styles.day, { width: columnWidth }]} testID={`week-value-${day.key}`}>
           <ThemedText type="nano" tabular style={[styles.value, { color }]}>{values[index]}</ThemedText>
           <View style={[styles.track, { height }]}>
             <GrowBar axis="height" delay={index * 50} size={ratio * height}
@@ -94,12 +97,18 @@ const styles = StyleSheet.create({
   root: { gap: 10 },
   heading: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 6 },
   stacked: { flexDirection: 'column', alignItems: 'flex-start' },
-  details: { gap: 12 },
+  details: { gap: 9 },
+  detailLine: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  shortDay: { minWidth: 32 },
+  detailAmount: { minWidth: 64, textAlign: 'right' },
+  largeTrack: { flex: undefined, width: '100%' },
   detail: { gap: 5 },
-  horizontalTrack: { width: '100%', height: 8, borderRadius: 4 },
-  horizontalBar: { height: 8, borderRadius: 4 },
+  horizontalTrack: { flex: 1, minWidth: 32, height: 6, borderRadius: 3 },
+  horizontalBar: { height: 6, borderRadius: 3 },
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: 7 },
-  day: { flex: 1, minWidth: 0, alignItems: 'center', gap: 6 },
+  // Use the same measured width as the fit check. Native relayout otherwise
+  // expanded these flex columns beyond the container and clipped the weekend.
+  day: { minWidth: 0, alignItems: 'center', gap: 6 },
   value: { textTransform: 'none', letterSpacing: 0, writingDirection: 'ltr', flexShrink: 1 },
   track: { width: '100%', justifyContent: 'flex-end' },
   bar: { width: '100%', borderRadius: 8 },

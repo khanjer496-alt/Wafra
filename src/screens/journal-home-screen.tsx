@@ -15,7 +15,7 @@ import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
-import { ReferenceHomeBand, ReferenceHomeSummary } from '@/components/reference-home-summary';
+import { ReferenceHomeBand, ReferenceHomeGreeting, ReferenceHomeSummary, ReferenceHomeToday, ReferenceHomeWeek } from '@/components/reference-home-summary';
 import { HOME_ADD_BUTTON_CLEARANCE, HomeAddButton } from '@/components/home-add-button';
 import { LimitSheet } from '@/components/limit-sheet';
 import { TransferReviewNotice } from '@/components/transfer-review-notice';
@@ -46,9 +46,7 @@ import { detectCapturePause } from '@/lib/capture-pause';
 import { loadCapturePauseSnooze, saveCapturePauseSnooze } from '@/lib/capture-pause-state';
 import { isLiveCapture } from '@/lib/transaction-source';
 import { homeSummaryCopy, paymentAgendaCopy } from '@/lib/reference-copy';
-import { buildWidgetSnapshot } from '@/lib/widget-snapshot';
-import { widgetMonthToday, widgetUpcomingInput } from '@/lib/widget-ledger';
-import { clearWidgetSnapshot, setWidgetSnapshot } from '../../modules/wafra-widgets';
+import { invalidateWidgetSnapshotSync, requestWidgetSnapshotSync } from '@/lib/widget-sync';
 import { allocationsOf } from '@/lib/splits';
 import { isFixedCommitment } from '@/lib/categories';
 import { moneyPictureProgress } from '@/lib/money-picture-progress';
@@ -63,7 +61,7 @@ import { fieldsEqual } from '@/lib/store-selection';
 import type { Subscription } from '@/lib/subscriptions';
 import type { AppState as LedgerState, CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
-import { homeWidgetVisible, loadHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
+import { homeWidgetVisible, loadHomeWidgetPreferences, splitHomeWidgetLayout, subscribeHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
 import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
 import { loadViewedRecaps } from '@/lib/recap-view-state';
@@ -151,7 +149,7 @@ export default function JournalHomeScreen() {
   const [recurring, setRecurring] = useState<Subscription | null>(null);
   const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() => defaultHomeWidgetPreferences());
   const [homeAnalysisReady, setHomeAnalysisReady] = useState(false);
-  const [homeInsight, setHomeInsight] = useState<Insight | null>(null);
+  const [homeInsight, setHomeInsight] = useState<(Insight & { scope: string }) | null>(null);
   const [recapEntry, setRecapEntry] = useState<{ descriptor: RecapDescriptor; unread: boolean } | null>(null);
   // The transfer review queue, computed after interactions (it needs the
   // full reconciliation graph). Null until known.
@@ -198,11 +196,12 @@ export default function JournalHomeScreen() {
     // Every return to this tab reloads the preference. Only publish a new
     // object when something actually changed, so the tab switch itself does
     // not re-render Home a second time.
-    void loadHomeWidgetPreferences().then((preferences) => {
-      if (!alive) return;
-      setHomeWidgets((current) => sameHomeWidgets(current, preferences) ? current : preferences);
-    });
-    return () => { alive = false; };
+    const apply = (preferences: HomeWidgetPreferences) => {
+      if (alive) setHomeWidgets(current => sameHomeWidgets(current, preferences) ? current : preferences);
+    };
+    const unsubscribe = subscribeHomeWidgetPreferences(apply);
+    void loadHomeWidgetPreferences().then(apply);
+    return () => { alive = false; unsubscribe(); };
   }, [focused]);
 
   useEffect(() => {
@@ -317,40 +316,35 @@ export default function JournalHomeScreen() {
     // Day-keyed like the dashboard: a foreground resume must not re-walk the ledger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
-  // Widgets always describe the live month, whatever period Home is showing.
-  const widgetToday = useMemo(() => {
-    const currentKey = monthKey(now);
-    if (period.mode === 'month' && period.key === currentKey) return homeToday;
-    // The same live-month summary the Widgets screen previews.
-    return widgetMonthToday({
-      transactions: state.transactions,
-      budgets: state.budgets,
-      now,
-      liveAccounts,
-      internalIds: dashboard.internalTransactionIds,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [homeToday, state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
+  // Native widgets use Bills' complete 30-day recurring projection, never
+  // Home's deliberately shorter, subscription-free first-paint list.
   useEffect(() => {
-    if (!state.hydrated || !state.onboarded) return;
-    // A legacy local-only preference keeps figures off every shared surface.
-    if (state.privateMode) { clearWidgetSnapshot(); return; }
+    if (!state.hydrated || !state.onboarded || state.privateMode) {
+      void invalidateWidgetSnapshotSync();
+      return;
+    }
+    const generation = getStateGeneration();
+    const source = getStateSnapshot();
+    let request: ReturnType<typeof requestWidgetSnapshotSync> | undefined;
+    let cancelled = false;
+    const current = () => {
+      const latest = getStateSnapshot();
+      return !cancelled && generation === getStateGeneration() && latest.hydrated && latest.onboarded && !latest.privateMode
+        && latest.transactions === source.transactions && latest.accounts === source.accounts
+        && latest.budgets === source.budgets && latest.bills === source.bills && latest.cardDues === source.cardDues
+        && latest.notSubscriptions === source.notSubscriptions && latest.cancelledSubscriptions === source.cancelledSubscriptions
+        && latest.transferInternalIds === source.transferInternalIds && latest.transferNormalizationVersion === source.transferNormalizationVersion
+        && latest.ledgerMoney === source.ledgerMoney && latest.marketId === source.marketId && latest.language === source.language
+        && latest.historyImport === source.historyImport;
+    };
     const task = InteractionManager.runAfterInteractions(() => {
-      setWidgetSnapshot(JSON.stringify(buildWidgetSnapshot({
-        today: widgetToday,
-        currency: moneySpec.currency,
-        exponent: moneySpec.exponent,
-        now: new Date(),
-        // Card statements are exact; bills and subscriptions are projections.
-        upcoming: widgetUpcomingInput(payments),
-        hideAmounts: false,
-        language: language === 'ar' ? 'ar' : 'en',
-      })));
+      if (current()) request = requestWidgetSnapshotSync({ state: source, now: new Date(), moneySpec,
+        language: language === 'ar' ? 'ar' : 'en' }, current);
     });
-    return () => task.cancel();
-    // `now` moves on every return to the foreground, so widgets are re-stamped
-    // even when no money changed and never age into their stale state.
-  }, [widgetToday, payments, moneySpec, language, state.hydrated, state.onboarded, state.privateMode, now]);
+    return () => { cancelled = true; task.cancel(); request?.cancel(); };
+  }, [state.hydrated, state.onboarded, state.privateMode, state.transactions, state.accounts, state.budgets, state.bills,
+    state.cardDues, state.notSubscriptions, state.cancelledSubscriptions, state.transferInternalIds, state.transferNormalizationVersion,
+    state.ledgerMoney, state.marketId, state.historyImport, moneySpec, language, now, getStateGeneration, getStateSnapshot]);
   // Recent activity, and which transfers it leaves to the Transfers screen,
   // come from the one dashboard projection rather than a second ledger walk.
   const hasPeriodTransfers = dashboard.hasPeriodTransfers === true;
@@ -365,13 +359,13 @@ export default function JournalHomeScreen() {
       return;
     }
     let cancelled = false;
-    // Keep the previous card on screen while this recomputes. A 14k-row
-    // insight must not hitch the same React turn that just painted a new SMS.
+    // Keep the previous card only inside its original period/language while
+    // recomputing. Analysis must not hitch the turn that just painted an SMS.
     const task = InteractionManager.runAfterInteractions(() => {
       if (cancelled) return;
       const next = measureRuntimeOperation('home-insight', () =>
         projectDashboardInsight(state, period, now));
-      if (!cancelled) setHomeInsight(next);
+      if (!cancelled) setHomeInsight(next ? { ...next, scope: `${language}:${JSON.stringify(period)}` } : null);
     });
     return () => {
       cancelled = true;
@@ -383,7 +377,7 @@ export default function JournalHomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [homeAnalysisReady, insightWidgetVisible, historyAnalysisBlocked, state.transactions, state.accounts, state.budgets,
     state.notSubscriptions, state.transferInternalIds, state.transferNormalizationVersion,
-    state.historyImport?.status, state.marketId, period, projectionDay]);
+    state.historyImport?.status, state.marketId, state.ledgerMoney, language, period, projectionDay]);
   // Home names the transfer review queue only once it is known: the same
   // pendingIds the review screen lists, so the count and the list agree. The
   // graph is built after interactions, never during hydration or a running
@@ -622,18 +616,27 @@ export default function JournalHomeScreen() {
     if (id === 'assistant') return <Pressable key={id} testID="home-widget-assistant" accessibilityRole="button"
       accessibilityLabel={t('homeWidgetAssistantTitle')} accessibilityHint={t('homeWidgetAssistantDetail')}
       onPress={() => router.push('/assistant')}
-      style={({ pressed }) => [styles.assistantCard, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
-      <Icon name="spark" size={18} color={theme.primary} />
-      <ThemedText type="smallBold" style={styles.grow}>{t('homeWidgetAssistantTitle')}</ThemedText>
+      style={({ pressed }) => [styles.assistantCard, largeText && styles.utilityStacked, { backgroundColor: band.card, opacity: pressed ? 0.75 : 1 }]}>
+      <View style={[styles.utilityGlyph, { backgroundColor: band.glyphGround }]}><Icon name="spark" size={22} color={band.text} /></View>
+      <View style={[styles.grow, styles.utilityCopy]}>
+        <ThemedText type="smallBold" style={styles.utilityTitle}>{t('homeWidgetAssistantTitle')}</ThemedText>
+        <ThemedText type="meta" style={{ color: band.textSecondary }}>{t('homeWidgetAssistantDetail')}</ThemedText>
+      </View>
       <Icon name="chevron-right" size={18} color={theme.textSecondary} />
     </Pressable>;
     if (id === 'insight') {
-      const insight = homeInsight;
-      return insight ? <Pressable key={id} testID="home-widget-insight" accessibilityRole="button"
-        onPress={() => insight.href && router.push(insight.href as never)} style={[styles.widgetCard, { borderColor: theme.cardBorder }]}>
-        <View style={styles.grow}><ThemedText type="micro" themeColor="textSecondary">{t('homeWidgetInsightTitle')}</ThemedText>
-          <ThemedText type="smallBold">{insight.title}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{insight.body}</ThemedText></View>
-        {insight.href ? <Icon name="chevron-right" size={18} color={theme.textSecondary} /> : null}
+      const insight = homeInsight?.scope === `${language}:${JSON.stringify(period)}` ? homeInsight : null;
+      return insight ? <Pressable key={id} testID="home-widget-insight" accessibilityRole={insight.href ? 'button' : 'text'}
+        disabled={!insight.href} accessibilityLabel={`${t('homeWidgetInsightTitle')}. ${insight.title}. ${insight.body}`}
+        onPress={() => insight.href && router.push(insight.href as never)}
+        style={({ pressed }) => [styles.widgetCard, { backgroundColor: band.card, opacity: pressed ? 0.8 : 1 }]}>
+        <View style={styles.insightHeading}>
+          <View style={[styles.utilityGlyph, { backgroundColor: band.glyphGround }]}><Icon name={insight.icon ?? 'chart'} size={22} color={band.text} /></View>
+          <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>{t('homeWidgetInsightTitle')} · {periodLabel(period)}</ThemedText>
+          {insight.href ? <Icon name="arrow-up-right" size={20} color={band.text} /> : null}
+        </View>
+        <ThemedText type="heading" style={styles.insightTitle}>{insight.title}</ThemedText>
+        <ThemedText type="small" style={{ color: band.textSecondary }}>{insight.body}</ThemedText>
       </Pressable> : null;
     }
     if (id === 'due' || id === 'upcoming') {
@@ -654,20 +657,23 @@ export default function JournalHomeScreen() {
           </View></Pressable>)}</View>
       </View>;
     }
+    if (id !== 'activity') return null;
     return <View key={id} style={styles.section} testID="home-widget-activity">
       <View style={styles.sectionHeading}><View style={styles.activityHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.activity}</ThemedText>
         <ThemedText testID="home-activity-period" type="meta" style={{ color: band.textSecondary }}>{periodLabel(period)}</ThemedText></View>
         <Pressable onPress={() => router.push('/transactions')} accessibilityRole="button" style={styles.smallAction}><Icon name="search" size={18} color={theme.text} /><ThemedText type="meta">{t('allActivity')}</ThemedText></Pressable></View>
       <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{dashboard.activityRows.slice(0, 5).map(transaction =>
         <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />)}</View>
-      {hasPeriodTransfers && <View style={styles.section}>
-        <ThemedText type="meta" themeColor="textSecondary">{transferWords.walletDetail}</ThemedText>
-        <Pressable accessibilityRole="button" accessibilityLabel={transferWords.viewAll}
-          onPress={() => router.push('/transfers')} style={styles.smallAction}>
-          <Icon name="repeat" size={18} color={theme.primary} />
-          <ThemedText type="meta" themeColor="primary">{transferWords.viewAll}</ThemedText>
-        </Pressable>
-      </View>}
+      {hasPeriodTransfers && <Pressable testID="home-transfers-link" accessibilityRole="button" accessibilityLabel={transferWords.viewAll}
+        accessibilityHint={transferWords.walletDetail} onPress={() => router.push('/transfers')}
+        style={[styles.assistantCard, styles.transferAction, largeText && styles.utilityStacked, { backgroundColor: band.card }]}>
+        <View style={[styles.utilityGlyph, { backgroundColor: band.glyphGround }]}><Icon name="repeat" size={22} color={band.text} /></View>
+        <View style={[styles.grow, styles.utilityCopy]}>
+          <ThemedText type="smallBold" style={styles.utilityTitle}>{transferWords.viewAll}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{transferWords.walletDetail}</ThemedText>
+        </View>
+        <Icon name="chevron-right" size={18} color={band.textSecondary} />
+      </Pressable>}
       {dashboard.activityRows.length === 0 && !hasPeriodRecords && <EmptyMonth monthName={periodLabel(period)} onReadInbox={() => void onRefresh()} primaryLabel={t('checkBankAlerts')} onAddManually={() => router.push('/add-transaction')} />}
     </View>;
   };
@@ -682,42 +688,19 @@ export default function JournalHomeScreen() {
     onSpending: () => router.push('/flow'),
   };
 
-  return <>
-    <BandScaffold band="home" tabbed testID="home-screen" contentStyle={styles.screen}
-      floatingClearance={Platform.OS === 'android' ? HOME_ADD_BUTTON_CLEARANCE : 0}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={band.onBand} />}
-      bandContent={state.hydrated ? <ReferenceHomeBand {...summaryProps}
-        pattern={<YourPattern tile={24} gap={3} />}
-        today={homeToday}
-        onToday={() => router.push('/transactions')}
-        hideHeaderAdd={Platform.OS === 'android'}
-        onAsk={Platform.OS === 'android' ? () => router.push('/assistant') : undefined}
-        onSetBudget={budgetMonthKey ? () => setBudgetSheetOpen(true) : undefined}
-        captureStopped={captureStopped}
-        // The recap W sits on the dark band, so it draws in the dark palette.
-        brandMark={openRecap ? <ThemeScope.Provider value={band.statusBar === 'light' ? 'dark' : 'light'}>
-          <RecapLogoTrigger
-            unread={recapEntry?.unread ?? false}
-            accessibilityLabel={language === 'ar'
-              ? `ملخص وفرة · ${recapEntry?.descriptor.label ?? ''}`
-              : `Wafra Recap · ${recapEntry?.descriptor.label ?? ''}`}
-            onPress={openRecap}
-            onLongPress={unlockFounder}
-          /></ThemeScope.Provider> : undefined}
-        onFounderUnlock={unlockFounder} /> : null}>
-      {!state.hydrated ? <View accessibilityRole="progressbar" accessibilityLabel={t('loadingLedger')} style={styles.loading}>
-        <SkeletonRows count={1} height={160} /><SkeletonRows count={4} height={66} />
-      </View> : <>
-        {/* Notices that change how the band's figures read come first on the sheet. */}
-        {captureStoppedNotice}
-        {transferNotice}
-        {/* First week: one truthful progress surface. After it retires, blocking
-            history states keep their existing compact recovery card. */}
-        {moneyPicture
-          ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
-          : history ? <HistoryReadingStatus progress={history} onResume={retryHistory} /> : null}
-
-
+  const sectionProps = { ...summaryProps, today: homeToday,
+    showPeriodContext: !homeWidgetVisible(homeWidgets, 'overview') || homeWidgets.order.indexOf('overview') > homeWidgets.order.indexOf('today'),
+    onToday: () => router.push('/transactions'),
+    onBudgets: () => router.push('/flow?view=categories&filter=limited'),
+    onSetBudget: budgetMonthKey ? () => setBudgetSheetOpen(true) : undefined,
+    captureStopped,
+  };
+  const layout = splitHomeWidgetLayout(homeWidgets);
+  const greetingInToolbar = layout.band[0] === 'greeting';
+  const sheetPalette = { ...band, onBand: band.text, onBandSecondary: band.textSecondary,
+    tile: band.glyphGround, bandMark: band.textSecondary, bandRule: band.rule };
+  const renderCapture = () => (<View style={styles.captureBlock}>
+    {!history && moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} /> : null}
         {captureSetUp && !hasLiveCapture && !history ? <View testID="home-capture-ready" accessible accessibilityRole="text"
           accessibilityLabel={`${Platform.OS === 'android' ? summaryWords.readyAndroid : summaryWords.readyIos}. ${summaryWords.readyBody}`}
           style={[styles.readyCard, { borderColor: theme.cardBorder }]}>
@@ -746,23 +729,17 @@ export default function JournalHomeScreen() {
           </View>
         </View> : null}
 
-        {/* E Home leads with upcoming payments and activity. Saved custom
-            widget order is respected; monthly totals remain available below. */}
-        {homeWidgets.order.map(renderWidget)}
-        <View style={[styles.periodSummary, { borderTopColor: band.rule }]}>
-          <ReferenceHomeSummary {...summaryProps} />
-        </View>
+
         {/* One dismissable pointer to the Widgets screen, after a week of capture. */}
         <WidgetsHint hydrated={state.hydrated} onboarded={state.onboarded} captureSetUp={captureSetUp}
           captureStopped={captureStopped} firstDays={moneyPicture !== null || history !== null || offerPast}
           transactions={state.transactions} now={now} palette={band} />
-
-        <View style={[styles.captureFooter, { borderTopColor: theme.cardBorder }]} testID="journal-import-controls">
+<View style={[styles.captureFooter, { backgroundColor: band.card }]} testID="journal-import-controls">
           <Pressable accessibilityRole="button" accessibilityLabel={`${words.import}. ${captureLabel}`}
             disabled={status === 'checking' || status === 'unsupported' || refreshing}
-            onPress={openCapture} style={styles.captureRow}>
-            <Icon name="mail" size={17} color={healthy ? theme.primary : theme.warning} />
-            <View style={styles.grow}><ThemedText type="smallBold">{words.import}</ThemedText>
+            onPress={openCapture} style={[styles.captureRow, largeText && styles.utilityStacked]}>
+            <View style={[styles.utilityGlyph, { backgroundColor: band.glyphGround }]}><Icon name="mail" size={22} color={healthy ? theme.primary : theme.warning} /></View>
+            <View style={[styles.grow, styles.utilityCopy]}><ThemedText type="smallBold" style={styles.utilityTitle}>{words.import}</ThemedText>
               <ThemedText type="meta" themeColor="textSecondary">{captureLabel}</ThemedText></View>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} />
           </Pressable>
@@ -776,11 +753,67 @@ export default function JournalHomeScreen() {
             <ThemedText type="meta">{tf('unreadFormatCount', { count: dashboard.unreadFormats.count,
               s: dashboard.unreadFormats.count === 1 ? '' : 's' })}</ThemedText>
             <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable> : null}
-          <Pressable testID="home-customize-link" onPress={() => router.push('/home-customize')} accessibilityRole="button"
-            accessibilityHint={t('homeCustomizeDetail')} style={styles.footerAction}>
-            <ThemedText type="meta">{t('homeCustomizeTitle')}</ThemedText>
-            <Icon name="chevron-right" size={16} color={theme.textSecondary} /></Pressable>
         </View>
+  </View>);
+  const renderSection = (id: HomeWidgetId, onBand = false) => {
+    const props = { ...sectionProps, band: onBand ? band : sheetPalette, figureInset: onBand ? 0 : 32,
+      pattern: id === 'greeting' && !greetingInToolbar ? <YourPattern tile={24} gap={3} /> : undefined };
+    const content = id === 'greeting' ? <ReferenceHomeGreeting {...props} />
+      : id === 'overview' ? <ReferenceHomeSummary {...props} onBand={onBand} />
+      : id === 'today' ? <ReferenceHomeToday {...props} />
+      : id === 'week' ? <ReferenceHomeWeek {...props} />
+      : id === 'capture' ? renderCapture() : renderWidget(id);
+    if (!content) return null;
+    const financial = id === 'overview' || id === 'today' || id === 'week';
+    return <View key={id} testID={`home-section-${id}`}
+      style={!onBand && financial ? [styles.movedMoneyBlock, { backgroundColor: band.card }] : undefined}>{content}</View>;
+  };
+
+  return <>
+    <BandScaffold band="home" tabbed testID="home-screen" contentStyle={styles.screen}
+      floatingClearance={Platform.OS === 'android' ? HOME_ADD_BUTTON_CLEARANCE : 0}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={band.onBand} />}
+      bandContent={state.hydrated ? <ReferenceHomeBand {...sectionProps}
+        sections={layout.band.map(id => renderSection(id, true))}
+        pattern={greetingInToolbar ? <YourPattern tile={24} gap={3} /> : undefined}
+        today={homeToday}
+        onToday={() => router.push('/transactions')}
+        hideHeaderAdd={Platform.OS === 'android'}
+        onSetBudget={budgetMonthKey ? () => setBudgetSheetOpen(true) : undefined}
+        captureStopped={captureStopped}
+        // The recap W sits on the dark band, so it draws in the dark palette.
+        brandMark={openRecap ? <ThemeScope.Provider value={band.statusBar === 'light' ? 'dark' : 'light'}>
+          <RecapLogoTrigger
+            unread={recapEntry?.unread ?? false}
+            accessibilityLabel={language === 'ar'
+              ? `ملخص وفرة · ${recapEntry?.descriptor.label ?? ''}`
+              : `Wafra Recap · ${recapEntry?.descriptor.label ?? ''}`}
+            onPress={openRecap}
+            onLongPress={unlockFounder}
+          /></ThemeScope.Provider> : undefined}
+        onFounderUnlock={unlockFounder} /> : null}>
+      {!state.hydrated ? <View accessibilityRole="progressbar" accessibilityLabel={t('loadingLedger')} style={styles.loading}>
+        <SkeletonRows count={1} height={160} /><SkeletonRows count={4} height={66} />
+      </View> : <>
+        {/* Notices that change how the band's figures read come first on the sheet. */}
+        {captureStoppedNotice}
+        {transferNotice}
+        {/* First week: one truthful progress surface. After it retires, blocking
+            history states keep their existing compact recovery card. */}
+        {history ? (moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
+          : <HistoryReadingStatus progress={history} onResume={retryHistory} />) : null}
+
+
+        {/* The band keeps the selected total beside daily spending. The sheet
+            leads with actionable payments and activity in the saved order. */}
+        {layout.sheet.map(id => renderSection(id))}
+
+
+        <Pressable testID="home-customize-link" onPress={() => router.push('/home-customize')} accessibilityRole="button"
+          accessibilityHint={t('homeCustomizeDetail')} style={styles.customizeAction}>
+          <Icon name="sliders" size={18} color={band.textSecondary} />
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{t('homeCustomizeTitle')}</ThemedText>
+        </Pressable>
       </>}
     </BandScaffold>
     <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
@@ -794,6 +827,9 @@ export default function JournalHomeScreen() {
 
 const styles = StyleSheet.create({
   screen: { gap: 24 },
+  captureBlock: { gap: 16 },
+  movedMoneyBlock: { padding: 16, borderRadius: 24 },
+  utilityStacked: { flexDirection: 'column', alignItems: 'stretch' },
   loading: { gap: 20, paddingTop: 20 },
   grow: { flex: 1, minWidth: 0 },
   // Its own line under the payee at the accessibility sizes, so the name is
@@ -813,9 +849,8 @@ const styles = StyleSheet.create({
   paymentDate: { width: 38, height: 38, borderWidth: 0, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   paymentAmount: { flexShrink: 1 },
   paymentMoney: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 4, marginStart: 'auto' },
-  periodSummary: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 24 },
   inlineAction: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start' },
-  captureFooter: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 14, marginTop: 16, paddingBottom: 16 },
+  captureFooter: { borderRadius: 22, padding: 16, gap: 8 },
   captureRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 },
   footerAction: { minHeight: 48, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 10 },
   stoppedNotice: { gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12 },
@@ -826,7 +861,13 @@ const styles = StyleSheet.create({
   readyCard: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 12 },
   pastRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth },
-  assistantCard: { minHeight: 52, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  widgetCard: { minHeight: 72, borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  assistantCard: { minHeight: 76, borderRadius: 22, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  widgetCard: { borderRadius: 24, padding: 20, gap: 12 },
+  utilityGlyph: { width: 44, height: 44, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  utilityCopy: { gap: 4 },
+  transferAction: { marginTop: 14 },
+  utilityTitle: { fontSize: 17, lineHeight: 23 },
+  insightHeading: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  insightTitle: { fontSize: 24, lineHeight: 30, letterSpacing: -0.6 },
+  customizeAction: { minHeight: 48, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 8 },
 });

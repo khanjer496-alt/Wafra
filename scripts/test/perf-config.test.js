@@ -1084,7 +1084,7 @@ function bodyOf(source, header) {
 
   ok('Home resume clock does not invalidate full-ledger projections within the same day',
     /const projectionDay\s*=/.test(home) &&
-      (home.match(/state\.marketId, period, projectionDay/g) ?? []).length >= 2 &&
+      (home.match(/state\.marketId,(?: state\.ledgerMoney, language,)? period, projectionDay/g) ?? []).length >= 2 &&
       !/state\.marketId, period, now\]/.test(home),
     'setNow(new Date()) runs on every foreground resume; the Date object must not make Home scan the whole ledger twice when only the clock changed');
 

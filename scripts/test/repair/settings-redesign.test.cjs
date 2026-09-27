@@ -119,17 +119,19 @@ test('Customize Home copy has matching keys and a title for every Home section',
   const customize = load(path.join(root, 'src/lib/customize-copy.ts'));
   const { en, ar } = customize.CUSTOMIZE_COPY;
   assert.deepEqual(shape(ar), shape(en));
-  assert.deepEqual(Object.keys(en.widgetTitle).sort(), ['activity', 'assistant', 'due', 'insight', 'upcoming']);
+  assert.deepEqual(Object.keys(en.widgetTitle).sort(), ['activity', 'assistant', 'capture', 'due', 'greeting', 'insight', 'overview', 'today', 'upcoming', 'week']);
   assert.equal(en.widgetTitle.due, 'Due soon');
   assert.equal(en.widgetTitle.activity, 'Latest activity');
   for (const value of Object.values(ar.widgetTitle)) assert.match(value, /[؀-ۿ]/);
 });
 
-test('Customize Home keeps accessible reorder buttons, fixed rows and a Done action', () => {
+test('Customize Home keeps accessible reorder buttons, a full preview and a Done action', () => {
   const source = require('node:fs').readFileSync(path.join(root, 'src/app/home-customize.tsx'), 'utf8');
   assert.match(source, /accessibilityLabel=\{`\$\{t\('moveUp'\)\} \$\{title\}`\}/);
   assert.match(source, /accessibilityLabel=\{`\$\{t\('moveDown'\)\} \$\{title\}`\}/);
-  assert.match(source, /actions: \[\{ icon: 'check', label: copy\.done, onPress: router\.back, testID: 'home-customize-done' \}\]/);
-  assert.match(source, /testID="home-customize-fixed"[\s\S]*copy\.moneyOverviewTitle[\s\S]*copy\.captureTitle/);
+  assert.match(source, /testID: 'home-customize-done'/);
+  assert.match(source, /testID="home-customize-preview"/);
+  assert.match(source, /testID="home-customize-reset"/);
+  assert.doesNotMatch(source, /testID="home-customize-fixed"/);
   assert.doesNotMatch(source, /homeCustomizeFixed/);
 });
