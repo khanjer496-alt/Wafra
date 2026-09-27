@@ -136,7 +136,8 @@ const candidate = (title, extra = {}) => ({ ...live(title), id: undefined, chann
   captureSource: 'pdf', statementImportId: 'b'.repeat(32), ts: ts('12'), smsKey: `s${ts('12')}-35500`, ...extra });
 test('a shared brand prefix cannot erase a different local business', () => {
   for (const [a, b] of [['Amazon', 'Amazon Cafe Dubai AE'], ['Netflix', 'Netflix Car Rental Dubai AE'],
-    ['Apple', 'Apple Pharmacy'], ['The One', 'The One Restaurant'], ['Urban Company', 'Urban Restaurant']]) {
+    ['Apple', 'Apple Pharmacy'], ['The One', 'The One Restaurant'], ['Urban Company', 'Urban Restaurant'],
+    ['Carrefour', 'Carrefour Cafe MOE DXB']]) {
     assert.equal(duplicateGuard([live(a)]).has(candidate(b)), false, `${a}/${b}`);
     assert.equal(duplicateGuard([live(b, { captureSource: 'pdf', statementImportId: 'c'.repeat(32) })])
       .has(candidate(a, { captureSource: undefined, statementImportId: undefined, channel: 'push' })), false);
@@ -145,6 +146,7 @@ test('a shared brand prefix cannot erase a different local business', () => {
 test('compatible descriptions consume once and respect card, bank, account, direction and date', () => {
   for (const [a, b] of [['Emarat', 'NFC - (G-PAY)- EMARAT 6840 DUBAI AE'],
     ['UrbanClap', 'Urban Company Dubai AE'], ['Carrefour', 'CARREFOUR HYPER 1234'],
+    ['Carrefour', 'CARREFOUR MOE DXB'],
     ['Endurancein', 'PAYPAL *ENDURANCEIN']]) {
     const guard = duplicateGuard([live(a)]);
     assert.equal(guard.has(candidate(b)), true, `${a}/${b}`);

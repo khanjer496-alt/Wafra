@@ -1798,14 +1798,16 @@ ok('a period the user picked is not overwritten by that recompute',
 // for money that had just landed. The sign follows the type; the colour is
 // what separates earned from merely moved.
 const txRow = read('src/components/transaction-row.tsx');
-ok('the sign follows the direction of the money, not whether it counts as income',
-  /\{arrived \? '\+' : '−'\}/.test(txRow),
+// Confirmed repayments are unsigned; ordinary movements still follow direction.
+// Executed row/speech regressions also live in transaction-presentation.test.cjs.
+ok('ordinary movement signs follow direction; only confirmed repayments are unsigned',
+  /const arrived = transaction\.type === 'income';/.test(txRow) && /\{presentation\.repayment \? '' : arrived \? '\+' : '−'\}/.test(txRow),
   'an arriving transfer was rendered with a minus');
 ok('green is still reserved for money actually earned',
   /color: isIncome \? theme\.income : theme\.text/.test(txRow),
   'painting transfer arrivals green made the list read as income landing twice');
-ok('the spoken label agrees with the sign on screen',
-  /\$\{arrived \? t\('plusWord'/.test(txRow),
+ok('the spoken label matches the visible repayment exception and direction',
+  /\$\{presentation\.repayment \? '' : arrived \? t\('plusWord', language\) : t\('minusWord', language\)\}/.test(txRow),
   'a screen reader saying "minus" over a plus is worse than either alone');
 
 // ---------------------------------------------------------------------------

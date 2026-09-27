@@ -216,10 +216,10 @@ ok('Wallet inactive disclosure exposes a localized expanded button',
   /accessibilityRole="button"[\s\S]{0,180}accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/.test(wallet));
 
 ok('transaction rows wrap merchant and complete category/account meaning at large text sizes',
-  !/<ThemedText[^>]*numberOfLines=\{1\}[^>]*>[\s\S]{0,100}\{transaction\.title\}/.test(transactionRow) &&
+  !/<ThemedText[^>]*numberOfLines=\{1\}[^>]*>[\s\S]{0,100}\{presentation\.title\}/.test(transactionRow) &&
     !/<ThemedText[^>]*numberOfLines=\{1\}[^>]*>[\s\S]{0,180}\{where\}/.test(transactionRow) &&
     /const accountLabel = accountReview \?\? account\?\.name/.test(transactionRow) &&
-    /const label = \[[\s\S]*?transaction\.title[\s\S]*?where[\s\S]*?accountLabel[\s\S]*?clock/.test(transactionRow));
+    /const label = \[[\s\S]*?presentation\.title[\s\S]*?where[\s\S]*?accountLabel[\s\S]*?clock/.test(transactionRow));
 ok('Add category and account containers expose labelled radio groups with hints',
   (addTransaction.match(/accessibilityRole="radiogroup"/g) ?? []).length === 2 &&
     /accessibilityLabel=\{tUi\('category'\)\}/.test(addTransaction) &&

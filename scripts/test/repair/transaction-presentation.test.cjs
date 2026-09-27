@@ -192,3 +192,89 @@ test('statement rows show the bank date, not the relay synthetic clock; alerts r
   assert.match(text(render(alert)), /16:00/);
   assert.match(text(h.renderDetail(alert)), /16:00/);
 });
+
+
+for (const platform of ['android', 'ios']) for (const language of ['en', 'ar']) {
+  test(`${platform}/${language}: ordinary movement signs and repayment neutrality agree with speech`, () => {
+    const h = createHarness({ platform, language });
+    const t = h.deps['@/lib/i18n'].t;
+    const render = transaction => h.deps['@/components/transaction-row'].TransactionRow({
+      transaction, merchantLinks: false, onPress() {},
+    });
+    for (const type of ['income', 'expense']) {
+      const glyph = type === 'income' ? '+' : '−';
+      const spoken = t(type === 'income' ? 'plusWord' : 'minusWord', language);
+      const opposite = t(type === 'income' ? 'minusWord' : 'plusWord', language);
+      for (const extra of [
+        {},
+        { title: 'Own account transfer', isTransfer: true,
+          transferEvidence: { version: 1, currency: 'AED', attribution: 'source', explicitOwn: true } },
+        { title: 'Bank transfer', isTransfer: true,
+          transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback' } },
+        { title: 'Bank transfer',
+          transferDecision: { version: 1, ownership: 'external', decidedAt: 1 } },
+      ]) {
+        const tx = row('Local Shop', { type, ...extra });
+        const view = display(tx, language);
+        const tree = render(tx);
+        const exact = h.format.formatAmount(tx.amountFils, { decimals: true });
+        assert.equal(view.repayment, false);
+        assert.equal(view.sign, type === 'income' ? 'plus' : 'minus');
+        assert.ok(text(tree).includes(`${glyph} ${exact}`), `${type}: ${tx.title}`);
+        assert.ok(tree.props.accessibilityLabel.includes(spoken));
+        assert.ok(!tree.props.accessibilityLabel.includes(opposite));
+      }
+      const tx = repayment({ type });
+      const tree = render(tx);
+      const exact = h.format.formatAmount(tx.amountFils, { decimals: true });
+      assert.equal(display(tx, language).repayment, true);
+      assert.ok(text(tree).includes(exact));
+      assert.ok(!text(tree).includes(`+ ${exact}`));
+      assert.ok(!text(tree).includes(`− ${exact}`));
+      assert.ok(!tree.props.accessibilityLabel.includes(t('plusWord', language)));
+      assert.ok(!tree.props.accessibilityLabel.includes(t('minusWord', language)));
+    }
+  });
+}
+
+// Per-index caching may reuse formatting, never a transaction's meaning.
+test('search presentation cache is build-local and respects every row-specific classification', () => {
+  let calls = 0;
+  const filter = load(path.join(root, 'src/lib/transaction-filter.ts'), {
+    '@/lib/categories': require('../build/categories.js'), '@/lib/format': require('../build/format.js'),
+    '@/lib/ledger': ledger, '@/lib/splits': require('../build/splits.js'),
+    '@/lib/transaction-source': load(path.join(root, 'src/lib/transaction-source.ts')),
+    '@/lib/transaction-presentation': {
+      transactionPresentation(...args) { calls++; return display(...args); },
+    },
+  });
+  const repeated = Array.from({ length: 1000 }, (_, i) => Object.freeze(row('NFC - (G-PAY)- SHOP 123 DUBAI AE', {
+    id: `format-${i}`, category: 'shopping', amountFils: i + 1,
+  })));
+  const first = filter.createTransactionFilterIndex(repeated, 'en');
+  assert.equal(calls, 1, 'repeated formatting is computed once for this build');
+  assert.equal(first.ordered('newest').length, repeated.length);
+  const cases = [
+    {}, { type: 'income' }, { userEdited: true }, { titleEdited: true },
+    { source: 'manual', captureSource: undefined },
+    { isTransfer: true, cardPaymentSide: 'receipt', type: 'income' },
+    { isTransfer: true, paymentFlowSide: 'receipt' },
+    { type: 'income', category: 'salary' }, { type: 'income', category: 'business' },
+    { type: 'income', transferEvidence: { version: 1, currency: 'AED', attribution: 'source', explicitOwn: true } },
+    { type: 'income', transferEvidence: { version: 1, currency: 'AED', attribution: 'source', explicitExternal: true } },
+    { type: 'income', transferDecision: { version: 1, ownership: 'own', decidedAt: 1 } },
+    { type: 'income', transferDecision: { version: 1, ownership: 'external', decidedAt: 1 } },
+  ].map((extra, i) => Object.freeze(row('Personal Internet Banking', { id: `meaning-${i}`, ...extra })));
+  for (const language of ['en', 'ar']) {
+    const index = filter.createTransactionFilterIndex([...cases, ...cases], language);
+    for (const indexed of index.ordered('newest')) {
+      const expected = display(indexed.row, language);
+      const segment = [expected.title, expected.tag].filter(Boolean).join(' ').toLowerCase();
+      assert.ok(indexed.search.includes(`\u0000${segment}\u0000`), `${language}/${indexed.row.id}`);
+      assert.equal(indexed.merchantKey, indexed.row.title.toLowerCase());
+    }
+  }
+  const before = calls;
+  filter.createTransactionFilterIndex(repeated, 'en');
+  assert.equal(calls, before + 1, 'no personal strings are reused across independent index builds');
+});

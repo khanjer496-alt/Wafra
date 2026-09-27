@@ -93,6 +93,9 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
   /** Account id → searchable name (name, bank, last four). Optional. */
   accountNames?: ReadonlyMap<string, string>) {
   const labels = new Map<CategoryId, string>();
+  // Only this index build owns these strings. Repeated merchant rows reuse
+  // their scalar presentation; evidence-bearing rows always run independently.
+  const displays = new Map<string, Map<string, string>>();
   const entries: IndexedTransaction[] = rows.map(row => {
     let category = labels.get(row.category);
     if (category === undefined) {
@@ -101,8 +104,20 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
       labels.set(row.category, category);
     }
     const title = row.title.toLowerCase();
-    const presentation = transactionPresentation(row, language);
-    const display = [presentation.title, presentation.tag].filter(Boolean).join(' ').toLowerCase();
+    const cacheable = row.transferEvidence === undefined && row.transferDecision === undefined;
+    const key = cacheable ? [row.type, row.category, row.source, !!row.smsKey,
+      row.captureSource, row.isTransfer === true, row.cardPaymentSide, row.paymentFlowSide,
+      row.userEdited === true, row.titleEdited === true].join('|') : '';
+    const variants = cacheable ? displays.get(row.title) : undefined;
+    let display = variants?.get(key);
+    if (display === undefined) {
+      const presentation = transactionPresentation(row, language);
+      display = [presentation.title, presentation.tag].filter(Boolean).join(' ').toLowerCase();
+      if (cacheable) {
+        if (variants) variants.set(key, display);
+        else displays.set(row.title, new Map([[key, display]]));
+      }
+    }
     const account = accountNames?.get(row.accountId);
     return { row, merchantKey: title.trim(), search: title + '\u0000' + display + '\u0000' + category + (account ? '\u0000' + account.toLowerCase() : ''),
       month: monthKey(row.date) };

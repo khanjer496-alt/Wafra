@@ -827,7 +827,7 @@ export function duplicateGuard(
     // Unknown extensions stay separate rather than silently deleting a charge.
     return long.slice(short.length).every((word) =>
       /^\d+$/.test(word) ||
-      /^(?:br|branch|site|no|llc|ltd|limited|fze|fzco|hyper|hypermarket|ae|uae|dubai|sharjah|ajman|abu|dhabi)$/.test(word));
+      /^(?:br|branch|site|no|llc|ltd|limited|fze|fzco|hyper|hypermarket|ae|uae|dubai|sharjah|ajman|abu|dhabi|dxb|auh|moe)$/.test(word));
   };
   const settlementTitle = (value: string) => /^card(?:\s*•\s*\d{4})?\s+payment$/i.test(value.trim());
   const statementDescriptorsAgree = (a: string, b: string): boolean =>
