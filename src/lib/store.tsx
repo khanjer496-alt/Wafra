@@ -34,6 +34,7 @@ import { cancelLocalSemanticBackgroundWork } from '@/lib/local-semantic-backgrou
 import { isValidBackupState } from '@/lib/backup-validation';
 import {
   applyTransferDecision,
+  applyTransferDecisionBatch,
   isTransferCandidate,
   isTransferInertTransaction,
   normalizeTransferLinks,
@@ -42,7 +43,7 @@ import {
   transferFingerprint,
   TRANSFER_NORMALIZATION_VERSION,
 } from '@/lib/transfer-reconciliation';
-import type { TransferDecisionRequest } from '@/lib/transfer-reconciliation-types';
+import type { TransferDecisionRequest, TransferDecisionBatchRequest } from '@/lib/transfer-reconciliation-types';
 import { getMonthStartDay, setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { getThemePreference, setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, getLanguage, setLanguage } from '@/lib/i18n';
@@ -883,6 +884,7 @@ export function parseBackupForRestore(
 
 type Action =
   | { type: 'resolveTransfers'; request: TransferDecisionRequest }
+  | { type: 'resolveTransferBatch'; request: TransferDecisionBatchRequest }
   | { type: 'hydrate'; state: Partial<Omit<AppState, 'hydrated'>> }
   | { type: 'addTransaction'; transaction: Transaction; ledgerMoney?: LedgerMoneySpec }
   | { type: 'editTransaction'; id: string; patch: Partial<Omit<Transaction, 'id'>> }
@@ -1220,6 +1222,8 @@ function reduceState(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'resolveTransfers':
       return { ...state, transactions: applyTransferDecision(state.transactions, state.accounts, action.request) };
+    case 'resolveTransferBatch':
+      return { ...state, transactions: applyTransferDecisionBatch(state.transactions, state.accounts, action.request) };
     case 'hydrate':
     case 'loadDemo':
     case 'restore': {
@@ -1858,6 +1862,7 @@ interface StoreValue {
   addTransaction: (t: Omit<Transaction, 'id'>, ledgerMoney?: LedgerMoneySpec) => void;
   editTransaction: (id: string, patch: Partial<Omit<Transaction, 'id'>>) => void;
   resolveTransfers: (request: Omit<TransferDecisionRequest, 'now'> & { expectedGeneration?: number }) => Promise<void>;
+  resolveTransferBatch: (request: Omit<TransferDecisionBatchRequest, 'now'> & { expectedGeneration?: number }) => Promise<void>;
   deleteTransaction: (id: string) => void;
   /** "Looks right" clears the Auto-added marker; "undo" removes the row for good. */
   resolveBestEffort: (id: string, outcome: 'confirm' | 'undo') => void;
@@ -2574,20 +2579,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: 'editTransaction', id, patch });
   }, [dispatch]);
 
-  const resolveTransfers = useCallback(async (
-    request: Omit<TransferDecisionRequest, 'now'> & { expectedGeneration?: number },
+  const commitTransferReview = useCallback(async (
+    action: Extract<Action, { type: 'resolveTransfers' | 'resolveTransferBatch' }>, expectedGeneration?: number,
   ) => {
+    // Let the pressed/saving state render before synchronous reconciliation.
+    // Validate after yielding so a restore or live capture cannot be overlooked.
+    const generation = expectedGeneration ?? getStateGeneration();
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
     if (!authoritativeState.current.hydrated ||
-      (request.expectedGeneration !== undefined && request.expectedGeneration !== getStateGeneration())) {
+      generation !== getStateGeneration()) {
       throw new Error('Transfer review is out of date');
     }
     if (saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = null;
     }
-    const next = dispatch({ type: 'resolveTransfers', request: { ...request, now: Date.now() } });
+    const next = dispatch(action);
     if (!await persist(next)) {
-      const selected = new Set([...request.ids, ...(request.counterpartId ? [request.counterpartId] : [])]);
+      const decisions = action.type === 'resolveTransferBatch' ? action.request.decisions : [action.request];
+      const selected = new Set(decisions.flatMap(decision => [...decision.ids, ...(decision.counterpartId ? [decision.counterpartId] : [])]));
       throw Object.assign(new Error('Encrypted ledger write failed'), {
         code: 'transfer-durability',
         expectedFingerprints: Object.fromEntries(next.transactions.filter(row => selected.has(row.id))
@@ -2595,6 +2605,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       });
     }
   }, [dispatch, getStateGeneration, persist]);
+
+  const resolveTransfers = useCallback((
+    request: Omit<TransferDecisionRequest, 'now'> & { expectedGeneration?: number },
+  ) => commitTransferReview({ type: 'resolveTransfers', request: { ...request, now: Date.now() } }, request.expectedGeneration), [commitTransferReview]);
+
+  const resolveTransferBatch = useCallback((
+    request: Omit<TransferDecisionBatchRequest, 'now'> & { expectedGeneration?: number },
+  ) => commitTransferReview({ type: 'resolveTransferBatch', request: { ...request, now: Date.now() } }, request.expectedGeneration), [commitTransferReview]);
 
   const deleteTransaction = useCallback((id: string) => {
     dispatch({ type: 'deleteTransaction', id });
@@ -3305,6 +3323,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addTransaction,
       editTransaction,
       resolveTransfers,
+      resolveTransferBatch,
       deleteTransaction,
       resolveBestEffort,
       setBestEffortAutoPost,
@@ -3379,6 +3398,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addTransaction,
       editTransaction,
       resolveTransfers,
+      resolveTransferBatch,
       deleteTransaction,
       resolveBestEffort,
       setBestEffortAutoPost,

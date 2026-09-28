@@ -22,13 +22,14 @@ const expandGroups = h => {
 const openEntry = h => { expandGroups(h); byId(h.render(), 'transfer-review-entry').props.onPress(); };
 
 function createUI({ language = 'en', transactions = [row('one'), row('two')], bulk = false,
-  params = {}, resolveTransfers, ensureDurable, groupDefinitions, assessments = {}, pending = [] } = {}) {
+  params = {}, resolveTransfers, resolveTransferBatch, ensureDurable, groupDefinitions, assessments = {}, pending = [] } = {}) {
   const events = [], slots = [], refs = [];
   let cursor = 0, refCursor = 0, generation = 1;
   const state = { language, hydrated: true, transactions,
     accounts: [{ id: 'bank', name: 'Synthetic bank', last4: '1234' }, { id: 'other', name: 'Other bank', last4: '5678' }] };
   const store = { state, getStateGeneration: () => generation, getStateSnapshot: () => state,
     resolveTransfers: async request => { events.push(['resolve', plain(request)]); return resolveTransfers?.(request, state); },
+    resolveTransferBatch: async request => { events.push(['batch', plain(request)]); return resolveTransferBatch?.(request, state); },
     ensureDurable: async () => { events.push(['durable']); return ensureDurable?.(state); },
   };
   const react = { useDeferredValue: value => value, useMemo: fn => fn(), useRef: initial => {
@@ -45,7 +46,8 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
   const reconcile = txs => {
     const definitions = groupDefinitions ?? [{ id: 'group', transactionIds: txs.map(tx => tx.id), bulkEligible: bulk }];
     const groups = definitions.flatMap(definition => {
-      const rows = txs.filter(tx => definition.transactionIds.includes(tx.id) && !tx.transferDecision && !assessments[tx.id]);
+      const rows = txs.filter(tx => definition.transactionIds.includes(tx.id) && !tx.transferDecision &&
+        (!assessments[tx.id] || pending.includes(tx.id)));
       return rows.length ? [{ id: definition.id, transactionIds: rows.map(tx => tx.id), accountId: rows[0].accountId,
         direction: rows[0].type, status: 'ownership-unknown', bulkEligible: definition.bulkEligible,
         counterparty: definition.bulkEligible ? { last4: '9876', kind: 'account', bankIdentity: 'synthetic-bank' } : undefined }] : [];
@@ -57,7 +59,7 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
   const deps = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' }, 'react-native': native,
     'expo-router': { useLocalSearchParams: () => params, useRouter: () => ({ back: () => events.push(['back']), push: route => events.push(['route', route]) }) },
-    '@/lib/store': { useStore: () => store }, '@/lib/i18n': { getLanguage: () => language },
+    '@/lib/store': { useStore: () => store, useStoreSelector: select => select(store), useStoreActions: () => store }, '@/lib/i18n': { getLanguage: () => language },
     '@/lib/markets': load(path.join(root, 'src/lib/markets.ts')),
     // Formatting is a boundary stub here, as with formatAED below; monetary implementation has its own suites.
     '@/lib/ledger-money': { formatMinorUnits: (amount, spec) => (amount / 10 ** spec.exponent).toFixed(spec.exponent) },
@@ -75,7 +77,7 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
     '@/components/ui/toast': { useToast: () => ({ show: message => events.push(['toast', message]) }) },
     '@/components/ui/bottom-sheet': { BottomSheet: props => props.visible ? jsx('Sheet', props) : null },
     // Design language E: the slate band scaffold renders its band, then the sheet.
-    '@/components/ui/band-scaffold': { BandScaffold: props => jsx('Scaffold', { ...props, children: [props.bandContent, props.children] }),
+    '@/components/ui/band-scaffold': { BandScaffold: props => jsx('Scaffold', { ...props, children: [props.bandContent, props.children, props.footer] }),
       useBandBottomInset: () => 20 },
     '@/hooks/use-band': { useBand: id => ({ id, band: '#2F6577', onBand: '#F4F1EA', onBandSecondary: '#D6DCD9', sheet: '#F4F1EA',
       card: '#FBF9F4', rule: '#E3DED2', text: '#16130F', textSecondary: '#57524A', tint: '#2F6577', fill: '#2F6577', onFill: '#F4F1EA' }) },
@@ -376,6 +378,42 @@ const pairAssessments = {
   out: { status: 'likely-own', reason: 'amount-time', counterpartId: 'in', candidateIds: ['in'] },
   in: { status: 'likely-own', reason: 'amount-time', counterpartId: 'out', candidateIds: ['out'] },
 };
+test('external classification of a suggested leg can retry storage without requiring an unchanged counterpart receipt', async () => {
+  const h = createUI({ transactions: pairLegs(),
+    groupDefinitions: [{ id: 'out-group', transactionIds: ['out'], bulkEligible: false }], params: { transactionId: 'out' },
+    pending: ['out', 'in'], assessments: pairAssessments,
+    resolveTransfers: async (request, state) => {
+      state.transactions = state.transactions.map(tx => tx.id === 'out'
+        ? { ...tx, transferDecision: { version: 1, ownership: request.ownership, decidedAt: 1 } } : tx);
+      throw Object.assign(new Error('write failed'), { code: 'transfer-durability',
+        expectedFingerprints: { out: fingerprint(state.transactions.find(tx => tx.id === 'out')) } });
+    } });
+  const screen = h.render();
+  const entry = byId(screen, 'transfer-review-entry');
+  assert.ok(entry, 'the suggested outgoing entry is available for individual review');
+  entry.props.onPress();
+  byId(h.render(), 'transfer-choice-external').props.onPress();
+  byLabel(h.render(), h.words.confirm).props.onPress();
+  await flush();
+  const retry = byLabel(h.render(), h.words.retrySave);
+  assert.equal(retry.props.disabled, false);
+  retry.props.onPress();
+  await flush();
+  assert.equal(h.events.filter(event => event[0] === 'resolve').length, 1);
+  assert.equal(h.events.filter(event => event[0] === 'durable').length, 1);
+  assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
+});
+
+test('an active transfer search remains clearable when the pending count drops below the search threshold', () => {
+  const h = createUI({ transactions: Array.from({ length: 10 }, (_, i) => row(`search-${i}`)) });
+  byId(h.render(), 'transfer-search').props.onChangeText('Bank');
+  h.state.transactions = h.state.transactions.slice(0, 3);
+  const search = byId(h.render(), 'transfer-search');
+  assert.ok(search);
+  assert.equal(search.props.value, 'Bank');
+  search.props.onChangeText('');
+  assert.equal(byId(h.render(), 'transfer-search'), undefined);
+});
 const pairCopy = language => load(path.join(root, 'src/lib/details-copy.ts')).detailsCopy[language];
 const bandCopy = language => load(path.join(root, 'src/lib/review-band-copy.ts')).reviewBandCopy(language);
 
@@ -480,4 +518,127 @@ test('pair legs with different amounts show both, never one merged figure', () =
   const h = createUI({ transactions: legs, groupDefinitions: [], pending: ['out', 'in'], assessments: pairAssessments });
   const card = text(byId(h.render(), 'transfer-pair-card'));
   assert.ok(card.includes('AED 123.45') && card.includes('AED 120.00'));
+});
+
+function manyPairs(count = 2) {
+  const transactions = [], assessments = {}, pending = [];
+  for (let i = 0; i < count; i++) {
+    const out = `out-${i}`, into = `in-${i}`, amountFils = 12345 + i * 100;
+    transactions.push(row(out, { amountFils }), row(into, { type: 'income', accountId: 'other', amountFils }));
+    assessments[out] = { status: 'likely-own', reason: 'amount-time', counterpartId: into, candidateIds: [into] };
+    assessments[into] = { status: 'likely-own', reason: 'amount-time', counterpartId: out, candidateIds: [out] };
+    pending.push(out, into);
+  }
+  return { transactions, assessments, pending, groupDefinitions: [] };
+}
+const startSelecting = h => byLabel(h.render(), h.words.selectTransfers).props.onPress();
+const checks = h => walk(h.render()).filter(n => n.props?.testID === 'transfer-pair-select');
+const reviewSelected = (h, count) => byLabel(h.render(), h.words.reviewSelected(count)).props.onPress();
+
+for (const language of ['en', 'ar']) {
+  test(`${language}: selected pairs confirm in one durable batch, with reciprocal targets and a repeated-tap guard`, async () => {
+    const pending = deferred();
+    const h = createUI({ ...manyPairs(), language, resolveTransferBatch: () => pending.promise });
+    startSelecting(h);
+    checks(h)[0].props.onPress(); checks(h)[1].props.onPress();
+    assert.equal(checks(h).every(n => n.props.accessibilityState.checked), true);
+    assert.equal(checks(h).every(n => n.props['aria-checked']), true, 'web exposes the checked state');
+    assert.deepEqual(h.events, [], 'checking a row never changes the ledger');
+    reviewSelected(h, 2);
+    const sheet = byId(h.render(), 'transfer-review-confirmation');
+    assert.equal(walk(sheet).filter(n => n.props?.testID === 'transfer-batch-preview-item').length, 2);
+    assert.ok(text(sheet).includes(h.words.ownBody));
+    assert.equal(byId(sheet, 'transfer-choice-external'), undefined, 'the batch action explicitly confirms own-account transfers');
+    const confirm = byLabel(sheet, h.words.confirmSelected(2));
+    confirm.props.onPress(); confirm.props.onPress();
+    assert.equal(h.events.filter(e => e[0] === 'batch').length, 1);
+    const request = h.events[0][1];
+    assert.equal(request.decisions.length, 2);
+    assert.deepEqual(request.decisions.map(d => [d.ids[0], d.counterpartId]).sort(), [['out-0', 'in-0'], ['out-1', 'in-1']]);
+    assert.deepEqual(Object.keys(request.expectedFingerprints).sort(), ['in-0', 'in-1', 'out-0', 'out-1']);
+    assert.equal(request.expectedGeneration, 1);
+    assert.equal(h.events.some(e => e[0] === 'toast'), false);
+    pending.resolve(); await flush();
+    assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
+    assert.equal(byId(h.render(), 'transfer-selection-footer'), undefined);
+    assert.deepEqual(h.events.at(-1), ['toast', h.words.batchSaved(2)]);
+  });
+}
+
+test('individual entries from different groups can be selected without applying a catchall group decision', async () => {
+  const h = createUI({ transactions: [row('a'), row('b', { accountId: 'other' }), row('untouched')],
+    groupDefinitions: [{ id: 'a', transactionIds: ['a', 'untouched'], bulkEligible: false },
+      { id: 'b', transactionIds: ['b'], bulkEligible: false }] });
+  startSelecting(h); expandGroups(h);
+  const entries = walk(h.render()).filter(n => n.props?.testID === 'transfer-review-entry');
+  entries[0].props.onPress(); entries[2].props.onPress();
+  reviewSelected(h, 2);
+  byLabel(byId(h.render(), 'transfer-review-confirmation'), h.words.confirmSelected(2)).props.onPress(); await flush();
+  assert.equal(h.events.filter(e => e[0] === 'batch').length, 1);
+  const request = h.events[0][1];
+  assert.equal(request.decisions.every(d => d.ids.length === 1 && !d.counterpartId), true);
+  assert.equal(request.decisions.length, 2);
+  assert.deepEqual(request.decisions.flatMap(d => d.ids).sort(), ['a', 'b']);
+  assert.equal(Object.keys(request.expectedFingerprints).length, 2);
+});
+
+test('Select all shown obeys pair search and clear selection leaves the ledger unchanged', () => {
+  const h = createUI(manyPairs(12));
+  startSelecting(h);
+  byId(h.render(), 'transfer-search').props.onChangeText('124.45');
+  assert.equal(checks(h).length, 1);
+  byId(h.render(), 'transfer-select-shown').props.onPress();
+  assert.equal(checks(h)[0].props.accessibilityState.checked, true);
+  byId(h.render(), 'transfer-search').props.onChangeText('');
+  assert.equal(checks(h).filter(n => n.props.accessibilityState.checked).length, 1);
+  byId(h.render(), 'transfer-clear-selection').props.onPress();
+  assert.equal(byLabel(h.render(), h.words.reviewSelected(0)).props.disabled, true);
+  assert.deepEqual(h.events, []);
+});
+
+test('300 suggested pair cards are list items, never eagerly mounted in the list header', () => {
+  const h = createUI(manyPairs(300));
+  const list = walk(h.render()).find(n => n.type === 'FlatList');
+  assert.equal(list.props.data.filter(item => item.kind === 'pair').length, 300);
+  assert.equal(walk(list.props.ListHeaderComponent).filter(n => n.props?.testID === 'transfer-pair-card').length, 0);
+  assert.equal(list.props.initialNumToRender, 8);
+  assert.equal(list.props.maxToRenderPerBatch, 8);
+});
+
+test('a checked transfer keeps its original preview and blocks the entire batch if a leg changes', async () => {
+  const h = createUI(manyPairs());
+  startSelecting(h); byId(h.render(), 'transfer-select-shown').props.onPress();
+  h.state.transactions = h.state.transactions.map(tx => tx.id === 'in-1' ? { ...tx, amountFils: 99999 } : tx);
+  reviewSelected(h, 2);
+  const sheet = byId(h.render(), 'transfer-review-confirmation');
+  assert.ok(text(sheet).includes('AED 124.45'));
+  assert.ok(!text(sheet).includes('AED 999.99'));
+  assert.equal(byLabel(sheet, h.words.confirmSelected(2)).props.disabled, true);
+  byLabel(sheet, h.words.confirmSelected(2)).props.onPress(); await flush();
+  assert.equal(h.events.some(e => e[0] === 'batch'), false);
+});
+
+test('restore between checking and opening confirmation invalidates the selected ledger', () => {
+  const h = createUI(manyPairs());
+  startSelecting(h); byId(h.render(), 'transfer-select-shown').props.onPress();
+  h.setGeneration(2); reviewSelected(h, 2);
+  assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
+  assert.deepEqual(h.events, [['toast', h.words.changed]]);
+});
+
+test('batch storage failure retries the write once without reapplying any selected decisions', async () => {
+  const h = createUI({ ...manyPairs(), resolveTransferBatch: async (request, state) => {
+    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 1 } }));
+    throw Object.assign(new Error('write failed'), { code: 'transfer-durability',
+      expectedFingerprints: Object.fromEntries(state.transactions.map(tx => [tx.id, fingerprint(tx)])) });
+  } });
+  startSelecting(h); byId(h.render(), 'transfer-select-shown').props.onPress(); reviewSelected(h, 2);
+  byLabel(byId(h.render(), 'transfer-review-confirmation'), h.words.confirmSelected(2)).props.onPress(); await flush();
+  const sheet = byId(h.render(), 'transfer-review-confirmation');
+  assert.equal(sheet.props.dismissible, false);
+  assert.equal(byLabel(sheet, h.words.cancel).props.disabled, true);
+  byLabel(sheet, h.words.retrySave).props.onPress(); await flush();
+  assert.equal(h.events.filter(e => e[0] === 'batch').length, 1);
+  assert.equal(h.events.filter(e => e[0] === 'durable').length, 1);
+  assert.deepEqual(h.events.at(-1), ['toast', h.words.batchSaved(2)]);
 });
