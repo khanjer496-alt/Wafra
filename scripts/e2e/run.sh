@@ -60,6 +60,7 @@ node scripts/e2e/e2e-navigation.mjs
 
 node scripts/e2e/e2e-universal-review.mjs
 node scripts/e2e/e2e-transfer-review.mjs
+node scripts/e2e/e2e-transfer-batch.mjs
 node scripts/e2e/e2e-redesign.mjs
 node scripts/e2e/e2e-merchant-logos.mjs
 

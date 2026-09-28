@@ -4,12 +4,12 @@ import { bankIdentityForName, ledgerCurrencyCode } from '@/lib/markets';
 import { currencyMinorUnits } from '@/lib/currency-metadata';
 import type { Account, Transaction } from '@/lib/types';
 import type {
-  TransferAssessment, TransferDecision, TransferDecisionRequest, TransferEvidence,
+  TransferAssessment, TransferDecision, TransferDecisionRequest, TransferDecisionBatchRequest, TransferEvidence,
   TransferMatch, TransferReconciliationResult, TransferReviewGroup,
 } from '@/lib/transfer-reconciliation-types';
 
 export type {
-  TransferAssessment, TransferDecision, TransferDecisionRequest, TransferEvidence,
+  TransferAssessment, TransferDecision, TransferDecisionRequest, TransferDecisionBatchRequest, TransferEvidence,
   TransferMatch, TransferReconciliationResult, TransferReviewGroup,
 } from '@/lib/transfer-reconciliation-types';
 
@@ -1152,44 +1152,79 @@ export function normalizeTransferLinks(transactions: Transaction[], accounts: Ac
 export function applyTransferDecision(
   transactions: Transaction[], accounts: Account[], request: TransferDecisionRequest,
 ): Transaction[] {
-  if (!record(request) || !Array.isArray(request.ids) || request.ids.length === 0 ||
-    request.ids.some(value => !id(value)) || new Set(request.ids).size !== request.ids.length ||
-    !['own', 'external', null].includes(request.ownership) || !clock(request.now) || !record(request.expectedFingerprints) ||
-    (request.counterpartId !== undefined && (!id(request.counterpartId) || request.ownership !== 'own' || request.ids.length !== 1))) {
-    throw new Error('Invalid transfer decision');
-  }
-  const ctx = context(transactions, accounts);
-  const targets = new Set(request.ids);
-  if (request.counterpartId) targets.add(request.counterpartId);
-  for (const target of targets) {
-    const tx = ctx.rows.get(target);
-    if (!tx || ctx.duplicateIds.has(target) || !isTransferCandidate(tx) ||
-      request.expectedFingerprints[target] !== transferFingerprint(tx)) throw new Error('Transfer review changed; open it again');
-  }
-  const assessment = reconcile(ctx);
-  if (request.ids.length > 1) {
-    // The visible group is not an authorization boundary: enforce the same
-    // current, sourced counterparty identity when the atomic write is applied.
-    // Build one set rather than repeatedly scanning a large group's rows.
-    const group = assessment.groups.find(candidate => candidate.bulkEligible &&
-      candidate.transactionIds.some(target => targets.has(target)));
-    const members = new Set(group?.transactionIds ?? []);
-    if (request.ids.some(target => !members.has(target))) {
-      throw new Error('Bulk transfer review requires one current known-counterparty group');
+  if (!record(request)) throw new Error('Invalid transfer decision');
+  return applyTransferDecisionBatch(transactions, accounts, {
+    decisions: [request], expectedFingerprints: request.expectedFingerprints, now: request.now,
+  });
+}
+
+/** Validate every selected item against the same snapshot before changing any row. */
+export function applyTransferDecisionBatch(
+  transactions: Transaction[], accounts: Account[], request: TransferDecisionBatchRequest,
+): Transaction[] {
+  if (!record(request) || !Array.isArray(request.decisions) || request.decisions.length === 0 ||
+    !clock(request.now) || !record(request.expectedFingerprints)) throw new Error('Invalid transfer decision');
+  const assignments = new Map<string, { ownership: TransferDecisionRequest['ownership']; counterpartId?: string }>();
+  for (const decision of request.decisions) {
+    if (!record(decision) || !Array.isArray(decision.ids) || decision.ids.length === 0 ||
+      decision.ids.some(value => !id(value)) || new Set(decision.ids).size !== decision.ids.length ||
+      !['own', 'external', null].includes(decision.ownership) ||
+      (decision.counterpartId !== undefined && (!id(decision.counterpartId) || decision.ownership !== 'own' || decision.ids.length !== 1))) {
+      throw new Error('Invalid transfer decision');
+    }
+    const selected = [...decision.ids, ...(decision.counterpartId ? [decision.counterpartId] : [])];
+    for (const target of selected) {
+      if (assignments.has(target)) throw new Error('A transfer entry was selected more than once');
+      assignments.set(target, { ownership: decision.ownership,
+        ...(decision.counterpartId ? { counterpartId: target === decision.ids[0] ? decision.counterpartId : decision.ids[0] } : {}) });
     }
   }
-  if (request.counterpartId) {
-    const a = ctx.rows.get(request.ids[0])!; const b = ctx.rows.get(request.counterpartId)!;
-    if (!manualPair(a, b, ctx)) throw new Error('These entries cannot be linked as a transfer');
-    for (const [tx, other] of [[a, b], [b, a]]) {
-      const existingPartner = assessment.byId.get(tx.id)?.counterpartId ?? decisionOf(tx)?.counterpartId;
-      if ((existingPartner && existingPartner !== other.id) || transferOwnership(tx) === 'external') {
-        throw new Error('Resolve the existing transfer decision before linking another entry');
+  // A standalone ownership correction needs no matching graph. Linked pairs
+  // and legacy counterparty groups share one context and the current cached graph.
+  const needsGraph = request.decisions.some(decision => decision.ids.length > 1 || decision.counterpartId !== undefined);
+  const ctx = needsGraph ? context(transactions, accounts) : undefined;
+  const rows = ctx?.rows ?? new Map<string, TransferRow>();
+  const duplicateIds = ctx?.duplicateIds ?? new Set<string>();
+  if (!ctx) for (const transaction of transactions) {
+    if (rows.has(transaction.id)) duplicateIds.add(transaction.id);
+    rows.set(transaction.id, transaction);
+  }
+  const targets = new Set(assignments.keys());
+  for (const target of targets) {
+    const tx = rows.get(target);
+    if (!tx || duplicateIds.has(target) || !isTransferCandidate(tx) ||
+      request.expectedFingerprints[target] !== transferFingerprint(tx)) throw new Error('Transfer review changed; open it again');
+  }
+  const assessment = ctx ? memoizedReconcile(transactions, accounts, ctx) : undefined;
+  const eligibleGroups = new Map<string, TransferReviewGroup>();
+  if (request.decisions.some(decision => decision.ids.length > 1)) {
+    for (const group of assessment!.groups) if (group.bulkEligible) {
+      for (const target of group.transactionIds) eligibleGroups.set(target, group);
+    }
+  }
+  for (const decision of request.decisions) {
+    if (decision.ids.length > 1) {
+      // Legacy group actions still require one current, sourced counterparty.
+      // Explicit selections enter as independent singleton or paired decisions.
+      const group = eligibleGroups.get(decision.ids[0]);
+      if (!group || decision.ids.some(target => eligibleGroups.get(target) !== group)) {
+        throw new Error('Bulk transfer review requires one current known-counterparty group');
+      }
+    }
+    if (decision.counterpartId) {
+      const a = rows.get(decision.ids[0])!; const b = rows.get(decision.counterpartId)!;
+      if (!manualPair(a, b, ctx!)) throw new Error('These entries cannot be linked as a transfer');
+      for (const [tx, other] of [[a, b], [b, a]]) {
+        const existingPartner = assessment!.byId.get(tx.id)?.counterpartId ?? decisionOf(tx)?.counterpartId;
+        if ((existingPartner && existingPartner !== other.id) || transferOwnership(tx) === 'external') {
+          throw new Error('Resolve the existing transfer decision before linking another entry');
+        }
       }
     }
   }
   // Preserve decisions on the other side, but detach all links affected by this
   // change in the same returned snapshot. No partner can be silently stolen.
+  const changedRows = new Map<string, TransferRow>();
   const detached = transactions.map((transaction): TransferRow => {
     const tx = transaction as TransferRow;
     const decision = decisionOf(tx);
@@ -1198,22 +1233,23 @@ export function applyTransferDecision(
     if (!touches) return tx;
     const { transferMatch: _match, transferDecision: _decision, ...kept } = tx;
     let nextDecision: TransferDecision | undefined;
-    if (targets.has(tx.id)) {
-      if (request.ownership !== null) nextDecision = { version: 1, ownership: request.ownership, decidedAt: request.now,
-        ...(request.counterpartId ? { counterpartId: tx.id === request.ids[0] ? request.counterpartId : request.ids[0] } : {}) };
+    const assignment = assignments.get(tx.id);
+    if (assignment) {
+      if (assignment.ownership !== null) nextDecision = { version: 1, ownership: assignment.ownership, decidedAt: request.now,
+        ...(assignment.counterpartId ? { counterpartId: assignment.counterpartId } : {}) };
     } else if (decision) {
       const { counterpartId: _partner, ...ownDecision } = decision;
       nextDecision = ownDecision;
     }
-    return { ...kept, ...(nextDecision ? { transferDecision: nextDecision } : {}) };
+    const changed = { ...kept, ...(nextDecision ? { transferDecision: nextDecision } : {}) };
+    changedRows.set(tx.id, changed);
+    return changed;
   });
-  if (request.counterpartId) {
-    const rows = new Map(detached.map(tx => [tx.id, tx]));
-    const a = rows.get(request.ids[0])!; const b = rows.get(request.counterpartId)!;
+  for (const decision of request.decisions) if (decision.counterpartId) {
+    const a = changedRows.get(decision.ids[0])!; const b = changedRows.get(decision.counterpartId)!;
     const aSignature = transferFingerprint(a); const bSignature = transferFingerprint(b);
     a.transferMatch = { version: 1, counterpartId: b.id, basis: 'user', signature: aSignature, counterpartSignature: bSignature };
     b.transferMatch = { version: 1, counterpartId: a.id, basis: 'user', signature: bSignature, counterpartSignature: aSignature };
-    return detached;
   }
   // Deliberately do not immediately re-pair an undone link. The next assessment
   // may still explain independent evidence, while the user's decision is gone.

@@ -136,10 +136,10 @@ export default function TransfersScreen() {
           <SegmentedControl<Scope> label={words.title} value={scope} onChange={setScope}
             segments={[{ value: 'all', label: words.all }, { value: 'confirmed', label: words.confirmed }, { value: 'unconfirmed', label: words.unconfirmedScope }]} />
           <ThemedText type="meta" themeColor="textSecondary">{words.recordsNote}</ThemedText>
-          {suggestedPairs > 0 ? <Pressable testID="transfer-pairs-link" accessibilityRole="button"
-            accessibilityLabel={d.transfers.pairsLink(suggestedPairs)}
+          {reconciliation.pendingIds.size > 0 ? <Pressable testID="transfer-pairs-link" accessibilityRole="button"
+            accessibilityLabel={suggestedPairs > 0 ? d.transfers.pairsLink(suggestedPairs) : words.review}
             onPress={() => router.push('/review-transfers')} style={styles.reviewAction}>
-            <ThemedText type="linkPrimary" style={{ color: band.tint }}>{d.transfers.pairsLink(suggestedPairs)}</ThemedText>
+            <ThemedText type="linkPrimary" style={{ color: band.tint }}>{suggestedPairs > 0 ? d.transfers.pairsLink(suggestedPairs) : words.review}</ThemedText>
             <Icon name="arrow-up-right" size={16} color={band.tint} />
           </Pressable> : null}
           {matched.length > 0 ? <View testID="transfer-matched-pairs" style={styles.matched}>
