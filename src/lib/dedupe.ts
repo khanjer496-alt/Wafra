@@ -43,9 +43,8 @@ export function bodyPrint(body: string): string {
 
 /**
  * An explicit transaction clock at SECOND precision — the same source as the
- * Android re-post guard (NotificationRepostIdentity.TRANSACTION_DATETIME_RE)
- * and auto-import's CARRIER_DUPLICATE_DATETIME_RE; kotlin-regex.test.js pins
- * all three byte-for-byte. Minute precision is refused on purpose: a terminal
+ * Android re-post guard (NotificationRepostIdentity.TRANSACTION_DATETIME_RE);
+ * kotlin-regex.test.js pins both byte-for-byte. Minute precision is refused on purpose: a terminal
  * double-tap inside one minute is two real charges with identical text.
  */
 export const CAPTURE_EVENT_CLOCK_RE = /\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s+\d{1,2}:\d{2}:\d{2}\b/;
@@ -96,6 +95,34 @@ function alertDigest(value: string): string {
 }
 
 /**
+ * The one transaction clock, to the second, that a normalized alert states,
+ * as `d/m/yyyy h:m:s`; undefined when it states none, more than one, a
+ * midnight or end-of-day batch stamp, an impossible time, or an AM/PM clock
+ * (the shared regex does not read the half-day).
+ */
+function singleEventClock(surface: string): string | undefined {
+  const clocks = new Set<string>();
+  for (const match of surface.matchAll(CAPTURE_EVENT_CLOCKS)) {
+    const [d, m, y, hh, mm, ss] = match[0].split(/[^0-9]+/).map(Number);
+    // Batch stamps and ambiguous AM/PM clocks cannot prove a unique charge.
+    if ((hh === 0 && mm === 0 && ss === 0) || (hh === 23 && mm === 59 && ss === 59) ||
+      hh > 23 || mm > 59 || ss > 59 || d < 1 || d > 31 || m < 1 || m > 12 ||
+      /^\s*[ap]\.?m\.?\b/.test(surface.slice((match.index ?? 0) + match[0].length))) return undefined;
+    clocks.add(`${d}/${m}/${y < 100 ? y + 2000 : y} ${hh}:${mm}:${ss}`);
+  }
+  return clocks.size === 1 ? [...clocks][0] : undefined;
+}
+
+/**
+ * Whether alert text states exactly one usable transaction clock to the
+ * second (singleEventClock) — the premise under which two byte-identical
+ * copies from one sender can only be one delivery of one event.
+ */
+export function statesSingleEventClock(text: string): boolean {
+  return typeof text === 'string' && singleEventClock(normalizeAlertText(text)) !== undefined;
+}
+
+/**
  * The bank event an alert describes, independent of when it was delivered.
  *
  * A bank app can post one alert several times (an owner's ADCB app posted
@@ -127,16 +154,8 @@ export function captureEventIdentity(input: {
   if (typeof input.raw !== 'string' || !instrument?.bankIdentity || !/^\d{4}$/.test(instrument.last4) ||
     !Number.isSafeInteger(input.amountFils) || input.amountFils <= 0) return undefined;
   const surface = normalizeAlertText(input.raw);
-  const clocks = new Set<string>();
-  for (const match of surface.matchAll(CAPTURE_EVENT_CLOCKS)) {
-    const [d, m, y, hh, mm, ss] = match[0].split(/[^0-9]+/).map(Number);
-    // Batch stamps and ambiguous AM/PM clocks cannot prove a unique charge.
-    if ((hh === 0 && mm === 0 && ss === 0) || (hh === 23 && mm === 59 && ss === 59) ||
-      hh > 23 || mm > 59 || ss > 59 || d < 1 || d > 31 || m < 1 || m > 12 ||
-      /^\s*[ap]\.?m\.?\b/.test(surface.slice((match.index ?? 0) + match[0].length))) return undefined;
-    clocks.add(`${d}/${m}/${y < 100 ? y + 2000 : y} ${hh}:${mm}:${ss}`);
-  }
-  if (clocks.size !== 1) return undefined;
+  const clock = singleEventClock(surface);
+  if (!clock) return undefined;
   const money: { at: number; token: string }[] = [];
   for (const match of surface.matchAll(CAPTURE_EVENT_MONEY_BEFORE)) {
     money.push({ at: match.index ?? 0, token: `${canonicalAlertCurrency(match[1])}:${canonicalAlertNumber(match[2])}` });
@@ -149,7 +168,7 @@ export function captureEventIdentity(input: {
   // is what a same-second repeat cannot share and a truncated copy may lack.
   const others = [...new Set(money.slice(1).map((m) => m.token).filter((t) => t !== money[0]?.token))].sort();
   const core = [instrument.bankIdentity, instrument.last4, input.type, input.currency ?? '', input.amountFils,
-    [...clocks].sort().join(',')].join('|');
+    clock].join('|');
   return `e1:${alertDigest(core)}:${others.length ? alertDigest(others.join(',')) : '-'}`;
 }
 

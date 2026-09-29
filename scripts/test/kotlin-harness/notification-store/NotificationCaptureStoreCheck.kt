@@ -108,6 +108,36 @@ fun main() {
     check("clearing erases the receipts with the queue",
       NotificationCaptureStore.append(c, pkg, "ADCB", alert, System.currentTimeMillis() + 1_000), "appended")
   }
+  run {
+    // A pick from an ambiguous notification history is queued review-only.
+    // The flag survives the encrypted queue, an ordinary row (written without
+    // the key, like a row from an older build) reads back false, and healing
+    // the same posting takes the new extraction's flag.
+    val c = enabledContext()
+    val noSeconds = alert.replace("17:38:39", "17:38")
+    check("a review-only row is appended",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", noSeconds, t0, reviewOnly = true), "appended")
+    NotificationCaptureStore.append(c, pkg, "ADCBAlert", noSeconds.replace("AED290.00", "AED12.00"), t0 + 5_000)
+    check("the review-only flag survives the encrypted queue",
+      NotificationCaptureStore.read(c, 0L).sortedBy { it.ts }.map { it.reviewOnly }, listOf(true, false))
+    check("healing the same posting takes the new extraction's flag",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", alert, t0, reviewOnly = false), "repaired")
+    check("the healed row is no longer review-only",
+      NotificationCaptureStore.read(c, 0L).first { it.ts == t0 }.reviewOnly, false)
+  }
+  run {
+    // A review-only pick is checked against receipts but leaves none: when it
+    // was the NEW charge, that charge's own notification is still captured
+    // (JS flags the Review card as a possible repeat). A pick repeating a
+    // charge already captured is still refused as a re-post.
+    val c = enabledContext()
+    check("a review-only pick of a new charge is appended",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", alert, t0, reviewOnly = true), "appended")
+    check("the charge's own notification is not refused as a re-post of the pick",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", alert, t0 + 60_000), "appended")
+    check("a later review-only pick of that captured charge is a re-post",
+      NotificationCaptureStore.append(c, pkg, "ADCBAlert", alert, t0 + 120_000, reviewOnly = true), "repost")
+  }
   println(if (bad == 0) "STORE ALL OK" else "STORE FAILURES $bad")
   System.exit(if (bad == 0) 0 else 1)
 }

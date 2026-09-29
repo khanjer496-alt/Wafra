@@ -129,6 +129,22 @@ for (const [currency, exponent, minorUnits] of [
   ok('malformed package metadata can never become a learned notification source',
     malformedResult.outcome === 'added' && malformedResult.learnedNotificationPackage === undefined,
     JSON.stringify(malformedResult));
+
+  // A BNPL provider app is never a trusted source: its restatements would
+  // double-count the bank's card charges. Current capture attaches no package
+  // to a provider's Review card, but a card queued by an older build may
+  // still carry one; confirming it records the money and learns nothing.
+  for (const sourcePackage of ['app.tabby.client', 'co.tamara.user']) {
+    const provider = { ...candidate, sourcePackage };
+    const providerResult = planReviewPromotion(
+      state(provider, { ledgerMoney: ledgerMoneySpec('AED') }),
+      command(provider),
+      `tx-provider-${sourcePackage.length}`, NOW + 1,
+    );
+    ok(`confirming a Review card from ${sourcePackage} never learns the BNPL provider package`,
+      providerResult.outcome === 'added' && providerResult.learnedNotificationPackage === undefined,
+      JSON.stringify(providerResult));
+  }
 }
 
 {

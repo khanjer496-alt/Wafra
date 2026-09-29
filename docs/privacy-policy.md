@@ -89,13 +89,19 @@ classification. This is off until the user enables it.
 
 Android's notification access is device-wide, so Wafra sees each posted
 notification and classifies it in memory before storing anything.
-Notifications from chat apps such as WhatsApp, Telegram or Signal are never
-stored or used. Notifications from SMS apps, including the default SMS app,
-are ignored while Wafra has SMS permission, because the SMS path already reads
-the same messages. Without SMS permission, an SMS app's notification that looks
-financial may enter the encrypted queue and is shown only in Review. It is
-never imported automatically, and approving it does not make Wafra trust that
-app.
+Notifications from known chat apps, such as WhatsApp, Telegram or Signal, are
+never stored or used. Notifications from SMS apps, including the default SMS
+app, are ignored while Wafra has SMS permission, because the SMS path already
+reads the same messages. Without SMS permission, an SMS app's notification that
+looks financial may enter the encrypted queue. If it reads as a transaction it
+is shown only in Review, where a personal message that happens to describe one
+can also appear for the user to dismiss; the Review card holds the extracted
+details, not the message text. If Wafra cannot read it, it is deleted from the
+queue when the app next processes it, unless it still looks like a bank alert
+(an amount together with a bank's sender ID or a masked card or account
+number), in which case it stays encrypted in the queue for up to seven days so
+a later version of the app can read it. It is never imported automatically, and
+approving it does not make Wafra trust that app.
 
 ## iPhone automatic capture
 
@@ -366,12 +372,20 @@ third-party AI. A tester may separately and explicitly authorize GitHub Actions
 and Anthropic Claude to process the redacted parser templates described above.
 
 Buy-now-pay-later providers restate instalments that the paying bank has
-already alerted on. Wafra therefore ignores, on the device, SMS and iPhone
-Messages whose sender ID it recognises as Tabby, Tamara, Postpay or Cashew,
-and Android notifications from the Tabby and Tamara consumer apps. They are
-not stored as transactions or sent to Review; the paying bank's own alert is
-the record Wafra uses. Bank alerts that merely mention a provider are
-processed normally.
+already alerted on. Wafra recognises, on the device, SMS and iPhone Messages
+whose sender ID is Tabby, Tamara, Postpay or Cashew (including when an
+Android SMS app's notification shows that sender), and Android notifications
+from the Tabby and Tamara consumer apps. Wafra never adds these messages to
+the ledger automatically, and approving one in Review never makes Wafra trust
+the provider's app. When such a message restates a card charge (an instalment
+or payment for an order, an order split into payments, an order refund to the
+card, a notice of tomorrow's charge, or a receipt for the user's payment that
+names no shop or person), Wafra ignores it; the paying bank's
+own alert is the record Wafra uses. Other messages from these providers, such
+as Tabby Cash card spending or transfers, have no bank alert behind them, so
+Wafra shows them in Review like any other financial alert it cannot read with
+confidence, and they become transactions only if the user approves them. Bank
+alerts that merely mention a provider are processed normally.
 
 ## Security and retention
 

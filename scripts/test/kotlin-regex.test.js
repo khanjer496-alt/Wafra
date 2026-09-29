@@ -229,23 +229,11 @@ for (let index = 0; index < CLOCK_CASES.length; index++) {
     out.split('\n').filter((line) => line.startsWith(`CLOCK wrong ${index} `)));
 }
 
-// The SMS carrier-duplicate fold (auto-import.ts) decides whether to DISCARD
-// an identical SMS on the same clock the notification re-post guard uses. If
-// the two drifted, one channel would fold a same-minute double charge the
-// other keeps. Same source, same flags, same verdict on every clock case.
+// The ledger's own event identity (dedupe.ts) reads the same clock as the
+// notification re-post guard, so a notification the native guard treats as
+// clockless never gets a JS identity either, and vice versa.
 {
   const kotlin = PATTERNS.find(([n]) => n === 'CLOCK_RE')[1];
-  const { CARRIER_DUPLICATE_DATETIME_RE } = require('./build/auto-import.js');
-  ok('SMS carrier-duplicate clock is byte-identical to the notification re-post clock',
-    CARRIER_DUPLICATE_DATETIME_RE.source === kotlin && CARRIER_DUPLICATE_DATETIME_RE.flags === '',
-    { kotlin, js: CARRIER_DUPLICATE_DATETIME_RE.source, flags: CARRIER_DUPLICATE_DATETIME_RE.flags });
-  const disagreements = CLOCK_CASES.filter(([body, want]) =>
-    CARRIER_DUPLICATE_DATETIME_RE.test(body) !== want);
-  ok('SMS carrier-duplicate clock gives the JVM verdict on every clock case',
-    disagreements.length === 0, disagreements);
-  // The ledger's own event identity (dedupe.ts) reads the same clock, so a
-  // notification the native guard treats as clockless never gets a JS
-  // identity either, and vice versa.
   const { CAPTURE_EVENT_CLOCK_RE } = require('./build/dedupe.js');
   ok('ledger event-identity clock is byte-identical to the notification re-post clock',
     CAPTURE_EVENT_CLOCK_RE.source === kotlin && CAPTURE_EVENT_CLOCK_RE.flags === '',
@@ -293,6 +281,20 @@ if (!kotlinc) {
     [`NotificationTextSurfaces.newest(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "hello"), NotificationTextSurfaces.Message(100L, "second AED 2.00")), amt)`, 'second AED 2.00'],
     [`NotificationTextSurfaces.newest(emptyList(), listOf(NotificationTextSurfaces.Message(0L, "a AED 1.00"), NotificationTextSurfaces.Message(0L, "b AED 2.00")), amt)`, 'null'],
     [`NotificationTextSurfaces.newest(emptyList(), emptyList(), amt)`, 'null'],
+    // What the history says, so an ambiguous one is never silently dropped:
+    // two or more amount-bearing entries with nothing to say which is new
+    // (untimed lines, or a tie at the newest timestamp) are Ambiguous, and
+    // the listener then reads them as origin/main did instead of dropping.
+    [`NotificationTextSurfaces.history(listOf("old AED 900.00", "new AED 5.00"), emptyList(), amt)`, 'Ambiguous'],
+    [`NotificationTextSurfaces.history(listOf("Your statement is ready", "new AED 5.00"), emptyList(), amt)`, 'Newest(text=new AED 5.00)'],
+    [`NotificationTextSurfaces.history(listOf("Your statement is ready"), emptyList(), amt)`, 'Silent'],
+    [`NotificationTextSurfaces.history(listOf("same AED 1.00", "same AED 1.00"), emptyList(), amt)`, 'Newest(text=same AED 1.00)'],
+    [`NotificationTextSurfaces.history(listOf("line AED 1.00"), listOf(NotificationTextSurfaces.Message(200L, "newest AED 5.00"), NotificationTextSurfaces.Message(100L, "older and much longer AED 900.00")), amt)`, 'Newest(text=newest AED 5.00)'],
+    [`NotificationTextSurfaces.history(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "first AED 1.00"), NotificationTextSurfaces.Message(100L, "second AED 2.00")), amt)`, 'Ambiguous'],
+    [`NotificationTextSurfaces.history(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "hello"), NotificationTextSurfaces.Message(100L, "second AED 2.00")), amt)`, 'Newest(text=second AED 2.00)'],
+    [`NotificationTextSurfaces.history(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "hello"), NotificationTextSurfaces.Message(100L, "bye")), amt)`, 'Silent'],
+    [`NotificationTextSurfaces.history(emptyList(), listOf(NotificationTextSurfaces.Message(0L, "a AED 1.00"), NotificationTextSurfaces.Message(0L, "b AED 2.00")), amt)`, 'Ambiguous'],
+    [`NotificationTextSurfaces.history(emptyList(), emptyList(), amt)`, 'Silent'],
     // A group summary is redundant only while one of its children is visible.
     [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true), NotificationTextSurfaces.Member("c", "g", false)))`, 'true'],
     [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true)))`, 'false'],

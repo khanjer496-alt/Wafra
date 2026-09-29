@@ -78,12 +78,16 @@ ok('a re-posted bank notification is one posting, not a second charge',
     // drained, so comparing against the queue alone would see nothing.
     notificationStore.indexOf('return "repost"') <
       notificationStore.indexOf('writeAll(context, next)') &&
-    notificationStore.includes('if (eventIdentity != null) recordRecentContent(prefs, eventIdentity)') &&
+    notificationStore.includes('if (receipt != null) recordRecentContent(prefs, receipt)') &&
     // Every path that admits or re-sees a posting records its receipt: a
     // repaired row, and a shade sweep re-reading a queued or acknowledged one.
-    notificationStore.includes('eventIdentity?.let { recordRecentContent(prefs, it) }\n      return "repaired"') &&
-    /eventIdentity\?\.let \{ ensureRecentContent\(prefs, it\) \}\s*return "acknowledged"/.test(notificationStore) &&
-    /eventIdentity\?\.let \{ ensureRecentContent\(prefs, it\) \}\s*return "duplicate"/.test(notificationStore),
+    // A review-only row (an ambiguous-history pick) is checked but records
+    // none, so the new charge's own notification is not refused as its repost.
+    notificationStore.includes('val receipt = eventIdentity.takeIf { !reviewOnly }') &&
+    notificationStore.includes('receipt?.let { recordRecentContent(prefs, it) }\n      return "repaired"') &&
+    /receipt\?\.let \{ ensureRecentContent\(prefs, it\) \}\s*return "acknowledged"/.test(notificationStore) &&
+    /receipt\?\.let \{ ensureRecentContent\(prefs, it\) \}\s*return "duplicate"/.test(notificationStore) &&
+    !/eventIdentity\?\.let \{ (?:record|ensure)RecentContent/.test(notificationStore),
   JSON.stringify({ notificationStore: notificationStore.length }));
 ok('retained re-post receipts stay ciphertext and are erased with the queue',
   // The class invariant is that SharedPreferences holds only opaque ids, IVs
@@ -102,36 +106,82 @@ ok('re-post suppression requires an explicit transaction clock',
     notificationStore.includes('if (eventIdentity != null && isRecentRepost(recentContent(prefs), eventIdentity))') &&
     notificationStore.includes('kotlin.math.abs(it.ts - candidate.ts) <= REPOST_WINDOW_MS'),
   JSON.stringify({ notificationStore: notificationStore.length }));
-ok('a summary is skipped only beside a visible child, and history is never read as the posting',
+ok('a summary is skipped only beside a visible child, and history is read as the posting only when unambiguous',
   // A summary restates its children, and InboxStyle/MessagingStyle history
   // re-posts every older alert with each update; choosing the longest entry
   // re-captured an old charge. A summary with no visible child is captured.
   // History is a fallback for every package, used only when no other field
-  // carries an amount, and only through NotificationTextSurfaces.newest(),
-  // whose decisions run as Kotlin in kotlin-regex.test.js.
+  // carries an amount, and through NotificationTextSurfaces.history(), whose
+  // decisions run as Kotlin in kotlin-regex.test.js.
   /flags and Notification\.FLAG_GROUP_SUMMARY\) != 0 &&\s*summaryHasVisibleChild\(sbn\)\) \{\s*recordAdmission\("groupSummary", adcb\)\s*return/
     .test(notificationListener) &&
     notificationListener.includes('NotificationTextSurfaces.summaryHasVisibleChild(') &&
     notificationListener.indexOf('FLAG_GROUP_SUMMARY') <
       notificationListener.indexOf('NotificationCaptureStore.append(') &&
+    // Reading the shade parcels every active notification. Only a summary
+    // that passed the cheap package/source and money gates may pay for it.
+    notificationListener.indexOf('summaryHasVisibleChild(sbn)') >
+      notificationListener.indexOf('recordAdmission("sourceRejected", adcb)') &&
+    notificationListener.indexOf('summaryHasVisibleChild(sbn)') >
+      notificationListener.indexOf('recordAdmission("moneyRejected", adcb)') &&
+    (notificationListener.match(/summaryHasVisibleChild\(sbn\)/g) ?? []).length === 1 &&
     notificationListener.indexOf('addText(extras.getCharSequence(Notification.EXTRA_BIG_TEXT))') <
       notificationListener.indexOf('addText(extras.getCharSequence(Notification.EXTRA_TEXT))') &&
     notificationListener.includes(
       'preferredCandidates.firstOrNull { MONEY_RE.containsMatchIn(it) }') &&
-    !/addText\(extras\.(?:get|getCharSequenceArray)\(Notification\.EXTRA_(?:TEXT_LINES|MESSAGES|HISTORIC_MESSAGES)\)\)/
-      .test(notificationListener) &&
     notificationListener.includes('.filter { key -> !CONVERSATION_EXTRA_KEYS.contains(key) }') &&
-    (notificationListener.match(/addText\(newestConversationText\)/g) ?? []).length === 1 &&
-    // Outside the curated-bank block: review-first apps get the fallback too.
-    notificationListener.indexOf('addText(newestConversationText)') >
-      notificationListener.indexOf('.forEach { key -> addText(extras.get(key)) }\n      }') &&
-    /newestConversationText != null &&\s*textCandidates\.none \{ MONEY_RE\.containsMatchIn\(it\) \}/
-      .test(notificationListener) &&
     notificationListener.includes(
-      'NotificationTextSurfaces.newest(textLines(lines), messages(current)) { MONEY_RE.containsMatchIn(it) }') &&
+      'NotificationTextSurfaces.history(textLines(lines), messages(current)) { MONEY_RE.containsMatchIn(it) }') &&
     // History still reaches the OTP/security filter.
     notificationListener.includes('(listOf(title) + nonBlankTextCandidates + conversationSurfaces)'),
   JSON.stringify({ notificationListener: notificationListener.length }));
+{
+  // The history fallback, for every package, only when no single-posting
+  // field carries an amount. An unambiguous newest entry is the posting. When
+  // two or more entries carry an amount and nothing says which is new, the
+  // notification is NOT dropped (that lost a real charge): the lines and
+  // messages become ordinary candidates exactly as on origin/main, and the
+  // longest amount-bearing one wins. Nowhere else is history a candidate.
+  const gate = 'if (textCandidates.none { MONEY_RE.containsMatchIn(it) }) {\n        when (history) {';
+  const gateAt = notificationListener.indexOf(gate);
+  const newestAt = notificationListener.indexOf('is NotificationTextSurfaces.History.Newest ->', gateAt);
+  const ambiguousAt = notificationListener.indexOf('NotificationTextSurfaces.History.Ambiguous ->', gateAt);
+  const silentAt = notificationListener.indexOf('NotificationTextSurfaces.History.Silent -> Unit', gateAt);
+  const newestBranch = notificationListener.slice(newestAt, ambiguousAt);
+  const ambiguousBranch = notificationListener.slice(ambiguousAt, silentAt);
+  const directHistory = /addText\(extras\.(?:get|getCharSequenceArray)\(Notification\.EXTRA_(?:TEXT_LINES|MESSAGES|HISTORIC_MESSAGES)\)\)/g;
+  ok('an ambiguous history falls back to main\'s candidates, queued review-only, instead of dropping the alert',
+    gateAt >= 0 && newestAt > gateAt && ambiguousAt > newestAt && silentAt > ambiguousAt &&
+      // Outside the curated-bank block: review-first apps get it too.
+      gateAt > notificationListener.indexOf('.forEach { key -> addText(extras.get(key)) }\n      }') &&
+      /recordAdmission\("conversationFallback", adcb\)\s*addText\(history\.text\)/.test(newestBranch) &&
+      ambiguousBranch.includes('recordAdmission("conversationAmbiguous", adcb)') &&
+      // The pick can be an older, already-imported charge: it is queued
+      // review-only, so JS never auto-posts it (see the scanInbox case).
+      ambiguousBranch.includes('historyAmbiguous = true') &&
+      (notificationListener.match(/historyAmbiguous = true/g) ?? []).length === 1 &&
+      /var historyAmbiguous = false\s*if \(textCandidates\.none \{ MONEY_RE\.containsMatchIn\(it\) \}\) \{/
+        .test(notificationListener) &&
+      /NotificationCaptureStore\.append\([\s\S]{0,200}reviewOnly = historyAmbiguous,\s*\)/.test(notificationListener) &&
+      // The flag survives the encrypted queue and reaches JS.
+      notificationStore.includes('val reviewOnly: Boolean = false,') &&
+      notificationStore.includes('.apply { if (row.reviewOnly) put("reviewOnly", true) }') &&
+      notificationStore.includes('reviewOnly = value.optBoolean("reviewOnly", false),') &&
+      notificationStore.includes('prior.copy(title = title, text = text, reviewOnly = reviewOnly)') &&
+      fs.readFileSync(path.join(notificationRoot, 'NotificationReaderModule.kt'), 'utf8')
+        .includes('"reviewOnly" to row.reviewOnly,') &&
+      ambiguousBranch.includes('addText(extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES))') &&
+      ambiguousBranch.includes('addText(extras.get(Notification.EXTRA_MESSAGES))') &&
+      ambiguousBranch.includes('addText(extras.get(Notification.EXTRA_HISTORIC_MESSAGES))') &&
+      (notificationListener.match(directHistory) ?? []).length === 3 &&
+      (ambiguousBranch.match(directHistory) ?? []).length === 3 &&
+      (notificationListener.match(/addText\(history\.text\)/g) ?? []).length === 1 &&
+      // Longest amount-bearing candidate wins when no preferred field has one.
+      /preferredCandidates\.firstOrNull \{ MONEY_RE\.containsMatchIn\(it\) \}\s*\?: nonBlankTextCandidates\s*\.filter \{ MONEY_RE\.containsMatchIn\(it\) \}\s*\.maxByOrNull \{ it\.length \}/
+        .test(notificationListener) &&
+      notificationListener.indexOf('val moneyCandidate =') > silentAt,
+    JSON.stringify({ gateAt, newestAt, ambiguousAt, silentAt }));
+}
 {
   const start = notificationStore.indexOf('fun admissionBlockReason(');
   const end = notificationStore.indexOf('@Synchronized', start);
@@ -240,8 +290,7 @@ const markets = require('./build/markets.js');
 markets.setLedgerCurrency(null);
 markets.setActiveMarket('AE');
 const { scanInbox, getAndroidNotificationImportDiagnostics,
-  MESSAGING_APP_PACKAGES, SMS_APP_PACKAGES, CHAT_APP_PACKAGES,
-  hasCarrierDuplicateIdentity } = require('./build/auto-import.js');
+  MESSAGING_APP_PACKAGES, SMS_APP_PACKAGES, CHAT_APP_PACKAGES } = require('./build/auto-import.js');
 const nativeTrustedPackages = fs.readFileSync(
   path.join(notificationRoot, 'TrustedBankNotificationPackages.kt'), 'utf8',
 );
@@ -284,6 +333,15 @@ const nativeReaderModule = fs.readFileSync(
       // Queued rows always reach JS so they can be acknowledged or reviewed.
       nativeReaderModule.includes('TrustedBankNotificationPackages.queuedSourceClass('),
     JSON.stringify({ capture: capture.length }));
+  // The build kill switch stops admission for every source, messaging apps
+  // included: with capture disabled nothing may enter the encrypted queue.
+  const queued = nativeTrustedPackages.slice(
+    nativeTrustedPackages.indexOf('fun queuedSourceClass('),
+    nativeTrustedPackages.indexOf('private const val MAX_APPLICATION_LABEL_CHARS'));
+  ok('the build kill switch refuses every source, messaging apps included',
+    /fun sourceClass\([^)]*\): String\? \{\s*(?:\/\/[^\n]*\n\s*)*if \(!CAPTURE_ENABLED\) return null/.test(capture) &&
+      /fun queuedSourceClass\([^)]*\): String\? \{\s*if \(!CAPTURE_ENABLED\) return null/.test(queued),
+    JSON.stringify({ capture: capture.slice(0, 200), queued: queued.slice(0, 200) }));
 }
 
 const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
@@ -640,6 +698,98 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         acknowledgedNotifications.slice(ackBeforeReview).includes('whatsapp-money-chat-0001'),
       JSON.stringify(acknowledgedNotifications.slice(ackBeforeReview)));
   }
+
+  // Without READ_SMS an SMS app's notification can be anyone's text. A row
+  // the parser cannot resolve is treated as personal: acknowledged out of the
+  // encrypted queue in the same scan, never retained for a future parser the
+  // way an unresolved bank-app row is. A bank SMS beside it still reaches
+  // Review, and an unreadable row that still reads as a bank alert (money
+  // and an account, from a bank sender ID) is retained like a bank-app row.
+  reactNative.PermissionsAndroid.check = async () => false;
+  for (const smsAppClass of ['messaging-review', 'financial-candidate']) {
+    const suffix = smsAppClass === 'messaging-review' ? 'mr' : 'fc';
+    const personalId = `samsung-messages-personal-${suffix}`;
+    const bankId = `samsung-messages-bank-sms-${suffix}`;
+    const unreadBankId = `samsung-messages-hdfc-unread-${suffix}`;
+    // "I sent 200 AED to your account", "send 150 AED to my account please":
+    // a person's texts, whatever the word for account.
+    const arabicPersonalIds = [`samsung-messages-ar-sent-${suffix}`, `samsung-messages-ar-ask-${suffix}`,
+      `samsung-messages-ar-visa-${suffix}`];
+    notificationRows = [{
+      // "The visa that expires tomorrow, its fee is 300 AED": "expires"
+      // (المنتهية) with no card digits after it is not a masked card.
+      id: arabicPersonalIds[2],
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'Sara',
+      text: 'التأشيرة المنتهية بكرة، رسومها 300 درهم',
+      ts: NOW + 5_375,
+      sourceClass: smsAppClass,
+    }, {
+      id: arabicPersonalIds[0],
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'أحمد',
+      text: 'حولت لك 200 درهم على حسابك',
+      ts: NOW + 5_380,
+      sourceClass: smsAppClass,
+    }, {
+      id: arabicPersonalIds[1],
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'Ahmed',
+      text: 'ارسل 150 درهم لحسابي الله يخليك',
+      ts: NOW + 5_385,
+      sourceClass: smsAppClass,
+    }, {
+      id: unreadBankId,
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'AD-HDFCBK',
+      text: 'Rs.500.00 debited from a/c **1234 on 20-09-26 to VPA x@ybl',
+      ts: NOW + 5_390,
+      sourceClass: smsAppClass,
+    }, {
+      id: personalId,
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'Sara',
+      text: 'Can you transfer AED 500 to my account tonight?',
+      ts: NOW + 5_400,
+      sourceClass: smsAppClass,
+    }, {
+      id: bankId,
+      pkg: 'com.samsung.android.messaging',
+      appLabel: 'Messages',
+      title: 'ADCB',
+      text: messagingAlert,
+      ts: NOW + 5_410,
+      sourceClass: smsAppClass,
+    }];
+    const personal = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+    const personalDiagnostics = getAndroidNotificationImportDiagnostics();
+    ok(`without READ_SMS, an unresolvable SMS-app row (${smsAppClass}) is neither reviewed nor kept unresolved`,
+      personal.parsed.length === 0 &&
+        !personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_400) &&
+        personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_410 &&
+          item.sourcePackage === undefined) &&
+        !personal.reviewCandidates.some((item) => item.observedAt === NOW + 5_390) &&
+        !personal.reviewCandidates.some((item) =>
+          item.observedAt === NOW + 5_375 || item.observedAt === NOW + 5_380 || item.observedAt === NOW + 5_385) &&
+        personalDiagnostics?.unresolved === 1 &&
+        personalDiagnostics?.acknowledgementPlanned === 5,
+      JSON.stringify({ reviews: personal.reviewCandidates, personalDiagnostics }));
+    const ackBeforePersonal = acknowledgedNotifications.length;
+    await personal.commit();
+    ok(`without READ_SMS, an unresolvable SMS-app row (${smsAppClass}) is acknowledged with the reviewed bank SMS`,
+      arabicPersonalIds.every((id) => acknowledgedNotifications.slice(ackBeforePersonal).includes(id)) &&
+        acknowledgedNotifications.slice(ackBeforePersonal).includes(personalId) &&
+        acknowledgedNotifications.slice(ackBeforePersonal).includes(bankId),
+      JSON.stringify(acknowledgedNotifications.slice(ackBeforePersonal)));
+    ok(`without READ_SMS, an unreadable SMS-app row that reads as a bank alert (${smsAppClass}) stays queued`,
+      !acknowledgedNotifications.slice(ackBeforePersonal).includes(unreadBankId),
+      JSON.stringify(acknowledgedNotifications.slice(ackBeforePersonal)));
+  }
   reactNative.PermissionsAndroid.check = originalSmsCheck;
 
   notificationRows = [{
@@ -723,6 +873,7 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       unresolvedTrusted.reviewCandidates[0]?.kind === 'universal' &&
       unresolvedTrusted.reviewCandidates[0]?.sourcePackage === 'ae.hsbc.hsbcuae' &&
       unresolvedTrusted.reviewCandidates[0]?.sourceClass === 'trusted-bank' &&
+      unresolvedTrusted.reviewCandidates[0]?.attentionReason === undefined &&
       trustedReviewDiagnostics?.review === 1 &&
       trustedReviewDiagnostics?.unresolved === 0 &&
       trustedReviewDiagnostics?.unresolvedParserMiss === 0 &&
@@ -742,6 +893,56 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       unresolvedRetry.parsed.length === 0 && unresolvedRetry.reviewCandidates.length === 1 &&
       acknowledgedNotifications.length === ackBeforeAmbiguousTrusted + 1,
     JSON.stringify({ firstUnresolvedAttempt, secondUnresolvedAttempt }));
+
+  {
+    // An in-place InboxStyle update whose newest line native cannot identify
+    // is queued review-only (BankNotificationListenerService, History.Ambiguous).
+    // The chosen line can be an OLDER charge that was already imported: here
+    // the first posting's line, re-read 5 minutes later with no seconds clock
+    // for any duplicate check to key on. Even from a curated bank it reaches
+    // Review and never auto-posts; an ordinary row with the same text still
+    // posts, so the flag is what makes the difference.
+    const older = 'Purchase of AED 1,250.00 at ELECTRONICS STORE with Debit Card ending 1234';
+    const newer = 'Purchase of AED 12.00 at CAFE with Debit Card ending 1234';
+    notificationRows = [{
+      id: 'hsbc-history-first-01', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE', text: older, ts: NOW + 5_960,
+    }];
+    const first = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+    await first.commit();
+    const ackBefore = acknowledgedNotifications.length;
+    notificationRows = [
+      { id: 'hsbc-history-ambig-01', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE', text: older,
+        ts: NOW + 5_960 + 5 * 60_000, reviewOnly: true },
+      { id: 'hsbc-history-ambig-02', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE', text: newer,
+        ts: NOW + 5_960 + 20 * 60_000, reviewOnly: true },
+    ];
+    const ambiguous = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+    const ambiguousDiagnostics = getAndroidNotificationImportDiagnostics();
+    ok('a curated-bank row read from an ambiguous notification history goes to Review, never the ledger',
+      first.parsed.length === 1 && first.parsed[0]?.amountFils === 125000 &&
+        ambiguous.parsed.length === 0 && ambiguous.reviewCandidates.length === 2 &&
+        ambiguous.reviewCandidates.every((row) => row.sourceClass === 'trusted-bank' &&
+          row.sourcePackage === 'ae.hsbc.hsbcuae' &&
+          // It may repeat a charge already recorded, so the card asks first.
+          row.attentionReason === 'possible-notification-replay') &&
+        ambiguousDiagnostics?.autoParsed === 0 && ambiguousDiagnostics?.review === 2 &&
+        acknowledgedNotifications.length === ackBefore,
+      JSON.stringify({ first: first.parsed, ambiguous, ambiguousDiagnostics }));
+    await ambiguous.commit();
+    ok('review-only history rows are acknowledged at the Review commit boundary',
+      acknowledgedNotifications.includes('hsbc-history-ambig-01') &&
+        acknowledgedNotifications.includes('hsbc-history-ambig-02'),
+      JSON.stringify(acknowledgedNotifications.slice(ackBefore)));
+    notificationRows = [
+      { id: 'hsbc-history-plain-01', pkg: 'ae.hsbc.hsbcuae', title: 'HSBC UAE', text: newer,
+        ts: NOW + 5_960 + 21 * 60_000, reviewOnly: false },
+    ];
+    const plain = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+    ok('the same curated-bank text without the review-only flag still auto-posts',
+      plain.parsed.length === 1 && plain.parsed[0]?.amountFils === 1200 && plain.reviewCandidates.length === 0,
+      JSON.stringify(plain));
+    await plain.commit();
+  }
 
   const hsbcTitle = 'Your credit card transaction is approved';
   const hsbcPurchase = 'Your Credit Card ending with *** 1234 has been used for AED 42.00 on 11/09/2026 17:10:20 at SAMPLE RESTAURANT. Your available limit is AED 5,000.00.';
@@ -1088,45 +1289,81 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         !Object.prototype.hasOwnProperty.call(item, 'raw')),
     JSON.stringify({ parsed: providerDuplicate.parsed, declined: providerDuplicate.declined }));
 
-  // Carrier double delivery: the provider stores one SMS twice, minutes apart
-  // and with unrelated ids. Fold it only when the body carries something a
-  // second genuine charge could not share word for word — never a bare hh:mm.
-  const tokenCases = require('./fixtures/distinguishing-token-cases');
-  tokenCases.forEach(([body, fold], index) => {
-    ok(`JS carrier-duplicate identity rule says ${fold} for case ${index + 1}`,
-      hasCarrierDuplicateIdentity(body) === fold, body);
-  });
-  const carrierScan = async (rows) => {
+  // The same provider double insert (ids n+1 and n, the newer copy 756 ms
+  // later) of a body that carries a balance figure or a clock with seconds —
+  // common UAE/KSA templates — is still exactly one message. No other rule may
+  // drop the surviving copy, and no stored copy may be removed except the one
+  // the exact-provider rule itself declined (the older id).
+  {
+    const { buildImportPlan } = require('./build/import-plan.js');
+    const doubleInsertBodies = [
+      ['a balance figure', `${duplicatedProviderBody}. Avl Bal AED 2,345.67`],
+      ['a seconds clock',
+        'Credit Card XX7720 was used for AED25.90 on 14/09/2026 23:52:52 at TEST MERCHANT'],
+    ];
+    const pair = (body) => [
+      { id: 30_850, address: 'FAB', body, date: NOW + 10_000 },
+      { id: 30_849, address: 'FAB', body, date: NOW + 9_244 },
+    ];
+    const storedFrom = (parsed) => ({ ...baseLedgerState(),
+      transactions: buildImportPlan(parsed, baseLedgerState(), NOW + 10_000).batch.transactions
+        .map((row, index) => ({ ...row, id: `stored-${index}` })) });
+    const apply = (state, plan) => {
+      const removed = new Set(plan.batch.updates.filter((u) => u.remove).map((u) => u.id));
+      return {
+        removed: state.transactions.filter((row) => removed.has(row.id)),
+        rows: state.transactions.filter((row) => !removed.has(row.id))
+          .concat(plan.batch.transactions),
+      };
+    };
+    for (const [label, body] of doubleInsertBodies) {
+      inboxRows = pair(body);
+      const scan = await scanInbox(0, {}, undefined, 'en-AE');
+      const fresh = apply(baseLedgerState(),
+        buildImportPlan(scan.parsed, baseLedgerState(), NOW + 10_000, undefined, scan.declined));
+      ok(`a provider double insert with ${label} imports exactly one row`,
+        scan.parsed.length === 1 && scan.parsed[0].sourceEventId === 'a30850' &&
+          scan.declined.length === 1 && scan.declined[0].sourceEventId === 'a30849' &&
+          scan.declined[0].reason === 'exact-provider-duplicate' &&
+          fresh.rows.length === 1 && fresh.removed.length === 0,
+        JSON.stringify({ parsed: scan.parsed, declined: scan.declined, fresh }));
+
+      // A scan ran between the two inserts and stored one copy. The rescan
+      // still ends with exactly one row, and the only row it may remove is
+      // the stored OLDER copy the exact-provider rule declined.
+      for (const storedId of [30_849, 30_850]) {
+        inboxRows = pair(body).filter((row) => row.id === storedId);
+        const earlier = await scanInbox(0, {}, undefined, 'en-AE');
+        const stored = storedFrom(earlier.parsed);
+        inboxRows = pair(body);
+        const rescan = await scanInbox(0, {}, undefined, 'en-AE');
+        const after = apply(stored,
+          buildImportPlan(rescan.parsed, stored, NOW + 10_000, undefined, rescan.declined));
+        ok(`a stored a${storedId} copy of a provider double insert with ${label} stays one row on rescan`,
+          stored.transactions.length === 1 && after.rows.length === 1 &&
+            after.removed.every((row) => storedId === 30_849 &&
+              row.smsKey === stored.transactions[0].smsKey),
+          JSON.stringify({ stored: stored.transactions.map((row) => row.smsKey),
+            parsed: rescan.parsed.map((row) => row.sourceEventId),
+            declined: rescan.declined, after }));
+      }
+    }
+  }
+
+  // Two genuine charges can read byte for byte alike: a double tap, or a
+  // merchant charging twice in one minute. Apart from the adjacent-id,
+  // sub-second provider double insert above, the SMS path keeps every copy.
+  const identicalScan = async (rows) => {
     inboxRows = rows;
     const scan = await scanInbox(0, {}, undefined, 'en-AE');
     const ids = new Set(scan.parsed.map((item) => item.sourceEventId));
     return { scan, ids };
   };
-  const withBalance =
-    'Purchase of AED 14.05 at CARRIER CONTROL with Debit Card ending 1234. Avl Bal AED 2,345.67';
   const noToken = 'Purchase of AED 14.05 at CARRIER CONTROL with Debit Card ending 1234';
-  const other = 'Purchase of AED 3.00 at OTHER SHOP with Debit Card ending 1234';
   {
-    const { scan, ids } = await carrierScan([
-      { id: 31_900, address: 'FAB', body: withBalance, date: NOW + 600_000 },
-      { id: 31_880, address: 'FAB', body: other, date: NOW + 400_000 },
-      { id: 31_870, address: 'FAB', body: withBalance, date: NOW + 360_000 },
-    ]);
-    // The EARLIER copy is kept — the one a previous scan may already have
-    // stored — and the fold never emits a retirement for either copy.
-    ok('a carrier re-delivery minutes later with a balance figure is one message',
-      ids.has('a31870') && ids.has('a31880') && !ids.has('a31900') &&
-        scan.parsed.filter((item) => item.sourceEventId === 'a31870')[0]?.amountFils === 1405 &&
-        !scan.declined.some((item) => item.sourceEventId === 'a31900' ||
-          item.sourceEventId === 'a31870'),
-      JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
-  }
-  {
-    // Shipped fixture adib-compact-masked-card: its only clock is hh:mm. A
-    // double tap or a merchant charging twice in one minute reads identically
-    // and both charges are real.
+    // Shipped fixture adib-compact-masked-card: its only clock is hh:mm.
     const adib = 'XXX456789 was used for AED 42.50 on Jan 17 2023 1:04PM at CARREFOUR,AE.';
-    const { scan, ids } = await carrierScan([
+    const { scan, ids } = await identicalScan([
       { id: 31_930, address: 'ADIB', body: adib, date: NOW + 640_000 },
       { id: 31_920, address: 'ADIB', body: adib, date: NOW + 600_000 },
     ]);
@@ -1135,30 +1372,12 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
   }
   {
-    // A ledger that already stored both copies before this fold existed is
-    // left alone: the rescan declines nothing and so retires nothing.
+    // The 1-second provider-duplicate retirement still exists. It must not
+    // remove a row a transfer pairing points at, whatever its evidence says,
+    // but the parser's own transfer hint is not a pairing: a proven second
+    // copy of a parser-flagged transfer is retired like any other.
     const { buildImportPlan } = require('./build/import-plan.js');
-    const both = await carrierScan([
-      { id: 31_910, address: 'FAB', body: withBalance, date: NOW + 700_000 },
-      { id: 31_905, address: 'FAB', body: withBalance, date: NOW + 460_000 },
-    ]);
-    const firstImport = buildImportPlan(
-      both.scan.parsed.map((item) => ({ ...item, sourceEventId: 'a31910', smsTs: NOW + 700_000 }))
-        .concat(both.scan.parsed), baseLedgerState(), NOW + 700_000,
-    );
-    const stored = { ...baseLedgerState(), transactions: firstImport.batch.transactions
-      .map((row, index) => ({ ...row, id: `stored-${index}` })) };
-    const reread = buildImportPlan(both.scan.parsed, stored, NOW + 700_000, undefined, both.scan.declined);
-    ok('the carrier fold never removes a row the ledger already holds',
-      stored.transactions.length === 2 && both.scan.declined.length === 0 &&
-        !reread.batch.updates.some((update) => update.remove),
-      JSON.stringify({ stored: stored.transactions.length, updates: reread.batch.updates }));
-  }
-  {
-    // The 1-second provider-duplicate retirement still exists; it must not
-    // remove a row that is part of a transfer, whatever its evidence says.
-    const { buildImportPlan } = require('./build/import-plan.js');
-    const row = { ...(await carrierScan([
+    const row = { ...(await identicalScan([
       { id: 31_960, address: 'FAB', body: noToken, date: NOW + 900_000 },
     ])).scan.parsed[0] };
     const imported = buildImportPlan([row], baseLedgerState(), NOW + 900_000).batch.transactions[0];
@@ -1169,15 +1388,20 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     ok('a provider-duplicate retirement still removes an ordinary stored copy',
       planFor({}).batch.updates.some((update) => update.id === 'provider-dup' && update.remove),
       JSON.stringify(planFor({}).batch.updates));
-    ok('a provider-duplicate retirement never removes a transfer or transfer-matched row',
-      !planFor({ isTransfer: true }).batch.updates.some((update) => update.remove) &&
-        !planFor({ transferMatch: { kind: 'own-account', counterpartId: 'other', matchedAt: NOW } })
-          .batch.updates.some((update) => update.remove),
-      JSON.stringify([planFor({ isTransfer: true }).batch.updates,
-        planFor({ transferMatch: { kind: 'own-account' } }).batch.updates]));
+    ok('a provider-duplicate retirement removes a parser-flagged transfer copy',
+      planFor({ isTransfer: true }).batch.updates.some((update) =>
+        update.id === 'provider-dup' && update.remove),
+      JSON.stringify(planFor({ isTransfer: true }).batch.updates));
+    const paired = { transferMatch: { version: 1, counterpartId: 'other', basis: 'reference',
+      signature: 'this-leg', counterpartSignature: 'other-leg' } };
+    ok('a provider-duplicate retirement never removes a transfer-matched row',
+      !planFor(paired).batch.updates.some((update) => update.remove) &&
+        !planFor({ isTransfer: true, ...paired }).batch.updates.some((update) => update.remove),
+      JSON.stringify([planFor(paired).batch.updates,
+        planFor({ isTransfer: true, ...paired }).batch.updates]));
   }
   {
-    const { scan, ids } = await carrierScan([
+    const { scan, ids } = await identicalScan([
       { id: 31_950, address: 'FAB', body: noToken, date: NOW + 600_000 },
       { id: 31_940, address: 'FAB', body: noToken, date: NOW + 360_000 },
     ]);
@@ -1186,34 +1410,92 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
         !scan.declined.some((item) => item.sourceEventId === 'a31940'),
       JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
   }
+  // A CARRIER RE-DELIVERY: the same SMS delivered again minutes later, stored
+  // by the provider under an unrelated id. When the body states one clock to
+  // the second, identical copies from one sender inside ten minutes are one
+  // message; the earliest copy is kept and no retirement is emitted. With a
+  // provider double insert in the same cluster, the older id the
+  // exact-provider rule declines takes no part, so exactly one copy survives.
   {
-    const { ids } = await carrierScan([
-      { id: 31_990, address: 'FAB', body: withBalance, date: NOW + 1_260_000 },
-      { id: 31_980, address: 'FAB', body: withBalance, date: NOW + 600_000 },
-    ]);
-    ok('an identical balance-bearing body eleven minutes later is a separate message',
-      ids.has('a31990') && ids.has('a31980'), JSON.stringify([...ids]));
-  }
-  {
-    const { ids } = await carrierScan([
-      { id: 32_010, address: 'FAB', body: withBalance, date: NOW + 600_000 },
-      { id: 32_000, address: 'ADCB', body: withBalance, date: NOW + 540_000 },
-    ]);
-    ok('an identical body from a different sender is never folded',
-      ids.has('a32010') && ids.has('a32000'), JSON.stringify([...ids]));
+    const { buildImportPlan } = require('./build/import-plan.js');
+    const secondsBody = 'Credit Card XX7720 was used for AED25.90 on 14/09/2026 23:52:52 at TEST MERCHANT';
+    const importedRows = (scan) =>
+      buildImportPlan(scan.parsed, baseLedgerState(), NOW + 1_000_000, undefined, scan.declined).batch.transactions;
+    {
+      const { scan, ids } = await identicalScan([
+        { id: 32_000, address: 'FAB', body: secondsBody, date: NOW + 300_000 },
+        { id: 31_990, address: 'FAB', body: secondsBody, date: NOW },
+      ]);
+      ok('a carrier re-delivery five minutes later with a seconds clock is one message, the earliest kept',
+        scan.parsed.length === 1 && ids.has('a31990') && scan.declined.length === 0 &&
+          importedRows(scan).length === 1,
+        JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
+
+      // An earlier scan stored the first delivery; the rescan sees both.
+      inboxRows = [{ id: 31_990, address: 'FAB', body: secondsBody, date: NOW }];
+      const earlier = await scanInbox(0, {}, undefined, 'en-AE');
+      const stored = { ...baseLedgerState(),
+        transactions: buildImportPlan(earlier.parsed, baseLedgerState(), NOW).batch.transactions
+          .map((row, index) => ({ ...row, id: `stored-carrier-${index}` })) };
+      const rescanPlan = buildImportPlan(scan.parsed, stored, NOW + 300_000, undefined, scan.declined);
+      ok('a stored first delivery stays the only row when the re-delivery is scanned',
+        stored.transactions.length === 1 && rescanPlan.batch.transactions.length === 0 &&
+          !rescanPlan.batch.updates.some((update) => update.remove),
+        JSON.stringify(rescanPlan.batch));
+    }
+    {
+      const { scan, ids } = await identicalScan([
+        { id: 32_120, address: 'FAB', body: secondsBody, date: NOW + 310_000 },
+        { id: 32_111, address: 'FAB', body: secondsBody, date: NOW + 10_000 },
+        { id: 32_110, address: 'FAB', body: secondsBody, date: NOW + 9_244 },
+      ]);
+      ok('a provider double insert plus a carrier re-delivery keeps exactly the copy the provider rule keeps',
+        scan.parsed.length === 1 && ids.has('a32111') &&
+          scan.declined.length === 1 && scan.declined[0].sourceEventId === 'a32110' &&
+          scan.declined[0].reason === 'exact-provider-duplicate' && importedRows(scan).length === 1,
+        JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
+    }
+    const keptBoth = [
+      ['a running-balance figure but no seconds clock',
+        `${noToken}. Avl Bal AED 2,345.67`, 'FAB', 'FAB', 300_000],
+      ['a midnight batch stamp', 'Credit Card XX7720 was used for AED25.90 on 14/09/2026 00:00:00 at TEST MERCHANT',
+        'FAB', 'FAB', 300_000],
+      ['an AM/PM clock', 'Credit Card XX7720 was used for AED25.90 on 14/09/2026 11:52:52 PM at TEST MERCHANT',
+        'FAB', 'FAB', 300_000],
+      ['eleven minutes between them', secondsBody, 'FAB', 'FAB', 660_000],
+      ['different senders', secondsBody, 'FAB', 'ADCB', 300_000],
+    ];
+    for (const [label, body, newerSender, olderSender, gap] of keptBoth) {
+      const { scan, ids } = await identicalScan([
+        { id: 32_300, address: newerSender, body, date: NOW + gap },
+        { id: 32_200, address: olderSender, body, date: NOW },
+      ]);
+      ok(`identical copies with ${label} are both kept`,
+        ids.has('a32300') && ids.has('a32200') && scan.declined.length === 0,
+        JSON.stringify({ parsed: scan.parsed, declined: scan.declined }));
+    }
+    inboxRows = [];
+    receivedRows = [
+      { address: 'FAB', body: secondsBody, date: NOW + 600_000 },
+      { address: 'FAB', body: secondsBody, date: NOW + 780_000 },
+    ];
+    const buffered = await scanInbox(0, {}, undefined, 'en-AE');
+    const delivered = buffered.parsed.filter((item) => item.channel === 'delivery');
+    ok('the delivery buffer folds a carrier double delivery with a seconds clock, keeping the first',
+      delivered.length === 1 && delivered[0].smsTs === NOW + 600_000,
+      JSON.stringify(delivered));
+    receivedRows = [];
   }
   {
     inboxRows = [];
     receivedRows = [
-      { address: 'FAB', body: withBalance, date: NOW + 600_000 },
-      { address: 'FAB', body: withBalance, date: NOW + 780_000 },
       { address: 'FAB', body: noToken, date: NOW + 600_000 },
       { address: 'FAB', body: noToken, date: NOW + 780_000 },
     ];
     const scan = await scanInbox(0, {}, undefined, 'en-AE');
     const delivered = scan.parsed.filter((item) => item.channel === 'delivery');
-    ok('the delivery buffer folds the same carrier re-delivery and keeps tokenless repeats',
-      delivered.filter((item) => item.smsTs === NOW + 600_000).length === 2 &&
+    ok('the delivery buffer keeps identical repeats from one sender',
+      delivered.filter((item) => item.smsTs === NOW + 600_000).length === 1 &&
         delivered.filter((item) => item.smsTs === NOW + 780_000).length === 1,
       JSON.stringify(delivered));
     receivedRows = [];
@@ -1279,6 +1561,45 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       cursor: secondResumablePage.nextCursor,
       unique: resumableIds.size,
     }));
+
+  {
+    // A provider double insert split at a history chunk boundary: the chunk
+    // ends [..., P'(4501), P(4500)], so P is declined there. The next chunk
+    // re-reads P only as adjacency context and must not import it as well.
+    const pairBody = 'Credit Card XX7720 was used for AED25.90 on 14/09/2026 23:52:52 at TEST MERCHANT';
+    const pagedInbox = inboxRows;
+    const boundaryRows = [
+      { id: 4_502, address: 'FAB', date: NOW + 50_300,
+        body: 'Purchase of AED 3.00 at BOUNDARY ONE with Debit Card ending 1234' },
+      { id: 4_501, address: 'FAB', body: pairBody, date: NOW + 50_000 },
+      { id: 4_500, address: 'FAB', body: pairBody, date: NOW + 49_400 },
+      { id: 4_400, address: 'FAB', date: NOW + 40_000,
+        body: 'Purchase of AED 4.00 at BOUNDARY TWO with Debit Card ending 1234' },
+    ];
+    const chunk = (cursor) => scanInbox(0, {}, undefined, 'en-AE', { maxInboxPages: 1, pageSize: 3, cursor });
+    const idsOf = (...scans) => scans.flatMap((scan) => scan.parsed.map((row) => row.sourceEventId));
+    inboxRows = boundaryRows;
+    const first = await chunk(undefined);
+    const second = await chunk(first.nextCursor);
+    ok('a provider double insert split at a history chunk boundary is imported once',
+      first.nextCursor?.overlapId === 4_500 &&
+        first.declined.some((row) => row.sourceEventId === 'a4500') &&
+        idsOf(first, second).filter((id) => id === 'a4501').length === 1 &&
+        !idsOf(first, second).includes('a4500') && idsOf(second).includes('a4400'),
+      JSON.stringify({ first: idsOf(first), second: idsOf(second), cursor: first.nextCursor }));
+    // The overlap row is skipped only when it is the exact row the cursor
+    // names. If it is gone, the next row is processed as usual.
+    inboxRows = boundaryRows.filter((row) => row.id !== 4_500);
+    const changed = await chunk(first.nextCursor);
+    ok('a resumed chunk whose overlap row disappeared still processes its first row',
+      idsOf(changed).includes('a4400'), JSON.stringify(idsOf(changed)));
+    // A cursor saved by an older build has no overlapId and resumes as before.
+    inboxRows = boundaryRows;
+    const legacy = await chunk({ beforeDateMs: first.nextCursor.beforeDateMs, beforeId: first.nextCursor.beforeId });
+    ok('a cursor without an overlap id resumes exactly as before',
+      idsOf(legacy).includes('a4500') && idsOf(legacy).includes('a4400'), JSON.stringify(idsOf(legacy)));
+    inboxRows = pagedInbox;
+  }
 
   inboxReadCursors.length = 0;
   const largerHistoryPage = await scanInbox(
@@ -1467,10 +1788,11 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
   // BNPL PROVIDER SOURCES. The bank's card charge to Tabby/Tamara is the one
   // real outflow; the provider's own SMS or app notification restates it
   // under the SHOP's name, which dedupe can never pair with "Tabby". Such a
-  // source must neither post nor raise a Review card inviting the user to add
-  // it — and a learned (previously approved) provider package must not start
-  // auto-posting either. Bodies are illustrative, not verified provider copy:
-  // the gate is the sender/package identity.
+  // restatement must neither post nor raise a Review card inviting the user
+  // to add it — and a learned (previously approved) provider package must not
+  // start auto-posting either. Bodies are illustrative, not verified provider
+  // copy: the gate is the sender/package identity, and the wording only
+  // separates a restatement from the provider's own money (below).
   markets.setLedgerCurrency(null);
   markets.setActiveMarket('AE');
   notificationsEnabled = true;
@@ -1541,8 +1863,185 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       lookalike.reviewCandidates[0]?.sourcePackage === 'com.example.tabbytailoring',
     JSON.stringify(lookalike));
   await lookalike.commit();
+
+  // THE PROVIDER'S OWN MONEY. Tabby Cash (launched in the UAE in July 2026)
+  // is a stored-value account in the same app.tabby.client package, with a
+  // Cash Card and person-to-person transfers; no bank alert ever reports those
+  // movements. The provider's app is still never trusted — nothing it says
+  // auto-posts, whatever its native class and even after an earlier approval
+  // — but its own money reaches Review like any other unparsed financial
+  // alert instead of being counted as ignored and acknowledged away.
+  const tabbyCashSpend = 'You spent AED 35.00 at CARREFOUR with your Tabby Cash Card ending 1234.';
+  const tabbyCashIncoming = 'You received AED 500.00 from Ahmed. Your Tabby Cash balance is AED 812.40.';
+  const reviewMoney = (item) => item.kind === 'universal'
+    ? `${item.event.direction}:${item.event.amount.value?.minorUnits}`
+    : `${item.direction}:${item.amount?.minorUnits}`;
+  for (const [label, learnedPackages, sourceClass] of [
+    ['unlearned', [], undefined],
+    ['previously learned', ['app.tabby.client', 'co.tamara.user'], undefined],
+    ['Play-finance classified', [], 'play-finance'],
+  ]) {
+    const suffix = label.replace(/[^a-z]/g, '').slice(0, 10);
+    const spendId = `tabby-cash-spend-${suffix}`;
+    const incomingId = `tabby-cash-in-${suffix}`;
+    notificationRows = [
+      { id: spendId, pkg: 'app.tabby.client', appLabel: 'Tabby', title: 'Tabby Cash',
+        text: tabbyCashSpend, ts: NOW + 42_000, ...(sourceClass ? { sourceClass } : {}) },
+      { id: incomingId, pkg: 'app.tabby.client', appLabel: 'Tabby', title: 'Money received',
+        text: tabbyCashIncoming, ts: NOW + 42_100, ...(sourceClass ? { sourceClass } : {}) },
+    ];
+    const cash = await scanInbox(0, {}, undefined, 'en-AE', {
+      notificationOnly: true, learnedNotificationPackages: learnedPackages,
+    });
+    const cashDiagnostics = getAndroidNotificationImportDiagnostics();
+    const monies = cash.reviewCandidates.map(reviewMoney).sort();
+    ok(`a Tabby Cash card spend and an incoming Tabby Cash transfer (${label}) reach Review, never the ledger`,
+      cash.parsed.length === 0 && cash.reviewCandidates.length === 2 &&
+        JSON.stringify(monies) === JSON.stringify(['credit:50000', 'debit:3500']),
+      JSON.stringify({ parsed: cash.parsed, reviews: cash.reviewCandidates }));
+    ok(`a Tabby Cash Review card (${label}) carries no package identity Review could learn to trust`,
+      cash.reviewCandidates.length === 2 &&
+        cash.reviewCandidates.every((item) => item.sourcePackage === undefined && item.sourceClass === undefined),
+      JSON.stringify(cash.reviewCandidates));
+    ok(`Tabby Cash pushes (${label}) are counted as Review, not ignored or auto-parsed`,
+      cashDiagnostics?.review === 2 && cashDiagnostics?.ignored === 0 &&
+        cashDiagnostics?.autoParsed === 0 && cashDiagnostics?.unresolved === 0,
+      JSON.stringify(cashDiagnostics));
+    const ackBeforeCash = acknowledgedNotifications.length;
+    await cash.commit();
+    ok(`Tabby Cash pushes (${label}) leave the queue only because Review now holds them`,
+      acknowledgedNotifications.slice(ackBeforeCash).includes(spendId) &&
+        acknowledgedNotifications.slice(ackBeforeCash).includes(incomingId),
+      JSON.stringify(acknowledgedNotifications.slice(ackBeforeCash)));
+  }
+
+  // The same split on the SMS lanes: a Tabby SMS restating a card charge is
+  // ignored (above), while a Tabby Cash movement from the Tabby sender ID is
+  // Review-only.
+  notificationsEnabled = false;
+  inboxRows = [
+    { id: 9501, address: 'Tabby', date: NOW + 43_000, body: tabbyCashSpend },
+    { id: 9502, address: 'AD-Tabby', date: NOW + 43_100, body: tabbyCashIncoming },
+    { id: 9503, address: 'Tabby', date: NOW + 43_200,
+      body: 'Your order of AED 199.00 at Noon is split into 4 payments. First payment of AED 49.75 paid.' },
+  ];
+  receivedRows = [];
+  const cashSms = await scanInbox(0, {}, undefined, 'en-AE');
+  ok('a Tabby Cash SMS reaches Review only; the restatement beside it is still ignored',
+    cashSms.parsed.length === 0 &&
+      JSON.stringify(cashSms.reviewCandidates.map(reviewMoney).sort()) ===
+        JSON.stringify(['credit:50000', 'debit:3500']) &&
+      !cashSms.reviewCandidates.some((item) => item.observedAt === NOW + 43_200) &&
+      cashSms.declined.every((row) => row.smsTs !== NOW + 43_200),
+    JSON.stringify({ parsed: cashSms.parsed, reviews: cashSms.reviewCandidates, declined: cashSms.declined }));
+  inboxRows = [];
+  notificationsEnabled = true;
+
+  // THE MESSAGES-APP LANE. Without READ_SMS a Tabby SMS reaches Wafra only as
+  // the SMS app's notification, whose TITLE is the sender ID. The package is
+  // Google/Samsung Messages, so the provider identity is the title: a
+  // restatement (including the whole-order "split into 4 payments") is
+  // ignored and acknowledged exactly as from the SMS inbox, and a Tabby Cash
+  // movement goes to Review with no learnable identity.
+  reactNative.PermissionsAndroid.check = async () => false;
+  for (const smsAppClass of ['messaging-review', 'financial-candidate']) {
+    const suffix = smsAppClass === 'messaging-review' ? 'mr' : 'fc';
+    const restatementIds = [`messages-tabby-split-${suffix}`, `messages-adtabby-chg-${suffix}`,
+      `messages-tamara-rfd-${suffix}`];
+    const cashId = `messages-tabby-cash-${suffix}`;
+    notificationRows = [{
+      id: restatementIds[0], pkg: 'com.google.android.apps.messaging', appLabel: 'Messages', title: 'Tabby',
+      text: 'Your order of AED 199.00 at Noon is split into 4 payments. First payment of AED 49.75 charged to your card ending 1234.',
+      ts: NOW + 44_000, sourceClass: smsAppClass,
+    }, {
+      id: restatementIds[1], pkg: 'com.google.android.apps.messaging', appLabel: 'Messages', title: 'AD-Tabby',
+      text: 'AED 49.75 charged to your card ending 1234 for your Noon order. Remaining: 2 payments.',
+      ts: NOW + 44_100, sourceClass: smsAppClass,
+    }, {
+      id: restatementIds[2], pkg: 'com.samsung.android.messaging', appLabel: 'Messages', title: 'Tamara',
+      text: 'Refund of AED 49.75 for your Noon order has been processed to your card ending 1234.',
+      ts: NOW + 44_200, sourceClass: smsAppClass,
+    }, {
+      id: cashId, pkg: 'com.google.android.apps.messaging', appLabel: 'Messages', title: 'Tabby',
+      text: tabbyCashSpend, ts: NOW + 44_300, sourceClass: smsAppClass,
+    }];
+    const lane = await scanInbox(0, {}, undefined, 'en-AE', {
+      notificationOnly: true, learnedNotificationPackages: ['com.google.android.apps.messaging'],
+    });
+    const laneDiagnostics = getAndroidNotificationImportDiagnostics();
+    ok(`without READ_SMS, a Tabby/Tamara restatement via the Messages app (${smsAppClass}) is ignored, not reviewed`,
+      lane.parsed.length === 0 &&
+        !lane.reviewCandidates.some((item) => item.observedAt >= NOW + 44_000 && item.observedAt <= NOW + 44_200) &&
+        laneDiagnostics?.ignored === 3 && laneDiagnostics?.unresolved === 0,
+      JSON.stringify({ reviews: lane.reviewCandidates, laneDiagnostics }));
+    const cashReview = lane.reviewCandidates.find((item) => item.observedAt === NOW + 44_300);
+    ok(`without READ_SMS, a Tabby Cash SMS via the Messages app (${smsAppClass}) reaches Review only`,
+      lane.parsed.length === 0 && lane.reviewCandidates.length === 1 && !!cashReview &&
+        reviewMoney(cashReview) === 'debit:3500' &&
+        cashReview.sourcePackage === undefined && cashReview.sourceClass === undefined &&
+        laneDiagnostics?.review === 1,
+      JSON.stringify({ reviews: lane.reviewCandidates, laneDiagnostics }));
+    const ackBeforeLane = acknowledgedNotifications.length;
+    await lane.commit();
+    ok(`without READ_SMS, the Messages-app provider rows (${smsAppClass}) are all settled and acknowledged`,
+      [...restatementIds, cashId].every((id) => acknowledgedNotifications.slice(ackBeforeLane).includes(id)),
+      JSON.stringify(acknowledgedNotifications.slice(ackBeforeLane)));
+  }
+  reactNative.PermissionsAndroid.check = originalSmsCheck;
   notificationRows = [];
   notificationsEnabled = false;
+
+  // PLAIN INSTALMENT RECEIPTS. A provider often confirms the shopper's
+  // instalment with no order, plan or preview wording at all. The bank alerts
+  // on the same charge to TABBY, so the receipt is a restatement: ignored on
+  // every lane, never a Review card that would count the instalment twice if
+  // approved. The same wording with a payee ("at IKEA") is a provider-card
+  // purchase and still reaches Review.
+  {
+    notificationsEnabled = true;
+    inboxRows = [
+      { id: 9601, address: 'Tabby', date: NOW + 45_000, body: 'Payment of AED 49.75 collected successfully.' },
+      { id: 9602, address: 'AD-Tabby', date: NOW + 45_100, body: 'AED 49.75 was charged to your card ending 1234.' },
+      { id: 9603, address: 'Tamara', date: NOW + 45_200, body: 'AED 49.75 paid for your Noon purchase. 2 of 4 paid.' },
+      { id: 9604, address: 'ADCB', date: NOW + 45_300, body: bankChargeToTabby },
+    ];
+    receivedRows = [];
+    notificationRows = [
+      { id: 'tabby-receipt-push-01', pkg: 'app.tabby.client', appLabel: 'Tabby', title: 'Tabby',
+        text: 'We have received your payment of AED 49.75. Thank you!', ts: NOW + 45_400 },
+      { id: 'tabby-card-at-shop-01', pkg: 'app.tabby.client', appLabel: 'Tabby', title: 'Tabby',
+        text: 'Your payment of AED 35.00 at IKEA was successful.', ts: NOW + 45_500 },
+    ];
+    const receipts = await scanInbox(0, {}, undefined, 'en-AE');
+    const receiptDiagnostics = getAndroidNotificationImportDiagnostics();
+    const shopReview = receipts.reviewCandidates.find((item) => item.observedAt === NOW + 45_500);
+    ok('plain provider instalment receipts are ignored on the SMS and app lanes; the bank charge posts once',
+      receipts.parsed.length === 1 && receipts.parsed[0]?.merchant === 'Tabby' &&
+        receipts.parsed[0]?.amountFils === 4975 &&
+        receipts.reviewCandidates.length === 1 && !!shopReview && reviewMoney(shopReview) === 'debit:3500' &&
+        receiptDiagnostics?.ignored === 1 && receiptDiagnostics?.review === 1,
+      JSON.stringify({ parsed: receipts.parsed, reviews: receipts.reviewCandidates, receiptDiagnostics }));
+    await receipts.commit();
+
+    reactNative.PermissionsAndroid.check = async () => false;
+    inboxRows = [];
+    notificationRows = [
+      { id: 'messages-tabby-rcpt-01', pkg: 'com.google.android.apps.messaging', appLabel: 'Messages', title: 'Tabby',
+        text: 'Your payment of AED 49.75 was successful.', ts: NOW + 45_600, sourceClass: 'messaging-review' },
+    ];
+    const ackBeforeReceiptLane = acknowledgedNotifications.length;
+    const receiptLane = await scanInbox(0, {}, undefined, 'en-AE', { notificationOnly: true });
+    const receiptLaneDiagnostics = getAndroidNotificationImportDiagnostics();
+    await receiptLane.commit();
+    ok('without READ_SMS, a plain provider receipt via the Messages app is ignored and acknowledged',
+      receiptLane.parsed.length === 0 && receiptLane.reviewCandidates.length === 0 &&
+        receiptLaneDiagnostics?.ignored === 1 &&
+        acknowledgedNotifications.slice(ackBeforeReceiptLane).includes('messages-tabby-rcpt-01'),
+      JSON.stringify({ reviews: receiptLane.reviewCandidates, receiptLaneDiagnostics }));
+    reactNative.PermissionsAndroid.check = originalSmsCheck;
+    notificationRows = [];
+    notificationsEnabled = false;
+  }
 
   // History import, iOS local capture and diagnostics parse through the launch
   // session with the record's own sender. On a ledger with no pinned currency
@@ -1570,6 +2069,24 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     ok('the launch session never posts a BNPL provider source, on either parser path',
       leaked.length === 0 && bankRow?.merchant === 'Tabby' && bankRow?.amountFils === 4975,
       JSON.stringify({ leaked, bankRow }));
+
+    // The unproven-format path (Android SMS from a non-launch sender, iOS
+    // History from a worldwide issuer) is the one a BNPL sender actually
+    // takes. On a non-Gulf ledger with best-effort posting on it posted a
+    // provider's message as a marked expense.
+    const unprovenBody = 'You spent USD 35.00 at TARGET with your card ending 1234.';
+    const unprovenSession = () => createLaunchAlertSession({
+      overrides: {}, pinnedCurrency: 'USD', activeMarket: 'AE', bestEffort: { enabled: true, country: 'US' },
+    });
+    const control = unprovenSession();
+    const controlRow = control.parseUnproven(unprovenBody, 'UNKNOWNBANK', control.inspect(unprovenBody, 'UNKNOWNBANK'), NOW);
+    const unprovenLeaks = ['Tabby', 'AD-Tabby', 'Tamara', 'app.tabby.client', 'co.tamara.user'].filter((sender) => {
+      const session = unprovenSession();
+      return session.parseUnproven(unprovenBody, sender, session.inspect(unprovenBody, sender), NOW) !== null;
+    });
+    ok('the unproven-format path never posts a BNPL provider source either',
+      controlRow?.amountFils === 3500 && !!controlRow?.bestEffort && unprovenLeaks.length === 0,
+      JSON.stringify({ controlRow, unprovenLeaks }));
   }
 
   reactNative.Platform.OS = 'ios';

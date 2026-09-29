@@ -265,13 +265,19 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
   const promotion = code(read('src/lib/review-promotion.ts'));
   const stateTypes = code(read('src/lib/types.ts'));
   ok('strong installed bank identity can auto-import on first sight while ambiguous apps still require review',
-    scanner.includes("sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg)") &&
-      scanner.includes("verifiedFinancialAppSender(n.appLabel ?? '')") &&
-      scanner.includes("sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned") &&
+    // A BNPL provider (bnpl-providers.ts) is never learned, verified or
+    // auto-authorised, and a row native read from an ambiguous notification
+    // history (reviewOnly) is never auto-authorised from any source class.
+    /const learned = !messagingRow && !bnplSender && sourceClass === 'financial-candidate' &&\s*learnedPackages\.has\(n\.pkg\);/
+      .test(scanner) &&
+      /const verifiedSender = nativeSourceClass === 'financial-candidate' && !messagingRow && !bnplSender\s*\?\s*verifiedFinancialAppSender\(n\.appLabel \?\? ''\)/
+        .test(scanner) &&
+      /const autoAuthorized = !bnplSender && n\.reviewOnly !== true &&\s*\(sourceClass === 'trusted-bank' \|\| sourceClass === 'play-finance' \|\| learned\);/
+        .test(scanner) &&
       scanner.includes("const launchParsed = trustedMarket === 'AE' || trustedMarket === 'SA'") &&
       scanner.includes("shouldReviewParsedIncome(p) || !autoAuthorized") &&
       scanner.includes("p && autoAuthorized && !reviewed") &&
-      scanner.includes("sender = trustedBankNotificationSender(n.pkg) ?? verifiedSender") &&
+      scanner.includes("sender = bnplSender ?? trustedBankNotificationSender(n.pkg) ?? verifiedSender") &&
       nativeModule.includes('"appLabel" to TrustedBankNotificationPackages.applicationLabel(context, row.pkg)') &&
       promotion.includes("item.sourceClass === 'financial-candidate'") &&
       promotion.includes('learnedNotificationPackage') &&

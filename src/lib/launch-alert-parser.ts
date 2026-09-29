@@ -450,9 +450,10 @@ export const createLaunchAlertSession = ({
     forcedMarket?: string,
     observedAt?: number,
   ): ParsedSms | null => {
-    // A BNPL provider's restatement of a bank card charge (see
-    // bnpl-providers.ts). The regional path already refuses it; the
-    // worldwide fallback below must not resurrect it on an unpinned ledger.
+    // A BNPL provider never posts by itself (bnpl-providers.ts): its
+    // restatements are ignored and its own money goes to Review. The regional
+    // path already refuses it; the worldwide fallback below must not
+    // resurrect it on an unpinned ledger.
     if (isBnplProviderSource(sender)) return null;
     const local = parseRegionalEvidence(source, sender, inspection, forcedMarket, observedAt)?.parsed ?? null;
     if (local) return local;
@@ -520,6 +521,10 @@ export const createLaunchAlertSession = ({
     observedAt?: number,
   ): ParsedSms | null => {
     if (!bestEffort.enabled) return null;
+    // Same rule as parse(): an SMS from a BNPL provider's sender ID reaches
+    // this path (it is no launch-bank sender) and must not post as an
+    // "unverified format" either.
+    if (isBnplProviderSource(sender)) return null;
     if (!hasBankAlertMoneyHint(source)) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
     const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;

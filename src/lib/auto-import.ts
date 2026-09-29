@@ -17,11 +17,12 @@ import {
   type UniversalReviewAlert,
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
-import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
-import { isBnplProviderSource } from '@/lib/bnpl-providers';
+import { bodyPrint, statesSingleEventClock, type CaptureChannel } from '@/lib/dedupe';
+import { isBnplProviderRestatement, isBnplProviderSource } from '@/lib/bnpl-providers';
 import {
   nonPostingReason,
   parseForeignAwaitingRate,
+  parseSms,
   PARSER_VERSION,
   type NonPostingReason,
   type ParsedSms,
@@ -160,58 +161,65 @@ const FOREGROUND_PARSE_YIELD_MS = 16;
 // Some Android providers insert one SMS twice. Collapse only byte-identical,
 // same-sender, consecutive inbox rows delivered less than one second apart.
 const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
+
+/**
+ * A masked card or account number as a bank prints it: "XX1234", "**1234",
+ * "...1234", "ending (in) 1234", "المنتهية بـ 1234". The same shapes as the
+ * Android re-post identity (NotificationRepostIdentity MASKED_DIGITS_RE,
+ * ENDING_DIGITS_RE), plus the Arabic "ending with".
+ */
+const MASKED_INSTRUMENT_RE =
+  /(?<![\p{L}\p{N}])(?:[x*•#]{2,}|\.{3,})\s?\d{3,6}(?!\d)|\bending\s+(?:in\s+|with\s+)?(?:no\.?\s*)?\d{3,6}(?!\d)|المنتهي[ةه]?\s+بـ?\s*\d{3,6}(?!\d)/iu;
+
+/**
+ * The provider's double insert: [sms] directly follows [previous] in the
+ * newest-first inbox with the next lower id, the same sender and text, and
+ * under a second earlier. [sms], the older id, is the copy declined.
+ */
+const isExactProviderDuplicate = (previous: InboxSms | null, sms: InboxSms): boolean =>
+  !!previous &&
+  previous.id === sms.id + 1 &&
+  previous.date >= sms.date &&
+  previous.date - sms.date <= EXACT_PROVIDER_DUPLICATE_MS &&
+  previous.address === sms.address &&
+  previous.body === sms.body;
+
 /**
  * A carrier can also deliver one SMS twice minutes apart — a retry after a
  * missed delivery report — and the provider stores both as ordinary rows with
- * unrelated ids, so the adjacent-row rule above never sees them. Byte-identical
- * text from one sender is NOT enough to call them one message on its own: two
- * genuine charges of the same amount at the same shop read identically too,
- * and so does a double tap or a merchant charging twice in the same minute.
- * They are folded only inside this window AND only when the body carries
- * something two real charges cannot share (hasCarrierDuplicateIdentity). A
- * plain hh:mm is deliberately not enough. Everything else is left as before.
- *
- * The fold only ever declines an incoming copy within one scan. It never
- * emits a retirement, so a row already in the ledger is never removed by it.
+ * unrelated ids. The adjacent-row rule above never sees them, and the ledger's
+ * event identity (dedupe.ts) deliberately never pairs two SMS rows.
+ * Byte-identical text from one sender is not enough on its own: two genuine
+ * charges of one amount at one shop read identically too. Copies are folded
+ * only inside this window AND only when the body states one transaction clock
+ * to the second (statesSingleEventClock), the premise of the Android re-post
+ * guard: two real charges then differ in their seconds. A balance figure is
+ * not enough, because some banks print a ledger balance that does not move
+ * with each charge. Anything else is left as before.
  */
 const CARRIER_DUPLICATE_MS = 10 * 60_000;
-/**
- * An explicit transaction date and time at SECOND precision. This is the rule
- * the Android notification re-post guard uses, and it must stay identical:
- * NotificationCaptureStore.TRANSACTION_DATETIME_RE (kotlin-regex.test.js
- * compares the two sources). Seconds are what separate a second delivery of
- * one alert from two real charges inside one minute.
- */
-export const CARRIER_DUPLICATE_DATETIME_RE =
-  new RegExp(String.raw`\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s+\d{1,2}:\d{2}:\d{2}\b`);
-/**
- * A running-balance FIGURE after a balance label. The balance moves with
- * every charge, so two real charges cannot share it. Only an amount-shaped
- * figure counts (currency code or two decimals), and never "balance
- * transfer", so an offer footer that is identical on every alert does not.
- */
-export const CARRIER_DUPLICATE_BALANCE_RE =
-  /\b(?:(?:avl|avail(?:able)?|current|curr|ledger|closing|remaining)\.?\s*)?bal(?:ance)?\b(?!\s*transfer)[^0-9٠-٩\n]{0,20}?(?:(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?\s*(?:AED|SAR|QAR|KWD|BHD|OMR|USD|EUR|GBP|د\.إ|ر\.س|درهم|ريال))|رصيد[^0-9٠-٩\n]{0,20}?(?:(?:AED|SAR|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*\s*(?:AED|SAR|د\.إ|ر\.س|درهم|ريال))/i;
-
-/** Whether an identical copy of [body] can only be the same posting. */
-export const hasCarrierDuplicateIdentity = (body: string): boolean =>
-  CARRIER_DUPLICATE_DATETIME_RE.test(body) || CARRIER_DUPLICATE_BALANCE_RE.test(body);
 
 /**
  * Indexes of [rows] that are later carrier re-deliveries of an earlier row in
- * the same list: same sender, byte-identical identity-bearing body, within
- * CARRIER_DUPLICATE_MS of the copy that is kept. The EARLIEST copy of each
- * cluster is the one kept, whatever order the rows arrive in, because that is
- * the copy an earlier scan is most likely to have stored already; keeping the
- * later one would then import it beside the stored row.
+ * the same list: same sender, byte-identical body stating one clock to the
+ * second, within CARRIER_DUPLICATE_MS of the copy that is kept. The EARLIEST
+ * copy of each cluster is kept, whatever order the rows arrive in, because an
+ * earlier scan most likely stored that one.
+ *
+ * Rows in [excluded] take no part: the older copy of a provider double insert,
+ * which the exact-provider rule declines in favour of the newer id. Otherwise
+ * this rule would keep the older copy and that one the newer, and together
+ * they dropped both. Folding only declines an incoming copy within one scan
+ * and emits no retirement, so it never removes a row the ledger holds.
  */
 export const carrierRedeliveryIndexes = (
   rows: readonly { address: string; body: string; date: number }[],
+  excluded: ReadonlySet<number> = new Set(),
 ): Set<number> => {
   const skipped = new Set<number>();
   const byKey = new Map<string, number[]>();
   rows.forEach((row, index) => {
-    if (typeof row.body !== 'string' || !hasCarrierDuplicateIdentity(row.body)) return;
+    if (excluded.has(index) || typeof row.body !== 'string' || !statesSingleEventClock(row.body)) return;
     const key = `${row.address}\u0000${row.body}`;
     const bucket = byKey.get(key);
     if (bucket) bucket.push(index);
@@ -360,6 +368,12 @@ export { buildImportPlan } from '@/lib/import-plan';
 export interface InboxScanCursor {
   beforeDateMs: number;
   beforeId: number;
+  /**
+   * The row this cursor deliberately reads again: the previous chunk's last
+   * row, already imported or declined there. On resume it is adjacency
+   * context only (see the page loop). Absent on cursors saved by older builds.
+   */
+  overlapId?: number;
 }
 
 export interface ScanInboxOptions {
@@ -832,9 +846,15 @@ export function inspectSourceFreeRefusedAlert(input: {
   /** Known launch-bank package identity makes worldwide fallback unnecessary. */
   skipUniversalFallback?: boolean;
 }): SourceFreeRefusedAlertDecision {
-  // BNPL provider restatement (see bnpl-providers.ts): the bank's
-  // card alert is the transaction, so this source never earns a Review card.
-  if (isBnplProviderSource(input.sender)) return { kind: 'ignored', reason: 'non-financial' };
+  // BNPL provider sources (bnpl-providers.ts). A restatement of a bank card
+  // charge is ignored: the bank's own alert is the transaction, so it never
+  // earns a Review card. Anything else a provider sends (Tabby Cash, the
+  // Tamara Card/Wallet) has no bank alert behind it and takes the ordinary
+  // Review path below; the parsers refuse the provider, so it never posts.
+  if (isBnplProviderRestatement(input.sender, input.source)) {
+    return { kind: 'ignored', reason: 'non-financial' };
+  }
+  const bnplProvider = isBnplProviderSource(input.sender);
   const reason = nonPostingReason(input.source);
   if (reason) return { kind: 'declined', reason };
   // A generic amount detector can read "Get AED 50 cashback on your next
@@ -853,6 +873,21 @@ export function inspectSourceFreeRefusedAlert(input: {
   // rate converts it at promotion. It is never dropped, even when the
   // worldwide fallback below is skipped or cannot read the template.
   const launchMarket = detectLaunchMarketFromAlert(input.source, input.sender);
+  // A provider message the review inspectors cannot read may still be one the
+  // regional grammar reads — "You received AED 500.00 from Ahmed" into Tabby
+  // Cash. parseSms refuses a provider sender outright, so read the text as if
+  // it had none and offer only its structured facts in Review: the proposal an
+  // unconfirmed Android app's parsed notification gets, never a posting.
+  const providerParsedReview = (): SourceFreeRefusedAlertDecision | null => {
+    if (!bnplProvider || !launchMarket) return null;
+    const parsed = withMarketPackForParsing(launchMarket, () => parseSms(input.source, undefined, {
+      observedAt: input.observedAt,
+    }));
+    if (!parsed || parsed.kind !== 'transaction') return null;
+    const { raw: _raw, ...facts } = parsed;
+    const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
+    return candidate ? { kind: 'review', candidate: { ...candidate, channel: input.channel } } : null;
+  };
   const awaitingRate = launchMarket
     ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(input.source, undefined, {
         sender: input.sender, observedAt: input.observedAt,
@@ -903,7 +938,7 @@ export function inspectSourceFreeRefusedAlert(input: {
       channel: input.channel,
       event,
     }) : null;
-    if (!universal) return { kind: 'ignored', reason: 'unrecognized' };
+    if (!universal) return providerParsedReview() ?? { kind: 'ignored', reason: 'unrecognized' };
     const { id: _id, sourceKey: _sourceKey, ...candidate } = universal;
     return { kind: 'review', candidate };
   }
@@ -1045,6 +1080,11 @@ export async function scanInbox(
     skipUniversalFallback = false,
     /** Only for alerts NO parser read (`!p`); never for a parsed row under review. */
     aiEligible = false,
+    /**
+     * A bank-app row native read from an ambiguous notification history: it
+     * may repeat a charge already recorded, so its Review item asks first.
+     */
+    possibleReplay = false,
   ): Promise<SourceFreeRefusedAlertDecision> => {
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
@@ -1107,6 +1147,7 @@ export async function scanInbox(
         sourcePackage: pushSource.packageName,
         sourceClass: pushSource.sourceClass,
       } : {}),
+      ...(possibleReplay && channel === 'push' ? { attentionReason: 'possible-notification-replay' as const } : {}),
       // Discovery is now even when this full scan finds an old Message.
       // Keep event time and its stable identity; only review retention moves.
       expiresAt: Math.max(identified.expiresAt, reviewDiscoveredAt + REVIEW_ALERT_TTL_MS),
@@ -1180,7 +1221,26 @@ export async function scanInbox(
     inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
-    const carrierCopies = carrierRedeliveryIndexes(batch);
+    // Decided for the whole page up front, so the carrier fold knows which
+    // copies the exact-provider rule declines and never keeps one of them.
+    const providerCopies = new Set<number>();
+    batch.forEach((sms, index) => {
+      if (isExactProviderDuplicate(index === 0 ? previousInboxSms : batch[index - 1], sms)) {
+        providerCopies.add(index);
+      }
+    });
+    // A resumed chunk starts by re-reading the previous chunk's last row so a
+    // provider double insert split across the boundary is still adjacent.
+    // That row was already imported or declined there; processing it again
+    // imported the copy the exact-provider rule had declined. Only the exact
+    // row the cursor names is skipped: if the inbox changed and another row
+    // comes first, it is processed as usual.
+    const overlapIndex = pagesRead === 1 && options.cursor?.overlapId !== undefined &&
+      batch[0].id === options.cursor.overlapId ? 0 : -1;
+    const carrierCopies = carrierRedeliveryIndexes(
+      batch,
+      overlapIndex === 0 ? new Set([...providerCopies, 0]) : providerCopies,
+    );
     const pageStarted = tracing ? Date.now() : 0;
     let traceCheckpoint = pageStarted;
     for (let i = 0; i < batch.length; i++) {
@@ -1192,16 +1252,9 @@ export async function scanInbox(
       const sourceEventId = `a${sms.id}`;
       if (sms.date > newestTs) newestTs = sms.date;
       inboxBodies.add(bodyPrint(sms.body));
-      const previous = previousInboxSms;
       previousInboxSms = sms;
-      if (
-        previous &&
-        previous.id === sms.id + 1 &&
-        previous.date >= sms.date &&
-        previous.date - sms.date <= EXACT_PROVIDER_DUPLICATE_MS &&
-        previous.address === sms.address &&
-        previous.body === sms.body
-      ) {
+      if (i === overlapIndex) continue;
+      if (providerCopies.has(i)) {
         declined.push({
           smsTs: sms.date,
           sender: sms.address,
@@ -1336,6 +1389,7 @@ export async function scanInbox(
       nextCursor = {
         beforeDateMs: overlapBoundary.date,
         beforeId: overlapBoundary.id,
+        overlapId: batch[batch.length - 1].id,
       };
       break;
     }
@@ -1492,6 +1546,14 @@ export async function scanInbox(
           continue;
         }
         const source = `${n.title} ${n.text}`.trim();
+        // BNPL provider identity (bnpl-providers.ts): the provider's own app,
+        // or — on the Messages-app lane — the SMS sender ID the conversation
+        // title shows, since the package there is the SMS app's. A provider is
+        // never trusted: it cannot auto-post, whatever native classed its app
+        // as, and it cannot be learned, even if an older build learned it.
+        const bnplSender = isBnplProviderSource(n.pkg)
+          ? n.pkg
+          : messagingRow && isBnplProviderSource(n.title) ? n.title.trim() : null;
         const skipKnownLaunchUniversal =
           knownLaunchBank && !KNOWN_BANK_UNIVERSAL_INFO_HINT.test(source);
         // Unknown Play apps enter native capture only after financial-context and
@@ -1501,7 +1563,7 @@ export async function scanInbox(
         // establish issuer trust. It still cannot authorize money by itself:
         // worldwide automatic import additionally requires a certified template.
         // Truly ambiguous apps remain review-first.
-        const verifiedSender = nativeSourceClass === 'financial-candidate' && !messagingRow
+        const verifiedSender = nativeSourceClass === 'financial-candidate' && !messagingRow && !bnplSender
           ? verifiedFinancialAppSender(n.appLabel ?? '')
           : null;
         const sourceClass = nativeSourceClass === 'messaging-review'
@@ -1509,20 +1571,29 @@ export async function scanInbox(
           : nativeSourceClass === 'financial-candidate' && verifiedSender
             ? 'play-finance' as const
             : nativeSourceClass;
-        const learned = !messagingRow && sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
-        const autoAuthorized = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned;
+        const learned = !messagingRow && !bnplSender && sourceClass === 'financial-candidate' &&
+          learnedPackages.has(n.pkg);
+        // A row native read from an ambiguous notification history may be an
+        // older charge already imported, so no source can auto-post it.
+        const autoAuthorized = !bnplSender && n.reviewOnly !== true &&
+          (sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned);
         // Green semantic generalization needs independently verified installed-
         // app identity. A user-learned package may still use an exact Gold
         // certified template, but cannot generalize beyond what was confirmed.
         const semanticGeneralizationAuthorized = sourceClass === 'trusted-bank' ||
           (sourceClass === 'play-finance' && !!verifiedSender && hasUniversalInstitutionSender(verifiedSender));
-        const sender = trustedBankNotificationSender(n.pkg) ?? verifiedSender ??
+        // A provider is parsed and inspected under its own identity, so every
+        // parser refuses to post it and the refusal inspector applies the
+        // provider policy; an unlearned candidate otherwise has no sender.
+        const sender = bnplSender ?? trustedBankNotificationSender(n.pkg) ?? verifiedSender ??
           (learned ? `${n.pkg} ${n.title}` : '');
-        // A BNPL provider app is gated on its PACKAGE: an unlearned candidate
-        // is parsed with no sender at all, so the parser cannot see it.
-        if (isPromotionalBankPush(source) || isBnplProviderSource(n.pkg)) {
+        // Offers, and a provider restating a charge the bank alerts on, are
+        // settled here as ignored. A provider's other messages continue to
+        // the Review path below exactly as any unparsed financial alert.
+        const promotion = isPromotionalBankPush(source);
+        if (promotion || isBnplProviderRestatement(bnplSender, source)) {
           if (notificationImportStats) notificationImportStats.ignored += 1;
-          promotionsSkipped += 1;
+          if (promotion) promotionsSkipped += 1;
           notificationIds.add(n.id);
           if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
             await yieldToUi();
@@ -1647,8 +1718,9 @@ export async function scanInbox(
           ? parsedCandidate
           : null;
         // A messaging row carries no package identity into Review, so
-        // confirming it can never teach Wafra to trust the Messages app.
-        const pushSource = messagingRow ? undefined : { packageName: n.pkg, sourceClass } as const;
+        // confirming it can never teach Wafra to trust the Messages app —
+        // nor, from a BNPL provider's app, to trust the provider.
+        const pushSource = messagingRow || bnplSender ? undefined : { packageName: n.pkg, sourceClass } as const;
         const parsedCandidateFallback = p && !autoAuthorized
           ? parsedFinancialCandidateReview(p, n.ts)
           : null;
@@ -1659,7 +1731,7 @@ export async function scanInbox(
         let refusal: SourceFreeRefusedAlertDecision | null = p && (shouldReviewParsedIncome(p) || !autoAuthorized)
           ? await inspectRefused(
               source, n.ts, sender, 'push', worldwide, undefined, pushSource,
-              reviewFallback, skipKnownLaunchUniversal,
+              reviewFallback, skipKnownLaunchUniversal, false, n.reviewOnly === true,
             )
           : null;
         const reviewed = refusal?.kind === 'review';
@@ -1686,6 +1758,7 @@ export async function scanInbox(
             reviewFallback,
             skipKnownLaunchUniversal,
             true,
+            n.reviewOnly === true,
           );
         }
         if (refusal?.kind === 'review') {
@@ -1695,6 +1768,20 @@ export async function scanInbox(
           if (notificationImportStats) notificationImportStats.declined += 1;
           handled = true;
         } else if (refusal?.kind === 'ignored' && refusal.reason !== 'unrecognized') {
+          if (notificationImportStats) notificationImportStats.ignored += 1;
+          handled = true;
+        }
+        // Without READ_SMS an SMS app's notification can be anyone's text,
+        // and one the parser cannot resolve is treated as personal ("Can you
+        // transfer AED 500 tonight?"). It is acknowledged now, as ignored.
+        // Only a row that still reads as a bank alert — money plus a
+        // recognised bank sender ID as the conversation title, or a masked
+        // card or account number — is retained in the encrypted queue for a
+        // future parser, the way an unresolved bank-app row is. A word like
+        // "account" (حساب) is not enough: people write it to each other.
+        if (!handled && messagingRow && !(hasBankAlertMoneyHint(source) &&
+            (detectLaunchMarketFromSender(n.title) !== null || hasUniversalInstitutionSender(n.title) ||
+              MASKED_INSTRUMENT_RE.test(source)))) {
           if (notificationImportStats) notificationImportStats.ignored += 1;
           handled = true;
         }

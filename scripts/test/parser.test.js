@@ -7,6 +7,7 @@ const {
   isDeclinedMessage,
   nonPostingReason,
   isBnplProviderSource,
+  isBnplProviderRestatement,
 } = require('./build/sms-parser');
 
 let pass = 0, fail = 0;
@@ -1114,6 +1115,117 @@ t('tabby charge-tomorrow preview is skipped (real charge arrives separately)',
       'co.tamara.merchant', 'com.example.tabby', ''].every((s) => !isBnplProviderSource(s)) &&
       !isBnplProviderSource(undefined),
     'a sender that only contains a provider name was treated as the provider');
+
+  // WHAT a provider says still matters for one decision: ignore it, or show
+  // it in Review. Tabby Cash (a stored-value account with its own Cash Card
+  // and person-to-person transfers, launched in the UAE in July 2026) and the
+  // Tamara Card/Wallet move money that NO bank alert will ever report, so only
+  // a recognised RESTATEMENT of a bank card charge may be dropped. The wording
+  // test is reachable only through the provider's identity: the same body
+  // from a bank, a shop or an unknown sender is never judged by it.
+  const restatements = [
+    ...providerBodies,
+    'Your Noon order for AED 49.75 is due tomorrow and will be charged to your default card. Pay it now at https://s.tabby.ai/s3b4DC',
+    'Your order from Namshi of AED 360.00 has been split into 3 interest-free payments of AED 120.00.',
+    'Your 2nd instalment of AED 49.75 for your Noon order was paid. 2 installments left.',
+    'Your next payment of AED 49.75 will be charged tomorrow to your card ending 1234.',
+    'تم تقسيم طلبك من نون بقيمة 199.00 درهم على 4 دفعات. تم خصم الدفعة الأولى 49.75 درهم من بطاقتك.',
+    'تم استرداد 49.75 درهم لطلبك من نون إلى بطاقتك المنتهية بـ 1234',
+    'سيتم خصم القسط القادم بقيمة 49.75 درهم من بطاقتك غدا',
+    // Plain receipts for an instalment the bank alerts on as a charge to
+    // TABBY: no order, plan or preview wording, and no payee.
+    'Payment of AED 49.75 collected successfully.',
+    'We have received your payment of AED 49.75. Thank you!',
+    'AED 49.75 was charged to your card ending 1234.',
+    'Your payment of AED 49.75 was successful.',
+    'Payment of AED49.75 collected successfully. Thank you!',
+    'AED 49.75 paid for your Noon purchase. 2 of 4 paid.',
+    'Autopay: AED 49.75 was charged to your card ending 1234.',
+    'تم خصم 49.75 درهم من بطاقتك المنتهية بـ 1234',
+    'تم استلام دفعتك بقيمة 49.75 درهم. شكرا لك',
+  ];
+  const providerOwnMoney = [
+    'You spent AED 35.00 at CARREFOUR with your Tabby Cash Card ending 1234.',
+    'You received AED 500.00 from Ahmed. Your Tabby Cash balance is AED 812.40.',
+    'You sent AED 100.00 to Sara. Your Tabby Cash balance is AED 712.40.',
+    'AED 200.00 has been added to your Tabby Cash account.',
+    'You earned AED 3.50 cashback on your Cash Card purchase at CARREFOUR.',
+    'Your payment of AED 49.75 for your Noon order was paid from your Tabby Cash balance.',
+    'You paid AED 120.00 for your Namshi order with your Tabby Cash Card ending 1234.',
+    'You paid SAR 120.00 at JARIR with your Tamara Card ending 5678.',
+    'SAR 15.00 cashback has been added to your Tamara Wallet.',
+    'You spent AED 96.50 at SAMPLE PIZZA RESTAURANT. Your Tabby Card limit is now AED 1,846.50.',
+    'دفعت 35.00 درهم في كارفور باستخدام بطاقة تابي كاش المنتهية بـ 1234',
+    'استلمت 500.00 درهم من أحمد. رصيدك في تابي كاش 812.40 درهم',
+    // Tabby Cash copy that happens not to name the account: no order of the
+    // shopper's, no instalment plan, no charge preview — so not a restatement.
+    'Payment successful: AED 35.00 paid at CARREFOUR with card ending 1234.',
+    'AED 35.00 paid at AMAZON.AE for order 123 with card ending 1234.',
+    'You paid AED 50.00 to Sara.',
+    // "طلب" is also a request: "Ahmed's request for AED 50 was paid".
+    'تم دفع طلب أحمد بقيمة 50.00 درهم',
+    // Receipt wording with a payee is a purchase or a transfer, not a
+    // receipt for the shopper's instalment.
+    'Payment of AED 500.00 received from Ahmed.',
+    'Your payment of AED 35.00 at IKEA was successful.',
+    'AED 35.00 was charged to your card at CARREFOUR.',
+    'Your payment of AED 75.00 to Sara was successful.',
+    'تم خصم 35.00 درهم من بطاقتك في كارفور',
+    'تم خصم 20.00 درهم من بطاقتك لدى ستاربكس',
+    'تم خصم 20.00 درهم من بطاقتك عند ستاربكس',
+    'Sara paid you AED 50.00. Payment received successfully.',
+    'Your payment of AED 20.00 with Starbucks was successful.',
+    'Your payment of AED 20.00 @ STARBUCKS was successful.',
+    'Payment of SAR 150.00 for JARIR BOOKSTORE completed.',
+    // A provider-card purchase whose notification title is the shop.
+    'Starbucks Payment of AED 20.00 successful',
+    'Merchant: STARBUCKS. Your payment of AED 20.00 was successful.',
+    // A receipt is ignored only when every word is receipt wording: any
+    // shop, person or label ("for Noon" included, which may be an instalment
+    // or a provider-card purchase) keeps it on the Review path.
+    'Your payment of AED 49.75 for Noon was successful.',
+    'Autopay: AED 49.75 was charged to your card ending 1234 for Noon.',
+    'Your payment of AED 20.00 for Starbucks was successful.',
+    'Your payment of AED 20.00 on Careem was successful.',
+    'AED 20.00 was charged to your card ending 4321 by STARBUCKS.',
+    'AED 20.00 was deducted from your card ending 4321 for STARBUCKS.',
+    'AED 20.00 was charged to your card ending 4321 - STARBUCKS DUBAI',
+    'AED 150.00 was charged to your card ending 9876, JARIR BOOKSTORE',
+    'Payment of AED 50.00 received. Sender: Sara Ahmed',
+    'Starbucks Your payment of AED 20.00 was successful.',
+    'Your payment of SAR 150.00 was successful. JARIR BOOKSTORE',
+    'تم خصم 20.00 درهم من بطاقتك لصالح ستاربكس',
+    'دفعتك بقيمة 20.00 درهم لستاربكس تمت بنجاح',
+    'تم خصم 20.00 درهم من بطاقتك المنتهية بـ 4321 - ستاربكس',
+  ];
+  ok('BNPL: provider restatements of a bank card charge are recognised, English and Arabic',
+    typeof isBnplProviderRestatement === 'function' &&
+      ['Tabby', 'AD-Tabby', 'Tamara', 'postpay', 'Cashew', 'app.tabby.client', 'co.tamara.user']
+        .every((sender) => restatements.every((body) => isBnplProviderRestatement(sender, body))),
+    typeof isBnplProviderRestatement === 'function'
+      ? JSON.stringify(restatements.filter((body) => !isBnplProviderRestatement('Tabby', body)))
+      : 'isBnplProviderRestatement is not exported');
+  ok("BNPL: the provider's own money (Tabby Cash, Cash Card, transfers, Tamara Card/Wallet) is never a restatement",
+    typeof isBnplProviderRestatement === 'function' &&
+      ['Tabby', 'AD-Tabby', 'Tamara', 'app.tabby.client', 'co.tamara.user']
+        .every((sender) => providerOwnMoney.every((body) => !isBnplProviderRestatement(sender, body))),
+    typeof isBnplProviderRestatement === 'function'
+      ? JSON.stringify(providerOwnMoney.filter((body) => isBnplProviderRestatement('Tabby', body)))
+      : 'isBnplProviderRestatement is not exported');
+  ok('BNPL: restatement wording is never judged without the provider identity',
+    typeof isBnplProviderRestatement === 'function' &&
+      ['', 'ADCB', 'TabbyTailoring', 'com.google.android.apps.messaging', 'app.tabby.cashier', undefined]
+        .every((sender) => restatements.every((body) => !isBnplProviderRestatement(sender, body))),
+    'a non-provider sender was judged by provider wording');
+  // Whatever it says, a provider source still never auto-posts: parseSms
+  // refuses it, and the capture lanes decide between ignoring and Review.
+  for (const body of providerOwnMoney) {
+    t(`BNPL provider own-money message never auto-posts: ${body.slice(0, 40)}`, body, null, { sender: 'Tabby' });
+  }
+  // ...while the same text with no sender reads exactly as it did before.
+  t('BNPL: a Tabby Cash Card spend with no sender parses as before',
+    'You spent AED 35.00 at CARREFOUR with your Tabby Cash Card ending 1234.',
+    { kind: 'transaction', type: 'expense', amountFils: 3500, merchant: 'Carrefour' });
 }
 
 t('instalment conversion offer is skipped',

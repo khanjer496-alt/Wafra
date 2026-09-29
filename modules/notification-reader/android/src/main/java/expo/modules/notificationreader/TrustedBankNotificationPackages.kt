@@ -159,6 +159,8 @@ object TrustedBankNotificationPackages {
    * category that the platform cannot actually provide.
    */
   fun sourceClass(context: Context, packageName: String, body: String): String? {
+    // The build kill switch admits nothing, messaging apps included.
+    if (!CAPTURE_ENABLED) return null
     // Exact curated bank package ids are accepted regardless of installer.
     // Android restores, OEM stores and phone-clone migrations can legitimately
     // leave installingPackageName null/non-Play even for the real bank app.
@@ -184,6 +186,7 @@ object TrustedBankNotificationPackages {
    * would strand it in the queue until retention expires.
    */
   fun queuedSourceClass(context: Context, packageName: String, body: String): String? {
+    if (!CAPTURE_ENABLED) return null
     if (isTrusted(context, packageName)) return SOURCE_TRUSTED_BANK
     if (isMessagingApp(context, packageName)) return SOURCE_MESSAGING_REVIEW
     return sourceClass(context, packageName, body)

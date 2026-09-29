@@ -404,6 +404,7 @@ class NotificationReaderModule : Module() {
           "text" to row.text,
           "ts" to row.ts.toDouble(),
           "sourceClass" to sourceClass,
+          "reviewOnly" to row.reviewOnly,
         )
       }
     }
