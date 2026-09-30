@@ -205,7 +205,6 @@ function createHarness(options = {}) {
     ['card-detail-sheet','CardDetailSheet'],['transaction-filter-sheet','TransactionFilterSheet'],['ui/amount-sheet','AmountSheet'],['ui/choice-sheet','ChoiceSheet'],['ui/confirm-sheet','ConfirmSheet'],['ui/category-chips','CategoryChips'],['limit-sheet','LimitSheet']]) {
     deps['@/components/'+module]={[name]:p=>jsx('Boundary',{...p,name})};
   }
-  local('@/components/ui/category-chips');
   // Manual Add: the keypad text model and its copy are pure and run for real;
   // the keypad itself is a boundary, and the category advisor (rules, then an
   // optional on-device model) answers "no suggestion" as it does off-device.
@@ -235,6 +234,9 @@ function createHarness(options = {}) {
   local('@/lib/spending-compare','src/lib/spending-compare.ts');local('@/lib/spending-calendar-tiles','src/lib/spending-calendar-tiles.ts');
   local('@/components/ui/band/band-segmented');local('@/components/ui/band/band-chip');local('@/components/ui/band/share-bar');
   local('@/components/ui/band/glyph-tile');local('@/components/ui/band/status-bar');local('@/components/ui/band/e-button');
+  // The category creation form uses the real field/button and band palette;
+  // load it only after those existing UI boundaries are ready.
+  local('@/components/ui/category-chips');
   local('@/components/spending/spending-band');
   // The limit dial's drag is native; its steppers and adjustable actions run.
   native.PanResponder={create:()=>({panHandlers:{}})};

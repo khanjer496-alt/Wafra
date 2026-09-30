@@ -32,6 +32,7 @@ function harness() {
   const contexts = [];
   let providerMemo;
   const theme = { text: 'black', primary: 'green', expense: 'red', textSecondary: 'gray' };
+  let state = { customCategories: [] };
   const deps = {
     react: {
       createContext: value => { const context = { value, Provider: 'ContextProvider' }; contexts.push(context); return context; },
@@ -74,12 +75,14 @@ function harness() {
     '@/components/ui/progress-bar': { ProgressBar: 'ProgressBar' },
     '@/components/ui/period-pill': { PeriodPill: 'PeriodPill' },
     '@/components/ui/controls': { Button: 'Button' },
-    '@/lib/categories': { categoryLabel: category => category },
+    '@/lib/categories': local('categories', { '@/lib/i18n': i18n }),
+    '@/lib/store': { useStoreSelector: selector => selector({ state }) },
     '@/lib/reference-presentation': local('reference-presentation'),
     '@/lib/runtime-performance': { measureRuntimeOperation: (_tag, work) => work() },
     '@/lib/format': format, '@/lib/markets': markets, '@/lib/ledger-money': money,
   };
   const denomination = load(path.join(root, 'src/hooks/use-ledger-money.tsx'), deps);
+  deps['@/hooks/use-category-catalog'] = load(path.join(root, 'src/hooks/use-category-catalog.ts'), deps);
   deps['@/hooks/use-ledger-money'] = denomination;
   const setDenomination = moneySpec => {
     const provider = denomination.LedgerMoneyProvider({ moneySpec, children: null });
@@ -156,7 +159,8 @@ function harness() {
     contexts.find(context => context.value === '' || context.isMoneyLocale).value = provider.props.value;
     contexts.find(context => context.value === provider.props.value).isMoneyLocale = true;
   };
-  return { render, renderMoney, renderAmountField, renderSurface, setDenomination, setMoneyLocale, props, markets, money, i18n };
+  return { render, renderMoney, renderAmountField, renderSurface, setDenomination, setMoneyLocale,
+    setCatalog: customCategories => { state = { ...state, customCategories }; }, props, markets, money, i18n };
 }
 function nodes(tree, output = []) {
   if (Array.isArray(tree)) tree.forEach(node => nodes(node, output));
@@ -250,6 +254,20 @@ test('retained Spending, Trends and Bills keep visible and accessible money in t
       assert.equal(JSON.stringify(props), before);
     }
   }
+});
+
+test('retained compiled Spending reads custom labels from the restored ledger catalog', () => {
+  const h = harness(); h.setDenomination(h.money.ledgerMoneySpec('AED'));
+  const id = 'custom:expense:' + 'a'.repeat(32);
+  const props = { totalFils: 828, rows: [{ category: id, spentFils: 828, limitFils: null, remainingFils: null, ratio: null }],
+    monthScoped: true, filter: 'all', onFilter() {}, onCategory() {}, onNewLimit() {} };
+  h.setCatalog([{ id, name: 'Synthetic hobby', type: 'expense' }]);
+  assert.match(strings(h.renderSurface('SpendingOverview', props)), /Synthetic hobby/);
+  h.setCatalog([{ id, name: 'Restored hobby', type: 'expense' }]);
+  const restored = h.renderSurface('SpendingOverview', props);
+  assert.match(strings(restored), /Restored hobby/);
+  assert.doesNotMatch(strings(restored), /Synthetic hobby/);
+  assert.ok(nodes(restored).some(node => node.props.accessibilityLabel?.includes('Restored hobby')));
 });
 
 test('the application provides denomination inside the existing reactive store boundary without a currency navigation remount', () => {

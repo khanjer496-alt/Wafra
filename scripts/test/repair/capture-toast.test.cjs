@@ -70,7 +70,7 @@ test('behind App Lock a live capture names nothing, on screen or aloud', () => {
   const hook = fs.readFileSync(path.join(root, 'src/hooks/use-auto-import.ts'), 'utf8');
   const body = hook.slice(hook.indexOf('const showLiveCaptureFeedback'), hook.indexOf('const performAutoImport'));
   assert.match(hook, /privacyGateCleared\.current = usePrivacyGateCleared\(\);/);
-  assert.match(body, /liveCaptureToastContent\(row, current\.ledgerMoney \?\? null, current\.language, privacyGateCleared\.current\)/);
+  assert.match(body, /liveCaptureToastContent\(row, current\.ledgerMoney \?\? null, current\.language, privacyGateCleared\.current,\s*current\.customCategories\)/);
   assert.doesNotMatch(body, /captureToastContent\(/, 'no path names the row without the gate');
 });
 

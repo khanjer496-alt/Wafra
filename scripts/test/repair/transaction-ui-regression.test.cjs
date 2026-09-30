@@ -183,7 +183,7 @@ test('entry edit does not rescan merchant history for every typed character', ()
     'the current edited merchant is counted once when Save actually needs the rule prompt');
   assert.equal((source.match(/horizontal nestedScrollEnabled/g) || []).length, 0,
     'categories are a wrapping grid, so no horizontal rail competes with the vertical sheet scroll; the account rail is a picker bottom sheet');
-  assert.equal((source.match(/<CategoryChips categories=\{categories\}[^>]*layout="wrap" \/>/g) || []).length, 2,
+  assert.equal((source.match(/<CategoryChips\b(?=[^>]*categories=\{categories\})(?=[^>]*createType=\{income \? 'income' : 'expense'\})[^>]*layout="wrap"\s*\/>/g) || []).length, 2,
     'both the edit form and the category sheet state use the wrapping category grid');
 });
 

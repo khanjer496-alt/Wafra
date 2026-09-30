@@ -48,6 +48,22 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return { ...dependencies[name], useMoneyLocaleKey: () => '' };
       }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      // Catalog labels are ledger-local. Run the shipping hook against this
+      // harness's React and store so rerenders observe edits/restores, rather
+      // than returning a fixed empty catalog or duplicating its lookup rules.
+      if (name === '@/hooks/use-category-catalog') {
+        const categories = loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/categories.ts'), {
+          '@/lib/i18n': dependencies['@/lib/i18n'] ?? require('../build/i18n.js'),
+        });
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/hooks/use-category-catalog.ts'), {
+          ...dependencies, '@/lib/categories': categories,
+        }, globals);
+      }
+      if (name === '@/lib/categories' || name === '@/lib/custom-categories' || name === '@/lib/custom-category-copy') {
+        return loadTypescript(require('node:path').resolve(__dirname, `../../../src/lib/${name.slice(6)}.ts`), {
+          '@/lib/i18n': dependencies['@/lib/i18n'] ?? require('../build/i18n.js'),
+        }, globals);
+      }
       // Pure production policies used by capture and backup validation.
       if (name === '@/lib/alert-review-tray') return require('../build/alert-review-tray.js');
       if (name === '@/lib/capture-source-identity') return require('../build/capture-source-identity.js');
