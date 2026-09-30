@@ -180,7 +180,8 @@ test('Statement import: sand band with the title, the true privacy line above th
   assert.equal(control.props.accessibilityLabel, copy.chooseFile);
   const sheet = tree.props.children;
   assert.ok(byId(sheet, 'statement-download-hint'));
-  assert.match(text(byId(sheet, 'statement-date-note')), /04\/09 is 4 September/);
+  assert.match(text(byId(sheet, 'statement-date-note')), /Detect from file[\s\S]*choose the order printed by your bank/);
+  assert.doesNotMatch(text(byId(sheet, 'statement-date-note')), /04\/09 is 4 September/);
   assert.equal(byId(band, 'statement-date-note'), undefined);
   // Without a ledger currency the control is off, and the band says why first.
   const noCurrency = statements({ ledgerMoney: null });

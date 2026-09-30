@@ -189,8 +189,13 @@ ok('the UAE and Saudi pickers are unchanged',
   ok('onboarding writes the country it asks for, except in the preview',
     /if \(!previewMode\) setLedgerCountry\(next\)/.test(gate));
   const upload = read('src/components/supplement-imports.tsx');
-  ok('statement uploads send the country date order',
-    /statementDateOrderForCountry\(state\.country\)/.test(upload));
+  // Upload date order is chosen for the file, not inferred from residence.
+  // Actual request headers and selected controls run in statement-client-audit
+  // and e2e-statement-import; this pins the screen's conservative default.
+  ok('statement uploads default to file evidence and offer an explicit date order',
+    /useState<StatementDateOrder>\(null\)/.test(upload) &&
+      /setDateOrder\(option\.value\)/.test(upload) &&
+      !/statementDateOrderForCountry\(state\.country\)/.test(upload));
   const cloud = read('src/lib/cloud-import.ts');
   ok('the date order travels as its own header', /'x-wafra-date-order'/.test(cloud));
 }
