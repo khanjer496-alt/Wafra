@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { spendingTrendsCopy as copy } from '@/lib/reference-copy';
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
@@ -12,7 +13,7 @@ import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { categoryLabel } from '@/lib/categories';
+
 import { formatAED, ledgerWholeMajor, monthLabel, weekdayShort } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import {
@@ -64,6 +65,7 @@ type Props = {
  * (the former Trends and Stats content) stay reachable below them.
  */
 export function SpendingTrends(p: Props) {
+  const { categoryLabel } = useCategoryCatalog();
   const theme = useTheme(); const band = useBand('spending'); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
   const moneyLabel = (fils: number) => moneySpec

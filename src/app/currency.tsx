@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { FlatList, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -16,7 +17,7 @@ import { Fonts, Radius, Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { categoryLabel, getCategory } from '@/lib/categories';
+
 import { detailsWords } from '@/lib/details-copy';
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { formatAED, shortDate } from '@/lib/format';
@@ -75,6 +76,7 @@ function CurrencyTile({ group, percent, selected, onPress, palette, language }: 
  * figure and the currencies move onto the sheet as rows and scroll with it.
  */
 export default function CurrencyScreen() {
+  const { categoryLabel, getCategory } = useCategoryCatalog();
   const band = useBand('spending');
   const language = useLanguage();
   const lang = language === 'ar' ? 'ar' : 'en';
@@ -229,7 +231,7 @@ export default function CurrencyScreen() {
         </View>
       </Pressable>
     );
-  }, [accountById, lang, largeText, band, words]);
+  }, [accountById, lang, largeText, band, words, categoryLabel, getCategory]);
 
   const figure = (colors?: { color: string; secondaryColor: string }) => <BandFigure testID="currency-total"
     palette={band} label={`${t('foreignConvertedTotal', language)} · ${periodLabel(period)}`}

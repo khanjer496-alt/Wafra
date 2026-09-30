@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -32,7 +33,7 @@ import { useBand } from '@/hooks/use-band';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { applyKeypadKey, keypadDisplay, keypadMinorUnits, keypadTextFromMinor, type KeypadKey } from '@/lib/amount-keypad';
-import { categorySupportsType, categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
+import { categorySupportsType } from '@/lib/categories';
 import { parseAmountToFils, parseAmountWithMoneySpec, shortDate, toISODate } from '@/lib/format';
 import { committed, tapped } from '@/lib/haptics';
 import { t as tUi, tf as tfUi } from '@/lib/i18n';
@@ -105,6 +106,7 @@ function defaultReviewTitle(item: ReviewAlert): string {
 }
 
 export default function AddTransactionScreen() {
+  const { categoryLabel, getCategory, expenseCategories, incomeCategories } = useCategoryCatalog();
   const theme = useTheme();
   // Design language E: adding is a capture flow and wears the green band.
   const band = useBand('flow');
@@ -245,7 +247,7 @@ export default function AddTransactionScreen() {
     return () => { current = false; };
   }, [manualEntry]);
 
-  const categories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
+  const categories = type === 'expense' ? expenseCategories : incomeCategories;
   const manualMoneySpec = state.ledgerMoney;
   // Foreign spending is entered in the receipt's currency and converted on
   // save with a dated reference rate; the original stays on the row.
@@ -1217,7 +1219,7 @@ export default function AddTransactionScreen() {
       title={tUi('category')}
       testID="category-picker-sheet">
       <View accessibilityRole="radiogroup" accessibilityLabel={tUi('category')}>
-        <CategoryChips
+        <CategoryChips createType={type}
           categories={categories}
           selected={category}
           onToggle={(value) => { setCategory(value); setCategoryPickerOpen(false); }}

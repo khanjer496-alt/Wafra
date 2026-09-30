@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState as NativeAppState, Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
@@ -18,7 +19,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
 import { assistantScreenCopy, evidenceTransactionCount } from '@/lib/assistant-screen-copy';
-import { categoryLabel } from '@/lib/categories';
+
 import { toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
@@ -37,6 +38,7 @@ import {
   assistantFollowUpQuestions, executeAssistantTool, latestAssistantContext, planAssistantCorrection, runWafraAssistant,
   runWafraAssistantCooperatively, suggestedAssistantQuestions,
   type AssistantAnswer, type AssistantCorrectionPlan, type AssistantFinding, type AssistantToolRequest,
+  hasKnownCustomCategoryMention,
 } from '@/lib/wafra-assistant';
 
 const MAX_TURNS = 12;
@@ -44,7 +46,7 @@ const MAX_TURNS = 12;
 // No ledger rows or raw messages are copied into persistent chat storage.
 const ledgerInputs = (state: AppState): unknown[] => [state.transactions, state.accounts,
   state.bills, state.cardDues, state.notSubscriptions, state.monthStartDay,
-  state.ledgerMoney, state.historyImport];
+  state.ledgerMoney, state.historyImport, state.customCategories];
 
 interface AssistantTurn {
   id: number;
@@ -94,6 +96,7 @@ function AskPill({ label, onPress, palette, primary = false, icon, testID }: {
 }
 
 export default function AssistantScreen() {
+  const { categoryLabel } = useCategoryCatalog();
   const router = useRouter();
   const params = useLocalSearchParams<{ question?: string }>();
   // Ask is a Home detail: it wears Home's ink band.
@@ -344,9 +347,10 @@ export default function AssistantScreen() {
         : runWafraAssistant(snapshot, interpretedQuestion, now, previous, period);
       if (result === null) return;
       let interpretedOnDevice = false;
+      const localCustomScope = hasKnownCustomCategoryMention(clean, snapshot.customCategories);
       // Unrecognised fresh question: the platform model may pick ONE closed
       // tool. Wafra validates it and the ledger executor computes the answer.
-      if (result.request.tool === 'help' && (!previous || isIndependentAssistantQuestion(clean))) {
+      if (!localCustomScope && result.request.tool === 'help' && (!previous || isIndependentAssistantQuestion(clean))) {
         const outcome = await improveAssistantRequestOnDevice({
           question: clean,
           deterministicRequest: result.request,
@@ -366,7 +370,7 @@ export default function AssistantScreen() {
         }
       }
       // Research builds only (EXPO_PUBLIC_WAFRA_LOCAL_E5=1): the old E5 path.
-      if (LOCAL_SEMANTIC_E5_ENABLED && !interpretedOnDevice && result.request.tool === 'help' &&
+      if (!localCustomScope && LOCAL_SEMANTIC_E5_ENABLED && !interpretedOnDevice && result.request.tool === 'help' &&
         (!previous || isIndependentAssistantQuestion(clean))) {
         const improved = await improveAssistantRequestLocally({
           question: clean,

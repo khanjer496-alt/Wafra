@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
@@ -24,7 +25,7 @@ import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
+
 import { formatAmount, formatAmountForInput, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
 import { formatOriginalCurrency, originalMoneyOf } from '@/lib/fx';
 import { ledgerCurrencyCode } from '@/lib/markets';
@@ -68,6 +69,7 @@ interface EntryDetailSheetProps {
  * comes first now; editing is one tap away.
  */
 export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment, initialMode = 'read', band: bandId = 'home' }: EntryDetailSheetProps) {
+  const { getCategory, categoryLabel, expenseCategories, incomeCategories } = useCategoryCatalog();
   const router = useRouter();
   const theme = useTheme();
   const band = useBand(bandId);
@@ -189,7 +191,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const pendingTransfer = !confirmedTransfer && isTransferCandidate(transaction) && ownership === 'unknown';
   const account = state.accounts.find((a) => a.id === transaction.accountId);
   const income = transaction.type === 'income';
-  const categories = income ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const categories = income ? incomeCategories : expenseCategories;
 
   const amountFils = parseAmountToFils(amountText);
   const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(dateText);
@@ -418,7 +420,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       {categoryPicking ? (
         <View style={styles.field} testID="entry-category-picker">
           <ThemedText type="meta" themeColor="textTertiary">{extra.chooseCategory}</ThemedText>
-          <CategoryChips categories={categories} selected={pickedCategory} onToggle={setPickedCategory} layout="wrap" />
+          <CategoryChips createType={income ? 'income' : 'expense'} categories={categories} selected={pickedCategory} onToggle={setPickedCategory} layout="wrap" />
         </View>
       ) : null}
       {!categoryPicking && <>
@@ -539,7 +541,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
               <ThemedText type="meta" themeColor="textTertiary">
                 {t('category')}
               </ThemedText>
-              <CategoryChips categories={categories} selected={category} onToggle={setCategory} layout="wrap" />
+              <CategoryChips createType={income ? 'income' : 'expense'} categories={categories} selected={category} onToggle={setCategory} layout="wrap" />
             </View>
           )}
 

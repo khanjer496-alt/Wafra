@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useLanguage } from '@/hooks/use-language';
 import { clearIosStatementHandoff, matchesIosStatementHandoff } from '@/lib/ios-statement-handoff';
 import * as Crypto from 'expo-crypto';
@@ -44,7 +45,7 @@ import {
   requestSmsDeliveryPermission,
   requestSmsPermission,
 } from '@/lib/auto-import';
-import { categoryLabel } from '@/lib/categories';
+
 import { committed } from '@/lib/haptics';
 import {
   cancelDailySummary,
@@ -147,6 +148,7 @@ function deviceCountry(): string | null {
  * last screen hand its pattern to Home's header as Home appears beneath it.
  */
 export function OnboardingGate({ children }: { children: React.ReactNode }) {
+  const { categoryLabel } = useCategoryCatalog();
   const language = useLanguage();
   const pathname = usePathname();
   const params = useGlobalSearchParams<{ onboarding?: string; statementSession?: string }>();

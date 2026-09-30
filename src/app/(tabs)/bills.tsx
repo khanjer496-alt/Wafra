@@ -42,7 +42,7 @@ import { useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { billsForMonth } from '@/lib/bills';
 import { openDues, recentlySettledDues } from '@/lib/cards';
-import { EXPENSE_CATEGORIES } from '@/lib/categories';
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import {
   formatAED,
   monthKey,
@@ -309,6 +309,7 @@ export default function BillsScreen() {
 
   // Design language E: Bills wears the ochre band (ink text in light, light
   // text on the deepened ochre in dark — both from the band tokens).
+  const { expenseCategories } = useCategoryCatalog();
   const band = useBand('bills');
   const billsNav: BandNav = {
     title: t('billsTitle'),
@@ -1071,8 +1072,8 @@ export default function BillsScreen() {
           </View>
         </View>
 
-        <CategoryChips
-          categories={EXPENSE_CATEGORIES}
+        <CategoryChips createType="expense"
+          categories={expenseCategories}
           selected={category}
           onToggle={setCategory}
         />

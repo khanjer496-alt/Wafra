@@ -150,6 +150,77 @@ test('Home ignores status churn it does not draw, but still follows import progr
   }
 });
 
+test('Home follows category creation and restored names without requiring a transaction edit', () => {
+  const s = subscriptions('home', 50);
+  const id = 'custom:expense:' + 'a'.repeat(32);
+  assert.ok(s.update({ customCategories: [{ id, name: 'Pets', type: 'expense' }] }));
+  assert.ok(s.update({ customCategories: [{ id, name: 'Restored pets', type: 'expense' }] }));
+  assert.equal(s.update({ lastScanTs: 9876 }), false, 'unrelated scan status remains excluded');
+});
+
+
+// Record the dependency arrays supplied by the actual Home component. The
+// projection services are observable boundaries; no Home dependency list is
+// copied into this test and no source-spelling regex identifies a hook.
+function homeProjectionDependencies(state, period) {
+  const h = createHarness({ state, period, states: { 7: true } }); // analysis is ready
+  const effects = [];
+  let activeMemo;
+  let dashboardDeps;
+  let insightCalled = false;
+  h.deps.react.useMemo = (factory, deps) => {
+    const prior = activeMemo;
+    activeMemo = deps;
+    try { return factory(); } finally { activeMemo = prior; }
+  };
+  h.deps.react.useEffect = (effect, deps) => effects.push({ effect, deps });
+  const projection = h.deps['@/lib/dashboard-projection'];
+  h.deps['@/lib/dashboard-projection'] = {
+    ...projection,
+    projectDashboard: request => {
+      dashboardDeps = activeMemo;
+      assert.equal(request.state.customCategories, state.customCategories);
+      return projection.projectDashboard(request);
+    },
+    projectDashboardInsight: current => {
+      insightCalled = true;
+      assert.equal(current.customCategories, state.customCategories);
+      return null;
+    },
+  };
+  h.local('@/screens/journal-home-screen', 'src/screens/journal-home-screen.tsx').default();
+  // The historical insight reads budgets/subscriptions but not the bill list;
+  // the independent widget-sync effect also reads bills. Select independently
+  // of customCategories so a missing catalog dependency cannot hide the bug.
+  const candidates = effects.filter(({ deps }) => deps?.includes(state.budgets) &&
+    deps.includes(state.notSubscriptions) && !deps.includes(state.bills));
+  assert.equal(candidates.length, 1, 'one historical insight effect is observed');
+  const cleanup = candidates[0].effect();
+  cleanup?.();
+  assert.equal(insightCalled, true, 'the observed effect actually calls the insight projection');
+  assert.ok(dashboardDeps, 'the dashboard projection actually ran inside useMemo');
+  return { dashboard: dashboardDeps, insight: candidates[0].deps };
+}
+
+test('Home retained dashboard and insight caches invalidate for catalog-only changes', () => {
+  const h = createHarness();
+  const id = 'custom:expense:' + 'a'.repeat(32);
+  const period = { mode: 'month', key: '2026-09' };
+  const initial = { ...h.state, customCategories: [{ id, name: 'Pets', type: 'expense' }] };
+  const restored = { ...initial, customCategories: [{ id, name: 'Restored pets', type: 'expense' }] };
+  const first = homeProjectionDependencies(initial, period);
+  const second = homeProjectionDependencies(restored, period);
+  const statusOnly = homeProjectionDependencies({ ...restored, lastScanTs: 9876 }, period);
+  for (const key of ['dashboard', 'insight']) {
+    assert.equal(first[key].length, second[key].length);
+    const changed = second[key].filter((value, index) => !Object.is(value, first[key][index]));
+    assert.equal(changed.length, 1, `${key}: a catalog update invalidates the retained computation`);
+    assert.equal(changed[0], restored.customCategories, `${key}: the catalog is the changed dependency`);
+    assert.ok(second[key].every((value, index) => Object.is(value, statusOnly[key][index])),
+      `${key}: unrelated scan status does not invalidate the cache`);
+  }
+});
+
 test('every state field the Home projections read is in HOME_STATE_FIELDS', () => {
   const h = createHarness();
   const fs = require('node:fs');

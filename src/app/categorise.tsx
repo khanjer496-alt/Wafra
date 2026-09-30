@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 /**
  * Improve categories — only the low-confidence cases the user can answer.
  *
@@ -52,7 +53,7 @@ import { Money } from '@/components/ui/money';
 import { useToast } from '@/components/ui/toast';
 import { Fonts, Radius, Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
-import { categoryLabel, EXPENSE_CATEGORIES } from '@/lib/categories';
+
 import { detailsWords } from '@/lib/details-copy';
 import { shortDate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
@@ -93,6 +94,7 @@ function Chip({ label, selected, onPress, testID, icon, palette }: {
 }
 
 export default function CategoriseScreen() {
+  const { categoryLabel, expenseCategories } = useCategoryCatalog();
   const band = useBand('settings');
   const toast = useToast();
   const { state, setMerchantOverride, setBillAlias } = useStore();
@@ -266,8 +268,8 @@ export default function CategoriseScreen() {
                       {t('categorisePaymentPurposeHint')}
                     </ThemedText>
                   )}
-                  <CategoryChips
-                    categories={EXPENSE_CATEGORIES}
+                  <CategoryChips createType="expense"
+                    categories={expenseCategories}
                     selected={answer ?? null}
                     onToggle={(category) => stage(item, category)}
                     layout="wrap"

@@ -46,7 +46,8 @@
     {
       "file": "src/app/settings-data.tsx",
       "name": "exportCsv",
-      "sha256": "b4876961a2edbe7070f4eac3c1a9a5ae8f9aee5a756d477fb74b64349ed728cf"
+      "sha256": "9d69eccec0292cca042e8ed3e18ea2510cf2777aef445393ccce5dfb6e102b36",
+      "reviewedChange": "2026-09-30: Explicit CSV export passes the ledger-local custom category catalog so saved names replace opaque custom IDs. Money values, currency scale, account selection, sharing and cleanup are unchanged. Real CSV tests verify formula escaping and exact money; the report suite and independent consumer review pass."
     },
     {
       "file": "src/app/settings-data.tsx",

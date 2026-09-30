@@ -3,6 +3,8 @@ import { isSpending } from '@/lib/ledger';
 import { isTransferEvidence, isTransferDecision, isTransferMatch } from '@/lib/transfer-reconciliation';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { isScopedSubscriptionKey } from '@/lib/subscriptions';
+import { isCustomCategoryId } from '@/lib/categories';
+import { categoryAssignmentAllowed, isValidCustomCategoryCatalog } from '@/lib/custom-categories';
 
 const categoryIds = new Set([
   'groceries', 'dining', 'transport', 'cash-withdrawal', 'utilities', 'telecom',
@@ -24,7 +26,7 @@ const integer: Check = (value) => Number.isSafeInteger(value);
 const nonnegative: Check = (value) => integer(value) && (value as number) >= 0;
 const positive: Check = (value) => integer(value) && (value as number) > 0;
 const finitePositive: Check = (value) => typeof value === 'number' && Number.isFinite(value) && value > 0;
-const category: Check = (value) => typeof value === 'string' && categoryIds.has(value);
+const category: Check = (value) => typeof value === 'string' && (categoryIds.has(value) || isCustomCategoryId(value));
 const ledgerCurrency: Check = (value) => typeof value === 'string' &&
   value === value.trim().toUpperCase() && ledgerMoneySpec(value) !== null;
 const oneOf = (...values: unknown[]): Check => (value) => values.includes(value);
@@ -183,6 +185,32 @@ const subscriptionCancellations: Check = value => record(value) &&
  */
 export function isValidBackupState(value: unknown): value is Partial<Omit<AppState, 'hydrated'>> {
   if (!record(value) || !uniqueRows(value.transactions, transaction)) return false;
+  const catalog = value.customCategories ?? [];
+  if (!isValidCustomCategoryCatalog(catalog)) return false;
+  // Existing builtin refund classifications remain compatible. Every custom
+  // reference must be registered and agree with the owning money direction.
+  const reference = (id: unknown, type: unknown): boolean =>
+    typeof id !== 'string' || !id.startsWith('custom:') || categoryAssignmentAllowed(id, type, catalog);
+  for (const row of value.transactions as RecordValue[]) {
+    if (!reference(row.category, row.type)) return false;
+    for (const split of (row.splits ?? []) as RecordValue[]) if (!reference(split.category, row.type)) return false;
+  }
+  for (const group of ['bills', 'budgets'] as const) {
+    if (!Array.isArray(value[group])) continue;
+    for (const row of value[group] as RecordValue[]) if (record(row) && !reference(row.category, 'expense')) return false;
+  }
+  if (record(value.merchantOverrides)) for (const [key, id] of Object.entries(value.merchantOverrides)) {
+    const type = key.startsWith('income:') || (typeof id === 'string' && id.startsWith('custom:income:') && !key.startsWith('expense:'))
+      ? 'income' : 'expense';
+    if (!reference(id, type)) return false;
+  }
+  if (record(value.billAliases)) for (const alias of Object.values(value.billAliases)) {
+    if (record(alias) && !reference(alias.category, 'expense')) return false;
+  }
+  if (record(value.reviewTray) && Array.isArray(value.reviewTray.templateRules)) {
+    for (const rule of value.reviewTray.templateRules) if (record(rule) && !reference(rule.category, rule.type)) return false;
+  }
+
   for (const [key, check] of Object.entries({ accounts: account, bills: bill, cardDues: due, goals: goal })) {
     if (value[key] !== undefined && !uniqueRows(value[key], check)) return false;
   }

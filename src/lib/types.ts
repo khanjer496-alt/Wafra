@@ -8,7 +8,11 @@ export type TransactionType = 'expense' | 'income';
 /** How an automatically captured bank event reached the parser. */
 export type CaptureSource = 'shortcut' | 'email' | 'pdf' | 'csv';
 
+export type CustomCategoryId = `custom:${TransactionType}:${string}`;
+export interface CustomCategory { id: CustomCategoryId; name: string; type: TransactionType }
+
 export type CategoryId =
+  | CustomCategoryId
   | 'groceries'
   | 'dining'
   | 'transport'
@@ -768,6 +772,8 @@ export interface StatementCoverageEntry {
 }
 
 export interface AppState {
+  /** Private, ledger-local names; IDs contain no user text. */
+  customCategories?: CustomCategory[];
   hydrated: boolean;
   /** Accounting currency/exponent for every legacy `*Fils` integer; null only until one is chosen or imported. */
   ledgerMoney: LedgerMoneySpec | null;

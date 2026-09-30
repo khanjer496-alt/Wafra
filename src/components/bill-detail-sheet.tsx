@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React, { useEffect, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -19,7 +20,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { useToday } from '@/hooks/use-today';
 import type { BillWithStatus } from '@/lib/bills';
-import { categoryLabel, getCategory } from '@/lib/categories';
+
 import {
   formatAED,
   formatAmount,
@@ -95,6 +96,7 @@ function SheetFigure({ fils, estimated, aboutWord, palette, testID }: {
  * sheet: the bank's own debit would count the same money twice.
  */
 export function BillDetailSheet({ subscription = null, bill = null, onClose, footer }: BillDetailSheetProps) {
+  const { categoryLabel, getCategory } = useCategoryCatalog();
   const theme = useTheme();
   // Bills' sheet: its figure, bars, links and primary button take the ochre
   // band's sheet tokens (ink fill on ochre's light scheme, ochre on dark).

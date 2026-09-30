@@ -11,6 +11,8 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import { getLocales, useLocales } from 'expo-localization';
+import { randomUUID } from 'expo-crypto';
+import { isAutomaticFounderProBuild } from '@/lib/founder-pro';
 import { isScopedSubscriptionKey } from '@/lib/subscriptions';
 
 import { MoneyLocaleProvider } from '@/hooks/use-ledger-money';
@@ -87,6 +89,8 @@ import {
 import { countsInTotals, internalTransferIdsForState, isSpending, liveAccountIds, primeInternalTransferIds } from '@/lib/ledger';
 import { accountsLabelledWithBank, sanitizeKnownBanks, singleKnownBank } from '@/lib/known-banks';
 import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
+import { categoryAssignmentAllowed, prepareCustomCategory, sanitizeCustomCategoryCatalog,
+  type CreateCustomCategoryResult } from '@/lib/custom-categories';
 import { BNPL_CATEGORY_REPAIR_VERSION, bnplRepairNeedsParser, repairBnplCategories } from '@/lib/bnpl-category-repair';
 import { reconcileReviewSourceBindings, type ReviewSourceBinding } from '@/lib/review-source-bindings';
 import {
@@ -175,6 +179,8 @@ import {
   type Budget,
   type CardDue,
   type CategoryId,
+  type CustomCategory,
+  type CustomCategoryId,
   type Goal,
   type GoalId,
   type ImportBatchInput,
@@ -234,6 +240,7 @@ const STORAGE_KEY = 'wafra/state/v1';
 export const HYDRATION_FINALIZE_VERSION = 1;
 
 const EMPTY_STATE: AppState = {
+  customCategories: [],
   hydrated: false,
   ledgerMoney: null,
   reviewTray: emptyAlertReviewTray(),
@@ -885,6 +892,7 @@ export function parseBackupForRestore(
 }
 
 type Action =
+  | { type: 'createCustomCategory'; category: CustomCategory }
   | { type: 'resolveTransfers'; request: TransferDecisionRequest }
   | { type: 'resolveTransferBatch'; request: TransferDecisionBatchRequest }
   | { type: 'hydrate'; state: Partial<Omit<AppState, 'hydrated'>> }
@@ -1127,12 +1135,74 @@ function reconcileCardSettlementClaims(before: AppState, after: AppState, edited
   return changed ? { ...after, cardDues } : after;
 }
 
+/** Validate new assignments at the authoritative ingress, never erase orphan history. */
+function assertCategoryAssignments(state: AppState, action: Action): void {
+  const check = (category: unknown, type: unknown) => {
+    // Existing builtin credits/refunds may retain their purchase category.
+    // Keep those established semantics; this boundary owns custom references.
+    if (typeof category !== 'string' || !category.startsWith('custom:')) return;
+    if (!categoryAssignmentAllowed(category, type, state.customCategories)) {
+      throw new Error('Choose a registered category for this transaction type');
+    }
+  };
+  const transaction = (row: Transaction) => {
+    check(row.category, row.type);
+    for (const split of row.splits ?? []) check(split.category, row.type);
+  };
+  const reviewRules = (tray: AppState['reviewTray']) => {
+    for (const rule of tray?.templateRules ?? []) {
+      const existing = state.reviewTray?.templateRules?.find((prior) => prior.templateKey === rule.templateKey &&
+        prior.category === rule.category && prior.type === rule.type);
+      if (!existing) check(rule.category, rule.type);
+    }
+  };
+  switch (action.type) {
+    case 'addTransaction': case 'promoteReviewAlert': case 'markBillPaid':
+      transaction(action.transaction);
+      if (action.type === 'promoteReviewAlert') reviewRules(action.reviewTray);
+      break;
+    case 'payCardDue': if (action.transaction) transaction(action.transaction); break;
+    case 'editTransaction': {
+      const prior = state.transactions.find((row) => row.id === action.id);
+      if (!prior) break;
+      const edited = applyTransactionEdit(prior, action.patch);
+      if (action.patch.category !== undefined || edited.category !== prior.category || action.patch.type !== undefined) check(edited.category, edited.type);
+      if (action.patch.splits !== undefined || action.patch.type !== undefined) {
+        for (const split of edited.splits ?? []) check(split.category, edited.type);
+      }
+      break;
+    }
+    case 'importBatch':
+      action.transactions.forEach(transaction);
+      action.newBills.forEach((bill) => check(bill.category, 'expense'));
+      {
+        let priorById: Map<string, Transaction> | undefined;
+        for (const patch of action.updates) {
+          if (!(typeof patch.category === 'string' && patch.category.startsWith('custom:')) && patch.type === undefined) continue;
+          priorById ??= new Map(state.transactions.map((row) => [row.id, row]));
+          const prior = priorById.get(patch.id);
+          if (prior && !prior.userEdited) check(patch.category ?? prior.category, patch.type ?? prior.type);
+        }
+      }
+      break;
+    case 'upsertBudget': check(action.budget.category, 'expense'); break;
+    case 'activateOnboardingPlan': action.budgets.forEach((budget) => check(budget.category, 'expense')); break;
+    case 'addBill': check(action.bill.category, 'expense'); break;
+    case 'editBill': if ('category' in action.patch) check(action.patch.category, 'expense'); break;
+    case 'setMerchantOverride': check(action.category, action.direction ?? getCategory(action.category, state.customCategories).type); break;
+    case 'setBillAlias': check(action.alias.category, 'expense'); break;
+    case 'setReviewTray': reviewRules(action.reviewTray); break;
+    default: break;
+  }
+}
+
 function reducer(state: AppState, action: Action): AppState {
   const restoreMarket = captureMarketContext();
   const month = getMonthStartDay();
   const theme = getThemePreference();
   const language = getLanguage();
   try {
+    assertCategoryAssignments(state, action);
     const nextState = reduceState(state, action);
     // A replacement ledger owns its own claims. Matching row ids across a
     // restore is not permission to revoke evidence from the incoming backup.
@@ -1295,6 +1365,11 @@ function actionMayChangeTransferLinks(state: AppState, reduced: AppState, action
 
 function reduceState(state: AppState, action: Action): AppState {
   switch (action.type) {
+    case 'createCustomCategory': {
+      if (!state.hydrated) return state;
+      const result = prepareCustomCategory(action.category.name, action.category.type, state.customCategories ?? [], action.category.id);
+      return result.ok ? { ...state, customCategories: [...(state.customCategories ?? []), result.category] } : state;
+    }
     case 'resolveTransfers':
       return { ...state, transactions: applyTransferDecision(state.transactions, state.accounts, action.request) };
     case 'resolveTransferBatch':
@@ -1304,6 +1379,18 @@ function reduceState(state: AppState, action: Action): AppState {
     case 'restore': {
       // Merge over defaults so states saved by older app versions stay valid.
       const next = { ...EMPTY_STATE, ...action.state, hydrated: true };
+      next.customCategories = sanitizeCustomCategoryCatalog(next.customCategories);
+      // Orphan money keeps its opaque category for honest history. Orphan
+      // automation rules cannot keep assigning an unregistered category.
+      const retainedCategory = (id: unknown, type: TransactionType) =>
+        typeof id !== 'string' || !id.startsWith('custom:') || categoryAssignmentAllowed(id, type, next.customCategories);
+      next.merchantOverrides = Object.fromEntries(Object.entries(next.merchantOverrides).filter(([key, id]) =>
+        retainedCategory(id, key.startsWith('income:') || (typeof id === 'string' && id.startsWith('custom:income:') && !key.startsWith('expense:')) ? 'income' : 'expense')));
+      next.billAliases = Object.fromEntries(Object.entries(next.billAliases).filter(([, alias]) => retainedCategory(alias.category, 'expense')));
+      if (next.reviewTray?.templateRules) next.reviewTray = { ...next.reviewTray,
+        templateRules: next.reviewTray.templateRules.filter((rule) => retainedCategory(rule.category, rule.type)) };
+
+      if (action.type === 'hydrate' && Platform.OS !== 'web' && isAutomaticFounderProBuild()) next.founderPro = true;
       next.historyImport = normalizeHistoryImportProgress(next.historyImport);
       // Optional and code-owned: an unknown or malformed value is dropped, never guessed.
       next.wafraGoals = sanitizeGoalIds(next.wafraGoals);
@@ -1762,7 +1849,7 @@ function reduceState(state: AppState, action: Action): AppState {
     }
     case 'setMerchantOverride': {
       const key = action.merchant.trim().toLowerCase();
-      const direction = action.direction ?? getCategory(action.category).type;
+      const direction = action.direction ?? getCategory(action.category, state.customCategories).type;
       if (!key || !categorySupportsType(action.category, direction)) return state;
       const ruleKey = scopedMerchantOverrideKey(key, direction);
       const merchantOverrides = { ...state.merchantOverrides, [ruleKey]: action.category };
@@ -1957,6 +2044,7 @@ interface StoreValue {
    * still mounted.
    */
   retryHydration: () => Promise<boolean>;
+  createCustomCategory: (name: string, type: TransactionType) => CreateCustomCategoryResult;
   addTransaction: (t: Omit<Transaction, 'id'>, ledgerMoney?: LedgerMoneySpec) => void;
   editTransaction: (id: string, patch: Partial<Omit<Transaction, 'id'>>) => void;
   resolveTransfers: (request: Omit<TransferDecisionRequest, 'now'> & { expectedGeneration?: number }) => Promise<void>;
@@ -2664,6 +2752,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
     };
   }, [persist]);
+
+  const createCustomCategory = useCallback((name: string, type: TransactionType): CreateCustomCategoryResult => {
+    const current = authoritativeState.current;
+    if (!current.hydrated) return { ok: false, reason: 'not-ready' };
+    const id = `custom:${type}:${randomUUID().replace(/-/g, '')}` as CustomCategoryId;
+    const prepared = prepareCustomCategory(name, type, current.customCategories ?? [], id);
+    if (!prepared.ok) return prepared;
+    const next = dispatch({ type: 'createCustomCategory', category: prepared.category });
+    if (next.customCategories?.some((category) => category.id === id)) return { ok: true, id };
+    const rejected = prepareCustomCategory(name, type, next.customCategories ?? [], id);
+    return rejected.ok ? { ok: false, reason: 'not-ready' } : rejected;
+  }, [dispatch]);
 
   const addTransaction = useCallback((t: Omit<Transaction, 'id'>, ledgerMoney?: LedgerMoneySpec) => {
     const current = authoritativeState.current;
@@ -3418,6 +3518,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       hydrationFailed,
       retryingHydration,
       retryHydration,
+      createCustomCategory,
       addTransaction,
       editTransaction,
       resolveTransfers,
@@ -3493,6 +3594,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       hydrationFailed,
       retryingHydration,
       retryHydration,
+      createCustomCategory,
       addTransaction,
       editTransaction,
       resolveTransfers,

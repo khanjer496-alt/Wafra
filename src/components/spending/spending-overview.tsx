@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { spendingCopy } from '@/lib/reference-copy';
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -12,7 +13,7 @@ import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
-import { categoryLabel } from '@/lib/categories';
+
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { formatAED } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
@@ -49,6 +50,7 @@ type Props = {
  * one list.
  */
 export function SpendingOverview(p: Props) {
+  const { categoryLabel } = useCategoryCatalog();
   const band = useBand('spending');
   const language = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();

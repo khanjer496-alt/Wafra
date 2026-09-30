@@ -7,6 +7,7 @@ const path = require('node:path');
 const root = process.env.WAFRA_TEST_ROOT ?? path.resolve(__dirname, '../../..');
 const load = require(path.join(root, 'scripts/test/repair/load-typescript.cjs'));
 const { createHarness, walk, text } = require(path.join(root, 'scripts/test/repair/reference-harness.cjs'));
+const { hasKnownCustomCategoryMention } = require(path.join(root, 'scripts/test/build/wafra-assistant.js'));
 
 function scaffoldHarness(language, platform) {
   const h = createHarness({ language });
@@ -49,6 +50,8 @@ for (const platform of ['ios', 'android']) {
       };
       const calls = [];
       h.deps['@/lib/wafra-assistant'] = {
+        // Scope/privacy detection remains the real policy while answer work is isolated.
+        hasKnownCustomCategoryMention,
         suggestedAssistantQuestions: () => [], assistantFollowUpQuestions: () => [],
         latestAssistantContext: requests => requests.at(-1) ?? null, planAssistantCorrection: () => undefined,
         executeAssistantTool: () => ({ tool: 'spending-total', title: 'Answer', body: 'A local answer' }),

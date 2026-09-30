@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 /**
  * E8 · First payment (green): the pieces of step 5. The gate owns every
  * action (permissions, the Shortcuts hand-off, the durable opt-out); these
@@ -20,7 +21,7 @@ import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Fonts, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { categoryLabel } from '@/lib/categories';
+
 import { tapped } from '@/lib/haptics';
 import { formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
@@ -77,6 +78,7 @@ export function ArrivedCard({ transaction, money, watch, palette }: {
   watch: { category: CategoryId; spentMinor: number; limitMinor: number } | null;
   palette: BandPalette;
 }) {
+  const { categoryLabel } = useCategoryCatalog();
   const language = useLanguage();
   const lang = language === 'ar' ? 'ar' : 'en';
   const words = onboardingECopy(language);

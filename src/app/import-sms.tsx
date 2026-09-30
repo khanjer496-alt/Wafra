@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 /**
  * Reading bank messages by hand.
  *
@@ -73,7 +74,7 @@ import {
   type ScannedSms,
   type ScanProgressDetail,
 } from '@/lib/auto-import';
-import { categoryLabel } from '@/lib/categories';
+
 import { shortDate } from '@/lib/format';
 import {
   discardIosHistorySession,
@@ -294,6 +295,7 @@ function ScanRing({ percent, fraction, caption }: { percent: string; fraction: n
 const IOS_HISTORY_CARD_FINISHING: ReadonlySet<IosHistoryCardState> = new Set<IosHistoryCardState>(['review', 'running']);
 
 export default function ImportSmsScreen() {
+  const { categoryLabel } = useCategoryCatalog();
   const router = useRouter();
   const band = useBand('flow');
   const largeText = useLargeTextLayout();

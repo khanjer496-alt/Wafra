@@ -1,3 +1,5 @@
+import { CategoryChips } from '@/components/ui/category-chips';
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
@@ -15,7 +17,7 @@ import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
-import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
+
 import { formatAED, formatAmountForInput, ledgerNiceMinor, ledgerTypicalMinor, monthLabel, monthStartISO, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
@@ -47,6 +49,7 @@ interface LimitSheetProps {
  * the figure — which is the question anyone types a number in here to answer.
  */
 export function LimitSheet({ category, open, monthKey: key, onClose }: LimitSheetProps) {
+  const { categoryLabel, getCategory, expenseCategories } = useCategoryCatalog();
   const theme = useTheme();
   // Limits belong to Spending: the clay band's sheet, lifted.
   const band = useBand('spending');
@@ -228,7 +231,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     // The ledger currency changes the preset scale and rounding step.
   }, [threeMonthAverage, usual?.fullMonths, spent, state.ledgerMoney]);
 
-  const available = EXPENSE_CATEGORIES.filter(
+  const available = expenseCategories.filter(
     (c) => !state.budgets.some((b) => b.category === c.id) || c.id === picked,
   );
 
@@ -280,25 +283,8 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
       )}>
             {!category && (
               <View style={styles.picker}>
-                {available.map((c) => {
-                  const on = picked === c.id;
-                  return (
-                    <Pressable
-                      key={c.id}
-                      onPress={() => setPicked(c.id)}
-                      style={[
-                        styles.chip,
-                        {
-                          backgroundColor: on ? band.fill : band.card,
-                          borderColor: on ? band.fill : band.rule,
-                        },
-                      ]}>
-                      <ThemedText type="meta" style={{ color: on ? band.onFill : band.text }}>
-                        {categoryLabel(c)}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
+                <CategoryChips categories={available} selected={picked} onToggle={setPicked}
+                  createType="expense" layout="wrap" />
               </View>
             )}
 

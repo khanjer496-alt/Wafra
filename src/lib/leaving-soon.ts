@@ -113,7 +113,7 @@ export function leavingSoon(
         kind: 'bill',
         title: bill.title,
         displayLabel: subscriptionLabel({ title: bill.title, billIdentity: bill.importIdentity }),
-        icon: getCategory(bill.category).icon,
+        icon: getCategory(bill.category, state.customCategories).icon,
         amountFils: bill.amountFils,
         // The real date, not one reconstructed from a day count. This used to
         // be `today + daysLeft`, which printed a date derived from calendar
@@ -152,7 +152,7 @@ export function leavingSoon(
         kind: 'subscription',
         title: sub.title,
         displayLabel: subscriptionLabel(sub),
-        icon: getCategory(sub.category).icon,
+        icon: getCategory(sub.category, state.customCategories).icon,
         amountFils: sub.lastAmountFils,
         dateISO: sub.nextExpectedISO,
         daysLeft,

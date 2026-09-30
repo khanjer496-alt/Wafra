@@ -1,67 +1,14 @@
-const fs = require('fs');
-const path = require('path');
-const ts = require('typescript');
+const path = require('node:path');
 
 /**
- * Load Store's pure migration/hydration exports without mounting React Native.
- * Shipping ledger modules execute unchanged; only UI/lifecycle adapters that
- * cannot run in Node are replaced. This keeps local corpus audits on the same
- * migration path an installed app uses before it scans the inbox.
+ * Load shipping migrations through the same platform boundary used by the
+ * store regression tests. Keeping a second import/stub table here let corpus
+ * audits drift whenever the store gained a native adapter or pure helper.
+ * No provider is mounted and no ledger is read or written by this loader.
  */
 module.exports = function loadLedgerHydration(root) {
-  const filename = path.join(root, 'src/lib/store.tsx');
-  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
-    compilerOptions: {
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2022,
-      jsx: ts.JsxEmit.ReactJSX,
-      esModuleInterop: true,
-    },
-    fileName: filename,
-  }).outputText;
-  const build = (name) => require(path.join(root, 'scripts/test/build', `${name}.js`));
-  const modules = {
-    'react/jsx-runtime': { jsx: () => ({}), jsxs: () => ({}), Fragment: Symbol('Fragment') },
-    react: {
-      createContext: () => ({}),
-      useCallback: (fn) => fn,
-      useContext: () => null,
-      useEffect: () => {},
-      useMemo: (fn) => fn(),
-      useRef: (value) => ({ current: value }),
-      useState: (value) => [value, () => {}],
-    },
-    'react-native': {
-      AppState: { addEventListener: () => ({ remove() {} }) },
-      I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
-      Platform: { OS: 'web' },
-    },
-    // Native locale subscriptions and export-file cleanup are lifecycle
-    // adapters, not ledger transforms. No provider is mounted in this audit.
-    'expo-localization': { useLocales: () => [] },
-    '@/lib/share-text': { cleanupGeneratedExports: async () => {} },
-    '@/lib/theme-preference': { setThemePreference() {} },
-    '@/lib/ledger-persistence': {
-      createLedgerPersistence: () => ({ load: async () => null, save: async () => true }),
-      LedgerResetError: class LedgerResetError extends Error {},
-    },
-    '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
-  };
-  const resolve = (id) => {
-    if (Object.hasOwn(modules, id)) return modules[id];
-    if (id === './balances') return build('balances');
-    if (id.startsWith('@/lib/')) return build(id.slice('@/lib/'.length));
-    throw new Error(`Unexpected Store dependency in corpus audit: ${id}`);
-  };
-  const loaded = { exports: {} };
-  Function('require', 'module', 'exports', '__filename', '__dirname', output)(
-    resolve,
-    loaded,
-    loaded.exports,
-    filename,
-    path.dirname(filename),
-  );
-  const { migratePersistedState, finalizeHydrationTransactions } = loaded.exports;
+  const { loadStore } = require(path.join(root, 'scripts/perf/load-store.cjs'));
+  const { migratePersistedState, finalizeHydrationTransactions } = loadStore().store;
   if (typeof migratePersistedState !== 'function' || typeof finalizeHydrationTransactions !== 'function') {
     throw new Error('Store hydration exports are unavailable');
   }

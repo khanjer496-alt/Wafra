@@ -36,10 +36,12 @@ function hooks() {
 const defaults = () => ({ type: null, accountId: null, categories: new Set(), datePreset: 'selected', dateFrom: null, dateTo: null, minFils: null, sort: 'newest' });
 function filterProbe(language = 'en', options = {}) {
   const deps = financialFixture(), react = hooks(), events = [];
+  const state = { customCategories: options.customCategories ?? [] };
   const native = { View: 'View', Pressable: 'Pressable', ScrollView: 'ScrollView', TextInput: 'TextInput',
     Platform: { OS: 'android' }, StyleSheet: { create: s => s, hairlineWidth: 1 } };
   Object.assign(deps, {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
+    '@/lib/store': { useStoreSelector: selector => selector({ state }) },
     '@react-native-community/datetimepicker': { __esModule: true, default: 'DateTimePicker' },
     '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/icon': { Icon: 'Icon' },
     '@/components/ui/bottom-sheet': { BottomSheet: 'Sheet' },

@@ -7,12 +7,14 @@ const load = require('./load-typescript.cjs');
 // Execute the real row; only navigation, presentation and OS primitives are
 // substituted. This checks interaction contracts, not native frame timings.
 const source = load(path.resolve(__dirname, '../../../src/lib/transaction-source.ts'));
-function rowFixture({ language = 'en', large = false } = {}) {
+function rowFixture({ language = 'en', large = false, customCategories = [] } = {}) {
   const events = [];
+  const state = { customCategories };
   const jsx = (type, props) => typeof type === 'function' ? type(props) : ({ type, props });
   const theme = { text: 'ink', income: 'income', backgroundSelected: 'selected' };
   const { TransactionRow } = load(path.resolve(__dirname, '../../../src/components/transaction-row.tsx'), {
-    react: { memo: component => component }, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    react: { memo: component => component, useMemo: factory => factory() }, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    '@/lib/store': { useStoreSelector: selector => selector({ state }) },
     'react-native': { Pressable: 'Pressable', View: 'View', StyleSheet: { create: value => value } },
     'expo-router': { useRouter: () => ({ navigate: href => events.push(['merchant', href]) }) },
     '@/components/themed-text': { ThemedText: props => jsx('Text', props) },
@@ -26,7 +28,7 @@ function rowFixture({ language = 'en', large = false } = {}) {
     '@/lib/ledger': require('./load-transfer-ledger.cjs').ledger,
     '@/lib/transfer-reconciliation': require('./load-transfer-ledger.cjs').core,
     '@/lib/transfer-review-copy': load(path.resolve(__dirname, '../../../src/lib/transfer-review-copy.ts'), { '@/lib/i18n': { getLanguage: () => language } }),
-    '@/lib/i18n': { t: (key, lang) => key === 'incomeAccountReview'
+    '@/lib/i18n': { getLanguage: () => language, t: (key, lang) => key === 'incomeAccountReview'
       ? (lang === 'ar' ? 'الحساب بحاجة إلى مراجعة' : 'Account needs review') : key },
     '@/lib/merchant-spending-copy': load(path.resolve(__dirname, '../../../src/lib/merchant-spending-copy.ts')),
     '@/lib/transaction-source': source,

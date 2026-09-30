@@ -1,5 +1,5 @@
 import { billsForMonth } from '@/lib/bills';
-import { CATEGORIES, categoryLabel } from '@/lib/categories';
+import { categoryLabel, getCategory, isCustomCategoryId, isRegisteredCategory } from '@/lib/categories';
 import { cardPaymentRows, duePayments, dueWithStatus } from '@/lib/cards';
 import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { formatAED as formatLedgerMoney, getMonthStartDay, monthEndISO, toISODate } from '@/lib/format';
@@ -37,7 +37,7 @@ import {
   type Subscription,
 } from '@/lib/subscriptions';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
-import type { Account, AppState, Bill, CategoryId, Transaction } from '@/lib/types';
+import type { Account, AppState, Bill, CategoryId, CustomCategory, Transaction } from '@/lib/types';
 
 export type AssistantTool =
   | 'help'
@@ -635,8 +635,54 @@ function narrowConceptParent(question: string): { phrase: string; category: Cate
   return undefined;
 }
 
-function categoriesFromQuestion(question: string): CategoryId[] {
-  return CATEGORY_ALIASES.filter(([pattern]) => pattern.test(question)).map(([, category]) => category);
+function customCategoryPattern(name: string): RegExp {
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(normalize(name.normalize('NFKC')))}(?=$|[^\\p{L}\\p{N}])`, 'gu');
+}
+
+/** Names are resolved locally; closed model schemas cannot carry custom scope. */
+export function hasKnownCustomCategoryMention(question: string, catalog: readonly CustomCategory[] = []): boolean {
+  const normalized = normalize(question.normalize('NFKC').replace(/\s+/gu, ' '));
+  return catalog.some(category => customCategoryPattern(category.name).test(normalized));
+}
+
+/** A list continues only across named categories and explicit conjunctions. */
+function followsCategoryContext(before: string, catalog: readonly CustomCategory[]): boolean {
+  return [...before.matchAll(/\b(?:on|category|categories|excluding|exclude|except|without|including|include)\s+/g)]
+    .some(match => {
+      let tail = before.slice(match.index! + match[0].length);
+      for (const category of [...catalog].sort((a, b) => b.name.length - a.name.length)) {
+        tail = tail.replace(customCategoryPattern(category.name), '$1 ');
+      }
+      tail = tail.replace(/\bcustomcategorytoken\d+end\b/g, ' ');
+      for (const [pattern] of CATEGORY_ALIASES) tail = tail.replace(new RegExp(pattern.source, 'g'), ' ');
+      return !tail.replace(/\b(?:and|or)\b|[,\s]/g, '').length;
+    });
+}
+
+/** Local-only tokens keep names containing dates or category words intact. */
+function protectCustomCategoryNames(question: string, catalog: readonly CustomCategory[]): string {
+  let protectedText = question;
+  const ordered = catalog.map((category, index) => ({ category, index }))
+    .sort((a, b) => b.category.name.length - a.category.name.length);
+  for (const { category, index } of ordered) {
+    protectedText = protectedText.replace(customCategoryPattern(category.name), (match, prefix: string, offset: number) => {
+      // Quoted names and explicit merchant syntax retain the existing merchant grammar.
+      const before = protectedText.slice(0, offset + prefix.length);
+      if ((before.match(/"/g)?.length ?? 0) % 2 || /\b(?:at|from)\s+$/.test(before)) return match;
+      // A saved label may itself be 'Income', 'May' or 'Last month'. It only
+      // becomes category scope when the question actually names a category.
+      if (!followsCategoryContext(before, catalog)) return match;
+      return `${prefix}customcategorytoken${index}end`;
+    });
+  }
+  return protectedText;
+}
+
+function categoriesFromQuestion(question: string, catalog: readonly CustomCategory[] = []): CategoryId[] {
+  const custom = catalog.flatMap((category, index) =>
+    new RegExp(`\\bcustomcategorytoken${index}end\\b`).test(question)
+      ? [category.id] : []);
+  return [...new Set([...custom, ...CATEGORY_ALIASES.filter(([pattern]) => pattern.test(question)).map(([, category]) => category)])];
 }
 
 /**
@@ -972,8 +1018,10 @@ function planObligationQuestion(
 }
 
 /** A bounded grammar: every meaningful token must be consumed, not ignored. */
-function hasUnsupportedRemainder(question: string): boolean {
-  let rest = question;
+function hasUnsupportedRemainder(question: string, _catalog: readonly CustomCategory[] = []): boolean {
+  // Matching is finished before grammar validation; never consume a new name
+  // here without also recording its category filter.
+  let rest = question.replace(/\bcustomcategorytoken\d+end\b/g, ' ');
   for (const [pattern] of CATEGORY_ALIASES) rest = rest.replace(new RegExp(pattern.source, 'g'), ' ');
   rest = rest.replace(/\bcash out\b|\bleft my accounts?\b|\bmoney out\b|\bactual outflow\b|\bon track\b|\bend of (?:the )?month\b|\bper day\b|\bdaily average\b|\baverage daily\b|\beach day\b|\b(?:spend|spending) daily\b/g, ' ');
   const grammar = new Set(('how much money did do does should i my me we our you your the a an what which are is was were have has had am at from of for on in to with by about than this that these those it all total recorded spending spend spent expense expenses purchase purchases transaction transactions pay paid payment payments cost costs net income salary business earned earn earning earnings received receive receives receiving more less higher lower difference different minus forecast projected biggest largest most expensive top merchants merchant categories category why compare comparison versus vs increase increased decrease decreased change changed show previous period and or same dates charges charge recurring subscriptions subscription renewals renewal unusual unusually outlier outliers weird odd suspicious review reviewing possible duplicate duplicates duplicated charged twice double coverage data gaps missing imports import status history recorded changes please kindly just actually really tell know see view look check let list find give roughly exactly overall altogether summary breakdown drilldown thanks bought buy buys buying went going gone go up down get got gets getting use used drop dropped blew blow burned burnt burn put many some any anything else then still ever').split(' '));
@@ -1084,13 +1132,15 @@ function resolveMerchant(phrase: string, rows: Transaction[]): { merchant?: stri
   return { candidates: scored.slice(0, 4).map((entry) => entry.title) };
 }
 
-function correctionCategory(text: string): CategoryId | undefined {
-  const normalized = normalize(text);
+function correctionCategory(text: string, catalog: readonly CustomCategory[] = []): CategoryId | undefined {
+  const exact = catalog.filter(category => normalize(category.name) === normalize(text));
+  if (exact.length) return exact.length === 1 ? exact[0].id : undefined;
+  const normalized = protectCustomCategoryNames(normalize(text), catalog);
   const beforeNegation = normalized.split(/\b(?:not|instead of|rather than)\b/)[0];
-  const before = categoriesFromQuestion(beforeNegation);
+  const before = categoriesFromQuestion(beforeNegation, catalog);
   if (before.length === 1) return before[0];
   const after = normalized.match(/\b(?:actually|instead|rather)\b[,:]?\s*(.*)$/)?.[1];
-  const afterCategories = after ? categoriesFromQuestion(after) : [];
+  const afterCategories = after ? categoriesFromQuestion(after, catalog) : [];
   return afterCategories.length === 1 ? afterCategories[0] : undefined;
 }
 
@@ -1140,16 +1190,16 @@ export function planAssistantCorrection(
 
   const applyAll = q.match(/^set all matching transactions to (.+)$/);
   if (applyAll) {
-    const category = correctionCategory(applyAll[1]);
+    const category = correctionCategory(applyAll[1], state.customCategories);
     const candidates = answerMerchantCandidates(state, previousAnswer);
     if (!category || candidates.length !== 1) return undefined;
     const merchant = candidates[0];
     const matchingRows = state.transactions.filter((row) => normalize(row.title) === normalize(merchant));
-    const meta = CATEGORIES.find((item) => item.id === category);
+    const meta = getCategory(category, state.customCategories);
     const recordedTypes = [...new Set(matchingRows.map((row) => row.type))];
     const direction = category === 'other' && recordedTypes.length === 1 ? recordedTypes[0] : meta?.type ?? 'expense';
     if (!matchingRows.some((row) => row.type === direction)) return { kind: 'clarification',
-      body: `${merchant} is recorded as ${recordedTypes.join(' and ') || 'an unknown direction'}, so ${categoryLabel(category, 'en')} would not apply to those transactions.` };
+      body: `${merchant} is recorded as ${recordedTypes.join(' and ') || 'an unknown direction'}, so ${categoryLabel(category, 'en', state.customCategories)} would not apply to those transactions.` };
     return { kind: 'merchant-category', merchant, category, direction };
   }
 
@@ -1176,13 +1226,13 @@ export function planAssistantCorrection(
 
   const demonstrative = q.match(/^(?:that|this|it)\s+(?:was|is|should be|belongs? (?:in|to))\s+(.+)$/);
   if (demonstrative) {
-    const category = correctionCategory(demonstrative[1]);
+    const category = correctionCategory(demonstrative[1], state.customCategories);
     if (!category) return undefined;
     if (evidenceIds.length === 0) return { kind: 'clarification',
       body: 'That answer has no matching transaction to correct.' };
     if (evidenceIds.length !== 1) {
       const merchants = answerMerchantCandidates(state, previousAnswer);
-      const label = categoryLabel(category, 'en');
+      const label = categoryLabel(category, 'en', state.customCategories);
       return { kind: 'clarification',
         body: merchants.length === 1
           ? `That answer contains more than one ${merchants[0]} transaction. Apply ${label} to all matching transactions, or choose one transaction.`
@@ -1195,26 +1245,26 @@ export function planAssistantCorrection(
     if (!row) return { kind: 'clarification', body: 'That transaction is no longer available.' };
     if (row.splits?.length) return { kind: 'clarification',
       body: 'That purchase is split across categories. Open the transaction to edit its split amounts rather than replacing the whole purchase category.' };
-    const meta = CATEGORIES.find((item) => item.id === category);
+    const meta = getCategory(category, state.customCategories);
     if (meta && meta.type !== row.type && category !== 'other') return { kind: 'clarification',
-      body: `${categoryLabel(category, 'en')} is a ${meta.type} category, but that transaction is recorded as ${row.type}.` };
+      body: `${categoryLabel(category, 'en', state.customCategories)} is a ${meta.type} category, but that transaction is recorded as ${row.type}.` };
     return { kind: 'transaction-category', transactionId: row.id, category };
   }
 
   const merchantRule = q.match(/^(.+?)\s+(?:is|was|should be|belongs? (?:in|to))\s+(.+)$/);
   if (merchantRule && !/^(?:what|which|why|how|when|where|who)\b/.test(merchantRule[1])) {
-    const category = correctionCategory(merchantRule[2]);
+    const category = correctionCategory(merchantRule[2], state.customCategories);
     if (!category) return undefined;
     const resolved = resolveMerchant(merchantRule[1].trim(), state.transactions);
     if (!resolved.merchant) return { kind: 'clarification', body: resolved.candidates?.length
       ? `Several recorded merchants match “${merchantRule[1].trim()}”. Name the exact merchant.`
       : `I could not find a recorded merchant matching “${merchantRule[1].trim()}”.` };
-    const meta = CATEGORIES.find((item) => item.id === category);
+    const meta = getCategory(category, state.customCategories);
     const matchingRows = state.transactions.filter((row) => normalize(row.title) === normalize(resolved.merchant!));
     const recordedTypes = [...new Set(matchingRows.map((row) => row.type))];
     const direction = category === 'other' && recordedTypes.length === 1 ? recordedTypes[0] : meta?.type ?? 'expense';
     if (!matchingRows.some((row) => row.type === direction)) return { kind: 'clarification',
-      body: `${resolved.merchant} is recorded as ${recordedTypes.join(' and ') || 'an unknown direction'}, so ${categoryLabel(category, 'en')} would not apply to those transactions.` };
+      body: `${resolved.merchant} is recorded as ${recordedTypes.join(' and ') || 'an unknown direction'}, so ${categoryLabel(category, 'en', state.customCategories)} would not apply to those transactions.` };
     return { kind: 'merchant-category', merchant: resolved.merchant, category, direction };
   }
   return undefined;
@@ -1292,7 +1342,7 @@ function invalidFilters(state: AppState, filters: AssistantFilters): string | un
   if ([...(filters.accountIds ?? []), ...(filters.excludedAccountIds ?? [])].some((id) => !live.has(id))) {
     return 'I could not identify every requested account. Use its exact name from Accounts.';
   }
-  if ([...includedCategories(filters), ...(filters.excludedCategories ?? [])].some((id) => !CATEGORIES.some((item) => item.id === id))) {
+  if ([...includedCategories(filters), ...(filters.excludedCategories ?? [])].some((id) => !isRegisteredCategory(id, state.customCategories))) {
     return 'I could not identify every category. Use a category name shown in Transactions.';
   }
   const merchantFilters = [...includedMerchants(filters), ...(filters.excludedMerchants ?? [])];
@@ -1367,7 +1417,7 @@ function observedCoverage(state: AppState, rows: Transaction[], filters: Assista
 
 function driverFinding(state: AppState, now: Date, request: AssistantFilters & { period: Period },
   period: Period, previous: Period, driver: SpendingChangeDriver, dimension: 'category' | 'merchant'): AssistantFinding {
-  const title = dimension === 'category' ? categoryLabel(driver.key as CategoryId, 'en') : driver.displayTitle ?? driver.key;
+  const title = dimension === 'category' ? categoryLabel(driver.key as CategoryId, 'en', state.customCategories) : driver.displayTitle ?? driver.key;
   const fromMap = (contributions: Record<string, number>) => state.transactions.filter((row) => Object.prototype.hasOwnProperty.call(contributions, row.id))
     .map((row) => ({ ...row, amountFils: contributions[row.id] }));
   const filter = copyFilters(request);
@@ -1908,7 +1958,7 @@ function executeAssistantToolResult(
     case 'category-breakdown': {
       const rows = spending.filter((tx) => amountInCategory(tx, request.category) > 0);
       const amount = checkedMinorSum(rows.map((tx) => amountInCategory(tx, request.category)));
-      const label = categoryLabel(request.category);
+      const label = categoryLabel(request.category, undefined, state.customCategories);
       const previous = previousScopeQuestion(period);
       return {
         tool: request.tool,
@@ -1982,7 +2032,7 @@ function executeAssistantToolResult(
         ? `There were ${analysis.currentCount} purchases in both periods.`
         : `There were ${analysis.currentCount} purchases, ${Math.abs(purchaseDelta)} ${purchaseDelta > 0 ? 'more' : 'fewer'} than before.`;
       const driverSummary = prior > 0 && delta !== 0
-        ? [primaryCategory ? `${categoryLabel(primaryCategory.key, 'en')} was the biggest category driver (${primaryCategory.deltaFils >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(primaryCategory.deltaFils))})` : '',
+        ? [primaryCategory ? `${categoryLabel(primaryCategory.key, 'en', state.customCategories)} was the biggest category driver (${primaryCategory.deltaFils >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(primaryCategory.deltaFils))})` : '',
           primaryMerchant ? `${primaryMerchant.displayTitle ?? primaryMerchant.key} was the biggest merchant driver (${primaryMerchant.deltaFils >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(primaryMerchant.deltaFils))})` : '']
           .filter(Boolean).join('; ')
         : '';
@@ -1999,7 +2049,7 @@ function executeAssistantToolResult(
           ...(primaryMerchant ? [{ label: 'Top merchant driver', value: `${primaryMerchant.displayTitle ?? primaryMerchant.key} · ${primaryMerchant.deltaFils >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(primaryMerchant.deltaFils))}` }] : []),
           ...(largestCurrent ? [{ label: 'Largest current purchase', value: `${largestCurrent.title} · ${formatLedgerMoney(largestCurrent.amountFils)}` }] : []),
           ...categoryChanges.slice(0, 3).map((item) => ({
-            label: `${categoryLabel(item.key)} change`,
+            label: `${categoryLabel(item.key, undefined, state.customCategories)} change`,
             value: `${item.delta >= 0 ? '+' : '−'}${formatLedgerMoney(Math.abs(item.delta))}`,
           })),
         ],
@@ -2148,9 +2198,9 @@ function executeAssistantToolResult(
         tool: request.tool,
         title: 'Top categories',
         body: top.length
-          ? `${categoryLabel(top[0].key)} is your biggest spending category in ${scope} at ${formatLedgerMoney(top[0].totalFils)}.`
+          ? `${categoryLabel(top[0].key, undefined, state.customCategories)} is your biggest spending category in ${scope} at ${formatLedgerMoney(top[0].totalFils)}.`
           : `I do not see any spending in ${scope} yet.`,
-        facts: top.map((item) => ({ label: categoryLabel(item.key), value: formatLedgerMoney(item.totalFils) })),
+        facts: top.map((item) => ({ label: categoryLabel(item.key, undefined, state.customCategories), value: formatLedgerMoney(item.totalFils) })),
         data: { categoryCount: groups.length, spendingFils: total(spending) },
       };
     }
@@ -2323,7 +2373,7 @@ function executeAssistantToolResult(
         headline: spending.length ? formatLedgerMoney(amount) : 'No recorded spending',
         meta: `${spending.length} transaction${spending.length === 1 ? '' : 's'} · ${scope}`,
         facts: [
-          ...(categories[0] ? [{ label: 'Top category', value: `${categoryLabel(categories[0].key)} · ${formatLedgerMoney(categories[0].totalFils)}` }] : []),
+          ...(categories[0] ? [{ label: 'Top category', value: `${categoryLabel(categories[0].key, undefined, state.customCategories)} · ${formatLedgerMoney(categories[0].totalFils)}` }] : []),
           ...(spending.length ? [{ label: 'Average transaction', value: formatLedgerMoney(average) }] : []),
         ],
         ...(spending.length ? {} : { suggestions: [previous, 'What is my data coverage?'].filter((value): value is string => !!value) }),
@@ -2411,7 +2461,7 @@ export function executeAssistantTool(
     groups = [evidenceFor(state, now, 'Charges to review', state.transactions.filter((row) => ids.has(row.id)))];
   } else groups = [evidence(request.tool === 'top-merchants' ? 'All spending used to rank merchants'
     : request.tool === 'top-categories' ? 'All spending used to rank categories'
-      : request.category ? categoryLabel(request.category, 'en') : 'Spending', spending)];
+      : request.category ? categoryLabel(request.category, 'en', state.customCategories) : 'Spending', spending)];
   const previousDates = request.tool === 'compare-periods' ? groups[1] : undefined;
   const coverageRows = request.tool === 'historical-baseline'
     ? filterRows(spendingRows(state, { mode: 'all' }), request)
@@ -2517,15 +2567,15 @@ function extractNamedClause(state: AppState, text: string, question: string, exc
   // merchant itself is a common word (for example "spending at Pay"). Unknown
   // vocabulary also gets the identity lookup so bare follow-ups like
   // "What about Talabat?" retain their existing behaviour.
-  const shouldScanMerchantTitles = /\b(?:at|from|on)\s+\S/.test(rest) || hasUnsupportedRemainder(rest);
+  const shouldScanMerchantTitles = /\b(?:at|from|on)\s+\S/.test(rest) || hasUnsupportedRemainder(rest, state.customCategories);
   const titles = shouldScanMerchantTitles ? merchantTitlesInText(state.transactions, rest) : [];
   for (const title of titles) {
     if (!containsPhrase(rest, title)) continue;
     // Category/income words are semantic unless explicitly introduced as a merchant.
-    const reserved = categoriesFromQuestion(normalize(title)).length > 0 || /^(?:salary|income|business)$/i.test(title);
+    const reserved = categoriesFromQuestion(normalize(title), state.customCategories).length > 0 || /^(?:salary|income|business)$/i.test(title);
     const explicit = new RegExp(`\\b(?:at|from|on)\\s+${escapeRegExp(normalize(title))}(?=\\W|$)`).test(rest);
     if (reserved && !explicit) continue;
-    if (!excluded && !explicit && categoriesFromQuestion(rest).length && !/\b(?:at|from|on)\b/.test(rest)) continue;
+    if (!excluded && !explicit && categoriesFromQuestion(rest, state.customCategories).length && !/\b(?:at|from|on)\b/.test(rest)) continue;
     const pattern = new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(normalize(title))}(?=$|[^\\p{L}\\p{N}])`, 'gu');
     if (!pattern.test(rest)) continue;
     merchants.push(title); rest = rest.replace(pattern, '$1 ');
@@ -2542,6 +2592,8 @@ export function planAssistantQuestion(
   defaultPeriod?: Period,
 ): AssistantToolRequest {
   let q = normalize(question);
+  if (/\bcustomcategorytoken\d+end\b/.test(q)) return clarification('Use a category name from Transactions.');
+  q = protectCustomCategoryNames(q, state.customCategories ?? []);
   if (/\bselectedreportingperiod\b/.test(q)) return clarification('Name the selected reporting period or an explicit date.');
   if (!q || q.length > 1000) return clarification('Ask one short question about your recorded spending, income, or payments.');
   if (/^(?:hi|hello|hey|hey wafra|help|what can (?:you|wafra) do|what can i ask|how does this work)[!?.]*$/.test(q)) return { tool: 'help' };
@@ -2638,7 +2690,7 @@ export function planAssistantQuestion(
     const windowless = q.replace(/\b(?:next|within)\s+\d+\s+days?\b/g, ' ');
     const futurePeriods = parsePeriods(windowless, now, state);
     if (rawClauses.length > 1 || clauses.some((clause) => clause.accounts.length || clause.merchants.length) ||
-      futurePeriods.error || futurePeriods.periods.length || categoriesFromQuestion(q).length || Object.keys(filters).length || /\bat\b/.test(q)) {
+      futurePeriods.error || futurePeriods.periods.length || categoriesFromQuestion(q, state.customCategories).length || Object.keys(filters).length || /\bat\b/.test(q)) {
       return clarification('I can show the overall upcoming payments or active subscriptions. A filtered historical view is not supported for those estimates.');
     }
     const match = q.match(/\b(?:next|within)\s+(\d+)\s+days?\b/);
@@ -2681,7 +2733,7 @@ export function planAssistantQuestion(
     if (phrase && !/^(?:and|or)$/.test(phrase) && !/^(?:change|changed|increase|decrease|with|using|on|in|for|compared|versus|vs)\b/.test(phrase)) {
       if (/\b(?:account|card)\b/.test(phrase)) return accountClarification(state);
       const semanticOnSyntax = preposition === 'on' &&
-        (categoriesFromQuestion(phrase).length > 0 || !!narrowConceptParent(phrase) || /^track\b/.test(phrase));
+        (categoriesFromQuestion(phrase, state.customCategories).length > 0 || !!narrowConceptParent(phrase) || /^track\b/.test(phrase));
       if (!semanticOnSyntax) {
         const resolved = resolveMerchant(phrase, state.transactions);
         if (!resolved.merchant) {
@@ -2692,7 +2744,7 @@ export function planAssistantQuestion(
         clause.merchants.push(resolved.merchant); clause.rest = clause.rest.replace(phrase, ' ');
       }
     }
-    const categories = categoriesFromQuestion(clause.rest);
+    const categories = categoriesFromQuestion(clause.rest, state.customCategories);
     if ((isIncomeQuestion && !net || index > 0) && /\bsalary\b/.test(clause.rest)) categories.push('salary');
     if ((isIncomeQuestion && !net || index > 0) && /\bbusiness\b/.test(clause.rest)) categories.push('business');
     if (index > 0 && clause.accounts.length && (categories.length || clause.merchants.length)) return clarification('Keep account selection before the exclusion, for example: spending from Everyday excluding rent. Name account exclusions separately.');
@@ -2721,12 +2773,12 @@ export function planAssistantQuestion(
       if (clause.accounts.length) filters.excludedAccountIds = [...new Set([...(filters.excludedAccountIds ?? []), ...clause.accounts])];
     }
   }
-  q = parsedClauses.map((clause) => clause.rest).join(' ').replace(/\s+/g, ' ').trim();
+  q = parsedClauses.map((clause) => clause.rest).join(' ').replace(/\bcustomcategorytoken\d+end\b/g, ' ').replace(/\s+/g, ' ').trim();
   if (parsed.periods.length) q = q.replace(/\b(?:in|on|for|during)\s+(?:the\s*)?(?=[?!.]|$)/g, ' ');
   q = q.replace(/\b(?:at|from|on|using|with)\s*(?=[?!.]|$)/g, ' ').replace(/\s+/g, ' ').trim();
   if (followUp && prior) {
     const subject = q.match(/^(?:what about|how about|and)\s+(.+?)[?!.]?$/)?.[1]?.trim();
-    if (subject && !categoriesFromQuestion(subject).length) {
+    if (subject && !categoriesFromQuestion(subject, state.customCategories).length) {
       const resolved = resolveMerchant(subject, state.transactions);
       if (resolved.merchant) {
         clearIncludedContent(filters);
@@ -2738,7 +2790,7 @@ export function planAssistantQuestion(
       }
     }
   }
-  let baselineText = q;
+  let baselineText = q.replace(/\bcustomcategorytoken\d+end\b/g, ' ');
   for (const [pattern] of CATEGORY_ALIASES) baselineText = baselineText.replace(new RegExp(pattern.source, 'g'), ' ');
   baselineText = baselineText.replace(/\s+/g, ' ');
   const cleanedHighestMonthQuestion = highestMonthQuestion || /\b(?:highest|biggest|most expensive)\s+(?:recorded\s+)?(?:spending\s+)?month\b|\bhighest monthly\b/.test(baselineText);
@@ -2765,7 +2817,7 @@ export function planAssistantQuestion(
   }
   const narrow = narrowConceptParent(q);
   if (narrow) {
-    const parent = categoryLabel(narrow.category, 'en');
+    const parent = categoryLabel(narrow.category, 'en', state.customCategories);
     return clarification(`I can’t reliably isolate “${narrow.phrase}” from the recorded data without guessing. I can show the broader ${parent} category, or you can name a merchant.`,
       [`How much did I spend on ${parent.toLowerCase()}?`, 'What are my top merchants?']);
   }
@@ -2777,7 +2829,7 @@ export function planAssistantQuestion(
   }
   const scopeError = invalidFilters(state, filters);
   if (scopeError) return clarification(scopeError);
-  if (hasUnsupportedRemainder(q)) return clarification('I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.', undefined, true);
+  if (hasUnsupportedRemainder(q, state.customCategories)) return clarification('I didn’t quite understand that. Try asking about spending, income, a merchant, category, account, subscription, bill, or date.', undefined, true);
   const scoped = { period, ...filters };
   const multipleDimensions = includedCategories(filters).length > 1 || includedMerchants(filters).length > 1 || (filters.accountIds?.length ?? 0) > 1;
   if (comparison && multipleDimensions && !comparisonPeriod && parsed.periods.length < 2 && !/\b(?:why|change|changed|previous period|same dates)\b/.test(q)) return clarification('I can compare the combined spending for these filters over time. Name two periods or ask why their combined spending changed.');
@@ -2896,7 +2948,11 @@ export function suggestedAssistantQuestions(state: AppState, period = currentMon
   const rows = spendingRows(state, period);
   const topCategory = groupedCategoryTotals(rows)[0]?.key;
   const suggestions = ['How much did I spend?', 'Anything unusual?', 'What are my largest purchases?'];
-  if (period.mode !== 'all' && topCategory) suggestions.push(`Why did my ${categoryLabel(topCategory, 'en').toLowerCase()} spending change?`);
+  if (period.mode !== 'all' && topCategory) {
+    const label = categoryLabel(topCategory, 'en', state.customCategories).toLowerCase();
+    suggestions.push(isCustomCategoryId(topCategory)
+      ? `Why did my spending on ${label} change?` : `Why did my ${label} spending change?`);
+  }
   if (rows.some((row) => amountInCategory(row, 'rent') > 0)) suggestions.push('How much did I spend excluding rent?');
   if (rows.length >= 3) suggestions.push('Which recurring charges changed?');
   // Suggestions are navigation hints, not analysis. Never run subscription

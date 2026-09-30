@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 /**
  * Structured parts of an Ask Wafra answer: upcoming payment rows with their
  * merchant logos, and a bar per recorded month. Both draw only what the
@@ -12,7 +13,7 @@ import { GrowBar } from '@/components/ui/grow-bar';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Spacing, type BandPalette } from '@/constants/theme';
 import { assistantScreenCopy } from '@/lib/assistant-screen-copy';
-import { categoryLabel } from '@/lib/categories';
+
 import { structuralTitleLabel } from '@/lib/i18n';
 import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
 import type { AssistantMonthTotal, AssistantPaymentRow } from '@/lib/wafra-assistant';
@@ -50,6 +51,7 @@ export function AssistantPaymentRows({ payments, money, language, palette }: {
   language: 'en' | 'ar';
   palette: BandPalette;
 }) {
+  const { categoryLabel } = useCategoryCatalog();
   const copy = assistantScreenCopy(language);
   return (
     <View testID="assistant-payment-rows" style={[styles.rows, { borderColor: palette.rule }]}>

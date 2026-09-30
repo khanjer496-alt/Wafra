@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 /**
  * The first-run "ready" summary: how much of the past the ledger now holds,
  * where the money went, and which payments repeat. Every figure comes from
@@ -11,7 +12,7 @@ import { StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { GrowBar } from '@/components/ui/grow-bar';
 import { Fonts, Spacing, type BandPalette } from '@/constants/theme';
-import { categoryLabel } from '@/lib/categories';
+
 import { formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { onboardingCopy } from '@/lib/onboarding-copy';
 import type { ReadySummary as ReadySummaryData } from '@/lib/onboarding-ready';
@@ -24,6 +25,7 @@ export function ReadySummary({ summary, money, language, pending, palette }: {
   language: 'en' | 'ar';
   pending: boolean;
 }) {
+  const { categoryLabel } = useCategoryCatalog();
   const copy = onboardingCopy(language);
   // The transaction count is the result card's; this line adds only what the
   // card does not say, so the two never show different numbers for one thing.

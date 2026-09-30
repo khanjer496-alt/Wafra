@@ -1,5 +1,6 @@
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
-import type { Account, CategoryId, Transaction } from '@/lib/types';
+import { categoryLabel } from '@/lib/categories';
+import type { Account, CategoryId, CustomCategory, Transaction } from '@/lib/types';
 
 export interface ExpenseReportOptions {
   transactions: Transaction[];
@@ -13,6 +14,7 @@ export interface ExpenseReportOptions {
   from: string;
   to: string;
   generatedAt?: Date;
+  customCategories?: readonly CustomCategory[];
 }
 
 const ARABIC_CATEGORIES: Record<CategoryId, string> = {
@@ -200,7 +202,7 @@ export function buildExpenseReportHtml(options: ExpenseReportOptions): string {
           return `<tr>
             <td class="nowrap">${escapeReportHtml(formatIso(tx.date))}</td>
             <td><strong>${escapeReportHtml(tx.title)}</strong>${note}</td>
-            <td>${escapeReportHtml(categories[tx.category])}</td>
+            <td>${escapeReportHtml(categories[tx.category] ?? categoryLabel(tx.category, language, options.customCategories))}</td>
             <td>${escapeReportHtml(account)}</td>
             <td class="money nowrap">${escapeReportHtml(formatMoney(tx.amountFils))}</td>
           </tr>`;

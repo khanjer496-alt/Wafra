@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useRouter } from 'expo-router';
 import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
@@ -17,7 +18,7 @@ import { Fonts, Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { topMerchants } from '@/lib/analytics';
-import { categoryLabel } from '@/lib/categories';
+
 import { detailsWords } from '@/lib/details-copy';
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { formatAED } from '@/lib/format';
@@ -68,6 +69,7 @@ const MerchantRow = React.memo(function MerchantRow({ item, meta, rankLabel, onO
  * with the list, so the rows keep room to scroll.
  */
 export default function MerchantsScreen() {
+  const { categoryLabel } = useCategoryCatalog();
   const router = useRouter(); const language = useLanguage();
   const band = useBand('spending');
   const largeText = useLargeTextLayout();
@@ -104,7 +106,7 @@ export default function MerchantsScreen() {
   // lets the list skip every cell whose merchant did not change.
   const renderRow = useCallback(({ item, index }: { item: RankedMerchant; index: number }) =>
     <MerchantRow item={item} meta={d.merchants.meta(categoryLabel(item.category, language === 'ar' ? 'ar' : 'en'), item.count)}
-      rankLabel={d.merchants.rank(item.rank)} onOpen={openMerchant} palette={band} first={index === 0} />, [openMerchant, d, language, band]);
+      rankLabel={d.merchants.rank(item.rank)} onOpen={openMerchant} palette={band} first={index === 0} />, [openMerchant, d, language, band, categoryLabel]);
   const segments = [
     { value: 'amount' as const, label: d.merchants.byAmount },
     { value: 'visits' as const, label: d.merchants.byVisits },
