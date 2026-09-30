@@ -1,7 +1,7 @@
 import { daysBetweenISO, shiftISO, toISODate } from '@/lib/format';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { isSpending } from '@/lib/ledger';
-import type { Account, CategoryId, Transaction } from '@/lib/types';
+import type { Account, Bill, CategoryId, Transaction } from '@/lib/types';
 
 export type Cadence = 'weekly' | 'monthly' | 'yearly' | 'as-needed';
 
@@ -15,6 +15,8 @@ export type RecurringGroup = 'subscription' | 'utility' | 'housing' | 'commitmen
 
 export interface Subscription {
   title: string;
+  /** Provider service identity, retaining only a closed kind and masked tail. */
+  billIdentity?: string;
   category: CategoryId;
   group: RecurringGroup;
   /** stopped = silent for well past its cadence (likely cancelled). */
@@ -236,7 +238,7 @@ function previousPriceRun(amounts: number[]): number[] {
  * parser-assigned utility/telecom rows; an arbitrary shop containing "internet"
  * must never become a household bill.
  */
-function recurringProviderTitle(transaction: Transaction): string {
+export function recurringProviderTitle(transaction: Pick<Transaction, 'title' | 'category' | 'userEdited'>): string {
   if (transaction.userEdited ||
     (transaction.category !== 'utilities' && transaction.category !== 'telecom')) {
     return transaction.title.trim();
@@ -248,6 +250,76 @@ function recurringProviderTitle(transaction: Transaction): string {
   if (/\bdewa\b/i.test(title)) return 'DEWA';
   if (/\b(?:fewa|etihadwe)\b/i.test(title)) return 'EtihadWE';
   return title;
+}
+
+type RecurringIdentity = Pick<Subscription, 'title' | 'billIdentity'>;
+
+/** Keep kinds distinct: a matching last four alone does not prove one service. */
+function normalizedBillIdentity(identity: string | undefined): string | undefined {
+  return typeof identity === 'string' && /^(?:account|consumer|party|customer|contract|service):[a-z0-9]{4}$/i.test(identity)
+    ? identity.toLowerCase()
+    : undefined;
+}
+
+/** Stable persistence/navigation key; legacy unidentified providers keep their old key. */
+export function subscriptionKey(sub: RecurringIdentity): string {
+  const provider = sub.title.trim().toLowerCase();
+  const identity = normalizedBillIdentity(sub.billIdentity);
+  if (identity) return `service:${JSON.stringify([provider, identity])}`;
+  // Raw merchant names are user-editable. Keep their namespace separate from
+  // encoded service keys, including names resembling another escaped name.
+  return /^(?:service|provider):/.test(provider) ? `provider:${JSON.stringify(provider)}` : provider;
+}
+
+/** Only canonical service keys may persist scoped undo markers. */
+export function isScopedSubscriptionKey(key: string): boolean {
+  if (!key.startsWith('service:')) return false;
+  try {
+    const value: unknown = JSON.parse(key.slice('service:'.length));
+    return Array.isArray(value) && value.length === 2 &&
+      typeof value[0] === 'string' && value[0].trim().length > 0 && typeof value[1] === 'string' &&
+      normalizedBillIdentity(value[1]) !== undefined &&
+      subscriptionKey({ title: value[0], billIdentity: value[1] }) === key;
+  } catch {
+    return false;
+  }
+}
+
+/** Human-facing discriminator without changing the provider used by merchant logos. */
+export function subscriptionLabel(sub: RecurringIdentity): string {
+  const identity = normalizedBillIdentity(sub.billIdentity);
+  return identity ? `${sub.title} · •••• ${identity.slice(-4).toUpperCase()}` : sub.title;
+}
+
+/** The detail history uses exactly the same provider/service boundary as detection. */
+export function matchesRecurringTransaction(sub: RecurringIdentity, transaction: Transaction): boolean {
+  return subscriptionKey(sub) === subscriptionKey({
+    title: recurringProviderTitle(transaction),
+    billIdentity: transaction.billIdentity,
+  });
+}
+
+/** An identified bill replaces only its own service; old manual reminders cover the provider. */
+export function subscriptionMatchesBill(
+  sub: RecurringIdentity,
+  bill: Pick<Bill, 'title' | 'category' | 'importIdentity'>,
+): boolean {
+  const provider = recurringProviderTitle(bill).trim().toLowerCase();
+  if (sub.title.trim().toLowerCase() !== provider) return false;
+  if (!bill.importIdentity) return true;
+  const identity = normalizedBillIdentity(bill.importIdentity);
+  return identity !== undefined && identity === normalizedBillIdentity(sub.billIdentity);
+}
+
+/** Scoped choices coexist with provider-wide choices saved by earlier versions. */
+export function isSubscriptionDismissed(
+  sub: RecurringIdentity,
+  dismissed: readonly string[] | ReadonlySet<string>,
+): boolean {
+  const keys: ReadonlySet<string> = Array.isArray(dismissed)
+    ? new Set(dismissed.map((key) => key.trim().toLowerCase()))
+    : dismissed as ReadonlySet<string>;
+  return keys.has(subscriptionKey(sub)) || keys.has(subscriptionKey({ title: sub.title }));
 }
 
 type SubscriptionDetectionKey = {
@@ -411,13 +483,17 @@ function* subscriptionDetectionWorker(
     const t = transactions[index];
     if (!isSpending(t, liveAccounts, internalTransfers)) continue;
     const providerTitle = recurringProviderTitle(t);
-    const k = providerTitle.toLowerCase();
-    if (!k || dismissed.has(k)) continue;
+    const providerKey = providerTitle.toLowerCase();
+    const service = { title: providerTitle, billIdentity: normalizedBillIdentity(t.billIdentity) };
+    // A raw merchant title can resemble a public service key. Keep the internal
+    // partition structurally distinct so such a title cannot merge ledger rows.
+    const k = JSON.stringify([providerKey, service.billIdentity ?? null]);
+    if (!providerKey || isSubscriptionDismissed(service, dismissed)) continue;
     // A fee alert proves a posted fee, not a future commitment. Even an annual
     // fee needs stable card/account identity carried through the Subscription
     // model before it can safely become a recurring bill. Until then every
     // parser-minted fee stays out of automatic recurrence detection.
-    if (/fee$/.test(k) || k === 'service charge') continue;
+    if (/fee$/.test(providerKey) || providerKey === 'service charge') continue;
     const list = groups.get(k) ?? [];
     list.push(providerTitle === t.title ? t : { ...t, title: providerTitle });
     groups.set(k, list);
@@ -619,6 +695,7 @@ function* subscriptionDetectionWorker(
 
     subs.push({
       title,
+      ...(normalizedBillIdentity(last.billIdentity) ? { billIdentity: normalizedBillIdentity(last.billIdentity) } : {}),
       category: last.category,
       group,
       status,
@@ -842,35 +919,46 @@ export function daysUntilNext(sub: Subscription, today: Date): number {
  * Whether the user has said this subscription is cancelled, and no charge
  * since has contradicted them.
  *
- * `cancelled` maps a lowercased merchant to the ISO date the user said so. A
+ * `cancelled` maps a service key (or legacy provider key) to the date the user said so. A
  * charge dated AFTER that day is the bank saying it is still being paid, so
  * the subscription counts again rather than hiding money that is still going
  * out. A charge on the same day is the one the user just cancelled after.
  */
 export function isCancelledByUser(
-  sub: Pick<Subscription, 'title' | 'lastChargedISO'>,
-  cancelled: Readonly<Record<string, string>> | undefined,
+  sub: Pick<Subscription, 'title' | 'billIdentity' | 'lastChargedISO'>,
+  cancelled: Readonly<Record<string, string | null>> | undefined,
 ): boolean {
-  if (!cancelled) return false;
-  const key = sub.title.trim().toLowerCase();
-  if (!Object.prototype.hasOwnProperty.call(cancelled, key)) return false;
-  const on = cancelled[key];
-  return typeof on === 'string' && sub.lastChargedISO <= on;
+  const on = subscriptionCancellationDate(sub, cancelled);
+  return on !== null && sub.lastChargedISO <= on;
+}
+
+/** An explicit scoped undo (null) takes precedence over an older provider cancellation. */
+export function subscriptionCancellationDate(
+  sub: RecurringIdentity,
+  cancelled: Readonly<Record<string, string | null>> | undefined,
+): string | null {
+  if (!cancelled) return null;
+  const key = subscriptionKey(sub);
+  const provider = subscriptionKey({ title: sub.title });
+  const on = Object.prototype.hasOwnProperty.call(cancelled, key)
+    ? cancelled[key]
+    : Object.prototype.hasOwnProperty.call(cancelled, provider) ? cancelled[provider] : null;
+  return typeof on === 'string' ? on : null;
 }
 
 /** Subscriptions still in play: the user has not marked them cancelled. */
-export function withoutCancelled<T extends Pick<Subscription, 'title' | 'lastChargedISO'>>(
+export function withoutCancelled<T extends Pick<Subscription, 'title' | 'billIdentity' | 'lastChargedISO'>>(
   subs: T[],
-  cancelled: Readonly<Record<string, string>> | undefined,
+  cancelled: Readonly<Record<string, string | null>> | undefined,
 ): T[] {
   if (!cancelled || Object.keys(cancelled).length === 0) return subs;
   return subs.filter((sub) => !isCancelledByUser(sub, cancelled));
 }
 
 /** The ones the user marked cancelled, for the reversible "Cancelled by you" list. */
-export function cancelledByUser<T extends Pick<Subscription, 'title' | 'lastChargedISO'>>(
+export function cancelledByUser<T extends Pick<Subscription, 'title' | 'billIdentity' | 'lastChargedISO'>>(
   subs: T[],
-  cancelled: Readonly<Record<string, string>> | undefined,
+  cancelled: Readonly<Record<string, string | null>> | undefined,
 ): T[] {
   if (!cancelled || Object.keys(cancelled).length === 0) return [];
   return subs.filter((sub) => isCancelledByUser(sub, cancelled));
@@ -882,7 +970,7 @@ export function cancelledByUser<T extends Pick<Subscription, 'title' | 'lastChar
  */
 export function subscriptionsMonthlyEquivalent(
   subs: Subscription[],
-  cancelled?: Readonly<Record<string, string>>,
+  cancelled?: Readonly<Record<string, string | null>>,
 ): number {
   return subscriptionsMonthlyTotal(withoutCancelled(activeSubscriptions(trueSubscriptions(subs)), cancelled));
 }

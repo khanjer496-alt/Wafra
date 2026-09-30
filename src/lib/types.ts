@@ -128,6 +128,16 @@ export interface BestEffortMarker {
   market: string;
 }
 
+export interface StatementOccurrence {
+  importId: string;
+  rowIndex: number;
+  /** Original statement facts may differ from the live alert's posting facts. */
+  date?: string;
+  amountFils?: number;
+  type?: TransactionType;
+  title?: string;
+}
+
 export interface Transaction {
   /** Bounded bank evidence and explicit user choices, persisted with the encrypted row. */
   transferEvidence?: TransferEvidence;
@@ -191,6 +201,8 @@ export interface Transaction {
   textClock?: number;
   /** Where this entry came from. Undefined = manual (pre-v2 data). */
   source?: 'sms' | 'manual';
+  /** Explicit claim created by Mark paid; removed when its expense is undone. */
+  billPayment?: { billId: string; month: string };
   /**
    * Fingerprint of the source SMS (timestamp + amount). Parser updates change
    * titles/accounts, so re-scans dedupe on this instead of parsed fields.
@@ -242,6 +254,12 @@ export interface Transaction {
    * one-to-one by day, amount, direction and account.
    */
   statementImportId?: string;
+  /** Stable occurrence within the source file, independent of delivery time. */
+  statementRowIndex?: number;
+  /** Durable one-to-one overlaps with other statement file occurrences (max 64). */
+  statementOccurrences?: StatementOccurrence[];
+  /** Canonical issuer stated by a PDF/CSV, retained even without account digits. */
+  statementBank?: string;
   captureInstrument?: CaptureInstrument;
   /** Auto-added from an unproven alert format; shown as "Auto-added — check". */
   bestEffort?: BestEffortMarker;
@@ -353,6 +371,10 @@ export interface Bill {
   importIdentity?: string;
   /** Expected amount in fils. */
   amountFils: number;
+  /** A notice stated this total for this due date; other cycles remain estimates. */
+  statedDueDate?: string;
+  /** Original source observation time used to order corrections within a cycle. */
+  noticeObservedAt?: number;
   /** Day of month the bill is due (1–31). */
   dueDay: number;
   /**
@@ -409,6 +431,8 @@ export interface CardDue {
   paidFils: number;
   /** User-recorded payment time; allocation evidence, never proof that the current total is paid. */
   settledAt?: string;
+  /** The manual receipt owning settledAt, when that time was recorded with a transaction. */
+  settledByTransactionId?: string;
 }
 
 export interface Goal {
@@ -786,18 +810,20 @@ export interface AppState {
   accountHints: Record<string, string>;
   /** User-confirmed Google Play packages learned from notification Review. */
   trustedNotificationPackages: string[];
-  /** Merchants (lowercased) the user marked as NOT a subscription. */
+  /** Legacy provider or scoped service keys marked as NOT recurring. */
   notSubscriptions: string[];
   /**
-   * Subscriptions the user told Wafra they cancelled: lowercased merchant →
+   * Subscriptions the user told Wafra they cancelled: provider/service key →
    * the ISO date they said so. Different from `notSubscriptions` (which says
    * the pattern was never a subscription): a cancelled one IS a subscription
    * that stopped, so it leaves upcoming renewals and monthly totals but keeps
    * its history. A charge dated after the cancellation brings it back, since
    * the bank then says it is still being paid. Optional so ledgers written
    * before it existed need no migration.
+   * A scoped null overrides an inherited provider-wide cancellation for just
+   * that service. Legacy provider-wide keys keep their existing semantics.
    */
-  cancelledSubscriptions?: Record<string, string>;
+  cancelledSubscriptions?: Record<string, string | null>;
   /** Epoch ms of the newest SMS already scanned. */
   lastScanTs: number;
   /** Body-free, resumable progress for Android's first full history import. */
@@ -927,6 +953,8 @@ export interface AppState {
  * genuinely changed are present; an absent field is left alone.
  */
 export interface TxHealUpdate {
+  /** Technical source claims; never replaces a user-facing financial field. */
+  statementOccurrences?: StatementOccurrence[];
   /** Exact original Message proof for the reproduced transposed receipt date. */
   sourceDateCorrection?: {
     from: string;

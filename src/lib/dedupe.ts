@@ -263,6 +263,9 @@ export function sameMerchantCapture(a: string, b: string): boolean {
 export type CaptureChannel = 'inbox' | 'delivery' | 'push';
 
 export interface DuplicateCandidate {
+  /** Stored user decisions survive replay of their authoritative source row. */
+  userEdited?: boolean;
+  titleEdited?: boolean;
   date: string;
   amountFils: number;
   title: string;
@@ -284,6 +287,9 @@ export interface DuplicateCandidate {
    * genuine repeat twice); rows of different uploads are matched one-to-one.
    */
   statementImportId?: string;
+  /** Stable zero-based row within a validated statement file. */
+  statementRowIndex?: number;
+  statementOccurrences?: Transaction['statementOccurrences'];
   /** Bank identity a statement named for itself, when it named one. */
   statementBank?: string;
   /** Resolved account/card. Required for high-confidence settlement pairing. */
@@ -408,6 +414,9 @@ interface SeenStatementPairEvent {
   captureInstrument?: CaptureInstrument;
   captureSource?: CaptureSource;
   statementImportId?: string;
+  /** Stable zero-based row within a validated statement file. */
+  statementRowIndex?: number;
+  statementOccurrences?: Transaction['statementOccurrences'];
   statementBank?: string;
   id?: string;
   consumed: boolean;
@@ -581,8 +590,8 @@ export interface DuplicateGuardOptions {
   accountBankIdentity?: (accountId: string) => string | undefined;
   /**
    * An account reference that attributes nothing — the unassigned holdings a
-   * statement with no card/account digits lands on. Only a statement row on
-   * such an account may be matched to an alert on another account.
+   * statement with no card/account digits lands on. Such a holding cannot
+   * establish ownership for matching different files or live alerts.
    */
   unresolvedAccount?: (accountId: string) => boolean;
 }
@@ -595,6 +604,27 @@ export function statementUploadOf(
 ): string | undefined {
   return isStatementCaptureSource(row.captureSource) && typeof row.statementImportId === 'string' &&
     STATEMENT_IMPORT_ID.test(row.statementImportId) ? row.statementImportId : undefined;
+}
+
+/** Stable file occurrence identity; legacy rows intentionally have none. */
+export function statementRowKey(
+  row: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId' | 'statementRowIndex'>,
+): string | undefined {
+  const upload = statementUploadOf(row);
+  return upload && Number.isInteger(row.statementRowIndex) && row.statementRowIndex! >= 0 && row.statementRowIndex! < 200
+    ? `${upload}:${row.statementRowIndex}` : undefined;
+}
+
+function statementKeys(row: Pick<DuplicateCandidate,
+  'captureSource' | 'statementImportId' | 'statementRowIndex' | 'statementOccurrences'>): string[] {
+  const primary = statementRowKey(row);
+  return [...new Set([
+    ...(primary ? [primary] : []),
+    ...(row.statementOccurrences ?? []).flatMap((claim) => {
+      const key = statementRowKey({ captureSource: 'pdf', statementImportId: claim.importId, statementRowIndex: claim.rowIndex });
+      return key ? [key] : [];
+    }),
+  ])];
 }
 
 /**
@@ -613,6 +643,41 @@ export function fromDifferentStatementUploads(
   const right = statementUploadOf(b);
   return (left !== undefined || right !== undefined) && left !== right;
 }
+
+const sameDescriptor = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+/**
+ * Whether a statement descriptor and an alert title can name one merchant:
+ * normalized merchant words agree in order ("PAYPAL
+ * *ENDURANCEIN" / "Endurancein", "CARREFOUR HYPER 1234" / "Carrefour").
+ * Money and a day alone are not an identity, even when the statement names an
+ * account: "NOON.COM 50.00" and "Carrefour 50.00" are two purchases.
+ */
+const descriptorOverlap = (a: string, b: string): boolean => {
+  // Compare the merchant phrase, not any shared word: Dubai/Company/Pay
+  // occur on unrelated rows, and "Urban Company" is not "Urban Restaurant".
+  const words = (value: string) => value.toLowerCase().normalize('NFKC')
+    .replace(/^(?:nfc|iap)\s*-\s*\(g-pay\)\s*-\s*/i, '')
+    .replace(/^(?:paypal|gpay|pos)\s*\*\s*/i, '')
+    .replace(/\burbanclap\b/g, 'urban company')
+    .split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const left = words(a);
+  const right = words(b);
+  const [short, long] = left.length <= right.length ? [left, right] : [right, left];
+  if (short.length === 0 || !short.some((word) => /\p{L}/u.test(word)) ||
+      !short.every((word, index) => word === long[index])) return false;
+  // A day-level statement has no precise clock to support arbitrary prefix
+  // matching: Amazon Cafe and Amazon are different businesses. Only bounded
+  // branch/legal/location metadata may extend an otherwise equal phrase.
+  // Unknown extensions stay separate rather than silently deleting a charge.
+  return long.slice(short.length).every((word) =>
+    /^\d+$/.test(word) ||
+    /^(?:br|branch|site|no|llc|ltd|limited|fze|fzco|hyper|hypermarket|ae|uae|dubai|sharjah|ajman|abu|dhabi|dxb|auh|moe)$/.test(word));
+};
+const settlementTitle = (value: string) => /^card(?:\s*•\s*\d{4})?\s+payment$/i.test(value.trim());
+export const statementDescriptorsAgree = (a: string, b: string): boolean =>
+  sameDescriptor(a, b) || (settlementTitle(a) && settlementTitle(b)) ||
+  (!GENERIC_CAPTURE_TITLES.has(a.trim().toLowerCase()) &&
+    !GENERIC_CAPTURE_TITLES.has(b.trim().toLowerCase()) && descriptorOverlap(a, b));
 
 export function duplicateGuard(
   existing: Transaction[],
@@ -638,6 +703,8 @@ export function duplicateGuard(
       push?: boolean; eventIdentity?: string; textClock?: number;
     } = {},
   ) => {
+    // File row clocks are synthetic; only statement matching may use these rows.
+    if (isStatementCaptureSource(flags.statement?.captureSource)) return;
     const at = seen.get(key);
     const historyIdentity = smsKey?.startsWith('h') === true;
     const occurrence: SeenOccurrence = {
@@ -702,7 +769,18 @@ export function duplicateGuard(
   }
   // Delivery clocks can collide across cards; retain every candidate per key.
   const exactRows = new Map<string, DuplicateCandidate[]>();
+  const statementRows = new Map<string, DuplicateCandidate>();
   const noteExact = (c: DuplicateCandidate) => {
+    const primary = statementRowKey(c);
+    if (primary) statementRows.set(primary, c);
+    for (const claim of c.statementOccurrences ?? []) {
+      const key = statementRowKey({ captureSource: 'pdf', statementImportId: claim.importId, statementRowIndex: claim.rowIndex });
+      if (!key) continue;
+      statementRows.set(key, claim.date !== undefined && claim.amountFils !== undefined && claim.type !== undefined
+        ? { ...c, date: claim.date, amountFils: claim.amountFils, type: claim.type,
+            title: claim.title ?? c.title, userEdited: false, titleEdited: claim.title === undefined ? c.titleEdited : false }
+        : c);
+    }
     if (!c.smsKey) return;
     const key = canonicalCaptureSourceKey(c.smsKey, c.ts);
     if (isUnboundAndroidSourceKey(key)) return;
@@ -713,7 +791,9 @@ export function duplicateGuard(
   for (const t of existing) noteExact(t);
   const exactMatch = (key: string, c: DuplicateCandidate) =>
     (exactRows.get(canonicalCaptureSourceKey(key, c.ts)) ?? []).find((row) => key.startsWith('h') || (
+      isStatementCaptureSource(row.captureSource) === isStatementCaptureSource(c.captureSource) &&
       !fromDifferentStatementUploads(row, c) &&
+      (!statementRowKey(row) || !statementRowKey(c) || statementRowKey(row) === statementRowKey(c)) &&
       (row.type === c.type || c.eventKind === 'cardPayment' ||
         (row.raw !== undefined && c.raw !== undefined && bodyPrint(row.raw) === bodyPrint(c.raw))) &&
       compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument)
@@ -800,48 +880,29 @@ export function duplicateGuard(
     row.statementBank ?? row.captureInstrument?.bankIdentity ??
       (row.accountId ? options.accountBankIdentity?.(row.accountId) : undefined);
   const banksCompatible = (a: string | undefined, b: string | undefined) => !a || !b || a === b;
-  const sameDescriptor = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-  /**
-   * Whether a statement descriptor and an alert title can name one merchant:
-   * normalized merchant words agree in order ("PAYPAL
-   * *ENDURANCEIN" / "Endurancein", "CARREFOUR HYPER 1234" / "Carrefour").
-   * Money and a day alone are not an identity, even when the statement names an
-   * account: "NOON.COM 50.00" and "Carrefour 50.00" are two purchases.
-   */
-  const descriptorOverlap = (a: string, b: string): boolean => {
-    // Compare the merchant phrase, not any shared word: Dubai/Company/Pay
-    // occur on unrelated rows, and "Urban Company" is not "Urban Restaurant".
-    const words = (value: string) => value.toLowerCase().normalize('NFKC')
-      .replace(/^(?:nfc|iap)\s*-\s*\(g-pay\)\s*-\s*/i, '')
-      .replace(/^(?:paypal|gpay|pos)\s*\*\s*/i, '')
-      .replace(/\burbanclap\b/g, 'urban company')
-      .split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-    const left = words(a);
-    const right = words(b);
-    const [short, long] = left.length <= right.length ? [left, right] : [right, left];
-    if (short.length === 0 || !short.some((word) => /\p{L}/u.test(word)) ||
-        !short.every((word, index) => word === long[index])) return false;
-    // A day-level statement has no precise clock to support arbitrary prefix
-    // matching: Amazon Cafe and Amazon are different businesses. Only bounded
-    // branch/legal/location metadata may extend an otherwise equal phrase.
-    // Unknown extensions stay separate rather than silently deleting a charge.
-    return long.slice(short.length).every((word) =>
-      /^\d+$/.test(word) ||
-      /^(?:br|branch|site|no|llc|ltd|limited|fze|fzco|hyper|hypermarket|ae|uae|dubai|sharjah|ajman|abu|dhabi|dxb|auh|moe)$/.test(word));
-  };
-  const settlementTitle = (value: string) => /^card(?:\s*•\s*\d{4})?\s+payment$/i.test(value.trim());
-  const statementDescriptorsAgree = (a: string, b: string): boolean =>
-    sameDescriptor(a, b) || (settlementTitle(a) && settlementTitle(b)) ||
-    (!GENERIC_CAPTURE_TITLES.has(a.trim().toLowerCase()) &&
-      !GENERIC_CAPTURE_TITLES.has(b.trim().toLowerCase()) && descriptorOverlap(a, b));
   const statementPairMatch = (c: DuplicateCandidate): SeenStatementPairEvent | undefined => {
     const incomingStatement = isStatementCaptureSource(c.captureSource);
-    const open = statementPairNear(c.date).filter((row) =>
-      !row.consumed && row.type === c.type &&
-      compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument));
+    const incomingUpload = incomingStatement ? statementUploadOf(c) : undefined;
+    const occurrence = statementRowKey(c);
+    const open = statementPairNear(c.date).filter((row) => {
+      if (row.consumed || row.type !== c.type || !compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument)) return false;
+      if (!occurrence) return true;
+      const keys = statementKeys(row);
+      // An existing transaction can explain only one occurrence in this file,
+      // including when earlier occurrences arrived on a previous relay page.
+      if (keys.some((key) => key.startsWith(`${incomingUpload}:`) && key !== occurrence)) return false;
+      // A new overlap requires a durable row to receive its claim.
+      return !!row.id;
+    });
+    const claimable = (row: SeenStatementPairEvent): SeenStatementPairEvent => {
+      if (occurrence && !statementKeys(row).includes(occurrence) && (row.statementOccurrences?.length ?? 0) >= 64) {
+        throw new Error('Statement occurrence claim capacity exceeded');
+      }
+      return row;
+    };
     // 1. Statement <-> live capture on the SAME resolved account. Provenance
     // permits bounded posting drift, never a contradiction in merchant identity.
-    if (c.accountId) {
+    if (c.accountId && !unresolvedAccount(c.accountId)) {
       const matches = open.filter((row) =>
         !!row.accountId &&
         row.accountId === c.accountId &&
@@ -856,17 +917,14 @@ export function duplicateGuard(
             (row.date === c.date ? 0 : 10) + Math.abs(row.amountFils - c.amountFils);
           return score(a) - score(b);
         });
-        return matches[0];
+        return claimable(matches[0]);
       }
     }
     // 2. Statement <-> statement from ANOTHER upload: the same day, amount,
     // direction and account, whatever each file's row order put on the clock.
-    // Two unlabelled statements share only the unassigned holding, which says
-    // nothing about the account, so they must also print the same descriptor.
-    // Rows of one upload never pair: a statement's repeat is a real repeat.
-    const incomingUpload = incomingStatement ? statementUploadOf(c) : undefined;
-    if (incomingUpload && c.accountId) {
-      const unlabelled = unresolvedAccount(c.accountId);
+    // An unassigned holding or issuer name does not prove account ownership.
+    // Different files need a positively resolved account as well as row facts.
+    if (incomingUpload && c.accountId && !unresolvedAccount(c.accountId)) {
       const match = open.find((row) =>
         isStatementCaptureSource(row.captureSource) &&
         fromDifferentStatementUploads(row, c) &&
@@ -874,23 +932,12 @@ export function duplicateGuard(
         row.amountFils === c.amountFils &&
         row.date === c.date &&
         banksCompatible(bankOf(row), bankOf(c)) &&
-        (unlabelled ? sameDescriptor(row.title, c.title) : statementDescriptorsAgree(row.title, c.title)));
-      if (match) return match;
+        statementDescriptorsAgree(row.title, c.title));
+      if (match) return claimable(match);
     }
-    // 3. A statement that could not name its account <-> a live capture on any
-    // account of a compatible bank. Exact day and amount only, one-to-one:
-    // the statement side attributes nothing, so no drift is tolerated.
-    const relaxed = incomingStatement
-      ? unresolvedAccount(c.accountId)
-        ? open.filter((row) => !isStatementCaptureSource(row.captureSource))
-        : []
-      : open.filter((row) => isStatementCaptureSource(row.captureSource) && unresolvedAccount(row.accountId));
-    const matches = relaxed.filter((row) =>
-      row.amountFils === c.amountFils &&
-      row.date === c.date &&
-      banksCompatible(bankOf(row), bankOf(c)) &&
-      statementDescriptorsAgree(row.title, c.title));
-    return matches[0];
+    // Bank/date/merchant/amount cannot identify which account an unlabelled
+    // file describes. Preserve an uncertain overlap instead of deleting money.
+    return undefined;
   };
   /** Opposite alerts for one card payment: bank-account debit + card receipt. */
   const cardPayments = new Map<string, SeenCardPayment[]>();
@@ -908,7 +955,7 @@ export function duplicateGuard(
     else manualPayments.set(key, [{ consumedSides: new Set() }]);
   };
   for (const t of heuristicRows) {
-    if (t.source === 'sms') {
+    if (t.source === 'sms' && !isStatementCaptureSource(t.captureSource)) {
       const cross: SeenEvent = {
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
         channel: t.viaPush ? 'push' : 'inbox',
@@ -939,11 +986,14 @@ export function duplicateGuard(
         captureInstrument: t.captureInstrument,
         captureSource: t.captureSource,
         statementImportId: t.statementImportId,
+        statementRowIndex: t.statementRowIndex,
+        statementOccurrences: t.statementOccurrences,
+        statementBank: t.statementBank,
         id: t.id,
         consumed: false,
       });
     }
-    if (t.cardPaymentSide) {
+    if (t.cardPaymentSide && !isStatementCaptureSource(t.captureSource)) {
       noteCardPayment(`${t.amountFils}|${t.accountId}`, {
         date: t.date,
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
@@ -972,6 +1022,9 @@ export function duplicateGuard(
       captureInstrument: t.captureInstrument,
       captureSource: t.captureSource,
       statementImportId: t.statementImportId,
+      statementRowIndex: t.statementRowIndex,
+      statementOccurrences: t.statementOccurrences,
+      statementBank: t.statementBank,
       id: t.id,
       consumed: false,
     });
@@ -981,8 +1034,29 @@ export function duplicateGuard(
     has(c) {
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) { lastMatchedId = null; return false; }
       lastMatchedId = null;
+      const statementKey = statementRowKey(c);
+      const statementRow = statementKey ? statementRows.get(statementKey) : undefined;
+      if (statementRow) {
+        // A file occurrence cannot change its posted financial facts on retry.
+        // Hold the source for recovery instead of editing money or adding a copy.
+        if ((!statementRow.userEdited && (statementRow.date !== c.date || statementRow.amountFils !== c.amountFils || statementRow.type !== c.type ||
+            !compatibleCaptureInstrument(statementRow.captureInstrument, c.captureInstrument))) ||
+            (!statementRow.userEdited && !statementRow.titleEdited && !statementDescriptorsAgree(statementRow.title, c.title))) {
+          throw new Error('Statement row identity conflicts with stored financial facts');
+        }
+        if (statementRow.id) {
+          const paired = statementPairById.get(statementRow.id);
+          if (paired) paired.consumed = true;
+        }
+        lastMatchedId = statementRow.id ?? null;
+        return true;
+      }
       const exact = c.smsKey ? exactMatch(c.smsKey, c) : undefined;
       if (exact) {
+        if (isStatementCaptureSource(c.captureSource) && exact.id) {
+          const paired = statementPairById.get(exact.id);
+          if (paired) paired.consumed = true;
+        }
         lastMatchedId = exact.id ?? null;
         return true;
       }
@@ -1016,7 +1090,7 @@ export function duplicateGuard(
           return true;
         }
       }
-      if (c.eventKind === 'cardPayment' && c.accountId) {
+      if (c.eventKind === 'cardPayment' && c.accountId && !statementRowKey(c)) {
         const side = c.cardPaymentSide ?? 'unknown';
         const manual = (
           manualPayments.get(`${c.date}|${c.amountFils}|${c.accountId}`) ?? []
@@ -1025,6 +1099,14 @@ export function duplicateGuard(
           manual.consumedSides.add(side);
           return true;
         }
+      }
+      if (isStatementCaptureSource(c.captureSource)) {
+        const statementMatch = statementPairMatch(c);
+        if (statementMatch) {
+          statementMatch.consumed = true;
+          if (statementRowKey(c)) lastMatchedId = statementMatch.id ?? null;
+        }
+        return statementMatch !== undefined;
       }
       if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
         const candidateIsHistory = c.smsKey?.startsWith('h') === true;
@@ -1176,7 +1258,7 @@ export function duplicateGuard(
     },
     supersedes(c) {
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return null;
-      if (c.channel === 'push') return null;
+      if (c.channel === 'push' || isStatementCaptureSource(c.captureSource)) return null;
       const mine = candidateTime(c);
       // The SMS about an event a stored push row already stated replaces
       // that row, however far apart they arrived; nearest first, one row.
@@ -1245,7 +1327,9 @@ export function duplicateGuard(
         title: c.title,
         captureInstrument: c.captureInstrument,
       };
-      noteCross(crossChannelKey(c.date, c.amountFils, c.type), cross);
+      if (!isStatementCaptureSource(c.captureSource)) {
+        noteCross(crossChannelKey(c.date, c.amountFils, c.type), cross);
+      }
       if (c.eventIdentity && CAPTURE_EVENT_IDENTITY.test(c.eventIdentity)) {
         noteEventIdentity({ eventIdentity: c.eventIdentity, ts, push: c.channel === 'push', id: c.id, cross });
       }
@@ -1258,11 +1342,14 @@ export function duplicateGuard(
         captureInstrument: c.captureInstrument,
         captureSource: c.captureSource,
         statementImportId: c.statementImportId,
+        statementRowIndex: c.statementRowIndex,
+        statementOccurrences: c.statementOccurrences,
         statementBank: c.statementBank,
         id: c.id,
         consumed: false,
       });
-      if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
+      if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide &&
+        !isStatementCaptureSource(c.captureSource)) {
         noteCardPayment(`${c.amountFils}|${c.accountId}`, {
           date: c.date,
           ts,
@@ -1453,6 +1540,10 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       // Import already matched statement uploads one-to-one; a shared midday
       // clock between two uploads is not an event identity.
       if (fromDifferentStatementUploads(row, prior)) return false;
+      if (statementRowKey(row) && statementRowKey(prior) && statementRowKey(row) !== statementRowKey(prior)) return false;
+      const statementClock = isStatementCaptureSource(row.captureSource) || isStatementCaptureSource(prior.captureSource);
+      if (statementClock && isStatementCaptureSource(row.captureSource) !== isStatementCaptureSource(prior.captureSource) &&
+        !(row.smsKey?.startsWith('h') && rowSourceKey === prior.smsKey)) return false;
       const rowPinned = Boolean(row.userEdited || row.transferDecision);
       const priorPinned = Boolean(prior.userEdited || prior.transferDecision);
       const bothEdited = rowPinned && priorPinned;
@@ -1461,6 +1552,7 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       if (row.smsKey && rowSource && !isUnboundAndroidSourceKey(rowSource) && rowSource === priorSource &&
         (row.smsKey.startsWith('h') || (row.type === prior.type &&
           compatibleCaptureInstrument(row.captureInstrument, prior.captureInstrument)))) return !bothEdited;
+      if (statementClock) return false;
       // A reviewed event may fold with its exact same provider identity, but
       // amount/time heuristics cannot delete a decision or attach it to a
       // different event. Two independently reviewed rows require user review.

@@ -119,6 +119,19 @@ CREATE TABLE IF NOT EXISTS ingest_receipts (
   PRIMARY KEY (device_id, replay_key)
 );
 
+-- Opaque per-device file/row-interpretation binding. Neither digest is an
+-- unkeyed statement hash; no amounts, dates, names or source text are stored.
+CREATE TABLE IF NOT EXISTS statement_import_bindings (
+  device_id TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  interpretation_digest TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  PRIMARY KEY (device_id, source_key),
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS statement_bindings_by_expiry ON statement_import_bindings (expires_at);
+
 -- A fixed-window counter limits authenticated Shortcut traffic without storing
 -- IP addresses, message hashes, sender IDs or any other user-derived value.
 CREATE TABLE IF NOT EXISTS ingest_limits (

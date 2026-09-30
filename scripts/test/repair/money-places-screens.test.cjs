@@ -246,7 +246,7 @@ test('a likely-stopped subscription offers Mark as cancelled behind a confirmati
   const confirmation = h.events.find((e) => e[0] === 'state' && typeof e[2]?.onConfirm === 'function')[2];
   assert.match(confirmation.question, /Mark City Gym as cancelled\?/);
   confirmation.onConfirm();
-  assert.deepEqual(h.events.filter((e) => e[0] === 'setSubscriptionCancelled').map((e) => e.slice(1)), [['City Gym', '2026-09-15']]);
+  assert.deepEqual(h.events.filter((e) => e[0] === 'setSubscriptionCancelled').map((e) => e.slice(1)), [['city gym', '2026-09-15']]);
   assert.equal(h.events.some((e) => e[0] === 'setNotSubscription'), false, 'cancelled is not Not-a-subscription');
 });
 
@@ -255,7 +255,7 @@ test('All lists what the user cancelled, with a Still paying undo', () => {
   const tree = h.render('bills');
   assert.match(text(byId(tree, 'bills-cancelled')), /Cancelled by you[\s\S]*City Gym/);
   press(byId(tree, 'bills-still-paying-city gym'));
-  assert.deepEqual(h.events.filter((e) => e[0] === 'setSubscriptionCancelled').map((e) => e.slice(1)), [['City Gym', null]]);
+  assert.deepEqual(h.events.filter((e) => e[0] === 'setSubscriptionCancelled').map((e) => e.slice(1)), [['city gym', null]]);
 });
 
 test('the 30-day timeline speaks its pins and leaves out anything beyond the window', () => {

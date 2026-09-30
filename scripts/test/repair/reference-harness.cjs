@@ -173,14 +173,9 @@ function createHarness(options = {}) {
   local('@/lib/details-copy','src/lib/details-copy.ts');
   deps['@/components/merchant-month-bars']={MerchantMonthBars:p=>jsx('MerchantMonthBars',p)};
   deps['@/components/merchant-category-rule']={MerchantCategoryRule:p=>jsx('MerchantCategoryRule',p)};
-  deps['@/lib/subscriptions']={detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
+  const recurringSource = load(path.join(root, 'src/lib/subscriptions.ts'), deps);
+  deps['@/lib/subscriptions']={...recurringSource, detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
     fixedCommitments:()=>[],billCommitments:()=>[],otherCommitments:()=>[],daysUntilNext:s=>Math.round((Date.parse(s.nextExpectedISO)-Date.parse('2026-09-06'))/86400000),
-    recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId),
-    // The user-cancelled state is pure and small; the harness uses the real rule.
-    isCancelledByUser:(sub,c)=>!!c&&Object.prototype.hasOwnProperty.call(c,sub.title.trim().toLowerCase())&&sub.lastChargedISO<=c[sub.title.trim().toLowerCase()],
-    withoutCancelled:(subs,c)=>subs.filter(sub=>!deps['@/lib/subscriptions'].isCancelledByUser(sub,c)),
-    cancelledByUser:(subs,c)=>subs.filter(sub=>deps['@/lib/subscriptions'].isCancelledByUser(sub,c)),
-    subscriptionsMonthlyEquivalent:(subs,c)=>subs.filter(sub=>sub.group==='subscription'&&sub.status==='active'&&!deps['@/lib/subscriptions'].isCancelledByUser(sub,c)).reduce((sum,sub)=>sum+sub.monthlyEquivalentFils,0),
     peekSubscriptionDetection:()=>null,subscriptionDetectionRunning:()=>false};
   local('@/lib/transaction-filter','src/lib/transaction-filter.ts');
   local('@/lib/spending-daily','src/lib/spending-daily.ts');

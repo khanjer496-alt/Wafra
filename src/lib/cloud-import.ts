@@ -24,6 +24,8 @@ export interface PickedStatement {
   name: string;
   mimeType?: string | null;
   size?: number;
+  /** Expo DocumentPicker supplies the browser File on web. */
+  file?: Blob;
 }
 
 async function safeJson(response: Response): Promise<unknown> {
@@ -184,9 +186,9 @@ export async function uploadPdfStatement(
   if (!capabilities.pdf.enabled || !capabilities.pdf.accepts.includes('application/pdf')) {
     throw new CloudImportError('service');
   }
-  const file = new File(picked.uri);
-  if (!file.exists) throw new CloudImportError('invalid_pdf');
-  const size = picked.size ?? file.size;
+  const file = picked.file ?? new File(picked.uri);
+  if (!picked.file && !(file as File).exists) throw new CloudImportError('invalid_pdf');
+  const size = file.size;
   if (!Number.isFinite(size) || size <= 0) throw new CloudImportError('invalid_pdf');
   if (size > capabilities.pdf.maxBytes) throw new CloudImportError('too_large', 413);
 
@@ -216,9 +218,9 @@ export async function uploadCsvStatement(
   dateOrder?: StatementDateOrder,
 ): Promise<CsvImportAccepted> {
   if (!capabilities.csv.enabled) throw new CloudImportError('service');
-  const file = new File(picked.uri);
-  if (!file.exists) throw new CloudImportError('invalid_csv');
-  const size = picked.size ?? file.size;
+  const file = picked.file ?? new File(picked.uri);
+  if (!picked.file && !(file as File).exists) throw new CloudImportError('invalid_csv');
+  const size = file.size;
   if (!Number.isFinite(size) || size <= 0) throw new CloudImportError('invalid_csv');
   if (size > capabilities.csv.maxBytes) throw new CloudImportError('too_large', 413);
 

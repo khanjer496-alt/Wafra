@@ -290,7 +290,12 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
       if (end > start) header = header.slice(0, start) + ' '.repeat(end - start) + header.slice(end);
     }
   }
-  const statementHeader = sourceControl?.family === 'statement' ||
+  // ADCB's supplied billing alert has no word "statement". Its document
+  // heading still proves an obligation when its total is masked/unreadable;
+  // neither the minimum nor the threatened late fee is a purchase choice.
+  // Anchor to the start and the card so a purchase's reminder footer loses.
+  const cardBillingHeader = /^\s*cr\.\s*card\s+[x*•·]*\d{4}\s+billing\s+alert\s*:/iu.test(source);
+  const statementHeader = cardBillingHeader || sourceControl?.family === 'statement' ||
     inspectMarketAlert(header, context.market ?? 'US').family === 'statement';
   if (statementHeader || (hasStatement && (!hasAmount || status !== 'posted'))) {
     family = 'statement';
@@ -306,7 +311,14 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   // Preserve it as a distinct fact until a settlement-specific adapter can
   // reconcile its bank/card sides. Generic "card payment at SHOP" is excluded.
   const cardSettlement = /\bpayment\b[\s\S]{0,100}\b(?:towards?|against)\s+(?:your\s+)?(?:(?:credit|covered|charge)\s+)?card\b|\bpayment\b[\s\S]{0,100}\b(?:received|credited)\s+(?:to|on|for)\s+(?:your\s+)?(?:credit|covered|charge)\s+card\b/iu.test(semanticSource);
-  if (cardSettlement && status === 'posted') family = 'card-payment';
+  // The exact supplied ADCB receipt places the amount before "against";
+  // money ownership can leave that completed receipt's clause unresolved.
+  // It still cannot be offered as a new expense/income in ordinary Review.
+  const cardPaymentReceipt = /^\s*your\s+payment\b[^\n]{0,96}\bagainst\s+(?:your\s+)?(?:credit|covered)\s+card\b[^\n]{0,96}\bwas\s+received\b/iu.test(source);
+  if (!statementHeader && (cardPaymentReceipt || (cardSettlement && status === 'posted'))) {
+    family = 'card-payment';
+    if (cardPaymentReceipt && status === 'unknown') status = 'posted';
+  }
   // Multiple independently owned principal amounts are distinct movements or
   // unresolved event attribution, not alternative spellings of one amount.
   // A single candidate with multiple currency/decimal interpretations remains

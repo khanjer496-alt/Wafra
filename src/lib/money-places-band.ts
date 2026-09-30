@@ -40,6 +40,7 @@ export interface BillsPin {
   /** Days from today; 0 is today. */
   dayOffset: number;
   title: string;
+  displayLabel?: string;
   category: CategoryId;
   amountFils: number;
   estimated: boolean;
@@ -59,7 +60,8 @@ export function billsTimelinePins(items: readonly PaymentAgendaItem[], todayISO:
     const dayOffset = daysBetweenISO(todayISO, item.dateISO);
     if (!Number.isFinite(dayOffset) || dayOffset < 0 || dayOffset > days) continue;
     pins.push({
-      key: item.id, dayOffset, title: item.title, category: item.category,
+      key: item.id, dayOffset, title: item.title,
+      ...(item.displayLabel ? { displayLabel: item.displayLabel } : {}), category: item.category,
       amountFils: item.amountFils, estimated: item.estimated,
     });
   }

@@ -54,7 +54,6 @@ import {
   prepareLaunchReviewAlert,
   prepareUniversalReviewAlert,
   type ReviewEntry,
-  type ReviewAlert,
 } from '@/lib/alert-review-tray';
 import { MARKETS, bankFromName, bankFromSender, getActiveMarket } from '@/lib/markets';
 import {
@@ -1286,6 +1285,8 @@ export interface RelaySyncResult {
   reviewCandidates?: ReviewEntry[];
   /** Review rows stay queued until their encrypted tray write is durable. */
   reviewIds?: string[];
+  /** Exact sealed queue identity to sanitized Review source; independent of candidate sorting. */
+  reviewSourceKeysById?: ReadonlyMap<string, string>;
   /**
    * Shortcut-delivered rows in this page, and how many of them carried enough
    * evidence to name their bank. See `shortcutCaptureHealth`.
@@ -1487,6 +1488,7 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
   let testReceived = 0;
   const testIds: string[] = [];
   const reviewIds: string[] = [];
+  const reviewSourceKeysById = new Map<string, string>();
   // Decoded once per sync rather than once per row: a page is up to 200 rows,
   // and this is the one value in the file that must not be re-derived casually.
   const secretKey = decodeKey(cfg.privateKey);
@@ -1526,7 +1528,9 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
       continue;
     }
     if (isRelayReviewRow(row)) {
-      reviewCandidates.push(relayReviewRowToReviewAlert(row));
+      const prepared = relayReviewRowToReviewAlert(row);
+      reviewCandidates.push(prepared);
+      reviewSourceKeysById.set(sealed.id, prepared.sourceKey);
       shortcutRows += 1;
       shortcutRowsWithBank += 1;
       ids.push(sealed.id);
@@ -1561,6 +1565,7 @@ export async function syncRelay(cfg: RelaySyncConfig): Promise<RelaySyncResult> 
     testReceived,
     testIds,
     reviewIds,
+    reviewSourceKeysById,
     shortcutRows,
     shortcutRowsWithBank,
   };
@@ -1577,6 +1582,8 @@ export type ParsedRelayRow = Omit<ParsedSms, 'raw'> & {
    */
   receivedAt?: string;
   captureSource?: 'shortcut' | 'email' | 'pdf' | 'csv';
+  statementImportId?: string;
+  statementRowIndex?: number;
   /** Untrusted optional proof metadata; conversion validates it independently. */
   captureAutomation?: unknown;
   /** Structured sender label only; raw Message Content never reaches sync. */
@@ -1773,6 +1780,13 @@ export function isParsedRelayRow(
     row.captureSource !== 'pdf' &&
     row.captureSource !== 'csv'
   ) return false;
+  if (row.statementImportId !== undefined &&
+    (typeof row.statementImportId !== 'string' || !/^[a-f0-9]{32}$/.test(row.statementImportId) ||
+      (row.captureSource !== 'pdf' && row.captureSource !== 'csv'))) return false;
+  if (row.statementRowIndex !== undefined &&
+    (!Number.isInteger(row.statementRowIndex) || (row.statementRowIndex as number) < 0 ||
+      (row.statementRowIndex as number) >= 200 || row.statementImportId === undefined ||
+      (row.captureSource !== 'pdf' && row.captureSource !== 'csv'))) return false;
   if (!validRelaySender(row.sender)) return false;
 
   if (

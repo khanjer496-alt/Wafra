@@ -26,7 +26,7 @@ import { openDues } from '@/lib/cards';
 import { formatAED, monthKey, monthStartISO, shiftISO, shiftMonthKey, toISODate } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
-import { daysUntilNext, detectSubscriptions, isCancelledByUser, type Subscription } from '@/lib/subscriptions';
+import { daysUntilNext, detectSubscriptions, isCancelledByUser, isSubscriptionDismissed, subscriptionKey, subscriptionLabel, subscriptionMatchesBill, type Subscription } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
 export type ReminderKind = 'bill' | 'card' | 'subscription';
@@ -114,7 +114,6 @@ export function buildPaymentReminders(
   // within 30 days. A short February can make this span three money months.
   // Include one extra due-date day: a bill just beyond the window still has
   // its day-before reminder inside it.
-  const billTitles = new Set(state.bills.map((b) => b.title.toLowerCase()));
   const lastBillReminderISO = shiftISO(toISODate(now), BILL_REMINDER_WINDOW_DAYS);
   const firstMonth = monthKey(now);
   const lastMonth = monthKey(shiftISO(lastBillReminderISO, 1));
@@ -139,7 +138,7 @@ export function buildPaymentReminders(
         `bill-${bill.id}-${dueISO}-${offset}`,
         'bill',
         dateISO,
-        tf('notificationBillDue', { name: bill.title, when: label }),
+        tf('notificationBillDue', { name: subscriptionLabel({ title: bill.title, billIdentity: bill.importIdentity }), when: label }),
         tf('notificationBillBody', {
           amount: formatAED(bill.amountFils, { decimals: false }),
         }),
@@ -190,6 +189,7 @@ export function buildPaymentReminders(
         internal,
       );
   for (const sub of subscriptions) {
+    if (isSubscriptionDismissed(sub, state.notSubscriptions ?? [])) continue;
     if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
     // Nor do ones the user told us they cancelled — until a later charge says otherwise.
     if (isCancelledByUser(sub, state.cancelledSubscriptions)) continue;
@@ -197,14 +197,14 @@ export function buildPaymentReminders(
     // see the recurring cash requirement, but predicting a day would create a
     // false reminder.
     if (sub.cadence === 'as-needed') continue;
-    if (billTitles.has(sub.title.toLowerCase())) continue;
+    if (state.bills.some(bill => subscriptionMatchesBill(sub, bill))) continue;
     const days = daysUntilNext(sub, now);
     if (days < 1 || days > 30) continue;
     add(
-      `sub-${sub.title.trim().toLowerCase()}`,
+      `sub-${subscriptionKey(sub)}`,
       'subscription',
       shiftISO(sub.nextExpectedISO, -1),
-      tf('notificationRenewsTomorrow', { name: sub.title }),
+      tf('notificationRenewsTomorrow', { name: subscriptionLabel(sub) }),
       tf('notificationRenewalBody', {
         amount: formatAED(sub.avgAmountFils, { decimals: false }),
       }),

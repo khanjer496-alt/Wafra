@@ -1,17 +1,12 @@
 import type { StatementCoverageEntry } from '@/lib/types';
 
 /**
- * Which months of statement history the ledger holds, per statement source.
+ * Observed transaction-date ranges, grouped by the source the file named.
  *
- * Gap-checking is only honest for a source the statement itself identified —
- * a masked account or card number (`account:…` / `card:…` keys from the
- * relay). A statement that names no account lands in a shared bucket
- * (`bank-statements`, or `bank:<issuer>` when only the bank is known), and
- * several different accounts can share that bucket: a current-account
- * statement for January and a card statement for February would read as
- * "no gaps" when neither account is complete. Those sources are summarised
- * with their imported range only and flagged unidentified, never as complete
- * and never with a missing-months list.
+ * The relay derives these bounds from parsed rows, not a bank-stated period
+ * or a reconciled opening/closing balance. Neither an identified instrument
+ * nor two transactions months apart proves that the intervening activity is
+ * complete. Keep this distinction in the shared model, not only the UI copy.
  */
 export type CoverageSummary = {
   sourceKey: string;
@@ -19,35 +14,20 @@ export type CoverageSummary = {
   range: string;
   throughMonth: string;
   sortDate: string;
-  /** False when the statement named no account/card; no completeness claim. */
+  /** Whether the source names account/card digits; this is not completeness. */
   identified: boolean;
-  /** Missing months in the last year; always empty for an unidentified source. */
+  /** No source-period or balance-reconciliation proof accompanies these ranges. */
+  canAssessCompleteness: false;
+  /** Retained for callers of the old contract; ranges prove no missing months. */
   missing: string[];
 };
 
 export function isIdentifiedCoverageSource(sourceKey: string): boolean {
-  return /^(?:account|card):[a-z]+:\d{4}$/.test(sourceKey);
+  return /^(?:issuer:[a-f0-9]{16}:)?(?:account|card):[a-z]+:\d{4}$/.test(sourceKey);
 }
 
 function monthKey(date: string): string {
   return date.slice(0, 7);
-}
-
-function monthIndex(key: string): number {
-  const [year, month] = key.split('-').map(Number);
-  return year * 12 + month - 1;
-}
-
-function monthFromIndex(index: number): string {
-  const year = Math.floor(index / 12);
-  const month = index % 12 + 1;
-  return `${year}-${String(month).padStart(2, '0')}`;
-}
-
-function nextMonth(key: string): string {
-  const [year, month] = key.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month, 1));
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 /**
@@ -100,26 +80,6 @@ export function summarizeCoverage(
     const lastEndDate = ordered.reduce((latest, row) => (row.endDate > latest ? row.endDate : latest), ordered[0].endDate);
     const lastImportedMonth = monthKey(lastEndDate);
     const identified = isIdentifiedCoverageSource(sourceKey);
-    const missing: string[] = [];
-    if (identified) {
-      const covered = new Set<string>();
-      for (const row of ordered) {
-        let cursor = monthKey(row.startDate);
-        const end = monthKey(row.endDate);
-        for (let guard = 0; guard < 240; guard += 1) {
-          covered.add(cursor);
-          if (cursor === end) break;
-          cursor = nextMonth(cursor);
-        }
-      }
-      const lastCompleteIndex = monthIndex(lastCompleteMonth);
-      let cursor = monthFromIndex(Math.max(monthIndex(firstMonth), lastCompleteIndex - 11));
-      for (let guard = 0; guard < 12; guard += 1) {
-        if (!covered.has(cursor)) missing.push(formatCoverageMonth(cursor, language, region));
-        if (cursor === lastCompleteMonth) break;
-        cursor = nextMonth(cursor);
-      }
-    }
     return {
       sourceKey,
       label: ordered[ordered.length - 1].label,
@@ -129,7 +89,8 @@ export function summarizeCoverage(
       throughMonth: formatCoverageMonth(lastCompleteMonth, language, region),
       sortDate: lastEndDate,
       identified,
-      missing,
+      canAssessCompleteness: false as const,
+      missing: [],
     };
   }).sort((a, b) => b.sortDate.localeCompare(a.sortDate));
 }

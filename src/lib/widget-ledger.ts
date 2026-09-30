@@ -7,7 +7,7 @@ import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/l
 import type { LedgerMoneySpec } from '@/lib/ledger-money';
 import { inPeriod } from '@/lib/period';
 import { allocationsOf } from '@/lib/splits';
-import { activeSubscriptions, billCommitments, daysUntilNext, fixedCommitments, trueSubscriptions, withoutCancelled, type Subscription } from '@/lib/subscriptions';
+import { activeSubscriptions, billCommitments, daysUntilNext, fixedCommitments, isSubscriptionDismissed, subscriptionKey, subscriptionLabel, subscriptionMatchesBill, trueSubscriptions, withoutCancelled, type Subscription } from '@/lib/subscriptions';
 import { futureAnnualBillAgendaItems } from '@/lib/upcoming-bills';
 import { upcomingWindowItems, type AgendaRecurrence } from '@/lib/upcoming-window';
 import type { PaymentAgendaItem } from '@/lib/reference-presentation';
@@ -63,9 +63,9 @@ export function widgetUpcomingForLedger(state: AppState, now: Date, detected: re
   const live = liveAccountIds(state.accounts);
   const internal = internalTransferIdsForState(state);
   const subs = withoutCancelled(activeSubscriptions(trueSubscriptions([...detected])), state.cancelledSubscriptions);
-  const fixed = billCommitments(activeSubscriptions(fixedCommitments([...detected])));
-  const recurring = [...subs, ...fixed];
-  const recurringById = new Map(recurring.map(sub => [`sub-${sub.title.trim().toLowerCase()}`, sub]));
+  const fixed = withoutCancelled(billCommitments(activeSubscriptions(fixedCommitments([...detected]))), state.cancelledSubscriptions);
+  const recurring = [...subs, ...fixed].filter(sub => !isSubscriptionDismissed(sub, state.notSubscriptions ?? []));
+  const recurringById = new Map(recurring.map(sub => [`sub-${subscriptionKey(sub)}`, sub]));
   const billById = new Map(state.bills.map(bill => [bill.id, bill]));
   const names = new Map(state.accounts.map(account => [account.id, account.name]));
   const items: PaymentAgendaItem[] = openDues(state, now).map(({ due, daysLeft, remainingFils }) => ({
@@ -74,15 +74,17 @@ export function widgetUpcomingForLedger(state: AppState, now: Date, detected: re
   }));
   for (const { bill, status, dueISO, daysLeft } of billsForMonth(state.bills, state.transactions, now, live, internal)) {
     items.push({ id: `bill-${bill.id}`, kind: 'bill', category: bill.category, title: bill.title,
+      displayLabel: subscriptionLabel({ title: bill.title, billIdentity: bill.importIdentity }),
       dateISO: dueISO, daysLeft, amountFils: bill.amountFils, estimated: false, paid: status === 'paid' });
   }
   items.push(...futureAnnualBillAgendaItems(state.bills, state.transactions, now, live, internal, WIDGET_UPCOMING_DAYS));
-  const manualTitles = new Set(state.bills.map(bill => bill.title.trim().toLowerCase()));
   for (const sub of recurring) {
-    if (sub.cadence === 'as-needed' || manualTitles.has(sub.title.trim().toLowerCase())) continue;
-    items.push({ id: `sub-${sub.title.trim().toLowerCase()}`, kind: 'recurring', category: sub.category, title: sub.title,
+    if (sub.cadence === 'as-needed' || state.bills.some(bill => subscriptionMatchesBill(sub, bill))) continue;
+    items.push({ id: `sub-${subscriptionKey(sub)}`, kind: 'recurring', category: sub.category, title: sub.title,
+      displayLabel: subscriptionLabel(sub),
       dateISO: sub.nextExpectedISO, daysLeft: daysUntilNext(sub, now), amountFils: sub.lastAmountFils,
-      estimated: sub.status !== 'stopped' && !sub.paymentHistory, paid: false });
+      // The prior receipt confirms a past payment, not this future renewal.
+      estimated: true, paid: false });
   }
   const recurrenceOf = (item: PaymentAgendaItem): AgendaRecurrence | null => {
     if (item.kind === 'bill') {
@@ -101,7 +103,8 @@ export function widgetUpcomingForLedger(state: AppState, now: Date, detected: re
     // rows, which must not consume the widget's three upcoming slots.
     .filter(item => !item.paid && item.dateISO >= todayISO)
     .sort((a, b) => a.dateISO.localeCompare(b.dateISO) || a.id.localeCompare(b.id))
-    .map(item => ({ title: item.title, amountFils: item.amountFils, dateISO: item.dateISO, estimated: item.estimated }));
+    .map(item => ({ title: item.title, ...(item.displayLabel ? { displayLabel: item.displayLabel } : {}),
+      amountFils: item.amountFils, dateISO: item.dateISO, estimated: item.estimated }));
 }
 
 /** Pure formatting after the cooperative caller has finished recurrence detection. */

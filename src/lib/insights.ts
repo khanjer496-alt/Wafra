@@ -235,7 +235,7 @@ export function buildInsights(
   notSubscriptions: string[] = [],
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
-  options: { includeRecurringAnalysis?: boolean; cancelledSubscriptions?: Readonly<Record<string, string>> } = {},
+  options: { includeRecurringAnalysis?: boolean; cancelledSubscriptions?: Readonly<Record<string, string | null>> } = {},
 ): Insight[] {
   const insights: Insight[] = [];
   const period = toPeriod(periodLike);

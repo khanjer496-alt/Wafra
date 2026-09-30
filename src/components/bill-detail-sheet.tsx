@@ -42,6 +42,10 @@ import { useStore } from '@/lib/store';
 import {
   daysUntilNext,
   isCancelledByUser,
+  matchesRecurringTransaction,
+  subscriptionKey,
+  subscriptionLabel,
+  subscriptionCancellationDate,
   recurringPaymentAccount,
   type Subscription,
 } from '@/lib/subscriptions';
@@ -139,14 +143,13 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
 
   const data = useMemo(() => {
     if (!subscription) return null;
-    const key = subscription.title.trim().toLowerCase();
     // The SAME predicate detectSubscriptions grouped these rows with, so the
     // counts here cannot exceed the figure the row that opened the sheet came
     // from (an archived card's charge or an own-account move is not a charge).
     const live = liveAccountIds(state.accounts);
     const internal = internalTransferIdsForState(state);
     const txs = state.transactions
-      .filter((transaction) => isSpending(transaction, live, internal) && transaction.title.trim().toLowerCase() === key)
+      .filter((transaction) => isSpending(transaction, live, internal) && matchesRecurringTransaction(subscription, transaction))
       .sort((a, b) => (a.date < b.date ? 1 : -1));
     const nowKey = monthKey(now);
     const history = Array.from({ length: 6 }, (_, i) => shiftMonthKey(nowKey, i - 5)).map((m) => {
@@ -221,7 +224,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
     // receipt, and not an on-demand top-up, is an estimate of the next charge.
     const estimated = !stopped && !subscription.paymentHistory && subscription.cadence !== 'as-needed';
     const sampled = Math.max(1, Math.min(3, subscription.chargeCount));
-    const cancelledOn = state.cancelledSubscriptions?.[subscription.title.trim().toLowerCase()];
+    const cancelledOn = subscriptionCancellationDate(subscription, state.cancelledSubscriptions);
     const cancelled = isCancelledByUser(subscription, state.cancelledSubscriptions);
     const cancellable = subscription.group === 'subscription';
     // "N months running, nothing to watch" is a claim about a charge still on
@@ -253,7 +256,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
         <View style={styles.head} testID="bill-detail-head">
           <MerchantAvatar title={subscription.title} category={subscription.category} size={48} />
           <View style={styles.headText}>
-            <ThemedText type="heading" accessibilityRole="header">{subscription.title}</ThemedText>
+            <ThemedText type="heading" accessibilityRole="header">{subscriptionLabel(subscription)}</ThemedText>
             <ThemedText type="meta" themeColor="textSecondary">
               {stopped
                 ? tf('stoppedLastCharged', { date: shortDate(subscription.lastChargedISO) })
@@ -354,7 +357,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
                     </ThemedText>
                   )}
                 </View>
-                <MerchantSpendingLink merchant={subscription.title} onClose={onClose} />
+                {!subscription.billIdentity && <MerchantSpendingLink merchant={subscription.title} onClose={onClose} />}
               </View>
             )}
           </>
@@ -370,7 +373,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
               {w.cancelledOn(shortDate(cancelledOn))}
             </ThemedText>
             <EButton palette={band} variant="secondary" label={w.stillPaying} testID="bill-detail-still-paying"
-              style={styles.inlineButton} onPress={() => setSubscriptionCancelled(subscription.title, null)} />
+              style={styles.inlineButton} onPress={() => setSubscriptionCancelled(subscriptionKey(subscription), null)} />
           </View>
         ) : (
           <EButton palette={band} variant="secondary" label={w.markCancelled} testID="bill-detail-mark-cancelled"
@@ -387,10 +390,10 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
             visible
             onClose={() => setConfirming(null)}
             question={t('notRecurringQ')}
-            body={tf('stopRecurringBody', { title: subscription.title })}
+            body={tf('stopRecurringBody', { title: subscriptionLabel(subscription) })}
             confirmLabel={t('notRecurring')}
             onConfirm={() => {
-              setNotSubscription(subscription.title, true);
+              setNotSubscription(subscriptionKey(subscription), true);
               onClose();
             }}
           />
@@ -399,10 +402,10 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
           <ConfirmSheet
             visible
             onClose={() => setConfirming(null)}
-            question={w.markCancelledQuestion(subscription.title)}
+            question={w.markCancelledQuestion(subscriptionLabel(subscription))}
             body={w.markCancelledBody}
             confirmLabel={w.markCancelled}
-            onConfirm={() => setSubscriptionCancelled(subscription.title, todayISO)}
+            onConfirm={() => setSubscriptionCancelled(subscriptionKey(subscription), todayISO)}
           />
         )}
       </BottomSheet>
@@ -446,7 +449,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
       <View style={styles.head} testID="bill-detail-head">
         <MerchantAvatar title={reminder.title} category={reminder.category} size={48} />
         <View style={styles.headText}>
-          <ThemedText type="heading" accessibilityRole="header">{reminder.title}</ThemedText>
+          <ThemedText type="heading" accessibilityRole="header">{subscriptionLabel({ title: reminder.title, billIdentity: reminder.importIdentity })}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary">
             {`${categoryLabel(getCategory(reminder.category))} · ${status}`}
           </ThemedText>

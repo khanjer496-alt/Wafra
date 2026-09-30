@@ -520,8 +520,8 @@ class BankNotificationListenerService : NotificationListenerService() {
       // example ADCB posts AED181.00). \s* already permits that; keep the
       // currency alternatives explicit so this remains only a cheap native
       // admission gate rather than a second transaction parser.
-      "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\\.إ|ر\\.س|درهم|ريال)\\s*[0-9]" +
-        "|[0-9]\\s*(?:د\\.إ|ر\\.س|درهم|ريال)",
+      "(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\\.إ|ر\\.س|درهم|ريال)[\\s\\u00A0\\u2007\\u202F\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]*[0-9\\u0660-\\u0669\\u06F0-\\u06F9]" +
+        "|[0-9\\u0660-\\u0669\\u06F0-\\u06F9][\\s\\u00A0\\u2007\\u202F\\u061C\\u200E\\u200F\\u202A-\\u202E\\u2066-\\u2069]*(?:د\\.إ|ر\\.س|درهم|ريال)",
       RegexOption.IGNORE_CASE
     )
 

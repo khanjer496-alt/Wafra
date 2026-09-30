@@ -58,7 +58,7 @@ export interface WidgetSnapshotInput {
   currency: string;
   exponent: number;
   now: Date;
-  upcoming: readonly { title: string; amountFils: number; dateISO: string; estimated?: boolean; overdue?: boolean; paid?: boolean }[];
+  upcoming: readonly { title: string; displayLabel?: string; amountFils: number; dateISO: string; estimated?: boolean; overdue?: boolean; paid?: boolean }[];
   /** The user turned widget amounts off entirely. */
   hideAmounts: boolean;
   language: 'en' | 'ar';
@@ -90,7 +90,7 @@ export function buildWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot 
       .sort((a, b) => a.dateISO.localeCompare(b.dateISO))
       .slice(0, 3)
       .map((item) => ({
-        title: item.title,
+        title: item.displayLabel ?? item.title,
         logoId: widgetLogoIdFor(item.title),
         amountMinor: money(item.amountFils),
         estimated: item.estimated ?? false,

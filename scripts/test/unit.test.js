@@ -875,8 +875,12 @@ const recon1 = bills.billsForMonth([dewaBill], dewaTx, new Date(2026, 6, 18))[0]
 ok('reconcile: imported DEWA debit marks bill paid', recon1.status === 'paid' && recon1.autoReconciled === true);
 const eandBill = { id: 'b-eand', title: 'E&', category: 'telecom', amountFils: 45045, dueDay: 15, importIdentity: 'account:1849', paidMonths: [] };
 const namedReceipt = [{ id: 'x-nazem', type: 'expense', amountFils: 45045, category: 'other', accountId: 'a', title: 'Nazemhome', date: '2026-08-03', source: 'sms', paymentFlowSide: 'receipt', billIdentity: 'consumer:1849' }];
-ok('reconcile: consumer receipt settles differently named provider account',
-  bills.billsForMonth([eandBill], namedReceipt, new Date(2026, 7, 14))[0].status === 'paid');
+ok('reconcile: a matching consumer tail does not prove an unknown nickname is the provider',
+  bills.billsForMonth([eandBill], namedReceipt, new Date(2026, 7, 14))[0].status !== 'paid');
+ok('reconcile: a user-confirmed provider alias supplies the missing payment evidence',
+  bills.billsForMonth([eandBill], require('./build/bill-alias').applyBillAliasToTransactions(
+    namedReceipt, 'Nazemhome', 'consumer:1849', { title: 'E&', category: 'telecom' },
+  ), new Date(2026, 7, 14))[0].status === 'paid');
 ok('reconcile: prior-month consumer receipt cannot settle current bill',
   bills.billsForMonth([eandBill], [{ ...namedReceipt[0], date: '2026-07-10' }], new Date(2026, 7, 14))[0].status !== 'paid');
 ok('reconcile: matching amount without bill identity cannot settle a differently named bill',

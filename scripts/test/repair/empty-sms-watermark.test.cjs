@@ -5,6 +5,12 @@ const path = require('node:path');
 const load = require('./load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
 const source = name => path.join(root, 'src/lib', `${name}.ts`);
+const reviewApi = require('../build/alert-review-tray.js');
+const reviewFixture = () => reviewApi.prepareUniversalReviewAlert({
+  id: 'watermark_review_fixture_1', sourceKey: 'watermark_review_source_1', observedAt: Date.now(), channel: 'inbox',
+  event: require('../build/launch-alert-parser.js').inspectGenericBankEventForReview(
+    'Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234'),
+});
 
 function harness(result = {}, initial = {}, options = {}) {
   // Steady state: this parser's recent-window re-read already completed.
@@ -39,7 +45,12 @@ function harness(result = {}, initial = {}, options = {}) {
           ...(batch.parserRereadComplete ? { parserVersion: 39 } : {}) };
         return { ids: [], durable: Promise.resolve().then(() => { events.push('durable'); }) };
       },
-      stageReviewAlerts: () => ({ admitted: 1, durable: Promise.resolve().then(() => { events.push('review-durable'); }) }),
+      stageReviewAlerts: items => {
+        const batch = reviewApi.admitPreparedReviewAlerts(current.reviewTray ?? reviewApi.emptyAlertReviewTray(), items, Date.now());
+        current = { ...current, reviewTray: batch.state };
+        return { admitted: batch.outcomes.filter(value => value === 'admitted').length,
+          durable: Promise.resolve().then(() => { events.push('review-durable'); }) };
+      },
       ensureDurable: async () => {
         events.push('flush');
         if (options.failFlush) throw Error('synthetic pending ledger save failed');
@@ -81,7 +92,7 @@ test('a real ignored or declined message at the exact next millisecond still adv
 
 test('a review-only inbox page stages review before advancing the cursor and acknowledging', async () => {
   const h = harness({ inboxScannedCount: 1, scannedCount: 1, newestTs: 1200,
-    reviewCandidates: [{ id: 'synthetic-review' }] });
+    reviewCandidates: [reviewFixture()] });
   await h.executor.execute('routine');
   assert.equal(h.getState().lastScanTs, 1200);
   assert.deepEqual(h.events, ['review-durable', 'save', 'durable', 'commit']);

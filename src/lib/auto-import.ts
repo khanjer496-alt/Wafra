@@ -18,6 +18,7 @@ import {
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
+import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import {
   nonPostingReason,
@@ -45,7 +46,7 @@ import {
 } from '@/lib/trusted-bank-notification-packages';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
-import { parsedTransactionReviewEvent } from '@/lib/parsed-review-event';
+import { parsedObligationReviewEvent, parsedTransactionReviewEvent } from '@/lib/parsed-review-event';
 import {
   detectLaunchMarketFromAlert,
   detectLaunchMarketFromSender,
@@ -379,6 +380,8 @@ export interface ScanInboxOptions {
   pageSize?: number;
   /** Exact old source hashes currently retained by the authoritative ledger/tray. */
   legacyReviewSourceKeys?: readonly string[];
+  /** Existing Review claims. The executor must flush and guard their generation before ACK. */
+  knownReviewSourceKeys?: readonly string[];
   /**
    * Bound bank-app queue work for short headless Android wakes. Foreground
    * drains omit this and keep the existing "read every retained row" behavior.
@@ -431,7 +434,11 @@ export interface ScanResult {
   /** Strong launch-pack evidence observed while parsing this scan. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
   /** Retire native notification rows only after ledger/review durability. */
-  commit: () => Promise<void>;
+  commit: (deferredReviewSourceKeys?: readonly string[]) => Promise<void>;
+  /** The bounded collector omitted inbox reviews; do not advance their cursor. */
+  deferredInboxReviews?: boolean;
+  /** Inbox outcomes omitted using current Review claims; revalidate before cursor completion. */
+  skippedKnownInboxReviewSourceKeys?: readonly string[];
   /** Queue ACK requires a flush even when every candidate deduplicated. */
   requiresDurableCommit?: boolean;
   /**
@@ -690,7 +697,7 @@ export function parsedFinancialCandidateReview(
   parsed: Omit<ParsedSms, 'raw'>,
   observedAt: number,
 ): SourceFreeReviewCandidate | null {
-  const event = parsedTransactionReviewEvent(parsed);
+  const event = parsedTransactionReviewEvent(parsed) ?? parsedObligationReviewEvent(parsed);
   if (!event) return null;
   const prepared = prepareUniversalReviewAlert({
     id: 'capture_probe_id_0001',
@@ -968,6 +975,7 @@ export async function scanInbox(
     sourceEventId?: string;
   })[] = [];
   const reviewCandidates: ReviewEntry[] = [];
+  let deferredInboxReviews = false;
   const reviewSourceBindings: ReviewSourceBinding[] = [];
   const requestedLegacySources = new Set((options.legacyReviewSourceKeys ?? [])
     .filter((value) => /^arc1_[0-9a-f]{64}$/.test(value)));
@@ -987,6 +995,8 @@ export async function scanInbox(
     });
   };
   const reviewSourceKeys = new Set<string>();
+  const knownReviewSourceKeys = new Set((options.knownReviewSourceKeys ?? []).map(key => canonicalCaptureSourceKey(key)));
+  const skippedKnownInboxReviewSourceKeys = new Set<string>();
   const reviewDiscoveredAt = Date.now();
   let databaseKeyPromise: Promise<string | null> | null = null;
   const databaseKey = (): Promise<string | null> => {
@@ -1020,6 +1030,9 @@ export async function scanInbox(
     return { promotionsSkipped, oldestInboxDateMs, recentFound };
   };
   const notificationIds = new Set<string>();
+  // Native IDs name observations; several observations can resolve to one
+  // Review source. Only ACK those whose source survives the bounded collector.
+  const notificationReviewSources = new Map<string, string>();
   let notificationImportStats: AndroidNotificationImportDiagnostics | null = null;
   const launchSession = createLaunchAlertSession({ overrides, regionHint });
   const inspectWorldwide = launchSession.inspect;
@@ -1045,6 +1058,7 @@ export async function scanInbox(
     skipUniversalFallback = false,
     /** Only for alerts NO parser read (`!p`); never for a parsed row under review. */
     aiEligible = false,
+    notificationId?: string,
   ): Promise<SourceFreeRefusedAlertDecision> => {
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
@@ -1111,6 +1125,11 @@ export async function scanInbox(
       // Keep event time and its stable identity; only review retention moves.
       expiresAt: Math.max(identified.expiresAt, reviewDiscoveredAt + REVIEW_ALERT_TTL_MS),
     };
+    if (notificationId) notificationReviewSources.set(notificationId, sourceIdentity.sourceKey);
+    if (knownReviewSourceKeys.has(canonicalCaptureSourceKey(sourceIdentity.sourceKey, ts))) {
+      if (channel !== 'push') skippedKnownInboxReviewSourceKeys.add(canonicalCaptureSourceKey(sourceIdentity.sourceKey, ts));
+      return decision;
+    }
     if (reviewSourceKeys.has(sourceIdentity.sourceKey)) return decision;
     reviewSourceKeys.add(sourceIdentity.sourceKey);
     if (isUniversalReviewAlert(reviewPrepared) && eligibleLocalReviewEvent(reviewPrepared.event)) {
@@ -1133,7 +1152,8 @@ export async function scanInbox(
     // first—so a full inbox cannot crowd out a fresh bank-app alert.
     reviewCandidates.sort((a, b) => a.observedAt - b.observedAt);
     if (reviewCandidates.length > MAX_REVIEW_CANDIDATES) {
-      reviewCandidates.splice(0, reviewCandidates.length - MAX_REVIEW_CANDIDATES);
+      const omitted = reviewCandidates.splice(0, reviewCandidates.length - MAX_REVIEW_CANDIDATES);
+      if (omitted.some(item => item.channel !== 'push')) deferredInboxReviews = true;
     }
     return decision;
   };
@@ -1660,6 +1680,7 @@ export async function scanInbox(
           ? await inspectRefused(
               source, n.ts, sender, 'push', worldwide, undefined, pushSource,
               reviewFallback, skipKnownLaunchUniversal,
+              false, n.id,
             )
           : null;
         const reviewed = refusal?.kind === 'review';
@@ -1686,6 +1707,7 @@ export async function scanInbox(
             reviewFallback,
             skipKnownLaunchUniversal,
             true,
+            n.id,
           );
         }
         if (refusal?.kind === 'review') {
@@ -1719,7 +1741,6 @@ export async function scanInbox(
         }
       }
       if (notificationImportStats) {
-        notificationImportStats.acknowledgementPlanned = notificationIds.size;
         latestAndroidNotificationImportDiagnostics = { ...notificationImportStats };
       }
       onProgress?.(scannedCount, parsed.length, progressDetail());
@@ -1732,10 +1753,20 @@ export async function scanInbox(
   // Oldest-first so account auto-creation sees the earliest occurrence first.
   parsed.sort((a, b) => a.smsTs - b.smsTs);
   reviewCandidates.sort((a, b) => a.observedAt - b.observedAt);
+  const retainedReviewSources = new Set(reviewCandidates.map(item => item.sourceKey));
+  for (const [id, sourceKey] of notificationReviewSources) {
+    if (!retainedReviewSources.has(sourceKey) && !knownReviewSourceKeys.has(sourceKey)) notificationIds.delete(id);
+  }
+  if (notificationImportStats) {
+    notificationImportStats.acknowledgementPlanned = notificationIds.size;
+    latestAndroidNotificationImportDiagnostics = { ...notificationImportStats };
+  }
   captureTrace('inbox:done', scannedCount, tracing ? Date.now() - traceStarted : 0, pagesRead);
   return {
     parsed,
     reviewCandidates,
+    deferredInboxReviews,
+    skippedKnownInboxReviewSourceKeys: [...skippedKnownInboxReviewSourceKeys],
     reviewSourceBindings,
     declined,
     newestTs,
@@ -1747,14 +1778,17 @@ export async function scanInbox(
     requiresDurableCommit: notificationIds.size > 0,
     promotionsSkipped,
     commit: notificationIds.size > 0 && notificationReader
-      ? async () => {
-          const acknowledged = await notificationReader.ackCaptured([...notificationIds]);
+      ? async (deferredReviewSourceKeys = []) => {
+          const deferredSources = new Set(deferredReviewSourceKeys);
+          const ids = [...notificationIds].filter(id => !deferredSources.has(notificationReviewSources.get(id) ?? ''));
+          if (ids.length === 0) return;
+          const acknowledged = await notificationReader.ackCaptured(ids);
           if (!acknowledged) throw new Error('Notification capture acknowledgement failed');
           if (notificationImportStats &&
               latestAndroidNotificationImportDiagnostics?.attemptedAt === notificationImportStats.attemptedAt) {
             latestAndroidNotificationImportDiagnostics = {
               ...latestAndroidNotificationImportDiagnostics,
-              acknowledged: notificationIds.size,
+              acknowledged: ids.length,
             };
           }
         }

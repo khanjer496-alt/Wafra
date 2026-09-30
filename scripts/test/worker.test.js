@@ -167,7 +167,7 @@ function makeDb(transformSchema = (sql) => sql, applyMigrations = true) {
 
 const ALL_TABLES = [
   'vaults', 'devices', 'automation_generations', 'device_invites', 'queue',
-  'push_registrations', 'ingest_receipts', 'ingest_limits', 'pair_limits',
+  'push_registrations', 'ingest_receipts', 'statement_import_bindings', 'ingest_limits', 'pair_limits',
   'cost_limits', 'admin_deletion_receipts', 'feedback', 'feedback_limits',
 ];
 
@@ -2035,8 +2035,9 @@ const CARD_PAYMENT_DEBIT =
     }
   }
 
-  // The old 72-hour receipt must not block a repaired reading of the same
-  // statement. Only delivery eligibility changes; file and row IDs must not.
+  // An old delivery receipt proves delivery, not the original interpretation.
+  // A parser revision cannot bypass it while its facts are unverified. Once
+  // those receipts expire, a fresh bound reading retains the stable file ID.
   for (const format of ['pdf', 'csv']) {
     const env = { DB: makeDb() };
     const me = await pairDevice(env);
@@ -2056,9 +2057,19 @@ const CARD_PAYMENT_DEBIT =
     const send = () => call(env, 'POST', `/v1/import/${format}`, {
       token: me.adminToken, headers: { 'content-type': format === 'pdf' ? 'application/pdf' : 'text/csv' }, body: statement,
     });
+    const refused = await send(); const refusal = await refused.json();
+    ok(`${format} upgrade: unbound older delivery revisions require an explicit refusal`,
+      refused.status === 409 && refusal.error === 'statement_options_conflict');
+    ok(`${format} upgrade: refusal queues no guessed correction or newly inferred range`,
+      (await drainOpened(env, me)).length === 0 && refusal.coverage === undefined &&
+      env.DB.handle.prepare('SELECT COUNT(*) AS n FROM statement_import_bindings WHERE device_id = ?').get(me.deviceId).n === 0);
+    const stillRefused = await send();
+    ok(`${format} upgrade: retry cannot bypass the live legacy receipt`,
+      stillRefused.status === 409 && (await drainOpened(env, me)).length === 0);
+    env.DB.handle.prepare('UPDATE ingest_receipts SET expires_at = unixepoch() - 1 WHERE device_id = ?').run(me.deviceId);
     const response = await send(); const outcome = await response.json();
     const rows = await drainOpened(env, me);
-    ok(`${format} upgrade: old delivery receipts do not block corrected rows`,
+    ok(`${format} upgrade: receipt expiry allows a fresh bound reading`,
       response.status === 202 && outcome.alreadyProcessed === false && rows.length === 2);
     const idBytes = new Uint8Array(await webcrypto.subtle.digest('SHA-256', enc.encode(`statement-file:${baseKey}`)));
     const stableId = [...idBytes.slice(0, 16)].map(byte => byte.toString(16).padStart(2, '0')).join('');
@@ -2075,7 +2086,10 @@ const CARD_PAYMENT_DEBIT =
       const save = (plan, state) => applyMaterializedImportBatch(state,
         materializeImportBatch(plan.batch, state, prefix => `${format}-${prefix}-${++sequence}`));
       const original = save(importOnPhone(rows, fresh), fresh);
-      const old = { ...original, transactions: original.transactions.map(row => row.amountFils === 12345
+      // That older parser did not persist ordinal identity. Keeping the new
+      // ordinal while changing money semantics would correctly be a conflict,
+      // not evidence for an automatic legacy repair.
+      const old = { ...original, transactions: original.transactions.map(({ statementRowIndex: _position, ...row }) => row.amountFils === 12345
         ? { ...row, title: 'TO 4111 1111 1111 1111', isTransfer: false, cardPaymentSide: undefined } : row) };
       const repair = importOnPhone(rows, old); const repaired = save(repair, old);
       const payment = repaired.transactions.find(row => row.amountFils === 12345);
@@ -2084,7 +2098,16 @@ const CARD_PAYMENT_DEBIT =
       ok(`${format} upgrade: transaction IDs and source keys remain stable`,
         repaired.transactions.every(row => original.transactions.some(prior => prior.id === row.id && prior.smsKey === row.smsKey)));
       const protectedState = { ...old, transactions: old.transactions.map(row => ({ ...row, userEdited: true })) };
-      ok(`${format} upgrade: manual corrections remain protected`, importOnPhone(rows, protectedState).batch.updates.length === 0);
+      const protectedPlan = importOnPhone(rows, protectedState);
+      const afterProtected = save(protectedPlan, protectedState);
+      const financialFields = ['id', 'smsKey', 'type', 'amountFils', 'date', 'title', 'category', 'accountId',
+        'isTransfer', 'cardPaymentSide', 'note', 'splits', 'originalCurrency', 'originalMinorUnits', 'fxRate'];
+      ok(`${format} upgrade: manual corrections remain protected while provenance may be enriched`,
+        protectedPlan.txCount === 0 && afterProtected.transactions.length === protectedState.transactions.length &&
+        afterProtected.transactions.every(row => {
+          const prior = protectedState.transactions.find(item => item.id === row.id);
+          return prior && row.userEdited === true && financialFields.every(field => JSON.stringify(row[field]) === JSON.stringify(prior[field]));
+        }));
     }
     const repeat = await send();
     ok(`${format} upgrade: the corrected revision is still idempotent`,

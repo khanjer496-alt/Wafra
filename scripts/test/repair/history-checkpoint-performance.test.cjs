@@ -33,13 +33,14 @@ function harness() {
     return id === '@/lib/transfer-reconciliation' ? counted : require('../build/' + id.slice(6));
   } });
   const store = ts.createSourceFile('store.tsx', read('store.tsx'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const names = ['reducer', 'reduceState', 'actionMayChangeTransferLinks', 'transactionNeedsTransferNormalization'];
+  const names = ['reducer', 'reduceState', 'reconcileBillPaymentClaims', 'reconcileCardSettlementClaims', 'actionMayChangeTransferLinks', 'transactionNeedsTransferNormalization'];
   const functions = names.map(name => {
     const node = store.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
     assert.ok(node, `shipping ${name} must exist`); return node.getText(store);
   }).join('\n');
   const { reducer } = evaluate(functions + '\nexports.reducer = reducer;', {
     ...counted, ...imports,
+    isSpending: require('../build/ledger').isSpending,
     // UI preference and currency side effects do not participate in matching.
     captureMarketContext: () => () => {}, getMonthStartDay: () => 1,
     getThemePreference: () => 'light', getLanguage: () => 'en',

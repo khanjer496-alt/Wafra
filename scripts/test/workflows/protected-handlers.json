@@ -56,7 +56,8 @@
     {
       "file": "src/app/settings-data.tsx",
       "name": "restoreFromFile",
-      "sha256": "a3b2472edccb72ea39f1688c81283e0c23c45760ee96cf20d19f1f2cae772886"
+      "sha256": "92597acdfa285c2696cf41e763751a2834e0dfe4f5a41bf6249d21a06b45eae1",
+      "reviewedChange": "2026-09-30: Reviewed browser backup fix reads the selected local File, retains explicit replacement confirmation and backup validation, and displays read/validation errors inline on web. Native file ownership and cleanup remain unchanged. Source tests and fresh light/dark download-restore-reload regressions verify success and invalid-file preservation."
     },
     {
       "file": "src/app/settings-data.tsx",

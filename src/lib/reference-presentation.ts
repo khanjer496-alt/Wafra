@@ -88,6 +88,8 @@ export type PaymentGroup = 'subscriptions' | 'utilities' | 'cards' | 'loans' | '
 export interface PaymentAgendaItem {
   id: string;
   title: string;
+  /** Service discriminator for visible text; title remains the merchant logo key. */
+  displayLabel?: string;
   category: CategoryId;
   kind: 'card' | 'bill' | 'recurring';
   /** Exact account when this obligation belongs to one (for example a card due). */

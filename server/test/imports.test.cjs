@@ -74,6 +74,34 @@ function wideTextPdf(lines) {
   return new Uint8Array(Buffer.from(pdf, 'binary'));
 }
 
+/** Actual multipage PDFs exercise extraction order and page text coverage. */
+function pagedPdf(pages) {
+  const objects = ['', '', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];
+  const kids = [];
+  for (const lines of pages) {
+    const pageId = objects.length + 1;
+    const streamId = pageId + 1;
+    kids.push(`${pageId} 0 R`);
+    const stream = `BT /F1 12 Tf 50 750 Td ${lines.map((line, index) =>
+      `${index ? '0 -20 Td ' : ''}(${line.replace(/([()\\])/g, '\\$1')}) Tj`).join(' ')} ET`;
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${streamId} 0 R >>`);
+    objects.push(`<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`);
+  }
+  objects[0] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objects[1] = `<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${kids.length} >>`;
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(pdf, 'binary'));
+}
+
 (async () => {
   const html = '<html><head><style>.x{}</style></head><body><p>Purchase of AED&nbsp;40.00</p>' +
     '<script>steal()</script><div>at &amp; Other</div></body></html>';
@@ -555,9 +583,9 @@ function wideTextPdf(lines) {
     '25/07/2026,Day first,11.00,',
     '07/25/2026,Month first,10.00,',
   ].join('\n'), 'AED');
-  ok('contradictory evidence keeps DD/MM and rejects the row that cannot be read that way',
-    contradictoryCsv.rows.length === 1 && contradictoryCsv.rows[0].date === '2026-07-25' &&
-      contradictoryCsv.rejectedRows === 1);
+  ok('contradictory date conventions retain only individually unambiguous dates',
+    contradictoryCsv.rows.length === 2 && contradictoryCsv.rows.every(row => row.date === '2026-07-25') &&
+      contradictoryCsv.rejectedRows === 0);
   const namedMonthCsv = parseStatementCsv([
     'Date,Description,Debit,Credit',
     '03-Apr-2026,Dashed,10.00,',
@@ -1448,6 +1476,136 @@ function wideTextPdf(lines) {
   ok('named months read in CSV date cells',
     namedCsv.rows.length === 2 && namedCsv.rows[0].date === '2026-03-03' && namedCsv.rows[1].date === '2026-03-04',
     JSON.stringify(namedCsv.rows.map((row) => row.date)));
+
+
+  // Accuracy audit: malformed evidence is never an empty cell or a guessed value.
+  const auditCsv = (rows, header = 'Date,Description,Debit,Credit') =>
+    parseStatementCsv([header, ...rows].join('\n'), 'AED');
+  for (const bad of ['garbage', 'USD 5.00', '-5.00', '1.2345']) {
+    const result = auditCsv([`2026-09-01,SHOP,10.00,${bad}`]);
+    ok(`invalid opposite CSV money cell refuses whole row: ${bad}`, result.rows.length === 0 && result.rejectedRows === 1);
+  }
+  const summaryCsv = auditCsv([
+    '2026-09-01,Opening balance,,1000.00',
+    '2026-09-01,SHOP,10.00,',
+    '2026-09-02,Closing balance,,990.00',
+    '2026-09-02,Total debits,10.00,',
+    '2026-09-02,TOTAL ENERGIES FUEL,50.00,',
+  ]);
+  ok('CSV account summaries never create income or duplicate expenses', summaryCsv.rows.length === 2 && summaryCsv.totalRows === 2 && summaryCsv.rejectedRows === 0);
+  const mixedDateAudit = auditCsv([
+    '25/09/2026,DAY FIRST,10.00,', '09/26/2026,MONTH FIRST,10.00,', '03/04/2026,AMBIGUOUS,10.00,',
+  ]);
+  ok('contradictory date evidence never silently chooses a country for ambiguous rows',
+    mixedDateAudit.rows.length === 2 && mixedDateAudit.ambiguousDateRows === 1 && mixedDateAudit.rejectedRows === 1);
+  for (const money of ['+-10.00', '-+10.00', '(+10.00)', 'AED -+10.00']) {
+    const result = auditCsv([`2026-09-01,SHOP,${money}`], 'Date,Description,Amount');
+    ok(`contradictory CSV signs are rejected: ${money}`, result.rows.length === 0 && result.rejectedRows === 1);
+  }
+  const foreignJoined = parseStatementLines('2026-09-01 SHOP USD10.00 DR', 'AED');
+  ok('attached foreign currency in PDF is never converted to ledger currency', foreignJoined.rows.length === 0 && foreignJoined.rejectedRows === 1);
+  const localJoined = parseStatementLines('2026-09-01 SHOP AED10.00 DR', 'AED');
+  ok('attached matching currency remains exact', localJoined.rows[0]?.amountFils === 1000);
+  let multiRejected = false;
+  try { parseStatementLines('Account Number XXXX1234\n2026-09-01 SHOP 10.00 DR\nAccount Number XXXX5678\n2026-09-02 SHOP 20.00 DR', 'AED'); }
+  catch (error) { multiRejected = error.message === 'multiple_statement_accounts'; }
+  ok('multi-account PDF refuses instead of assigning all sections to the first account', multiRejected);
+  const repeatedAccount = parseStatementLines('Account Number XXXX1234\n2026-09-01 SHOP 10.00 DR\nAccount Number XXXX1234\n2026-09-02 SHOP 20.00 DR', 'AED');
+  ok('repeated same-account page headers remain supported', repeatedAccount.rows.length === 2 && repeatedAccount.rows.every(row => row.card?.last4 === '1234'));
+  const longAudit = parseStatementLines(`2026-09-01 ${'A'.repeat(410)} 10.00 DR\n2026-09-02 SHOP 5.00 DR`, 'AED');
+  ok('overlong transaction lines are counted as rejected instead of complete coverage', longAudit.rows.length === 1 && longAudit.totalRows === 2 && longAudit.rejectedRows === 1);
+  const arabicAudit = parseStatementLines('٢٠٢٦-٠٩-٠١ SHOP ١٠٫٠٠ DR', 'AED');
+  ok('Arabic digits on PDF dates and amounts are normalized before row recognition', arabicAudit.rows[0]?.date === '2026-09-01' && arabicAudit.rows[0]?.amountFils === 1000);
+
+
+  let multiPageError = '';
+  try { await extractPdfStatementRows(pagedPdf([
+    ['Account Number XXXX1234', '2026-09-01 SHOP 10.00 DR'],
+    ['Account Number XXXX5678', '2026-09-02 SHOP 20.00 DR'],
+  ]), 'AED'); } catch (error) { multiPageError = error.message; }
+  ok('actual multipage PDF refuses mixed source accounts', multiPageError === 'multiple_statement_accounts');
+  const repeatedPages = await extractPdfStatementRows(pagedPdf([
+    ['Account Number XXXX1234', '2026-09-01 SHOP 10.00 DR'],
+    ['Account Number XXXX1234', '2026-09-02 SHOP 20.00 DR'],
+  ]), 'AED');
+  ok('actual multipage PDF preserves repeated same-account pages', repeatedPages.pages === 2 && repeatedPages.rows.length === 2 && repeatedPages.completeRowAccounting === true);
+  const blankPage = await extractPdfStatementRows(pagedPdf([
+    ['2026-09-01 SHOP 10.00 DR'], [],
+  ]), 'AED');
+  ok('a page with no extractable text cannot prove complete PDF coverage', blankPage.rows.length === 1 && blankPage.completeRowAccounting === false);
+  const unsupportedDateRow = parseStatementLines('01/09 SHOP 10.00 DR\n2026-09-02 SHOP 20.00 DR', 'AED');
+  ok('unsupported yearless transaction date is counted rather than silently covered', unsupportedDateRow.rows.length === 1 && unsupportedDateRow.rejectedRows === 1);
+  let duplicateColumnsError = '';
+  try { auditCsv(['2026-09-01,SHOP,10.00,500.00,'], 'Date,Description,Debit,Debit,Credit'); }
+  catch (error) { duplicateColumnsError = error.message; }
+  ok('duplicate financial columns cannot silently choose one amount', duplicateColumnsError === 'unsupported_statement_format');
+  let changedColumnsError = '';
+  try { auditCsv(['2026-09-01,SHOP,10.00,', 'Date,Description,Credit,Debit', '2026-09-02,SHOP,20.00,']); }
+  catch (error) { changedColumnsError = error.message; }
+  ok('changed CSV column order cannot invert later sections', changedColumnsError === 'unsupported_statement_format');
+  const sameHeader = auditCsv(['2026-09-01,SHOP,10.00,', 'Date,Description,Debit,Credit', '2026-09-02,SHOP,20.00,']);
+  ok('repeated identical CSV page headings are not missing transactions', sameHeader.rows.length === 2 && sameHeader.rejectedRows === 0 && sameHeader.totalRows === 2);
+
+
+  const creditBalances = parseStatementLines([
+    'Date Description Debit Credit Balance',
+    ...Array.from({length: 6}, (_,index) => `2026-09-0${index+1} SHOP 10.00 ${100-index*10}.00 CR`),
+  ].join('\n'), 'AED');
+  ok('credit balance suffix never turns balance-decreasing purchases into income',
+    creditBalances.rows.length === 5 && creditBalances.rows.every(row => row.type === 'expense' && row.amountFils === 1000) && creditBalances.rejectedRows === 1);
+  const debitBalances = parseStatementLines([
+    'Date Description Debit Credit Balance',
+    ...Array.from({length: 6}, (_,index) => `2026-09-0${index+1} SHOP 10.00 ${100-index*10}.00 DR`),
+  ].join('\n'), 'AED');
+  ok('ambiguous debit balance versus transaction labels are refused', debitBalances.rows.length === 0 && debitBalances.rejectedRows === 6);
+
+
+  const changedPdfColumns = parseStatementLines([
+    'Date Description Debit Credit Balance', '2026-09-01 SHOP 10.00 - 990.00',
+    'Date Description Credit Debit Balance', '2026-09-02 SALARY 20.00 - 1010.00',
+    '2026-09-03 SHOP 5.00 DR',
+  ].join('\n'), 'AED');
+  ok('mixed PDF column layouts cannot invert later sections', changedPdfColumns.rows.length === 1 && changedPdfColumns.rows[0].amountFils === 500 && changedPdfColumns.rejectedRows === 2);
+  const integerRejected = parseStatementLines('2026-09-01 SHOP 100', 'JPY');
+  ok('unresolved integer-money rows in zero-decimal statements are counted', integerRejected.rows.length === 0 && integerRejected.rejectedRows === 1);
+
+
+  for (const kind of ['CSV', 'PDF']) {
+    let currencyError = '';
+    try {
+      if (kind === 'CSV') parseStatementCsv('Account currency:,USD\nDate,Description,Debit,Credit\n2026-09-01,SHOP,10.00,', 'AED');
+      else parseStatementLines('Statement currency: USD\n2026-09-01 SHOP 10.00 DR', 'AED');
+    } catch (error) { currencyError = error.message; }
+    ok(`explicit ${kind} metadata currency cannot be relabelled to ledger currency`, currencyError === 'statement_currency_mismatch');
+  }
+  const metadataCurrencyMatches = parseStatementCsv('Account currency:,AED\nDate,Description,Debit,Credit\n2026-09-01,SHOP,10.00,', 'AED');
+  ok('matching metadata currency remains importable', metadataCurrencyMatches.rows[0]?.amountFils === 1000);
+  const shortAccountPages = 'Account: XXXX1234\n2026-09-01 SHOP 10.00 DR\nAccount: XXXX5678\n2026-09-02 SHOP 20.00 DR';
+  let shortAccountError = '';
+  try { parseStatementLines(shortAccountPages, 'AED'); } catch (error) { shortAccountError = error.message; }
+  ok('short labelled multi-account sections cannot inherit first account', shortAccountError === 'multiple_statement_accounts');
+
+
+  for (const label of ['Currency:USD', 'Account currency=USD', 'Statement currency-USD', 'Currency USD']) {
+    let metadataError = '';
+    try { parseStatementLines(`${label}\n2026-09-01 SHOP 10.00 DR`, 'AED'); }
+    catch (error) { metadataError = error.message; }
+    ok(`compact metadata currency rejects mismatched denomination: ${label}`, metadataError === 'statement_currency_mismatch');
+  }
+
+
+  for (const status of ['Pending','Declined','Cancelled','Unknown','']) {
+    const result=auditCsv([`2026-09-01,CAFE,25.00,,${status}`],'Date,Description,Debit,Credit,Status');
+    ok(`explicit non-posted CSV status cannot create ledger money: ${status || 'blank'}`,result.rows.length===0 && result.rejectedRows===1);
+  }
+  const postedStatuses=auditCsv(['Posted','Completed','Cleared','Settled'].map(status=>`2026-09-01,CAFE,25.00,,${status}`),'Date,Description,Debit,Credit,Transaction Status');
+  ok('explicit completed CSV statuses remain importable',postedStatuses.rows.length===4 && postedStatuses.rejectedRows===0);
+  const pendingMerchant=auditCsv(['2026-09-01,Pending Cafe,25.00,']);
+  ok('merchant names never stand in for posting status',pendingMerchant.rows.length===1);
+  for (const amount of ['USD10.00','USD 10.00']) {
+    const result=parseStatementLines(`Date Description Amount Balance\n2026-09-01 SHOP ${amount} 100.00 DR`,'AED');
+    ok(`explicit balance column is not a local posted amount after ${amount}`,result.rows.length===0 && result.rejectedRows===1);
+  }
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

@@ -132,7 +132,7 @@ export const PaymentAgenda = React.memo(function PaymentAgenda({ items, accounts
         const dateChipColor = isOverdue ? theme.expense : isToday ? theme.warning : theme.textSecondary;
         const cardAccount = item.kind === 'card' && item.accountId ? accountById.get(item.accountId) : undefined;
         return <Pressable key={item.id} accessibilityRole="button"
-          accessibilityLabel={`${item.title}. ${date}. ${w[section.key]}. ${item.estimated ? w.estimate : ''} ${moneyLabel(item.amountFils)}`}
+          accessibilityLabel={`${item.displayLabel ?? item.title}. ${date}. ${w[section.key]}. ${item.estimated ? w.estimate : ''} ${moneyLabel(item.amountFils)}`}
           onPress={() => onOpen(item)} style={({ pressed }) => [styles.row,
             { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
           {cardAccount
@@ -140,7 +140,7 @@ export const PaymentAgenda = React.memo(function PaymentAgenda({ items, accounts
             : <MerchantAvatar title={item.title} category={item.category} size={36} />}
           <View style={styles.content}>
             <View style={[styles.top, large && styles.stack]}>
-              <ThemedText type="smallBold" style={styles.grow}>{item.title}</ThemedText>
+              <ThemedText type="smallBold" style={styles.grow}>{item.displayLabel ?? item.title}</ThemedText>
               <Money fils={item.amountFils} type="smallBold" color={isOverdue ? theme.expense : theme.text} />
             </View>
             <View style={styles.metaRow}>

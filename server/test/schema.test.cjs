@@ -154,7 +154,7 @@ ok('email and PDF rows cross the same raw-discard boundary',
   /\.\.\.withoutRaw\(parsedRows\[index\]\)[\s\S]{0,160}captureSource: 'email'/.test(worker) &&
     /\.\.\.withoutRaw\(extracted\.rows\[index\]\)/.test(worker));
 ok('PDF endpoint never returns extracted rows or text',
-  /return json\(\{\s*acceptedRows: extracted\.rows\.length,\s*rejectedRows: extracted\.rejectedRows,\s*totalRows: extracted\.totalRows,\s*pages: extracted\.pages,[\s\S]{0,320}coverage: extracted\.completeRowAccounting/.test(worker) &&
+  /return json\(\{\s*acceptedRows: extracted\.rows\.length,\s*rejectedRows: extracted\.rejectedRows,\s*totalRows: extracted\.totalRows,\s*pages: extracted\.pages,[\s\S]{0,600}coverage: interpretation !== 'legacy' && extracted\.completeRowAccounting/.test(worker) &&
     !/return json\(\{[\s\S]{0,220}\brows\s*:/.test(worker.slice(worker.indexOf("url.pathname === '/v1/import/pdf'"))));
 ok('import module has no persistence or logging surface',
   !/(console\.|D1|R2|writeFile|put\(|INSERT INTO)/.test(imports));
@@ -178,7 +178,8 @@ ok('direct CSV upload requires admin scope, an allowed media type, and a byte ca
   /url\.pathname === '\/v1\/import\/csv'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker) &&
   /CSV_CONTENT_TYPES\.has\(contentType\)/.test(worker) &&
   /readBytes\(req, MAX_CSV_BYTES\)/.test(worker) &&
-  /wake\.size === 0 && await queueIsFull\(env, device\.id\)/.test(worker));
+  /delivery\.remainingDeliveries > 0/.test(worker.slice(worker.indexOf("url.pathname === '/v1/import/csv'"))) &&
+  /remainingRows: delivery\.remainingRows/.test(worker));
 ok('cloud imports have request, fan-out, and emergency-disable cost guards',
   /const STATEMENT_IMPORTS_PER_HOUR = 12/.test(worker) &&
     /GLOBAL_STATEMENT_IMPORTS_PER_HOUR = 1_000/.test(worker) &&
