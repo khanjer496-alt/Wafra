@@ -3,11 +3,7 @@ import { isCaptureTimestamp } from './ios-capture-health';
 
 export const IOS_APPLE_PAY_SHORTCUT_NAME = 'Wafra Apple Pay v1';
 
-export function iosSupportsApplePayAutomation(version: unknown): boolean {
-  if (typeof version === 'number') return Number.isFinite(version) && version >= 17;
-  if (typeof version !== 'string' || !/^\d+(?:\.\d+)*$/.test(version)) return false;
-  return Number(version.split('.')[0]) >= 17;
-}
+export { iosSupportsApplePayAutomation } from './ios-setup-availability';
 
 export function iosApplePayCheckUrl(fromOnboarding: boolean): string {
   const callback = (result: string) => encodeURIComponent(
@@ -44,10 +40,10 @@ export function resolveApplePaySetupState(
 
 const COPY = {
   en: {
-    title: 'Apple Pay purchases', subtitle: 'iOS 17 or later · Shortcuts setup',
+    title: 'Apple Pay purchases', subtitle: 'Wafra Apple Pay setup · iOS 27 or later',
     intro: 'Capture new card taps with Apple Pay. Each supported purchase goes to Review, where you choose the account before adding it.',
     scope: 'This covers positive purchase amounts. It does not import Wallet history, refunds, card identity or payment status. No bank selection is needed here.',
-    unsupported: 'Apple Pay transaction automations need iOS 17 or later. You can use bank SMS or import a statement instead.',
+    unsupported: 'Wafra Apple Pay setup is available on iOS 27 or later. Use regular bank-message setup on earlier versions.',
     checking: 'Checking Apple Pay capture support…', update: 'Update Wafra to a build with Apple Pay capture before continuing.',
     enable: 'Enable capture on this iPhone', inactive: 'Capture access is inactive. Check your Wafra access before continuing.',
     addTitle: '1. Add the Shortcut',
@@ -59,8 +55,8 @@ const COPY = {
     waitingCheck: 'No Apple Pay permission check received yet. Run the check, then return here.',
     automationTitle: '3. Choose the card in Shortcuts',
     automationSteps: [
-      'Open Shortcuts → Automation → + → Transaction. Choose the card you use with Apple Pay.',
-      'Choose Run Immediately. Add Run Shortcut and select Wafra Apple Pay v1. Pass Shortcut Input to the shortcut.',
+      'Open Wafra Apple Pay v1 in the Shortcuts editor. In its Automation section, add a Transaction trigger.',
+      'Choose the Wallet card you use with Apple Pay and Run Immediately. Keep Amount and Merchant bound to Shortcut Input in the existing actions.',
       'Save the automation, then return here to confirm. Repeat for another card if needed.',
     ],
     confirm: 'I saved the Apple Pay automation', confirmed: 'Automation confirmed by you',
@@ -83,10 +79,10 @@ const COPY = {
     privacy: 'Only the amount, currency and merchant passed by your automation are saved on this iPhone. Wafra cannot inspect or create the card automation for you. Manage it in Shortcuts.',
   },
   ar: {
-    title: 'مشتريات Apple Pay', subtitle: 'iOS 17 أو أحدث · إعداد الاختصارات',
+    title: 'مشتريات Apple Pay', subtitle: 'إعداد Apple Pay في وفرة · iOS 27 أو أحدث',
     intro: 'التقط عمليات الشراء الجديدة بالبطاقة عبر Apple Pay. تنتقل كل عملية مدعومة إلى المراجعة لتختار الحساب قبل إضافتها.',
     scope: 'يشمل هذا المبالغ الموجبة للمشتريات فقط. لا يستورد سجل المحفظة أو المبالغ المستردة أو هوية البطاقة أو حالة الدفع. لا تحتاج إلى اختيار البنك هنا.',
-    unsupported: 'تتطلب أتمتة معاملات Apple Pay إصدار iOS 17 أو أحدث. يمكنك استخدام رسائل البنك أو استيراد كشف حساب بدلاً منها.',
+    unsupported: 'يتوفر إعداد Apple Pay في وفرة على iOS 27 أو أحدث. استخدم إعداد رسائل البنك المعتاد في الإصدارات الأقدم.',
     checking: 'جارٍ فحص دعم التقاط Apple Pay…', update: 'حدّث وفرة إلى إصدار يدعم التقاط Apple Pay قبل المتابعة.',
     enable: 'تفعيل الالتقاط على هذا الآيفون', inactive: 'الوصول إلى الالتقاط غير نشط. تحقّق من صلاحية الوصول في وفرة قبل المتابعة.',
     addTitle: '١. أضف الاختصار',
@@ -98,8 +94,8 @@ const COPY = {
     waitingCheck: 'لم يصل فحص أذونات Apple Pay بعد. شغّل الفحص ثم عد إلى هنا.',
     automationTitle: '٣. اختر البطاقة في الاختصارات',
     automationSteps: [
-      'افتح الاختصارات ← الأتمتة ← + ← المعاملة. اختر البطاقة التي تستخدمها مع Apple Pay.',
-      'اختر تشغيل فوراً. أضف تشغيل الاختصار واختر Wafra Apple Pay v1. مرّر إدخال الاختصار إليه.',
+      'افتح Wafra Apple Pay v1 في محرّر الاختصارات. من قسم الأتمتة فيه، أضف مشغّل المعاملة.',
+      'اختر بطاقة المحفظة التي تستخدمها مع Apple Pay و«تشغيل فوراً». أبقِ المبلغ والتاجر مرتبطَين بإدخال الاختصار في الإجراءات الموجودة.',
       'احفظ الأتمتة ثم عد إلى هنا للتأكيد. كرّر ذلك لبطاقة أخرى عند الحاجة.',
     ],
     confirm: 'حفظت أتمتة Apple Pay', confirmed: 'أكّدت حفظ الأتمتة',

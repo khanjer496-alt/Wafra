@@ -69,3 +69,4 @@ node scripts/e2e/e2e-redesign.mjs
 node scripts/e2e/e2e-merchant-logos.mjs
 
 node scripts/e2e/e2e-onboarding.mjs
+node scripts/e2e/e2e-ios-setup-videos.mjs

@@ -20,6 +20,7 @@ import { banksSeenInAlerts, captureHealthStatus, capturedThisMonth } from '@/lib
 import { detailsWords } from '@/lib/details-copy';
 import { iosCaptureHealthCopy, readIosCaptureHealth, type IosCaptureHealth } from '@/lib/ios-capture-health';
 import { useStore } from '@/lib/store';
+import { iosSupportsApplePayAutomation } from '@/lib/ios-setup-availability';
 import type { Account } from '@/lib/types';
 
 type Load = { state: 'loading' } | { state: 'ready'; health: IosCaptureHealth | null };
@@ -44,6 +45,8 @@ export default function CaptureHealthScreen() {
   const healthCopy = iosCaptureHealthCopy(language);
   const { state } = useStore();
   const ios = Platform.OS === 'ios';
+  const applePaySetupAvailable = ios && iosSupportsApplePayAutomation(Platform.Version) &&
+    getIosCaptureNativeModule()?.applePayCaptureSupported === true;
   const [load, setLoad] = useState<Load>(ios ? { state: 'loading' } : { state: 'ready', health: null });
   const alive = useRef(true);
   const sequence = useRef(0);
@@ -155,7 +158,7 @@ export default function CaptureHealthScreen() {
 
       <View style={styles.section}>
         <SheetSectionTitle title={d.capture.alsoTitle} palette={band} />
-        {ios ? <SheetLinkRow testID="capture-health-apple-pay" icon="phone" palette={band} title={d.capture.applePay}
+        {applePaySetupAvailable ? <SheetLinkRow testID="capture-health-apple-pay" icon="phone" palette={band} title={d.capture.applePay}
           body={d.capture.applePayBody} onPress={() => router.push('/ios-apple-pay-setup')} /> : null}
         <SheetLinkRow testID="capture-health-statements" icon="upload" palette={band} title={d.capture.statements}
           body={d.capture.statementsBody} onPress={() => router.push('/statement-import')} last />

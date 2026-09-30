@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, Platform, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
+import { IosSetupVideoCard } from '@/components/ios-setup-video-card';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Button } from '@/components/ui/controls';
 import { SetupShell, SetupHeader } from '@/components/onboarding/setup-shell';
@@ -182,6 +183,7 @@ function PagedHistoryScreen() {
     <Stack.Screen options={{ title: w.title, gestureEnabled: !busy }} />
     <ScrollView contentContainerStyle={{ width: '100%', maxWidth: MaxContentWidth, alignSelf: 'center', padding: ScreenPadding, gap: Spacing.four }}>
       <SetupHeader onboarding={onboarding} title={w.title} subtitle={w.intro} back={{ label: w.back, onPress: leave, disabled: busy }} />
+      {bundled && <IosSetupVideoCard kind="history" language={language} compact disabled={busy} />}
       <View testID="paged-history-setup" style={{ gap: Spacing.three }}>
         <ThemedText>{w.privacy}</ThemedText>
         {!installed && progress?.status !== 'complete' && <ThemedText type="small" themeColor="textSecondary">{bundled ? w.bundleHelp : w.installHelp}</ThemedText>}

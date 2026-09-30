@@ -163,7 +163,9 @@ const executeFile = (filename, requireModule) => {
   const loaded = { exports: {} };
   Function('require', 'module', 'exports', '__filename', '__dirname', output)(
     (id) => id === './ios-capture-health' || id === '@/lib/ios-capture-health'
-      ? execute('src/lib/ios-capture-health.ts', requireModule) : requireModule(id),
+      ? execute('src/lib/ios-capture-health.ts', requireModule)
+      : id === './ios-setup-availability' || id === '@/lib/ios-setup-availability'
+        ? execute('src/lib/ios-setup-availability.ts', requireModule) : requireModule(id),
     loaded, loaded.exports, filename, path.dirname(filename),
   );
   return loaded.exports;

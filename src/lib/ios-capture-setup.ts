@@ -1,4 +1,5 @@
 import { Linking, Platform } from 'react-native';
+import { iosSupportsApplePayAutomation } from './ios-setup-availability';
 
 import type {
   WafraLiveCaptureNativeModule,
@@ -20,6 +21,8 @@ import {
   readIosCaptureHealth,
   type IosCaptureHealth,
 } from './ios-capture-health';
+
+export { iosSupportsApplePayAutomation } from './ios-setup-availability';
 
 export const SHORTCUTS_APP_STORE_URL =
   'https://apps.apple.com/app/shortcuts/id1462947752';
@@ -75,6 +78,7 @@ export interface IosSetupModel {
   shortcutName?: string;
   shortcutVersion?: 3;
   bundledHistorySupported?: boolean;
+  bundledApplePaySupported?: boolean;
   /** Raw native Message proof. Only compared with setup attempts, never shown as capture proof. */
   setupProofVersion?: number | null;
   setupProofAt?: number | null;
@@ -107,7 +111,7 @@ export interface IosSetupDependencies {
   isSupported(): boolean;
   getNativeModule(): Pick<
     WafraLiveCaptureNativeModule,
-    'getCaptureStatus' | 'setCaptureEnabled' | 'notificationCaptureSupported' | 'applePayCaptureSupported' | 'getMessageShortcutURL' | 'getHistoryShortcutURL'
+    'getCaptureStatus' | 'setCaptureEnabled' | 'notificationCaptureSupported' | 'applePayCaptureSupported' | 'getMessageShortcutURL' | 'getHistoryShortcutURL' | 'getApplePayShortcutURL'
   > | null;
   shortcutUrl: string | null;
   canOpenUrl(url: string): Promise<boolean>;
@@ -157,11 +161,6 @@ export function resolveIosNotificationReadiness(status: Pick<WafraLiveCaptureSta
     ? 'shortcut-proven' : 'not-added';
 }
 
-export function iosSupportsApplePayAutomation(version: unknown): boolean {
-  const value = String(version);
-  return /^\d+(?:\.\d+)*$/.test(value) && Number(value.split('.')[0]) >= 17;
-}
-
 export function resolveIosApplePayReadiness(status: Pick<WafraLiveCaptureStatus,
   'enabled' | 'entitled' | 'applePaySetupProofAt' | 'firstApplePayReceivedAt'>): IosSetupReadiness {
   if (!status.enabled || !status.entitled) return 'not-added';
@@ -200,15 +199,17 @@ export function isIosLegacyCaptureUpgrade(
 }
 
 /**
- * True only when a Message reached Wafra's queue after the owner confirmed the
- * automation: evidence the automation itself fires, not that every alert will.
+ * A bank-message claim needs a qualified financial capture, not merely a queue
+ * receipt: manually supplied ordinary text advances the same receipt clock.
+ * Neither signal alone attests that a particular automation fired.
  */
 export function iosMessageAutomationVerified(
   progress: { futureAutomationConfirmedAt?: number },
-  model: Partial<Pick<IosSetupModel, 'lastMessageReceivedAt' | 'setupProofAt'>>,
+  model: Partial<Pick<IosSetupModel, 'lastMessageReceivedAt' | 'setupProofAt' | 'captureHealth'>>,
 ): boolean {
   const baseline = progress.futureAutomationConfirmedAt ?? model.setupProofAt;
-  return isCaptureTimestamp(baseline) && isCaptureTimestamp(model.lastMessageReceivedAt) &&
+  return isCaptureTimestamp(model.captureHealth?.firstCapturedAt) &&
+    isCaptureTimestamp(baseline) && isCaptureTimestamp(model.lastMessageReceivedAt) &&
     model.lastMessageReceivedAt > baseline;
 }
 
@@ -443,6 +444,7 @@ export function createIosCaptureSetup({
         native.applePayCaptureSupported === true;
       publish({
         applePaySupported,
+        bundledApplePaySupported: applePaySupported && typeof native.getApplePayShortcutURL === 'function',
         applePayReadiness: applePaySupported ? resolveIosApplePayReadiness(status) : 'not-added',
         loading: false,
         supported: true,

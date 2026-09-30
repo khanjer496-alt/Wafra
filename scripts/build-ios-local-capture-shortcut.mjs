@@ -478,7 +478,7 @@ const v3LiveMessageActions = () => {
   ];
 };
 
-// A separate, unpublished candidate. Apple's Get Type returns localized
+// The bundled v3 graph. Apple's Get Type returns localized
 // display names, so obtain the comparison value from a known Text action on
 // the same device. Both the setup-control branch and ordinary text capture
 // must compare against that value. Keep the published v2 graph byte-identical;
@@ -529,6 +529,35 @@ const createLocalCaptureV3Shortcut = () => {
   actions.splice(findStart, repeatEnd - findStart + 1);
   const liveStart = indexOf(ids.senderText);
   actions.splice(liveStart, actions.length - liveStart, ...v3LiveMessageActions());
+  // Simulator 26.1 execution qualified these two condition bindings with
+  // native setup proof and nonfinancial text admission. Message delivery is
+  // still a separate runtime check; its original extraction lane is unchanged.
+  const textUUID = "C17E0000-0000-4000-8000-000000000203";
+  const index = shortcut.WFWorkflowActions.findIndex((action) =>
+    action.WFWorkflowActionParameters.WFConditionalActionString === IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER);
+  if (index < 0) throw new Error("v3 setup marker comparison is missing");
+  shortcut.WFWorkflowActions[index].WFWorkflowActionParameters.WFInput = {
+    Type: "Variable",
+    Variable: actionOutput(textUUID, "Setup Check Text"),
+  };
+  shortcut.WFWorkflowActions.splice(index, 0, {
+    WFWorkflowActionIdentifier: "is.workflow.actions.gettext",
+    WFWorkflowActionParameters: {
+      UUID: textUUID,
+      CustomOutputName: "Setup Check Text",
+      WFTextActionText: extensionInputTextToken([stringCoercion()]),
+    },
+  });
+  // The legacy fallback guard passed a bare attachment. On Simulator 26.1
+  // that imports as an empty "If Condition", unlike the earlier valid guard.
+  const fallbackGuard = shortcut.WFWorkflowActions.find((action) =>
+    action.WFWorkflowActionParameters.GroupingIdentifier === ids.inputTypeGroup &&
+    action.WFWorkflowActionParameters.WFControlFlowMode === 0);
+  if (!fallbackGuard) throw new Error("v3 fallback type guard is missing");
+  fallbackGuard.WFWorkflowActionParameters.WFInput = {
+    Type: "Variable",
+    Variable: actionOutput(ids.inputType, "Type"),
+  };
   shortcut.WFWorkflowName = IOS_LOCAL_CAPTURE_V3_SHORTCUT_NAME;
   return shortcut;
 };

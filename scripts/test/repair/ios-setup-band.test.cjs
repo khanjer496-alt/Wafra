@@ -26,6 +26,7 @@ for (const scheme of ['light', 'dark']) {
     const tree = StepProgress({ current: 2, labels: ['Add', 'Test', 'Automate'], template: 'Step {step} of {total}', palette: theme.bandPalette('flow', scheme) });
     assert.equal(style(tree.props.style).flexDirection, 'column');
     assert.equal(tree.props.accessibilityValue.now, 2);
+    assert.equal(tree.props.accessibilityValue.min, 0, 'native progress must not announce more than 100% at the last step');
     assert.equal(tree.props.accessibilityLabel, 'Step 2 of 3: Test');
     assert.equal(walk(tree).filter(node => node.type === 'Icon' && node.props.name === 'check').length, 1);
     assert.ok(walk(tree).filter(node => node.type === 'Text').every(node => node.props.numberOfLines === undefined));

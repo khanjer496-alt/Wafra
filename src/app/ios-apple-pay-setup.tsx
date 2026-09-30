@@ -1,9 +1,10 @@
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, Platform, StyleSheet, View } from 'react-native';
 import type { WafraLiveCaptureStatus } from '../../modules/wafra-live-capture';
 import { ThemedText } from '@/components/themed-text';
+import { IosSetupVideoCard } from '@/components/ios-setup-video-card';
 import { BandScaffold } from '@/components/ui/band-scaffold';
 import { EButton } from '@/components/ui/band/e-button';
 import { Fonts, type BandPalette } from '@/constants/theme';
@@ -46,6 +47,19 @@ function Step({ index, title, body, done, palette, spoken, children, last = fals
 }
 
 export default function IosApplePaySetup() {
+  const params = useLocalSearchParams<{ fromOnboarding?: string }>();
+  const { state } = useStore();
+  const onboarding = params.fromOnboarding === '1' || (state.hydrated === true && !state.onboarded);
+  if (Platform.OS !== 'ios' || !iosSupportsApplePayAutomation(Platform.Version)) {
+    return <Redirect href={{ pathname: '/ios-setup', params: {
+      section: 'future', ...(onboarding ? { fromOnboarding: '1' } : {}),
+    } }} />;
+  }
+  // Unsupported deep links never mount the native status/permission owner.
+  return <ApplePaySetupScreen />;
+}
+
+function ApplePaySetupScreen() {
   const language = useLanguage();
   const w = iosApplePayCopy(language);
   const d = detailsWords(language).applePay;
@@ -203,6 +217,7 @@ export default function IosApplePaySetup() {
     scrollProps={{ showsVerticalScrollIndicator: false }}>
     <Stack.Screen options={{ gestureEnabled: !busy }} />
     <View style={styles.sheet}>
+      {ready && bundled && <IosSetupVideoCard kind="apple-pay" language={language} compact disabled={busy} />}
       {!supported ? <ThemedText style={{ color: band.text }}>{w.unsupported}</ThemedText> : !available ?
         <ThemedText accessibilityLiveRegion="polite" style={{ color: band.text }}>{loading ? w.checking : error ?? w.update}</ThemedText> : <>
         {/* What turning it on covers, read before the button that turns it on. */}

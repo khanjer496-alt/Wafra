@@ -24,7 +24,7 @@ const deferred = () => {
 async function screen(t, options = {}) {
   const slots = [], effects = [], listeners = new Set(), receipts = [], routes = [];
   const urls = [], discards = [], storageEvents = [], growth = [], announcements = [];
-  let cursor = 0, tree, disposed = false, onboarded = false, durableCalls = 0, chunksRead = 0, dismissals = 0;
+  let cursor = 0, tree, disposed = false, onboarded = false, durableCalls = 0, chunksRead = 0, dismissals = 0, historyChecks = 0;
   const params = { fromOnboarding: '1', ...options.params };
   const slot = initial => slots[cursor++] ?? (slots[cursor - 1] = initial());
   const react = {
@@ -87,10 +87,11 @@ async function screen(t, options = {}) {
     applePayCaptureSupported: options.applePayCaptureSupported === true,
     ...(options.bundled ? { getMessageShortcutURL: async () => 'file:///app/Wafra%20Capture%20v3.shortcut' } : {}),
     ...(options.bundledHistory ? { getHistoryShortcutURL: async () => 'file:///app/Wafra%20History%20v8.shortcut' } : {}),
+    ...(options.bundledApplePay ? { getApplePayShortcutURL: async () => 'file:///app/Wafra%20Apple%20Pay%20v1.shortcut' } : {}),
     async getCaptureStatus() { await controls.beforeStatus?.(); return { ...nativeStatus }; },
     async setCaptureEnabled(value) { await controls.beforeEnable?.(value); nativeStatus.enabled = value; receipts.push(['enabled', value]); },
     async getCompletedSession() { return null; },
-    async recoverCompletedSession(startedAt) { return await controls.recover?.(startedAt) ?? null; },
+    async recoverCompletedSession(startedAt) { historyChecks++; await controls.beforeHistoryStatus?.(); return await controls.recover?.(startedAt) ?? null; },
     async readChunk() { chunksRead++; return []; },
     async discardSession(id) { await controls.beforeDiscard?.(id); discards.push(id); },
   };
@@ -145,6 +146,7 @@ async function screen(t, options = {}) {
     '@/components/themed-text': { ThemedText: 'Text' },
     '@/components/ui/controls': { Button: 'Button', Chip: 'Chip' },
     '@/components/ui/band/e-button': { EButton: 'Button' },
+    '@/components/ios-setup-video-card': { IosSetupVideoCard: 'VideoGuide' },
     '@/components/ui/band-scaffold': { BandScaffold: 'BandScaffold' },
     '@/hooks/use-band': { useBand: () => ({}) },
     '@/constants/theme': { Spacing: {}, Radius: {}, Fonts: { sansSemi: 'Geist' }, ScreenPadding: 20, MaxContentWidth: 600 },
@@ -227,7 +229,7 @@ async function screen(t, options = {}) {
     get dismissals() { return dismissals; },
     growth, announcements, store, copy, dispose, history, progress,
     saved: () => JSON.parse(values.get(PROGRESS)),
-    get durableCalls() { return durableCalls; }, get onboarded() { return onboarded; }, get chunksRead() { return chunksRead; },
+    get historyChecks() { return historyChecks; }, get durableCalls() { return durableCalls; }, get onboarded() { return onboarded; }, get chunksRead() { return chunksRead; },
     // Visible words: text nodes plus the guided step and result cards' own
     // title/body props (those components are presentational boundaries here).
     text: () => all().flatMap(node => node.type === 'Text' ? [node.props.children].flat()
@@ -635,7 +637,7 @@ test('expired history with failed native lookup retains recovery and successful 
     progress: { historyStatus: 'in-progress' }, controls: { recover: async () => { throw Error('locked'); } } });
   assert.equal(s.values.get(HANDOFF), String(handoff));
   assert.equal(s.routes.length, 0);
-  assert.ok(s.text().includes(s.copy.t('historySetupStateFailed')));
+  assert.ok(s.text().includes(s.copy.t('iosHistoryRefreshFailed')));
   s.controls.recover = async () => ({ sessionId: 'protected_history_after_unlock' });
   await s.press('iosMessageRetrySetup');
   assert.equal(s.routes.at(-1)[1].params.history, 'protected_history_after_unlock');
@@ -827,13 +829,16 @@ test('automation guide is one Apple screen per step, leads with Open Shortcuts, 
     screens.push(step(s, 'ios-automation-guide-step'));
   }
   assert.deepEqual(screens.map(item => item.title), ['Choose Message', 'Type one space', 'Run Immediately', 'Pick the shortcut']);
-  assert.equal(screens.at(-1).chips.join(' › '), 'Wafra Capture v3 › Done', 'the exact Shortcut name is shown to pick');
+  assert.equal(screens.at(-1).chips.join(' › '), 'Wafra Capture v3 › Done (if shown)', 'the exact Shortcut name is shown to pick');
   await s.press('iosLocalAutomationAdded');
   const done = () => step(s, 'ios-capture-ready');
   assert.deepEqual([done().result.title, done().result.body], [iosEn.testPassed, iosEn.waitingAutomation]);
-  // A message from the automation after the confirmation is real evidence it fires.
+  // A nonfinancial manual-text receipt shares this clock but proves no bank alert.
   s.nativeStatus.lastReceivedAt = s.saved().futureAutomationConfirmedAt + 5; await s.foreground();
-  assert.equal(done().result.title, iosEn.verifiedAutomation);
+  assert.deepEqual([done().result.title, done().result.body], [iosEn.testPassed, iosEn.waitingAutomation]);
+  s.nativeStatus.firstCapturedAt = s.nativeStatus.lastReceivedAt; await s.foreground();
+  assert.equal(done().result.title, s.copy.t('iosLocalFirstAlertCaptured'));
+  s.nativeStatus.firstCapturedAt = null;
   // An Apple Pay receipt on the shared queue clock is not Message evidence.
   s.nativeStatus.lastApplePayReceivedAt = s.nativeStatus.lastReceivedAt; await s.foreground();
   assert.deepEqual([done().result.title, done().result.body], [iosEn.testPassed, iosEn.waitingAutomation]);
@@ -852,8 +857,8 @@ test('a failed check overrides an already-open automation review guide', async t
 
 
 test('Apple Pay is a secondary option below SMS and merely opening it keeps a finished SMS setup', async t => {
-  // Optional sources live in Settings → Capture sources, never in first-run setup.
-  const s = await screen(t, { knownBanks: [], applePayCaptureSupported: true, bundled: true, params: { fromOnboarding: '0' },
+  // Settings retains the same optional Apple Pay entry and saved-source behavior.
+  const s = await screen(t, { version: '27.0', knownBanks: [], applePayCaptureSupported: true, bundled: true, params: { fromOnboarding: '0' },
     progress: { futureShortcutConfirmed: true, futureShortcutVersion: 3, futureAutomationConfirmed: true, futureStatus: 'complete' },
     nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: Date.now() - 1000 } });
   const nodes = s.all();
@@ -872,7 +877,7 @@ test('Apple Pay is a secondary option below SMS and merely opening it keeps a fi
 });
 test('Apple Pay onboarding requires its own proof and manual automation confirmation', async t => {
   for (const proven of [false, true]) {
-    const s = await screen(t, { knownBanks: [], applePayCaptureSupported: true, bundled: true,
+    const s = await screen(t, { version: '27.0', knownBanks: [], applePayCaptureSupported: true, bundled: true,
       nativeStatus: { enabled: true, setupProofVersion: 3, firstCapturedAt: Date.now(),
         ...(proven ? { applePaySetupProofAt: Date.now() } : {}) },
       progress: { futureCaptureSource: 'apple-pay', futureAutomationConfirmed: true, historyStatus: 'complete' } });
@@ -880,4 +885,118 @@ test('Apple Pay onboarding requires its own proof and manual automation confirma
     if (proven) { await s.press('iosMessageContinue'); assert.equal(s.onboarded, true); }
     else { assert.equal(s.button('iosMessageContinue'), undefined); assert.equal(s.onboarded, false); }
   }
+});
+
+
+test('older iOS hides Apple Pay options and views saved Apple Pay progress as SMS without rewriting it', async t => {
+  for (const version of ['17.0', '26.6', '27oops']) {
+    const s = await screen(t, { version, applePayCaptureSupported: true, bundled: true,
+      params: { fromOnboarding: '0', applePayReturn: '1' },
+      nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: Date.now() - 1000, applePaySetupProofAt: Date.now() },
+      progress: { futureCaptureSource: 'apple-pay', futureShortcutConfirmed: true, futureAutomationConfirmed: true,
+        futureStatus: 'complete', parkedSources: { message: { shortcutConfirmed: true, shortcutVersion: 3, automationConfirmed: true } } } });
+    assert.equal(s.all().some(n => n.type === 'Button' && n.props.label === 'Set up Apple Pay'), false);
+    assert.ok(s.all().some(n => n.props?.testID === 'ios-capture-ready'), 'the saved SMS setup is the displayed source');
+    assert.equal(s.saved().futureCaptureSource, 'apple-pay');
+    assert.equal(s.saved().futureAutomationConfirmed, true);
+    assert.equal(s.saved().futureStatus, 'complete');
+    assert.equal(s.saved().parkedSources.message.automationConfirmed, true);
+    assert.equal(s.receipts.some(r => r[0] === 'enabled'), false);
+  }
+});
+
+
+test('iOS27 saved Apple Pay setup shows only the matching bundled video, without changing source', async t => {
+  for (const bundledApplePay of [true, false]) {
+    const s = await screen(t, { version: '27.0', applePayCaptureSupported: true, bundledApplePay,
+      progress: { futureCaptureSource: 'apple-pay', futureShortcutConfirmed: true, futureAutomationConfirmed: true, futureStatus: 'complete' },
+      nativeStatus: { enabled: true, applePaySetupProofAt: Date.now() } });
+    const guides = s.all().filter(node => node.type === 'VideoGuide');
+    assert.equal(guides.length, bundledApplePay ? 1 : 0);
+    if (guides.length) assert.equal(guides[0].props.kind, 'apple-pay');
+    assert.equal(s.saved().futureCaptureSource, 'apple-pay');
+  }
+});
+
+test('supported iOS27 onboarding offers Apple Pay beside the regular SMS guide without switching saved source', async t => {
+  for (const [version, applePayCaptureSupported, offered] of [['27.0', true, true], ['26.6', true, false], ['27.0', false, false]]) {
+    const s = await screen(t, { version, applePayCaptureSupported, bundled: true,
+      params: { fromOnboarding: '1' }, progress: { futureStatus: 'in-progress' } });
+    assert.ok(s.all().some(node => node.props?.testID === 'ios-message-setup-guide'));
+    assert.ok(s.button('iosLocalInstallShortcut'), 'regular setup remains available');
+    const action = s.all().find(node => node.type === 'Button' && node.props.label === 'Set up Apple Pay');
+    assert.equal(!!action, offered, `${version}/${applePayCaptureSupported}`);
+    if (action) {
+      action.props.onPress(); await s.flush();
+      assert.equal(s.routes.at(-1)[1].pathname, '/ios-apple-pay-setup');
+      assert.equal(s.routes.at(-1)[1].params.fromOnboarding, '1');
+    }
+    assert.equal(s.saved().futureCaptureSource, undefined);
+    assert.equal(s.saved().futureAutomationConfirmed, false);
+    assert.equal(s.receipts.some(receipt => receipt[0] === 'enabled'), false);
+  }
+});
+
+
+for (const language of ['en', 'ar']) test(`${language}: hidden History recovery failure never labels verified Capture v3 as unsaved`, async t => {
+  const at = Date.now() - 1000;
+  const s = await screen(t, { language, bundled: true, handoff: Date.now() - 1000,
+    progress: { ...ready, historyStatus: 'not-started', futureShortcutVersion: 3, futureAutomationConfirmedAt: at },
+    nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: at },
+    controls: { beforeHistoryStatus: async () => { throw Error('file_protection_guard'); } } });
+  assert.ok(s.historyChecks > 0, 'hidden History still attempts native crash recovery');
+  assert.ok(s.button('iosMessageContinue'), 'verified future capture remains usable');
+  assert.equal(s.text().includes(s.copy.t('historySetupStateFailed')), false);
+  assert.equal(s.text().includes(s.copy.t('iosHistoryRefreshFailed')), false, 'irrelevant History errors stay in their own domain');
+  assert.equal(s.saved().futureStatus, 'complete');
+  const checks = s.historyChecks;
+  s.controls.beforeHistoryStatus = undefined;
+  await s.foreground();
+  assert.ok(s.historyChecks > checks, 'a hidden failed recovery is retried on the next foreground');
+  assert.equal(s.text().includes(s.copy.t('historySetupStateFailed')), false);
+  assert.deepEqual(s.discards, []);
+});
+
+test('visible History errors name its refresh and clear after a successful foreground refresh', async t => {
+  const s = await screen(t, { params: { section: 'history' }, handoff: Date.now() - 1000,
+    controls: { beforeHistoryStatus: async () => { throw Error('file_protection_guard'); } } });
+  assert.ok(s.text().includes(s.copy.t('iosHistoryRefreshFailed')));
+  assert.equal(s.text().includes(s.copy.t('historySetupStateFailed')), false);
+  assert.equal(s.text().includes('file_protection_guard'), false);
+  s.controls.beforeHistoryStatus = undefined;
+  await s.foreground();
+  assert.equal(s.text().includes(s.copy.t('iosHistoryRefreshFailed')), false);
+  assert.deepEqual(s.discards, []);
+  assert.equal(s.chunksRead, 0);
+});
+
+test('a saved Capture-progress read failure remains actionable and clears only when its read succeeds', async t => {
+  const at = Date.now() - 1000;
+  const s = await screen(t, { bundled: true,
+    progress: { ...ready, historyStatus: 'not-started', futureShortcutVersion: 3, futureAutomationConfirmedAt: at },
+    nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: at } });
+  s.controls.beforeStorage = async (operation, key) => { if (operation === 'get' && key === PROGRESS) throw Error('read unavailable'); };
+  await s.returnWith({ notificationReturn: 'retry-read' });
+  assert.ok(s.text().includes(s.copy.t('iosSetupProgressReadFailed')));
+  assert.ok(s.button('iosMessageRetrySetup'));
+  assert.equal(s.onboarded, false);
+  s.controls.beforeStorage = undefined;
+  await s.foreground();
+  assert.equal(s.text().includes(s.copy.t('iosSetupProgressReadFailed')), false);
+  assert.ok(s.button('iosMessageContinue'));
+  assert.equal(s.onboarded, false);
+});
+
+test('successful refreshes do not erase a real onboarding progress-write failure', async t => {
+  const at = Date.now() - 1000;
+  const s = await screen(t, { bundled: true,
+    progress: { ...ready, futureShortcutVersion: 3, futureAutomationConfirmedAt: at },
+    nativeStatus: { enabled: true, setupProofVersion: 3, setupProofAt: at } });
+  s.controls.beforeStorage = async (operation, key) => { if (operation === 'set' && key === PROGRESS) throw Error('write unavailable'); };
+  await s.press('iosMessageContinue');
+  assert.ok(s.text().includes(s.copy.t('iosMessageFinishFailed')));
+  s.controls.beforeStorage = undefined;
+  await s.returnWith({ notificationReturn: 'successful-read-after-failed-write' });
+  assert.ok(s.text().includes(s.copy.t('iosMessageFinishFailed')), 'reading progress cannot prove a failed write committed');
+  assert.equal(s.onboarded, false);
 });

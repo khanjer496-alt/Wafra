@@ -122,8 +122,8 @@
     {
       "file": "src/app/ios-setup.tsx",
       "name": "refreshSetup",
-      "sha256": "747b9dae02a3fa5a3e1b1580c0303b6af57c9463f76a66c084190a95fe99e15d",
-      "reviewedChange": "2026-09-13: When the installed History record is paged, refresh also reads the source-free native paged status (checked/accepted/skipped counts) so the setup screen can show progress after the Shortcut pauses. Recovery, reconciliation and error handling are unchanged. Covered by ios-setup-ux.test.js and ios-journey tests."
+      "sha256": "783796125607d5b97467c1b5fc22c2218747cfa1d36b64b2e9f93f4c0deb0d6a",
+      "reviewedChange": "2026-09-30: Separate setup-progress read failures from optional History reconciliation failures. Successful same-generation refresh clears only its own error; actual save/check failures remain intact. History errors are visible in History without blocking Message setup, and failed hidden recovery retries on foreground. Recovery, receipt persistence, operation locks, generation guards and native protection requirements are unchanged. Forty-eight actual-route setup regressions and independent review passed."
     },
     {
       "file": "src/app/ios-setup.tsx",

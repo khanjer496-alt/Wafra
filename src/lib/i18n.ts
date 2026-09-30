@@ -2886,6 +2886,14 @@ const S = {
     en: 'Nothing was filed. Wafra could not delete the protected staged messages you cancelled. Try deletion again, or leave them. They become eligible after one hour and are removed the next time Wafra checks history.',
     ar: 'لم يُسجّل شيء. لم يتمكن وفرة من حذف الرسائل المؤقتة المحمية التي ألغيتها. أعد محاولة الحذف أو اتركها. تصبح مؤهلة للحذف بعد ساعة وتُزال في المرة التالية التي يفحص فيها وفرة سجل الاستيراد.',
   },
+  iosSetupProgressReadFailed: {
+    en: 'Saved setup progress couldn’t be read. Tap Try again.',
+    ar: 'تعذّرت قراءة تقدّم الإعداد المحفوظ. اضغط «حاول مجدداً».',
+  },
+  iosHistoryRefreshFailed: {
+    en: 'Past-message import couldn’t be checked. Tap Try again.',
+    ar: 'تعذّر التحقق من استيراد الرسائل السابقة. اضغط «حاول مجدداً».',
+  },
   historySetupStateFailed: {
     en: 'Setup progress didn’t save. Tap Try again.',
     ar: 'لم يُحفظ تقدّم الإعداد. اضغط «حاول مجدداً».',
@@ -2936,8 +2944,8 @@ const S = {
     ar: 'مصادر الالتقاط',
   },
   iosMessageSettingsDetail: {
-    en: 'Messages, Apple Pay and more',
-    ar: 'الرسائل وApple Pay والمزيد',
+    en: 'Set up and check capture',
+    ar: 'إعداد الالتقاط والتحقق منه',
   },
   iosPastSmsTitle: {
     en: 'Import past SMS (experimental)',
@@ -2989,6 +2997,10 @@ const S = {
     ar: 'في «أتمتة جديدة»، اضغط «رسالة»',
   },
   iosMessageAddAgain: { en: 'Reinstall Shortcut', ar: 'إعادة تثبيت الاختصار' },
+  iosMessageHelpReinstall: {
+    en: 'App updates do not replace an installed Shortcut. Use Reinstall Shortcut, open it in Shortcuts, and choose Replace if asked. Keep your existing automation linked to the shortcut you installed.',
+    ar: 'تحديث التطبيق لا يستبدل الاختصار المثبّت. استخدم «إعادة تثبيت الاختصار»، وافتحه في الاختصارات، واختر «استبدال» إذا طُلب منك. أبقِ الأتمتة الحالية مرتبطة بالاختصار الذي ثبّتّه.',
+  },
   iosMessageReviewAutomation: { en: 'Automation steps', ar: 'خطوات الأتمتة' },
   iosMessageRetryCheck: { en: 'Run setup check again', ar: 'إعادة تشغيل فحص الإعداد' },
   iosMessageRetrySetup: { en: 'Try again', ar: 'حاول مجدداً' },
@@ -3034,7 +3046,7 @@ const S = {
   iosMessageResetHistoryTitle: { en: 'Stopped in Shortcuts?', ar: 'أوقفته في الاختصارات؟' },
   iosMessageResetHistoryBody: { en: 'Stop the Shortcut first. Reset this attempt; saved entries stay unchanged.', ar: 'أوقف الاختصار أولاً. أعد ضبط المحاولة؛ تبقى العمليات المحفوظة كما هي.' },
   iosMessageGuideImmediate: { en: 'Choose Run Immediately, turn off Notify When Run if shown, then Next', ar: 'اختر تشغيل فوراً، وأوقف الإشعار عند التشغيل إن ظهر، ثم اضغط التالي' },
-  iosMessageGuideRunShortcut: { en: 'Pick {shortcut} from the list (not New Blank Automation), then Done', ar: 'اختر {shortcut} من القائمة (وليس أتمتة جديدة فارغة)، ثم تم' },
+  iosMessageGuideRunShortcut: { en: 'Pick {shortcut} from the list (not New Blank Automation). Tap Done if it appears.', ar: 'اختر {shortcut} من القائمة (وليس أتمتة جديدة فارغة). اضغط «تم» إن ظهر.' },
   iosMessageLearnMore: {
     en: 'How it works',
     ar: 'كيف يعمل',

@@ -100,8 +100,8 @@ test('Wallet readiness is independent of message and notification proof and requ
   assert.equal(setup.resolveIosApplePayReadiness({ ...status, firstApplePayReceivedAt: Date.now() }), 'shortcut-proven');
   assert.equal(setup.resolveIosApplePayReadiness({ ...status, applePaySetupProofAt: Date.now(), entitled: false }), 'not-added');
   assert.equal(setup.resolveIosSelectedReadiness('apple-pay', { readiness: 'first-alert-captured', shortcutVersion: 3 }), 'not-added');
-  for (const version of ['16.6', '27oops', NaN]) assert.equal(setup.iosSupportsApplePayAutomation(version), false);
-  for (const version of [17, '26.6.2', '27.0']) assert.equal(setup.iosSupportsApplePayAutomation(version), true);
+  for (const version of [17, '16.6', '26.6.2', '27oops', NaN]) assert.equal(setup.iosSupportsApplePayAutomation(version), false);
+  for (const version of [27, '27.0', '28.0']) assert.equal(setup.iosSupportsApplePayAutomation(version), true);
 });
 
 test('a started install or check only accepts Message proof recorded after it', () => {
@@ -125,11 +125,19 @@ test('only a confirmed v2 setup with v2 proof on a v3 build reads as an upgrade'
   assert.equal(setup.isIosLegacyCaptureUpgrade(v2, { ...model, shortcutVersion: undefined }), false);
 });
 
-test('automation verification needs a Message receipt after the confirmation', () => {
-  assert.equal(setup.iosMessageAutomationVerified({ futureAutomationConfirmedAt: 100 }, { lastMessageReceivedAt: 101 }), true);
-  assert.equal(setup.iosMessageAutomationVerified({ futureAutomationConfirmedAt: 100 }, { lastMessageReceivedAt: 100 }), false);
-  assert.equal(setup.iosMessageAutomationVerified({ futureAutomationConfirmedAt: 100 }, { lastMessageReceivedAt: null }), false);
+test('bank-message verification needs qualified capture as well as a receipt after confirmation', () => {
+  const qualified = { captureHealth: { firstCapturedAt: 101 } };
+  assert.equal(setup.iosMessageAutomationVerified({ futureAutomationConfirmedAt: 100 }, { ...qualified, lastMessageReceivedAt: 101 }), true);
+  for (const firstCapturedAt of [undefined, null, NaN, -1]) {
+    assert.equal(setup.iosMessageAutomationVerified({ futureAutomationConfirmedAt: 100 },
+      { lastMessageReceivedAt: 101, captureHealth: { firstCapturedAt } }), false,
+    'a consumed nonfinancial manual-text receipt must not claim a bank alert reached Wafra');
+  }
+  assert.equal(setup.iosMessageAutomationVerified({ futureAutomationConfirmedAt: 100 }, { lastMessageReceivedAt: 101 }), false);
+  assert.equal(setup.iosMessageAutomationVerified({ futureAutomationConfirmedAt: 100 }, { ...qualified, lastMessageReceivedAt: 100 }), false);
+  assert.equal(setup.iosMessageAutomationVerified({ futureAutomationConfirmedAt: 100 }, { ...qualified, lastMessageReceivedAt: null }), false);
   // Legacy progress without a confirmation time falls back to the setup proof time, never to "always".
-  assert.equal(setup.iosMessageAutomationVerified({}, { setupProofAt: 50, lastMessageReceivedAt: 60 }), true);
-  assert.equal(setup.iosMessageAutomationVerified({}, { lastMessageReceivedAt: 60 }), false);
+  assert.equal(setup.iosMessageAutomationVerified({}, { ...qualified, setupProofAt: 50, lastMessageReceivedAt: 60 }), true);
+  assert.equal(setup.iosMessageAutomationVerified({}, { setupProofAt: 50, lastMessageReceivedAt: 60 }), false);
+  assert.equal(setup.iosMessageAutomationVerified({}, { ...qualified, lastMessageReceivedAt: 60 }), false);
 });

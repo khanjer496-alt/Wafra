@@ -24,6 +24,7 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.mp4': 'video/mp4',
   '.svg': 'image/svg+xml',
   '.ttf': 'font/ttf',
   '.woff': 'font/woff',
@@ -55,10 +56,34 @@ http
       res.end('not found');
       return;
     }
-    res.writeHead(200, {
+    const size = fs.statSync(file).size;
+    const headers = {
       'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream',
       'cache-control': 'no-store',
-    });
-    fs.createReadStream(file).pipe(res);
+      'accept-ranges': 'bytes',
+    };
+    let start = 0; let end = size - 1;
+    const range = req.headers.range;
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      if (match && (match[1] || match[2])) {
+        if (match[1]) {
+          start = Number(match[1]);
+          end = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+        } else {
+          start = Math.max(0, size - Number(match[2]));
+        }
+      }
+      if (!match || (!match[1] && !match[2]) || !Number.isSafeInteger(start) ||
+          !Number.isSafeInteger(end) || start >= size || end < start) {
+        res.writeHead(416, { ...headers, 'content-range': `bytes */${size}` });
+        res.end();
+        return;
+      }
+      headers['content-range'] = `bytes ${start}-${end}/${size}`;
+    }
+    res.writeHead(range ? 206 : 200, { ...headers, 'content-length': range ? end - start + 1 : size });
+    if (req.method === 'HEAD') res.end();
+    else fs.createReadStream(file, range ? { start, end } : undefined).pipe(res);
   })
-  .listen(PORT, () => console.log(`serving ${ROOT} on http://localhost:${PORT}`));
+  .listen(PORT, function () { console.log(`serving ${ROOT} on http://localhost:${this.address().port}`); });
