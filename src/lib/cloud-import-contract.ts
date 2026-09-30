@@ -38,6 +38,7 @@ export interface StatementImportCoverage {
 }
 
 export interface PdfImportAccepted {
+  statementImportId?: string;
   acceptedRows: number;
   /** Date-led money lines the relay would not read; 0 from a relay that predates the field. */
   rejectedRows: number;
@@ -55,6 +56,7 @@ export interface PdfImportAccepted {
 }
 
 export interface CsvImportAccepted {
+  statementImportId?: string;
   acceptedRows: number;
   rejectedRows: number;
   totalRows: number;
@@ -90,6 +92,9 @@ export type CloudImportErrorCode =
   | 'unsupported_statement_format'
   | 'ambiguous_card_signs'
   | 'ambiguous_dates'
+  | 'multiple_statement_accounts'
+  | 'statement_currency_mismatch'
+  | 'statement_options_conflict'
   | 'rate_limited'
   | 'queue_full'
   | 'email_not_configured'
@@ -195,12 +200,24 @@ function parseStatementCoverage(value: unknown): StatementImportCoverage | null 
       typeof row.label !== 'string' || row.label.length < 1 || row.label.length > 80 ||
       typeof row.startDate !== 'string' || typeof row.endDate !== 'string' ||
       !/^\d{4}-\d{2}-\d{2}$/.test(row.startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(row.endDate) ||
+      !validCalendarDate(row.startDate) || !validCalendarDate(row.endDate) ||
       row.startDate > row.endDate) return null;
   return { sourceKey: row.sourceKey, label: row.label, startDate: row.startDate, endDate: row.endDate };
 }
 
+function validCalendarDate(value: string): boolean {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function parseStatementImportId(value: unknown): string | undefined | null {
+  return value === undefined ? undefined : typeof value === 'string' && /^[a-f0-9]{32}$/.test(value) ? value : null;
+}
+
 export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null {
   const body = object(value);
+  const statementImportId = parseStatementImportId(body?.statementImportId);
+  if (statementImportId === null) return null;
   if (!positiveInt(body?.acceptedRows) || !positiveInt(body.pages)) return null;
   // Optional so an older relay's response still parses; present but malformed
   // is a different relay contract and is refused like any other field.
@@ -219,6 +236,7 @@ export function parsePdfImportAccepted(value: unknown): PdfImportAccepted | null
   const alreadyProcessed = optionalFlag(body.alreadyProcessed);
   if (cardSignRowsSkipped === null || alreadyProcessed === null) return null;
   return {
+    ...(statementImportId ? { statementImportId } : {}),
     acceptedRows: body.acceptedRows, rejectedRows, totalRows, pages: body.pages, coverage, cardSignRowsSkipped,
     alreadyProcessed,
   };
@@ -238,6 +256,8 @@ function cardSignSkips(value: unknown, rejectedRows: number): number | null {
 
 export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null {
   const body = object(value);
+  const statementImportId = parseStatementImportId(body?.statementImportId);
+  if (statementImportId === null) return null;
   if (
     !positiveInt(body?.acceptedRows) ||
     !nonNegativeInt(body.rejectedRows) ||
@@ -250,10 +270,11 @@ export function parseCsvImportAccepted(value: unknown): CsvImportAccepted | null
   const alreadyProcessed = optionalFlag(body.alreadyProcessed);
   if (cardSignRowsSkipped === null || alreadyProcessed === null) return null;
   return {
+    ...(statementImportId ? { statementImportId } : {}),
     acceptedRows: body.acceptedRows,
     rejectedRows: body.rejectedRows,
     totalRows: body.totalRows,
-    coverage,
+    coverage: body.rejectedRows === 0 ? coverage : null,
     cardSignRowsSkipped,
     alreadyProcessed,
   };
@@ -290,6 +311,9 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'unsupported_statement_format',
   'ambiguous_card_signs',
   'ambiguous_dates',
+  'multiple_statement_accounts',
+  'statement_currency_mismatch',
+  'statement_options_conflict',
   'rate_limited',
   'queue_full',
   'email_not_configured',

@@ -3314,9 +3314,8 @@ const DECLINE_SMS = [{
  * A statement row carries a date and a coarse relay clock (midday UTC,
  * separated 121s per repeat inside one upload). Three defects followed from
  * letting that clock and the resolved account decide overlap:
- *   - an unlabelled statement files every row to the unassigned account, so
- *     it never met the alerts already captured for the same month, and the
- *     whole month's spending doubled;
+ *   - an unlabelled statement does not prove account ownership, so matching
+ *     day, merchant and amount must preserve the uncertain overlap;
  *   - two overlapping statements put the same row at different offsets from
  *     midday, so the 120s window called them two events;
  *   - two different uploads could share `s{midday}-{amount}` and one row was
@@ -3357,14 +3356,14 @@ const DECLINE_SMS = [{
     stmt('PAYPAL *ENDURANCEIN', 3215, noon, upload('a')),
     stmt('CARREFOUR HYPER 1234', 4000, noon - 121_000, upload('a')),
   ], ledger(alerts), noon);
-  ok('statement vs alert: an unlabelled statement does not re-add a month already captured by alerts',
-    month.txCount === 0, month.batch.transactions);
+  ok('statement vs alert: unlabelled file ownership remains unresolved despite matching alert descriptions',
+    month.txCount === 2, month.batch.transactions);
 
   const twoGenuine = [alertAt('09:10', 2500, 'Talabat', 'g1'), alertAt('20:15', 2500, 'Talabat', 'g2')];
   const threeRows = buildImportPlan([
-    stmt('TALABAT', 2500, noon, upload('b')),
-    stmt('TALABAT', 2500, noon - 121_000, upload('b')),
-    stmt('TALABAT', 2500, noon - 242_000, upload('b')),
+    stmt('TALABAT', 2500, noon, upload('b'), { card: { last4: '3215', kind: 'credit' }, bankHint: 'ADCB' }),
+    stmt('TALABAT', 2500, noon - 121_000, upload('b'), { card: { last4: '3215', kind: 'credit' }, bankHint: 'ADCB' }),
+    stmt('TALABAT', 2500, noon - 242_000, upload('b'), { card: { last4: '3215', kind: 'credit' }, bankHint: 'ADCB' }),
   ], ledger(twoGenuine), noon);
   ok('statement vs alert: matching is one-to-one — two alerts explain two statement rows, the third is new',
     threeRows.txCount === 1, threeRows.batch.transactions);
@@ -3394,8 +3393,8 @@ const DECLINE_SMS = [{
     smsTs: Date.parse(`${D}T09:10:00Z`), sender: 'ADCB', channel: 'inbox',
   };
   const reverse = buildImportPlan([historyAlert], ledger([storedStatement]), noon);
-  ok('statement vs alert: an alert arriving after an unlabelled statement row does not duplicate it',
-    reverse.txCount === 0, reverse.batch.transactions);
+  ok('statement vs alert: unidentified statement ownership cannot consume a later alert',
+    reverse.txCount === 1, reverse.batch.transactions);
 
   // Review follow-up: an unresolved statement row names neither account nor
   // (usually) bank, so money and day alone must not absorb a different
@@ -3468,8 +3467,8 @@ const DECLINE_SMS = [{
   const unlabelledSame = buildImportPlan([
     stmt('SALIK', 400, noon - 121_000, upload('k')),
   ], ledger([unlabelledStored]), noon);
-  ok('statement vs statement: an unlabelled re-import of the same row is recognised',
-    unlabelledSame.txCount === 0, unlabelledSame.batch.transactions);
+  ok('statement vs statement: a different unlabelled file cannot prove equal rows belong to one account',
+    unlabelledSame.txCount === 1, unlabelledSame.batch.transactions);
 
   // Hydration repair must not fold two uploads' rows that share a relay clock.
   const collided = reconcileCaptureDuplicates([

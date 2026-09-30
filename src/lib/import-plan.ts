@@ -20,6 +20,8 @@ import {
   mergeCaptureInstrument,
   sameMerchantCapture,
   statementUploadOf,
+  statementRowKey,
+  statementDescriptorsAgree,
   type CaptureChannel,
   type DuplicateCandidate,
 } from '@/lib/dedupe';
@@ -82,6 +84,7 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   captureSource?: CaptureSource;
   /** Relay-assigned opaque id of the statement upload a PDF/CSV row came from. */
   statementImportId?: string;
+  statementRowIndex?: number;
   /**
    * Server-bound proof of the exact Shortcut branch and setup generation.
    * Only a marker for this receiving device's current generation may prove
@@ -462,15 +465,16 @@ function buildImportPlanInMarket(
   const guard = (): ReturnType<typeof duplicateGuard> => {
     if (!guardCache) {
       guardCache = duplicateGuard(matchableTransactions(), true, {
-        // Statement overlap may cross accounts only when the statement side
-        // names none, and never across two banks either side does name.
+        // Cross-file statement overlap needs a resolved source account; a
+        // bank name or an unassigned holding cannot establish ownership.
         accountBankIdentity: (accountId) => {
           const bankName = state.accounts.find((account) => account.id === accountId)?.bankName ??
             bankNames[accountId];
           return bankName ? bankIdentityForName(bankName) : undefined;
         },
         unresolvedAccount: (accountId) =>
-          accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID || isUnassignedTransferAccount(accountId),
+          accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID || accountId === UNASSIGNED_INCOME_ACCOUNT_ID ||
+          isUnassignedTransferAccount(accountId),
       });
       for (const id of protectedEditedPushConsumed) guardCache.consume(id);
       for (const candidate of protectedReplacementCandidates) guardCache.add(candidate);
@@ -499,11 +503,13 @@ function buildImportPlanInMarket(
    * Statement-upload provenance for dedupe: the relay's upload id (validated)
    * and the bank the statement itself named. Empty for every other capture.
    */
-  const statementFactsOf = (p: ScannedSms): Pick<DuplicateCandidate, 'statementImportId' | 'statementBank'> => {
+  const statementFactsOf = (p: ScannedSms): Pick<DuplicateCandidate, 'statementImportId' | 'statementRowIndex' | 'statementBank'> => {
     const statementImportId = statementUploadOf(p);
     if (!statementImportId) return {};
     const bank = bankFromHint(p);
-    return { statementImportId, ...(bank ? { statementBank: bankIdentityForName(bank.name) } : {}) };
+    return { statementImportId,
+      ...(statementRowKey(p) ? { statementRowIndex: p.statementRowIndex } : {}),
+      ...(bank ? { statementBank: bankIdentityForName(bank.name) } : {}) };
   };
   /**
    * A statement row may take an existing row's identity only when that row is
@@ -511,17 +517,37 @@ function buildImportPlanInMarket(
    * clock at midday, so a shared `s{ts}-{amount}` there is a collision between
    * different rows, not a re-read of one. The duplicate guard pairs those.
    */
-  const sameStatementUploadOrNone = (prior: Transaction | undefined, p: ScannedSms): Transaction | undefined =>
-    prior && fromDifferentStatementUploads(prior, p) ? undefined : prior;
+  const sameStatementUploadOrNone = (prior: Transaction | undefined, p: ScannedSms): Transaction | undefined => {
+    if (!prior) return undefined;
+    const incomingRow = statementRowKey(p);
+    const priorRow = statementRowKey(prior);
+    if (incomingRow && priorRow) {
+      if (incomingRow !== priorRow) return undefined;
+      const incomingType = p.kind === 'cardPayment' ? 'income' : p.type;
+      if ((!prior.userEdited && (prior.date !== p.date || prior.amountFils !== p.amountFils || prior.type !== incomingType ||
+          !compatibleCaptureInstrument(prior.captureInstrument, captureInstrumentOf(p)))) ||
+          (!prior.userEdited && !prior.titleEdited && !statementDescriptorsAgree(prior.title, p.merchant))) {
+        throw new Error('Statement row identity conflicts with stored financial facts');
+      }
+    }
+    // A file's synthetic midday clock cannot identify a live message. A
+    // retained provider identity may legitimately have been bound to a file
+    // row by the one-to-one statement matcher on an earlier import.
+    if (p.sourceEventId && prior.smsKey === canonicalCaptureSourceKey(`h${p.sourceEventId}`, p.smsTs)) return prior;
+    return fromDifferentStatementUploads(prior, p) ||
+      isStatementCaptureSource(prior.captureSource) !== isStatementCaptureSource(p.captureSource)
+      ? undefined : prior;
+  };
   let protectedEditedPushIndex: Map<string, Transaction[]> | null = null;
   const editedPushKey = (date: string, amountFils: number, type: Transaction['type']) =>
     `${date}|${amountFils}|${type}`;
   const protectedEditedPushFor = (p: ScannedSms, date: string): Transaction | undefined => {
-    if (p.channel === 'push' || !Number.isFinite(p.smsTs)) return undefined;
+    if (p.channel === 'push' || isStatementCaptureSource(p.captureSource) || !Number.isFinite(p.smsTs)) return undefined;
     if (!protectedEditedPushIndex) {
       const index = new Map<string, Transaction[]>();
       for (const row of state.transactions) {
-        if (row.source !== 'sms' || row.viaPush !== true || row.userEdited !== true || !Number.isFinite(row.ts)) continue;
+        if (row.source !== 'sms' || row.viaPush !== true || row.userEdited !== true ||
+          isStatementCaptureSource(row.captureSource) || !Number.isFinite(row.ts)) continue;
         // Wallet rows bind only through applePayWalletPriorFor's strict rule.
         if (isApplePayWalletRow(row)) continue;
         const key = editedPushKey(row.date, row.amountFils, row.type);
@@ -829,6 +855,24 @@ function buildImportPlanInMarket(
     return candidates.length === 1 ? candidates[0] : undefined;
   };
   const updates: TxHealUpdate[] = [];
+  const claimStatementOccurrence = (prior: Transaction, p: ScannedSms): void => {
+    const key = statementRowKey(p);
+    if (!key || statementRowKey(prior) === key) return;
+    let previousPatch: TxHealUpdate | undefined;
+    for (let index = updates.length - 1; index >= 0; index -= 1) {
+      const patch = updates[index];
+      if (patch.id === prior.id && patch.statementOccurrences !== undefined) { previousPatch = patch; break; }
+    }
+    const claims = previousPatch?.statementOccurrences ?? prior.statementOccurrences ?? [];
+    if (claims.some((claim) => `${claim.importId}:${claim.rowIndex}` === key)) return;
+    if (claims.length >= 64) throw new Error('Statement occurrence claim capacity exceeded');
+    if (!p.date) throw new Error('Statement occurrence requires an explicit source date');
+    const next = [...claims, { importId: p.statementImportId!, rowIndex: p.statementRowIndex!,
+      date: p.date, amountFils: p.amountFils, type: p.kind === 'cardPayment' ? 'income' as const : p.type,
+      title: p.merchant.normalize('NFKC').trim().replace(/\s+/g, ' ') }];
+    if (previousPatch) previousPatch.statementOccurrences = next;
+    else updates.push({ id: prior.id, statementOccurrences: next });
+  };
   const healFromReparse = (
     smsKey: string | undefined,
     p: ScannedSms,
@@ -836,7 +880,7 @@ function buildImportPlanInMarket(
     cardPaymentSide?: 'debit' | 'receipt',
     stablePrior?: Transaction,
   ) => {
-    const prior = stablePrior ?? (smsKey ? compatiblePrior(smsKey, p) : undefined);
+    const prior = stablePrior ?? (smsKey ? sameStatementUploadOrNone(compatiblePrior(smsKey, p), p) : undefined);
     // A hand-entered row may explain one bank alert for duplicate prevention,
     // but it is never parser-owned. Do not attach parser roles or move it to a
     // guessed account during a later inbox re-read.
@@ -1595,6 +1639,10 @@ function buildImportPlanInMarket(
       if (resolution.confident) noteSnapshot(accountId, p);
       const cardPaymentSide = cardPaymentSideOf(p);
       if (exactPrior) {
+        if (isStatementCaptureSource(p.captureSource)) {
+          claimStatementOccurrence(exactPrior, p);
+          guard().consume(exactPrior.id);
+        }
         // Exact retained-message identity is already one-to-one. Do not build
         // the generalized duplicate/cross-channel indexes just to rediscover
         // the same row during a parser backfill.
@@ -1638,6 +1686,10 @@ function buildImportPlanInMarket(
       if (duplicate.has(candidate)) {
         const matchedId = duplicate.takeMatchedId();
         const matchedPrior = matchedId ? priorById().get(matchedId) : undefined;
+        if (statementRowKey(p) && matchedPrior) {
+          claimStatementOccurrence(matchedPrior, p);
+          continue;
+        }
         const matchedOppositeSettlementSide =
           matchedPrior?.cardPaymentSide !== undefined &&
           cardPaymentSide !== undefined &&
@@ -1677,7 +1729,7 @@ function buildImportPlanInMarket(
         source: 'sms',
         smsKey,
         captureSource: p.captureSource,
-        ...(statementUploadOf(p) ? { statementImportId: statementUploadOf(p) } : {}),
+        ...statementFactsOf(p),
         cardPaymentSide,
         isTransfer: true,
         captureInstrument: captureInstrumentOf(p),
@@ -1776,6 +1828,10 @@ function buildImportPlanInMarket(
       (!prior?.userEdited && !prior?.captureInstrument && accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) ||
       (!prior?.userEdited && isUnassignedTransferAccount(accountId)) ? accountId : undefined;
     if (exactPrior) {
+      if (isStatementCaptureSource(p.captureSource)) {
+        claimStatementOccurrence(exactPrior, p);
+        guard().consume(exactPrior.id);
+      }
       healFromReparse(smsKey, p, healedAccountId, undefined, exactPrior);
       continue;
     }
@@ -1819,6 +1875,10 @@ function buildImportPlanInMarket(
     if (duplicate.has(candidate)) {
       const matchedId = duplicate.takeMatchedId();
       const matchedPrior = matchedId ? priorById().get(matchedId) : undefined;
+      if (statementRowKey(p) && matchedPrior) {
+        claimStatementOccurrence(matchedPrior, p);
+        continue;
+      }
       if (p.sourceEventId && matchedId) {
         // Promote the matched live capture to the exact retained-Message key.
         // The next distinct history GUID can then survive reducer hydration.
@@ -1953,7 +2013,7 @@ function buildImportPlanInMarket(
         ? { notificationObservationId: p.notificationObservationId } : {}),
       ...(liveMessageObservation(p) ? { messageObservationId: p.messageObservationId } : {}),
       captureSource: p.captureSource,
-      ...(statementUploadOf(p) ? { statementImportId: statementUploadOf(p) } : {}),
+      ...statementFactsOf(p),
       isTransfer: p.transferHint || undefined,
       transferEvidence: buildTransferEvidence(p, resolution.confident),
       paymentFlowSide: p.paymentFlowSide,
@@ -2129,14 +2189,23 @@ function buildImportPlanInMarket(
     // treating it as such creates a second monthly reminder every month.
     return due.billIdentity ?? null;
   };
+  const statedBillDate = (due: ScannedSms): string | undefined =>
+    due.date && Number.isInteger(due.dueDay) && Number(due.date.slice(8)) === due.dueDay
+      ? due.date : undefined;
+  const billObservationTime = (due: ScannedSms): number | undefined =>
+    Number.isSafeInteger(due.smsTs) && due.smsTs! > 0 ? due.smsTs : undefined;
+  const datedUnidentifiedProviders = new Set(billDues
+    .filter((due) => !billImportIdentity(due) && statedBillDate(due))
+    .map((due) => due.merchant.trim().toLowerCase()));
   const latestUnidentifiedCycle = billDues.reduce((latest, due) => {
     if (billImportIdentity(due)) return latest;
     const merchant = due.merchant.trim().toLowerCase();
+    if (datedUnidentifiedProviders.has(merchant) && !statedBillDate(due)) return latest;
     const cycle = due.date?.slice(0, 7) ?? '';
     if (cycle > (latest.get(merchant) ?? '')) latest.set(merchant, cycle);
     return latest;
   }, new Map<string, string>());
-  const latestBillDues = [...billDues.reduce((latest, due) => {
+  const groupedBillDues = billDues.reduce((groups, due) => {
     // Keep separately referenced accounts distinct when the bank supplies an
     // account/reference identity, while still collapsing monthly repeats.
     const merchant = due.merchant.trim().toLowerCase();
@@ -2145,16 +2214,36 @@ function buildImportPlanInMarket(
     // With no account identity, retain distinct obligations from the newest
     // provider cycle (amount/day are the only structured facts available),
     // but never resurrect the same provider's previous month beside it.
-    if (!identity && cycle !== latestUnidentifiedCycle.get(merchant)) return latest;
+    if (!identity && (cycle !== latestUnidentifiedCycle.get(merchant) ||
+        (datedUnidentifiedProviders.has(merchant) && !statedBillDate(due)))) return groups;
     const key = identity
       ? `${merchant}|${identity}`
       : `${merchant}|unidentified|${due.amountFils}|${due.dueDay ?? due.date?.slice(8) ?? ''}`;
-    const prior = latest.get(key);
-    const dueTime = due.smsTs ?? Date.parse(`${due.date ?? '1970-01-01'}T00:00:00Z`);
-    const priorTime = prior?.smsTs ?? Date.parse(`${prior?.date ?? '1970-01-01'}T00:00:00Z`);
-    if (!prior || dueTime >= priorTime) latest.set(key, due);
-    return latest;
-  }, new Map<string, ScannedSms>()).values()];
+    const group = groups.get(key) ?? [];
+    group.push(due);
+    groups.set(key, group);
+    return groups;
+  }, new Map<string, ScannedSms[]>());
+  const latestBillDues = [...groupedBillDues.values()].map((group) => {
+    // A recent reminder for an older bill is still the older cycle. Align
+    // batch selection with mergeImportedBills before considering source time.
+    const latestDate = group.reduce((latest, due) => {
+      const date = statedBillDate(due) ?? '';
+      return date > latest ? date : latest;
+    }, '');
+    const cycle = latestDate ? group.filter((due) => statedBillDate(due) === latestDate) : group;
+    const unknownClock = cycle.some((due) => billObservationTime(due) === undefined);
+    const latestTime = cycle.reduce((latest, due) => Math.max(latest, billObservationTime(due) ?? 0), 0);
+    const newest = cycle.filter((due) => (billObservationTime(due) ?? 0) === latestTime);
+    const unresolved = unknownClock ? cycle : newest;
+    if (new Set(unresolved.map((due) => due.amountFils)).size > 1) {
+      // No batch or new cursor is returned, so capture cannot acknowledge an
+      // obligation that was silently omitted. A generic Review lane is not
+      // yet part of the planner contract; retain the source for recovery.
+      throw new Error('Conflicting bill notices require distinct source timestamps');
+    }
+    return newest[0];
+  });
 
   for (const due of latestBillDues) {
     const dueDay = due.dueDay ?? (due.date ? Number(due.date.slice(8)) : 0);
@@ -2166,6 +2255,8 @@ function buildImportPlanInMarket(
       amountFils: due.amountFils,
       dueDay,
       autoDetected: true,
+      ...(statedBillDate(due) ? { statedDueDate: statedBillDate(due) } : {}),
+      ...(billObservationTime(due) !== undefined ? { noticeObservedAt: billObservationTime(due) } : {}),
       ...(importIdentity ? { importIdentity } : {}),
     });
   }

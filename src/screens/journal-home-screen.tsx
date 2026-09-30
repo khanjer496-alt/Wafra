@@ -646,11 +646,11 @@ export default function JournalHomeScreen() {
         <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{id === 'due' ? t('homeWidgetDueTitle') : words.upcoming}</ThemedText>
           <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" accessibilityLabel={words.more} style={styles.smallAction}><Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
         <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{due.slice(0, 2).map(item => <Pressable key={item.id} accessibilityRole="button"
-          accessibilityLabel={`${item.title}. ${daysPhrase(item.daysLeft)}. ${item.kind !== 'card' ? `${paymentWords.estimate} ` : ''}${formatMoneyText(item.amountFils, moneySpec, { decimals: true })}`}
+          accessibilityLabel={`${item.displayLabel ?? item.title}. ${daysPhrase(item.daysLeft)}. ${item.kind !== 'card' ? `${paymentWords.estimate} ` : ''}${formatMoneyText(item.amountFils, moneySpec, { decimals: true })}`}
           onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
           {/* Every payee row keeps its logo tile; the category glyph is only the fallback. */}
           <MerchantAvatar title={item.title} category={item.subscription?.category ?? 'other'} size={40} />
-          <View style={styles.grow}><ThemedText type="smallBold">{item.title}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{daysPhrase(item.daysLeft)}</ThemedText></View>
+          <View style={styles.grow}><ThemedText type="smallBold">{item.displayLabel ?? item.title}</ThemedText><ThemedText type="meta" themeColor="textSecondary">{daysPhrase(item.daysLeft)}</ThemedText></View>
           <View style={[styles.paymentMoney, largeText && styles.paymentAmountStacked]}>
             {item.kind !== 'card' ? <ThemedText type="meta" style={{ color: band.textSecondary }}>≈</ThemedText> : null}
             <Money fils={item.amountFils} moneySpec={moneySpec} type="smallBold" decimals color={band.text} />

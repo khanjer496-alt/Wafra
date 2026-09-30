@@ -126,6 +126,7 @@ export default function SettingsDataScreen() {
   const [eraseDialogBody, setEraseDialogBody] = useState('');
   const eraseAfterDismiss = useRef(false);
   const [reportScopeSheet, setReportScopeSheet] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<{
     question: string;
     body?: string;
@@ -373,13 +374,14 @@ export default function SettingsDataScreen() {
   ];
 
   const restoreFromFile = async () => {
+    setRestoreError(null);
     try {
       const picked = await DocumentPicker.getDocumentAsync({
         type: ['application/json', 'text/plain', '*/*'],
         copyToCacheDirectory: true,
       });
       if (picked.canceled || !picked.assets?.[0]) return;
-      const content = await readBackupPickerCopy(picked.assets[0].uri);
+      const content = await readBackupPickerCopy(picked.assets[0].uri, picked.assets[0].file);
       setConfirmation({
         question: t('restoreBackupQ'),
         body: t('restoreReplacesAll'),
@@ -387,12 +389,14 @@ export default function SettingsDataScreen() {
         destructive: true,
         onConfirm: () => {
           if (!restoreBackup(content)) {
-            Alert.alert(t('invalidFile'), t('notAWafraBackup'));
+            if (Platform.OS === 'web') setRestoreError(t('notAWafraBackup'));
+            else Alert.alert(t('invalidFile'), t('notAWafraBackup'));
           }
         },
       });
     } catch {
-      Alert.alert(t('couldNotReadFile'), t('couldNotReadFileBody'));
+      if (Platform.OS === 'web') setRestoreError(t('couldNotReadFileBody'));
+      else Alert.alert(t('couldNotReadFile'), t('couldNotReadFileBody'));
     }
   };
 
@@ -575,6 +579,8 @@ export default function SettingsDataScreen() {
             icon: 'repeat',
             last: !isSmsCorpusExportAvailable() && !isInternalLaunchDiagnosticsEnabled(),
           })}
+          {restoreError && <ThemedText type="small" accessibilityRole="alert"
+            testID="settings-restore-error">{restoreError}</ThemedText>}
           {isSmsCorpusExportAvailable() && (
             <View style={styles.tester}>
               <EButton

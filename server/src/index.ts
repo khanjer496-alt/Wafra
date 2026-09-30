@@ -27,6 +27,7 @@
  */
 import {
   detectLaunchMarketFromAlert,
+  bankIdentityForName,
   MARKETS,
   withMarketPackForParsing,
 } from '@/lib/markets';
@@ -65,7 +66,7 @@ import {
   parseRawEmail,
   legacyStatementDateHint,
   parseStatementCsv,
-  parseStatementText,
+  parseStatementLines,
   statementDateHintFrom,
   type StatementDateHint,
 } from './imports';
@@ -372,9 +373,9 @@ function validMarket(id: unknown): string | null {
   return MARKETS.some((market) => market.id === up) ? up : null;
 }
 
-function statementCoverage(rows: ReadonlyArray<{ date?: string | null; card?: { last4: string; kind: string } | null; bankHint?: string }>): {
+async function statementCoverage(rows: ReadonlyArray<{ date?: string | null; card?: { last4: string; kind: string } | null; bankHint?: string }>): Promise<{
   sourceKey: string; label: string; startDate: string; endDate: string;
-} | null {
+} | null> {
   const dates = rows.map((row) => row.date).filter((date): date is string =>
     typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date));
   if (dates.length === 0) return null;
@@ -386,11 +387,21 @@ function statementCoverage(rows: ReadonlyArray<{ date?: string | null; card?: { 
     const key = `${kind}:${row.card.kind}:${row.card.last4}`;
     instruments.set(key, { key, label: `${kind === 'account' ? 'Account' : 'Card'} •${row.card.last4}` });
   }
-  const banks = [...new Set(rows.map((row) => row.bankHint?.trim()).filter((value): value is string => !!value))];
+  const banks = new Map(rows.filter(row => row.bankHint).map(row => [bankIdentityForName(row.bankHint), row.bankHint!.trim()]));
+  const bank = banks.size === 1 && rows.every(row => bankIdentityForName(row.bankHint))
+    ? [...banks.entries()][0] : undefined;
+  // Preserve Unicode issuer identity without truncating different bank names
+  // into one key. This digest names an issuer, never a statement or person.
+  const bankKey = bank?.[0] ? [...new Uint8Array(await crypto.subtle.digest('SHA-256',
+    new TextEncoder().encode(bank[0])))].slice(0, 8).map(byte => byte.toString(16).padStart(2, '0')).join('') : undefined;
   const source = instruments.size === 1
-    ? [...instruments.values()][0]
-    : banks.length === 1
-      ? { key: `bank:${banks[0].toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 48)}`, label: banks[0].slice(0, 60) }
+    ? (() => {
+        const instrument = [...instruments.values()][0];
+        return bankKey && bank ? { key: `issuer:${bankKey}:${instrument.key}`,
+          label: `${bank[1].slice(0, 50)} ${instrument.label}` } : instrument;
+      })()
+    : bankKey && bank
+      ? { key: `bank:${bankKey}`, label: bank[1].slice(0, 60) }
       : { key: 'bank-statements', label: 'Bank statements' };
   return { sourceKey: source.key, label: source.label, startDate: dates[0], endDate: dates[dates.length - 1] };
 }
@@ -1045,6 +1056,53 @@ function statementReplayKey(baseKey: string, rowIndex: number): string {
   return `${baseKey}:settlement-v1:${rowIndex}`;
 }
 
+/** Canonical key order, preserving row order because it owns replay indices. */
+function orderedInterpretation(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(orderedInterpretation);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
+    .sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, orderedInterpretation(item)]));
+  return value;
+}
+
+async function bindStatementInterpretation(
+  env: Env, device: Device, baseKey: string, rows: readonly NonNullable<ReturnType<typeof parseSms>>[], receiptTtlSeconds: number,
+): Promise<'bound' | 'legacy' | 'conflict'> {
+  const digest = await keyedFingerprint(device.requestSecret,
+    `statement-interpretation-v1:${JSON.stringify(orderedInterpretation(rows.map(withoutRaw)))}`);
+  const priorReceipts = `${baseKey}:*`;
+  // SQLite serializes this conditional insert, so simultaneous requests with
+  // different date/currency interpretations cannot both become authoritative.
+  // A live old receipt without a binding never licenses guessing its contents.
+  await env.DB.prepare(
+    `INSERT INTO statement_import_bindings
+       (device_id, source_key, interpretation_digest, created_at, expires_at)
+     SELECT ?1, ?2, ?3, unixepoch(), unixepoch() + ?4
+      WHERE EXISTS (SELECT 1 FROM devices WHERE id = ?1)
+        AND NOT EXISTS (SELECT 1 FROM ingest_receipts
+          WHERE device_id = ?1 AND replay_key GLOB ?5 AND expires_at > unixepoch())
+     ON CONFLICT(device_id, source_key) DO UPDATE SET
+       interpretation_digest = excluded.interpretation_digest,
+       created_at = excluded.created_at, expires_at = excluded.expires_at
+     WHERE statement_import_bindings.expires_at <= unixepoch()`,
+  ).bind(device.id, baseKey, digest, receiptTtlSeconds, priorReceipts).run();
+  const binding = await env.DB.prepare(
+    'SELECT interpretation_digest FROM statement_import_bindings WHERE device_id = ?1 AND source_key = ?2 AND expires_at > unixepoch()',
+  ).bind(device.id, baseKey).first<{ interpretation_digest: string }>();
+  if (binding) {
+    if (binding.interpretation_digest !== digest) return 'conflict';
+    const renewed = await env.DB.prepare(
+      `UPDATE statement_import_bindings SET expires_at = MAX(expires_at, unixepoch() + ?4)
+        WHERE device_id = ?1 AND source_key = ?2 AND interpretation_digest = ?3 AND expires_at > unixepoch()
+        RETURNING interpretation_digest`,
+    ).bind(device.id, baseKey, digest, receiptTtlSeconds).first<{ interpretation_digest: string }>();
+    return renewed ? 'bound' : 'conflict';
+  }
+  const legacy = await env.DB.prepare(
+    'SELECT 1 AS present FROM ingest_receipts WHERE device_id = ?1 AND replay_key GLOB ?2 AND expires_at > unixepoch() LIMIT 1',
+  ).bind(device.id, priorReceipts).first<{ present: number }>();
+  return legacy ? 'legacy' : 'conflict';
+}
+
 const DAY_MS = 86_400_000;
 
 function rowReceiptTimes(rows: { date?: string | null }[], nowMs: number): string[] {
@@ -1197,22 +1255,57 @@ async function queueStructuredRow(
     .map((target) => target.id);
 }
 
+interface SupplementalDeliveryResult {
+  wake: Set<string>;
+  /** Rows durably delivered to the requesting device, including safe replays. */
+  acceptedRows: number;
+  insertedRows: number;
+  remainingRows: number;
+  remainingDeliveries: number;
+}
+
 async function queueSupplementalRows(
   env: Env,
   device: Device,
   rows: readonly { row: Record<string, unknown>; replayKey: string; receiptTtlSeconds: number }[],
   targets: readonly QueueTarget[],
-): Promise<Set<string>> {
+  replayOnly = false,
+): Promise<SupplementalDeliveryResult> {
   const wake = new Set<string>();
+  let acceptedRows = 0;
+  let insertedRows = 0;
+  let remainingDeliveries = 0;
+  const requiredTargets = [...new Set([device.id, ...targets.map(target => target.id)])];
   const CONCURRENCY = 8;
   for (let start = 0; start < rows.length; start += CONCURRENCY) {
-    const inserted = await Promise.all(rows.slice(start, start + CONCURRENCY).map((item) =>
-      queueStructuredRow(env, device, item.row, item.replayKey, item.receiptTtlSeconds,
-        { sourceScope: 'supplemental' }, targets),
-    ));
-    for (const ids of inserted) for (const id of ids) wake.add(id);
+    const deliveries = await Promise.all(rows.slice(start, start + CONCURRENCY).map(async (item) => {
+      const inserted = replayOnly ? [] : await queueStructuredRow(env, device, item.row, item.replayKey, item.receiptTtlSeconds,
+        { sourceScope: 'supplemental' }, targets);
+      const completed = new Set(inserted);
+      const missing = requiredTargets.filter(id => !completed.has(id));
+      if (missing.length > 0) {
+        // Zero inserts can mean either a replay or a full/disappeared target.
+        // Only the existing atomic queue+receipt write proves prior delivery.
+        const keys = missing.map(id => `${item.replayKey}:${id}`);
+        const placeholders = keys.map((_, index) => `?${index + 2}`).join(',');
+        const { results } = await env.DB.prepare(
+          `SELECT replay_key FROM ingest_receipts
+            WHERE device_id = ?1 AND expires_at > unixepoch()
+              AND replay_key IN (${placeholders})`,
+        ).bind(device.id, ...keys).all<{ replay_key: string }>();
+        const receipts = new Set((results ?? []).map(row => row.replay_key));
+        for (const id of missing) if (receipts.has(`${item.replayKey}:${id}`)) completed.add(id);
+      }
+      return { inserted, completed };
+    }));
+    for (const delivery of deliveries) {
+      for (const id of delivery.inserted) wake.add(id);
+      if (delivery.inserted.includes(device.id)) insertedRows += 1;
+      if (delivery.completed.has(device.id)) acceptedRows += 1;
+      remainingDeliveries += requiredTargets.filter(id => !delivery.completed.has(id)).length;
+    }
   }
-  return wake;
+  return { wake, acceptedRows, insertedRows, remainingRows: rows.length - acceptedRows, remainingDeliveries };
 }
 
 const opaqueFingerprint = (value: string): string => value
@@ -1226,7 +1319,7 @@ async function queueEmailRows(
   normalized: string,
   eventMaterial: string,
   knownTargets?: readonly QueueTarget[],
-): Promise<{ acceptedRows: number; wake: Set<string> }> {
+): Promise<SupplementalDeliveryResult> {
   // Forwarded single alerts use the same per-alert AED/SAR routing as the
   // Shortcut. The paired device market remains the default only for
   // currency-less statement rows and older evidence-free templates.
@@ -1240,10 +1333,13 @@ async function queueEmailRows(
     ? alertInterpretation.parsed
     : null;
   const statementLocale = alert ? null : await emailStatementLocale(env, device);
-  const parsedRows = alert
-    ? [alert]
-    : parseStatementText(normalized, statementLocale!.currency, { card: null }, statementLocale!.hint);
-  if (parsedRows.length === 0) return { acceptedRows: 0, wake: new Set() };
+  const statement = alert ? null
+    : parseStatementLines(normalized, statementLocale!.currency, { card: null }, statementLocale!.hint);
+  if (statement && statement.rows.length > 0 &&
+      (statement.rejectedRows > 0 || !statement.completeRowAccounting)) throw new Error('incomplete_statement');
+  const parsedRows = alert ? [alert] : statement!.rows;
+  if (parsedRows.length === 0) return { acceptedRows: 0, insertedRows: 0, remainingRows: 0,
+    remainingDeliveries: 0, wake: new Set() };
   if (parsedRows.length > MAX_IMPORT_ROWS) throw new Error('too_many_rows');
   const baseKey = await keyedFingerprint(device.requestSecret, eventMaterial);
   // Per ROW, not per batch — see rowReceiptTimes. One shared stamp here gave
@@ -1262,15 +1358,18 @@ async function queueEmailRows(
   if (!(await reserveSupplementalDeliveries(env, device.id, parsedRows.length, targets.length))) {
     throw new Error('supplemental_budget_exceeded');
   }
-  const wake = await queueSupplementalRows(
+  const interpretation = await bindStatementInterpretation(env, device, baseKey, parsedRows, REPLAY_WINDOW_SECONDS);
+  if (interpretation === 'conflict') throw new Error('statement_options_conflict');
+  const delivery = await queueSupplementalRows(
     env, device,
     parsedRows.map((_, index) => ({
       row: { ...withoutRaw(parsedRows[index]), captureSource: 'email', market: alert ? alertMarket : device.market, receivedAt: receivedAt[index] },
       replayKey: `${baseKey}:${index}`, receiptTtlSeconds: REPLAY_WINDOW_SECONDS,
     })),
-    targets,
+    targets, interpretation === 'legacy',
   );
-  return { acceptedRows: parsedRows.length, wake };
+  if (interpretation === 'legacy' && delivery.remainingDeliveries > 0) throw new Error('statement_options_conflict');
+  return delivery;
 }
 
 async function wakeDevice(env: Env, deviceId: string): Promise<void> {
@@ -1625,6 +1724,7 @@ export default {
         recordAdminDeletion(env, target.admin_token_hash, '/v1/device'),
         env.DB.prepare('DELETE FROM push_registrations WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM ingest_receipts WHERE device_id = ?1').bind(target.id),
+        env.DB.prepare('DELETE FROM statement_import_bindings WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM queue WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM ingest_limits WHERE device_id = ?1').bind(target.id),
         env.DB.prepare('DELETE FROM cost_limits WHERE actor_id = ?1').bind(target.id),
@@ -1648,6 +1748,9 @@ export default {
         ).bind(device.vault_id),
         env.DB.prepare(
           'DELETE FROM ingest_receipts WHERE device_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
+        ).bind(device.vault_id),
+        env.DB.prepare(
+          'DELETE FROM statement_import_bindings WHERE device_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
         ).bind(device.vault_id),
         env.DB.prepare(
           'DELETE FROM queue WHERE device_id IN (SELECT id FROM devices WHERE vault_id = ?1)',
@@ -2082,12 +2185,21 @@ export default {
         if (error instanceof Error && error.message === 'too_many_rows') {
           return json({ error: 'too_many_rows' }, 413);
         }
+        if (error instanceof Error && error.message === 'statement_options_conflict') {
+          return json({ error: 'statement_options_conflict' }, 409);
+        }
+        if (error instanceof Error && ['multiple_statement_accounts', 'statement_currency_mismatch', 'incomplete_statement'].includes(error.message)) {
+          return json({ error: error.message }, 422);
+        }
         throw error;
       }
-      if (imported.acceptedRows === 0) return empty(204);
       if (imported.wake.size > 0) ctx.waitUntil(
         Promise.all([...imported.wake].map((id) => wakeDevice(env, id))),
       );
+      if (imported.remainingDeliveries > 0) return json({ error: 'queue_full',
+        acceptedRows: imported.acceptedRows, remainingRows: imported.remainingRows,
+        remainingDeliveries: imported.remainingDeliveries }, 429);
+      if (imported.acceptedRows === 0) return empty(204);
       return empty(202);
     }
 
@@ -2139,6 +2251,9 @@ export default {
         if (error instanceof Error && error.message === 'pdf_too_long') {
           return json({ error: 'pdf_too_long' }, 413);
         }
+        if (error instanceof Error && ['multiple_statement_accounts', 'statement_currency_mismatch'].includes(error.message)) {
+          return json({ error: error.message }, 422);
+        }
         return json({ error: 'unreadable_pdf' }, 422);
       }
       if (extracted.pages > MAX_PDF_PAGES) return json({ error: 'too_many_pages' }, 413);
@@ -2168,25 +2283,29 @@ export default {
       if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
         return json({ error: 'rate_limited' }, 429);
       }
-      const wake = await queueSupplementalRows(
+      const interpretation = await bindStatementInterpretation(env, device, baseKey, extracted.rows, 72 * 60 * 60);
+      if (interpretation === 'conflict') return json({ error: 'statement_options_conflict' }, 409);
+      const delivery = await queueSupplementalRows(
         env, device,
         extracted.rows.map((_, index) => ({
           row: {
-            ...withoutRaw(extracted.rows[index]), captureSource: 'pdf', receivedAt: receivedAt[index], statementImportId,
+            ...withoutRaw(extracted.rows[index]), captureSource: 'pdf', receivedAt: receivedAt[index], statementImportId, statementRowIndex: index,
           },
           replayKey: statementReplayKey(baseKey, index), receiptTtlSeconds: 72 * 60 * 60,
         })),
-        targets,
+        targets, interpretation === 'legacy',
       );
-      if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map((id) => wakeDevice(env, id))));
-      if (wake.size === 0 && await queueIsFull(env, device.id)) {
-        return json({ error: 'queue_full' }, 429);
+      if (delivery.wake.size > 0) ctx.waitUntil(Promise.all([...delivery.wake].map((id) => wakeDevice(env, id))));
+      if (delivery.remainingDeliveries > 0) {
+        if (interpretation === 'legacy') return json({ error: 'statement_options_conflict' }, 409);
+        return json({ error: 'queue_full', acceptedRows: delivery.acceptedRows,
+          remainingRows: delivery.remainingRows, remainingDeliveries: delivery.remainingDeliveries }, 429);
       }
       // Nothing new queued and the queue has room: every row already carried
       // this upload's replay receipt, i.e. this exact file was processed in
       // the last 72 hours. Say that, rather than let the phone report
       // "already in your ledger" about rows it has not looked at.
-      const alreadyProcessed = wake.size === 0;
+      const alreadyProcessed = delivery.insertedRows === 0;
       // rejectedRows is a count of date-led money lines the parser would not
       // read: without it a statement that half-imported looked, on the phone,
       // like it had imported completely. Counts and coverage only, never rows.
@@ -2197,10 +2316,13 @@ export default {
         pages: extracted.pages,
         cardSignRowsSkipped: extracted.ambiguousCardSignRows,
         alreadyProcessed,
-        // Coverage means "this range is fully represented locally". Never
-        // claim it when the parser explicitly counted rows it refused.
-        coverage: extracted.completeRowAccounting && extracted.rejectedRows === 0
-          ? statementCoverage(extracted.rows)
+        statementImportId,
+        ...(interpretation === 'legacy' ? { legacyInterpretation: true } : {}),
+        // Only the observed transaction-date range, never proof of a complete
+        // statement or month. Refused/unaccounted rows and unbound legacy
+        // replays cannot even establish that range for this interpretation.
+        coverage: interpretation !== 'legacy' && extracted.completeRowAccounting && extracted.rejectedRows === 0
+          ? await statementCoverage(extracted.rows)
           : null,
       }, 202);
     }
@@ -2236,7 +2358,7 @@ export default {
       } catch (error) {
         const code = error instanceof Error ? error.message : 'invalid_csv';
         if (code === 'too_many_rows') return json({ error: code }, 413);
-        if (code === 'unsupported_statement_format') return json({ error: code }, 422);
+        if (code === 'unsupported_statement_format' || code === 'statement_currency_mismatch') return json({ error: code }, 422);
         return json({ error: 'invalid_csv' }, 400);
       }
       if (parsed.rows.length === 0) {
@@ -2260,30 +2382,36 @@ export default {
       if (!(await reserveSupplementalDeliveries(env, device.id, parsed.rows.length, targets.length))) {
         return json({ error: 'rate_limited' }, 429);
       }
-      const wake = await queueSupplementalRows(
+      const interpretation = await bindStatementInterpretation(env, device, baseKey, parsed.rows, 72 * 60 * 60);
+      if (interpretation === 'conflict') return json({ error: 'statement_options_conflict' }, 409);
+      const delivery = await queueSupplementalRows(
         env, device,
         parsed.rows.map((row, index) => ({
-          row: { ...withoutRaw(row), captureSource: 'csv', receivedAt: receivedAt[index], statementImportId },
+          row: { ...withoutRaw(row), captureSource: 'csv', receivedAt: receivedAt[index], statementImportId, statementRowIndex: index },
           replayKey: statementReplayKey(baseKey, index), receiptTtlSeconds: 72 * 60 * 60,
         })),
-        targets,
+        targets, interpretation === 'legacy',
       );
-      if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map((id) => wakeDevice(env, id))));
-      if (wake.size === 0 && await queueIsFull(env, device.id)) {
-        return json({ error: 'queue_full' }, 429);
+      if (delivery.wake.size > 0) ctx.waitUntil(Promise.all([...delivery.wake].map((id) => wakeDevice(env, id))));
+      if (delivery.remainingDeliveries > 0) {
+        if (interpretation === 'legacy') return json({ error: 'statement_options_conflict' }, 409);
+        return json({ error: 'queue_full', acceptedRows: delivery.acceptedRows,
+          remainingRows: delivery.remainingRows, remainingDeliveries: delivery.remainingDeliveries }, 429);
       }
       // Nothing new queued and the queue has room: every row already carried
       // this upload's replay receipt, i.e. this exact file was processed in
       // the last 72 hours. Say that, rather than let the phone report
       // "already in your ledger" about rows it has not looked at.
-      const alreadyProcessed = wake.size === 0;
+      const alreadyProcessed = delivery.insertedRows === 0;
       return json({
         acceptedRows: parsed.rows.length,
         rejectedRows: parsed.rejectedRows,
         totalRows: parsed.totalRows,
         cardSignRowsSkipped: parsed.ambiguousCardSignRows,
         alreadyProcessed,
-        coverage: parsed.rejectedRows === 0 ? statementCoverage(parsed.rows) : null,
+        statementImportId,
+        ...(interpretation === 'legacy' ? { legacyInterpretation: true } : {}),
+        coverage: interpretation !== 'legacy' && parsed.rejectedRows === 0 ? await statementCoverage(parsed.rows) : null,
       }, 202);
     }
 
@@ -2436,6 +2564,7 @@ export default {
         recordAdminDeletion(env, tokenHash, url.pathname),
         env.DB.prepare('DELETE FROM push_registrations WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM ingest_receipts WHERE device_id = ?1').bind(device.id),
+        env.DB.prepare('DELETE FROM statement_import_bindings WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM queue WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM ingest_limits WHERE device_id = ?1').bind(device.id),
         env.DB.prepare('DELETE FROM cost_limits WHERE actor_id = ?1').bind(device.id),
@@ -2648,6 +2777,7 @@ export default {
       try {
         await env.DB.prepare('SELECT market FROM devices LIMIT 0').all();
         await env.DB.prepare('SELECT shortcut_ingest_enabled FROM devices LIMIT 0').all();
+        await env.DB.prepare('SELECT device_id, source_key, interpretation_digest, expires_at FROM statement_import_bindings LIMIT 0').all();
         await env.DB.prepare(
           'SELECT email_statement_currency, email_statement_date_order FROM devices LIMIT 0',
         ).all();
@@ -2704,7 +2834,30 @@ export default {
 
     const messageId = message.headers.get('message-id')?.slice(0, 512) ?? crypto.randomUUID();
     const wake = new Set<string>();
+    const rejectImport = (reason: string) => {
+      if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map(id => wakeDevice(env, id))));
+      message.setReject(reason);
+    };
+    const acceptDelivery = (delivery: SupplementalDeliveryResult): boolean => {
+      for (const id of delivery.wake) wake.add(id);
+      if (delivery.remainingDeliveries === 0) return true;
+      rejectImport('Wafra queue space is exhausted. Some rows may already be queued; sync your devices and resend this email.');
+      return false;
+    };
+    const rejectExtraction = (error?: unknown) => rejectImport(
+      error instanceof Error && error.message === 'statement_options_conflict'
+        ? 'This statement was previously imported with a different or unverified interpretation. Review the earlier import before retrying.'
+        : error instanceof Error && error.message === 'statement_currency_mismatch'
+        ? 'The statement currency differs from your Wafra ledger. Check the forwarding currency before resending.'
+        : error instanceof Error && error.message === 'multiple_statement_accounts'
+          ? 'Wafra cannot safely import multiple statement accounts in one PDF. Split the accounts before resending.'
+          : 'Wafra could not import every statement row or attachment. Some rows may already be queued; use file import to review the result.',
+    );
     let importedRows = 0;
+    if (parsedEmail.pdfAttachments.length + parsedEmail.csvAttachments.length > MAX_EMAIL_ATTACHMENTS) {
+      rejectImport('This email has too many statement attachments. Split it into smaller emails.');
+      return;
+    }
     // Reuse this target set for the whole MIME message. Previously every row of
     // every attachment rediscovered the vault devices, multiplying D1 reads.
     const targets = await supplementalQueueTargets(env, device);
@@ -2718,14 +2871,12 @@ export default {
           `mime:${messageId}`,
           targets,
         );
+        if (!acceptDelivery(imported)) return;
         importedRows += imported.acceptedRows;
-        for (const id of imported.wake) wake.add(id);
       } catch (error) {
-        message.setReject(
-          error instanceof Error && error.message === 'supplemental_budget_exceeded'
-            ? 'Wafra import limit reached; try again later.'
-            : 'This forwarded email has too many statement rows.',
-        );
+        if (error instanceof Error && error.message === 'supplemental_budget_exceeded') {
+          rejectImport('Wafra import limit reached; try again later.');
+        } else rejectExtraction(error);
         return;
       }
     }
@@ -2737,7 +2888,7 @@ export default {
       attachmentIndex++, attachmentBudget--
     ) {
       const bytes = parsedEmail.pdfAttachments[attachmentIndex];
-      if (bytes.byteLength > MAX_PDF_BYTES) continue;
+      if (bytes.byteLength > MAX_PDF_BYTES) { rejectExtraction(); return; }
       // BEFORE the extract. pdf.js detaches the buffer it is handed, so a
       // digest taken afterwards is the digest of nothing — see the note on
       // /v1/import/pdf, where that was an outage.
@@ -2757,17 +2908,19 @@ export default {
       let extracted: Awaited<ReturnType<typeof extractPdfStatementRows>>;
       try {
         extracted = await extractPdfStatementRows(bytes, emailLocale.currency, undefined, emailLocale.hint);
-      } catch {
-        continue;
+      } catch (error) {
+        rejectExtraction(error);
+        return;
       }
       if (
         extracted.pages > MAX_PDF_PAGES ||
         extracted.rows.length === 0 ||
         extracted.totalRows > MAX_IMPORT_ROWS ||
-        importedRows + extracted.rows.length > MAX_IMPORT_ROWS
-      ) continue;
+        importedRows + extracted.rows.length > MAX_IMPORT_ROWS ||
+        extracted.rejectedRows > 0 || !extracted.completeRowAccounting
+      ) { rejectExtraction(); return; }
       if (!(await reserveSupplementalDeliveries(env, device.id, extracted.rows.length, targets.length))) {
-        message.setReject('Wafra import limit reached; try again later.');
+        rejectImport('Wafra import limit reached; try again later.');
         return;
       }
       const baseKey = await keyedFingerprint(
@@ -2777,23 +2930,14 @@ export default {
       // Per ROW, not per batch — see rowReceiptTimes.
       const receivedAt = rowReceiptTimes(extracted.rows, Date.now());
       const statementImportId = await statementImportIdFor(baseKey);
-      for (let rowIndex = 0; rowIndex < extracted.rows.length; rowIndex++) {
-        const inserted = await queueStructuredRow(
-          env,
-          device,
-          {
-            ...withoutRaw(extracted.rows[rowIndex]),
-            captureSource: 'pdf',
-            receivedAt: receivedAt[rowIndex],
-            statementImportId,
-          },
-          statementReplayKey(baseKey, rowIndex),
-          72 * 60 * 60,
-          { sourceScope: 'supplemental' },
-          targets,
-        );
-        for (const id of inserted) wake.add(id);
-      }
+      const interpretation = await bindStatementInterpretation(env, device, baseKey, extracted.rows, 72 * 60 * 60);
+      if (interpretation === 'conflict') { rejectExtraction(new Error('statement_options_conflict')); return; }
+      const delivery = await queueSupplementalRows(env, device, extracted.rows.map((row, index) => ({
+        row: { ...withoutRaw(row), captureSource: 'pdf', receivedAt: receivedAt[index], statementImportId, statementRowIndex: index },
+        replayKey: statementReplayKey(baseKey, index), receiptTtlSeconds: 72 * 60 * 60,
+      })), targets, interpretation === 'legacy');
+      if (interpretation === 'legacy' && delivery.remainingDeliveries > 0) { rejectExtraction(new Error('statement_options_conflict')); return; }
+      if (!acceptDelivery(delivery)) return;
       importedRows += extracted.rows.length;
     }
     for (
@@ -2802,7 +2946,7 @@ export default {
       attachmentIndex++, attachmentBudget--
     ) {
       const attachment = parsedEmail.csvAttachments[attachmentIndex];
-      if (attachment.bytes.byteLength === 0 || attachment.bytes.byteLength > MAX_CSV_BYTES) continue;
+      if (attachment.bytes.byteLength === 0 || attachment.bytes.byteLength > MAX_CSV_BYTES) { rejectExtraction(); return; }
       let parsed: ReturnType<typeof parseStatementCsv>;
       try {
         parsed = parseStatementCsv(
@@ -2811,12 +2955,14 @@ export default {
           MAX_IMPORT_ROWS,
           emailLocale.hint,
         );
-      } catch {
-        continue;
+      } catch (error) {
+        rejectExtraction(error);
+        return;
       }
-      if (parsed.rows.length === 0 || importedRows + parsed.rows.length > MAX_IMPORT_ROWS) continue;
+      if (parsed.rows.length === 0 || importedRows + parsed.rows.length > MAX_IMPORT_ROWS ||
+          parsed.rejectedRows > 0) { rejectExtraction(); return; }
       if (!(await reserveSupplementalDeliveries(env, device.id, parsed.rows.length, targets.length))) {
-        message.setReject('Wafra import limit reached; try again later.');
+        rejectImport('Wafra import limit reached; try again later.');
         return;
       }
       const digest = b64encode(
@@ -2831,25 +2977,17 @@ export default {
       );
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
       const statementImportId = await statementImportIdFor(baseKey);
-      for (let rowIndex = 0; rowIndex < parsed.rows.length; rowIndex++) {
-        const inserted = await queueStructuredRow(
-          env,
-          device,
-          {
-            ...withoutRaw(parsed.rows[rowIndex]),
-            captureSource: 'csv',
-            receivedAt: receivedAt[rowIndex],
-            statementImportId,
-          },
-          statementReplayKey(baseKey, rowIndex),
-          72 * 60 * 60,
-          { sourceScope: 'supplemental' },
-          targets,
-        );
-        for (const id of inserted) wake.add(id);
-      }
+      const interpretation = await bindStatementInterpretation(env, device, baseKey, parsed.rows, 72 * 60 * 60);
+      if (interpretation === 'conflict') { rejectExtraction(new Error('statement_options_conflict')); return; }
+      const delivery = await queueSupplementalRows(env, device, parsed.rows.map((row, index) => ({
+        row: { ...withoutRaw(row), captureSource: 'csv', receivedAt: receivedAt[index], statementImportId, statementRowIndex: index },
+        replayKey: statementReplayKey(baseKey, index), receiptTtlSeconds: 72 * 60 * 60,
+      })), targets, interpretation === 'legacy');
+      if (interpretation === 'legacy' && delivery.remainingDeliveries > 0) { rejectExtraction(new Error('statement_options_conflict')); return; }
+      if (!acceptDelivery(delivery)) return;
       importedRows += parsed.rows.length;
     }
+    if (importedRows === 0) { rejectExtraction(); return; }
     if (wake.size > 0) ctx.waitUntil(Promise.all([...wake].map((id) => wakeDevice(env, id))));
   },
 
@@ -2894,6 +3032,7 @@ export default {
     await env.DB.prepare(
       'DELETE FROM ingest_receipts WHERE expires_at <= unixepoch()',
     ).run();
+    await env.DB.prepare('DELETE FROM statement_import_bindings WHERE expires_at <= unixepoch()').run();
     await env.DB.prepare(
       `DELETE FROM devices
        WHERE last_seen < unixepoch() - 31536000
@@ -2908,6 +3047,7 @@ export default {
     await env.DB.prepare(
       'DELETE FROM ingest_receipts WHERE device_id NOT IN (SELECT id FROM devices)',
     ).run();
+    await env.DB.prepare('DELETE FROM statement_import_bindings WHERE device_id NOT IN (SELECT id FROM devices)').run();
     await env.DB.prepare(
       'DELETE FROM automation_generations WHERE device_id NOT IN (SELECT id FROM devices)',
     ).run();

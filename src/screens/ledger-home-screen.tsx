@@ -385,7 +385,7 @@ function LeavingSoon({
           <SpringPressable
             key={x.id}
             accessibilityRole="button"
-            accessibilityLabel={x.title}
+            accessibilityLabel={x.displayLabel ?? x.title}
             onPress={() => onOpen(x)}
             scaleTo={0.99}
             style={[
@@ -395,7 +395,7 @@ function LeavingSoon({
             <Icon name={x.icon} size={17} color={alarming ? theme.expense : theme.text} />
             <View style={styles.leaveText}>
               <ThemedText type="small" numberOfLines={1}>
-                {x.title}
+                {x.displayLabel ?? x.title}
               </ThemedText>
               <ThemedText
                 type="meta"

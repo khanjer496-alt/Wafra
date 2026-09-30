@@ -58,6 +58,13 @@ interface LedgerPersistenceOptions {
 
 type Mode = 'blocked' | 'ready' | 'resetting';
 
+// Fixed, source-free wording also classifies this as corruption in the existing
+// recovery screen. A partial snapshot must never become the next saved ledger.
+function readSnapshotJson(raw: string): unknown {
+  try { return JSON.parse(raw); }
+  catch { throw new Error('Corrupt ledger snapshot'); }
+}
+
 /**
  * Construction is exported for an in-memory adapter in interface tests. The
  * shipping StoreProvider creates one instance for its lifetime.
@@ -110,39 +117,46 @@ export function createLedgerPersistence({
   const readExistingSnapshot = async (): Promise<PersistedState | null> =>
     withSnapshotRead(async () => {
       const raw = await storage.getItem(prefix);
-      if (!raw) {
+      if (raw === null) {
         resetWriteCache();
         return null;
       }
 
-      const parsed = JSON.parse(raw) as PersistedMeta;
+      const value = readSnapshotJson(raw);
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error('Corrupt ledger snapshot');
+      }
+      const parsed = value as PersistedMeta;
       const inlineTransactions = Array.isArray(parsed.transactions);
+      if (parsed.transactions !== undefined && !inlineTransactions) {
+        throw new Error('Corrupt ledger snapshot');
+      }
+      if (parsed.txChunkOrder !== undefined &&
+          parsed.txChunkOrder !== currentChunkOrder && parsed.txChunkOrder !== 'newest-first') {
+        throw new Error('Corrupt ledger snapshot');
+      }
       const chunkOrder: ChunkOrder =
         parsed.txChunkOrder === currentChunkOrder ? currentChunkOrder : 'newest-first';
-      let corrupt = false;
-
       if (!inlineTransactions) {
-        const count = Number(parsed.txChunks) || 0;
+        if (parsed.txChunkOrder !== undefined && parsed.txChunks === undefined) {
+          throw new Error('Corrupt ledger snapshot');
+        }
+        const count = parsed.txChunks === undefined ? 0 : parsed.txChunks;
+        if (!Number.isSafeInteger(count) || count < 0) {
+          throw new Error('Corrupt ledger snapshot');
+        }
         const blocks: Transaction[][] = [];
         if (count > 0) {
-          const pairs = await storage.multiGet(
-            Array.from({ length: count }, (_, index) => chunkKey(index)),
-          );
-          for (const [, value] of pairs) {
-            if (!value) {
-              corrupt = true;
-              continue;
-            }
-            try {
-              const rows = JSON.parse(value) as Transaction[];
-              if (Array.isArray(rows)) {
-                blocks.push(rows);
-              } else {
-                corrupt = true;
-              }
-            } catch {
-              corrupt = true;
-            }
+          const keys = Array.from({ length: count }, (_, index) => chunkKey(index));
+          const pairs = await storage.multiGet(keys);
+          const byKey = new Map(pairs);
+          if (pairs.length !== count || byKey.size !== count) throw new Error('Corrupt ledger snapshot');
+          for (const key of keys) {
+            const body = byKey.get(key);
+            if (!body) throw new Error('Corrupt ledger snapshot');
+            const rows = readSnapshotJson(body);
+            if (!Array.isArray(rows) || rows.length === 0) throw new Error('Corrupt ledger snapshot');
+            blocks.push(rows as Transaction[]);
           }
         }
         if (chunkOrder === currentChunkOrder) blocks.reverse();
@@ -154,10 +168,9 @@ export function createLedgerPersistence({
 
       previousChunkCount = Math.ceil((parsed.transactions?.length ?? 0) / chunkSize);
       storedChunkOrder = chunkOrder;
-      // Inline rows have no durable chunk bodies to reuse. Like a partial or
-      // corrupt chunk read, they must force the first save to write every
-      // chunk before replacing the metadata that held the original rows.
-      previousTransactions = corrupt || inlineTransactions ? null : parsed.transactions ?? [];
+      // Inline rows have no durable chunk bodies to reuse. Their first save
+      // writes every chunk before replacing the metadata holding those rows.
+      previousTransactions = inlineTransactions ? null : parsed.transactions ?? [];
       return parsed;
     });
 

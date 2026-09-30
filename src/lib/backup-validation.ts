@@ -1,6 +1,8 @@
-import type { AppState } from '@/lib/types';
+import type { AppState, Transaction } from '@/lib/types';
+import { isSpending } from '@/lib/ledger';
 import { isTransferEvidence, isTransferDecision, isTransferMatch } from '@/lib/transfer-reconciliation';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
+import { isScopedSubscriptionKey } from '@/lib/subscriptions';
 
 const categoryIds = new Set([
   'groceries', 'dining', 'transport', 'cash-withdrawal', 'utilities', 'telecom',
@@ -69,6 +71,17 @@ const bestEffortMarker: Check = (value) => record(value) &&
     market: (v) => typeof v === 'string' && /^[A-Z]{2}$/.test(v),
   });
 const bestEffortUndoKey: Check = (v) => typeof v === 'string' && v.length > 0 && v.length <= 256;
+const billPayment: Check = (value) => record(value) &&
+  Object.keys(value).every((key) => key === 'billId' || key === 'month') &&
+  required(value, { billId: id, month });
+const statementOccurrences: Check = (value) => Array.isArray(value) && value.length <= 64 &&
+  value.every((claim) => record(claim) && Object.keys(claim).every((key) => ['importId', 'rowIndex', 'date', 'amountFils', 'type', 'title'].includes(key)) &&
+    typeof claim.importId === 'string' && /^[a-f0-9]{32}$/.test(claim.importId) &&
+    integer(claim.rowIndex) && (claim.rowIndex as number) >= 0 && (claim.rowIndex as number) < 200 &&
+    ((claim.date === undefined && claim.amountFils === undefined && claim.type === undefined && claim.title === undefined) ||
+      (isoDate(claim.date) && positive(claim.amountFils) && oneOf('income', 'expense')(claim.type) &&
+        (claim.title === undefined || (typeof claim.title === 'string' && claim.title.trim().length > 0 && claim.title.length <= 180))))) &&
+  new Set(value.map((claim) => `${claim.importId}:${claim.rowIndex}`)).size === value.length;
 const transaction: Check = (value) => {
   if (!record(value) || !required(value, {
     id, type: oneOf('expense', 'income'), amountFils: positive, category,
@@ -83,12 +96,21 @@ const transaction: Check = (value) => {
     captureEventIdentity: (v) => typeof v === 'string' && /^e1:[0-9a-f]{16}:(?:[0-9a-f]{16}|-)$/.test(v),
     viaPush: boolean, walletBound: oneOf(true), captureInstrument, cardPaymentSide: oneOf('debit', 'receipt'),
     statementImportId: (v) => typeof v === 'string' && /^[a-f0-9]{32}$/.test(v),
+    statementRowIndex: (v) => integer(v) && (v as number) >= 0 && (v as number) < 200,
+    statementOccurrences,
+    statementBank: (v) => typeof v === 'string' && v.length <= 240 && /^[\p{L}\p{N}]+(?: [\p{L}\p{N}]+)*$/u.test(v),
     bestEffort: bestEffortMarker,
     transferEvidence: isTransferEvidence, transferDecision: isTransferDecision, transferMatch: isTransferMatch,
-    paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text,
+    paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text, billPayment,
     paymentInstrumentSource: oneOf('alert', 'user'), cashOutDate: isoDate,
     cashOutAccountId: id, isTransfer: boolean, userEdited: boolean, titleEdited: boolean, raw: text,
   })) return false;
+  if (value.statementRowIndex !== undefined && (value.statementImportId === undefined ||
+    (value.captureSource !== 'pdf' && value.captureSource !== 'csv'))) return false;
+  if (value.statementBank !== undefined &&
+    (value.captureSource !== 'pdf' && value.captureSource !== 'csv')) return false;
+  if (value.billPayment !== undefined &&
+    (value.source !== 'manual' || !isSpending(value as unknown as Transaction))) return false;
   // Exponent-correct originals travel as a pair and must agree with the
   // legacy two-decimal figure when both are present.
   if ((value.originalMinorUnits === undefined) !== (value.originalExponent === undefined)) return false;
@@ -113,15 +135,17 @@ const bill: Check = (value) => record(value) && required(value, {
   dueDay: (v) => integer(v) && (v as number) >= 1 && (v as number) <= 31,
   paidMonths: arrayOf(month),
 }) && optional(value, {
-  importIdentity: text, yearlyOnISO: isoDate, accountId: id, autoDetected: boolean,
-});
+  importIdentity: text, yearlyOnISO: isoDate, statedDueDate: isoDate, noticeObservedAt: nonnegative,
+  accountId: id, autoDetected: boolean,
+}) && (value.statedDueDate === undefined ||
+  (value.autoDetected === true && Number((value.statedDueDate as string).slice(8)) === value.dueDay));
 const billAlias: Check = (value) => record(value) &&
   required(value, { title: text, category }) &&
   (value.title as string).trim().length >= 2;
 const due: Check = (value) => record(value) && required(value, {
   id, accountId: id, totalDueFils: nonnegative, minDueFils: nonnegative,
   paidFils: nonnegative, dueDate: isoDate,
-}) && optional(value, { minDueEstimated: boolean, settledAt: isoDateOrTimestamp });
+}) && optional(value, { minDueEstimated: boolean, settledAt: isoDateOrTimestamp, settledByTransactionId: id });
 const statementCoverageEntry: Check = (value) => record(value) && required(value, {
   id, sourceKey: id, label: text, startDate: isoDate, endDate: isoDate, importedAt: nonnegative,
   format: oneOf('pdf', 'csv'),
@@ -148,6 +172,11 @@ const dictionary = (check: Check): Check => (value) => record(value) &&
   Object.entries(value).every(([key, item]) =>
     !['__proto__', 'prototype', 'constructor'].includes(key) && check(item));
 
+const subscriptionCancellations: Check = value => record(value) &&
+  Object.entries(value).every(([key, item]) =>
+    !['__proto__', 'prototype', 'constructor'].includes(key) &&
+    (isoDate(item) || (item === null && isScopedSubscriptionKey(key))));
+
 /** Validate external state before any migration changes process-wide preferences.
  * Missing collections remain compatible with old backups. Dangling account IDs
  * remain valid: deleting/merging legacy accounts can leave historical references.
@@ -156,6 +185,23 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
   if (!record(value) || !uniqueRows(value.transactions, transaction)) return false;
   for (const [key, check] of Object.entries({ accounts: account, bills: bill, cardDues: due, goals: goal })) {
     if (value[key] !== undefined && !uniqueRows(value[key], check)) return false;
+  }
+  const billsById = new Map(((value.bills ?? []) as RecordValue[]).map((row) => [row.id, row]));
+  const transactionsById = new Map((value.transactions as RecordValue[]).map(row => [row.id, row]));
+  for (const statement of (value.cardDues ?? []) as RecordValue[]) {
+    if (statement.settledByTransactionId === undefined) continue;
+    const receipt = transactionsById.get(statement.settledByTransactionId);
+    if (!statement.settledAt || !receipt || receipt.source !== 'manual' ||
+        receipt.type !== 'income' || receipt.isTransfer !== true || receipt.accountId !== statement.accountId) return false;
+  }
+  const billClaims = new Set<string>();
+  for (const row of value.transactions as RecordValue[]) {
+    if (row.billPayment === undefined) continue;
+    const link = row.billPayment as RecordValue;
+    const linkedBill = billsById.get(link.billId);
+    const key = JSON.stringify([link.billId, link.month]);
+    if (!linkedBill || !(linkedBill.paidMonths as unknown[]).includes(link.month) || billClaims.has(key)) return false;
+    billClaims.add(key);
   }
   if (value.budgets !== undefined) {
     if (!arrayOf((v) => record(v) && required(v, { category, limitFils: positive }))(value.budgets)) return false;
@@ -167,7 +213,7 @@ export function isValidBackupState(value: unknown): value is Partial<Omit<AppSta
     statementCoverage: arrayOf(statementCoverageEntry),
     trustedNotificationPackages: arrayOf((v) => typeof v === 'string' && v.length <= 255 &&
       /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/.test(v)),
-    notSubscriptions: arrayOf(text), cancelledSubscriptions: dictionary(isoDate),
+    notSubscriptions: arrayOf(text), cancelledSubscriptions: subscriptionCancellations,
     lastScanTs: nonnegative, parserVersion: nonnegative,
     recentRereadParserVersion: nonnegative,
     hydrationFinalizeVersion: nonnegative, bnplCategoryRepairVersion: nonnegative,

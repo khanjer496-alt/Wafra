@@ -52,7 +52,7 @@ test('Pro copy is paired and sells only what Pro gates', () => {
   assert.match(pro, /t\('proOutcomeTitle'\)/);
 });
 
-test('statement date note follows the selected country, and the privacy line stays truthful', () => {
+test('country notes remain available while file imports explain explicit date choice and privacy', () => {
   const names = load(path.join(root, 'src/lib/country-names.ts'));
   const country = load(path.join(root, 'src/lib/country.ts'), { '@/lib/country-names': names });
   const copy = load(path.join(root, 'src/lib/supplement-copy.ts'), { '@/lib/country': country });
@@ -74,7 +74,7 @@ test('statement date note follows the selected country, and the privacy line sta
   }
   assert.match(en.uploadDisclosure, /Wafra’s import service/);
   const screen = read('src/components/supplement-imports.tsx');
-  assert.match(screen, /testID="statement-date-note"[\s\S]{0,300}statementDateNote\(state\.country, language\)/);
+  assert.match(screen, /testID="statement-date-note"[\s\S]{0,300}copy\.dateAutoNote/);
   assert.match(screen, /testID="statement-file-status"/);
   // No pre-import confirmation step and no per-file duplicate counts.
   assert.doesNotMatch(screen, /already captured|not duplicated/);

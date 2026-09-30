@@ -11,6 +11,7 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import { getLocales, useLocales } from 'expo-localization';
+import { isScopedSubscriptionKey } from '@/lib/subscriptions';
 
 import { MoneyLocaleProvider } from '@/hooks/use-ledger-money';
 import {
@@ -32,6 +33,7 @@ import {
 import { cleanupGeneratedExports } from '@/lib/share-text';
 import { cancelLocalSemanticBackgroundWork } from '@/lib/local-semantic-background-policy';
 import { isValidBackupState } from '@/lib/backup-validation';
+import { billsForMonth } from '@/lib/bills';
 import {
   applyTransferDecision,
   applyTransferDecisionBatch,
@@ -44,7 +46,7 @@ import {
   TRANSFER_NORMALIZATION_VERSION,
 } from '@/lib/transfer-reconciliation';
 import type { TransferDecisionRequest, TransferDecisionBatchRequest } from '@/lib/transfer-reconciliation-types';
-import { getMonthStartDay, setMonthStartDay as applyMonthStartDay } from '@/lib/format';
+import { getMonthStartDay, monthStartISO, setMonthStartDay as applyMonthStartDay } from '@/lib/format';
 import { getThemePreference, setThemePreference as applyThemePreference } from '@/lib/theme-preference';
 import { detectLanguage, getLanguage, setLanguage } from '@/lib/i18n';
 import {
@@ -82,7 +84,7 @@ import {
   PARSER_BACKFILL_VERSION,
   parseSms,
 } from '@/lib/sms-parser';
-import { countsInTotals, internalTransferIdsForState, primeInternalTransferIds } from '@/lib/ledger';
+import { countsInTotals, internalTransferIdsForState, isSpending, liveAccountIds, primeInternalTransferIds } from '@/lib/ledger';
 import { accountsLabelledWithBank, sanitizeKnownBanks, singleKnownBank } from '@/lib/known-banks';
 import { categorySupportsType, getCategory, readMerchantCategoryOverride, scopedMerchantOverrideKey } from '@/lib/categories';
 import { BNPL_CATEGORY_REPAIR_VERSION, bnplRepairNeedsParser, repairBnplCategories } from '@/lib/bnpl-category-repair';
@@ -1057,13 +1059,86 @@ export { applyBillEdit, type BillEdit };
 /** Keys an object literal must never be given from user-typed merchant names. */
 const UNSAFE_RECORD_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
+/** Revoke only claims explicitly owned by a removed or financially edited row. */
+function reconcileBillPaymentClaims(before: AppState, after: AppState, editedId?: string): AppState {
+  if (before.transactions === after.transactions && before.bills === after.bills) return after;
+  const linked = before.transactions.filter((row) => row.billPayment);
+  if (linked.length === 0) return after;
+  const nextById = new Map(after.transactions.map((row) => [row.id, row]));
+  const remainingClaims = new Map(after.bills.map(bill => [bill.id, new Set(bill.paidMonths)]));
+  const revoked: NonNullable<Transaction['billPayment']>[] = [];
+  const detach = new Set<string>();
+  for (const previous of linked) {
+    const next = nextById.get(previous.id);
+    const link = previous.billPayment!;
+    const changed = next && previous.id === editedId && (
+      next.amountFils !== previous.amountFils || next.type !== previous.type ||
+      next.accountId !== previous.accountId || next.date !== previous.date ||
+      Boolean(next.isTransfer) !== Boolean(previous.isTransfer)
+    );
+    if (!next || changed || next.billPayment?.billId !== link.billId || next.billPayment.month !== link.month ||
+        !remainingClaims.get(link.billId)?.has(link.month)) {
+      revoked.push(link);
+      if (next?.billPayment) detach.add(next.id);
+    }
+  }
+  if (revoked.length === 0) return after;
+  const transactions: Transaction[] = detach.size ? after.transactions.map((row) => {
+    if (!detach.has(row.id)) return row;
+    const { billPayment: _link, ...unlinked } = row;
+    return unlinked;
+  }) : after.transactions;
+  // Be defensive about pre-existing duplicate claims: a surviving real
+  // expense still owns its claim. New mark-paid actions never create duplicates.
+  const stillPaid = new Set(transactions.filter((row) => row.billPayment &&
+    row.source === 'manual' && isSpending(row) && row.amountFils > 0)
+    .map((row) => JSON.stringify([row.billPayment!.billId, row.billPayment!.month])));
+  const bills = after.bills.map((bill) => {
+    const months = new Set(revoked.filter((link) => link.billId === bill.id &&
+      !stillPaid.has(JSON.stringify([link.billId, link.month]))).map((link) => link.month));
+    return months.size ? { ...bill, paidMonths: bill.paidMonths.filter((month) => !months.has(month)) } : bill;
+  });
+  return { ...after, transactions, bills };
+}
+
+/** A removed or edited receipt cannot keep extending an older statement's window. */
+function reconcileCardSettlementClaims(before: AppState, after: AppState, editedId?: string): AppState {
+  if (before.transactions === after.transactions) return after;
+  const owners = new Map(before.cardDues.filter(due => due.settledByTransactionId).map(due => [due.id, due]));
+  if (owners.size === 0) return after;
+  const rows = new Map(after.transactions.map(row => [row.id, row]));
+  const previousEdited = editedId ? before.transactions.find(row => row.id === editedId) : undefined;
+  let changed = false;
+  const cardDues = after.cardDues.map(due => {
+    const prior = owners.get(due.id);
+    const owner = due.settledByTransactionId;
+    if (!owner || prior?.settledByTransactionId !== owner || prior.settledAt !== due.settledAt) return due;
+    const row = rows.get(owner);
+    const financialEdit = row && previousEdited?.id === owner && (
+      row.amountFils !== previousEdited.amountFils || row.type !== previousEdited.type ||
+      row.accountId !== previousEdited.accountId || row.date !== previousEdited.date ||
+      Boolean(row.isTransfer) !== Boolean(previousEdited.isTransfer)
+    );
+    if (row && !financialEdit) return due;
+    changed = true;
+    const { settledAt: _time, settledByTransactionId: _owner, ...remaining } = due;
+    return remaining;
+  });
+  return changed ? { ...after, cardDues } : after;
+}
+
 function reducer(state: AppState, action: Action): AppState {
   const restoreMarket = captureMarketContext();
   const month = getMonthStartDay();
   const theme = getThemePreference();
   const language = getLanguage();
   try {
-    const reduced = reduceState(state, action);
+    const nextState = reduceState(state, action);
+    // A replacement ledger owns its own claims. Matching row ids across a
+    // restore is not permission to revoke evidence from the incoming backup.
+    const editedId = action.type === 'editTransaction' ? action.id : undefined;
+    const reduced = action.type === 'hydrate' || action.type === 'restore' || action.type === 'loadDemo' ? nextState :
+      reconcileCardSettlementClaims(state, reconcileBillPaymentClaims(state, nextState, editedId), editedId);
     if (action.type === 'hydrate') markLaunchPhase('ledger-reducer-normalize-start');
     // Transfer reconciliation is synchronous ledger work. Avoid a complete
     // transfer-graph walk when the action cannot change transfer identity.
@@ -1608,28 +1683,50 @@ function reduceState(state: AppState, action: Action): AppState {
       return { ...state, bills };
     }
     case 'deleteBill':
-      return { ...state, bills: state.bills.filter((b) => b.id !== action.id) };
+      return { ...state, bills: state.bills.filter((b) => b.id !== action.id),
+        transactions: state.transactions.map((row) => {
+          if (row.billPayment?.billId !== action.id) return row;
+          const { billPayment: _link, ...unlinked } = row;
+          return unlinked;
+        }) };
     case 'setAccountBalance':
       return reduceSetAccountBalance(state, action.id, action.fils, action.ts);
     case 'setSubscriptionCancelled': {
       const key = action.merchant.trim().toLowerCase();
       if (!key || UNSAFE_RECORD_KEYS.has(key)) return state;
-      const rest: Record<string, string> = {};
+      const rest: Record<string, string | null> = {};
       for (const [merchant, on] of Object.entries(state.cancelledSubscriptions ?? {})) {
         if (merchant !== key) rest[merchant] = on;
       }
-      if (action.cancelledOn === null) return { ...state, cancelledSubscriptions: rest };
+      if (action.cancelledOn === null) return { ...state, cancelledSubscriptions:
+        isScopedSubscriptionKey(key) ? { ...rest, [key]: null } : rest };
       if (!/^\d{4}-\d{2}-\d{2}$/.test(action.cancelledOn)) return state;
       return { ...state, cancelledSubscriptions: { ...rest, [key]: action.cancelledOn } };
     }
     case 'markBillPaid': {
+      const target = state.bills.find((bill) => bill.id === action.id);
+      if (!target || target.paidMonths.includes(action.month)) return state;
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(action.month) ||
+        !isSpending(action.transaction) ||
+        action.transaction.source !== 'manual' || !Number.isSafeInteger(action.transaction.amountFils) ||
+        action.transaction.amountFils <= 0 || action.transaction.amountFils !== target.amountFils) return state;
+      // Capture can land while the confirmation is open. Recheck the same
+      // all-bill projection as the screen, including competing payment claims,
+      // for the requested money month before recording another expense.
+      const current = billsForMonth(state.bills, state.transactions,
+        new Date(`${monthStartISO(action.month)}T12:00:00`),
+        liveAccountIds(state.accounts), internalTransferIdsForState(state))
+        .find((row) => row.bill.id === action.id);
+      if (current?.status === 'paid') return state;
       requireSelectedLedgerMoney(state);
       const bills = state.bills.map((b) =>
         b.id === action.id && !b.paidMonths.includes(action.month)
           ? { ...b, paidMonths: [...b.paidMonths, action.month] }
           : b,
       );
-      return { ...state, bills, transactions: sortTxs([action.transaction, ...state.transactions]) };
+      const transaction = { ...action.transaction, billPayment: { billId: action.id, month: action.month },
+        ...(target.importIdentity ? { billIdentity: target.importIdentity } : {}) };
+      return { ...state, bills, transactions: sortTxs([transaction, ...state.transactions]) };
     }
     case 'upsertCardDue': {
       if (action.due.totalDueFils !== 0 || action.due.minDueFils !== 0 || action.due.paidFils !== 0) {
@@ -1654,6 +1751,7 @@ function reduceState(state: AppState, action: Action): AppState {
               // moves when no transaction backs the payment.
               paidFils: action.transaction ? d.paidFils : d.paidFils + action.amountFils,
               settledAt: action.settledAt ?? d.settledAt,
+              settledByTransactionId: action.settledAt ? action.transaction?.id : d.settledByTransactionId,
             }
           : d,
       );

@@ -59,6 +59,11 @@ import {
   billCommitments,
   cancelledByUser,
   isCancelledByUser,
+  isSubscriptionDismissed,
+  subscriptionKey,
+  subscriptionLabel,
+  subscriptionMatchesBill,
+  subscriptionCancellationDate,
   detectSubscriptions,
   detectSubscriptionsCooperatively,
   daysUntilNext,
@@ -186,7 +191,7 @@ const RecurringRow = React.memo(function RecurringRow({
       entering={enter(FadeInDown.delay(Math.min(i, 8) * 40).duration(300))}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${sub.title}. ${schedule}. ${chargeLabel}: ${formatAED(charge.amountFils, { decimals: false })}`}
+        accessibilityLabel={`${subscriptionLabel(sub)}. ${schedule}. ${chargeLabel}: ${formatAED(charge.amountFils, { decimals: false })}`}
         onPress={() => onOpen(sub)}
         onLongPress={() => onLongPress(sub)}
         style={({ pressed }) => [
@@ -200,7 +205,7 @@ const RecurringRow = React.memo(function RecurringRow({
           <View style={styles.rowInfo}>
             <View style={styles.rowTitleLine}>
               <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1} style={styles.rowTitle}>
-                {sub.title}
+                {subscriptionLabel(sub)}
               </ThemedText>
               {sub.priceIncreased && (
                 <View style={[styles.badge, { backgroundColor: theme.goldSoft }]}>
@@ -300,7 +305,7 @@ export default function BillsScreen() {
   const [otherLimit, setOtherLimit] = useState(RECURRING_PAGE_SIZE);
   const [stoppedLimit, setStoppedLimit] = useState(RECURRING_PAGE_SIZE);
   // The subscription just marked cancelled, until undone or replaced.
-  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
+  const [cancelNotice, setCancelNotice] = useState<{ key: string; label: string } | null>(null);
 
   // Design language E: Bills wears the ochre band (ink text in light, light
   // text on the deepened ochre in dark — both from the band tokens).
@@ -380,7 +385,7 @@ export default function BillsScreen() {
     if (!androidRecurringResult) return null;
     if (androidRecurringResult.notSubscriptions === state.notSubscriptions) return androidRecurringResult.value;
     const dismissed = new Set(state.notSubscriptions.map((title) => title.trim().toLowerCase()));
-    return androidRecurringResult.value.filter((sub) => !dismissed.has(sub.title.trim().toLowerCase()));
+    return androidRecurringResult.value.filter((sub) => !isSubscriptionDismissed(sub, dismissed));
   }, [cachedRecurring, androidRecurringResult, state.notSubscriptions]);
 
   // useFocusEffect rather than useIsFocused: focus changes no longer re-render
@@ -477,8 +482,8 @@ export default function BillsScreen() {
     [detected, cancelled],
   );
   const allCommitments = useMemo(
-    () => activeSubscriptions(fixedCommitments(detected)),
-    [detected],
+    () => withoutCancelled(activeSubscriptions(fixedCommitments(detected)), cancelled),
+    [detected, cancelled],
   );
   // A car loan filed under "Utilities & fixed bills" reads as a bug even when
   // the detection is right, so repayments get their own block.
@@ -494,13 +499,10 @@ export default function BillsScreen() {
     [allCommitments],
   );
   const otherRepeats = useMemo(() => otherCommitments(allCommitments), [allCommitments]);
-  const trackedTitles = useMemo(
-    () => new Set(state.bills.map((b) => b.title.toLowerCase())),
-    [state.bills],
-  );
+  const isTracked = (sub: Subscription) => state.bills.some((bill) => subscriptionMatchesBill(sub, bill));
   const subByAgendaId = useMemo(
     () => new Map<string, Subscription>(
-      [...subs, ...loans, ...commitments].map((sub) => [`sub-${sub.title.trim().toLowerCase()}`, sub]),
+      [...subs, ...loans, ...commitments].map((sub) => [`sub-${subscriptionKey(sub)}`, sub]),
     ),
     [subs, loans, commitments],
   );
@@ -516,21 +518,21 @@ export default function BillsScreen() {
       kind: 'card', accountId: due.accountId, dateISO: due.dueDate, daysLeft, amountFils: due.totalDueFils, estimated: false, paid: true,
     });
     for (const { bill, status, dueISO, daysLeft } of rows) items.push({
-      id: `bill-${bill.id}`, title: bill.title, category: bill.category, kind: 'bill', dateISO: dueISO,
-      group: subs.some((sub) => sub.title.trim().toLowerCase() === bill.title.trim().toLowerCase())
+      id: `bill-${bill.id}`, title: bill.title, displayLabel: subscriptionLabel({ title: bill.title, billIdentity: bill.importIdentity }),
+      category: bill.category, kind: 'bill', dateISO: dueISO,
+      group: subs.some((sub) => subscriptionMatchesBill(sub, bill))
         ? 'subscriptions' : undefined,
       daysLeft, amountFils: bill.amountFils, estimated: false, paid: status === 'paid',
       accountName: bill.accountId ? accountNames.get(bill.accountId) : undefined,
     });
-    const manualTitles = new Set(state.bills.map((bill) => bill.title.trim().toLowerCase()));
     for (const sub of [...subs, ...loans, ...commitments]) {
-      if (sub.cadence === 'as-needed' || manualTitles.has(sub.title.trim().toLowerCase())) continue;
+      if (sub.cadence === 'as-needed' || state.bills.some((bill) => subscriptionMatchesBill(sub, bill))) continue;
       // An observed past charge is not proof the next one is payable or late.
       const charge = recurringChargePresentation(sub);
-      items.push({ id: `sub-${sub.title.trim().toLowerCase()}`, title: sub.title, category: sub.category,
+      items.push({ id: `sub-${subscriptionKey(sub)}`, title: sub.title, displayLabel: subscriptionLabel(sub), category: sub.category,
         kind: 'recurring', dateISO: sub.nextExpectedISO, daysLeft: daysUntilNext(sub, now),
         group: sub.group === 'subscription' ? 'subscriptions' : undefined,
-        amountFils: charge.amountFils, estimated: charge.estimated, paid: false });
+        amountFils: charge.amountFils, estimated: true, paid: false });
     }
     return items;
   }), [dues, paidCards, rows, subs, loans, commitments, state.accounts, state.bills, now]);
@@ -621,6 +623,7 @@ export default function BillsScreen() {
    */
   const billFromSubscription = (sub: Subscription): Omit<Bill, 'id' | 'paidMonths'> => ({
     title: sub.title,
+    ...(sub.billIdentity ? { importIdentity: sub.billIdentity } : {}),
     category: sub.category,
     amountFils: sub.avgAmountFils,
     dueDay: Number(sub.nextExpectedISO.slice(8)),
@@ -703,10 +706,10 @@ export default function BillsScreen() {
   const onDismissSub = useCallback((sub: Subscription) => {
     setConfirmation({
       question: t('notASubscriptionQ'),
-      body: tf('removeSubscriptionBody', { title: sub.title }),
+      body: tf('removeSubscriptionBody', { title: subscriptionLabel(sub) }),
       confirmLabel: t('remove'),
       destructive: true,
-      onConfirm: () => setNotSubscription(sub.title, true),
+      onConfirm: () => setNotSubscription(subscriptionKey(sub), true),
     });
   }, [setNotSubscription]);
 
@@ -714,17 +717,17 @@ export default function BillsScreen() {
   // subscription": its history stays, and a later charge brings it back.
   const onMarkCancelled = (sub: Subscription) => {
     setConfirmation({
-      question: w.markCancelledQuestion(sub.title),
+      question: w.markCancelledQuestion(subscriptionLabel(sub)),
       body: w.markCancelledBody,
       confirmLabel: w.markCancelled,
       onConfirm: () => {
-        setSubscriptionCancelled(sub.title, todayISO);
-        setCancelNotice(sub.title);
+        setSubscriptionCancelled(subscriptionKey(sub), todayISO);
+        setCancelNotice({ key: subscriptionKey(sub), label: subscriptionLabel(sub) });
       },
     });
   };
-  const undoCancelled = (subTitle: string) => {
-    setSubscriptionCancelled(subTitle, null);
+  const undoCancelled = (key: string) => {
+    setSubscriptionCancelled(key, null);
     setCancelNotice(null);
   };
 
@@ -746,7 +749,7 @@ export default function BillsScreen() {
     } else if (item.kind === 'bill') setSelectedBill({ id: (item.repeatOf ?? item.id).slice(5), dueISO: item.dateISO });
     else {
       const id = item.repeatOf ?? item.id;
-      const sub = detected.find((sub) => `sub-${sub.title.trim().toLowerCase()}` === id);
+      const sub = detected.find((sub) => `sub-${subscriptionKey(sub)}` === id);
       if (sub) setDetail(sub);
     }
   };
@@ -769,23 +772,23 @@ export default function BillsScreen() {
   // A known service that has gone quiet: "Likely stopped", and the one
   // action that says so for certain.
   const renderStoppedRow = (sub: Subscription, i: number) => (
-    <View key={sub.title} testID={`bills-stopped-${sub.title.trim().toLowerCase()}`}
+    <View key={subscriptionKey(sub)} testID={`bills-stopped-${subscriptionKey(sub)}`}
       style={[styles.row, largeText && styles.rowLarge,
         i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
       <Pressable accessibilityRole="button"
-        accessibilityLabel={`${sub.title}. ${w.likelyStopped}. ${tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })}`}
+        accessibilityLabel={`${subscriptionLabel(sub)}. ${w.likelyStopped}. ${tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })}`}
         onPress={() => setDetail(sub)}
         style={[styles.recurringIdentity, largeText && styles.rowIdentityLarge]}>
         <MerchantAvatar title={sub.title} category={sub.category} size={32} />
         <View style={styles.rowInfo}>
-          <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1}>{sub.title}</ThemedText>
+          <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1}>{subscriptionLabel(sub)}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary">
             {`${w.likelyStopped} · ${tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })}`}
           </ThemedText>
         </View>
       </Pressable>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${w.markCancelled}: ${sub.title}`}
-        testID={`bills-mark-cancelled-${sub.title.trim().toLowerCase()}`}
+      <Pressable accessibilityRole="button" accessibilityLabel={`${w.markCancelled}: ${subscriptionLabel(sub)}`}
+        testID={`bills-mark-cancelled-${subscriptionKey(sub)}`}
         onPress={() => onMarkCancelled(sub)}
         style={({ pressed }) => [styles.pill, { borderColor: band.rule,
           backgroundColor: band.card, opacity: pressed ? 0.75 : 1 }]}>
@@ -796,11 +799,11 @@ export default function BillsScreen() {
 
   const renderRecurringRow = (sub: Subscription, i: number) => (
     <RecurringRow
-      key={sub.title}
+      key={subscriptionKey(sub)}
       sub={sub}
       index={i}
       now={now}
-      tracked={trackedTitles.has(sub.title.toLowerCase())}
+      tracked={isTracked(sub)}
       largeText={largeText}
       language={language}
       enter={enter}
@@ -833,12 +836,12 @@ export default function BillsScreen() {
           </View>
         )}>
         {/* Only while it is still cancelled: Still paying, or a new charge, ends it. */}
-        {cancelNotice && cancelled?.[cancelNotice.trim().toLowerCase()] && (
+        {cancelNotice && cancelled?.[cancelNotice.key] && (
           <View accessibilityLiveRegion="polite" testID="bills-cancel-notice"
             style={[styles.notice, { borderColor: band.rule, backgroundColor: band.card }]}>
-            <ThemedText type="small" style={styles.rowInfo}>{w.markedCancelled(cancelNotice)}</ThemedText>
-            <Pressable accessibilityRole="button" accessibilityLabel={`${w.undo}: ${cancelNotice}`}
-              onPress={() => undoCancelled(cancelNotice)} style={styles.noticeAction}>
+            <ThemedText type="small" style={styles.rowInfo}>{w.markedCancelled(cancelNotice.label)}</ThemedText>
+            <Pressable accessibilityRole="button" accessibilityLabel={`${w.undo}: ${cancelNotice.label}`}
+              onPress={() => undoCancelled(cancelNotice.key)} style={styles.noticeAction}>
               <ThemedText type="smallBold" style={{ color: band.tint }}>{w.undo}</ThemedText>
             </Pressable>
           </View>
@@ -910,21 +913,21 @@ export default function BillsScreen() {
             <View style={[styles.referenceGroup, { borderColor: band.rule, backgroundColor: band.card }]} testID="bills-cancelled">
               <ThemedText type="heading" accessibilityRole="header">{w.cancelledByYou}</ThemedText>
               {cancelledList.map((sub, i) => {
-                const on = cancelled?.[sub.title.trim().toLowerCase()];
+                const on = subscriptionCancellationDate(sub, cancelled);
                 return (
-                  <View key={sub.title} style={[styles.row, largeText && styles.rowLarge,
+                  <View key={subscriptionKey(sub)} style={[styles.row, largeText && styles.rowLarge,
                     i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
-                    <Pressable accessibilityRole="button" accessibilityLabel={`${sub.title}. ${w.cancelledByYou}`}
+                    <Pressable accessibilityRole="button" accessibilityLabel={`${subscriptionLabel(sub)}. ${w.cancelledByYou}`}
                       onPress={() => setDetail(sub)} style={[styles.recurringIdentity, largeText && styles.rowIdentityLarge]}>
                       <MerchantAvatar title={sub.title} category={sub.category} size={32} />
                       <View style={styles.rowInfo}>
-                        <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1}>{sub.title}</ThemedText>
+                        <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1}>{subscriptionLabel(sub)}</ThemedText>
                         {on && <ThemedText type="meta" themeColor="textSecondary">{w.cancelledOn(shortDate(on))}</ThemedText>}
                       </View>
                     </Pressable>
-                    <Pressable accessibilityRole="button" accessibilityLabel={w.stillPayingA11y(sub.title)}
-                      testID={`bills-still-paying-${sub.title.trim().toLowerCase()}`}
-                      onPress={() => undoCancelled(sub.title)}
+                    <Pressable accessibilityRole="button" accessibilityLabel={w.stillPayingA11y(subscriptionLabel(sub))}
+                      testID={`bills-still-paying-${subscriptionKey(sub)}`}
+                      onPress={() => undoCancelled(subscriptionKey(sub))}
                       style={({ pressed }) => [styles.pill, { borderColor: band.rule,
                         backgroundColor: band.sheet, opacity: pressed ? 0.75 : 1 }]}>
                       <ThemedText type="smallBold">{w.stillPaying}</ThemedText>
@@ -945,7 +948,7 @@ export default function BillsScreen() {
           onClose={() => setDetail(null)}
           footer={(
             <View style={styles.detailActions}>
-              {!trackedTitles.has(detail.title.toLowerCase()) &&
+              {!isTracked(detail) &&
                 detail.status !== 'stopped' &&
                 !isCancelledByUser(detail, cancelled) &&
                 remindable(detail) && (

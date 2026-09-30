@@ -48,6 +48,11 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return { ...dependencies[name], useMoneyLocaleKey: () => '' };
       }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      // Pure production policies used by capture and backup validation.
+      if (name === '@/lib/alert-review-tray') return require('../build/alert-review-tray.js');
+      if (name === '@/lib/capture-source-identity') return require('../build/capture-source-identity.js');
+      if (name === '@/lib/statement-import-flow') return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/statement-import-flow.ts'));
+      if (name === '@/lib/subscriptions') return require('../build/subscriptions.js');
       // Display labels execute from current source; accounting predicates stay real.
       if (name === '@/lib/transaction-presentation') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/transaction-presentation.ts'), {

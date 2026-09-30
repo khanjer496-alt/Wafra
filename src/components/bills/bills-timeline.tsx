@@ -58,7 +58,7 @@ export function BillsTimeline({ items, todayISO, palette }: {
   }
   const cardWidth = large ? Math.min(560, width - 40) : Math.min(184, width - 80);
   const spoken = `${words.nextDays(WINDOW_DAYS)}: ` + timelinePins.map(pin =>
-    `${pin.title} ${words.dueIn(pin.dayOffset)} ${pin.spokenAmount}`).join(', ');
+    `${pin.displayLabel ?? pin.title} ${words.dueIn(pin.dayOffset)} ${pin.spokenAmount}`).join(', ');
   return <View testID="bills-timeline" accessible={false} accessibilityLabel={spoken} style={styles.root}>
     <ScrollView key={language} horizontal showsHorizontalScrollIndicator
       testID="bills-timeline-scroll" contentContainerStyle={styles.groups}>
@@ -68,7 +68,7 @@ export function BillsTimeline({ items, todayISO, palette }: {
         return <View key={group.dayOffset} testID={`bills-timeline-date-${group.dayOffset}`} style={styles.group}>
           <View style={styles.payments}>
             {group.payments.map(pin => <View key={pin.key} testID={`bills-timeline-payment-${pin.key}`}
-              accessible accessibilityRole="text" accessibilityLabel={`${pin.title}. ${date}. ${pin.spokenAmount}`}
+              accessible accessibilityRole="text" accessibilityLabel={`${pin.displayLabel ?? pin.title}. ${date}. ${pin.spokenAmount}`}
               style={[styles.payment, { width: cardWidth, backgroundColor: palette.tile }]}>
               <ThemedText type="meta" testID={`bills-payment-due-${pin.key}`} style={{ color: palette.onBandSecondary }}>
                 {date} · {due}
@@ -76,7 +76,7 @@ export function BillsTimeline({ items, todayISO, palette }: {
               <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
                 <MerchantAvatar title={pin.title} category={pin.category} size={32} />
               </View>
-              <ThemedText type="smallBold" style={{ color: palette.onBand }}>{pin.title}</ThemedText>
+              <ThemedText type="smallBold" style={{ color: palette.onBand }}>{pin.displayLabel ?? pin.title}</ThemedText>
               <View style={styles.figure}>
                 {pin.estimated ? <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{w.about}</ThemedText> : null}
                 <BandFigure fils={pin.amountFils} moneySpec={moneySpec ?? undefined} palette={palette} size="medium"

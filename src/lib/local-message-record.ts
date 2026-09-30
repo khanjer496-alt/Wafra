@@ -7,6 +7,7 @@ import {
 import {
   appleMessageReviewIdentity,
   isUniversalReviewAlert,
+  prepareUniversalReviewAlert,
   type ReviewEntry,
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
@@ -27,6 +28,7 @@ import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { ParsedSms } from '@/lib/sms-parser';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
 import { parseIosApplePayRecord } from '@/lib/ios-apple-pay-record';
+import { parsedObligationReviewEvent } from '@/lib/parsed-review-event';
 import type { FxQuote, MinorExponent } from '@/lib/fx';
 import { convertWithReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 
@@ -316,9 +318,9 @@ export function convertCurrencyConflictRow(
 /**
  * A parsed row whose own currency this ledger cannot hold. Money-moving rows
  * (transactions and card payments) become a durable, source-free Universal
- * Review under the record's own review identity: Review shows the foreign
- * amount and promotion refuses it as a currency mismatch, so nothing posts and
- * nothing is lost silently. Informational kinds (statement, bill reminder)
+ * Review under the record's own review identity. Purchases require a dated
+ * conversion at confirmation; card payments retain their settlement family
+ * and cannot become ordinary spending. Informational kinds (statement, bill reminder)
  * move no money and return null for the caller to acknowledge as ignored.
  */
 export function currencyConflictReview(
@@ -329,7 +331,7 @@ export function currencyConflictReview(
   if (row.kind !== 'transaction' && row.kind !== 'cardPayment') return null;
   const observedAt = row.smsTs;
   if (observedAt === undefined || !Number.isSafeInteger(observedAt)) return null;
-  const candidate = parsedFinancialCandidateReview({ ...row, kind: 'transaction' }, observedAt);
+  const candidate = parsedFinancialCandidateReview(row, observedAt);
   if (!candidate || !('kind' in candidate) || candidate.kind !== 'universal') return null;
   const item = identifySourceFreeReviewAlert(
     { ...candidate, channel: row.channel === 'push' ? 'push' : 'inbox' },
@@ -447,6 +449,14 @@ export function parseLocalMessageRecord(
     // durable source-free Review path until those kinds have end-to-end replay
     // identity; authoritative Message capture retains its existing behavior.
     if (isNotification && parsed.kind !== 'transaction') {
+      // Successful parser facts outrank an independent generic extractor's
+      // miss. Preserve the statement/settlement family without authorizing a
+      // card mutation or reinterpreting its total as a transaction amount.
+      const event = parsedObligationReviewEvent(parsed);
+      const item = event ? prepareUniversalReviewAlert({
+        ...localReviewIdentity(envelope.id), observedAt, channel: 'push', event,
+      }) : null;
+      if (item) return { kind: 'review', market: expectedMarket, item, milestone: 'none' };
       return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection, notificationDecision);
     }
     if (shouldReviewParsedIncome(parsed) || (isNotification && parsed.type === 'income' &&

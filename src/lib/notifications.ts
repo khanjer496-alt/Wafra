@@ -2,12 +2,10 @@
  * The OS half of reminders: permissions, the Android channel, and handing a
  * list of dates to expo-notifications.
  *
- * Deliberately thin. Everything that can actually be WRONG — which day a bill
- * falls on, whether a minimum may be quoted, which obligations deserve a push
- * at all — lives in reminders.ts, which imports no native module and is
- * therefore reachable from the test harness. This file imports
- * expo-notifications, so nothing in it can be tested; the rule is that nothing
- * in it should need to be.
+ * Dates, bank-stated minimums and obligation selection live in reminders.ts.
+ * This adapter owns permission, scheduling scope and concurrent refreshes;
+ * source-level tests replace the native boundary to exercise those decisions.
+ * Actual notification delivery still requires a device check.
  */
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
@@ -188,10 +186,27 @@ const reminderScheduler: ReminderSchedulerApi = {
   },
 };
 
-/** One sync at a time; the newest request wins. See reminder-schedule.ts. */
+export interface ReminderSyncOptions {
+  /** Headless capture updates known obligations without rescanning recurrence. */
+  obligationsOnly?: boolean;
+}
+
+// Coalescing must not let a later bounded wake discard a requested full refresh.
+let fullReminderSyncPending = false;
+/** One sync at a time; the newest state wins. See reminder-schedule.ts. */
 const runReminderSync = createLatestWinsRunner(
-  ({ state, now, summaryGenerationAtRequest }: { state: AppState; now: Date; summaryGenerationAtRequest: number }, isCurrent: () => boolean) =>
-    syncPaymentRemindersNow(state, now, isCurrent, summaryGenerationAtRequest),
+  async ({ state, now, summaryGenerationAtRequest, obligationsOnly }: {
+    state: AppState; now: Date; summaryGenerationAtRequest: number; obligationsOnly: boolean;
+  }, isCurrent: () => boolean) => {
+    try {
+      await syncPaymentRemindersNow(state, now, isCurrent, summaryGenerationAtRequest,
+        obligationsOnly && !fullReminderSyncPending);
+    } finally {
+      // A failed, settled foreground request must not upgrade a later headless
+      // wake. A superseded request leaves the queued full request intact.
+      if (isCurrent()) fullReminderSyncPending = false;
+    }
+  },
 );
 
 /**
@@ -206,9 +221,15 @@ const runReminderSync = createLatestWinsRunner(
  * The plan — dates, titles, bodies, ordering and the cap — comes from
  * `buildPaymentReminders`. This file only speaks to the OS.
  */
-export function syncPaymentReminders(state: AppState, now: Date = new Date()): Promise<void> {
+export function syncPaymentReminders(
+  state: AppState,
+  now: Date = new Date(),
+  options: ReminderSyncOptions = {},
+): Promise<void> {
   if (Platform.OS === 'web') return Promise.resolve();
-  return runReminderSync({ state, now, summaryGenerationAtRequest: summaryGeneration });
+  if (!options.obligationsOnly) fullReminderSyncPending = true;
+  return runReminderSync({ state, now, summaryGenerationAtRequest: summaryGeneration,
+    obligationsOnly: options.obligationsOnly === true });
 }
 
 async function syncPaymentRemindersNow(
@@ -216,6 +237,7 @@ async function syncPaymentRemindersNow(
   now: Date,
   isCurrent: () => boolean,
   summaryGenerationAtRequest: number,
+  obligationsOnly: boolean,
 ): Promise<void> {
   const historyBusy = Platform.OS === 'android' && historyImportIncomplete(state.historyImport);
   configureHandler();
@@ -239,8 +261,8 @@ async function syncPaymentRemindersNow(
   // immediately after Home becomes visible, which looks exactly like a launch
   // freeze. Bills already uses the cooperative detector; reminder setup must do
   // the same because it runs automatically once per app launch.
-  let detectedSubscriptions: readonly Subscription[] | undefined;
-  if (Platform.OS === 'android') {
+  let detectedSubscriptions: readonly Subscription[] | undefined = obligationsOnly ? [] : undefined;
+  if (Platform.OS === 'android' && !obligationsOnly) {
     if (historyBusy) {
       detectedSubscriptions = [];
     } else {
@@ -263,7 +285,9 @@ async function syncPaymentRemindersNow(
   if (!isCurrent()) return;
 
   const plan = buildPaymentReminders(state, now, MAX_REMINDERS, detectedSubscriptions);
-  if ((await applyReminderPlan(reminderScheduler, plan, isCurrent)) === 'superseded') return;
+  if ((await applyReminderPlan(reminderScheduler, plan, isCurrent,
+    obligationsOnly || historyBusy ? 'obligations' : 'all')) === 'superseded') return;
+  if (obligationsOnly) return;
 
   // The summary is no longer collateral damage of a reminder rebuild, so while
   // a history import is busy the one already scheduled simply stays. When the

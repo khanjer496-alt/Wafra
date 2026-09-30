@@ -272,6 +272,11 @@ export function healPatch(
  * `remove` is not handled here; a caller drops those rows before applying.
  */
 export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transaction {
+  const claims = patch.statementOccurrences ? [...new Map([
+    ...(tx.statementOccurrences ?? []), ...patch.statementOccurrences,
+  ].map((claim) => [`${claim.importId}:${claim.rowIndex}`, claim])).values()] : tx.statementOccurrences;
+  if (claims && claims.length > 64) throw new Error('Statement occurrence claim capacity exceeded');
+
   // This evidence class admits exactly one field. Never smuggle unrelated
   // account, ownership, source identity or classification edits with it.
   if (patch.sourceDateCorrection) {
@@ -295,11 +300,13 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
       (patch.captureInstrument === undefined ||
         JSON.stringify(patch.captureInstrument) === JSON.stringify(tx.captureInstrument)) &&
       nextViaPush === tx.viaPush &&
-      (patch.walletBound === undefined || tx.walletBound === true)
+      (patch.walletBound === undefined || tx.walletBound === true) &&
+      JSON.stringify(claims) === JSON.stringify(tx.statementOccurrences)
     ) {
       return tx;
     }
     const identified: Transaction = { ...tx };
+    if (claims) identified.statementOccurrences = claims;
     if (patch.walletBound === true) identified.walletBound = true;
     if (patch.ts !== undefined) identified.ts = patch.ts;
     if (patch.textClock !== undefined) identified.textClock = patch.textClock;
@@ -333,6 +340,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   }
   if (patch.transferEvidence !== undefined) next.transferEvidence = patch.transferEvidence;
   if (patch.clearTransferEvidence) delete next.transferEvidence;
+  if (claims) next.statementOccurrences = claims;
   if (patch.clearBestEffort) delete next.bestEffort;
   if (patch.raw !== undefined) {
     if (patch.raw === null) delete next.raw;
@@ -351,7 +359,17 @@ export function applyHealUpdates(
   updates: TxHealUpdate[],
 ): Transaction[] {
   if (updates.length === 0) return transactions;
-  const patches = new Map(updates.map((update) => [update.id, update]));
+  const patches = new Map<string, TxHealUpdate>();
+  for (const update of updates) {
+    const prior = patches.get(update.id);
+    const claims = [...(prior?.statementOccurrences ?? []), ...(update.statementOccurrences ?? [])];
+    const claimOnly = update.statementOccurrences !== undefined &&
+      Object.keys(update).every((key) => key === 'id' || key === 'statementOccurrences');
+    patches.set(update.id, {
+      ...(claimOnly && prior ? prior : {}), ...update,
+      ...(claims.length ? { statementOccurrences: claims } : {}),
+    });
+  }
   const correctedSources = new Map<string, number>();
   for (const update of updates) {
     if (update.sourceDateCorrection) correctedSources.set(update.sourceDateCorrection.sourceKey, 0);

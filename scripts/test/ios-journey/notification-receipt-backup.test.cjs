@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '../../..');
 const { isValidBackupState } = load(path.join(root, 'src/lib/backup-validation.ts'), {
   '@/lib/transfer-reconciliation': require('../build/transfer-reconciliation'),
   '@/lib/ledger-money': require('../build/ledger-money'),
+  '@/lib/ledger': require('../build/ledger'),
 });
 const row = { id: 'saved', type: 'expense', amountFils: 25000, category: 'groceries', accountId: 'account',
   title: 'SHOP', date: '2026-09-23', source: 'sms', viaPush: true };

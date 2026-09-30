@@ -70,7 +70,7 @@ for f in types routes format categories ledger bill-alias capture-source-identit
          brand-marks leaving-soon accounts heal bnpl-category-repair accuracy onboarding onboarding-bank-examples reminders reminder-schedule app-lock auto-import android-capture-sources \
          history-import foreground-history-priority diagnostic-export diagnostic-messages transaction-source transaction-presentation transaction-filter capture-trace \
          launch-performance launch-benchmark runtime-performance dashboard-projection \
-         relay-protocol trusted-device-contract cloud-import-contract statement-coverage statement-batch reimbursement-report fx fx-rates \
+         relay-protocol trusted-device-contract cloud-import-contract statement-coverage statement-batch statement-import-flow reimbursement-report fx fx-rates \
          fx-summary splits db-schema storage-diagnostics daily-summary charge-alert \
          background-relay-storage uncategorised currency-metadata alert-draft bank-alert-semantic-types \
          bank-alert-semantic-rules bank-alert-semantic-output bank-alert-interpreter \

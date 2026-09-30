@@ -1047,6 +1047,49 @@ if (adcbDue && adcbDue.kind === 'cardStatement' && adcbDue.amountFils === 117449
     JSON.stringify(adcbDue && { k: adcbDue.kind, a: adcbDue.amountFils, min: adcbDue.minDueFils, d: adcbDue.date }));
 }
 
+// Synthetic wrappers isolate minimum extraction; the reported source wording
+// supplied afterward is covered separately below.
+// Reported bank wording; synthetic financial values for public regression coverage.
+const observedCompactMinimum = 'Pay min. AED462.48 by due date to avoid AED241.50 late fees.';
+for (const [label, expectedCard] of [
+  ['Credit Card 9426', { last4: '9426', kind: 'credit' }],
+  ['Credit Card', null],
+]) {
+  t(`observed pay-min footer supplies the minimum for a synthetic ${label} statement`,
+    `Your ${label} statement. Total amount due AED9249.64. Due date 30/09/2026. ${observedCompactMinimum}`,
+    { kind: 'cardStatement', amountFils: 924964, minDueFils: 46248, date: '2026-09-30',
+      dueDay: 30, card: expectedCard });
+}
+t('a compact minimum and late fee cannot fabricate a missing statement total',
+  `Your Credit Card 9426 statement. Due date 30/09/2026. ${observedCompactMinimum}`,
+  null);
+t('a purchase with the observed compact-minimum footer keeps the purchase amount',
+  `Purchase of AED65.00 with Credit Card 9426 at IKEA on 29/09/2026. ${observedCompactMinimum}`,
+  { kind: 'transaction', amountFils: 6500, minDueFils: null, merchant: 'Ikea' });
+t('a compact minimum above the independently labelled total is discarded',
+  `Your Credit Card 9426 statement. Total amount due AED100.00. Due date 30/09/2026. ${observedCompactMinimum}`,
+  { kind: 'cardStatement', amountFils: 10000, minDueFils: null });
+
+// Reported ADCB statement and receipt supplied for the missing-card report.
+const adcbFinanceChargesStatement = 'Cr.Card XXX9426 Billing alert: Total due to avoid fin. charges: AED9249.64. Due date Sep 30 2026; Pay min. AED462.48 by due date to avoid AED241.50 late fees.';
+t('ADCB finance-charge total creates the stated card obligation',
+  adcbFinanceChargesStatement,
+  { kind: 'cardStatement', amountFils: 924964, minDueFils: 46248, date: '2026-09-30',
+    dueDay: 30, card: { last4: '9426', kind: 'credit' }, transfer: false });
+t('the reported ADCB receipt identifies payment on the same credit card',
+  'Your payment of AED 9251 against Credit Card no. XXX9426 was received at 12:10 PM on 30/09/2026. Thank you.',
+  { kind: 'cardPayment', amountFils: 925100, date: '2026-09-30',
+    card: { last4: '9426', kind: 'credit' }, side: 'receipt', transfer: true });
+// Synthetic mutations must not let the minimum/late fee replace the total.
+for (const unreadable of ['XXXX', '9,24.64', '9249.641']) {
+  t(`an unreadable ADCB finance-charge total (${unreadable}) is not replaced by another amount`,
+    adcbFinanceChargesStatement.replace('9249.64', unreadable), null);
+}
+t('ADCB finance-charge total remains authoritative when the minimum comes first',
+  'Cr.Card XXX9426 Billing alert: Pay min. AED462.48 by due date to avoid AED241.50 late fees. ' +
+    'Total due to avoid fin. charges: AED9249.64. Due date Sep 30 2026;',
+  { kind: 'cardStatement', amountFils: 924964, minDueFils: 46248, date: '2026-09-30' });
+
 const payAgainst = parseSms(
   'Your payment of AED 3506.37 against Credit Card no. XXX7720 was received at 07:06 PM on 11/12/2025. Thank you.');
 if (payAgainst && payAgainst.kind === 'cardPayment' && payAgainst.amountFils === 350637) {

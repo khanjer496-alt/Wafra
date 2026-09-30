@@ -586,6 +586,16 @@ export function useAutoImport(
     lastScanTs: watchForeground ? s.lastScanTs : 0,
     dailySummary: watchForeground ? s.dailySummary : false,
     transactions: watchForeground ? s.transactions : NOT_WATCHED_TRANSACTIONS,
+    accounts: watchForeground ? s.accounts : undefined,
+    cardDues: watchForeground ? s.cardDues : undefined,
+    bills: watchForeground ? s.bills : undefined,
+    budgets: watchForeground ? s.budgets : undefined,
+    notSubscriptions: watchForeground ? s.notSubscriptions : undefined,
+    cancelledSubscriptions: watchForeground ? s.cancelledSubscriptions : undefined,
+    monthStartDay: watchForeground ? s.monthStartDay : undefined,
+    language: watchForeground ? s.language : undefined,
+    marketId: watchForeground ? s.marketId : undefined,
+    ledgerMoney: watchForeground ? s.ledgerMoney : undefined,
   }));
   const {
     getStateSnapshot,
@@ -598,7 +608,7 @@ export function useAutoImport(
     recordIosCaptureWarning,
     clearIosCaptureWarning,
   } = useStoreActions();
-  const previousHistoryIncomplete = useRef(historyImportIncomplete(state.historyImport));
+  const reminderInputsObserved = useRef(false);
   const captureLedger = useMemo<CaptureLedgerAdapter>(() => ({
     getState: getStateSnapshot,
     getStateGeneration,
@@ -1678,35 +1688,89 @@ export function useAutoImport(
     watchForeground,
   ]);
 
-  // The first session reminder sync may run while Android is still rebuilding
-  // retained SMS history. In that state syncPaymentReminders deliberately skips
-  // the full subscription recurrence projection. Rebuild once, after the final
-  // history page is durable, so reminders become complete without competing
-  // with parser/history work on every intermediate page.
+  // Session setup cannot cover a statement or repayment arriving later. The
+  // foreground owner follows only reminder inputs, coalesces changing snapshots,
+  // and waits for encrypted durability before updating the OS. History pages
+  // stay deferred until completion, including when setup ran during that job.
   useEffect(() => {
-    if (!watchForeground || Platform.OS !== 'android') return;
-    const incomplete = historyImportIncomplete(state.historyImport);
-    const wasIncomplete = previousHistoryIncomplete.current;
-    previousHistoryIncomplete.current = incomplete;
-    if (!wasIncomplete || incomplete || !state.hydrated || !state.onboarded) return;
+    if (!watchForeground || Platform.OS === 'web' || !state.hydrated || !state.onboarded) return;
+    if (!reminderInputsObserved.current) {
+      reminderInputsObserved.current = true;
+      return; // The session setup above owns the initial schedule.
+    }
     let cancelled = false;
-    void (async () => {
-      await waitForForegroundHistoryIdle(SESSION_REMINDER_SYNC_GRACE_MS);
-      if (cancelled || RNAppState.currentState !== 'active') return;
-      const current = getStateSnapshot();
-      if (!current.hydrated || !current.onboarded || historyImportIncomplete(current.historyImport)) return;
+    let running = false;
+    let completed = false;
+    let obligationsRunning = false;
+    let obligationsCompleted = false;
+    const refresh = async () => {
+      if (cancelled || running || completed || RNAppState.currentState !== 'active' ||
+          getStateSnapshot().historyImport?.status === 'running') return;
+      running = true;
       try {
-        await syncPaymentReminders(current);
+        await waitForForegroundHistoryIdle(SESSION_REMINDER_SYNC_GRACE_MS);
+        if (cancelled || RNAppState.currentState !== 'active') return;
+        await ensureDurable();
+        if (cancelled || RNAppState.currentState !== 'active') return;
+        const current = getStateSnapshot();
+        if (!current.hydrated || !current.onboarded || current.historyImport?.status === 'running') return;
+        // A paused/failed history job may stay that way while independent bank
+        // pushes arrive. Their authoritative dues still deserve reminders;
+        // recurrence discovery waits until the retained history is complete.
+        await syncPaymentReminders(current, new Date(),
+          historyImportIncomplete(current.historyImport) ? { obligationsOnly: true } : undefined);
+        completed = true;
       } catch {
-        // Best-effort maintenance; completed history never depends on reminders.
+        // Reminders are best-effort; a later resume can retry this snapshot.
+      } finally {
+        running = false;
       }
-    })();
-    return () => { cancelled = true; };
+    };
+    // A live alert can arrive just before the user leaves. Native headless
+    // capture already deferred that event to us while the Activity was active;
+    // waiting for another app open would lose its reminder through the due day.
+    // Flush only bank-stated obligations on departure, without recurrence work.
+    const flushObligations = async () => {
+      if (cancelled || completed || obligationsRunning || obligationsCompleted) return;
+      obligationsRunning = true;
+      try {
+        await ensureDurable();
+        if (cancelled) return;
+        const current = getStateSnapshot();
+        if (!current.hydrated || !current.onboarded) return;
+        await syncPaymentReminders(current, new Date(), { obligationsOnly: true });
+        obligationsCompleted = true;
+      } catch {
+        // Best-effort delivery; the normal foreground refresh remains pending.
+      } finally {
+        obligationsRunning = false;
+      }
+    };
+    if (RNAppState.currentState === 'active') void refresh();
+    else if (state.historyImport?.status !== 'running') void flushObligations();
+    const sub = RNAppState.addEventListener('change', next => {
+      if (next === 'active') void refresh();
+      else void flushObligations();
+    });
+    return () => { cancelled = true; sub.remove(); };
   }, [
+    ensureDurable,
     getStateSnapshot,
     state.historyImport?.status,
     state.hydrated,
     state.onboarded,
+    state.accounts,
+    state.cardDues,
+    state.transactions,
+    state.bills,
+    state.budgets,
+    state.notSubscriptions,
+    state.cancelledSubscriptions,
+    state.dailySummary,
+    state.monthStartDay,
+    state.language,
+    state.marketId,
+    state.ledgerMoney,
     watchForeground,
   ]);
 

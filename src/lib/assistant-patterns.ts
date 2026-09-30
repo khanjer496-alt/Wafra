@@ -1,5 +1,6 @@
 import type { Transaction } from '@/lib/types';
 import { isSpending } from '@/lib/ledger';
+import { isSubscriptionDismissed, recurringProviderTitle, subscriptionKey, subscriptionLabel } from '@/lib/subscriptions';
 import {
   canonicalCaptureSourceKey,
   isUnboundAndroidSourceKey,
@@ -103,23 +104,26 @@ function instrumentKey(transaction: Transaction): string | null {
   return JSON.stringify([instrument.last4, instrument.kind, instrument.bankIdentity?.trim().toLowerCase() ?? '']);
 }
 
-function groupKey(transaction: Transaction): string | null {
+function groupKey(transaction: Transaction, recurring = false): string | null {
   const instrument = instrumentKey(transaction);
-  return instrument === null ? null : JSON.stringify([merchantKey(transaction.title), transaction.accountId, instrument]);
+  const merchant = recurring
+    ? subscriptionKey({ title: merchantKey(recurringProviderTitle(transaction)), billIdentity: transaction.billIdentity })
+    : merchantKey(transaction.title);
+  return instrument === null ? null : JSON.stringify([merchant, transaction.accountId, instrument]);
 }
 
 function compareRows(a: Transaction, b: Transaction): number {
   return textOrder(a.date, b.date) || (a.ts ?? 0) - (b.ts ?? 0) || textOrder(a.id, b.id);
 }
 
-function groups(history: Transaction[], now: Date): Map<string, Transaction[]> {
+function groups(history: Transaction[], now: Date, recurring = false): Map<string, Transaction[]> {
   const counts = new Map<string, number>();
   for (const transaction of history) counts.set(transaction.id, (counts.get(transaction.id) ?? 0) + 1);
   const result = new Map<string, Transaction[]>();
   for (const transaction of history) {
     if (counts.get(transaction.id) !== 1 || !baseEligible(transaction, now) || hasConversion(transaction) ||
       transaction.splits?.length) continue;
-    const key = groupKey(transaction);
+    const key = groupKey(transaction, recurring);
     if (key === null) continue;
     const group = result.get(key) ?? [];
     group.push(transaction);
@@ -151,9 +155,10 @@ export function findRecurringChanges(
   const selectedIds = new Set(selected.map(transaction => transaction.id));
   const dismissed = new Set(notSubscriptions.map(merchantKey));
   const findings: AssistantPattern[] = [];
-  for (const group of groups(history, now).values()) {
+  for (const group of groups(history, now, true).values()) {
     const latest = group.filter(transaction => selectedIds.has(transaction.id)).at(-1);
-    if (!latest || dismissed.has(merchantKey(latest.title))) continue;
+    if (!latest || isSubscriptionDismissed({ title: merchantKey(recurringProviderTitle(latest)), billIdentity: latest.billIdentity }, dismissed) ||
+      dismissed.has(merchantKey(latest.title))) continue;
     const observations = group.filter(transaction => compareRows(transaction, latest) <= 0);
     // Several charges on one day do not establish a regular recurring charge.
     if (group.filter(transaction => transaction.date === latest.date).length !== 1) continue;
@@ -180,7 +185,7 @@ export function findRecurringChanges(
     if (!cadence) continue;
     const direction = delta > 0 ? 'increase' : 'decrease';
     findings.push({ id: patternId('recurring-change', [latest.id]), kind: 'recurring-change',
-      title: latest.title.trim(), accountId: latest.accountId, date: latest.date,
+      title: subscriptionLabel({ title: recurringProviderTitle(latest), billIdentity: latest.billIdentity }), accountId: latest.accountId, date: latest.date,
       transactionIds: [latest.id], baselineTransactionIds: priorRun.map(transaction => transaction.id),
       amountFils: latest.amountFils, baselineFils: baseline, deltaFils: delta, direction,
       reason: `The latest recorded charge is ${delta > 0 ? 'higher' : 'lower'} than the median of ${priorRun.length} earlier charges on a ${cadence.name} pattern. Amounts alone do not show whether price, usage, or plan changed.` });

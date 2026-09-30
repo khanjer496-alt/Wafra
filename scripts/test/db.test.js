@@ -556,6 +556,7 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/store-selection': execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); }),
     // The real one-time BNPL category repair (it reads the real parser).
     '@/lib/bnpl-category-repair': require('./build/bnpl-category-repair'),
+    '@/lib/subscriptions': require('./build/subscriptions'),
     './balances': {},
     ...realModules,
   };

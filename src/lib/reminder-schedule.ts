@@ -65,6 +65,7 @@ export async function applyReminderPlan(
   api: ReminderSchedulerApi,
   plan: readonly PaymentReminder[],
   isCurrent: () => boolean = () => true,
+  scope: 'all' | 'obligations' = 'all',
 ): Promise<ReminderApplyResult> {
   const wanted = new Map<string, PaymentReminder>();
   for (const reminder of plan) {
@@ -77,6 +78,12 @@ export async function applyReminderPlan(
   const existing = await api.getAllScheduled();
   for (const { identifier } of existing) {
     if (!isCurrent()) return 'superseded';
+    // A bounded background capture does not recompute subscription recurrence.
+    // It may replace only known bill/card reminders, never that existing plan
+    // or legacy random identifiers whose kind cannot be established.
+    if (scope === 'obligations' &&
+        !identifier.startsWith(`${REMINDER_ID_PREFIX}card-`) &&
+        !identifier.startsWith(`${REMINDER_ID_PREFIX}bill-`)) continue;
     if (isStaleReminderIdentifier(identifier, keep)) await api.cancel(identifier);
   }
   for (const [identifier, reminder] of wanted) {

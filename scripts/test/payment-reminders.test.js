@@ -157,6 +157,15 @@ async function main() {
   }
 
   {
+    const os = fakeOs(['wafra-daily-summary', 'legacy-uuid', 'wafra-reminder-sub-netflix',
+      'wafra-reminder-card-paid-0', 'wafra-reminder-bill-paid-0']);
+    await schedule.applyReminderPlan(os.api, plan('card-new-0'), () => true, 'obligations');
+    eq('a background obligation refresh cancels paid dues but preserves subscription and digest schedules',
+      [...os.pending.keys()].sort(),
+      ['legacy-uuid', 'wafra-daily-summary', 'wafra-reminder-card-new-0', 'wafra-reminder-sub-netflix']);
+  }
+
+  {
     const os = fakeOs();
     let calls = 0;
     const result = await schedule.applyReminderPlan(os.api, plan('a', 'b', 'c'), () => ++calls <= 1);
@@ -239,8 +248,8 @@ async function main() {
       /applyReminderPlan\(/.test(notifications) &&
         /identifier,\s*\n?\s*content:/.test(notifications) &&
         /createLatestWinsRunner\(/.test(notifications));
-    ok('the exported sync goes through the single flight',
-      /export function syncPaymentReminders\([^)]*\)[^{]*\{\s*if \(Platform\.OS === 'web'\) return Promise\.resolve\(\);\s*return runReminderSync\(/.test(notifications));
+    // The real exported sync's coalescing is exercised by
+    // repair/card-reminder-notifications.test.cjs, including mixed scopes.
     for (const sheet of ['src/components/bill-detail-sheet.tsx', 'src/components/card-payment-sheet.tsx']) {
       const src = stripComments(read(sheet));
       ok(`${path.basename(sheet)}: Remind me handles a failed sync visibly`,

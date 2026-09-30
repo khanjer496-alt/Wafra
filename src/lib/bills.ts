@@ -104,13 +104,37 @@ function billIdentity(s: string): string {
   return s.normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
+function noticeObservedAt(bill: Bill): number | undefined {
+  return Number.isSafeInteger(bill.noticeObservedAt) && bill.noticeObservedAt! > 0
+    ? bill.noticeObservedAt : undefined;
+}
+
+/** Import order is not source chronology: history pages can arrive backwards. */
+function canRefreshNotice(prior: Bill, incoming: Bill): boolean {
+  if (!prior.statedDueDate) return true;
+  // An undated estimate cannot erase a bank-stated obligation. Its existing
+  // amount remains an estimate automatically outside the recorded cycle.
+  if (!incoming.statedDueDate) return false;
+  if (incoming.statedDueDate !== prior.statedDueDate) {
+    return incoming.statedDueDate > prior.statedDueDate;
+  }
+  const before = noticeObservedAt(prior);
+  const after = noticeObservedAt(incoming);
+  if (before !== undefined && after !== undefined && after < before) return false;
+  // Matching facts can acquire missing source metadata on a reread. A changed
+  // total needs positive chronology, including for downward bank corrections;
+  // a legacy notice with no clock cannot establish which version came first.
+  return incoming.amountFils === prior.amountFils ||
+    (before !== undefined && after !== undefined && after > before);
+}
+
 /**
  * Merge bill reminders learned during an encrypted capture.
  *
  * A manual reminder is the user's decision and is never rewritten. An
  * automatically detected reminder is refreshed by the newest bank notice so
- * its amount and due day do not stay frozen at last month's values. Paid
- * months and an explicitly chosen account survive that refresh.
+ * its amount and due day do not stay frozen at last month's values. An
+ * explicitly chosen account and unrelated paid months survive that refresh.
  */
 export function mergeImportedBills(existing: Bill[], incoming: Bill[]): Bill[] {
   const merged = existing.slice();
@@ -146,13 +170,26 @@ export function mergeImportedBills(existing: Bill[], incoming: Bill[]): Bill[] {
     }
     claimed.add(index);
     const prior = merged[index];
+    if (!canRefreshNotice(prior, bill)) continue;
+    const { statedDueDate: _priorDeadline, noticeObservedAt: _priorObservedAt, ...priorFields } = prior;
+    const observedAt = noticeObservedAt(bill) ??
+      (bill.statedDueDate === prior.statedDueDate ? noticeObservedAt(prior) : undefined);
+    // A manual claim covered the prior expected total. When an accepted bank
+    // notice raises that total, its money month needs payment evidence again.
+    // Keep the actual expense; receipt reconciliation can still cover the new
+    // figure. The import/store boundary detaches any revoked payment link.
+    const reopenedMonth = bill.statedDueDate && bill.amountFils > prior.amountFils
+      ? monthKey(bill.statedDueDate) : undefined;
     merged[index] = {
-      ...prior,
+      ...priorFields,
       title: bill.title,
       category: bill.category,
       amountFils: bill.amountFils,
       dueDay: bill.dueDay,
       autoDetected: true,
+      paidMonths: reopenedMonth ? prior.paidMonths.filter((month) => month !== reopenedMonth) : prior.paidMonths,
+      ...(bill.statedDueDate ? { statedDueDate: bill.statedDueDate } : {}),
+      ...(observedAt !== undefined ? { noticeObservedAt: observedAt } : {}),
       ...(bill.importIdentity ? { importIdentity: bill.importIdentity } : {}),
     };
   }
@@ -198,9 +235,28 @@ function exactBillAccount(bill: Bill, transaction: Transaction): boolean {
   return tail !== null && tail === billIdentityTail(transaction.billIdentity);
 }
 
+/** Provider spellings already emitted by bank alerts, including Arabic SEWA. */
+function providerTitle(title: string): string {
+  const key = normalize(title.replace(/&/g, ' and '));
+  if (/^(?:e and(?: uae)?|etisalat|e digital app)$/.test(key)) return 'etisalat';
+  if (key === 'كهرباء الشارقة') return 'sewa';
+  return key;
+}
+
+function sameBillProvider(billTitle: string, transactionTitle: string): boolean {
+  const b = providerTitle(billTitle);
+  const x = providerTitle(transactionTitle);
+  if (!b || !x) return false;
+  if (b === x) return true;
+  // Short provider names need equality: E& must never match every title with e.
+  if (b.length >= 4 && x.length >= 4 && (x.includes(b) || b.includes(x))) return true;
+  const tokens = payeeTokens(b);
+  return [...payeeTokens(x)].some((token) => tokens.has(token));
+}
+
 /**
  * Transactions that could be this bill's payment: same month, amount within
- * ±15%, and a title that either CONTAINS the bill's (or is contained by it) or
+ * ±15% for manual estimates, and a title that either CONTAINS the bill's (or is contained by it) or
  * shares a token that names the payee.
  *
  * Containment alone was the whole rule, and it is exact where it applies —
@@ -223,8 +279,12 @@ function candidatePayments(
 ): Transaction[] {
   const billTitle = normalize(bill.title);
   if (!billTitle) return [];
-  const billTokens = payeeTokens(bill.title);
   const billTail = billIdentityTail(bill.importIdentity);
+  // A notice is exact only for its stated cycle. Recurring averages and later
+  // cycles keep estimate tolerance; a partial payment cannot settle this one.
+  const hasStatedTotal = bill.autoDetected && bill.statedDueDate !== undefined &&
+    bill.statedDueDate === dueDateInMonth(key, bill.dueDay);
+  const minimumPayment = hasStatedTotal ? bill.amountFils : bill.amountFils * 0.85;
   const out: Transaction[] = [];
   for (const t of transactions) {
     // `live`/`internal` are what stop a bill settling against money the rest
@@ -234,48 +294,18 @@ function candidatePayments(
     // of this error. Optional, so a caller with no accounts to hand (tests,
     // the importer) still gets the transfer rule; see ledger.ts.
     if (!isSpending(t, live, internal) || monthKey(t.date) !== key) continue;
-    if (t.amountFils < bill.amountFils * 0.85 || t.amountFils > bill.amountFils * 1.15) continue;
-    // A provider may call this "account 1849" while the bank's registered
-    // payee receipt calls it "consumer number 1849". The tail is accepted
-    // only alongside same-month spending and the amount band above. The
-    // claims pass below then refuses it if two obligations want the same row.
+    if (t.amountFils < minimumPayment || t.amountFils > bill.amountFils * 1.15) continue;
+    // "Account 1849" and "consumer number 1849" can describe one provider's
+    // customer, but the same four digits can occur at another provider. Amount
+    // and month cannot establish who was paid. Require provider evidence even
+    // for matching tails; a user-confirmed bill alias supplies it for a bank
+    // nickname that otherwise tells us nothing about the provider.
     const paymentTail = billIdentityTail(t.billIdentity);
     // Matching provider names cannot override an explicitly different account.
     if (billTail && paymentTail && billTail !== paymentTail) continue;
-    if (billTail && paymentTail === billTail) {
-      out.push(t);
-      continue;
-    }
-    const txTitle = normalize(t.title);
-    // Every string contains "", so a title that normalizes to nothing (a row
-    // titled "—" or "***") would otherwise mark any similar-sized bill paid.
-    if (!txTitle) continue;
-    if (nests(bill, t)) {
-      out.push(t);
-      continue;
-    }
-    for (const token of payeeTokens(t.title)) {
-      if (billTokens.has(token)) {
-        out.push(t);
-        break;
-      }
-    }
+    if (sameBillProvider(bill.title, t.title)) out.push(t);
   }
   return out;
-}
-
-/** True when the two titles nest, which needs no corroboration. */
-function nests(bill: Bill, t: Transaction): boolean {
-  const b = normalize(bill.title);
-  const x = normalize(t.title);
-  if (!b || !x) return false;
-  if (b === x) return true;
-  // A short provider title such as "E&" normalizes to "e". Treating one
-  // character as containment made any similarly priced merchant containing
-  // that letter look like proof the telecom bill was paid. Short names need
-  // exact title equality or the structured identity path above.
-  if (b.length < 4 || x.length < 4) return false;
-  return x.includes(b) || b.includes(x);
 }
 
 /**

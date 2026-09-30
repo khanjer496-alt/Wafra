@@ -20,6 +20,7 @@ import {
   uploadCsvStatement,
   uploadPdfStatement,
   type PickedStatement,
+  type StatementDateOrder,
 } from '@/lib/cloud-import';
 import {
   CloudImportError,
@@ -33,20 +34,22 @@ import {
   RelayError,
   type RelayConfig,
 } from '@/lib/relay';
-import { statementDateOrderForCountry } from '@/lib/country';
 import { useStore } from '@/lib/store';
-import { statementDateNote, SUPPLEMENT_COPY } from '@/lib/supplement-copy';
+import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
 import { displayRegion } from '@/lib/ledger-money';
 import { summarizeCoverage } from '@/lib/statement-coverage';
 import { countPhrase, nextUploadDelay } from '@/lib/statement-batch';
+import { drainStatementQueue, newStatementRange } from '@/lib/statement-import-flow';
 import { t } from '@/lib/i18n';
 import { committed, failed } from '@/lib/haptics';
+
+type CoverageRange = { item: StatementImportCoverage | null; format: 'pdf' | 'csv' };
 
 type Busy = 'connect' | 'capabilities' | 'statement' | null;
 
 type PendingProtectedPdf = {
   asset: PickedStatement;
-  file: File;
+  file: File | null;
 };
 
 /** What one import added, for the three-number result summary. */
@@ -123,6 +126,7 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
   const {
     state,
     getStateSnapshot,
+    getStateGeneration,
     importBatch,
     stageReviewAlerts,
     ensureDurable,
@@ -134,13 +138,14 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
     () => createCaptureExecutor({
       ledger: {
         getState: getStateSnapshot,
+        getStateGeneration,
         importBatch,
         stageReviewAlerts,
         ensureDurable,
         setMarket: (market) => setMarket(market),
       },
     }),
-    [ensureDurable, getStateSnapshot, importBatch, setMarket, stageReviewAlerts],
+    [ensureDurable, getStateGeneration, getStateSnapshot, importBatch, setMarket, stageReviewAlerts],
   );
 
   const [cfg, setCfg] = useState<RelayConfig | null>(null);
@@ -167,8 +172,13 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
     rejected: number;
     pages: number;
     alreadyProcessed: number;
+    ranges: readonly CoverageRange[];
+    generation: number;
+    reportedImported: number;
+    totalRejected: number;
   } | null>(null);
   const [pdfPassword, setPdfPassword] = useState('');
+  const [dateOrder, setDateOrder] = useState<StatementDateOrder>(null);
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   const coverage = useMemo(
     () => summarizeCoverage(state.statementCoverage ?? [], language, undefined, displayRegion()),
@@ -187,8 +197,9 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
     return () => {
       aliveRef.current = false;
       for (const pending of pendingPdfsRef.current) {
+        if (inFlightPickerUris.has(pending.asset.uri)) continue;
         try {
-          if (pending.file.exists) pending.file.delete();
+          if (pending.file?.exists) pending.file.delete();
         } catch {
           // Picker cache cleanup is best effort.
         }
@@ -213,7 +224,11 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
     if (value.code === 'unsupported_statement_format') return copy.errFormat;
     if (value.code === 'ambiguous_card_signs') return copy.errCardSigns;
     if (value.code === 'ambiguous_dates') return copy.errDates;
-    if (value.code === 'rate_limited' || value.code === 'queue_full') return copy.errRate;
+    if (value.code === 'statement_options_conflict') return copy.errOptionsConflict;
+    if (value.code === 'statement_currency_mismatch') return copy.errCurrencyMismatch;
+    if (value.code === 'multiple_statement_accounts') return copy.errMultipleAccounts;
+    if (value.code === 'queue_full') return copy.errQueueFull;
+    if (value.code === 'rate_limited') return copy.errRate;
     if (value.code === 'service') return copy.serviceError;
     return copy.errUnexpected;
   }, [copy]);
@@ -287,33 +302,18 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
     }
   };
 
-  const syncQueued = useCallback(async (): Promise<{ imported: number; review: number }> => {
-    let imported = 0;
-    let review = 0;
-    // The relay intentionally serves at most 200 rows per page. A multi-file
-    // statement import can queue more than that, so one successful page must not
-    // be mistaken for a completed import. Drain page-by-page, yielding between
-    // durable commits so the Settings screen and tab bar stay responsive.
-    for (let page = 0; page < 50; page += 1) {
-      const outcome = await captureExecutor.execute('supplemental');
-      if (outcome.kind === 'not-hydrated') throw new Error(copy.notHydrated);
-      if (outcome.kind === 'needs-setup') throw new Error(copy.unavailable);
-      if (outcome.kind !== 'imported' && outcome.kind !== 'up-to-date') return { imported, review };
-      imported += outcome.transactions;
-      review += outcome.reviewAlerts;
-      if (outcome.moreQueued !== true) return { imported, review };
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    }
-    throw new Error(copy.syncFailedUnknown);
-  }, [captureExecutor, copy.notHydrated, copy.syncFailedUnknown, copy.unavailable]);
+  const syncQueued = useCallback((generation: number) => drainStatementQueue(
+    () => captureExecutor.execute('supplemental'),
+    () => aliveRef.current && getStateGeneration() === generation && !getStateSnapshot().privateMode,
+  ), [captureExecutor, getStateGeneration, getStateSnapshot]);
 
-  // Coverage is written after the whole batch has uploaded, not between files.
+  // Ranges are recorded only after the accepted queue is durably filed.
   // recordStatementCoverage persists the full encrypted ledger on every call,
   // and awaiting it inside the per-file loop stalled the picker once per
   // statement — the "laggy import" report. Duplicate ranges (the same account
   // exported twice) collapse to one write here rather than one persist each.
   const rememberCoverage = useCallback(async (
-    items: readonly { item: StatementImportCoverage | null; format: 'pdf' | 'csv' }[],
+    items: readonly CoverageRange[],
   ) => {
     const importedAt = Date.now();
     const seen = new Set<string>();
@@ -358,82 +358,99 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
   }, [copy, language]);
 
   const finishQueuedImport = useCallback(async (
-    files: number,
-    accepted: number,
-    rejected: number,
-    pages: number,
-    alreadyProcessed = 0,
+    files: number, accepted: number, rejected: number, pages: number,
+    alreadyProcessed = 0, ranges: readonly CoverageRange[] = [],
+    generation = getStateGeneration(), reportedImported = 0, totalRejected = rejected, isRetry = false,
   ): Promise<boolean> => {
-    setStatus(interpolate(copy.acceptedFiling, { accepted }));
-    try {
-      // Paint the accepted state before planning/reconciling a potentially large ledger.
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-      const { imported, review } = await syncQueued();
+    const pending = queuedRetryContextRef.current;
+    if (!isRetry && pending && pending.generation === generation) {
+      files += pending.files;
+      accepted += pending.accepted;
+      pages += pending.pages;
+      alreadyProcessed += pending.alreadyProcessed;
+      ranges = [...pending.ranges, ...ranges];
+      reportedImported += pending.reportedImported;
+      totalRejected += pending.totalRejected;
+    }
+    queuedRetryContextRef.current = null;
+    setStatus(accepted > 0 ? interpolate(copy.acceptedFiling, { accepted }) : copy.queueFiling);
+    const result = await syncQueued(generation);
+    if (generation !== getStateGeneration() || !aliveRef.current) {
       queuedRetryNeededRef.current = false;
       queuedRetryContextRef.current = null;
-      setStatus(batchSummary({ files, accepted, rejected, alreadyProcessed }, imported));
-      setSummary((current) => ({
-        added: (current?.added ?? 0) + imported,
-        review: (current?.review ?? 0) + review,
-        skipped: (current?.skipped ?? 0) + rejected,
-      }));
-      committed();
-      return true;
-    } catch (e) {
-      // The rows stay queued on the relay; say what stopped them landing here
-      // instead of folding every failure into the "not synced yet" status.
-      setStatus(interpolate(copy.acceptedPending, { accepted }));
-      setError(interpolate(copy.syncFailed, { reason: syncFailureReason(e) }));
-      queuedRetryNeededRef.current = true;
-      queuedRetryContextRef.current = { files, accepted, rejected, pages, alreadyProcessed };
-      failed();
       return false;
     }
-  }, [batchSummary, copy, syncFailureReason, syncQueued]);
-
-  // Successful upload means the normalized rows are already safe in the relay
-  // queue. If the immediate phone-side drain loses a network turn, retry once
-  // shortly afterwards and again whenever the app returns to foreground. The
-  // capture executor still owns save-before-ACK, so a retry cannot retire rows
-  // until the local encrypted ledger write is durable.
-  useEffect(() => {
-    if (!cfg || state.privateMode) return;
-
-    const retryQueued = async () => {
-      if (!queuedRetryNeededRef.current || queuedRetryInFlightRef.current) return;
-      queuedRetryInFlightRef.current = true;
+    setSummary(current => ({
+      added: (current?.added ?? 0) + result.imported,
+      review: (current?.review ?? 0) + result.review,
+      skipped: (current?.skipped ?? 0) + rejected,
+    }));
+    const imported = reportedImported + result.imported;
+    if (result.complete) {
       try {
-        const { imported, review } = await syncQueued();
+        await rememberCoverage(ranges);
+        await ensureDurable();
+        if (generation !== getStateGeneration() || !aliveRef.current) return false;
         queuedRetryNeededRef.current = false;
-        const context = queuedRetryContextRef.current;
         queuedRetryContextRef.current = null;
         setError(null);
-        if (context) {
-          setStatus(batchSummary(context, imported));
-          setSummary((current) => ({
-            added: (current?.added ?? 0) + imported,
-            review: (current?.review ?? 0) + review,
-            skipped: (current?.skipped ?? 0) + context.rejected,
-          }));
-        }
+        setStatus(files > 0 ? batchSummary({ files, accepted, rejected: totalRejected, alreadyProcessed }, imported) : copy.queueFiled);
         committed();
-      } catch {
-        // Keep the queued rows untouched. A later foreground transition gets
-        // another chance without asking the user to upload the statement again.
+        return true;
+      } catch (error) {
+        result.error = error;
+      }
+    }
+    setStatus(accepted > 0 ? interpolate(copy.acceptedPending, { accepted }) : copy.queuePending);
+    setError(result.reason === 'review' ? copy.syncNeedsReview :
+      interpolate(copy.syncFailed, { reason: syncFailureReason(result.error) }));
+    queuedRetryNeededRef.current = true;
+    // Counts already shown are not added again on the next attempt.
+    queuedRetryContextRef.current = { files, accepted, rejected: 0, pages,
+      alreadyProcessed, ranges, generation, reportedImported: imported, totalRejected };
+    failed();
+    return false;
+  }, [batchSummary, copy, ensureDurable, getStateGeneration, rememberCoverage, syncFailureReason, syncQueued]);
+
+  useEffect(() => {
+    if (!cfg || state.privateMode) return;
+    const retryQueued = async () => {
+      if (!queuedRetryNeededRef.current || queuedRetryInFlightRef.current || busy !== null) return;
+      const context = queuedRetryContextRef.current;
+      if (!context) return;
+      queuedRetryInFlightRef.current = true;
+      try {
+        await finishQueuedImport(context.files, context.accepted, context.rejected, context.pages,
+          context.alreadyProcessed, context.ranges, context.generation, context.reportedImported, context.totalRejected, true);
       } finally {
         queuedRetryInFlightRef.current = false;
       }
     };
-
     const timer = setTimeout(() => { void retryQueued(); }, 1_500);
-    const subscription = AppState.addEventListener('change', (next) => {
+    const subscription = AppState.addEventListener('change', next => {
       if (next === 'active') void retryQueued();
     });
-    return () => {
-      clearTimeout(timer);
-      subscription.remove();
-    };
-  }, [batchSummary, cfg, state.privateMode, syncQueued]);
+    return () => { clearTimeout(timer); subscription.remove(); };
+  }, [busy, cfg, finishQueuedImport, state.privateMode]);
+
+  const recoverQueuedRows = useCallback(async (generation: number) => {
+    const progress = await syncQueued(generation);
+    if (getStateGeneration() !== generation || !aliveRef.current) return { ...progress, progressStored: false };
+    setSummary(current => ({ added: (current?.added ?? 0) + progress.imported,
+      review: (current?.review ?? 0) + progress.review, skipped: current?.skipped ?? 0 }));
+    const pending = queuedRetryContextRef.current;
+    const matching = pending?.generation === generation ? pending : null;
+    const progressStored = !!matching || !progress.complete;
+    if (matching || !progress.complete) {
+      queuedRetryNeededRef.current = true;
+      queuedRetryContextRef.current = matching
+        ? { ...matching, reportedImported: matching.reportedImported + progress.imported }
+        : { files: 0, accepted: 0, rejected: 0, pages: 0, alreadyProcessed: 0, ranges: [],
+            generation, reportedImported: progress.imported, totalRejected: 0 };
+    }
+    setStatus(progress.complete ? copy.queueFiled : copy.queuePending);
+    return { ...progress, progressStored };
+  }, [copy, getStateGeneration, syncQueued]);
 
   /** What one successfully uploaded file contributed, in words. */
   const fileImportedDetail = (accepted: {
@@ -456,12 +473,14 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
       setCurrencySheetVisible(true);
       return;
     }
-    const ledgerMoney = state.ledgerMoney;
-    const dateOrder = statementDateOrderForCountry(state.country);
+    const generation = getStateGeneration();
+    const current = getStateSnapshot();
+    if (!current.hydrated || current.privateMode || !current.ledgerMoney) return;
+    const ledgerMoney = current.ledgerMoney;
     setError(null);
     setStatus(null);
     setFileResults([]);
-    setSummary(null);
+    if (!queuedRetryContextRef.current) setSummary(null);
     setFilesOpen(false);
     const pickedFiles: File[] = [];
     const retainedUris = new Set<string>();
@@ -482,6 +501,7 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
         if (!aliveRef.current) return;
         setLiveFiles((current) => current.map((item, i) => i === position ? { ...item, status, detail } : item));
       };
+      let recoveredImported = 0;
       let acceptedRows = 0;
       let rejectedRows = 0;
       let pages = 0;
@@ -506,12 +526,12 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
       };
       for (let index = 0; index < picked.assets.length; index += 1) {
         const asset = picked.assets[index];
-        const file = new File(asset.uri);
-        pickedFiles.push(file);
+        const file = Platform.OS === 'web' ? null : new File(asset.uri);
+        if (file) pickedFiles.push(file);
         const csv = /\.(?:csv|tsv)$/i.test(asset.name) ||
           capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
         const format = csv ? 'csv' : 'pdf';
-        if (limitReached || !aliveRef.current) {
+        if (limitReached || !aliveRef.current || getStateGeneration() !== generation || getStateSnapshot().privateMode) {
           fileResults.push({ name: asset.name, ok: false, detail: copy.fileNotTried });
           markFile(index, 'failed', copy.fileNotTried);
           continue;
@@ -522,6 +542,7 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
           for (let attempt = 0; accepted === null; attempt += 1) {
             const delay = nextUploadDelay(starts[format], Date.now());
             if (delay > 0 && !(await waitFor(delay, index + 1))) throw new CloudImportError('network');
+            if (getStateGeneration() !== generation || getStateSnapshot().privateMode || !aliveRef.current) throw new CloudImportError('network');
             setStatus(interpolate(copy.uploadingProgress, { index: index + 1, total }));
             setProgress({ index: index + 1, total });
             markFile(index, 'reading');
@@ -543,7 +564,7 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
           uploadedFiles += 1;
           if (accepted.alreadyProcessed) alreadyProcessedFiles += 1;
           if ('pages' in accepted && typeof accepted.pages === 'number') pages += accepted.pages;
-          coverage.push({ item: accepted.coverage, format });
+          coverage.push({ item: newStatementRange(accepted, getStateSnapshot().transactions), format });
           fileResults.push({ name: asset.name, ok: true, detail: fileImportedDetail(accepted) });
           markFile(index, 'done', fileImportedDetail(accepted));
         } catch (e) {
@@ -565,6 +586,13 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
           // and their rows filed below.
           if (e instanceof CloudImportError && (e.code === 'rate_limited' || e.code === 'queue_full')) {
             limitReached = true;
+            if (e.code === 'queue_full') {
+              // A rejected upload may already have queued some rows. Drain
+              // safely even when no file returned a success response, otherwise
+              // this screen could never free its own full queue for a retry.
+              const progress = await recoverQueuedRows(generation);
+              if (!progress.progressStored) recoveredImported += progress.imported;
+            }
           }
           const failedDetail = interpolate(copy.fileFailed, {
             reason: e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e),
@@ -580,14 +608,13 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
         }
       }
       if (aliveRef.current) setFileResults(fileResults);
-      await rememberCoverage(coverage);
       if (protectedPdfs.length > 0) {
         setPendingPdfs(protectedPdfs);
         setPdfPassword('');
         setError(null);
       }
       if (uploadedFiles > 0) {
-        await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages, alreadyProcessedFiles);
+        await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages, alreadyProcessedFiles, coverage, generation, recoveredImported);
       } else {
         setStatus(null);
         if (fileResults.some((result) => !result.ok && result.detail !== copy.fileLocked)) failed();
@@ -617,7 +644,7 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
 
   /** One tap: connect if needed, then open the file picker. */
   const chooseFile = async () => {
-    if (loadingConfig || busy !== null || pendingPdfs.length > 0) return;
+    if (loadingConfig || busy !== null || queuedRetryInFlightRef.current || pendingPdfs.length > 0) return;
     if (!state.ledgerMoney) {
       setCurrencySheetVisible(true);
       return;
@@ -634,11 +661,15 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
   };
 
   const retryProtectedPdf = async () => {
-    if (!cfg || !capabilities || !pendingPdf || !pdfPassword || busy !== null) return;
-    if (!state.ledgerMoney) {
+    if (!cfg || !capabilities || !pendingPdf || !pdfPassword || busy !== null || queuedRetryInFlightRef.current) return;
+    const current = getStateSnapshot();
+    if (!current.hydrated || current.privateMode || !aliveRef.current) return;
+    if (!current.ledgerMoney) {
       setCurrencySheetVisible(true);
       return;
     }
+    const generation = getStateGeneration();
+    inFlightPickerUris.add(pendingPdf.asset.uri);
     setBusy('statement');
     setError(null);
     try {
@@ -646,11 +677,10 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
         cfg,
         pendingPdf.asset,
         capabilities,
-        state.ledgerMoney,
+        current.ledgerMoney,
         pdfPassword,
-        statementDateOrderForCountry(state.country),
+        dateOrder,
       );
-      await rememberCoverage([{ item: accepted.coverage, format: 'pdf' }]);
       const unlockedName = pendingPdf.asset.name;
       setFileResults((current) => [
         ...current.filter((result) => result.name !== unlockedName || result.detail !== copy.fileLocked),
@@ -658,16 +688,22 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
       ]);
       await finishQueuedImport(
         1, accepted.acceptedRows, accepted.rejectedRows, accepted.pages, accepted.alreadyProcessed ? 1 : 0,
+        [{ item: newStatementRange(accepted, getStateSnapshot().transactions), format: 'pdf' }], generation,
       );
-      try { if (pendingPdf.file.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
-      setPendingPdfs((current) => current[0]?.file.uri === pendingPdf.file.uri
+      try { if (pendingPdf.file?.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
+      setPendingPdfs((current) => current[0]?.asset.uri === pendingPdf.asset.uri
         ? current.slice(1)
-        : current.filter((item) => item.file.uri !== pendingPdf.file.uri));
+        : current.filter((item) => item.asset.uri !== pendingPdf.asset.uri));
       setPdfPassword('');
     } catch (e) {
+      if (e instanceof CloudImportError && e.code === 'queue_full') await recoverQueuedRows(generation);
       setError(errorText(e));
       if (!(e instanceof CloudImportError) || e.code !== 'pdf_password_incorrect') failed();
     } finally {
+      inFlightPickerUris.delete(pendingPdf.asset.uri);
+      if (!aliveRef.current) {
+        try { if (pendingPdf.file?.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
+      }
       // Clear the entered secret from React state after a failed attempt too.
       setPdfPassword('');
       setBusy(null);
@@ -676,10 +712,10 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
 
   const cancelProtectedPdf = () => {
     if (!pendingPdf) return;
-    try { if (pendingPdf.file.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
-    setPendingPdfs((current) => current[0]?.file.uri === pendingPdf.file.uri
+    try { if (pendingPdf.file?.exists) pendingPdf.file.delete(); } catch { /* best effort */ }
+    setPendingPdfs((current) => current[0]?.asset.uri === pendingPdf.asset.uri
       ? current.slice(1)
-      : current.filter((item) => item.file.uri !== pendingPdf.file.uri));
+      : current.filter((item) => item.asset.uri !== pendingPdf.asset.uri));
     setPdfPassword('');
     setError(null);
   };
@@ -737,6 +773,19 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
             </View>
           )}
           {disclosure}
+          <ThemedText type="meta" style={{ color: ink.secondary }}>{copy.dateFormatTitle}</ThemedText>
+          <View style={styles.dateChoices} accessibilityRole="radiogroup" accessibilityLabel={copy.dateFormatTitle}>
+            {([{ value: null, label: copy.dateDetect }, { value: 'day-first', label: copy.dateDayFirst },
+              { value: 'month-first', label: copy.dateMonthFirst }] as const).map(option => (
+              <Pressable key={option.label} accessibilityRole="radio"
+                aria-checked={dateOrder === option.value} aria-disabled={busy !== null}
+                accessibilityState={{ checked: dateOrder === option.value, disabled: busy !== null }}
+                onPress={() => setDateOrder(option.value)} disabled={busy !== null}
+                style={[styles.dateChoice, { borderColor: dateOrder === option.value ? ink.text : ink.rule }]}>
+                <ThemedText type="meta" style={{ color: ink.text }}>{option.label}</ThemedText>
+              </Pressable>
+            ))}
+          </View>
           <Pressable
             testID="statement-choose"
             accessibilityRole="button"
@@ -932,7 +981,7 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
             <View style={styles.lineRow} testID="statement-date-note">
               <Icon name="calendar" size={15} color={band.textSecondary} />
               <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>
-                {statementDateNote(state.country, language)}
+                {copy.dateAutoNote}
               </ThemedText>
             </View>
           </View>
@@ -943,8 +992,6 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
                 {copy.coverageTitle}
               </ThemedText>
               {coverage.map((item) => {
-                const shownMissing = item.missing.slice(0, 4);
-                const more = item.missing.length - shownMissing.length;
                 return (
                   <View key={item.sourceKey} style={[styles.coverageRow, { borderTopColor: band.rule }]}>
                     <View style={styles.coverageHead}>
@@ -953,15 +1000,8 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
                       </ThemedText>
                       <ThemedText type="meta" tabular style={{ color: band.textSecondary }}>{item.range}</ThemedText>
                     </View>
-                    {/* A statement that names no account cannot prove there are no gaps. */}
-                    <ThemedText type="meta" style={{ color: item.identified && item.missing.length ? band.statusOver : band.textSecondary }}>
-                      {!item.identified
-                        ? copy.coverageUnknown
-                        : item.missing.length
-                          ? interpolate(copy.coverageMissing, {
-                              months: `${shownMissing.join(', ')}${more > 0 ? ` +${more}` : ''}`,
-                            })
-                          : interpolate(copy.coverageComplete, { month: item.throughMonth })}
+                    <ThemedText type="meta" style={{ color: band.textSecondary }}>
+                      {copy.coverageRangeOnly}
                     </ThemedText>
                   </View>
                 );
@@ -1067,6 +1107,8 @@ function FileRow({ palette, name, status, tone, busy = false, last, accessibilit
 }
 
 const styles = StyleSheet.create({
+  dateChoices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  dateChoice: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, borderWidth: 1, borderRadius: 12 },
   root: { gap: Spacing.four },
   bandPart: { gap: Spacing.two + Spacing.one },
   choose: {

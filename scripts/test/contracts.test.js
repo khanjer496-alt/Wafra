@@ -300,9 +300,8 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     nativeModule.includes('AsyncFunction("getCaptured")') &&
       nativeModule.includes('AsyncFunction("ackCaptured")') &&
       nativeModule.includes('AsyncFunction("clearCaptured")'));
-  ok('notification rows are acknowledged only through the scan commit boundary',
-    scanner.includes('commit: notificationIds.size > 0') &&
-      scanner.includes('notificationReader.ackCaptured([...notificationIds])'));
+  // ACK ordering, partial admission and failed durability execute against the
+  // shipping scanner/executor in repair/capture-review-admission.test.cjs.
 }
 
 /* ── One definition of spending ───────────────────────────────────────── */
@@ -715,24 +714,14 @@ function ktSources(dir) {
 /* ── relay acknowledgement follows encrypted durability ─────────────── */
 {
   const store = read('src/lib/store.tsx');
-  const executor = read('src/lib/capture-executor.ts');
-  const routineDurableAt = executor.indexOf('await receipt.durable');
-  const setupSlice = executor.slice(
-    executor.indexOf('const executeSetupVerification'),
-    executor.indexOf("return {\n    execute:"),
-  );
-  const setupDurableAt = setupSlice.indexOf("await activeLedger.importBatch(plan.batch).durable");
   ok('an import exposes an encrypted-write durability promise',
     /interface ImportReceipt[\s\S]*durable: Promise<void>/.test(store) &&
       /const next = dispatch\(action\)/.test(store) &&
       /persist\(next\)/.test(store));
-  ok('routine relay sync waits for SQLCipher before commit',
-    routineDurableAt > executor.indexOf('importBatch(collected.plan.batch)') &&
-      executor.indexOf('await collected.commit()', routineDurableAt) > routineDurableAt);
-  ok('setup test waits for SQLCipher before acknowledging',
-    setupDurableAt >= 0 &&
-      setupSlice.indexOf('await dependencies.acknowledge(cfg, queued.ids)', setupDurableAt) >
-        setupDurableAt);
+  // Actual setup/routine persistence failures and ACK ordering are exercised
+  // in relay.test.js and repair/capture-review-admission.test.cjs. Source
+  // spelling cannot prove async durability or selective acknowledgement.
+
 }
 
 /* ── iOS relay wakes the app without carrying financial data ───────── */
@@ -773,9 +762,7 @@ function ktSources(dir) {
         'await dependencies.acknowledge(cfg, acknowledge)',
         executor.indexOf('const executeBackground'),
       ));
-  ok('background sync reserves setup proof markers for the foreground verifier',
-    /const reserved = new Set\(queued\.testIds\)/.test(executor) &&
-      /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(executor));
+
   ok('only a parsed Messages-automation delivery records proof after durable storage',
     executor.indexOf('await background.stage(queued.parsed)') <
       executor.indexOf('await background.recordAutomationProof(cfg, marker)') &&
@@ -862,15 +849,14 @@ function ktSources(dir) {
 //
 // background-relay.ts got this right on its own; capture.ts and
 // supplement-imports.tsx did not, and neither failed any test. This is the
-// assertion that stops the fourth collector from repeating it.
+// behavior is exercised across executor intents in relay.test.js; these
+// checks retain the screen/adapter boundary assertions.
 {
-  const executor = read('src/lib/capture-executor.ts');
+  // Probe ownership across every executor intent is covered in relay.test.js.
   const capture = read('src/lib/capture.ts');
   const background = read('src/lib/background-relay.ts');
   const supplemental = read('src/components/supplement-imports.tsx');
-  ok('non-setup executor intents reserve setup probe ids',
-    /new Set\(queued\.testIds\)/.test(executor) &&
-      /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(executor));
+
   ok('the foreground collector still reserves setup probe ids internally',
     /new Set\(testIds\)/.test(capture) &&
       /ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(capture));
@@ -882,9 +868,7 @@ function ktSources(dir) {
       /if \(loadingConfig \|\| busy !== null\) return/.test(supplemental) &&
       supplemental.indexOf('const existing = await getRelayConfig()') <
         supplemental.indexOf('const connected = await pairDevice(DEFAULT_RELAY_URL)'));
-  const setupSlice = executor.slice(executor.indexOf('const executeSetupVerification'));
-  ok('the setup intent is still the one place that acknowledges probe ids',
-    /acknowledge\(cfg, queued\.ids\)/.test(setupSlice) && /testReceived/.test(setupSlice));
+
 }
 
 /* ── the staging queue is cleared by snapshot, never by key ──────────── */

@@ -46,6 +46,7 @@ import {
 } from '@/lib/review-source-bindings';
 import type { AppState } from '@/lib/types';
 import type { HistoryImportProgress } from '@/lib/history-import';
+import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 
 export type CaptureSource = 'sms' | 'push' | 'relay' | 'none';
 
@@ -85,7 +86,11 @@ export interface CaptureResult {
   detectedLaunchMarket: 'AE' | 'SA' | null;
   source: CaptureSource;
   /** Acknowledge collected rows. Safe to call when there is nothing to ack. */
-  commit: () => Promise<void>;
+  commit: (deferredReviewSourceKeys?: readonly string[]) => Promise<void>;
+  /** Inbox review evidence omitted by bounded collection must be re-read. */
+  deferredInboxReviews?: boolean;
+  /** Inbox reviews omitted through a claim that must survive cursor completion. */
+  skippedKnownInboxReviewSourceKeys?: readonly string[];
   /** Native queue rows need a durability flush even when planning is a no-op. */
   requiresDurableCommit?: boolean;
   /**
@@ -342,7 +347,7 @@ function relayLaunchMarket(
  */
 export async function collectNewMessages(
   state: AppState,
-  options: { notificationOnly?: boolean } = {},
+  options: { notificationOnly?: boolean; knownReviewSourceKeys?: readonly string[] } = {},
 ): Promise<CaptureResult> {
   // An Android runtime permission can remain granted after the user turns
   // capture off inside Wafra, so the durable app preference must stop before
@@ -383,6 +388,8 @@ export async function collectNewMessages(
     const {
       parsed,
       reviewCandidates: scannedReviewCandidates = [],
+      deferredInboxReviews,
+      skippedKnownInboxReviewSourceKeys,
       reviewSourceBindings = [],
       declined = [],
       newestTs,
@@ -405,6 +412,7 @@ export async function collectNewMessages(
         // it just yields between 128-row provider reads.
         pageSize: 128,
         notificationOnly,
+        knownReviewSourceKeys: options.knownReviewSourceKeys,
         learnedNotificationPackages: state.trustedNotificationPackages },
     );
     // A parser migration is only complete when Android actually yielded the
@@ -440,6 +448,8 @@ export async function collectNewMessages(
     return {
       parsed,
       reviewCandidates,
+      deferredInboxReviews,
+      skippedKnownInboxReviewSourceKeys,
       reviewSourceBindings,
       declined,
       // Push rows carry their own event timestamp. Never use them to skip SMS
@@ -519,7 +529,7 @@ export async function collectNewMessages(
       throw error;
     });
     if (!queued) return stagedOnly();
-    const { parsed, reviewCandidates = [], ids, testIds } = queued;
+    const { parsed, reviewCandidates = [], ids, testIds, reviewIds = [], reviewSourceKeysById } = queued;
     const collected = [...staged.rows, ...parsed];
     const detectedLaunchMarket = relayLaunchMarket(collected, cfg.market);
     const newestTs = collected.reduce((max, p) => Math.max(max, p.smsTs ?? 0), state.lastScanTs);
@@ -531,7 +541,7 @@ export async function collectNewMessages(
       newestTs,
       detectedLaunchMarket,
       source: 'relay',
-      commit: async () => {
+      commit: async (deferredReviewSourceKeys = []) => {
         // The setup probe is addressed to /ios-setup and to nobody else.
         // syncRelay() reports its id in BOTH `ids` and `testIds` — it does have
         // to be acknowledged eventually, but only by the screen that is polling
@@ -543,6 +553,17 @@ export async function collectNewMessages(
         // extended the block. background-relay.ts reserves these ids the same
         // way; this is the second of the three collectors, not a special case.
         const reserved = new Set(testIds);
+        if (deferredReviewSourceKeys.length > 0) {
+          const deferred = new Set(deferredReviewSourceKeys.map(key => canonicalCaptureSourceKey(key)));
+          const reviewsBySource = new Map(reviewCandidates.map(item => [item.sourceKey, item]));
+          for (const id of reviewIds) {
+            const sourceKey = reviewSourceKeysById?.get(id);
+            const review = sourceKey ? reviewsBySource.get(sourceKey) : undefined;
+            // An older adapter without identity mapping cannot prove which
+            // review was retained. Keep those sealed rows for a safe retry.
+            if (!sourceKey || !review || deferred.has(canonicalCaptureSourceKey(sourceKey, review.observedAt))) reserved.add(id);
+          }
+        }
         const acknowledge = ids.filter((id) => !reserved.has(id));
         if (acknowledge.length > 0) await ackRelay(cfg, acknowledge);
         await clearStagedRows(staged.snapshot);

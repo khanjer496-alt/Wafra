@@ -427,8 +427,13 @@ export interface ParsedCard {
  * retain transfer semantics without inventing own-account ownership. Future
  * captures and source-backed rereads only; missing notification text is never
  * reconstructed from amounts. PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 57: ADCB's "Total due to avoid fin. charges" is a statement total;
+ * "Pay min. AED..." supplies its minimum. Neither the minimum nor the late
+ * fee can replace an unreadable total. Future captures plus the bounded recent reread;
+ * PARSER_BACKFILL_VERSION remains 49.
  */
-export const PARSER_VERSION = 56;
+export const PARSER_VERSION = 57;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -1921,10 +1926,13 @@ function ensureCurrencyPatterns(): void {
   AED_SUFFIX_RE = new RegExp(
     `(${FIGURE})\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}])`, 'gi');
   // "Min Amt AED 154.32" is the abbreviated card-summary spelling of the same
-  // figure. Without it that block had no minimum, and a statement with no
-  // minimum raises no reminder for the payment the user actually has to make.
+  // figure. Missing it loses the bank-stated minimum even when the statement
+  // total and deadline remain readable.
+  // The observed "Pay min. AED462.48 ... AED241.50 late fees" footer labels
+  // only the minimum. Keep the pay verb and dot so neither bare "min" nor
+  // the later late-fee amount can supply it; the total remains independent.
   MIN_DUE_RE = new RegExp(
-    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)\\s*(?:of|:|is|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    `(?:min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)|\\bpay\\s+min\\.)\\s*(?:of|:|is|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   // "Closing balance" and "statement balance" are what a statement calls its
   // total. Without them the branch fell through to first-amount extraction and
   // recorded the MINIMUM as the statement total — AED 425 owed on a AED 8,500
@@ -1943,7 +1951,9 @@ function ensureCurrencyPatterns(): void {
   // malformed balance sanitization must distinguish an obligation total from
   // an optional account snapshot. See sanitizeLocalMoney.
   const TOTAL_DUE_LABEL =
-    `(?:total\\s+(?:(?:amount|amt)\\s+due|due|billed\\s+am(?:oun)?t|outstanding(?:\\s+(?:amount|balance))?)` +
+    // ADCB inserts this exact qualifier between the total label and amount.
+    // Keep it literal: arbitrary text here could capture a minimum or late fee.
+    `(?:total\\s+(?:(?:amount|amt)\\s+due|due(?:\\s+to\\s+avoid\\s+fin\\.\\s+charges)?|billed\\s+am(?:oun)?t|outstanding(?:\\s+(?:amount|balance))?)` +
     // A bill heading states its amount directly. Anchor the clause so
     // "minimum payment for credit card bill" cannot masquerade as a total.
     `|(?:^|[.!?;\\n]\\s*)(?:your\\s+)?(?:credit|covered)\\s+card\\s+bill` +
