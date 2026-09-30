@@ -64,10 +64,14 @@ export type RuntimeOperationTag =
   | 'bills-agenda-window'
   | 'notification-drain'
   | 'capture-collect'
+  | 'capture-source-keys'
+  | 'capture-parse'
+  | 'capture-inspect'
   | 'capture-plan'
   | 'capture-save'
   | 'auto-import'
   | 'daily-summary'
+  | 'daily-summary-project'
   | 'reminder-projection'
   | 'history-scan-page'
   | 'history-plan-page'
@@ -97,10 +101,14 @@ const OPERATION_TAGS: Record<RuntimeOperationTag, true> = {
   'bills-agenda-window': true,
   'notification-drain': true,
   'capture-collect': true,
+  'capture-source-keys': true,
+  'capture-parse': true,
+  'capture-inspect': true,
   'capture-plan': true,
   'capture-save': true,
   'auto-import': true,
   'daily-summary': true,
+  'daily-summary-project': true,
   'reminder-projection': true,
   'history-scan-page': true,
   'history-plan-page': true,

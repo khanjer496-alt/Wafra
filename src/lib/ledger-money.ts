@@ -63,19 +63,23 @@ export const ledgerMoneyMatchesCurrentMetadata = (spec: LedgerMoneySpec): boolea
   currencyMinorUnits(spec.currency) === spec.exponent;
 
 const nonZeroNumber = (value: unknown): boolean => typeof value === 'number' && value !== 0;
-const records = (value: unknown): Record<string, unknown>[] => Array.isArray(value)
-  ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-  : [];
+// This guard runs on every store action. Existence needs only the first
+// qualifying row, not a filtered copy of the entire transaction history.
+const hasRecord = (
+  value: unknown,
+  matches?: (item: Record<string, unknown>) => boolean,
+): boolean => Array.isArray(value) && value.some((item) =>
+  !!item && typeof item === 'object' && (!matches || matches(item)));
 
 export const ledgerStateHasMoney = (state: LegacyMoneyState): boolean =>
-  records(state.accounts).some((item) => nonZeroNumber(item.openingFils) ||
+  hasRecord(state.accounts, (item) => nonZeroNumber(item.openingFils) ||
     nonZeroNumber(item.snapshotFils) || nonZeroNumber(item.creditLimitFils)) ||
-  records(state.transactions).length > 0 ||
-  records(state.budgets).some((item) => nonZeroNumber(item.limitFils)) ||
-  records(state.bills).some((item) => nonZeroNumber(item.amountFils)) ||
-  records(state.cardDues).some((item) => nonZeroNumber(item.totalDueFils) ||
+  hasRecord(state.transactions) ||
+  hasRecord(state.budgets, (item) => nonZeroNumber(item.limitFils)) ||
+  hasRecord(state.bills, (item) => nonZeroNumber(item.amountFils)) ||
+  hasRecord(state.cardDues, (item) => nonZeroNumber(item.totalDueFils) ||
     nonZeroNumber(item.minDueFils) || nonZeroNumber(item.paidFils)) ||
-  records(state.goals).some((item) => nonZeroNumber(item.targetFils) ||
+  hasRecord(state.goals, (item) => nonZeroNumber(item.targetFils) ||
     nonZeroNumber(item.savedFils));
 
 /** Add an explicit currency/exponent to old ledgers without rescaling integers. */

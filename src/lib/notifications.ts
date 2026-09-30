@@ -340,7 +340,11 @@ export async function syncDailySummary(state: AppState, now: Date = new Date()):
   // under the word "today".
   if (at.getTime() <= now.getTime()) return;
 
+  // The outer daily-summary timer includes permission/channel/schedule waits.
+  // This phase identifies actual synchronous ledger work in support exports.
+  const projectionStarted = Date.now();
   const summary = buildDailySummary(state, toISODate(now));
+  recordRuntimeOperation('daily-summary-project', Date.now() - projectionStarted);
   // Nothing spent today (for instance the only charge was deleted): a summary
   // scheduled earlier with that charge in it must not still fire tonight. A
   // reminder rebuild used to clear it as a side effect; now this does.

@@ -46,6 +46,7 @@ import {
 } from '@/lib/review-source-bindings';
 import type { AppState } from '@/lib/types';
 import type { HistoryImportProgress } from '@/lib/history-import';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 
 export type CaptureSource = 'sms' | 'push' | 'relay' | 'none';
@@ -403,7 +404,7 @@ export async function collectNewMessages(
     } = await scanInbox(
       sinceMs,
       state.merchantOverrides,
-      undefined, undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(state),
+      undefined, undefined, { legacyReviewSourceKeys: measureRuntimeOperation('capture-source-keys', () => collectLegacyReviewSourceKeys(state)),
         // The first page brings newest activity forward. Older pages belong
         // to the durable, resumable history coordinator, not one giant refresh.
         maxInboxPages: fullHistoricalReread ? 1 : undefined,

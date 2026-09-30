@@ -7,6 +7,16 @@ const { createHarness, walk, text } = require('./reference-harness.cjs');
 const projection = load(path.resolve(__dirname, '../../../src/lib/reference-presentation.ts'));
 const nodeById = (tree, id) => walk(tree).find(n => n.props?.testID === id);
 
+// Completed recurrence is a fixture for presentation checks. Native scheduling
+// and pending/cancelled states run separately in screen-background-work.test.cjs.
+function billsHarness(options = {}) {
+  const h = createHarness({ platform: 'ios', ...options });
+  const subscriptions = h.deps['@/lib/subscriptions'];
+  const completed = subscriptions.detectSubscriptions();
+  subscriptions.peekSubscriptionDetection = () => completed;
+  return h;
+}
+
 test('category share uses period spending, independently of its budget', () => {
   assert.equal(projection.spendingShare(25000, 100000), .25);
   assert.equal(projection.spendingShareLabel(.25, 'en'), '25%');
@@ -76,10 +86,7 @@ test('Home renders at most five recent transactions without losing the full acti
   assert.ok(all); all.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/transactions']);
 });
 test('Bills All keeps every obligation in one due-date timeline instead of type silos', () => {
-  // iOS keeps the synchronous recurrence projection used by this presentation
-  // contract. Android deliberately defers that historical scan until after the
-  // first Bills frame; its behavior is covered by the performance suites.
-  const tree = createHarness({ platform: 'ios', states: { 0: 'all' } }).render('bills');
+  const tree = billsHarness({ states: { 0: 'all' } }).render('bills');
   const agenda = text(nodeById(tree, 'payment-agenda'));
   for (const label of ['Netflix', 'Spotify', 'DEWA', 'Etisalat', 'NBD credit card']) {
     assert.match(agenda, new RegExp(label));
@@ -90,7 +97,7 @@ test('Bills All keeps every obligation in one due-date timeline instead of type 
   assert.ok(agenda.indexOf('Next 7 days') < agenda.indexOf('Later'));
 });
 test('Bills Next 30 days groups subscriptions under their monthly total, then bills and cards', () => {
-  const tree = createHarness({ platform: 'ios' }).render('bills');
+  const tree = billsHarness().render('bills');
   const subscriptions = text(nodeById(tree, 'bills-subscriptions'));
   assert.match(subscriptions, /Subscriptions[\s\S]*AED 62.00 \/ month/);
   assert.match(subscriptions, /Netflix/);
@@ -101,7 +108,7 @@ test('Bills Next 30 days groups subscriptions under their monthly total, then bi
   assert.ok(nodeById(tree, 'bills-timeline'));
 });
 test('a manually tracked detected subscription is shown once in the due timeline', () => {
-  const h = createHarness({ platform: 'ios' });
+  const h = billsHarness();
   h.state.bills.push({ id: 'netflix', title: 'Netflix', category: 'entertainment', amountFils: 4900, dueDay: 9, paidMonths: [] });
   const tree = h.render('bills');
   const rows = walk(nodeById(tree, 'payment-agenda')).filter(n => n.props?.accessibilityLabel?.startsWith('Netflix.') && n.props.onPress);
@@ -132,7 +139,7 @@ test('estimated, confirmed overdue and paid semantics survive payment-type group
   assert.equal(JSON.stringify(items), before);
 });
 test('empty Bills shows one truthful empty timeline without inventing type sections', () => {
-  const tree = createHarness({ empty: true, platform: 'ios' }).render('bills');
+  const tree = billsHarness({ empty: true }).render('bills');
   assert.match(text(nodeById(tree, 'payment-agenda')), /Nothing coming up/);
   assert.equal(nodeById(tree, 'bills-subscriptions'), undefined);
   assert.equal(nodeById(tree, 'bills-utilities'), undefined);

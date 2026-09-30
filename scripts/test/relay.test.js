@@ -1829,6 +1829,7 @@ async function queueItem(id, row, publicKey) {
     let acked = [];
     const captureDep = (id) => {
       if (id === '@/lib/capture-source-identity') return require('./build/capture-source-identity.js');
+      if (id === '@/lib/runtime-performance') return require('./build/runtime-performance');
       if (id === '@/lib/review-source-bindings') return require('./build/review-source-bindings');
       if (id === '@/lib/background-relay-storage') return { backgroundRelayStorage: storage };
       if (id === '@/lib/background-relay') {
@@ -1871,6 +1872,7 @@ async function queueItem(id, row, publicKey) {
       let requestedSince = null;
       const historyCapture = execute('src/lib/capture.ts', (id) => {
         if (id === '@/lib/capture-source-identity') return require('./build/capture-source-identity.js');
+        if (id === '@/lib/runtime-performance') return require('./build/runtime-performance');
         if (id === '@/lib/review-source-bindings') return require('./build/review-source-bindings');
         if (id === '@/lib/background-relay-storage') return { backgroundRelayStorage: storage };
         if (id === '@/lib/background-relay') {

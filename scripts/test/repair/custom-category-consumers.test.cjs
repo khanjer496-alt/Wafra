@@ -22,11 +22,11 @@ const now=new Date('2026-09-30T12:00:00Z');
 test('search indexes explicit catalog labels and renames without mutating older indexes or totals',()=>{
  const f=load('transaction-filter'),row=tx();
  const original=f.createTransactionFilterIndex([row],'en',undefined,catalog);
- assert.ok(original.ordered('newest')[0].search.includes('school trip 2026'));
+ assert.ok(original.search(original.ordered('newest')[0]).includes('school trip 2026'));
  const renamed=f.createTransactionFilterIndex([row],'ar',undefined,[{...catalog[0],name:'رحلة المدرسة'}]);
- assert.ok(renamed.ordered('newest')[0].search.includes('رحلة المدرسة'));
- assert.ok(!renamed.ordered('newest')[0].search.includes('school trip 2026'));
- assert.ok(original.ordered('newest')[0].search.includes('school trip 2026'));
+ assert.ok(renamed.search(renamed.ordered('newest')[0]).includes('رحلة المدرسة'));
+ assert.ok(!renamed.search(renamed.ordered('newest')[0]).includes('school trip 2026'));
+ assert.ok(original.search(original.ordered('newest')[0]).includes('school trip 2026'));
  assert.equal(row.amountFils,2500);
 });
 test('CSV custom labels are escaped as literal spreadsheet text and money remains exact',()=>{
@@ -79,8 +79,8 @@ test('assistant category correction preserves direction for custom income catego
 test('split-category search names the custom portion without changing allocations',()=>{
  const split=tx({category:'other',splits:[{category:expense,amountFils:1000},{category:'groceries',amountFils:1500}]});
  const index=load('transaction-filter').createTransactionFilterIndex([split],'en',undefined,catalog);
- assert.ok(index.ordered('newest')[0].search.includes('school trip 2026'));
- assert.ok(index.ordered('newest')[0].search.includes('groceries'));
+ assert.ok(index.search(index.ordered('newest')[0]).includes('school trip 2026'));
+ assert.ok(index.search(index.ordered('newest')[0]).includes('groceries'));
  assert.deepEqual(split.splits.map(p=>p.amountFils),[1000,1500]);
 });
 test('recap category rankings name custom groups and preserve exact totals',()=>{

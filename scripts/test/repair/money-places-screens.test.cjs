@@ -216,7 +216,10 @@ const netflix = { title: 'Netflix', category: 'entertainment', lastAmountFils: 1
 function billsWith(detected, options = {}) {
   const h = createHarness({ platform: 'ios', ...options });
   const real = h.deps['@/lib/subscriptions'];
+  // Presentation assertions start with completed shared analysis; scheduling
+  // and cancellation are exercised by screen-background-work.test.cjs.
   h.deps['@/lib/subscriptions'] = { ...real, detectSubscriptions: () => detected,
+    peekSubscriptionDetection: () => detected,
     activeSubscriptions: (s) => s.filter((x) => x.status === 'active'),
     stoppedSubscriptions: (s) => s.filter((x) => x.status === 'stopped'),
     trueSubscriptions: (s) => s.filter((x) => x.group === 'subscription') };
@@ -273,7 +276,7 @@ test('the 30-day timeline speaks its pins and leaves out anything beyond the win
   // A payment due today pins at the start; nothing due leaves the strip out and says so.
   const today = billsWith([{ ...netflix, nextExpectedISO: '2026-09-15' }]).render('bills');
   assert.match(byId(today, 'bills-timeline').props.accessibilityLabel, /Netflix today/);
-  const empty = createHarness({ platform: 'ios', empty: true }).render('bills');
+  const empty = billsWith([], { empty: true }).render('bills');
   assert.equal(byId(empty, 'bills-timeline'), undefined);
   assert.match(text(byId(empty, 'bills-timeline-empty')), /Nothing due in the next 30 days/);
 });

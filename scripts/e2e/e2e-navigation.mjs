@@ -435,7 +435,13 @@ await pressEverything('bills all obligations', async () => {
   await bills(); await page.getByRole('tab', { name: 'All', exact: true }).click();
 });
 await pressEverything('wallet', wallet);
-await pressEverything('transactions', async () => { await home(); await tapKey(page, 'All activity'); await page.waitForURL(/\/transactions/); });
+await pressEverything('transactions', async () => {
+  await home();
+  // Re-entry can follow a sheet/filter layout change. Let Playwright wait for
+  // this unique button to be actionable instead of ignoring a failed tapKey.
+  await page.getByRole('button', { name: 'All activity', exact: true }).click();
+  await page.waitForURL(/\/transactions/);
+});
 // Settings is two screens: the main list, and Data and help (exports,
 // backup, the clean-ups, feedback, public links and Erase). Assert that each
 // section is present, then sweep the complete scroll range of both.

@@ -1,6 +1,7 @@
 import React, { startTransition, useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
+  ActivityIndicator,
   InteractionManager,
   Platform,
   Pressable,
@@ -274,7 +275,7 @@ export default function BillsScreen() {
   const now = useToday();
   const todayISO = toISODate(now);
   // Recurrence is day-based. Reusing the same Date for the whole day prevents
-  // every Android foreground/resume from invalidating a full-ledger projection.
+  // every native foreground/resume from invalidating a full-ledger projection.
   const recurrenceToday = useMemo(() => new Date(`${todayISO}T12:00:00`), [todayISO]);
 
   const [agendaView, setAgendaView] = useState<BillsSegment>('upcoming');
@@ -294,7 +295,7 @@ export default function BillsScreen() {
   const [dueDayText, setDueDayText] = useState('');
   const [category, setCategory] = useState<CategoryId>('utilities');
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
-  const [androidRecurringResult, setAndroidRecurringResult] = useState<{
+  const [nativeRecurringResult, setNativeRecurringResult] = useState<{
     value: Subscription[];
     transactions: Transaction[];
     notSubscriptions: string[];
@@ -338,6 +339,8 @@ export default function BillsScreen() {
     [needsPaidCards, state.accounts, state.transactions, state.cardDues, now]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   const internal = measureRuntimeOperation('bills-transfer-scope', () => internalTransferIdsForState(state));
+  // Both native platforms schedule recurrence cooperatively: rendering the
+  // first iOS frame must not synchronously analyse the complete ledger either.
   // Recurrence detection walks the complete ledger. It is useful on Next 30
   // days, but it is not required to make Bills usable. Never start that
   // historical job in the same interaction window as the first tab paint.
@@ -355,44 +358,44 @@ export default function BillsScreen() {
   // empty Subscriptions list and a four-second idle wait for a job whose
   // result already exists.
   const cachedRecurring = useMemo(
-    () => Platform.OS === 'android'
+    () => Platform.OS !== 'web'
       ? peekSubscriptionDetection(state.transactions, state.notSubscriptions, recurrenceToday, liveAccounts, internal)
       : null,
     [state.transactions, state.notSubscriptions, recurrenceToday, liveAccounts, internal],
   );
-  const recurringFresh = cachedRecurring !== null || (androidRecurringResult !== null &&
-    androidRecurringResult.transactions === state.transactions &&
-    androidRecurringResult.notSubscriptions === state.notSubscriptions &&
-    androidRecurringResult.today === recurrenceToday &&
-    androidRecurringResult.liveAccounts === liveAccounts &&
-    androidRecurringResult.internal === internal);
-  const hasRecurringResult = androidRecurringResult !== null || cachedRecurring !== null;
+  const recurringFresh = cachedRecurring !== null || (nativeRecurringResult !== null &&
+    nativeRecurringResult.transactions === state.transactions &&
+    nativeRecurringResult.notSubscriptions === state.notSubscriptions &&
+    nativeRecurringResult.today === recurrenceToday &&
+    nativeRecurringResult.liveAccounts === liveAccounts &&
+    nativeRecurringResult.internal === internal);
+  const hasRecurringResult = nativeRecurringResult !== null || cachedRecurring !== null;
   // Keep a result found in the shared cache as this screen's last answer, so a
   // later capture refreshes it in place (stale rows stay visible, the refresh
   // starts at once) instead of emptying the lists and waiting for the idle
   // grace as if the tab had never had an answer.
   useFocusEffect(useCallback(() => {
-    if (!cachedRecurring || androidRecurringResult?.value === cachedRecurring) return;
-    startTransition(() => setAndroidRecurringResult({
+    if (!cachedRecurring || nativeRecurringResult?.value === cachedRecurring) return;
+    startTransition(() => setNativeRecurringResult({
       value: cachedRecurring, transactions: state.transactions, notSubscriptions: state.notSubscriptions,
       today: recurrenceToday, liveAccounts, internal,
     }));
-  }, [cachedRecurring, androidRecurringResult, state.transactions, state.notSubscriptions, recurrenceToday,
+  }, [cachedRecurring, nativeRecurringResult, state.transactions, state.notSubscriptions, recurrenceToday,
     liveAccounts, internal]));
   // A previous result may predate a "Not a subscription" choice; never show a
   // merchant the user has just dismissed while the refresh runs.
-  const androidRecurring = useMemo(() => {
+  const nativeRecurring = useMemo(() => {
     if (cachedRecurring) return cachedRecurring;
-    if (!androidRecurringResult) return null;
-    if (androidRecurringResult.notSubscriptions === state.notSubscriptions) return androidRecurringResult.value;
+    if (!nativeRecurringResult) return null;
+    if (nativeRecurringResult.notSubscriptions === state.notSubscriptions) return nativeRecurringResult.value;
     const dismissed = new Set(state.notSubscriptions.map((title) => title.trim().toLowerCase()));
-    return androidRecurringResult.value.filter((sub) => !isSubscriptionDismissed(sub, dismissed));
-  }, [cachedRecurring, androidRecurringResult, state.notSubscriptions]);
+    return nativeRecurringResult.value.filter((sub) => !isSubscriptionDismissed(sub, dismissed));
+  }, [cachedRecurring, nativeRecurringResult, state.notSubscriptions]);
 
   // useFocusEffect rather than useIsFocused: focus changes no longer re-render
   // the whole screen just to start or cancel this job.
   useFocusEffect(useCallback(() => {
-    if (Platform.OS !== 'android' || recurringFresh ||
+    if (Platform.OS === 'web' || recurringFresh ||
       (agendaView === 'all' && groupFilter === 'cards')) return;
     let cancelled = false;
     let delay: ReturnType<typeof setTimeout> | null = null;
@@ -418,7 +421,7 @@ export default function BillsScreen() {
             ).then((value) => {
               recordRuntimeOperation('bills-projection', Date.now() - projectionStartedAt);
               if (cancelled || value === null) return;
-              startTransition(() => setAndroidRecurringResult({
+              startTransition(() => setNativeRecurringResult({
                 value, transactions, notSubscriptions, today: recurrenceToday, liveAccounts, internal,
               }));
             });
@@ -427,12 +430,13 @@ export default function BillsScreen() {
       });
     };
 
-    // The first analysis on Next 30 days waits for an idle grace period.
+    // Android's first Next 30 days analysis keeps its measured idle grace.
+    // iOS starts after the first paint without adding four seconds of waiting.
     // Refreshing an existing result runs in the cooperative worker's small
     // slices, so it starts straight away instead of showing stale rows for
     // seconds. Joining a scan another caller already started costs no extra
     // work.
-    const needsRecurrenceNow = hasRecurringResult || agendaView === 'all' ||
+    const needsRecurrenceNow = Platform.OS === 'ios' || hasRecurringResult || agendaView === 'all' ||
       subscriptionDetectionRunning(transactions, notSubscriptions, recurrenceToday, liveAccounts, internal);
     if (needsRecurrenceNow) startProjection();
     else delay = setTimeout(startProjection, UPCOMING_RECURRENCE_IDLE_MS);
@@ -461,10 +465,10 @@ export default function BillsScreen() {
     [state.bills, state.transactions, selectedBill, now, liveAccounts, internal],
   );
   const detected = useMemo(
-    () => Platform.OS === 'android'
-      ? androidRecurring ?? []
+    () => Platform.OS !== 'web'
+      ? nativeRecurring ?? []
       : detectSubscriptions(state.transactions, state.notSubscriptions, now, liveAccounts, internal),
-    [androidRecurring, state.transactions, state.notSubscriptions, now, liveAccounts, internal],
+    [nativeRecurring, state.transactions, state.notSubscriptions, now, liveAccounts, internal],
   );
   // A subscription the user said they cancelled leaves upcoming renewals and
   // every total here — until a later charge says it is still being paid.
@@ -573,6 +577,10 @@ export default function BillsScreen() {
     [agendaView, windowed, agendaItems, selectedAgendaGroup],
   );
   const includePaidAgenda = agendaView !== 'upcoming';
+  // A missing recurring result means unknown, not zero. Card-only history
+  // is already complete without recurrence; known reminders remain usable.
+  const recurrencePending = Platform.OS !== 'web' && !hasRecurringResult &&
+    !(agendaView === 'all' && groupFilter === 'cards');
   const summary = useMemo(() => {
     const label = agendaView === 'upcoming'
       ? w.next30Total
@@ -826,14 +834,21 @@ export default function BillsScreen() {
         bandContent={(
           <View style={styles.bandBody}>
             <BillsSegmentControl segment={agendaView} onChange={setAgendaView} palette={band} />
-            <BandFigure
+            {recurrencePending ? <View testID="bills-summary-pending"
+              accessibilityLiveRegion="polite" accessibilityState={{ busy: true }} style={styles.pendingSummary}>
+              <ThemedText type="small" style={{ color: band.onBandSecondary }}>{summary.label}</ThemedText>
+              <View style={styles.pendingStatus}>
+                <ActivityIndicator color={band.onBand} />
+                <ThemedText type="smallBold" style={{ color: band.onBand, flexShrink: 1 }}>{t('billsCheckingRecurring')}</ThemedText>
+              </View>
+            </View> : <BandFigure
               testID="bills-summary"
               label={summary.label}
               fils={summary.totalFils}
               decimals
               qualifier={summaryQualifier}
-              palette={band} />
-            {agendaView === 'upcoming' && <BillsTimeline items={windowed} todayISO={todayISO} palette={band} />}
+              palette={band} />}
+            {agendaView === 'upcoming' && !recurrencePending && <BillsTimeline items={windowed} todayISO={todayISO} palette={band} />}
           </View>
         )}>
         {/* Only while it is still cancelled: Still paying, or a new charge, ends it. */}
@@ -870,7 +885,7 @@ export default function BillsScreen() {
               label={tf('showMoreRecurring', { count: stopped.length - stoppedLimit })}
               onPress={() => setStoppedLimit((limit) => limit + RECURRING_PAGE_SIZE)} />}
           </View>}
-          <View style={styles.block} testID="bills-and-cards">
+          {(!recurrencePending || billAndCardItems.length > 0) && <View style={styles.block} testID="bills-and-cards">
             <ThemedText type="heading" accessibilityRole="header" style={styles.blockTitle}>{w.billsAndCards}</ThemedText>
             <PaymentAgenda
               items={billAndCardItems}
@@ -878,16 +893,16 @@ export default function BillsScreen() {
               includePaid={false}
               renderMeta={renderAgendaMeta}
               onOpen={onOpenAgendaItem} />
-          </View>
+          </View>}
         </> : <>
           <BillsGroupFilter value={groupFilter} onChange={setGroupFilter} palette={band} />
-          <PaymentAgenda
+          {(!recurrencePending || visibleAgendaItems.length > 0) && <PaymentAgenda
             items={visibleAgendaItems}
             accounts={state.accounts}
             includePaid={includePaidAgenda}
             group={selectedAgendaGroup}
             renderMeta={renderAgendaMeta}
-            onOpen={onOpenAgendaItem} />
+            onOpen={onOpenAgendaItem} />}
           {groupFilter === 'everything' && otherRepeats.length > 0 && <View style={[styles.referenceGroup, { borderColor: band.rule, backgroundColor: band.card }]}>
             <ThemedText type="heading" accessibilityRole="header">{words.unscheduled}</ThemedText>
             {otherRepeats.slice(0, otherLimit).map(renderRecurringRow)}
@@ -1108,6 +1123,8 @@ export default function BillsScreen() {
 }
 
 const styles = StyleSheet.create({
+  pendingSummary: { minHeight: 94, justifyContent: 'center', gap: 12 },
+  pendingStatus: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10 },
   bandBody: { gap: Spacing.three },
   referenceGroup: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, padding: 14, gap: 6 },
   headerLarge: { alignItems: 'stretch' },

@@ -574,6 +574,7 @@ const S = {
   seeAllCategoryTx: { en: 'See all transactions', ar: 'عرض كل العمليات' },
   utilitiesSeg: { en: 'Utilities', ar: 'المرافق' },
   billsUpcomingTotal: { en: 'Upcoming total', ar: 'إجمالي الاستحقاقات القادمة' },
+  billsCheckingRecurring: { en: 'Checking recurring payments…', ar: 'جارٍ التحقق من الدفعات المتكررة…' },
   billsSubscriptionsTotal: { en: 'Subscriptions due', ar: 'الاشتراكات المستحقة' },
   billsUtilitiesTotal: { en: 'Utilities due', ar: 'المرافق المستحقة' },
   billsCardsTotal: { en: 'Card payments due', ar: 'دفعات البطاقات المستحقة' },
