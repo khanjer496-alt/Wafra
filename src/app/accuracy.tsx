@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { Share, StyleSheet, View } from 'react-native';
@@ -19,7 +20,7 @@ import { cardDiagnostics, formatKey, newestRowOfFormat, noFormatsReason, parserC
 import { accuracyBandCopy } from '@/lib/accuracy-band-copy';
 import { isCaptureAvailable } from '@/lib/capture';
 import { shareText } from '@/lib/share-text';
-import { categoryLabel } from '@/lib/categories';
+
 import { detailsWords } from '@/lib/details-copy';
 import { isRelayPlatform } from '@/lib/relay';
 import { useStore } from '@/lib/store';
@@ -44,6 +45,7 @@ function maskDigits(s: string): string {
 const FORMAT_PAGE = 30;
 
 export default function AccuracyScreen() {
+  const { categoryLabel } = useCategoryCatalog();
   const band = useBand('settings');
   const router = useRouter();
   const { state } = useStore();
@@ -53,7 +55,7 @@ export default function AccuracyScreen() {
 
   const rows = useMemo(
     () => unreadFormats(state.transactions, (id) => categoryLabel(id, state.language === 'ar' ? 'ar' : 'en')),
-    [state.transactions, state.language],
+    [state.transactions, state.language, categoryLabel],
   );
 
   // The newest recorded row of each listed format. These rows are already in

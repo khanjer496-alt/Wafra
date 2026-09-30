@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
@@ -9,7 +10,7 @@ import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { Fonts, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
-import { categoryLabel, EXPENSE_CATEGORIES, INCOME_CATEGORIES } from '@/lib/categories';
+
 import { detailsWords } from '@/lib/details-copy';
 import { t, tf } from '@/lib/i18n';
 import { merchantRuleSummary } from '@/lib/merchant-insights';
@@ -38,6 +39,7 @@ export function MerchantCategoryRule({ merchant, kind, palette }: {
   /** The screen's band: the row is a card on its sheet, "Change" in its tint. */
   palette: BandPalette;
 }) {
+  const { categoryLabel, expenseCategories, incomeCategories } = useCategoryCatalog();
   const language = useLanguage();
   const d = detailsWords(language);
   const words = spendingDetailsCopy(language);
@@ -71,7 +73,7 @@ export function MerchantCategoryRule({ merchant, kind, palette }: {
     </Pressable>
     <BottomSheet visible={open} onClose={() => setOpen(false)} title={d.merchant.ruleTitle} subtitle={merchant}
       palette={palette} testID="merchant-category-rule-sheet">
-      <CategoryChips categories={kind === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES} selected={rule.category}
+      <CategoryChips createType={kind} categories={kind === 'income' ? incomeCategories : expenseCategories} selected={rule.category}
         onToggle={choose} layout="wrap" />
     </BottomSheet>
     {ask && ask.count > 0 && <ChoiceSheet visible onClose={() => setAsk(null)}

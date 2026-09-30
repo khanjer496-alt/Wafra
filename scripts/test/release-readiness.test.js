@@ -458,6 +458,60 @@ const validFixture = () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 
+  for (const profile of ['production', 'production-candidate', 'preview']) {
+    const root = validFixture();
+    const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+    eas.build[profile].env = { ...eas.build[profile].env,
+      EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1', EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: '1' };
+    write(root, 'eas.json', eas);
+    const report = await assessReleaseReadiness({ root,
+      intent: { kind: 'build', platform: 'ios', profile, submit: false } });
+    ok(`automatic tester Pro cannot enter ${profile}`, report.findings.some(item => item.code === 'tester-pro-build'));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  {
+    const root = validFixture();
+    const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+    eas.build['history-beta'] = { channel: 'history-beta', environment: 'preview', distribution: 'store',
+      env: { EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1', EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: '1' } };
+    write(root, 'eas.json', eas);
+    const beta = await assessReleaseReadiness({ root,
+      intent: { kind: 'build', platform: 'ios', profile: 'history-beta', submit: false } });
+    ok('automatic tester Pro is allowed only on the isolated iOS beta profile', beta.ready, JSON.stringify(beta.findings));
+    for (const patch of [{ platform: 'android' }, { channel: 'production' }, { eligibility: '0' }]) {
+      eas.build['history-beta'].channel = patch.channel ?? 'history-beta';
+      eas.build['history-beta'].env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK = patch.eligibility ?? '1';
+      write(root, 'eas.json', eas);
+      const report = await assessReleaseReadiness({ root,
+        intent: { kind: 'build', platform: patch.platform ?? 'ios', profile: 'history-beta', submit: false } });
+      ok(`beta auto-grant refuses conflicting configuration ${JSON.stringify(patch)}`,
+        report.findings.some(item => item.code === 'tester-pro-build'));
+    }
+    const override = await assessReleaseReadiness({ root,
+      intent: { kind: 'build', platform: 'ios', profile: 'production', submit: false },
+      publicEnv: { EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: '1' } });
+    ok('CI environment cannot enable automatic Pro in a public production build',
+      override.findings.some(item => item.code === 'tester-pro-build'));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  {
+    const root = validFixture();
+    const eas = JSON.parse(fs.readFileSync(path.join(root, 'eas.json'), 'utf8'));
+    eas.build.base = { env: { EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: '1', EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: '1' } };
+    eas.build.production.extends = 'base';
+    write(root, 'eas.json', eas);
+    const inherited = await assessReleaseReadiness({ root,
+      intent: { kind: 'build', platform: 'android', profile: 'production-candidate', submit: false } });
+    ok('public candidate checks inherited tester flags instead of only its own env block',
+      inherited.findings.some(item => item.code === 'tester-pro-build'));
+    eas.build.base.env.EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO = '0';
+    write(root, 'eas.json', eas);
+    const gestureOnly = await assessReleaseReadiness({ root,
+      intent: { kind: 'build', platform: 'android', profile: 'production', submit: false } });
+    ok('public production also refuses a leaked manual founder grant flag',
+      gestureOnly.findings.some(item => item.code === 'tester-pro-build'));
+    fs.rmSync(root, { recursive: true, force: true });
+  }
   console.log(`\nrelease-readiness: ${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
 })().catch((error) => {

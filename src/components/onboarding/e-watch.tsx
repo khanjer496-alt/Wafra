@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 /**
  * E4 · Watch (sand): "Anything to keep an eye on?". Pick everyday categories;
  * the one being set gets the dial (DialLimit, currency-scaled steps) and every
@@ -21,7 +22,7 @@ import { Icon } from '@/components/ui/icon';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { categoryLabel, getCategory } from '@/lib/categories';
+
 import { tapped } from '@/lib/haptics';
 import { formatMoneyText, typicalMinorAmount, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { WATCH_CATEGORIES, type WatchDraft } from '@/lib/onboarding-e';
@@ -46,6 +47,7 @@ export function WatchStep({ draft, active, onToggle, onActivate, onLimit, moneyS
   onClose?: () => void;
   disabled: boolean;
 }) {
+  const { categoryLabel, getCategory } = useCategoryCatalog();
   const language = useLanguage();
   const lang = language === 'ar' ? 'ar' : 'en';
   const words = onboardingECopy(language);

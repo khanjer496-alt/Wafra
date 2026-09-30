@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -8,7 +9,7 @@ import { Fonts, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import type { ComparableSpend } from '@/lib/analytics';
-import { categoryLabel } from '@/lib/categories';
+
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { formatAED } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
@@ -33,6 +34,7 @@ export function SpendingCategoriesBand({ palette, label, totalFils, paceLabel, r
   /** The parent keeps the same total above every Spending view. */
   showFigure?: boolean;
 }) {
+  const { categoryLabel } = useCategoryCatalog();
   const language = useLanguage();
   const w = spendingTrendsCopy[language === 'ar' ? 'ar' : 'en'];
   return <View style={styles.block} testID="spending-hero">

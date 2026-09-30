@@ -26,7 +26,7 @@ import {
   trueSubscriptions,
   withoutCancelled,
 } from '@/lib/subscriptions';
-import type { Budget, CategoryId, Transaction } from '@/lib/types';
+import type { CustomCategory, Budget, CategoryId, Transaction } from '@/lib/types';
 
 export interface MonthSummary {
   incomeFils: number;
@@ -235,7 +235,7 @@ export function buildInsights(
   notSubscriptions: string[] = [],
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
-  options: { includeRecurringAnalysis?: boolean; cancelledSubscriptions?: Readonly<Record<string, string | null>> } = {},
+  options: { customCategories?: readonly CustomCategory[]; includeRecurringAnalysis?: boolean; cancelledSubscriptions?: Readonly<Record<string, string | null>> } = {},
 ): Insight[] {
   const insights: Insight[] = [];
   const period = toPeriod(periodLike);
@@ -324,7 +324,7 @@ export function buildInsights(
     const spent = spentByCategory.get(b.category) ?? 0;
     if (b.limitFils <= 0) continue;
     const ratio = spent / b.limitFils;
-    const cat = getCategory(b.category);
+    const cat = getCategory(b.category, options.customCategories);
     if (ratio >= 1) {
       insights.push({
         id: `budget-over-${b.category}`,
@@ -359,7 +359,7 @@ export function buildInsights(
   // drift the moment a third fixed category is added.
   const top = current.byCategory.filter((c) => !isFixedCommitment(c.category))[0];
   if (top && top.share >= 0.15) {
-    const cat = getCategory(top.category);
+    const cat = getCategory(top.category, options.customCategories);
     insights.push({
       id: 'top-category',
       tone: 'neutral',
@@ -441,7 +441,7 @@ export function buildInsights(
       // The glyph of what was bought, not a decoration. `diamond` used to sit
       // here, and `diamond` is the Wafra Pro mark on Settings, Home and /pro —
       // one glyph cannot mean both "premium" and "largest transaction".
-      icon: getCategory(largest.category).icon,
+      icon: getCategory(largest.category, options.customCategories).icon,
       title: t('insightBiggestPurchase'),
       body: tf('insightBiggestPurchaseBody', {
         merchant: largest.title,

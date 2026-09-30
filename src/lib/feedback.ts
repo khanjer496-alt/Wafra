@@ -120,6 +120,7 @@ export interface FeedbackLedger {
   transactions: Transaction[];
   cardDues: CardDue[];
   merchantOverrides?: Record<string, CategoryId>;
+  customCategories?: readonly { id: string; name: string; type: string }[];
 }
 
 export interface FeedbackInput {
@@ -341,6 +342,12 @@ function buildAliases(ledger: FeedbackLedger): Aliases {
       key,
       a.kind === 'card' ? `[card ${letterAlias(cards++)}]` : `[account ${letterAlias(accounts++)}]`,
     );
+  }
+
+  // Custom category labels are personal vocabulary, never support telemetry.
+  for (const category of ledger.customCategories ?? []) {
+    const key = category.name.trim().toLowerCase();
+    if (key && !names.has(key)) names.set(key, `[category ${letterAlias(names.size)}]`);
   }
 
   const last4 = new Map<string, string>();

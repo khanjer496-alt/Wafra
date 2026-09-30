@@ -31,7 +31,7 @@ import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { CATEGORIES } from '@/lib/categories';
+import { isRegisteredCategory } from '@/lib/categories';
 import { formatAED, formatAmount, friendlyDate, monthKey, toISODate } from '@/lib/format';
 import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -215,7 +215,7 @@ export default function TransactionsScreen() {
   const state = useStoreSelector(({ state: s }) => ({
     transactions: s.transactions, accounts: s.accounts, monthStartDay: s.monthStartDay,
     transferInternalIds: s.transferInternalIds, transferNormalizationVersion: s.transferNormalizationVersion,
-    historyImport: historyStatusOnly(s.historyImport), ledgerMoney: s.ledgerMoney,
+    historyImport: historyStatusOnly(s.historyImport), ledgerMoney: s.ledgerMoney, customCategories: s.customCategories,
   }));
   const { deleteTransaction } = useStoreActions();
   const { period } = usePeriod();
@@ -240,7 +240,7 @@ export default function TransactionsScreen() {
   // category behind it, so the drill-down covers exactly what the row totalled.
   const deepCategories = (categoryParam ?? '')
     .split(',')
-    .map((c) => CATEGORIES.find((x) => x.id === c.trim())?.id)
+    .map((c) => isRegisteredCategory(c.trim(), state.customCategories) ? c.trim() as CategoryId : undefined)
     .filter((c): c is CategoryId => !!c);
 
   const [query, setQuery] = useState(typeof queryParam === 'string' ? queryParam : '');
@@ -345,10 +345,10 @@ export default function TransactionsScreen() {
   // Search also matches the account a row belongs to.
   const accountNames = useMemo(() => new Map(state.accounts.map((account) => [account.id,
     [account.name, account.bankName].filter(Boolean).join(' ')] as const)), [state.accounts]);
-  const filterIndex = useMemo(() => createTransactionFilterIndex(state.transactions, language, accountNames),
+  const filterIndex = useMemo(() => createTransactionFilterIndex(state.transactions, language, accountNames, state.customCategories),
     // monthKey follows the current stored salary-day boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, language, state.monthStartDay, accountNames]);
+    [state.transactions, language, state.monthStartDay, accountNames, state.customCategories]);
   const hasUnassignedIncome = useMemo(() => state.transactions.some(tx => tx.accountId === UNASSIGNED_INCOME_ACCOUNT_ID), [state.transactions]);
   // Only the sources this ledger actually has, in display order.
   const sourceKinds = useMemo(() => {

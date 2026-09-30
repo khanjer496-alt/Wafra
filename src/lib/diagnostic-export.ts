@@ -1,6 +1,6 @@
 /** Explicit, user-owned diagnostic export. No I/O, uploads, credentials or mutations. */
 import { normalizeAlertReviewTray } from '@/lib/alert-review-tray';
-import { categorySupportsType } from '@/lib/categories';
+import { categorySupportsType, categoryLabel, isCustomCategoryId, isRegisteredCategory } from '@/lib/categories';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { captureTraceEnabled, captureTraceSnapshot } from '@/lib/capture-trace';
 import { getMonthStartDay, monthKey } from '@/lib/format';
@@ -95,6 +95,10 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     else if (!counted && (tx.isTransfer || internal.has(tx.id))) flags.push('transfer-excluded');
     if (!Number.isSafeInteger(tx.amountFils) || tx.amountFils <= 0) flags.push('invalid-amount');
     if (!categorySupportsType(tx.category, tx.type)) flags.push('category-direction-conflict');
+    if (isCustomCategoryId(tx.category)) {
+      row.categoryLabel = categoryLabel(tx.category, 'en', state.customCategories);
+      if (!isRegisteredCategory(tx.category, state.customCategories)) flags.push('missing-custom-category');
+    }
     if (tx.smsKey && (sourceCounts.get(canonicalCaptureSourceKey(tx.smsKey, tx.ts)) ?? 0) > 1) flags.push('repeated-source-identity');
     if (tx.splits && tx.splits.reduce((sum, part) => sum + part.amountFils, 0) !== tx.amountFils) flags.push('split-total-mismatch');
     const key = tx.title.trim().toLowerCase();
@@ -117,7 +121,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
         reparse = p ? fields(p, 'kind type amountFils currency merchant categoryGuess categoryDeliberate transferHint date') : { outcome: 'not-parsed' };
         reparse.senderAvailable = false;
         if (!p) flags.push('current-parser-refuses-retained-text');
-        if (p && (p.type !== tx.type || p.amountFils !== tx.amountFils || p.categoryGuess !== tx.category)) flags.push('current-parser-disagrees');
+        if (p && (p.type !== tx.type || p.amountFils !== tx.amountFils || (!isCustomCategoryId(tx.category) && p.categoryGuess !== tx.category))) flags.push('current-parser-disagrees');
         if (p && p.merchant !== tx.title) flags.push('current-parser-name-differs');
         if (options.includeRetainedMessages) { row.raw = tx.raw; retainedMessages++; }
       }
@@ -171,6 +175,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
       cursor: state.historyImport.cursor ? fields(state.historyImport.cursor, 'beforeDateMs beforeId') : null,
     } : null,
     accounts: state.accounts.map(account => fields(account, ACCOUNT_FIELDS)), transactions,
+    customCategories: (state.customCategories ?? []).map(row => fields(row, 'id name type')),
     budgets: state.budgets.map(row => fields(row, 'category limitFils')),
     bills: state.bills.map(row => ({ ...fields(row, 'id title category importIdentity amountFils dueDay yearlyOnISO accountId autoDetected'), paidMonths: row.paidMonths.filter(v => typeof v === 'string') })),
     cardDues: state.cardDues.map(row => fields(row, 'id accountId totalDueFils minDueFils minDueEstimated paidFils dueDate settledAt')),

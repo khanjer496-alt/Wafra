@@ -24,6 +24,10 @@ on:
         description: 'Hidden Wafra logo Founder Pro unlock (on by default; forced off for a Play bundle)'
         type: boolean
         default: true
+      auto_pro:
+        description: 'Tester APK: automatically grant permanent device-local Founder Pro on first launch (never a Play bundle)'
+        type: boolean
+        default: false
       architecture:
         description: 'ARM64 for modern Android phones; universal for all supported CPUs'
         type: choice
@@ -82,9 +86,16 @@ jobs:
       # regardless of the input — Metro inlines this value into whichever
       # artifact the same job builds.
       EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK: ${{ (github.event.inputs.bundle != 'true' && github.event.inputs.founder_unlock != 'false') && '1' || '0' }}
+      EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO: ${{ (github.event.inputs.auto_pro == 'true' && github.event.inputs.bundle != 'true' && github.event.inputs.founder_unlock != 'false') && '1' || '0' }}
       EXPO_PUBLIC_WAFRA_CAPTURE_TRACE: ${{ github.event.inputs.capture_trace == 'true' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Refuse conflicting automatic tester Pro inputs
+        if: inputs.auto_pro == true && (inputs.bundle == true || inputs.founder_unlock == false)
+        run: |
+          echo '::error::Automatic tester Pro requires founder access and an APK-only build. It cannot enter a Play bundle.'
+          exit 1
 
       - name: Refuse diagnostic tracing in a Play bundle
         if: github.event.inputs.capture_trace == 'true' && github.event.inputs.bundle == 'true'
@@ -92,9 +103,12 @@ jobs:
           echo '::error::Capture tracing is for a local device test APK, not a Play bundle.'
           exit 1
 
-      - name: Record the Founder Pro gesture state
+      - name: Record tester Pro policy
         run: |
-          if [ "$EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK" = "1" ]; then
+          if [ "$EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO" = "1" ]; then
+            echo "### Automatic tester Pro enabled" >> "$GITHUB_STEP_SUMMARY"
+            echo "First native launch grants device-local Founder Pro without a store purchase. The grant survives ledger erase and later production upgrades on this installation; backups do not transfer it." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK" = "1" ]; then
             echo "### 🔓 Founder Pro gesture enabled" >> "$GITHUB_STEP_SUMMARY"
             echo "Tap the Wafra logo at the bottom of Settings five times to activate Founder Pro." >> "$GITHUB_STEP_SUMMARY"
           else

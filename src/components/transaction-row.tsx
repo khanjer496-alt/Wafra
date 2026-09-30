@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React from 'react';
 import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -6,7 +7,7 @@ import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { categoryLabel, getCategory } from '@/lib/categories';
+
 import { clockTime, formatAmount } from '@/lib/format';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import type { Account, Transaction } from '@/lib/types';
@@ -40,6 +41,7 @@ interface TransactionRowProps {
  */
 function TransactionRowInner({ transaction, account, onPress, internal, merchantLinks = true,
   accessibilityActions, onAccessibilityAction }: TransactionRowProps) {
+  const { getCategory, categoryLabel } = useCategoryCatalog();
   const router = useRouter();
   const theme = useTheme();
   const language = useLanguage();

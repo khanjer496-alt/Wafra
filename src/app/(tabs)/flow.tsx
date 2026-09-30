@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 /** Spending owns categories, their limits, transactions and the former Stats insights. */
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -30,7 +31,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { categoryMovers, categoryTrend, comparableSpend, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
 import { assistantCopy } from '@/lib/assistant-copy';
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
-import { categoryLabel, isFixedCommitment } from '@/lib/categories';
+import { isFixedCommitment } from '@/lib/categories';
 import { formatAED, formatCompactAED, ledgerTypicalMinor, monthEndISO, monthKey, monthLabel, monthStartISO, shiftMonthKey } from '@/lib/format';
 import { summarizeForeignActivity } from '@/lib/fx-summary';
 import { tapped } from '@/lib/haptics';
@@ -66,6 +67,7 @@ const ACTIVITY_PREVIEW_LIMIT = 8;
 const shortMonthLabel = (key: string) => monthLabel(key, true).replace(/\s+\d{4}$/, '');
 
 export default function FlowScreen() {
+  const { categoryLabel } = useCategoryCatalog();
   // Design language E: Spending wears the clay band in both schemes.
   const band = useBand('spending'); const language = useLanguage(); const router = useRouter();
   const largeText = useLargeTextLayout();

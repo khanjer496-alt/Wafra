@@ -262,7 +262,7 @@ export function projectRecap(state: AppState, descriptor: RecapDescriptor): Reca
   const topCategories = top(categorySpend.entries(), (entry) => entry[1], 5)
     .map(([category, spendFils]) => ({
       category,
-      label: categoryLabel(category),
+      label: categoryLabel(category, undefined, state.customCategories),
       spendFils,
       percent: totalSpendFils > 0 ? Math.round((spendFils / totalSpendFils) * 100) : 0,
     }));

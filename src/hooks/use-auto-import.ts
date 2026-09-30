@@ -1004,7 +1004,7 @@ export function useAutoImport(
     if (count === 1 && transactionIds.length === 1) {
       const current = getStateSnapshot();
       const row = current.transactions.find((transaction) => transaction.id === transactionIds[0]);
-      content = liveCaptureToastContent(row, current.ledgerMoney ?? null, current.language, privacyGateCleared.current);
+      content = liveCaptureToastContent(row, current.ledgerMoney ?? null, current.language, privacyGateCleared.current, current.customCategories);
     }
     toast.show(
       content?.message ?? (count === 1 ? t('liveTransactionAdded') : tf('liveTransactionsAdded', { count })),

@@ -11,7 +11,7 @@ import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import { EXPENSE_CATEGORIES } from '@/lib/categories';
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { formatAmount, ledgerTypicalMinor, shortDate, toISODate } from '@/lib/format';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
@@ -58,6 +58,7 @@ function FilterSection({ title, summary, children }: { title: string; summary: s
  * the modal. Close discards the draft; Show results applies it once. */
 export function TransactionFilterSheet({ initialFilters, resetFilters, accounts, hasUnassignedIncome, index, options, sourceKinds, onClose, onApply }: TransactionFilterSheetProps) {
   const theme = useTheme();
+  const { expenseCategories, incomeCategories } = useCategoryCatalog();
   // Opens over Transactions: the ink band's sheet, lifted.
   const band = useBand('home');
   const language = useLanguage();
@@ -66,6 +67,12 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
   const trf = useCallback((key: StringKey, vars: Record<string, string | number>) => tf(key, vars, language), [language]);
   const [filters, setFilters] = useState<Filters>(() => ({ ...initialFilters, categories: new Set(initialFilters.categories),
     sources: new Set(initialFilters.sources ?? []) }));
+  // Direction narrows suggestions, but an active filter must stay removable.
+  // Builtin purchase categories can also appear on income refunds.
+  const allCategories = [...expenseCategories, ...incomeCategories.filter(c => c.id !== 'other')];
+  const suggestedCategories = filters.type === 'income' ? incomeCategories : filters.type === 'expense' ? expenseCategories : allCategories;
+  const visibleCategories = [...suggestedCategories, ...allCategories.filter(c =>
+    filters.categories.has(c.id) && !suggestedCategories.some(suggested => suggested.id === c.id))];
   const [resetScope, setResetScope] = useState(false);
   const [picking, setPicking] = useState<'dateFrom' | 'dateTo' | null>(null);
   const [rangeDraft, setRangeDraft] = useState({ dateFrom: initialFilters.dateFrom ?? '', dateTo: initialFilters.dateTo ?? '' });
@@ -286,7 +293,7 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
 
 <FilterSection title={tr('categoriesFilter')} summary={filters.categories.size > 0 ? String(filters.categories.size) : tr('allWord')}>
           <CategoryChips
-            categories={EXPENSE_CATEGORIES}
+            categories={visibleCategories}
             selected={filters.categories}
             onToggle={toggleCategory}
             layout="wrap"

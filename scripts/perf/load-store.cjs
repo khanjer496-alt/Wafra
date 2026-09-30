@@ -41,6 +41,7 @@ function loadStore({ storePath = 'src/lib/store.tsx', counted = {} } = {}) {
     throw new Error('Run `bash scripts/test/build.sh` first.');
   }
   const stubs = {
+    'expo-crypto': { randomUUID: () => require('node:crypto').randomUUID() },
     react: {
       createContext: () => ({}), useCallback: (fn) => fn, useContext: () => null, useEffect() {},
       useLayoutEffect() {}, useSyncExternalStore: (_subscribe, snapshot) => snapshot(),

@@ -239,7 +239,7 @@ export default function SettingsDataScreen() {
   /* ── Data ───────────────────────────────────────────────────────────── */
 
   const exportCsv = () => {
-    const csv = buildLedgerCsv(state.transactions, state.accounts, state.ledgerMoney);
+    const csv = buildLedgerCsv(state.transactions, state.accounts, state.ledgerMoney, state.customCategories);
     // A whole ledger is far past the intent-payload ceiling; share the file.
     shareText('wafra-export.csv', csv, {
       mimeType: 'text/csv',
@@ -329,6 +329,7 @@ export default function SettingsDataScreen() {
 
     try {
       const html = buildExpenseReportHtml({
+        customCategories: state.customCategories,
         transactions: state.transactions,
         accounts: state.accounts,
         currency: state.ledgerMoney?.currency ?? marketCurrencyCode(state.marketId),

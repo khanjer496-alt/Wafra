@@ -1,7 +1,7 @@
 import { categoryLabel } from '@/lib/categories';
 import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { motionAndroidCopy } from '@/lib/motion-android-copy';
-import type { Transaction } from '@/lib/types';
+import type { CustomCategory, Transaction } from '@/lib/types';
 
 export interface CaptureToastContent {
   /** "Starbucks added · Dining" */
@@ -26,13 +26,14 @@ export function captureToastContent(
   row: Pick<Transaction, 'title' | 'category' | 'amountFils' | 'type'> | null | undefined,
   money: LedgerMoneySpec | null | undefined,
   language?: string,
+  customCategories?: readonly CustomCategory[],
 ): CaptureToastContent | null {
   if (!row || !money) return null;
   const merchant = row.title.trim();
   if (!merchant) return null;
   if (!Number.isSafeInteger(row.amountFils) || row.amountFils <= 0) return null;
   const copy = motionAndroidCopy(language);
-  const category = categoryLabel(row.category, language === 'ar' ? 'ar' : language === undefined ? undefined : 'en');
+  const category = categoryLabel(row.category, language === 'ar' ? 'ar' : language === undefined ? undefined : 'en', customCategories);
   const sign = row.type === 'income' ? '+' : '';
   const visible = formatMoneyText(row.amountFils, money);
   const spokenAmount = `${sign}${money.currency} ${formatMinorUnits(row.amountFils, money)}`;
@@ -55,6 +56,7 @@ export function liveCaptureToastContent(
   money: LedgerMoneySpec | null | undefined,
   language: string | undefined,
   privacyGateCleared: boolean,
+  customCategories?: readonly CustomCategory[],
 ): CaptureToastContent | null {
-  return privacyGateCleared ? captureToastContent(row, money, language) : null;
+  return privacyGateCleared ? captureToastContent(row, money, language, customCategories) : null;
 }

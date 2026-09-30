@@ -5,7 +5,7 @@ import type { Period } from '@/lib/period';
 import { amountInCategories, touchesCategories } from '@/lib/splits';
 import { transactionSource, type TransactionSourceKind } from '@/lib/transaction-source';
 import { transactionPresentation } from '@/lib/transaction-presentation';
-import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
+import type { CategoryId, CustomCategory, Transaction, TransactionType } from '@/lib/types';
 
 export type DatePreset = 'selected' | 'all' | 'month' | 'lastMonth' | '3months' | 'custom';
 export type SortMode = 'newest' | 'oldest' | 'largest';
@@ -91,18 +91,22 @@ type TransactionFilterProjection = {
  * changes; never cache personal strings globally or modify the source rows. */
 export function createTransactionFilterIndex(rows: readonly Transaction[], language: string,
   /** Account id → searchable name (name, bank, last four). Optional. */
-  accountNames?: ReadonlyMap<string, string>) {
+  accountNames?: ReadonlyMap<string, string>,
+  customCategories: readonly CustomCategory[] = []) {
   const labels = new Map<CategoryId, string>();
   // Only this index build owns these strings. Repeated merchant rows reuse
   // their scalar presentation; evidence-bearing rows always run independently.
   const displays = new Map<string, Map<string, string>>();
   const entries: IndexedTransaction[] = rows.map(row => {
-    let category = labels.get(row.category);
-    if (category === undefined) {
-      category = getCategory(row.category).label.toLowerCase() + '\u0000' +
-        categoryLabel(row.category, language === 'ar' ? 'ar' : 'en').toLowerCase();
-      labels.set(row.category, category);
-    }
+    const category = [...new Set([row.category, ...(row.splits ?? []).map(part => part.category)])].map(id => {
+      let label = labels.get(id);
+      if (label === undefined) {
+        label = getCategory(id, customCategories).label.toLowerCase() + '\u0000' +
+          categoryLabel(id, language === 'ar' ? 'ar' : 'en', customCategories).toLowerCase();
+        labels.set(id, label);
+      }
+      return label;
+    }).join('\u0000');
     const title = row.title.toLowerCase();
     const cacheable = row.transferEvidence === undefined && row.transferDecision === undefined;
     // Display meaning distinguishes salary/business and unclassified income;

@@ -274,7 +274,10 @@ ok('long digit runs are masked', !/\b\d{5,}\b/.test(diag));
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     }).outputText;
     const loaded = { exports: {} };
-    Function('module', 'exports', compiled)(loaded, loaded.exports);
+    Function('require', 'module', 'exports', compiled)((id) => {
+      if (id.startsWith('@/lib/')) return require(path.join(__dirname, 'build', id.slice(6)));
+      throw new Error(`Unexpected CSV dependency: ${id}`);
+    }, loaded, loaded.exports);
     buildLedgerCsv = loaded.exports.buildLedgerCsv;
   }
   for (const [currency, exponent, amount, expected] of [

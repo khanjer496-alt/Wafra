@@ -1,3 +1,4 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -20,7 +21,7 @@ import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { assistantCopy } from '@/lib/assistant-copy';
-import { categoryLabel } from '@/lib/categories';
+
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { countsInTotals, internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { projectMerchantSpending } from '@/lib/merchant-spending';
@@ -54,6 +55,7 @@ export default function MerchantRoute() {
  * handoff to every transaction.
  */
 function MerchantScreen({ merchant, activityType }: { merchant: string; activityType: Transaction['type'] }) {
+  const { categoryLabel } = useCategoryCatalog();
   const router = useRouter(); const language = useLanguage();
   const band = useBand('spending');
   const large = useLargeTextLayout(); const { state } = useStore(); const { period, setPeriod } = usePeriod();
