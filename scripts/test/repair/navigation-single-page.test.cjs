@@ -48,7 +48,7 @@ test('application hook forwards singular identity and preserves other router act
   const tabCalls = [];
   const raw = { dismissTo: (...args) => tabCalls.push(args), push: (...args) => calls.push(args), back: () => {}, replace: () => {} };
   const { useRouter } = load(path.resolve('src/hooks/use-app-router.ts'), {
-    'expo-router': { useRouter: () => raw }, react: { useMemo: f => f() },
+    'expo-router': { useRouter: () => raw, useSegments: () => ['add-transaction'] }, react: { useMemo: f => f() },
     '@/lib/navigation-identity': { singlePageId },
   });
   const router = useRouter();
@@ -67,4 +67,15 @@ test('application hook forwards singular identity and preserves other router act
   assert.equal(calls[2][1].dangerouslySingular, singlePageId);
   assert.equal(calls[2][1].preserveTabHistory, undefined);
   assert.equal(tabCalls.length, 2);
+});
+
+test('links within the tab shell navigate instead of sending an unsupported POP_TO to tabs', () => {
+  const calls = [];
+  const raw = { navigate: (...args) => calls.push(args), dismissTo: () => assert.fail('must not pop inside tabs'), push: () => assert.fail('must not push tabs') };
+  const { useRouter } = load(path.resolve('src/hooks/use-app-router.ts'), {
+    'expo-router': { useRouter: () => raw, useSegments: () => ['(tabs)', 'index'] },
+    react: { useMemo: f => f() }, '@/lib/navigation-identity': { singlePageId },
+  });
+  useRouter().push('/flow?view=categories&filter=limited');
+  assert.equal(calls[0][0], '/flow?view=categories&filter=limited');
 });

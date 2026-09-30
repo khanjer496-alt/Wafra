@@ -1,4 +1,4 @@
-import { useRouter as useExpoRouter, type Href, type Router } from 'expo-router';
+import { useRouter as useExpoRouter, useSegments, type Href, type Router } from 'expo-router';
 import { useMemo } from 'react';
 
 import { singlePageId } from '@/lib/navigation-identity';
@@ -13,6 +13,7 @@ type AppRouter = Omit<Router, 'push'> & {
 
 export function useRouter(): AppRouter {
   const router = useExpoRouter();
+  const inTabs = useSegments()[0] === '(tabs)';
   return useMemo(() => ({
     ...router,
     push: (href, options) => {
@@ -20,12 +21,13 @@ export function useRouter(): AppRouter {
       // would mount another shell (and another background capture owner).
       const { preserveTabHistory = false, ...navigationOptions } = options ?? {};
       if (isTabDestination(href) && !preserveTabHistory) {
-        router.dismissTo(href, navigationOptions);
+        if (inTabs) router.navigate(href, navigationOptions);
+        else router.dismissTo(href, navigationOptions);
         return;
       }
       router.push(href, { dangerouslySingular: singlePageId, ...navigationOptions });
     },
-  }), [router]);
+  }), [router, inTabs]);
 }
 
 function isTabDestination(href: Href): boolean {

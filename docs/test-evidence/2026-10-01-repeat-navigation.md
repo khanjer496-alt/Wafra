@@ -8,15 +8,17 @@ to press Back twice; it is not physical-device proof of the original lag.
 The shared app router now uses the SDK singular destination identity, including
 sorted query parameters, for page pushes. Different records and filters remain
 separate. An existing matching destination is reused, including its component
-state, rather than creating another instance. Ordinary tab links dismiss to the
+state, rather than creating another instance. Links inside the tab shell use navigate; tab links from details dismiss to the
 existing tab shell. The two Create account links explicitly preserve history so
 an unfinished transaction survives the Wallet detour.
 
 Verification:
-- Six tests execute the installed SDK stack reducer and the real app-router hook.
+- Seven tests execute the installed SDK stack reducer and the real app-router hook.
 - 52 focused tests pass across navigation, transaction keypad, tab clarity,
   detail screens, and everyday screens.
+- iOS capture/setup harnesses pass 446 and 281 checks after aligning router stubs.
 - Fresh web export succeeds.
+- All eight Home cashflow browser cases pass (English/Arabic, light/dark, 320/390px).
 - Browser regression: two Settings clicks in one event turn, one Back returns
   Home, then immediate reopening and Back succeeds.
 - Independent read-only review identified the nested tab and draft-history
