@@ -18,7 +18,8 @@ import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,

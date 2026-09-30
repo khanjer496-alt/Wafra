@@ -1,5 +1,6 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';

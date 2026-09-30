@@ -1,5 +1,5 @@
 /** Whole-Home layout editor. Visible order mirrors Home; changes save in sequence. */
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import { useNavigation, usePreventRemove } from '@react-navigation/native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';

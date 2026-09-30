@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Platform, Pressable, StyleSheet, View } from 'react-native';
 

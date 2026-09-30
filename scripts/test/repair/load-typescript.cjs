@@ -48,6 +48,11 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
         return { ...dependencies[name], useMoneyLocaleKey: () => '' };
       }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      // Route-level tests keep their existing navigation boundary. The real app
+      // router and SDK stack identity policy have their own behavioral suite.
+      if (name === '@/hooks/use-app-router' && dependencies['expo-router']?.useRouter) {
+        return { useRouter: dependencies['expo-router'].useRouter };
+      }
       // Catalog labels are ledger-local. Run the shipping hook against this
       // harness's React and store so rerenders observe edits/restores, rather
       // than returning a fixed empty catalog or duplicating its lookup rules.

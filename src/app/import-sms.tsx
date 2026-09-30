@@ -22,7 +22,8 @@ import { useCategoryCatalog } from '@/hooks/use-category-catalog';
  * platform that has one.
  */
 import { ImportSteps } from '@/components/workflows/workflow-surfaces';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import * as Crypto from 'expo-crypto';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {

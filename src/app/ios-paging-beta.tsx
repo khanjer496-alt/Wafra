@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import WafraLiveCapture from '../../modules/wafra-live-capture';
-import { Redirect, Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Redirect, Stack, useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Linking, Platform, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';

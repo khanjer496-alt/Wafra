@@ -1,5 +1,6 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -447,7 +448,7 @@ export default function AddTransactionScreen() {
         {!chip && state.accounts.length === 0 && (
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.push('/wallet')}
+            onPress={() => router.push('/wallet', { preserveTabHistory: true })}
             style={styles.emptyAccountAction}>
             <ThemedText type="small" style={{ color: theme.primary }}>
               {tUi('reviewAlertCreateAccount')}
@@ -1159,7 +1160,7 @@ export default function AddTransactionScreen() {
         {state.accounts.length === 0 && (
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.push('/wallet')}
+            onPress={() => router.push('/wallet', { preserveTabHistory: true })}
             style={styles.emptyAccountAction}>
             <ThemedText type="small" style={{ color: theme.primary }}>
               {tUi('reviewAlertCreateAccount')}
