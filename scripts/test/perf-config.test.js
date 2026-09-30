@@ -1163,13 +1163,9 @@ function bodyOf(source, header) {
   const cards = stripComments(read('src/lib/cards.ts'));
   const assistant = stripComments(read('src/lib/wafra-assistant.ts'));
   const assistantScreen = stripComments(read('src/app/assistant.tsx'));
-  ok('the first Android Bills frame does not synchronously run recurring detection',
-    /androidRecurring/.test(bills) &&
-      /InteractionManager\.runAfterInteractions/.test(bills) &&
-      (bills.match(/requestAnimationFrame/g) ?? []).length >= 2 &&
-      /detectSubscriptionsCooperatively\(/.test(bills) &&
-      /Platform\.OS === 'android'[\s\S]*?androidRecurring \?\? \[\]/.test(bills),
-    'Bills is lazy-mounted on the navigation tap; full-ledger recurrence work must start only after the tab has painted');
+  // First-paint deferral and Android's navigation grace execute against the
+  // actual screen in repair/screen-background-work.test.cjs. Source-name
+  // checks here rejected the same behavior when the worker expanded to iOS.
 
   ok('Android recurring detection yields the full-ledger scan instead of merely delaying one blocking turn',
     /function\* subscriptionDetectionWorker/.test(subscriptions) &&
@@ -1204,13 +1200,6 @@ function bodyOf(source, header) {
       /peekSubscriptionDetection\(state\.transactions/.test(bills) &&
       /subscriptionDetectionRunning\(transactions/.test(bills),
     'identity-only keys let every caller start its own 15k-row scan, and orphaned scans of replaced ledgers kept running; Subscriptions stayed empty on the phone');
-
-  ok('default Upcoming does not start recurrence in the navigation-critical window',
-    /else delay = setTimeout\(startProjection, UPCOMING_RECURRENCE_IDLE_MS\)/.test(bills) &&
-      // A refresh of an existing result may start at once (it keeps the last
-      // result on screen and runs in the cooperative worker's slices).
-      /const needsRecurrenceNow = hasRecurringResult \|\| agendaView === 'all'/.test(bills),
-    'cards/manual bills must paint immediately; only an explicit recurrence view may bypass the idle grace');
 
   ok('Bills does not compute recently-paid card history for the default Upcoming view',
     /const needsPaidCards = agendaView === 'all' && \(groupFilter === 'everything' \|\| groupFilter === 'cards'\)/.test(bills) &&

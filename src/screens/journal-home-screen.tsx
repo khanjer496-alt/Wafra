@@ -353,11 +353,23 @@ export default function JournalHomeScreen() {
   const hasPeriodRecords = dashboard.hasPeriodRecords === true || hasPeriodTransfers;
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
   const historyAnalysisBlocked = state.historyImport !== null && state.historyImport.status !== 'complete';
+  const completedInsightInputs = useRef<readonly unknown[] | null>(null);
   useEffect(() => {
     if (!homeAnalysisReady || !insightWidgetVisible || historyAnalysisBlocked) {
+      completedInsightInputs.current = null;
       setHomeInsight(null);
       return;
     }
+    // Focus resumes unfinished work, but a simple tab round trip must not
+    // repeat a completed full-history projection for identical inputs.
+    const inputs = [state.transactions, state.accounts, state.budgets, state.notSubscriptions,
+      state.transferInternalIds, state.transferNormalizationVersion, state.historyImport?.status,
+      state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay];
+    if (completedInsightInputs.current?.every((value, index) => Object.is(value, inputs[index]))) return;
+    // Release obsolete ledger references even while this visited tab is hidden.
+    // Cancel queued work on blur and analyse new inputs only on returning Home.
+    completedInsightInputs.current = null;
+    if (!focused) return;
     let cancelled = false;
     // Keep the previous card only inside its original period/language while
     // recomputing. Analysis must not hitch the turn that just painted an SMS.
@@ -365,7 +377,10 @@ export default function JournalHomeScreen() {
       if (cancelled) return;
       const next = measureRuntimeOperation('home-insight', () =>
         projectDashboardInsight(state, period, now));
-      if (!cancelled) setHomeInsight(next ? { ...next, scope: `${language}:${JSON.stringify(period)}` } : null);
+      if (!cancelled) {
+        completedInsightInputs.current = inputs;
+        setHomeInsight(next ? { ...next, scope: `${language}:${JSON.stringify(period)}` } : null);
+      }
     });
     return () => {
       cancelled = true;
@@ -375,7 +390,7 @@ export default function JournalHomeScreen() {
     // insight is computed only after Home is already interactive and only while
     // the user has that widget enabled.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [homeAnalysisReady, insightWidgetVisible, historyAnalysisBlocked, state.transactions, state.accounts, state.budgets,
+  }, [focused, homeAnalysisReady, insightWidgetVisible, historyAnalysisBlocked, state.transactions, state.accounts, state.budgets,
     state.notSubscriptions, state.transferInternalIds, state.transferNormalizationVersion,
     state.historyImport?.status, state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay]);
   // Home names the transfer review queue only once it is known: the same

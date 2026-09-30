@@ -149,10 +149,10 @@ test('search accepts both readable names and recorded descriptions without chang
   const transactions = [row('UrbanClap'), repayment({ id: 'repayment' })];
   const index = filter.createTransactionFilterIndex(transactions, 'en');
   const indexed = index.ordered('newest');
-  assert.ok(indexed[0].search.includes('urban company'));
-  assert.ok(indexed[0].search.includes('urbanclap'));
+  assert.ok(index.search(indexed[0]).includes('urban company'));
+  assert.ok(index.search(indexed[0]).includes('urbanclap'));
   assert.equal(indexed[0].merchantKey, 'urbanclap');
-  assert.ok(indexed[1].search.includes('credit-card repayment'));
+  assert.ok(index.search(indexed[1]).includes('credit-card repayment'));
   assert.equal(indexed[1].merchantKey, 'card •1111 payment');
   assert.equal(indexed[1].row, transactions[1]);
 });
@@ -252,13 +252,14 @@ test('search presentation cache is build-local and respects every row-specific c
     id: `format-${i}`, category: ['shopping', 'dining', 'groceries', 'transport', 'other'][i % 5], amountFils: i + 1,
   })));
   const first = filter.createTransactionFilterIndex(repeated, 'en');
-  assert.equal(calls, 1, 'identical merchant formatting is computed once even across ordinary expense categories');
+  assert.equal(calls, 0, 'browsing prepares no search presentation');
   assert.equal(first.ordered('newest').length, repeated.length);
   const categories = require('../build/categories.js');
   for (const indexed of first.ordered('newest')) {
-    assert.ok(indexed.search.includes(categories.getCategory(indexed.row.category).label.toLowerCase()),
+    assert.ok(first.search(indexed).includes(categories.getCategory(indexed.row.category).label.toLowerCase()),
       'each row retains its own searchable category');
   }
+  assert.equal(calls, 1, 'identical merchant formatting is computed once even across ordinary expense categories');
   const cases = [
     {}, { type: 'income' }, { userEdited: true }, { titleEdited: true },
     { source: 'manual', captureSource: undefined },
@@ -275,11 +276,12 @@ test('search presentation cache is build-local and respects every row-specific c
     for (const indexed of index.ordered('newest')) {
       const expected = display(indexed.row, language);
       const segment = [expected.title, expected.tag].filter(Boolean).join(' ').toLowerCase();
-      assert.ok(indexed.search.includes(`\u0000${segment}\u0000`), `${language}/${indexed.row.id}`);
+      assert.ok(index.search(indexed).includes(`\u0000${segment}\u0000`), `${language}/${indexed.row.id}`);
       assert.equal(indexed.merchantKey, indexed.row.title.toLowerCase());
     }
   }
   const before = calls;
-  filter.createTransactionFilterIndex(repeated, 'en');
+  const second = filter.createTransactionFilterIndex(repeated, 'en');
+  assert.ok(second.search(second.ordered('newest')[0]));
   assert.equal(calls, before + 1, 'no personal strings are reused across independent index builds');
 });

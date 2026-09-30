@@ -61,6 +61,7 @@ import type { UniversalBankEvent } from '@/lib/universal-types';
 import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { canCollectLocalSemanticShadow, queueLocalSemanticParserShadow, buildLocalParserSemanticWindow } from '@/lib/local-semantic-shadow';
 import { eligibleLocalReviewEvent, localReviewAdvisor } from '@/lib/local-semantic-review';
@@ -1035,8 +1036,13 @@ export async function scanInbox(
   const notificationReviewSources = new Map<string, string>();
   let notificationImportStats: AndroidNotificationImportDiagnostics | null = null;
   const launchSession = createLaunchAlertSession({ overrides, regionHint });
-  const inspectWorldwide = launchSession.inspect;
-  const parseLaunchAlert = launchSession.parse;
+  // Collection also includes native I/O and deliberate UI yields. Record the
+  // synchronous parser work separately so wall-clock waits cannot masquerade
+  // as parser CPU in a tester diagnostic. Tags contain no message content.
+  const inspectWorldwide: typeof launchSession.inspect = (...args) =>
+    measureRuntimeOperation('capture-inspect', () => launchSession.inspect(...args));
+  const parseLaunchAlert: typeof launchSession.parse = (...args) =>
+    measureRuntimeOperation('capture-parse', () => launchSession.parse(...args));
   /**
    * Called only where the launch parser returned null. Declines keep their
    * existing healing fingerprint and stop there. Every other refusal may be

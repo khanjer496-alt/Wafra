@@ -21,7 +21,7 @@ export interface TransactionFilters {
   sources?: ReadonlySet<TransactionSourceKind>;
   kind?: TransactionKind | null;
 }
-interface IndexedTransaction { row: Transaction; merchantKey: string; search: string; month: string }
+interface IndexedTransaction { row: Transaction; merchantKey: string; search: string | undefined; month: string }
 type TransactionFilterOptions = {
   query: string;
   merchant: string | null;
@@ -94,10 +94,11 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
   accountNames?: ReadonlyMap<string, string>,
   customCategories: readonly CustomCategory[] = []) {
   const labels = new Map<CategoryId, string>();
-  // Only this index build owns these strings. Repeated merchant rows reuse
-  // their scalar presentation; evidence-bearing rows always run independently.
+  // Only this mounted index owns these strings. Browsing does not need search
+  // labels, and a date/account filter should not format years of excluded rows.
+  // Build search text on first use, then reuse it across keystrokes.
   const displays = new Map<string, Map<string, string>>();
-  const entries: IndexedTransaction[] = rows.map(row => {
+  const searchText = (row: Transaction): string => {
     const category = [...new Set([row.category, ...(row.splits ?? []).map(part => part.category)])].map(id => {
       let label = labels.get(id);
       if (label === undefined) {
@@ -127,9 +128,11 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
       }
     }
     const account = accountNames?.get(row.accountId);
-    return { row, merchantKey: title.trim(), search: title + '\u0000' + display + '\u0000' + category + (account ? '\u0000' + account.toLowerCase() : ''),
-      month: monthKey(row.date) };
-  });
+    return title + '\u0000' + display + '\u0000' + category + (account ? '\u0000' + account.toLowerCase() : '');
+  };
+  const entries: IndexedTransaction[] = rows.map(row => ({
+    row, merchantKey: row.title.toLowerCase().trim(), search: undefined, month: monthKey(row.date),
+  }));
   // Sorting changes no filter result and is needed at most once per ledger.
   // The expensive Date parse is computed once per row, not per comparison.
   const ordered = new Map<SortMode, IndexedTransaction[]>([['newest', entries]]);
@@ -148,6 +151,9 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
   return {
     size: rows.length,
     newestDateOrdered,
+    search(item: IndexedTransaction): string {
+      return item.search ??= searchText(item.row);
+    },
     ordered(sort: SortMode) {
       const prior = ordered.get(sort);
       if (prior) return prior;
@@ -202,7 +208,8 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
   const ordered = index.ordered(filters.sort);
   const ascending = filters.sort === 'oldest';
   const canStopAtDateBoundary = ascending || (filters.sort === 'newest' && index.newestDateOrdered);
-  for (const { row, merchantKey, search, month } of ordered) {
+  for (const item of ordered) {
+    const { row, month } = item;
     // Date filtering is normally the narrowest filter on a large ledger. The
     // source ledger is newest-first and the cached oldest view is explicitly
     // sorted, so once we cross the requested boundary there is no reason to
@@ -222,7 +229,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     }
     if (options.smsOnly && row.source !== 'sms') continue;
     if (options.bestEffortOnly && !row.bestEffort) continue;
-    if (merchant && merchant !== merchantKey) continue;
+    if (merchant && merchant !== item.merchantKey) continue;
     if (filters.type && row.type !== filters.type) continue;
     if (filters.accountId && row.accountId !== filters.accountId) continue;
     if (filters.categories.size > 0 && !touchesCategories(row, filters.categories)) continue;
@@ -231,7 +238,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     if (kind === 'transfers' && !options.transferIds?.has(row.id)) continue;
     if (kind === 'review' && !options.reviewIds?.has(row.id)) continue;
     if (sources && !sources.has(transactionSource(row))) continue;
-    if (query && !search.includes(query) && !(numeric !== null && amountMatches(row.amountFils, numeric, options.amountExponent))) continue;
+    if (query && !index.search(item).includes(query) && !(numeric !== null && amountMatches(row.amountFils, numeric, options.amountExponent))) continue;
     if (options.corroborating.has(row.id)) continue;
     const counts = countsInTotals(row, options.live, options.internal);
     const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
