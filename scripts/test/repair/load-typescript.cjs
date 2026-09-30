@@ -56,7 +56,9 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           '@/lib/i18n': dependencies['@/lib/i18n'] ?? require('../build/i18n.js'),
         });
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/hooks/use-category-catalog.ts'), {
-          ...dependencies, '@/lib/categories': categories,
+          react: dependencies.react,
+          '@/lib/store': dependencies['@/lib/store'],
+          '@/lib/categories': categories,
         }, globals);
       }
       if (name === '@/lib/categories' || name === '@/lib/custom-categories' || name === '@/lib/custom-category-copy') {

@@ -110,7 +110,7 @@ export const HOME_STATE_FIELDS = [
   'pro', 'founderPro', 'trialStartTs', 'marketId', 'ledgerMoney',
   'transactions', 'accounts', 'budgets', 'bills', 'cardDues', 'notSubscriptions', 'cancelledSubscriptions',
   'merchantOverrides', 'billAliases', 'transferInternalIds', 'transferNormalizationVersion',
-  'historyImport',
+  'historyImport', 'customCategories',
 ] as const satisfies readonly (keyof LedgerState)[];
 const homeStateEqual = fieldsEqual<LedgerState>(HOME_STATE_FIELDS);
 
@@ -291,7 +291,7 @@ export default function JournalHomeScreen() {
     [state.hydrated, state.transactions, state.accounts, state.budgets, state.bills,
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
       state.ledgerMoney, state.transferInternalIds, state.transferNormalizationVersion,
-      state.historyImport?.status, state.marketId, period, projectionDay]);
+      state.historyImport?.status, state.marketId, state.customCategories, period, projectionDay]);
   const payments = dashboard.upcoming.items;
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   // Today and this week use the same spending definition and transfer scope as
@@ -377,7 +377,7 @@ export default function JournalHomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [homeAnalysisReady, insightWidgetVisible, historyAnalysisBlocked, state.transactions, state.accounts, state.budgets,
     state.notSubscriptions, state.transferInternalIds, state.transferNormalizationVersion,
-    state.historyImport?.status, state.marketId, state.ledgerMoney, language, period, projectionDay]);
+    state.historyImport?.status, state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay]);
   // Home names the transfer review queue only once it is known: the same
   // pendingIds the review screen lists, so the count and the list agree. The
   // graph is built after interactions, never during hydration or a running
