@@ -926,7 +926,9 @@ function ktSources(dir) {
       automationGuide.includes("'iosMessageGuideRunShortcut'") &&
       /shortcutName = IOS_LOCAL_CAPTURE_SHORTCUT_NAME/.test(automationGuide) &&
       /tf\(step, \{ shortcut: shortcutName \}\)/.test(automationGuide) &&
-      /iosMessageGuideRunShortcut:\s*\{ en: 'Pick \{shortcut\} from the list \(not New Blank Automation\), then Done'/.test(copy));
+      /iosMessageGuideRunShortcut:\s*\{ en: 'Pick \{shortcut\} from the list \(not New Blank Automation\)\. Tap Done if it appears\.'/.test(copy) &&
+      /iosMessageGuideImmediate:\s*\{ en: 'Choose Run Immediately, turn off Notify When Run if shown, then Next'/.test(copy) &&
+      /complete \*\*Received Message\*\*/.test(shortcutSpec));
   ok('the installed Shortcut uses Message input and a separate no-input setup proof',
     /accepts only Messages/.test(shortcutSpec) &&
       /run with no input invokes the native setup-proof action/.test(shortcutSpec));
@@ -958,7 +960,9 @@ function ktSources(dir) {
     !/\b(?:Clipboard|setupCode|tokenPreview|sensitiveCopyPending|writeClipboard|credential)\b/.test(
       `${setup}\n${setupWorkflow}`));
   ok('the Message-object and setup instructions have first-class Arabic copy',
-    /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'اختر \{shortcut\} من القائمة \(وليس أتمتة جديدة فارغة\)، ثم تم'/.test(copy) &&
+    /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'اختر \{shortcut\} من القائمة \(وليس أتمتة جديدة فارغة\)\. اضغط «تم» إن ظهر\.'/.test(copy) &&
+      /iosMessageGuideImmediate:\s*\{ en: '[^']*', ar: 'اختر تشغيل فوراً، وأوقف الإشعار عند التشغيل إن ظهر، ثم اضغط التالي'/.test(copy) &&
+      /الإدخال: «الرسالة المستلمة» \(وليس «المحتوى» فقط\)/.test(copy) &&
       /iosLocalAutomationAdded:[\s\S]{0,80}ar: 'فعّلتها'/.test(copy) &&
       /جهات الاتصال فقط/.test(copy) &&
       /معرّفات رسائل البنوك ليست جهات اتصال/.test(copy) &&

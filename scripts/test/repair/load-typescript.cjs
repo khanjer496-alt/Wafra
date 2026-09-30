@@ -66,11 +66,19 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           '@/lib/i18n': dependencies['@/lib/i18n'] ?? require('../build/i18n.js'),
         }, globals);
       }
+      if (name === './ios-setup-availability' || name === '@/lib/ios-setup-availability') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/ios-setup-availability.ts'));
+      }
       // Pure production policies used by capture and backup validation.
       if (name === '@/lib/alert-review-tray') return require('../build/alert-review-tray.js');
       if (name === '@/lib/capture-source-identity') return require('../build/capture-source-identity.js');
       if (name === '@/lib/statement-import-flow') return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/statement-import-flow.ts'));
       if (name === '@/lib/subscriptions') return require('../build/subscriptions.js');
+      // Setup videos are an opaque presentation child in route harnesses;
+      // their optional native player/lifecycle has its own behavioral suite.
+      if (name === '@/components/ios-setup-video-card') {
+        return { IosSetupVideoCard: () => null };
+      }
       // Display labels execute from current source; accounting predicates stay real.
       if (name === '@/lib/transaction-presentation') {
         return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/transaction-presentation.ts'), {

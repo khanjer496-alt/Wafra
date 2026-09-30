@@ -163,7 +163,9 @@ const executeFile = (filename, requireModule) => {
   const loaded = { exports: {} };
   Function('require', 'module', 'exports', '__filename', '__dirname', output)(
     (id) => id === './ios-capture-health' || id === '@/lib/ios-capture-health'
-      ? execute('src/lib/ios-capture-health.ts', requireModule) : requireModule(id),
+      ? execute('src/lib/ios-capture-health.ts', requireModule)
+      : id === './ios-setup-availability' || id === '@/lib/ios-setup-availability'
+        ? execute('src/lib/ios-setup-availability.ts', requireModule) : requireModule(id),
     loaded, loaded.exports, filename, path.dirname(filename),
   );
   return loaded.exports;
@@ -3037,6 +3039,82 @@ struct WafraBankSenderRegistryTests {
         native.milestones.length === 1 && native.acknowledged[0] === id &&
           native.pending().length === 0,
         JSON.stringify({ milestones: native.milestones, acknowledged: native.acknowledged }));
+    }
+
+    // First capture is evidence of recognized bank information, not evidence
+    // that a new expense was added. Use the production sender registry,
+    // parser, planner and qualification policy; only storage durability waits.
+    for (const fixture of [
+      {
+        name: 'ADCB credit-card statement', kind: 'cardStatement',
+        text: 'Cr.Card XXX9426 Billing alert: Total due to avoid fin. charges: AED9249.64. Due date Sep 30 2026; Pay min. AED462.48 by due date to avoid AED241.50 late fees.',
+        observedAt: '2026-09-29T08:00:00.000Z',
+      },
+      {
+        name: 'ADCB credit-card payment receipt', kind: 'cardPayment',
+        text: 'Your payment of AED 9251 against Credit Card no. XXX9426 was received at 12:10 PM on 30/09/2026. Thank you.',
+        observedAt: '2026-09-30T08:10:00.000Z',
+      },
+    ]) {
+      const id = nextId();
+      const now = Date.parse('2026-09-30T08:30:00.000Z');
+      const serialized = envelope({ id, sender: 'ADCB', text: fixture.text, observedAt: fixture.observedAt });
+      const parsed = productionLocalMessage.parseLocalMessageRecord(serialized, new Date(now), 'AE', session('AE'));
+      ok(`${fixture.name} is recognized by the production parser as its own financial kind`,
+        parsed.kind === 'parsed' && parsed.row.kind === fixture.kind &&
+          parsed.row.card?.last4 === '9426', JSON.stringify(parsed));
+      if (parsed.kind !== 'parsed' || parsed.row.kind !== fixture.kind) {
+        throw new Error(`${fixture.name} did not reach the financial parser path`);
+      }
+      const native = nativeQueue([serialized]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...ledger.getState(), ledgerMoney: AED_MONEY,
+        accounts: [{ id: 'adcb-9426', name: 'ADCB Credit Card', kind: 'card', cardType: 'credit',
+          bankName: 'ADCB', last4: '9426', openingFils: 0, color: '#000000' }],
+      });
+      const staged = deferred();
+      const durable = deferred();
+      const importBatch = ledger.importBatch.bind(ledger);
+      ledger.importBatch = (batch, mappings) => {
+        const receipt = importBatch(batch, mappings);
+        staged.resolve();
+        return { ...receipt, durable: durable.promise };
+      };
+      const pending = productionLocalCapture.createIosLocalCaptureCoordinator({
+        native, ledger, now: () => now, retireShortcutCapture: async () => 'not-needed',
+      }).drain();
+      await Promise.race([staged.promise, pending.then(() => {
+        throw new Error(`${fixture.name} finished without a financial import`);
+      })]);
+      ok(`${fixture.name} cannot qualify or acknowledge before its financial write is durable`,
+        native.milestones.length === 0 && native.acknowledged.length === 0 && native.pending().length === 1,
+        JSON.stringify({ milestones: native.milestones, acknowledged: native.acknowledged }));
+      durable.resolve();
+      const outcome = await pending;
+      const stored = ledger.getState();
+      ok(`${fixture.name} qualifies the first bank capture after durable processing`,
+        outcome.firstCapturedAt === Date.parse(fixture.observedAt) && outcome.reviews === 0 &&
+          native.milestones.length === 1 && native.milestones[0] === Date.parse(fixture.observedAt) &&
+          native.acknowledged.length === 1 && native.acknowledged[0] === id && native.pending().length === 0,
+        JSON.stringify({ outcome, milestones: native.milestones, acknowledged: native.acknowledged }));
+      if (fixture.kind === 'cardStatement') {
+        const due = stored.cardDues[0];
+        ok('statement-only first capture records the stated due and minimum without inventing a transaction',
+          outcome.imported === 0 && stored.transactions.length === 0 && stored.cardDues.length === 1 &&
+            due.accountId === 'adcb-9426' && due.totalDueFils === 924964 && due.minDueFils === 46248 &&
+            due.minDueEstimated !== true && due.dueDate === '2026-09-30' &&
+            ledger.calls.indexOf('ensure') > ledger.calls.indexOf('import'),
+          JSON.stringify({ outcome, dues: stored.cardDues, calls: ledger.calls }));
+      } else {
+        const payment = stored.transactions[0];
+        const { isIncome, isSpending } = requireBuild('@/lib/ledger');
+        ok('payment-receipt first capture records a settlement rather than spending or earned income',
+          outcome.imported === 1 && stored.transactions.length === 1 && stored.cardDues.length === 0 &&
+            payment.accountId === 'adcb-9426' && payment.amountFils === 925100 && payment.type === 'income' &&
+            payment.isTransfer === true && payment.cardPaymentSide === 'receipt' &&
+            !isSpending(payment) && !isIncome(payment),
+          JSON.stringify({ outcome, payment }));
+      }
     }
 
     {

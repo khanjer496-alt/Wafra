@@ -20,6 +20,7 @@ import { t, tf } from '@/lib/i18n';
 import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
 import { SUPPLEMENT_COPY } from '@/lib/supplement-copy';
 import { useStore } from '@/lib/store';
+import { IosSetupVideoCard } from '@/components/ios-setup-video-card';
 
 /**
  * Design preview for iPhone-only setup screens, rendered on the web E2E build.
@@ -37,6 +38,15 @@ const night = Colors.dark;
 export default function SetupPreview() {
   const { screen = 'past', mode = 'onboarding' } = useLocalSearchParams<{ screen?: string; mode?: string }>();
   if (!PREVIEW_ENABLED) return <Redirect href="/" />;
+  if (screen === 'videos') return <ThemedView style={styles.root}>
+    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <IosSetupVideoCard kind="capture" compact preview />
+        <IosSetupVideoCard kind="history" compact preview />
+        <IosSetupVideoCard kind="apple-pay" compact preview />
+      </ScrollView>
+    </SafeAreaView>
+  </ThemedView>;
   if (screen === 'past' || screen === 'live') return <IntroPreview step={screen} />;
   if (screen.startsWith('statement')) return <StatementPreview state={screen} onboarding={mode === 'onboarding'} />;
   return <GuidePreview state={screen} onboarding={mode === 'onboarding'} />;

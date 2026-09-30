@@ -136,7 +136,7 @@ test('v3 fixes both language-dependent branches while published v2 stays byte-id
   assert.throws(() => trace(v2, 'Card charged AED 10 at SHOP', 'fr'), /plain text must never reach/);
   const candidate = a.buildLocalCaptureV3Shortcut();
   assert.equal(candidate.WFWorkflowName, 'Wafra Capture v3');
-  assert.equal(candidate.WFWorkflowActions.length, 36);
+  assert.equal(candidate.WFWorkflowActions.length, 37);
   assert.equal(a.verifyLocalCaptureV3ShortcutGraph(candidate), true);
   assert.throws(() => a.verifyLocalCaptureShortcutGraph(candidate));
   assert.throws(() => a.verifyLocalCaptureV3ShortcutGraph(v2));
@@ -251,9 +251,12 @@ test('published v2 against the new optional intent contract', async () => {
   assert.deepEqual(recovery.at(-1), { action: 'stop' });
 });
 
-test('v3 changes only type references, versioned proof, the no-input lane and the Message lane', async () => {
+test('v3 changes only its repaired guards, type references, versioned proof and capture lanes', async () => {
   const a = await api, v2 = a.buildLocalCaptureShortcut(), v3 = a.buildLocalCaptureV3Shortcut();
   const original = structuredClone(v3.WFWorkflowActions.slice(2));
+  const typedMarker = original.findIndex(action => action.WFWorkflowActionParameters.CustomOutputName === 'Setup Check Text');
+  assert.ok(typedMarker >= 0);
+  original.splice(typedMarker, 1);
   let checks = 0;
   for (let i = 0; i < original.length; i++) {
     if (original[i].WFWorkflowActionIdentifier === 'app.wafra.ios.RecordWafraCaptureV3SetupProofIntent') {
@@ -261,6 +264,13 @@ test('v3 changes only type references, versioned proof, the no-input lane and th
       original[i].WFWorkflowActionParameters.AppIntentDescriptor.AppIntentIdentifier = 'RecordWafraCaptureSetupProofIntent';
     }
     const p = original[i].WFWorkflowActionParameters;
+    if (p.WFConditionalActionString === a.IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER) {
+      const prior = v2.WFWorkflowActions.find(action => action.WFWorkflowActionParameters.UUID === p.UUID);
+      p.WFInput = structuredClone(prior.WFWorkflowActionParameters.WFInput);
+    }
+    if (p.GroupingIdentifier === '42D178D1-49EA-4BEF-9CE4-58FC30D00B37' && p.WFControlFlowMode === 0) {
+      p.WFInput = p.WFInput.Variable;
+    }
     if (p.WFConditionalActionString?.WFSerializationType === 'WFTextTokenString') {
       assert.equal(p.WFConditionalActionString.Value.attachmentsByRange['{0, 1}'].OutputUUID,
         v3.WFWorkflowActions[1].WFWorkflowActionParameters.UUID);
@@ -296,4 +306,53 @@ test('v3 changes only type references, versioned proof, the no-input lane and th
   const tampered = structuredClone(v3);
   tampered.WFWorkflowActions.find(x => x.WFWorkflowActionIdentifier.endsWith('StageWafraLiveTextIntent')).WFWorkflowActionParameters.body = 'wrong';
   assert.throws(() => a.verifyLocalCaptureV3ShortcutGraph(tampered));
+});
+
+test('production v3 gives the marker comparison an explicit Text output', async () => {
+  const a = await api;
+  const candidate = a.buildLocalCaptureV3Shortcut();
+  const actions = candidate.WFWorkflowActions;
+  const index = actions.findIndex(action => action.WFWorkflowActionParameters.WFConditionalActionString === a.IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER);
+  const comparison = actions[index].WFWorkflowActionParameters;
+  // Simulator 26.1 displays a missing literal when this is the untyped
+  // Shortcut Input variable. A preceding Get Type condition does not provide
+  // a statically typed operand to Apple's condition editor/runtime.
+  const input = comparison.WFInput.Variable.Value;
+  assert.equal(input.Type, 'ActionOutput', 'the literal comparison must consume explicit Text, not raw mixed-type Shortcut Input');
+  const text = actions[index - 1];
+  assert.equal(text.WFWorkflowActionIdentifier, 'is.workflow.actions.gettext');
+  assert.equal(input.OutputUUID, text.WFWorkflowActionParameters.UUID);
+  const token = text.WFWorkflowActionParameters.WFTextActionText.Value.attachmentsByRange['{0, 1}'];
+  assert.equal(token.Type, 'ExtensionInput');
+  assert.deepEqual(token.Aggrandizements, [{ Type: 'WFCoercionVariableAggrandizement', CoercionItemClass: 'WFStringContentItem' }]);
+  assert.equal(candidate.WFWorkflowName, 'Wafra Capture v3');
+  assert.equal(actions.length, 37);
+});
+
+test('repaired v3 verifies its exact graph while the legacy v2 hash stays pinned', async () => {
+  const a = await api;
+  const graph = a.buildLocalCaptureV3Shortcut();
+  assert.equal(graph.WFWorkflowActions.length, 37);
+  assert.equal(createHash('sha256').update(JSON.stringify(a.buildLocalCaptureShortcut())).digest('hex'), 'aba5266fdc8382f5b832eab77bab25c23a67cc8353210003cb4f289b4e862f55');
+  assert.equal(a.verifyLocalCaptureV3ShortcutGraph(graph), true);
+  const invalid = structuredClone(graph);
+  invalid.WFWorkflowActions.find(action => action.WFWorkflowActionParameters.WFConditionalActionString === a.IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER)
+    .WFWorkflowActionParameters.WFConditionalActionString = 'not-the-marker';
+  assert.throws(() => a.verifyLocalCaptureV3ShortcutGraph(invalid));
+});
+
+test('production v3 binds both type comparisons through the native If variable parameter', async () => {
+  const a = await api;
+  const candidate = a.buildLocalCaptureV3Shortcut();
+  const guards = candidate.WFWorkflowActions.filter(action => action.WFWorkflowActionIdentifier === 'is.workflow.actions.conditional'
+    && action.WFWorkflowActionParameters.WFControlFlowMode === 0
+    && action.WFWorkflowActionParameters.WFConditionalActionString?.WFSerializationType === 'WFTextTokenString');
+  assert.equal(guards.length, 2);
+  for (const guard of guards) {
+    const input = guard.WFWorkflowActionParameters.WFInput;
+    assert.equal(input.Type, 'Variable', 'both If actions must bind operands; a bare attachment rendered as an empty If Condition on Simulator26.1');
+    assert.equal(input.Variable.WFSerializationType, 'WFTextTokenAttachment');
+    const output = candidate.WFWorkflowActions.find(action => action.WFWorkflowActionParameters.UUID === input.Variable.Value.OutputUUID);
+    assert.equal(output.WFWorkflowActionIdentifier, 'is.workflow.actions.getitemtype');
+  }
 });

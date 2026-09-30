@@ -53,7 +53,9 @@ const execute = (relative, dependencies = {}) => {
     output,
   )(
     (request) => dependencies[request] ??
-      (request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') : {}),
+      (request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') :
+        request === './ios-setup-availability' || request === '@/lib/ios-setup-availability'
+          ? execute('src/lib/ios-setup-availability.ts') : {}),
     loaded,
     loaded.exports,
     filename,
@@ -145,7 +147,7 @@ eq('iOS message setup: Future guide tells the user to leave Sender empty because
     'Message',
     'Sender: leave empty · Message Contains: one space',
     'Choose Run Immediately, turn off Notify When Run if shown, then Next',
-    'Pick {shortcut} from the list (not New Blank Automation), then Done',
+    'Pick {shortcut} from the list (not New Blank Automation). Tap Done if it appears.',
   ]);
 ok('iOS message setup: the unfiltered trigger is explained as on-device filtering, never a fake contact or a skip',
   translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&

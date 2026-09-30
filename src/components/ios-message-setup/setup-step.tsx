@@ -45,7 +45,7 @@ export function StepProgress({ current, labels, template, palette }: StepProgres
       accessible
       accessibilityRole="progressbar"
       accessibilityLabel={label}
-      accessibilityValue={{ min: 1, max: total, now: shown }}
+      accessibilityValue={{ min: 0, max: total, now: shown }}
       style={[styles.progress, largeText && { flexDirection: 'column' }]}>
       {labels.map((item, index) => {
         const done = index + 1 < current;

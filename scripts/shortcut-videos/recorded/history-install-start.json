@@ -1,0 +1,365 @@
+{
+  "schema": 1,
+  "outputPrefix": "history-install-start",
+  "fps": 24,
+  "width": 720,
+  "height": 1740,
+  "durationInFrames": 1608,
+  "sourceSha256": "65a4d7f50435a93920ef2d761504005505c1eef70f0b1797c4401df861126433",
+  "sourceDurationSeconds": 67,
+  "sourceWidth": 720,
+  "sourceHeight": 1566,
+  "sourcePlatform": "iOS Simulator",
+  "sourceOS": "26.1",
+  "uiLanguage": "en",
+  "coverage": "install-and-start-only",
+  "posterFrame": 48,
+  "finalHoldSeconds": 0,
+  "doesNotShow": [
+    "Apple Messages permission prompt",
+    "Populated history import",
+    "Review transactions",
+    "Filing entries"
+  ],
+  "headings": {
+    "en": {
+      "title": "Install and start history import",
+      "recordingLabel": "Real iOS 26.1 Simulator recording"
+    },
+    "ar": {
+      "title": "تثبيت اختصار السجل وبدء الاستيراد",
+      "recordingLabel": "تسجيل محاكي iOS 26.1 · الواجهة بالإنجليزية"
+    }
+  },
+  "chapters": [
+    {
+      "id": "settings-data-help",
+      "sourceInSeconds": 0,
+      "sourceOutSeconds": 6.5,
+      "startFrame": 0,
+      "durationFrames": 156,
+      "startSeconds": 0,
+      "endSeconds": 6.5,
+      "en": {
+        "title": "Open Data and help",
+        "body": "In Settings, scroll to Data and help and open it."
+      },
+      "ar": {
+        "title": "افتح البيانات والمساعدة",
+        "body": "من Settings مرّر إلى Data and help وافتحها."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-setup",
+          "start": 143.5,
+          "end": 150,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 0,
+          "outputDurationFrames": 156
+        }
+      ]
+    },
+    {
+      "id": "past-messages",
+      "sourceInSeconds": 6.5,
+      "sourceOutSeconds": 11.5,
+      "startFrame": 156,
+      "durationFrames": 120,
+      "startSeconds": 6.5,
+      "endSeconds": 11.5,
+      "en": {
+        "title": "Choose past messages",
+        "body": "Scroll down and tap Import past SMS (experimental)."
+      },
+      "ar": {
+        "title": "اختر الرسائل السابقة",
+        "body": "مرّر للأسفل واضغط Import past SMS (experimental)."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-setup",
+          "start": 224,
+          "end": 229,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 156,
+          "outputDurationFrames": 120
+        }
+      ]
+    },
+    {
+      "id": "start-history-setup",
+      "sourceInSeconds": 11.5,
+      "sourceOutSeconds": 17.5,
+      "startFrame": 276,
+      "durationFrames": 144,
+      "startSeconds": 11.5,
+      "endSeconds": 17.5,
+      "en": {
+        "title": "Start history setup",
+        "body": "Tap Start history import. Past messages are optional."
+      },
+      "ar": {
+        "title": "ابدأ إعداد السجل",
+        "body": "اضغط Start history import. استيراد الرسائل السابقة اختياري."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-setup",
+          "start": 237.5,
+          "end": 243.5,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 276,
+          "outputDurationFrames": 144
+        }
+      ]
+    },
+    {
+      "id": "share-shortcut",
+      "sourceInSeconds": 17.5,
+      "sourceOutSeconds": 23.5,
+      "startFrame": 420,
+      "durationFrames": 144,
+      "startSeconds": 17.5,
+      "endSeconds": 23.5,
+      "en": {
+        "title": "Add the history Shortcut",
+        "body": "Tap Add the history Shortcut. The share sheet opens."
+      },
+      "ar": {
+        "title": "أضف اختصار السجل",
+        "body": "اضغط Add the history Shortcut لفتح قائمة المشاركة."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-setup",
+          "start": 247,
+          "end": 253,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 420,
+          "outputDurationFrames": 144
+        }
+      ]
+    },
+    {
+      "id": "open-shortcuts",
+      "sourceInSeconds": 23.5,
+      "sourceOutSeconds": 31,
+      "startFrame": 564,
+      "durationFrames": 180,
+      "startSeconds": 23.5,
+      "endSeconds": 31,
+      "en": {
+        "title": "Choose Shortcuts",
+        "body": "Choose Shortcuts in the share sheet. The installation page opens."
+      },
+      "ar": {
+        "title": "اختر الاختصارات",
+        "body": "اختر Shortcuts من قائمة المشاركة لتفتح صفحة إضافة الاختصار."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-setup",
+          "start": 271,
+          "end": 278.5,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 564,
+          "outputDurationFrames": 180
+        }
+      ]
+    },
+    {
+      "id": "install-history",
+      "sourceInSeconds": 31,
+      "sourceOutSeconds": 37,
+      "startFrame": 744,
+      "durationFrames": 144,
+      "startSeconds": 31,
+      "endSeconds": 37,
+      "en": {
+        "title": "Install Wafra History v8",
+        "body": "Tap Add Shortcut. Wafra History v8 appears in your library."
+      },
+      "ar": {
+        "title": "ثبّت اختصار السجل",
+        "body": "اضغط Add Shortcut. يظهر Wafra History v8 في مكتبة اختصاراتك."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-setup",
+          "start": 331.5,
+          "end": 337.5,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 744,
+          "outputDurationFrames": 144
+        }
+      ]
+    },
+    {
+      "id": "return-and-start",
+      "sourceInSeconds": 37,
+      "sourceOutSeconds": 42,
+      "startFrame": 888,
+      "durationFrames": 120,
+      "startSeconds": 37,
+      "endSeconds": 42,
+      "en": {
+        "title": "Return to Wafra",
+        "body": "Tap I added it — start import. Wafra opens the installed Shortcut."
+      },
+      "ar": {
+        "title": "عُد إلى وفرة",
+        "body": "اضغط I added it — start import لفتح الاختصار المثبّت."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-start",
+          "start": 0,
+          "end": 1.5,
+          "holdAfterSeconds": 2,
+          "outputStartFrame": 888,
+          "outputDurationFrames": 84
+        },
+        {
+          "sourceId": "history-start",
+          "start": 4,
+          "end": 5.5,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 972,
+          "outputDurationFrames": 36
+        }
+      ]
+    },
+    {
+      "id": "read-notice",
+      "sourceInSeconds": 42,
+      "sourceOutSeconds": 48,
+      "startFrame": 1008,
+      "durationFrames": 144,
+      "startSeconds": 42,
+      "endSeconds": 48,
+      "en": {
+        "title": "Read the explanation",
+        "body": "The real Shortcut notice explains local pages. Keep your phone unlocked while it runs."
+      },
+      "ar": {
+        "title": "اقرأ التوضيح",
+        "body": "توضح رسالة الاختصار حفظ الصفحات محلياً. أبقِ هاتفك دون قفل أثناء التشغيل."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-start",
+          "start": 50.5,
+          "end": 56.5,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 1008,
+          "outputDurationFrames": 144
+        }
+      ]
+    },
+    {
+      "id": "run-shortcut",
+      "sourceInSeconds": 48,
+      "sourceOutSeconds": 56,
+      "startFrame": 1152,
+      "durationFrames": 192,
+      "startSeconds": 48,
+      "endSeconds": 56,
+      "en": {
+        "title": "Start reading",
+        "body": "Tap OK to let the Shortcut check for available Messages."
+      },
+      "ar": {
+        "title": "ابدأ القراءة",
+        "body": "اضغط OK ليبحث الاختصار عن الرسائل المتاحة."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-start",
+          "start": 152.5,
+          "end": 160.5,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 1152,
+          "outputDurationFrames": 192
+        }
+      ]
+    },
+    {
+      "id": "empty-simulator",
+      "sourceInSeconds": 56,
+      "sourceOutSeconds": 61,
+      "startFrame": 1344,
+      "durationFrames": 120,
+      "startSeconds": 56,
+      "endSeconds": 61,
+      "en": {
+        "title": "An empty simulator",
+        "body": "This simulator has no Messages. It reports No available messages; nothing was added to Wafra."
+      },
+      "ar": {
+        "title": "محاكي بلا رسائل",
+        "body": "لا توجد رسائل في هذا المحاكي. يظهر No available messages، ولم يُضَف شيء إلى وفرة."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-start",
+          "start": 161,
+          "end": 166,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 1344,
+          "outputDurationFrames": 120
+        }
+      ]
+    },
+    {
+      "id": "remaining-written-steps",
+      "sourceInSeconds": 61,
+      "sourceOutSeconds": 67,
+      "startFrame": 1464,
+      "durationFrames": 144,
+      "startSeconds": 61,
+      "endSeconds": 67,
+      "en": {
+        "title": "Next on your iPhone",
+        "body": "Not recorded here: allow access if asked, then review the results and approve what to file."
+      },
+      "ar": {
+        "title": "الخطوات التالية على هاتفك",
+        "body": "غير مسجّل هنا: اسمح بالوصول إن طُلب، ثم راجع النتائج واختر ما توافق على تسجيله."
+      },
+      "originalSourceParts": [
+        {
+          "sourceId": "history-start",
+          "start": 167,
+          "end": 173,
+          "holdAfterSeconds": 0,
+          "outputStartFrame": 1464,
+          "outputDurationFrames": 144
+        }
+      ]
+    }
+  ],
+  "originalSources": [
+    {
+      "id": "history-setup",
+      "file": "history-setup.mov",
+      "sha256": "cc3f13f89f36b7bbba8cdaef096ba9d05069fa186744811a543dcd30ebf189b3",
+      "durationSeconds": 351.38,
+      "width": 1206,
+      "height": 2622
+    },
+    {
+      "id": "history-start",
+      "file": "history-start.mov",
+      "sha256": "de6a406696969b57c05fded9c03b2df7ddb30e828965dd36e923cfe71c1a5f15",
+      "durationSeconds": 286.246667,
+      "width": 1206,
+      "height": 2622
+    }
+  ],
+  "editingNotes": [
+    "The source is a composite of the two listed genuine simulator recordings.",
+    "Both raw recordings were normalized to 24 fps before selecting time ranges, preserving held UI states in sparse VFR footage.",
+    "One two-second hold uses the genuine initial Wafra frame; the development Refreshing banner between the before/after states is omitted.",
+    "The last chapter gives written steps that were not filmed, over the real No available messages result. No prompts or UI were recreated."
+  ]
+}

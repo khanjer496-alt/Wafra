@@ -1,0 +1,171 @@
+{
+  "fps": 24,
+  "width": 720,
+  "height": 1740,
+  "durationInFrames": 1135,
+  "sourceSha256": "629555897815a581fe3977af5c17f24b18d5d2d7faea310db50ce462234ec1c8",
+  "finalHoldSeconds": 2,
+  "chapters": [
+    {
+      "id": "new-automation",
+      "sourceInSeconds": 4.5,
+      "sourceOutSeconds": 10.5,
+      "startFrame": 0,
+      "durationFrames": 144,
+      "startSeconds": 0.0,
+      "endSeconds": 6.0,
+      "en": {
+        "title": "Create a new automation",
+        "body": "Open the Automation tab and tap New Automation."
+      },
+      "ar": {
+        "title": "أنشئ تحكماً تلقائياً",
+        "body": "افتح تبويب Automation واضغط New Automation."
+      }
+    },
+    {
+      "id": "message-trigger",
+      "sourceInSeconds": 17.5,
+      "sourceOutSeconds": 25.0,
+      "startFrame": 144,
+      "durationFrames": 180,
+      "startSeconds": 6.0,
+      "endSeconds": 13.5,
+      "en": {
+        "title": "Choose Message",
+        "body": "Scroll to Message and tap it."
+      },
+      "ar": {
+        "title": "اختر الرسائل",
+        "body": "مرّر إلى Message واضغط عليها."
+      }
+    },
+    {
+      "id": "message-contains",
+      "sourceInSeconds": 33.5,
+      "sourceOutSeconds": 39.0,
+      "startFrame": 324,
+      "durationFrames": 132,
+      "startSeconds": 13.5,
+      "endSeconds": 19.0,
+      "en": {
+        "title": "Open Message Contains",
+        "body": "Leave Sender as Any Sender. Tap Message Contains."
+      },
+      "ar": {
+        "title": "افتح شرط الرسالة",
+        "body": "اترك Sender على Any Sender. اضغط Message Contains."
+      }
+    },
+    {
+      "id": "show-keyboard",
+      "sourceInSeconds": 64.5,
+      "sourceOutSeconds": 69.0,
+      "startFrame": 456,
+      "durationFrames": 108,
+      "startSeconds": 19.0,
+      "endSeconds": 23.5,
+      "en": {
+        "title": "Show the keyboard",
+        "body": "Tap the text field to show the keyboard."
+      },
+      "ar": {
+        "title": "أظهر لوحة المفاتيح",
+        "body": "اضغط حقل النص لإظهار لوحة المفاتيح."
+      }
+    },
+    {
+      "id": "one-space-and-done",
+      "sourceInSeconds": 82.0,
+      "sourceOutSeconds": 89.0,
+      "startFrame": 564,
+      "durationFrames": 168,
+      "startSeconds": 23.5,
+      "endSeconds": 30.5,
+      "en": {
+        "title": "Enter one space",
+        "body": "Press the space bar once, then tap Done. Next becomes available."
+      },
+      "ar": {
+        "title": "أدخل مسافة واحدة",
+        "body": "اضغط مفتاح المسافة مرة واحدة ثم Done. يصبح Next متاحاً."
+      }
+    },
+    {
+      "id": "run-immediately",
+      "sourceInSeconds": 92.5,
+      "sourceOutSeconds": 98.0,
+      "startFrame": 732,
+      "durationFrames": 132,
+      "startSeconds": 30.5,
+      "endSeconds": 36.0,
+      "en": {
+        "title": "Run immediately",
+        "body": "Select Run Immediately so messages can trigger the Shortcut automatically."
+      },
+      "ar": {
+        "title": "شغّله فوراً",
+        "body": "اختر Run Immediately لتشغيل الاختصار تلقائياً عند وصول الرسائل."
+      }
+    },
+    {
+      "id": "next-and-choose",
+      "sourceInSeconds": 112.5,
+      "sourceOutSeconds": 118.5,
+      "startFrame": 864,
+      "durationFrames": 144,
+      "startSeconds": 36.0,
+      "endSeconds": 42.0,
+      "en": {
+        "title": "Continue to your Shortcuts",
+        "body": "Tap Next. Find Wafra Capture v3 in My Shortcuts."
+      },
+      "ar": {
+        "title": "انتقل إلى اختصاراتك",
+        "body": "اضغط Next. ابحث عن Wafra Capture v3 ضمن My Shortcuts."
+      }
+    },
+    {
+      "id": "save-automation",
+      "sourceInSeconds": 174.0,
+      "sourceOutSeconds": 177.286667,
+      "startFrame": 1008,
+      "durationFrames": 127,
+      "startSeconds": 42.0,
+      "endSeconds": 47.291666666666664,
+      "en": {
+        "title": "Automation saved",
+        "body": "Select Wafra Capture v3. Its saved automation appears. A real bank message is still needed to verify capture."
+      },
+      "ar": {
+        "title": "حُفظ التحكم التلقائي",
+        "body": "اختر Wafra Capture v3 لتظهر الأتمتة المحفوظة. يلزم وصول رسالة بنكية فعلية للتحقق من الالتقاط."
+      }
+    }
+  ],
+  "schema": 1,
+  "outputPrefix": "capture-automation",
+  "sourceDurationSeconds": 177.286667,
+  "sourceWidth": 1206,
+  "sourceHeight": 2622,
+  "sourcePlatform": "iOS Simulator",
+  "sourceOS": "26.1",
+  "uiLanguage": "en",
+  "coverage": "automation-only",
+  "posterFrame": 48,
+  "doesNotShow": [
+    "Wafra installation",
+    "permission check",
+    "incoming bank-message capture"
+  ],
+  "headings": {
+    "en": {
+      "title": "Create Message automation",
+      "recordingLabel": "Real iOS 26.1 Simulator recording"
+    },
+    "ar": {
+      "title": "إنشاء تحكم تلقائي للرسائل",
+      "recordingLabel": "تسجيل محاكي iOS 26.1 · الواجهة بالإنجليزية"
+    }
+  }
+}

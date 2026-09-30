@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "fps": 24,
+  "secondsPerStep": 6,
+  "illustrationNote": {
+    "en": "Illustrated guide · Not a screen recording",
+    "ar": "دليل توضيحي · ليس تسجيلاً للشاشة"
+  },
+  "guides": {
+    "apple-pay": {
+      "shortcutName": "Wafra Apple Pay v1",
+      "en": {
+        "title": "Set up Apple Pay · iOS 27",
+        "description": "Connect Wallet card taps to Wafra Review on iOS 27 or later.",
+        "steps": [
+          { "title": "Choose Apple Pay setup", "body": "In Wafra’s setup, choose Set up Apple Pay. This option is shown only on iOS 27 or later.", "screenTitle": "Wafra", "rows": ["Other ways to capture", "Set up Apple Pay"], "highlight": 1 },
+          { "title": "Add the Apple Pay Shortcut", "body": "Enable capture if asked. Tap Add Apple Pay Shortcut, choose Shortcuts, then Add Shortcut. Keep Wafra Apple Pay v1.", "screenTitle": "Add to Shortcuts", "rows": ["Add Apple Pay Shortcut", "Wafra Apple Pay v1", "Add Shortcut"], "highlight": 2 },
+          { "title": "Check the connection", "body": "Return to Wafra and confirm it is installed. Run permission check with your iPhone unlocked. This adds no purchase.", "screenTitle": "Wafra", "rows": ["I added the Shortcut", "Run permission check"], "highlight": 1 },
+          { "title": "Add the Transaction trigger", "body": "In Shortcuts, open Wafra Apple Pay v1 in the editor. Open its Automation section and add a Transaction trigger.", "screenTitle": "Shortcut editor", "rows": ["Wafra Apple Pay v1", "Automation", "Transaction"], "highlight": 2 },
+          { "title": "Choose your Wallet card", "body": "Under When I tap, select your Apple Pay card. Choose Run Immediately where offered.", "screenTitle": "Transaction", "rows": ["When I tap", "Choose your Wallet card", "Run Immediately"], "highlight": 1 },
+          { "title": "Keep the input connected", "body": "Keep the Shortcut’s Amount and Merchant bindings from Shortcut Input. Do not convert the currency amount to plain text.", "screenTitle": "Wafra Apple Pay v1", "rows": ["Shortcut Input", "Amount + currency", "Merchant"], "highlight": 0 },
+          { "title": "Save and confirm", "body": "Save the automation and return to Wafra. Tap I saved the Apple Pay automation. Edit existing triggers instead of duplicating them.", "screenTitle": "Wafra", "rows": ["Automation saved", "I saved the Apple Pay automation"], "highlight": 1 },
+          { "title": "Purchases go to Review", "body": "No test purchase is needed. When a purchase arrives, review it and choose its account before adding it. Wallet history is not imported.", "screenTitle": "Wafra Review", "rows": ["Check the purchase", "Choose its account", "Add only what you approve"], "highlight": 1 }
+        ]
+      },
+      "ar": {
+        "title": "إعداد Apple Pay · iOS 27",
+        "description": "اربط عمليات بطاقتك في المحفظة بمراجعة وفرة على iOS 27 أو أحدث.",
+        "steps": [
+          { "title": "اختر إعداد Apple Pay", "body": "من إعداد وفرة، اختر «إعداد Apple Pay». يظهر هذا الخيار على iOS 27 أو أحدث فقط.", "screenTitle": "وفرة", "rows": ["طرق أخرى للالتقاط", "إعداد Apple Pay"], "highlight": 1 },
+          { "title": "أضف اختصار Apple Pay", "body": "فعّل الالتقاط عند الطلب. اضغط إضافة اختصار Apple Pay ثم الاختصارات ثم إضافة اختصار. أبقِ الاسم Wafra Apple Pay v1.", "screenTitle": "الإضافة إلى الاختصارات", "rows": ["إضافة اختصار Apple Pay", "Wafra Apple Pay v1", "إضافة اختصار"], "highlight": 2 },
+          { "title": "تحقّق من الاتصال", "body": "عُد إلى وفرة وأكّد إضافة الاختصار. شغّل فحص الأذونات والآيفون مفتوح. لا يضيف هذا الفحص عملية شراء.", "screenTitle": "وفرة", "rows": ["أضفت الاختصار", "تشغيل فحص الأذونات"], "highlight": 1 },
+          { "title": "أضف مشغّل المعاملة", "body": "افتح Wafra Apple Pay v1 في محرر الاختصارات. افتح قسم التحكم التلقائي وأضف مشغّل المعاملة.", "screenTitle": "محرر الاختصارات", "rows": ["Wafra Apple Pay v1", "التحكم التلقائي", "المعاملة"], "highlight": 2 },
+          { "title": "اختر بطاقة المحفظة", "body": "اختر بطاقة Apple Pay التي تريد تشغيل الاختصار عند استخدامها. اختر التشغيل فوراً عندما يظهر الخيار.", "screenTitle": "المعاملة", "rows": ["عند استخدام البطاقة", "اختر بطاقة المحفظة", "تشغيل فوراً"], "highlight": 1 },
+          { "title": "أبقِ الإدخال متصلاً", "body": "أبقِ ربط المبلغ والتاجر بإدخال الاختصار كما هو. لا تحوّل المبلغ مع العملة إلى نص عادي.", "screenTitle": "Wafra Apple Pay v1", "rows": ["إدخال الاختصار", "المبلغ والعملة", "التاجر"], "highlight": 0 },
+          { "title": "احفظ ثم أكّد", "body": "احفظ التحكم التلقائي وعُد إلى وفرة. اضغط «حفظت أتمتة Apple Pay». عدّل المشغّل الموجود بدلاً من تكراره.", "screenTitle": "وفرة", "rows": ["حُفظ التحكم التلقائي", "حفظت أتمتة Apple Pay"], "highlight": 1 },
+          { "title": "المشتريات في المراجعة", "body": "لا تحتاج إلى شراء تجريبي. عند وصول عملية، راجعها واختر حسابها قبل إضافتها. لا يُستورد سجل المحفظة.", "screenTitle": "مراجعة وفرة", "rows": ["راجع عملية الشراء", "اختر حسابها", "أضف ما توافق عليه فقط"], "highlight": 1 }
+        ]
+      }
+    },
+    "capture": {
+      "shortcutName": "Wafra Capture v3",
+      "en": {
+        "title": "Set up future transactions",
+        "description": "Add Wafra Capture and create your Message automation.",
+        "steps": [
+          { "title": "Add the capture Shortcut", "body": "In Wafra, tap Set up, then Add Shortcut.", "screenTitle": "Wafra", "rows": ["Future transactions", "Set up", "Add Shortcut"], "highlight": 2 },
+          { "title": "Keep the Shortcut name", "body": "Choose Shortcuts in the share sheet, then Add Shortcut. Keep Wafra Capture v3.", "screenTitle": "Add to Shortcuts", "rows": ["Shortcuts", "Wafra Capture v3", "Add Shortcut"], "highlight": 2 },
+          { "title": "Run the connection check", "body": "Return to Wafra. If needed, tap I added it — test it. Allow access when asked.", "screenTitle": "Wafra", "rows": ["Wafra Capture v3", "I added it — test it", "Run test"], "highlight": 1 },
+          { "title": "Create a Message automation", "body": "Open Shortcuts → Automation → + → Message. Edit an existing Wafra automation instead of adding another.", "screenTitle": "Shortcuts", "rows": ["Automation", "+", "Message"], "highlight": 2 },
+          { "title": "Enter one space", "body": "Leave Sender empty. In Message Contains, press the space bar once. This matches messages containing a space.", "screenTitle": "Message", "rows": ["Sender — leave empty", "Message Contains", "Press the space bar once"], "highlight": 1 },
+          { "title": "Run immediately", "body": "Choose Run Immediately. Turn Notify When Run off if shown, then tap Next.", "screenTitle": "Message automation", "rows": ["Run Immediately", "Notify When Run · Off", "Next"], "highlight": 0 },
+          { "title": "Choose Wafra Capture", "body": "Choose Wafra Capture v3. If a Done button appears, tap it. The saved automation should appear in the list.", "screenTitle": "Choose a Shortcut", "rows": ["Wafra Capture v3", "Done"], "highlight": 0 },
+          { "title": "Return to Wafra", "body": "Tap I turned it on, then Finish setup. Watching this guide does not enable capture.", "screenTitle": "Wafra", "rows": ["I turned it on", "Finish setup"], "highlight": 0 },
+          { "title": "Check the next bank message", "body": "The setup check proves the connection. A real message and its recorded or Review result confirm capture.", "screenTitle": "Wafra", "rows": ["Shortcut connected", "Waiting for a message", "Check its result in Wafra"], "highlight": 1 }
+        ]
+      },
+      "ar": {
+        "title": "إعداد العمليات القادمة",
+        "description": "أضف اختصار وفرة وأنشئ أتمتة الرسائل.",
+        "steps": [
+          { "title": "أضف اختصار الالتقاط", "body": "في وفرة، اضغط «إعداد» ثم «إضافة الاختصار».", "screenTitle": "وفرة", "rows": ["العمليات القادمة", "إعداد", "إضافة الاختصار"], "highlight": 2 },
+          { "title": "احتفظ باسم الاختصار", "body": "اختر «الاختصارات» من قائمة المشاركة، ثم «إضافة اختصار». أبقِ الاسم Wafra Capture v3.", "screenTitle": "الإضافة إلى الاختصارات", "rows": ["الاختصارات", "Wafra Capture v3", "إضافة اختصار"], "highlight": 2 },
+          { "title": "اختبر الاتصال", "body": "عُد إلى وفرة. عند الحاجة اضغط «أضفته — اختبره». اسمح بالوصول عندما يُطلب منك.", "screenTitle": "وفرة", "rows": ["Wafra Capture v3", "أضفته — اختبره", "تشغيل الاختبار"], "highlight": 1 },
+          { "title": "أنشئ أتمتة للرسائل", "body": "افتح الاختصارات ثم «التحكم التلقائي» ثم + ثم «رسالة». عدّل أتمتة وفرة الحالية إن وجدت.", "screenTitle": "الاختصارات", "rows": ["التحكم التلقائي", "+", "رسالة"], "highlight": 2 },
+          { "title": "أدخل مسافة واحدة", "body": "اترك «المرسل» فارغاً. في «الرسالة تحتوي على» اضغط مفتاح المسافة مرة واحدة. تُطابق الرسائل التي تحتوي مسافة.", "screenTitle": "رسالة", "rows": ["المرسل — اتركه فارغاً", "الرسالة تحتوي على", "اضغط مفتاح المسافة مرة"], "highlight": 1 },
+          { "title": "شغّلها فوراً", "body": "اختر «تشغيل فوراً». أوقف «الإشعار عند التشغيل» إن ظهر، ثم اضغط «التالي».", "screenTitle": "أتمتة الرسائل", "rows": ["تشغيل فوراً", "الإشعار عند التشغيل · متوقف", "التالي"], "highlight": 0 },
+          { "title": "اختر اختصار وفرة", "body": "اختر Wafra Capture v3. إذا ظهر زر «تم»، اضغط عليه. يجب أن يظهر التحكم التلقائي المحفوظ في القائمة.", "screenTitle": "اختيار الاختصار", "rows": ["Wafra Capture v3", "تم"], "highlight": 0 },
+          { "title": "عُد إلى وفرة", "body": "اضغط «فعّلتها» ثم «إنهاء الإعداد». مشاهدة هذا الدليل لا تفعّل الالتقاط.", "screenTitle": "وفرة", "rows": ["فعّلتها", "إنهاء الإعداد"], "highlight": 0 },
+          { "title": "تحقق من الرسالة التالية", "body": "الاختبار يؤكد الاتصال فقط. وصول رسالة فعلية وظهور نتيجتها في السجل أو المراجعة يؤكد الالتقاط.", "screenTitle": "وفرة", "rows": ["الاختصار متصل", "بانتظار رسالة", "تحقق من نتيجتها في وفرة"], "highlight": 1 }
+        ]
+      }
+    },
+    "history": {
+      "shortcutName": "Wafra History v8",
+      "en": {
+        "title": "Import past messages",
+        "description": "Set up the optional History Shortcut and review before filing.",
+        "steps": [
+          { "title": "Optional, after onboarding", "body": "Open Settings → Data and help → Import past SMS (experimental), then tap Start history import. Requires iOS 26+.", "screenTitle": "Wafra", "rows": ["Data and help", "Import past messages", "Start history import"], "highlight": 2 },
+          { "title": "Add the history Shortcut", "body": "On the next screen, tap Add the history Shortcut. Choose Shortcuts in the share sheet.", "screenTitle": "Import past messages", "rows": ["Wafra History v8", "Add the history Shortcut", "Shortcuts"], "highlight": 1 },
+          { "title": "Keep the Shortcut name", "body": "Tap Add Shortcut. Keep the name Wafra History v8, then return to Wafra.", "screenTitle": "Add to Shortcuts", "rows": ["Wafra History v8", "Add Shortcut"], "highlight": 1 },
+          { "title": "Start from Wafra", "body": "Return to Wafra and tap I added it — start import.", "screenTitle": "Import past messages", "rows": ["Wafra History v8", "I added it — start import", "Allow access when asked"], "highlight": 1 },
+          { "title": "Allow access if asked", "body": "On your iPhone, allow Messages access when asked. Use Always Allow only if it is offered. This permission prompt is not shown in the empty-simulator recording.", "screenTitle": "Permissions", "rows": ["Allow Messages access when asked"], "highlight": 0 },
+          { "title": "Let the import run", "body": "Keep Shortcuts open and your iPhone unlocked. Large histories can take time. Messages checked are not transaction counts.", "screenTitle": "Wafra History v8", "rows": ["Reading saved Messages", "Keep Shortcuts open", "Keep iPhone unlocked"], "highlight": 1 },
+          { "title": "Resume if interrupted", "body": "Return to Wafra and choose Resume saved import. Saved progress lasts up to 24 hours. Follow any error shown.", "screenTitle": "Import past messages", "rows": ["Saved progress", "Resume saved import", "Refresh progress"], "highlight": 1 },
+          { "title": "Review the results", "body": "When reading finishes, choose Review transactions. Temporary pages are saved; nothing is filed until you confirm.", "screenTitle": "Import past messages", "rows": ["Messages ready", "Review transactions"], "highlight": 1 },
+          { "title": "File what you approve", "body": "Check the entries, accounts and dates, then use File entries. The button shows your actual entry count or fixes.", "screenTitle": "Review import", "rows": ["Check entries and accounts", "Check dates", "File entries"], "highlight": 2 }
+        ]
+      },
+      "ar": {
+        "title": "استيراد الرسائل السابقة",
+        "description": "أعدّ اختصار السجل الاختياري وراجع النتائج قبل تسجيلها.",
+        "steps": [
+          { "title": "اختياري، بعد إنهاء الإعداد", "body": "افتح الإعدادات ← البيانات والمساعدة ← استيراد الرسائل السابقة (تجريبي)، ثم اضغط بدء استيراد السجل. يتطلب iOS 26 أو أحدث.", "screenTitle": "وفرة", "rows": ["البيانات والمساعدة", "استيراد الرسائل السابقة", "بدء استيراد السجل"], "highlight": 2 },
+          { "title": "أضف اختصار السجل", "body": "في الشاشة التالية، اضغط «إضافة اختصار السجل». اختر «الاختصارات» من قائمة المشاركة.", "screenTitle": "استيراد الرسائل السابقة", "rows": ["Wafra History v8", "إضافة اختصار السجل", "الاختصارات"], "highlight": 1 },
+          { "title": "احتفظ باسم الاختصار", "body": "اضغط «إضافة اختصار». أبقِ الاسم Wafra History v8 ثم عُد إلى وفرة.", "screenTitle": "الإضافة إلى الاختصارات", "rows": ["Wafra History v8", "إضافة اختصار"], "highlight": 1 },
+          { "title": "ابدأ من وفرة", "body": "عُد إلى وفرة واضغط «أضفته — ابدأ الاستيراد».", "screenTitle": "استيراد الرسائل السابقة", "rows": ["Wafra History v8", "أضفته — بدء الاستيراد", "اسمح بالوصول عند الطلب"], "highlight": 1 },
+          { "title": "اسمح بالوصول إذا طُلب منك", "body": "على iPhone، اسمح بالوصول إلى الرسائل عندما يُطلب منك. استخدم «السماح دائماً» فقط إن ظهر. لا يظهر طلب الإذن هذا في تسجيل المحاكي الخالي من الرسائل.", "screenTitle": "الأذونات", "rows": ["اسمح بالوصول إلى الرسائل عند الطلب"], "highlight": 0 },
+          { "title": "دع الاستيراد يعمل", "body": "أبقِ الاختصارات مفتوحاً والآيفون دون قفل. قد يستغرق السجل الكبير وقتاً. عدد الرسائل ليس عدد العمليات.", "screenTitle": "Wafra History v8", "rows": ["قراءة الرسائل المحفوظة", "أبقِ الاختصارات مفتوحاً", "أبقِ الآيفون دون قفل"], "highlight": 1 },
+          { "title": "تابع إذا توقف", "body": "عُد إلى وفرة واختر «متابعة الاستيراد المحفوظ». يُحفظ التقدم حتى 24 ساعة. اتبع توضيح أي خطأ ظاهر.", "screenTitle": "استيراد الرسائل السابقة", "rows": ["التقدم محفوظ", "متابعة الاستيراد المحفوظ", "تحديث التقدم"], "highlight": 1 },
+          { "title": "راجع النتائج", "body": "عند اكتمال القراءة، اختر «مراجعة العمليات». الصفحات محفوظة مؤقتاً، ولا تُسجّل العمليات حتى تؤكد.", "screenTitle": "استيراد الرسائل السابقة", "rows": ["الرسائل جاهزة", "مراجعة العمليات"], "highlight": 1 },
+          { "title": "سجّل ما توافق عليه", "body": "راجع العمليات والحسابات والتواريخ ثم اضغط التسجيل. يعرض الزر عدد عملياتك أو الإصلاحات الفعلية.", "screenTitle": "مراجعة الاستيراد", "rows": ["راجع العمليات والحسابات", "راجع التواريخ", "تسجيل العمليات"], "highlight": 2 }
+        ]
+      }
+    }
+  }
+}

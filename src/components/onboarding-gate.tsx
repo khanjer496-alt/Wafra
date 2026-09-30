@@ -63,6 +63,8 @@ import { getIosCaptureNativeModule } from '@/lib/capture';
 import { iosCaptureChecklist, type IosChecklistEvidence } from '@/lib/ios-capture-checklist';
 import { resolveIosSetupReadiness } from '@/lib/ios-capture-setup';
 import { iosShortcutSetupCopy } from '@/lib/ios-shortcut-setup-copy';
+import { IosSetupVideoCard } from '@/components/ios-setup-video-card';
+import { iosSupportsApplePayAutomation } from '@/lib/ios-setup-availability';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { onboardingCopy } from '@/lib/onboarding-copy';
@@ -1347,6 +1349,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const onClose = previewMode ? closePreview : undefined;
   const lang = language === 'ar' ? 'ar' : 'en';
 
+  const videoNative = Platform.OS === 'ios' && !previewMode ? getIosCaptureNativeModule() : null;
+  const applePayVideo = iosSupportsApplePayAutomation(Platform.Version) &&
+    videoNative?.applePayCaptureSupported === true && typeof videoNative.getApplePayShortcutURL === 'function';
+
   const captureStep = (
     <EStepFrame palette={stepBand} step={5} testID={Platform.OS === 'ios' ? 'onboarding-ios-live' : 'onboarding-capture'}
       // Back from the SMS explainer returns to the source list on the same
@@ -1381,6 +1387,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         <EBody palette={stepBand}>
           {Platform.OS === 'ios' ? t('onboardLiveBody') : Platform.OS === 'android' ? words.captureBodyAndroid : words.captureBodyWeb}
         </EBody>
+        {videoNative && (videoNative.getMessageShortcutURL || applePayVideo) && <View style={{ gap: 10 }}>
+          {videoNative.getMessageShortcutURL && <IosSetupVideoCard kind="capture" language={language} compact disabled={setupBusy || transitioning} />}
+          {videoNative.getHistoryShortcutURL &&
+            <IosSetupVideoCard kind="history" language={language} compact disabled={setupBusy || transitioning} />}
+          {applePayVideo && <IosSetupVideoCard kind="apple-pay" language={language} compact disabled={setupBusy || transitioning} />}
+        </View>}
         {Platform.OS === 'ios' ? <CaptureChecklist
           palette={stepBand}
           rows={iosCaptureChecklist(previewMode ? null : checklistEvidence)}

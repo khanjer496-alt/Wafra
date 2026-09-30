@@ -25,7 +25,8 @@ const summary = load(path.join(root, 'src/lib/capture-health-summary.ts'), {
   '@/lib/format': build('format'), '@/lib/ios-capture-health': health,
 });
 
-function captureHealth({ platform = 'ios', status = null, largeText = false, state = {} } = {}) {
+function captureHealth({ platform = 'ios', version = '26.6', applePayCaptureSupported = false,
+  status = null, largeText = false, state = {} } = {}) {
   const slots = []; let cursor = 0; const routes = []; const effects = [];
   const slot = (create) => slots[cursor++] ?? (slots[cursor - 1] = create());
   const react = {
@@ -41,7 +42,7 @@ function captureHealth({ platform = 'ios', status = null, largeText = false, sta
   const ledger = { reviewTray: { pending: [] }, transactions: [], accounts: [], monthStartDay: 1, ...state };
   const Screen = load(path.join(root, 'src/app/capture-health.tsx'), {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
-    'react-native': { AppState: { addEventListener: () => ({ remove() {} }) }, Platform: { OS: platform },
+    'react-native': { AppState: { addEventListener: () => ({ remove() {} }) }, Platform: { OS: platform, Version: version },
       StyleSheet: { create: (s) => s, hairlineWidth: 1 }, View: 'View' },
     'expo-router': { useRouter: () => ({ push: (r) => routes.push(r), back() {}, canGoBack: () => true, replace() {} }) },
     '@/components/capture/band-count': { BandCount: boundary('BandCount') },
@@ -55,7 +56,7 @@ function captureHealth({ platform = 'ios', status = null, largeText = false, sta
     '@/hooks/use-band': { useBand: band },
     '@/hooks/use-language': { useLanguage: () => 'en' },
     '@/hooks/use-large-text-layout': { useLargeTextLayout: () => largeText },
-    '@/lib/capture': { getIosCaptureNativeModule: () => status ? { getCaptureStatus: async () => status } : null,
+    '@/lib/capture': { getIosCaptureNativeModule: () => status ? { getCaptureStatus: async () => status, applePayCaptureSupported } : null,
       subscribeIosCaptureStatusRefresh: () => () => {} },
     '@/lib/capture-band': captureBand,
     '@/lib/capture-band-copy': copy,
@@ -78,7 +79,7 @@ test('Capture status: green band, status and the handled time as the figure, rea
   const handledAt = Date.now() - 60_000;
   const tx = (over) => ({ id: Math.random().toString(36), type: 'expense', amountFils: 100, category: 'other', accountId: 'a',
     title: 'Shop', date: new Date().toISOString().slice(0, 10), source: 'sms', ...over });
-  const h = captureHealth({ status: receipt({ lastHandledAt: handledAt }), state: {
+  const h = captureHealth({ version: '27.0', applePayCaptureSupported: true, status: receipt({ lastHandledAt: handledAt }), state: {
     reviewTray: { pending: [{ id: 'r', expiresAt: Date.now() + 1e6 }, { id: 'old', expiresAt: 1 }] },
     accounts: [{ id: 'a', bankName: 'First Bank', kind: 'bank' }],
     transactions: [tx({}), tx({ source: 'manual' }), tx({ captureSource: 'pdf' })],
@@ -109,6 +110,25 @@ test('Capture status: green band, status and the handled time as the figure, rea
   byId(sheet, 'capture-health-apple-pay').props.onPress();
   byId(sheet, 'capture-health-statements').props.onPress();
   assert.deepEqual(h.routes.slice(1), ['/ios-apple-pay-setup', '/statement-import']);
+});
+
+test('Capture status: Apple Pay requires iOS 27 and native support; statements remain usable', async () => {
+  for (const [version, applePayCaptureSupported, nativeAvailable, visible] of [
+    ['27.0', true, true, true], ['28.1', true, true, true],
+    ['26.6', true, true, false], ['27.0', false, true, false],
+    ['27.0', true, false, false], ['27oops', true, true, false],
+  ]) {
+    const h = captureHealth({ version, applePayCaptureSupported, status: nativeAvailable ? receipt() : null });
+    await h.settle();
+    const sheet = h.tree.props.children;
+    const applePay = byId(sheet, 'capture-health-apple-pay');
+    assert.equal(!!applePay, visible, `${version}/${applePayCaptureSupported}/${nativeAvailable}`);
+    if (applePay) applePay.props.onPress();
+    const statements = byId(sheet, 'capture-health-statements');
+    assert.ok(statements, 'statement import does not require Apple Pay support');
+    statements.props.onPress();
+    assert.deepEqual(h.routes, visible ? ['/ios-apple-pay-setup', '/statement-import'] : ['/statement-import']);
+  }
 });
 
 test('Capture status: no receipt means no figure, and Working is never claimed', async () => {

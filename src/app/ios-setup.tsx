@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 
 import { ChecklistRow } from '@/components/ios-message-setup/checklist-row';
+import { IosSetupVideoCard } from '@/components/ios-setup-video-card';
+import { iosSupportsApplePayAutomation, visibleIosSetupSource } from '@/lib/ios-setup-availability';
 import { AutomationGuide } from '@/components/ios-message-setup/automation-guide';
 import { SetupResult, SetupStep, StepProgress } from '@/components/ios-message-setup/setup-step';
 import { DetailsSheet } from '@/components/ios-message-setup/details-sheet';
@@ -177,7 +179,12 @@ export default function IosSetupScreen() {
   // recorded one; only that source's confirmed automation does.
   const [viewSource, setViewSource] = useState<IosCaptureSource | null>(null);
   const recordedSource = recordedIosCaptureSource(progress);
-  const shownSource = viewSource ?? recordedSource;
+  const offersApplePay = Platform.OS === 'ios' && iosSupportsApplePayAutomation(Platform.Version) &&
+    rawSetup.applePaySupported === true;
+  const shownSource = visibleIosSetupSource(viewSource ?? recordedSource, {
+    applePay: offersApplePay,
+    notification: Platform.OS === 'ios' && iosSupportsNotificationAutomation(Platform.Version) && rawSetup.notificationSupported === true,
+  });
   const futureProgress = progressForSource(progress, shownSource);
   const notificationMode = shownSource === 'notification';
   const applePayMode = shownSource === 'apple-pay';
@@ -189,6 +196,7 @@ export default function IosSetupScreen() {
   const legacyUpgrade = messageMode && !rawSetup.loading && isIosLegacyCaptureUpgrade(futureProgress, rawSetup);
   const automationRelink = messageMode && futureProgress.futureAutomationRelink === true;
   const offersNotifications = Platform.OS === 'ios' && iosSupportsNotificationAutomation(Platform.Version);
+  const showNotificationOption = offersNotifications && (!fromOnboarding || !setup.supported || setup.failure === 'load');
   const [progressLoaded, setProgressLoaded] = useState(false);
   const [historyReady, setHistoryReady] = useState(false);
   const [historySetup, setHistorySetup] = useState({
@@ -199,6 +207,10 @@ export default function IosSetupScreen() {
   const [busy, setBusy] = useState(false);
   const [finishRetryRequired, setFinishRetryRequired] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  // Refresh failures belong to the data they read, not to an unrelated
+  // Capture operation. Successful reads must not erase a failed save/check.
+  const [progressRefreshFailed, setProgressRefreshFailed] = useState(false);
+  const [historyRefreshFailed, setHistoryRefreshFailed] = useState(false);
   const [detailsVisible, setDetailsVisible] = useState(false);
   const [privacyExpanded, setPrivacyExpanded] = useState(false);
   const [shortcutsMissing, setShortcutsMissing] = useState(false);
@@ -234,7 +246,7 @@ export default function IosSetupScreen() {
   const futureConfigured = !activeMessageCheckFailed && futureSetupConfigured(setup.readiness,
     futureProgress.futureAutomationConfirmed && !automationRelink);
   // New-alert capture is the whole required setup; past messages are optional.
-  const setupComplete = !activeMessageCheckFailed && progressLoaded && !setup.loading &&
+  const setupComplete = !activeMessageCheckFailed && !progressRefreshFailed && progressLoaded && !setup.loading &&
     recordedSourceConfigured(progress, rawSetup);
   const automationVerified = messageMode && futureConfigured &&
     iosMessageAutomationVerified(futureProgress, rawSetup);
@@ -288,12 +300,13 @@ export default function IosSetupScreen() {
     } catch {
       if (!screenActive.current || generation !== refreshGeneration.current) return;
       setProgressLoaded(true);
-      setLocalError(t('historySetupStateFailed'));
+      setProgressRefreshFailed(true);
       return;
     }
     if (!screenActive.current || generation !== refreshGeneration.current) return;
     setProgress(restored);
     setProgressLoaded(true);
+    setProgressRefreshFailed(false);
 
     try {
       let nextHistory: Awaited<ReturnType<typeof loadIosHistorySetup>>;
@@ -325,6 +338,7 @@ export default function IosSetupScreen() {
       }
       if (!screenActive.current || generation !== refreshGeneration.current) return;
       setHistoryReady(historySupported);
+      setHistoryRefreshFailed(false);
       setHistorySetup({
         installed: nextHistory.installed,
         handoffStartedAt: nextHistory.handoffStartedAt,
@@ -339,7 +353,7 @@ export default function IosSetupScreen() {
     } catch {
       if (!screenActive.current || generation !== refreshGeneration.current) return;
       setHistoryReady(false);
-      setLocalError(t('historySetupStateFailed'));
+      setHistoryRefreshFailed(true);
     }
   }, [historySupported, pagedEnabled, router]);
 
@@ -411,7 +425,8 @@ export default function IosSetupScreen() {
       if (next === 'background' && autoCheck.current) autoCheck.current.wentBackground = true;
       if (next !== 'active') return;
       void send({ type: 'refresh-status' });
-      if (progress.activeSection === 'history' || progress.historyStatus !== 'not-started') {
+      if (progress.activeSection === 'history' || progress.historyStatus !== 'not-started' ||
+        progressRefreshFailed || historyRefreshFailed) {
         void refreshSetup();
       }
       // Back from adding the Shortcut: run the setup check without asking for
@@ -427,7 +442,7 @@ export default function IosSetupScreen() {
       }
     });
     return () => subscription.remove();
-  }, [progress.activeSection, progress.historyStatus, refreshSetup, send]);
+  }, [progress.activeSection, progress.historyStatus, progressRefreshFailed, historyRefreshFailed, refreshSetup, send]);
 
   useEffect(() => {
     if (setup.loading) return;
@@ -570,6 +585,7 @@ export default function IosSetupScreen() {
     router.push({ pathname: '/ios-notification-setup', params: { fromOnboarding: fromOnboarding ? '1' : undefined } });
   };
   const openApplePaySetup = () => {
+    if (!offersApplePay) return;
     autoCheck.current = null;
     setShowAutomationGuide(false);
     router.push({ pathname: '/ios-apple-pay-setup', params: { fromOnboarding: fromOnboarding ? '1' : undefined } });
@@ -928,7 +944,10 @@ export default function IosSetupScreen() {
     : resolveIosFutureSetupStep(futureProgress, setup.readiness, messageMode ? setup.shortcutVersion : undefined);
   autoCheckAction.current = messageMode && futureStep === 'confirm-shortcut' && setup.shortcutVersion === 3
     ? confirmFutureShortcut : null;
-  const error = localError ?? (setup.failure ? failureCopy(setup.failure) : null);
+  const error = localError
+    ?? (progressRefreshFailed ? t('iosSetupProgressReadFailed') : null)
+    ?? (activeSection === 'history' && historyRefreshFailed ? t('iosHistoryRefreshFailed') : null)
+    ?? (setup.failure ? failureCopy(setup.failure) : null);
   const shortcutCheckFailed = activeSection === 'future' && failedMessageCheck;
   const shortcutName = setup.shortcutName ?? IOS_LOCAL_CAPTURE_SHORTCUT_NAME;
   const historyConfirmed = progress.historyShortcutConfirmed || historySetup.installed;
@@ -1059,6 +1078,11 @@ export default function IosSetupScreen() {
         </View>
       ) : undefined}>
       <Stack.Screen options={{ headerShown: false, gestureEnabled: !fromOnboarding && !busy && !finishRetryRequired }} />
+      {progressLoaded && !setup.loading && (historyMode
+        ? rawSetup.bundledHistorySupported === true && <IosSetupVideoCard kind="history" language={language} compact disabled={busy} />
+        : applePayMode && rawSetup.bundledApplePaySupported === true
+          ? <IosSetupVideoCard kind="apple-pay" language={language} compact disabled={busy} />
+          : messageMode && setup.shortcutVersion === 3 && <IosSetupVideoCard kind="capture" language={language} compact disabled={busy} />)}
           {!progressLoaded || setup.loading ? (
             <ThemedText type="meta" style={{ color: band.textSecondary }}>{t('stillLoading')}</ThemedText>
           ) : historyMode ? (
@@ -1293,18 +1317,18 @@ export default function IosSetupScreen() {
               )}
             </View>
           )}
-          {/* Optional sources live here, outside first-run setup, unless
-              Messages capture cannot run on this iPhone at all. */}
-          {guideVisible && (!fromOnboarding || !setup.supported || setup.failure === 'load') &&
-            ((setup.applePaySupported && !applePayMode) ||
-            (offersNotifications && !notificationMode)) && (
+          {/* Apple Pay is an optional iOS27 onboarding path beside SMS.
+              Notification setup keeps its existing Settings/recovery placement. */}
+          {guideVisible &&
+            ((offersApplePay && !applePayMode) ||
+            (showNotificationOption && !notificationMode)) && (
             <View testID="ios-setup-other-sources" style={styles.otherWays}>
               <ThemedText type="smallBold" style={{ color: band.text }}>{shortcutCopy.otherWays}</ThemedText>
               <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortcutCopy.otherWaysBody}</ThemedText>
-              {setup.applePaySupported && !applePayMode && (
+              {offersApplePay && !applePayMode && (
                 <EButton palette={band} label={applePayLabel} variant="secondary" onPress={openApplePaySetup} disabled={busy} />
               )}
-              {offersNotifications && !notificationMode && (
+              {showNotificationOption && !notificationMode && (
                 <EButton palette={band} label={t('iosNotificationSetupAction')} variant="secondary" onPress={openNotificationSetup}
                   disabled={busy} />
               )}

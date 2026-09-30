@@ -206,6 +206,7 @@ done
 # available host CPU makes unrelated suites contend with bounded parser and
 # transfer benchmarks; their existing timing limits must remain unchanged.
 node --test --test-concurrency=2 repair/*.test.cjs workflows/*.test.cjs ios-journey/*.test.cjs ios-paging-shortcut.test.mjs ios-paging-loader.test.cjs ios-history-input-probe.test.mjs ios-notification-shortcut.test.mjs learned-alert-formats.test.cjs brand-categories.test.cjs ai-ask-understanding.test.cjs ai-alert-extractor.test.cjs
+node --test ../shortcut-videos/recorded/validation.test.mjs
 node numeric-input-regression.cjs
 
 echo "run.sh: ${#SUITES[@]} app suites + ${#SERVER_SUITES[@]} server suites + $NATIVE_SUITES native Swift suites ran."

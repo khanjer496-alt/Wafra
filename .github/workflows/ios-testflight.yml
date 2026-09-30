@@ -817,9 +817,11 @@ jobs:
               echo "The configured Wafra Local Capture and Wafra History Import graphs are checked separately"
               echo "from real-device execution. History can be explicitly deferred while future capture is set up."
             fi
-            echo "In-app purchases"
-            echo "are also inert until a RevenueCat Apple key exists."
-            echo "Manual entry, import, and the whole ledger work normally."
+            if [ "$PROFILE" = "history-beta" ]; then
+              echo "This tester profile enables device-local Pro automatically on first native launch; no purchase or hidden tap sequence is required."
+            else
+              echo "Public profiles retain store-verified billing; tester grants are not enabled by this release workflow."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record exact completed beta build
