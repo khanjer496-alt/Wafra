@@ -40,7 +40,7 @@ import { friendlyDate, monthEndISO, monthKey, monthStartISO } from '@/lib/format
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
-import { formatMoneyText, ledgerMoneySpec } from '@/lib/ledger-money';
+import { formatMinorUnits, formatMoneyText, ledgerMoneySpec } from '@/lib/ledger-money';
 import { isSpending, liveAccountIds, transferReconciliationForState } from '@/lib/ledger';
 import { hasRecordsBefore, liveCaptureTimes, pendingTransferSummary, summarizeHomeToday, type PendingTransferSummary } from '@/lib/home-today';
 import { detectCapturePause } from '@/lib/capture-pause';
@@ -154,6 +154,9 @@ export default function JournalHomeScreen() {
   // Restores can change denomination while all three figures stay identical.
   // Make it a prop so compiled children cannot retain ambient currency text.
   const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId))!;
+  /** Money for a screen reader: the ISO code, exact, and signed when asked. */
+  const spokenMoney = (fils: number, signed = false) =>
+    `${signed && fils !== 0 ? (fils < 0 ? '−' : '+') : ''}${moneySpec.currency} ${formatMinorUnits(Math.abs(Math.round(fils)), moneySpec, { decimals: true })}`;
   // The tab shell still owns capture. This screen only observes or explicitly joins it.
   const { runAutoImport, needsPermission, captureState } = useAutoImport(false, true);
   const [now, setNow] = useState(() => new Date());
@@ -688,7 +691,8 @@ export default function JournalHomeScreen() {
       return <View key={id} style={styles.section} testID={`home-widget-${id}`}>
         <View style={styles.sectionHeading}><ThemedText type="smallBold" style={[styles.sectionTitle, styles.grow]}>{id === 'due' ? t('homeWidgetDueTitle') : words.upcoming}</ThemedText>
           <Pressable testID={`home-widget-${id}-total`} onPress={() => router.push('/bills')} accessibilityRole="button"
-            accessibilityLabel={`${words.more}. ${words.dueTotal(due.length, dueTotalText)}`} style={styles.smallAction}>
+            accessibilityLabel={`${words.more}. ${words.dueTotal(due.length, `${dueEstimated ? `${paymentWords.estimate} ` : ''}${spokenMoney(dueTotal)}`)}`}
+            style={styles.smallAction}>
             <ThemedText type="meta" style={{ color: band.textSecondary }}>{dueTotalText}</ThemedText>
             <Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
         <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{due.slice(0, 3).map(item => <Pressable key={item.id} accessibilityRole="button"
@@ -710,18 +714,19 @@ export default function JournalHomeScreen() {
         <Pressable onPress={() => router.push('/transactions')} accessibilityRole="button" style={styles.smallAction}><Icon name="search" size={18} color={theme.text} /><ThemedText type="meta">{t('allActivity')}</ThemedText></Pressable></View>
       {/* Grouped by day; each day carries its whole cash-flow total, not only
           the rows shown here (dashboard-projection activityDayTotals). */}
-      {activityDays(dashboard.activityRows.slice(0, 5)).map(day => <View key={day.date} testID={`home-activity-day-${day.date}`}>
+      {activityDays(dashboard.activityRows.slice(0, 5)).map(day => {
+        const dayTotal = dashboard.activityDayTotals.get(day.date);
+        return <View key={day.date} testID={`home-activity-day-${day.date}`}>
         <View style={styles.dayHeading} accessible accessibilityRole="header"
-          accessibilityLabel={[friendlyDate(day.date, projectionDay), dashboard.activityDayTotals.has(day.date)
-            ? formatMoneyText(dashboard.activityDayTotals.get(day.date)!, moneySpec, { decimals: true }) : null].filter(Boolean).join(', ')}>
+          accessibilityLabel={[friendlyDate(day.date, projectionDay), dayTotal === undefined ? null : spokenMoney(dayTotal, true)].filter(Boolean).join(', ')}>
           <ThemedText type="meta" style={[styles.grow, styles.dayTitle, { color: band.textSecondary }]}>{friendlyDate(day.date, projectionDay)}</ThemedText>
-          {dashboard.activityDayTotals.has(day.date)
-            ? <Money fils={dashboard.activityDayTotals.get(day.date)!} moneySpec={moneySpec} type="meta" decimals sign="auto" color={band.textSecondary} />
-            : null}
+          {dayTotal === undefined ? null
+            : <Money fils={dayTotal} moneySpec={moneySpec} type="meta" decimals sign={dayTotal === 0 ? 'none' : 'auto'} color={band.textSecondary} />}
         </View>
         <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{day.rows.map(transaction =>
           <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />)}</View>
-      </View>)}
+      </View>;
+      })}
       {hasPeriodTransfers && <Pressable testID="home-transfers-link" accessibilityRole="button" accessibilityLabel={transferWords.viewAll}
         accessibilityHint={transferWords.walletDetail} onPress={() => router.push('/transfers')}
         style={({ pressed }) => [styles.utilityRow, styles.transferAction, { borderColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>

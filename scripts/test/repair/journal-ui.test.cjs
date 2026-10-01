@@ -189,3 +189,18 @@ test('projected Home bills keep an explicit estimate and exact denominated amoun
   assert.equal(amount.props.moneySpec.currency, 'AED');
   assert.equal(amount.props.decimals, true);
 });
+test('payment headings show their count and total; an estimate is marked and spoken as one', () => {
+  const nodes = walk(harness().tree);
+  const total = nodes.find((node) => node.props.testID === 'home-widget-upcoming-total');
+  assert.equal(text(total).trim(), '≈ AED 380.00');
+  assert.equal(total.props.accessibilityLabel, 'View all payments. 1 payment, Estimated AED 380.00');
+});
+test('activity days carry their whole total, signed when spoken, and none when unfinished', () => {
+  const nodes = walk(harness({ dayTotals: new Map([['2026-09-06', -24435]]) }).tree);
+  const heading = (date) => walk(nodes.find((node) => node.props.testID === `home-activity-day-${date}`))
+    .find((node) => node.props.accessibilityRole === 'header');
+  assert.equal(heading('2026-09-06').props.accessibilityLabel, 'Sunday 6 Sept, −AED 244.35');
+  assert.equal(heading('2026-09-05').props.accessibilityLabel, 'Saturday 5 Sept', 'an unfinished day shows no partial total');
+  assert.equal(walk(heading('2026-09-06')).some((node) => node.type === 'Money'), true);
+  assert.equal(walk(heading('2026-09-05')).some((node) => node.type === 'Money'), false);
+});

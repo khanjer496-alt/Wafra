@@ -224,18 +224,24 @@ function MonthLine(p: Props & { band: BandPalette }) {
   ];
   // The period heads the strip; each figure takes a third of the row under
   // it, set smaller to fit rather than clipped, and stacks when even 12pt
-  // would not fit.
+  // would not fit. `fitted` is the size drawn after the system text scale,
+  // so the style size divides it back out.
   const cellWidth = (width - 40 - 24 - 2 * 10) / 3;
   const fitted = Math.min(...cells.map(cell => Math.min(15, cellWidth / Math.max(1, figureEms(cell.value)))));
   const stacked = p.largeText || fitted < 12 || fontScale > 1.3;
-  const size = stacked ? 15 : fitted;
+  const size = stacked ? 15 : fitted / Math.max(1, fontScale);
   return <View style={styles.root} testID="reference-home-summary">
     <View testID="journal-summary" style={[styles.line, stacked && styles.lineStacked, { backgroundColor: band.tile }]}>
-      <Pressable testID="home-period" accessibilityRole="button" accessibilityLabel={`${w.choosePeriod}. ${p.periodLabel}`}
-        onPress={p.onPeriod} hitSlop={6} style={({ pressed }) => [styles.linePeriod, { opacity: pressed ? 0.7 : 1 }]}>
-        <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{p.periodLabel}</ThemedText>
-        <Icon name="chevron-down" size={14} color={band.onBandSecondary} />
-      </Pressable>
+      <View style={styles.lineHeader}>
+        <Pressable testID="home-period" accessibilityRole="button" accessibilityLabel={`${w.choosePeriod}, ${p.periodLabel}`}
+          onPress={p.onPeriod} hitSlop={6} style={({ pressed }) => [styles.linePeriod, { opacity: pressed ? 0.7 : 1 }]}>
+          <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{p.periodLabel}</ThemedText>
+          <Icon name="chevron-down" size={14} color={band.onBandSecondary} />
+        </Pressable>
+        {/* The figures' currency, once for the line; each figure speaks its own. */}
+        <ThemedText type="meta" testID="home-line-currency" importantForAccessibility="no" accessibilityElementsHidden
+          style={{ color: band.onBandSecondary }}>{currency}</ThemedText>
+      </View>
       <View style={[styles.lineCells, stacked && styles.stack]}>
         {cells.map(cell => {
           const body = <>
@@ -340,9 +346,10 @@ const styles = StyleSheet.create({
   stack: { flexDirection: 'column', alignItems: 'stretch' },
   line: { borderRadius: 18, paddingTop: 2, paddingBottom: 10, paddingHorizontal: 12, gap: 2 },
   lineStacked: { gap: 6 },
-  linePeriod: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start' },
+  lineHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  linePeriod: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 4 },
   lineCells: { flexDirection: 'row', gap: 10 },
-  lineCell: { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 44, justifyContent: 'center' },
+  lineCell: { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 48, justifyContent: 'center' },
   lineCellStacked: { flexBasis: 'auto', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   lineValue: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], letterSpacing: -0.2, writingDirection: 'ltr' },
 });

@@ -137,7 +137,7 @@ try {
       const homeTotal = page.getByTestId('home-spending-total');
       check(minor(await homeTotal.innerText()), 15444, 'Home selected-month amount is independently correct');
       const homeBox = await homeTotal.boundingBox(); const weekBox = await page.getByTestId('home-week').boundingBox();
-      check(weekBox.y < homeBox.y, true, 'Home week on the band precedes the selected total on the sheet');
+      check(homeBox.y < weekBox.y, true, 'Home month line on the band precedes the week');
       check(await page.getByTestId('home-week').locator('[data-testid^="week-value-"]').count(), 7, 'seven daily values remain visible');
       // Columns are labelled in whole units (12); Larger Text lists the exact
       // 12.34. The exact amount is always in the week's spoken label.

@@ -57,12 +57,12 @@ try {
             }
             return null;
           });
-          // Design language E: the selected total leads the sheet, in its card,
-          // under the band's Today tiles and week.
-          assert.equal(background, mode === 'dark' ? 'rgb(36, 33, 28)' : 'rgb(251, 249, 244)');
+          // Home v2: the selected total is the month line on the ink band,
+          // under the Today tiles and above the week.
+          assert.equal(background, mode === 'dark' ? 'rgb(11, 10, 8)' : 'rgb(22, 19, 15)');
           const weekBox = await page.getByTestId('home-week').boundingBox();
           const totalBox = await outgoing.boundingBox();
-          assert.ok(weekBox.y < totalBox.y, 'daily spending on the band is above the selected total');
+          assert.ok(totalBox.y < weekBox.y, 'the month line sits above the week on the band');
           const days = page.locator('[data-testid^="week-value-"]');
           assert.equal(await days.count(), 7, 'the entire week is present');
           for (const day of await days.all()) {
