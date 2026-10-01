@@ -22,6 +22,8 @@ try {
   for (const [width,height,theme] of [[360,780,'dark'],[390,844,'light'],[320,568,'dark'],[390,420,'dark']]) {
     const name = `${width}x${height}-${theme}`;
     const page = await browser.newPage({ viewport:{width,height}, colorScheme:theme, reducedMotion:'reduce' });
+    // The single-purchase fixture must already exist in the selected month.
+    await page.clock.setFixedTime(new Date('2026-09-27T08:00:00Z'));
     await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
     const errors = [];page.on('pageerror', error => errors.push(String(error)));
     try {

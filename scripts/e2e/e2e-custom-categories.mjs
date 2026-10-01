@@ -81,6 +81,8 @@ async function backup(page,file) {
 try {
   for (const theme of ['light', 'dark']) {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: theme, reducedMotion: 'reduce' });
+    // Category assignment uses the seeded Apple purchase in the current month.
+    await page.clock.setFixedTime(new Date('2026-09-27T08:00:00Z'));
     const errors = [];
     page.on('pageerror', e => errors.push(String(e)));
     await page.context().route('**/*', route => {
