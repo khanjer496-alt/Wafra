@@ -916,7 +916,7 @@ function bodyOf(source, header) {
     'only a source-backed SMS/notification edge should get the short live success feedback; launch/resume safety scans remain silent');
 
   ok('daily summary work is keyed to ledger changes, not every store mutation',
-    /\[getStateSnapshot, historyImportRunning, state\.dailySummary, state\.hydrated, state\.onboarded,[\s\S]*?state\.transactions, watchForeground\]/.test(autoImport) &&
+    /\[ensureDurable, getStateSnapshot, historyImportRunning, state\.dailySummary, state\.hydrated, state\.onboarded,[\s\S]*?state\.transactions, watchForeground\]/.test(autoImport) &&
       !/\}, \[state, watchForeground\]\);/.test(autoImport),
     'history pages, settings changes, and other unrelated reducer updates must not reschedule the daily summary; completion may schedule once');
 
