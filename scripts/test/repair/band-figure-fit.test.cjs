@@ -9,7 +9,7 @@ for (const language of ['en', 'ar']) for (const fontScale of [1, 1.3, 3.1]) {
     const h = createHarness({ language, theme: 'dark', width: 320, largeText: fontScale >= 1.6 });
     h.deps['react-native'].useWindowDimensions = () => ({ width: 320, fontScale });
     h.deps['@/components/ui/rolling-money'] = { RollingMoney: 'RollingMoney' };
-    const { BandFigure } = h.local('@/components/ui/band/band-figure');
+    const { BandFigure, figureEms } = h.local('@/components/ui/band/band-figure');
     const palette = h.deps['@/constants/theme'].bandPalette('spending', 'dark');
     const spec = { schemaVersion: 2, currency: 'AED', exponent: 2 };
     for (const [size, fitInset] of [['hero', 0], ['large', 160], ['medium', 100]]) {
@@ -20,7 +20,10 @@ for (const language of ['en', 'ar']) for (const fontScale of [1, 1.3, 3.1]) {
       assert.ok(digits, 'all exact digits are rendered as text');
       const metrics = flat(digits.props.style);
       const drawnSize = metrics.fontSize * Math.min(fontScale, digits.props.maxFontSizeMultiplier);
-      assert.ok(drawnSize * amount.length * .64 <= 320 - 40 - fitInset, 'amount fits conservative tabular advance');
+      // Measured Geist SemiBold: digits 0.62em, separators 0.23em; the estimate
+      // charges 0.64em and 0.32em.
+      assert.ok(figureEms(amount) >= amount.replace(/[^0-9]/g, '').length * .62 + amount.replace(/[0-9]/g, '').length * .23);
+      assert.ok(drawnSize * figureEms(amount) <= 320 - 40 - fitInset, 'amount fits conservative tabular advance');
       assert.equal(metrics.writingDirection, 'ltr');
       assert.equal(digits.props.ellipsizeMode, undefined);
       assert.equal(digits.props.numberOfLines, undefined);

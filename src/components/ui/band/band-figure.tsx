@@ -29,6 +29,20 @@ const valueFor = (fils: number, spec: LedgerMoneySpec | null, decimals: boolean 
   ? formatMinorUnits(Math.round(Math.abs(fils)), spec, decimals === true ? { decimals: true } : undefined)
   : formatAmount(Math.abs(fils), { decimals });
 
+/*
+ * Measured Geist SemiBold advances: tabular digits 0.62em, separators 0.23em.
+ * Digits, signs and any other glyph (a fallback face's digits) are charged
+ * 0.64em and grouping/decimal separators 0.32em, both above the measurement,
+ * so "5,524.92" keeps its currency on the same line in a Home tile instead
+ * of stacking it because two commas were priced as digits.
+ */
+const NARROW = new Set([',', '.', '٬', '٫', ' ', '\u00a0', '\u202f', "'", '’']);
+export function figureEms(text: string): number {
+  let ems = 0;
+  for (const char of text) ems += NARROW.has(char) ? 0.32 : 0.64;
+  return ems;
+}
+
 function signGlyph(fils: number, sign: Sign): string {
   if (sign === 'minus') return '−';
   if (sign === 'plus') return '+';
@@ -90,7 +104,7 @@ export function BandFigure({
   // Geist tabular digits fit inside this conservative advance, including the
   // sign/separators. Fit the BASE size too: a font multiplier cannot shrink
   // 56pt text at the default system scale, which clipped million-size values.
-  const amountEm = Math.max(1, amount.length) * 0.64;
+  const amountEm = Math.max(1, figureEms(amount));
   const fittedSize = Math.min(metrics.fontSize, availableWidth / amountEm);
   const multiplier = Math.max(1, Math.min(metrics.cap, fontScale, availableWidth / (amountEm * fittedSize)));
   const textScale = Math.min(Math.max(1, fontScale), multiplier);

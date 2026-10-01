@@ -149,7 +149,7 @@ export const PaymentAgenda = React.memo(function PaymentAgenda({ items, accounts
                 paddingHorizontal: isOverdue || isToday ? 8 : 0,
                 paddingVertical: isOverdue || isToday ? 2 : 0,
               }]}>
-                <ThemedText type="meta" style={{ color: dateChipColor }} tabular>{date}</ThemedText>
+                <ThemedText type="meta" style={{ color: dateChipColor }}>{date}</ThemedText>
               </View>
               {item.estimated && <ThemedText type="meta" style={{ color: theme.gold }}>{w.estimate}</ThemedText>}
               {item.paid && <Icon name="check" size={15} color={theme.income} />}

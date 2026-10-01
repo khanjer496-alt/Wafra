@@ -51,7 +51,9 @@ test('Spending share bar keeps large totals exact, one tone, the top three named
   assert.ok(segments.every((node) => node.props.style[1].backgroundColor === band.onBand));
   // One accessible image naming the three biggest and counting the rest; the
   // real "Other" category and the pooled rest keep different names.
-  assert.match(image.props.accessibilityLabel, /Utilities 30%, Transport 25%, Dining 17%, 3 other categories 28%/);
+  // Shares use the rows' own formatter and denominator, so the legend never
+  // says "30%" over a row reading 29.4%.
+  assert.match(image.props.accessibilityLabel, /Utilities 29.4%, Transport 25.4%, Dining 16.8%, 3 other categories 28.4%/);
   const withOther = renderBand(h, { rows: [
     { category: 'other', spentFils: 50_000, limitFils: null, ratio: null, remainingFils: null },
     { category: 'dining', spentFils: 30_000, limitFils: null, ratio: null, remainingFils: null },
@@ -92,4 +94,17 @@ test('limit captions read "N% of LIMIT limit" and colour amber from 85% and red 
   assert.equal(limitHealth(1), 'warning');
   assert.equal(limitHealth(1.0001), 'over');
   assert.equal(limitHealth(null), 'ok');
+});
+
+test('Spending share legend agrees with the rows when one category dominates', () => {
+  // Rent 5,500 and a 24.92 ride: whole-number shares read "Rent 100%, Transport 0%"
+  // over rows reading 99.5% and 0.5%.
+  const h = createHarness({ width: 390 });
+  const tree = renderBand(h, { totalFils: 552_492, rows: [
+    { category: 'rent', spentFils: 550_000, limitFils: null, ratio: null, remainingFils: null },
+    { category: 'transport', spentFils: 2_492, limitFils: 90_000, ratio: 2_492 / 90_000, remainingFils: 87_508 },
+  ] });
+  const image = walk(tree).find((node) => node.props?.accessibilityRole === 'image');
+  assert.match(image.props.accessibilityLabel, /Rent 99.5%, Transport 0.5%$/);
+  assert.doesNotMatch(text(tree), /\b(100|0)%/);
 });

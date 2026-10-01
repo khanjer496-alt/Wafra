@@ -14,7 +14,7 @@ import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { formatAED } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
 import { spendingTrendsCopy } from '@/lib/reference-copy';
-import type { SpendingCategoryRow } from '@/lib/reference-presentation';
+import { spendingShare, spendingShareLabel, type SpendingCategoryRow } from '@/lib/reference-presentation';
 import { compareDirection } from '@/lib/spending-compare';
 
 /**
@@ -43,6 +43,7 @@ export function SpendingCategoriesBand({ palette, label, totalFils, paceLabel, r
       {paceLabel ? <ThemedText type="meta" testID="spending-pace" style={{ color: palette.onBandSecondary }}>{paceLabel}</ThemedText> : null}
     </View> : null}
     <ShareBar testID="spending-share-bar" palette={palette} label={w.spending}
+      formatShare={(value) => spendingShareLabel(spendingShare(value, totalFils), language)}
       segments={rows.map((row) => ({ key: row.category, label: categoryLabel(row.category, language), value: row.spentFils }))} />
   </View>;
 }

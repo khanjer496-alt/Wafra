@@ -105,8 +105,8 @@ export function SpendingTrends(p: Props) {
     <View style={styles.section} testID="spending-compare">
       {/* The sentence that answers "more or less than last time" sits on the
           band above; the categories that moved it are listed here, each with
-          this period's bar in the band tint over the earlier one in the rule
-          tone. Colour carries "now" and "then", never a category. */}
+          this period's bar in the band tint over the earlier one in the
+          secondary text tone, both on the rule-tone track. Colour carries "now" and "then", never a category. */}
       {([['more', p.movers.filter((m) => m.deltaFils > 0)], ['less', p.movers.filter((m) => m.deltaFils < 0)]] as const).map(([kind, list]) =>
         list.length === 0 ? null : <View key={kind} style={styles.compareGroup}>
           <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionTitle}>{kind === 'more' ? w.spendingMore : w.spendingLess}</ThemedText>
@@ -122,14 +122,18 @@ export function SpendingTrends(p: Props) {
                 <ThemedText type="smallBold" tabular>
                   {m.deltaFils > 0 ? '+' : '−'}{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
               </View>
-              {([[p.currentName ?? p.periodLabel, m.currentFils, band.tint], [p.previousName ?? p.comparisonLabel ?? '', m.previousFils, band.rule]] as const).map(([label, fils, color], index) =>
+              {([[p.currentName ?? p.periodLabel, m.currentFils, band.tint], [p.previousName ?? p.comparisonLabel ?? '', m.previousFils, band.textSecondary]] as const).map(([label, fils, color], index) =>
                 <View key={index} style={styles.compareBarStack}>
                   <View style={[styles.compareBarHead, large && styles.stackColumn]}>
                     <ThemedText type="meta" style={{ color: band.textSecondary }}>{label}</ThemedText>
                     <Money fils={fils} type="meta" />
                   </View>
-                  <GrowBar axis="width" delay={index * 50} size={fils / scale * 100}
-                    style={{ height: 10, borderRadius: 5, backgroundColor: color }} />
+                  {/* Both bars sit on the rule-tone track, so a period at zero
+                      still reads as an empty bar rather than a missing one. */}
+                  <View style={[styles.compareTrack, { backgroundColor: band.rule }]}>
+                    <GrowBar axis="width" delay={index * 50} size={fils / scale * 100}
+                      style={{ height: 10, borderRadius: 5, backgroundColor: color }} />
+                  </View>
                 </View>)}
             </Pressable>;
           })}
@@ -320,6 +324,7 @@ const styles = StyleSheet.create({
   compareTopLarge: { flexWrap: 'wrap' },
   compareNameLarge: { flexBasis: '100%' },
   compareBarStack: { gap: 4 },
+  compareTrack: { height: 10, borderRadius: 5, overflow: 'hidden' },
   compareBarHead: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 },
   empty: { paddingVertical: 20 }, disclosure: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 48 },
   weekday: { gap: 6 }, weekdayTrack: { width: '100%', height: 6, borderRadius: 3 },
