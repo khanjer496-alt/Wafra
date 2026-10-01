@@ -226,10 +226,15 @@ function MonthLine(p: Props & { band: BandPalette }) {
   // it, set smaller to fit rather than clipped, and stacks when even 12pt
   // would not fit. `fitted` is the size drawn after the system text scale,
   // so the style size divides it back out.
-  const cellWidth = (width - 40 - 24 - 2 * 10) / 3;
-  const fitted = Math.min(...cells.map(cell => Math.min(15, cellWidth / Math.max(1, figureEms(cell.value)))));
+  const lineWidth = width - 40 - 24;
+  const cellWidth = (lineWidth - 2 * 10) / 3;
+  const ems = Math.max(1, ...cells.map(cell => figureEms(cell.value)));
+  const fitted = Math.min(15, cellWidth / ems);
   const stacked = p.largeText || fitted < 12 || fontScale > 1.3;
-  const size = stacked ? 15 : fitted / Math.max(1, fontScale);
+  // Stacked, each figure has the whole line under its label: the person's
+  // text size, unless even that would run past the edge.
+  const scale = Math.max(1, fontScale);
+  const size = stacked ? Math.min(15, lineWidth / (ems * scale)) : fitted / scale;
   return <View style={styles.root} testID="reference-home-summary">
     <View testID="journal-summary" style={[styles.line, stacked && styles.lineStacked, { backgroundColor: band.tile }]}>
       <View style={styles.lineHeader}>
@@ -350,6 +355,6 @@ const styles = StyleSheet.create({
   linePeriod: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 4 },
   lineCells: { flexDirection: 'row', gap: 10 },
   lineCell: { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 48, justifyContent: 'center' },
-  lineCellStacked: { flexBasis: 'auto', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
+  lineCellStacked: { flexBasis: 'auto', alignItems: 'flex-start' },
   lineValue: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], letterSpacing: -0.2, writingDirection: 'ltr' },
 });
