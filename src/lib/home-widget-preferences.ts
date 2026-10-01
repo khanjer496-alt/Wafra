@@ -14,6 +14,8 @@ export const DEFAULT_HOME_WIDGETS: HomeWidgetPreferences = {
 
 const LEGACY_ORDER: readonly HomeWidgetId[] = ['due', 'upcoming', 'activity', 'assistant', 'insight'];
 const BAND_SECTIONS: readonly HomeWidgetId[] = ['greeting', 'overview', 'today', 'week'];
+/** In the opening group, but drawn first on the sheet (splitHomeWidgetLayout). */
+const SHEET_LEAD: HomeWidgetId = 'overview';
 
 /** Whether a section is one of the four that can sit on Home's colour band. */
 export function isHomeBandSection(id: HomeWidgetId): boolean {
@@ -79,11 +81,19 @@ export function homeWidgetVisible(preferences: HomeWidgetPreferences, id: HomeWi
   return !preferences.hidden.includes(id);
 }
 
-/** Only the visible opening run of header/financial sections belongs on the band. */
+/**
+ * Only the visible opening run of header sections belongs on the band: the
+ * greeting, Today | Left in budgets and the week, as design language E draws
+ * Home. The period overview (Total spent, Income, Net) still belongs to that
+ * opening group, so it never ends the run, but it leads the sheet rather than
+ * crowding the band. Placed lower by the person, it stays where they put it.
+ */
 export function splitHomeWidgetLayout(preferences: HomeWidgetPreferences): { band: HomeWidgetId[]; sheet: HomeWidgetId[] } {
   const current = normalizeHomeWidgetPreferences(preferences);
   const visible = current.order.filter(id => !current.hidden.includes(id));
   const firstSheet = visible.findIndex(id => !BAND_SECTIONS.includes(id));
   const boundary = firstSheet < 0 ? visible.length : firstSheet;
-  return { band: visible.slice(0, boundary), sheet: visible.slice(boundary) };
+  const opening = visible.slice(0, boundary);
+  const lead = opening.filter(id => id === SHEET_LEAD);
+  return { band: opening.filter(id => id !== SHEET_LEAD), sheet: [...lead, ...visible.slice(boundary)] };
 }

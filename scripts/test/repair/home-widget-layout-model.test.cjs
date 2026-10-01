@@ -33,16 +33,23 @@ test('expanded order and hidden choices remain exact; partial expanded layouts a
   const partial = model.normalizeHomeWidgetPreferences({ order: ['activity', 'today'], hidden: ['greeting'] });
   assert.deepEqual(plain(partial), pref(['activity', 'today', ...defaults.filter(id => !['activity', 'today'].includes(id))], ['greeting']));
 });
+// Design language E: the band holds the greeting, the Today tiles and the
+// week; the overview (Total spent, Income, Net) leads the sheet under it.
+const band3 = ['greeting', 'today', 'week'];
 test('visible band prefix stops at the first visible ordinary section', () => {
-  assert.deepEqual(plain(model.splitHomeWidgetLayout(pref())), { band: top, sheet: defaults.slice(4) });
+  assert.deepEqual(plain(model.splitHomeWidgetLayout(pref())), { band: band3, sheet: ['overview', ...defaults.slice(4)] });
   const layout = pref(['week', 'due', 'greeting', 'overview', 'today', ...defaults.filter(id => !['week', 'due', ...top].includes(id))]);
   assert.deepEqual(plain(model.splitHomeWidgetLayout(layout)), { band: ['week'], sheet: layout.order.slice(1) });
   const hiddenBarrier = { ...layout, hidden: ['due'] };
-  assert.deepEqual(plain(model.splitHomeWidgetLayout(hiddenBarrier)).band, ['week', 'greeting', 'overview', 'today']);
+  assert.deepEqual(plain(model.splitHomeWidgetLayout(hiddenBarrier)), { band: ['week', 'greeting', 'today'],
+    sheet: ['overview', ...layout.order.slice(5)] });
+  // Placed lower by the person, the overview stays where they put it.
+  const lower = pref(['greeting', 'today', 'week', 'due', 'overview', 'upcoming', 'activity', 'assistant', 'insight', 'capture']);
+  assert.deepEqual(plain(model.splitHomeWidgetLayout(lower)), { band: band3, sheet: lower.order.slice(3) });
 });
 test('moving a financial block below an ordinary section moves it onto the sheet', () => {
   const moved = model.moveHomeWidget(pref(), 'week', 1);
-  assert.deepEqual(plain(model.splitHomeWidgetLayout(moved)), { band: ['greeting', 'overview', 'today'], sheet: ['due', 'week', 'upcoming', 'activity', 'assistant', 'insight', 'capture'] });
+  assert.deepEqual(plain(model.splitHomeWidgetLayout(moved)), { band: ['greeting', 'today'], sheet: ['overview', 'due', 'week', 'upcoming', 'activity', 'assistant', 'insight', 'capture'] });
   assert.deepEqual(plain(model.moveHomeWidget(pref(), 'greeting', -1)), pref());
   assert.deepEqual(plain(model.moveHomeWidget(pref(), 'capture', 1)), pref());
 });
@@ -62,9 +69,13 @@ test('deterministic permutations preserve the complete visible sequence across b
     for (let i = order.length - 1; i > 0; i--) { seed = (seed * 1664525 + 1013904223) >>> 0; const at = seed % (i + 1); [order[i], order[at]] = [order[at], order[i]]; }
     const hidden = order.filter((_, i) => (n >> i) & 1);
     const { band, sheet } = model.splitHomeWidgetLayout(pref(order, hidden));
-    assert.deepEqual([...band, ...sheet], order.filter(id => !hidden.includes(id)));
-    assert.ok(band.every(id => top.includes(id)));
-    assert.ok(!sheet.length || !top.includes(sheet[0]));
+    const visible = order.filter(id => !hidden.includes(id));
+    // Same sections, each once; only the overview may move, from the band's run to the sheet's head.
+    assert.deepEqual([...band, ...sheet].filter(id => id !== 'overview'), visible.filter(id => id !== 'overview'));
+    assert.equal([...band, ...sheet].filter(id => id === 'overview').length, visible.includes('overview') ? 1 : 0);
+    assert.ok(band.every(id => band3.includes(id)));
+    const afterLead = sheet[0] === 'overview' ? sheet.slice(1) : sheet;
+    assert.ok(!afterLead.length || !band3.includes(afterLead[0]), 'the band takes the whole opening run');
   }
 });
 

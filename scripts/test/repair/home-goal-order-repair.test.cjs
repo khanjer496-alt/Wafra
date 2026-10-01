@@ -11,6 +11,8 @@ const root = path.resolve(__dirname, '../../..');
 const LAYOUT = 'wafra/ui/home-widgets/v1';
 const MARKER = 'wafra/ui/home-widgets/goal-order-repair/v1';
 const TOP = ['greeting', 'overview', 'today', 'week'];
+// What the band draws: the overview leads the sheet instead (splitHomeWidgetLayout).
+const BAND = ['greeting', 'today', 'week'];
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function setup(initial = {}, { failRead = 0, failWrite = 0 } = {}) {
@@ -48,7 +50,7 @@ test('an earlier goal-first Home is repaired once and the check is retired', asy
   const h = setup({ [LAYOUT]: JSON.stringify(earlierBills) });
   await h.repair.repairGoalOrderedHomeOnce();
   assert.deepEqual(h.layout().order, [...TOP, 'due', 'upcoming', 'assistant', 'insight', 'activity', 'capture']);
-  assert.deepEqual(plain(h.model.splitHomeWidgetLayout(h.layout()).band), TOP);
+  assert.deepEqual(plain(h.model.splitHomeWidgetLayout(h.layout()).band), BAND);
   assert.equal(h.store.get(MARKER), '1');
   assert.deepEqual(h.writes, [LAYOUT, MARKER], 'layout saved before the check is retired');
   // The person later puts the goal sections first again in Customize Home: never undone.

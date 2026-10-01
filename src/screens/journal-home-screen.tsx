@@ -712,14 +712,16 @@ export default function JournalHomeScreen() {
     onSpending: () => router.push('/flow'),
   };
 
+  const layout = splitHomeWidgetLayout(homeWidgets);
+  // Drawn order, band then sheet: the overview leads the sheet, below the tiles.
+  const drawn = [...layout.band, ...layout.sheet];
   const sectionProps = { ...summaryProps, today: homeToday,
-    showPeriodContext: !homeWidgetVisible(homeWidgets, 'overview') || homeWidgets.order.indexOf('overview') > homeWidgets.order.indexOf('today'),
+    showPeriodContext: !drawn.includes('overview') || drawn.indexOf('overview') > drawn.indexOf('today'),
     onToday: () => router.push('/transactions'),
     onBudgets: () => router.push('/flow?view=categories&filter=limited'),
     onSetBudget: budgetMonthKey ? () => setBudgetSheetOpen(true) : undefined,
     captureStopped,
   };
-  const layout = splitHomeWidgetLayout(homeWidgets);
   const greetingInToolbar = layout.band[0] === 'greeting';
   const sheetPalette = { ...band, onBand: band.text, onBandSecondary: band.textSecondary,
     tile: band.glyphGround, bandMark: band.textSecondary, bandRule: band.rule };

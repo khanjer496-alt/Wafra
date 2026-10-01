@@ -21,6 +21,7 @@ import {
   moveHomeWidget,
   saveHomeWidgetPreferences,
   setHomeWidgetVisible,
+  splitHomeWidgetLayout,
   type HomeWidgetId,
   type HomeWidgetPreferences,
 } from '@/lib/home-widgets';
@@ -110,7 +111,10 @@ export default function HomeCustomizeScreen() {
     actions: [{ icon: 'check', label: copy.done, onPress: () => { void close(); }, testID: 'home-customize-done' }],
   };
   const enabled = loaded && !leaving;
-  const visible = preferences.order.filter(id => !preferences.hidden.includes(id));
+  // The preview lists sections in the order Home draws them: the overview
+  // leads the sheet under the band rather than sitting second.
+  const drawn = splitHomeWidgetLayout(preferences);
+  const visible = [...drawn.band, ...drawn.sheet];
   const statusLabel = saveStatus === 'loading' ? t('stillLoading')
     : saveStatus === 'saving' ? copy.saving : saveStatus === 'error' ? copy.saveError : copy.saved;
 

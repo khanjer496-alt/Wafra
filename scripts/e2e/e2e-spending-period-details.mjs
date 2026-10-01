@@ -137,9 +137,13 @@ try {
       const homeTotal = page.getByTestId('home-spending-total');
       check(minor(await homeTotal.innerText()), 15444, 'Home selected-month amount is independently correct');
       const homeBox = await homeTotal.boundingBox(); const weekBox = await page.getByTestId('home-week').boundingBox();
-      check(homeBox.y < weekBox.y, true, 'Home selected total precedes daily details');
+      check(weekBox.y < homeBox.y, true, 'Home week on the band precedes the selected total on the sheet');
       check(await page.getByTestId('home-week').locator('[data-testid^="week-value-"]').count(), 7, 'seven daily values remain visible');
-      check(minor(await page.getByTestId('week-value-2026-09-27').innerText()), 1234, 'Home today exact daily amount');
+      // Columns are labelled in whole units (12); Larger Text lists the exact
+      // 12.34. The exact amount is always in the week's spoken label.
+      const todayColumn = minor(await page.getByTestId('week-value-2026-09-27').innerText());
+      check(todayColumn === 1200 || todayColumn === 1234, true, 'Home today daily amount, whole units or exact');
+      check((await page.getByTestId('home-week').getAttribute('aria-label')).includes('12.34'), true, 'Home today exact daily amount is spoken');
       await shot(page, `${name}-home`, homeTotal);
       await page.getByRole('tab', { name: label('Spending', 'الإنفاق'), exact: true }).click();
       await sameTotal(15444);

@@ -11,14 +11,16 @@ const periodMinor = (nodes) => {
   return Math.round(Number(match[1].replace(/,/g,''))*100);
 };
 
-test('Home leads with one selected-period summary before daily spending and activity', () => {
+test('Home draws the week on its band, then one selected-period summary, then activity', () => {
   const h = harness();
   const nodes = walk(h.tree);
   const section = (id) => nodes.findIndex((node) => node.props.testID === id);
   for (const id of ['journal-summary', 'home-widget-activity', 'journal-import-controls']) {
     assert.notEqual(section(id), -1, `${id} is rendered`);
   }
-  assert.ok(section('journal-summary') < section('home-week') && section('home-week') < section('home-widget-activity'));
+  // Design language E: the band holds the greeting, the Today tiles and the
+  // week; the period summary leads the sheet beneath it.
+  assert.ok(section('home-week') < section('journal-summary') && section('journal-summary') < section('home-widget-activity'));
   assert.ok(section('home-widget-activity') < section('journal-import-controls'));
   assert.equal(periodMinor(nodes), 508700);
   assert.match(text(h.tree), /View spending breakdown/);

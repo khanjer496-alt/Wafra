@@ -55,11 +55,14 @@ function harness({ language = 'en', large = false, initial, save } = {}) {
   const mount = async () => { render(); effects.splice(0).forEach(fn => fn()); await tick(); return render(); };
   return { render, mount, saves, events, remove: () => { if (removal?.prevent) removal.callback({ data: { action: { type: 'GO_BACK' } } }); else events.push('back'); } };
 }
+// The preview lists sections in the order Home draws them: the overview leads the sheet, after the band.
+const drawnOrder = (preferences) => { const { band, sheet } = model.splitHomeWidgetLayout(preferences); return clone([...band, ...sheet]); };
 function previewIds(tree) { return walk(tree).filter(node => String(node.props.testID ?? '').startsWith('home-customize-preview-') && node.props.testID !== 'home-customize-preview-empty').map(node => node.props.testID.replace('home-customize-preview-', '')); }
 for (const language of ['en', 'ar']) test(`all ten sections have visible preview, independent visibility and accessible movement (${language})`, async () => {
   const h = harness({ language, large: true }); const tree = await h.mount();
   assert.equal(model.DEFAULT_HOME_WIDGETS.order.length, 10);
-  assert.deepEqual(previewIds(tree), clone(model.DEFAULT_HOME_WIDGETS.order));
+  assert.deepEqual(previewIds(tree), drawnOrder(model.DEFAULT_HOME_WIDGETS));
+  assert.deepEqual(previewIds(tree).slice(0, 4), ['greeting', 'today', 'week', 'overview']);
   assert.equal(byId(tree, 'home-customize-fixed'), undefined);
   for (const id of model.DEFAULT_HOME_WIDGETS.order) {
     assert.ok(byId(tree, `home-customize-${id}`));
@@ -86,6 +89,7 @@ test('rapid moves use newest order; hiding changes preview and reset restores ev
   const h = harness(); let tree = await h.mount();
   const move = byId(tree, 'home-customize-up-capture').props.onPress;
   move(); move(); move(); await tick(); tree = h.render();
+  assert.deepEqual(previewIds(tree), drawnOrder(h.saves.at(-1)));
   assert.equal(previewIds(tree).indexOf('capture'), 6);
   assert.equal(h.saves.at(-1).order.indexOf('capture'), 6);
   for (const id of model.DEFAULT_HOME_WIDGETS.order) byId(tree, `home-customize-toggle-${id}`).props.onPress();
@@ -93,7 +97,7 @@ test('rapid moves use newest order; hiding changes preview and reset restores ev
   assert.ok(byId(tree, 'home-customize-preview-empty'));
   assert.equal(h.saves.at(-1).hidden.length, 10);
   byId(tree, 'home-customize-reset').props.onPress(); await tick();
-  assert.deepEqual(previewIds(h.render()), clone(model.DEFAULT_HOME_WIDGETS.order));
+  assert.deepEqual(previewIds(h.render()), drawnOrder(model.DEFAULT_HOME_WIDGETS));
   assert.deepEqual(h.saves.at(-1), clone(model.DEFAULT_HOME_WIDGETS));
 });
 test('queued storage writes never race and Done waits for the final layout', async () => {
