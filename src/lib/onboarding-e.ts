@@ -10,7 +10,7 @@
  */
 import type { BandId } from '@/constants/theme';
 import type { HomeWidgetId, HomeWidgetPreferences } from '@/lib/home-widget-preferences';
-import { normalizeHomeWidgetPreferences } from '@/lib/home-widget-preferences';
+import { isHomeBandSection, normalizeHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 import { allocationsOf, amountInCategory } from '@/lib/splits';
 import { isLiveCapture } from '@/lib/transaction-source';
 import type { Budget, CategoryId, GoalId, OnboardingAlertDelivery, OnboardingJourneyStage, Transaction } from '@/lib/types';
@@ -117,7 +117,8 @@ export function onboardingEResumeStep(
  *
  * "What should Wafra do?" reorders Home through the SAME preference Customize
  * Home edits (home-widget-preferences). Nothing is hidden and nothing new is
- * stored: the chosen goals only decide which existing sections come first.
+ * stored: the chosen goals only decide which existing sections come first on
+ * the sheet, under the band's greeting, totals and week.
  *
  *   bills          → Due payments, then Upcoming payments
  *   subscriptions  → Upcoming payments (renewals are listed there)
@@ -155,11 +156,20 @@ export function homeOrderForGoals(
       if (!promoted.includes(section)) promoted.push(section);
     }
   }
-  const rest = base.order.filter((section) => !promoted.includes(section));
-  return { order: [...promoted, ...rest], hidden: [...base.hidden] };
+  // Promoted sections lead the sheet, never the band: the opening run of band
+  // sections (greeting, totals, week) stays where it is. Putting a sheet
+  // section first would end that run at zero and move the whole band onto
+  // the sheet (splitHomeWidgetLayout). Hidden sections are invisible to that
+  // split, so they do not end the run here either.
+  let bandRun = 0;
+  while (bandRun < base.order.length
+    && (isHomeBandSection(base.order[bandRun]) || base.hidden.includes(base.order[bandRun]))) bandRun++;
+  const band = base.order.slice(0, bandRun).filter((section) => !promoted.includes(section));
+  const rest = base.order.slice(bandRun).filter((section) => !promoted.includes(section));
+  return { order: [...band, ...promoted, ...rest], hidden: [...base.hidden] };
 }
 
-/** The section the chosen goals put at the top of Home, for the Goals step's hint. */
+/** The section the chosen goals put first on Home's sheet, for the Goals step's hint. */
 export function firstHomeSectionForGoals(goals: readonly GoalId[]): GoalHomeSectionId | null {
   for (const goal of GOAL_HOME_PRECEDENCE) {
     if (goals.includes(goal)) return GOAL_HOME_SECTIONS[goal][0] ?? null;

@@ -127,14 +127,30 @@ test('reminders name only what Wafra sends; the daily summary time matches SUMMA
 
 test('goals reorder Home through the Customize Home preference', () => {
   const base = { order: [...DEFAULT], hidden: [] };
-  assert.deepEqual(e.homeOrderForGoals(['bills'], base).order, ['due', 'upcoming', ...TOP, 'assistant', 'insight', 'activity', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['subscriptions'], base).order, ['upcoming', ...TOP, 'due', 'assistant', 'insight', 'activity', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['spend-less'], base).order, ['insight', ...TOP, 'due', 'assistant', 'activity', 'upcoming', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['salary'], base).order, ['activity', 'insight', ...TOP, 'due', 'assistant', 'upcoming', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['cash-cards'], base).order, ['activity', 'due', ...TOP, 'assistant', 'insight', 'upcoming', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['bills'], base).order, [...TOP, 'due', 'upcoming', 'assistant', 'insight', 'activity', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['subscriptions'], base).order, [...TOP, 'upcoming', 'due', 'assistant', 'insight', 'activity', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['spend-less'], base).order, [...TOP, 'insight', 'due', 'assistant', 'activity', 'upcoming', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['salary'], base).order, [...TOP, 'activity', 'insight', 'due', 'assistant', 'upcoming', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['cash-cards'], base).order, [...TOP, 'activity', 'due', 'assistant', 'insight', 'upcoming', 'capture']);
   assert.deepEqual(e.homeOrderForGoals(['salary', 'bills'], base).order,
-    ['due', 'upcoming', 'activity', 'insight', ...TOP, 'assistant', 'capture'], 'precedence, not tap order: bills before salary');
+    [...TOP, 'due', 'upcoming', 'activity', 'insight', 'assistant', 'capture'], 'precedence, not tap order: bills before salary');
   assert.deepEqual(e.homeOrderForGoals(['bills', 'salary'], base), e.homeOrderForGoals(['salary', 'bills'], base));
+});
+
+test('goals reorder the sheet and never take the band away', () => {
+  for (const goals of [['bills'], ['subscriptions'], ['spend-less'], ['salary'], ['cash-cards'], ['bills', 'salary', 'spend-less']]) {
+    const next = e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: [] });
+    assert.deepEqual(JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(next).band)), TOP, goals.join());
+  }
+  // A Home whose owner already moved a band section down keeps that choice.
+  const moved = { order: ['greeting', 'due', 'overview', 'today', 'week', 'upcoming', 'activity', 'assistant', 'insight', 'capture'], hidden: [] };
+  assert.deepEqual(e.homeOrderForGoals(['subscriptions'], moved).order,
+    ['greeting', 'upcoming', 'due', 'overview', 'today', 'week', 'activity', 'assistant', 'insight', 'capture']);
+  // A hidden section ahead of the band is invisible to the split, so it does not end the band either.
+  const hiddenFirst = { order: ['due', ...TOP, 'upcoming', 'activity', 'assistant', 'insight', 'capture'], hidden: ['due'] };
+  const next = e.homeOrderForGoals(['subscriptions'], hiddenFirst);
+  assert.deepEqual(JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(next).band)), TOP);
+  assert.deepEqual(next.order, ['due', ...TOP, 'upcoming', 'activity', 'assistant', 'insight', 'capture']);
 });
 
 test('goals never hide a section and no goals leaves the order alone', () => {
@@ -145,10 +161,10 @@ test('goals never hide a section and no goals leaves the order alone', () => {
   assert.deepEqual(e.homeOrderForGoals([], expanded), expanded, 'existing whole-Home choices remain unchanged');
   const next = e.homeOrderForGoals(['bills'], custom);
   assert.deepEqual(next.hidden, ['assistant']);
-  assert.deepEqual(next.order, ['due', 'upcoming', ...TOP, 'activity', 'assistant', 'insight', 'capture']);
+  assert.deepEqual(next.order, [...TOP, 'due', 'upcoming', 'activity', 'assistant', 'insight', 'capture']);
   assert.deepEqual([...next.order].sort(), [...EXPANDED_DEFAULT].sort(), 'all ten sections, each once');
   // A preference the reader would normalise is normalised first.
-  assert.deepEqual(e.homeOrderForGoals(['bills'], { order: ['bogus'], hidden: 'x' }).order.slice(0, 2), ['due', 'upcoming']);
+  assert.deepEqual(e.homeOrderForGoals(['bills'], { order: ['bogus'], hidden: 'x' }).order.slice(TOP.length, TOP.length + 2), ['due', 'upcoming']);
 });
 
 test('the Goals hint names the section that really goes first', () => {
@@ -157,7 +173,7 @@ test('the Goals hint names the section that really goes first', () => {
   assert.equal(e.firstHomeSectionForGoals(['subscriptions']), 'upcoming');
   for (const goals of [['bills'], ['subscriptions'], ['spend-less'], ['salary'], ['cash-cards'], ['salary', 'spend-less']]) {
     const first = e.firstHomeSectionForGoals(goals);
-    assert.equal(e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: [] }).order[0], first, goals.join());
+    assert.equal(e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: [] }).order[TOP.length], first, goals.join());
     assert.ok(ONBOARDING_E_COPY.en.goalsHint[first] && ONBOARDING_E_COPY.ar.goalsHint[first]);
   }
   assert.deepEqual(e.toggleGoal(['salary'], 'bills'), ['salary', 'bills'], 'canonical order');
