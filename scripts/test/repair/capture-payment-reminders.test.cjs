@@ -19,7 +19,7 @@ const account = { id: 'card', kind: 'card', cardType: 'credit', last4: '9426', b
 
 function hookHarness({ owner = true, platform = 'android' } = {}) {
   let state = baseState(), cursor = 0;
-  const slots = [], effects = [], waits = [], calls = [], modes = [], listeners = new Set();
+  const slots = [], effects = [], waits = [], calls = [], summaries = [], modes = [], listeners = new Set();
   let durable = Promise.resolve();
   const same = (a, b) => a && b && a.length === b.length && a.every((value, i) => Object.is(value, b[i]));
   const slot = () => { const i = cursor++; return slots[i] ??= {}; };
@@ -48,7 +48,7 @@ function hookHarness({ owner = true, platform = 'android' } = {}) {
     '@/lib/android-capture-sources': { androidSmsCaptureEnabled: () => false, androidNotificationCaptureEnabled: () => false },
     '@/lib/haptics': {}, '@/lib/capture-toast': {}, '@/lib/i18n': { t: value => value },
     '@/lib/fx-rates': {},
-    '@/lib/notifications': { syncPaymentReminders: async (value, _now, mode) => { calls.push(value); modes.push(mode); }, syncDailySummary: async () => {} },
+    '@/lib/notifications': { syncPaymentReminders: async (value, _now, mode) => { calls.push(value); modes.push(mode); }, syncDailySummary: async value => { summaries.push(value); } },
     '@/lib/purchases': { isProActive: () => false },
     '@/lib/trusted-bank-notification-packages': { bankNotificationAdmissionExpiresAt: () => 0 },
     '@/lib/relay': { getRelayConfig: async () => null }, '@/lib/ios-local-capture': {},
@@ -61,7 +61,7 @@ function hookHarness({ owner = true, platform = 'android' } = {}) {
   }, { setTimeout: () => 1, clearTimeout() {} });
   const render = () => { cursor = 0; hook.useAutoImport(owner, false); while (effects.length) effects.shift()(); };
   return {
-    calls, modes, render,
+    calls, summaries, modes, render,
     update(patch) { state = { ...state, ...patch }; render(); },
     setDurable(promise) { durable = promise; },
     async idle() { const pending = waits.splice(0); pending.forEach(wait => wait.resolve()); await settle(); },
@@ -166,7 +166,7 @@ test('non-owner consumers never schedule reactive reminders', async t => {
 function backgroundHarness() {
   let state = { ...baseState(), pro: true }, handler;
   let next = {}, durable = Promise.resolve(), failSync = false;
-  const calls = [];
+  const calls = [], summaries = [];
   const api = load(path.join(root, 'src/lib/android-live-background.ts'), {
     'react-native': { Platform: { OS: 'android' }, AppState: { currentState: 'background' }, AppRegistry: { registerHeadlessTask: (_name, factory) => { handler = factory(); } } },
     '../../modules/notification-reader': { __esModule: true, default: { isAdmissionActive: () => true } },
@@ -186,10 +186,10 @@ function backgroundHarness() {
     '@/lib/reminders': load(path.join(root, 'src/lib/reminders.ts'), {
       '@/lib/bills': {}, '@/lib/cards': {}, '@/lib/format': {}, '@/lib/i18n': {}, '@/lib/ledger': {}, '@/lib/subscriptions': {},
     }),
-    '@/lib/notifications': { syncPaymentReminders: async (...args) => { calls.push(args); if (failSync) throw new Error('OS denied scheduling'); } },
+    '@/lib/notifications': { syncDailySummary: async state => { summaries.push(state); }, syncPaymentReminders: async (...args) => { calls.push(args); if (failSync) throw new Error('OS denied scheduling'); } },
   });
   const uninstall = api.installAndroidLiveCaptureLedger({ getState: () => state });
-  return { calls, uninstall, run: () => handler({ source: 'sms', observedAt: 1000 }),
+  return { calls, summaries, uninstall, run: () => handler({ source: 'sms', observedAt: 1000 }),
     change: patch => { next = patch; }, setDurable: promise => { durable = promise; }, failSync: () => { failSync = true; } };
 }
 
@@ -214,4 +214,47 @@ test('headless empty capture, rejected persistence, and notification failure can
   h.setDurable(Promise.resolve()); h.change({ cardDues: [{ ...due }] }); h.failSync();
   await h.run();
   assert.equal(h.calls.length, 1, 'notification failure is contained after durable capture');
+});
+
+test('headless spend refreshes tonight summary after durability even when obligation scheduling fails', async t => {
+  const h = backgroundHarness(); t.after(h.uninstall);
+  const gate = deferred(); h.setDurable(gate.promise);
+  h.change({ dailySummary: true, transactions: [{ id: 'new-charge', amountFils: 3690 }] });
+  h.failSync();
+  const run = h.run(); await settle();
+  assert.equal(h.summaries.length, 0);
+  gate.resolve(); await run;
+  assert.equal(h.summaries.length, 1);
+  assert.equal(h.summaries[0].transactions[0].amountFils, 3690);
+});
+
+test('returning from Android settings retries reminders even with unchanged ledger', async t => {
+  const h = hookHarness(); t.after(h.cleanup); h.render(); await settle(); await h.idle();
+  h.calls.length = 0;
+  await h.lifecycle('background'); await h.lifecycle('active'); await h.idle();
+  assert.equal(h.calls.length, 1, 'permission grants and calendar rollover need a fresh plan on resume');
+  await h.lifecycle('background'); await h.lifecycle('active'); await h.idle();
+  assert.equal(h.calls.length, 2, 'a completed refresh must not suppress future resumes');
+});
+
+test('leaving before summary grace flushes durable spending for 9 pm', async t => {
+  const h = hookHarness(); t.after(h.cleanup); h.render(); await settle(); await h.idle();
+  const gate = deferred(); h.setDurable(gate.promise);
+  h.update({ dailySummary: true, transactions: [{ id: 'new-charge', amountFils: 3690 }] });
+  await h.lifecycle('background');
+  assert.equal(h.summaries.length, 0);
+  gate.resolve(); await settle();
+  assert.equal(h.summaries.length, 1);
+  assert.equal(h.summaries[0].transactions[0].amountFils, 3690);
+  await h.idle();
+  assert.equal(h.summaries.length, 1, 'the grace callback must not duplicate the departure flush');
+});
+
+test('history completing while already background schedules the durable summary', async t => {
+  const h = hookHarness(); t.after(h.cleanup); h.render(); await settle(); await h.idle();
+  h.update({ dailySummary: true, historyImport: { status: 'running' }, transactions: [{ id: 'charge' }] });
+  await h.lifecycle('background');
+  assert.equal(h.summaries.length, 0);
+  h.update({ historyImport: { status: 'complete' } }); await h.idle();
+  assert.equal(h.summaries.length, 1);
 });

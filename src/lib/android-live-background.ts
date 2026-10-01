@@ -38,7 +38,7 @@ import {
 import { setActiveCountry } from '@/lib/country';
 import { setBestEffortAutoPostEnabled } from '@/lib/best-effort-autopost';
 import { isProActive } from '@/lib/purchases';
-import { syncPaymentReminders } from '@/lib/notifications';
+import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
 import { reminderScheduleInputsChanged } from '@/lib/reminders';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import type { AppState, ImportBatchInput, Transaction } from '@/lib/types';
@@ -303,14 +303,22 @@ async function processBackgroundCapture(source: BackgroundSource, observedAt: nu
   const outcome = await executor.execute(source === 'push' ? 'notification-only' : 'routine');
   // execute resolves only after the ledger is durable. A closed-app statement
   // must earn a due reminder now, and a receipt must cancel one now. Keep this
-  // wake bounded: recurrence discovery and daily summaries belong to foreground
-  // maintenance; their already-scheduled notifications remain untouched.
+  // wake bounded: recurrence discovery belongs to foreground maintenance.
+  // Refresh the dated summary too: otherwise a closed-app spending day has no
+  // 9 pm notification, or still reports the snapshot from the last app open.
   const after = adapter.getState();
   if (reminderScheduleInputsChanged(before, after)) {
     try {
       await syncPaymentReminders(after, new Date(), { obligationsOnly: true });
     } catch {
       // Notification delivery cannot roll back or fail a durable bank capture.
+    }
+  }
+  if (after.dailySummary && before.transactions !== after.transactions) {
+    try {
+      await syncDailySummary(after);
+    } catch {
+      // Independent of payment scheduling: either notification can fail alone.
     }
   }
   if (source === 'push' && outcome.kind === 'imported') {
