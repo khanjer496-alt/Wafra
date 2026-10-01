@@ -516,11 +516,11 @@ export default function ReviewAlertsScreen() {
       <EButton testID="review-step-dismiss" variant="secondary" palette={band} style={!largeText && styles.answer}
         label={reviewIsPurchase(current) ? d.review.notPurchase : t('dismiss')}
         accessibilityHint={`${currentIdentity}. ${t('reviewAlertDismissBody')}`} disabled={currentBusy}
-        onPress={() => { tapped(); setTarget(current); }} />
+        onPress={() => setTarget(current)} />
       <EButton testID="review-alert-open" palette={band} style={!largeText && styles.answer}
         label={informationalCurrent ? t('genericReviewDetails') : d.review.looksRight}
         accessibilityHint={currentIdentity} disabled={currentBusy}
-        onPress={() => { tapped(); openAdd(current); }} />
+        onPress={() => openAdd(current)} />
     </View>
     {!informationalCurrent ? <ThemedText type="meta" style={[styles.answerHint, { color: band.textSecondary }]}>{d.review.looksRightHint}</ThemedText> : null}
     {notices}

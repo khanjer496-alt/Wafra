@@ -911,6 +911,8 @@ export default function AddTransactionScreen() {
           palette={band}
           label={tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
           onPress={onSavePress}
+          // save() gives the commit haptic itself.
+          haptic="none"
           disabled={saving || reviewRouteInvalid}
           testID="add-save"
         />

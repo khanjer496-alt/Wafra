@@ -189,7 +189,7 @@ export default function CategoriseScreen() {
       </View>}
       footer={staged.length > 0 ? (
         <View testID="categorise-save" accessibilityLiveRegion="polite">
-          <EButton palette={band} label={d.categorise.save(staged.length)} onPress={save} />
+          <EButton palette={band} label={d.categorise.save(staged.length)} onPress={save} haptic="none" />
         </View>
       ) : undefined}
       scrollProps={{ showsVerticalScrollIndicator: false }}>

@@ -603,8 +603,8 @@ export default function AssistantScreen() {
         : !hasRecords && currentTurns.length === 0 ? <View style={styles.hero}>
           <ThemedText type="smallBold" style={{ color: band.text }}>{copy.emptyTitle}</ThemedText>
           <ThemedText style={{ color: band.textSecondary }}>{copy.emptyBody}</ThemedText>
-          <EButton palette={band} label={copy.import} onPress={() => { tapped(); router.push('/import-sms'); }} />
-          <EButton palette={band} variant="secondary" label={copy.add} onPress={() => { tapped(); router.push('/add-transaction'); }} />
+          <EButton palette={band} label={copy.import} onPress={() => router.push('/import-sms')} />
+          <EButton palette={band} variant="secondary" label={copy.add} onPress={() => router.push('/add-transaction')} />
         </View> : currentTurns.length === 0 ? <View style={styles.suggestions}>
           {suggestions.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => { tapped(); void ask(item); }}
             style={({ pressed }) => [styles.suggestion, { borderColor: band.rule, backgroundColor: band.card, opacity: pressed ? 0.8 : 1 }]}>
