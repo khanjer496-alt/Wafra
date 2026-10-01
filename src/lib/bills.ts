@@ -1,4 +1,4 @@
-import { monthEndISO, monthKey, monthStartISO, toISODate } from '@/lib/format';
+import { daysBetweenISO, getMonthStartDay, monthEndISO, monthKey, monthStartISO, toISODate } from '@/lib/format';
 import { isSpending } from '@/lib/ledger';
 import type { Bill, Transaction } from '@/lib/types';
 
@@ -89,6 +89,7 @@ let billsForMonthCache: {
   bills: Bill[];
   transactions: Transaction[];
   key: string;
+  monthStartDay: number;
   day: string;
   live?: Set<string>;
   internal?: Set<string>;
@@ -254,6 +255,133 @@ function sameBillProvider(billTitle: string, transactionTitle: string): boolean 
   return [...payeeTokens(x)].some((token) => tokens.has(token));
 }
 
+/** Single-service descriptors, not marketplaces such as Apple or Amazon. */
+const DIRECT_SUBSCRIPTIONS = new Set([
+  'chatgpt', 'claude', 'google one', 'netflix', 'spotify', 'alldebrid', 'real debrid',
+  'disney', 'disney plus', 'youtube premium', 'anghami', 'shahid', 'osn', 'starzplay',
+  'deezer', 'audible', 'dropbox', 'canva', 'microsoft 365', 'office 365',
+]);
+
+type RenewalCycle = { dueISO: string; ordinal: number; rows: Transaction[]; confirmed: boolean };
+type RenewalHistory = Map<number, RenewalCycle>;
+let renewalHistoryCache: {
+  bills: Bill[]; transactions: Transaction[]; live?: Set<string>; internal?: Set<string>;
+  value: Map<Bill, RenewalHistory>; monthStartDay: number;
+} | undefined;
+
+function renewalOrdinal(bill: Bill, date: string): number {
+  const year = Number(date.slice(0, 4));
+  return bill.yearlyOnISO ? year : year * 12 + Number(date.slice(5, 7)) - 1;
+}
+
+function renewalAnchor(bill: Bill, ordinal: number): string {
+  const year = bill.yearlyOnISO ? ordinal : Math.floor(ordinal / 12);
+  const month = bill.yearlyOnISO ? Number(bill.yearlyOnISO.slice(5, 7)) - 1 : ordinal % 12;
+  const day = Math.min(bill.dueDay, new Date(Date.UTC(year, month + 1, 0)).getUTCDate());
+  return new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
+}
+
+const nearAmount = (amount: number, baseline: number): boolean =>
+  baseline > 0 && amount >= baseline * 0.85 && amount <= baseline * 1.15;
+const serviceIdentity = (identity?: string): string | undefined | null => identity === undefined
+  ? undefined : /^(?:account|consumer|party|customer|contract|service):[a-z0-9]{4}$/i.test(identity)
+    ? identity.toLowerCase() : null;
+const timelyRenewal = (bill: Bill, row: Transaction, dueISO: string): boolean =>
+  (row.source === 'manual' && row.billPayment?.billId === bill.id &&
+    row.billPayment.month === monthKey(dueISO) && bill.paidMonths.includes(row.billPayment.month)) ||
+  Math.abs(daysBetweenISO(row.date, dueISO)) <= 5;
+
+/**
+ * A saved recurring estimate has more evidence than an arbitrary manual bill.
+ * Two consecutive, single-charge cycles at its saved price establish a renewal
+ * run. Subsequent single charges near that calendar anchor can change price.
+ * Gaps, off-anchor extras and ambiguous services interrupt that evidence.
+ *
+ * Each raw charge belongs to ONE nearest calendar anchor, even when it posts
+ * across a reporting-month boundary. Do not also offer it to the legacy
+ * same-month matcher: September 30 must not settle both September and October.
+ * Scan targeted histories once per immutable ledger snapshot, not once per
+ * forecast month or once per bill on a large imported ledger.
+ */
+function renewalHistories(
+  bills: Bill[], transactions: Transaction[], live?: Set<string>, internal?: Set<string>,
+): Map<Bill, RenewalHistory> {
+  if (renewalHistoryCache?.bills === bills && renewalHistoryCache.transactions === transactions &&
+      renewalHistoryCache.live === live && renewalHistoryCache.internal === internal &&
+      renewalHistoryCache.monthStartDay === getMonthStartDay()) {
+    return renewalHistoryCache.value;
+  }
+  const value = new Map<Bill, RenewalHistory>();
+  const byTitle = new Map<string, Bill[]>();
+  for (const bill of bills) {
+    if (!bill.autoDetected || bill.statedDueDate || serviceIdentity(bill.importIdentity) === null ||
+        !DIRECT_SUBSCRIPTIONS.has(normalize(bill.title))) continue;
+    // Legacy matching compares masked tails, even across identity kinds.
+    // Unknown/malformed identities or equal tails therefore remain competing
+    // claims; only distinct valid tails are disjoint from that matcher.
+    if (bills.some(other => other !== bill && sameBillProvider(other.title, bill.title) &&
+        (!billIdentityTail(other.importIdentity) || !billIdentityTail(bill.importIdentity) ||
+          billIdentityTail(other.importIdentity) === billIdentityTail(bill.importIdentity)))) continue;
+    value.set(bill, new Map());
+    const title = normalize(bill.title);
+    byTitle.set(title, [...(byTitle.get(title) ?? []), bill]);
+  }
+  if (value.size) for (const transaction of transactions) {
+    const targets = byTitle.get(normalize(transaction.title));
+    if (!targets || !isSpending(transaction, live, internal) || transaction.amountFils <= 0) continue;
+    for (const bill of targets) {
+      // Unknown identity cannot stand in for an explicitly identified service.
+      if (serviceIdentity(transaction.billIdentity) === null ||
+          serviceIdentity(bill.importIdentity) !== serviceIdentity(transaction.billIdentity)) continue;
+      if (transaction.billPayment) {
+        const claim = transaction.billPayment;
+        if (transaction.source !== 'manual' || claim.billId !== bill.id || !bill.paidMonths.includes(claim.month)) continue;
+        const dueISO = bill.yearlyOnISO ? yearlyDueInMonth(claim.month, bill.yearlyOnISO)
+          : dueDateInMonth(claim.month, bill.dueDay);
+        if (!dueISO) continue;
+        const ordinal = renewalOrdinal(bill, dueISO);
+        const history = value.get(bill)!;
+        const cycle = history.get(ordinal) ?? { dueISO, ordinal, rows: [], confirmed: false };
+        cycle.rows.push(transaction);
+        history.set(ordinal, cycle);
+        continue;
+      }
+      const ordinal = renewalOrdinal(bill, transaction.date);
+      const anchors = [ordinal - 1, ordinal, ordinal + 1].map(index => ({
+        ordinal: index, dueISO: renewalAnchor(bill, index),
+      }));
+      const distance = (anchor: { dueISO: string }) => Math.abs(daysBetweenISO(transaction.date, anchor.dueISO));
+      const minimum = Math.min(...anchors.map(distance));
+      // A midpoint is ambiguous evidence for both adjacent cycles.
+      for (const anchor of anchors.filter(candidate => distance(candidate) === minimum)) {
+        const history = value.get(bill)!;
+        const cycle = history.get(anchor.ordinal) ?? { ...anchor, rows: [], confirmed: false };
+        cycle.rows.push(transaction);
+        history.set(anchor.ordinal, cycle);
+      }
+    }
+  }
+  for (const [bill, history] of value) {
+    let previous: RenewalCycle | undefined;
+    for (const cycle of [...history.values()].sort((a, b) => a.ordinal - b.ordinal)) {
+      const row = cycle.rows.length === 1 ? cycle.rows[0] : undefined;
+      const prior = previous?.rows.length === 1 ? previous.rows[0] : undefined;
+      const timely = row && timelyRenewal(bill, row, cycle.dueISO);
+      const consecutive = previous && previous.ordinal + 1 === cycle.ordinal && prior &&
+        timelyRenewal(bill, prior, previous.dueISO);
+      if (timely && consecutive && previous) {
+        const baseline = nearAmount(row.amountFils, bill.amountFils) &&
+          nearAmount(prior.amountFils, bill.amountFils) && nearAmount(row.amountFils, prior.amountFils);
+        cycle.confirmed = Boolean(previous.confirmed || baseline);
+        if (baseline) previous.confirmed = true;
+      }
+      previous = cycle;
+    }
+  }
+  renewalHistoryCache = { bills, transactions, live, internal, value, monthStartDay: getMonthStartDay() };
+  return value;
+}
+
 /**
  * Transactions that could be this bill's payment: same month, amount within
  * ±15% for manual estimates, and a title that either CONTAINS the bill's (or is contained by it) or
@@ -357,6 +485,7 @@ export function billsForMonth(
       billsForMonthCache.bills === bills &&
       billsForMonthCache.transactions === transactions &&
       billsForMonthCache.key === key &&
+      billsForMonthCache.monthStartDay === getMonthStartDay() &&
       billsForMonthCache.day === todayISO &&
       billsForMonthCache.live === live &&
       billsForMonthCache.internal === internal) {
@@ -396,7 +525,16 @@ export function billsForMonth(
    * bill that says paid while the money is still owed.
    */
   const monthRows = spendingInMonth(transactions, key, live, internal);
-  const candidates = scheduled.map(({ bill }) => candidatePayments(bill, monthRows, key, live, internal));
+  const histories = renewalHistories(bills, transactions, live, internal);
+  const candidates = scheduled.map(({ bill, dueISO }) => {
+    const history = histories.get(bill);
+    if (!history) return candidatePayments(bill, monthRows, key, live, internal);
+    const cycle = history.get(renewalOrdinal(bill, dueISO));
+    if (!cycle || cycle.rows.length !== 1) return [];
+    const row = cycle.rows[0];
+    if (!timelyRenewal(bill, row, dueISO)) return [];
+    return cycle.confirmed || nearAmount(row.amountFils, bill.amountFils) ? [row] : [];
+  });
   const explicitlyClaimed = new Set<string>();
   candidates.forEach((rows, index) => {
     for (const transaction of rows) {
@@ -435,11 +573,18 @@ export function billsForMonth(
     else if (daysLeft < 0) status = 'overdue';
     else if (daysLeft <= 5) status = 'due-soon';
     else status = 'upcoming';
-    return { bill, status, daysLeft, dueISO, autoReconciled };
+    const history = histories.get(bill);
+    const ordinal = renewalOrdinal(bill, dueISO);
+    const current = history?.get(ordinal);
+    const prior = history?.get(ordinal - 1);
+    const evidence = current?.confirmed ? current : !current && prior?.confirmed ? prior : undefined;
+    const projectedBill = evidence ? { ...bill, amountFils: evidence.rows[0].amountFils } : bill;
+    return { bill: projectedBill, status, daysLeft, dueISO, autoReconciled };
   });
 
   const rank: Record<BillStatus, number> = { overdue: 0, 'due-soon': 1, upcoming: 2, paid: 3 };
   rows.sort((a, b) => rank[a.status] - rank[b.status] || a.daysLeft - b.daysLeft);
-  billsForMonthCache = { bills, transactions, key, day: todayISO, live, internal, value: rows };
+  billsForMonthCache = { bills, transactions, key, day: todayISO, live, internal, value: rows,
+    monthStartDay: getMonthStartDay() };
   return rows.slice();
 }

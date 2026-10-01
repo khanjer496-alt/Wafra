@@ -624,7 +624,7 @@ export default function BillsScreen() {
   /**
    * The reminder a subscription becomes.
    *
-   * `sub.avgAmountFils` is the RAW charge and `Bill` was monthly-only, so an
+   * `sub.lastAmountFils` is the latest RAW charge and `Bill` was monthly-only, so an
    * Amazon Prime renewal of AED 310 a YEAR was filed as AED 310 a MONTH and
    * restated at twelve times the money in the Reminders list and in every
    * notification derived from it. `yearlyOnISO` is what confines it to the one
@@ -634,7 +634,7 @@ export default function BillsScreen() {
     title: sub.title,
     ...(sub.billIdentity ? { importIdentity: sub.billIdentity } : {}),
     category: sub.category,
-    amountFils: sub.avgAmountFils,
+    amountFils: sub.lastAmountFils,
     dueDay: Number(sub.nextExpectedISO.slice(8)),
     yearlyOnISO: sub.cadence === 'yearly' ? sub.nextExpectedISO : undefined,
     autoDetected: true,
@@ -670,8 +670,10 @@ export default function BillsScreen() {
   };
 
   const onPay = (billId: string, dueISO: string) => {
-    const bill = state.bills.find((b) => b.id === billId);
-    if (!bill) return;
+    const occurrence = billForAgendaOccurrence(state.bills, state.transactions,
+      { id: billId, dueISO }, now, liveAccounts, internal);
+    if (!occurrence || occurrence.status === 'paid') return;
+    const bill = occurrence.bill;
     // `state.accounts[0]` is the raw, UNFILTERED list, so index 0 can be an
     // archived account — and an expense booked there is excluded by
     // `liveAccountIds`/`isSpending`, so an AED 450 DEWA bill flipped to "Paid"
