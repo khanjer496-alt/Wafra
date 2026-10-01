@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useDeferredValue, useMemo, useState } from 'react';
 import { Keyboard, Platform, Pressable, SectionList, StyleSheet, View } from 'react-native';
 

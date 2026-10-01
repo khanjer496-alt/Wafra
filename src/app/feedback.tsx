@@ -24,7 +24,8 @@
  */
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import Constants from 'expo-constants';
-import { useRouter, type Href } from 'expo-router';
+import { type Href } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useMemo, useState } from 'react';
 import {
   Platform,

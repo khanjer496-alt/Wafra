@@ -1,6 +1,6 @@
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import { useLanguage } from '@/hooks/use-language';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 

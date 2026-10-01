@@ -19,7 +19,8 @@
  *  - `sessionSetupRan` — entitlement refresh and reminder sync happen once per
  *    launch, not once per screen that mounts.
  */
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState as RNAppState, Platform } from 'react-native';
 

@@ -14,7 +14,7 @@
  * flight the sheet cannot be dismissed or left, so the store's answer is
  * always shown and no second checkout can start beside it.
  */
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 

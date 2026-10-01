@@ -1,5 +1,5 @@
 import { workflowCopy } from '@/components/workflows/workflow-copy';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { FlatList, Pressable, StyleSheet, View, type ScrollView } from 'react-native';
 

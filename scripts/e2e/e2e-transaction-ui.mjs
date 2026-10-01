@@ -10,6 +10,17 @@ const results = [];
 const browser = await chromium.launch();
 async function exposed(locator, page) {
   assert.equal(await locator.count(), 1, 'Expected exactly one action');
+  // Modal content is attached before its opening transform reaches the viewport.
+  // Wait without scrolling it: an off-screen or covered footer must still fail.
+  const element = await locator.elementHandle();
+  try {
+    await page.waitForFunction(node => {
+      const r = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return r.width > 0 && r.height > 0 && r.top >= -1 && r.bottom <= innerHeight + 1 &&
+        !!hit && (node === hit || node.contains(hit));
+    }, element, { timeout: 10000 });
+  } finally { await element.dispose(); }
   const geometry = await locator.evaluate(node => {
     const r = node.getBoundingClientRect(), p = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
     return { x:r.x, y:r.y, right:r.right, bottom:r.bottom, width:r.width, height:r.height, hit:!!p && (p === node || node.contains(p)) };

@@ -18,10 +18,10 @@ const ok = (name, cond) => {
 
 // The router keeps hidden screens mounted, so hit-test: only return an element
 // that is actually on top at its own centre point.
-async function visibleText(page, text, timeout = 8000) {
+async function visibleText(page, text, timeout = 8000, scope = page) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    const els = await page.getByText(text).all();
+    const els = await scope.getByText(text).all();
     for (const el of els) {
       // Bring it on screen first. This helper used to test only what already
       // happened to be in the viewport, so any section that moved below the
@@ -374,7 +374,7 @@ await tapText(page,'Categories',700);
 await tapLabel(page,/^Transport\. AED /,800);
 await tapText(page,'Edit monthly limit',800);
 ok('Category limit editor remains reachable',!!(await visibleText(page,/MONTHLY LIMIT/i)));
-ok('Limit editor preserves its merchant detail',!!(await visibleText(page,/WHERE IT WENT/i)));
+ok('Limit editor preserves its merchant detail',!!(await visibleText(page,/WHERE IT WENT/i,8000,page.getByTestId('limit-sheet'))));
 // Opening the limit editor already closes the category detail sheet.
 await tapLabel(page,'Close',500);
 

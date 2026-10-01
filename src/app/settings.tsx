@@ -19,7 +19,8 @@
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import * as LocalAuthentication from 'expo-local-authentication';
 
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,

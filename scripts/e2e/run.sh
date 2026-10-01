@@ -61,6 +61,7 @@ node scripts/e2e/e2e-large-ledger.mjs
 node scripts/e2e/e2e-persist.mjs
 node scripts/e2e/e2e-backup-restore.mjs
 node scripts/e2e/e2e-navigation.mjs
+node scripts/e2e/e2e-repeat-navigation.mjs
 
 node scripts/e2e/e2e-universal-review.mjs
 node scripts/e2e/e2e-transfer-review.mjs

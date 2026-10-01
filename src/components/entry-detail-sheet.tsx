@@ -1,6 +1,6 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React, { useEffect, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
