@@ -1,5 +1,5 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';

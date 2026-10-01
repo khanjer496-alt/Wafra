@@ -2,7 +2,8 @@ import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 /** Spending owns categories, their limits, transactions and the former Stats insights. */
 import React, { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import { CaptureRefreshControl } from '@/components/capture-refresh-control';
 import { ThemedText } from '@/components/themed-text';
 import { TransactionRow } from '@/components/transaction-row';

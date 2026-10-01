@@ -2,7 +2,8 @@
  * Money overview, capture status and recent activity.
  * Detailed spending insights live on Flow; upcoming payments remain actionable below.
  */
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import { useIsFocused } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';

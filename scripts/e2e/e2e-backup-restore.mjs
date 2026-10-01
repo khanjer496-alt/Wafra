@@ -93,11 +93,20 @@ try {
       assert.ok(original.data.accounts.length > 0);
       // Alter a disposable fixture after export so a no-op restore cannot pass.
       const changed = 'Changed after backup';
+      // Unmount the app before editing its stored fixture: a pending store save
+      // in the live document can otherwise overwrite our deliberately changed
+      // state between localStorage.setItem and the next navigation.
+      const fixtureUrl = BASE + '/__backup-fixture__';
+      await page.route(fixtureUrl, route => route.fulfill({
+        status: 200, contentType: 'text/html', body: '<!doctype html><title>Backup fixture</title>',
+      }));
+      await page.goto(fixtureUrl);
       await page.evaluate(({ key, changed }) => {
         const state = JSON.parse(localStorage.getItem(key));
         state.userName = changed;
         localStorage.setItem(key, JSON.stringify(state));
       }, { key: STATE, changed });
+      await page.unroute(fixtureUrl);
       await dataScreen(page);
       assert.equal((await backup(page, path.join(OUT, `${theme}-changed.json`))).data.userName, changed);
       await choose(page, file);

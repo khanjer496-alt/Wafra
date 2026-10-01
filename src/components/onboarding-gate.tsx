@@ -4,7 +4,8 @@ import { clearIosStatementHandoff, matchesIosStatementHandoff } from '@/lib/ios-
 import * as Crypto from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
 import { getLocales } from 'expo-localization';
-import { useGlobalSearchParams, usePathname, useRouter } from 'expo-router';
+import { useGlobalSearchParams, usePathname } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {

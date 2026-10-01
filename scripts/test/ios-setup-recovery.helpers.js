@@ -129,6 +129,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
       'react-native': platform,
       'expo-router': { Stack: { Screen: 'StackScreen' }, useRouter: () => router, useLocalSearchParams: () => params },
+      '@/hooks/use-app-router': { useRouter: () => router },
       'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
       '@/components/ios-message-setup/checklist-row': { ChecklistRow: 'ChecklistRow' },
       '@/components/ios-message-setup/details-sheet': { DetailsSheet: 'DetailsSheet' },

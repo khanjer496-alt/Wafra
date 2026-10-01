@@ -15,7 +15,7 @@
  * Design language E: a plain sand screen — "Page not found", one line, one
  * button back to Home. No stamp, no mono eyebrow, no illustration.
  */
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';

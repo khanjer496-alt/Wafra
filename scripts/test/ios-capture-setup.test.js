@@ -3434,7 +3434,7 @@ struct WafraBankSenderRegistryTests {
   {
     const hookModule = execute('src/hooks/use-auto-import.ts', (id) => {
       if (id === 'react') return require('react');
-      if (id === 'expo-router') {
+      if (id === 'expo-router' || id === '@/hooks/use-app-router') {
         return {
           useFocusEffect: () => {},
           useRouter: () => ({ push: () => {} }),
@@ -4101,7 +4101,7 @@ struct WafraBankSenderRegistryTests {
       };
       const mountedHookModule = execute('src/hooks/use-auto-import.ts', (id) => {
         if (id === 'react') return runtime.react;
-        if (id === 'expo-router') {
+        if (id === 'expo-router' || id === '@/hooks/use-app-router') {
           return {
             useFocusEffect: (effect) => {
               focusEnter = effect;
@@ -4338,7 +4338,7 @@ struct WafraBankSenderRegistryTests {
       };
       const mountedAndroidHook = execute('src/hooks/use-auto-import.ts', (id) => {
         if (id === 'react') return runtime.react;
-        if (id === 'expo-router') {
+        if (id === 'expo-router' || id === '@/hooks/use-app-router') {
           return {
             useFocusEffect: (effect) => runtime.react.useEffect(effect, [effect]),
             useRouter: () => ({ push: () => {} }),

@@ -1,6 +1,6 @@
 import { useIsFocused } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useEffect, useRef } from 'react';
 import {
   KeyboardAvoidingView,

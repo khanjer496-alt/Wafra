@@ -2,7 +2,7 @@ import { HistoryReadingStatus } from '@/components/history-reading-status';
 import { MoneyPictureProgress } from '@/components/money-picture-progress';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import { useIsFocused } from '@react-navigation/native';
 
 import { ThemedText } from '@/components/themed-text';

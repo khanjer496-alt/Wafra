@@ -1,5 +1,5 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useMemo, useState } from 'react';
 import { Share, StyleSheet, View } from 'react-native';
 

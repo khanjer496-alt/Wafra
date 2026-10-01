@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 
 import { RecapStory } from '@/components/recap/recap-story';
 import { ledgerMoneySpec } from '@/lib/ledger-money';

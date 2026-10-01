@@ -14,7 +14,8 @@
  */
 import { workflowCopy } from '@/components/workflows/workflow-copy';
 import * as Device from 'expo-device';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Platform,
