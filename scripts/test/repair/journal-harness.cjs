@@ -116,6 +116,8 @@ function harness(options = {}) {
   dependencies['@react-native-async-storage/async-storage'] = { getItem: async () => null, setItem: async () => {} };
   dependencies['@/lib/home-widget-preferences'] = load(path.join(root, 'src/lib/home-widget-preferences.ts'));
   dependencies['@/lib/home-widgets'] = load(path.join(root, 'src/lib/home-widgets.ts'), dependencies);
+  // Covered by home-goal-order-repair.test.cjs; Home's own tests need no storage repair.
+  dependencies['@/lib/home-goal-order-repair'] = { repairGoalOrderedHomeOnce: async () => {} };
   dependencies['@/lib/home-today'] = load(path.join(root, 'src/lib/home-today.ts'), dependencies);
   dependencies['@/lib/transaction-source'] = load(path.join(root, 'src/lib/transaction-source.ts'), dependencies);
   dependencies['@/lib/transactions-copy'] = load(path.join(root, 'src/lib/transactions-copy.ts'), dependencies);

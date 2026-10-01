@@ -153,6 +153,8 @@ function createHarness(options = {}) {
   deps['@/components/ui/grow-bar']={GrowBar:p=>jsx('View',{style:[p.style,p.axis==='width'?{width:`${p.size}%`}:{height:p.size}]})};
   local('@/lib/account-freshness','src/lib/account-freshness.ts');
   local('@/lib/home-widgets','src/lib/home-widgets.ts');
+  // Covered by home-goal-order-repair.test.cjs; Home's own tests need no storage repair.
+  deps['@/lib/home-goal-order-repair']={repairGoalOrderedHomeOnce:async()=>{}};
   local('@/lib/reference-copy','src/lib/reference-copy.ts');
   local('@/lib/currency-metadata','src/lib/currency-metadata.ts');
   local('@/lib/ledger-money','src/lib/ledger-money.ts');

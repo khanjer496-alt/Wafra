@@ -363,3 +363,52 @@ test('the paywall sells through the real billing layer and never writes a price'
   // An entitled person never sees it.
   assert.match(read('src/components/onboarding-gate.tsx'), /const showPaywall = previewMode \|\| !entitled/);
 });
+
+/* ── repair for Homes saved by the earlier Goals step ─────────────────── */
+
+// The earlier step: promoted sections in front of whatever was saved before.
+const earlierGoals = (goals, current) => {
+  const base = JSON.parse(JSON.stringify(prefs.normalizeHomeWidgetPreferences(current)));
+  const promotedIds = [];
+  for (const goal of e.GOAL_HOME_PRECEDENCE) if (goals.includes(goal)) for (const id of e.GOAL_HOME_SECTIONS[goal]) if (!promotedIds.includes(id)) promotedIds.push(id);
+  return { order: [...promotedIds, ...base.order.filter((id) => !promotedIds.includes(id))], hidden: base.hidden };
+};
+const shown = (layout) => JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(layout)));
+
+test('a Home saved by the earlier goal-first Goals step gets its band back', () => {
+  const cases = [['bills'], ['subscriptions'], ['spend-less'], ['salary'], ['cash-cards'], ['salary', 'bills'], ['bills', 'spend-less', 'cash-cards']];
+  for (const goals of cases) {
+    const saved = earlierGoals(goals, { order: [...DEFAULT], hidden: ['assistant'] });
+    assert.deepEqual(shown(saved).band, [], `${goals.join()}: the earlier step emptied the band`);
+    const repaired = e.repairGoalOrderedHome(saved);
+    assert.deepEqual(repaired, e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: ['assistant'] }), `${goals.join()}: same as today's Goals step`);
+    assert.deepEqual(shown(repaired).band, TOP);
+    assert.equal(e.repairGoalOrderedHome(repaired), null, 'a repaired Home is left alone');
+  }
+});
+
+test('going Back and choosing again stacked the runs; the repair still restores the band', () => {
+  const once = earlierGoals(['bills'], { order: [...DEFAULT], hidden: [] });
+  for (const second of [['salary'], ['bills', 'salary'], ['subscriptions']]) {
+    const twice = earlierGoals(second, once);
+    const repaired = e.repairGoalOrderedHome(twice);
+    assert.deepEqual(shown(repaired).band, TOP, second.join());
+    assert.deepEqual(repaired.order.slice(TOP.length, twice.order.indexOf('greeting') + TOP.length),
+      twice.order.slice(0, twice.order.indexOf('greeting')), 'the goal sections keep their order under the band');
+    assert.deepEqual([...repaired.order].sort(), [...EXPANDED_DEFAULT].sort());
+  }
+});
+
+test('the repair leaves every other layout alone', () => {
+  const rest = ['assistant', 'insight', 'activity', 'capture'];
+  // A non-goal section first, or something other than the band after the goal run.
+  assert.equal(e.repairGoalOrderedHome({ order: ['assistant', ...TOP, 'due', 'upcoming', 'insight', 'activity', 'capture'], hidden: [] }), null);
+  assert.equal(e.repairGoalOrderedHome({ order: ['due', 'assistant', ...TOP, 'upcoming', 'insight', 'activity', 'capture'], hidden: [] }), null);
+  assert.equal(e.repairGoalOrderedHome({ order: ['due', 'upcoming', 'capture', ...TOP, ...rest.slice(0, 3)], hidden: [] }), null);
+  // Today's default and today's Goals output.
+  assert.equal(e.repairGoalOrderedHome({ order: [...EXPANDED_DEFAULT], hidden: [] }), null);
+  assert.equal(e.repairGoalOrderedHome(e.homeOrderForGoals(['bills'], { order: [...DEFAULT], hidden: [] })), null);
+  // Accepted: a Customize Home layout with only goal sections above the band
+  // is indistinguishable from the earlier step's output and is repaired once.
+  assert.deepEqual(shown(e.repairGoalOrderedHome({ order: ['insight', ...TOP, 'due', 'upcoming', 'assistant', 'activity', 'capture'], hidden: [] })).band, TOP);
+});
