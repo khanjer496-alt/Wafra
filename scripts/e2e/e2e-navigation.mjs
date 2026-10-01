@@ -235,6 +235,8 @@ const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark', reducedMotion: 'reduce' });
+// Keep the seeded merchant/category coverage stable at the start of a real month.
+await page.clock.setFixedTime(new Date('2026-09-27T08:00:00Z'));
 await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
 /**
  * Text whose box extends past the right edge of the viewport.
