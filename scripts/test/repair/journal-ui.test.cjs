@@ -11,19 +11,20 @@ const periodMinor = (nodes) => {
   return Math.round(Number(match[1].replace(/,/g,''))*100);
 };
 
-test('Home draws the week on its band, then one selected-period summary, then activity', () => {
+test('Home draws one selected-period month line on its band, then the week, then activity', () => {
   const h = harness();
   const nodes = walk(h.tree);
   const section = (id) => nodes.findIndex((node) => node.props.testID === id);
   for (const id of ['journal-summary', 'home-widget-activity', 'journal-import-controls']) {
     assert.notEqual(section(id), -1, `${id} is rendered`);
   }
-  // Design language E: the band holds the greeting, the Today tiles and the
-  // week; the period summary leads the sheet beneath it.
-  assert.ok(section('home-week') < section('journal-summary') && section('journal-summary') < section('home-widget-activity'));
+  // Home v2: the band holds the greeting, the Today tiles, the month line
+  // (Spent · In · Net for the selected period) and the week.
+  assert.ok(section('journal-summary') < section('home-week') && section('home-week') < section('home-widget-activity'));
   assert.ok(section('home-widget-activity') < section('journal-import-controls'));
   assert.equal(periodMinor(nodes), 508700);
-  assert.match(text(h.tree), /View spending breakdown/);
+  // The Spent figure is the button into the breakdown, and says so.
+  assert.match(nodes.find((node) => node.props.testID === 'home-spending-total').props.accessibilityLabel, /View spending breakdown/);
   assert.match(text(nodes.find((node) => node.props.testID === 'home-widget-activity')), /Recent transactions/);
 });
 test('settings and explicit manual entry remain working visible quick actions', () => {
@@ -78,7 +79,7 @@ test('Founder logo unlock exists only in founder-enabled internal builds', async
 test('activity search and full bills remain reachable without duplicate Accounts shortcuts', () => {
   const h = harness();
   for (const node of walk(h.tree)) {
-    if (node.type === 'Pressable' && (text(node.props.children).trim() === 'See all' || node.props.accessibilityLabel === 'View all payments')) node.props.onPress();
+    if (node.type === 'Pressable' && (text(node.props.children).trim() === 'See all' || String(node.props.accessibilityLabel).startsWith('View all payments'))) node.props.onPress();
   }
   assert.ok(h.events.some((e) => e[1] === '/transactions'));
   assert.ok(h.events.some((e) => e[1] === '/bills'));

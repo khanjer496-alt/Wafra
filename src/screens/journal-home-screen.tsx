@@ -3,6 +3,7 @@ import { MoneyPictureProgress } from '@/components/money-picture-progress';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from '@/hooks/use-app-router';
+import { Fonts } from '@/constants/theme';
 import { useIsFocused } from '@react-navigation/native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -35,7 +36,7 @@ import type { Insight } from '@/lib/insights';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
-import { monthEndISO, monthKey, monthStartISO } from '@/lib/format';
+import { friendlyDate, monthEndISO, monthKey, monthStartISO } from '@/lib/format';
 import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
@@ -76,14 +77,27 @@ const copy = {
     import: 'Bank alerts', paused: 'History import paused', resume: 'Resume',
     more: 'View all payments', accounts: 'Your accounts',
     income: 'Money in', spent: 'Spent', netNote: 'Income minus spending · not your bank balance',
-    progress: 'Reading history', attention: 'Needs your attention' },
+    progress: 'Reading history', attention: 'Needs your attention',
+    dueTotal: (count: number, total: string) => `${count} ${count === 1 ? 'payment' : 'payments'}, ${total}` },
   ar: { journal: 'أموالك بوضوح', month: 'هذه الفترة', activity: 'حركتك المالية',
     add: 'إضافة حركة', breakdown: 'عرض الإنفاق', upcoming: 'الدفعات القادمة',
     import: 'تنبيهات البنك', paused: 'استيراد السجل متوقف مؤقتاً', resume: 'متابعة',
     more: 'عرض كل الدفعات', accounts: 'حساباتك',
     income: 'الدخل', spent: 'الإنفاق', netNote: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
-    progress: 'قراءة السجل', attention: 'يحتاج إلى انتباهك' },
+    progress: 'قراءة السجل', attention: 'يحتاج إلى انتباهك',
+    dueTotal: (count: number, total: string) => `${count === 1 ? 'دفعة واحدة' : count === 2 ? 'دفعتان' : `${count} دفعات`}، ${total}` },
 } as const;
+
+/** Recent rows grouped by their date, newest first, in display order. */
+function activityDays(rows: readonly Transaction[]): { date: string; rows: Transaction[] }[] {
+  const days: { date: string; rows: Transaction[] }[] = [];
+  for (const row of rows) {
+    const last = days.at(-1);
+    if (last && last.date === row.date) last.rows.push(row);
+    else days.push({ date: row.date, rows: [row] });
+  }
+  return days;
+}
 
 const sameHomeWidgets = (a: HomeWidgetPreferences, b: HomeWidgetPreferences): boolean =>
   a === b || JSON.stringify(a) === JSON.stringify(b);
@@ -640,36 +654,44 @@ export default function JournalHomeScreen() {
     if (id === 'assistant') return <Pressable key={id} testID="home-widget-assistant" accessibilityRole="button"
       accessibilityLabel={t('homeWidgetAssistantTitle')} accessibilityHint={t('homeWidgetAssistantDetail')}
       onPress={() => router.push('/assistant')}
-      style={({ pressed }) => [styles.assistantCard, largeText && styles.utilityStacked, { backgroundColor: band.card, opacity: pressed ? 0.75 : 1 }]}>
-      <View style={[styles.utilityGlyph, { backgroundColor: band.glyphGround }]}><Icon name="spark" size={22} color={band.text} /></View>
+      style={({ pressed }) => [styles.utilityRow, { borderColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
+      <View style={[styles.rowGlyph, { backgroundColor: band.glyphGround }]}><Icon name="spark" size={18} color={band.text} /></View>
       <View style={[styles.grow, styles.utilityCopy]}>
-        <ThemedText type="smallBold" style={styles.utilityTitle}>{t('homeWidgetAssistantTitle')}</ThemedText>
+        <ThemedText type="smallBold">{t('homeWidgetAssistantTitle')}</ThemedText>
         <ThemedText type="meta" style={{ color: band.textSecondary }}>{t('homeWidgetAssistantDetail')}</ThemedText>
       </View>
-      <Icon name="chevron-right" size={18} color={theme.textSecondary} />
+      <Icon name="chevron-right" size={18} color={band.textSecondary} />
     </Pressable>;
     if (id === 'insight') {
       const insight = homeInsight?.scope === `${language}:${JSON.stringify(period)}` ? homeInsight : null;
       return insight ? <Pressable key={id} testID="home-widget-insight" accessibilityRole={insight.href ? 'button' : 'text'}
         disabled={!insight.href} accessibilityLabel={`${t('homeWidgetInsightTitle')}. ${insight.title}. ${insight.body}`}
         onPress={() => insight.href && router.push(insight.href as never)}
-        style={({ pressed }) => [styles.widgetCard, { backgroundColor: band.card, opacity: pressed ? 0.8 : 1 }]}>
-        <View style={styles.insightHeading}>
-          <View style={[styles.utilityGlyph, { backgroundColor: band.glyphGround }]}><Icon name={insight.icon ?? 'chart'} size={22} color={band.text} /></View>
-          <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>{t('homeWidgetInsightTitle')} · {periodLabel(period)}</ThemedText>
-          {insight.href ? <Icon name="arrow-up-right" size={20} color={band.text} /> : null}
+        style={({ pressed }) => [styles.utilityRow, { borderColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
+        {/* One factual line, not a card: the observation and its figure. */}
+        <View style={[styles.rowGlyph, { backgroundColor: band.glyphGround }]}><Icon name={insight.icon ?? 'chart'} size={18} color={band.text} /></View>
+        <View style={[styles.grow, styles.utilityCopy]}>
+          <ThemedText type="smallBold">{insight.title}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{insight.body}</ThemedText>
         </View>
-        <ThemedText type="heading" style={styles.insightTitle}>{insight.title}</ThemedText>
-        <ThemedText type="small" style={{ color: band.textSecondary }}>{insight.body}</ThemedText>
+        {insight.href ? <Icon name="chevron-right" size={18} color={band.textSecondary} /> : null}
       </Pressable> : null;
     }
     if (id === 'due' || id === 'upcoming') {
       const due = payments.filter(item => id === 'due' ? (item.overdue || item.urgent) : (!item.overdue && !item.urgent));
       if (due.length === 0) return null;
+      // The heading totals every payment in this group, ≈ when any is an
+      // estimate (bills and subscriptions; card dues are exact).
+      const dueTotal = due.reduce((sum, item) => sum + item.amountFils, 0);
+      const dueEstimated = due.some(item => item.kind !== 'card');
+      const dueTotalText = `${dueEstimated ? '≈ ' : ''}${formatMoneyText(dueTotal, moneySpec, { decimals: true })}`;
       return <View key={id} style={styles.section} testID={`home-widget-${id}`}>
-        <View style={styles.sectionHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{id === 'due' ? t('homeWidgetDueTitle') : words.upcoming}</ThemedText>
-          <Pressable onPress={() => router.push('/bills')} accessibilityRole="button" accessibilityLabel={words.more} style={styles.smallAction}><Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
-        <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{due.slice(0, 2).map(item => <Pressable key={item.id} accessibilityRole="button"
+        <View style={styles.sectionHeading}><ThemedText type="smallBold" style={[styles.sectionTitle, styles.grow]}>{id === 'due' ? t('homeWidgetDueTitle') : words.upcoming}</ThemedText>
+          <Pressable testID={`home-widget-${id}-total`} onPress={() => router.push('/bills')} accessibilityRole="button"
+            accessibilityLabel={`${words.more}. ${words.dueTotal(due.length, dueTotalText)}`} style={styles.smallAction}>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{dueTotalText}</ThemedText>
+            <Icon name="chevron-right" size={18} color={theme.text} /></Pressable></View>
+        <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{due.slice(0, 3).map(item => <Pressable key={item.id} accessibilityRole="button"
           accessibilityLabel={`${item.displayLabel ?? item.title}. ${daysPhrase(item.daysLeft)}. ${item.kind !== 'card' ? `${paymentWords.estimate} ` : ''}${formatMoneyText(item.amountFils, moneySpec, { decimals: true })}`}
           onPress={() => openPayment(item)} style={[styles.paymentRow, { borderBottomColor: theme.cardBorder }]}>
           {/* Every payee row keeps its logo tile; the category glyph is only the fallback. */}
@@ -686,14 +708,26 @@ export default function JournalHomeScreen() {
       <View style={styles.sectionHeading}><View style={styles.activityHeading}><ThemedText type="smallBold" style={styles.sectionTitle}>{words.activity}</ThemedText>
         <ThemedText testID="home-activity-period" type="meta" style={{ color: band.textSecondary }}>{periodLabel(period)}</ThemedText></View>
         <Pressable onPress={() => router.push('/transactions')} accessibilityRole="button" style={styles.smallAction}><Icon name="search" size={18} color={theme.text} /><ThemedText type="meta">{t('allActivity')}</ThemedText></Pressable></View>
-      <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{dashboard.activityRows.slice(0, 5).map(transaction =>
-        <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />)}</View>
+      {/* Grouped by day; each day carries its whole cash-flow total, not only
+          the rows shown here (dashboard-projection activityDayTotals). */}
+      {activityDays(dashboard.activityRows.slice(0, 5)).map(day => <View key={day.date} testID={`home-activity-day-${day.date}`}>
+        <View style={styles.dayHeading} accessible accessibilityRole="header"
+          accessibilityLabel={[friendlyDate(day.date, projectionDay), dashboard.activityDayTotals.has(day.date)
+            ? formatMoneyText(dashboard.activityDayTotals.get(day.date)!, moneySpec, { decimals: true }) : null].filter(Boolean).join(', ')}>
+          <ThemedText type="meta" style={[styles.grow, styles.dayTitle, { color: band.textSecondary }]}>{friendlyDate(day.date, projectionDay)}</ThemedText>
+          {dashboard.activityDayTotals.has(day.date)
+            ? <Money fils={dashboard.activityDayTotals.get(day.date)!} moneySpec={moneySpec} type="meta" decimals sign="auto" color={band.textSecondary} />
+            : null}
+        </View>
+        <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{day.rows.map(transaction =>
+          <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />)}</View>
+      </View>)}
       {hasPeriodTransfers && <Pressable testID="home-transfers-link" accessibilityRole="button" accessibilityLabel={transferWords.viewAll}
         accessibilityHint={transferWords.walletDetail} onPress={() => router.push('/transfers')}
-        style={[styles.assistantCard, styles.transferAction, largeText && styles.utilityStacked, { backgroundColor: band.card }]}>
-        <View style={[styles.utilityGlyph, { backgroundColor: band.glyphGround }]}><Icon name="repeat" size={22} color={band.text} /></View>
+        style={({ pressed }) => [styles.utilityRow, styles.transferAction, { borderColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
+        <View style={[styles.rowGlyph, { backgroundColor: band.glyphGround }]}><Icon name="repeat" size={18} color={band.text} /></View>
         <View style={[styles.grow, styles.utilityCopy]}>
-          <ThemedText type="smallBold" style={styles.utilityTitle}>{transferWords.viewAll}</ThemedText>
+          <ThemedText type="smallBold">{transferWords.viewAll}</ThemedText>
           <ThemedText type="meta" style={{ color: band.textSecondary }}>{transferWords.walletDetail}</ThemedText>
         </View>
         <Icon name="chevron-right" size={18} color={band.textSecondary} />
@@ -713,10 +747,10 @@ export default function JournalHomeScreen() {
   };
 
   const layout = splitHomeWidgetLayout(homeWidgets);
-  // Drawn order, band then sheet: the overview leads the sheet, below the tiles.
-  const drawn = [...layout.band, ...layout.sheet];
+  // On the band, the month line sits right under the Today tiles and names the
+  // period; anywhere else (hidden, or moved down the sheet) the tiles name it.
   const sectionProps = { ...summaryProps, today: homeToday,
-    showPeriodContext: !drawn.includes('overview') || drawn.indexOf('overview') > drawn.indexOf('today'),
+    showPeriodContext: !layout.band.includes('overview'),
     onToday: () => router.push('/transactions'),
     onBudgets: () => router.push('/flow?view=categories&filter=limited'),
     onSetBudget: budgetMonthKey ? () => setBudgetSheetOpen(true) : undefined,
@@ -822,8 +856,10 @@ export default function JournalHomeScreen() {
         <SkeletonRows count={1} height={160} /><SkeletonRows count={4} height={66} />
       </View> : <>
         {/* Notices that change how the band's figures read come first on the sheet. */}
-        {captureStoppedNotice}
-        {transferNotice}
+        {/* Needs you: at most one card, the most urgent first. Capture that has
+            stopped outranks transfers waiting for a decision; the next shows
+            once the first is resolved. */}
+        {captureStoppedNotice ?? transferNotice}
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}
         {history ? (moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
@@ -896,5 +932,10 @@ const styles = StyleSheet.create({
   utilityTitle: { fontSize: 17, lineHeight: 23 },
   insightHeading: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   insightTitle: { fontSize: 24, lineHeight: 30, letterSpacing: -0.6 },
+  // Home v2: Ask Wafra, the insight and Transfers are plain rows, not cards.
+  utilityRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
+  rowGlyph: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  dayHeading: { flexDirection: 'row', alignItems: 'baseline', gap: 12, paddingTop: 12 },
+  dayTitle: { fontFamily: Fonts.sansSemi },
   customizeAction: { minHeight: 48, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 8 },
 });

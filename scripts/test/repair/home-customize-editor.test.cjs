@@ -55,14 +55,14 @@ function harness({ language = 'en', large = false, initial, save } = {}) {
   const mount = async () => { render(); effects.splice(0).forEach(fn => fn()); await tick(); return render(); };
   return { render, mount, saves, events, remove: () => { if (removal?.prevent) removal.callback({ data: { action: { type: 'GO_BACK' } } }); else events.push('back'); } };
 }
-// The preview lists sections in the order Home draws them: the overview leads the sheet, after the band.
+// The preview lists sections in the order Home draws them: on the band the month line follows Today.
 const drawnOrder = (preferences) => { const { band, sheet } = model.splitHomeWidgetLayout(preferences); return clone([...band, ...sheet]); };
 function previewIds(tree) { return walk(tree).filter(node => String(node.props.testID ?? '').startsWith('home-customize-preview-') && node.props.testID !== 'home-customize-preview-empty').map(node => node.props.testID.replace('home-customize-preview-', '')); }
 for (const language of ['en', 'ar']) test(`all ten sections have visible preview, independent visibility and accessible movement (${language})`, async () => {
   const h = harness({ language, large: true }); const tree = await h.mount();
   assert.equal(model.DEFAULT_HOME_WIDGETS.order.length, 10);
   assert.deepEqual(previewIds(tree), drawnOrder(model.DEFAULT_HOME_WIDGETS));
-  assert.deepEqual(previewIds(tree).slice(0, 4), ['greeting', 'today', 'week', 'overview']);
+  assert.deepEqual(previewIds(tree).slice(0, 4), ['greeting', 'today', 'overview', 'week']);
   assert.equal(byId(tree, 'home-customize-fixed'), undefined);
   for (const id of model.DEFAULT_HOME_WIDGETS.order) {
     assert.ok(byId(tree, `home-customize-${id}`));
@@ -80,7 +80,7 @@ for (const language of ['en', 'ar']) test(`all ten sections have visible preview
   const ids = new Set(model.DEFAULT_HOME_WIDGETS.order.map(id => `home-customize-${id}`));
   const listed = walk(tree).filter(node => ids.has(node.props.testID)).map(node => node.props.testID.replace('home-customize-', ''));
   assert.deepEqual(listed, drawnOrder(model.DEFAULT_HOME_WIDGETS));
-  assert.equal(byId(tree, 'home-customize-up-overview').props.disabled, true, 'the overview cannot move onto the band');
+  assert.equal(byId(tree, 'home-customize-up-overview').props.disabled, true, 'the month line always follows Today on the band');
 });
 test('initial loading cannot overwrite edits because controls wait for stored preferences', async () => {
   const waiting = deferred(), h = harness({ initial: waiting.promise });

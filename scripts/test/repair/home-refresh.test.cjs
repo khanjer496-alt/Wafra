@@ -76,7 +76,7 @@ function refreshHarness({ platform = 'android', empty = false, scan, reminders }
   h.deps['@/lib/period-context'] = { usePeriod: () => ({ period }) };
   h.deps['@/lib/dashboard-projection'] = { projectDashboard: () => ({
     hero: { incomeFils: 0, expenseFils: 0, netFils: 0 },
-    activityRows: period.mode === 'all' ? h.state.transactions : [],
+    activityRows: period.mode === 'all' ? h.state.transactions : [], activityDayTotals: new Map(),
     accountById: new Map(), internalTransactionIds: new Set(), upcoming: { items: [] },
     uncategorised: { shouldPrompt: false }, unreadFormats: { shouldPrompt: false },
   }) };

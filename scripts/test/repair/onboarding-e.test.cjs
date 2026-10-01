@@ -33,8 +33,8 @@ const ARABIC = /[؀-ۿ]/;
 const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const DEFAULT = ['due', 'assistant', 'insight', 'activity', 'upcoming'];
 const TOP = ['greeting', 'overview', 'today', 'week'];
-// What the band draws: the overview leads the sheet instead (splitHomeWidgetLayout).
-const BAND = ['greeting', 'today', 'week'];
+// What the band draws: the month line (overview) right under Today (splitHomeWidgetLayout).
+const BAND = ['greeting', 'today', 'overview', 'week'];
 const EXPANDED_DEFAULT = [...TOP, ...DEFAULT, 'capture'];
 
 /* ── copy ─────────────────────────────────────────────────────────────── */

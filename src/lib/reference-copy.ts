@@ -104,6 +104,7 @@ export const spendingTrendsCopy = {
 export const homeSummaryCopy = {
   en: { balance: 'Recorded balances', net: 'Net after spending', notBalance: 'Income minus spending · not your bank balance',
     moneyIn: 'Income', moneyOut: 'Spending', netLabel: 'Net', totalSpent: 'Total spent',
+    lineSpent: 'Spent', lineIn: 'In', lineNet: 'Net', choosePeriod: 'Choose period',
     cashflowNote: 'Income minus spending',
     noIncome: 'No income recorded for this period.',
     add: 'Add', import: 'Import', accounts: 'Accounts', settings: 'Settings',
@@ -136,6 +137,7 @@ export const homeSummaryCopy = {
     transfersNotCounted: 'Not counted in spending or income until you confirm.' },
   ar: { balance: 'الأرصدة المسجلة', net: 'الصافي بعد الإنفاق', notBalance: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
     moneyIn: 'الدخل', moneyOut: 'المصروفات', netLabel: 'الصافي', totalSpent: 'إجمالي الإنفاق',
+    lineSpent: 'المصروف', lineIn: 'الدخل', lineNet: 'الصافي', choosePeriod: 'اختر الفترة',
     cashflowNote: 'الدخل ناقص المصروفات',
     noIncome: 'لا يوجد دخل مسجل لهذه الفترة.',
     add: 'إضافة', import: 'استيراد', accounts: 'الحسابات', settings: 'الإعدادات',

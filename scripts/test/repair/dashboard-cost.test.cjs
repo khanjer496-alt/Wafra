@@ -53,8 +53,23 @@ test('Home can skip invisible insights without changing the monetary projection'
 test('activity selection stops at six visible rows and preserves display order', () => {
   const rows = Array.from({ length: 10000 }, (_, i) => ({ id: `${i}`, date: '2026-09-06', accountId: 'bank' }));
   const h = harness(rows);
-  assert.deepEqual(Array.from(h.project().activityRows, (r) => r.id), ['0', '1', '2', '3', '4', '5']);
-  assert.equal(h.counts().periodChecks, 6);
+  const projected = h.project();
+  assert.deepEqual(Array.from(projected.activityRows, (r) => r.id), ['0', '1', '2', '3', '4', '5']);
+  // Six rows, then at most 50 more to finish the last day's total: bounded,
+  // never the whole ledger. A day it cannot finish carries no total.
+  assert.ok(h.counts().periodChecks <= 56, `${h.counts().periodChecks} period checks`);
+  assert.equal(harness(rows).project({ surface: 'home' }).activityDayTotals.has('2026-09-06'), false,
+    'an unfinished day has no partial total');
+});
+test('activity day totals cover the whole listed day, not only the rows shown', () => {
+  const rows = [
+    ...Array.from({ length: 8 }, (_, i) => ({ id: `t${i}`, date: '2026-09-06', accountId: 'bank', type: 'expense', amountFils: 100 })),
+    { id: 'y', date: '2026-09-05', accountId: 'bank', type: 'income', amountFils: 5000 },
+  ];
+  const projected = harness(rows).project({ surface: 'home' });
+  assert.equal(projected.activityRows.length, 6);
+  assert.equal(projected.activityDayTotals.get('2026-09-06'), -800, 'all eight rows of the day, though six are listed');
+  assert.equal(projected.activityDayTotals.has('2026-09-05'), false, 'a day not listed carries no total');
 });
 test('transfer, archived, internal and other-period rows cannot displace visible activity', () => {
   const rows = [

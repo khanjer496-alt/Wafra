@@ -11,8 +11,8 @@ const root = path.resolve(__dirname, '../../..');
 const LAYOUT = 'wafra/ui/home-widgets/v1';
 const MARKER = 'wafra/ui/home-widgets/goal-order-repair/v1';
 const TOP = ['greeting', 'overview', 'today', 'week'];
-// What the band draws: the overview leads the sheet instead (splitHomeWidgetLayout).
-const BAND = ['greeting', 'today', 'week'];
+// What the band draws: the month line (overview) right under Today (splitHomeWidgetLayout).
+const BAND = ['greeting', 'today', 'overview', 'week'];
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function setup(initial = {}, { failRead = 0, failWrite = 0 } = {}) {

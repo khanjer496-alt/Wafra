@@ -14,8 +14,8 @@ export const DEFAULT_HOME_WIDGETS: HomeWidgetPreferences = {
 
 const LEGACY_ORDER: readonly HomeWidgetId[] = ['due', 'upcoming', 'activity', 'assistant', 'insight'];
 const BAND_SECTIONS: readonly HomeWidgetId[] = ['greeting', 'overview', 'today', 'week'];
-/** In the opening group, but drawn first on the sheet (splitHomeWidgetLayout). */
-const SHEET_LEAD: HomeWidgetId = 'overview';
+/** On the band, the overview is the month line under the Today tiles (splitHomeWidgetLayout). */
+const MONTH_LINE: HomeWidgetId = 'overview';
 
 /**
  * Whether a section belongs to Home's opening group (greeting, overview,
@@ -85,11 +85,11 @@ export function homeWidgetVisible(preferences: HomeWidgetPreferences, id: HomeWi
 }
 
 /**
- * Only the visible opening run of header sections belongs on the band: the
- * greeting, Today | Left in budgets and the week, as design language E draws
- * Home. The period overview (Total spent, Income, Net) still belongs to that
- * opening group, so it never ends the run, but it leads the sheet rather than
- * crowding the band. Placed lower by the person, it stays where they put it.
+ * Only the visible opening run of header sections belongs on the band. Home
+ * v2 draws it as the greeting, Today | Left in budgets, the month line
+ * (the overview: Spent · In · Net) and the week: within the band the
+ * overview always follows the Today tiles. Placed lower by the person, it is
+ * drawn on the sheet where they put it, as its full card.
  */
 export function splitHomeWidgetLayout(preferences: HomeWidgetPreferences): { band: HomeWidgetId[]; sheet: HomeWidgetId[] } {
   const current = normalizeHomeWidgetPreferences(preferences);
@@ -97,8 +97,11 @@ export function splitHomeWidgetLayout(preferences: HomeWidgetPreferences): { ban
   const firstSheet = visible.findIndex(id => !BAND_SECTIONS.includes(id));
   const boundary = firstSheet < 0 ? visible.length : firstSheet;
   const opening = visible.slice(0, boundary);
-  const lead = opening.filter(id => id === SHEET_LEAD);
-  return { band: opening.filter(id => id !== SHEET_LEAD), sheet: [...lead, ...visible.slice(boundary)] };
+  const anchor = opening.indexOf('today');
+  if (!opening.includes(MONTH_LINE) || anchor < 0) return { band: opening, sheet: visible.slice(boundary) };
+  const band = opening.filter(id => id !== MONTH_LINE);
+  band.splice(band.indexOf('today') + 1, 0, MONTH_LINE);
+  return { band, sheet: visible.slice(boundary) };
 }
 
 /**
@@ -112,25 +115,27 @@ export function drawnHomeWidgetOrder(preferences: HomeWidgetPreferences): HomeWi
 }
 
 /**
- * The same layout with the overview stored where it is drawn: after the
- * opening run rather than inside it. Home draws both identically; only this
- * form lets a sheet section be placed above the overview.
+ * The same layout with the overview stored where it is drawn: right after
+ * Today within the opening run. Home draws both identically; this form keeps
+ * moves in the editor one visible step at a time.
  */
 function drawnCanonical(preferences: HomeWidgetPreferences): HomeWidgetPreferences {
   const { order, hidden } = preferences;
   let run = 0;
   while (run < order.length && BAND_SECTIONS.includes(order[run])) run++;
-  const at = order.indexOf(SHEET_LEAD);
-  if (at < 0 || at >= run) return { order: [...order], hidden: [...hidden] };
-  const without = order.filter(id => id !== SHEET_LEAD);
-  return { order: [...without.slice(0, run - 1), SHEET_LEAD, ...without.slice(run - 1)], hidden: [...hidden] };
+  const at = order.indexOf(MONTH_LINE);
+  const today = order.indexOf('today');
+  if (at < 0 || at >= run || today < 0 || today >= run) return { order: [...order], hidden: [...hidden] };
+  const without = order.filter(id => id !== MONTH_LINE);
+  without.splice(without.indexOf('today') + 1, 0, MONTH_LINE);
+  return { order: without, hidden: [...hidden] };
 }
 
 /**
  * Moves a section one visible step up (-1) or down (1) in the drawn order,
  * keeping every other section where it is drawn. Some steps cannot be drawn
- * (the overview never sits on the band; a band section that leaves the band
- * lands after the first ordinary section), so the nearest drawable step in
+ * (on the band the month line always follows Today; a band section that
+ * leaves the band lands after the first ordinary section), so the nearest drawable step in
  * that direction is taken. Returns null when none exists: the editor then
  * disables the control rather than offering a press that changes nothing.
  */
