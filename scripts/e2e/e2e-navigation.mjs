@@ -235,6 +235,8 @@ const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark', reducedMotion: 'reduce' });
+// This broad sweep requires a populated reporting month, not day-one totals.
+await page.clock.setFixedTime(new Date('2026-09-27T08:00:00Z'));
 await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
 /**
  * Text whose box extends past the right edge of the viewport.
@@ -627,18 +629,20 @@ for (const [name, enter] of [
     categoryLabels.reduce((sum, label) => sum + minor(label), 0) === expense);
 
   await home(); await homeFact('Income'); await page.waitForURL(/type=income/);
-  const caption = page.getByText(/^\d+ transactions?(?: ·|$)/).last();
+  const ledger = page.locator('[data-testid="transactions-screen"]:visible');
+  const caption = ledger.getByText(/^\d+ transactions?(?: ·|$)/).last();
   await caption.waitFor({ state: 'visible' });
   // The list states a net total only when it differs from a single row
   // (transfers now sit in their own history, so one income row is common).
   // Without it, the regular rows themselves are the income-filtered ledger.
-  const netTotal = page.getByTestId('transactions-net-total');
+  const netTotal = ledger.getByTestId('transactions-net-total');
   let listed;
   if (await netTotal.count()) {
     const summary = await netTotal.textContent();
     listed = /\+\s*AED/.test(summary) ? minor(summary) : NaN;
   } else {
-    const rows = await page.locator('[aria-label$=" AED"]').evaluateAll(nodes => nodes
+    await ledger.locator('[aria-label*=", plus "][aria-label$=" AED"]').first().waitFor({ state: 'visible' });
+    const rows = await ledger.locator('[aria-label$=" AED"]').evaluateAll(nodes => nodes
       .map(node => node.getAttribute('aria-label').match(/, plus ([\d,]+(?:\.\d{1,2})?) AED$/))
       .filter(Boolean).map(match => match[1]));
     listed = rows.length === Number((await caption.textContent()).match(/^\d+/)[0])
