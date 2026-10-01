@@ -82,7 +82,8 @@ try {
   for (const theme of ['light', 'dark']) {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: theme, reducedMotion: 'reduce' });
     // The demo omits future charges; its single Apple Store fixture needs a completed day 23.
-    await page.clock.setFixedTime(new Date('2026-09-27T08:00:00Z'));
+    // Let Date.now advance too: React Native sheet animations depend on elapsed time.
+    await page.clock.install({ time: new Date('2026-09-27T08:00:00Z') });
     const errors = [];
     page.on('pageerror', e => errors.push(String(e)));
     await page.context().route('**/*', route => {
