@@ -11,7 +11,7 @@ const sdk = load(require.resolve('expo-router/build/layouts/StackClient'), {
   '../navigationParams': require('expo-router/build/navigationParams'),
   '../useScreens': {}, './stack-utils': {}, '../utils/children': {}, '../views/Protected': {},
 });
-const { singlePageId } = load(path.resolve('src/lib/navigation-identity.ts'));
+const { singlePageId } = load(path.resolve(__dirname, '../../../src/lib/navigation-identity.ts'));
 const reducer = sdk.stackRouterOverride({ getStateForAction: () => null }).getStateForAction;
 const options = { routeGetIdList: {}, routeParamList: {} };
 const initial = () => ({ key: 'root', type: 'stack', index: 0, routeNames: ['home', 'settings', 'account', 'transactions'], routes: [{ key: 'home-1', name: 'home' }], preloadedRoutes: [] });
@@ -47,7 +47,7 @@ test('application hook forwards singular identity and preserves other router act
   const calls = [];
   const tabCalls = [];
   const raw = { dismissTo: (...args) => tabCalls.push(args), push: (...args) => calls.push(args), back: () => {}, replace: () => {} };
-  const { useRouter } = load(path.resolve('src/hooks/use-app-router.ts'), {
+  const { useRouter } = load(path.resolve(__dirname, '../../../src/hooks/use-app-router.ts'), {
     'expo-router': { useRouter: () => raw, useSegments: () => ['add-transaction'] }, react: { useMemo: f => f() },
     '@/lib/navigation-identity': { singlePageId },
   });
@@ -72,7 +72,7 @@ test('application hook forwards singular identity and preserves other router act
 test('links within the tab shell navigate instead of sending an unsupported POP_TO to tabs', () => {
   const calls = [];
   const raw = { navigate: (...args) => calls.push(args), dismissTo: () => assert.fail('must not pop inside tabs'), push: () => assert.fail('must not push tabs') };
-  const { useRouter } = load(path.resolve('src/hooks/use-app-router.ts'), {
+  const { useRouter } = load(path.resolve(__dirname, '../../../src/hooks/use-app-router.ts'), {
     'expo-router': { useRouter: () => raw, useSegments: () => ['(tabs)', 'index'] },
     react: { useMemo: f => f() }, '@/lib/navigation-identity': { singlePageId },
   });
