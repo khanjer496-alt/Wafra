@@ -28,7 +28,7 @@ import { initialWindowMetrics, useSafeAreaInsets } from 'react-native-safe-area-
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
-import { BandLayout, EASE, Elevation, MotionSpring, Radius, ScreenPadding, Spacing, type BandPalette } from '@/constants/theme';
+import { BandLayout, EASE, Elevation, Motion, MotionSpring, Radius, ScreenPadding, Spacing, type BandPalette } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -48,7 +48,7 @@ const OPEN_SPRING = {
   reduceMotion: ReduceMotion.System,
 } as const;
 
-const CLOSE_DURATION = 240;
+const CLOSE_DURATION = Motion.change;
 
 type BottomSheetCommonProps = {
   visible: boolean;

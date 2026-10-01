@@ -17,7 +17,7 @@ import {
 import { EASE, Motion, Radius, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
-import { tapped } from '@/lib/haptics';
+import { committed, tapped } from '@/lib/haptics';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -38,6 +38,11 @@ interface ButtonProps {
   /** Let long/localized labels grow the control instead of clipping to one line. */
   wrapLabel?: boolean;
   style?: StyleProp<ViewStyle>;
+  /**
+   * The press's haptic: a tick for a choice (default), a firmer tap when the
+   * press itself commits (a confirm sheet's Pay, Delete, Mark paid), or none.
+   */
+  haptic?: 'tap' | 'commit' | 'none';
 }
 
 /** The shared 48dp action. Sentence-case sans keeps controls human and calm. */
@@ -51,6 +56,7 @@ export function Button({
   labelColor: labelColorOverride,
   wrapLabel = true,
   style,
+  haptic = 'tap',
 }: ButtonProps) {
   const theme = useTheme();
 
@@ -76,7 +82,8 @@ export function Button({
       onPress={
         onPress
           ? () => {
-              tapped();
+              if (haptic === 'commit') committed();
+              else if (haptic === 'tap') tapped();
               onPress();
             }
           : undefined
@@ -119,7 +126,7 @@ export function Toggle({
     const next = value ? 18 : 0;
     offset.value = reducedMotion
       ? next
-      : withTiming(next, { duration: Motion.rowPress, easing: EASING });
+      : withTiming(next, { duration: Motion.tap, easing: EASING });
   }, [value, offset, reducedMotion]);
 
   const thumb = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));

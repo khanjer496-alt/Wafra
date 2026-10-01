@@ -83,6 +83,7 @@ import { billForAgendaOccurrence, futureAnnualBillAgendaItems } from '@/lib/upco
 import { upcomingWindowItems, type AgendaRecurrence } from '@/lib/upcoming-window';
 import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, Bill, CategoryId, Transaction } from '@/lib/types';
+import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 
 
@@ -194,7 +195,7 @@ const RecurringRow = React.memo(function RecurringRow({
         accessibilityRole="button"
         accessibilityLabel={`${subscriptionLabel(sub)}. ${schedule}. ${chargeLabel}: ${formatAED(charge.amountFils, { decimals: false })}`}
         onPress={() => onOpen(sub)}
-        onLongPress={() => onLongPress(sub)}
+        onLongPress={() => { tapped(); onLongPress(sub); }}
         style={({ pressed }) => [
           styles.row,
           largeText && styles.rowLarge,

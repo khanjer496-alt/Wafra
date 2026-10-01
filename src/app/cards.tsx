@@ -29,6 +29,7 @@ import { formatAmount, formatAmountForInput, monthKey, parseAmountWithMoneySpec,
 import { reliableBalanceFils, useStore } from '@/lib/store';
 import type { Account } from '@/lib/types';
 import { bankPickerOptions } from '@/lib/known-banks';
+import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 
 /**
@@ -229,7 +230,7 @@ export default function CardsScreen() {
       <Row
         key={card.id}
         onPress={() => setDetail(card)}
-        onLongPress={() => setOptionsFor(card)}
+        onLongPress={() => { tapped(); setOptionsFor(card); }}
         last={i === list.length - 1}
         accessibilityLabel={tf('cardOpenHistoryA11y', { name: card.name })}
         style={inactive ? styles.inactiveRow : undefined}>
