@@ -17,8 +17,9 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { customizeCopy } from '@/lib/customize-copy';
 import {
   DEFAULT_HOME_WIDGETS,
+  drawnHomeWidgetOrder,
   loadHomeWidgetPreferences,
-  moveHomeWidget,
+  moveHomeWidgetDrawn,
   saveHomeWidgetPreferences,
   setHomeWidgetVisible,
   splitHomeWidgetLayout,
@@ -148,10 +149,14 @@ export default function HomeCustomizeScreen() {
     <View style={styles.list} testID="home-customize-sections">
       <SettingsGroupTitle title={copy.yourSections} palette={band} />
       <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.reorderHint}</ThemedText>
-      {preferences.order.map((id, index) => {
+      {/* Listed in the order Home draws them, like the preview. A move is one
+          drawn step; a step Home cannot draw (the overview on the band) is
+          disabled rather than offered as a press that changes nothing. */}
+      {drawnHomeWidgetOrder(preferences).map((id) => {
         const shown = !preferences.hidden.includes(id);
         const title = copy.widgetTitle[id];
-        const first = index === 0, last = index === preferences.order.length - 1;
+        const first = moveHomeWidgetDrawn(preferences, id, -1) === null;
+        const last = moveHomeWidgetDrawn(preferences, id, 1) === null;
         return <View key={id} testID={`home-customize-${id}`} style={[styles.card, { backgroundColor: band.card }]}>
           <View style={[styles.titleRow, largeText && styles.titleRowLarge]}>
             <SettingsIconTile icon={ICONS[id]} palette={band} />
@@ -171,13 +176,13 @@ export default function HomeCustomizeScreen() {
             <View style={styles.moves}>
               <Pressable testID={`home-customize-up-${id}`} accessibilityRole="button" accessibilityLabel={`${t('moveUp')} ${title}`}
                 accessibilityState={{ disabled: first || !enabled }} disabled={first || !enabled}
-                onPress={() => update(before => moveHomeWidget(before, id, -1))}
+                onPress={() => update(before => moveHomeWidgetDrawn(before, id, -1) ?? before)}
                 style={({ pressed }) => [styles.iconButton, { backgroundColor: band.glyphGround }, (first || !enabled) && styles.disabled, pressed && styles.pressed]}>
                 <Icon name="arrow-up" size={20} color={band.text} />
               </Pressable>
               <Pressable testID={`home-customize-down-${id}`} accessibilityRole="button" accessibilityLabel={`${t('moveDown')} ${title}`}
                 accessibilityState={{ disabled: last || !enabled }} disabled={last || !enabled}
-                onPress={() => update(before => moveHomeWidget(before, id, 1))}
+                onPress={() => update(before => moveHomeWidgetDrawn(before, id, 1) ?? before)}
                 style={({ pressed }) => [styles.iconButton, { backgroundColor: band.glyphGround }, (last || !enabled) && styles.disabled, pressed && styles.pressed]}>
                 <Icon name="arrow-down" size={20} color={band.text} />
               </Pressable>

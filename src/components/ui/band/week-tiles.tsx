@@ -34,15 +34,17 @@ export const weekColumnText = (fils: number, spec: LedgerMoneySpec | null): stri
   const minor = Math.max(0, Math.round(fils));
   if (minor === 0) return '0';
   const scale = 10 ** (spec?.exponent ?? 2);
-  if (minor * 2 < scale) return '<1';
+  // Isolated left-to-right: Android ignores writingDirection, and a bare
+  // "<" in an Arabic line would mirror into ">".
+  if (minor * 2 < scale) return '\u2066<1\u2069';
   return spec ? formatMinorUnits(minor, spec, { decimals: false }) : formatAmount(Math.round(minor / scale) * scale);
 };
 
 /** Mono digits and marks advance 0.6em; charge 0.64 so a label never clips. */
 const COLUMN_EM = 0.64;
 const COLUMN_FONT = 12;
-/** The column label's line and its gap above the bar. */
-const VALUE_ROOM = 20;
+const COLUMN_LINE = 14;
+const COLUMN_GAP = 6;
 
 /**
  * Real daily values as seven columns on one shared scale, labelled in whole
@@ -78,6 +80,8 @@ export function WeekTiles({ days, palette, moneySpec, height = 70, accessibility
     ? Math.min(COLUMN_FONT, columnWidth / (Math.max(1, label.length) * COLUMN_EM)) : COLUMN_FONT;
   const columnScale = (label: string) => Math.max(1, Math.min(fontScale,
     columnWidth / (Math.max(1, label.length) * COLUMN_EM * columnFont(label))));
+  // Room above the tallest bar for its label at the size it is drawn.
+  const valueRoom = COLUMN_GAP + Math.ceil(COLUMN_LINE * Math.max(1, ...columns.map(columnScale)));
   const longestValue = Math.max(1, ...values.map(value => value.length));
   const amountScale = Math.max(1, Math.min(fontScale, (availableWidth || 280) / (longestValue * 8)));
   const amountWidth = Math.max(64, longestValue * 8 * amountScale);
@@ -109,9 +113,9 @@ export function WeekTiles({ days, palette, moneySpec, height = 70, accessibility
           </View>
         </View> : <View key={day.key} style={[styles.day, { width: columnWidth }]} testID={`week-value-${day.key}`}>
           {/* The figure rides on its own bar, as the design draws the week. */}
-          <View style={[styles.track, { height: height + VALUE_ROOM }]}>
+          <View style={[styles.track, { height: height + valueRoom }]}>
             <ThemedText type="nano" tabular maxFontSizeMultiplier={columnScale(columns[index]!)}
-              style={[styles.value, { color, fontSize: columnFont(columns[index]!), lineHeight: 14 }]}>{columns[index]}</ThemedText>
+              style={[styles.value, { color, fontSize: columnFont(columns[index]!), lineHeight: COLUMN_LINE }]}>{columns[index]}</ThemedText>
             <GrowBar axis="height" delay={index * 50} size={ratio * height}
               style={[styles.bar, { backgroundColor: day.today ? palette.accent : palette.bandMark }]} />
           </View>
@@ -139,7 +143,7 @@ const styles = StyleSheet.create({
   // expanded these flex columns beyond the container and clipped the weekend.
   day: { minWidth: 0, alignItems: 'center', gap: 6 },
   value: { textTransform: 'none', letterSpacing: 0, writingDirection: 'ltr', flexShrink: 1 },
-  track: { width: '100%', justifyContent: 'flex-end', alignItems: 'center', gap: 6 },
+  track: { width: '100%', justifyContent: 'flex-end', alignItems: 'center', gap: COLUMN_GAP },
   bar: { width: '100%', borderRadius: 8 },
   label: { textAlign: 'center' },
   today: { fontFamily: Fonts.sansSemi },

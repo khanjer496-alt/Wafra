@@ -141,8 +141,9 @@ try {
       check(await page.getByTestId('home-week').locator('[data-testid^="week-value-"]').count(), 7, 'seven daily values remain visible');
       // Columns are labelled in whole units (12); Larger Text lists the exact
       // 12.34. The exact amount is always in the week's spoken label.
-      const todayColumn = minor(await page.getByTestId('week-value-2026-09-27').innerText());
-      check(todayColumn === 1200 || todayColumn === 1234, true, 'Home today daily amount, whole units or exact');
+      // Larger Text (useLargeTextLayout: font scale 1.6 or more) is the exact list.
+      check(minor(await page.getByTestId('week-value-2026-09-27').innerText()), scale >= 1.6 ? 1234 : 1200,
+        scale >= 1.6 ? 'Home today exact daily amount in the Larger Text list' : 'Home today column in whole units');
       check((await page.getByTestId('home-week').getAttribute('aria-label')).includes('12.34'), true, 'Home today exact daily amount is spoken');
       await shot(page, `${name}-home`, homeTotal);
       await page.getByRole('tab', { name: label('Spending', 'الإنفاق'), exact: true }).click();

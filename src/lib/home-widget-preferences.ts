@@ -17,7 +17,10 @@ const BAND_SECTIONS: readonly HomeWidgetId[] = ['greeting', 'overview', 'today',
 /** In the opening group, but drawn first on the sheet (splitHomeWidgetLayout). */
 const SHEET_LEAD: HomeWidgetId = 'overview';
 
-/** Whether a section is one of the four that can sit on Home's colour band. */
+/**
+ * Whether a section belongs to Home's opening group (greeting, overview,
+ * Today, week). All but the overview are drawn on the colour band.
+ */
 export function isHomeBandSection(id: HomeWidgetId): boolean {
   return BAND_SECTIONS.includes(id);
 }
@@ -96,4 +99,61 @@ export function splitHomeWidgetLayout(preferences: HomeWidgetPreferences): { ban
   const opening = visible.slice(0, boundary);
   const lead = opening.filter(id => id === SHEET_LEAD);
   return { band: opening.filter(id => id !== SHEET_LEAD), sheet: [...lead, ...visible.slice(boundary)] };
+}
+
+/**
+ * Every section, hidden ones included, in the order Home draws them: the
+ * order an editor lists them in, so its list and Home's preview agree.
+ */
+export function drawnHomeWidgetOrder(preferences: HomeWidgetPreferences): HomeWidgetId[] {
+  const current = normalizeHomeWidgetPreferences(preferences);
+  const { band, sheet } = splitHomeWidgetLayout({ order: current.order, hidden: [] });
+  return [...band, ...sheet];
+}
+
+/**
+ * The same layout with the overview stored where it is drawn: after the
+ * opening run rather than inside it. Home draws both identically; only this
+ * form lets a sheet section be placed above the overview.
+ */
+function drawnCanonical(preferences: HomeWidgetPreferences): HomeWidgetPreferences {
+  const { order, hidden } = preferences;
+  let run = 0;
+  while (run < order.length && BAND_SECTIONS.includes(order[run])) run++;
+  const at = order.indexOf(SHEET_LEAD);
+  if (at < 0 || at >= run) return { order: [...order], hidden: [...hidden] };
+  const without = order.filter(id => id !== SHEET_LEAD);
+  return { order: [...without.slice(0, run - 1), SHEET_LEAD, ...without.slice(run - 1)], hidden: [...hidden] };
+}
+
+/**
+ * Moves a section one visible step up (-1) or down (1) in the drawn order,
+ * keeping every other section where it is drawn. Some steps cannot be drawn
+ * (the overview never sits on the band; a band section that leaves the band
+ * lands after the first ordinary section), so the nearest drawable step in
+ * that direction is taken. Returns null when none exists: the editor then
+ * disables the control rather than offering a press that changes nothing.
+ */
+export function moveHomeWidgetDrawn(
+  preferences: HomeWidgetPreferences,
+  id: HomeWidgetId,
+  direction: -1 | 1,
+): HomeWidgetPreferences | null {
+  const current = drawnCanonical(normalizeHomeWidgetPreferences(preferences));
+  const before = drawnHomeWidgetOrder(current);
+  const from = before.indexOf(id);
+  const saved = current.order.indexOf(id);
+  if (from < 0 || saved < 0) return null;
+  const others = before.filter(other => other !== id).join();
+  const rest = current.order.filter(other => other !== id);
+  let best: { order: HomeWidgetId[]; step: number; shift: number } | null = null;
+  for (let at = 0; at <= rest.length; at++) {
+    const order = [...rest.slice(0, at), id, ...rest.slice(at)];
+    const drawn = drawnHomeWidgetOrder({ order, hidden: [] });
+    const step = (drawn.indexOf(id) - from) * direction;
+    if (step <= 0 || drawn.filter(other => other !== id).join() !== others) continue;
+    const shift = Math.abs(at - saved);
+    if (!best || step < best.step || (step === best.step && shift < best.shift)) best = { order, step, shift };
+  }
+  return best ? { order: best.order, hidden: [...current.hidden] } : null;
 }

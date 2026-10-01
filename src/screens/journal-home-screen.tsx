@@ -830,8 +830,9 @@ export default function JournalHomeScreen() {
           : <HistoryReadingStatus progress={history} onResume={retryHistory} />) : null}
 
 
-        {/* The band keeps the selected total beside daily spending. The sheet
-            leads with actionable payments and activity in the saved order. */}
+        {/* The band holds the greeting, Today and the week. The sheet leads
+            with the selected-period totals, then payments and activity in
+            the saved order. */}
         {layout.sheet.map(id => renderSection(id))}
 
 

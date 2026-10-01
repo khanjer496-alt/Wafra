@@ -79,6 +79,45 @@ test('deterministic permutations preserve the complete visible sequence across b
   }
 });
 
+test('editors list and move sections in drawn order, one visible step at a time', () => {
+  const drawn = (p) => plain(model.drawnHomeWidgetOrder(p));
+  assert.deepEqual(drawn(pref()), [...band3, 'overview', ...defaults.slice(4)]);
+  // The overview cannot be drawn on the band: no step up from the head of the sheet.
+  assert.equal(model.moveHomeWidgetDrawn(pref(), 'overview', -1), null);
+  assert.equal(model.moveHomeWidgetDrawn(pref(), 'greeting', -1), null);
+  assert.equal(model.moveHomeWidgetDrawn(pref(), 'capture', 1), null);
+  // Down: the overview follows the first payments section; others keep their drawn places.
+  const overviewDown = model.moveHomeWidgetDrawn(pref(), 'overview', 1);
+  assert.deepEqual(drawn(overviewDown), [...band3, 'due', 'overview', ...defaults.slice(5)]);
+  // Within the band, Today and the week swap places.
+  assert.deepEqual(drawn(model.moveHomeWidgetDrawn(pref(), 'today', 1)), ['greeting', 'week', 'today', 'overview', ...defaults.slice(4)]);
+  // The week leaving the band lands after the first ordinary section (it cannot sit right under the overview).
+  const weekDown = model.moveHomeWidgetDrawn(pref(), 'week', 1);
+  assert.deepEqual(drawn(weekDown), ['greeting', 'today', 'overview', 'due', 'week', ...defaults.slice(5)]);
+  assert.deepEqual(plain(model.splitHomeWidgetLayout(weekDown)).band, ['greeting', 'today']);
+  // And back up again restores the band.
+  assert.deepEqual(drawn(model.moveHomeWidgetDrawn(weekDown, 'week', -1)).slice(0, 3), band3);
+  // A sheet section can climb above the overview, one drawn step per press.
+  let climbing = pref();
+  const steps = [];
+  for (let i = 0; i < 3; i++) { climbing = model.moveHomeWidgetDrawn(climbing, 'activity', -1); steps.push(drawn(climbing).indexOf('activity')); }
+  assert.deepEqual(steps, [5, 4, 3]);
+  assert.deepEqual(drawn(climbing), [...band3, 'activity', 'overview', 'due', 'upcoming', 'assistant', 'insight', 'capture']);
+  assert.deepEqual(plain(model.splitHomeWidgetLayout(climbing)).band, band3, 'the band is untouched');
+  // One more step crosses the band boundary, as before: the week leaves the band below it.
+  const across = model.moveHomeWidgetDrawn(climbing, 'activity', -1);
+  assert.deepEqual(drawn(across).slice(0, 4), ['greeting', 'today', 'activity', 'week']);
+  assert.deepEqual(plain(model.splitHomeWidgetLayout(across)).band, ['greeting', 'today']);
+  // Every move keeps all ten sections, each once, and hidden flags.
+  const hidden = pref(defaults, ['insight']);
+  for (const id of defaults) for (const dir of [-1, 1]) {
+    const next = model.moveHomeWidgetDrawn(hidden, id, dir);
+    if (!next) continue;
+    assert.deepEqual([...next.order].sort(), [...defaults].sort());
+    assert.deepEqual(plain(next.hidden), ['insight']);
+  }
+});
+
 const defer = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function persistence(storage) {

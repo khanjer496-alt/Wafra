@@ -46,13 +46,16 @@ for (const language of ['en', 'ar']) {
     const { h, tree, days, bars, spec, weekColumnText } = renderWeek({ language, values: [0, 1, 999, 12345, 987654321, 100, 250] });
     assert.ok(text(tree).includes('AED'));
     for (const day of [days[0], days.at(-1)]) assert.ok(text(tree).includes(h.deps['@/lib/format'].shortDate(day.key)), 'shared date range stays visible');
-    const labels = days.map(day => text(byId(tree, `week-value-${day.key}`)));
-    assert.deepEqual(days.map(day => weekColumnText(day.fils, spec)), ['0', '<1', '10', '123', '9,876,543', '1', '3']);
-    days.forEach((day, i) => assert.ok(labels[i].includes(weekColumnText(day.fils, spec)) && labels[i].includes(day.label)));
+    const LT1 = '\u2066<1\u2069';
+    const columnText = (day) => text(walk(byId(tree, `week-value-${day.key}`)).find(node => node.type === 'Text'));
+    const labels = days.map(columnText);
+    assert.deepEqual(labels, ['0', LT1, '10', '123', '9,876,543', '1', '3'], 'each column reads its whole-unit figure exactly');
+    days.forEach((day, i) => assert.equal(labels[i], weekColumnText(day.fils, spec)));
+    days.forEach((day) => assert.ok(text(byId(tree, `week-value-${day.key}`)).endsWith(day.label), 'the day name sits under its column'));
     assert.ok(!labels.some(label => /\.\d/.test(label)), 'no decimals in a column');
     assert.ok(bars.every(bar => bar.axis === 'height'), 'large days stay in the column chart');
     assert.equal(bars[0].size, 0, 'zero must not look like positive activity');
-    assert.ok(bars[1].size > 0 && labels[1].includes('<1'), 'a tiny day reads <1, not 0, over its bar');
+    assert.ok(bars[1].size > 0 && labels[1] === LT1, 'a tiny day reads <1, not 0, over its bar');
     assert.equal(bars[4].size, 70);
     // The seven-figure label is set smaller instead of clipping its column.
     const big = walk(byId(tree, `week-value-${days[4].key}`)).find(node => text(node) === '9,876,543' && node.props?.style);
@@ -79,11 +82,13 @@ for (const language of ['en', 'ar']) for (const largeText of [true]) {
 }
 for (const spec of [{ schemaVersion: 2, currency: 'JPY', exponent: 0 }, { schemaVersion: 2, currency: 'KWD', exponent: 3 }]) {
   test(`weekly values follow ${spec.currency} denomination in compact columns`, () => {
-    const { h, tree, days, bars } = renderWeek({ spec, width: 800, values: [0, 1, 1234, 2, 3, 4, 5] });
+    const { tree, days, bars } = renderWeek({ spec, width: 800, values: [0, 1, 1234, 2, 3, 4, 5] });
     assert.ok(text(tree).includes(spec.currency));
     // Whole units of the ledger's own currency: 1,234 fils is "1" KWD, "1,234" JPY; 1 unit of a 3-decimal currency is "<1".
-    const expected = spec.exponent === 0 ? ['0', '1', '1,234', '2', '3', '4', '5'] : ['0', '<1', '1', '<1', '<1', '<1', '<1'];
-    days.forEach((day, i) => assert.ok(text(byId(tree, `week-value-${day.key}`)).includes(expected[i]), `${spec.currency} ${expected[i]}`));
+    const LT1 = '\u2066<1\u2069';
+    const expected = spec.exponent === 0 ? ['0', '1', '1,234', '2', '3', '4', '5'] : ['0', LT1, '1', LT1, LT1, LT1, LT1];
+    const shown = days.map(day => text(walk(byId(tree, `week-value-${day.key}`)).find(node => node.type === 'Text')));
+    assert.deepEqual(shown, expected, `${spec.currency} whole units`);
     assert.ok(bars.every(bar => bar.axis === 'height'));
     assert.equal(bars[0].size, 0);
     assert.equal(bars[2].size, 70);

@@ -76,6 +76,11 @@ for (const language of ['en', 'ar']) test(`all ten sections have visible preview
   }
   assert.equal(byId(tree, 'home-customize-up-greeting').props.disabled, true);
   assert.equal(byId(tree, 'home-customize-down-capture').props.disabled, true);
+  // The list follows the drawn order, and a step Home cannot draw is disabled.
+  const ids = new Set(model.DEFAULT_HOME_WIDGETS.order.map(id => `home-customize-${id}`));
+  const listed = walk(tree).filter(node => ids.has(node.props.testID)).map(node => node.props.testID.replace('home-customize-', ''));
+  assert.deepEqual(listed, drawnOrder(model.DEFAULT_HOME_WIDGETS));
+  assert.equal(byId(tree, 'home-customize-up-overview').props.disabled, true, 'the overview cannot move onto the band');
 });
 test('initial loading cannot overwrite edits because controls wait for stored preferences', async () => {
   const waiting = deferred(), h = harness({ initial: waiting.promise });

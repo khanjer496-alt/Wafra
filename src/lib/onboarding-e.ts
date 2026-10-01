@@ -162,8 +162,9 @@ export function homeOrderForGoals(
   const base = normalizeHomeWidgetPreferences(current);
   const promoted = promotedSections(goals);
   if (promoted.length === 0) return base;
-  // Promoted sections lead the sheet, never the band: the opening run of band
-  // sections (greeting, totals, week) stays where it is. Putting a sheet
+  // Promoted sections follow the opening group, never precede it: the opening
+  // run (greeting, totals, Today, week) stays where it is, so they come
+  // first on the sheet, right under the totals. Putting a sheet
   // section first would end that run at zero and move the whole band onto
   // the sheet (splitHomeWidgetLayout). Hidden sections are invisible to that
   // split, so they do not end the run here either.
