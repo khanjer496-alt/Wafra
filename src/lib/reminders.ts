@@ -206,7 +206,7 @@ export function buildPaymentReminders(
       shiftISO(sub.nextExpectedISO, -1),
       tf('notificationRenewsTomorrow', { name: subscriptionLabel(sub) }),
       tf('notificationRenewalBody', {
-        amount: formatAED(sub.avgAmountFils, { decimals: false }),
+        amount: formatAED(sub.lastAmountFils, { decimals: false }),
       }),
     );
   }

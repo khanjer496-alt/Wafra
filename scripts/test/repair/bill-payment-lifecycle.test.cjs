@@ -180,3 +180,54 @@ test('backup preserves the link and refuses malformed or dangling settlement evi
   }
   assert.equal(validate({ ...paid, transactions: [...paid.transactions, { ...paid.transactions[0], id: 'duplicate' }] }), false);
 });
+
+const renewalState = () => {
+  const initial = base();
+  initial.bills = [{ ...bill, title: 'ChatGPT', category: 'software', amountFils: 39900,
+    dueDay: 1, autoDetected: true }];
+  initial.transactions = ['2026-07-01', '2026-08-01', '2026-09-01', '2026-10-01'].map((date, i) => ({
+    ...payment, id: `renewal-${i}`, title: 'ChatGPT', category: 'software', source: 'sms', date,
+    amountFils: i === 3 ? 8900 : 39900,
+  }));
+  return initial;
+};
+const markRenewal = (state, amountFils = 8900) => reducer(state, { type: 'markBillPaid', id: 'bill',
+  month: '2026-11', transaction: { ...payment, title: 'ChatGPT', category: 'software',
+    amountFils, date: '2026-11-01' } });
+
+test('mark-paid records the proven renewal projection while retaining the saved baseline', () => {
+  const initial = renewalState();
+  const paid = markRenewal(initial);
+  assert.equal(paid.transactions.length, initial.transactions.length + 1);
+  assert.equal(paid.transactions.find(t => t.id === 'payment').amountFils, 8900);
+  assert.equal(paid.bills[0].amountFils, 39900);
+  assert.deepEqual(paid.bills[0].paidMonths, ['2026-11']);
+  assert.equal(validate(paid), true);
+  const restored = store.parseBackupForRestore(JSON.stringify({ app: 'wafra', version: 1, data: paid }));
+  assert.ok(restored);
+  assert.equal(restored.transactions.find(t => t.id === 'payment').amountFils, 8900);
+  const deleted = reducer(restored, { type: 'deleteTransaction', id: 'payment' });
+  assert.deepEqual(deleted.bills[0].paidMonths, []);
+  assert.notEqual(build('bills').billsForMonth(deleted.bills, deleted.transactions,
+    new Date(2026, 10, 1, 12))[0].status, 'paid');
+});
+
+test('mark-paid rejects a stale baseline amount after the proven renewal price changes', () => {
+  const initial = renewalState();
+  assert.equal(markRenewal(initial, 39900), initial);
+});
+
+test('a renewal receipt arriving during confirmation prevents both projected and stale duplicates', () => {
+  const initial = renewalState();
+  initial.transactions.push({ ...initial.transactions[3], id: 'november-receipt', date: '2026-11-01' });
+  for (const amount of [8900, 39900]) assert.equal(markRenewal(initial, amount), initial);
+});
+
+test('an explicit bank notice preserves its stated total after a subscription price changes', () => {
+  const initial = renewalState();
+  initial.bills[0] = { ...initial.bills[0], statedDueDate: '2026-11-01' };
+  assert.equal(markRenewal(initial, 8900), initial);
+  const paid = markRenewal(initial, 39900);
+  assert.equal(paid.transactions.length, initial.transactions.length + 1);
+  assert.equal(paid.transactions.find(t => t.id === 'payment').amountFils, 39900);
+});

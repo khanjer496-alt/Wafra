@@ -1796,15 +1796,18 @@ function reduceState(state: AppState, action: Action): AppState {
       if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(action.month) ||
         !isSpending(action.transaction) ||
         action.transaction.source !== 'manual' || !Number.isSafeInteger(action.transaction.amountFils) ||
-        action.transaction.amountFils <= 0 || action.transaction.amountFils !== target.amountFils) return state;
+        action.transaction.amountFils <= 0) return state;
       // Capture can land while the confirmation is open. Recheck the same
       // all-bill projection as the screen, including competing payment claims,
-      // for the requested money month before recording another expense.
+      // for the requested money month before recording another expense. A proven
+      // subscription renewal can change the projected amount without rewriting
+      // the saved baseline; reject confirmations quoting an older projection.
       const current = billsForMonth(state.bills, state.transactions,
         new Date(`${monthStartISO(action.month)}T12:00:00`),
         liveAccountIds(state.accounts), internalTransferIdsForState(state))
         .find((row) => row.bill.id === action.id);
-      if (current?.status === 'paid') return state;
+      if (!current || current.status === 'paid' ||
+        action.transaction.amountFils !== current.bill.amountFils) return state;
       requireSelectedLedgerMoney(state);
       const bills = state.bills.map((b) =>
         b.id === action.id && !b.paidMonths.includes(action.month)

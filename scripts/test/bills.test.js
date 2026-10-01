@@ -307,14 +307,11 @@ eq(
     (src.match(/addBill\(billFromSubscription\(/g) ?? []).length,
     1,
   );
-  // The raw charge is read in ONE place — the helper, where the cadence that
-  // qualifies it is read too. A second reading is a second call site that has
-  // forgotten about yearly.
-  eq(
-    'bills.tsx: the raw subscription charge is read exactly once',
-    (src.match(/\.avgAmountFils/g) ?? []).length -
-      (src.match(/formatAED\(sub\.avgAmountFils/g) ?? []).length,
-    1,
+  // The shared conversion keeps the latest observed price. The executable
+  // subscription-payment-actions regression also exercises its result.
+  ok(
+    'bills.tsx: the shared reminder conversion reads the latest charge',
+    /const billFromSubscription =[\s\S]*?amountFils: sub\.lastAmountFils/.test(src),
   );
   ok(
     'bills.tsx: the remind affordance is gated on a representable cadence',
