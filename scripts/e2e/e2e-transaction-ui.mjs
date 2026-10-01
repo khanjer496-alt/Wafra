@@ -10,6 +10,12 @@ const results = [];
 const browser = await chromium.launch();
 async function exposed(locator, page) {
   assert.equal(await locator.count(), 1, 'Expected exactly one action');
+  // Mounted sheets are visible to Playwright before their entrance animation
+  // reaches the viewport. Wait for placement without scrolling the action.
+  await page.waitForFunction(node => {
+    const r = node.getBoundingClientRect();
+    return r.y >= -1 && r.bottom <= innerHeight + 1;
+  }, await locator.elementHandle(), { timeout: 5000 });
   const geometry = await locator.evaluate(node => {
     const r = node.getBoundingClientRect(), p = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
     return { x:r.x, y:r.y, right:r.right, bottom:r.bottom, width:r.width, height:r.height, hit:!!p && (p === node || node.contains(p)) };
@@ -23,8 +29,8 @@ try {
     const name = `${width}x${height}-${theme}`;
     const page = await browser.newPage({ viewport:{width,height}, colorScheme:theme, reducedMotion:'reduce' });
     // The seed emits this month's Apple charge only once its fixture day passes.
-    // Pin a late-month date so rollovers cannot hide it; timers still run normally.
-    await page.clock.setFixedTime(new Date('2026-09-27T08:00:00Z'));
+    // Start late in the month; Date.now must advance for React Native animations.
+    await page.clock.setSystemTime(new Date('2026-09-27T08:00:00Z'));
     await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
     const errors = [];page.on('pageerror', error => errors.push(String(error)));
     try {

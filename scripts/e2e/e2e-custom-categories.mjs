@@ -82,8 +82,8 @@ try {
   for (const theme of ['light', 'dark']) {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: theme, reducedMotion: 'reduce' });
     // The current-month Apple fixture is dated after the first of the month.
-    // Keep it present across calendar rollovers without freezing normal timers.
-    await page.clock.setFixedTime(new Date('2026-09-27T08:00:00Z'));
+    // Start late in the month; Date.now must advance for React Native animations.
+    await page.clock.setSystemTime(new Date('2026-09-27T08:00:00Z'));
     const errors = [];
     page.on('pageerror', e => errors.push(String(e)));
     await page.context().route('**/*', route => {
