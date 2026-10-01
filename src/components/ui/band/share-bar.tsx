@@ -41,9 +41,16 @@ export function sharePercents(values: readonly number[]): number[] {
  * share, the rest counted as "+N more". Assistive tech hears every named
  * share plus the rest as one figure. Shows shares only, never amounts.
  */
-export function ShareBar({ segments, palette, labelled = 3, label, testID }: {
+export function ShareBar({ segments, palette, labelled = 3, label, formatShare, testID }: {
   segments: readonly ShareSegment[];
   palette: BandPalette;
+  /**
+   * Formats a share from its value and the bar's total. Pass the formatter
+   * and denominator the rows under the bar use, so the legend and the rows
+   * never disagree ("Rent 100%" over a row reading 99.5%). Without it, whole
+   * percents that add up to 100.
+   */
+  formatShare?: (value: number, total: number) => string;
   /** How many of the largest segments get a visible name. */
   labelled?: number;
   /** What the bar divides ("Spending"), spoken first. */
@@ -54,12 +61,15 @@ export function ShareBar({ segments, palette, labelled = 3, label, testID }: {
   const sorted = segments.filter((segment) => segment.value > 0).sort((a, b) => b.value - a.value);
   if (sorted.length === 0) return null;
   const percents = sharePercents(sorted.map((segment) => segment.value));
+  const total = sorted.reduce((sum, segment) => sum + segment.value, 0);
   const named = sorted.slice(0, labelled);
   const restCount = sorted.length - named.length;
-  const restPercent = percents.slice(named.length).reduce((sum, value) => sum + value, 0);
+  const shareText = (from: number, to: number) => formatShare
+    ? formatShare(sorted.slice(from, to).reduce((sum, segment) => sum + segment.value, 0), total)
+    : words.percent(percents.slice(from, to).reduce((sum, value) => sum + value, 0));
   const spoken = [
-    ...named.map((segment, index) => `${segment.label} ${words.percent(percents[index]!)}`),
-    restCount > 0 ? words.shareOthers(restCount, words.percent(restPercent)) : null,
+    ...named.map((segment, index) => `${segment.label} ${shareText(index, index + 1)}`),
+    restCount > 0 ? words.shareOthers(restCount, shareText(named.length, sorted.length)) : null,
   ].filter(Boolean).join(', ');
   const opacityAt = (index: number) => RANK_OPACITY[index] ?? REST_OPACITY;
 
@@ -71,7 +81,7 @@ export function ShareBar({ segments, palette, labelled = 3, label, testID }: {
     <View style={styles.legend} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
       {named.map((segment, index) => <View key={segment.key} style={styles.legendItem}>
         <View style={[styles.swatch, { backgroundColor: palette.onBand, opacity: opacityAt(index) }]} />
-        <ThemedText type="meta" style={{ color: palette.onBand }}>{`${segment.label} ${words.percent(percents[index]!)}`}</ThemedText>
+        <ThemedText type="meta" style={{ color: palette.onBand }}>{`${segment.label} ${shareText(index, index + 1)}`}</ThemedText>
       </View>)}
       {restCount > 0 ? <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{words.shareMore(restCount)}</ThemedText> : null}
     </View>

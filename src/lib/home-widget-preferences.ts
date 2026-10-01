@@ -14,6 +14,11 @@ export const DEFAULT_HOME_WIDGETS: HomeWidgetPreferences = {
 
 const LEGACY_ORDER: readonly HomeWidgetId[] = ['due', 'upcoming', 'activity', 'assistant', 'insight'];
 const BAND_SECTIONS: readonly HomeWidgetId[] = ['greeting', 'overview', 'today', 'week'];
+
+/** Whether a section is one of the four that can sit on Home's colour band. */
+export function isHomeBandSection(id: HomeWidgetId): boolean {
+  return BAND_SECTIONS.includes(id);
+}
 const ADDED = new Set<HomeWidgetId>([...BAND_SECTIONS, 'capture']);
 const VALID = new Set<HomeWidgetId>(DEFAULT_HOME_WIDGETS.order);
 const ids = (value: unknown): HomeWidgetId[] => Array.isArray(value)

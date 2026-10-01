@@ -362,7 +362,8 @@ for (const language of ['en', 'ar']) {
     await h.press('continue'); at(h, 'watch');
     assert.deepEqual(h.state.wafraGoals, ['salary', 'bills']);
     // Home's sections follow the goals through Customize Home's preference.
-    assert.deepEqual(calls(h, 'saveHomeWidgets').at(-1)[1].order.slice(0, 2), ['due', 'upcoming']);
+    // The bills goal leads the sheet; the band's greeting, totals and week stay first.
+    assert.deepEqual(calls(h, 'saveHomeWidgets').at(-1)[1].order.slice(0, 6), ['greeting', 'overview', 'today', 'week', 'due', 'upcoming']);
     await h.tap('onboarding-watch-dining');
     h.byTestID('onboarding-watch-limit').props.onChange(60000); await h.flush();
     await h.press('continue'); at(h, 'reminders');

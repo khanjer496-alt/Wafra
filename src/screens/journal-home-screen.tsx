@@ -62,6 +62,7 @@ import type { Subscription } from '@/lib/subscriptions';
 import type { AppState as LedgerState, CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 import { homeWidgetVisible, loadHomeWidgetPreferences, splitHomeWidgetLayout, subscribeHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
+import { repairGoalOrderedHomeOnce } from '@/lib/home-goal-order-repair';
 import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
 import { loadViewedRecaps } from '@/lib/recap-view-state';
@@ -221,6 +222,14 @@ export default function JournalHomeScreen() {
     // full-history scans a moment after the first frame just to render a prompt.
     markLaunchPhase('first-usable-home');
   }, [focused, privacyGateCleared, state.hydrated, state.onboarded]);
+  // Homes saved by the earlier Goals step opened with the goal sections and
+  // lost their band; put the band back once (home-goal-order-repair.ts). A
+  // repaired layout reaches this screen through the preference subscription.
+  const choseGoals = (state.wafraGoals?.length ?? 0) > 0;
+  useEffect(() => {
+    if (!state.hydrated || !state.onboarded || !choseGoals) return;
+    void repairGoalOrderedHomeOnce();
+  }, [state.hydrated, state.onboarded, choseGoals]);
   useEffect(() => {
     if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded || homeAnalysisReady) return;
     // The insight is lower priority again. Its Home variant deliberately skips

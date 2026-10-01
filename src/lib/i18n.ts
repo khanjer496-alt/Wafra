@@ -4004,12 +4004,14 @@ const S = {
   insightBudgetNearBody: { en: '{percent}% used — {left} left for the month.', ar: 'استخدمت {percent}٪ — متبقي {left} لهذا الشهر.' },
   insightCategoryLeads: { en: '{category} leads your spending', ar: '{category} يتصدر مصروفاتك' },
   insightCategoryLeadsBody: { en: '{amount} — {percent}% of this month’s expenses.', ar: '{amount} — {percent}٪ من مصروفات هذا الشهر.' },
+  // Income minus spending, stated as such: no cheer, and no claim that the
+  // difference was saved anywhere. Mirrors the overspend lines below.
   insightSavingRate: {
-    en: 'Saving {percent}% of income',
-    ar: 'تدخر \u2066{percent}٪\u2069 من الدخل',
+    en: '{percent}% of income not spent',
+    ar: 'لم يُنفق \u2066{percent}٪\u2069 من الدخل',
   },
-  insightSavingBodyLive: { en: '{amount} kept aside so far this month. Keep it up!', ar: 'ادخرت {amount} حتى الآن هذا الشهر. استمر!' },
-  insightSavingBodyPeriod: { en: '{amount} kept aside. Keep it up!', ar: 'ادخرت {amount}. استمر!' },
+  insightSavingBodyLive: { en: 'Income is {amount} above expenses so far this month.', ar: 'يزيد الدخل على المصروفات بمقدار {amount} حتى الآن هذا الشهر.' },
+  insightSavingBodyPeriod: { en: 'Income is {amount} above expenses in this period.', ar: 'يزيد الدخل على المصروفات بمقدار {amount} في هذه الفترة.' },
   insightSpendingExceeds: { en: 'Spending exceeds income', ar: 'المصروف يتجاوز الدخل' },
   insightOverspendMonth: { en: 'Expenses are {amount} above income this month.', ar: 'تزيد المصروفات على الدخل بمقدار {amount} هذا الشهر.' },
   insightOverspendPeriod: { en: 'Expenses are {amount} above income in this period.', ar: 'تزيد المصروفات على الدخل بمقدار {amount} في هذه الفترة.' },

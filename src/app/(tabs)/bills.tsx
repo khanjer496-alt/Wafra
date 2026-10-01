@@ -869,7 +869,7 @@ export default function BillsScreen() {
             <View style={styles.blockHeader} accessible accessibilityRole="header"
               accessibilityLabel={w.subscriptionsTotalA11y(formatAED(monthlySubscriptionsFils))}>
               <ThemedText type="heading" style={styles.blockTitle}>{w.subscriptions}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary" tabular>
+              <ThemedText type="small" themeColor="textSecondary">
                 {w.perMonth(formatAED(monthlySubscriptionsFils))}
               </ThemedText>
             </View>

@@ -125,6 +125,7 @@ function loadAvatar(identities) {
       case '@/lib/store': return { useStore: () => ({ state: { privateMode: false } }), usePrivateMode: () => false };
       case '@/hooks/use-theme': return { useTheme: () => ({ text: themeText }) };
       case '@/hooks/use-color-scheme': return { useColorScheme: () => colorScheme };
+      case '@/hooks/use-band': return { useBand: () => ({ glyphGround: '#2E2A23' }) };
       case '@/lib/merchant-logo-resolver': return { resolveRemoteMerchantLogo: async () => null };
       case '@/constants/theme': return { Radius: { control: 12, tile: 8 } };
       default: throw new Error(`Unexpected runtime dependency: ${id}`);

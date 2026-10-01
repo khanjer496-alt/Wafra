@@ -10,7 +10,7 @@
  */
 import type { BandId } from '@/constants/theme';
 import type { HomeWidgetId, HomeWidgetPreferences } from '@/lib/home-widget-preferences';
-import { normalizeHomeWidgetPreferences } from '@/lib/home-widget-preferences';
+import { isHomeBandSection, normalizeHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 import { allocationsOf, amountInCategory } from '@/lib/splits';
 import { isLiveCapture } from '@/lib/transaction-source';
 import type { Budget, CategoryId, GoalId, OnboardingAlertDelivery, OnboardingJourneyStage, Transaction } from '@/lib/types';
@@ -117,7 +117,8 @@ export function onboardingEResumeStep(
  *
  * "What should Wafra do?" reorders Home through the SAME preference Customize
  * Home edits (home-widget-preferences). Nothing is hidden and nothing new is
- * stored: the chosen goals only decide which existing sections come first.
+ * stored: the chosen goals only decide which existing sections come first on
+ * the sheet, under the band's greeting, totals and week.
  *
  *   bills          → Due payments, then Upcoming payments
  *   subscriptions  → Upcoming payments (renewals are listed there)
@@ -141,13 +142,9 @@ export const GOAL_HOME_SECTIONS: Record<GoalId, readonly GoalHomeSectionId[]> = 
 };
 export const GOAL_HOME_PRECEDENCE: readonly GoalId[] = ['bills', 'subscriptions', 'spend-less', 'salary', 'cash-cards'];
 
-export function homeOrderForGoals(
-  goals: readonly GoalId[],
-  current: HomeWidgetPreferences,
-): HomeWidgetPreferences {
-  const base = normalizeHomeWidgetPreferences(current);
+/** The sections the chosen goals promote, in precedence order (not tap order). */
+function promotedSections(goals: readonly GoalId[]): HomeWidgetId[] {
   const chosen = new Set(goals.filter((goal) => (GOAL_IDS as readonly string[]).includes(goal)));
-  if (chosen.size === 0) return base;
   const promoted: HomeWidgetId[] = [];
   for (const goal of GOAL_HOME_PRECEDENCE) {
     if (!chosen.has(goal)) continue;
@@ -155,11 +152,57 @@ export function homeOrderForGoals(
       if (!promoted.includes(section)) promoted.push(section);
     }
   }
-  const rest = base.order.filter((section) => !promoted.includes(section));
-  return { order: [...promoted, ...rest], hidden: [...base.hidden] };
+  return promoted;
 }
 
-/** The section the chosen goals put at the top of Home, for the Goals step's hint. */
+export function homeOrderForGoals(
+  goals: readonly GoalId[],
+  current: HomeWidgetPreferences,
+): HomeWidgetPreferences {
+  const base = normalizeHomeWidgetPreferences(current);
+  const promoted = promotedSections(goals);
+  if (promoted.length === 0) return base;
+  // Promoted sections lead the sheet, never the band: the opening run of band
+  // sections (greeting, totals, week) stays where it is. Putting a sheet
+  // section first would end that run at zero and move the whole band onto
+  // the sheet (splitHomeWidgetLayout). Hidden sections are invisible to that
+  // split, so they do not end the run here either.
+  let bandRun = 0;
+  while (bandRun < base.order.length
+    && (isHomeBandSection(base.order[bandRun]) || base.hidden.includes(base.order[bandRun]))) bandRun++;
+  const band = base.order.slice(0, bandRun).filter((section) => !promoted.includes(section));
+  const rest = base.order.slice(bandRun).filter((section) => !promoted.includes(section));
+  return { order: [...band, ...promoted, ...rest], hidden: [...base.hidden] };
+}
+
+/**
+ * One-time repair for Homes saved by the earlier Goals step, which put the
+ * promoted sections ahead of the greeting and so emptied Home's band. Going
+ * Back and choosing again stacked another run on top (salary over bills:
+ * activity, insight, due, upcoming, greeting, …).
+ *
+ * It recognises only that shape: the saved order opens with one or more
+ * sections a goal can promote (and nothing else), followed directly by a
+ * band section. The band run then moves back in front; everything else keeps
+ * its relative position and hidden flag. Anything else is left alone (null),
+ * because a layout arranged in Customize Home is the person's choice. The
+ * caller only runs it for people who chose goals.
+ */
+export function repairGoalOrderedHome(current: HomeWidgetPreferences): HomeWidgetPreferences | null {
+  const base = normalizeHomeWidgetPreferences(current);
+  const promotable = new Set<HomeWidgetId>(Object.values(GOAL_HOME_SECTIONS).flat());
+  let goalRun = 0;
+  while (goalRun < base.order.length && promotable.has(base.order[goalRun])) goalRun++;
+  let bandEnd = goalRun;
+  while (bandEnd < base.order.length && isHomeBandSection(base.order[bandEnd])) bandEnd++;
+  if (goalRun === 0 || bandEnd === goalRun) return null;
+  return {
+    order: [...base.order.slice(goalRun, bandEnd), ...base.order.slice(0, goalRun), ...base.order.slice(bandEnd)],
+    hidden: [...base.hidden],
+  };
+}
+
+/** The section the chosen goals put first on Home's sheet, for the Goals step's hint. */
 export function firstHomeSectionForGoals(goals: readonly GoalId[]): GoalHomeSectionId | null {
   for (const goal of GOAL_HOME_PRECEDENCE) {
     if (goals.includes(goal)) return GOAL_HOME_SECTIONS[goal][0] ?? null;

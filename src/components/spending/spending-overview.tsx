@@ -103,9 +103,9 @@ export function SpendingOverview(p: Props) {
               <Money fils={row.spentFils} type="smallBold" />
             </View>
             <View style={[styles.categoryBottom, large && styles.stack]}>
-              <ThemedText type="meta" tabular testID={`spending-share-${row.category}`} style={{ color: band.textSecondary }}>
+              <ThemedText type="meta" testID={`spending-share-${row.category}`} style={{ color: band.textSecondary }}>
                 {row.limitFils === null ? words.shareNoLimit(shareLabel) : `${shareLabel} ${w.share}`}</ThemedText>
-              {limitCaption ? <ThemedText type="meta" tabular testID={`spending-limit-${row.category}`}
+              {limitCaption ? <ThemedText type="meta" testID={`spending-limit-${row.category}`}
                 style={[styles.caption, { color: status === 'ok' ? band.textSecondary : limitStatusColor(band, status!) },
                   status !== 'ok' && styles.captionStrong]}>
                 {limitCaption}</ThemedText> : null}
