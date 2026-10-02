@@ -281,8 +281,6 @@ function renewalAnchor(bill: Bill, ordinal: number): string {
   return new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
 }
 
-const nearAmount = (amount: number, baseline: number): boolean =>
-  baseline > 0 && amount >= baseline * 0.85 && amount <= baseline * 1.15;
 const serviceIdentity = (identity?: string): string | undefined | null => identity === undefined
   ? undefined : /^(?:account|consumer|party|customer|contract|service):[a-z0-9]{4}$/i.test(identity)
     ? identity.toLowerCase() : null;
@@ -292,10 +290,12 @@ const timelyRenewal = (bill: Bill, row: Transaction, dueISO: string): boolean =>
   Math.abs(daysBetweenISO(row.date, dueISO)) <= 5;
 
 /**
- * A saved recurring estimate has more evidence than an arbitrary manual bill.
- * Two consecutive, single-charge cycles at its saved price establish a renewal
- * run. Subsequent single charges near that calendar anchor can change price.
- * Gaps, off-anchor extras and ambiguous services interrupt that evidence.
+ * A single-service subscription (ChatGPT, Netflix…) is settled by the one
+ * charge from that exact service within five days of its calendar anchor, at
+ * whatever price was charged: plans change price and providers bill a few days
+ * early. That holds for a saved estimate and for a bill the person added. Two
+ * charges in one cycle, a competing bill for the same service, or a
+ * bank-stated exact total keep the cycle on the stricter rules.
  *
  * Each raw charge belongs to ONE nearest calendar anchor, even when it posts
  * across a reporting-month boundary. Do not also offer it to the legacy
@@ -314,7 +314,7 @@ function renewalHistories(
   const value = new Map<Bill, RenewalHistory>();
   const byTitle = new Map<string, Bill[]>();
   for (const bill of bills) {
-    if (!bill.autoDetected || bill.statedDueDate || serviceIdentity(bill.importIdentity) === null ||
+    if (bill.statedDueDate || serviceIdentity(bill.importIdentity) === null ||
         !DIRECT_SUBSCRIPTIONS.has(normalize(bill.title))) continue;
     // Legacy matching compares masked tails, even across identity kinds.
     // Unknown/malformed identities or equal tails therefore remain competing
@@ -362,20 +362,8 @@ function renewalHistories(
     }
   }
   for (const [bill, history] of value) {
-    let previous: RenewalCycle | undefined;
-    for (const cycle of [...history.values()].sort((a, b) => a.ordinal - b.ordinal)) {
-      const row = cycle.rows.length === 1 ? cycle.rows[0] : undefined;
-      const prior = previous?.rows.length === 1 ? previous.rows[0] : undefined;
-      const timely = row && timelyRenewal(bill, row, cycle.dueISO);
-      const consecutive = previous && previous.ordinal + 1 === cycle.ordinal && prior &&
-        timelyRenewal(bill, prior, previous.dueISO);
-      if (timely && consecutive && previous) {
-        const baseline = nearAmount(row.amountFils, bill.amountFils) &&
-          nearAmount(prior.amountFils, bill.amountFils) && nearAmount(row.amountFils, prior.amountFils);
-        cycle.confirmed = Boolean(previous.confirmed || baseline);
-        if (baseline) previous.confirmed = true;
-      }
-      previous = cycle;
+    for (const cycle of history.values()) {
+      cycle.confirmed = cycle.rows.length === 1 && timelyRenewal(bill, cycle.rows[0], cycle.dueISO);
     }
   }
   renewalHistoryCache = { bills, transactions, live, internal, value, monthStartDay: getMonthStartDay() };
@@ -529,11 +517,16 @@ export function billsForMonth(
   const candidates = scheduled.map(({ bill, dueISO }) => {
     const history = histories.get(bill);
     if (!history) return candidatePayments(bill, monthRows, key, live, internal);
-    const cycle = history.get(renewalOrdinal(bill, dueISO));
-    if (!cycle || cycle.rows.length !== 1) return [];
-    const row = cycle.rows[0];
-    if (!timelyRenewal(bill, row, dueISO)) return [];
-    return cycle.confirmed || nearAmount(row.amountFils, bill.amountFils) ? [row] : [];
+    const ordinal = renewalOrdinal(bill, dueISO);
+    const cycle = history.get(ordinal);
+    if (cycle?.confirmed) return cycle.rows;
+    if (bill.autoDetected) return [];
+    // A bill the person added keeps its same-month match for a charge off
+    // the anchor, but never one already counted for a neighbouring cycle:
+    // a September 27 renewal for October must not also settle September.
+    const elsewhere = new Set<string>();
+    for (const [other, { rows }] of history) if (other !== ordinal) for (const row of rows) elsewhere.add(row.id);
+    return candidatePayments(bill, monthRows, key, live, internal).filter(row => !elsewhere.has(row.id));
   });
   const explicitlyClaimed = new Set<string>();
   candidates.forEach((rows, index) => {

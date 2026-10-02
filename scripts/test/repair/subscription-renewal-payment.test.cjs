@@ -53,9 +53,8 @@ test('later payments do not change the amount of an earlier billing cycle', () =
   assert.equal(project(rows, '2026-11-01')[0].bill.amountFils, 12900);
 });
 
-test('manual bills, exact notices, marketplaces and unrelated providers keep strict amount matching', () => {
-  for (const patch of [{ autoDetected: false }, { statedDueDate: '2026-10-01' },
-    { title: 'Apple.com' }, { title: 'ChatGPT Cafe' }]) {
+test('exact notices, marketplaces and unrelated providers keep strict amount matching', () => {
+  for (const patch of [{ statedDueDate: '2026-10-01' }, { title: 'Apple.com' }, { title: 'ChatGPT Cafe' }]) {
     const b = bill(patch);
     const rows = [...history(), charge('2026-10-01', 8900)].map(t => ({ ...t, title: b.title }));
     assert.notEqual(project(rows, '2026-10-01', [b])[0].status, 'paid');
@@ -63,15 +62,45 @@ test('manual bills, exact notices, marketplaces and unrelated providers keep str
   }
 });
 
-test('a lone charge, interrupted cadence or ambiguous cycle cannot establish a changed-price renewal', () => {
+test('one timely charge settles a single-service subscription at its new price, saved or added by hand', () => {
+  // The reported case: a bill the person added at AED 384.99, then one charge
+  // at AED 799.99 four days early (27 Sep for 1 Oct), with no earlier history.
+  for (const autoDetected of [true, false]) {
+    const b = bill({ amountFils: 38499, autoDetected });
+    const rows = [charge('2026-09-27', 79999)];
+    const october = project(rows, '2026-10-01', [b])[0];
+    assert.equal(october.status, 'paid', `autoDetected=${autoDetected}`);
+    assert.equal(october.bill.amountFils, 79999);
+    assert.equal(project(rows, '2026-11-01', [b])[0].bill.amountFils, 79999, 'the next estimate uses the new price');
+    assert.notEqual(project(rows, '2026-11-01', [b])[0].status, 'paid');
+    assert.notEqual(project(rows, '2026-09-01', [b])[0].status, 'paid', 'the early renewal is not also September\'s');
+    assert.equal(b.amountFils, 38499, 'projection must not rewrite the saved bill');
+  }
+});
+
+test('a bill added by hand keeps its same-month match off the anchor, but never double-counts a renewal', () => {
+  const b = bill({ autoDetected: false, dueDay: 15 });
+  // Charged on the 3rd for a bill the person dated the 15th: same month, same price.
+  assert.equal(project([charge('2026-10-03')], '2026-10-01', [b])[0].status, 'paid');
+  // An early renewal counts for the cycle it renews, not the month it posted in.
+  const first = bill({ autoDetected: false });
+  const rows = [charge('2026-09-28')];
+  assert.equal(project(rows, '2026-10-01', [first])[0].status, 'paid');
+  assert.notEqual(project(rows, '2026-09-01', [first])[0].status, 'paid', 'a 28 Sep renewal is October\'s, not September\'s');
+});
+
+test('ambiguous or off-anchor charges cannot settle a changed-price renewal', () => {
   const scenarios = [
-    [charge('2026-10-01', 8900)],
-    [charge('2026-07-01'), charge('2026-09-01'), charge('2026-10-01', 8900)],
     [...history(), charge('2026-10-01', 8900), charge('2026-10-01', 9900, { id: 'other' })],
     [...history(), charge('2026-10-01', 8900), charge('2026-09-20', 5000)],
     [...history(), charge('2026-10-12', 8900)],
   ];
   for (const rows of scenarios) assert.notEqual(project(rows)[0].status, 'paid');
+  // A lone timely charge, or one after a missed month, is that cycle's renewal.
+  for (const rows of [[charge('2026-10-01', 8900)], [charge('2026-07-01'), charge('2026-09-01'), charge('2026-10-01', 8900)]]) {
+    assert.equal(project(rows)[0].status, 'paid');
+    assert.equal(project(rows)[0].bill.amountFils, 8900);
+  }
 });
 
 test('competing saved obligations cannot both claim a changed-price renewal', () => {
