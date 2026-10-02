@@ -123,9 +123,14 @@ test('cold bundle entry registers live capture before Router without rendering a
       '@/lib/notifications': {}, '@/lib/reminders': {}, '@/lib/state-storage': {},
     });
   };
-  const dependencies = { '@expo/metro-runtime': {}, './src/lib/background-relay': {} };
+  const nativeTasks = {};
+  Object.defineProperties(nativeTasks, {
+    '@/lib/android-live-background': { get: registerLiveCapture },
+    '@/lib/background-relay': { get: () => ({}) },
+  });
+  const dependencies = { '@expo/metro-runtime': {} };
   Object.defineProperties(dependencies, {
-    './src/lib/android-live-background': { get: registerLiveCapture },
+    './src/lib/native-background-tasks': { get: () => load(path.join(root, 'src/lib/native-background-tasks.ts'), nativeTasks) },
     'expo-router/entry': { get: registerRouter },
   });
   const main = JSON.parse(read('package.json')).main;
@@ -136,4 +141,12 @@ test('cold bundle entry registers live capture before Router without rendering a
   assert.equal(typeof tasks.get('WafraLiveCapture'), 'function',
     'cold headless launch must register the real task without opening a route');
   assert.deepEqual(events, ['live', 'router'], 'background registration precedes Router');
+});
+
+test('the web entry registers no background tasks, so the public site stays light', () => {
+  const web = read('src/lib/native-background-tasks.web.ts');
+  assert.doesNotMatch(web, /^\s*import /m, 'web has no background tasks to register');
+  assert.match(read('index.js'), /import '\.\/src\/lib\/native-background-tasks';/);
+  assert.doesNotMatch(read('index.js'), /android-live-background|background-relay/,
+    'native task modules are reached only through the platform-resolved file');
 });
