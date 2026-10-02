@@ -362,8 +362,13 @@ function renewalHistories(
     }
   }
   for (const [bill, history] of value) {
-    for (const cycle of history.values()) {
-      cycle.confirmed = cycle.rows.length === 1 && timelyRenewal(bill, cycle.rows[0], cycle.dueISO);
+    for (const cycle of [...history.values()].sort((a, b) => a.ordinal - b.ordinal)) {
+      const row = cycle.rows.length === 1 ? cycle.rows[0] : undefined;
+      // A rise is a new plan price; a fall below half the saved price could
+      // be an add-on, a top-up or a card check, so it counts only once the
+      // previous cycle already renewed through this service.
+      cycle.confirmed = Boolean(row && timelyRenewal(bill, row, cycle.dueISO) &&
+        (row.amountFils * 2 >= bill.amountFils || history.get(cycle.ordinal - 1)?.confirmed));
     }
   }
   renewalHistoryCache = { bills, transactions, live, internal, value, monthStartDay: getMonthStartDay() };
@@ -522,10 +527,10 @@ export function billsForMonth(
     if (cycle?.confirmed) return cycle.rows;
     if (bill.autoDetected) return [];
     // A bill the person added keeps its same-month match for a charge off
-    // the anchor, but never one already counted for a neighbouring cycle:
-    // a September 27 renewal for October must not also settle September.
+    // the anchor, but never one that settled a neighbouring cycle: a
+    // September 27 renewal for October must not also settle September.
     const elsewhere = new Set<string>();
-    for (const [other, { rows }] of history) if (other !== ordinal) for (const row of rows) elsewhere.add(row.id);
+    for (const [other, { rows, confirmed }] of history) if (other !== ordinal && confirmed) for (const row of rows) elsewhere.add(row.id);
     return candidatePayments(bill, monthRows, key, live, internal).filter(row => !elsewhere.has(row.id));
   });
   const explicitlyClaimed = new Set<string>();

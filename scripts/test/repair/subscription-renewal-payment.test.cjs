@@ -96,11 +96,39 @@ test('ambiguous or off-anchor charges cannot settle a changed-price renewal', ()
     [...history(), charge('2026-10-12', 8900)],
   ];
   for (const rows of scenarios) assert.notEqual(project(rows)[0].status, 'paid');
-  // A lone timely charge, or one after a missed month, is that cycle's renewal.
-  for (const rows of [[charge('2026-10-01', 8900)], [charge('2026-07-01'), charge('2026-09-01'), charge('2026-10-01', 8900)]]) {
+  // A lone timely rise, or a fall after a renewed month, is that cycle's renewal.
+  for (const [rows, amount] of [[[charge('2026-10-01', 49900)], 49900],
+    [[charge('2026-07-01'), charge('2026-09-01'), charge('2026-10-01', 8900)], 8900]]) {
     assert.equal(project(rows)[0].status, 'paid');
-    assert.equal(project(rows)[0].bill.amountFils, 8900);
+    assert.equal(project(rows)[0].bill.amountFils, amount);
   }
+});
+
+test('a small charge from the same service cannot settle a bill or lower its estimate on its own', () => {
+  // An add-on, a top-up or a card check near the renewal date: AED 3.67 against AED 56.
+  for (const autoDetected of [true, false]) {
+    const b = bill({ title: 'Netflix', amountFils: 5600, autoDetected });
+    const rows = [charge('2026-10-01', 367, { title: 'Netflix' })];
+    assert.notEqual(project(rows, '2026-10-01', [b])[0].status, 'paid', `autoDetected=${autoDetected}`);
+    assert.equal(project(rows, '2026-11-01', [b])[0].bill.amountFils, 5600);
+  }
+  // A real downgrade is accepted once the previous month renewed through the service.
+  const b = bill({ title: 'Netflix', amountFils: 5600 });
+  const downgraded = [charge('2026-09-01', 5600, { title: 'Netflix' }), charge('2026-10-01', 2500, { title: 'Netflix' })];
+  assert.equal(project(downgraded, '2026-10-01', [b])[0].status, 'paid');
+  assert.equal(project(downgraded, '2026-11-01', [b])[0].bill.amountFils, 2500);
+});
+
+test('a hand-added bill charged far from its saved day still reconciles every month', () => {
+  // Due on the 1st, always charged on the 20th: each charge sits nearer the
+  // next anchor but renews nothing there, so its own month still claims it.
+  const b = bill({ title: 'Netflix', amountFils: 5600, autoDetected: false });
+  const rows = [charge('2026-09-20', 5600, { title: 'Netflix' }), charge('2026-10-20', 5600, { title: 'Netflix', id: 'oct' })];
+  assert.equal(project(rows, '2026-09-01', [b])[0].status, 'paid');
+  assert.equal(project(rows, '2026-10-01', [b])[0].status, 'paid');
+  // A bank descriptor that only contains the name still settles through the provider match.
+  const spelled = [charge('2026-10-03', 5600, { title: 'Netflix.com' })];
+  assert.equal(project(spelled, '2026-10-01', [b])[0].status, 'paid');
 });
 
 test('competing saved obligations cannot both claim a changed-price renewal', () => {

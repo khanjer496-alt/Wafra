@@ -10,9 +10,11 @@ The one charge from that service within five days of a cycle's calendar
 anchor settles that cycle at its actual amount, with no earlier history
 required: plans change price and providers bill a few days early (a ChatGPT
 plan billed at AED 799.99 on 27 September settles a bill saved at AED 384.99
-and due 1 October). Additional charges in the cycle and competing bill
+and due 1 October). A charge below half the saved price could be an add-on
+or a card check, so it settles a cycle only after the previous cycle renewed
+through the same service. Additional charges in the cycle and competing bill
 records keep it unsettled. A bill added by hand also keeps its same-month
-match for a charge off the anchor, unless that charge renews another cycle.
+match for a charge off the anchor, unless that charge settled another cycle.
 
 Each charge belongs to one calendar cycle even across month/year boundaries
 or salary reporting periods.
