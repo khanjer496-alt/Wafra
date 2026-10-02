@@ -1802,7 +1802,9 @@ export function useAutoImport(
   // ledger.
   const historyImportRunning = state.historyImport?.status === 'running';
   useEffect(() => {
-    if (!watchForeground || !state.hydrated || !state.onboarded || !state.dailySummary) return;
+    // Web has no local notifications (syncDailySummary is a no-op there), so
+    // it must not flush the ledger on every visibility change for nothing.
+    if (!watchForeground || Platform.OS === 'web' || !state.hydrated || !state.onboarded || !state.dailySummary) return;
     if (historyImportRunning) return;
     let cancelled = false;
     const refreshSummary = async (departing = false) => {
