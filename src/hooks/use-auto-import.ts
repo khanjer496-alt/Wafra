@@ -1695,15 +1695,15 @@ export function useAutoImport(
   // stay deferred until completion, including when setup ran during that job.
   useEffect(() => {
     if (!watchForeground || Platform.OS === 'web' || !state.hydrated || !state.onboarded) return;
-    if (!reminderInputsObserved.current) {
-      reminderInputsObserved.current = true;
-      return; // The session setup above owns the initial schedule.
-    }
+    const initialSchedule = !reminderInputsObserved.current;
+    reminderInputsObserved.current = true;
     let cancelled = false;
     let running = false;
-    let completed = false;
+    // Session setup owns the initial plan, but this listener must still exist
+    // when a permission grant or a new calendar day changes it on resume.
+    let completed = initialSchedule;
     let obligationsRunning = false;
-    let obligationsCompleted = false;
+    let obligationsCompleted = initialSchedule;
     const refresh = async () => {
       if (cancelled || running || completed || RNAppState.currentState !== 'active' ||
           getStateSnapshot().historyImport?.status === 'running') return;
@@ -1750,8 +1750,11 @@ export function useAutoImport(
     if (RNAppState.currentState === 'active') void refresh();
     else if (state.historyImport?.status !== 'running') void flushObligations();
     const sub = RNAppState.addEventListener('change', next => {
-      if (next === 'active') void refresh();
-      else void flushObligations();
+      if (next === 'active') {
+        completed = false;
+        obligationsCompleted = false;
+        void refresh();
+      } else void flushObligations();
     });
     return () => { cancelled = true; sub.remove(); };
   }, [
@@ -1802,23 +1805,33 @@ export function useAutoImport(
     if (!watchForeground || !state.hydrated || !state.onboarded || !state.dailySummary) return;
     if (historyImportRunning) return;
     let cancelled = false;
-    void (async () => {
-      await waitForForegroundHistoryIdle(DAILY_SUMMARY_MAINTENANCE_GRACE_MS);
-      if (cancelled || RNAppState.currentState !== 'active') return;
-      const current = getStateSnapshot();
-      if (!current.hydrated || !current.onboarded || !current.dailySummary ||
-          current.historyImport?.status === 'running') return;
-      const startedAt = Date.now();
+    const refreshSummary = async (departing = false) => {
       try {
-        await syncDailySummary(current);
+        if (!departing) await waitForForegroundHistoryIdle(DAILY_SUMMARY_MAINTENANCE_GRACE_MS);
+        if (cancelled || (!departing && RNAppState.currentState !== 'active')) return;
+        await ensureDurable();
+        if (cancelled || (!departing && RNAppState.currentState !== 'active')) return;
+        const current = getStateSnapshot();
+        if (!current.hydrated || !current.onboarded || !current.dailySummary ||
+            current.historyImport?.status === 'running') return;
+        const startedAt = Date.now();
+        try {
+          await syncDailySummary(current);
+        } finally {
+          recordRuntimeOperation('daily-summary', Date.now() - startedAt);
+        }
       } catch {
-        // A digest is never worth surfacing an error over.
-      } finally {
-        recordRuntimeOperation('daily-summary', Date.now() - startedAt);
+        // Delivery may fail independently of the durable ledger; resume retries.
       }
-    })();
-    return () => { cancelled = true; };
-  }, [getStateSnapshot, historyImportRunning, state.dailySummary, state.hydrated, state.onboarded,
+    };
+    void refreshSummary(RNAppState.currentState !== 'active');
+    const sub = RNAppState.addEventListener('change', next => {
+      // Leaving before the maintenance grace expires must not lose tonight's
+      // only dated summary. Never quote an uncommitted ledger snapshot.
+      void refreshSummary(next !== 'active');
+    });
+    return () => { cancelled = true; sub.remove(); };
+  }, [ensureDurable, getStateSnapshot, historyImportRunning, state.dailySummary, state.hydrated, state.onboarded,
     state.transactions, watchForeground]);
 
   return {
