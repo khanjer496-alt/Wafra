@@ -27,21 +27,31 @@ four closed questions using the `schema.cjs` vocabulary:
 | Question | Type | Compared with |
 | --- | --- | --- |
 | `status` | choice (completed, pending, declined, otp, promo, informational, future, request, unknown) | `inspectUniversalBankEvent` status |
-| `family` | choice (purchase … non-posting) | universal reader family |
-| `direction` | choice (debit, credit, none) | universal reader direction |
+| `family` | choice (purchase … non-posting) | the ledger's family when it posts, else the universal reader's |
+| `direction` | choice (debit, credit, none) | the ledger's direction when it posts, else the universal reader's |
 | `shouldPost` | yes/no | `createLaunchAlertSession` posted a row |
+
+`family` and `direction` are scored only on rows labelled `shouldPost`, the
+same scope `score.cjs` uses, so non-posting rows don't inflate them. The
+family comes from the ledger because only the ledger recognises salary.
 
 ## What it reports
 
 For each field it reports parser accuracy and Clef accuracy against the TRUE
 label, how often the two agree, a both-right/only-one-right/both-wrong split,
 and Clef's calibration: Brier score, expected calibration error and reliability
-bins. It also lists two sets of row ids:
+bins. "Confidence" here means the probability of Clef's top option, not Clef's
+own `confidence` field. Brier is the binary score for `shouldPost` (0–1) and
+the multi-class sum for the choice fields (0–2). It also lists two sets of
+row ids:
 
 - **leads**: the parser is wrong and Clef is right with confidence ≥
   `--threshold` (default 0.9). Start reading here.
 - **overconfident**: Clef is wrong with high confidence. These show where Clef
-  itself is unreliable on bank alerts.
+  itself is unreliable on bank alerts. Some of them are labelling conventions
+  rather than Clef errors. Examples: repo fixtures that must not post are
+  labelled status `unknown`, and a few public rows are `completed` but not
+  posting. Check the label before you conclude Clef is wrong.
 
 ## Privacy rules
 
@@ -66,15 +76,20 @@ node scripts/parser-ai/clef-audit.cjs --dry-run --sets repo,public,synth
 node --env-file-if-exists=.env.local scripts/parser-ai/clef-audit.cjs \
   --cache /tmp/clef-cache.jsonl --json /tmp/clef-report.json
 
-# Add a 300-row evenly spaced synthetic sample and use the larger model.
+# Add an evenly spaced synthetic sample (default 300 rows) and use the larger model.
 node --env-file-if-exists=.env.local scripts/parser-ai/clef-audit.cjs \
-  --sets repo,public,synth --limit 300 --model clef --cache /tmp/clef-cache.jsonl
+  --sets repo,public,synth --synth-limit 300 --model clef --cache /tmp/clef-cache.jsonl
 ```
 
+Repo and public rows are always sent in full (376 rows). `--synth-limit` only
+samples the 3,150-row synthetic split.
+
 `--cache` stores answers by request hash, so you can re-score after a parser
-change without paying for new requests. Keep the cache and report outside the
-repository. Cost is input tokens only, at $0.24 per million per the Workers AI
-model page. A full run over all three sets is about 3,500 short requests.
+change without paying for new requests. Only answers that pass validation are
+cached, and a truncated line is skipped and asked again. Keep the cache and
+report outside the repository. Cost is input tokens only, at $0.24 per million
+per the Workers AI model page. The default run is 376 short requests; with
+`--sets repo,public,synth --synth-limit 3150` it is about 3,500.
 
 Tests: `node --test scripts/test/clef-audit.test.cjs` (no network; also part of
 `npm test`).

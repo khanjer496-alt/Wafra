@@ -4,6 +4,9 @@
 // Run: node --test scripts/test/clef-audit.test.cjs
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const lib = require('../parser-ai/clef-audit-lib.cjs');
 const cli = require('../parser-ai/clef-audit.cjs');
 const { buildPublicRealEvalSet } = require('../parser-ai/public-real-eval-set.cjs');
@@ -59,6 +62,12 @@ test('answers outside the closed vocabulary or with bad probabilities are reject
   outOfRange.answers.direction.probabilities.credit = 1.5;
   assert.throws(() => lib.readClefAnswers(outOfRange), /bad direction probability/);
   assert.throws(() => lib.readClefAnswers({ result: {} }), /no answers/);
+  const missing = response();
+  delete missing.answers.family.probabilities.fee;
+  assert.throws(() => lib.readClefAnswers(missing), /bad family probability for fee/);
+  const unnormalised = response();
+  unnormalised.answers.status.probabilities.unknown = 0.5;
+  assert.throws(() => lib.readClefAnswers(unnormalised), /status probabilities do not sum to 1/);
 });
 
 test('scoring separates leads from overconfident Clef errors and computes calibration', () => {
@@ -80,14 +89,20 @@ test('scoring separates leads from overconfident Clef errors and computes calibr
   assert.equal(s.fields.shouldPost.clefAccuracy, 1);
   assert.deepEqual(s.leads.map((l) => `${l.id}:${l.field}`), ['a:status', 'a:shouldPost']);
   assert.deepEqual(s.overconfident.map((l) => `${l.id}:${l.field}`), ['b:status']);
-  // shouldPost Brier: row a (0.95 yes, true) -> 2 * 0.05^2; row b (0.1 yes, false) -> 2 * 0.1^2.
-  assert.equal(s.fields.shouldPost.clefBrier, Number(((2 * 0.0025 + 2 * 0.01) / 2).toFixed(4)));
+  // Family and direction are scored only on posting rows (as score.cjs does): row b is skipped.
+  assert.equal(s.fields.family.n, 1);
+  assert.equal(s.fields.direction.n, 1);
+  assert.equal(s.fields.status.n, 2);
+  // shouldPost uses the binary Brier: row a (0.95 yes, true) -> 0.05^2; row b (0.1 yes, false) -> 0.1^2.
+  assert.equal(s.fields.shouldPost.clefBrier, Number(((0.0025 + 0.01) / 2).toFixed(4)));
   // status ECE: one bin holds both rows, mean confidence 0.935, accuracy 0.5.
   assert.equal(s.fields.status.clefEce, 0.435);
 });
 
 test('only the built-in privacy-safe sets can be selected', () => {
   assert.deepEqual(cli.parseArgs([]).sets, ['repo', 'public']);
+  assert.deepEqual(cli.parseArgs(['--sets', 'repo,repo,synth']).sets, ['repo', 'synth']);
+  assert.throws(() => cli.parseArgs(['--synth-limit', '0']), /--synth-limit/);
   assert.throws(() => cli.parseArgs(['--sets', 'private']), /unknown set private/);
   assert.throws(() => cli.parseArgs(['--sets', '/tmp/export.json']), /unknown set/);
   assert.throws(() => cli.parseArgs(['--model', 'gpt']), /--model/);
@@ -105,28 +120,58 @@ test('a live run needs credentials unless it is a dry run', async () => {
   await assert.rejects(cli.main(['--sets', 'public'], {}, () => {}), /CLOUDFLARE_ACCOUNT_ID/);
 });
 
-test('end to end against a stubbed Workers AI: report holds ids and metrics, never message text', async (t) => {
-  const bodies = buildPublicRealEvalSet({ localPath: null }).filter((r) => r.origin === 'committed').map((r) => r.body);
+const publicBodies = () => buildPublicRealEvalSet({ localPath: null })
+  .filter((r) => r.origin === 'committed').map((r) => r.body);
+const ENV = { CLOUDFLARE_ACCOUNT_ID: 'acct', CLOUDFLARE_API_TOKEN: 'test-token-7f3a' };
+
+const REAL_FETCH = globalThis.fetch;
+function stubFetch(t, reply) {
   const calls = [];
-  const realFetch = globalThis.fetch;
-  t.after(() => { globalThis.fetch = realFetch; });
+  t.after(() => { globalThis.fetch = REAL_FETCH; });
   globalThis.fetch = async (url, init) => {
     calls.push({ url, auth: init.headers.authorization, body: JSON.parse(init.body) });
-    // Fail one request to exercise the failure path without leaking its body.
-    if (calls.length === 3) return { ok: false, status: 400, json: async () => ({ echo: init.body }) };
-    return { ok: true, status: 200, json: async () => ({ success: true, result: response() }) };
+    return reply(calls.length, init);
   };
+  return calls;
+}
+const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+
+test('end to end against a stubbed Workers AI: report holds ids and metrics, never message text', async (t) => {
+  const bodies = publicBodies();
+  // Fail one request to exercise the failure path without leaking its body.
+  const calls = stubFetch(t, (n, init) => (n === 3
+    ? { ok: false, status: 400, json: async () => ({ echo: init.body }) }
+    : ok({ success: true, result: response() })));
   const lines = [];
-  const report = await cli.main(['--sets', 'public', '--limit', '6', '--concurrency', '1'],
-    { CLOUDFLARE_ACCOUNT_ID: 'acct', CLOUDFLARE_API_TOKEN: 'test-token-7f3a' }, (line) => lines.push(line));
-  assert.equal(calls.length, 6);
+  const report = await cli.main(['--sets', 'public', '--concurrency', '1'], ENV, (line) => lines.push(line));
+  assert.equal(calls.length, bodies.length);
   assert.equal(calls[0].url, 'https://api.cloudflare.com/client/v4/accounts/acct/ai/run/@cf/cloudflare/clef-flash');
   assert.equal(calls[0].auth, 'Bearer test-token-7f3a');
   assert.equal(calls[0].body.model, 'clef-flash');
-  assert.equal(report.rows, 5);
-  assert.deepEqual(report.requests, { sent: 5, cached: 0, failed: 1 });
+  assert.equal(report.rows, bodies.length - 1);
+  assert.deepEqual(report.requests, { sent: bodies.length - 1, cached: 0, failed: 1 });
   assert.deepEqual(report.failures.map((f) => f.error), ['Workers AI HTTP 400']);
   const out = JSON.stringify(report) + lines.join('\n');
   for (const body of bodies) assert.ok(!out.includes(body), 'report must not contain message text');
   assert.ok(!out.includes('test-token-7f3a'), 'report must not contain the token');
+});
+
+test('the cache keeps only valid answers, skips corrupt lines and is reused on the next run', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clef-audit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cacheFile = path.join(dir, 'cache.jsonl');
+  const total = publicBodies().length;
+  // First run: one 200 answer is malformed, so it is a failure and is not cached.
+  stubFetch(t, (n) => ok(n === 2 ? { result: { answers: {} } } : response()));
+  const first = await cli.main(['--sets', 'public', '--concurrency', '1', '--cache', cacheFile], ENV, () => {});
+  assert.deepEqual(first.requests, { sent: total, cached: 0, failed: 1 });
+  assert.equal(fs.readFileSync(cacheFile, 'utf8').trim().split('\n').length, total - 1);
+  assert.ok(!publicBodies().some((body) => fs.readFileSync(cacheFile, 'utf8').includes(body)));
+  fs.appendFileSync(cacheFile, '{"key":"trunc');
+  // Second run: only the previously invalid row is asked again.
+  const calls = stubFetch(t, () => ok(response()));
+  const second = await cli.main(['--sets', 'public', '--concurrency', '4', '--cache', cacheFile], ENV, () => {});
+  assert.equal(calls.length, 1);
+  assert.deepEqual(second.requests, { sent: 1, cached: total - 1, failed: 0 });
+  assert.equal(second.rows, total);
 });

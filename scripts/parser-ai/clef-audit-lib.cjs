@@ -39,7 +39,7 @@ const FAMILY_CRITERIA = Object.freeze({
 
 const DIRECTION_CRITERIA = Object.freeze({
   debit: 'Money left the user\'s account or card.',
-  credit: 'Money arrived in the user\'s account or card.',
+  credit: 'Money arrived in the user\'s account or card, including a payment made towards a credit card balance.',
   none: 'No completed money movement is stated.',
 });
 
@@ -109,10 +109,14 @@ function readClefAnswers(response) {
     if (!a || a.type !== 'choice' || !options.includes(a.choice)) throw new Error(`clef-audit: bad ${field} answer`);
     const probabilities = {};
     for (const option of options) {
-      const p = a.probabilities?.[option] ?? 0;
+      const p = a.probabilities?.[option];
       if (!isProbability(p)) throw new Error(`clef-audit: bad ${field} probability for ${option}`);
       probabilities[option] = p;
     }
+    const total = Object.values(probabilities).reduce((sum, p) => sum + p, 0);
+    if (Math.abs(total - 1) > 0.02) throw new Error(`clef-audit: ${field} probabilities do not sum to 1`);
+    // "confidence" in this audit is the top option's probability, so it can be
+    // checked against accuracy; Clef's own `confidence` field is not used.
     out[field] = { choice: a.choice, confidence: probabilities[a.choice], probabilities };
   }
   const post = answers.shouldPost;
@@ -139,6 +143,9 @@ function newAudit() {
   return { rows: 0, fields: Object.fromEntries(FIELDS.map((f) => [f, newFieldBucket()])), leads: [], overconfident: [] };
 }
 
+/** Family and direction are scored only on posting rows, as score.cjs does. */
+const POSTING_ONLY = new Set(['family', 'direction']);
+
 /**
  * Score one labelled row. `parser` holds the parser's value per field
  * (`status`/`family`/`direction` strings, `shouldPost` boolean); `clef` is
@@ -154,6 +161,7 @@ function scoreClefRow(audit, row, parser, clef, threshold) {
   for (const field of FIELDS) {
     const truth = row.label[field];
     if (truth === undefined) continue;
+    if (POSTING_ONLY.has(field) && row.label.shouldPost !== true) continue;
     const b = audit.fields[field];
     const c = clef[field];
     const parserRight = parser[field] === truth;
@@ -166,9 +174,12 @@ function scoreClefRow(audit, row, parser, clef, threshold) {
     else if (parserRight) b.onlyParserRight += 1;
     else if (clefRight) b.onlyClefRight += 1;
     else b.bothWrong += 1;
-    for (const [option, p] of Object.entries(c.probabilities)) {
-      const y = option === String(truth) ? 1 : 0;
-      b.brier += (p - y) ** 2;
+    if (field === 'shouldPost') {
+      // Conventional binary Brier (0-1): squared error of P(yes).
+      b.brier += (c.probabilities.true - (truth ? 1 : 0)) ** 2;
+    } else {
+      // Multi-class Brier (0-2): summed over every option.
+      for (const [option, p] of Object.entries(c.probabilities)) b.brier += (p - (option === truth ? 1 : 0)) ** 2;
     }
     const bin = b.bins[Math.min(BINS - 1, Math.floor(c.confidence * BINS))];
     bin.n += 1;
