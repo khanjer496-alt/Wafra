@@ -453,8 +453,15 @@ export interface ParsedCard {
  * minted a phantom "Account •9876" — and is kept as the bill identity instead.
  * Future captures plus the bounded recent reread; PARSER_BACKFILL_VERSION
  * remains 49.
+ *
+ * 60: worldwide pass. Worldwide card statements and card payments post as
+ * statements and settlements; Korean, Chinese, Hindi, Spanish, Portuguese,
+ * Polish, Peruvian, Ghanaian and German completed wordings; South African
+ * rand and Indian currency-less UPI alerts; accented French alerts no longer
+ * dropped before parsing. Future captures plus the bounded recent reread;
+ * PARSER_BACKFILL_VERSION remains 49.
  */
-export const PARSER_VERSION = 59;
+export const PARSER_VERSION = 60;
 /**
  * Historical-repair contract for already-saved data.
  *
