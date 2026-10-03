@@ -25,7 +25,7 @@ function renderDirectory({ largeText = false, language = 'en', transactions } = 
     react: { memo: (f) => f, useMemo: (fn) => fn(), useCallback: (fn) => fn, useDeferredValue: (v) => v,
       useState: (value) => [typeof value === 'function' ? value() : value, (next) => events.push(['state', next])] },
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
-    'react-native': { FlatList: boundary('FlatList'), Platform: { OS: 'android' }, Pressable: 'Pressable', View: 'View',
+    'react-native': { FlatList: boundary('FlatList'), Platform: { OS: 'android' }, Pressable: 'Pressable', View: 'View', TextInput: 'TextInput',
       StyleSheet: { create: (s) => s, hairlineWidth: 1 } },
     'expo-router': { useRouter: () => ({ push: (href) => events.push(['route', href]), back() {}, replace() {}, canGoBack: () => true }) },
     '@/components/themed-text': { ThemedText: boundary('Text') },
@@ -34,6 +34,8 @@ function renderDirectory({ largeText = false, language = 'en', transactions } = 
     '@/components/ui/band-scaffold': { BandScaffold: boundary('BandScaffold'), useBandBottomInset: () => 10, BAND_GUTTER: 20 },
     '@/components/ui/band/band-segmented': { BandSegmented: boundary('BandSegmented') },
     '@/components/ui/band/e-button': { EButton: boundary('EButton') },
+    '@/components/ui/icon': { Icon: boundary('Icon') },
+    '@/lib/e2e-font-scale': { scaleTextStyleForE2E: (style) => style },
     '@/components/ui/merchant-avatar': { MerchantAvatar: boundary('Avatar') },
     '@/components/ui/money': { Money: boundary('Money') },
     '@/components/ui/segmented-control': { SegmentedControl: boundary('SegmentedControl') },
@@ -101,4 +103,8 @@ test('rows are ranked 1, 2… with the logo tile, "category · N payments" and t
   assert.ok(textOf(row).includes('Groceries · 2 payments'));
   assert.equal(rendered.find((n) => n.type === 'Money').props.fils, 143000);
   assert.equal(walk(byId(tree, 'merchant-directory-total')).find((n) => n.type === 'Money').props.fils, 207000);
+  // The search is a compact pill whose name is spoken rather than printed above it.
+  const search = walk(list.props.ListHeaderComponent).find((n) => n.type === 'TextInput');
+  assert.equal(search.props.accessibilityLabel, 'Search merchants');
+  assert.equal(search.props.placeholder, 'Try a shop, restaurant or service');
 });

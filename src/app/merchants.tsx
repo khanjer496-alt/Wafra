@@ -1,25 +1,26 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
-import { FlatList, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { FlatList, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ActionIconButton } from '@/components/ui/action-icon-button';
 import { BAND_GUTTER, BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold';
 import { BandSegmented } from '@/components/ui/band/band-segmented';
 import { EButton } from '@/components/ui/band/e-button';
+import { Icon } from '@/components/ui/icon';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Money } from '@/components/ui/money';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { SkeletonRows } from '@/components/ui/states';
-import { TextField } from '@/components/ui/text-field';
 import { Fonts, Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { topMerchants } from '@/lib/analytics';
 
 import { detailsWords } from '@/lib/details-copy';
+import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { formatAED } from '@/lib/format';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
@@ -110,8 +111,9 @@ export default function MerchantsScreen() {
   const segments = [
     { value: 'amount' as const, label: d.merchants.byAmount },
     { value: 'visits' as const, label: d.merchants.byVisits },
-    ...(fresh.available ? [{ value: 'new' as const,
-      label: period.mode === 'month' ? d.merchants.newThisMonth : d.merchants.newInPeriod }] : []),
+    // "New" (the band line above already names the period), so the third
+    // segment stays on one line like the design instead of wrapping to 56pt.
+    ...(fresh.available ? [{ value: 'new' as const, label: d.merchants.newInPeriod }] : []),
   ];
   const listNote = activeView === 'visits' ? d.merchants.visitsNote : activeView === 'new' ? d.merchants.newNote : w.highest;
   const range = periodRange(period);
@@ -145,13 +147,23 @@ export default function MerchantsScreen() {
           {!onBand && merchants.length > 0 ? <View testID="merchant-sort">
             <SegmentedControl<DirectoryView> label={d.merchants.sortLabel} value={activeView} onChange={setView} segments={segments} />
           </View> : null}
-          <View style={styles.total}>
-            <ThemedText type="meta" style={{ color: band.textSecondary }}>{needle ? w.matching : w.total}{range ? ` · ${range}` : ''}</ThemedText>
-            <View testID="merchant-directory-total"><Money fils={totalFils} type="amount" color={band.text} /></View>
+          {/* A compact 44pt search pill; its name is spoken, the placeholder says what it matches. */}
+          <View style={[styles.search, { backgroundColor: band.card, borderColor: band.rule }]}>
+            <Icon name="search" size={17} color={band.textSecondary} />
+            <TextInput accessibilityLabel={w.search} value={query} onChangeText={setQuery} autoCorrect={false}
+              inputMode="search" returnKeyType="search" placeholder={w.searchHint} placeholderTextColor={band.textSecondary}
+              selectionColor={band.text}
+              style={scaleTextStyleForE2E([styles.searchInput, { color: band.text,
+                fontFamily: language === 'ar' ? Fonts.arabic : Fonts.sans, textAlign: language === 'ar' ? 'right' : 'left' }], true, undefined)} />
+            {query ? <ActionIconButton icon="close" label={w.clear} variant="plain" onPress={() => setQuery('')} /> : null}
           </View>
-          <TextField label={w.search} placeholder={w.searchHint} value={query} onChangeText={setQuery} autoCorrect={false}
-            trailing={query ? <ActionIconButton icon="close" label={w.clear} variant="plain" onPress={() => setQuery('')} /> : undefined} />
-          <ThemedText type="meta" style={{ color: band.textSecondary }} accessibilityLiveRegion="polite">{d.merchants.count(rows.length)} · {listNote}</ThemedText>
+          <View style={styles.summary}>
+            <View style={styles.total}>
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>{needle ? w.matching : w.total}{range ? ` · ${range}` : ''}</ThemedText>
+              <View testID="merchant-directory-total"><Money fils={totalFils} type="smallBold" color={band.text} /></View>
+            </View>
+            <ThemedText type="meta" style={{ color: band.textSecondary }} accessibilityLiveRegion="polite">{d.merchants.count(rows.length)} · {listNote}</ThemedText>
+          </View>
         </View>}
         ListEmptyComponent={activeView === 'new' && !query ? <View style={styles.empty} testID="merchant-new-empty">
           <ThemedText type="smallBold" style={{ color: band.text }}>{d.merchants.newEmpty}</ThemedText>
@@ -170,8 +182,13 @@ const styles = StyleSheet.create({
   // The sheet holds the list edge to edge; header and rows carry the gutter.
   sheetContent: { paddingHorizontal: 0, paddingTop: Spacing.two },
   listContent: { paddingHorizontal: BAND_GUTTER },
-  header: { gap: 14, paddingBottom: 12 },
-  total: { gap: 4 },
+  header: { gap: 10, paddingBottom: 4 },
+  search: { minHeight: 44, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center',
+    gap: 8, paddingStart: 14, paddingEnd: 4 },
+  searchInput: { flex: 1, minWidth: 0, fontSize: 16, minHeight: 44, paddingVertical: 8 },
+  summary: { gap: 2 },
+  // "Total spent · 1–31 Oct" and its amount share a line, wrapping when either is long.
+  total: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', columnGap: 12 },
   row: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
   rank: { minWidth: 22 },
   words: { flex: 1, minWidth: 0, gap: 3 },

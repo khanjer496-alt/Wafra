@@ -15,10 +15,13 @@ export function statTileColors(palette: BandPalette, tone: StatTileTone): { bg: 
 
 /**
  * A figure tile on a band: the band's own tone (or the mint accent for the
- * one figure that is good news, like Left in budgets). Label on top, the
- * value (usually a `BandFigure size="large"` in `statTileColors(...).fg`),
- * then a meta line. Pressable when it opens something; otherwise read as one
- * piece of text with `accessibilityLabel`.
+ * one figure that is good news, like Left in budgets). The value comes first
+ * (a `BandFigure size="medium"` or `BandCount` in `statTileColors(...).fg`),
+ * so values in a row of tiles share one top line however their labels wrap;
+ * then the 13pt label and an optional meta line. About 64pt tall at the
+ * default text size; labels wrap rather than truncate at every size.
+ * Pressable when it opens something; otherwise read as one piece of text with
+ * `accessibilityLabel`.
  */
 export function StatTile({ label, meta, metaTone = 'normal', children, tone = 'band', palette, onPress,
   accessibilityLabel, accessibilityHint, testID, style }: {
@@ -37,8 +40,8 @@ export function StatTile({ label, meta, metaTone = 'normal', children, tone = 'b
 }) {
   const colors = statTileColors(palette, tone);
   const body = <>
-    <ThemedText type="small" style={{ color: colors.fgSecondary }}>{label}</ThemedText>
     {children}
+    <ThemedText type="meta" style={[styles.label, { color: colors.fgSecondary }]}>{label}</ThemedText>
     {meta ? <ThemedText type={metaTone === 'strong' ? 'smallBold' : 'meta'} style={{ color: colors.fgSecondary }}>{meta}</ThemedText> : null}
   </>;
   if (onPress) {
@@ -55,5 +58,7 @@ export function StatTile({ label, meta, metaTone = 'normal', children, tone = 'b
 }
 
 const styles = StyleSheet.create({
-  tile: { flex: 1, minWidth: 0, borderRadius: 22, padding: 14, gap: 4 },
+  // Tops align across a row: a short tile does not stretch its value down.
+  tile: { flex: 1, minWidth: 0, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 10, gap: 2, justifyContent: 'flex-start' },
+  label: { lineHeight: 17 },
 });
