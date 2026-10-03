@@ -453,8 +453,15 @@ export interface ParsedCard {
  * minted a phantom "Account •9876" — and is kept as the bill identity instead.
  * Future captures plus the bounded recent reread; PARSER_BACKFILL_VERSION
  * remains 49.
+ *
+ * 61: a card statement's issue date is read in more wordings (ISO, 28Aug26,
+ * "01 Aug 2026", "generated on", FAB's "statement of the card ending with 3749
+ * dated 01Aug26"), and a statement-date RANGE is read as no date. A
+ * fraud-verification question ("Did you attempt …? Reply YES or NO") is never
+ * a posted transaction. Future captures plus the bounded recent reread;
+ * PARSER_BACKFILL_VERSION remains 49.
  */
-export const PARSER_VERSION = 59;
+export const PARSER_VERSION = 61;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -5183,17 +5190,46 @@ function numericDate(d: string, m: string, yRaw: string): string | null {
 /**
  * The ISSUE date a card statement states, read only off an explicit
  * statement-date label. Never the due date and never a generic "on <date>".
+ *
+ * The label may reach across the card it belongs to — FAB writes "Your
+ * statement of the card ending with 3749 dated 01Aug26" — but never across a
+ * "due". The date may be numeric (28/08/26), ISO (2026-08-28) or carry a month
+ * name with or without spaces (28Aug26, 01 Aug 2026). A label followed by a
+ * RANGE ("01/08/26 - 31/08/26", "01 Aug 2026 to 31 Aug 2026") states a period,
+ * not a closing day, and is read as no date at all: its start would open the
+ * payment window a full cycle early. A two-digit year after a space must not
+ * be a clock or a count ("28 Aug 15:30", "28 Aug, 21 days").
  */
-const STATEMENT_ISSUE_DATE_RE =
-  /\b(?:statement|stmt)\s*(?:date|dt\.?|dated|generated\s+on|issued\s+on|prepared\s+on)\s*(?:is|:|-|on)?\s*(\d{1,2})[/.-](\d{1,2}|[A-Za-z]{3,9})[/.-](\d{2,4})(?!\d)|تاريخ\s+(?:ال)?كشف\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/i;
-function extractStatementIssueDate(raw: string, dueDate: string | null): string | null {
-  const m = raw.match(STATEMENT_ISSUE_DATE_RE);
-  if (!m) return null;
-  const [d, mo, y] = m[1] !== undefined ? [m[1], m[2], m[3]] : [m[4], m[5], m[6]];
+const STATEMENT_ISSUE_LABEL_RE =
+  /\b(?:statement|stmt)(?:\s+of\s+(?:the\s+|your\s+)?(?:credit\s+)?card\s+(?:no\.?\s+|number\s+)?(?:ending\s+(?:with|in)\s+)?[X*•·\d]{4,})?\s*(?:is\s+)?(?:dated|date|dt\.?|generated\s+on|issued\s+on|prepared\s+on)\s*(?:is|:|-|on)?\s*/gi;
+const STATEMENT_DATE_TOKEN_RE =
+  /^(?:(\d{4})-(\d{2})-(\d{2})(?!\d)|(\d{1,2})[/.-](\d{1,2}|[A-Za-z]{3,9})[/.-](\d{2,4})(?!\d)|(\d{1,2})\s*([A-Za-z]{3,9})(?:\s*,?\s*(\d{4})(?![\d:])|(\d{2})(?![\d:])|\s*,?\s+(\d{2})(?![\d:])(?!\s*[A-Za-z])))/;
+const STATEMENT_DATE_RANGE_RE = /^\s*(?:-|–|—|to|till|until)\s*\d/i;
+const STATEMENT_ISSUE_DATE_AR_RE = /تاريخ\s+(?:ال)?كشف\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/;
+function statementTokenDate(m: RegExpMatchArray): string | null {
+  if (m[1] !== undefined) return isoDate(Number(m[1]), Number(m[2]), Number(m[3]));
+  const [d, mo, y] = m[4] !== undefined ? [m[4], m[5], m[6]] : [m[7], m[8], m[9] ?? m[10] ?? m[11]];
+  const year = y.length === 2 ? 2000 + Number(y) : Number(y);
+  if (/^\d+$/.test(mo)) return numericDate(d, mo, y);
   const named = MONTH_NAMES[mo.slice(0, 3).toLowerCase()];
-  const date = /^\d+$/.test(mo)
-    ? numericDate(d, mo, y)
-    : named ? isoDate(y.length === 2 ? 2000 + Number(y) : Number(y), named, Number(d)) : null;
+  return named ? isoDate(year, named, Number(d)) : null;
+}
+function extractStatementIssueDate(raw: string, dueDate: string | null): string | null {
+  let date: string | null = null;
+  STATEMENT_ISSUE_LABEL_RE.lastIndex = 0;
+  for (let label = STATEMENT_ISSUE_LABEL_RE.exec(raw); label; label = STATEMENT_ISSUE_LABEL_RE.exec(raw)) {
+    const rest = raw.slice(label.index + label[0].length);
+    const token = rest.match(STATEMENT_DATE_TOKEN_RE);
+    if (!token) continue;
+    if (STATEMENT_DATE_RANGE_RE.test(rest.slice(token[0].length))) return null;
+    date = statementTokenDate(token);
+    break;
+  }
+  STATEMENT_ISSUE_LABEL_RE.lastIndex = 0;
+  if (!date) {
+    const ar = raw.match(STATEMENT_ISSUE_DATE_AR_RE);
+    if (ar) date = numericDate(ar[1], ar[2], ar[3]);
+  }
   // An issue date on or after the deadline is not an issue date.
   if (!date || (dueDate && date >= dueDate)) return null;
   return date;
