@@ -11,10 +11,83 @@ import {
   PRODUCT_SCHEMA,
   SITE_URL,
   TESTFLIGHT_URL,
+  captureLanes,
   faqItems,
   featureCards,
+  renewals,
+  sortingRows,
   structuredData,
 } from '@/marketing/content';
+
+/* The exported page ships without JavaScript. Every demo below is CSS-only and
+   rests on its finished frame when the visitor prefers reduced motion. */
+function CaptureStage() {
+  return (
+    <figure className={styles.stage}>
+      <div
+        className={styles.stageScene}
+        role="img"
+        aria-label="Illustration with sample data: bank alerts arrive on an iPhone and an Android phone, then appear in the Wafra ledger with a merchant, category and amount."
+      >
+        <div className={`${styles.device} ${styles.iphone}`} aria-hidden="true">
+          <div className={styles.screen}>
+            <span className={styles.island} />
+            <span className={styles.clock}>9:41</span>
+            <span className={styles.date}>Thursday 25 September</span>
+            <div className={`${styles.alert} ${styles.iosAlert} ${styles.alertOne}`}>
+              <span className={styles.alertApp}><i className={styles.msgIcon} />Messages · Your bank</span>
+              <span>Card ••4821 used for USD 6.75 at STARBUCKS #1182</span>
+            </div>
+            <div className={`${styles.alert} ${styles.iosAlert} ${styles.alertThree}`}>
+              <span className={styles.alertApp}><i className={styles.msgIcon} />Messages · Your bank</span>
+              <span>USD 15.49 charged at NETFLIX.COM on card ••4821</span>
+            </div>
+            <span className={styles.handoff}>Shortcuts → Wafra Local Capture</span>
+          </div>
+        </div>
+
+        <div className={`${styles.device} ${styles.android}`} aria-hidden="true">
+          <div className={styles.screen}>
+            <span className={styles.punch} />
+            <span className={styles.statusBar}><b>09:41</b><b>▾ ▮</b></span>
+            <span className={styles.clockAndroid}>09:41</span>
+            <div className={`${styles.alert} ${styles.droidAlert} ${styles.alertTwo}`}>
+              <span className={styles.alertApp}><i className={styles.bankIcon} />Bank app · now</span>
+              <span>Purchase EUR 42.00 at CARREFOUR MARKET PARIS</span>
+            </div>
+            <span className={styles.handoff}>Read on this phone</span>
+          </div>
+        </div>
+
+        <div className={styles.tape} aria-hidden="true">
+          <div className={styles.tapeHead}><span>Today</span><span>Wafra ledger</span></div>
+          <div className={`${styles.tapeRow} ${styles.rowOne}`}>
+            <span className={styles.tapeMerchant}>Starbucks</span>
+            <span className={styles.stamp}>Dining</span>
+            <span className={styles.tapeAmount}>−$6.75</span>
+          </div>
+          <div className={`${styles.tapeRow} ${styles.rowTwo}`}>
+            <span className={styles.tapeMerchant}>Carrefour<small>€42.00 converted</small></span>
+            <span className={styles.stamp}>Groceries</span>
+            <span className={styles.tapeAmount}>−$45.62</span>
+          </div>
+          <div className={`${styles.tapeRow} ${styles.rowThree}`}>
+            <span className={styles.tapeMerchant}>Netflix<small>Monthly · recurring</small></span>
+            <span className={styles.stamp}>Entertainment</span>
+            <span className={styles.tapeAmount}>−$15.49</span>
+          </div>
+        </div>
+      </div>
+      <label className={styles.motionToggle}>
+        <input type="checkbox" />
+        <span>Pause animations</span>
+      </label>
+      <figcaption className={styles.previewCaption}>
+        Illustration · sample data · automatic capture depends on your bank’s alert format
+      </figcaption>
+    </figure>
+  );
+}
 
 export default function MarketingHome() {
   return (
@@ -57,7 +130,8 @@ export default function MarketingHome() {
           </a>
           <div className={styles.navLinks}>
             <a href="#how-it-works">How it works</a>
-            <a href="#inside-wafra">Inside the app</a>
+            <a href="#categories">Categories</a>
+            <a href="#subscriptions">Bills</a>
             <a href="#privacy">Privacy</a>
             <a href="#questions">Questions</a>
           </div>
@@ -99,30 +173,129 @@ export default function MarketingHome() {
             <p className={styles.languageNote}>Available in English and Arabic.</p>
           </div>
 
-          <figure className={styles.productStage} aria-label="Wafra app previews">
-            <div className={styles.phonePair}>
-            <div className={`${styles.phone} ${styles.phoneBack}`}>
-              <img
-                src="/wafra-app-bills.png"
-                decoding="async"
-                alt="Redesigned Wafra Bills in dark mode, with subscriptions separated from utilities and telecom; sample data"
-                width={390}
-                height={844}
-              />
-            </div>
-            <div className={`${styles.phone} ${styles.phoneFront}`}>
-              <img
-                src="/wafra-app-home.png"
-                fetchPriority="high"
-                alt="Redesigned Wafra Home, focused on spending, income and the next payments instead of a total balance; sample data"
-                width={390}
-                height={844}
-              />
-            </div>
-            </div>
-            <figcaption className={styles.previewCaption}>App previews · sample data</figcaption>
-          </figure>
+          <CaptureStage />
         </header>
+
+        <section className={styles.capture} id="how-it-works" aria-labelledby="capture-title">
+          <div className={styles.tourIntro}>
+            <p className={styles.kicker}>Live capture</p>
+            <h2 id="capture-title">From bank alert to ledger, on your phone.</h2>
+            <p>
+              Each platform allows something different, so Wafra uses a different route on each. Both end in the
+              same encrypted ledger, and neither route needs a bank login.
+            </p>
+          </div>
+          <ol className={styles.lanes}>
+            {captureLanes.map((lane, laneIndex) => (
+              <li className={styles.lane} key={lane.platform} style={{ '--lane': laneIndex } as React.CSSProperties}>
+                <div className={styles.laneHead}>
+                  <h3>{lane.platform}</h3>
+                  <span>{lane.note}</span>
+                </div>
+                <ol className={styles.track}>
+                  {lane.steps.map((step, stepIndex) => (
+                    <li key={step.title}>
+                      <span className={styles.trackIndex}>{String(stepIndex + 1).padStart(2, '0')}</span>
+                      <div><strong>{step.title}</strong><span>{step.copy}</span></div>
+                    </li>
+                  ))}
+                </ol>
+              </li>
+            ))}
+          </ol>
+        </section>
+
+        <section className={styles.sorting} id="categories" aria-labelledby="sorting-title">
+          <div className={styles.sortingIntro}>
+            <p className={styles.kicker}>Automatic categories</p>
+            <h2 id="sorting-title">Messy in.<br />Meaningful out.</h2>
+            <p>
+              Bank alerts name merchants in shorthand. Wafra trims the terminal codes, finds the merchant and gives
+              the charge a category. It knows merchant words in English, Arabic and several other languages.
+            </p>
+            <ul className={styles.sortingRules}>
+              <li>Refunds, card payments and transfers between your own accounts stay out of spending.</li>
+              <li>When the merchant alone cannot tell, Wafra leaves the charge for you instead of guessing.</li>
+            </ul>
+          </div>
+
+          <div className={styles.sorter}>
+            <div className={styles.sorterHead} aria-hidden="true">
+              <span>From your bank</span><span>In Wafra</span>
+            </div>
+            <ul className={styles.sorterRows} aria-label="Examples with sample data">
+              {sortingRows.map((row, index) => (
+                <li key={row.raw} style={{ '--i': index } as React.CSSProperties}>
+                  <code className={styles.raw}>{row.raw}</code>
+                  <span className={styles.sortArrow} aria-hidden="true">→</span>
+                  <span className={styles.clean}>
+                    <span>{row.merchant}</span>
+                    <span className={row.neutral ? `${styles.chip} ${styles.chipNeutral}` : styles.chip}>
+                      {row.neutral ? 'Refund · not spending' : row.category}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            <div className={styles.teach}>
+              <div className={styles.teachCard} aria-hidden="true">
+                <code>AL NOOR LDRY 22</code>
+                <span className={styles.teachChips}>
+                  <span className={`${styles.chip} ${styles.chipNeutral} ${styles.teachBefore}`}>Other</span>
+                  <span className={`${styles.chip} ${styles.teachAfter}`}>Home services</span>
+                  <span className={styles.tap} />
+                </span>
+              </div>
+              <p><strong>Tell it once.</strong> Change a merchant’s category and its next charges follow your choice.</p>
+            </div>
+          </div>
+        </section>
+
+        <section className={styles.radar} id="subscriptions" aria-labelledby="radar-title">
+          <div className={styles.radarIntro}>
+            <p className={styles.kicker}>Subscriptions and bills</p>
+            <h2 id="radar-title">See every renewal before it lands.</h2>
+            <p>
+              Wafra spots charges that repeat, learns their rhythm and shows when the next one is due. Price rises and
+              services that have gone quiet are flagged.
+            </p>
+          </div>
+
+          <div className={styles.radarBoard}>
+            <div className={styles.timeline} aria-hidden="true">
+              <span className={styles.today}>Today</span>
+              {renewals.filter((item) => item.day !== null).map((item, index) => (
+                <span
+                  className={item.alert ? `${styles.pin} ${styles.pinAlert}` : styles.pin}
+                  key={item.name}
+                  style={{ '--day': item.day, '--i': index } as React.CSSProperties}
+                >
+                  <b>{item.name.split(' ')[0]}</b>
+                </span>
+              ))}
+              <span className={styles.axis}><i>0</i><i>10 days</i><i>20 days</i><i>30</i></span>
+            </div>
+
+            <ul className={styles.renewals} aria-label="Upcoming charges, sample data">
+              {renewals.map((item) => (
+                <li className={item.muted ? styles.renewalMuted : undefined} key={item.name}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <span>{item.detail}</span>
+                  </div>
+                  <span className={item.alert ? `${styles.tag} ${styles.tagAlert}` : styles.tag}>{item.tag}</span>
+                  <span className={styles.renewalAmount}>{item.amount}</span>
+                </li>
+              ))}
+            </ul>
+            <div className={styles.radarTotal}>
+              <span>Subscriptions</span>
+              <strong>$27.48<small> / month</small></strong>
+              <p>Utilities, rent and card statements are counted apart, so this is only what you could cancel.</p>
+            </div>
+          </div>
+        </section>
 
         <section className={styles.appTour} id="inside-wafra" aria-labelledby="app-tour-title">
           <div className={styles.tourIntro}>
@@ -146,7 +319,7 @@ export default function MarketingHome() {
           </div>
         </section>
 
-        <section className={styles.features} id="how-it-works">
+        <section className={styles.features} id="daily-picture">
           <div className={styles.sectionIntro}>
             <p className={styles.kicker}>The daily picture</p>
             <h2>Make sense of the details.</h2>

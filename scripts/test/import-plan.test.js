@@ -2786,6 +2786,35 @@ const DECLINE_SMS = [{
       duplicateRepair.batch.updates[0].id === 'duplicate-1405' &&
       duplicateRepair.batch.updates[0].remove === true,
     duplicateRepair.batch.updates);
+
+  // isTransfer is the parser's own transfer hint, not a pairing or a user
+  // decision: a proven second provider copy of a parser-flagged transfer is
+  // retired like any other, or the transfer shows twice. Only a copy another
+  // leg's pairing points at (transferMatch) is kept.
+  const retireWith = (extra) => buildImportPlan(
+    [],
+    { ...duplicateState, transactions: duplicateState.transactions.map((row) =>
+      row.id === 'duplicate-1405' ? { ...row, ...extra } : { ...row, isTransfer: extra.isTransfer }) },
+    1786544431861,
+    new Date('2026-08-14T12:00:00Z'),
+    [{
+      smsTs: 1786544431105,
+      sender: 'FAB',
+      channel: 'inbox',
+      sourceEventId: 'a30849',
+      reason: 'exact-provider-duplicate',
+    }],
+  ).batch.updates;
+  const flaggedTransfer = retireWith({ isTransfer: true });
+  ok('a full reread retires a proven duplicate provider copy the parser flagged as a transfer',
+    flaggedTransfer.length === 1 && flaggedTransfer[0].id === 'duplicate-1405' &&
+      flaggedTransfer[0].remove === true,
+    flaggedTransfer);
+  const pairedTransfer = retireWith({ isTransfer: true,
+    transferMatch: { version: 1, counterpartId: 'other-leg', basis: 'reference',
+      signature: 'this-leg', counterpartSignature: 'other-leg' } });
+  ok('a full reread never retires a provider copy a transfer pairing points at',
+    !pairedTransfer.some((update) => update.remove), pairedTransfer);
 }
 
 // Existing redacted ENBD specimen: currency is an admission fact, not a
@@ -3730,6 +3759,22 @@ const DECLINE_SMS = [{
   ok('a credit LIMIT beside the total keeps the statement owed',
     plan.batch.newDues.length === 1 && plan.batch.newDues[0].totalDueFils === 150000,
     plan.batch.newDues.map((d) => d.totalDueFils));
+}
+
+
+/* ── a credit balance supersedes the same statement's earlier debt ────── */
+{
+  const { mergeImportedCardDues } = require('./build/cards');
+  const t = Date.parse('2026-10-05T09:00:00Z');
+  const card = { id: 'cc', name: 'Card', kind: 'card', cardType: 'credit', bankName: 'Emirates NBD', last4: '4321', openingFils: 0, color: '#123' };
+  const state = { ...BASE, accounts: [card],
+    cardDues: [{ id: 'd1', accountId: 'cc', totalDueFils: 15000, minDueFils: 750, dueDate: '2026-10-25', paidFils: 0 }] };
+  const scanned = scan([{ body: 'Your Credit Card ending 4321 statement: Total Amount Due AED 150.00 CR. Minimum Amount Due AED 0.00. Payment Due Date 25/10/2026.', ts: t, sender: 'EmiratesNBD' }]);
+  const plan = buildImportPlan(scanned.parsed, state, scanned.newestTs);
+  const merged = mergeImportedCardDues(state.cardDues, plan.batch.newDues.map((d, i) => ({ ...d, id: `n${i}`, accountId: 'cc' })), state.accounts);
+  ok('a CR re-read of a stored positive due leaves nothing owed',
+    merged.length === 1 && merged[0].totalDueFils === 0 && merged[0].minDueFils === 0 && !('creditBalance' in merged[0]),
+    { newDues: plan.batch.newDues, merged });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

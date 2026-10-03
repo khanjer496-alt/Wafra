@@ -1155,8 +1155,10 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
       JSON.stringify({ stored: stored.transactions.length, updates: reread.batch.updates }));
   }
   {
-    // The 1-second provider-duplicate retirement still exists; it must not
-    // remove a row that is part of a transfer, whatever its evidence says.
+    // The 1-second provider-duplicate retirement still exists. It must not
+    // remove a row a transfer pairing points at, whatever its evidence says,
+    // but the parser's own transfer hint is not a pairing: a proven second
+    // copy of a parser-flagged transfer is retired like any other.
     const { buildImportPlan } = require('./build/import-plan.js');
     const row = { ...(await carrierScan([
       { id: 31_960, address: 'FAB', body: noToken, date: NOW + 900_000 },
@@ -1169,12 +1171,17 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     ok('a provider-duplicate retirement still removes an ordinary stored copy',
       planFor({}).batch.updates.some((update) => update.id === 'provider-dup' && update.remove),
       JSON.stringify(planFor({}).batch.updates));
-    ok('a provider-duplicate retirement never removes a transfer or transfer-matched row',
-      !planFor({ isTransfer: true }).batch.updates.some((update) => update.remove) &&
-        !planFor({ transferMatch: { kind: 'own-account', counterpartId: 'other', matchedAt: NOW } })
-          .batch.updates.some((update) => update.remove),
-      JSON.stringify([planFor({ isTransfer: true }).batch.updates,
-        planFor({ transferMatch: { kind: 'own-account' } }).batch.updates]));
+    ok('a provider-duplicate retirement removes a parser-flagged transfer copy',
+      planFor({ isTransfer: true }).batch.updates.some((update) =>
+        update.id === 'provider-dup' && update.remove),
+      JSON.stringify(planFor({ isTransfer: true }).batch.updates));
+    const paired = { transferMatch: { version: 1, counterpartId: 'other', basis: 'reference',
+      signature: 'this-leg', counterpartSignature: 'other-leg' } };
+    ok('a provider-duplicate retirement never removes a transfer-matched row',
+      !planFor(paired).batch.updates.some((update) => update.remove) &&
+        !planFor({ isTransfer: true, ...paired }).batch.updates.some((update) => update.remove),
+      JSON.stringify([planFor(paired).batch.updates,
+        planFor({ isTransfer: true, ...paired }).batch.updates]));
   }
   {
     const { scan, ids } = await carrierScan([
@@ -1570,6 +1577,24 @@ const baseLedgerState = () => ({ hydrated: true, marketId: 'AE',
     ok('the launch session never posts a BNPL provider source, on either parser path',
       leaked.length === 0 && bankRow?.merchant === 'Tabby' && bankRow?.amountFils === 4975,
       JSON.stringify({ leaked, bankRow }));
+
+    // The unproven-format path (Android SMS from a non-launch sender, iOS
+    // History from a worldwide issuer) is the one a BNPL sender actually
+    // takes. On a non-Gulf ledger with best-effort posting on it posted a
+    // provider's message as a marked expense.
+    const unprovenBody = 'You spent USD 35.00 at TARGET with your card ending 1234.';
+    const unprovenSession = () => createLaunchAlertSession({
+      overrides: {}, pinnedCurrency: 'USD', activeMarket: 'AE', bestEffort: { enabled: true, country: 'US' },
+    });
+    const control = unprovenSession();
+    const controlRow = control.parseUnproven(unprovenBody, 'UNKNOWNBANK', control.inspect(unprovenBody, 'UNKNOWNBANK'), NOW);
+    const unprovenLeaks = ['Tabby', 'AD-Tabby', 'Tamara', 'app.tabby.client', 'co.tamara.user'].filter((sender) => {
+      const session = unprovenSession();
+      return session.parseUnproven(unprovenBody, sender, session.inspect(unprovenBody, sender), NOW) !== null;
+    });
+    ok('the unproven-format path never posts a BNPL provider source either',
+      controlRow?.amountFils === 3500 && !!controlRow?.bestEffort && unprovenLeaks.length === 0,
+      JSON.stringify({ controlRow, unprovenLeaks }));
   }
 
   reactNative.Platform.OS = 'ios';

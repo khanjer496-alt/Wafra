@@ -107,6 +107,53 @@ export const featureCards = [
   },
 ];
 
+/* Illustration data for the landing demos. Synthetic sample data only. */
+export const captureLanes = [
+  {
+    platform: 'iPhone',
+    note: 'Bank texts from senders you choose',
+    steps: [
+      { title: 'A bank text arrives', copy: 'Only from a bank sender you selected in Apple Shortcuts.' },
+      { title: 'Shortcuts hands it over', copy: 'A personal automation passes it to Wafra Local Capture on the same iPhone. There is no network step.' },
+      { title: 'Read on the iPhone', copy: 'The parser keeps the amount, merchant and date. Codes and promotions are dropped, and the raw text is deleted.' },
+      { title: 'In your ledger', copy: 'When iOS next lets Wafra run, or as soon as you open it.' },
+    ],
+  },
+  {
+    platform: 'Android',
+    note: 'Bank SMS and bank-app alerts',
+    steps: [
+      { title: 'An alert arrives', copy: 'A bank SMS, or an optional bank-app notification.' },
+      { title: 'Read on the device', copy: 'Only with the access you grant. Messages that are not financial are ignored.' },
+      { title: 'Sorted and saved', copy: 'Added to the encrypted ledger, or held for your review when Wafra is not sure.' },
+    ],
+  },
+  {
+    platform: 'Past months',
+    note: 'Both platforms',
+    steps: [
+      { title: 'Import a statement', copy: 'A PDF or CSV from your bank fills in what happened before you installed Wafra.' },
+      { title: 'Or add it by hand', copy: 'Manual entry works in every country, with or without alerts.' },
+    ],
+  },
+];
+
+export const sortingRows = [
+  { raw: 'POS 4821 CARREFOUR MKT 0231', merchant: 'Carrefour', category: 'Groceries' },
+  { raw: 'UBER *TRIP HELP.UBER.COM', merchant: 'Uber', category: 'Transport' },
+  { raw: 'STARBUCKS #1182 DUBAI MALL', merchant: 'Starbucks', category: 'Dining' },
+  { raw: 'NETFLIX.COM 866-579-7172', merchant: 'Netflix', category: 'Entertainment' },
+  { raw: 'REFUND AMAZON MKTPLACE', merchant: 'Amazon', category: 'Refund', neutral: true },
+];
+
+export const renewals = [
+  { name: 'Netflix', detail: 'Monthly · renews in 3 days', amount: '$15.49', day: 3, tag: 'Subscription' },
+  { name: 'Spotify', detail: 'Monthly · was $10.99', amount: '$11.99', day: 12, tag: 'Price went up', alert: true },
+  { name: 'Electricity', detail: 'Utilities · due in 9 days', amount: '≈ $84.20', day: 9, tag: 'Bill' },
+  { name: 'Visa ••4821 statement', detail: 'Card · due in 18 days', amount: '$1,240.00', day: 18, tag: 'Card due' },
+  { name: 'City Gym', detail: 'No charge for two months', amount: '$39.00', day: null, tag: 'Likely stopped', muted: true },
+];
+
 export const faqItems = [
   {
     question: 'Does Wafra connect to my bank account?',
