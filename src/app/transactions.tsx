@@ -679,8 +679,11 @@ export default function TransactionsScreen() {
               )}
 
               <View testID="transactions-summary" style={styles.summaryRow}>
-            {/* Full-width metadata; money and exclusions have their own lines. */}
-            <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
+            {/* One line: what is listed (and what is left out of the total)
+                on the start side, the net on the end side. At the
+                accessibility sizes the net takes its own line. */}
+            <View style={[styles.summaryTop, largeText && styles.summaryTopLarge]}>
+            <ThemedText type="small" themeColor="textSecondary" style={[styles.summaryText, largeText && styles.summaryTextLarge]}>
               {trf('transactionsCount', {
                 count: filtered.length,
                 s: filtered.length === 1 ? '' : 's',
@@ -699,7 +702,26 @@ export default function TransactionsScreen() {
                     s: activeFilterCount === 1 ? '' : 's',
                   })}`
                 : ''}
-
+              {(excluded.transfers > 0 || excluded.movements > 0 || excluded.hidden > 0) && (
+                <ThemedText testID="transactions-exclusions" type="small" themeColor="textSecondary">
+              {' · '}
+              {excluded.transfers > 0
+                ? `${trf('transfersExcluded', {
+                    count: excluded.transfers,
+                    s: excluded.transfers === 1 ? '' : 's',
+                  })}`
+                : ''}
+              {excluded.movements > 0
+                ? `${excluded.transfers > 0 ? ' · ' : ''}${trf('movementsExcluded', {
+                    count: excluded.movements,
+                    s: excluded.movements === 1 ? '' : 's',
+                  })}`
+                : ''}
+              {excluded.hidden > 0
+                ? `${excluded.transfers > 0 || excluded.movements > 0 ? ' · ' : ''}${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
+                : ''}
+                </ThemedText>
+              )}
             </ThemedText>
             {(showResultTotal || activeFilterCount > 0) && <View style={styles.summaryRight}>
               {showResultTotal && <View testID="transactions-net-total" style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
@@ -726,6 +748,9 @@ export default function TransactionsScreen() {
                 </Pressable>
               )}
             </View>}
+            </View>
+              {/* The separated-transfers note and the way to them share a line. */}
+              <View style={[styles.transferRow, largeText && styles.transferRowLarge]}>
               {separatedTransfers.count > 0 && <View testID="transactions-separated-transfers" style={styles.transferNotice}>
                 <ThemedText type="meta" themeColor="textSecondary">{transferWords.separated(separatedTransfers.count)}</ThemedText>
                 {separatedTransfers.reviewCount > 0 &&
@@ -742,31 +767,16 @@ export default function TransactionsScreen() {
                   <ThemedText type="meta" themeColor="textSecondary">{transferWords.countsNote}</ThemedText>
                 </>}
               </View>}
-              <Pressable accessibilityRole="button" onPress={() => routerRef.current.push('/transfers')}
-                style={styles.transferLink} testID="transactions-transfers-link">
-                <Icon name="repeat" size={17} color={band.tint} />
-                <ThemedText type="small" style={{ color: band.tint, fontFamily: Fonts.sansSemi }}>{transferWords.viewAll}</ThemedText>
-                <Icon name="chevron-right" size={16} color={band.tint} />
+              {/* Short visible label ("Transfers ›") so it fits beside the note;
+                  the spoken label keeps the full action. */}
+              <Pressable accessibilityRole="button" accessibilityLabel={transferWords.viewAll}
+                onPress={() => routerRef.current.push('/transfers')}
+                hitSlop={4} style={styles.transferLink} testID="transactions-transfers-link">
+                <Icon name="repeat" size={15} color={band.tint} />
+                <ThemedText type="small" style={{ color: band.tint, fontFamily: Fonts.sansSemi }}>{transferWords.title}</ThemedText>
+                <Icon name="chevron-right" size={14} color={band.tint} />
               </Pressable>
-              {(excluded.transfers > 0 || excluded.movements > 0 || excluded.hidden > 0) && (
-                <ThemedText testID="transactions-exclusions" type="meta" themeColor="textSecondary">
-              {excluded.transfers > 0
-                ? `${trf('transfersExcluded', {
-                    count: excluded.transfers,
-                    s: excluded.transfers === 1 ? '' : 's',
-                  })}`
-                : ''}
-              {excluded.movements > 0
-                ? `${excluded.transfers > 0 ? ' · ' : ''}${trf('movementsExcluded', {
-                    count: excluded.movements,
-                    s: excluded.movements === 1 ? '' : 's',
-                  })}`
-                : ''}
-              {excluded.hidden > 0
-                ? `${excluded.transfers > 0 || excluded.movements > 0 ? ' · ' : ''}${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
-                : ''}
-                </ThemedText>
-              )}
+              </View>
               </View>
             </View>
           )}
@@ -853,8 +863,11 @@ export default function TransactionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  transferNotice: { gap: Spacing.one },
-  transferLink: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, alignSelf: 'flex-start' },
+  transferNotice: { gap: 2, flexShrink: 1, minWidth: 0 },
+  // 36pt plus the 4pt hit slop on each side keeps the 44pt target.
+  transferLink: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  transferRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', columnGap: Spacing.two },
+  transferRowLarge: { flexDirection: 'column', alignItems: 'flex-start' },
   // The sheet holds the list edge to edge, so a swiped row's actions reach the
   // screen edge; header, section and row cells carry the gutter themselves.
   sheetContent: { paddingHorizontal: 0, paddingTop: Spacing.two },
@@ -887,13 +900,16 @@ const styles = StyleSheet.create({
   summaryRow: {
     flexDirection: 'column',
     alignItems: 'stretch',
-    gap: Spacing.two,
+    gap: 2,
   },
+  summaryTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', columnGap: Spacing.two, rowGap: 2 },
+  summaryTopLarge: { flexDirection: 'column', alignItems: 'stretch' },
   summaryValue: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two, minWidth: 0, flexShrink: 1 },
   summaryValueLarge: { flexDirection: 'column', alignItems: 'flex-start' },
-  summaryText: {
-    flexShrink: 1,
-  },
+  // Shares the line with the net while at least 140pt is left for it, then
+  // wraps inside that space.
+  summaryText: { flexGrow: 1, flexShrink: 1, flexBasis: 140, minWidth: 0 },
+  summaryTextLarge: { flexBasis: 'auto' },
   merchantChip: {
     flexDirection: 'row',
     alignItems: 'center',
