@@ -1,11 +1,12 @@
 import Constants from 'expo-constants';
 import React, { useEffect, useRef, useState } from 'react';
 import { AppState as NativeAppState, Platform, View } from 'react-native';
+import { SettingsLinkRow } from '@/components/settings-rows';
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button, Toggle } from '@/components/ui/controls';
-import { Row } from '@/components/ui/layout';
 import { merchantLogoDecision } from '@/components/ui/merchant-logo-assets';
+import type { BandPalette } from '@/constants/theme';
 import { hasSmsPermission, requestSmsPermission } from '@/lib/auto-import';
 import { buildDiagnosticExport, serializeDiagnosticExport } from '@/lib/diagnostic-export';
 import { collectDiagnosticBankMessages } from '@/lib/diagnostic-messages';
@@ -15,8 +16,12 @@ import SmsReader from '../../modules/sms-reader';
 
 import { diagnosticCopy as copy } from '@/lib/diagnostic-copy';
 
-/** Opens a consent sheet first. Preparing and sharing are separate actions. */
-export function DiagnosticExportControl() {
+/**
+ * Opens a consent sheet first. Preparing and sharing are separate actions.
+ * The entry is an ordinary Data and help row: glyph tile, title and line,
+ * chevron (a sheet opens here).
+ */
+export function DiagnosticExportControl({ palette, last = false }: { palette?: BandPalette; last?: boolean } = {}) {
   const { state, getStateSnapshot, getStateGeneration } = useStore();
   const ledgerGeneration = getStateGeneration();
   const w = copy[state.language === 'ar' ? 'ar' : 'en'];
@@ -87,10 +92,8 @@ export function DiagnosticExportControl() {
     finally { running.current = false; if (mounted.current) clear(); }
   };
   return <>
-    <Row accessibilityLabel={w.title} onPress={() => { clear(); setMessages(false); setError(false); setOpen(true); }}>
-      <View style={{ flex: 1, gap: 4 }}><ThemedText type="smallBold">{w.title}</ThemedText>
-        <ThemedText type="meta" themeColor="textSecondary">{w.intro}</ThemedText></View>
-    </Row>
+    <SettingsLinkRow title={w.title} subtitle={w.intro} icon="tools" palette={palette} last={last}
+      testID="diagnostic-export-row" onPress={() => { clear(); setMessages(false); setError(false); setOpen(true); }} />
     <BottomSheet visible={open} title={w.title} onClose={() => { clear(); setOpen(false); }} testID="diagnostic-export-sheet">
       <ThemedText type="small">{w.warning}</ThemedText>
       <ThemedText type="meta" themeColor="textSecondary">{prepared ? preparedCount : state.transactions.length} {w.records} · {w.intro}</ThemedText>

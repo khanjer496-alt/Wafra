@@ -18,7 +18,7 @@ import { EButton } from '@/components/ui/band/e-button';
 import { StatTile } from '@/components/ui/band/stat-tile';
 import { TextField } from '@/components/ui/text-field';
 import { AccountTile } from '@/components/ui/tile';
-import { Fonts, Spacing } from '@/constants/theme';
+import { Fonts, Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -30,6 +30,7 @@ import { bankPickerOptions } from '@/lib/known-banks';
 import { corroboratingTransferIdsForState } from '@/lib/ledger';
 import { accountMonthFlow, isAccountDetailTarget, recentAccountTransactions } from '@/lib/money-places';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
+import { tapped } from '@/lib/haptics';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import type { Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
@@ -266,15 +267,15 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
 
       <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
       {managing && (
-        <ChoiceSheet
-          visible
+        <ManageSheet
+          palette={band}
           onClose={() => setManaging(false)}
           title={account.name}
           body={account.archived ? t('hiddenFromLists') : undefined}
           options={[
-            { value: 'visibility' as ManageAction, label: account.archived ? t('unhide') : t('hideFromLists') },
-            { value: 'bank' as ManageAction, label: t('accountSetBank'), detail: account.bankName },
-            { value: 'delete' as ManageAction, label: t('delete') },
+            { value: 'visibility', label: account.archived ? t('unhide') : t('hideFromLists') },
+            { value: 'bank', label: t('accountSetBank'), detail: account.bankName },
+            { value: 'delete', label: t('delete'), destructive: true },
           ]}
           onSelect={onManage}
         />
@@ -317,6 +318,44 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
   );
 }
 
+/**
+ * The account's actions: a plain list on the sheet, separated by straight
+ * hairline rules like every other sheet list. Delete wears the destructive
+ * tone here and still asks first (ConfirmSheet) before anything is removed.
+ */
+function ManageSheet({ palette, title, body, options, onSelect, onClose }: {
+  palette: BandPalette;
+  title: string;
+  body?: string;
+  options: { value: ManageAction; label: string; detail?: string; destructive?: boolean }[];
+  onSelect: (action: ManageAction) => void;
+  onClose: () => void;
+}) {
+  return (
+    <BottomSheet visible onClose={onClose} title={title} palette={palette}>
+      {body ? <ThemedText type="small" style={{ color: palette.textSecondary }}>{body}</ThemedText> : null}
+      <View testID="account-manage-options">
+        {options.map((option, index) => (
+          <Pressable
+            key={option.value}
+            accessibilityRole="button"
+            accessibilityLabel={option.detail ? `${option.label}, ${option.detail}` : option.label}
+            testID={`account-manage-${option.value}`}
+            onPress={() => { tapped(); onSelect(option.value); }}
+            style={({ pressed }) => [styles.manageRow, index > 0 && {
+              borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.rule,
+            }, { opacity: pressed ? 0.6 : 1 }]}>
+            <ThemedText type="small" style={{ color: option.destructive ? palette.statusOver : palette.text }}>
+              {option.label}
+            </ThemedText>
+            {option.detail ? <ThemedText type="meta" style={{ color: palette.textSecondary }}>{option.detail}</ThemedText> : null}
+          </Pressable>
+        ))}
+      </View>
+    </BottomSheet>
+  );
+}
+
 const styles = StyleSheet.create({
   content: { gap: Spacing.three },
   bandBody: { gap: 20 },
@@ -335,4 +374,6 @@ const styles = StyleSheet.create({
   section: { gap: Spacing.one },
   sectionHead: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   seeAll: { minHeight: 44, minWidth: 44, flexDirection: 'row', alignItems: 'center', gap: Spacing.half },
+  // Square ends: a rounded row would curl its hairline rule up at both edges.
+  manageRow: { minHeight: 52, justifyContent: 'center', gap: Spacing.half, paddingVertical: Spacing.two },
 });
