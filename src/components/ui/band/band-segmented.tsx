@@ -56,7 +56,8 @@ const styles = StyleSheet.create({
   track: { flexDirection: 'row', borderRadius: 22, paddingHorizontal: 4 },
   stack: { flexDirection: 'column', borderRadius: 20, padding: 4, gap: 4 },
   segment: { flex: 1, minHeight: 44, paddingVertical: 4 },
-  segmentLarge: { paddingVertical: 0 },
+  // Stacked at Larger Text: each tab takes its own label's height, not a share.
+  segmentLarge: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto', paddingVertical: 0 },
   pill: { flexGrow: 1, borderRadius: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 4 },
   pillLarge: { minHeight: 44, borderRadius: 22, paddingVertical: 8 },
   label: { textAlign: 'center', flexShrink: 1 },
