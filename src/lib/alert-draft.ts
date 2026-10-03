@@ -249,8 +249,11 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
   const scanSymbol = (re: RegExp, prefix: boolean): void => {
     re.lastIndex = 0;
     for (const match of normalized.matchAll(re)) {
+      // A Latin letter or digit glued in front is an identifier ("AB250Ksh");
+      // a CJK label is not ("金额58.00元", "금액12,000원").
       if (!prefix && (match.index as number) > 0 &&
-        /[\p{L}\p{N}]/u.test(normalized[(match.index as number) - 1])) continue;
+        /[\p{L}\p{N}]/u.test(normalized[(match.index as number) - 1]) &&
+        !/[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(normalized[(match.index as number) - 1])) continue;
       const matchEnd = (match.index as number) + match[0].length;
       if (matchEnd < normalized.length && /[\p{L}\p{N}]/u.test(normalized[matchEnd])) continue;
       const token = prefix ? match[1] : match[2];

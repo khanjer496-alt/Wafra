@@ -1,7 +1,7 @@
 import { inspectUniversalAlert, type UniversalAlertReview } from '@/lib/alert-market-detection';
 import { hasUniversalInstitutionSender } from '@/lib/alert-institution-grammars';
 import { activeCountryDateOrder, getActiveCountry } from '@/lib/country';
-import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-effort-autopost';
+import { bestEffortAutoPostEnabled, decideBestEffortAutoPost, hasNonCompletedWording, sharedSymbolCurrencyForCountry } from '@/lib/best-effort-autopost';
 import {
   interpretBankAlert,
   type BankAlertInterpretation,
@@ -14,14 +14,14 @@ import {
   pinnedLedgerCurrencyCode,
 } from '@/lib/markets';
 import { isBnplProviderSource } from '@/lib/bnpl-providers';
-import { parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
+import { nonPostingReason, parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
 import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
-import type { UniversalBankEvent, UniversalParseContext } from '@/lib/universal-types';
+import type { UniversalBankEvent, UniversalField, UniversalMoney, UniversalParseContext } from '@/lib/universal-types';
 
 type CurrencyAliasMap = NonNullable<UniversalParseContext['currencyAliases']>;
 
@@ -34,7 +34,10 @@ export const hasBankAlertMoneyHint = (source: string): boolean =>
   REVIEW_MONEY_HINT.test(source) || LAUNCH_MONEY_HINT.test(source) ||
   [...source.matchAll(/(?<![A-Z])([A-Z]{3})(?![A-Z])/giu)]
     .some((match) => currencyMinorUnits(match[1]) !== null) ||
-  Object.keys(CURRENCY_SYMBOL_CANDIDATES).some((symbol) => source.includes(symbol));
+  // Case-insensitive only for multi-letter symbols ("Ksh" for KSh): a short
+  // one lower-cased is inside ordinary words ("users", "hours", "Sharma").
+  Object.keys(CURRENCY_SYMBOL_CANDIDATES).some((symbol) => symbol.length >= 3
+    ? source.toLowerCase().includes(symbol.toLowerCase()) : source.includes(symbol));
 
 /**
  * Cheap evidence that a final money movement MAY have posted.
@@ -49,8 +52,10 @@ export const hasBankAlertMoneyHint = (source: string): boolean =>
  * institution sender bypasses this vocabulary gate below, so an unfamiliar
  * bank phrasing from a supported institution still reaches the full parser.
  */
+// Unicode-aware boundaries: `\b` treats an accented letter as a non-letter,
+// so "effectué" and "payé" never matched and French alerts were dropped here.
 const UNIVERSAL_POSTED_EVENT_HINT =
-  /\b(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+of|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)\b|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額)/iu;
+  /(?<![\p{L}\p{N}])(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+of|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|realizad[oa]|efetuad[oa]|zrealizowana|consumo|realizaste|lastschrift|paiement|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)(?![\p{L}\p{N}])|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額|消费|支付|승인|डेबिट|क्रेडिट)/iu;
 
 // A small family of real bank field-list alerts has amount + instrument +
 // merchant but no verb at all. The 30k Jev benchmark found one such rescued FAB
@@ -155,6 +160,118 @@ const countryReadSource = (source: string, country: string | null): string => {
 };
 const countryMoneyHint = (source: string, country: string | null): boolean =>
   (country === 'ZA' && ZA_RAND_HINT.test(source)) || countryReadSource(source, country) !== source;
+
+/**
+ * A money field in the ledger currency, or null. An explicit figure must
+ * already be in it; a shared symbol ($, Rs) resolves only through the
+ * person's own country, exactly as the best-effort policy resolves it.
+ */
+const ledgerMinorOf = (
+  field: UniversalField<UniversalMoney>,
+  country: string | null,
+  ledgerCurrency: string,
+  ledgerExponent: number | null,
+): number | null => {
+  let money: UniversalMoney | null = null;
+  if (field.evidence === 'explicit' && field.value && field.alternatives.length === 0) money = field.value;
+  else if (field.evidence === 'ambiguous' && field.issues.length > 0 &&
+    field.issues.every((issue) => issue === 'currency-symbol' || issue === 'currency-exponent')) {
+    const wanted = sharedSymbolCurrencyForCountry(country);
+    const options = [...(field.value ? [field.value] : []), ...field.alternatives].filter((m) => m.currency === wanted);
+    if (new Set(options.map((m) => `${m.minorUnits}/${m.exponent}`)).size === 1) money = options[0];
+  }
+  if (!money || money.currency !== ledgerCurrency || (ledgerExponent !== null && money.exponent !== ledgerExponent)) return null;
+  if (!/^[1-9]\d{0,15}$/.test(money.minorUnits)) return null;
+  const minor = Number(money.minorUnits);
+  return Number.isSafeInteger(minor) ? minor : null;
+};
+
+// Credit-card brands that never write the words "credit card" count too.
+const CREDIT_CARD_WORDS = /\b(?:credit|charge|covered)\s+card\b|\bcredit\s*card\b|\bbarclaycard\b|\bamerican\s+express\b|\bamex\b|\bcapital\s+one\b|\bdiscover\s+card\b/iu;
+/** Not a card obligation at all: a loan/EMI statement that merely mentions a card. */
+const NOT_CARD_OBLIGATION = /\b(?:loan|emi|mortgage|finance|instal?ment\s+plan)\b/iu;
+/** A statement that owes nothing, or is not (yet / any more) an open bill. */
+const STATEMENT_NOT_OWED =
+  /\b\d[\d,]*(?:\.\d+)?\s*cr\b|\bcredit\s+balance\b|\bno\s+payment\s+(?:is\s+)?(?:due|required)\b|(?<![\p{L}\p{N}])-\s*[$£€₹]?\s*\d|\bpaid\s+in\s+full\b|\bhas\s+been\s+paid\b|\bwill\s+be\s+(?:generated|issued)\b|\bso\s+far\b|\bunbilled\b|\bwas\s+due\b|\boverdue\b/iu;
+
+/**
+ * WORLDWIDE CARD STATEMENTS AND CARD PAYMENTS.
+ *
+ * The best-effort policy deliberately refuses these: a statement is an
+ * obligation, not a movement, and a card payment is a settlement, not
+ * spending or income. They used to stop in Review everywhere outside the
+ * Gulf, so a US or Indian card never got its bill or its payment. They are
+ * read here only when the alert proves the obligation on its own:
+ *  - a statement needs a card (its last four, or credit-card wording), an
+ *    explicit TOTAL and an explicit DUE DATE in the ledger currency; the
+ *    minimum is kept only when it does not exceed the total;
+ *  - a payment must be a completed card-payment family alert that names the
+ *    card's last four, in the ledger currency;
+ *  - any refusal, code challenge, hold or pending wording stops both.
+ */
+const universalCardObligation = (
+  source: string,
+  event: UniversalBankEvent,
+  ledgerCurrency: string,
+  ledgerExponent: number | null,
+  country: string | null,
+  observedAt?: number,
+): Omit<ParsedSms, 'raw' | 'bestEffort'> | null => {
+  if (event.decision !== 'review' || nonPostingReason(source)) return null;
+  if (NOT_CARD_OBLIGATION.test(source) || !CREDIT_CARD_WORDS.test(source)) return null;
+  const today = localIsoDay(observedAt);
+  if (event.status === 'failed' || event.issues.some((issue) =>
+    issue === 'authentication-not-posting' || issue === 'pending-not-posting' || issue === 'failed-not-posting')) return null;
+  const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
+  const last4 = instrument?.kind === 'card' && instrument.last4 && /^\d{4}$/.test(instrument.last4) ? instrument.last4 : null;
+  if (event.family === 'statement') {
+    if (STATEMENT_NOT_OWED.test(source)) return null;
+    // Some issuers call the statement total just "Balance" ("Your statement
+    // is ready. Balance £845.20, minimum payment £25.00 due by ..."). Only in
+    // a statement ANNOUNCEMENT that also states a minimum is that balance the
+    // amount owed; anywhere else "balance" is headroom or cash.
+    const announced = /\bstatement\b[^.\n]{0,40}\b(?:is\s+)?(?:ready|available|generated|issued)\b/iu.test(source);
+    const plainBalance = !/\b(?:available|avail|avl|remaining|current)\.?\s+(?:credit\s+)?(?:bal(?:ance)?|limit)\b/iu.test(source);
+    const total = ledgerMinorOf(event.statementTotal, country, ledgerCurrency, ledgerExponent) ??
+      (event.statementTotal.evidence === 'missing' && announced && plainBalance && event.minimumDue.evidence !== 'missing'
+        ? ledgerMinorOf(event.balance, country, ledgerCurrency, ledgerExponent) : null);
+    const due = event.dueDate.evidence === 'explicit' ? event.dueDate.value : null;
+    if (!total || !due || !/^\d{4}-\d{2}-\d{2}$/.test(due)) return null;
+    // A due date already behind the alert is a reminder about an old bill.
+    if (today && due < today) return null;
+    const minimum = ledgerMinorOf(event.minimumDue, country, ledgerCurrency, ledgerExponent);
+    const issued = event.statementDate.evidence === 'explicit' ? event.statementDate.value : null;
+    return {
+      kind: 'cardStatement', type: 'expense', amountFils: total, currency: ledgerCurrency,
+      merchant: last4 ? `Card •${last4}` : 'Card statement',
+      date: due, dueDay: Number(due.slice(8)),
+      minDueFils: minimum !== null && minimum <= total ? minimum : null,
+      card: last4 ? { last4, kind: 'credit' } : null,
+      ...(issued && /^\d{4}-\d{2}-\d{2}$/.test(issued) && issued < due ? { statementDate: issued } : {}),
+      reference: null, transferHint: false, snapshotFils: null, snapshotKind: null,
+      categoryGuess: 'other', categoryDeliberate: true,
+    };
+  }
+  if (event.family === 'card-payment' && event.status === 'posted' && last4 &&
+    (event.direction === 'credit' || event.direction === 'debit')) {
+    // The same completed-money guard every other worldwide posting passes:
+    // reversed, processing, scheduled or auto-debit-later payments are not paid.
+    if (hasNonCompletedWording(source)) return null;
+    const amount = ledgerMinorOf(event.amount, country, ledgerCurrency, ledgerExponent);
+    if (!amount) return null;
+    const date = event.transactionDate.evidence === 'explicit' ? event.transactionDate.value : null;
+    if (date && today && date > today) return null;
+    const receipt = event.direction === 'credit';
+    return {
+      kind: 'cardPayment', type: receipt ? 'income' : 'expense', amountFils: amount, currency: ledgerCurrency,
+      merchant: `Card •${last4} payment`, date, dueDay: null, minDueFils: null,
+      card: { last4, kind: 'credit' }, cardPaymentSide: receipt ? 'receipt' : 'debit',
+      reference: null, transferHint: true, snapshotFils: null, snapshotKind: null,
+      categoryGuess: 'other', categoryDeliberate: true,
+    };
+  }
+  return null;
+};
 
 const localIsoDay = (epochMs: number | undefined): string | null => {
   if (epochMs === undefined || !Number.isFinite(epochMs)) return null;
@@ -329,6 +446,16 @@ const parseUniversalPostedEvent = (
     sender, dateOrder: activeCountryDateOrder(),
     ...(aliases ? { currencyAliases: aliases } : {}),
   });
+  // `$` resolves through the issuer's routed market first, as the policy does.
+  const obligation = universalCardObligation(readSource, event, pinnedCurrency, pinnedExponent,
+    context.routedMarket ?? context.country, observedAt);
+  if (obligation) {
+    return {
+      ...obligation,
+      bestEffort: { v: 1, format: `universal:${event.family}:${event.direction}`, market: context.routedMarket ?? context.country ?? 'ZZ' },
+      raw: source.trim(),
+    };
+  }
   const decision = decideBestEffortAutoPost({
     source: readSource,
     event,

@@ -71,6 +71,20 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     phrase(String.raw`transaksi[\s\S]{0,100}berhasil`),
     // Indian UPI account alerts: "A/C X1234 debited by 450.0 ... trf to ZOMATO".
     phrase(String.raw`debited\s+by[\s\S]{0,80}?\btrf\s+to`),
+    // Spanish/Portuguese/Polish/Peruvian finished card charges, a Ghanaian
+    // mobile-money payment, and the Korean card approval (승인, never 승인취소).
+    phrase(String.raw`se\s+ha\s+realizado\s+un\s+cargo`),
+    phrase(String.raw`compra\s+de[\s\S]{0,40}efetuad[ao]`),
+    phrase(String.raw`transakcja[\s\S]{0,100}zrealizowana`),
+    phrase(String.raw`realizaste\s+un\s+consumo`),
+    phrase(String.raw`payment\s+made\s+for`),
+    // A German direct debit that has been charged (a single one is not a
+    // subscription by itself; recurrence is the subscription detector's call).
+    phrase(String.raw`lastschrift[\s\S]{0,100}\b(?:belastet|abgebucht)`),
+    // Only the approval line itself: "[신한카드] 승인 12,000원 ...". 승인거절,
+    // 승인대기, limit notices and adverts are not purchases.
+    /\[[^\]]{1,12}카드\]\s*(?:해외\s*)?승인\s+[\d,]+원/u,
+    /डेबिट\s+(?:किया\s+गया|किए\s+गए)/u,
     phrase(String.raw`charged\s+to\s+(?:your\s+)?card[\s\S]{0,60}\bat`),
     /カード利用のお知らせ[\s\S]{0,40}ご利用金額/u,
     /(?:カード利用|購入)が完了しました/u,
@@ -94,8 +108,8 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
   // Completed person-to-person transfers in other languages and wallets. Each
   // is a finished verb, never a heading: "Pix enviado", "Você recebeu um Pix",
   // "Virement reçu", "havale gelmiştir" (has arrived), "You have sent/received".
-  const transferOutWords = /(?<!\p{L})(?:pix\s+enviado|você\s+enviou\s+um\s+pix|you\s+have\s+sent|^\s*sent\s+(?:rs\.?|inr|₹))(?!\p{L})/iu;
-  const transferInWords = /(?<!\p{L})(?:virement\s+reçu|você\s+recebeu\s+um\s+pix|pix\s+recebido|havale\s+gelmiştir|eft\s+gelmiştir|you\s+have\s+received)(?!\p{L})/iu;
+  const transferOutWords = /(?<!\p{L})(?:pix\s+enviado|você\s+enviou\s+um\s+pix|you\s+have\s+(?:successfully\s+)?sent|^\s*sent\s+(?:rs\.?|inr|₹)|has\s+enviado\s+un\s+bizum)(?!\p{L})/iu;
+  const transferInWords = /(?<!\p{L})(?:virement\s+reçu|você\s+recebeu\s+um\s+pix|pix\s+recebido|havale\s+gelmiştir|eft\s+gelmiştir|you\s+have\s+(?:successfully\s+)?received|has\s+recibido\s+un\s+bizum|bizum\s+recibido)(?!\p{L})/iu;
   const statuses: PostingStatus[] = [];
   const matches = (pattern: RegExp): boolean => {
     let found = false;
@@ -347,7 +361,10 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   // A credit-card bill payment is not fresh spending or business revenue.
   // Preserve it as a distinct fact until a settlement-specific adapter can
   // reconcile its bank/card sides. Generic "card payment at SHOP" is excluded.
-  const cardSettlement = /\bpayment\b[\s\S]{0,100}\b(?:towards?|against)\s+(?:your\s+)?(?:(?:credit|covered|charge)\s+)?card\b|\bpayment\b[\s\S]{0,100}\b(?:received|credited)\s+(?:to|on|for)\s+(?:your\s+)?(?:credit|covered|charge)\s+card\b/iu.test(semanticSource);
+  // A bank or product name may sit before the card noun ("towards your HDFC
+  // Bank Credit Card"), and "We received your payment of $X to your credit
+  // card" states the receipt before the payment.
+  const cardSettlement = /\bpayment\b[\s\S]{0,100}\b(?:towards?|against)\s+(?:your\s+)?(?:[\p{L}&.-]+\s+){0,3}?(?:(?:credit|covered|charge)\s+)?card\b|\bpayment\b[\s\S]{0,100}\b(?:received|credited)\s+(?:to|on|for)\s+(?:your\s+)?(?:[\p{L}&.-]+\s+){0,3}?(?:credit|covered|charge)\s+card\b|\breceived\s+your\s+payment\b[\s\S]{0,100}\b(?:to|towards?|for|on)\s+(?:your\s+)?(?:[\p{L}&.-]+\s+){0,3}?(?:credit|covered|charge)\s+card\b/iu.test(semanticSource);
   // The exact supplied ADCB receipt places the amount before "against";
   // money ownership can leave that completed receipt's clause unresolved.
   // It still cannot be offered as a new expense/income in ordinary Review.

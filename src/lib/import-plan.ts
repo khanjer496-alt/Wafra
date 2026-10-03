@@ -1678,7 +1678,9 @@ function buildImportPlanInMarket(
       const matchingDues = state.cardDues.filter(
         (due) =>
           due.dueDate === dueDate &&
-          due.totalDueFils === totalDueFils &&
+          // A credit balance supersedes whatever this statement said before,
+          // so it finds the earlier reading whatever total that one stored.
+          (creditBalance || due.totalDueFils === totalDueFils) &&
           (p.card
             ? matchesCard(
                 due.accountId,
@@ -1720,7 +1722,10 @@ function buildImportPlanInMarket(
       // v47 could retain a contradictory minimum above this exact statement's
       // total. Re-offer the corrected unknown minimum so the merge can repair
       // it without resetting payment evidence or weakening a valid minimum.
-      if (existingDue && !improvesMinimum && !removesWrongMarketEstimate && !removesContradictoryMinimum) continue;
+      const clearsToCredit = creditBalance && existingDue !== undefined &&
+        (existingDue.totalDueFils > 0 || existingDue.minDueFils > 0);
+      if (existingDue && !improvesMinimum && !removesWrongMarketEstimate && !removesContradictoryMinimum &&
+        !clearsToCredit) continue;
       // The parser reaches this branch only with statement structure and
       // forces card.kind=credit. That is authoritative evidence which upgrades
       // a debit fallback; rejecting it is what stranded real statements.
@@ -1739,6 +1744,9 @@ function buildImportPlanInMarket(
         dueDate,
         paidFils: 0,
         ...evidence,
+        // Tells the reducer's monotonic merge that zero is the bank's answer,
+        // not a lower reading to be outvoted by the stored debt.
+        ...(creditBalance ? { creditBalance: true as const } : {}),
       };
       newDues.push(statementDue);
       continue;

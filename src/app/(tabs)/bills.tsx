@@ -564,7 +564,9 @@ export default function BillsScreen() {
       }
       if (item.kind !== 'recurring') return null;
       const cadence = subByAgendaId.get(item.id)?.cadence;
-      return cadence === 'weekly' || cadence === 'monthly' || cadence === 'yearly' ? { cadence } : null;
+      // Every scheduled cadence repeats in the window (fortnightly and
+      // quarterly included); only as-needed charges have no date to repeat on.
+      return cadence && cadence !== 'as-needed' ? { cadence } : null;
     };
     const futureAnnual = futureAnnualBillAgendaItems(state.bills, state.transactions, now, liveAccounts, internal, UPCOMING_WINDOW_DAYS);
     return upcomingWindowItems([...agendaItems, ...futureAnnual], recurrenceOf, todayISO, UPCOMING_WINDOW_DAYS);

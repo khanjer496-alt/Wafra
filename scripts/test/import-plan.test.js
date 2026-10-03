@@ -3761,5 +3761,21 @@ const DECLINE_SMS = [{
     plan.batch.newDues.map((d) => d.totalDueFils));
 }
 
+
+/* ── a credit balance supersedes the same statement's earlier debt ────── */
+{
+  const { mergeImportedCardDues } = require('./build/cards');
+  const t = Date.parse('2026-10-05T09:00:00Z');
+  const card = { id: 'cc', name: 'Card', kind: 'card', cardType: 'credit', bankName: 'Emirates NBD', last4: '4321', openingFils: 0, color: '#123' };
+  const state = { ...BASE, accounts: [card],
+    cardDues: [{ id: 'd1', accountId: 'cc', totalDueFils: 15000, minDueFils: 750, dueDate: '2026-10-25', paidFils: 0 }] };
+  const scanned = scan([{ body: 'Your Credit Card ending 4321 statement: Total Amount Due AED 150.00 CR. Minimum Amount Due AED 0.00. Payment Due Date 25/10/2026.', ts: t, sender: 'EmiratesNBD' }]);
+  const plan = buildImportPlan(scanned.parsed, state, scanned.newestTs);
+  const merged = mergeImportedCardDues(state.cardDues, plan.batch.newDues.map((d, i) => ({ ...d, id: `n${i}`, accountId: 'cc' })), state.accounts);
+  ok('a CR re-read of a stored positive due leaves nothing owed',
+    merged.length === 1 && merged[0].totalDueFils === 0 && merged[0].minDueFils === 0 && !('creditBalance' in merged[0]),
+    { newDues: plan.batch.newDues, merged });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
