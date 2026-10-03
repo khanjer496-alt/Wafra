@@ -44,7 +44,8 @@ for (const language of ['en', 'ar']) for (const largeText of [false, true]) {
     }
     assert.doesNotMatch(tree.props.accessibilityLabel, /Paid|Overdue|Beyond window/);
     const estimated = shown.find(node => node.props.testID.endsWith('YouTube Premium'));
-    assert.ok(text(estimated).includes(language === 'ar' ? 'حوالي' : 'About'));
+    assert.ok(text(estimated).includes('≈'), 'an estimate is marked on the card');
+    assert.ok(estimated.props.accessibilityLabel.includes(language === 'ar' ? 'حوالي' : 'About'), 'and spoken as one');
   });
 }
 test('the bounded preview shows all first eight payments and names the remaining count', () => {

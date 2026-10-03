@@ -776,7 +776,7 @@ export default function BillsScreen() {
     if (!sub?.priceIncreased) return null;
     return (
       <ThemedText type="meta" style={{ color: theme.warning }} testID={`bills-price-up-${item.id}`}>
-        {`${w.wasPrice(formatAED(sub.priorTypicalFils))} · ${w.priceWentUp}`}
+        {`· ${w.wasPrice(formatAED(sub.priorTypicalFils))} · ${w.priceWentUp}`}
       </ThemedText>
     );
   }, [subByAgendaId, theme.warning, w]);
@@ -879,6 +879,7 @@ export default function BillsScreen() {
               accounts={state.accounts}
               includePaid={false}
               showNote={false}
+              timingHeadings={false}
               renderMeta={renderAgendaMeta}
               onOpen={onOpenAgendaItem} />}
             {stopped.slice(0, stoppedLimit).map(renderStoppedRow)}
@@ -894,6 +895,7 @@ export default function BillsScreen() {
               items={billAndCardItems}
               accounts={state.accounts}
               includePaid={false}
+              timingHeadings={false}
               renderMeta={renderAgendaMeta}
               onOpen={onOpenAgendaItem} />
           </View>}

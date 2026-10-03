@@ -2,7 +2,6 @@ import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { BandFigure } from '@/components/ui/band/band-figure';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import type { BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
@@ -56,7 +55,7 @@ export function BillsTimeline({ items, todayISO, palette }: {
       {w.nothingIn30Days}
     </ThemedText>;
   }
-  const cardWidth = large ? Math.min(560, width - 40) : Math.min(184, width - 80);
+  const cardWidth = large ? Math.min(560, width - 40) : Math.min(204, width - 80);
   const spoken = `${words.nextDays(WINDOW_DAYS)}: ` + timelinePins.map(pin =>
     `${pin.displayLabel ?? pin.title} ${words.dueIn(pin.dayOffset)} ${pin.spokenAmount}`).join(', ');
   return <View testID="bills-timeline" accessible={false} accessibilityLabel={spoken} style={styles.root}>
@@ -70,41 +69,41 @@ export function BillsTimeline({ items, todayISO, palette }: {
             {group.payments.map(pin => <View key={pin.key} testID={`bills-timeline-payment-${pin.key}`}
               accessible accessibilityRole="text" accessibilityLabel={`${pin.displayLabel ?? pin.title}. ${date}. ${pin.spokenAmount}`}
               style={[styles.payment, { width: cardWidth, backgroundColor: palette.tile }]}>
-              {/* One compact cell: logo beside the payee and its date, then the amount. */}
-              <View style={styles.head}>
-                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                  <MerchantAvatar title={pin.title} category={pin.category} size={28} />
-                </View>
-                <View style={styles.name}>
-                  <ThemedText type="smallBold" style={{ color: palette.onBand }}>{pin.displayLabel ?? pin.title}</ThemedText>
-                  <ThemedText type="meta" testID={`bills-payment-due-${pin.key}`} style={{ color: palette.onBandSecondary }}>
-                    {date} · {due}
-                  </ThemedText>
-                </View>
+              {/* One compact cell: the logo beside the payee, its date and its amount. */}
+              <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <MerchantAvatar title={pin.title} category={pin.category} size={28} />
               </View>
-              <View style={styles.figure}>
-                {pin.estimated ? <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{w.about}</ThemedText> : null}
-                <BandFigure fils={pin.amountFils} moneySpec={moneySpec ?? undefined} palette={palette} size="medium"
-                  fitInset={Math.max(0, width - 40 - (cardWidth - 24))} />
+              <View style={styles.name}>
+                <ThemedText type="smallBold" style={{ color: palette.onBand }}>{pin.displayLabel ?? pin.title}</ThemedText>
+                <ThemedText type="meta" testID={`bills-payment-due-${pin.key}`} style={{ color: palette.onBandSecondary }}>
+                  {date} · {due}
+                </ThemedText>
+                <ThemedText type="smallBold" tabular style={{ color: palette.onBand }}>
+                  {/* ≈ marks an estimate, as on the list; the spoken label says "About". */}
+                  {pin.estimated ? `≈ ${pin.amount}` : pin.amount}
+                </ThemedText>
               </View>
             </View>)}
           </View>
         </View>;
       })}
+      {/* The rest are in the list below; say how many at the end of the strip. */}
+      {timelinePins.length > PREVIEW_COUNT ? <View style={styles.more}>
+        <ThemedText type="meta" testID="bills-timeline-more" style={{ color: palette.onBandSecondary }}>
+          {words.morePins(timelinePins.length - PREVIEW_COUNT)}
+        </ThemedText>
+      </View> : null}
     </ScrollView>
-    {timelinePins.length > PREVIEW_COUNT ? <ThemedText type="meta" testID="bills-timeline-more" style={{ color: palette.onBandSecondary }}>
-      {words.morePins(timelinePins.length - PREVIEW_COUNT)}
-    </ThemedText> : null}
   </View>;
 }
 
 const styles = StyleSheet.create({
   root: { gap: 8 },
-  groups: { flexDirection: 'row', gap: 12, paddingBottom: 8 },
+  groups: { flexDirection: 'row', gap: 8, paddingBottom: 4 },
   group: { gap: 8 },
   payments: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
-  payment: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, gap: 6, flexShrink: 0 },
-  head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  name: { flexShrink: 1, minWidth: 0 },
-  figure: { marginTop: 'auto', flexDirection: 'row', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' },
+  payment: { borderRadius: 14, paddingHorizontal: 10, paddingVertical: 10, gap: 8, flexShrink: 0,
+    flexDirection: 'row', alignItems: 'flex-start' },
+  name: { flex: 1, minWidth: 0, gap: 1 },
+  more: { justifyContent: 'center', paddingHorizontal: 8 },
 });

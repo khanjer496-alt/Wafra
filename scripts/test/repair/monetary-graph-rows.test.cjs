@@ -51,3 +51,26 @@ test('limit history keeps exact monthly amounts and one shared limit position on
   assert.equal(new Set(markers.map(node => flat(node.props.style).start)).size, 1);
   assert.equal(flat(markers[0].props.style).start, `${150025 / 496007 * 100}%`);
 });
+
+for (const language of ['en', 'ar']) test(`bill history draws six short amounts as side-by-side columns (${language})`, () => {
+  const h = createHarness({ language, largeText: false, width: 320 });
+  const palette = h.deps['@/constants/theme'].bandPalette('bills', 'light');
+  h.deps['@/components/ui/grow-bar'] = { GrowBar: props => h.jsx('GrowBar', props) };
+  const { BillHistoryTiles } = load(path.join(root, 'src/components/bills/bill-history-tiles.tsx'), h.deps);
+  const fils = [37200, 39800, 44600, 47100, 45200, 0];
+  const months = fils.map((value, index) => ({ label: `M${index}`, fils: value, current: index === 5 }));
+  const tree = BillHistoryTiles({ months, palette, label: 'History' });
+  const format = h.deps['@/lib/format'];
+  for (const value of fils) assert.ok(text(tree).includes(format.formatAmount(value)), 'every exact amount stays visible');
+  for (const value of fils) assert.match(tree.props.accessibilityLabel, new RegExp(format.formatAED(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const bars = walk(tree).filter(node => node.type === 'GrowBar');
+  assert.equal(bars.length, 5, 'a month with no charge draws no bar');
+  assert.ok(bars.every(node => node.props.axis === 'height'));
+  assert.equal(Math.max(...bars.map(node => node.props.size)), 64);
+  for (const node of walk(tree).filter(node => node.type === 'Text')) assert.equal(node.props.numberOfLines, undefined);
+  // At an accessibility size the same months fall back to full-width rows.
+  const large = createHarness({ language, largeText: true, width: 320 });
+  large.deps['@/components/ui/grow-bar'] = { GrowBar: props => large.jsx('GrowBar', props) };
+  const rows = load(path.join(root, 'src/components/bills/bill-history-tiles.tsx'), large.deps).BillHistoryTiles({ months, palette, label: 'History' });
+  assert.ok(walk(rows).filter(node => node.type === 'GrowBar').every(node => node.props.axis === 'width'));
+});
