@@ -803,6 +803,121 @@ function statementRow(id, amountFils, date, over = {}) {
         out.length === 2 && out.filter((row) => row.accountId === 'adcb-card').length === 1, describe(out));
     }
   }
+
+  // M2 through parse -> plan -> apply: the settlement keeps the biller tail
+  // as a guard, the e& receipt for another account survives, and the
+  // settlement still pays a Party-ID-keyed e& reminder.
+  {
+    const settlement = (id, iso, tail) => sms(id, iso, 'ETISALAT',
+      `Your payment of AED 313.95 from your Credit Card ending 2518 has been received towards your Etisalat account ${tail}.`);
+    const s9876 = settlement(51, '2026-08-04T10:00:00Z', '9876');
+    ok('the parsed settlement carries the guard, its card and no bill identity',
+      s9876.billerAccountTail === '9876' && s9876.billIdentity === undefined && s9876.card?.last4 === '2518',
+      JSON.stringify({ g: s9876.billerAccountTail, b: s9876.billIdentity, c: s9876.card }));
+    const receipt2543 = eAndReceipt(52, '2026-08-04T10:05:00Z', '2543');
+    for (const [label, rows] of [['settlement first', [s9876, receipt2543]], ['receipt first', [receipt2543, s9876]]]) {
+      let state = BASE;
+      for (const row of rows) state = importRows(state, [row]);
+      const out = e(state.transactions);
+      ok(`${label}: a settlement for e& 9876 and a receipt for e& 2543 stay two payments`,
+        out.length === 2 && out.some((row) => row.billIdentity === 'account:2543') &&
+          out.some((row) => row.billerAccountTail === '9876' && row.billIdentity === undefined), describe(out));
+      const party = { id: 'party', title: 'E&', category: 'telecom', amountFils: 31395, dueDay: 15,
+        autoDetected: true, importIdentity: 'party:4835', paidMonths: [] };
+      const bills = billsForMonth([party], state.transactions, today);
+      ok(`${label}: the settlement still pays a Party-ID-keyed e& reminder`, bills[0]?.status === 'paid',
+        JSON.stringify(bills[0] && bills[0].status));
+    }
+  }
+}
+
+// --- M2: a settlement's biller account is a fold guard ----------------------
+{
+  // "Your payment of AED 350.00 from your Credit Card ending 2518 has been
+  // received towards your Etisalat account 9876" carries no bill identity
+  // (bills.ts would refuse it against a Party-ID reminder), only the guard
+  // billerAccountTail. An e& receipt for account 2543 of the same amount the
+  // same morning is a different line's payment and must survive.
+  const r = receipt('r2543', 35000, '2026-09-01T09:00:00Z');
+  const settle = bank('s9876', 35000, '2026-09-01T09:30:00Z', { billerAccountTail: '9876' });
+  for (const [label, rows] of [['receipt first', [r, settle]], ['settlement first', [settle, r]]]) {
+    const out = reconcilePaymentFlows(rows);
+    ok(`${label}: a settlement for e& 9876 never absorbs a receipt for e& 2543`,
+      ids(out) === 'r2543,s9876', ids(out));
+  }
+  ok('the guard is not carried onto the bank row or turned into a bill identity',
+    reconcilePaymentFlows([r, settle]).find((row) => row.id === 's9876')?.billIdentity === undefined);
+  // Control: the same account on both sides is one payment, as before.
+  const same = reconcilePaymentFlows([r, bank('s2543', 35000, '2026-09-01T09:30:00Z', { billerAccountTail: '2543' })]);
+  ok('a settlement naming the receipt\'s own account still folds the receipt', ids(same) === 's2543', ids(same));
+  // A malformed stored guard reads as absent, never as a wildcard conflict.
+  const junk = reconcilePaymentFlows([r, bank('sjunk', 35000, '2026-09-01T09:30:00Z', { billerAccountTail: 'account:9876' })]);
+  ok('a malformed guard is ignored', ids(junk) === 'sjunk', ids(junk));
+  // An unplaceable receipt is compared with the BANK row's stated accounts,
+  // the guard included: one for 9876 cannot be the receipt of a settlement
+  // that names 2543, so it does not block that fold.
+  const otherCompetitor = reconcilePaymentFlows([
+    receipt('r', 35000, '2026-09-01T09:00:00Z'),
+    bank('b', 35000, '2026-09-01T09:00:30Z', { billerAccountTail: '2543' }),
+    receipt('c', 35000, '2026-09-01T09:05:00Z', { title: 'Payment to •9876', billIdentity: 'account:9876' }),
+  ]);
+  ok("an unnamed receipt for another account than the bank row's guard does not compete", ids(otherCompetitor) === 'b,c',
+    ids(otherCompetitor));
+  // Against a bank row that states no account, either receipt could be its
+  // own, exactly like two named receipts for two accounts: nothing folds.
+  const open = reconcilePaymentFlows([
+    receipt('r', 35000, '2026-09-01T09:00:00Z'),
+    bank('b', 35000, '2026-09-01T09:00:30Z'),
+    receipt('c', 35000, '2026-09-01T09:05:00Z', { title: 'Payment to •9876', billIdentity: 'account:9876' }),
+  ]);
+  ok('with no stated account on the bank row, an unnamed receipt for another account keeps it ambiguous',
+    ids(open) === 'b,c,r', ids(open));
+}
+
+// --- L1: receipts the rule cannot place still compete ------------------------
+{
+  const r = receipt('r', 45045, '2026-08-04T10:00:30Z');
+  const b = bank('b', 45045, '2026-08-04T10:00:00Z');
+  ok('control: the receipt folds into the bank row on its own', ids(reconcilePaymentFlows([r, b])) === 'b');
+  // e&'s amount-first receipt is titled "Payment to •2543" (parser 62). A
+  // second message about the same payment makes the bank row's receipt
+  // ambiguous: nothing is folded.
+  const unnamed = receipt('u', 45045, '2026-08-04T10:01:00Z', { title: 'Payment to •2543' });
+  for (const [label, rows] of [['unnamed first', [unnamed, r, b]], ['unnamed last', [r, b, unnamed]]]) {
+    ok(`${label}: an unnamed same-money receipt competes, so nothing is folded`,
+      ids(reconcilePaymentFlows(rows)) === 'b,r,u', ids(reconcilePaymentFlows(rows)));
+  }
+  const bareUnnamed = receipt('u2', 45045, '2026-08-04T10:01:00Z', { title: 'Payment to •2543', billIdentity: undefined });
+  ok('an unnamed receipt with no identity competes too',
+    ids(reconcilePaymentFlows([r, b, bareUnnamed])) === 'b,r,u2');
+  const pinnedUnnamed = { ...unnamed, id: 'up', userEdited: true };
+  ok('a pinned unnamed receipt competes and is never removed',
+    ids(reconcilePaymentFlows([r, b, pinnedUnnamed])) === 'b,r,up');
+  const bankSentUnnamed = { ...unnamed, id: 'uc', billIdentity: 'consumer:2543' };
+  ok("a bank's unnamed bill-pay confirmation competes as well",
+    ids(reconcilePaymentFlows([r, b, bankSentUnnamed])) === 'b,r,uc');
+  ok('an unnamed receipt alone is never folded and never removes anything',
+    ids(reconcilePaymentFlows([unnamed, b])) === 'b,u');
+  // Only a receipt that COULD be the bank row's: another amount, another
+  // stated account, or a day outside the window does not compete.
+  ok('an unnamed receipt of another amount does not compete',
+    ids(reconcilePaymentFlows([r, b, { ...unnamed, amountFils: 45046 }])) === 'b,u');
+  ok('an unnamed receipt three days earlier does not compete',
+    ids(reconcilePaymentFlows([r, b, receipt('far', 45045, '2026-08-01T10:00:00Z', { title: 'Payment to •2543' })])) === 'b,far');
+  // A receipt whose date cannot be read cannot be placed in any window, so it
+  // competes with every same-money bank row instead of being ignored.
+  const undated = receipt('d', 45045, '2026-08-04T10:01:00Z', { date: '' });
+  ok('an undated receipt is never removed', ids(reconcilePaymentFlows([undated, b])) === 'b,d');
+  ok('an undated receipt competes, so nothing is folded',
+    ids(reconcilePaymentFlows([r, b, undated])) === 'b,d,r');
+  const statedBank = bank('bs', 45045, '2026-08-04T10:00:00Z', { billerAccountTail: '2543' });
+  ok("an undated receipt for another account than the bank row's does not compete",
+    ids(reconcilePaymentFlows([r, statedBank, { ...undated, billIdentity: 'account:9911' }])) === 'bs,d');
+  ok('an undated bank bill-pay confirmation competes as well',
+    ids(reconcilePaymentFlows([r, b, { ...undated, id: 'dc', billIdentity: 'consumer:2543' }])) === 'b,dc,r');
+  const unreadable = receipt('x', 45045, '2026-08-04T10:01:00Z', { title: '•' });
+  ok('a receipt whose title yields no biller key competes',
+    ids(reconcilePaymentFlows([r, b, unreadable])) === 'b,r,x');
 }
 
 console.log(`\nbiller-receipt-dedupe.test.js: ${pass} passed, ${fail} failed`);

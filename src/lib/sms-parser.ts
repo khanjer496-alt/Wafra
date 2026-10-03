@@ -459,8 +459,10 @@ export interface ParsedCard {
  * runs first. A settlement's biller customer number ("towards your Etisalat
  * account 9876") is no longer emitted as `billIdentity` — it made bills.ts
  * refuse a settlement against a reminder keyed on e&'s Party-ID — and the row
- * matches on provider as before 59. Future captures plus the bounded recent
- * reread; PARSER_BACKFILL_VERSION remains 49.
+ * matches on provider as before 59. The tail travels instead as
+ * `billerAccountTail`, a fold guard bills.ts never reads, so a settlement for
+ * one e& account cannot absorb a same-amount receipt for another. Future
+ * captures plus the bounded recent reread; PARSER_BACKFILL_VERSION remains 49.
  */
 export const PARSER_VERSION = 62;
 /**
@@ -548,6 +550,12 @@ export interface ParsedSms {
   reference: string | null;
   /** Privacy-safe provider/account tail for a bill reminder, when stated. */
   billIdentity?: string;
+  /**
+   * Last four of the biller's own customer number a settlement names. A
+   * payment-flow fold guard only, never a bill identity; see
+   * Transaction.billerAccountTail.
+   */
+  billerAccountTail?: string;
   /** Bank-side leg of a card payment / own-account transfer: money moved, not spent. */
   transferHint: boolean;
   /**
@@ -844,7 +852,8 @@ function billerSettlement(prose: string): string | null {
  * import planner minted a phantom "Account •9876" from it. The digits belong to
  * the biller, so the card they produced is dropped. They are not re-emitted as
  * a bill identity either: see the settlement return site for why that broke
- * reminder matching.
+ * reminder matching. They survive only as `billerAccountTail`, the
+ * payment-flow fold guard.
  *
  * Narrow on purpose: only the verb-first settlement order, only digits that sit
  * directly after "<biller> account", and only a payee the category vocabulary
@@ -7121,6 +7130,10 @@ function parseSmsInner(
   // Party-ID ("party:4835"). With the identity attached, an AED 775.81
   // settlement stopped settling that AED 775.81 reminder, which origin/main
   // marked paid. Without it the row matches on provider, exactly as before.
+  //
+  // It IS kept as `billerAccountTail`, which only payment-flow's biller-receipt
+  // fold reads: without it, an e& receipt for account 2543 of the same amount
+  // could be folded into this settlement for account 9876 and deleted.
   const billerAccount = billerPaid && !isBillDue ? billerOwnAccountTail(raw, billerPaid) : null;
   const billerOwnsCard = billerAccount !== null && card?.kind === 'account' && card.last4 === billerAccount;
 
@@ -7135,6 +7148,7 @@ function parseSmsInner(
     dueDay: billDueDate ? Number(billDueDate.slice(8)) : null,
     minDueFils: null,
     card: billerOwnsCard ? null : card,
+    ...(billerAccount ? { billerAccountTail: billerAccount } : {}),
     transferHint,
     snapshotFils: fundingBalance ? null : snapshotFils,
     snapshotKind: fundingBalance ? null : snapshotKind,

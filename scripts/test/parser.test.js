@@ -2962,6 +2962,19 @@ t('a biller\'s account number in a settlement is never the user\'s account',
   const r = parseSms('We have received AED 350.00 towards your Etisalat account 9876.');
   ok('...and carries no bill identity of its own', r && r.billIdentity === undefined,
     JSON.stringify(r && r.billIdentity));
+  // The digits still travel as the fold-only guard billerAccountTail, which
+  // bills.ts never reads (payment-flow uses it to refuse folding a receipt
+  // for ANOTHER e& account into this settlement).
+  ok('...but keeps the biller account tail as a fold guard', r && r.billerAccountTail === '9876',
+    JSON.stringify(r && r.billerAccountTail));
+  const withCard = parseSms('Your payment of AED 350.00 from your Credit Card ending 2518 has been received towards your Etisalat account 9876.');
+  ok('a card-paid settlement keeps its card, no bill identity, and the biller tail as a guard',
+    withCard && withCard.card && withCard.card.last4 === '2518' && withCard.billIdentity === undefined &&
+      withCard.billerAccountTail === '9876',
+    JSON.stringify(withCard && { card: withCard.card, b: withCard.billIdentity, g: withCard.billerAccountTail }));
+  const own = parseSms('Your salary payment of AED 12,000.00 has been credited to your RAKBANK account 1234.');
+  ok("the user's own bank account is never a biller tail", own && own.billerAccountTail === undefined,
+    JSON.stringify(own && own.billerAccountTail));
 }
 {
   const { buildImportPlan } = require('./build/import-plan');
@@ -2973,6 +2986,15 @@ t('a biller\'s account number in a settlement is never the user\'s account',
   ok('importing a biller settlement mints no "Account •9876"',
     plan.txCount === 1 && plan.batch.newAccounts.length === 0 && Object.keys(plan.batch.newHints).length === 0,
     JSON.stringify({ na: plan.batch.newAccounts, nh: plan.batch.newHints }));
+  const stored = plan.batch.transactions[0];
+  ok('the imported settlement stores the biller tail as a guard, not as a bill identity',
+    stored && stored.billerAccountTail === '9876' && stored.billIdentity === undefined,
+    JSON.stringify(stored && { g: stored.billerAccountTail, b: stored.billIdentity }));
+  const forged = buildImportPlan([{ ...row, billerAccountTail: 'account:9876<script>', date: '2026-10-03', smsTs: ts + 1,
+    sender: 'ETISALAT', channel: 'inbox' }], empty, ts);
+  const forgedRow = forged.batch.transactions[0];
+  ok('a biller tail not in its four-digit parser shape is dropped at import',
+    forgedRow && forgedRow.billerAccountTail === undefined, JSON.stringify(forgedRow && forgedRow.billerAccountTail));
 }
 // The other biller-account settlements already had no card and stay as they
 // were on origin/main: no card, no identity.
@@ -2997,10 +3019,12 @@ t('a biller\'s account number in a settlement is never the user\'s account',
   const bill = { id: 'eand', title: due.merchant, category: 'telecom', amountFils: due.amountFils, dueDay: due.dueDay,
     autoDetected: true, importIdentity: due.billIdentity, paidMonths: [] };
   const tx = { id: 'settle', type: 'expense', amountFils: paid.amountFils, category: paid.categoryGuess, accountId: 'a',
-    title: paid.merchant, date: '2026-08-10', source: 'sms', ...(paid.billIdentity ? { billIdentity: paid.billIdentity } : {}) };
+    title: paid.merchant, date: '2026-08-10', source: 'sms', ...(paid.billIdentity ? { billIdentity: paid.billIdentity } : {}),
+    // The fold guard rides along exactly as import stores it; bills.ts must ignore it.
+    ...(paid.billerAccountTail ? { billerAccountTail: paid.billerAccountTail } : {}) };
   const rows = bills.billsForMonth([bill], [tx], new Date(2026, 7, 12));
   ok('a biller settlement still settles a Party-ID-keyed reminder for the same provider',
-    due.billIdentity === 'party:4835' && rows.length === 1 && rows[0].status === 'paid',
+    due.billIdentity === 'party:4835' && paid.billerAccountTail === '9876' && rows.length === 1 && rows[0].status === 'paid',
     JSON.stringify({ due: due.billIdentity, paid: paid.billIdentity, rows: rows.map((r) => [r.bill.id, r.status]) }));
 }
 // CONTROLS: the user's OWN bank account in the same verb-first shape keeps its

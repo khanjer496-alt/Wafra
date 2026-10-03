@@ -238,12 +238,40 @@ const sameMoney = (a: Transaction, b: Transaction): boolean => {
 const billTail = (identity: string): string | null =>
   identity.match(/^(?:account|consumer|party|customer|contract|service):([A-Z0-9]{4})$/i)?.[1].toUpperCase() ?? null;
 
-/** Two stated bill accounts that differ are two bills, whatever the amount. */
+/**
+ * Every bill-account tail a row states: its bill identity's, and a
+ * settlement's biller-account tail (Transaction.billerAccountTail). The
+ * latter is read HERE ONLY — it is a fold guard, never a bill identity, so
+ * bills.ts can keep matching that settlement to a reminder keyed on another
+ * number (e&'s Party-ID).
+ */
+const statedBillTails = (row: Transaction): string[] => {
+  const tails: string[] = [];
+  const identityTail = row.billIdentity ? billTail(row.billIdentity) : null;
+  if (identityTail !== null) tails.push(identityTail);
+  if (typeof row.billerAccountTail === 'string' && /^\d{4}$/.test(row.billerAccountTail)) {
+    tails.push(row.billerAccountTail);
+  }
+  return tails;
+};
+
+/**
+ * Two stated bill accounts that differ are two bills, whatever the amount.
+ *
+ * "Your payment of AED 350.00 from your Credit Card ending 2518 has been
+ * received towards your Etisalat account 9876" carries no bill identity (see
+ * the parser's settlement site), only billerAccountTail 9876. Without reading
+ * it here, e&'s AED 350.00 receipt for account 2543 the same day folded into
+ * that settlement and was deleted: a second e& line's payment gone.
+ */
 const conflictingBillIdentity = (a: Transaction, b: Transaction): boolean => {
+  const ta = statedBillTails(a);
+  const tb = statedBillTails(b);
+  if (ta.length > 0 && tb.length > 0 && ta.some(x => tb.some(y => x !== y))) return true;
+  // Identities with no recognisable tail compare whole, as they always did.
   if (!a.billIdentity || !b.billIdentity) return false;
-  const ta = billTail(a.billIdentity);
-  const tb = billTail(b.billIdentity);
-  return ta !== null && tb !== null ? ta !== tb : a.billIdentity.toLowerCase() !== b.billIdentity.toLowerCase();
+  if (billTail(a.billIdentity) !== null && billTail(b.billIdentity) !== null) return false;
+  return a.billIdentity.toLowerCase() !== b.billIdentity.toLowerCase();
 };
 
 /**
@@ -318,7 +346,10 @@ const bankBillerKey = (key: string): string =>
  */
 const CONTAINMENT_BILLER_KEYS: ReadonlySet<string> = new Set(['etisalat']);
 
-/** A receipt titled only by an account fragment names no biller to compare. */
+/**
+ * A receipt titled only by an account fragment names no biller to compare, so
+ * it is never folded; it still competes (see CompetitorEntry).
+ */
 const UNNAMED_RECEIPT_RE = /^payment\s+to\b/i;
 
 interface ReceiptEntry {
@@ -328,6 +359,20 @@ interface ReceiptEntry {
   paddedKey: string;
   /** A biller-sent (and biller-own), unpinned, live receipt: the only kind ever removed. */
   removable: boolean;
+}
+
+/**
+ * A receipt-side row the fold cannot place: titled only by an account
+ * fragment ("Payment to •2543", UNNAMED_RECEIPT_RE), titled with no usable
+ * biller key, or dated with something dayNumber cannot read. It is never
+ * removed and never the kept side, but it may still be another message for
+ * the very payment a bank row records, so it CLAIMS every same-money bank row
+ * it could be (any biller, its window, or every day when it has none). That
+ * keeps an ambiguous situation ambiguous instead of folding through it.
+ */
+interface CompetitorEntry {
+  row: Transaction;
+  day: number | null;
 }
 
 interface BankEntry {
@@ -362,7 +407,7 @@ interface BankEntry {
  * happens to sit on the right side of the receipt.
  */
 type WindowFit = 'pair' | 'compete' | null;
-const receiptWindowFit = (receipt: ReceiptEntry, bank: BankEntry): WindowFit => {
+const receiptWindowFit = (receipt: { row: Transaction; day: number }, bank: BankEntry): WindowFit => {
   const delta = bank.day - receipt.day;
   if (isStatementRow(bank.row) || isStatementRow(receipt.row)) {
     if (delta >= 0 && delta <= STATEMENT_POSTING_LAG_DAYS) return 'pair';
@@ -452,7 +497,10 @@ const isHoldingAccount = (accountId: string): boolean =>
  *   - inside the asymmetric window (receiptWindowFit);
  *   - exactly ONE candidate on each side. A second receipt (edited or not), a
  *     second bank row, or a bank's own confirmation of a same-amount payment
- *     to the same biller makes the evidence ambiguous and nothing is paired;
+ *     to the same biller makes the evidence ambiguous and nothing is paired.
+ *     So does a same-money receipt the rule cannot place (no biller name, or
+ *     no readable date; CompetitorEntry): it is never removed or kept, but
+ *     it may be the bank row's own receipt;
  *   - never against income, a transfer, a card settlement, a funding leg, a
  *     receipt already explained by a funding alert, or a bundle parent;
  *   - a pinned receipt is never removed. A pinned bank row may be the kept
@@ -488,18 +536,26 @@ const pairBillerReceipts = (
   };
   const receipts: ReceiptEntry[] = [];
   const blockers: Transaction[] = [];
+  const competitors: CompetitorEntry[] = [];
   let anyRemovable = false;
   for (const row of transactions) {
     if (row.paymentFlowSide !== 'receipt' || row.source !== 'sms' || row.type !== 'expense' ||
       row.isTransfer === true || row.cardPaymentSide !== undefined || !(row.amountFils > 0) ||
-      removed.has(row.id) || fundedReceipts.has(row.id) || UNNAMED_RECEIPT_RE.test(row.title.trim())) continue;
+      removed.has(row.id) || fundedReceipts.has(row.id)) continue;
+    const day = dayOf(row.date);
+    if (UNNAMED_RECEIPT_RE.test(row.title.trim()) || day === null) {
+      competitors.push({ row, day });
+      continue;
+    }
     if (!billerSentReceipt(row)) {
       blockers.push(row);
       continue;
     }
     const key = providerKeyOf(row.title);
-    const day = dayOf(row.date);
-    if (key.length < 2 || day === null) continue;
+    if (key.length < 2) {
+      competitors.push({ row, day });
+      continue;
+    }
     // A receipt without the biller's account number (isBillerOwnReceipt) is
     // kept like a pinned one: it still claims the bank rows it matches, so it
     // can make a fold ambiguous, but it is never removed itself.
@@ -539,6 +595,18 @@ const pairBillerReceipts = (
   for (const row of blockers) if (amounts.has(row.amountFils)) addBank(row, true);
   if (banksByAmount.size === 0) return merged;
   for (const bucket of banksByAmount.values()) if (bucket.length > 1) bucket.sort((a, b) => a.day - b.day);
+  const competitorsByAmount = new Map<number, CompetitorEntry[]>();
+  for (const entry of competitors) {
+    if (!banksByAmount.has(entry.row.amountFils)) continue;
+    const list = competitorsByAmount.get(entry.row.amountFils);
+    if (list) list.push(entry);
+    else competitorsByAmount.set(entry.row.amountFils, [entry]);
+  }
+  /** Whether an unplaceable receipt could be another message for this bank row's payment. */
+  const competitorClaims = (competitor: CompetitorEntry, bank: BankEntry): boolean =>
+    competitor.row !== bank.row && sameMoney(competitor.row, bank.row) &&
+    !conflictingBillIdentity(competitor.row, bank.row) &&
+    (competitor.day === null || receiptWindowFit({ row: competitor.row, day: competitor.day }, bank) !== null);
 
   const banksOfReceipt = new Map<ReceiptEntry, CandidateLink[]>();
   const receiptCount = new Map<BankEntry, number>();
@@ -569,6 +637,8 @@ const pairBillerReceipts = (
     if (!receipt.removable || banks.length !== 1 || !banks[0].pairs) continue;
     const bank = banks[0].bank;
     if (bank.blockOnly || receiptCount.get(bank) !== 1) continue;
+    // A second, unplaceable receipt for this bank row makes the count two.
+    if (competitorsByAmount.get(bank.row.amountFils)?.some(c => competitorClaims(c, bank))) continue;
     removed.add(receipt.row.id);
     if (pinned(bank.row)) continue;
     const carryIdentity = bank.row.billIdentity === undefined && receipt.row.billIdentity !== undefined;
