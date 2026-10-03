@@ -149,7 +149,8 @@ export function mergeImportedCardDues(
   const keyOf = cardIdentity(accounts);
   const merged: CardDue[] = [];
 
-  for (const due of [...existing, ...incoming]) {
+  for (const withMarker of [...existing, ...incoming]) {
+    const { creditBalance, ...due } = withMarker as CardDue & { creditBalance?: true };
     const key = `${keyOf(due.accountId)}|${due.dueDate}`;
     const at = merged.findIndex((row) => `${keyOf(row.accountId)}|${row.dueDate}` === key);
     if (at < 0) {
@@ -158,6 +159,13 @@ export function mergeImportedCardDues(
     }
 
     const prior = merged[at];
+    if (creditBalance) {
+      // The bank now says nothing is owed on this statement: zero replaces the
+      // stored debt rather than losing to it in a maximum. Payment evidence
+      // and a user's settlement are kept.
+      merged[at] = { ...prior, totalDueFils: 0, minDueFils: 0, minDueEstimated: undefined };
+      continue;
+    }
     const priorKnown = !prior.minDueEstimated;
     const nextKnown = !due.minDueEstimated;
     // A re-read of the same total can disprove an old impossible minimum.
@@ -1190,6 +1198,12 @@ function collapseSettlementLegsWithEvidence(rows: Transaction[]): CanonicalCardP
 export interface StatementIssueEvidence {
   statementDate?: string;
   observedAt?: number;
+  /**
+   * Transient import marker: the statement states a CREDIT balance, so this
+   * reading replaces the stored total and minimum with zero instead of
+   * merging by maximum. Never persisted; the merge strips it.
+   */
+  creditBalance?: true;
 }
 
 type CardDueWithEvidence = CardDue & StatementIssueEvidence;
