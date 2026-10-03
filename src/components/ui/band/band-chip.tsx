@@ -42,6 +42,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, alignSelf: 'flex-start',
   },
   /** A quiet fact ("3 accounts") is a label, not a control: the design's 30pt pill. */
-  fact: { minHeight: 30, borderRadius: 15, paddingHorizontal: 12 },
+  fact: { minHeight: 30, borderRadius: 15, paddingHorizontal: 12, paddingVertical: 4, maxWidth: '100%' },
   label: { flexShrink: 1 },
 });

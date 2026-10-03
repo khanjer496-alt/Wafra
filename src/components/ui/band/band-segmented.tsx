@@ -57,7 +57,7 @@ const styles = StyleSheet.create({
   stack: { flexDirection: 'column', borderRadius: 20, padding: 4, gap: 4 },
   segment: { flex: 1, minHeight: 44, paddingVertical: 4 },
   segmentLarge: { paddingVertical: 0 },
-  pill: { flex: 1, borderRadius: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 4 },
+  pill: { flexGrow: 1, borderRadius: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 4 },
   pillLarge: { minHeight: 44, borderRadius: 22, paddingVertical: 8 },
   label: { textAlign: 'center', flexShrink: 1 },
   labelCompact: { fontSize: 14, lineHeight: 20 },
