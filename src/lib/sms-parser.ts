@@ -443,8 +443,18 @@ export interface ParsedCard {
  * statements carry their stated issue date; subscription and channel-label
  * categories corrected. Future captures plus the bounded recent reread;
  * PARSER_BACKFILL_VERSION remains 49.
+ * 59: e&'s amount-first receipt ("your payment of AED X for account N has been
+ * received" + Amount Paid / Payment Channel lines) joins the biller-portal
+ * receipt family: Etisalat / Telecom / receipt side / account bill identity,
+ * no snapshot of the paying account, and never a "Transaction #:" title. A
+ * loyalty paragraph after the receipt block no longer decides its category.
+ * A biller's own customer number in a settlement ("received towards your
+ * Etisalat account 9876") is no longer read as the user's bank account — it
+ * minted a phantom "Account •9876" — and is kept as the bill identity instead.
+ * Future captures plus the bounded recent reread; PARSER_BACKFILL_VERSION
+ * remains 49.
  */
-export const PARSER_VERSION = 58;
+export const PARSER_VERSION = 59;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -817,6 +827,31 @@ function billerSettlement(prose: string): string | null {
   if (PAYMENT_SUBJECT_RE.test(prose)) return name;
   return BILLER_CATEGORIES.includes(guessCategory(name, 'expense')) ? name : null;
 }
+/**
+ * THE BILLER'S OWN ACCOUNT NUMBER, when a settlement names one.
+ *
+ * "We have received AED 350.00 towards your Etisalat account 9876." — 9876 is
+ * the customer's number AT ETISALAT. extractCard reads any "account NNNN" as
+ * the user's own bank account, so the row carried card {9876, account} and the
+ * import planner minted a phantom "Account •9876" from it. The digits belong to
+ * the biller and are kept only as the privacy-safe bill identity, exactly as
+ * the portal-receipt family does with its "account number ····2543".
+ *
+ * Narrow on purpose: only the verb-first settlement order, only digits that sit
+ * directly after "<biller> account", and only a payee the category vocabulary
+ * recognises as a biller (telecom, utilities, transport, government) — never
+ * merely "a payee after `your payment`", which is how an unlisted bank's name
+ * could otherwise reach here. A bank or an account type is refused upstream by
+ * billerSettlement itself.
+ */
+function billerOwnAccountTail(raw: string, biller: string): string | null {
+  if (!BILLER_CATEGORIES.includes(guessCategory(biller, 'expense'))) return null;
+  const m = raw.match(BILLER_SETTLED_RE);
+  if (!m || m.index === undefined || !m[1]) return null;
+  const after = raw.slice(m.index + m[0].length)
+    .match(/^\s*(?:(?:number|no\.?)\s*)?[:#-]?\s*[·•X*]*(\d{4,})(?![\dX*·•])/i);
+  return after ? after[1].slice(-4) : null;
+}
 // DEBIT_WORDS is market-compiled below (its payment guard embeds the currency).
 // "صرف" is deliberately absent — it is the stem of "مصرف" (BANK), which
 // appears in almost every alert, and it would have made hasDebit permanently
@@ -917,6 +952,45 @@ const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent
  */
 const PORTAL_RECEIPT_RE =
   /(?:payment\s+to\s+(?:the\s+)?account\s+(?:number|no\.?)|لحساب رقم)\s*:?\s*[·•X*]*(\d{4,})[\s\S]*?(?:amount\s+paid|المبلغ المدفوع)\s*:?\s*(?:[A-Z]{3}|Dhs?)?\s*([\d,]+(?:\.\d{1,2})?)/i;
+/**
+ * THE SAME RECEIPT, OPENED THE OTHER WAY ROUND.
+ *
+ * e& (sender "eandINF") now heads the identical labelled block with the amount
+ * first: "Hello, your payment of AED 313.95 for account 065000000 has been
+ * received." followed by the same Amount Due / Amount Paid / Remaining Balance
+ * / Payment Channel / Card Number lines as PORTAL_RECEIPT_RE's family. Without
+ * this head it fell to the generic path, which titled the row with its
+ * "Transaction #:" line, snapshotted the paying account to the biller's
+ * "Remaining Balance: AED 0", and carried no payment-flow side.
+ *
+ * Three things are REQUIRED, and together they keep bank card repayments out:
+ * a bare "account" + digits as the object of "payment ... for" (never "credit
+ * card", "card no." or "towards your ..."), the "has been received" verb
+ * directly after those digits, and the biller's own "Amount Paid:" label later
+ * in the body — which is where the amount is read from, exactly as in the
+ * original family. "Payment of AED 351.35 ... has been received and posted to
+ * your account no 5552906" (an AutoPay echo) and "Your payment of AED 9251
+ * against Credit Card no. XXX9426 was received" both fail it.
+ */
+const PORTAL_RECEIVED_RE =
+  /\bpayment\s+of\s+(?:[A-Z]{3}|Dhs?)\.?\s*[\d,]+(?:\.\d{1,2})?\s+for\s+account\s+(?:(?:number|no\.?)\s*:?\s*)?[·•X*]*(\d{4,})\s+has\s+been\s+received\b[\s\S]*?\bamount\s+paid\s*:?\s*(?:[A-Z]{3}|Dhs?)?\s*([\d,]+(?:\.\d{1,2})?)/i;
+/**
+ * Where the receipt's own labelled block ends and marketing begins.
+ *
+ * e& appends a loyalty paragraph after a blank line — "You've earned Smiles
+ * points on this payment. Redeem them for savings on food, groceries,
+ * shopping, travel, e& add-ons ..." — and the category vocabulary read
+ * "groceries" out of it and filed a phone bill as Groceries. The category is
+ * asked about the receipt alone: everything up to the first blank line after
+ * the Amount Paid label, or up to the Smiles lead-in should a capture ever
+ * arrive with its paragraphs flattened.
+ */
+// A card repayment or a loan, never a biller's receipt. "Outstanding Balance:
+// AED 0" is how a receipt may label what is left on the biller account, so a
+// zero outstanding is not a refusal.
+const PORTAL_RECEIVED_REFUSE_RE =
+  /\bcredit\s+card\b|\bmin(?:imum)?\.?\s+(?:amount\s+|payment\s+)?due\b|\boutstanding(?:\s+balance)?\s*:?\s*(?:[A-Z]{3}|Dhs?)?\.?\s*(?!0+(?:\.0+)?\b)\d|\bloan\b/i;
+const PORTAL_RECEIPT_TAIL_RE = /\n[ \t]*\r?\n|\bYou['’]ve\s+earned\s+Smiles\b/i;
 /** The line that says how the receipt was paid — and, very often, to whom. */
 const PORTAL_CHANNEL_RE = /(?:payment\s+channel|تم الدفع عن طريق)\s*:?\s*([^\n]{2,60})/i;
 /**
@@ -2846,7 +2920,7 @@ const MOBILE_RECHARGE_RE =
 // ("WL *STEAM PURCHASE"), and dropping those lines cost the merchant. The
 // plural form and the "card purchase" header are the noise.
 const LINE_NOISE_RE =
-  /\bcard\b|a\/?c\b|\baccount\s+(?:no|number|xx)|\bbal(?:ance)?\b|\blimit\b|statement|\bdue\b|payment\s+channel|\bpayment\b(?!\s*[A-Za-z])|purchases\b|purchase\s+of\b|debited|credited|\botp\b|\bref(?:erence)?\b|\btxn\b|\bavl\b|avail|value date|^date\b|paid upto|transaction\s+(?:date|time|id|ref)|mode\s+of\s+payment|amount\s+(?:due|paid)|^remaining\b/i;
+  /\bcard\b|a\/?c\b|\baccount\s+(?:no|number|xx)|\bbal(?:ance)?\b|\blimit\b|statement|\bdue\b|payment\s+channel|\bpayment\b(?!\s*[A-Za-z])|purchases\b|purchase\s+of\b|debited|credited|\botp\b|\bref(?:erence)?\b|\btxn\b|\bavl\b|avail|value date|^date\b|paid upto|transaction\s+(?:date|time|id|ref)|^transaction\s*(?:#|no\b|number\b)|mode\s+of\s+payment|amount\s+(?:due|paid)|^remaining\b/i;
 /**
  * A REWARD BADGE printed on its own line, which is not the acquirer descriptor.
  *
@@ -6057,7 +6131,25 @@ function parseSmsInner(
   // If a bank ever does send a card settlement in this template, the rule that
   // catches it must key on the body NAMING a credit card as the payee, and it
   // needs a real sample first.
-  const portalPay = raw.match(PORTAL_RECEIPT_RE);
+  // The amount-first opening is ordinary bank wording on its own ("your
+  // payment of AED 3,000.00 for account 4711 has been received" is also how a
+  // card repayment can read), so it joins the family only when the channel
+  // line names a known biller and the body says nothing about a card, a
+  // minimum due, an outstanding balance or a loan.
+  const portalPay = raw.match(PORTAL_RECEIPT_RE) ?? (() => {
+    const received = raw.match(PORTAL_RECEIVED_RE);
+    if (!received) return null;
+    // Only the receipt's own block is asked: an advert after it may say
+    // "credit card", and the funding lines ("Mode of Payment : Credit Card",
+    // "Card Number: 4111XXXXXXXX2518") say how the user paid, not what was paid.
+    const blockEnd = (received.index ?? 0) + received[0].length;
+    const tail = raw.slice(blockEnd).search(PORTAL_RECEIPT_TAIL_RE);
+    const block = (tail < 0 ? raw : raw.slice(0, blockEnd + tail))
+      .split('\n').filter((line) => !/^\s*(?:mode\s+of\s+payment|card\s+(?:no\.?|number))\b/i.test(line)).join('\n');
+    if (PORTAL_RECEIVED_REFUSE_RE.test(block)) return null;
+    const channel = raw.match(PORTAL_CHANNEL_RE)?.[1] ?? '';
+    return RECEIPT_BILLERS.some(([re]) => re.test(channel)) ? received : null;
+  })();
   if (portalPay) {
     // Last four, not first four: an unmasked account number would otherwise
     // label the row with its leading digits.
@@ -6074,7 +6166,12 @@ function parseSmsInner(
     const biller = channel ? (RECEIPT_BILLERS.find(([re]) => re.test(channel))?.[1] ?? null) : null;
     const merchant = biller ?? `Payment to •${last4}`;
     if (amountFils > 0) {
-      const cat = categoryOf(raw, 'expense', overrides, merchant);
+      // The receipt block only; see PORTAL_RECEIPT_TAIL_RE. A user's merchant
+      // override still wins, because categoryOf reads it off `merchant`.
+      const blockEnd = (portalPay.index ?? 0) + portalPay[0].length;
+      const tail = raw.slice(blockEnd).search(PORTAL_RECEIPT_TAIL_RE);
+      const receiptText = tail < 0 ? raw : raw.slice(0, blockEnd + tail);
+      const cat = categoryOf(receiptText, 'expense', overrides, merchant);
       /**
        * A RECEIPT IN THIS TEMPLATE IS A POSTPAID TELECOM BILL, EVEN WHEN THE
        * CHANNEL LINE NAMES NOBODY.
@@ -6132,7 +6229,9 @@ function parseSmsInner(
         date,
         dueDay: null,
         minDueFils: null,
-        card,
+        // The account number in this template is the BILLER's ("for account
+        // XXXXX2543"), so a card read from those same digits is not the user's.
+        card: card && card.last4 === last4 ? null : card,
         transferHint: false,
         // This is biller-side evidence for a payment. It remains useful when
         // captured alone, while payment-flow reconciliation can fold multiple
@@ -6957,6 +7056,13 @@ function parseSmsInner(
   const fundingBalance =
     transferHint && snapshot?.kind === 'balance' && card?.kind === 'credit' &&
     /\b(?:debited|deducted|transferred|paid)\b(?:[^.\n]|\.\d){0,40}?\bfrom\s+(?:your\s+)?(?:(?:savings?|current)\s+)?(?:a\/?c|acc(?:oun)?t?)\b/i.test(raw);
+  // A biller's customer number is not the user's account; see
+  // billerOwnAccountTail. Only the instrument extractCard took FROM that
+  // number is dropped — a real card or account named elsewhere in the body
+  // (different digits) is kept. The number itself survives as the bill
+  // identity whether or not extractCard had picked it up.
+  const billerAccount = billerPaid && !isBillDue ? billerOwnAccountTail(raw, billerPaid) : null;
+  const billerOwnsCard = billerAccount !== null && card?.kind === 'account' && card.last4 === billerAccount;
 
   return {
     kind: isBillDue ? 'billDue' : 'transaction',
@@ -6968,7 +7074,8 @@ function parseSmsInner(
     date: isBillDue ? billDueDate : date,
     dueDay: billDueDate ? Number(billDueDate.slice(8)) : null,
     minDueFils: null,
-    card,
+    card: billerOwnsCard ? null : card,
+    ...(billerAccount ? { billIdentity: `account:${billerAccount}` } : {}),
     transferHint,
     snapshotFils: fundingBalance ? null : snapshotFils,
     snapshotKind: fundingBalance ? null : snapshotKind,
