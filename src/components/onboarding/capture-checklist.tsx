@@ -1,9 +1,9 @@
 /**
  * The four iPhone capture steps as a checklist, each row showing whether it
- * is done from recorded evidence (see ios-capture-checklist.ts). The
- * automation row carries its own "Open Shortcuts" button because that step
- * happens in the Shortcuts app. The Test step stays: it is how the app proves
- * the shortcut reaches it.
+ * is done from recorded evidence (see ios-capture-checklist.ts). Once the
+ * shortcut is added and tested, the automation row carries its own "Open
+ * Shortcuts" button because that step happens in the Shortcuts app. The Test
+ * step stays: it is how the app proves the shortcut reaches it.
  */
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -49,7 +49,9 @@ export function CaptureChecklist({ rows, titles, details, doneLabel, toDoLabel, 
               {details[row.id] ? <ThemedText style={[styles.detail, { color: palette.textSecondary }]}>{details[row.id]}</ThemedText> : null}
             </View>
           </View>
-          {row.id === 'automate' && !row.done ? (
+          {/* Offered only once the steps before it are done: the automation
+              needs the shortcut, so it never reads as the first thing to do. */}
+          {row.id === 'automate' && !row.done && rows.slice(0, index).every((earlier) => earlier.done) ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={openShortcutsLabel}
