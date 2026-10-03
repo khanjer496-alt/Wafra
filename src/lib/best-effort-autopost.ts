@@ -109,11 +109,17 @@ const SHARED_SYMBOL_COUNTRY_CURRENCY: Readonly<Record<string, string>> = {
   JP: 'JPY', CN: 'CNY',
   // `Rs`
   IN: 'INR', PK: 'PKR', LK: 'LKR', NP: 'NPR', MU: 'MUR', SC: 'SCR',
+  EG: 'EGP', SD: 'SDG', SS: 'SSP',
 };
 
 /** Exposed for tests and the settings copy; never a general country→currency map. */
 export const sharedSymbolCurrencyForCountry = (country: string | null | undefined): string | null =>
   (country && SHARED_SYMBOL_COUNTRY_CURRENCY[country.toUpperCase()]) || null;
+
+/** Countries whose own banking writes a three-decimal currency with a dot decimal point. */
+const THREE_DECIMAL_COUNTRY_CURRENCY: Readonly<Record<string, string>> = {
+  KW: 'KWD', BH: 'BHD', OM: 'OMR', JO: 'JOD',
+};
 
 const LAUNCH_MARKETS = new Set(['AE', 'SA']);
 
@@ -206,6 +212,7 @@ const validMoney = (money: UniversalMoney | null | undefined): money is Universa
  * currency than the ledger then needs a dated rate like any foreign charge.
  */
 const resolvePrincipalMoney = (
+  source: string,
   event: UniversalBankEvent,
   country: string | null,
   routedMarket: string | null,
@@ -216,8 +223,25 @@ const resolvePrincipalMoney = (
     return field.value;
   }
   if (field.evidence !== 'ambiguous') return 'amount-unclear';
-  // Only a currency-symbol ambiguity may be resolved. Any other doubt (two
-  // numbers, a role question) stays with the person.
+  // LOCALE EVIDENCE FOR A THREE-DECIMAL FIGURE. "KWD 12.500" is kept
+  // ambiguous by the reader (12.5 or 12,500) because nothing in the text says
+  // which. The person's own country does, for its own currency: Kuwait,
+  // Bahrain, Oman and Jordan print the full stop as the decimal point. Only
+  // that exact case resolves: one currency, two readings,
+  // the grouping reading exactly 1000x it, and the figure written with a
+  // FULL STOP (a comma stays ambiguous).
+  const localThreeDecimal = THREE_DECIMAL_COUNTRY_CURRENCY[(routedMarket ?? country ?? '').toUpperCase()];
+  const figure = field.spans.length === 1 ? source.slice(field.spans[0].start, field.spans[0].end) : '';
+  const [decimal, grouped] = [...field.alternatives].sort((a, b) => a.minorUnits.length - b.minorUnits.length);
+  if (localThreeDecimal && field.issues.length > 0 && field.issues.every((issue) => issue === 'decimal-or-grouping') &&
+    field.value === null && field.alternatives.length === 2 &&
+    /^[^,]*\d\.\d{3}(?!\d)[^,]*$/.test(figure) &&
+    validMoney(decimal) && decimal.currency === localThreeDecimal && grouped?.currency === localThreeDecimal &&
+    BigInt(grouped.minorUnits) === BigInt(decimal.minorUnits) * 1000n) {
+    return decimal;
+  }
+  // Otherwise only a currency-symbol ambiguity may be resolved. Any other
+  // doubt (two numbers, a role question) stays with the person.
   const symbolOnly = field.issues.length > 0 &&
     field.issues.every((issue) => issue === 'currency-symbol' || issue === 'currency-exponent');
   if (!symbolOnly) return 'amount-unclear';
@@ -258,6 +282,11 @@ const hasCompetingAmounts = (
     principals += 1;
     const others = [...observation.field.alternatives, ...(value ? [value] : [])]
       .filter((money) => !(money.currency === principal.currency && money.minorUnits === principal.minorUnits))
+      // The grouping reading of a locale-resolved three-decimal figure is the
+      // same printed number, not a second amount (see resolvePrincipalMoney).
+      .filter((money) => !(observation.field.issues.includes('decimal-or-grouping') &&
+        money.currency === principal.currency && /^\d+$/.test(money.minorUnits) &&
+        BigInt(money.minorUnits) === BigInt(principal.minorUnits) * 1000n))
       .filter((money) => !statedLedger(money));
     // A symbol ambiguity lists every candidate currency for the same figure.
     if (others.some((money) => money.minorUnits !== principal.minorUnits &&
@@ -288,7 +317,7 @@ export function decideBestEffortAutoPost(input: BestEffortInput): BestEffortDeci
     return review(event.issues.some((issue) => issue.startsWith('direction')) ? 'direction-unclear' : 'not-posted');
   }
 
-  const principal = resolvePrincipalMoney(event, input.country, input.routedMarket);
+  const principal = resolvePrincipalMoney(input.source, event, input.country, input.routedMarket);
   if (typeof principal === 'string') return review(principal);
   if (hasCompetingAmounts(event, principal, input.ledgerCurrency)) return review('competing-amounts');
 

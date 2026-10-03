@@ -224,7 +224,11 @@ export function BandScaffold({
   const insets = useSafeAreaInsets();
   const tabBarClearance = useTabBarClearance();
   const focused = useIsFocused();
-  const keyboardHeight = useKeyboardHeight(keyboardAware && Platform.OS !== 'ios');
+  // iOS subscribes too: KeyboardAvoidingView's own update is async, so a show
+  // update that resolves after the hide (a quick type-and-submit) re-applies
+  // the keyboard's padding and leaves a keyboard-sized blank under the screen.
+  // Our listener resets reliably, so the view only pads while it says shown.
+  const keyboardHeight = useKeyboardHeight(keyboardAware);
   const { ready, reducedMotion } = useMotionPreference();
 
   // First appearance: the sheet rises into place once. Never on Android
@@ -319,7 +323,8 @@ export function BandScaffold({
     {focused ? <StatusBar style={palette.statusBar} /> : null}
     {keyboardAware ? (
       <KeyboardAvoidingView style={styles.flex} keyboardVerticalOffset={keyboardVerticalOffset}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        enabled={Platform.OS !== 'ios' || keyboardHeight > 0}>
         {frame}
       </KeyboardAvoidingView>
     ) : frame}

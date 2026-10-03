@@ -93,7 +93,7 @@ const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,3}(?:\\D|$)|\\d,\\d{1,2}(?
 // the description so a merchant merely containing the word is untouched.
 // "Total" only counts when a figure, a colon or a totals word follows it;
 // "TOTAL ENERGIES FUEL 120.00" is a merchant.
-const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing|new|previous|prev)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried|outstanding)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:[A-Z]{3})?\s*[\d,]+(?:\.\d{1,3})?\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع)/iu;
+const SUMMARY_DESCRIPTION = /^(?:(?:opening|closing|new|previous|prev|beginning|ending|starting)\s+balance\b|balance\s+(?:b\/?f|c\/?f|brought|carried|outstanding)\b|(?:brought|carried)\s+forward\b|(?:sub)?totals?(?=\s*(?:$|:|(?:[A-Z]{3})?\s*[\d,]+(?:\.\d{1,3})?\b)|\s+(?:debits?|credits?|amounts?|for|of)\b)|الرصيد الافتتاحي|الرصيد الختامي|الإجمالي|المجموع)/iu;
 const NAMED_ENTITIES: Record<string, string> = {
   amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
 };
@@ -197,6 +197,8 @@ const HEADER_ALIASES = {
   description: [
     'transaction description', 'transaction details', 'description', 'details', 'narration',
     'particulars', 'merchant', 'remarks', 'تفاصيل العملية', 'البيان', 'الوصف', 'التفاصيل',
+    // Last: Barclays exports name the payee only in "Memo".
+    'memo',
   ],
   debit: [
     'debit amount', 'amount debited', 'withdrawal amount', 'withdrawals', 'withdrawal',
@@ -306,14 +308,34 @@ function maskedTail(value: string): string | null {
 
 type StatementInstrument = NonNullable<ParsedSms['card']>;
 
-/** Statement-wide identity from explicitly labelled document metadata only. */
-function statementInstrument(text: string): StatementInstrument | null {
+/**
+ * The document's header: the lines above its first date-led row. Labels
+ * added after launch (Arabic card/account labels, IBANs) are read only here,
+ * because transaction narrations print them too ("شراء رقم البطاقة 4321").
+ */
+function documentHeader(text: string): string {
+  const header: string[] = [];
+  for (const line of text.split(/\n+/)) {
+    if (DATE_LED_LINE.test(line.replace(/\s+/g, ' ').trim())) break;
+    header.push(line);
+  }
+  return header.join('\n');
+}
+
+/**
+ * Statement-wide identity from explicitly labelled document metadata only.
+ * `iban: false` leaves IBAN-shaped values out — the multi-account check
+ * must not mistake a card statement's printed IBAN for a second account.
+ */
+function statementInstrument(text: string, options: { iban?: boolean } = {}): StatementInstrument | null {
   const normalized = normalizeDigits(text).normalize('NFKC');
+  const header = documentHeader(normalized);
   const labelled = (
     kind: StatementInstrument['kind'],
     pattern: RegExp,
+    source = normalized,
   ): StatementInstrument | null => {
-    const match = pattern.exec(normalized);
+    const match = pattern.exec(source);
     if (!match?.[1]) return null;
     const last4 = maskedTail(match[1]);
     return last4 ? { last4, kind } : null;
@@ -340,12 +362,90 @@ function statementInstrument(text: string): StatementInstrument | null {
     'unknown',
     /\bcard\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
   ) ?? labelled(
+    'unknown',
+    /رقم\s+البطاقة\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/u,
+    header,
+  ) ?? labelled(
     'account',
     /\b(?:account|a\/c)\s+(?:number|no\.?|ending(?:\s+(?:in|with))?)\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/i,
-  );
+  ) ?? labelled(
+    'account',
+    /رقم\s+الحساب\s*[:#-]?\s*([*xX•\s-]*\d(?:[*xX•\s-]*\d){3,23})/u,
+    header,
+  ) ?? (options.iban === false ? null : labelled(
+    // An IBAN carries the domestic account number at its end (AE, SA and GB
+    // all do), so its last four digits are the account's. Only an explicitly
+    // labelled IBAN-shaped value counts, after every other account label.
+    'account',
+    new RegExp(String.raw`(?:\b(?:iban|account\s+(?:number|no\.?)|a\/c\s+(?:number|no\.?))|رقم\s+الآيبان|الآيبان|الايبان)\s*[:#-]?\s*(${IBAN_VALUE})`, 'iu'),
+    header,
+  ));
 }
 
+/**
+ * An IBAN as statements print it: two letters, two check digits, then the
+ * BBAN in optional groups of up to four (`SA03 8000 0000 6080 1016 7519`,
+ * `AE070331234567890123456`). Its last four digits are the account's tail.
+ */
+// Ends on a digit so a following short word (`… 7519 SAR`) is never absorbed.
+const IBAN_VALUE = String.raw`[A-Z]{2}\d{2}(?:[ \t]?[A-Z0-9]{1,4}){2,8}?\d(?![A-Z0-9])`;
+
+/**
+ * The issuing bank, from the statement's own letterhead only: the lines above
+ * the first transaction row. Row descriptions name banks constantly (`ADCB ATM
+ * MARINA`, `BARCLAYCARD PAYMENT`) and must never name the statement's bank.
+ * The earliest bank named wins; on a tie the order below decides, so Liv (an
+ * Emirates NBD brand) and ADIB resolve before their look-alikes. Names that
+ * are also ordinary words or initials (Chase, Citi, FAB, SAB, CBD) count only
+ * in bank-shaped forms ("Chase Bank", "chase.com"). Names follow
+ * the app's market packs where those list the bank.
+ */
+const STATEMENT_BANKS: readonly (readonly [RegExp, string])[] = [
+  [/\bliv\b/i, 'Liv'],
+  [/\bemirates\s*nbd\b|\benbd\b/i, 'Emirates NBD'],
+  [/\badcb\b|abu\s+dhabi\s+commercial\s+bank/i, 'ADCB'],
+  [/first\s+abu\s+dhabi\s+bank|\bbankfab\b|\bfab\s+bank\b/i, 'FAB'],
+  [/\bmashreq\b/i, 'Mashreq'],
+  [/\brak\s*bank\b|\brakbank\b/i, 'RAKBANK'],
+  [/\badib\b|abu\s+dhabi\s+islamic\s+bank/i, 'ADIB'],
+  [/\bdib\b|dubai\s+islamic\s+bank/i, 'DIB'],
+  [/commercial\s+bank\s+of\s+dubai|\bcbd\s+bank\b/i, 'CBD'],
+  [/\bwio\b/i, 'Wio'],
+  [/al\s*rajhi|مصرف\s+الراجحي/iu, 'Al Rajhi'],
+  [/\bsnb\b|saudi\s+national\s+bank|\balahli\b|\bal\s+ahli\b|البنك\s+الأهلي/iu, 'SNB AlAhli'],
+  [/\briyad\s*bank\b|بنك\s+الرياض/iu, 'Riyad Bank'],
+  [/\balinma\b|مصرف\s+الإنماء/iu, 'Alinma'],
+  [/saudi\s+awwal\s+bank|\bsab\s+bank\b|\bsab\.com\b/i, 'SAB'],
+  [/\bjp\s*morgan\s+chase\b|\bchase\s+bank\b|\bchase\.com\b/i, 'Chase'],
+  [/\bbank\s+of\s+america\b|\bbofa\b/i, 'Bank of America'],
+  [/\bcitibank\b|\bciti\s+(?:bank|cards?)\b|\bciti\.com\b/i, 'Citi'],
+  [/\bamerican\s+express\b|\bamex\b/i, 'American Express'],
+  [/\bcapital\s+one\b/i, 'Capital One'],
+  [/\bbarclay(?:s|card)\b/i, 'Barclays'],
+  [/\bhsbc\b/i, 'HSBC'],
+  [/\blloyds\b/i, 'Lloyds'],
+  [/\bmonzo\b/i, 'Monzo'],
+  [/\brevolut\b/i, 'Revolut'],
+  [/\bnationwide\b/i, 'Nationwide'],
+];
+
 function statementBankHint(text: string): string | undefined {
+  const header: string[] = [];
+  for (const line of text.split(/\n+/).slice(0, 60)) {
+    if (DATE_LED_LINE.test(line.trim())) break;
+    header.push(line);
+  }
+  const letterhead = header.join('\n');
+  // The bank named FIRST in the letterhead, not the first in this list: an
+  // address or a payee further down must not outrank the issuer's own name.
+  let best: { index: number; name: string } | null = null;
+  for (const [pattern, name] of STATEMENT_BANKS) {
+    const index = letterhead.search(pattern);
+    if (index >= 0 && (best === null || index < best.index)) best = { index, name };
+  }
+  if (best) return best.name;
+  // The launch rule, kept for the issuer it was written for: HSBC prints its
+  // name in page footers below the table as well as above it.
   if (/\bHSBC\b/i.test(text)) return 'HSBC';
   return undefined;
 }
@@ -389,6 +489,8 @@ function statementCounterparty(
   return { last4, kind: (match[1] ?? '').toLowerCase() === 'card' ? 'unknown' : 'account' };
 }
 
+const STATEMENT_SALARY = /\bsalar(?:y|ies)\b|\bpayroll\b|\bwps\b|\bwages?\b|راتب|رواتب/iu;
+
 function statementTransferMeaning(
   description: string,
   type: 'expense' | 'income',
@@ -404,8 +506,16 @@ function statementTransferMeaning(
   const transferCharge = /\b(?:transfer|remittance|wire)\b[\s\S]{0,36}\b(?:fee|fees|charge|commission|vat)\b|\b(?:fee|fees|charge|commission|vat)\b[\s\S]{0,36}\b(?:transfer|remittance|wire)\b/i.test(text) ||
     /(?:رسوم|عمولة)[^\n]{0,36}(?:تحويل|حوالة)|(?:تحويل|حوالة)[^\n]{0,36}(?:رسوم|عمولة)/u.test(text);
   if (!isTransfer || transferCharge) return null;
+  // Payroll reaches the account over a transfer rail and banks say so
+  // ("SALARY TRANSFER ACME", "WPS SALARY TRANSFER", "INWARD TRANSFER SALARY
+  // SEP"). It is still the user's income, never a move between their own
+  // accounts, so the salary classifier decides it instead.
+  // A move between the user's own accounts stays one, even from a "salary
+  // account": that income was already counted where it first arrived.
   const explicitOwn = /\b(?:own|self|internal)\s+(?:account\s+)?transfer\b|\bbetween\s+(?:my|own)\s+accounts\b/i.test(text) ||
     /تحويل\s+(?:بين\s+)?حساب(?:ات)?(?:ي|ك)/u.test(text);
+  if (type === 'income' && !explicitOwn && STATEMENT_SALARY.test(text) &&
+      !/\bsalary\s+(?:a\/c|acc(?:oun)?t)\b/i.test(text)) return null;
   const reference = explicitReference ?? referenceFromDescription(description);
   const counterparty = statementCounterparty(description, type);
   return {
@@ -439,8 +549,36 @@ function statementTransferMeaning(
  * leg. Without them it stays an ordinary row flagged as a transfer.
  */
 const CARD_SETTLEMENT_EXCLUSION = /\b(?:fees?|charges?|interest|vat|commission|late|annual|penalty|cash\s*back|refund|reversal|return)\b|رسوم|فائدة|استرداد|عمولة/iu;
-const ACCOUNT_SIDE_CARD_SETTLEMENT = /\b(?:credit\s+card|cc)\s+(?:bill\s+)?(?:payment|repayment|settlement)\b|\bpayment\s+(?:to|towards)\s+(?:your\s+|the\s+)?credit\s+card\b|سداد\s+(?:ال)?بطاقة\s+(?:ال)?ائتمان/iu;
-const CARD_SIDE_SETTLEMENT = /\b(?:payment|pymt)\s+(?:received|recd|thank)|\bthank\s+you\b|^\s*(?:payment|pymt)\b|\b(?:auto\s*pay(?:ment)?|direct\s+debit)\b|سداد|دفعة\s+مستلمة/iu;
+// The account-side wording also covers issuer names a current account prints
+// for the card bill it pays: "CHASE CREDIT CRD AUTOPAY", "BARCLAYCARD
+// PAYMENT", "AMEX EPAYMENT", and the Saudi SADAD biller "SADAD CREDIT CARD".
+const ACCOUNT_SIDE_CARD_SETTLEMENT = new RegExp([
+  String.raw`\b(?:credit\s+card|cc)\s+(?:bill\s+)?(?:payment|repayment|settlement)\b`,
+  String.raw`\bpayment\s+(?:to|towards)\s+(?:your\s+|the\s+)?credit\s+card\b`,
+  String.raw`\bcredit\s+(?:crd|card)\b[^\n]{0,24}\b(?:auto\s*pay|e?payment|epay|pymt)\b`,
+  String.raw`\b(?:barclaycard|amex|american\s+express|capital\s+one|discover\s+card|citi\s*cards?)\b[^\n]{0,24}\b(?:auto\s*pay|e?payment|pymt|bill\s+pay(?:ment)?)\b`,
+  String.raw`\bsadad\s+(?:credit\s+card|cc)\b`,
+  // A current-account debit named only for a card issuer is that card's bill.
+  // Only the bare name, a direct-debit marker or a reference may follow:
+  // "AMEX TRAVEL" is a merchant, not the card's bill.
+  String.raw`^\s*(?:barclaycard|american\s+express|amex)(?:\s+(?:dd|d\/d|direct\s+debit|[a-z]{0,3}\d[\w*#./-]*))?\s*$`,
+  String.raw`سداد\s+(?:ال)?بطاقة\s+(?:ال)?ائتمان`,
+].join('|'), 'iu');
+// Card-side: the payment credits a card statement prints. Every channel the
+// money can arrive through is still a settlement on a PROVEN card statement:
+// online/mobile/internet banking, a CDM cash deposit, a CC payment, an issuer
+// mobile payment ("CAPITAL ONE MOBILE PYMT") or an autopay.
+const CARD_SIDE_SETTLEMENT = new RegExp([
+  String.raw`\b(?:payment|pymt)\s+(?:received|recd|thank)`,
+  String.raw`\bthank\s+you\b`,
+  String.raw`^\s*(?:payment|pymt)\b`,
+  String.raw`\b(?:auto\s*pay(?:ment)?|direct\s+debit)\b`,
+  String.raw`\b(?:online|mobile|internet|net|ib|digital)\s+(?:banking\s+)?(?:payment|pymt|transfer)\b`,
+  String.raw`\b(?:credit\s+card|cc)\s+(?:bill\s+)?(?:payment|pymt|repayment)\b`,
+  String.raw`\bcash\s+deposit\b|\bcdm\b`,
+  String.raw`\bmobile\s+pymt\b`,
+  String.raw`سداد|دفعة\s+مستلمة`,
+].join('|'), 'iu');
 // Payment companies are merchants: their credits are refunds, not settlements.
 const PAYMENT_COMPANY = /\b(?:paypal|amazon\s+payments?|apple\s+pay|google\s+pay|samsung\s+pay|stripe|checkout\.com|payfort|tabby|tamara)\b/i;
 
@@ -508,6 +646,240 @@ function statementCardSettlement(
       : { kind: 'transaction', type, merchant: 'Card payment', card: source, ...transfer };
   }
   return null;
+}
+
+/**
+ * The acquirer noise a card network appends to a statement descriptor, peeled
+ * the way the SMS parser's own descriptor cleaner peels it so the same charge
+ * reads alike from both sources: `NOON.COM DUBAI ARE` → `NOON`,
+ * `PANDA RIYADH SAU` → `PANDA`, `CARREFOUR MOE DUBAI ARE` → `CARREFOUR MOE`.
+ *
+ * Only TRAILING country codes, Gulf city names and a host suffix are removed,
+ * one at a time, and a peel is discarded unless three letters of name survive
+ * it — a shop really can be called "Dubai Something", and a bare "SA" or
+ * "DUBAI" is left as it was. This is a title, never an identity: transfer,
+ * settlement and category decisions still read the full description.
+ */
+const DESCRIPTOR_COUNTRY_TAIL = /[\s,-]+(?:AE|ARE|UAE|SA|SAU|KSA|US|USA|GB|GBR|UK|IRL|NLD|SWE|DEU|FRA)$/i;
+const DESCRIPTOR_CITY_TAIL = /[\s,-]+(?:DXB|DUBAI|ABU\s?DHABI|AUH|SHARJAH|AJMAN|FUJAIRAH|AL\s+AIN|RAS\s+AL\s+KHAIMAH|UMM\s+AL\s+QUWAIN|RIYADH|JEDDAH|DAMMAM|AL\s+KHOBAR|KHOBAR|MAKKAH|MECCA|MADINAH|MEDINA|DHAHRAN|TABUK|ABHA|BURAIDAH)$/i;
+const DESCRIPTOR_HOST_TAIL = /\.(?:com|ae|sa|net|org|io|co)$/i;
+
+export function cleanStatementDescriptor(description: string): string {
+  let out = description.normalize('NFKC').replace(/\s+/g, ' ').trim();
+  const letters = (value: string) => (value.match(/\p{L}/gu) ?? []).length;
+  for (let guard = 0; guard < 6; guard += 1) {
+    const before = out;
+    for (const tail of [DESCRIPTOR_COUNTRY_TAIL, DESCRIPTOR_CITY_TAIL, DESCRIPTOR_HOST_TAIL]) {
+      const peeled = out.replace(tail, '').trim();
+      if (peeled !== out && letters(peeled) >= 3) out = peeled;
+    }
+    if (out === before) break;
+  }
+  return out.replace(/^www\./i, '').trim() || description;
+}
+
+/**
+ * A card row's foreign original at the end of its description:
+ * `SPOTIFY STOCKHOLM USD 20.00` charged as 73.60 in the ledger currency.
+ * The ledger-currency figure stays the row amount; the original travels as
+ * the relay's bank-stated FX fields. Null unless the code is a real ISO
+ * currency other than the ledger's and the figure is exact in its exponent.
+ */
+function foreignOriginalTail(
+  description: string,
+  ledgerCurrency: StatementCurrency,
+): { merchant: string; code: string; minorUnits: number; exponent: 0 | 2 | 3 } | null {
+  const match = /^(.{2,}?)\s+([A-Z]{3})\s*([\d,]+(?:\.\d{1,3})?)$/.exec(description.trim());
+  if (!match) return null;
+  const code = match[2].toUpperCase();
+  if (code === ledgerCurrency || statementCurrency(code) !== code) return null;
+  const exponent = ledgerMoneySpec(code)?.exponent;
+  if (exponent !== 0 && exponent !== 2 && exponent !== 3) return null;
+  // The figure must carry exactly its currency's decimals: `USD 20.00`,
+  // `KWD 1.250`, `JPY 2000`. A bare integer after a three-letter word is a
+  // quantity or a name (`STC PAY TOP 100`), not a Tongan pa'anga amount.
+  const fraction = /\.(\d+)$/.exec(match[3])?.[1] ?? '';
+  if (fraction.length !== exponent) return null;
+  const minorUnits = amountMinor(match[3], code, false);
+  if (minorUnits === null) return null;
+  return { merchant: match[1].trim(), code, minorUnits, exponent };
+}
+
+function foreignOriginalFields(
+  original: NonNullable<ReturnType<typeof foreignOriginalTail>>,
+  localMinor: number,
+  ledgerCurrency: StatementCurrency,
+): Pick<ParsedSms, 'originalMinorUnits' | 'originalExponent' | 'originalAmountMinor' | 'originalCurrency' | 'fxRate' | 'fxSource'> | null {
+  const localExponent = ledgerMoneySpec(ledgerCurrency)?.exponent;
+  if (localExponent === undefined) return null;
+  const rate = (localMinor / 10 ** localExponent) / (original.minorUnits / 10 ** original.exponent);
+  if (!Number.isFinite(rate) || rate <= 0) return null;
+  // The legacy two-decimal figure only when it is exact (never for KWD 12.345).
+  const legacy = original.exponent === 3
+    ? (original.minorUnits % 10 === 0 ? original.minorUnits / 10 : undefined)
+    : original.minorUnits * 10 ** (2 - original.exponent);
+  return {
+    originalMinorUnits: original.minorUnits,
+    originalExponent: original.exponent,
+    ...(legacy !== undefined && Number.isSafeInteger(legacy) ? { originalAmountMinor: legacy } : {}),
+    originalCurrency: original.code,
+    fxRate: Number(rate.toPrecision(10)),
+    fxSource: 'bank',
+  };
+}
+
+/**
+ * The relay refuses a merchant longer than 160 characters and the phone then
+ * drops the whole row. A statement narration can run to 180 (remittance
+ * details), so the TITLE is cut at a word boundary instead of losing money.
+ */
+const MAX_RELAY_TITLE = 160;
+function relayTitle(value: string): string {
+  if (value.length <= MAX_RELAY_TITLE) return value;
+  const cut = value.slice(0, MAX_RELAY_TITLE);
+  const space = cut.lastIndexOf(' ');
+  return (space >= MAX_RELAY_TITLE / 2 ? cut.slice(0, space) : cut).trim();
+}
+
+/**
+ * Classify a statement description the way the SMS parser classifies a
+ * merchant, with the acquirer's location/country noise peeled from the TITLE
+ * only. A recognised service name on the full text (Netflix, ATM withdrawal)
+ * wins; the category keeps the full description's verdict unless only the
+ * cleaned title is recognised.
+ */
+function statementMerchantClassification(
+  description: string,
+  type: 'expense' | 'income',
+  market: 'AE' | 'SA' | null,
+): ReturnType<typeof classifyMerchantDescription> {
+  const full = classifyMerchantDescription(description, type, market);
+  const flat = description.normalize('NFKC').replace(/\s+/g, ' ').trim();
+  const cleaned = cleanStatementDescriptor(flat);
+  if (cleaned === flat) return full;
+  const titled = classifyMerchantDescription(cleaned, type, market);
+  const merchant = full.merchant !== flat ? full.merchant : titled.merchant;
+  return full.categoryDeliberate || !titled.categoryDeliberate
+    ? { ...full, merchant }
+    : { ...titled, merchant };
+}
+
+/** Two leading dates: keep the transaction date, drop the posting date. */
+const POSTING_DATE_AFTER_DATE = new RegExp(`^(${DATE_TOKEN})\\s+${DATE_TOKEN}\\s+(?=\\S)`, 'i');
+
+const OPENING_BALANCE = /^(?:(?:opening|previous|prev|beginning|starting)\s+balance\b|balance\s+(?:b\/?f|brought\s+forward)\b|brought\s+forward\b|الرصيد\s+الافتتاحي)/iu;
+
+/**
+ * The figure on an opening-balance line (`Opening Balance 10,000.00`,
+ * `Balance B/F 1,200.00 DR`), signed the way the balance chain reads it.
+ * Null for anything else, including an opening line with no readable figure.
+ */
+function openingBalanceMinor(
+  rest: string,
+  currency: StatementCurrency,
+  labels: 'transaction' | 'balance' | null,
+): number | null {
+  const text = rest.replace(/\s+/g, ' ').trim();
+  if (!OPENING_BALANCE.test(text)) return null;
+  const words = text.split(' ');
+  const label = /^(?:DR|CR|DEBIT|CREDIT)$/i.test(words.at(-1) ?? '') ? words.pop() : undefined;
+  const token = classifyMoneyToken(words.at(-1) ?? '', currency);
+  if (!token || token.kind === 'placeholder') return null;
+  const value = token.kind === 'signed' && token.type === 'expense' ? -token.minor : token.minor;
+  return labels === 'balance' && label && /^(?:DR|DEBIT)$/i.test(label) ? -Math.abs(value) : value;
+}
+
+/**
+ * A card statement's own summary — what is owed, the minimum, and by when —
+ * as the same `cardStatement` row a bank's statement alert produces, so a
+ * statement import creates or refreshes the card's due instead of leaving it
+ * to an SMS that may never arrive.
+ *
+ * All three figures must be stated with their labels, in the ledger
+ * currency, on lines that are not transaction rows; a minimum above the
+ * total, or a due date that is not a real date, refuses the summary. The
+ * issue date is carried only when labelled and strictly before the due date.
+ */
+/** The Worker's per-import row ceiling (MAX_IMPORT_ROWS, relay statementRowIndex < 200). */
+const STATEMENT_ROW_CEILING = 200;
+// Groups: a minus attached to the figure, the figure, a CR/DR label. A hyphen
+// followed by a space is a separator (`Total Due - 380.00`); one touching the
+// digits (`New Balance -380.00`) is a credit balance, as is CR.
+const SUMMARY_MONEY = String.raw`\s*(?:\(\s*[A-Z]{3}\s*\))?\s*(?:[:=]\s*|-\s+)?(-\s*)?((?:[A-Z]{3}\s*)?-?\s*[\d,]+(?:\.\d{1,3})?)(\s*(?:CR|DR)\b)?`;
+// The CURRENT statement's figure, never the previous one printed beside it.
+const NOT_PRIOR_PERIOD = String.raw`(?<!\b(?:previous|prior|last|opening|old)\s+)`;
+const SUMMARY_TOTAL_LABELS = [
+  String.raw`total\s+(?:amount\s+)?due`,
+  String.raw`statement\s+balance`,
+  String.raw`new\s+balance`,
+  String.raw`total\s+outstanding(?:\s+balance)?`,
+  String.raw`total\s+(?:statement\s+)?balance`,
+];
+const SUMMARY_MINIMUM = new RegExp(String.raw`\bmin(?:imum)?\.?\s+(?:amount\s+|payment\s+)?(?:due|payable)\b${SUMMARY_MONEY}|\bminimum\s+payment\b${SUMMARY_MONEY}`, 'i');
+const SUMMARY_DUE_DATE = new RegExp(String.raw`\b(?:payment\s+due\s+date|due\s+date|pay(?:ment)?\s+(?:due\s+)?by)\b\s*[:=-]?\s*(${DATE_TOKEN})`, 'i');
+const SUMMARY_STATEMENT_DATE = new RegExp(String.raw`\bstatement\s+date\b\s*[:=-]?\s*(${DATE_TOKEN})`, 'i');
+
+function cardStatementSummary(
+  text: string,
+  currency: StatementCurrency,
+  dateOrder: DateOrder,
+  instrument: ParsedSms['card'],
+  bankHint: string | undefined,
+): StatementParsedRow | null {
+  if (!instrument || instrument.kind === 'account' || !/^\d{4}$/.test(instrument.last4)) return null;
+  const header = text.split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line && !DATE_LED_LINE.test(line))
+    .slice(0, 120);
+  // A CR/DR beside the figure is a credit balance or a debit note, not a due.
+  // A credit balance owes nothing: 0, which refuses the summary below.
+  const money = (match: RegExpExecArray, offset = 1): number | null => {
+    const figure = match[offset + 1];
+    if (!figure) return null;
+    if (match[offset] || figure.includes('-') || /CR/i.test(match[offset + 2] ?? '')) return 0;
+    return amountMinor(figure, currency, false);
+  };
+  const first = <T>(read: (line: string) => T | null): T | null => {
+    for (const line of header) {
+      const value = read(line);
+      if (value !== null) return value;
+    }
+    return null;
+  };
+  let total: number | null = null;
+  for (const label of SUMMARY_TOTAL_LABELS) {
+    const pattern = new RegExp(String.raw`${NOT_PRIOR_PERIOD}\b${label}\b${SUMMARY_MONEY}`, 'i');
+    total = first((line) => {
+      const match = pattern.exec(line);
+      return match ? money(match) : null;
+    });
+    if (total !== null) break;
+  }
+  const minimum = first((line) => {
+    const match = SUMMARY_MINIMUM.exec(line);
+    if (!match) return null;
+    return match[2] !== undefined ? money(match, 1) : money(match, 4);
+  });
+  const due = first((line) => {
+    const match = SUMMARY_DUE_DATE.exec(line);
+    return match ? isoDate(match[1], dateOrder) : null;
+  });
+  if (total === null || minimum === null || !due || total <= 0 || minimum > total) return null;
+  const issued = first((line) => {
+    const match = SUMMARY_STATEMENT_DATE.exec(line);
+    return match ? isoDate(match[1], dateOrder) : null;
+  });
+  return {
+    kind: 'cardStatement', type: 'expense', amountFils: total, currency,
+    merchant: `Card •${instrument.last4}`, date: due,
+    dueDay: Number(due.slice(8)), minDueFils: minimum,
+    card: { last4: instrument.last4, kind: 'credit' }, reference: null,
+    transferHint: false, snapshotFils: null, snapshotKind: null,
+    categoryGuess: 'other', categoryDeliberate: true,
+    ...(issued && issued < due ? { statementDate: issued } : {}),
+    ...(bankHint ? { bankHint } : {}),
+    raw: 'statement summary',
+  };
 }
 
 function uniqueColumnInstrument(
@@ -654,6 +1026,13 @@ function cellFigure(value: string): string {
     .replace(/[^\d.,'’ ]/g, '').trim();
 }
 
+/** The ledger currencies each money symbol can stand for. */
+const CURRENCY_SYMBOLS: Record<string, readonly string[]> = {
+  '£': ['GBP'],
+  '€': ['EUR'],
+  '$': ['USD', 'CAD', 'AUD', 'NZD', 'SGD', 'HKD'],
+};
+
 function amountMinor(
   value: string,
   currency: StatementCurrency,
@@ -687,6 +1066,14 @@ function amountMinor(
   // Amount cells may carry either a canonical ISO code or the two launch-era
   // local aliases. Currency evidence is checked, never used to change the
   // requested ledger denomination.
+  // A currency SYMBOL (`£23.40`, `-€5.00`, `$84.12`) is evidence like a code:
+  // accepted only when it can name the ledger's own currency.
+  const symbol = /^([£€$])\s*/.exec(normalized);
+  if (symbol) {
+    if (!(CURRENCY_SYMBOLS[symbol[1]] ?? []).includes(currency)) return null;
+    normalized = normalized.slice(symbol[0].length).trim();
+    takeSign();
+  }
   const localAlias = String.raw`(?:AED|DHS?|D\.E|DIRHAMS?|د\.?\s*إ|درهم(?: إماراتي)?|SAR|SR|S\.R|RIYALS?|ر\.?\s*س|ريال(?: سعودي)?|[A-Z]{3})`;
   const prefixCurrency = new RegExp(`^(${localAlias})\\s*`, 'iu').exec(normalized)?.[1];
   if (prefixCurrency) {
@@ -738,14 +1125,24 @@ function rowDirection(value: string): 'expense' | 'income' | null {
  *
  * `account`      minus is money out, plus/unsigned-with-sign is money in — the
  *                account-statement convention, and the only one assumed.
+ * `account-unsigned-credit`
+ *                a bank export proved by its own rows (inferCsvSignConvention)
+ *                to print debits with a minus and credits as plain figures.
  * `minus-credit` the card statement SAYS a minus marks a credit (payment,
- *                refund, cashback); plain and plus figures are charges.
- * `minus-debit`  the card statement SAYS charges carry the minus; plain and
- *                plus figures are credits.
+ *                refund, cashback), or its rows prove it (Amex-style exports);
+ *                plain and plus figures are charges.
+ * `minus-debit`  the card statement SAYS charges carry the minus, or its rows
+ *                prove it (Chase-style exports); plain and plus figures are
+ *                credits.
  * `refuse`       a card statement that says neither. Card issuers use both
  *                conventions, so a bare sign there is not a direction.
  */
-type SignConvention = 'account' | 'minus-credit' | 'minus-debit' | 'refuse';
+type SignConvention = 'account' | 'account-unsigned-credit' | 'minus-credit' | 'minus-debit' | 'refuse';
+
+/** Conventions under which an unsigned figure has a direction of its own. */
+const PLAIN_FIGURE_CONVENTIONS: ReadonlySet<SignConvention> = new Set([
+  'account-unsigned-credit', 'minus-credit', 'minus-debit',
+]);
 
 const SIGN_VERB = String.raw`(?:denotes?|indicates?|represents?|means?|shows?|=)`;
 const SIGN_MARK = String.raw`(?:minus|negative)(?:\s+sign)?\s*(?:\(\s*-\s*\)\s*)?(?:amounts?|figures?|values?|entries|transactions)?`;
@@ -792,10 +1189,91 @@ function directionFromSign(
 ): 'expense' | 'income' | null {
   switch (convention) {
     case 'account': return sign === '-' ? 'expense' : sign === '+' ? 'income' : null;
+    case 'account-unsigned-credit': return sign === '-' ? 'expense' : 'income';
     case 'minus-credit': return sign === '-' ? 'income' : 'expense';
     case 'minus-debit': return sign === '-' ? 'expense' : 'income';
     default: return null;
   }
+}
+
+/** Card-side payment wording strong enough to identify a card export. */
+// Only wording a card issuer prints for money RECEIVED onto the card. A bare
+// AUTOPAY or MOBILE PYMT is just as often a utility bill leaving an account,
+// so it never proves a card export; an issuer named with it does.
+const CARD_PAYMENT_PHRASE = /\b(?:payment|pymt)\s*-?\s*(?:received|recd|thank)|\bthank\s+you\b|\b(?:capital\s+one|chase|citi|amex|american\s+express|discover|barclaycard)\s+(?:(?:mobile|online|auto)\s*)?(?:pymt|payment)\b/i;
+/** A row a card statement credits: a payment, refund, return or cashback. */
+const CARD_CREDIT_ROW = /\brefund|\breturn|\bcash\s*back\b|\bcredit\b|\brevers(?:al|ed)\b/i;
+const CARD_CREDIT_TYPE = /^(?:payment|payment credit|return|refund|credit|adjustment)$/;
+/** Money a current account receives. Only used to recognise a bank export. */
+const ACCOUNT_INCOME_HINT = /\bsalar(?:y|ies)\b|\bpayroll\b|\bwages?\b|\bdir\s+dep\b|\bdirect\s+dep(?:osit)?\b|\bdeposit|\btransfer\b|\btrf\b|\binterest\b|\bdividend|\bpaid\s+in\b|\breceived\b|\bfrom\b|\bcredit\b|\brefund|\bcash\s*back\b|\brevers|\bzelle\b|راتب|ايداع|إيداع|تحويل/iu;
+
+/**
+ * The sign convention a bare amount column follows, read from the rows when
+ * the file states none. Three shapes, each needing positive evidence:
+ *
+ *   minus-credit  (Amex-style card export) no plus signs; every minus row is
+ *                 a payment, refund or credit, at least one is a card payment
+ *                 ("AUTOPAY PAYMENT - THANK YOU"), no plain row looks like
+ *                 money a bank account receives, and there is no balance.
+ *   minus-debit   (Chase-style card export) no plus signs; every PLAIN row is
+ *                 a payment/return/credit by its description or Type cell, at
+ *                 least one is a card payment, and no minus row is.
+ *   account-unsigned-credit
+ *                 (bank export) not a card statement; some minus row is an
+ *                 ordinary debit; and the plain rows are credits by proof — a
+ *                 running balance column, or every one reading as income.
+ *
+ * Anything else stays undecided and its plain figures are refused as before.
+ */
+function inferCsvSignConvention(
+  records: string[][],
+  options: {
+    amountIndex: number; descriptionIndex: number; directionIndex: number; headers: string[];
+    currency: StatementCurrency; decimal: DecimalConvention; cardStatement: boolean;
+    /** The file labels itself as an ACCOUNT (an account column or preamble). */
+    accountLabelled: boolean;
+  },
+): SignConvention | null {
+  const samples: { sign: '-' | '+' | null; description: string; typeCell: string }[] = [];
+  for (const record of records) {
+    if (record.length !== options.headers.length) continue;
+    const typeCell = options.directionIndex >= 0 ? record[options.directionIndex] ?? '' : '';
+    if (rowDirection(typeCell)) continue; // already explicit
+    const cell = record[options.amountIndex] ?? '';
+    const signed = amountMinor(cell, options.currency, true, options.decimal);
+    const plain = signed === null ? amountMinor(cell, options.currency, false, options.decimal) : null;
+    if (signed === null && plain === null) continue;
+    samples.push({
+      sign: signed === null ? null : signed < 0 ? '-' : '+',
+      description: normalizeDigits(record[options.descriptionIndex] ?? '').normalize('NFKC'),
+      typeCell: normalizedHeader(typeCell),
+    });
+  }
+  const minus = samples.filter((sample) => sample.sign === '-');
+  const plus = samples.filter((sample) => sample.sign === '+');
+  const plain = samples.filter((sample) => sample.sign === null);
+  if (minus.length === 0 || plain.length === 0) return null;
+  const creditLike = (sample: typeof samples[number]) => CARD_PAYMENT_PHRASE.test(sample.description) ||
+    CARD_CREDIT_ROW.test(sample.description) || CARD_CREDIT_TYPE.test(sample.typeCell);
+  const cardPayment = (sample: typeof samples[number]) => CARD_PAYMENT_PHRASE.test(sample.description);
+  const incomeLike = (sample: typeof samples[number]) => ACCOUNT_INCOME_HINT.test(sample.description);
+  const balanceColumn = options.headers.some((header) => /\b(?:balance|bal)\b|الرصيد/u.test(header));
+  // An account-labelled file is never re-read as a card's: its AUTOPAY rows
+  // are bills and its "payment received" rows are money in.
+  if (plus.length === 0 && !balanceColumn && !options.accountLabelled) {
+    if (minus.every(creditLike) && minus.some(cardPayment) && !plain.some(incomeLike) &&
+        !minus.some((sample) => ACCOUNT_SIDE_CARD_SETTLEMENT.test(sample.description))) {
+      return 'minus-credit';
+    }
+    if (plain.every(creditLike) && plain.some(cardPayment) && !minus.some(creditLike) && !minus.some(incomeLike)) {
+      return 'minus-debit';
+    }
+  }
+  if (!options.cardStatement && minus.some((sample) => !creditLike(sample)) &&
+      (balanceColumn || plain.every(incomeLike))) {
+    return 'account-unsigned-credit';
+  }
+  return null;
 }
 
 /**
@@ -916,7 +1394,7 @@ export function parseStatementCsv(
   // A source instrument column is useful only when the whole export identifies
   // one statement account/card. A varying column is transaction metadata, not
   // authority to route every row to a different local account.
-  const sourceInstrument = sourceAccountIndex >= 0 && sourceCardIndex >= 0
+  const columnInstrument = sourceAccountIndex >= 0 && sourceCardIndex >= 0
     ? null
     : sourceAccountIndex >= 0
       ? uniqueColumnInstrument(dataRecords, sourceAccountIndex, 'account')
@@ -933,9 +1411,54 @@ export function parseStatementCsv(
   // column is then only a direction when the preamble says what a minus means.
   const preamble = records.slice(0, headerRow).map((record) => record.join(' ')).join('\n');
   assertStatementCurrency(preamble, defaultCurrency);
-  const cardEvidence = isCardStatement(preamble) || headers.includes(normalizedHeader('credit card number'));
-  const signEvidence = cardEvidence || (sourceAccountIndex < 0 && CARD_STATEMENT_MARKER.test(preamble));
-  const convention = signConvention(signEvidence, preamble);
+  // The statement's own account/card, from a labelled preamble line
+  // ("Card Number,4567XXXXXXXX1234", "رقم الحساب,XXXX4455", an IBAN) when no
+  // instrument column says it. Without it every row landed on the unassigned
+  // holding and never met the same charge from an SMS, PDF or re-export.
+  // Labelled numbers first; an IBAN only when nothing else names the account.
+  const preambleIdentity = (iban: boolean): NonNullable<ParsedSms['card']> | null => {
+    const found = new Map<string, NonNullable<ParsedSms['card']>>();
+    for (const record of records.slice(0, headerRow)) {
+      const line = record.filter((cell) => cell.trim()).join(' ');
+      const instrument = statementInstrument(line, { iban }) ?? statementHeaderInstrument(line);
+      if (instrument) found.set(`${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`, instrument);
+    }
+    return found.size === 1 ? [...found.values()][0] : null;
+  };
+  const preambleInstrument = preambleIdentity(false) ?? preambleIdentity(true);
+  const statedInstrument = columnInstrument ??
+    (sourceAccountIndex < 0 && sourceCardIndex < 0 ? preambleInstrument : null);
+  const bankHint = statementBankHint(preamble);
+  const creditMarker = CARD_STATEMENT_MARKER.test(preamble);
+  // Card-side payment wording in the rows themselves ("PAYMENT RECEIVED -
+  // THANK YOU", "MOBILE PYMT", "AUTOPAY"): with a card-number column and no
+  // account column, that is a card statement even with no preamble at all.
+  const cardPaymentRows = dataRecords.some((record) =>
+    CARD_PAYMENT_PHRASE.test(normalizeDigits(record[descriptionIndex] ?? '').normalize('NFKC')));
+  const cardColumnOnly = sourceCardIndex >= 0 && sourceAccountIndex < 0;
+  let cardEvidence = isCardStatement(preamble) || headers.includes(normalizedHeader('credit card number')) ||
+    (cardColumnOnly && (creditMarker || cardPaymentRows));
+  const signEvidence = cardEvidence || (sourceAccountIndex < 0 && creditMarker);
+  let convention = signConvention(signEvidence, preamble);
+  // A bare amount column with no stated legend: read the file's convention
+  // from its own rows (see inferCsvSignConvention). An inferred card layout
+  // proves the export is a card's.
+  if ((signedAmount || directedAmount) && (convention === 'account' || convention === 'refuse')) {
+    const inferred = inferCsvSignConvention(dataRecords, {
+      amountIndex, descriptionIndex, directionIndex, headers, currency: defaultCurrency, decimal,
+      cardStatement: signEvidence,
+      accountLabelled: sourceAccountIndex >= 0 || statedInstrument?.kind === 'account',
+    });
+    if (inferred) {
+      convention = inferred;
+      if (inferred !== 'account-unsigned-credit') cardEvidence = true;
+    }
+  }
+  const creditCard = cardEvidence && (creditMarker || cardPaymentRows ||
+    headers.includes(normalizedHeader('credit card number')) || convention === 'minus-credit' || convention === 'minus-debit');
+  const asCredit = (instrument: ParsedSms['card']): ParsedSms['card'] =>
+    instrument?.kind === 'unknown' && creditCard ? { last4: instrument.last4, kind: 'credit' } : instrument;
+  const sourceInstrument = asCredit(statedInstrument);
 
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
@@ -991,17 +1514,22 @@ export function parseStatementCsv(
         ? null
         : directionFromSign(signedMinor < 0 ? '-' : '+', convention);
       if (!labelled && signedMinor !== null && convention === 'refuse') ambiguousCardSignRows += 1;
+      // A plain figure has a direction only under a convention that gives it
+      // one: a stated card legend or one inferred from the file's own rows.
+      const plainType = !labelled && unsignedMinor !== null && PLAIN_FIGURE_CONVENTIONS.has(convention)
+        ? directionFromSign(null, convention)
+        : null;
       if (labelled && signedType && labelled !== signedType) {
         type = null;
       } else {
-        type = labelled ?? signedType;
+        type = labelled ?? signedType ?? plainType;
         minor = unsignedMinor ?? (signedMinor === null ? null : Math.abs(signedMinor));
       }
     } else if (currency === defaultCurrency && signedAmount) {
       const signedMinor = amountMinor(record[amountIndex] ?? '', currency, true, decimal);
       // A stated card convention also gives a plain figure its meaning; the
       // account convention and an unstated card one never do.
-      const plainMinor = signedMinor === null && (convention === 'minus-credit' || convention === 'minus-debit')
+      const plainMinor = signedMinor === null && PLAIN_FIGURE_CONVENTIONS.has(convention)
         ? amountMinor(record[amountIndex] ?? '', currency, false, decimal)
         : null;
       if (signedMinor !== null) {
@@ -1025,7 +1553,7 @@ export function parseStatementCsv(
       rejectedRows += 1;
       continue;
     }
-    const classification = classifyMerchantDescription(
+    const classification = statementMerchantClassification(
       merchant,
       type,
       defaultCurrency === 'AED' ? 'AE' : defaultCurrency === 'SAR' ? 'SA' : null,
@@ -1036,7 +1564,7 @@ export function parseStatementCsv(
     const rowAccountTail = sourceAccountIndex >= 0 ? maskedTail(record[sourceAccountIndex] ?? '') : null;
     const rowCardTail = sourceCardIndex >= 0 ? maskedTail(record[sourceCardIndex] ?? '') : null;
     const rowInstrument: ParsedSms['card'] = rowCardTail
-      ? { last4: rowCardTail, kind: 'unknown' }
+      ? asCredit({ last4: rowCardTail, kind: 'unknown' })
       : rowAccountTail
         ? { last4: rowAccountTail, kind: 'account' }
         : null;
@@ -1045,6 +1573,7 @@ export function parseStatementCsv(
       rows.push({
         amountFils: minor, currency: defaultCurrency, date,
         dueDay: null, minDueFils: null, reference,
+        ...(bankHint ? { bankHint } : {}),
         snapshotFils: null, snapshotKind: null,
         ...settlement,
         raw: record.join(delimiter),
@@ -1060,9 +1589,10 @@ export function parseStatementCsv(
     );
     rows.push({
       kind: 'transaction', type, amountFils: minor, currency: defaultCurrency,
-      merchant: transfer?.merchant ?? classification.merchant, date,
-      dueDay: null, minDueFils: null, card: rowInstrument, reference,
+      merchant: transfer?.merchant ?? relayTitle(classification.merchant), date,
+      dueDay: null, minDueFils: null, card: rowInstrument ?? sourceInstrument, reference,
       transferHint: transfer?.transferHint ?? false,
+      ...(bankHint ? { bankHint } : {}),
       snapshotFils: null, snapshotKind: null,
       categoryGuess: transfer ? 'other' : classification.categoryGuess,
       categoryDeliberate: transfer ? true : classification.categoryDeliberate,
@@ -1070,7 +1600,12 @@ export function parseStatementCsv(
       raw: record.join(delimiter),
     });
   }
-  return { rows, totalRows, rejectedRows, ambiguousCardSignRows, ambiguousDateRows };
+  // The preamble's own summary (total, minimum, due date) beside the rows.
+  const summary = cardEvidence && rows.length > 0 && totalRows < Math.min(maxRows, STATEMENT_ROW_CEILING)
+    ? cardStatementSummary(preamble, defaultCurrency, dateOrder, sourceInstrument, bankHint)
+    : null;
+  if (summary) rows.push({ ...summary, raw: 'statement summary' });
+  return { rows, totalRows: totalRows + (summary ? 1 : 0), rejectedRows, ambiguousCardSignRows, ambiguousDateRows };
 }
 
 type DateOrder = 'day-first' | 'month-first' | 'unknown';
@@ -1262,6 +1797,50 @@ function isCardStatement(text: string): boolean {
     /\bstatement\s+(?:period|date)\b/i,
   ];
   return markers.filter((marker) => marker.test(header)).length >= 2;
+}
+
+/**
+ * One statement, not two bound into one PDF: it states a payment due date,
+ * and every due date, statement date and minimum it prints agrees. A
+ * repeated page header prints the same values again, so it still counts as one.
+ */
+function singleStatementSummary(text: string): boolean {
+  const distinct = (pattern: RegExp) => new Set(
+    text.split(/\n+/)
+      .map((line) => pattern.exec(line.replace(/\s+/g, ' '))?.[1]?.replace(/\s+/g, ''))
+      .filter((value): value is string => !!value),
+  );
+  const dues = distinct(SUMMARY_DUE_DATE);
+  if (dues.size !== 1) return false;
+  if (distinct(SUMMARY_STATEMENT_DATE).size > 1) return false;
+  const minimums = new Set(
+    text.split(/\n+/)
+      .map((line) => SUMMARY_MINIMUM.exec(line.replace(/\s+/g, ' '))?.[0]?.replace(/^\D+/, '').replace(/\s+/g, ''))
+      .filter((value): value is string => !!value),
+  );
+  return minimums.size <= 1;
+}
+
+/**
+ * The one card a card statement belongs to: exactly one distinct top-level
+ * "Card Number" / "Credit Card Number" in the whole file, and the same card is
+ * the first one its header names. Cardholder sections ("Card No : XXXX - NAME")
+ * are not top-level labels. Null whenever that is not proven.
+ */
+function soleStatementCard(text: string): StatementInstrument | null {
+  const topLevel = /\b(?:credit\s+)?card\s+number\b|\bnumber\s+card\s+credit\b|رقم\s+البطاقة/iu;
+  const tails = new Set<string>();
+  let card: StatementInstrument | null = null;
+  for (const line of normalizeDigits(text).split(/\n+/)) {
+    if (!topLevel.test(line)) continue;
+    const instrument = statementInstrument(line, { iban: false });
+    if (!instrument || instrument.kind === 'account') continue;
+    tails.add(instrument.last4);
+    card ??= instrument;
+  }
+  if (tails.size !== 1 || !card) return null;
+  const header = statementInstrument(documentHeader(text), { iban: false });
+  return header && header.kind !== 'account' && header.last4 === card.last4 ? card : null;
 }
 
 /**
@@ -1523,8 +2102,13 @@ function parseCardTotalAmountRow(
   const priorMinor = prior ? ledgerCellMinor(prior, currency) : null;
   const hasExplicitVat = prior !== null && nearestMinor !== null && priorMinor !== null &&
     priorMinor + nearestMinor === totalMinor;
-  const merchant = (hasExplicitVat ? prior.before : nearest.before).trim();
+  let merchant = (hasExplicitVat ? prior.before : nearest.before).trim();
   if (merchant.length < 2 || merchant.length > 180) return null;
+  // A foreign Original Amount cell (`EUR 100.00`) stays beside the merchant
+  // so push() can carry it as the bank-stated FX original.
+  const foreignOriginal = !hasExplicitVat && /^[A-Z]{3}\s*[\d,]+(?:\.\d{1,3})?$/.test(nearest.surface) &&
+    !nearest.direction && statementCurrency(nearest.surface.slice(0, 3)) !== currency;
+  if (foreignOriginal) merchant = `${merchant} ${nearest.surface}`;
   if (EMBEDDED_CARD_DATE_PAIR.test(merchant)) return null;
 
   const direction = directionsAgree([
@@ -1557,6 +2141,21 @@ function parseColumnTail(
     const word = words[cut - 1];
     const standaloneCurrency = statementCurrency(word);
     if (standaloneCurrency) {
+      // A card row printing its foreign original before the charged figure:
+      // `SPOTIFY STOCKHOLM USD 20.00 73.60`. The LAST figure is the ledger
+      // charge; the code and the figure after it stay in the description,
+      // where push() lifts them into the FX fields. Only on a card table,
+      // whose rows carry one charged figure and never a running balance.
+      if (standaloneCurrency !== currency && loneAmountIsCharge && tail.length === 2 &&
+          tail.every((token) => token.kind === 'unsigned')) {
+        const merchant = [...words.slice(0, cut), words[cut]].join(' ').trim();
+        const charge = tail[1] as Extract<MoneyToken, { kind: 'unsigned' }>;
+        return merchant.length < 2 || merchant.length > 180 ? null : {
+          merchant,
+          amountFils: charge.minor,
+          type: convention === 'minus-debit' ? 'income' : 'expense',
+        };
+      }
       // A currency word only qualifies the money token after it; one that
       // names another market's currency means this row is not ours.
       if (tail.length === 0 || standaloneCurrency !== currency) return null;
@@ -1666,6 +2265,11 @@ function trailingBalanceRuns(lines: string[], currency: StatementCurrency): bool
   let agreed = 0;
   for (const line of lines) {
     const prefixed = ROW_DATE_PREFIX.exec(line);
+    const opening = openingBalanceMinor(prefixed ? prefixed[2] : line, currency, null);
+    if (opening !== null) {
+      previous = opening;
+      continue;
+    }
     if (!prefixed || SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
     const figures = rowBalanceFigures(prefixed[2], currency);
     // A row this cannot read is a hole in the chain, not a disagreement. Its
@@ -1754,16 +2358,29 @@ export function parseStatementLines(
   // A flattened document has no safe table-to-account mapping. Repeated page
   // headers are fine; distinct labelled statement accounts must be split before
   // import instead of silently routing every section to the first account.
+  //
+  // One exception: a credit-card statement with a single summary. Its
+  // "Card No : XXXX7316 - NAME" sections are the supplementary or replacement
+  // cards billed on that one card account (ADCB prints one per cardholder),
+  // and the statement's one total, minimum and due date cover all of them.
+  // It needs a positive single-account signal, not just agreeing dates: one
+  // top-level card number in the whole file, the one its header prints. Two
+  // card numbers, or two different ACCOUNT numbers, still refuse.
+  const singleCardAccount = isCardStatement(text) && singleStatementSummary(text) ? soleStatementCard(text) : null;
   const sectionInstruments = new Set<string>();
   for (const line of text.split(/\n+/)) {
     if (!/^\s*(?:credit\s+card|card|account|a\/c)\s+(?:number|no\.?|ending)\b/i.test(line) &&
         !/^\s*(?:account|acct|a\/c|iban|card)\s*[:#-]?\s*[*xX•·\d]/i.test(line) &&
         !/^\s*number\s+card\s+credit\b/i.test(line)) continue;
-    const instrument = statementInstrument(line) ?? statementHeaderInstrument(line);
-    if (instrument) sectionInstruments.add(`${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`);
+    const instrument = statementInstrument(line, { iban: false }) ?? statementHeaderInstrument(line);
+    if (!instrument) continue;
+    if (instrument.kind !== 'account' && singleCardAccount) continue;
+    sectionInstruments.add(`${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`);
   }
   if (sectionInstruments.size > 1) throw new Error('multiple_statement_accounts');
-  const sourceInstrument = identity.card ?? statementInstrument(text) ?? statementHeaderInstrument(text);
+  // Every row of a single card account goes to the statement's own card, never
+  // to whichever cardholder section happens to come first.
+  const statedInstrument = identity.card ?? singleCardAccount ?? statementInstrument(text) ?? statementHeaderInstrument(text);
   const bankHint = identity.bankHint ?? statementBankHint(text);
   const hsbcRepaymentCard = hsbcStatementRepaymentCard(text);
   const rawLines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
@@ -1777,13 +2394,26 @@ export function parseStatementLines(
   // one strong marker — but never on a statement labelled with an ACCOUNT
   // number: "Available Credit Limit" on an overdrawn current account is not a
   // card statement.
-  const cardEvidence = cardStatement || sourceInstrument?.kind === 'credit';
-  const signEvidence = cardEvidence || (sourceInstrument?.kind !== 'account' &&
-    CARD_STATEMENT_MARKER.test(rawLines.slice(0, 60).join('\n')));
+  const cardEvidence = cardStatement || statedInstrument?.kind === 'credit';
+  const creditMarker = CARD_STATEMENT_MARKER.test(rawLines.slice(0, 60).join('\n'));
+  const signEvidence = cardEvidence || (statedInstrument?.kind !== 'account' && creditMarker);
+  // A proven card statement that also carries a credit-only marker (a credit
+  // limit, a minimum due, "credit card statement") is a CREDIT card's, even
+  // when its number is labelled just "Card Number". Without this the card's
+  // account was created as a card of unknown type, and a month with no
+  // payment row never got marked credit at all.
+  const sourceInstrument: ParsedSms['card'] = statedInstrument?.kind === 'unknown' && cardEvidence && creditMarker
+    ? { last4: statedInstrument.last4, kind: 'credit' }
+    : statedInstrument;
   const convention = signConvention(signEvidence, text);
   let ambiguousCardSignRows = 0;
   const cardTotalAmountTable = hasCardTotalAmountTable(text, cardStatement);
-  const lines = cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines;
+  // Two-date layouts (transaction date, then posting date) outside the
+  // strongly identified Total Amount table: the FIRST date is the
+  // transaction's, and the posting date is dropped rather than left at the
+  // front of the merchant ("04/09/2026 CARREFOUR CITY CENTRE").
+  const lines = (cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines)
+    .map((line) => cardTotalAmountTable ? line : line.replace(POSTING_DATE_AFTER_DATE, '$1 '));
   const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''), dateHint);
   let ambiguousDateRows = 0;
   const columnOrder = statementColumnOrder(text);
@@ -1802,12 +2432,17 @@ export function parseStatementLines(
   let previousBalance: number | null = null;
   const push = (
     date: string,
-    merchant: string,
+    description: string,
     amountFils: number,
     type: 'expense' | 'income',
     line: string,
   ) => {
-    const classification = classifyMerchantDescription(
+    // A card row's foreign original rides in its description; lift it into
+    // the FX fields and keep the ledger-currency figure as the amount.
+    const foreign = cardEvidence ? foreignOriginalTail(description, currency) : null;
+    const fx = foreign ? foreignOriginalFields(foreign, amountFils, currency) : null;
+    const merchant = foreign && fx ? foreign.merchant : description;
+    const classification = statementMerchantClassification(
       merchant,
       type,
       currency === 'AED' ? 'AE' : currency === 'SAR' ? 'SA' : null,
@@ -1828,7 +2463,7 @@ export function parseStatementLines(
     const transfer = statementTransferMeaning(merchant, type, currency, sourceInstrument, reference);
     rows.push({
       kind: 'transaction', type, amountFils, currency,
-      merchant: transfer?.merchant ?? classification.merchant, date,
+      merchant: transfer?.merchant ?? relayTitle(classification.merchant), date,
       dueDay: null, minDueFils: null, card: sourceInstrument, reference,
       transferHint: transfer?.transferHint ?? false,
       ...(bankHint ? { bankHint } : {}),
@@ -1836,12 +2471,21 @@ export function parseStatementLines(
       categoryGuess: transfer ? 'other' : classification.categoryGuess,
       categoryDeliberate: transfer ? true : classification.categoryDeliberate,
       ...(transfer?.transferEvidence ? { transferEvidence: transfer.transferEvidence } : {}),
+      ...(!transfer && fx ? fx : {}),
       raw: line,
     });
   };
   for (const line of lines) {
     if (!line) continue;
     const prefixed = ROW_DATE_PREFIX.exec(line);
+    // An opening balance is not a transaction, but it IS the running balance
+    // the first row steps from. Without it that row's direction had nothing
+    // to be measured against and, with blank debit/credit cells, was lost.
+    const opening = balanceTrailing ? openingBalanceMinor(prefixed ? prefixed[2] : line, currency, balanceLabels) : null;
+    if (opening !== null) {
+      previousBalance = opening;
+      continue;
+    }
     if (prefixed && SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
     // Date-like rows with unsupported yearless/year-first spellings are still
     // missing transactions, not evidence of complete coverage.
@@ -1980,6 +2624,13 @@ export function parseStatementLines(
       if (dateOrder === 'unknown' && prefixed && ambiguousLocalDate(prefixed[1])) ambiguousDateRows += 1;
     }
   }
+  // Only beside transactions this parser could read: a summary alone is what
+  // a scanned statement's text layer looks like, not a statement imported.
+  // Never at the cost of the row ceiling: a full statement keeps its rows.
+  const summary = cardEvidence && rows.length > 0 && rows.length + rejectedRows < STATEMENT_ROW_CEILING
+    ? cardStatementSummary(text, currency, dateOrder, sourceInstrument, bankHint)
+    : null;
+  if (summary) rows.push(summary);
   return {
     rows,
     totalRows: rows.length + rejectedRows,
@@ -1988,6 +2639,28 @@ export function parseStatementLines(
     ambiguousCardSignRows,
     ambiguousDateRows,
   };
+}
+
+/**
+ * Whether a forwarded email BODY is a statement rather than one alert.
+ *
+ * A statement email carries its own summary — total, minimum, due date — and
+ * the alert reader recognises that summary as a single card-statement alert.
+ * Read first, it swallowed every transaction row below it. A body counts as a
+ * statement when it has at least two date-led money rows and either a
+ * statement marker or a third such row; an alert has one date at most.
+ */
+export function looksLikeStatementBody(text: string): boolean {
+  const lines = normalizeDigits(text).normalize('NFC').split(/\n+/).map((line) => line.replace(/\s+/g, ' ').trim());
+  let dated = 0;
+  for (const line of lines) {
+    const prefixed = ROW_DATE_PREFIX.exec(line);
+    if (!prefixed || SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
+    if (LOOKS_LIKE_MONEY_LINE.test(prefixed[2])) dated += 1;
+  }
+  if (dated < 2) return false;
+  return dated >= 3 || isCardStatement(text) ||
+    /\b(?:account|card|bank)\s+statement\b|\bstatement\s+(?:period|date)\b|\bopening\s+balance\b|\btransaction\s+date\b|كشف\s+(?:ال)?حساب/iu.test(text);
 }
 
 export function parseStatementText(

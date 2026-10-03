@@ -131,9 +131,9 @@ test('goals reorder Home through the Customize Home preference', () => {
   const base = { order: [...DEFAULT], hidden: [] };
   assert.deepEqual(e.homeOrderForGoals(['bills'], base).order, [...TOP, 'due', 'upcoming', 'assistant', 'insight', 'activity', 'capture']);
   assert.deepEqual(e.homeOrderForGoals(['subscriptions'], base).order, [...TOP, 'upcoming', 'due', 'assistant', 'insight', 'activity', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['spend-less'], base).order, [...TOP, 'insight', 'due', 'assistant', 'activity', 'upcoming', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['salary'], base).order, [...TOP, 'activity', 'insight', 'due', 'assistant', 'upcoming', 'capture']);
-  assert.deepEqual(e.homeOrderForGoals(['cash-cards'], base).order, [...TOP, 'activity', 'due', 'assistant', 'insight', 'upcoming', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['spend-less'], base).order, [...TOP, 'insight', 'due', 'assistant', 'upcoming', 'activity', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['salary'], base).order, [...TOP, 'due', 'upcoming', 'activity', 'insight', 'assistant', 'capture']);
+  assert.deepEqual(e.homeOrderForGoals(['cash-cards'], base).order, [...TOP, 'due', 'upcoming', 'activity', 'assistant', 'insight', 'capture']);
   assert.deepEqual(e.homeOrderForGoals(['salary', 'bills'], base).order,
     [...TOP, 'due', 'upcoming', 'activity', 'insight', 'assistant', 'capture'], 'precedence, not tap order: bills before salary');
   assert.deepEqual(e.homeOrderForGoals(['bills', 'salary'], base), e.homeOrderForGoals(['salary', 'bills'], base));
@@ -175,7 +175,10 @@ test('the Goals hint names the section that really goes first', () => {
   assert.equal(e.firstHomeSectionForGoals(['subscriptions']), 'upcoming');
   for (const goals of [['bills'], ['subscriptions'], ['spend-less'], ['salary'], ['cash-cards'], ['salary', 'spend-less']]) {
     const first = e.firstHomeSectionForGoals(goals);
-    assert.equal(e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: [] }).order[TOP.length], first, goals.join());
+    // Due and upcoming payments may still draw ahead of it (paymentsBeforeActivity); the activity hint says so.
+    const sheet = e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: [] }).order.slice(TOP.length);
+    const promoted = goals.flatMap((goal) => e.GOAL_HOME_SECTIONS[goal]);
+    assert.equal(sheet.find((id) => promoted.includes(id) || !['due', 'upcoming'].includes(id)), first, goals.join());
     assert.ok(ONBOARDING_E_COPY.en.goalsHint[first] && ONBOARDING_E_COPY.ar.goalsHint[first]);
   }
   assert.deepEqual(e.toggleGoal(['salary'], 'bills'), ['salary', 'bills'], 'canonical order');
@@ -395,8 +398,12 @@ test('going Back and choosing again stacked the runs; the repair still restores 
     const twice = earlierGoals(second, once);
     const repaired = e.repairGoalOrderedHome(twice);
     assert.deepEqual(shown(repaired).band, BAND, second.join());
-    assert.deepEqual(repaired.order.slice(TOP.length, twice.order.indexOf('greeting') + TOP.length),
-      twice.order.slice(0, twice.order.indexOf('greeting')), 'the goal sections keep their order under the band');
+    const goalRun = twice.order.slice(0, twice.order.indexOf('greeting'));
+    const payments = goalRun.filter((id, index) => ['due', 'upcoming'].includes(id) && index > goalRun.indexOf('activity') && goalRun.includes('activity'));
+    const expected = goalRun.filter((id) => !payments.includes(id));
+    if (payments.length) expected.splice(expected.indexOf('activity'), 0, ...payments);
+    assert.deepEqual(repaired.order.slice(TOP.length, goalRun.length + TOP.length), expected,
+      'the goal sections keep their order under the band, payments before activity');
     assert.deepEqual([...repaired.order].sort(), [...EXPANDED_DEFAULT].sort());
   }
 });

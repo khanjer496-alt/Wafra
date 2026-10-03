@@ -142,6 +142,10 @@ export function leavingSoon(
       // They stay visible in Bills but cannot honestly be placed on a
       // "leaving soon" timeline.
       if (sub.cadence === 'as-needed') continue;
+      // A generic commitment (weekly fuel at a round amount) is a spending
+      // pattern, not a renewal; reminders.ts applies the same rule, so Home
+      // must not count down to a charge the user will never be billed.
+      if (sub.group === 'commitment' && sub.category !== 'loan' && !sub.paymentHistory) continue;
       // A bill and a detected subscription can describe the same debit; the
       // bill wins, because the user set it up by hand.
       const key = subscriptionKey(sub);

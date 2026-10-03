@@ -849,7 +849,8 @@ function pagedPdf(pages) {
       packedCardTable.rows[0].type === 'expense' && packedCardTable.rows[0].amountFils === 1000 &&
       packedCardTable.rows[1].type === 'income' && packedCardTable.rows[1].amountFils === 725 &&
       packedCardTable.rows[2].type === 'expense' && packedCardTable.rows[2].amountFils === 10500 &&
-      packedCardTable.rows[2].merchant === 'MERCHANT TWO DUBAI AE' &&
+      // The acquirer's city/country tail is peeled from the title, as SMS does.
+      packedCardTable.rows[2].merchant === 'MERCHANT TWO' &&
       packedCardTable.rows[3].type === 'expense' && packedCardTable.rows[3].amountFils === 4410 &&
       /FOREIGN SHOP/.test(packedCardTable.rows[3].merchant),
     JSON.stringify(packedCardTable));
@@ -897,7 +898,7 @@ function pagedPdf(pages) {
   ok('a Total Amount wrapped after populated VAT reconciles before the row is accepted',
     vatTotalLineBreak.rows.length === 1 && vatTotalLineBreak.rejectedRows === 0 &&
       vatTotalLineBreak.rows[0].amountFils === 202278 &&
-      vatTotalLineBreak.rows[0].merchant === 'STORE 2026 LLC DUBAI AE',
+      vatTotalLineBreak.rows[0].merchant === 'STORE 2026 LLC',
     JSON.stringify(vatTotalLineBreak));
 
   const datesInsideMerchant = parseStatementLines([
@@ -1110,11 +1111,25 @@ function pagedPdf(pages) {
     'Card Number,XXXX-XXXX-XXXX-4821',
     'Date,Description,Amount',
     '01/07/2026,NOON.COM,68.93',
-    '05/07/2026,PAYMENT RECEIVED,-500.00',
+    '05/07/2026,CARREFOUR,-40.00',
   ].join('\n'), 'AED');
-  ok('a card CSV with one signed amount column and no legend is refused, not read as account signs',
+  ok('a card CSV with one signed amount column, no legend and no telling rows is refused, not read as account signs',
     cardCsvSigned.rows.length === 0 && cardCsvSigned.ambiguousCardSignRows === 2,
     JSON.stringify(cardCsvSigned));
+  // The same file whose only minus row is the card payment proves its own
+  // convention: payments negative, charges plain (Amex-style).
+  const cardCsvInferred = parseStatementCsv([
+    'Credit Card Statement',
+    'Card Number,XXXX-XXXX-XXXX-4821',
+    'Date,Description,Amount',
+    '01/07/2026,NOON.COM,68.93',
+    '05/07/2026,PAYMENT RECEIVED,-500.00',
+  ].join('\n'), 'AED');
+  ok('a card CSV whose minus rows are all payments reads charges plain and payments negative',
+    cardCsvInferred.rows.length === 2 && cardCsvInferred.ambiguousCardSignRows === 0 &&
+      cardCsvInferred.rows[0].type === 'expense' && cardCsvInferred.rows[0].amountFils === 6893 &&
+      cardCsvInferred.rows[1].kind === 'cardPayment' && cardCsvInferred.rows[1].card?.last4 === '4821',
+    JSON.stringify(cardCsvInferred));
   const cardCsvLegend = parseStatementCsv([
     'Credit Card Statement',
     'Negative amounts indicate payments and credits',
@@ -1424,11 +1439,11 @@ function pagedPdf(pages) {
     '06/04/2026 SHOP FOUR 50,00 900,00',
   ].join('\n'), 'EUR', { card: null }, 'day-first');
   ok('a decimal-comma running balance still proves each row direction',
-    // SHOP ONE has no prior balance to step from (the opening line is a
-    // summary), so it stays refused exactly as its decimal-point twin would.
-    commaBalancePdf.rows.length === 4 && commaBalancePdf.rows[1].merchant === 'REFUND' &&
-      commaBalancePdf.rows[1].type === 'income' && commaBalancePdf.rows[1].amountFils === 500 &&
-      commaBalancePdf.rows[0].amountFils === 2000 && commaBalancePdf.rows[0].type === 'expense',
+    // SHOP ONE steps from the opening balance, which seeds the chain.
+    commaBalancePdf.rows.length === 5 && commaBalancePdf.rows[2].merchant === 'REFUND' &&
+      commaBalancePdf.rows[2].type === 'income' && commaBalancePdf.rows[2].amountFils === 500 &&
+      commaBalancePdf.rows[0].amountFils === 1000 && commaBalancePdf.rows[0].type === 'expense' &&
+      commaBalancePdf.rows[1].amountFils === 2000 && commaBalancePdf.rows[1].type === 'expense',
     JSON.stringify(commaBalancePdf.rows.map((row) => [row.merchant, row.amountFils, row.type])));
   const aedPdfUnchanged = parseStatementLines([
     '01/07/2026 CARREFOUR 1,234.50 DR',
@@ -1512,6 +1527,46 @@ function pagedPdf(pages) {
   ok('multi-account PDF refuses instead of assigning all sections to the first account', multiRejected);
   const repeatedAccount = parseStatementLines('Account Number XXXX1234\n2026-09-01 SHOP 10.00 DR\nAccount Number XXXX1234\n2026-09-02 SHOP 20.00 DR', 'AED');
   ok('repeated same-account page headers remain supported', repeatedAccount.rows.length === 2 && repeatedAccount.rows.every(row => row.card?.last4 === '1234'));
+  // An ADCB card statement prints one "Card No : XXXX - NAME" section per
+  // cardholder. A supplementary card is billed on the same card account, under
+  // the statement's one total and due date, so it is not a second statement.
+  const adcbHead = [
+    'Statement of account', 'Card Number XXXXXXXXXXXX2280',
+    'Statement Date 05/08/26', 'Payment Due Date 30/08/26', 'Minimum Payment Due 189.16',
+    'Total Outstanding 838.14', 'Total Credit Limit 16,100.00', 'Available Credit Limit 15,261.86',
+    'Transaction Date Transaction Description Amount in AED', 'PREVIOUS BALANCE OUTSTANDING 0.00',
+    'Card No : XXXXXXXXXXXX2280 - PRIMARY HOLDER',
+    '26/07/2026 DING MIDDLE EAST DUBAI ARE 27.99', '04/08/2026 E& DIGITAL APP ABU DHABI ARE 313.95',
+  ];
+  const adcbSupp = ['Card No : XXXXXXXXXXXX7316 - SUPPLEMENTARY HOLDER', '02/08/2026 AL SABAH SUPERMARKET AJMAN ARE 496.20'];
+  const adcbTail = ['05/08/2026 NEW BALANCE OUTSTANDING 838.14'];
+  const supplementary = parseStatementLines([...adcbHead, ...adcbSupp, ...adcbTail].join('\n'), 'AED');
+  const suppPurchases = supplementary.rows.filter(row => row.kind === 'transaction');
+  ok('a supplementary card section on one card statement imports onto the statement card',
+    suppPurchases.length === 3 && suppPurchases.every(row => row.card?.last4 === '2280' && row.type === 'expense') &&
+    supplementary.rows.some(row => row.kind === 'cardStatement' && row.amountFils === 83814) && supplementary.rejectedRows === 0);
+  let boundStatements = '';
+  try {
+    parseStatementLines([...adcbHead, ...adcbTail, 'Card Number XXXXXXXXXXXX9911', 'Statement Date 05/09/26',
+      'Payment Due Date 30/09/26', 'Minimum Payment Due 50.00', 'Card No : XXXXXXXXXXXX9911 - OTHER', '02/09/2026 SHOP ARE 80.00'].join('\n'), 'AED');
+  } catch (error) { boundStatements = error.message; }
+  ok('two card statements bound into one PDF still refuse', boundStatements === 'multiple_statement_accounts');
+  let cardTwoAccounts = '';
+  try {
+    parseStatementLines([...adcbHead, 'Account Number XXXX1234', ...adcbSupp, 'Account Number XXXX5678', ...adcbTail].join('\n'), 'AED');
+  } catch (error) { cardTwoAccounts = error.message; }
+  ok('a card statement naming two different accounts still refuses', cardTwoAccounts === 'multiple_statement_accounts');
+  // Agreeing dates and a common minimum floor are not proof of one account.
+  const refuses = (lines) => { try { parseStatementLines(lines.join('\n'), 'AED'); return ''; } catch (error) { return error.message; } };
+  ok('a second "Credit Card Number" on the same cycle still refuses',
+    refuses([...adcbHead, 'Credit Card Number XXXXXXXXXXXX9911', 'Card No : XXXXXXXXXXXX9911 - OTHER', '03/08/2026 SHOP ARE 80.00', ...adcbTail]) === 'multiple_statement_accounts');
+  ok('two card accounts with the same due date and minimum still refuse',
+    refuses([...adcbHead, ...adcbTail, 'Card Number XXXXXXXXXXXX9911', 'Statement Date 05/08/26', 'Payment Due Date 30/08/26',
+      'Minimum Payment Due 189.16', 'Card No : XXXXXXXXXXXX9911 - OTHER', '03/08/2026 SHOP ARE 80.00']) === 'multiple_statement_accounts');
+  ok('cardholder sections with no top-level card number still refuse',
+    refuses(['Statement Date 05/08/26', 'Payment Due Date 30/08/26', 'Minimum Payment Due 189.16', 'Total Outstanding 838.14',
+      'Total Credit Limit 16,100.00', 'Card No : XXXXXXXXXXXX7316 - SUPPLEMENTARY HOLDER', '02/08/2026 SHOP ARE 496.20',
+      'Card No : XXXXXXXXXXXX2280 - PRIMARY HOLDER', '04/08/2026 SHOP ARE 341.94']) === 'multiple_statement_accounts');
   const longAudit = parseStatementLines(`2026-09-01 ${'A'.repeat(410)} 10.00 DR\n2026-09-02 SHOP 5.00 DR`, 'AED');
   ok('overlong transaction lines are counted as rejected instead of complete coverage', longAudit.rows.length === 1 && longAudit.totalRows === 2 && longAudit.rejectedRows === 1);
   const arabicAudit = parseStatementLines('٢٠٢٦-٠٩-٠١ SHOP ١٠٫٠٠ DR', 'AED');
@@ -1606,6 +1661,363 @@ function pagedPdf(pages) {
     const result=parseStatementLines(`Date Description Amount Balance\n2026-09-01 SHOP ${amount} 100.00 DR`,'AED');
     ok(`explicit balance column is not a local posted amount after ${amount}`,result.rows.length===0 && result.rejectedRows===1);
   }
+
+
+  /* ── Statement-import audit (2026-10): one regression per confirmed defect ── */
+  const enbdCard = [
+    'Emirates NBD',
+    'Credit Card Statement',
+    'Card Number: 4567 XXXX XXXX 1234',
+    'Statement Date: 25/09/2026',
+    'Payment Due Date: 20/10/2026',
+    'Total Amount Due: AED 3,456.78',
+    'Minimum Amount Due: AED 172.84',
+    'Credit Limit: AED 30,000.00',
+    'Transaction Date Description Amount (AED)',
+    '27/08/2026 CARREFOUR MOE DUBAI ARE 245.50',
+    '05/09/2026 NOON.COM DUBAI ARE 189.00',
+    '10/09/2026 SPOTIFY STOCKHOLM USD 20.00 73.60',
+  ].join('\n');
+  const enbdParsed = parseStatementLines(enbdCard, 'AED');
+  const enbdTx = enbdParsed.rows.filter((row) => row.kind === 'transaction');
+
+  // 1: statement descriptors are titled like SMS merchants.
+  ok('audit 1: trailing city/country/host noise is peeled from statement merchant titles',
+    enbdTx[0]?.merchant === 'CARREFOUR MOE' && enbdTx[1]?.merchant === 'NOON' &&
+      enbdTx[0]?.categoryGuess === 'groceries' && enbdTx[1]?.categoryGuess === 'shopping',
+    JSON.stringify(enbdTx.map((row) => [row.merchant, row.categoryGuess])));
+  const saudiTitle = parseStatementLines([
+    'Credit Card Statement', 'Card Number: 4321 XXXX XXXX 1234', 'Minimum Amount Due: SAR 100.00',
+    '01/09/2026 PANDA RIYADH SAU 101.00', '02/09/2026 DUBAI 5.00',
+  ].join('\n'), 'SAR');
+  ok('audit 1: Saudi city tails peel, and a name that is only a city is kept',
+    saudiTitle.rows[0]?.merchant === 'PANDA' && saudiTitle.rows[1]?.merchant === 'DUBAI',
+    JSON.stringify(saudiTitle.rows.map((row) => row.merchant)));
+
+  // 3: CSV preamble identity.
+  const preambleCard = parseStatementCsv([
+    'Emirates NBD Credit Card Statement',
+    'Card Number,4567XXXXXXXX1234',
+    'Statement Date,25/09/2026',
+    'Transaction Date,Description,Debit,Credit',
+    '27/08/2026,CARREFOUR MOE DUBAI,245.50,',
+  ].join('\n'), 'AED');
+  ok('audit 3: a CSV card number printed above the table identifies every row as that credit card',
+    preambleCard.rows[0]?.card?.last4 === '1234' && preambleCard.rows[0]?.card?.kind === 'credit' &&
+      preambleCard.rows[0]?.bankHint === 'Emirates NBD',
+    JSON.stringify(preambleCard.rows[0]));
+  const preambleAccount = parseStatementCsv([
+    'كشف حساب',
+    'رقم الحساب,XXXXXXXX4455',
+    'التاريخ,البيان,مدين,دائن,الرصيد',
+    '2026-09-02,شراء JARIR BOOKSTORE,125.50,,"15,874.50"',
+  ].join('\n'), 'SAR');
+  ok('audit 3: an Arabic account-number preamble identifies the account',
+    preambleAccount.rows[0]?.card?.last4 === '4455' && preambleAccount.rows[0]?.card?.kind === 'account',
+    JSON.stringify(preambleAccount.rows[0]?.card));
+  const twoPreambleAccounts = parseStatementCsv([
+    'Account Number,XXXX1001', 'Account Number,XXXX2002',
+    'Date,Description,Debit,Credit', '2026-09-02,SHOP,10.00,',
+  ].join('\n'), 'AED');
+  ok('audit 3: two different preamble accounts identify nothing',
+    twoPreambleAccounts.rows[0]?.card === null, JSON.stringify(twoPreambleAccounts.rows[0]?.card));
+
+  // 4: IBANs.
+  const ibanBody = '\nDate Description Debit Credit Balance\n03/09/2026 PANDA RIYADH 245.00 0.00 14,755.00';
+  for (const [head, last4] of [
+    ['Account Number: SA0380000000608010167519', '7519'],
+    ['IBAN: SA03 8000 0000 6080 1016 7519', '7519'],
+    ['IBAN: AE07 0331 2345 6789 0123 456', '3456'],
+    ['IBAN: SA03 8000 0000 6080 1016 7519 SAR', '7519'],
+  ]) {
+    const result = parseStatementLines(head + ibanBody, 'SAR');
+    ok(`audit 4: an IBAN identifies the account: ${head}`,
+      result.rows[0]?.card?.last4 === last4 && result.rows[0]?.card?.kind === 'account',
+      JSON.stringify(result.rows[0]?.card));
+  }
+
+  // 5: a statement body is a statement, not one alert (route: worker.test.js).
+  const { looksLikeStatementBody } = require('../.test-build/imports.cjs');
+  ok('audit 5: a forwarded card statement body is recognised as a statement',
+    looksLikeStatementBody(normalizeEmailContent(enbdCard, null)));
+  ok('audit 5: a single bank alert is not',
+    !looksLikeStatementBody('Purchase of AED 245.50 with Credit Card ending 1234 at CARREFOUR on 27/08/2026. Avl Cr. Limit AED 27,754.50') &&
+      !looksLikeStatementBody('Your Credit Card ending 1234 statement: Total amount due AED 3,456.78. Minimum amount due AED 172.84. Payment due date 20/10/2026.'));
+
+  // 6: card-side payment wording on a proven card statement.
+  const cardHead = 'Credit Card Statement\nCard Number: 4567 XXXX XXXX 1234\nStatement Date: 25/09/2026\nMinimum Amount Due: AED 100.00\n';
+  for (const wording of ['ONLINE PAYMENT', 'CREDIT CARD PAYMENT', 'CC PAYMENT', 'MOBILE BANKING PAYMENT',
+    'IB PAYMENT FROM A/C XXX1001', 'CASH DEPOSIT CDM', 'CAPITAL ONE MOBILE PYMT', 'CHASE AUTOPAY']) {
+    const row = parseStatementLines(`${cardHead}22/09/2026 ${wording} 500.00 CR`, 'AED').rows[0];
+    ok(`audit 6: "${wording}" on a card statement is the card's settlement, not income`,
+      row?.kind === 'cardPayment' && row.cardPaymentSide === 'receipt' && row.card?.kind === 'credit', JSON.stringify(row));
+  }
+  for (const wording of ['REFUND AMAZON.AE', 'CASHBACK', 'REVERSAL LATE PAYMENT FEE']) {
+    const row = parseStatementLines(`${cardHead}22/09/2026 ${wording} 500.00 CR`, 'AED').rows[0];
+    ok(`audit 6: "${wording}" stays a credit, not a settlement`, row?.kind === 'transaction' && row.type === 'income');
+  }
+  const cardColumnCsv = parseStatementCsv([
+    'Generated on 26/09/2026',
+    'Transaction Date,Card Number,Description,Debit,Credit',
+    '27/08/2026,4567XXXXXXXX1234,CARREFOUR MOE DUBAI,245.50,',
+    '22/09/2026,4567XXXXXXXX1234,PAYMENT RECEIVED - THANK YOU,,500.00',
+  ].join('\n'), 'AED');
+  ok('audit 6: a plain Card Number column plus a payment-received row is a credit card statement',
+    cardColumnCsv.rows[0]?.card?.kind === 'credit' && cardColumnCsv.rows[1]?.kind === 'cardPayment',
+    JSON.stringify(cardColumnCsv.rows));
+
+  // 7: salary over a transfer rail is income.
+  for (const wording of ['SALARY TRANSFER ACME', 'WPS SALARY TRANSFER', 'INWARD TRANSFER SALARY SEP']) {
+    const row = parseStatementLines(
+      `Account Statement\nAccount Number: 12345678901001\nDate Description Debit Credit Balance\n01/09/2026 ${wording} - 15,000.00 25,000.00`,
+      'AED').rows[0];
+    ok(`audit 7: "${wording}" is salary income`,
+      row?.type === 'income' && row.categoryGuess === 'salary' && row.transferHint === false, JSON.stringify(row));
+  }
+  const ownTransfer = parseStatementLines(
+    'Date Description Debit Credit Balance\n01/09/2026 FUNDS TRANSFER FROM 1002 - 500.00 25,000.00', 'AED').rows[0];
+  ok('audit 7: an ordinary incoming transfer stays a transfer', ownTransfer?.transferHint === true);
+  for (const wording of ['OWN ACCOUNT TRANSFER SALARY SEP', 'TRANSFER FROM SALARY ACCOUNT 1002']) {
+    const row = parseStatementLines(
+      `Date Description Debit Credit Balance\n01/09/2026 ${wording} - 500.00 25,000.00`, 'AED').rows[0];
+    ok(`audit 7: "${wording}" is a move between own accounts, not salary`, row?.transferHint === true, JSON.stringify(row));
+  }
+  const longRemittance = 'INWARD REMITTANCE REF FT26251ABCD1234 FROM ACME GENERAL TRADING LLC DUBAI UNITED ARAB EMIRATES ' +
+    'BENEFICIARY JOHN SMITH PURPOSE SALARY SEPTEMBER 2026 VIA ENBD ACCOUNT XXXX5566 OK';
+  const longTitle = parseStatementCsv(`Date,Description,Debit,Credit\n01/09/2026,${longRemittance},,"15,000.00"`, 'AED');
+  ok('audit 7: a long salary narration keeps its money with a title the relay accepts',
+    longTitle.rows[0]?.categoryGuess === 'salary' && longTitle.rows[0].merchant.length <= 160 &&
+      longTitle.rows[0].merchant === longTitle.rows[0].merchant.trim(),
+    JSON.stringify(longTitle.rows[0]));
+
+  // 8: US/UK sign conventions and account-side card bills.
+  const amex = parseStatementCsv([
+    'Date,Description,Amount',
+    '09/02/2026,WHOLE FOODS MARKET,84.12',
+    '09/10/2026,AUTOPAY PAYMENT - THANK YOU,-1200.00',
+    '09/12/2026,AMAZON MARKETPLACE REFUND,-25.99',
+  ].join('\n'), 'USD', 200, 'month-first');
+  ok('audit 8: an Amex-style export reads plain charges and negative credits',
+    amex.rows.length === 3 && amex.rows[0].type === 'expense' && amex.rows[1].transferHint === true &&
+      amex.rows[2].type === 'income' && amex.ambiguousCardSignRows === 0,
+    JSON.stringify(amex.rows.map((row) => [row.merchant, row.type, row.transferHint])));
+  const chaseCard = parseStatementCsv([
+    'Transaction Date,Post Date,Description,Category,Type,Amount,Memo',
+    '09/02/2026,09/03/2026,WHOLEFDS MKT 10234,Groceries,Sale,-84.12,',
+    '09/10/2026,09/10/2026,Payment Thank You-Mobile,,Payment,1200.00,',
+    '09/12/2026,09/13/2026,AMAZON MKTPL*AB12C,Shopping,Return,25.99,',
+    '09/15/2026,09/16/2026,LATE FEE,Fees & Adjustments,Fee,-39.00,',
+  ].join('\n'), 'USD', 200, 'month-first');
+  ok('audit 8/14: a Chase-style card export reads negative charges and its Payment/Return types as credits',
+    chaseCard.rows.length === 4 && chaseCard.rows[0].type === 'expense' && chaseCard.rows[1].transferHint === true &&
+      chaseCard.rows[2].type === 'income' && chaseCard.rows[3].type === 'expense',
+    JSON.stringify(chaseCard.rows.map((row) => [row.merchant, row.type, row.transferHint])));
+  const genericBank = parseStatementCsv([
+    'Date,Description,Amount',
+    '2026-09-02,ACME LTD SALARY,2500.00',
+    '2026-09-03,TESCO STORES 3021,-23.40',
+    '2026-09-04,BARCLAYCARD PAYMENT,-300.00',
+  ].join('\n'), 'GBP', 200, 'day-first');
+  ok('audit 8: a generic bank export accepts credits without a plus and files the card bill as a settlement',
+    genericBank.rows.length === 3 && genericBank.rows[0].type === 'income' && genericBank.rows[0].categoryGuess === 'salary' &&
+      genericBank.rows[1].type === 'expense' && genericBank.rows[1].transferHint === false &&
+      genericBank.rows[2].transferHint === true && genericBank.rows[2].merchant === 'Card payment',
+    JSON.stringify(genericBank.rows.map((row) => [row.merchant, row.type, row.transferHint])));
+  const unproven = parseStatementCsv([
+    'Date,Description,Amount', '2026-09-02,ACME LTD,2500.00', '2026-09-03,TESCO STORES 3021,-23.40',
+  ].join('\n'), 'GBP', 200, 'day-first');
+  ok('audit 8: a plain figure with no income or balance proof is still refused',
+    unproven.rows.length === 1 && unproven.rejectedRows === 1, JSON.stringify(unproven.rows));
+  for (const wording of ['CHASE CREDIT CRD AUTOPAY', 'BARCLAYCARD PAYMENT', 'SADAD CREDIT CARD 1234']) {
+    const row = parseStatementLines(
+      `Account Statement\nAccount Number: 12345678901001\n02/09/2026 ${wording} 2,000.00 DR`, 'AED').rows[0];
+    ok(`audit 8: "${wording}" on an account statement is a card-settlement debit leg`,
+      row?.type === 'expense' && row.transferHint === true && row.merchant === 'Card payment', JSON.stringify(row));
+  }
+
+  const amexMerchant = parseStatementLines(
+    'Account Statement\nAccount Number: 12345678901001\n02/09/2026 AMEX TRAVEL 2,000.00 DR', 'AED').rows[0];
+  ok('audit 8: a merchant that merely starts with an issuer name stays spending',
+    amexMerchant?.transferHint === false && amexMerchant.merchant === 'AMEX TRAVEL', JSON.stringify(amexMerchant));
+
+  // 9: transaction date + posting date.
+  const twoDates = parseStatementLines([
+    'Credit Card Statement', 'Card Number 5432 10XX XXXX 9876', 'Minimum Payment Due AED 250.00',
+    'Transaction Date Posting Date Description Amount (AED)',
+    '03/09/2026 04/09/2026 CARREFOUR CITY CENTRE DEIRA 230.75',
+    '14/09/2026 15/09/2026 REFUND TALABAT 64.00 CR',
+  ].join('\n'), 'AED');
+  ok('audit 9: the first of two dates is the transaction date and the posting date leaves the merchant',
+    twoDates.rows[0]?.date === '2026-09-03' && twoDates.rows[0]?.merchant === 'CARREFOUR CITY CENTRE DEIRA' &&
+      twoDates.rows[1]?.date === '2026-09-14' && twoDates.rows[1]?.type === 'income' &&
+      !/\d{2}\/\d{2}/.test(twoDates.rows[1]?.merchant),
+    JSON.stringify(twoDates.rows.map((row) => [row.date, row.merchant])));
+
+  // 10: the statement's own due.
+  const due = enbdParsed.rows.find((row) => row.kind === 'cardStatement');
+  ok('audit 10: a card statement with total, minimum and due date emits one cardStatement row',
+    enbdParsed.rows.filter((row) => row.kind === 'cardStatement').length === 1 &&
+      due.amountFils === 345678 && due.minDueFils === 17284 && due.date === '2026-10-20' && due.dueDay === 20 &&
+      due.card?.last4 === '1234' && due.card?.kind === 'credit' && due.statementDate === '2026-09-25' &&
+      due.type === 'expense' && due.transferHint === false && due.categoryGuess === 'other',
+    JSON.stringify(due));
+  const noMinimum = parseStatementLines(enbdCard.replace(/Minimum Amount Due:.*\n/, ''), 'AED');
+  ok('audit 10: no stated minimum, no due row', !noMinimum.rows.some((row) => row.kind === 'cardStatement'));
+  const accountNoDue = parseStatementLines(
+    'Account Statement\nAccount Number: 12345678901001\nPayment Due Date: 20/10/2026\nTotal Amount Due: AED 100.00\nMinimum Amount Due: AED 10.00\n01/09/2026 SHOP 10.00 DR', 'AED');
+  ok('audit 10: an account statement never emits a card due', !accountNoDue.rows.some((row) => row.kind === 'cardStatement'));
+  const csvDue = parseStatementCsv([
+    'Credit Card Statement', 'Card Number,4567XXXXXXXX1234', 'Statement Date,25/09/2026',
+    'Payment Due Date,20/10/2026', 'Total Amount Due,"3,456.78"', 'Minimum Amount Due,172.84',
+    'Transaction Date,Description,Debit,Credit', '27/08/2026,CARREFOUR,245.50,',
+  ].join('\n'), 'AED');
+  const csvDueRow = csvDue.rows.find((row) => row.kind === 'cardStatement');
+  ok('audit 10: a CSV preamble summary emits the same cardStatement row',
+    csvDueRow?.amountFils === 345678 && csvDueRow?.minDueFils === 17284 && csvDueRow?.date === '2026-10-20' &&
+      csvDue.totalRows === csvDue.rows.length + csvDue.rejectedRows,
+    JSON.stringify(csvDueRow));
+
+  const fullStatement = parseStatementLines(enbdCard.split('\n').slice(0, 9).join('\n') + '\n' +
+    Array.from({ length: 200 }, (_, index) => `01/09/2026 SHOP ${index} 1.00`).join('\n'), 'AED');
+  ok('audit 10: a statement already at the 200-row ceiling keeps its rows and skips the due row',
+    fullStatement.rows.length === 200 && fullStatement.totalRows === 200 &&
+      !fullStatement.rows.some((row) => row.kind === 'cardStatement'));
+
+  // 11: blank debit/credit cells after an opening balance.
+  const blankCells = parseStatementLines([
+    'Account Statement', 'Account Number: 12345678901001',
+    'Date Description Debit Credit Balance',
+    '01/09/2026 Opening Balance 10,000.00',
+    '01/09/2026 SALARY ACME TRADING LLC 15,000.00 25,000.00',
+    '02/09/2026 CARREFOUR 2,000.00 23,000.00',
+    '03/09/2026 ATM WITHDRAWAL 500.00 22,500.00',
+    '05/09/2026 LULU HYPERMARKET 312.40 22,187.60',
+    '08/09/2026 DEWA BILL PAYMENT 450.00 21,737.60',
+  ].join('\n'), 'AED');
+  ok('audit 11: the first row after Opening Balance steps from it and is not lost',
+    blankCells.rows.length === 5 && blankCells.rejectedRows === 0 &&
+      blankCells.rows[0].type === 'income' && blankCells.rows[0].amountFils === 1500000,
+    JSON.stringify(blankCells.rows.map((row) => [row.merchant, row.type, row.amountFils])));
+
+  // 14: credit kind, banks, FX, symbols, Barclays memo.
+  const noPayment = parseStatementLines(
+    'Credit Card Statement\nCard Number: 4567 XXXX XXXX 1234\nCredit Limit: AED 30,000.00\n05/09/2026 NOON 189.00', 'AED');
+  ok('audit 14: a proven credit card statement without a payment row is still a credit card',
+    noPayment.rows[0]?.card?.kind === 'credit', JSON.stringify(noPayment.rows[0]?.card));
+  for (const [letterhead, bank] of [['ADCB', 'ADCB'], ['Abu Dhabi Islamic Bank', 'ADIB'], ['Dubai Islamic Bank', 'DIB'],
+    ['Al Rajhi Bank', 'Al Rajhi'], ['Liv. by Emirates NBD', 'Liv'], ['Capital One', 'Capital One'], ['Nationwide', 'Nationwide']]) {
+    const row = parseStatementLines(`${letterhead}\nAccount Statement\n01/09/2026 SHOP 10.00 DR`, 'AED').rows[0];
+    ok(`audit 14: bank letterhead "${letterhead}" names ${bank}`, row?.bankHint === bank, row?.bankHint);
+  }
+  const rowNamesBank = parseStatementLines('Account Statement\n01/09/2026 ADCB ATM MARINA 10.00 DR', 'AED').rows[0];
+  ok('audit 14: a bank named only inside a row is not the statement bank', rowNamesBank?.bankHint === undefined);
+  const spotify = enbdTx[2];
+  ok('audit 14: a foreign card row keeps the local amount and carries the original as bank FX',
+    spotify?.amountFils === 7360 && spotify.originalCurrency === 'USD' && spotify.originalMinorUnits === 2000 &&
+      spotify.originalExponent === 2 && spotify.originalAmountMinor === 2000 && spotify.fxSource === 'bank' &&
+      Math.abs(spotify.fxRate - 3.68) < 1e-9 && !/USD/.test(spotify.merchant),
+    JSON.stringify(spotify));
+  const pounds = parseStatementCsv([
+    'Date,Transaction type,Description,Paid out,Paid in,Balance',
+    '02 Sep 2026,Visa purchase,TESCO STORES 3021,£23.40,,"£1,211.16"',
+    '05 Sep 2026,Bank credit,ACME LTD SALARY,,"£2,500.00","£3,711.16"',
+  ].join('\n'), 'GBP', 200, 'day-first');
+  ok('audit 14: £-prefixed amounts read in a GBP ledger',
+    pounds.rows.length === 2 && pounds.rows[0].amountFils === 2340 && pounds.rows[1].type === 'income',
+    JSON.stringify(pounds));
+  const wrongSymbol = parseStatementCsv('Date,Description,Debit,Credit\n2026-09-02,SHOP,£23.40,', 'AED');
+  ok('audit 14: a £ amount never reads into an AED ledger', wrongSymbol.rows.length === 0 && wrongSymbol.rejectedRows === 1);
+  const barclays = parseStatementCsv([
+    'Number,Date,Account,Amount,Subcategory,Memo',
+    ',02/09/2026,20-00-00 12345678,-23.40,PAYMENT,TESCO STORES 3021',
+    ',05/09/2026,20-00-00 12345678,2500.00,DIRECTDEP,ACME LTD SALARY',
+  ].join('\n'), 'GBP', 200, 'day-first');
+  ok('audit 14: a Barclays export uses its Memo column as the description',
+    barclays.rows.length === 2 && barclays.rows[0].merchant === 'TESCO STORES 3021' && barclays.rows[1].type === 'income',
+    JSON.stringify(barclays.rows));
+
+
+  /* ── Independent review of the audit fixes: one regression per finding ── */
+  const accountAutopay = parseStatementCsv([
+    'Account Number,XXXXXX4455',
+    'Date,Description,Amount',
+    '09/01/2026,VERIZON WIRELESS AUTOPAY,-85.00',
+    '09/03/2026,GEICO AUTOPAY,-120.00',
+    '09/15/2026,ACME CORP DIR DEP PPD,2500.00',
+  ].join('\n'), 'USD', 200, 'month-first');
+  ok('review 1: an account-labelled export with AUTOPAY bills is never re-read as a card export',
+    accountAutopay.rows.length === 3 &&
+      accountAutopay.rows[0].type === 'expense' && accountAutopay.rows[0].transferHint === false &&
+      accountAutopay.rows[1].type === 'expense' && accountAutopay.rows[2].type === 'income',
+    JSON.stringify(accountAutopay.rows.map((row) => [row.merchant, row.type, row.transferHint])));
+  const accountThankYou = parseStatementCsv([
+    'Account Number,XXXXXX9911',
+    'Date,Description,Amount',
+    '02/09/2026,TESCO STORES 3021,-23.40',
+    '05/09/2026,PAYMENT RECEIVED - THANK YOU JOHN SMITH,250.00',
+  ].join('\n'), 'GBP', 200, 'day-first');
+  ok('review 1: a "payment received" credit on an account export stays money in, not a card settlement',
+    !accountThankYou.rows.some((row) => row.kind === 'cardPayment' || row.transferHint),
+    JSON.stringify(accountThankYou.rows));
+  const cardColumnAutopay = parseStatementCsv([
+    'Date,Description,Card Number,Amount',
+    '01/09/2026,CARREFOUR,XXXX1234,-120.00',
+    '02/09/2026,DU AUTOPAY,XXXX1234,-200.00',
+  ].join('\n'), 'AED');
+  ok('review 2: a bill AUTOPAY row does not turn a card-column export into a refused card statement',
+    cardColumnAutopay.rows.length === 2 && cardColumnAutopay.ambiguousCardSignRows === 0 &&
+      cardColumnAutopay.rows.every((row) => row.type === 'expense'),
+    JSON.stringify(cardColumnAutopay));
+  let cardWithIbanError = '';
+  let cardWithIban = null;
+  try {
+    cardWithIban = parseStatementLines([
+      'Credit Card Statement', 'Card Number: 4567 XXXX XXXX 1234', 'Credit Limit 10,000.00',
+      'Account Number: AE070331234567890123456', '05/09/2026 CARREFOUR 120.00',
+    ].join('\n'), 'AED');
+  } catch (error) { cardWithIbanError = error.message; }
+  ok('review 3: a card statement that also prints an IBAN is one card, not multiple accounts',
+    cardWithIbanError === '' && cardWithIban?.rows[0]?.card?.last4 === '1234', cardWithIbanError);
+  const priorBalance = parseStatementLines([
+    'Credit Card Statement', 'Card Number: 4567 XXXX XXXX 1234',
+    'Previous Statement Balance AED 3,000.00', 'Statement Balance AED 1,200.00',
+    'Minimum Payment Due AED 60.00', 'Payment Due Date 20/10/2026',
+    '05/09/2026 CARREFOUR 120.00',
+  ].join('\n'), 'AED').rows.find((row) => row.kind === 'cardStatement');
+  ok('review 4: the previous statement balance is never the amount due',
+    priorBalance?.amountFils === 120000, JSON.stringify(priorBalance));
+  const creditBalance = parseStatementLines([
+    'Credit Card Statement', 'Card Number: 4567 XXXX XXXX 1234',
+    'New Balance -380.00', 'Minimum Payment Due 0.00', 'Payment Due Date 20/10/2026',
+    '05/09/2026 REFUND SHOP 500.00 CR',
+  ].join('\n'), 'AED');
+  ok('review 4: a minus-signed new balance is a credit balance and emits no due',
+    !creditBalance.rows.some((row) => row.kind === 'cardStatement'), JSON.stringify(creditBalance.rows));
+  const monzoChase = parseStatementLines(
+    'Monzo Bank Ltd\nMr Chase Thompson\n12 Chase Side\nAccount Statement\n2026-09-01 SHOP 10.00 DR', 'GBP').rows[0];
+  ok('review 5: the earliest bank-shaped name wins and a person or street called Chase is not a bank',
+    monzoChase?.bankHint === 'Monzo', monzoChase?.bankHint);
+  const chaseBank = parseStatementLines('JPMorgan Chase Bank, N.A.\nAccount Statement\n2026-09-01 SHOP 10.00 DR', 'USD').rows[0];
+  ok('review 5: "JPMorgan Chase" is still Chase', chaseBank?.bankHint === 'Chase', chaseBank?.bankHint);
+  const arabicRowCard = parseStatementLines(
+    'كشف حساب\nرقم الحساب: 1234567890\n05/09/2026 شراء رقم البطاقة 4321 كارفور 120.00 DR', 'SAR').rows[0];
+  ok('review 6: a card number printed inside a transaction row never becomes the statement identity',
+    arabicRowCard?.card?.last4 === '7890' && arabicRowCard?.card?.kind === 'account',
+    JSON.stringify(arabicRowCard?.card));
+  const topUp = parseStatementLines([
+    'Credit Card Statement', 'Card Number: 4321 XXXX XXXX 1234', 'Minimum Amount Due: SAR 100.00',
+    '05/09/2026 STC PAY TOP 100 120.00',
+  ].join('\n'), 'SAR').rows[0];
+  ok('review 8: a three-letter word before a bare integer is not a foreign original',
+    topUp?.amountFils === 12000 && topUp.originalCurrency === undefined && /TOP 100/.test(topUp.merchant),
+    JSON.stringify(topUp));
+  const yen = parseStatementLines([
+    'Credit Card Statement', 'Card Number: 4567 XXXX XXXX 1234', 'Minimum Amount Due: AED 100.00',
+    '05/09/2026 UNIQLO TOKYO JPY 2000 49.80',
+  ].join('\n'), 'AED').rows[0];
+  ok('review 8: a zero-decimal original (JPY 2000) is still carried',
+    yen?.amountFils === 4980 && yen.originalCurrency === 'JPY' && yen.originalMinorUnits === 2000 && yen.originalExponent === 0,
+    JSON.stringify(yen));
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

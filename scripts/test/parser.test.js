@@ -1894,6 +1894,149 @@ t('a masked PAN in the same processed-payment voice is still a card payment',
   'Dear Customer, Your payment instructions of AED 5,645.07 to 5492********3749 has been processed on 05/08/2026 20:02',
   { kind: 'cardPayment', transfer: true, amountFils: 564507, card: { last4: '3749', kind: 'credit' } });
 
+// ══ THE SAME e& RECEIPT, AMOUNT FIRST ══
+//
+// Captured on a real iPhone through the Shortcut SMS automation, sender
+// "eandINF". The user paid the bill in the Etisalat app with an ADCB card and
+// ADCB sent nothing, so this receipt is the ONLY record of the AED 313.95. The
+// account, transaction and reference digits are replaced; every other byte is
+// verbatim, including the WhatsApp tail cut off on screen.
+//
+// It parsed as an expense of the right amount and nothing else was right:
+// titled "Transaction #: Mobileapp2470000000006212", filed as Groceries
+// because the Smiles paragraph lists "food, groceries, shopping", no receipt
+// side, no bill identity, and a "Remaining Balance: AED 0" snapshot aimed at
+// whichever account the row landed on. It is the portal-receipt family above
+// with its first sentence turned round, and it must parse exactly as that
+// family does — including the date: the family reads Transaction Date and
+// leaves Transaction Time to the capture timestamp.
+{
+  const EAND_RECEIPT =
+    'Hello, your payment of AED 313.95 for account 065000000 has been received.\n' +
+    'Amount Due: AED 313.95\n' +
+    'Amount Paid: AED 313.95\n' +
+    'Remaining Balance: AED 0\n' +
+    'Transaction Date: 2026-10-03\n' +
+    'Transaction Time: 15:31:16\n' +
+    'Payment Channel: Etisalat Mobile App\n' +
+    'Card Number: NA\n' +
+    'Mode of Payment : Credit/Debit Card\n' +
+    'Transaction #: MOBILEAPP2470000000006212\n' +
+    'Reference #: 300000000000';
+  const SMILES_TAIL =
+    "\n\nYou've earned Smiles points on this payment. Redeem them for savings on food, groceries, shopping, travel, e& add-ons, home services, and more. Check your balance and start redeeming: https://smilesuae.go.link/xxxx" +
+    '\n\nTo Know your Payment Status through WhatsApp Click on https://api.whatsapp.com/send?phone=971000000000';
+  const EXPECT = {
+    kind: 'transaction', type: 'expense', amountFils: 31395, currency: 'AED',
+    merchant: 'Etisalat', category: 'telecom', deliberate: true,
+    paymentFlowSide: 'receipt', billIdentity: 'account:0000',
+    card: null, transfer: false, snapshotFils: null, snapshotKind: null, date: '2026-10-03',
+  };
+  t('the real e& amount-first receipt is the biller-receipt family',
+    EAND_RECEIPT + SMILES_TAIL, EXPECT, { sender: 'eandINF' });
+  t('...and so is the same receipt without its Smiles paragraph',
+    EAND_RECEIPT, EXPECT, { sender: 'eandINF' });
+  t('...and with no sender at all, which is how the paste path reads it',
+    EAND_RECEIPT + SMILES_TAIL, EXPECT);
+  t('...and in the "Dear Customer, Your payment" voice the older family uses',
+    EAND_RECEIPT.replace('Hello, your payment', 'Dear Customer, Your payment') + SMILES_TAIL,
+    EXPECT, { sender: 'eandINF' });
+  // A capture that loses its blank lines still keeps the advert out of the
+  // category: the Smiles lead-in ends the receipt block on its own.
+  t('...and with its paragraphs flattened',
+    (EAND_RECEIPT + SMILES_TAIL).replace(/\n\n/g, '\n'), EXPECT, { sender: 'eandINF' });
+
+  // The amount-first opening alone is ordinary bank wording. Without a biller
+  // in the channel line, or with card / minimum / outstanding vocabulary, it is
+  // not this receipt family and must never become a Telecom expense.
+  {
+    const cardRepay = parseSms('Dear Cardholder, your payment of AED 3,000.00 for account 4711 has been received.\n' +
+      'Amount Paid: AED 3,000.00\nMinimum Amount Due: AED 0.00\nCredit Card Outstanding: AED 1,250.00', undefined, {});
+    ok('a card repayment in the amount-first voice is not a Telecom expense',
+      !cardRepay || cardRepay.categoryGuess !== 'telecom' || cardRepay.paymentFlowSide !== 'receipt',
+      JSON.stringify(cardRepay && [cardRepay.merchant, cardRepay.categoryGuess, cardRepay.paymentFlowSide]));
+    const loan = parseSms('Your payment of AED 2,000.00 for account 7890 has been received.\nAmount Paid: AED 2,000.00\n' +
+      'Outstanding Balance: AED 40,000.00', undefined, {});
+    ok('a loan instalment in the amount-first voice is not a biller receipt',
+      !loan || loan.paymentFlowSide !== 'receipt', JSON.stringify(loan && [loan.merchant, loan.categoryGuess, loan.paymentFlowSide]));
+    const masked = parseSms(EAND_RECEIPT.replace(/for account \d+/, 'for account XXXXX2543'), undefined, { sender: 'eandINF' });
+    ok('a masked biller account number in the receipt is not the user\'s account',
+      masked && masked.merchant === 'Etisalat' && masked.card === null, JSON.stringify(masked && masked.card));
+  }
+
+  // Plausible real variants of the same receipt stay in the family: the
+  // funding lines and the advert describe how it was paid, not what.
+  for (const [label, body] of [
+    ['"Mode of Payment : Credit Card"', EAND_RECEIPT.replace(/Mode of Payment : [^\n]+/, 'Mode of Payment : Credit Card')],
+    ['a saved card number', EAND_RECEIPT.replace(/Card Number: NA/, 'Card Number: 4111XXXXXXXX2518')],
+    ['"Outstanding Balance: AED 0"', EAND_RECEIPT.replace(/Remaining Balance: AED 0/, 'Outstanding Balance: AED 0')],
+    ['an advert naming a credit card', EAND_RECEIPT + '\n\nPay with your e& credit card and earn double Smiles.'],
+  ]) {
+    const r = parseSms(body, undefined, { sender: 'eandINF' });
+    ok(`the e& receipt with ${label} is still Etisalat telecom on the receipt side`,
+      r && r.merchant === 'Etisalat' && r.categoryGuess === 'telecom' && r.paymentFlowSide === 'receipt' && r.amountFils === 31395,
+      JSON.stringify(r && [r.merchant, r.categoryGuess, r.paymentFlowSide, r.amountFils]));
+  }
+
+  // The reference lines are labels, never a payee — on any path. With the
+  // Amount Paid label removed neither receipt head applies and the message
+  // falls through to the generic multi-line reader, which is the path that
+  // titled the real row "Transaction #: ...".
+  {
+    const generic = parseSms(EAND_RECEIPT.replace('Amount Paid: AED 313.95\n', ''), undefined, { sender: 'eandINF' });
+    ok('a "Transaction #:" or "Reference #:" line is never a merchant',
+      !generic || !/transaction\s*#|reference\s*#|mobileapp/i.test(generic.merchant),
+      JSON.stringify(generic && generic.merchant));
+  }
+
+  // The e& account number is the BILLER's. It must not become a card, a bank
+  // account, a transfer party or a balance on anything the user owns.
+  {
+    const row = parseSms(EAND_RECEIPT + SMILES_TAIL, undefined, { sender: 'eandINF' });
+    ok('the e& account number is not read as a transfer party',
+      extractOutgoingTransferParties(EAND_RECEIPT + SMILES_TAIL) === null);
+    const { buildImportPlan } = require('./build/import-plan');
+    const empty = { hydrated: true, accounts: [], transactions: [], budgets: [], bills: [], goals: [],
+      cardDues: [], accountHints: {}, merchantOverrides: {}, billAliases: {}, lastScanTs: 0, parserVersion: 0 };
+    const ts = Date.parse('2026-10-03T11:31:16Z');
+    const plan = buildImportPlan([{ ...row, smsTs: ts, sender: 'eandINF', channel: 'push' }], empty, ts);
+    const b = plan.batch;
+    ok('importing the e& receipt mints no account, hint or snapshot from the biller number',
+      plan.txCount === 1 && b.newAccounts.length === 0 && Object.keys(b.newHints).length === 0 &&
+        Object.keys(b.snapshots).length === 0 && b.transactions[0].title === 'Etisalat' &&
+        b.transactions[0].category === 'telecom' && b.transactions[0].billIdentity === 'account:0000',
+      JSON.stringify({ na: b.newAccounts, nh: b.newHints, sn: b.snapshots, tx: b.transactions }));
+  }
+
+  // The older processed-voice family gets the same advert protection. Its own
+  // receipts have not been seen carrying the Smiles paragraph; the paragraph is
+  // the real one above, appended to the real receipt pinned earlier in this file.
+  t('a Smiles paragraph cannot re-file a processed-voice e& receipt either',
+    'Dear Customer, Your payment to the account number ····2543 has been processed.\nAmount Due: AED 408.45 \nAmount Paid: AED 408.45 \nPayment Channel: Etisalat Mobile App' + SMILES_TAIL,
+    { merchant: 'Etisalat', category: 'telecom', paymentFlowSide: 'receipt', billIdentity: 'account:2543' });
+}
+
+// CONTROLS: a BANK saying a payment "has been received" toward the user's own
+// credit card is a settlement, and the new head must not take it. Every one of
+// these is pinned elsewhere in this file or the corpus; here they are asserted
+// together against the specific things the receipt branch would change.
+for (const [name, msg, expectKind, last4] of [
+  ['ADIB Covered Card', 'Your payment of AED 1,500.00 has been received towards your ADIB Covered Card ending 4417.', 'cardPayment', '4417'],
+  ['masked PAN', 'Payment of AED 7,663.00 has been received on your Credit Card 5492********4711.', 'cardPayment', '4711'],
+  ['ADCB against-card', 'Your payment of AED 9251 against Credit Card no. XXX9426 was received at 12:10 PM on 30/09/2026. Thank you.', 'cardPayment', '9426'],
+  ['towards credit card', 'Payment of AED 8,144.40 has been received towards your credit card ending 4833 on 05/07/2026', 'cardPayment', '4833'],
+]) {
+  const r = parseSms(msg);
+  ok(`a bank card repayment that "has been received" is not a biller receipt (${name})`,
+    r && r.kind === expectKind && r.transferHint === true && r.card && r.card.last4 === last4 &&
+      r.card.kind === 'credit' && r.cardPaymentSide === 'receipt' && r.paymentFlowSide === undefined &&
+      r.merchant !== 'Etisalat',
+    JSON.stringify(r && { k: r.kind, m: r.merchant, card: r.card, s: r.paymentFlowSide, cps: r.cardPaymentSide }));
+}
+t('an AutoPay "has been received and posted to your account no" echo stays skipped',
+  'Dear Valued Customer, Payment of AED 351.35 on 15/04/2019 has been received and posted to your account no 5552906 Thank you for using AutoPay service.',
+  null);
+
 // Third corpus, from the shipped build.
 t('Trip.com is travel, dot and all',
   'Purchase of GBP 37.6 with Debit Card ending 4733 at TRIP.COM, LONDON. Avl Balance is AED 43,415.07.',
@@ -2733,6 +2876,49 @@ t('..."received for your <biller> account" too',
 t('..."we have received X towards your <biller> account"',
   'We have received AED 350.00 towards your Etisalat account 9876.',
   { type: 'expense', amountFils: 35000, merchant: 'Etisalat', category: 'telecom' });
+// ...AND 9876 IS ETISALAT'S NUMBER FOR THE USER, NOT THE USER'S BANK ACCOUNT.
+// extractCard read "account 9876" as an account the user owns, so this row
+// carried card {9876, account} and the import planner minted a phantom bank
+// account "Account •9876" out of a phone-bill reference. The digits survive
+// only as the bill identity, which is how the portal-receipt family keeps its
+// own biller account number.
+t('a biller\'s account number in a settlement is the bill identity, never the user\'s account',
+  'We have received AED 350.00 towards your Etisalat account 9876.',
+  { type: 'expense', amountFils: 35000, merchant: 'Etisalat', category: 'telecom',
+    card: null, billIdentity: 'account:9876', transfer: false });
+{
+  const { buildImportPlan } = require('./build/import-plan');
+  const empty = { hydrated: true, accounts: [], transactions: [], budgets: [], bills: [], goals: [],
+    cardDues: [], accountHints: {}, merchantOverrides: {}, billAliases: {}, lastScanTs: 0, parserVersion: 0 };
+  const ts = Date.parse('2026-10-03T08:00:00Z');
+  const row = parseSms('We have received AED 350.00 towards your Etisalat account 9876.');
+  const plan = buildImportPlan([{ ...row, date: '2026-10-03', smsTs: ts, sender: 'ETISALAT', channel: 'inbox' }], empty, ts);
+  ok('importing a biller settlement mints no "Account •9876"',
+    plan.txCount === 1 && plan.batch.newAccounts.length === 0 && Object.keys(plan.batch.newHints).length === 0,
+    JSON.stringify({ na: plan.batch.newAccounts, nh: plan.batch.newHints }));
+}
+// The other biller-account settlements already had no card; they gain the
+// identity and nothing else.
+t('"credited to your du account 1234567" keeps the du number as bill identity',
+  'AED 200.00 has been credited to your du account 1234567.',
+  { type: 'expense', merchant: 'Du', category: 'telecom', card: null, billIdentity: 'account:4567' });
+// CONTROLS: the user's OWN bank account in the same verb-first shape keeps its
+// account. A bank and an account type are never a biller.
+t('a salary credited to the user\'s RAKBANK account keeps that account',
+  'Your salary payment of AED 12,000.00 has been credited to your RAKBANK account 1234.',
+  { type: 'income', merchant: 'Salary', card: { last4: '1234', kind: 'account' } });
+t('profit credited to the user\'s ADIB savings account keeps that account',
+  'Profit of AED 34.22 has been credited to your ADIB Savings Account XXXX1234. Available Balance AED 20,034.22',
+  { type: 'income', card: { last4: '1234', kind: 'account' } });
+t('a FAB credit to the user\'s account keeps that account',
+  'An amount of AED 5000.00 has been credited to your FAB account XXXX0004 on 26/06/2026 .Your balance is AED 401913.68',
+  { type: 'income', card: { last4: '0004', kind: 'account' } });
+{
+  const r = parseSms('AED 5,000.00 was debited from your account XX9012 and credited to your other account XX7788');
+  ok('an own-account move keeps its source account',
+    r && r.card && r.card.last4 === '9012' && r.card.kind === 'account' && !r.billIdentity,
+    JSON.stringify(r && { card: r.card, b: r.billIdentity }));
+}
 t('...and with no payment noun anywhere in the sentence',
   'Thank you. AED 500.00 received towards your Salik account.',
   { type: 'expense', amountFils: 50000, merchant: 'Salik', category: 'transport' });
@@ -6176,6 +6362,166 @@ t('an alert offering two possible amounts is not posted',
 t('a mixed-language alert with an unconfirmed corrected amount is not posted',
   'تم تسجيل عملية شراء لدى Harbor Lamp Bakery. Amount: AED 45.00 or AED 145.00; corrected amount not confirmed.',
   null);
+
+
+// ── 2026-10 accuracy pass: synthetic grammar probes (not customer evidence) ──
+// Each case below was a confirmed wrong answer before the pass.
+t('an OTP whose merchant is a domain is still a challenge, never a purchase',
+  'Your OTP for purchase of AED 250.00 at NOON.COM with card ending 4844 is 482913. Do not share it with anyone.', null);
+t('a footer that runs into a reference still cannot make an OTP challenge',
+  'AED 89.50 spent at CARREFOUR using Debit Card 1234. Do not share your OTP with anyone.Ref: 123456',
+  { amountFils: 8950, type: 'expense' });
+t('a dated balance enquiry reply is not an expense',
+  'Your available balance on account XXX2501 as of 02/10/2026 is AED 5,450.00.', null);
+t('"If unauthorised, call" is a fraud footer, not a decline',
+  'Purchase of AED 50.00 with Credit Card ending 1234 at CARREFOUR. If unauthorised, call 600 54 0000.',
+  { amountFils: 5000, type: 'expense', category: 'groceries' });
+t('"If not you" is a fraud footer, not a decline',
+  'AED 50.00 spent at CARREFOUR with Credit Card 1234. If not you, call 800 123.',
+  { amountFils: 5000, type: 'expense' });
+t('a statement that states its total as "statement for <month> is" is a card statement',
+  'FAB Credit Card XXXX3749: Your statement for September 2026 is AED 8,900.40. Minimum due AED 445.02 by 26/10/2026. Pay on time to avoid late payment fee.',
+  { kind: 'cardStatement', amountFils: 890040, minDueFils: 44502, dueDay: 26 });
+t('"received your payment" is the receipt leg of a card payment',
+  'Thank you. We have received your payment of AED 2,045.00 towards your Mashreq Credit Card ending 1234.',
+  { kind: 'cardPayment', amountFils: 204500, side: 'receipt' });
+t('the funding account balance on an account-side card payment is not the card limit',
+  'AED3120.55 debited from Acc XXX1122 towards Credit Card XXX2518 payment on 20-10-2026 through ADCB Mobile App. Avl.Bal is AED 9,872.30',
+  { amountFils: 312055, transfer: true, snapshotKind: null, snapshotFils: null });
+t('a salary transfer FROM an employer is income, not an own-account transfer',
+  'Salary transfer of AED 15,000.00 from ACME LLC has been credited to your account XXX1234.',
+  { type: 'income', category: 'salary', transfer: false });
+t('money credited via transfer from a person is income, not an own-account transfer',
+  'AED 3,000.00 credited to your account XXXX5678 via funds transfer from AHMED ALI',
+  { type: 'income', transfer: false, merchant: 'Ahmed Ali' });
+t('"transferred from <person> to your account" is money arriving',
+  'An amount of AED 2,000.00 has been transferred from JOHN DOE to your account XXXX9876.',
+  { type: 'income', transfer: false });
+t('a move to your own account at another bank is a transfer, not spending',
+  'AED 2,500.00 has been transferred from your Account XXX1234 to your Wio Account ending 5678 on 10/09/2026.',
+  { type: 'expense', transfer: true, merchant: 'Own account transfer' });
+t('a move to your own currency account is a transfer, not spending',
+  'AED 3,672.50 has been transferred from your Account XXX1234 to your USD Account XXX7777 on 10/09/2026.',
+  { transfer: true, merchant: 'Own account transfer' });
+t('paying a biller account is not hidden as an own transfer',
+  'AED 500.00 has been transferred from your account XXX1234 to your du account 0551234567.',
+  { type: 'expense', transfer: false });
+// Categories and canonical subscription names.
+for (const [desc, merchant, category] of [
+  ['MICROSOFT*MICROSOFT 365 P, MSBILL.INFO', 'Microsoft 365', 'software'],
+  ['APPLE.COM/BILL ICLOUD, CORK', undefined, 'software'],
+  ['GOOGLE *Gemini Advanced, g.co/helppay#', undefined, 'software'],
+  ['FIGMA MONTHLY RENEWAL, SAN FRANCISCO', 'Figma', 'software'],
+  ['MIDJOURNEY INC., SOUTH SAN FRAN', 'Midjourney', 'software'],
+  ['PERPLEXITY AI, SAN FRANCISCO', 'Perplexity', 'software'],
+  ['DUOLINGO, PITTSBURGH', 'Duolingo', 'education'],
+  ['SNAPCHAT+ SUBSCRIPTION, SANTA MONICA', undefined, 'entertainment'],
+  ['DisneyPlus, BURBANK', 'Disney+', 'entertainment'],
+  ['STARZPLAY, DUBAI', 'StarzPlay', 'entertainment'],
+  ['KIBSONS INTERNATIONAL, DUBAI', undefined, 'groceries'],
+  ['ICP SMART SERVICES, ABU DHABI', undefined, 'government'],
+  ['SALIM AL SHAMSI ELECT, SHARJAH', undefined, 'shopping'],
+]) {
+  t(`category: ${desc}`, `Purchase of AED 35.00 with Credit Card ending 4844 at ${desc}. Avl Cr. Limit AED 14,600.00`,
+    { amountFils: 3500, type: 'expense', category, ...(merchant ? { merchant } : {}) });
+}
+
+{
+  const stmt = parseSms('Mini Stmt for Card ending 8575: Statement date 20/10/26. Total Amt Due AED 3,000.00, Due Date 14/11/26. Min Amt Due AED 150.00');
+  if (stmt && stmt.kind === 'cardStatement' && stmt.statementDate === '2026-10-20' && stmt.date === '2026-11-14') { pass++; console.log('✓ a statement carries its stated issue date apart from its due date'); }
+  else { fail++; console.log('✗ a statement carries its stated issue date apart from its due date', JSON.stringify(stmt && { k: stmt.kind, s: stmt.statementDate, d: stmt.date })); }
+  const noIssue = parseSms('Your Credit Card ending 4844 statement has been generated. Total Amount Due AED 5,234.10. Minimum Amount Due AED 261.70. Payment Due Date 25/10/2026.');
+  if (noIssue && noIssue.kind === 'cardStatement' && noIssue.statementDate === undefined) { pass++; console.log('✓ a due date is never mistaken for the issue date'); }
+  else { fail++; console.log('✗ a due date is never mistaken for the issue date', JSON.stringify(noIssue && noIssue.statementDate)); }
+}
+t('an Arabic card payment stated amount-first is a settlement, not spending',
+  'تم سداد مبلغ 2,000.00 درهم لبطاقة الائتمان المنتهية بـ 5678',
+  { type: 'expense', amountFils: 200000, transfer: true, card: { last4: '5678', kind: 'credit' } });
+t('an Arabic statement heading without اجمالي is still a card statement',
+  'كشف حساب البطاقة المنتهية 4833: المبلغ المستحق 3,240.00 درهم، الحد الأدنى للدفع 162.00 درهم، تاريخ الاستحقاق 05/08/2026',
+  { kind: 'cardStatement', amountFils: 324000, minDueFils: 16200, dueDay: 5 });
+t('an Arabic card-labelled statement is a card statement, not a generic bill',
+  'بطاقة الائتمان المنتهية بـ 1234: المبلغ المستحق 3,240.00 درهم، الحد الأدنى للدفع 162.00 درهم، تاريخ الاستحقاق 05/08/2026',
+  { kind: 'cardStatement', amountFils: 324000, minDueFils: 16200 });
+t('a fee forecast footer does not drop the cash advance it follows',
+  'Cash advance of AED 1,000.00 on your Mashreq Credit Card ending 9876 at ATM. Cash advance fee AED 105.00 will be charged. Avl limit AED 9,000.00',
+  { type: 'expense', amountFils: 100000, category: 'cash-withdrawal' });
+t('the Disney Store is a shop, not the Disney+ subscription',
+  'Purchase of AED 120.00 with Credit Card ending 4844 at DISNEY STORE DUBAI MALL, DUBAI. Avl Cr. Limit AED 14,600.00',
+  { amountFils: 12000, category: 'shopping', merchant: 'Disney Store Dubai Mall' });
+// Independent-review regressions: none of these may change direction or hide money.
+for (const body of [
+  'AED 2,000.00 has been transferred from Current Account XXX1234 to your Savings Account XXX5678 on 02/10/2026.',
+  'AED 500.00 sent from Current A/C XXX1234 to your Savings Account XXX5678',
+  'AED 500.00 transferred from card ending 1234 to your account XXX5678',
+  'AED 500.00 transferred from XXX1234 to your Wio account XXX5678',
+  'Funds of AED 500.00 have been transferred from Acc No. XXX1234 to your account XXX5678',
+]) t(`an own-account move named by its source account stays an own transfer: ${body.slice(0, 48)}`, body,
+  { type: 'expense', transfer: true, merchant: 'Own account transfer' });
+for (const body of [
+  'AED 500.00 has been sent to you by AHMED ALI. Avl Bal AED 1,500.00',
+  'AED 500.00 was sent to your account XXX1234 by AHMED ALI.',
+]) {
+  const p = parseSms(body);
+  if (!p || p.type !== 'expense') { pass++; console.log(`✓ money sent TO you is never an expense: ${body.slice(0, 40)}`); }
+  else { fail++; console.log(`✗ money sent TO you is never an expense: ${body.slice(0, 40)}`, JSON.stringify(p.merchant)); }
+}
+t('a recharge card bought with "سداد مبلغ" is spending, not a card settlement',
+  'تم سداد مبلغ 100 درهم لبطاقة شحن سوا', { type: 'expense', transfer: false });
+t('a nursery named Bumble Bee is not a dating app', 'Purchase of AED 50.00 with Debit Card ending 1354 at BUMBLE BEE NURSERY, DUBAI. Avl Balance is AED 5,168.85.',
+  { category: 'education' });
+t('a hardware shop named Hinge is not a dating app', 'Purchase of AED 50.00 with Debit Card ending 1354 at HINGE HARDWARE TRADING, DUBAI. Avl Balance is AED 5,168.85.',
+  { category: 'shopping' });
+t('a national electricity company abbreviated ELECT is a utility', 'Purchase of AED 50.00 with Debit Card ending 1354 at SAUDI ELECT, DUBAI. Avl Balance is AED 5,168.85.',
+  { category: 'utilities' });
+t('a reversal forecast for the purchase itself is never posted',
+  'Your purchase of AED 55.75 at TALABAT with card ending 1234 will be reversed tomorrow.', null);
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  t('a labelled bill notice with a due date is a reminder, not a payment',
+    'سداد فاتورة\nالمفوتر: STC\nالمبلغ: 230 SAR\nتاريخ الاستحقاق: 15/10/2026\nيرجى السداد قبل تاريخ الاستحقاق', { kind: 'billDue' });
+  {
+    const p = parseSms('سداد\nفاتورة جديدة\nالمفوتر: STC\nمبلغ: 230 SAR');
+    if (!p || p.kind !== 'transaction') { pass++; console.log('✓ a new-bill notice is never a posted payment'); }
+    else { fail++; console.log('✗ a new-bill notice is never a posted payment', JSON.stringify(p.kind)); }
+  }
+  setActiveMarket('AE');
+}
+t('a spaced masked card number keeps its LAST four digits',
+  'Your Credit Card 4567 XXXX XXXX 1234 statement: Total Amount Due AED 3,456.78, Minimum Amount Due AED 172.84, Due Date 20/10/2026.',
+  { kind: 'cardStatement', card: { last4: '1234', kind: 'credit' } });
+// Saudi labelled field-list families (synthetic grammar probes).
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  t('an Al Rajhi online purchase label is a channel, never a phone bill',
+    'شراء انترنت\nبطاقة: 4321;فيزا\nمبلغ: 39.99 SAR\nلدى: NETFLIX.COM\nفي: 2026-10-01 01:10',
+    { amountFils: 3999, merchant: 'Netflix', category: 'entertainment', date: '2026-10-01' });
+  t('a labelled bill payment names its biller and is a posted expense',
+    'سداد فاتورة\nالمفوتر: STC\nرقم الفاتورة: 1234\nمبلغ: 230 SAR\nمن: 4455\nفي: 2026-10-02 09:00',
+    { type: 'expense', amountFils: 23000, category: 'telecom' });
+  t('a labelled outgoing local transfer is money leaving',
+    'حوالة محلية صادرة\nمن: 4455\nإلى: محمد أحمد\nمبلغ: 1500 SAR\nفي: 2026-10-02 10:30',
+    { type: 'expense', amountFils: 150000, merchant: 'محمد أحمد' });
+  t('a labelled incoming local transfer from a person is income, not business revenue',
+    'حوالة محلية واردة\nإلى: 4455\nمن: خالد سعيد\nمبلغ: 700 SAR\nفي: 2026-10-02 10:30',
+    { type: 'income', amountFils: 70000, category: 'other' });
+  t('an Arabic refund is an offset, not business revenue',
+    'استرداد مبلغ\nبطاقة: 4321;مدى\nمبلغ: 120 SAR\nمن: NOON\nفي: 2026-10-02 18:00',
+    { type: 'income', amountFils: 12000, category: 'other' });
+  t('a bill reminder sentence is still not a bill-payment header',
+    'يرجى سداد فاتورة STC بمبلغ 230 SAR قبل تاريخ الاستحقاق 25/10/2026', { kind: 'billDue' });
+  t('an English labelled block reads its Merchant: field without the label',
+    'Purchase\nCard: **4321 (mada)\nAmount: SAR 89.00\nMerchant: TAMIMI MARKETS\nDate: 02/10/2026 19:20',
+    { amountFils: 8900, merchant: 'Tamimi Markets', category: 'groceries', card: { last4: '4321', kind: 'debit' } });
+  t('a wallet transfer to a person is spending, and the wallet is not the phone company',
+    'You have sent SAR 150.00 to Abdullah via stc pay on 02/10/2026. Balance SAR 340.00',
+    { type: 'expense', amountFils: 15000, merchant: 'Abdullah', category: 'other' });
+  t('a statement emailed notice with an amount is not money sent',
+    'Your e-statement of SAR 4,210.00 has been sent to your email', null);
+  setActiveMarket('AE');
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

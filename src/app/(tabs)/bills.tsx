@@ -125,11 +125,15 @@ const RECURRING_PAGE_SIZE = 12;
 function cadenceLabel(cadence: Subscription['cadence']): string {
   return cadence === 'weekly'
     ? t('cadenceWeekly')
-    : cadence === 'monthly'
-      ? t('cadenceMonthly')
-      : cadence === 'yearly'
-        ? t('cadenceYearly')
-        : t('cadenceAsNeeded');
+    : cadence === 'biweekly'
+      ? t('cadenceBiweekly')
+      : cadence === 'monthly'
+        ? t('cadenceMonthly')
+        : cadence === 'quarterly'
+          ? t('cadenceQuarterly')
+          : cadence === 'yearly'
+            ? t('cadenceYearly')
+            : t('cadenceAsNeeded');
 }
 
 function scheduleWhen(days: number): string {
@@ -619,8 +623,10 @@ export default function BillsScreen() {
    * case below in the opposite direction. An affordance that can only produce
    * a wrong number is worse than no affordance.
    */
+  // Fortnightly and quarterly charges cannot become a monthly Bill either: a
+  // monthly reminder would state them at about 2.2x and 1/3 of the real money.
   const remindable = (sub: Subscription): boolean =>
-    sub.cadence !== 'weekly' && sub.cadence !== 'as-needed';
+    sub.cadence === 'monthly' || sub.cadence === 'yearly';
 
   /**
    * The reminder a subscription becomes.

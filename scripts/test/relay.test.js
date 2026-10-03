@@ -1286,7 +1286,24 @@ async function queueItem(id, row, publicKey) {
     !relay.isParsedRelayRow({ ...row, sender: 'ENBD\nforged' }));
   ok('row: a legitimate rawless structured row is accepted',
     !('raw' in row) && relay.isParsedRelayRow(row));
-  const indexedStatement = { ...row, captureSource: 'pdf', statementImportId: 'a'.repeat(32), statementRowIndex: 0 };
+  {
+    // The Worker's statement parser keeps descriptions up to 180 characters.
+    // A 171-character POS row it accepted used to be acknowledged and then
+    // dropped here by a 160 cap, with no notice to the user.
+    const pos = (merchant) => ({ ...row, captureSource: 'pdf', statementImportId: 'a'.repeat(32), merchant });
+    const long = 'POS PURCHASE REF FT26251ABCD1234 FROM ACME GENERAL TRADING LLC DUBAI UNITED ARAB EMIRATES ' +
+      'BENEFICIARY JOHN SMITH PURPOSE SALARY SEPTEMBER 2026 VIA ENBD ACCOUNT XXXX5566 OK';
+    ok('row: a 171-character statement description the server accepted is not dropped',
+      long.length === 171 && relay.isParsedRelayRow(pos(long)) &&
+        relay.relayRowToScannedSms(pos(long)).merchant === long);
+    ok('row: the merchant cap matches the server contract (180 accepted, 181 refused)',
+      relay.MAX_RELAY_MERCHANT_LENGTH === 180 &&
+        relay.isParsedRelayRow(pos('M'.repeat(180))) && !relay.isParsedRelayRow(pos('M'.repeat(181))));
+    ok('row: a long merchant still refuses control characters and padding',
+      !relay.isParsedRelayRow(pos(`${'M'.repeat(100)}\u0007${'M'.repeat(60)}`)) &&
+        !relay.isParsedRelayRow(pos(` ${'M'.repeat(170)}`)));
+  }
+  const indexedStatement ={ ...row, captureSource: 'pdf', statementImportId: 'a'.repeat(32), statementRowIndex: 0 };
   ok('row: statement file ordinal survives validated relay conversion',
     relay.isParsedRelayRow(indexedStatement) && relay.relayRowToScannedSms(indexedStatement).statementRowIndex === 0);
   for (const changed of [

@@ -594,6 +594,36 @@ export interface DuplicateGuardOptions {
    * establish ownership for matching different files or live alerts.
    */
   unresolvedAccount?: (accountId: string) => boolean;
+  /**
+   * What a ledger account is: a bank `account`, or a card of a known type
+   * (`card` when its type is unknown). Lets a bank-account statement row meet
+   * the debit-card alert for the same purchase, which lands on the card.
+   */
+  accountInstrument?: (accountId: string) => 'account' | 'debit' | 'credit' | 'card' | undefined;
+}
+
+/**
+ * Days a statement row may trail the live alert for the same event. Many
+ * statements print only the POSTING date, which follows the purchase by up to
+ * three days; one day the other way covers time-zone and midnight stamps.
+ */
+const STATEMENT_POSTING_LAG_DAYS = 3;
+const STATEMENT_EARLY_DAYS = 1;
+
+function dayNumber(date: string): number | undefined {
+  const time = Date.parse(`${date}T12:00:00Z`);
+  return Number.isFinite(time) ? Math.floor(time / 86_400_000) : undefined;
+}
+
+/** Statement day minus alert day, when both are valid dates. */
+function statementLagDays(statementDate: string, captureDate: string): number | undefined {
+  const s = dayNumber(statementDate);
+  const c = dayNumber(captureDate);
+  return s === undefined || c === undefined ? undefined : s - c;
+}
+
+function withinPostingLag(lag: number | undefined): boolean {
+  return lag !== undefined && lag >= -STATEMENT_EARLY_DAYS && lag <= STATEMENT_POSTING_LAG_DAYS;
 }
 
 const STATEMENT_IMPORT_ID = /^[a-f0-9]{32}$/;
@@ -645,37 +675,148 @@ export function fromDifferentStatementUploads(
 }
 
 const sameDescriptor = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
 /**
- * Whether a statement descriptor and an alert title can name one merchant:
- * normalized merchant words agree in order ("PAYPAL
- * *ENDURANCEIN" / "Endurancein", "CARREFOUR HYPER 1234" / "Carrefour").
- * Money and a day alone are not an identity, even when the statement names an
- * account: "NOON.COM 50.00" and "Carrefour 50.00" are two purchases.
+ * Words a card network or bank appends AFTER the merchant: country codes and
+ * names, cities, districts and malls, legal forms and branch markers. They may
+ * only EXTEND a phrase both sides already share word for word; they are never
+ * stripped before comparing, so "AIR ARABIA" / "AIR KUWAIT", "CITY CENTRE
+ * DEIRA" / "CITY CENTRE MIRDIF" and "Dubai Mall" / "DUBAI TAXI" stay apart.
+ * The same purchase reads "Starbucks" in the SMS and "STARBUCKS DUBAI MALL
+ * DUBAI ARE" on the statement; a PDF and a CSV of one month differ by " ARE".
+ */
+const DESCRIPTOR_EXTENSION_NOISE = new Set([
+  // Countries (ISO alpha-2/alpha-3 and names) networks print after the city.
+  'ae', 'are', 'uae', 'sa', 'sau', 'ksa', 'us', 'usa', 'gb', 'gbr', 'uk', 'ie', 'irl', 'nl', 'nld', 'lu', 'lux',
+  'sg', 'sgp', 'ind', 'eg', 'egy', 'kw', 'kwt', 'qa', 'qat', 'bh', 'bhr', 'om', 'omn', 'jo', 'jor', 'de', 'deu',
+  'fr', 'fra', 'tr', 'tur', 'pk', 'pak', 'ph', 'phl', 'ca', 'can', 'au', 'aus', 'hk', 'hkg', 'cn', 'chn', 'se', 'swe',
+  'united', 'arab', 'emirates', 'saudi', 'arabia',
+  // UAE cities, districts and malls.
+  'dubai', 'sharjah', 'ajman', 'abu', 'dhabi', 'fujairah', 'ras', 'khaimah', 'rak', 'umm', 'quwain', 'uaq',
+  'dxb', 'auh', 'shj', 'ain', 'alain', 'khor', 'fakkan', 'hatta', 'moe', 'dfc', 'jlt', 'jbr', 'marina', 'barsha',
+  'jumeirah', 'jumeira', 'deira', 'karama', 'bur', 'mirdif', 'festival', 'mall', 'city', 'centre', 'center',
+  'downtown', 'ibn', 'battuta', 'nakheel', 'mussafah', 'musaffah', 'yas', 'reem', 'saadiyat', 'qusais', 'nahda',
+  'satwa', 'garhoud', 'quoz', 'jvc', 'silicon', 'oasis', 'al',
+  // Saudi cities and districts.
+  'riyadh', 'jeddah', 'jiddah', 'dammam', 'khobar', 'makkah', 'mecca', 'madinah', 'medina', 'madina', 'taif',
+  'tabuk', 'abha', 'buraidah', 'buraydah', 'jubail', 'yanbu', 'dhahran', 'qassim', 'hail', 'najran', 'jazan',
+  'jizan', 'khamis', 'mushait', 'hofuf', 'ahsa', 'qatif', 'olaya', 'olaiya', 'tahlia', 'malaz', 'ruh', 'jed', 'dmm',
+  'الرياض', 'جدة', 'جده', 'الدمام', 'الخبر', 'مكة', 'المدينة', 'دبي', 'الشارقة', 'ابوظبي', 'أبوظبي',
+  // Other cities networks commonly print for online merchants.
+  'doha', 'kuwait', 'manama', 'muscat', 'cairo', 'amman', 'london', 'dublin', 'cork', 'amsterdam', 'luxembourg',
+  'singapore', 'stockholm',
+  // Legal forms, branch markers and billing suffixes.
+  'llc', 'ltd', 'limited', 'fze', 'fzco', 'fzc', 'fzllc', 'fz', 'est', 'inc', 'corp', 'co', 'plc', 'gmbh', 'wll',
+  'spc', 'pjsc', 'psc', 'bv', 'ab', 'br', 'branch', 'site', 'no', 'bill', 'payment',
+]);
+/**
+ * Words a network prints for the SAME service of a brand ("CAREEM RIDE",
+ * "UBER *TRIP", "AMAZON MKTPLACE", "CARREFOUR HYPER"). Anything else after a
+ * shared brand may be a sub-brand or another business — "UBER EATS", "CAREEM
+ * FOOD", "AMAZON PRIME", "NOON FOOD", "EMIRATES NBD", "AMAZON CAFE" — and is
+ * never folded into the shorter name.
+ */
+const DESCRIPTOR_SAME_SERVICE = new Set([
+  'ride', 'rides', 'trip', 'hyper', 'hypermarket', 'mktp', 'mktplace', 'marketplace',
+]);
+/** Acquirer/processor and channel words a bank prints BEFORE the merchant. */
+const DESCRIPTOR_HEAD_NOISE = new Set([
+  'pos', 'purchase', 'pur', 'ecom', 'ecommerce', 'nfc', 'iap', 'gpay', 'paypal', 'pp', 'sq', 'tst', 'sumup', 'mada',
+  'شراء', 'نقاط', 'بيع', 'مشتريات', 'عملية', 'عمليه', 'مدى',
+]);
+/** Processor brand spellings that name the same merchant. */
+const DESCRIPTOR_ALIASES: Record<string, string[]> = {
+  urbanclap: ['urban', 'company'],
+  amzn: ['amazon'],
+  itunes: ['apple'],
+};
+
+/**
+ * The words a descriptor names, in order: processor/channel prefix and web
+ * suffix removed, nothing else. Location, legal and number words are kept;
+ * descriptorOverlap decides where they may be ignored.
+ */
+export function statementMerchantWords(value: string): string[] {
+  const text = value.toLowerCase().normalize('NFKC')
+    .replace(/^(?:nfc|iap)\s*-\s*\(g-pay\)\s*-\s*/i, '')
+    .replace(/^(?:paypal|gpay|pos|sq|tst|pp)\s*\*\s*/i, '')
+    .replace(/^(?:(?:apple|google|samsung)\s*pay|g-pay)\b\s*[-*:]?\s*/i, '')
+    .replace(/^(?:(?:debit|credit)\s+card|card)\s+purchase\b\s*[-*:]?\s*/i, '')
+    .replace(/\bl\.l\.c\.?/g, 'llc')
+    .replace(/\bwww\./g, '')
+    // NOON.COM, AMAZON.AE, TALABAT.COM.SA: the web suffix is not the name.
+    .replace(/(?<=[\p{L}\p{N}])\.(?:com|net|org|co|io|me|app|ae|sa)(?:\.(?:ae|sa|uk))?(?![\p{L}\p{N}])/gu, ' ');
+  let words = text.split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+    .flatMap((word) => DESCRIPTOR_ALIASES[word] ?? [word]);
+  while (words.length > 1 && DESCRIPTOR_HEAD_NOISE.has(words[0])) words = words.slice(1);
+  return words;
+}
+
+/**
+ * Whether a statement descriptor and an alert title can name one merchant.
+ * The shorter phrase must open the longer one word for word, and every word
+ * the longer one adds must be location/legal/branch noise, a store number, or
+ * a same-service word: "Lulu Hypermarket" / "POS PURCHASE LULU HYPERMARKET AL
+ * BARSHA DUBAI ARE", "Careem" / "CAREEM RIDE DUBAI ARE", "ENOC" / "ENOC 1023".
+ * Two different store numbers ("ENOC 1023" / "ENOC 1088") are two stations.
+ * Money and a day alone are not an identity: "NOON.COM 50.00" and "Carrefour
+ * 50.00" are two purchases, and "Urban Company" is not "Urban Restaurant".
  */
 const descriptorOverlap = (a: string, b: string): boolean => {
-  // Compare the merchant phrase, not any shared word: Dubai/Company/Pay
-  // occur on unrelated rows, and "Urban Company" is not "Urban Restaurant".
-  const words = (value: string) => value.toLowerCase().normalize('NFKC')
-    .replace(/^(?:nfc|iap)\s*-\s*\(g-pay\)\s*-\s*/i, '')
-    .replace(/^(?:paypal|gpay|pos)\s*\*\s*/i, '')
-    .replace(/\burbanclap\b/g, 'urban company')
-    .split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  const left = words(a);
-  const right = words(b);
+  const left = statementMerchantWords(a);
+  const right = statementMerchantWords(b);
   const [short, long] = left.length <= right.length ? [left, right] : [right, left];
   if (short.length === 0 || !short.some((word) => /\p{L}/u.test(word)) ||
       !short.every((word, index) => word === long[index])) return false;
-  // A day-level statement has no precise clock to support arbitrary prefix
-  // matching: Amazon Cafe and Amazon are different businesses. Only bounded
-  // branch/legal/location metadata may extend an otherwise equal phrase.
-  // Unknown extensions stay separate rather than silently deleting a charge.
   return long.slice(short.length).every((word) =>
-    /^\d+$/.test(word) ||
-    /^(?:br|branch|site|no|llc|ltd|limited|fze|fzco|hyper|hypermarket|ae|uae|dubai|sharjah|ajman|abu|dhabi|dxb|auh|moe)$/.test(word));
+    /^\d+$/.test(word) || DESCRIPTOR_EXTENSION_NOISE.has(word) || DESCRIPTOR_SAME_SERVICE.has(word));
 };
 const settlementTitle = (value: string) => /^card(?:\s*•\s*\d{4})?\s+payment$/i.test(value.trim());
+
+type StructuralKind = 'salary' | 'atm' | 'card-payment' | 'transfer' | 'cash-deposit';
+/**
+ * The bank event a structural title or a statement descriptor names when it
+ * names no merchant: the SMS says "Salary", the statement "SALARY ACME
+ * TRADING LLC". Direction is held separately by the caller (same type).
+ */
+function structuralKindOf(value: string): StructuralKind | undefined {
+  const text = value.toLowerCase().normalize('NFKC').replace(/\s+/g, ' ').trim();
+  if (/\b(?:salary|salaries|payroll|wps)\b|رواتب|راتب/u.test(text)) return 'salary';
+  // "PAYMENT RECEIVED - THANK YOU" is how a card statement prints the same
+  // settlement a PDF of that month reads as "Card payment".
+  // Anchored: "DEBIT CARD PAYMENT CARREFOUR" is a purchase, not a settlement.
+  if (settlementTitle(text) || /^(?:credit\s+)?card\s+(?:re)?payment\b|^payment\s+received\b|^سداد\s+بطاق/u.test(text)) {
+    return 'card-payment';
+  }
+  // Deposits first: "ATM DEPOSIT" is not an ATM withdrawal.
+  if (/\b(?:cash|atm|cdm)\s+deposit\b|ايداع\s+نقدي|إيداع\s+نقدي/u.test(text)) return 'cash-deposit';
+  if (/\batm\b|\bcash\s+withdrawal\b|سحب\s+(?:نقدي|صراف)/u.test(text)) return 'atm';
+  // Direction is not read here: the caller already requires the same type.
+  if (/\b(?:incoming|inward|outgoing|outward|telegraphic|own\s+account|bank|funds)\s+(?:transfer|remittance)\b|حوالة|تحويل/u
+    .test(text)) return 'transfer';
+  return undefined;
+}
+/** Titles the parser assigns from a message's shape; they name no party. */
+const BARE_STRUCTURAL_TITLE = /^(?:salary(?:\s+(?:credit|credited|transfer))?|راتب|atm withdrawal|cash withdrawal|cash deposit|incoming transfer|inward remittance|outgoing transfer|outward remittance|telegraphic transfer|own account transfer|bank transfer|card(?:\s*•\s*\d{4})?\s+payment)$/u;
+/**
+ * A structural capture title ("Salary", "ATM withdrawal", "Incoming
+ * transfer") and a statement descriptor of the same kind of event. One side
+ * must be the bare title: two descriptors naming different payers are not
+ * one salary just because both say so.
+ */
+const structuralAgree = (a: string, b: string): boolean => {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (!BARE_STRUCTURAL_TITLE.test(x) && !BARE_STRUCTURAL_TITLE.test(y)) return false;
+  const left = structuralKindOf(x);
+  const right = structuralKindOf(y);
+  if (!left || !right) return false;
+  // Some banks word a salary credit as a plain incoming transfer.
+  const salaryLike = (kind: StructuralKind) => kind === 'salary' || kind === 'transfer';
+  return left === right || (salaryLike(left) && salaryLike(right));
+};
 export const statementDescriptorsAgree = (a: string, b: string): boolean =>
-  sameDescriptor(a, b) || (settlementTitle(a) && settlementTitle(b)) ||
+  sameDescriptor(a, b) || (settlementTitle(a) && settlementTitle(b)) || structuralAgree(a, b) ||
   (!GENERIC_CAPTURE_TITLES.has(a.trim().toLowerCase()) &&
     !GENERIC_CAPTURE_TITLES.has(b.trim().toLowerCase()) && descriptorOverlap(a, b));
 
@@ -777,7 +918,10 @@ export function duplicateGuard(
       const key = statementRowKey({ captureSource: 'pdf', statementImportId: claim.importId, statementRowIndex: claim.rowIndex });
       if (!key) continue;
       statementRows.set(key, claim.date !== undefined && claim.amountFils !== undefined && claim.type !== undefined
-        ? { ...c, date: claim.date, amountFils: claim.amountFils, type: claim.type,
+        // A claim records the file row's posted facts, not its instrument: the
+        // claiming row may be the debit card that account statement row was
+        // paired with, so its card digits are not the file's.
+        ? { ...c, date: claim.date, amountFils: claim.amountFils, type: claim.type, captureInstrument: undefined,
             title: claim.title ?? c.title, userEdited: false, titleEdited: claim.title === undefined ? c.titleEdited : false }
         : c);
     }
@@ -868,7 +1012,8 @@ export function duplicateGuard(
     const day = statementPairDay(date);
     if (typeof day !== 'number') return statementPairByDay.get(day) ?? [];
     const near: SeenStatementPairEvent[] = [];
-    for (let d = day - 2; d <= day + 2; d++) {
+    const reach = Math.max(STATEMENT_POSTING_LAG_DAYS, STATEMENT_EARLY_DAYS);
+    for (let d = day - reach; d <= day + reach; d++) {
       const rows = statementPairByDay.get(d);
       if (rows) near.push(...rows);
     }
@@ -880,12 +1025,25 @@ export function duplicateGuard(
     row.statementBank ?? row.captureInstrument?.bankIdentity ??
       (row.accountId ? options.accountBankIdentity?.(row.accountId) : undefined);
   const banksCompatible = (a: string | undefined, b: string | undefined) => !a || !b || a === b;
+  /** Set by statementPairMatch when its last match paired a statement account with a debit card. */
+  let crossAccountPair = false;
   const statementPairMatch = (c: DuplicateCandidate): SeenStatementPairEvent | undefined => {
+    crossAccountPair = false;
     const incomingStatement = isStatementCaptureSource(c.captureSource);
     const incomingUpload = incomingStatement ? statementUploadOf(c) : undefined;
     const occurrence = statementRowKey(c);
+    // Instrument compatibility is checked per rule below: a bank-account
+    // statement row and a debit-card alert state different digits by design.
     const open = statementPairNear(c.date).filter((row) => {
-      if (row.consumed || row.type !== c.type || !compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument)) return false;
+      if (row.consumed || row.type !== c.type) return false;
+      // With a multi-day posting window, one alert could be claimed by a row
+      // in each of two statements (September's 29th, October's 1st) — two
+      // different purchases, one of them silently lost. A claim from another
+      // upload records that file's posted facts; a reprint of the same
+      // purchase keeps its date and amount, a different purchase does not.
+      if (incomingUpload && (row.statementOccurrences ?? []).some((claim) =>
+        claim.importId !== incomingUpload && claim.date !== undefined && claim.amountFils !== undefined &&
+        (claim.date !== c.date || claim.amountFils !== c.amountFils))) return false;
       if (!occurrence) return true;
       const keys = statementKeys(row);
       // An existing transaction can explain only one occurrence in this file,
@@ -900,23 +1058,68 @@ export function duplicateGuard(
       }
       return row;
     };
+    // Statement day minus alert day for a statement/alert pair.
+    const lagOf = (row: SeenStatementPairEvent) => incomingStatement
+      ? statementLagDays(c.date, row.date) : statementLagDays(row.date, c.date);
+    // Nearest posting first; a statement dated after the alert is the usual
+    // direction, so it outranks one dated the day before.
+    const lagScore = (row: SeenStatementPairEvent) => {
+      const lag = lagOf(row) ?? Number.POSITIVE_INFINITY;
+      return lag >= 0 ? lag * 10 : -lag * 10 + 5;
+    };
     // 1. Statement <-> live capture on the SAME resolved account. Provenance
     // permits bounded posting drift, never a contradiction in merchant identity.
     if (c.accountId && !unresolvedAccount(c.accountId)) {
       const matches = open.filter((row) =>
         !!row.accountId &&
         row.accountId === c.accountId &&
+        compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
         isStatementCaptureSource(row.captureSource) !== incomingStatement &&
         Math.abs(row.amountFils - c.amountFils) <= 1 &&
         banksCompatible(bankOf(row), bankOf(c)) &&
         statementDescriptorsAgree(row.title, c.title) &&
-        sameOrAdjacentDate(row.date, c.date));
+        withinPostingLag(lagOf(row)));
       if (matches.length) {
         matches.sort((a, b) => {
-          const score = (row: SeenStatementPairEvent) =>
-            (row.date === c.date ? 0 : 10) + Math.abs(row.amountFils - c.amountFils);
+          const score = (row: SeenStatementPairEvent) => lagScore(row) + Math.abs(row.amountFils - c.amountFils);
           return score(a) - score(b);
         });
+        return claimable(matches[0]);
+      }
+    }
+    // 1b. A purchase made with a DEBIT card is alerted against the card and
+    // printed on the ACCOUNT statement it draws from. Pair them only when
+    // both sides positively name the same bank, the statement side is a bank
+    // account, the alert side is a debit (or untyped) card, and the exact
+    // amount, posting window and merchant agree. A credit card is a separate
+    // liability and never pairs this way.
+    if (c.accountId && !unresolvedAccount(c.accountId) && options.accountInstrument) {
+      const statementSideIsAccount = (row: Pick<SeenStatementPairEvent, 'accountId' | 'captureInstrument'>) =>
+        !!row.accountId && options.accountInstrument!(row.accountId) === 'account' &&
+        (!row.captureInstrument || row.captureInstrument.kind === 'account' || row.captureInstrument.kind === 'unknown');
+      const alertSideIsDebitCard = (row: Pick<SeenStatementPairEvent, 'accountId' | 'captureInstrument'>) => {
+        if (!row.accountId) return false;
+        const kind = options.accountInstrument!(row.accountId);
+        const stated = row.captureInstrument?.kind;
+        // Positive debit evidence is required — the account's card type or
+        // the alert's own wording (mada is a debit card). An untyped card may
+        // be a credit card, which is a separate liability.
+        return (kind === 'debit' || kind === 'card') && (kind === 'debit' || stated === 'debit') &&
+          (stated === undefined || stated === 'debit' || stated === 'unknown');
+      };
+      const matches = open.filter((row) => {
+        if (!row.accountId || row.accountId === c.accountId || unresolvedAccount(row.accountId) ||
+          isStatementCaptureSource(row.captureSource) === incomingStatement || row.amountFils !== c.amountFils) return false;
+        const [statementSide, alertSide] = incomingStatement ? [c, row] : [row, c];
+        if (!statementSideIsAccount(statementSide) || !alertSideIsDebitCard(alertSide)) return false;
+        const left = bankOf(row);
+        const right = bankOf(c);
+        return !!left && left === right && withinPostingLag(lagOf(row)) &&
+          statementDescriptorsAgree(row.title, c.title);
+      });
+      if (matches.length) {
+        matches.sort((a, b) => lagScore(a) - lagScore(b));
+        crossAccountPair = true;
         return claimable(matches[0]);
       }
     }
@@ -928,6 +1131,7 @@ export function duplicateGuard(
       const match = open.find((row) =>
         isStatementCaptureSource(row.captureSource) &&
         fromDifferentStatementUploads(row, c) &&
+        compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
         row.accountId === c.accountId &&
         row.amountFils === c.amountFils &&
         row.date === c.date &&
@@ -1220,7 +1424,10 @@ export function duplicateGuard(
         // Never let a later statement descriptor overwrite a richer live row.
         // In the reverse direction the live capture may heal the stored row,
         // which keeps its persisted statement provenance for future reimports.
-        if (!isStatementCaptureSource(c.captureSource)) {
+        // Not across instruments: a debit-card alert healing an account
+        // statement row would move a file occurrence onto the card and make
+        // the next import of that same file conflict. The alert is dropped.
+        if (!isStatementCaptureSource(c.captureSource) && !crossAccountPair) {
           lastMatchedId = statementMatch.id ?? null;
         }
         return true;

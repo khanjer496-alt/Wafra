@@ -239,6 +239,58 @@ async function main() {
       failedLatest.map((o) => o.status), ['rejected', 'rejected']);
   }
 
+  // ── Renewal reminders need subscription or bill evidence ──
+  // Weekly AED 100 at ENOC is a recurring pattern, not a renewal. It used to
+  // push "ENOC renews tomorrow"; a real subscription and a bill still remind.
+  {
+    let n = 0;
+    const tx = (title, date, fils, category, extra = {}) => ({
+      id: `${title}-${date}-${n++}`, type: 'expense', amountFils: fils, category,
+      accountId: 'a', title, date, ...extra,
+    });
+    const now = new Date(2026, 9, 2, 8);
+    const enoc = ['2026-08-03', '2026-08-10', '2026-08-17', '2026-08-24', '2026-08-31',
+      '2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28'].map((d) => tx('ENOC', d, 10000, 'transport'));
+    const netflix = ['2026-07-04', '2026-08-04', '2026-09-04'].map((d) => tx('Netflix', d, 3900, 'entertainment'));
+    const loan = ['2026-07-05', '2026-08-05', '2026-09-05'].map((d) => tx('Car Loan', d, 320000, 'loan'));
+    const transactions = [...enoc, ...netflix, ...loan].sort((a, b) => (a.date < b.date ? 1 : -1));
+    const subs = remind.buildPaymentReminders(remState({ transactions }), now)
+      .filter((r) => r.kind === 'subscription').map((r) => r.title);
+    ok('a generic weekly fuel commitment never sends a renewal reminder',
+      !subs.some((title) => /ENOC/.test(title)), JSON.stringify(subs));
+    ok('a real subscription still gets its renewal reminder',
+      subs.some((title) => /Netflix/.test(title)), JSON.stringify(subs));
+    ok('a loan instalment still gets its reminder', subs.some((title) => /Car Loan/.test(title)), JSON.stringify(subs));
+  }
+
+  // ── A partial card payment lowers the minimum the reminder quotes ──
+  // AED 300 paid against a stated AED 500 minimum leaves AED 200 to reach it;
+  // quoting the original 500 told the user to pay more than they must. Same
+  // figure the payment sheet's "minimum" choice uses.
+  {
+    const cardState = (paidFils, over = {}) => remState({
+      accounts: [{ id: 'cc', name: 'Visa', kind: 'card', cardType: 'credit', openingFils: 0, color: '#fff' }],
+      cardDues: [{ id: 'd1', accountId: 'cc', totalDueFils: 400000, minDueFils: 50000,
+        dueDate: '2026-10-20', paidFils, ...over }],
+    });
+    const now = new Date(2026, 9, 2, 8);
+    const bodies = (state) => remind.buildPaymentReminders(state, now)
+      .filter((r) => r.kind === 'card').map((r) => r.body);
+    const partial = bodies(cardState(30000));
+    ok('after a partial payment the reminder quotes what is left to reach the minimum',
+      partial.length > 0 && partial.every((b) => /3,700/.test(b) && /200/.test(b) && !/500/.test(b)),
+      JSON.stringify(partial));
+    const unpaid = bodies(cardState(0));
+    ok('with nothing paid the stated minimum is quoted in full',
+      unpaid.length > 0 && unpaid.every((b) => /4,000/.test(b) && /500/.test(b)), JSON.stringify(unpaid));
+    const met = bodies(cardState(60000));
+    ok('once the minimum is met only the outstanding is quoted',
+      met.length > 0 && met.every((b) => /3,400/.test(b) && !/·/.test(b)), JSON.stringify(met));
+    const estimated = bodies(cardState(0, { minDueEstimated: true }));
+    ok('an estimated minimum is still never quoted',
+      estimated.length > 0 && estimated.every((b) => !/·/.test(b)), JSON.stringify(estimated));
+  }
+
   // ── Wiring in the native half ──
   {
     const notifications = stripComments(read('src/lib/notifications.ts'));

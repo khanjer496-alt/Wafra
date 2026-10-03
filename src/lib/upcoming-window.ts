@@ -14,7 +14,7 @@ import type { PaymentAgendaItem } from '@/lib/reference-presentation';
 
 /** How an agenda row repeats; `null` or no entry = it does not (a card statement). */
 export interface AgendaRecurrence {
-  cadence: 'weekly' | 'monthly' | 'yearly';
+  cadence: 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly';
   /**
    * Day of month the payment is anchored to, when a short month clamps it
    * (a bill on the 31st falls on 28 Feb and returns to 31 Mar). Defaults to
@@ -71,9 +71,10 @@ export function recurrenceDatesInWindow(
   // A yearly payment can repeat at most once in any window this app uses; a
   // weekly one at most windowDays / 7 + 1 times. The cap only guards a bad date.
   for (let step = 1; step <= 60; step += 1) {
-    const next = recurrence.cadence === 'weekly'
-      ? addDaysISO(firstISO, step * 7)
-      : addCalendarMonths(firstISO, recurrence.cadence === 'monthly' ? step : step * 12, anchorDay);
+    const next = recurrence.cadence === 'weekly' || recurrence.cadence === 'biweekly'
+      ? addDaysISO(firstISO, step * (recurrence.cadence === 'weekly' ? 7 : 14))
+      : addCalendarMonths(firstISO,
+        step * (recurrence.cadence === 'monthly' ? 1 : recurrence.cadence === 'quarterly' ? 3 : 12), anchorDay);
     if (next > endISO) break;
     if (next < todayISO || recurrence.isPaid?.(next)) continue;
     dates.push(next);

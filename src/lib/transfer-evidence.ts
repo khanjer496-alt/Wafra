@@ -88,6 +88,42 @@ function safeName(value: unknown): string | undefined {
   return name;
 }
 
+/** An institution or channel after "from" is routing, never a sender. */
+function institutionLabel(name: string): boolean {
+  if (/\bbank(?:ing)?\b|^(?:بنك|مصرف)(?:\s|$)/iu.test(name)) return true;
+  const trimmed = name.replace(/\s+(?:p\.?\s?j\.?\s?s\.?\s?c\.?|plc|ltd|limited)\.?$/i, '').trim();
+  return recognizedBankIdentity(trimmed) !== undefined;
+}
+
+// What may follow a sender's name. The name itself stays letters only, so a
+// masked account, amount or date can never be lifted as a person.
+const NAME_END = String.raw`(?=\s+(?:to|into|in|on|via|through|for|with|ref|reference|at|dated|date|has|have|was|is|are|and|towards|using|by|account|a\/c|iban)\b|\s*(?:[,;:()\n/]|\.(?:\s|$)|-\s)|\s*$)`;
+const GENERIC_SOURCE = /^(?:your|our|the|a|an|my|own|self|account|card|savings?|current|deposit|wallet|atm|branch|mobile|online|internet|app|cash|instant|local|international|domestic|transfer|remittance|funds?|ipp|uaefts|swift|sarie|salary|payroll)\b/i;
+const EN_SENDER = new RegExp(String.raw`\b(?:from|b\/o|by\s+order\s+of|sent\s+by|remitter|sender)\s*:?\s+([\p{L}][\p{L}\p{M} .'&-]{0,79}?)${NAME_END}`, 'giu');
+// Arabic "من X" only after a transfer/receipt word, and never "from your
+// account", "through" or "by" — those name an instrument, not a person.
+// Text is already orthography-folded, so "على" reads as "علي", which is also
+// the name Ali: it ends a name only before an account or card word.
+const AR_SENDER = /(?:حواله|حوالات|تحويل|ايداع|استلام|وارده)(?:[^.\n،]|\.(?=\d)){0,60}?\sمن\s+(?!(?:حساب|حسابك|بطاقه|بطاقتك|خلال|قبل|رقم|تاريخ)(?:\s|$|[،.:]))([\u0621-\u064A][\u0621-\u064A\u064B-\u065F ]{1,79}?)(?=\s+(?:الي|في|بتاريخ|رقم|عبر|لحساب|بمبلغ|مبلغ|بقيمه|الرصيد)(?:\s|$|[،.:])|\s+علي\s+(?:حساب|بطاق)|\s*[،,.:;()\n]|\s+[\dA-Za-z]|\s*$)/gu;
+
+/**
+ * The payer a credit names ("received from AHMED ALI", "transfer from X",
+ * "B/O X", Arabic "حوالة واردة من X"). A named payer is display/suggestion
+ * evidence only: it may be the person themself, so it never proves either
+ * ownership or a third party. It does stop amount-and-time inference from
+ * silently hiding the credit as an own-account move.
+ */
+function incomingSenderName(raw: string): string | undefined {
+  for (const pattern of [EN_SENDER, AR_SENDER]) {
+    for (const match of raw.matchAll(pattern)) {
+      const name = safeName(match[1]);
+      if (!name || GENERIC_SOURCE.test(name) || institutionLabel(name)) continue;
+      return name;
+    }
+  }
+  return undefined;
+}
+
 function maskedSourceKey(raw: string, bank: string): string | undefined {
   // A mask with only one to three final digits cannot become a four-digit
   // account. Preserve a scoped opaque hint, not a guessed bank account number.
@@ -179,6 +215,7 @@ export function buildTransferEvidence(
         counterpartyName = safeName(raw.match(/\bYour local transfer of\s+[A-Z]{3}\s+[\d,.]+\s+to\s+(.{2,80}?)\s+from your account number\b/i)?.[1]);
       }
     }
+    if (alert.type === 'income' && !counterpartyName) counterpartyName = incomingSenderName(raw);
   } else {
     if (carried) {
       counterparty = safeCounterparty(carried.counterparty);

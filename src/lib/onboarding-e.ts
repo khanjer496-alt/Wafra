@@ -130,7 +130,9 @@ export function onboardingEResumeStep(
  * Goals are applied in this precedence, not in tap order, so the same answers
  * always give the same Home: money about to leave first, then spending, then
  * the overview. Sections no goal names keep their current relative order,
- * after the promoted ones. No goals leaves the order exactly as it was.
+ * after the promoted ones, except that Due and Upcoming payments always come
+ * before Recent activity (paymentsBeforeActivity). No goals leaves the order
+ * exactly as it was.
  */
 export type GoalHomeSectionId = Extract<HomeWidgetId, 'due' | 'upcoming' | 'activity' | 'assistant' | 'insight'>;
 export const GOAL_HOME_SECTIONS: Record<GoalId, readonly GoalHomeSectionId[]> = {
@@ -173,7 +175,25 @@ export function homeOrderForGoals(
     && (isHomeBandSection(base.order[bandRun]) || base.hidden.includes(base.order[bandRun]))) bandRun++;
   const band = base.order.slice(0, bandRun).filter((section) => !promoted.includes(section));
   const rest = base.order.slice(bandRun).filter((section) => !promoted.includes(section));
-  return { order: [...band, ...promoted, ...rest], hidden: [...base.hidden] };
+  return { order: [...band, ...paymentsBeforeActivity([...promoted, ...rest])], hidden: [...base.hidden] };
+}
+
+const PAYMENT_SECTIONS: readonly HomeWidgetId[] = ['due', 'upcoming'];
+
+/**
+ * Due and upcoming payments always come before recent activity in a
+ * goal-ordered sheet: money about to leave is read before money that left.
+ * Both sections draw nothing when there is nothing to pay, so this costs an
+ * empty Home no space. Payments that already lead activity keep their place,
+ * and their relative order is kept when they move.
+ */
+function paymentsBeforeActivity(order: readonly HomeWidgetId[]): HomeWidgetId[] {
+  const at = order.indexOf('activity');
+  const late = order.filter((section, index) => PAYMENT_SECTIONS.includes(section) && at >= 0 && index > at);
+  if (late.length === 0) return [...order];
+  const rest = order.filter((section) => !late.includes(section));
+  rest.splice(rest.indexOf('activity'), 0, ...late);
+  return rest;
 }
 
 /**
@@ -198,17 +218,19 @@ export function repairGoalOrderedHome(current: HomeWidgetPreferences): HomeWidge
   while (bandEnd < base.order.length && isHomeBandSection(base.order[bandEnd])) bandEnd++;
   if (goalRun === 0 || bandEnd === goalRun) return null;
   return {
-    order: [...base.order.slice(goalRun, bandEnd), ...base.order.slice(0, goalRun), ...base.order.slice(bandEnd)],
+    order: [...base.order.slice(goalRun, bandEnd),
+      ...paymentsBeforeActivity([...base.order.slice(0, goalRun), ...base.order.slice(bandEnd)])],
     hidden: [...base.hidden],
   };
 }
 
-/** The section the chosen goals put first on Home's sheet, for the Goals step's hint. */
+/**
+ * The first section the chosen goals promote, for the Goals step's hint. A
+ * payments section the goals did not name can still draw ahead of it
+ * (paymentsBeforeActivity); the activity hint says so.
+ */
 export function firstHomeSectionForGoals(goals: readonly GoalId[]): GoalHomeSectionId | null {
-  for (const goal of GOAL_HOME_PRECEDENCE) {
-    if (goals.includes(goal)) return GOAL_HOME_SECTIONS[goal][0] ?? null;
-  }
-  return null;
+  return (paymentsBeforeActivity(promotedSections(goals))[0] as GoalHomeSectionId | undefined) ?? null;
 }
 
 /** Toggle one goal, keeping the canonical order `sanitizeGoalIds` stores. */

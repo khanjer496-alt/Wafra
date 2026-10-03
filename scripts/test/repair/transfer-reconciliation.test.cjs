@@ -205,6 +205,78 @@ test('amount-time ownership stays fail-closed for named recipients, distant rows
   assert.deepEqual(sorted(reconcileTransfers([outgoing, incoming, collision], [fab]).internalIds), []);
 });
 
+test('a credit naming its payer is never auto-confirmed against an unnamed debit, only suggested', () => {
+  const adcb = bank('adcb-cur', '1234', 'ADCB');
+  const wio = bank('wio', '5678', 'Wio');
+  const debit = row('instant-out', 'expense', {
+    accountId: adcb.id, ts: NOW, captureInstrument: instrument(adcb),
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'adcb' },
+  });
+  const credit = row('wio-in', 'income', {
+    accountId: wio.id, ts: NOW + 4 * 60_000, captureInstrument: instrument(wio),
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'wio' },
+  });
+  // Control: two unnamed legs keep the deliberate amount-and-time inference.
+  const unnamed = reconcileTransfers([debit, credit], [adcb, wio]);
+  assert.deepEqual(sorted(unnamed.internalIds), ['instant-out', 'wio-in']);
+
+  const named = { ...credit, transferEvidence: { ...credit.transferEvidence, counterpartyName: 'AHMED ALI' } };
+  const result = reconcileTransfers([debit, named], [adcb, wio]);
+  assert.deepEqual(sorted(result.internalIds), [], 'a named payer cannot be hidden as an own-account move');
+  assert.equal(result.byId.get('instant-out').status, 'likely-own');
+  assert.equal(result.byId.get('wio-in').status, 'likely-own');
+  assert.equal(result.byId.get('wio-in').counterpartId, 'instant-out');
+  assert.deepEqual(sorted(result.pendingIds), ['instant-out', 'wio-in']);
+  assert.equal(ledger.isIncome(named, undefined, result.internalIds), false,
+    'an unresolved suggestion stays out of income until the person decides');
+  // A payer name earns no longer suggestion window than an unnamed credit.
+  const late = reconcileTransfers([debit, { ...named, ts: NOW + 45 * 60_000 }], [adcb, wio]);
+  assert.equal(late.byId.get('instant-out').status, 'ownership-unknown');
+});
+
+test('an explicit own transfer naming its destination tail pairs a delayed receiving credit', () => {
+  const current = bank('enbd-cur', '1234', 'Emirates NBD');
+  const savings = bank('enbd-sav', '5679', 'Emirates NBD');
+  const other = bank('enbd-other', '7777', 'Emirates NBD');
+  const all = [current, savings, other];
+  const debit = row('own-out', 'expense', {
+    accountId: current.id, title: 'Own account transfer', isTransfer: true, ts: NOW,
+    captureInstrument: instrument(current),
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'emirates nbd',
+      counterparty: { last4: '5679', kind: 'account' }, endpointProof: 'explicit-transfer', explicitOwn: true },
+  });
+  const credit = (id, account, ts, extra = {}) => row(id, 'income', {
+    accountId: account.id, ts, captureInstrument: instrument(account),
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'emirates nbd',
+      postingForm: 'credit-receipt' }, ...extra,
+  });
+  const nextDay = credit('sav-in', savings, NOW + 86_400_000);
+  const result = reconcileTransfers([debit, nextDay], all);
+  assert.deepEqual(sorted(result.internalIds), ['own-out', 'sav-in']);
+  assert.equal(result.byId.get('sav-in').status, 'confirmed-own');
+  assert.equal(result.byId.get('sav-in').reason, 'explicit-ownership');
+  assert.equal(result.byId.get('own-out').counterpartId, 'sav-in');
+  assert.equal(ledger.isIncome(nextDay, undefined, result.internalIds), false);
+
+  const unpaired = rows => reconcileTransfers(rows, all).byId.get('own-out').status;
+  assert.equal(unpaired([debit, credit('other-in', other, NOW + 86_400_000)]), 'counterpart-missing',
+    'a credit to a different tail is not the stated destination');
+  assert.equal(unpaired([debit, credit('sav-late', savings, NOW + 3 * 86_400_000 + 1)]), 'counterpart-missing');
+  assert.equal(unpaired([debit, credit('sav-before', savings, NOW - 86_400_000)]), 'counterpart-missing',
+    'the receiving leg cannot precede the transfer it receives');
+  assert.equal(unpaired([debit, credit('sav-usd', savings, NOW + 86_400_000, { amountFils: 10001 })]), 'counterpart-missing');
+  const twice = reconcileTransfers([debit, credit('sav-1', savings, NOW + 3_600_000),
+    credit('sav-2', savings, NOW + 86_400_000)], all);
+  assert.deepEqual(sorted(twice.internalIds), ['own-out'], 'two possible receipts stay unresolved');
+  // A stated destination also rejects a near posting on another account...
+  assert.equal(unpaired([debit, credit('other-near', other, NOW + 60_000)]), 'counterpart-missing');
+  // ...and a prompt receipt still wins over a later same-amount credit.
+  const prompt = reconcileTransfers([debit, credit('sav-now', savings, NOW + 60_000),
+    credit('sav-later', savings, NOW + 86_400_000)], all);
+  assert.equal(prompt.byId.get('own-out').counterpartId, 'sav-now');
+  assert.equal(prompt.internalIds.has('sav-later'), false);
+});
+
 test('generic Business-labelled transfers still match evidence while named business receipts remain income', () => {
   const evidenced = pair({ category: 'business' }, { category: 'business' });
   assert.deepEqual(sorted(reconcileTransfers(evidenced, accounts).internalIds), ['in', 'out']);
