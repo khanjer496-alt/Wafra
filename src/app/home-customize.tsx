@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { BandTitle } from '@/components/settings-band/band-title';
-import { SettingsGroupTitle, SettingsIconTile } from '@/components/settings-rows';
+import { SettingsGroupTitle } from '@/components/settings-rows';
 import { ThemedText } from '@/components/themed-text';
 import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
 import { EButton } from '@/components/ui/band/e-button';
@@ -32,6 +32,10 @@ const ICONS: Record<HomeWidgetId, IconName> = {
   greeting: 'sun', overview: 'wallet', today: 'calendar', week: 'chart', capture: 'mail',
   assistant: 'spark', insight: 'trend', due: 'calendar', activity: 'receipt', upcoming: 'repeat',
 };
+/** One meta line plus the footer's top padding, until the panel reports its size. */
+const FOOTER_ESTIMATE = 28;
+/** BandScaffold's own end padding (Spacing.four) when a footer is present. */
+const CONTENT_END = 24;
 type SaveStatus = 'loading' | 'saved' | 'saving' | 'error';
 const defaults = (): HomeWidgetPreferences => ({ order: [...DEFAULT_HOME_WIDGETS.order], hidden: [...DEFAULT_HOME_WIDGETS.hidden] });
 
@@ -45,6 +49,7 @@ export default function HomeCustomizeScreen() {
   const [loaded, setLoaded] = useState(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('loading');
   const [leaving, setLeaving] = useState(false);
+  const [footerHeight, setFooterHeight] = useState(FOOTER_ESTIMATE);
   const current = useRef(preferences);
   const alive = useRef(true);
   const closing = useRef(false);
@@ -119,9 +124,12 @@ export default function HomeCustomizeScreen() {
   const statusLabel = saveStatus === 'loading' ? t('stillLoading')
     : saveStatus === 'saving' ? copy.saving : saveStatus === 'error' ? copy.saveError : copy.saved;
 
-  return <BandScaffold band="home" testID="home-customize-screen" nav={nav} contentStyle={styles.content}
+  return <BandScaffold band="home" testID="home-customize-screen" nav={nav}
+    // The save line sits under the scroll view; the sheet's end clears its
+    // full height so Reset is never left under it, at any text size.
+    contentStyle={[styles.content, { paddingBottom: CONTENT_END + footerHeight }]}
     bandContent={<BandTitle title={copy.title} body={copy.body} palette={band} testID="home-customize-title" />}
-    footer={<View style={styles.savePanel}>
+    footer={<View style={styles.savePanel} onLayout={event => setFooterHeight(Math.ceil(event.nativeEvent.layout.height))}>
       <ThemedText testID="home-customize-save-status" type="meta" accessibilityLiveRegion="polite"
         accessibilityRole={saveStatus === 'error' ? 'alert' : 'text'} style={{ color: saveStatus === 'error' ? band.statusOver : band.textSecondary }}>{statusLabel}</ThemedText>
       {saveStatus === 'error' ? <View style={styles.errorActions}>
@@ -133,14 +141,17 @@ export default function HomeCustomizeScreen() {
         </Pressable>
       </View> : null}
     </View>}>
+    {/* A compact miniature of Home's order: numbered pills that wrap, so all
+        ten sections read at a glance without pushing the controls below the
+        fold. The list underneath carries the same order with its controls. */}
     <View style={styles.previewSection}>
       <SettingsGroupTitle title={copy.previewTitle} palette={band} />
       <View testID="home-customize-preview" style={[styles.preview, { backgroundColor: band.band }]}>
         {visible.length ? visible.map((id, index) => <View key={id} testID={`home-customize-preview-${id}`}
           accessible accessibilityRole="text" accessibilityLabel={`${index + 1}. ${copy.widgetTitle[id]}`}
-          style={[styles.previewRow, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.bandRule }]}>
-          <ThemedText type="meta" tabular maxFontSizeMultiplier={1.5} style={[styles.previewIndex, { color: band.onBandSecondary }]}>{index + 1}</ThemedText>
-          <Icon name={ICONS[id]} size={16} color={band.onBandSecondary} />
+          style={[styles.previewPill, { backgroundColor: band.tile }]}>
+          <ThemedText type="micro" tabular maxFontSizeMultiplier={1.5} style={{ color: band.onBandSecondary }}>{index + 1}</ThemedText>
+          <Icon name={ICONS[id]} size={13} color={band.onBandSecondary} />
           <ThemedText type="meta" maxFontSizeMultiplier={1.5} style={[styles.previewTitle, { color: band.onBand }]}>{copy.widgetTitle[id]}</ThemedText>
         </View>) : <ThemedText type="small" testID="home-customize-preview-empty" style={{ color: band.onBand }}>{copy.previewEmpty}</ThemedText>}
       </View>
@@ -148,43 +159,44 @@ export default function HomeCustomizeScreen() {
     </View>
     <View style={styles.list} testID="home-customize-sections">
       <SettingsGroupTitle title={copy.yourSections} palette={band} />
-      <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.reorderHint}</ThemedText>
+      <ThemedText type="meta" style={[styles.hint, { color: band.textSecondary }]}>{copy.reorderHint}</ThemedText>
       {/* Listed in the order Home draws them, like the preview. A move is one
           drawn step; a step Home cannot draw (the overview on the band) is
           disabled rather than offered as a press that changes nothing. */}
-      {drawnHomeWidgetOrder(preferences).map((id) => {
+      {drawnHomeWidgetOrder(preferences).map((id, index) => {
         const shown = !preferences.hidden.includes(id);
         const title = copy.widgetTitle[id];
         const first = moveHomeWidgetDrawn(preferences, id, -1) === null;
         const last = moveHomeWidgetDrawn(preferences, id, 1) === null;
-        return <View key={id} testID={`home-customize-${id}`} style={[styles.card, { backgroundColor: band.card }]}>
-          <View style={[styles.titleRow, largeText && styles.titleRowLarge]}>
-            <SettingsIconTile icon={ICONS[id]} palette={band} />
-            <View style={[styles.copy, largeText && styles.copyLarge]}>
-              <ThemedText type="smallBold" maxFontSizeMultiplier={2} style={[styles.rowTitle, { color: shown ? band.text : band.textSecondary }]}>{title}</ThemedText>
-              <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.widgetDetail[id]}</ThemedText>
-            </View>
+        // One row per section, as on the design: words, then a switch and the
+        // two arrows. Larger Text stacks the controls under the words.
+        return <View key={id} testID={`home-customize-${id}`} style={[styles.row, largeText && styles.rowLarge,
+          { borderColor: band.rule }, index === 0 && styles.firstRow]}>
+          <View style={[styles.copy, largeText && styles.copyLarge]}>
+            <ThemedText type="smallBold" maxFontSizeMultiplier={2} style={[styles.rowTitle, { color: shown ? band.text : band.textSecondary }]}>{title}</ThemedText>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.widgetDetail[id]}</ThemedText>
           </View>
           <View style={styles.actions}>
             <Pressable testID={`home-customize-toggle-${id}`} accessibilityRole="switch" accessibilityLabel={title}
               accessibilityState={{ checked: shown, disabled: !enabled }} aria-checked={shown} disabled={!enabled}
               onPress={() => update(before => setHomeWidgetVisible(before, id, before.hidden.includes(id)))}
-              style={[styles.visibility, { borderColor: band.rule, backgroundColor: shown ? band.glyphGround : 'transparent', opacity: enabled ? 1 : 0.5 }]}>
-              <Icon name={shown ? 'check' : 'close'} size={16} color={band.text} />
-              <ThemedText type="meta" style={{ color: band.text }}>{shown ? copy.shown : copy.hidden}</ThemedText>
+              style={[styles.switchTarget, { opacity: enabled ? 1 : 0.5 }]}>
+              <View style={[styles.track, shown ? { backgroundColor: band.fill, borderColor: band.fill } : { backgroundColor: band.glyphGround, borderColor: band.rule }]}>
+                <View style={[styles.knob, shown && styles.knobOn, { backgroundColor: shown ? band.onFill : band.card }]} />
+              </View>
             </Pressable>
             <View style={styles.moves}>
               <Pressable testID={`home-customize-up-${id}`} accessibilityRole="button" accessibilityLabel={`${t('moveUp')} ${title}`}
                 accessibilityState={{ disabled: first || !enabled }} disabled={first || !enabled}
                 onPress={() => update(before => moveHomeWidgetDrawn(before, id, -1) ?? before)}
-                style={({ pressed }) => [styles.iconButton, { backgroundColor: band.glyphGround }, (first || !enabled) && styles.disabled, pressed && styles.pressed]}>
-                <Icon name="arrow-up" size={20} color={band.text} />
+                style={({ pressed }) => [styles.iconButton, (first || !enabled) && styles.disabled, pressed && styles.pressed]}>
+                <Icon name="arrow-up" size={18} color={band.tint} />
               </Pressable>
               <Pressable testID={`home-customize-down-${id}`} accessibilityRole="button" accessibilityLabel={`${t('moveDown')} ${title}`}
                 accessibilityState={{ disabled: last || !enabled }} disabled={last || !enabled}
                 onPress={() => update(before => moveHomeWidgetDrawn(before, id, 1) ?? before)}
-                style={({ pressed }) => [styles.iconButton, { backgroundColor: band.glyphGround }, (last || !enabled) && styles.disabled, pressed && styles.pressed]}>
-                <Icon name="arrow-down" size={20} color={band.text} />
+                style={({ pressed }) => [styles.iconButton, (last || !enabled) && styles.disabled, pressed && styles.pressed]}>
+                <Icon name="arrow-down" size={18} color={band.tint} />
               </Pressable>
             </View>
           </View>
@@ -197,19 +209,25 @@ export default function HomeCustomizeScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { gap: 24 }, previewSection: { gap: 10 },
-  preview: { borderRadius: 22, paddingHorizontal: 16, paddingVertical: 10 },
-  previewRow: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 7 },
-  previewIndex: { minWidth: 22 }, previewTitle: { flex: 1, flexShrink: 1 },
-  list: { gap: 12 }, card: { borderRadius: 22, padding: 16, gap: 16 },
-  titleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  titleRowLarge: { flexDirection: 'column' },
-  copy: { flex: 1, minWidth: 0, gap: 4 },
+  content: { gap: 20 }, previewSection: { gap: 8 },
+  preview: { borderRadius: 18, padding: 10, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  previewPill: { minHeight: 26, maxWidth: '100%', borderRadius: 13, paddingHorizontal: 9, paddingVertical: 3,
+    flexDirection: 'row', alignItems: 'center', gap: 5 },
+  previewTitle: { flexShrink: 1 },
+  list: { gap: 0 }, hint: { paddingBottom: 6 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 60, paddingVertical: 6, borderTopWidth: StyleSheet.hairlineWidth },
+  rowLarge: { flexDirection: 'column', alignItems: 'stretch', paddingVertical: 10 },
+  firstRow: { borderTopWidth: 0 },
+  copy: { flex: 1, minWidth: 0, gap: 1 },
   copyLarge: { flex: 0, alignSelf: 'stretch' },
-  rowTitle: { fontFamily: Fonts.sansSemi, fontSize: 17, lineHeight: 23 },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  visibility: { minHeight: 48, borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
-  moves: { flexDirection: 'row', gap: 6 },
+  rowTitle: { fontFamily: Fonts.sansSemi, fontSize: 16, lineHeight: 21 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 2 },
+  // The switch's visible track is 44×26; its target is the full 48pt square.
+  switchTarget: { minWidth: 52, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+  track: { width: 44, height: 26, borderRadius: 13, borderWidth: 1, padding: 2, justifyContent: 'center' },
+  knob: { width: 20, height: 20, borderRadius: 10 },
+  knobOn: { alignSelf: 'flex-end' },
+  moves: { flexDirection: 'row' },
   iconButton: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   disabled: { opacity: 0.3 }, pressed: { opacity: 0.6 },
   savePanel: { gap: 4 }, errorActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },

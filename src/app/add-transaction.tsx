@@ -424,9 +424,9 @@ export default function AddTransactionScreen() {
             ]}>
             {selected ? <>
               <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
-              {/* The review field lets a long account name wrap (Larger Text);
-                  the compact chip keeps one line. */}
-              <ThemedText type="small" style={chip ? styles.chipText : styles.accountTriggerName} numberOfLines={chip ? 1 : undefined}>
+              {/* Never cut short: the chip row wraps, so a long account
+                  name takes its own line (and wraps under Larger Text). */}
+              <ThemedText type="small" style={chip ? styles.chipText : styles.accountTriggerName}>
                 {accountDisplayName(selected)}
               </ThemedText>
             </> : <ThemedText type="small" themeColor="textSecondary" style={chip ? styles.chipText : styles.accountTriggerName}>
@@ -1089,9 +1089,11 @@ export default function AddTransactionScreen() {
       )}
 
       {/* One row for the three things a manual entry still needs: what it
-          was, when, and which account. Each chip opens its own picker. */}
+          was, when, and which account. Each chip opens its own picker. The
+          row wraps rather than scrolls: a sideways row hid the account chip
+          past the screen edge ("Emirat…"). */}
       {!reviewItem ? <View testID="add-detail-chips" style={styles.chipRowWrap}>
-        <ScrollView {...CHIP_SCROLL} contentContainerStyle={styles.chipRow}>
+        <View style={styles.chipRow}>
         <View
           ref={categoryRef}
           collapsable={false}
@@ -1114,7 +1116,7 @@ export default function AddTransactionScreen() {
               backgroundColor: pressed ? band.rule : band.card,
             }]}>
             {category && <Icon name={getCategory(category).icon} size={16} color={theme.textSecondary} />}
-            <ThemedText type="small" numberOfLines={1}>
+            <ThemedText type="small" style={styles.chipText}>
               {category ? categoryLabel(getCategory(category)) : tUi('category')}
             </ThemedText>
             <Icon name="chevron-down" size={16} color={theme.textSecondary} />
@@ -1138,7 +1140,7 @@ export default function AddTransactionScreen() {
           </Pressable>
         </View>
         {accountGroup('chip')}
-        </ScrollView>
+        </View>
         {categoryInvalid && (
           <ThemedText
             type="meta"
@@ -1392,12 +1394,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.one,
   },
   chipRowWrap: { gap: Spacing.two },
-  chipRow: { gap: Spacing.two, paddingEnd: Spacing.two },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.two, rowGap: Spacing.two + 2 },
   chipScroll: { gap: Spacing.two, paddingEnd: Spacing.two },
-  chipGroup: { gap: Spacing.one },
+  chipGroup: { gap: Spacing.one, maxWidth: '100%', flexShrink: 1 },
   chip: {
     minHeight: 44,
-    maxWidth: 240,
+    maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.one + 2,

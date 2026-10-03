@@ -84,7 +84,10 @@ function TransactionRowInner({ transaction, account, onPress, internal, merchant
     ? { accessibilityActions: [...accessibilityActions],
       onAccessibilityAction: (event: { nativeEvent: { actionName: string } }) => onAccessibilityAction(event.nativeEvent.actionName) }
     : {};
-  const amountText = <ThemedText type="smallBold" tabular style={[styles.amount, { color: isIncome ? theme.income : theme.text }]}>
+  // A transfer's amount is quieter than spending's: it moves money rather
+  // than spends it, and a day's total beside it may leave it out.
+  const amountColor = isIncome ? theme.income : isTransfer || pending ? theme.textSecondary : theme.text;
+  const amountText = <ThemedText type="smallBold" tabular style={[styles.amount, { color: amountColor }]}>
     {presentation.repayment ? '' : arrived ? '+' : '−'}{formatAmount(transaction.amountFils, { decimals: true })}
   </ThemedText>;
   const secondary = <>

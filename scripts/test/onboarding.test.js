@@ -1035,7 +1035,7 @@ const emptyLedger = {
 i18n.setLanguage('en');
 eq('balance-coverage copy resolves every placeholder',
   i18n.tf('balanceCoverage', { known: 2, total: 4 }),
-  'Balances recorded for 2 of 4 active accounts');
+  '2 of 4 balances recorded');
 
 /* Net worth: a sum of nothing is not an answer.
  *

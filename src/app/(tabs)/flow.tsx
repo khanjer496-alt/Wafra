@@ -44,7 +44,7 @@ import { usePeriod } from '@/lib/period-context';
 import { periodDayProgress } from '@/lib/period-pace';
 import { spendingTrendsCopy } from '@/lib/reference-copy';
 import { spendingDailyView } from '@/lib/spending-daily';
-import { spendingCategoryRows } from '@/lib/reference-presentation';
+import { spendingCategoryRows, spendingShare, spendingShareLabel } from '@/lib/reference-presentation';
 import { useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
 import { t, tf } from '@/lib/i18n';
@@ -157,9 +157,9 @@ export default function FlowScreen() {
     [category, state.transactions, categoryHistoryAnchor, live, internal]);
   const categoryHistoryMax = Math.max(1, ...categoryHistory.map((month) => month.fils));
   const categorySpentFils = selectedCategory?.spentFils ?? 0;
-  const categorySharePercent = summary.expenseFils > 0
-    ? Math.round(categorySpentFils / summary.expenseFils * 100)
-    : 0;
+  // The same share and label the category list prints, so the sheet can never
+  // say "0%" beside a row that says "0.4%" for the same category and period.
+  const categoryShareLabel = spendingShareLabel(spendingShare(categorySpentFils, summary.expenseFils), language);
   const categoryHistoryAverage = categoryHistory.length > 0
     ? Math.round(categoryHistory.reduce((total, month) => total + month.fils, 0) / categoryHistory.length)
     : 0;
@@ -413,7 +413,7 @@ export default function FlowScreen() {
           <Money fils={categorySpentFils} type="amount" />
           <View style={styles.categoryHeroMeta}>
             <ThemedText type="meta" style={{ color: band.textSecondary }}>
-              {categorySharePercent}% {w.share}
+              {categoryShareLabel} {w.share}
             </ThemedText>
             {categoryMonthDeltaPercent != null && categoryPreviousMonth ? (
               <ThemedText type="meta" style={{ color: band.textSecondary }}>

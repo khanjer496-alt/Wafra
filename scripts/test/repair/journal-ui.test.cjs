@@ -127,7 +127,9 @@ test('incoming transfer remains positive but not coloured as earned income', () 
     category: 'other', type: 'income' }, internal: true });
   const amount = walk(row).find((node) => node.type === 'Text' && text(node.props.children).startsWith('+'));
   assert.ok(amount);
-  assert.equal(amount.props.style[1].color, h.theme.text);
+  // Never income green; a transfer's amount is the quieter secondary tone.
+  assert.notEqual(amount.props.style[1].color, h.theme.income);
+  assert.equal(amount.props.style[1].color, h.theme.textSecondary);
 });
 test('Arabic and larger text render the same controls without English journal headings', () => {
   const h = harness({ language: 'ar', largeText: true, theme: 'dark' });
