@@ -64,6 +64,8 @@ export function BillsTimeline({ items, todayISO, palette }: {
 
 const styles = StyleSheet.create({
   root: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 6, rowGap: 8, paddingTop: 2 },
-  pin: { width: 46, alignItems: 'center', gap: 3 },
+  // At least the logo's column; a longer date (Arabic, Larger Text) widens
+  // its own cell rather than overflowing it.
+  pin: { minWidth: 46, maxWidth: '100%', alignItems: 'center', gap: 3 },
   date: { textAlign: 'center', fontSize: 11.5, lineHeight: 14 },
 });
