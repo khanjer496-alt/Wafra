@@ -573,6 +573,15 @@ function buildImportPlanInMarket(
         unresolvedAccount: (accountId) =>
           accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID || accountId === UNASSIGNED_INCOME_ACCOUNT_ID ||
           isUnassignedTransferAccount(accountId),
+        // A bank-account statement row may meet the debit-card alert for the
+        // same purchase; this says which side of that pair an account is.
+        accountInstrument: (accountId) => {
+          const account = accountAtRef(accountId);
+          if (!account) return undefined;
+          if (account.kind === 'bank') return 'account';
+          if (account.kind !== 'card') return undefined;
+          return effectiveCardType(accountId, account) ?? 'card';
+        },
       });
       for (const id of protectedEditedPushConsumed) guardCache.consume(id);
       for (const candidate of protectedReplacementCandidates) guardCache.add(candidate);

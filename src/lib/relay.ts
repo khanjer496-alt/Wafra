@@ -1595,6 +1595,12 @@ export type ParsedRelayRow = Omit<ParsedSms, 'raw'> & {
 };
 
 const MAX_RELAY_SENDER_LENGTH = 80;
+/**
+ * The Worker's statement parser accepts descriptions up to 180 characters
+ * (server/src/imports.ts). A lower cap here acknowledged and then silently
+ * dropped a long POS row the server had already accepted, so the two match.
+ */
+export const MAX_RELAY_MERCHANT_LENGTH = 180;
 const RELAY_CATEGORIES = new Set([
   'groceries',
   'dining',
@@ -1681,7 +1687,7 @@ export function isParsedRelayRow(
     typeof row.merchant !== 'string' ||
     row.merchant !== row.merchant.trim() ||
     row.merchant.length < 1 ||
-    row.merchant.length > 160 ||
+    row.merchant.length > MAX_RELAY_MERCHANT_LENGTH ||
     /[\u0000-\u001F\u007F-\u009F]/u.test(row.merchant)
   ) return false;
   if (!validIsoDate(row.date)) return false;
