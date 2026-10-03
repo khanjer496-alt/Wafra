@@ -48,7 +48,16 @@ check(WafraDates.dueLabel(day("2026-10-01"), now: lateNight, strings: en) == "To
 check(WafraInitial.of("DEWA") == "D", "initial of DEWA")
 check(WafraInitial.of("  netflix") == "N", "initial skips spaces and uppercases")
 check(WafraInitial.of("•••• 1234") == nil, "masked card has no letter, so no digit tile")
-check(WafraInitial.of("الكهرباء") == "ا", "Arabic initial")
+check(WafraInitial.of("كهرباء") == "ك", "Arabic initial")
+check(WafraInitial.of("الكهرباء") == "ك", "Arabic initial skips the article")
+check(WafraInitial.of("الإيجار") == "إ", "Arabic initial skips the article before a hamza")
+check(WafraInitial.of("ال") == "ا", "a bare article keeps its first letter")
+check(WafraInitial.of("Allianz") == "A", "Latin titles are untouched")
+
+// Masked card titles hold left to right inside Arabic only.
+check(WafraTitle.display("•••• 1234", .ar) == "\u{200E}•••• 1234\u{200E}", "masked card title is isolated in Arabic")
+check(WafraTitle.display("•••• 1234", .en) == "•••• 1234", "English titles are unchanged")
+check(WafraTitle.display("الكهرباء", .ar) == "الكهرباء", "Arabic titles with letters are unchanged")
 check(WafraInitial.of("") == nil, "empty title")
 
 // Snapshot decoding and money parts.

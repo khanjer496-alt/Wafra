@@ -215,6 +215,7 @@ struct WafraTodayView: View {
       }
     }
     .wafraDirection(entry.language)
+    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
     .wafraWidgetBackground(WafraBand.home(colorScheme).band)
     .widgetURL(WafraShared.appURL)
   }
@@ -229,7 +230,8 @@ struct WafraTodayView: View {
         Text(WafraMoney.format(snapshot.weekTotalMinor, in: snapshot))
           .font(.caption.weight(.semibold).monospacedDigit())
           .foregroundColor(band.onBand)
-          .lineLimit(2)
+          .lineLimit(1)
+          .minimumScaleFactor(0.75)
           .wafraAmount(snapshot)
           .modifier(HiddenAmountLabel(label: snapshot.weekTotalMinor == nil ? strings.amountHidden : nil))
       }
@@ -240,6 +242,7 @@ struct WafraTodayView: View {
           .foregroundColor(band.onBandSecondary)
           .lineLimit(1)
         WafraBandFigure(minor: snapshot.todayMinor, snapshot: snapshot, strings: strings, band: band)
+          .layoutPriority(1)
       }
       WafraTodayLine(snapshot: snapshot, strings: strings, band: band)
         .padding(.top, 2)
@@ -373,6 +376,7 @@ struct WafraComingUpView: View {
       }
     }
     .wafraDirection(entry.language)
+    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
     .wafraWidgetBackground(WafraBand.bills(colorScheme).band)
     .widgetURL(WafraShared.appURL)
   }
@@ -411,7 +415,7 @@ struct WafraComingUpView: View {
         HStack(spacing: 10) {
           WafraMerchantTile(title: bill.title, logoId: bill.logoId, band: band)
           VStack(alignment: .leading, spacing: 0) {
-            Text(bill.title)
+            Text(WafraTitle.display(bill.title, snapshot.language))
               .font(.footnote.weight(.semibold))
               .foregroundColor(band.onBand)
               .lineLimit(1)
@@ -426,6 +430,7 @@ struct WafraComingUpView: View {
             .foregroundColor(band.onBand)
             .lineLimit(1)
             .minimumScaleFactor(0.6)
+            .layoutPriority(1)
             .wafraAmount(snapshot)
             .modifier(HiddenAmountLabel(label: bill.amountMinor == nil || snapshot.hidden ? strings.amountHidden : nil))
         }
@@ -444,6 +449,10 @@ struct WafraComingUpView: View {
 
 /// Offline bundled logo when the snapshot carries an allowlisted identity.
 /// Older/unknown identities keep their initial, or a calendar for masked cards.
+///
+/// In accented (tinted) rendering only the tile and the initial take the
+/// accent; a full-colour logo is desaturated rather than flattened into a
+/// solid tinted block (iOS 18).
 struct WafraMerchantTile: View {
   let title: String
   let logoId: String?
@@ -453,17 +462,23 @@ struct WafraMerchantTile: View {
     ZStack {
       RoundedRectangle(cornerRadius: 8, style: .continuous)
         .fill(band.tile)
+        .widgetAccentable()
       if let id = WafraLogo.validated(logoId) {
-        Image("wafra_logo_" + id)
-          .renderingMode(WafraLogo.monochrome.contains(id) ? .template : .original)
-          .resizable()
-          .scaledToFit()
-          .frame(width: 22, height: 22)
-          .foregroundColor(band.onBand)
+        if WafraLogo.monochrome.contains(id) {
+          Image("wafra_logo_" + id)
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 22, height: 22)
+            .foregroundColor(band.onBand)
+        } else {
+          WafraFullColorLogo(name: "wafra_logo_" + id)
+        }
       } else if let initial = WafraInitial.of(title) {
         Text(initial)
           .font(.system(size: 14, weight: .bold))
           .foregroundColor(band.onBand)
+          .widgetAccentable()
       } else {
         Image(systemName: "calendar")
           .font(.system(size: 13, weight: .semibold))
@@ -471,8 +486,30 @@ struct WafraMerchantTile: View {
       }
     }
     .frame(width: 28, height: 28)
-    .widgetAccentable()
     .accessibilityHidden(true)
+  }
+}
+
+/// A brand's own pixels. Accented rendering (iOS 18 tinted Home Screen)
+/// would otherwise draw the whole image as one flat tint.
+private struct WafraFullColorLogo: View {
+  let name: String
+
+  var body: some View {
+    if #available(iOS 18.0, *) {
+      Image(name)
+        .renderingMode(.original)
+        .resizable()
+        .widgetAccentedRenderingMode(.accentedDesaturated)
+        .scaledToFit()
+        .frame(width: 22, height: 22)
+    } else {
+      Image(name)
+        .renderingMode(.original)
+        .resizable()
+        .scaledToFit()
+        .frame(width: 22, height: 22)
+    }
   }
 }
 

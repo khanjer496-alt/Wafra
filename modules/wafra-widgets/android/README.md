@@ -8,7 +8,7 @@ Compose):
   (currency code set smaller, tabular digits) and one line under it: what is
   left in budgets when they are set, otherwise today's payment count.
 - **Coming up** (`UpcomingWidgetProvider`, 4x2): on Bills' ochre band, up to
-  three upcoming bills, each with a bundled service logo (the title's initial
+  three upcoming bills (fewer when the widget is short), each with a bundled service logo (the title's initial
   when unknown; a calendar glyph when the title has no letter), a due word
   ("Today", "Tomorrow", the weekday within the coming week, otherwise
   "Mon 5 Oct") and the amount (`≈` when estimated).
@@ -22,6 +22,27 @@ never a URL or path. No merchant lookup leaves the device. Unknown identities
 and older snapshots without a logo id retain their initial fallback.
 
 Tapping either widget opens the app.
+
+## Sizes
+
+Each widget renders one layout per height breakpoint
+(`WafraWidgets.TODAY_FULL_MIN_HEIGHT_DP` and the `UPCOMING_*` constants), so
+a short widget leaves content out instead of clipping it:
+
+- **Today** shows the seven-day total from 152dp of height; below that the
+  total is left out and the budget words keep to one line.
+- **Coming up** lists three bills from 170dp, two from 130dp, otherwise one.
+
+Android 12+ receives every layout at once (`RemoteViews(Map<SizeF, RemoteViews>)`)
+and picks among them for each size the widget takes; older versions re-render
+on `onAppWidgetOptionsChanged` from the reported minimum height. Amounts never
+break across lines: the figures shrink to fit, and the budget amount is its own
+view beside the words, which give way instead.
+
+On Android 12+ the outer frame is `@android:id/background`, rounded to the
+launcher's own widget radius (`drawable-v31`) and clipped to it. Single-ink
+logos (Apple, GitHub, Notion, Uber, Vercel) sit in an `ImageView` tinted with
+`wafra_widget_upcoming_text`, so they follow the launcher's light or dark mode.
 
 ## Data
 

@@ -416,9 +416,28 @@ enum WafraInitial {
   /// The first letter of a bill's title for its tile ("DEWA" -> "D"). Nil when
   /// the title has no letter (a masked card such as "•••• 1234"); the tile
   /// then shows a plain glyph rather than a digit that reads like a figure.
+  /// The Arabic article is skipped ("الكهرباء" -> "ك"), as on Android and in
+  /// the app's preview.
   static func of(_ title: String) -> String? {
-    guard let letter = title.first(where: { $0.isLetter }) else { return nil }
+    guard let start = title.firstIndex(where: { $0.isLetter }) else { return nil }
+    var letter = title[start]
+    let word = title[start...]
+    if word.hasPrefix(arabicArticle), let next = word.dropFirst(arabicArticle.count).first, next.isLetter {
+      letter = next
+    }
     return String(letter).uppercased()
+  }
+
+  private static let arabicArticle = "\u{0627}\u{0644}"
+}
+
+enum WafraTitle {
+  /// A bill title as the widget sets it. A title without a letter (a masked
+  /// card such as "•••• 1234") is held left to right inside Arabic, so its
+  /// digits and dots do not swap sides.
+  static func display(_ title: String, _ language: WafraLanguage) -> String {
+    guard language == .ar, WafraInitial.of(title) == nil else { return title }
+    return "\u{200E}\(title)\u{200E}"
   }
 }
 

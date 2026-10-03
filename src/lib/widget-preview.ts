@@ -37,12 +37,34 @@ export function widgetMoneyText(minor: number | null, snapshot: WidgetSnapshot):
   return parts ? `${parts.currency} ${parts.number}` : WIDGET_DASH;
 }
 
-/** First letter of a title, upper-cased, for its tile; null when it has none (a masked card). */
+const LETTER = /\p{L}/u;
+const ARABIC_ARTICLE = ['\u0627', '\u0644'];
+/** Left-to-right mark: keeps Latin figures and masked numbers in order inside Arabic. */
+const LRM = '\u200E';
+
+/**
+ * First letter of a title, upper-cased, for its tile; null when it has none (a
+ * masked card). The Arabic article is skipped ("الكهرباء" -> "ك"), as in both
+ * native widgets.
+ */
 export function widgetInitial(title: string): string | null {
-  for (const char of title) {
-    if (/\p{L}/u.test(char)) return char.toUpperCase();
-  }
-  return null;
+  const chars = [...title];
+  const start = chars.findIndex((char) => LETTER.test(char));
+  if (start < 0) return null;
+  const next = chars[start + 2];
+  const article = chars[start] === ARABIC_ARTICLE[0] && chars[start + 1] === ARABIC_ARTICLE[1];
+  const letter = article && next !== undefined && LETTER.test(next) ? next : chars[start]!;
+  return letter.toUpperCase();
+}
+
+/**
+ * A bill title as the widgets set it: one without a letter (a masked card such
+ * as "•••• 1234") is held left to right inside Arabic so its digits and dots
+ * do not swap sides.
+ */
+export function widgetBillTitle(bill: WidgetBill, snapshot: WidgetSnapshot): string {
+  if (!bill.title) return WIDGET_DASH;
+  return snapshot.language === 'ar' && widgetInitial(bill.title) === null ? `${LRM}${bill.title}${LRM}` : bill.title;
 }
 
 function dayNumber(iso: string): number | null {
@@ -76,10 +98,16 @@ export function widgetUpcomingBills(snapshot: WidgetSnapshot): WidgetBill[] {
   return snapshot.bills.filter((bill) => bill.dueISO >= snapshot.todayISO).slice(0, 3);
 }
 
-/** A bill's amount as the widget prints it: "≈ " before an estimate, "—" when hidden. */
+/**
+ * A bill's amount as the widget prints it: "≈ " before an estimate, "—" when
+ * hidden. Inside Arabic it is held left to right, so "≈" stays before the
+ * currency code as both native widgets draw it.
+ */
 export function widgetBillAmount(bill: WidgetBill, snapshot: WidgetSnapshot): string {
   const amount = widgetMoneyText(bill.amountMinor, snapshot);
-  return bill.estimated && amount !== WIDGET_DASH ? `≈ ${amount}` : amount;
+  if (amount === WIDGET_DASH) return amount;
+  const text = bill.estimated ? `≈ ${amount}` : amount;
+  return snapshot.language === 'ar' ? `${LRM}${text}${LRM}` : text;
 }
 
 /**

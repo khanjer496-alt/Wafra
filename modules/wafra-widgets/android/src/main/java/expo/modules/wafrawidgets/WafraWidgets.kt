@@ -8,16 +8,13 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.content.res.Resources
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
+import android.os.Build
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
 import android.util.Log
+import android.util.SizeF
 import android.view.View
 import android.widget.RemoteViews
 import java.text.DateFormatSymbols
@@ -50,6 +47,7 @@ internal object WafraWidgets {
   private val BILL_TILES = intArrayOf(R.id.wafra_bill_tile_1, R.id.wafra_bill_tile_2, R.id.wafra_bill_tile_3)
   private val BILL_GLYPHS = intArrayOf(R.id.wafra_bill_glyph_1, R.id.wafra_bill_glyph_2, R.id.wafra_bill_glyph_3)
   private val BILL_LOGOS = intArrayOf(R.id.wafra_bill_logo_1, R.id.wafra_bill_logo_2, R.id.wafra_bill_logo_3)
+  private val BILL_MONO_LOGOS = intArrayOf(R.id.wafra_bill_logo_mono_1, R.id.wafra_bill_logo_mono_2, R.id.wafra_bill_logo_mono_3)
   private val LOGO_DRAWABLES = mapOf(
     "amazon" to R.drawable.wafra_logo_amazon,
     "netflix" to R.drawable.wafra_logo_netflix,
@@ -88,6 +86,30 @@ internal object WafraWidgets {
   private val MONOCHROME_LOGOS = setOf("apple", "github", "notion", "uber", "vercel")
   private const val DAY_MS = 24L * 60L * 60L * 1000L
 
+  /**
+   * Height breakpoints in dp. Today needs [TODAY_FULL_MIN_HEIGHT_DP] for the
+   * seven-day total above the figure; below it the total is left out and the
+   * budget words keep to one line. Coming up shows three bills from
+   * [UPCOMING_THREE_ROWS_MIN_HEIGHT_DP], two from
+   * [UPCOMING_TWO_ROWS_MIN_HEIGHT_DP], otherwise one, so a short widget drops
+   * rows instead of clipping them.
+   */
+  internal const val TODAY_FULL_MIN_HEIGHT_DP = 152
+  internal const val UPCOMING_TWO_ROWS_MIN_HEIGHT_DP = 130
+  internal const val UPCOMING_THREE_ROWS_MIN_HEIGHT_DP = 170
+  private val TODAY_BREAKPOINTS = intArrayOf(1, TODAY_FULL_MIN_HEIGHT_DP)
+  private val UPCOMING_BREAKPOINTS = intArrayOf(1, UPCOMING_TWO_ROWS_MIN_HEIGHT_DP, UPCOMING_THREE_ROWS_MIN_HEIGHT_DP)
+
+  /** Today keeps its seven-day total only from [TODAY_FULL_MIN_HEIGHT_DP] up. */
+  internal fun todayIsCompact(heightDp: Int): Boolean = heightDp < TODAY_FULL_MIN_HEIGHT_DP
+
+  /** How many bills Coming up lists at a given height. */
+  internal fun upcomingRowsFor(heightDp: Int): Int = when {
+    heightDp >= UPCOMING_THREE_ROWS_MIN_HEIGHT_DP -> 3
+    heightDp >= UPCOMING_TWO_ROWS_MIN_HEIGHT_DP -> 2
+    else -> 1
+  }
+
   fun isRefreshAction(action: String?): Boolean = action != null && action in REFRESH_ACTIONS
 
   fun store(context: Context, json: String?) {
@@ -114,15 +136,50 @@ internal object WafraWidgets {
       )
       val now = System.currentTimeMillis()
       val todayISO = isoDate(Calendar.getInstance())
-      if (todayIds.isNotEmpty()) manager.updateAppWidget(todayIds, renderToday(app, snapshot, now, todayISO))
-      if (upcomingIds.isNotEmpty()) manager.updateAppWidget(upcomingIds, renderUpcoming(app, snapshot, now, todayISO))
+      for (id in todayIds) {
+        manager.updateAppWidget(id, sized(manager, id, TODAY_BREAKPOINTS) { height ->
+          renderToday(app, snapshot, now, todayISO, todayIsCompact(height))
+        })
+      }
+      for (id in upcomingIds) {
+        manager.updateAppWidget(id, sized(manager, id, UPCOMING_BREAKPOINTS) { height ->
+          renderUpcoming(app, snapshot, now, todayISO, upcomingRowsFor(height))
+        })
+      }
       scheduleNextRefresh(app, snapshot, now)
     } catch (error: Exception) {
       Log.w(TAG, "Widget refresh failed", error)
     }
   }
 
-  private fun renderToday(context: Context, snapshot: WidgetSnapshot?, now: Long, todayISO: String): RemoteViews {
+  /**
+   * One layout per height breakpoint. Android 12+ picks among them itself for
+   * every size the widget takes (portrait and landscape), so a resize needs no
+   * round trip. Older versions report the widget's smallest height in its
+   * options; an unknown height keeps the full layout.
+   */
+  private fun sized(
+    manager: AppWidgetManager,
+    appWidgetId: Int,
+    breakpoints: IntArray,
+    render: (Int) -> RemoteViews,
+  ): RemoteViews {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      val layouts = LinkedHashMap<SizeF, RemoteViews>()
+      for (height in breakpoints) layouts[SizeF(1f, height.toFloat())] = render(height)
+      return RemoteViews(layouts)
+    }
+    val height = manager.getAppWidgetOptions(appWidgetId)?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0
+    return render(if (height > 0) height else Int.MAX_VALUE)
+  }
+
+  private fun renderToday(
+    context: Context,
+    snapshot: WidgetSnapshot?,
+    now: Long,
+    todayISO: String,
+    compact: Boolean,
+  ): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.wafra_widget_today)
     attachLaunch(context, views)
     applyLanguageDirection(context, views, snapshot?.language)
@@ -142,28 +199,36 @@ internal object WafraWidgets {
     views.setViewVisibility(R.id.wafra_today_content, View.VISIBLE)
 
     val amount = snapshot.formatMinor(snapshot.todayMinor)
-    views.setTextViewText(R.id.wafra_today_amount, bandFigure(amount, snapshot))
+    views.setTextViewText(R.id.wafra_today_amount, bandFigure(context, amount, snapshot))
     views.setContentDescription(
       R.id.wafra_today_amount,
       if (amount == WidgetSnapshot.DASH) res.getString(R.string.wafra_widget_amount_hidden) else amount,
     )
 
-    views.setViewVisibility(R.id.wafra_today_week, View.VISIBLE)
+    views.setViewVisibility(R.id.wafra_today_week, if (compact) View.GONE else View.VISIBLE)
     views.setTextViewText(R.id.wafra_today_week_label, res.getString(R.string.wafra_widget_last_7_total))
     val weekAmount = snapshot.formatMinor(snapshot.weekTotalMinor())
     views.setTextViewText(R.id.wafra_today_week_amount, isolate(weekAmount, snapshot.language))
     views.setContentDescription(R.id.wafra_today_week_amount,
       if (weekAmount == WidgetSnapshot.DASH) res.getString(R.string.wafra_widget_amount_hidden) else weekAmount)
 
-    // One line under the figure: what is left in budgets when they are set,
-    // otherwise today's payment count.
+    // One line under the figure: what is left in (or over) budgets when they
+    // are set, otherwise today's payment count. As on iOS the amount is its
+    // own view, so it never breaks across lines; the words give way instead.
     val left = snapshot.leftInBudgetsMinor
     if (left != null && !snapshot.hidden) {
       views.setViewVisibility(R.id.wafra_today_count, View.GONE)
       views.setViewVisibility(R.id.wafra_today_budget, View.VISIBLE)
+      val line = budgetLine(res.getString(budgetLineTemplate(left)))
+      val wordLines = if (compact) 1 else 2
+      for ((view, words) in listOf(R.id.wafra_today_budget_lead to line.lead, R.id.wafra_today_budget_trail to line.trail)) {
+        views.setViewVisibility(view, if (words.isEmpty()) View.GONE else View.VISIBLE)
+        views.setTextViewText(view, words)
+        views.setInt(view, "setMaxLines", wordLines)
+      }
       views.setTextViewText(
-        R.id.wafra_today_budget,
-        res.getString(R.string.wafra_widget_left_in_budgets, isolate(snapshot.formatMinor(left), snapshot.language)),
+        R.id.wafra_today_budget_amount,
+        isolate(snapshot.formatMinor(Math.abs(left)), snapshot.language),
       )
     } else {
       views.setViewVisibility(R.id.wafra_today_budget, View.GONE)
@@ -173,16 +238,41 @@ internal object WafraWidgets {
     return views
   }
 
+  /** "%1$s over budgets" when spending is past the budgets, else "%1$s left in budgets". */
+  internal fun budgetLineTemplate(leftMinor: Long): Int =
+    if (leftMinor < 0) R.string.wafra_widget_over_budgets else R.string.wafra_widget_left_in_budgets
+
+  internal data class BudgetLine(val lead: String, val trail: String)
+
   /**
-   * The band figure: "AED 24.00" with the currency code set smaller, as on the
-   * app's band figures. Kept in reading order inside Arabic text.
+   * Splits a budget template at its amount: "%1$s left in budgets" has the
+   * words after the amount, the Arabic "المتبقي في الميزانيات %1$s" before it.
    */
-  private fun bandFigure(amount: String, snapshot: WidgetSnapshot): CharSequence {
+  internal fun budgetLine(template: String): BudgetLine {
+    val at = template.indexOf(AMOUNT_PLACEHOLDER)
+    if (at < 0) return BudgetLine(template.trim(), "")
+    return BudgetLine(template.substring(0, at).trim(), template.substring(at + AMOUNT_PLACEHOLDER.length).trim())
+  }
+
+  private const val AMOUNT_PLACEHOLDER = "%1\$s"
+
+  /**
+   * The band figure: "AED 24.00" with the currency code set smaller and dimmed,
+   * as on the app's band figures. Kept in reading order inside Arabic text.
+   */
+  private fun bandFigure(context: Context, amount: String, snapshot: WidgetSnapshot): CharSequence {
     if (amount == WidgetSnapshot.DASH || !amount.startsWith(snapshot.currency)) return amount
     val text = isolate(amount, snapshot.language)
     val start = text.indexOf(snapshot.currency)
+    val end = start + snapshot.currency.length
     val figure = SpannableString(text)
-    figure.setSpan(RelativeSizeSpan(0.62f), start, start + snapshot.currency.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    figure.setSpan(RelativeSizeSpan(0.62f), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    figure.setSpan(
+      ForegroundColorSpan(context.getColor(R.color.wafra_widget_today_secondary)),
+      start,
+      end,
+      Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+    )
     return figure
   }
 
@@ -190,7 +280,13 @@ internal object WafraWidgets {
   private fun isolate(text: String, language: String): String =
     if (language == "ar" && text != WidgetSnapshot.DASH) "\u200E$text\u200E" else text
 
-  private fun renderUpcoming(context: Context, snapshot: WidgetSnapshot?, now: Long, todayISO: String): RemoteViews {
+  private fun renderUpcoming(
+    context: Context,
+    snapshot: WidgetSnapshot?,
+    now: Long,
+    todayISO: String,
+    maxRows: Int,
+  ): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.wafra_widget_upcoming)
     attachLaunch(context, views)
     applyLanguageDirection(context, views, snapshot?.language)
@@ -199,7 +295,7 @@ internal object WafraWidgets {
 
     // ISO dates compare correctly as strings; drop anything already past.
     val bills = if (snapshot != null && snapshot.isFresh(now)) {
-      snapshot.bills.filter { it.dueISO >= todayISO }.take(BILL_ROWS.size)
+      snapshot.bills.filter { it.dueISO >= todayISO }.take(maxRows.coerceIn(1, BILL_ROWS.size))
     } else {
       null
     }
@@ -222,13 +318,14 @@ internal object WafraWidgets {
       // JSON can select only a compiled resource; never a URI or arbitrary path.
       val logo = LOGO_DRAWABLES[bill.logoId]
       val initial = initialOf(bill.title)
-      views.setViewVisibility(BILL_LOGOS[i], if (logo != null) View.VISIBLE else View.GONE)
+      // Single-ink marks go in a view tinted by a colour resource, so they
+      // follow the launcher's light or dark mode; multicolour brands keep
+      // their bundled pixels.
+      val mono = logo != null && bill.logoId in MONOCHROME_LOGOS
+      views.setViewVisibility(BILL_LOGOS[i], if (logo != null && !mono) View.VISIBLE else View.GONE)
+      views.setViewVisibility(BILL_MONO_LOGOS[i], if (mono) View.VISIBLE else View.GONE)
       if (logo != null) {
-        if (bill.logoId in MONOCHROME_LOGOS) {
-          views.setImageViewBitmap(BILL_LOGOS[i], tintedLogo(context, logo))
-        } else {
-          views.setImageViewResource(BILL_LOGOS[i], logo)
-        }
+        views.setImageViewResource(if (mono) BILL_MONO_LOGOS[i] else BILL_LOGOS[i], logo)
         views.setViewVisibility(BILL_TILES[i], View.GONE)
         views.setViewVisibility(BILL_GLYPHS[i], View.GONE)
       } else if (initial != null) {
@@ -243,25 +340,14 @@ internal object WafraWidgets {
       views.setTextViewText(BILL_DATES[i], dueWord(res, bill.dueISO, todayISO, locale))
       val formatted = snapshot.formatMinor(bill.amountMinor)
       val amount = if (bill.estimated && formatted != WidgetSnapshot.DASH) "≈ $formatted" else formatted
-      views.setTextViewText(BILL_AMOUNTS[i], amount)
+      // "≈ AED 380.00" stays in reading order inside Arabic.
+      views.setTextViewText(BILL_AMOUNTS[i], isolate(amount, snapshot.language))
       views.setContentDescription(
         BILL_AMOUNTS[i],
         if (formatted == WidgetSnapshot.DASH) res.getString(R.string.wafra_widget_amount_hidden) else amount,
       )
     }
     return views
-  }
-
-  /** Tint only reviewed single-ink marks; multicolor brands keep their bundled pixels. */
-  private fun tintedLogo(context: Context, resource: Int): Bitmap {
-    val source = BitmapFactory.decodeResource(context.resources, resource)
-    val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      colorFilter = PorterDuffColorFilter(context.getColor(R.color.wafra_widget_upcoming_text), PorterDuff.Mode.SRC_IN)
-    }
-    Canvas(output).drawBitmap(source, 0f, 0f, paint)
-    source.recycle()
-    return output
   }
 
   /** Follow Wafra's chosen language even when the launcher uses another one. */
@@ -299,16 +385,31 @@ internal object WafraWidgets {
     return String.format(Locale.US, template, count)
   }
 
-  /** First letter of a title, upper-cased, for its tile; null when it has none. */
+  /**
+   * First letter of a title, upper-cased, for its tile; null when it has none.
+   * The Arabic article is skipped ("الكهرباء" -> "ك"), as on iOS and in the
+   * app's preview.
+   */
   internal fun initialOf(title: String): String? {
     var index = 0
     while (index < title.length) {
       val codePoint = title.codePointAt(index)
-      if (Character.isLetter(codePoint)) return String(Character.toChars(codePoint)).uppercase(Locale.ROOT)
+      if (Character.isLetter(codePoint)) {
+        var letter = codePoint
+        val after = index + ARABIC_ARTICLE.length
+        if (title.startsWith(ARABIC_ARTICLE, index) && after < title.length) {
+          val next = title.codePointAt(after)
+          if (Character.isLetter(next)) letter = next
+        }
+        return String(Character.toChars(letter)).uppercase(Locale.ROOT)
+      }
       index += Character.charCount(codePoint)
     }
     return null
   }
+
+  private const val ARABIC_ARTICLE = "\u0627\u0644"
+
 
   /**
    * "Today", "Tomorrow", the weekday within the coming week ("Monday"), or

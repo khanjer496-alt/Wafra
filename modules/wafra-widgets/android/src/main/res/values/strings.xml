@@ -8,15 +8,17 @@
   <string name="wafra_widget_today">Today</string>
   <string name="wafra_widget_upcoming">Coming up</string>
   <string name="wafra_widget_left_in_budgets">%1$s left in budgets</string>
+  <string name="wafra_widget_over_budgets">%1$s over budgets</string>
   <string name="wafra_widget_tomorrow">Tomorrow</string>
   <string name="wafra_widget_last_7_days">Spending over the last 7 days</string>
   <string name="wafra_widget_amount_hidden">Amount hidden</string>
-  <string name="wafra_widget_no_bills">No upcoming bills</string>
+  <string name="wafra_widget_no_bills">Nothing coming up</string>
   <string name="wafra_widget_open_to_update">Open Wafra to update</string>
   <string name="wafra_widget_no_payments">No payments yet</string>
-  <string name="wafra_widget_preview_week_amount" translatable="false">USD 542.10</string>
   <!-- Widget-picker preview samples (illustrative, never user data). -->
-  <string name="wafra_widget_preview_amount" translatable="false">USD 86.40</string>
+  <string name="wafra_widget_preview_week_amount" translatable="false">USD 542.10</string>
+  <string name="wafra_widget_preview_currency" translatable="false">USD</string>
+  <string name="wafra_widget_preview_number" translatable="false">86.40</string>
   <string name="wafra_widget_preview_count">3 payments</string>
   <string name="wafra_widget_preview_bill_1">Rent</string>
   <string name="wafra_widget_preview_tile_1">R</string>

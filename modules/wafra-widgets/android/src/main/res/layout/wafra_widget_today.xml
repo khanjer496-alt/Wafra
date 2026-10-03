@@ -2,116 +2,172 @@
 <!-- Live "Today" widget on Home's ink band. An exact seven-day total at the
      top; the one figure that matters sits low on the band. Every value is set
      from the snapshot at render time; the XML text is only the empty state
-     shown before the first render. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-  android:id="@+id/wafra_widget_root"
+     shown before the first render. Below 152dp of height the seven-day total
+     is left out (WafraWidgets.TODAY_FULL_MIN_HEIGHT_DP).
+
+     The outer frame is the widget background: Android 12+ rounds it to the
+     launcher's own widget radius (drawable-v31) and clips content to it. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:id="@android:id/background"
   android:layout_width="match_parent"
   android:layout_height="match_parent"
   android:background="@drawable/wafra_widget_today_background"
-  android:orientation="vertical"
-  android:padding="16dp">
+  android:clipToOutline="true">
 
   <LinearLayout
-    android:id="@+id/wafra_today_week"
+    android:id="@+id/wafra_widget_root"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
+    android:layout_height="match_parent"
     android:orientation="vertical"
-    android:visibility="gone">
-    <TextView
-      android:id="@+id/wafra_today_week_label"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:text="@string/wafra_widget_last_7_total"
-      android:textAlignment="viewStart"
-      android:textColor="@color/wafra_widget_today_secondary"
-      android:textSize="12sp" />
-    <TextView
-      android:id="@+id/wafra_today_week_amount"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:fontFamily="sans-serif-medium"
-      android:fontFeatureSettings="tnum"
-      android:maxLines="2"
-      android:textAlignment="viewStart"
-      android:textColor="@color/wafra_widget_today_text"
-      android:textSize="13sp" />
-  </LinearLayout>
-
-  <LinearLayout
-    android:layout_width="match_parent"
-    android:layout_height="0dp"
-    android:layout_weight="1"
-    android:gravity="bottom"
-    android:orientation="vertical">
-
-    <TextView
-      android:id="@+id/wafra_today_label"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:maxLines="1"
-      android:ellipsize="end"
-      android:text="@string/wafra_widget_today"
-      android:textAlignment="viewStart"
-      android:textColor="@color/wafra_widget_today_secondary"
-      android:textSize="12sp" />
-
-    <TextView
-      android:id="@+id/wafra_today_empty"
-      android:layout_width="match_parent"
-      android:layout_height="wrap_content"
-      android:layout_marginTop="4dp"
-      android:fontFamily="sans-serif-medium"
-      android:text="@string/wafra_widget_open_to_update"
-      android:textAlignment="viewStart"
-      android:textColor="@color/wafra_widget_today_text"
-      android:textSize="15sp" />
+    android:padding="16dp">
 
     <LinearLayout
-      android:id="@+id/wafra_today_content"
+      android:id="@+id/wafra_today_week"
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
       android:orientation="vertical"
       android:visibility="gone">
-
-      <!-- The band figure: semibold sans with tabular digits (never a
-           monospaced face). The currency code is set smaller in code. -->
       <TextView
-        android:id="@+id/wafra_today_amount"
-        android:layout_width="match_parent"
-        android:layout_height="38dp"
-        android:autoSizeMaxTextSize="30sp"
-        android:autoSizeMinTextSize="14sp"
-        android:autoSizeTextType="uniform"
-        android:fontFamily="sans-serif-medium"
-        android:fontFeatureSettings="tnum"
-        android:gravity="center_vertical|start"
-        android:letterSpacing="-0.02"
-        android:maxLines="1"
-        android:textAlignment="viewStart"
-        android:textColor="@color/wafra_widget_today_text"
-        android:textSize="28sp" />
-
-      <TextView
-        android:id="@+id/wafra_today_count"
+        android:id="@+id/wafra_today_week_label"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:maxLines="1"
         android:ellipsize="end"
+        android:text="@string/wafra_widget_last_7_total"
+        android:textAlignment="viewStart"
+        android:textColor="@color/wafra_widget_today_secondary"
+        android:textSize="12sp" />
+      <!-- One line that shrinks for a long total rather than wrapping it. -->
+      <TextView
+        android:id="@+id/wafra_today_week_amount"
+        android:layout_width="match_parent"
+        android:layout_height="18dp"
+        android:autoSizeMaxTextSize="13sp"
+        android:autoSizeMinTextSize="9sp"
+        android:autoSizeTextType="uniform"
+        android:fontFamily="sans-serif-medium"
+        android:fontFeatureSettings="tnum"
+        android:gravity="center_vertical|start"
+        android:maxLines="1"
+        android:textAlignment="viewStart"
+        android:textColor="@color/wafra_widget_today_text"
+        android:textSize="13sp" />
+    </LinearLayout>
+
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="0dp"
+      android:layout_weight="1"
+      android:gravity="bottom"
+      android:orientation="vertical">
+
+      <TextView
+        android:id="@+id/wafra_today_label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="@string/wafra_widget_today"
         android:textAlignment="viewStart"
         android:textColor="@color/wafra_widget_today_secondary"
         android:textSize="12sp" />
 
       <TextView
-        android:id="@+id/wafra_today_budget"
+        android:id="@+id/wafra_today_empty"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:fontFeatureSettings="tnum"
-        android:maxLines="2"
-        android:ellipsize="end"
+        android:layout_marginTop="4dp"
+        android:fontFamily="sans-serif-medium"
+        android:text="@string/wafra_widget_open_to_update"
         android:textAlignment="viewStart"
-        android:textColor="@color/wafra_widget_today_secondary"
-        android:textSize="12sp"
-        android:visibility="gone" />
+        android:textColor="@color/wafra_widget_today_text"
+        android:textSize="15sp" />
+
+      <LinearLayout
+        android:id="@+id/wafra_today_content"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <!-- The band figure: semibold sans with tabular digits (never a
+             monospaced face). The currency code is set smaller and dimmed in
+             code. It shrinks to fit rather than cutting a number short. -->
+        <TextView
+          android:id="@+id/wafra_today_amount"
+          android:layout_width="match_parent"
+          android:layout_height="38dp"
+          android:autoSizeMaxTextSize="30sp"
+          android:autoSizeMinTextSize="11sp"
+          android:autoSizeTextType="uniform"
+          android:fontFamily="sans-serif-medium"
+          android:fontFeatureSettings="tnum"
+          android:gravity="center_vertical|start"
+          android:letterSpacing="-0.02"
+          android:maxLines="1"
+          android:textAlignment="viewStart"
+          android:textColor="@color/wafra_widget_today_text"
+          android:textSize="28sp" />
+
+        <TextView
+          android:id="@+id/wafra_today_count"
+          android:layout_width="match_parent"
+          android:layout_height="wrap_content"
+          android:maxLines="1"
+          android:ellipsize="end"
+          android:textAlignment="viewStart"
+          android:textColor="@color/wafra_widget_today_secondary"
+          android:textSize="12sp" />
+
+        <!-- Left in (or over) budgets, as on iOS: the amount is its own view
+             and never breaks; the words beside it wrap or shorten instead.
+             The row hugs its content from the start edge, so the words sit
+             next to the amount in both reading directions. Arabic puts the
+             words first (lead), English after the amount (trail). -->
+        <LinearLayout
+          android:id="@+id/wafra_today_budget"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:layout_gravity="start"
+          android:orientation="horizontal"
+          android:visibility="gone">
+
+          <TextView
+            android:id="@+id/wafra_today_budget_lead"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="4dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:textAlignment="viewStart"
+            android:textColor="@color/wafra_widget_today_secondary"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+          <TextView
+            android:id="@+id/wafra_today_budget_amount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFeatureSettings="tnum"
+            android:maxLines="1"
+            android:textColor="@color/wafra_widget_today_secondary"
+            android:textSize="12sp" />
+
+          <TextView
+            android:id="@+id/wafra_today_budget_trail"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="2"
+            android:textAlignment="viewStart"
+            android:textColor="@color/wafra_widget_today_secondary"
+            android:textSize="12sp"
+            android:visibility="gone" />
+        </LinearLayout>
+      </LinearLayout>
     </LinearLayout>
   </LinearLayout>
-</LinearLayout>
+</FrameLayout>

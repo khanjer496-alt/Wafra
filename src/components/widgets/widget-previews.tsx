@@ -8,7 +8,7 @@ import { isWidgetLogoId } from '@/lib/widget-logo';
 import { Icon } from '@/components/ui/icon';
 import { Fonts, type BandPalette } from '@/constants/theme';
 import {
-  widgetAmountParts, widgetBillAmount, widgetDueLabel, widgetInitial, widgetMoneyText,
+  widgetAmountParts, widgetBillAmount, widgetBillTitle, widgetDueLabel, widgetInitial, widgetMoneyText,
   widgetTodayLine, widgetUpcomingBills, widgetWeekTotal,
 } from '@/lib/widget-preview';
 import type { WidgetSnapshot } from '@/lib/widget-snapshot';
@@ -24,6 +24,10 @@ import type { WidgetsCopy } from '@/lib/widgets-copy';
  *
  * Each preview is one image to a screen reader, with the words the widget
  * shows spoken in order.
+ *
+ * Type follows the native widgets (WafraWidgetViews.swift, the Android
+ * layouts): 12/16 labels and second lines in sentence case, a 13 seven-day
+ * total, a 28 figure with its currency code at 17, and 16 of padding.
  */
 
 const SIZE = 164;
@@ -46,13 +50,14 @@ export function TodayWidgetPreview({ snapshot, palette, words, testID }: {
     style={[styles.small, { backgroundColor: palette.band }]}>
     {snapshot ? <>
       <View style={styles.week}>
-        <ThemedText type="meta" maxFontSizeMultiplier={TEXT_SCALE} style={{ color: palette.onBandSecondary }}>{words.widgetLast7Total}</ThemedText>
-        <ThemedText testID={testID ? `${testID}-week-total` : undefined} type="smallBold" maxFontSizeMultiplier={TEXT_SCALE}
-          style={{ color: palette.onBand }}>{week}</ThemedText>
+        <ThemedText type="meta" numberOfLines={1} maxFontSizeMultiplier={TEXT_SCALE}
+          style={[styles.label, { color: palette.onBandSecondary }]}>{words.widgetLast7Total}</ThemedText>
+        <ThemedText testID={testID ? `${testID}-week-total` : undefined} type="smallBold" numberOfLines={1} adjustsFontSizeToFit
+          maxFontSizeMultiplier={TEXT_SCALE} style={[styles.weekTotal, { color: palette.onBand }]}>{week}</ThemedText>
       </View>
       <View style={styles.grow} />
       <ThemedText type="meta" numberOfLines={1} maxFontSizeMultiplier={TEXT_SCALE}
-        style={{ color: palette.onBandSecondary }}>{words.widgetToday}</ThemedText>
+        style={[styles.label, { color: palette.onBandSecondary }]}>{words.widgetToday}</ThemedText>
       <ThemedText testID={testID ? `${testID}-amount` : undefined} numberOfLines={1} adjustsFontSizeToFit
         maxFontSizeMultiplier={TEXT_SCALE} style={[styles.figure, { color: palette.onBand }]}>
         {parts ? <>
@@ -60,27 +65,30 @@ export function TodayWidgetPreview({ snapshot, palette, words, testID }: {
           {`${parts.number}\u200E`}
         </> : '—'}
       </ThemedText>
-      <ThemedText testID={testID ? `${testID}-line` : undefined} type="micro" numberOfLines={2}
-        maxFontSizeMultiplier={TEXT_SCALE} style={{ color: palette.onBandSecondary }}>{line}</ThemedText>
+      <ThemedText testID={testID ? `${testID}-line` : undefined} type="meta" numberOfLines={2}
+        maxFontSizeMultiplier={TEXT_SCALE} style={[styles.label, { color: palette.onBandSecondary }]}>{line}</ThemedText>
     </> : <>
-      <ThemedText type="meta" maxFontSizeMultiplier={TEXT_SCALE} style={{ color: palette.onBandSecondary }}>{words.widgetToday}</ThemedText>
+      <ThemedText type="meta" maxFontSizeMultiplier={TEXT_SCALE}
+        style={[styles.label, { color: palette.onBandSecondary }]}>{words.widgetToday}</ThemedText>
       <View style={styles.grow} />
       <ThemedText type="smallBold" maxFontSizeMultiplier={TEXT_SCALE} style={{ color: palette.onBand }}>{words.widgetOpenToUpdate}</ThemedText>
     </>}
   </View>;
 }
 
-export function UpcomingWidgetPreview({ snapshot, palette, words, platform, testID }: {
+export function UpcomingWidgetPreview({ snapshot, palette, words, testID }: {
   snapshot: WidgetSnapshot | null;
   palette: BandPalette;
   words: WidgetsCopy;
-  platform: 'ios' | 'android';
+  /** Both platforms draw Coming up alike; kept for callers. */
+  platform?: 'ios' | 'android';
   testID?: string;
 }) {
   const bills = snapshot ? widgetUpcomingBills(snapshot) : [];
   const rows = snapshot ? bills.map((bill) => ({
     key: `${bill.dueISO}:${bill.title}`,
-    title: bill.title || '—',
+    title: widgetBillTitle(bill, snapshot),
+    spokenTitle: bill.title || '—',
     initial: widgetInitial(bill.title),
     logo: (() => {
       const id = isWidgetLogoId(bill.logoId) ? bill.logoId : null;
@@ -90,9 +98,9 @@ export function UpcomingWidgetPreview({ snapshot, palette, words, platform, test
     due: widgetDueLabel(bill.dueISO, snapshot.todayISO, words),
     amount: widgetBillAmount(bill, snapshot),
   })) : [];
-  const empty = !snapshot ? words.widgetOpenToUpdate : rows.length === 0 ? words.widgetNothingComingUp(platform) : null;
+  const empty = !snapshot ? words.widgetOpenToUpdate : rows.length === 0 ? words.widgetNothingComingUp : null;
   const spoken = [words.previewLabel(words.upcomingName), words.widgetComingUp,
-    ...(empty ? [empty] : rows.map((row) => `${row.title}, ${row.due}, ${row.amount === '—' ? words.widgetAmountHidden : row.amount}`))].join('. ');
+    ...(empty ? [empty] : rows.map((row) => `${row.spokenTitle}, ${row.due}, ${row.amount === '—' ? words.widgetAmountHidden : row.amount}`))].join('. ');
   return <View testID={testID} accessible accessibilityRole="image" accessibilityLabel={spoken}
     style={[styles.medium, { backgroundColor: palette.band }]}>
     <ThemedText type="smallBold" numberOfLines={1} maxFontSizeMultiplier={TEXT_SCALE}
@@ -110,8 +118,8 @@ export function UpcomingWidgetPreview({ snapshot, palette, words, platform, test
         <View style={styles.rowCopy}>
           <ThemedText type="smallBold" numberOfLines={1} maxFontSizeMultiplier={TEXT_SCALE}
             style={[styles.rowTitle, { color: palette.onBand }]}>{row.title}</ThemedText>
-          <ThemedText type="micro" numberOfLines={1} maxFontSizeMultiplier={TEXT_SCALE}
-            style={{ color: palette.onBandSecondary }}>{row.due}</ThemedText>
+          <ThemedText type="meta" numberOfLines={1} maxFontSizeMultiplier={TEXT_SCALE}
+            style={[styles.label, { color: palette.onBandSecondary }]}>{row.due}</ThemedText>
         </View>
         <ThemedText numberOfLines={1} adjustsFontSizeToFit maxFontSizeMultiplier={TEXT_SCALE}
           style={[styles.rowAmount, { color: palette.onBand }]}>{row.amount}</ThemedText>
@@ -122,13 +130,15 @@ export function UpcomingWidgetPreview({ snapshot, palette, words, platform, test
 
 const styles = StyleSheet.create({
   grow: { flex: 1, minHeight: 6 },
-  small: { width: SIZE, minHeight: SIZE, borderRadius: 24, padding: 14 },
-  medium: { width: '100%', maxWidth: 360, minHeight: SIZE, borderRadius: 24, padding: 14 },
+  small: { width: SIZE, minHeight: SIZE, borderRadius: 24, padding: 16 },
+  medium: { width: '100%', maxWidth: 360, minHeight: SIZE, borderRadius: 24, padding: 16 },
   week: { gap: 2 },
+  label: { fontSize: 12, lineHeight: 16 },
+  weekTotal: { fontSize: 13, lineHeight: 17, fontVariant: ['tabular-nums'] },
   logo: { width: 22, height: 22 },
   figure: { fontFamily: Fonts.sansSemi, fontSize: 28, lineHeight: 34, letterSpacing: -0.6, fontVariant: ['tabular-nums'] },
-  currency: { fontFamily: Fonts.sansMedium, fontSize: 15, letterSpacing: 0 },
-  upcomingLabel: { fontSize: 13, lineHeight: 18, marginBottom: 8 },
+  currency: { fontFamily: Fonts.sansMedium, fontSize: 17, letterSpacing: 0 },
+  upcomingLabel: { fontSize: 12, lineHeight: 16, marginBottom: 8 },
   emptyWrap: { flex: 1, justifyContent: 'center' },
   rows: { gap: 6 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
