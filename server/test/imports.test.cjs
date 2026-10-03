@@ -1585,6 +1585,233 @@ function pagedPdf(pages) {
   try { parseStatementLines(shortAccountPages, 'AED'); } catch (error) { shortAccountError = error.message; }
   ok('short labelled multi-account sections cannot inherit first account', shortAccountError === 'multiple_statement_accounts');
 
+  // ── One card account, many labelled numbers (ADCB-style bilingual card statement) ──
+  // A real, ordinary card statement was refused as `multiple_statement_accounts`
+  // because every labelled number anywhere in the file, including its payment
+  // instructions page, counted as another account.
+  const adcbHeader = [
+    'Credit Card Statement كشف الحساب',
+    'Card Number XXXXXXXXXXXX2280 رقم البطاقة',
+    'Statement Date 05/08/26 تاريخ كشف الحساب',
+    'Payment Due Date 30/08/26 تاريخ استحقاق الدفع',
+    'Minimum Payment Due 189.16 الحد الأدنى للدفعة المستحقة',
+    'Total Amount Due (to avoid any Finance Charges) 3,783.14 إجمالي المبلغ المستحق',
+    'Total Outstanding 3,783.14 إجمالي المبلغ القائم',
+    'Total Credit Limit 16,100.00 إجمالي حد الائتمان',
+    'Available Credit Limit 9,103.75 حد الائتمان المتاح',
+    'Available Cash Limit 9,104.00 حد السحب النقدي المتاح',
+    'Previous Balance 0.00 الرصيد السابق',
+    'Payments received/ other Credits (-) 0.00 الدفعات المستلمة',
+    'New purchases/cash/ debits (+) 3,783.14 المشتريات الجديدة',
+    'Fees and Finance Charges (+) 0.00 الرسوم',
+    'Total Outstanding 3,783.14',
+    'CARDHOLDER NAME', 'P.O. BOX 36728', 'ABU DHABI',
+  ];
+  const adcbTable = 'Transaction Date Transaction Description Amount in AED تاريخ المعاملة الوصف المبلغ بالدرهم';
+  const adcbPage1 = [
+    ...adcbHeader,
+    adcbTable,
+    'PREVIOUS BALANCE OUTSTANDING 0.00',
+    'Card No : XXXXXXXXXXXX2280 - CARDHOLDER NAME',
+    '26/07/2026 DING MIDDLE EAST DUBAI ARE 27.99',
+    '27/07/2026 E& DIGITAL APP ABU DHABI ARE 30.00',
+    '27/07/2026 EMIRATES.CO 2213836991 DUBAI ARE 1410.00',
+    '01/08/2026 www*MobileRecharge.com ATLANTA USA 10.14 USD 38.79',
+    '[1 USD=AED 3.82544]',
+    'Abu Dhabi Commercial Bank PJSC is licensed and regulated by the Central Bank of the United Arab Emirates.',
+    'Page 1 of 3', 'adcb.com',
+  ];
+  const adcbPage2 = [
+    'Card Number XXXXXXXXXXXX2280 رقم البطاقة',
+    adcbTable,
+    '02/08/2026 CARREFOUR ABU DHABI ARE 1962.41',
+    '04/08/2026 E& DIGITAL APP ABU DHABI ARE 313.95',
+    '05/08/2026 NEW BALANCE OUTSTANDING 3783.14',
+    'Page 2 of 3', 'adcb.com',
+  ];
+  const adcbPage3 = [
+    'How to pay your credit card',
+    'Pay from another bank account to Account Number 12345678901234',
+    'Account Number 12345678901234',
+    'IBAN: AE07 0030 0123 4567 8901 234',
+    'Account No. 998877665544 TouchPoints rewards',
+    'Account Number XXXXXXXXXXXX2280',
+    'Card Number XXXXXXXXXXXX2280',
+    'Page 3 of 3', 'adcb.com',
+  ];
+  const adcbParse = (pages) => parseStatementLines(pages.map((page) => page.join('\n')).join('\n'), 'AED',
+    { card: null }, 'day-first', pages.map((page) => page.join('\n')));
+  const adcbTotal = (result) => result.rows.reduce((sum, row) => sum + (row.type === 'expense' ? row.amountFils : -row.amountFils), 0);
+  const adcb = adcbParse([adcbPage1, adcbPage2, adcbPage3]);
+  ok('a bilingual card statement with a payment, IBAN and rewards page imports every row to its one card',
+    adcb.rows.length === 6 && adcb.rejectedRows === 0 && adcb.totalRows === 6 &&
+      adcbTotal(adcb) === 378314 &&
+      adcb.rows.every((row) => row.type === 'expense' && row.card?.last4 === '2280'),
+    JSON.stringify({ rows: adcb.rows.map((row) => [row.date, row.merchant, row.amountFils, row.card]), rejected: adcb.rejectedRows }));
+  const foreignRow = adcb.rows.find((row) => row.date === '2026-08-01');
+  ok('a foreign original amount inside an Amount in AED card row files only the AED charge',
+    foreignRow?.amountFils === 3879 && !/10\.14|USD|38\.79/.test(foreignRow?.merchant ?? ''),
+    JSON.stringify(foreignRow));
+  ok('the statement summary and new-balance lines are not transactions',
+    !adcb.rows.some((row) => [378314, 1891600, 18916].includes(row.amountFils)));
+  const adcbNoPage3 = adcbParse([adcbPage1, adcbPage2]);
+  ok('the same card under its header and its section is one card',
+    adcbNoPage3.rows.length === 6 && adcbNoPage3.rows.every((row) => row.card?.last4 === '2280'));
+  const adcbSameLast4 = adcbParse([[...adcbPage1, 'Account Number XXXXXXXXXXXX2280'], adcbPage2]);
+  ok('on a card statement the same last four under an account label is the same instrument',
+    adcbSameLast4.rows.length === 6 && adcbSameLast4.rows.every((row) => row.card?.last4 === '2280'));
+
+  const asciiPage = (page) => page.map((line) => line.replace(/[^\x20-\x7e]+/g, '').trim()).filter(Boolean);
+  const adcbPdf = await extractPdfStatementRows(pagedPdf([
+    asciiPage(adcbPage1), asciiPage(adcbPage2), adcbPage3,
+  ]), 'AED', undefined, 'day-first');
+  ok('an actual three-page card PDF with a payment-instructions page imports instead of refusing',
+    adcbPdf.pages === 3 && adcbPdf.rows.length === 6 && adcbPdf.rejectedRows === 0 &&
+      adcbPdf.completeRowAccounting === true && adcbTotal(adcbPdf) === 378314 &&
+      adcbPdf.rows.every((row) => row.card?.last4 === '2280'),
+    JSON.stringify({ rows: adcbPdf.rows.length, rejected: adcbPdf.rejectedRows }));
+
+  let samePageInstructionsError = '';
+  try { parseStatementLines([...adcbPage1, ...adcbPage2, ...adcbPage3].join('\n'), 'AED', { card: null }, 'day-first'); }
+  catch (error) { samePageInstructionsError = error.message; }
+  ok('without page evidence another labelled account in the text still refuses',
+    samePageInstructionsError === 'multiple_statement_accounts');
+  let rowPageAccountError = '';
+  try { adcbParse([adcbPage1, [...adcbPage2, 'Account Number 12345678901234']]); }
+  catch (error) { rowPageAccountError = error.message; }
+  ok('an account number on a page that holds transactions still refuses',
+    rowPageAccountError === 'multiple_statement_accounts');
+
+  const supplementarySection = [
+    'Card No : XXXXXXXXXXXX5512 - SUPPLEMENTARY NAME',
+    '03/08/2026 NOON.COM DUBAI ARE 120.00',
+    '04/08/2026 TALABAT DUBAI ARE 45.50',
+  ];
+  const adcbSupplementary = adcbParse([
+    adcbPage1, [...adcbPage2.slice(0, -3), ...supplementarySection, ...adcbPage2.slice(-3)], adcbPage3,
+  ]);
+  ok('supplementary-card sections share the card account and import to the primary card',
+    adcbSupplementary.rows.length === 8 && adcbSupplementary.rejectedRows === 0 &&
+      adcbTotal(adcbSupplementary) === 378314 + 16550 &&
+      adcbSupplementary.rows.every((row) => row.card?.last4 === '2280'),
+    JSON.stringify(adcbSupplementary.rows.map((row) => [row.merchant, row.amountFils, row.card])));
+
+  // Each of these was refused before the supplementary exception existed and
+  // must stay refused: a second account's rows would be filed to the card.
+  const refusal = (lines, pages) => {
+    try { parseStatementLines(lines.join('\n'), 'AED', { card: null }, 'day-first', pages); return 'accepted'; }
+    catch (error) { return error.message; }
+  };
+  const cardTop = ['Credit Card Statement', 'Card Number XXXXXXXXXXXX2280', 'Statement Date 05/08/26',
+    'Minimum Payment Due 189.16', 'Total Credit Limit 16,100.00', 'Transaction Date Transaction Description Amount in AED'];
+  const mustRefuse = {
+    'two card accounts with their own limits and dues': [
+      'Credit Card Statement', 'Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 189.16', 'Total Credit Limit 16,100.00',
+      '26/07/2026 SHOP ONE ARE 27.99',
+      'Card Number XXXXXXXXXXXX7731', 'Minimum Payment Due 52.00', 'Total Credit Limit 5,000.00',
+      '27/07/2026 SHOP TWO ARE 30.00'],
+    'two card accounts with one minimum floor and whole-number limits': [
+      'Credit Card Statement', 'Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 100.00', 'Credit Limit AED 16,100',
+      '26/07/2026 SHOP ONE ARE 27.99',
+      'Card Number XXXXXXXXXXXX7731', 'Minimum Payment Due 100.00', 'Credit Limit AED 5,000',
+      '27/07/2026 SHOP TWO ARE 30.00'],
+    'two card accounts with differently spelled figures': [
+      'Credit Card Statement', 'Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 189.16', 'Card Limit 16,100.00',
+      '26/07/2026 SHOP ONE ARE 27.99',
+      'Card Number XXXXXXXXXXXX7731', 'Min. Payment Due 52.00', 'Card Limit 5,000.00',
+      '27/07/2026 SHOP TWO ARE 30.00'],
+    'per-card figures in a table beside a combined total': [
+      'Credit Card Statement', 'Statement Date 05/08/26', 'Total Minimum Payment Due 241.16',
+      'Total Credit Limit 21,100.00', 'Card Number Credit Limit Minimum Due',
+      'Card Number XXXXXXXXXXXX2280', '16,100.00 189.16', '26/07/2026 SHOP ONE ARE 27.99',
+      'Card Number XXXXXXXXXXXX7731', '5,000.00 52.00', '27/07/2026 SHOP TWO ARE 30.00'],
+    'a primary card shown only by its BIN': [
+      'Credit Card Statement', 'Card Number 4111XXXXXXXXXXXX', 'Minimum Payment Due 189.16',
+      'Card No : XXXXXXXXXXXX5512 - SUPP', '26/07/2026 SHOP ONE ARE 27.99',
+      'Card No : XXXXXXXXXXXX2280 - PRIMARY', '27/07/2026 SHOP TWO ARE 30.00'],
+    'a card statement with a bank account section': [
+      ...cardTop, '26/07/2026 SHOP ONE ARE 27.99',
+      'Account Number XXXXXXXX9031', '02/08/2026 SALARY TRANSFER 9,000.00 CR', '03/08/2026 ATM WITHDRAWAL 500.00 DR'],
+    'a card statement with a bank account section labelled with its IBAN': [
+      ...cardTop, '26/07/2026 SHOP ONE ARE 27.99',
+      'Account Number XXXXXXXX9031 IBAN AE070030000000000009031',
+      '02/08/2026 SALARY TRANSFER 9,000.00 CR', '03/08/2026 ATM WITHDRAWAL 500.00 DR'],
+    'two card accounts labelled as accounts with rewards wording': [
+      'Credit Card Statement', 'Statement Date 05/08/26', 'Minimum Payment Due 189.16',
+      'Account Number XXXXXXXXXXXX2280 Skywards Miles Card', '26/07/2026 SHOP ONE ARE 27.99',
+      'Account Number XXXXXXXXXXXX7731 Skywards Miles Card', 'Minimum Payment Due 52.00', '27/07/2026 SHOP TWO ARE 30.00'],
+    'two accounts with IBANs and a row naming a credit card number': [
+      'Statement of Account', 'Account Number XXXX1111 IBAN AE070000000000001111', '2026-09-01 SHOP 10.00 DR',
+      '2026-09-02 PAYMENT TO CREDIT CARD NUMBER XXXX5555 500.00 DR',
+      'Account Number XXXX2222 IBAN AE070000000000002222', '2026-09-03 SALARY 20.00 CR'],
+    'two accounts under a debit card header': [
+      'Statement of Account', 'Statement Period 01/09/2026 - 30/09/2026', 'Debit Card Number XXXX4444',
+      'Account Number XXXX1111 IBAN AE070000000000001111', '2026-09-01 SHOP 10.00 DR',
+      'Account Number XXXX2222 IBAN AE070000000000002222', '2026-09-03 SALARY 20.00 CR'],
+    'a second account labelled only after the rows': [
+      'Statement of Account', 'Account Number XXXX1111', '2026-09-01 SHOP 10.00 DR', '2026-09-03 SALARY 20.00 CR',
+      'Account Number XXXX2222'],
+    'an account statement header that lists two accounts': [
+      'Statement of Account', 'Account Number XXXX1111', 'Account Number XXXX2222', '2026-09-01 SHOP 10.00 DR'],
+    'an account statement beside a card shown only by its BIN': [
+      'Statement of Account', 'Card Number 4111XXXXXXXXXXXX', 'Account Number XXXX1234', '2026-09-01 SHOP 10.00 DR'],
+  };
+  for (const [name, lines] of Object.entries(mustRefuse)) {
+    ok(`still refuses: ${name}`, refusal(lines) === 'multiple_statement_accounts', refusal(lines));
+  }
+  const wrappedSecondCard = [
+    ['Credit Card Statement', 'Statement Date 05/08/26', 'Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 189.16',
+      'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+      '01-Aug-26 02-Aug-26 SHOP ONE DUBAI AE 10.00 10.00'],
+    ['Card Number XXXXXXXXXXXX7731', 'Minimum Payment Due 52.00',
+      'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+      '03-Aug-26 04-Aug-26 SHOP TWO WITH A LONG NAME DUBAI AE', '20.00 20.00'],
+  ];
+  ok('still refuses: a second card account whose only row wraps across lines on its own page',
+    refusal(wrappedSecondCard.flat(), wrappedSecondCard.map((page) => page.join('\n'))) === 'multiple_statement_accounts');
+
+  ok('still refuses: card numbers that lead packed rows on their own lines',
+    refusal(['Credit Card Statement Minimum Payment Due AED 50.00',
+      'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)',
+      'Card Number XXXXXXXXXXXX2280 01-Aug-26 02-Aug-26 SHOP ONE DUBAI AE 10.00 10.00 -03-Aug-26 04-Aug-26 SHOP TWO DUBAI AE 20.00 20.00',
+      'Card Number XXXXXXXXXXXX7731 05-Aug-26 06-Aug-26 SHOP THREE DUBAI AE 30.00 30.00']) === 'multiple_statement_accounts');
+  ok('a named-month date merged onto a card number never becomes its last four',
+    parseStatementLines(['Credit Card Statement', 'Minimum Payment Due 189.16', 'Card Number XXXXXXXXXXXX2280 01-Aug-26',
+      '26/07/2026 DING MIDDLE EAST DUBAI ARE 27.99'].join('\n'), 'AED', { card: null }, 'day-first').rows[0]?.card?.last4 === '2280');
+  const identity = (line) => parseStatementLines(['Statement of Account', line, '2026-09-01 SHOP 10.00 DR'].join('\n'), 'AED').rows[0]?.card?.last4 ?? null;
+  ok('a date merged onto a labelled number never becomes its last four',
+    identity('Account Number 0123456789 12/09/2026') === '6789' &&
+      parseStatementLines(['Credit Card Statement', 'Card Number XXXXXXXXXXXX2280 05/08/26', 'Minimum Payment Due 189.16',
+        '26/07/2026 DING MIDDLE EAST DUBAI ARE 27.99'].join('\n'), 'AED', { card: null }, 'day-first').rows[0]?.card?.last4 === '2280' &&
+      parseStatementLines(['Credit Card Statement', 'Minimum Payment Due 189.16', 'Card No : XXXXXXXXXXXX2280 26/07/2026',
+        '26/07/2026 DING MIDDLE EAST DUBAI ARE 27.99'].join('\n'), 'AED', { card: null }, 'day-first').rows[0]?.card?.last4 === '2280');
+  ok('spaced and dash-grouped numbers keep their real last four',
+    identity('Account Number XXXX XXXX 1234 5678') === '5678' &&
+      identity('Account Number **** **** 1234 5678') === '5678' &&
+      identity('Account Number 1012 34-56-7890') === '7890' &&
+      identity('Card No : XXXXXXXXXXXX2280 - XAVIER NAME') === '2280');
+  ok('digits printed before the mask (BIN-only or RTL-reversed) are not a last four',
+    parseStatementLines(['Credit Card Statement', 'Card Number 0822XXXXXXXXXXXX', 'Minimum Payment Due 189.16',
+      'Card No : XXXXXXXXXXXX2280 - CARDHOLDER NAME', '26/07/2026 DING MIDDLE EAST DUBAI ARE 27.99'].join('\n'),
+    'AED', { card: null }, 'day-first').rows[0]?.card?.last4 === '2280');
+  const splitLabels = parseStatementLines(['Statement of Account', 'Account Number', 'XXXX1111', '2026-09-01 SHOP 10.00 DR'].join('\n'), 'AED');
+  ok('a label and a number on separate lines still name no identity',
+    splitLabels.rows.length === 1 && splitLabels.rows[0].card === null, JSON.stringify(splitLabels.rows[0]?.card));
+
+  const foreignCase = (header, row) => parseStatementLines([...adcbHeader, header, row].join('\n'), 'AED', { card: null }, 'day-first');
+  const foreignRefused = [
+    ['Date Description Amount', '01/08/2026 www*MobileRecharge.com ATLANTA USA 10.14 USD 38.79'],
+    [adcbTable, '01/08/2026 SHOP ATLANTA USA 10.14 USD 38.79 120.00'],
+    ['Transaction Date Description Amount (AED) Original Currency Amount', '01/08/2026 AMAZON US SEATTLE 38.79 USD 10.14'],
+    [adcbTable, '01/08/2026 STORE 2026 USD 38.79'],
+  ].map(([header, row]) => foreignCase(header, row));
+  ok('a foreign figure is never dropped unless the only amount column is the ledger one and the original is exact',
+    foreignRefused.every((result) => result.rows.length === 0 && result.rejectedRows === 1),
+    JSON.stringify(foreignRefused.map((result) => result.rows.map((row) => [row.merchant, row.amountFils]))));
+  const foreignYen = foreignCase(adcbTable, '01/08/2026 TOKYO SHOP JPN 1,500 JPY 38.79');
+  ok('a zero-decimal foreign original is recognised by its own minor unit',
+    foreignYen.rows.length === 1 && foreignYen.rows[0].amountFils === 3879 && !/JPY|1,500/.test(foreignYen.rows[0].merchant));
+
 
   for (const label of ['Currency:USD', 'Account currency=USD', 'Statement currency-USD', 'Currency USD']) {
     let metadataError = '';

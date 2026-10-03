@@ -95,7 +95,8 @@ test('a stacked order from going Back in the Goals step is repaired too', async 
   const stacked = { order: ['activity', 'insight', 'due', 'upcoming', ...TOP, 'assistant', 'capture'], hidden: ['insight'] };
   const h = setup({ [LAYOUT]: JSON.stringify(stacked) });
   await h.repair.repairGoalOrderedHomeOnce();
-  assert.deepEqual(h.layout(), { order: [...TOP, 'activity', 'insight', 'due', 'upcoming', 'assistant', 'capture'], hidden: ['insight'] });
+  // Payments are drawn before recent activity (onboarding-e.ts paymentsBeforeActivity).
+  assert.deepEqual(h.layout(), { order: [...TOP, 'due', 'upcoming', 'activity', 'insight', 'assistant', 'capture'], hidden: ['insight'] });
   assert.equal(h.store.get(MARKER), '1');
 });
 

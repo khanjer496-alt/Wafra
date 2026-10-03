@@ -8,6 +8,18 @@ import type { Transaction } from '@/lib/types';
  */
 const PAYMENT_FLOW_WINDOW_MS = 5 * 60_000;
 const COMPOUND_BILL_WINDOW_MS = 3 * 24 * 60 * 60_000;
+/**
+ * How far apart a biller's own receipt and the bank's alert for the same
+ * payment may be. The card alert and the e& receipt normally land within a
+ * minute, but the owner's corpus has an e& receipt two days after the card
+ * debit it confirms (the compound-bill fixture), and a PDF/CSV statement row
+ * carries only a posting DATE that can trail the payment by a weekend. Three
+ * days is the window the bundle rule already uses for the same biller; the
+ * one-candidate-on-each-side rule, not the window, is what refuses a guess.
+ */
+const BILLER_RECEIPT_WINDOW_MS = COMPOUND_BILL_WINDOW_MS;
+const BILLER_RECEIPT_WINDOW_DAYS = 3;
+const DAY_MS = 24 * 60 * 60_000;
 
 interface MatchScore {
   count: number;
@@ -105,11 +117,15 @@ export const reconcilePaymentFlows = (transactions: Transaction[]): Transaction[
   }
 
   const removed = new Set<string>();
+  /** Receipts whose funding leg was just folded: already one economic event. */
+  const fundedReceipts = new Set<string>();
+  const bundleParents = new Set<string>();
   for (const bucket of buckets.values()) {
     const funding = bucket.funding.sort((a, b) => (eventTime(a) ?? 0) - (eventTime(b) ?? 0));
     const receipts = bucket.receipts.sort((a, b) => (eventTime(a) ?? 0) - (eventTime(b) ?? 0));
-    for (const [fundingIndex] of preferredPairs(funding, receipts)) {
+    for (const [fundingIndex, receiptIndex] of preferredPairs(funding, receipts)) {
       removed.add(funding[fundingIndex].id);
+      fundedReceipts.add(receipts[receiptIndex].id);
     }
   }
 
@@ -182,7 +198,174 @@ export const reconcilePaymentFlows = (transactions: Transaction[]): Transaction[
       }
       if (rows.length >= 2 && sum === parent.amountFils) match = rows;
     }
-    if (match) for (const child of match) removed.add(child.id);
+    if (match) {
+      for (const child of match) removed.add(child.id);
+      bundleParents.add(parent.id);
+    }
   }
-  return removed.size === 0 ? transactions : transactions.filter((row) => !removed.has(row.id));
+
+  const merged = pairBillerReceipts(transactions, removed, fundedReceipts, bundleParents, providerKeyOf);
+  if (removed.size === 0 && merged.size === 0) return transactions;
+  const out: Transaction[] = [];
+  for (const row of transactions) {
+    if (removed.has(row.id)) continue;
+    out.push(merged.get(row.id) ?? row);
+  }
+  return out;
+};
+
+const isStatementRow = (row: Transaction): boolean =>
+  row.captureSource === 'pdf' || row.captureSource === 'csv';
+
+const dayNumber = (iso: string): number | null => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) / DAY_MS : null;
+};
+
+/**
+ * A statement row's clock is synthetic (midday of the posting date), so a
+ * pair involving one is compared by calendar day. Two live alerts compare by
+ * their own clocks.
+ */
+const withinReceiptWindow = (receipt: Transaction, bank: Transaction): boolean => {
+  const a = eventTime(receipt);
+  const b = eventTime(bank);
+  if (a !== null && b !== null && !isStatementRow(receipt) && !isStatementRow(bank)) {
+    return Math.abs(a - b) <= BILLER_RECEIPT_WINDOW_MS;
+  }
+  const da = dayNumber(receipt.date);
+  const db = dayNumber(bank.date);
+  return da !== null && db !== null && Math.abs(da - db) <= BILLER_RECEIPT_WINDOW_DAYS;
+};
+
+/** Same ledger amount AND the same stated original money, to the minor unit. */
+const sameMoney = (a: Transaction, b: Transaction): boolean => {
+  if (a.amountFils !== b.amountFils) return false;
+  if ((a.originalCurrency ?? '') !== (b.originalCurrency ?? '')) return false;
+  if (a.originalCurrency === undefined) return true;
+  return a.originalMinorUnits !== undefined && b.originalMinorUnits !== undefined
+    ? a.originalMinorUnits === b.originalMinorUnits && a.originalExponent === b.originalExponent
+    : a.originalAmountMinor === b.originalAmountMinor;
+};
+
+const billTail = (identity: string): string | null =>
+  identity.match(/^(?:account|consumer|party|customer|contract|service):([A-Z0-9]{4})$/i)?.[1].toUpperCase() ?? null;
+
+/** Two stated bill accounts that differ are two bills, whatever the amount. */
+const conflictingBillIdentity = (a: Transaction, b: Transaction): boolean => {
+  if (!a.billIdentity || !b.billIdentity) return false;
+  const ta = billTail(a.billIdentity);
+  const tb = billTail(b.billIdentity);
+  return ta !== null && tb !== null ? ta !== tb : a.billIdentity.toLowerCase() !== b.billIdentity.toLowerCase();
+};
+
+/** Anything a person decided about the row. Such a row is never removed here. */
+const pinned = (row: Transaction): boolean =>
+  row.userEdited === true || row.titleEdited === true || row.transferDecision !== undefined ||
+  row.billPayment !== undefined || (row.splits?.length ?? 0) > 0;
+
+/**
+ * A bank descriptor that still reads as raw text, padded for whole-word tests.
+ *
+ * The parser and the statement importer (classifyMerchantDescription) both
+ * title "E& DIGITAL APP ABU DHABI ARE" — ADCB's statement descriptor for an
+ * e& app payment — as "Etisalat", so this only matters for a row that kept
+ * the raw descriptor. "e and digital app" is e&'s own app name, never a word
+ * sequence another payee uses.
+ */
+const bankBillerKey = (key: string): string =>
+  ` ${key} `.replace(/ e and digital app /g, ' etisalat ');
+
+/** A receipt titled only by an account fragment names no biller to compare. */
+const UNNAMED_RECEIPT_RE = /^payment\s+to\b/i;
+
+/**
+ * Pair a biller's own receipt with the bank's alert for the SAME payment.
+ *
+ * e& confirms a bill payment itself ("Your payment ... Amount Paid: AED
+ * 450.45 / Payment Channel: Etisalat Mobile App"), and the card that paid it
+ * alerts too ("ADCB Credit Card XXX2518 has been used for AED 450.45 at MB
+ * BILL DR:ETISALAT TELEP"). Both are expenses, so Spent counted the bill
+ * twice. The receipt usually names no paying card and lands on the
+ * unassigned account; the bank row has the real card. Keep the bank row,
+ * carry the receipt's bill identity onto it (so an account-exact bill still
+ * settles, and two e& lines are not confused), and drop the receipt.
+ *
+ * Deliberately narrow:
+ *   - exactly the same amount and original currency;
+ *   - the bank row's payee resolves to the receipt's biller (providerKey
+ *     equality, or the receipt's biller as a whole word of the bank
+ *     descriptor: "mb bill dr etisalat telep dubai" names "etisalat");
+ *   - within BILLER_RECEIPT_WINDOW of each other, in either order;
+ *   - exactly ONE candidate on each side. A second receipt or a second bank
+ *     row — including a user-edited one, which is never itself removed — makes
+ *     the evidence ambiguous and nothing is paired;
+ *   - never against income, a transfer, a card settlement, a funding leg, a
+ *     receipt already explained by a funding alert, or a bundle parent;
+ *   - neither row edited by the user. Pinned rows still count as competitors.
+ *
+ * The rule is stateless like the two above: it is re-derived over the whole
+ * ledger on every reconciliation, so a re-imported receipt is folded again.
+ */
+const pairBillerReceipts = (
+  transactions: Transaction[],
+  removed: Set<string>,
+  fundedReceipts: Set<string>,
+  bundleParents: Set<string>,
+  providerKeyOf: (title: string) => string,
+): Map<string, Transaction> => {
+  const merged = new Map<string, Transaction>();
+  const receiptsByAmount = new Map<number, Transaction[]>();
+  for (const row of transactions) {
+    if (row.source !== 'sms' || row.type !== 'expense' || row.paymentFlowSide !== 'receipt' ||
+      row.isTransfer === true || row.cardPaymentSide !== undefined || !(row.amountFils > 0) ||
+      removed.has(row.id) || fundedReceipts.has(row.id) || UNNAMED_RECEIPT_RE.test(row.title.trim())) continue;
+    if (providerKeyOf(row.title).length < 2) continue;
+    const group = receiptsByAmount.get(row.amountFils);
+    if (group) group.push(row);
+    else receiptsByAmount.set(row.amountFils, [row]);
+  }
+  if (receiptsByAmount.size === 0) return merged;
+
+  const banksOfReceipt = new Map<Transaction, Transaction[]>();
+  const receiptsOfBank = new Map<Transaction, Transaction[]>();
+  for (const bank of transactions) {
+    const group = receiptsByAmount.get(bank.amountFils);
+    if (!group) continue;
+    if (bank.source !== 'sms' || bank.type !== 'expense' || bank.paymentFlowSide !== undefined ||
+      bank.isTransfer === true || bank.cardPaymentSide !== undefined || bank.transferMatch !== undefined ||
+      removed.has(bank.id) || bundleParents.has(bank.id)) continue;
+    const bankKey = bankBillerKey(providerKeyOf(bank.title));
+    for (const receipt of group) {
+      const receiptKey = providerKeyOf(receipt.title);
+      const sameBiller = bankKey === ` ${receiptKey} ` ||
+        (receiptKey.length >= 4 && bankKey.includes(` ${receiptKey} `));
+      if (!sameBiller || !sameMoney(receipt, bank) || conflictingBillIdentity(receipt, bank) ||
+        !withinReceiptWindow(receipt, bank)) continue;
+      const banks = banksOfReceipt.get(receipt);
+      if (banks) banks.push(bank);
+      else banksOfReceipt.set(receipt, [bank]);
+      const receipts = receiptsOfBank.get(bank);
+      if (receipts) receipts.push(receipt);
+      else receiptsOfBank.set(bank, [receipt]);
+    }
+  }
+
+  for (const [receipt, banks] of banksOfReceipt) {
+    if (banks.length !== 1) continue;
+    const bank = banks[0];
+    if (receiptsOfBank.get(bank)?.length !== 1) continue;
+    if (pinned(receipt) || pinned(bank)) continue;
+    removed.add(receipt.id);
+    const carryIdentity = bank.billIdentity === undefined && receipt.billIdentity !== undefined;
+    const carryNote = bank.note === undefined && receipt.note !== undefined;
+    if (carryIdentity || carryNote) {
+      merged.set(bank.id, {
+        ...bank,
+        ...(carryIdentity ? { billIdentity: receipt.billIdentity } : {}),
+        ...(carryNote ? { note: receipt.note } : {}),
+      });
+    }
+  }
+  return merged;
 };

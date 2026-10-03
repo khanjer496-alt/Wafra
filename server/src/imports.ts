@@ -306,6 +306,39 @@ function maskedTail(value: string): string | null {
 
 type StatementInstrument = NonNullable<ParsedSms['card']>;
 
+/**
+ * The labelled number alone, without a neighbouring cell PDF line merging
+ * glued onto it.
+ *
+ * A flattened header row can put the next cell straight after the number:
+ * `Card Number XXXXXXXXXXXX2280 05/08/26` captures `…2280 05`, because a
+ * spaced number may legitimately continue across a space, and its last four
+ * would read `8005`. Only punctuation proves the glue: `after` (the text that
+ * followed the capture) resuming mid-token, as in `/08/26`, `-Aug-26` or
+ * `,783.14`, puts the last short group in that token; a valid date captured
+ * through its dashes is cut the same way. A capture spanning lines is returned unchanged
+ * so `maskedTail` keeps refusing it, as before.
+ */
+function labelledInstrumentValue(value: string, after = ''): string {
+  if (/[\r\n]/.test(value)) return value;
+  const trimmed = value.trimEnd();
+  const wholeDate = /\s+(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2}|(?:19|20)\d{2})$/.exec(trimmed);
+  if (wholeDate) {
+    const [first, second] = [Number(wholeDate[1]), Number(wholeDate[2])];
+    const valid = first >= 1 && second >= 1 && first <= 31 && second <= 31 && (first <= 12 || second <= 12);
+    if (valid) return trimmed.slice(0, wholeDate.index);
+  }
+  if (/^(?:[\/.,:]\d|[-\/.\s](?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)/i.test(after)) {
+    const partial = /\s+\d{1,3}$/.exec(trimmed);
+    if (partial) return trimmed.slice(0, partial.index);
+  }
+  return trimmed;
+}
+
+// A labelled value whose digits run into mask characters shows a prefix, not
+// its last four. A word that merely starts with X (`- XAVIER`) is not mask.
+const MASK_FOLLOWS = /^[\s-]*[*xX•][*xX•\d]/;
+
 /** Statement-wide identity from explicitly labelled document metadata only. */
 function statementInstrument(text: string): StatementInstrument | null {
   const normalized = normalizeDigits(text).normalize('NFKC');
@@ -313,10 +346,17 @@ function statementInstrument(text: string): StatementInstrument | null {
     kind: StatementInstrument['kind'],
     pattern: RegExp,
   ): StatementInstrument | null => {
-    const match = pattern.exec(normalized);
-    if (!match?.[1]) return null;
-    const last4 = maskedTail(match[1]);
-    return last4 ? { last4, kind } : null;
+    for (const match of normalized.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))) {
+      const after = normalized.slice((match.index ?? 0) + match[0].length);
+      // `4111XXXXXXXXXXXX` (only the BIN visible) and an RTL-reversed
+      // `0822XXXXXXXXXXXX` both end in mask: their leading digits are not the
+      // number's last four, so that occurrence names no identity. Only such
+      // an occurrence is passed over; the first other one decides, as before.
+      if (MASK_FOLLOWS.test(after)) continue;
+      const last4 = match[1] ? maskedTail(labelledInstrumentValue(match[1], after)) : null;
+      return last4 ? { last4, kind } : null;
+    }
+    return null;
   };
   return labelled(
     'credit',
@@ -533,8 +573,11 @@ function statementHeaderInstrument(text: string): ParsedSms['card'] {
       { kind: 'account' as const, re: /\b(?:account|acct|a\/c|iban)(?:\s+(?:no\.?|number))?\s*[:#-]?\s*([Xx*•·\d][Xx*•·\d .\/-]{2,48}\d{4})(?!\d)/i },
       { kind: 'unknown' as const, re: /\bcard(?:\s+(?:no\.?|number))?\s*[:#-]?\s*([Xx*•·\d][Xx*•·\d .\/-]{2,48}\d{4})(?!\d)/i },
     ]) {
-      const match = candidate.re.exec(normalizeDigits(line));
-      const last4 = match ? maskedTail(match[1]) : null;
+      const normalized = normalizeDigits(line);
+      const match = candidate.re.exec(normalized);
+      const last4 = match
+        ? maskedTail(labelledInstrumentValue(match[1], normalized.slice(match.index + match[0].length)))
+        : null;
       if (last4) found.set(`${candidate.kind}:${last4}`, { last4, kind: candidate.kind });
     }
   }
@@ -1543,12 +1586,21 @@ function parseCardTotalAmountRow(
   };
 }
 
+/** `10.14` before `USD`: a figure printed exactly to that currency's minor unit. */
+function foreignOriginalAmount(word: string, foreign: StatementCurrency): boolean {
+  const exponent = ledgerMoneySpec(foreign)?.exponent;
+  if (exponent === undefined) return false;
+  const match = /^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?$/.exec(word);
+  return match !== null && (match[1]?.length ?? 0) === exponent;
+}
+
 function parseColumnTail(
   rest: string,
   currency: StatementCurrency,
   order: ColumnOrder,
   loneAmountIsCharge = false,
   convention: SignConvention = 'account',
+  foreignOriginalBeforeLedger = false,
 ): { merchant: string; amountFils: number; type: 'expense' | 'income' } | 'ambiguous-card-sign' | null {
   const words = rest.split(' ');
   const tail: MoneyToken[] = [];
@@ -1557,6 +1609,19 @@ function parseColumnTail(
     const word = words[cut - 1];
     const standaloneCurrency = statementCurrency(word);
     if (standaloneCurrency) {
+      // `www*MobileRecharge.com ATLANTA USA 10.14 USD 38.79` under an
+      // "Amount in AED" column: the description carries the original
+      // foreign amount, suffixed by its code, and the one bare figure after
+      // it is the ledger charge. Only that exact shape, only where the table
+      // names the ledger currency as its single amount column.
+      if (
+        foreignOriginalBeforeLedger && standaloneCurrency !== currency &&
+        tail.length === 1 && tail[0].kind === 'unsigned' && cut >= 2 &&
+        foreignOriginalAmount(words[cut - 2], standaloneCurrency)
+      ) {
+        cut -= 2;
+        break;
+      }
       // A currency word only qualifies the money token after it; one that
       // names another market's currency means this row is not ours.
       if (tail.length === 0 || standaloneCurrency !== currency) return null;
@@ -1732,6 +1797,140 @@ export interface StatementTextResult {
   ambiguousDateRows: number;
 }
 
+// A line that opens a statement section by labelling its account or card.
+const SECTION_LABEL = /^\s*(?:(?:credit\s+card|card|account|a\/c)\s+(?:number|no\.?|ending)\b|(?:account|acct|a\/c|iban|card)\s*[:#-]?\s*[*xX•·\d]|number\s+card\s+credit\b)/i;
+
+// Anything that could be all or part of a transaction row: a date-led line,
+// or a date and a money figure on one line (packed or reordered rows).
+const DATE_ANYWHERE = new RegExp(`(?:^|[\\s-])${DATE_TOKEN}(?=$|[\\s-])`, 'i');
+function mayCarryTransactions(line: string): boolean {
+  return DATE_LED_LINE.test(line) || (DATE_ANYWHERE.test(line) && LOOKS_LIKE_MONEY_LINE.test(line));
+}
+
+/**
+ * How many text lines at the end of a PDF belong to pages printed after the
+ * last page that could hold a transaction: payment instructions, rewards
+ * summaries, terms. Zero unless the per-page text maps exactly onto `lines`.
+ */
+function trailingInformationLines(pages: readonly string[] | undefined, lines: string[]): number {
+  if (!pages || pages.length < 2) return 0;
+  const pageLines = pages.map((page) => normalizeDigits(page).normalize('NFC').split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim()).filter(Boolean));
+  if (pageLines.reduce((count, page) => count + page.length, 0) !== lines.filter(Boolean).length) return 0;
+  let lastTransactionPage = -1;
+  pageLines.forEach((page, index) => {
+    if (page.some(mayCarryTransactions)) lastTransactionPage = index;
+  });
+  if (lastTransactionPage < 0) return 0;
+  return pageLines.slice(lastTransactionPage + 1).reduce((count, page) => count + page.length, 0);
+}
+
+// The statement-level figures of one card account. Supplementary cards share
+// them; separate card accounts printed in one file each carry their own.
+const MINIMUM_DUE_LABEL = /\bmin(?:imum|\.)?\s+(?:amount\s+|payment\s+|pay\s+)?due\b/i;
+const CREDIT_LIMIT_LABEL = /(?<!\b(?:available|avail\.?|cash|over|remaining|unused)\s)\b(?:credit|card)\s+limit\b/i;
+
+/**
+ * One minimum due and at most one credit limit across the file: one card
+ * account. Fails closed on any such label whose figure it cannot read.
+ */
+function singleCardAccount(lines: string[]): boolean {
+  let minimumDue = false;
+  for (const label of [MINIMUM_DUE_LABEL, CREDIT_LIMIT_LABEL]) {
+    const values = new Set<string>();
+    for (const line of lines) {
+      const match = label.exec(line);
+      if (!match) continue;
+      if (line.length > 160) return false;
+      const figure = /^[^\d\n%]{0,40}?(\d[\d,]*(?:\.\d{1,3})?)(?![\d%])/.exec(line.slice(match.index + match[0].length));
+      if (!figure) return false;
+      values.add(figure[1].replace(/,/g, '').replace(/\.0+$/, ''));
+    }
+    if (values.size > 1) return false;
+    if (label === MINIMUM_DUE_LABEL) minimumDue = values.size === 1;
+  }
+  return minimumDue;
+}
+
+/**
+ * Refuse a file that names more than one account.
+ *
+ * A flattened PDF has no safe table-to-account mapping, so every number the
+ * file labels as a section's account or card must be the same one; otherwise
+ * the statements must be split before import rather than every row filed to
+ * one of them. Three exceptions, each proved rather than inferred from layout:
+ *
+ * - Pages after the last page that could hold a transaction (payment
+ *   instructions, IBANs to pay into, rewards summaries) name no section.
+ * - On a card statement the same last four under a card label and an account
+ *   label is one instrument.
+ * - A credit-card statement that lists supplementary cards. They share one
+ *   card account (one limit, one balance, one due), so their rows belong to
+ *   the primary card in the statement header. Accepted only when every
+ *   labelled number is a card or is the primary, the primary is the first
+ *   labelled number and appears before any transaction, it is the source the
+ *   rows are filed to, no labelled number was unreadable or carries rows on
+ *   its own line, and the file shows exactly one minimum due and at most one
+ *   credit limit.
+ *
+ * A genuinely mixed account statement, two card accounts with their own
+ * figures, or a card statement with a bank account's section still refuses.
+ */
+function assertSingleStatementInstrument(
+  lines: string[],
+  source: ParsedSms['card'],
+  cardStatement: boolean,
+  cardEvidence: boolean,
+  trailingLines: number,
+): void {
+  const body = lines.filter(Boolean);
+  const considered = body.slice(0, body.length - trailingLines);
+  const key = (instrument: StatementInstrument): string => cardEvidence
+    ? instrument.last4
+    : `${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`;
+  const isCard = (instrument: StatementInstrument) => instrument.kind !== 'account';
+  const found = new Map<string, StatementInstrument>();
+  let primary: StatementInstrument | null = null;
+  let primaryBeforeTransactions = false;
+  let unreadable = false;
+  let seenTransaction = false;
+  let labelCarriesRows = false;
+  for (const line of considered) {
+    if (!SECTION_LABEL.test(line)) {
+      if (mayCarryTransactions(line)) seenTransaction = true;
+      continue;
+    }
+    // Rows packed onto a label line are not rows the parser can see whole.
+    if (mayCarryTransactions(line)) labelCarriesRows = true;
+    const instrument = statementInstrument(line) ?? statementHeaderInstrument(line);
+    if (!instrument) {
+      // `Card Number 4111XXXXXXXXXXXX` shows only a prefix. It was a distinct
+      // number to the old reader and stays one on an account statement; on a
+      // card statement it only means the primary card cannot be verified.
+      const prefix = /(\d{4})[\s-]*[*xX•]{2,}/.exec(normalizeDigits(line));
+      if (prefix && !cardEvidence) {
+        const kind = /^\s*(?:account|acct|a\/c|iban)/i.test(line) ? 'account' : 'card';
+        found.set(`${kind}:${prefix[1]}`, { last4: prefix[1], kind: kind === 'account' ? 'account' : 'unknown' });
+      }
+      if (/\d/.test(line)) unreadable = true;
+      if (mayCarryTransactions(line)) seenTransaction = true;
+      continue;
+    }
+    found.set(key(instrument), instrument);
+    if (!primary) {
+      primary = instrument;
+      primaryBeforeTransactions = !seenTransaction;
+    }
+    if (mayCarryTransactions(line)) seenTransaction = true;
+  }
+  if (found.size <= 1) return;
+  const supplementaryCards = cardStatement && !unreadable && !labelCarriesRows && primary !== null && isCard(primary) &&
+    primaryBeforeTransactions && source !== null && isCard(source) && source.last4 === primary.last4 &&
+    [...found.values()].every((instrument) => instrument.last4 === primary.last4 || isCard(instrument)) &&
+    singleCardAccount(considered);
+  if (!supplementaryCards) throw new Error('multiple_statement_accounts');
+}
+
 /**
  * Conservative statement-row parser. A row is accepted only when its direction
  * is explicit: a DR/CR label (tried first, unchanged), a signed amount, or a
@@ -1745,29 +1944,25 @@ export function parseStatementLines(
   currency: StatementCurrency,
   identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
   dateHint: StatementDateHint = legacyStatementDateHint(currency),
+  pages?: readonly string[],
 ): StatementTextResult {
   if (!ledgerMoneySpec(currency)) throw new Error('unsupported_statement_currency');
   text = normalizeStatementFigures(normalizeDigits(text).normalize('NFC'), currency);
   assertStatementCurrency(text, currency);
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
-  // A flattened document has no safe table-to-account mapping. Repeated page
-  // headers are fine; distinct labelled statement accounts must be split before
-  // import instead of silently routing every section to the first account.
-  const sectionInstruments = new Set<string>();
-  for (const line of text.split(/\n+/)) {
-    if (!/^\s*(?:credit\s+card|card|account|a\/c)\s+(?:number|no\.?|ending)\b/i.test(line) &&
-        !/^\s*(?:account|acct|a\/c|iban|card)\s*[:#-]?\s*[*xX•·\d]/i.test(line) &&
-        !/^\s*number\s+card\s+credit\b/i.test(line)) continue;
-    const instrument = statementInstrument(line) ?? statementHeaderInstrument(line);
-    if (instrument) sectionInstruments.add(`${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`);
-  }
-  if (sectionInstruments.size > 1) throw new Error('multiple_statement_accounts');
   const sourceInstrument = identity.card ?? statementInstrument(text) ?? statementHeaderInstrument(text);
   const bankHint = identity.bankHint ?? statementBankHint(text);
   const hsbcRepaymentCard = hsbcStatementRepaymentCard(text);
   const rawLines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
   const cardStatement = isCardStatement(text);
+  assertSingleStatementInstrument(
+    rawLines,
+    sourceInstrument,
+    cardStatement,
+    cardStatement || sourceInstrument?.kind === 'credit',
+    trailingInformationLines(pages, rawLines),
+  );
   // Refusing a bare sign needs less proof than reading every plain figure as
   // a charge does: one strong marker, or a header card explicitly labelled a
   // credit card, is enough to stop the account convention being assumed.
@@ -1787,6 +1982,17 @@ export function parseStatementLines(
   const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''), dateHint);
   let ambiguousDateRows = 0;
   const columnOrder = statementColumnOrder(text);
+  // A card table whose ONLY money column is its last, headed in the ledger
+  // currency: `Transaction Date | Transaction Description | Amount in AED`
+  // (a translated header may follow). Any second amount, original or
+  // currency column means a figure's column cannot be told from its place.
+  const ledgerAmountColumn = cardStatement && rawLines.some((line) => {
+    const english = line.replace(/[^\x20-\x7e]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return line.length <= 160 && !DATE_LED_LINE.test(line) && /\bdate\b/i.test(english) &&
+      (english.match(/\bamount\b/gi) ?? []).length === 1 &&
+      !/\b(?:balance|original|foreign|currency|debit|credit|fx|rate|vat)\b/i.test(english) &&
+      new RegExp(String.raw`\bamount\s*(?:in\s+${currency}|\(\s*${currency}\s*\))$`, 'i').test(english);
+  });
   const trailingBalanceHeader = rawLines.some((line) => line.length <= 120 &&
     line.split(' ').length <= 12 && !DATE_LED_LINE.test(line) &&
     /\bdate\b/i.test(line) && /\b(?:description|details|particulars|narration)\b/i.test(line) &&
@@ -1960,7 +2166,7 @@ export function parseStatementLines(
     } else {
       const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
       const tail = prefixed && date
-        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement, convention)
+        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement, convention, ledgerAmountColumn)
         : null;
       if (tail === 'ambiguous-card-sign') ambiguousCardSignRows += 1;
       const column = tail === 'ambiguous-card-sign' ? null : tail;
@@ -2020,7 +2226,7 @@ export async function extractPdfStatementRows(
     // Its own code, not the generic unreadable one: a long text statement is
     // not a scan, and telling the user it is sends them the wrong way.
     if (text.length > MAX_NORMALIZED_CHARS) throw new Error('pdf_too_long');
-    const parsed = parseStatementLines(text, currency, { card: null }, dateHint);
+    const parsed = parseStatementLines(text, currency, { card: null }, dateHint, extracted.text);
     return {
       pages: extracted.totalPages,
       rows: parsed.rows,
