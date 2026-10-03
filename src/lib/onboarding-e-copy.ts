@@ -68,7 +68,7 @@ const en = {
     due: 'Due payments come first, right under your totals.',
     upcoming: 'Upcoming payments come first, right under your totals.',
     insight: 'Your spending insight comes first, right under your totals.',
-    activity: 'Your latest activity comes first, right under your totals.',
+    activity: 'Your latest activity comes first after any payments due, right under your totals.',
     assistant: 'Ask Wafra comes first, right under your totals.',
   } satisfies Record<GoalHomeSectionId, string>,
   // 4 · Watch
@@ -173,7 +173,7 @@ const ar: OnboardingECopy = {
     due: 'تظهر الدفعات المستحقة أولاً، تحت أرقامك مباشرة.',
     upcoming: 'تظهر الدفعات القادمة أولاً، تحت أرقامك مباشرة.',
     insight: 'تظهر ملاحظة إنفاقك أولاً، تحت أرقامك مباشرة.',
-    activity: 'تظهر أحدث عملياتك أولاً، تحت أرقامك مباشرة.',
+    activity: 'تظهر أحدث عملياتك أولاً بعد أي دفعات مستحقة، تحت أرقامك مباشرة.',
     assistant: 'يظهر «اسأل وفرة» أولاً، تحت أرقامك مباشرة.',
   },
   watchTitle: 'هل هناك ما تريد مراقبته؟',

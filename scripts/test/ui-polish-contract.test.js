@@ -191,7 +191,10 @@ assert.match(task3Add, /Platform\.OS === 'web' \? [a-zA-Z]+WebAriaProps : \{\}/)
 assert.doesNotMatch(task3Add, /useKeyboardHeight/);
 
 const task3Scaffold = read('src/components/ui/screen-scaffold.tsx');
-assert.match(task3Scaffold, /useKeyboardHeight\(keyboardAware && Platform\.OS !== 'ios'\)/);
+// iOS subscribes too, but only to gate KeyboardAvoidingView: its padding is
+// on while the keyboard is shown, so a late show update cannot leave a blank.
+assert.match(task3Scaffold, /useKeyboardHeight\(keyboardAware\)/);
+assert.match(task3Scaffold, /enabled=\{Platform\.OS !== 'ios' \|\| keyboardHeight > 0\}/);
 assert.match(task3Scaffold, /contentInset: \{ top, bottom:/);
 assert.match(task3Scaffold, /keyboardAware && Platform\.OS !== 'ios'[\s\S]*?keyboardHeight/);
 assert.match(task3Scaffold, /scrollIndicatorInsets:[\s\S]*?bottom:[\s\S]*?keyboardHeight/);
