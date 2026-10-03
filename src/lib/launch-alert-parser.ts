@@ -18,9 +18,12 @@ import { parseSmsBatch, type ParsedSms } from '@/lib/sms-parser';
 import type { CategoryId } from '@/lib/types';
 import { CURRENCY_SYMBOL_CANDIDATES, currencyMinorUnits } from '@/lib/currency-metadata';
 import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
 import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
-import type { UniversalBankEvent } from '@/lib/universal-types';
+import type { UniversalBankEvent, UniversalParseContext } from '@/lib/universal-types';
+
+type CurrencyAliasMap = NonNullable<UniversalParseContext['currencyAliases']>;
 
 // Cheap supersets used only to decide whether market routing must run. The
 // parser/reviewer remains the authority; matching one of these never imports.
@@ -47,7 +50,7 @@ export const hasBankAlertMoneyHint = (source: string): boolean =>
  * bank phrasing from a supported institution still reaches the full parser.
  */
 const UNIVERSAL_POSTED_EVENT_HINT =
-  /\b(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|transferr(?:ed|ing)|sent|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)\b|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم)/iu;
+  /\b(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+of|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)\b|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額)/iu;
 
 // A small family of real bank field-list alerts has amount + instrument +
 // merchant but no verb at all. The 30k Jev benchmark found one such rescued FAB
@@ -88,6 +91,71 @@ export const inspectGenericBankEventForReview = (
 /** Synchronous, network-free rate lookup used while parsing. */
 export type ParseFxLookup = (base: string, quote: string, date: string) => FxQuote | null;
 
+/**
+ * The category and title an automatically posted worldwide row gets.
+ *
+ * Both posting seams below used to hard-code `other` for everything except
+ * ATM and utility rows, so a Tesco, Spotify or REWE purchase posted in the
+ * UK or Germany arrived uncategorized even though the worldwide merchant
+ * vocabulary and brand table (universal-categorization.ts) already knew them,
+ * and the SAME alert promoted from Review was categorized. One alert must get
+ * one answer whichever door it came through, so this is the Review path's own
+ * call. Transfers keep their structural title and stay uncategorized: whether
+ * they are the user's own money is reconciliation's question, not a merchant's.
+ */
+const WORLD_SALARY_RE = /\b(?:salary|payroll|wages?|pay\s*cheque|paycheck|salaire|gehalt|lohn|salario|sueldo|n[óo]mina|sal[áa]rio|stipendio|salaris|maa[şs]|gaji)\b|راتب|رواتب|वेतन/iu;
+const universalRowCategory = (
+  source: string,
+  event: UniversalBankEvent,
+  overrides: Record<string, CategoryId>,
+  market: string | null,
+): { category: CategoryId; deliberate: boolean; merchant: string } => {
+  const explicit = event.merchant.evidence === 'explicit' ? event.merchant.value?.trim() ?? '' : '';
+  if (event.family === 'cash-withdrawal') return { category: 'cash-withdrawal', deliberate: true, merchant: explicit };
+  // Salary is the one incoming transfer whose purpose the wording states.
+  if (event.direction === 'credit' && event.family === 'transfer' && WORLD_SALARY_RE.test(source)) {
+    return { category: 'salary', deliberate: true, merchant: 'Salary' };
+  }
+  if (event.family === 'transfer' || (event.direction !== 'debit' && event.direction !== 'credit')) {
+    return { category: 'other', deliberate: false, merchant: explicit };
+  }
+  const type = event.direction === 'credit' ? 'income' as const : 'expense' as const;
+  const suggestion = suggestUniversalCategory(event, { type, overrides, market: market ?? undefined });
+  if (event.family === 'utility' && suggestion.needsReview) {
+    return { category: 'utilities', deliberate: true, merchant: suggestion.merchant || explicit };
+  }
+  return {
+    category: suggestion.category,
+    deliberate: !suggestion.needsReview,
+    merchant: explicit ? suggestion.merchant || explicit : '',
+  };
+};
+
+/**
+ * COUNTRY CONVENTIONS FOR MONEY WITHOUT AN ISO CODE.
+ *
+ * Both apply only when the PERSON's country states the convention; nothing
+ * here reads the ledger currency, and no other country is affected.
+ *  - South Africa prints the rand as a bare "R" ("R450.00 paid from Cheq
+ *    a/c"). A letter on its own is not a currency anywhere else.
+ *  - Indian UPI/IMPS/NEFT account alerts often state no currency at all
+ *    ("A/C X1234 debited by 450.0 ... trf to ZOMATO"). Only that exact shape
+ *    is read as rupees: an account reference, a payment rail, a debited/
+ *    credited-by figure, and no other money in the text.
+ */
+const COUNTRY_CURRENCY_ALIASES: Readonly<Record<string, CurrencyAliasMap>> = {
+  ZA: { R: ['ZAR'] },
+};
+const ZA_RAND_HINT = /(?<![\p{L}\p{N}])R\s?\d/u;
+const IN_IMPLICIT_RUPEE_RE = /\b(debited|credited)\s+(by|for|with)\s+(?=\d[\d,]*(?:\.\d{1,2})?\b)/i;
+const countryReadSource = (source: string, country: string | null): string => {
+  if (country !== 'IN' || hasBankAlertMoneyHint(source)) return source;
+  if (!/\b(?:a\/c|acct?|account)\b/i.test(source) || !/\b(?:upi|imps|neft|rtgs)\b/i.test(source)) return source;
+  return source.replace(IN_IMPLICIT_RUPEE_RE, '$1 $2 INR ');
+};
+const countryMoneyHint = (source: string, country: string | null): boolean =>
+  (country === 'ZA' && ZA_RAND_HINT.test(source)) || countryReadSource(source, country) !== source;
+
 const localIsoDay = (epochMs: number | undefined): string | null => {
   if (epochMs === undefined || !Number.isFinite(epochMs)) return null;
   const day = new Date(epochMs);
@@ -117,6 +185,8 @@ const parseUniversalLaunchStrict = (
   pinnedExponent: number | null,
   fxLookup: ParseFxLookup,
   observedAt?: number,
+  overrides: Record<string, CategoryId> = {},
+  market: string | null = null,
 ): ParsedSms | null => {
   const event = inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
   if (event.decision !== 'review' || event.status !== 'posted') return null;
@@ -179,8 +249,9 @@ const parseUniversalLaunchStrict = (
     last4: instrument.last4 ?? '',
     kind: instrument.kind === 'account' ? 'account' as const : 'unknown' as const,
   } : null;
-  const merchant = event.merchant.evidence === 'explicit' && event.merchant.value
-    ? event.merchant.value
+  const classified = universalRowCategory(source, event, overrides, market);
+  const merchant = classified.merchant
+    ? classified.merchant
     : event.family === 'cash-withdrawal'
       ? 'ATM withdrawal'
       : event.family === 'refund'
@@ -188,9 +259,7 @@ const parseUniversalLaunchStrict = (
         : event.direction === 'credit'
           ? 'Incoming transfer'
           : 'Account debit';
-  const categoryGuess: CategoryId =
-    event.family === 'cash-withdrawal' ? 'cash-withdrawal' :
-      event.family === 'utility' ? 'utilities' : 'other';
+  const categoryGuess: CategoryId = classified.category;
 
   return {
     kind: 'transaction',
@@ -208,7 +277,7 @@ const parseUniversalLaunchStrict = (
     snapshotFils: null,
     snapshotKind: null,
     categoryGuess,
-    categoryDeliberate: event.family === 'cash-withdrawal' || event.family === 'utility',
+    categoryDeliberate: classified.deliberate,
     raw: source.trim(),
   };
 };
@@ -219,6 +288,7 @@ interface UnprovenPostingContext {
   routedMarket: string | null;
   /** Launch (AE/SA) sender evidence; the policy then refuses unconditionally. */
   launchSenderMarket: string | null;
+  overrides?: Record<string, CategoryId>;
 }
 
 /**
@@ -253,9 +323,14 @@ const parseUniversalPostedEvent = (
   // A best-effort row is only ever written in the pinned ledger currency; an
   // unpinned ledger waits for Review (or a proven alert) to choose it.
   if (!pinnedCurrency) return null;
-  const event = inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
+  const readSource = countryReadSource(source, context.country);
+  const aliases = context.country ? COUNTRY_CURRENCY_ALIASES[context.country] : undefined;
+  const event = inspectUniversalBankEvent(readSource, {
+    sender, dateOrder: activeCountryDateOrder(),
+    ...(aliases ? { currencyAliases: aliases } : {}),
+  });
   const decision = decideBestEffortAutoPost({
-    source,
+    source: readSource,
     event,
     enabled: context.enabled,
     country: context.country,
@@ -276,10 +351,11 @@ const parseUniversalPostedEvent = (
   const transfer = event.family === 'transfer';
   // Transfer ownership is a separate reconciliation question: keep the
   // structural title so a recipient name cannot turn it into spending.
+  const classified = universalRowCategory(source, event, context.overrides ?? {}, context.routedMarket ?? context.country);
   const merchant = transfer
-    ? event.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer'
-    : event.merchant.evidence === 'explicit' && event.merchant.value
-      ? event.merchant.value
+    ? classified.category === 'salary' ? 'Salary' : event.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer'
+    : classified.merchant
+      ? classified.merchant
       : event.family === 'cash-withdrawal'
         ? 'ATM withdrawal'
         : event.family === 'refund'
@@ -287,9 +363,7 @@ const parseUniversalPostedEvent = (
           : event.direction === 'credit'
             ? 'Incoming transfer'
             : 'Account debit';
-  const categoryGuess: CategoryId =
-    event.family === 'cash-withdrawal' ? 'cash-withdrawal' :
-      event.family === 'utility' ? 'utilities' : 'other';
+  const categoryGuess: CategoryId = classified.category;
 
   return {
     kind: 'transaction',
@@ -304,14 +378,36 @@ const parseUniversalPostedEvent = (
     minDueFils: null,
     card: card && card.last4 ? card : null,
     reference: null,
-    transferHint: transfer,
+    // A salary credit is income whose purpose the wording states; marking it
+    // a transfer stored it with isTransfer and kept it out of Income entirely.
+    transferHint: transfer && classified.category !== 'salary',
     snapshotFils: null,
     snapshotKind: null,
     categoryGuess,
-    categoryDeliberate: event.family === 'cash-withdrawal' || event.family === 'utility',
+    categoryDeliberate: classified.deliberate,
     raw: source.trim(),
   };
 };
+
+/**
+ * A sender name some Gulf bank shares with the same institution elsewhere.
+ *
+ * HSBC sends as "HSBC" in the UAE and in the UK. The router already sees
+ * this and reports the sender as overlapping, with a non-Gulf market among
+ * the candidates. When that happens on a non-Gulf ledger and the alert's own
+ * money is not AED/SAR, the name is not UAE evidence: treating it as one sent
+ * a UK customer's GBP salary down the strict Gulf fallback, which refused it.
+ * A Gulf-only name (FAB, ADCB) is never overlapping and stays launch evidence.
+ */
+const sharedSenderOutsideGulf = (
+  source: string,
+  inspection: UniversalAlertReview | null,
+  pinnedCurrency: string | null,
+): boolean =>
+  !!pinnedCurrency && pinnedCurrency !== 'AED' && pinnedCurrency !== 'SAR' &&
+  detectLaunchMarketFromAlert(source, '') === null &&
+  inspection?.route.decision === 'ambiguous' &&
+  inspection.route.candidates.some((candidate) => candidate.market !== 'AE' && candidate.market !== 'SA');
 
 export interface LaunchAlertSession {
   inspect(source: string, sender: string): UniversalAlertReview | null;
@@ -463,8 +559,9 @@ export const createLaunchAlertSession = ({
     // bank-agnostic universal seam for unknown institutions and countries.
     // Same rule for the worldwide parser: without explicit money it cannot
     // create a valid ledger row. Bank context is still consumed by the review
-    // pipeline after this function returns null.
-    if (!hasBankAlertMoneyHint(source)) return null;
+    // pipeline after this function returns null. The person's own country
+    // may supply money a bare "R" or a currency-less UPI alert states.
+    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country)) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
     /**
      * ONE PUBLIC PARSER, WITH A MATURE LOCAL EVIDENCE PACK.
@@ -488,7 +585,11 @@ export const createLaunchAlertSession = ({
       inspection.route.market !== 'AE' &&
       inspection.route.market !== 'SA';
     const gulfLedger = pinnedCurrency === 'AED' || pinnedCurrency === 'SAR';
-    const launchSenderMarket = detectLaunchMarketFromSender(sender);
+    // See sharedSenderOutsideGulf: a multinational sender name is not UAE
+    // evidence for a non-Gulf alert on a non-Gulf ledger.
+    const namedLaunchMarket = detectLaunchMarketFromSender(sender);
+    const launchSenderMarket = namedLaunchMarket &&
+      !sharedSenderOutsideGulf(source, inspection, pinnedCurrency) ? namedLaunchMarket : null;
     // A single ordered capture/history session cannot change Gulf markets
     // through the broad universal fallback after regional evidence already
     // locked it. Without this guard, 50 UAE messages could establish AE and a
@@ -503,13 +604,15 @@ export const createLaunchAlertSession = ({
     // best-effort setting.
     if (launchSenderMarket === 'AE' || launchSenderMarket === 'SA' ||
       routedMarket === 'AE' || routedMarket === 'SA') {
-      return parseUniversalLaunchStrict(source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt);
+      return parseUniversalLaunchStrict(source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt,
+        overrides, launchSenderMarket ?? routedMarket);
     }
     return parseUniversalPostedEvent(source, sender, pinnedCurrency, pinnedExponent, fxLookup, observedAt, {
       enabled: bestEffort.enabled,
       country: bestEffort.country,
       routedMarket,
       launchSenderMarket: null,
+      overrides,
     });
   };
 
@@ -520,10 +623,13 @@ export const createLaunchAlertSession = ({
     observedAt?: number,
   ): ParsedSms | null => {
     if (!bestEffort.enabled) return null;
-    if (!hasBankAlertMoneyHint(source)) return null;
+    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country)) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
     const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;
-    const launchSenderMarket = detectLaunchMarketFromSender(sender);
+    // Same rule as parse(): see sharedSenderOutsideGulf.
+    const namedLaunchMarket = detectLaunchMarketFromSender(sender);
+    const launchSenderMarket = namedLaunchMarket &&
+      !sharedSenderOutsideGulf(source, inspection, pinnedCurrency) ? namedLaunchMarket : null;
     // AE/SA formats are PROVEN: when the mature grammar refused one, or the
     // alert is routed there, that refusal is the evidence. Never best-effort.
     if (launchSenderMarket || routedMarket === 'AE' || routedMarket === 'SA') return null;
@@ -536,6 +642,7 @@ export const createLaunchAlertSession = ({
       country: bestEffort.country,
       routedMarket,
       launchSenderMarket,
+      overrides,
     });
   };
 

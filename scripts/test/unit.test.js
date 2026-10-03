@@ -724,7 +724,8 @@ ok('openDues: recent overdue credit due still shows',
   // Two REAL payments of the same amount on different days stay two payments.
   // Both statements are dated so that both payments fall inside their windows —
   // otherwise this would pass for the wrong reason, with the second payment
-  // dropped as too early rather than counted.
+  // dropped as too early rather than counted. September states its issue date
+  // (5 Aug), so the 6 Aug payment postdates it and may reduce it.
   const twoDays = {
     ...dupState,
     transactions: [
@@ -733,7 +734,7 @@ ok('openDues: recent overdue credit due still shows',
     ],
     cardDues: [
       { id: 'aug', accountId: 'c', totalDueFils: 564507, minDueFils: 28225, dueDate: '2026-08-26', paidFils: 0 },
-      { id: 'sep', accountId: 'c', totalDueFils: 564507, minDueFils: 28225, dueDate: '2026-09-10', paidFils: 0 },
+      { id: 'sep', accountId: 'c', totalDueFils: 564507, minDueFils: 28225, dueDate: '2026-09-10', paidFils: 0, statementDate: '2026-08-05' },
     ],
   };
   ok('pairing: same amount on different days is two payments, not one',
@@ -1217,10 +1218,26 @@ ok('dues: a single payment settles only the statement it covers',
 ok('dues: the unpaid second statement stays open',
   allocLib.openDues(oneCoversOne, new Date(2026, 6, 20)).length === 1);
 
+// An overpayment made BEFORE the next statement was issued is already netted
+// into that statement's total by the bank. Spilling it onto July credited the
+// same AED 500 twice: a July statement of AED 800 (bank already net of the
+// credit) read AED 300.
 const overpay = mkAlloc([{ amountFils: 150000, date: '2026-06-10' }]);
-ok('dues: an overpayment spills onto the next statement',
+ok('dues: an overpayment before the next statement was issued does not spill onto it',
   allocLib.duePaidFils(overpay, overpay.cardDues[0]) === 100000 &&
-  allocLib.duePaidFils(overpay, overpay.cardDues[1]) === 50000);
+  allocLib.duePaidFils(overpay, overpay.cardDues[1]) === 0);
+// Spill survives where it is real: June marked paid late, on a day July had
+// already been issued, by a payment larger than June.
+const lateOverpay = {
+  ...mkAlloc([{ amountFils: 150000, date: '2026-06-26' }]),
+};
+lateOverpay.cardDues = [
+  { ...lateOverpay.cardDues[0], settledAt: '2026-06-26T10:00:00Z' },
+  lateOverpay.cardDues[1],
+];
+ok('dues: an overpayment made after the next statement was issued still spills onto it',
+  allocLib.duePaidFils(lateOverpay, lateOverpay.cardDues[0]) === 100000 &&
+  allocLib.duePaidFils(lateOverpay, lateOverpay.cardDues[1]) === 50000);
 
 const bothPaid = mkAlloc([
   { amountFils: 100000, date: '2026-06-10' },
@@ -1303,8 +1320,11 @@ const twoBankLegs = mkLegs([
   { id: 'b2', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
     date: '2026-07-12', category: 'other', title: 'Card payment', source: 'sms', cardPaymentSide: 'receipt' },
 ]);
+// Counted as two canonical payments. (The second can no longer spill onto
+// August: it predates August's issue, so August's total already nets it.)
 ok('dues: two bank alerts four days apart stay two payments',
-  allocLib.duePaidFils(twoBankLegs, twoBankLegs.cardDues[1]) === 80000);
+  allocLib.cardStatementView(twoBankLegs, 'c1').payments.length === 2 &&
+  allocLib.cardStatementView(twoBankLegs, 'c1').paidTotalFils === 200000);
 const adjacentBankLegs = mkLegs([
   { id: 'b1', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
     date: '2026-07-09', category: 'other', title: 'Card payment', source: 'sms', cardPaymentSide: 'debit' },
@@ -1320,6 +1340,149 @@ const overlapOnce = mkLegs([manualJul10, receiptJul12]);
 ok('dues: one payment across two overlapping statements is counted exactly once',
   allocLib.duePaidFils(overlapOnce, overlapOnce.cardDues[0]) +
   allocLib.duePaidFils(overlapOnce, overlapOnce.cardDues[1]) === 100000);
+
+// ── A payment counts only toward statements issued before it ──
+//
+// A statement's total is the balance on its issue date; it already nets every
+// earlier payment. Reported: a fresh install saw AED 3,000 paid on 12 Oct, then
+// the 20 Oct statement for AED 3,000 due 14 Nov, and said the card was settled.
+{
+  const issueCard = { id: 'ic', name: 'ENBD Credit Card •8575', kind: 'card', cardType: 'credit', last4: '8575', openingFils: 0, color: '#fff' };
+  const pay = (id, amountFils, date, extra = {}) => ({
+    id, type: 'income', isTransfer: true, accountId: 'ic', amountFils, date,
+    category: 'other', title: 'Card •8575 payment', source: 'sms', cardPaymentSide: 'receipt', ...extra,
+  });
+  const due = (id, dueDate, totalDueFils, extra = {}) => ({
+    id, accountId: 'ic', totalDueFils, minDueFils: 15000, dueDate, paidFils: 0, ...extra,
+  });
+  const st = (cardDues, transactions) => ({ accounts: [issueCard], cardDues, transactions });
+  const observed = Date.parse('2026-10-20T08:00:00');
+
+  const fresh = st([due('nov', '2026-11-14', 300000, { observedAt: observed })], [pay('p', 300000, '2026-10-12')]);
+  ok('issue: a payment before the statement was observed does not settle it',
+    allocLib.duePaidFils(fresh, fresh.cardDues[0]) === 0 &&
+    allocLib.openDues(fresh, new Date(2026, 9, 21))[0]?.remainingFils === 300000);
+
+  // Two overlapping statements, one payment: counted exactly once, and only
+  // toward the statement whose issue it postdates.
+  const twoStatements = st([
+    due('oct', '2026-10-14', 250000, { observedAt: Date.parse('2026-09-20T08:00:00') }),
+    due('nov', '2026-11-14', 300000, { observedAt: observed }),
+  ], [pay('p', 300000, '2026-10-12')]);
+  ok('issue: one payment between two statements pays the older one only, once',
+    allocLib.duePaidFils(twoStatements, twoStatements.cardDues[0]) === 250000 &&
+    allocLib.duePaidFils(twoStatements, twoStatements.cardDues[1]) === 0);
+
+  // On the observation day the clocks decide.
+  const sameDay = (ts) => st([due('nov', '2026-11-14', 300000, { observedAt: observed })],
+    [pay('p', 300000, '2026-10-20', { ts })]);
+  ok('issue: a payment alert after the statement alert on the same day counts',
+    allocLib.duePaidFils(sameDay(observed + 3_600_000), sameDay(observed + 3_600_000).cardDues[0]) === 300000);
+  ok('issue: a payment alert before the statement alert on the same day does not',
+    allocLib.duePaidFils(sameDay(observed - 3_600_000), sameDay(observed - 3_600_000).cardDues[0]) === 0);
+
+  // A bank-stated statement date is exact: payments after it count, a payment
+  // on it may already be inside the total and does not.
+  const stated = (date) => st([due('jan', '2027-01-14', 406196, { statementDate: '2026-12-20', observedAt: Date.parse('2026-12-22T08:00:00') })],
+    [pay('p', 406196, date)]);
+  ok('issue: a payment the day after the stated statement date counts even before the SMS arrived',
+    allocLib.duePaidFils(stated('2026-12-21'), stated('2026-12-21').cardDues[0]) === 406196);
+  ok('issue: a payment on the stated statement date does not',
+    allocLib.duePaidFils(stated('2026-12-20'), stated('2026-12-20').cardDues[0]) === 0);
+  const implausible = st([due('jan', '2027-01-14', 406196, { statementDate: '2027-02-01', observedAt: Date.parse('2026-12-22T08:00:00') })], [pay('p', 406196, '2026-12-21')]);
+  ok('issue: a stated statement date after the due date is ignored, not trusted',
+    allocLib.duePaidFils(implausible, implausible.cardDues[0]) === 0);
+
+  // An estimated issue date never reaches back to the previous due date.
+  const irregular = st([
+    due('oct', '2026-10-14', 100000),
+    due('nov', '2026-11-03', 200000),
+  ], [pay('p', 100000, '2026-10-14')]);
+  ok('issue: a payment on the previous due date is not credited to the next statement',
+    allocLib.duePaidFils(irregular, irregular.cardDues[0]) === 100000 &&
+    allocLib.duePaidFils(irregular, irregular.cardDues[1]) === 0);
+
+  // A due stored before observation evidence existed keeps the window it was
+  // created under (40 days before the due date), so an upgrade never
+  // un-settles a statement the user already saw paid; Mark paid always counts.
+  const legacyMarked = (source) => st([due('nov', '2026-11-14', 300000)], [pay('p', 300000, '2026-10-21', { source, cardPaymentSide: source === 'manual' ? undefined : 'receipt' })]);
+  ok('issue: Mark paid 24 days before the due date settles a legacy statement',
+    allocLib.duePaidFils(legacyMarked('manual'), legacyMarked('manual').cardDues[0]) === 300000);
+  ok('issue: a bank alert on that day still settles a legacy statement (pre-evidence window kept)',
+    allocLib.duePaidFils(legacyMarked('sms'), legacyMarked('sms').cardDues[0]) === 300000);
+  const legacyEarly = st([due('nov', '2026-11-14', 300000)], [pay('p', 300000, '2026-10-01', { source: 'sms', cardPaymentSide: 'receipt' })]);
+  ok('issue: a legacy statement still ignores a payment before its old 40-day window',
+    allocLib.duePaidFils(legacyEarly, legacyEarly.cardDues[0]) === 0);
+
+  // Copies of one statement: earliest observation, latest stated issue date.
+  const mergedEvidence = allocLib.mergeImportedCardDues(
+    [due('a', '2026-11-14', 300000, { observedAt: observed + 86_400_000 })],
+    [due('b', '2026-11-14', 300000, { observedAt: observed, statementDate: '2026-10-20' })],
+    [issueCard]);
+  ok('issue: merging copies keeps the earliest observation and the stated date',
+    mergedEvidence.length === 1 && mergedEvidence[0].observedAt === observed &&
+    mergedEvidence[0].statementDate === '2026-10-20', mergedEvidence);
+}
+
+// ── Two legs of one payment, a few days apart ──
+//
+// RAKBANK: debited from the funding account on the 17th in the evening, the
+// card's receipt the next morning worded "We have received your payment of
+// AED 4,120.55 towards your RAKBANK Credit Card ending 7712" — which older
+// parsers could not side. Two payments, and the second settled November.
+{
+  const rakCard = { id: 'rk', name: 'RAKBANK Credit Card •7712', kind: 'card', cardType: 'credit', last4: '7712', openingFils: 0, color: '#fff' };
+  const leg = (id, date, side, amountFils = 412055) => ({
+    id, type: 'income', isTransfer: true, accountId: 'rk', amountFils, date,
+    category: 'other', title: 'Card •7712 payment', source: 'sms',
+    ...(side ? { cardPaymentSide: side } : {}),
+  });
+  const rakState = (transactions) => ({
+    accounts: [rakCard],
+    cardDues: [
+      { id: 'oct', accountId: 'rk', totalDueFils: 412055, minDueFils: 20603, dueDate: '2026-10-20', paidFils: 0, observedAt: Date.parse('2026-09-25T08:00:00') },
+      { id: 'nov', accountId: 'rk', totalDueFils: 350000, minDueFils: 17500, dueDate: '2026-11-20', paidFils: 0, observedAt: Date.parse('2026-10-25T08:00:00') },
+    ],
+    transactions,
+  });
+  const novOwed = (state) => allocLib.openDues(state, new Date(2026, 9, 26))[0]?.remainingFils;
+  const paidTotal = (state) => allocLib.cardStatementView(state, 'rk').paidTotalFils;
+
+  const nextMorning = rakState([leg('d', '2026-10-17', 'debit'), leg('r', '2026-10-18')]);
+  ok('legs: an unsided receipt the morning after its debit is one payment',
+    paidTotal(nextMorning) === 412055 && novOwed(nextMorning) === 350000,
+    { paid: paidTotal(nextMorning), nov: novOwed(nextMorning) });
+  const receiptFirst = rakState([leg('d', '2026-10-17', 'debit'), leg('r', '2026-10-15')]);
+  ok('legs: an unsided receipt two days before the debit leg is one payment',
+    paidTotal(receiptFirst) === 412055);
+  const farApart = rakState([leg('d', '2026-10-12', 'debit'), leg('r', '2026-10-17')]);
+  ok('legs: an unsided receipt five days after a debit is a second payment',
+    paidTotal(farApart) === 824110);
+  const twoGenuine = rakState([
+    leg('d1', '2026-10-12', 'debit'), leg('r1', '2026-10-12'),
+    leg('d2', '2026-10-14', 'debit'), leg('r2', '2026-10-14'),
+  ]);
+  ok('legs: two same-amount payments, each with a debit and an unsided receipt, stay two',
+    paidTotal(twoGenuine) === 824110, paidTotal(twoGenuine));
+  const sidedPair = rakState([leg('d', '2026-10-15', 'debit'), leg('r', '2026-10-15', 'receipt'), leg('u', '2026-10-16')]);
+  ok('legs: a debit already paired with its sided receipt does not absorb another unsided row',
+    paidTotal(sidedPair) === 824110, paidTotal(sidedPair));
+
+  // A sided receipt may trail its debit by up to three days (an inter-bank
+  // payment clearing over a weekend); never lead it by more than one.
+  const cleared = rakState([leg('d', '2026-10-15', 'debit'), leg('r', '2026-10-18', 'receipt')]);
+  ok('legs: a sided receipt three days after the debit is one payment',
+    paidTotal(cleared) === 412055 && novOwed(cleared) === 350000, { paid: paidTotal(cleared), nov: novOwed(cleared) });
+  const early = rakState([leg('r', '2026-10-15', 'receipt'), leg('d', '2026-10-17', 'debit')]);
+  ok('legs: a sided receipt two days BEFORE the debit is a different payment',
+    paidTotal(early) === 824110);
+  const twoSidedPayments = rakState([
+    leg('d1', '2026-10-12', 'debit'), leg('r1', '2026-10-12', 'receipt'),
+    leg('d2', '2026-10-14', 'debit'), leg('r2', '2026-10-14', 'receipt'),
+  ]);
+  ok('legs: two sided payments two days apart are still two',
+    paidTotal(twoSidedPayments) === 824110);
+}
 
 // ── "N payments matched" is a claim about ONE statement ──
 //
@@ -1344,12 +1507,17 @@ eq('dues: each statement names only the payment credited to it',
   [allocLib.duePayments(matchedState, matchedState.cardDues[0]).map((t) => t.id),
    allocLib.duePayments(matchedState, matchedState.cardDues[1]).map((t) => t.id)],
   [['p_jun'], ['p_jul']]);
-// An overpayment really does pay into both, so it is named against both.
+// An overpayment really does pay into both, so it is named against both. It
+// can only do so when it postdates July's issue and June was marked paid then.
 const spillState = {
   ...matchedState,
+  cardDues: [
+    { ...matchedState.cardDues[0], settledAt: '2026-06-26T10:00:00Z' },
+    matchedState.cardDues[1],
+  ],
   transactions: [{
     id: 'big', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 150000,
-    date: '2026-06-10', category: 'other', title: 'card payment', source: 'sms',
+    date: '2026-06-26', category: 'other', title: 'card payment', source: 'sms',
   }],
 };
 eq('dues: a payment that spills is named against both statements it paid',
@@ -1393,24 +1561,34 @@ ok('dues: the compat expense-side settlement row is a matched payment',
   allocLib.duePayments(compatState, compatState.cardDues[0]).length === 1 &&
   allocLib.duePaidFils(compatState, compatState.cardDues[0]) === 100000);
 
-// ── The 40-day floor is deliberate, and stays ──
+// ── The issue-date floor is deliberate, and stays ──
 //
-// A payment more than ~40 days before a due date belongs to the PREVIOUS
-// statement's cycle, not this one. When that earlier statement was never
-// captured — a first import, a card added late — crediting this one instead
-// would say "nothing owed" about a balance that is genuinely owed, which is
-// the expensive direction of error this whole file is written against. Leaving
-// it uncredited leaves a balance the user can clear with Mark paid.
+// A payment before the statement was issued belongs to the PREVIOUS
+// statement's cycle, not this one — this total already nets it. When that
+// earlier statement was never captured — a first import, a card added late —
+// crediting this one instead would say "nothing owed" about a balance that is
+// genuinely owed, which is the expensive direction of error this whole file is
+// written against. Leaving it uncredited leaves a balance the user can clear
+// with Mark paid. With an observation but no statement date, issue is taken
+// as 21 days before the due date (the old floor was 40, which reached back
+// past the issue date and double counted).
 const floorState = (date) => ({
   accounts: [legCard],
-  cardDues: [{ id: 'aug', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-08-15', paidFils: 0 }],
+  // Observed after the estimated issue day, so the estimate is the binding
+  // bound. A due with no evidence at all keeps the legacy window instead.
+  cardDues: [{ id: 'aug', accountId: 'c1', totalDueFils: 100000, minDueFils: 5000, dueDate: '2026-08-15', paidFils: 0,
+    observedAt: Date.parse('2026-07-28T08:00:00') }],
   transactions: [{
     id: 'p', type: 'income', isTransfer: true, accountId: 'c1', amountFils: 100000,
     date, category: 'other', title: 'card payment', source: 'sms',
   }],
 });
-ok('dues: a payment inside the 40-day window settles the statement',
-  allocLib.duePaidFils(floorState('2026-07-06'), floorState('2026-07-06').cardDues[0]) === 100000);
+ok('dues: a payment on or after the estimated issue date settles the statement',
+  allocLib.duePaidFils(floorState('2026-07-25'), floorState('2026-07-25').cardDues[0]) === 100000);
+ok('dues: a payment the day before the estimated issue date does not',
+  allocLib.duePaidFils(floorState('2026-07-24'), floorState('2026-07-24').cardDues[0]) === 0);
+ok('dues: a payment 40 days out, once inside the old window, is not credited',
+  allocLib.duePaidFils(floorState('2026-07-06'), floorState('2026-07-06').cardDues[0]) === 0);
 ok('dues: a payment from the previous cycle does not settle this statement',
   allocLib.duePaidFils(floorState('2026-07-05'), floorState('2026-07-05').cardDues[0]) === 0);
 
@@ -3029,9 +3207,20 @@ ok('stale: a stale statement that gets paid leaves openDues',
     cardsLib.duePaidFils(early, early.cardDues[0]) === 0);
   // The month before the due date is inside the cycle and does count: the
   // statement is issued around 25 days ahead and people pay it that week.
-  const onCycle = st([stmt('jul', '2026-07-15', 100000)], [pay('p', 100000, '2026-06-22')]);
+  // Its SMS, observed on 20 Jun, proves it existed by then.
+  const onCycle = st([stmt('jul', '2026-07-15', 100000, { observedAt: Date.parse('2026-06-20T08:00:00') })],
+    [pay('p', 100000, '2026-06-22')]);
   ok('window: a payment made after the statement was issued is credited',
     cardsLib.duePaidFils(onCycle, onCycle.cardDues[0]) === 100000);
+  // With observation evidence that postdates the payment, the conservative
+  // estimate applies; with no evidence at all the pre-evidence window stays.
+  const lateObserved = st([stmt('jul', '2026-07-15', 100000, { observedAt: Date.parse('2026-06-25T08:00:00') })],
+    [pay('p', 100000, '2026-06-22')]);
+  ok('window: observed after the payment, 23 days ahead is not assumed to be after issue',
+    cardsLib.duePaidFils(lateObserved, lateObserved.cardDues[0]) === 0);
+  const unobserved = st([stmt('jul', '2026-07-15', 100000)], [pay('p', 100000, '2026-06-22')]);
+  ok('window: a statement stored without evidence keeps the pre-evidence window',
+    cardsLib.duePaidFils(unobserved, unobserved.cardDues[0]) === 100000);
 
   // Part of the bill is part of the bill.
   const partial = st([stmt('jul', '2026-07-15', 100000)], [pay('p', 40000, '2026-07-10')]);
@@ -5607,6 +5796,153 @@ eq('analytics: the category trend follows the split too',
     healPatch(oldBusiness, { ...refund, categoryDeliberate: false })?.category === undefined);
   ok('user-edited refund categories remain untouched',
     healPatch({ ...oldBusiness, userEdited: true }, refund) === null);
+}
+
+// ── Subscription detection regressions (audit 2026-10) ──
+{
+  const subs = require('./build/subscriptions');
+  let n = 0;
+  const tx = (title, date, fils, cat = 'entertainment', extra = {}) => ({
+    id: `${title}-${date}-${n++}`, type: 'expense', amountFils: fils, category: cat,
+    accountId: 'a', title, date, ...extra,
+  });
+  const newestFirst = (rows) => [...rows].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  const detect = (rows, today, not = []) => subs.detectSubscriptions(newestFirst(rows), not, today);
+  const months = ['04', '05', '06', '07', '08', '09'];
+  const today = new Date(2026, 9, 3, 12);
+
+  // 1. The parser titles APPLE.COM/BILL "Apple": a monthly Apple charge is a service.
+  const apple = detect(months.map((m) => tx('Apple', `2026-${m}-12`, 2599)), today);
+  ok('subs: a steady monthly "Apple" charge is a subscription',
+    apple.length === 1 && apple[0].group === 'subscription' &&
+      subs.subscriptionsMonthlyEquivalent(apple) === 2599, JSON.stringify(apple));
+  const appleLapsed = detect(['04', '05', '06'].map((m) => tx('Apple', `2026-${m}-12`, 2599)), today);
+  ok('subs: a lapsed "Apple" plan is listed as stopped',
+    subs.stoppedSubscriptions(appleLapsed).map((s) => s.title).join() === 'Apple');
+  ok('subs: two Apple Store purchases a month apart are not a subscription',
+    detect([tx('Apple', '2026-08-20', 429900), tx('Apple', '2026-09-19', 89900)], today).length === 0);
+
+  // 2. Two plans on one descriptor are two subscriptions, on any day.
+  for (const [label, musicDay] of [['different days', '19'], ['the same day', '05']]) {
+    const rows = months.flatMap((m) => [tx('Apple', `2026-${m}-05`, 369), tx('Apple', `2026-${m}-${musicDay}`, 2199)]);
+    const found = detect(rows, today);
+    eq(`subs: two concurrent Apple plans on ${label} are detected separately`,
+      found.map((s) => [s.lastAmountFils, s.cadence, s.group]).sort((a, b) => a[0] - b[0]),
+      [[369, 'monthly', 'subscription'], [2199, 'monthly', 'subscription']]);
+    ok(`subs: the two plans on ${label} have distinct keys`,
+      new Set(found.map((s) => subs.subscriptionKey(s))).size === 2);
+    const music = found.find((s) => s.lastAmountFils === 2199);
+    ok(`subs: a plan's history holds only its own charges (${label})`,
+      music && rows.filter((r) => subs.matchesRecurringTransaction(music, r)).length === 6 &&
+        rows.filter((r) => subs.matchesRecurringTransaction(music, r)).every((r) => r.amountFils === 2199));
+    ok(`subs: dismissing one plan keeps the other (${label})`,
+      music && detect(rows, today, [subs.subscriptionKey(music)]).map((s) => s.lastAmountFils).join() === '369');
+    ok(`subs: a plan key can carry a scoped undo marker (${label})`,
+      music && subs.isScopedSubscriptionKey(subs.subscriptionKey(music)));
+  }
+  const single = detect(months.map((m) => tx('Netflix', `2026-${m}-03`, 3900)), today)[0];
+  ok('subs: a single-plan service keeps its plain provider key', subs.subscriptionKey(single) === 'netflix');
+  const repriced = [...['04', '05', '06'].map((m) => tx('Apple', `2026-${m}-19`, 2199)),
+    ...['07', '08', '09'].map((m) => tx('Apple', `2026-${m}-19`, 2699)),
+    ...months.map((m) => tx('Apple', `2026-${m}-05`, 369))];
+  const repricedFound = detect(repriced, today);
+  ok('subs: a repriced plan beside another stays one active plan, not a stopped one',
+    repricedFound.length === 2 && repricedFound.every((s) => s.status === 'active') &&
+      repricedFound.some((s) => s.lastAmountFils === 2699 && s.priceIncreased),
+    JSON.stringify(repricedFound.map((s) => [s.lastAmountFils, s.status])));
+
+  // 4. Stopped after one missed cycle plus grace, not 2.2 cycles.
+  const netflixToJul = ['04', '05', '06', '07'].map((m) => tx('Netflix', `2026-${m}-03`, 3900));
+  ok('subs: a monthly plan silent since 3 Jul is stopped by 10 Sep',
+    detect(netflixToJul, new Date(2026, 8, 10, 12))[0]?.status === 'stopped');
+  ok('subs: ...and still active within its grace on 15 Aug',
+    detect(netflixToJul, new Date(2026, 7, 15, 12))[0]?.status === 'active');
+  const primeYearly = [tx('Amazon Prime', '2024-01-20', 14000), tx('Amazon Prime', '2025-01-20', 14000)];
+  ok('subs: a yearly plan not renewed in January is stopped by late March',
+    detect(primeYearly, new Date(2026, 2, 25, 12))[0]?.status === 'stopped');
+  ok('subs: a yearly plan is still active shortly after its renewal date',
+    detect(primeYearly, new Date(2026, 1, 10, 12))[0]?.status === 'active');
+
+  // 5. Refunds net out the charge they return.
+  const netflixToSep = months.map((m) => tx('Netflix', `2026-${m}-03`, 3900));
+  const refund = { ...tx('Netflix', '2026-09-05', 3900, 'other'), type: 'income' };
+  const doubled = detect([...netflixToSep, tx('Netflix', '2026-09-03', 3900), refund], today)[0];
+  ok('subs: a refunded duplicate charge is not a price rise',
+    doubled && doubled.lastAmountFils === 3900 && doubled.priceIncreased === false, JSON.stringify(doubled));
+  const refundedLast = detect([...netflixToSep, refund], today)[0];
+  ok('subs: a refunded final charge stops predicting renewals',
+    refundedLast && refundedLast.lastChargedISO === '2026-08-03' && refundedLast.status === 'stopped',
+    JSON.stringify(refundedLast));
+  ok('subs: a partial credit does not cancel a charge',
+    detect([...netflixToSep, { ...refund, amountFils: 1000 }], today)[0]?.lastChargedISO === '2026-09-03');
+
+  // 6. One early (or late) bill payment does not demote a monthly bill.
+  const receipt = (date, fils) => tx('DEWA', date, fils, 'utilities', { paymentFlowSide: 'receipt' });
+  const early = detect([receipt('2026-05-05', 45000), receipt('2026-06-05', 52000), receipt('2026-07-05', 61000),
+    receipt('2026-08-05', 70000), receipt('2026-08-30', 66000), receipt('2026-10-01', 64000)], today)[0];
+  ok('subs: a bill paid early once stays monthly', early?.cadence === 'monthly' && early.chargeCount === 6,
+    JSON.stringify(early));
+  const late = detect([receipt('2026-05-05', 45000), receipt('2026-06-05', 52000), receipt('2026-07-06', 61000),
+    receipt('2026-09-02', 70000), receipt('2026-09-29', 66000)], today)[0];
+  ok('subs: a bill paid late once stays monthly', late?.cadence === 'monthly', JSON.stringify(late));
+  const tank = detect([receipt('2026-06-03', 10000), receipt('2026-06-20', 10000), receipt('2026-07-04', 10000),
+    receipt('2026-07-22', 10000), receipt('2026-08-30', 10000)], today)[0];
+  ok('subs: repeated doubled months are still an as-needed top-up', tank?.cadence === 'as-needed',
+    JSON.stringify(tank));
+
+  // 7. Stability is judged on the current price run.
+  const midjourney = detect([...['01', '02', '03', '04'].map((m) => tx('Midjourney', `2026-${m}-08`, 3673, 'software')),
+    ...['05', '06', '07', '08', '09'].map((m) => tx('Midjourney', `2026-${m}-08`, 11019, 'software'))], today)[0];
+  ok('subs: a plan whose price changed is still detected, at its new price',
+    midjourney?.avgAmountFils === 11019 && midjourney.priceIncreased === true, JSON.stringify(midjourney));
+  const gym = detect([...['03', '04', '05', '06'].map((m) => tx('Gym Club', `2026-${m}-01`, 29900, 'health')),
+    ...['07', '08', '09'].map((m) => tx('Gym Club', `2026-${m}-01`, 34900, 'health'))], today)[0];
+  ok('subs: a 17% membership rise does not hide the recurring payment',
+    gym?.cadence === 'monthly' && gym.lastAmountFils === 34900, JSON.stringify(gym));
+  ok('subs: random amounts ending in a short similar run stay hidden',
+    detect([['2026-05-10', 1200], ['2026-06-10', 9800], ['2026-07-10', 3100], ['2026-08-10', 5000],
+      ['2026-09-10', 5100]].map(([d, a]) => tx('Corner Shop', d, a, 'groceries')), today).length === 0);
+
+  // 8. A skipped month does not erase a known subscription.
+  const skipped = detect(['2026-07-03', '2026-08-03', '2026-10-03'].map((d) => tx('Netflix', d, 3900)), today)[0];
+  ok('subs: a third charge after a skipped month keeps the subscription',
+    skipped?.cadence === 'monthly' && skipped.chargeCount === 3, JSON.stringify(skipped));
+  ok('subs: an ordinary merchant with a long gap is not made monthly by skip tolerance',
+    detect(['2025-12-10', '2026-01-02', '2026-02-28', '2026-03-30', '2026-04-29'].map((d) =>
+      tx('City Pharmacy', d, 9000, 'health')), new Date(2026, 4, 2, 12)).length === 0);
+
+  // 9. A switch to an annual plan is not a monthly price rise.
+  const annualSwitch = detect([...['03', '04', '05', '06', '07', '08'].map((m) => tx('Amazon Prime', `2026-${m}-20`, 1600)),
+    tx('Amazon Prime', '2026-09-20', 14000)], today)[0];
+  ok('subs: a lone annual charge after monthly ones is not a price rise',
+    annualSwitch && annualSwitch.priceIncreased === false && annualSwitch.lastAmountFils === 1600,
+    JSON.stringify(annualSwitch));
+
+  // 10. Known names are word-bounded.
+  ok('subs: "Canvas Home Llc" is not Canva',
+    detect([tx('Canvas Home Llc', '2026-08-04', 34900, 'shopping'), tx('Canvas Home Llc', '2026-09-03', 129000, 'shopping')],
+      today).length === 0);
+  ok('subs: joined canonical names still match (StarzPlay, OSN+, Disney+)',
+    ['StarzPlay', 'OSN+', 'Disney+'].every((title) =>
+      detect([tx(title, '2026-08-10', 2000), tx(title, '2026-09-10', 2000)], today)[0]?.group === 'subscription'));
+
+  // 11. Fortnightly and quarterly cadences.
+  const fortnightly = detect(['2026-07-04', '2026-07-18', '2026-08-01', '2026-08-15', '2026-08-29', '2026-09-12',
+    '2026-09-26'].map((d) => tx('Justlife', d, 15000, 'home')), today)[0];
+  eq('subs: a fortnightly charge is biweekly at ~2.17x a month',
+    [fortnightly?.cadence, fortnightly?.nextExpectedISO, fortnightly?.monthlyEquivalentFils],
+    ['biweekly', '2026-10-10', Math.round(15000 * 30.4375 / 14)]);
+  const quarterly = detect(['2026-01-10', '2026-04-10', '2026-07-10'].map((d) => tx('Shahid', d, 4999)), today)[0];
+  eq('subs: a quarterly plan renews three calendar months on at a third a month',
+    [quarterly?.cadence, quarterly?.nextExpectedISO, quarterly?.monthlyEquivalentFils, quarterly?.status],
+    ['quarterly', '2026-10-10', Math.round(4999 / 3), 'active']);
+
+  // 12. A yearly software renewal needs two charges, not three.
+  const domain = detect([tx('Namecheap', '2025-03-15', 4500, 'software'), tx('Namecheap', '2026-03-14', 4700, 'software')], today)[0];
+  ok('subs: two yearly software renewals are a yearly subscription',
+    domain?.cadence === 'yearly' && domain.group === 'subscription', JSON.stringify(domain));
+  ok('subs: two monthly charges from an unknown software merchant are still not enough',
+    detect([tx('Vercel', '2026-08-20', 7350, 'software'), tx('Vercel', '2026-09-20', 7350, 'software')], today).length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

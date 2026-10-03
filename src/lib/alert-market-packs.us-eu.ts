@@ -4,7 +4,7 @@ export const US_EU_ALERT_MARKET_PACKS = {
   US: {
     market: 'US', currencies: ['USD'], currencyAliases: { '$': ['USD'] },
     rails: ['ach', 'wire transfer', 'zelle'],
-    transferTerms: ['transfer', 'direct deposit'],
+    transferTerms: ['transfer', 'direct deposit', 'zelle', 'venmo', 'cash app'],
     utilityTerms: ['utility', 'electric', 'water bill', 'gas bill'],
     recurringTerms: ['recurring', 'autopay', 'standing instruction'],
   },

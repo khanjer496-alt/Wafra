@@ -3568,5 +3568,169 @@ const DECLINE_SMS = [{
       !isValidBackupState({ transactions: [{ ...tx, captureEventIdentity: 7 }] }));
 }
 
+// ── Card statements: issue-date evidence, yearless due dates, credit totals ──
+//
+// Rows are built the way auto-import.ts builds them: a statement keeps the
+// parser's own `date` (null when the deadline has no year); every other kind
+// falls back to the message's day.
+{
+  setActiveMarket('AE');
+  const cardMath = require('./build/cards.js');
+  const { resolveYearlessDueDate } = require('./build/import-plan.js');
+  const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import.js');
+  let serial = 0;
+  const msg = (sender, at, body) => {
+    const ts = Date.parse(at);
+    const p = parseSms(body);
+    if (!p) return null;
+    return {
+      ...p,
+      date: p.kind === 'cardStatement' ? p.date : p.date ?? new Date(ts).toISOString().slice(0, 10),
+      smsTs: ts, sender, channel: 'inbox', sourceEventId: `card-evidence-${serial++}`,
+    };
+  };
+  const ingest = (state, rows, today) => {
+    const parsed = rows.filter(Boolean);
+    const newest = Math.max(...parsed.map((r) => r.smsTs));
+    const plan = buildImportPlan(parsed, state, newest, new Date(today));
+    return {
+      plan,
+      state: JSON.parse(JSON.stringify(applyMaterializedImportBatch(state,
+        materializeImportBatch(plan.batch, state, (prefix) => `${prefix}-ev-${serial++}`)))),
+    };
+  };
+  const enbdStmt = (sd, amt, min, due, at) => msg('EmiratesNBD', at,
+    `Emirates NBD Credit Card Mini Stmt for Card ending 8575: Statement date ${sd}. Total Amt Due AED ${amt}, Due Date ${due}. Min Amt Due AED ${min}`);
+  const enbdPay = (amt, at) => msg('EmiratesNBD', at,
+    `Payment of AED ${amt} received towards your Credit Card ending 8575. Thank you.`);
+  const owed = (state, today) => cardMath.openDues(state, new Date(today)).map((d) => `${d.due.dueDate}:${d.remainingFils}`).join();
+
+  // Fresh install: a payment on 12 Oct (for a September bill the app never
+  // saw), then the 20 Oct statement for AED 3,000. That total already nets the
+  // 12 Oct payment; crediting it again showed the card settled.
+  let live = ingest(BASE, [enbdPay('3,000.00', '2026-10-12T08:00:00Z')], '2026-10-12T09:00:00Z').state;
+  live = ingest(live, [enbdStmt('20/10/26', '3,000.00', '150.00', '14/11/26', '2026-10-20T08:00:00Z')], '2026-10-20T09:00:00Z').state;
+  ok('statement issue: a payment made before the statement existed does not settle it',
+    owed(live, '2026-10-21T09:00:00Z') === '2026-11-14:300000', owed(live, '2026-10-21T09:00:00Z'));
+  ok('statement issue: the imported due carries its observation time',
+    live.cardDues[0].observedAt === Date.parse('2026-10-20T08:00:00Z'), live.cardDues[0]);
+
+  // History import of a pay-in-full user, run on 25 Oct. Every month's payment
+  // used to cascade into the next statement: AED 1,200 owed instead of 3,000.
+  const history = ingest(BASE, [
+    enbdStmt('20/07/26', '2,100.00', '105.00', '14/08/26', '2026-07-20T08:00:00Z'), enbdPay('2,100.00', '2026-08-12T08:00:00Z'),
+    enbdStmt('20/08/26', '1,800.00', '90.00', '14/09/26', '2026-08-20T08:00:00Z'), enbdPay('1,800.00', '2026-09-12T08:00:00Z'),
+    enbdStmt('20/09/26', '2,500.00', '125.00', '14/10/26', '2026-09-20T08:00:00Z'), enbdPay('2,500.00', '2026-10-12T08:00:00Z'),
+    enbdStmt('20/10/26', '3,000.00', '150.00', '14/11/26', '2026-10-20T08:00:00Z'),
+  ], '2026-10-25T09:00:00Z').state;
+  ok('statement issue: a pay-in-full history owes the whole newest statement',
+    owed(history, '2026-10-25T09:00:00Z') === '2026-11-14:300000', owed(history, '2026-10-25T09:00:00Z'));
+
+  // Overpayment before the next statement: the bank netted the AED 500 credit
+  // into the AED 800 statement already.
+  const netted = ingest(BASE, [
+    enbdStmt('20/09/26', '1,000.00', '100.00', '14/10/26', '2026-09-20T08:00:00Z'), enbdPay('1,500.00', '2026-10-10T08:00:00Z'),
+    enbdStmt('20/10/26', '800.00', '100.00', '14/11/26', '2026-10-20T08:00:00Z'),
+  ], '2026-10-25T09:00:00Z').state;
+  ok('statement issue: an overpayment before the next statement does not reduce it again',
+    owed(netted, '2026-10-25T09:00:00Z') === '2026-11-14:80000', owed(netted, '2026-10-25T09:00:00Z'));
+  // ...while a payment after the statement arrived still settles it.
+  const paidAfter = ingest(netted, [enbdPay('800.00', '2026-10-22T08:00:00Z')], '2026-10-25T09:00:00Z').state;
+  ok('statement issue: a payment after the statement arrived settles it',
+    owed(paidAfter, '2026-10-25T09:00:00Z') === '', owed(paidAfter, '2026-10-25T09:00:00Z'));
+
+  // A parsed statement date, once the parser provides one, is consumed.
+  const stated = { ...enbdStmt('20/12/26', '4,061.96', '203.10', '14/01/27', '2026-12-22T08:00:00Z'), statementDate: '2026-12-20' };
+  const statedPlan = buildImportPlan([stated], BASE, stated.smsTs, new Date('2026-12-23T09:00:00Z'));
+  ok('statement issue: a parser-supplied statement date is carried onto the due',
+    statedPlan.batch.newDues[0]?.statementDate === '2026-12-20', statedPlan.batch.newDues);
+
+  // ── Yearless due dates ──
+  const sib = msg('SIB', '2026-09-01T08:00:00Z',
+    'Your Card ending with XXXX1234 payment is due on 25-Sep is AED 1,234.56, minimum payment due is AED 123.45.');
+  const sibPlan = buildImportPlan([sib], BASE, sib.smsTs, new Date('2026-09-03T09:00:00Z'));
+  ok('yearless due: SIB "due on 25-Sep" observed 1 Sep is due 25 Sep 2026',
+    sib.date === null && sibPlan.dueCount === 1 && sibPlan.batch.newDues[0].dueDate === '2026-09-25' &&
+      sibPlan.batch.newDues[0].totalDueFils === 123456, sibPlan.batch.newDues);
+  const fab = msg('FAB', '2026-08-01T08:00:00Z',
+    'Credit card bill AED 1,200.00 due on 25 Aug. Minimum payment AED 100.00 for card 1234.');
+  const fabPlan = buildImportPlan([fab], BASE, fab.smsTs, new Date('2026-08-02T09:00:00Z'));
+  ok('yearless due: FAB "due on 25 Aug" observed 1 Aug is due 25 Aug 2026',
+    fab.date === null && fabPlan.dueCount === 1 && fabPlan.batch.newDues[0].dueDate === '2026-08-25', fabPlan.batch.newDues);
+  const at = (iso) => Date.parse(iso);
+  ok('yearless due: a stated month in the next year resolves across the year end',
+    resolveYearlessDueDate({ date: null, dueDay: 5, smsTs: at('2026-12-20T08:00:00'), raw: 'payment is due on 05-Jan' }) === '2027-01-05');
+  ok('yearless due: the stated month wins over the next occurrence of the day',
+    resolveYearlessDueDate({ date: null, dueDay: 25, smsTs: at('2026-09-01T08:00:00'), raw: 'payment is due on 25-Oct is AED 1,234.56' }) === '2026-10-25');
+  ok('yearless due: with no month, the next such day on or after the message',
+    resolveYearlessDueDate({ date: null, dueDay: 3, smsTs: at('2026-09-10T08:00:00') }) === '2026-10-03' &&
+      resolveYearlessDueDate({ date: null, dueDay: 10, smsTs: at('2026-09-10T08:00:00') }) === '2026-09-10');
+  ok('yearless due: a stated month already past is not pushed a year ahead',
+    resolveYearlessDueDate({ date: null, dueDay: 25, smsTs: at('2026-09-27T08:00:00'), raw: 'payment was due on 25-Sep' }) === null);
+  ok('yearless due: no observation time, no anchor, no due',
+    resolveYearlessDueDate({ date: null, dueDay: 25, raw: 'due on 25-Sep' }) === null);
+  ok('yearless due: an amount after the cue cannot supply a month',
+    resolveYearlessDueDate({ date: null, dueDay: 12, smsTs: at('2026-09-01T08:00:00'), raw: 'due AED 12.34 on the 12th' }) === '2026-09-12');
+
+  // ── A credit-balance statement owes nothing ──
+  const credit = msg('EmiratesNBD', '2026-12-21T08:00:00Z',
+    'Your Credit Card ending 1234 statement: Total due AED 150.00 CR. Due date 14/01/2027.');
+  const creditPlan = buildImportPlan([credit], BASE, credit.smsTs, new Date('2026-12-22T09:00:00Z'));
+  ok('credit balance: "Total due AED 150.00 CR" is recorded as nothing owed',
+    creditPlan.dueCount === 1 && creditPlan.batch.newDues[0].totalDueFils === 0 &&
+      creditPlan.batch.newDues[0].minDueFils === 0 && creditPlan.batch.newDues[0].minDueEstimated === undefined,
+    creditPlan.batch.newDues);
+  const debitTotal = msg('EmiratesNBD', '2026-12-21T08:00:00Z',
+    'Your Credit Card ending 1234 statement: Total amount due AED 150.00. Minimum amount due AED 100.00. Due date 14/01/2027.');
+  const debitPlan = buildImportPlan([debitTotal], BASE, debitTotal.smsTs, new Date('2026-12-22T09:00:00Z'));
+  ok('credit balance: an ordinary total is still owed in full',
+    debitPlan.batch.newDues[0]?.totalDueFils === 15000, debitPlan.batch.newDues);
+  const adcbCr = msg('ADCBAlert', '2026-09-05T08:00:00Z',
+    'Cr.Card XXX9426 Billing alert: Total due to avoid fin. charges: AED9249.64. Due date Sep 30 2026; Pay min. AED462.48 by due date to avoid AED241.50 late fees.');
+  const adcbPlan = buildImportPlan([adcbCr], BASE, adcbCr.smsTs, new Date('2026-09-06T09:00:00Z'));
+  ok('credit balance: the "Cr.Card" abbreviation is not a credit marker',
+    adcbPlan.batch.newDues[0]?.totalDueFils === 924964, adcbPlan.batch.newDues);
+
+  // ── The receipt leg worded "received your payment" ──
+  const rak = { ...msg('RAKBANK', '2026-10-18T07:00:00Z',
+    'We have received your payment of AED 4,120.55 towards your RAKBANK Credit Card ending 7712.') };
+  delete rak.cardPaymentSide;
+  const rakPlan = buildImportPlan([rak], BASE, rak.smsTs, new Date('2026-10-19T09:00:00Z'));
+  ok('card receipt: the planner fallback sides "We have received your payment of" as the receipt',
+    rak.kind === 'cardPayment' && rakPlan.batch.transactions[0]?.cardPaymentSide === 'receipt',
+    rakPlan.batch.transactions.map((t) => t.cardPaymentSide));
+}
+
+
+/* ── a card paid from another bank's account mints no phantom card ─────── */
+{
+  const state = {
+    ...BASE,
+    accounts: [
+      { id: 'enbd-cc', name: 'ENBD card', kind: 'card', cardType: 'credit', bankName: 'Emirates NBD', last4: '4321', openingFils: 0, color: '#123' },
+      { id: 'wio', name: 'Wio', kind: 'bank', bankName: 'Wio', last4: '5678', openingFils: 0, color: '#222' },
+    ],
+  };
+  const t = Date.parse('2026-10-01T09:00:00Z');
+  const scanned = scan([
+    { body: 'AED 1,000.00 has been debited from your account XXXX5678 towards payment of Credit Card ending 4321.', ts: t, sender: 'Wio' },
+  ]);
+  const plan = buildImportPlan(scanned.parsed, state, scanned.newestTs);
+  ok('the funding bank of a card payment is not taken as the card issuer',
+    plan.batch.newAccounts.length === 0 && plan.batch.transactions.every((row) => row.accountId === 'enbd-cc'),
+    { accounts: plan.batch.newAccounts, rows: plan.batch.transactions.map((row) => row.accountId) });
+}
+
+
+/* ── "Cr Limit" beside a total is not a credit balance ─────────────────── */
+{
+  const t = Date.parse('2026-10-05T09:00:00Z');
+  const scanned = scan([{ body: 'Your Credit Card XX4321 statement: Total Due AED 1,500.00 Cr Limit AED 20,000.00 Min Due AED 75.00 Due Date 25/10/2026', ts: t }]);
+  const plan = buildImportPlan(scanned.parsed, BASE, scanned.newestTs);
+  ok('a credit LIMIT beside the total keeps the statement owed',
+    plan.batch.newDues.length === 1 && plan.batch.newDues[0].totalDueFils === 150000,
+    plan.batch.newDues.map((d) => d.totalDueFils));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

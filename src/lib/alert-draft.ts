@@ -256,6 +256,8 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
       const token = prefix ? match[1] : match[2];
       const currencies = CURRENCY_SYMBOL_CANDIDATES[token];
       if (!currencies) continue;
+      // "جنيه استرليني" is pound STERLING, not the Egyptian pound.
+      if (token === 'جنيه' && /^\s*[اإأ]?سترلين/u.test(normalized.slice(matchEnd))) continue;
       found.push({
         start: match.index as number,
         end: (match.index as number) + match[0].length,
@@ -273,9 +275,16 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
   found.push(...collectAliasRaw(normalized, aliases));
   scanSymbol(SYMBOL_PREFIX, true);
   scanSymbol(SYMBOL_SUFFIX, false);
-  return found
+  const sorted = found
     .sort((a, b) => a.start - b.start || b.end - a.end)
     .filter((item, index, all) => !all.slice(0, index).some((prior) => prior.start === item.start && prior.end === item.end));
+  // "$350.00 MXN" is ONE amount written with both a symbol and its ISO code.
+  // A symbol reading that overlaps an ISO reading of the same figure is that
+  // same figure, never a second movement.
+  return sorted.filter((item) => item.evidence === 'iso-code' || !sorted.some((other) =>
+    other.evidence === 'iso-code' && other.start < item.end && item.start < other.end &&
+    other.amount.replace(/[^\d]/g, '') === item.amount.replace(/[^\d]/g, '') &&
+    item.currencies.includes(other.currencies[0])));
 }
 
 const HARD_NEGATIVES: readonly [string, RegExp][] = [

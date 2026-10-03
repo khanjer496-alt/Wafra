@@ -631,6 +631,10 @@ ok('compact bank shorthand replay is idempotent',
 
 // A yearless statement must not acquire its deadline from Message receipt
 // time. Exercise both real source-free capture wrappers and the reducer.
+// The STATED day and month are the deadline; receipt time only anchors the
+// year (the next 25 Aug on or after the message), so the due is 25 Aug 2026
+// and never the 10 Aug receipt day. Dropping the statement instead left the
+// card showing nothing owed.
 {
   const { parseHistoricalMessageRecords } = require('./build/historical-import.js');
   const { parseLocalMessageRecord } = require('./build/local-message-record.js');
@@ -651,7 +655,10 @@ ok('compact bank shorthand replay is idempotent',
     const batch = materializeImportBatch(plan.batch, BASE, (prefix) => `deadline-${prefix}-${nextId++}`);
     const result = applyMaterializedImportBatch(BASE, batch);
     ok(`${channel}: Message receipt cannot create a fabricated card payment deadline`,
-      result.cardDues.length === BASE.cardDues.length && plan.txCount === 0);
+      result.cardDues.length === BASE.cardDues.length + 1 &&
+        result.cardDues.at(-1).dueDate === '2026-08-25' &&
+        result.cardDues.at(-1).dueDate !== observedAt.slice(0, 10) && plan.txCount === 0,
+      JSON.stringify(result.cardDues));
   }
 }
 

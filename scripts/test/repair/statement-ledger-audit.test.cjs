@@ -348,3 +348,236 @@ test('a parser-shifted ordinal cannot replace a different named merchant of equa
   const edited={...first.state,transactions:first.state.transactions.map(tx=>({...tx,title:'My books',titleEdited:true,userEdited:true}))};
   assert.equal(apply([row],edited).plan.txCount,0);
 });
+
+// ---------------------------------------------------------------------------
+// Statement <-> live-alert overlap: one purchase, one ledger row, whichever
+// channel arrives first and however the card network spells the merchant.
+// ---------------------------------------------------------------------------
+const { parseSms } = require('../build/sms-parser.js');
+const markets = require('../build/markets.js');
+const { statementDescriptorsAgree } = dedupe;
+let alertSerial = 0;
+function alert(body, sender, iso) {
+  const at = Date.parse(iso);
+  const parsed = parseSms(body, {}, { sender, observedAt: at });
+  assert.ok(parsed, `alert parses: ${body}`);
+  const { raw: _raw, ...rest } = parsed;
+  return { ...rest, raw: body, date: parsed.date ?? iso.slice(0, 10), smsTs: at, sender,
+    channel: 'inbox', sourceEventId: `stmt-overlap-${++alertSerial}` };
+}
+/** A statement row as the relay hands it over: midday file clock, upload id, ordinal. */
+function fileRow(upload, index, date, merchant, amountFils, changes = {}) {
+  return { kind: 'transaction', type: 'expense', amountFils, currency: 'AED', merchant, date,
+    dueDay: null, minDueFils: null, card: { kind: 'credit', last4: '1234' }, reference: null,
+    transferHint: false, snapshotFils: null, snapshotKind: null, categoryGuess: 'other',
+    categoryDeliberate: false, captureSource: 'pdf', smsTs: Date.parse(`${date}T12:00:00Z`) + index,
+    statementImportId: upload.repeat(32), statementRowIndex: index, ...changes };
+}
+function ledger(currency = 'AED') {
+  return { ...base(), ledgerMoney: { schemaVersion: 2, currency, exponent: 2 } };
+}
+const spendOf = (state) => state.transactions.filter((t) => t.type === 'expense').reduce((n, t) => n + t.amountFils, 0);
+const enbd = (amount, merchant, day) =>
+  alert(`Purchase of AED ${amount} with Credit Card ending 1234 at ${merchant} on ${day}/09/2026. Avl Cr. Limit AED 20,000.00`,
+    'EmiratesNBD', `2026-09-${day}T10:00:00Z`);
+
+test('UAE statement descriptors with country, web, city and branch tails reconcile with the prior SMS', () => {
+  markets.setActiveMarket('AE'); markets.setLedgerCurrency('AED', 2);
+  const pairs = [['CARREFOUR MOE', 'CARREFOUR MOE DUBAI ARE'], ['NOON.COM', 'NOON.COM DUBAI ARE'],
+    ['TALABAT', 'TALABAT.COM DUBAI ARE'], ['CAREEM', 'CAREEM RIDE DUBAI ARE'],
+    ['LULU HYPERMARKET', 'LULU HYPERMARKET AL BARSHA DUBAI ARE'], ['STARBUCKS', 'STARBUCKS DUBAI MALL DUBAI ARE'],
+    ['ENOC 1023', 'ENOC 1023 DUBAI ARE'], ['SPINNEYS JLT', 'SPINNEYS JLT DUBAI']];
+  pairs.forEach(([sms, descriptor], i) => {
+    const day = String(i + 1).padStart(2, '0');
+    const amount = (100 + i).toFixed(2);
+    const live = apply([enbd(amount, sms, day)], ledger());
+    const result = apply([fileRow('a', 0, `2026-09-${day}`, descriptor, 10000 + i * 100)], live.state);
+    assert.equal(result.plan.txCount, 0, `${sms} / ${descriptor}`);
+    assert.equal(result.state.transactions.length, 1, `${sms} / ${descriptor}`);
+    // And the reverse arrival: the statement first, the SMS later.
+    const filed = apply([fileRow('b', 0, `2026-09-${day}`, descriptor, 10000 + i * 100)], ledger());
+    const reverse = apply([enbd(amount, sms, day)], filed.state);
+    assert.equal(reverse.state.transactions.length, 1, `reverse ${sms} / ${descriptor}`);
+  });
+});
+
+test('Saudi statement descriptors with city and country tails reconcile with the prior SMS', () => {
+  markets.setActiveMarket('SA'); markets.setLedgerCurrency('SAR', 2);
+  try {
+    const pairs = [['PANDA', 'PANDA RIYADH SAU'], ['JARIR BOOKSTORE', 'JARIR BOOKSTORE RIYADH SA'],
+      ['HUNGERSTATION', 'HUNGERSTATION JEDDAH SAU'], ['DANUBE', 'DANUBE JEDDAH'],
+      ['NAHDI PHARMACY', 'NAHDI PHARMACY RIYADH'], ['PANDA', 'شراء نقاط بيع PANDA RIYADH']];
+    pairs.forEach(([sms, descriptor], i) => {
+      const day = String(i + 1).padStart(2, '0');
+      const live = apply([alert(`Purchase of SAR ${(100 + i).toFixed(2)} with Credit Card ending 1234 at ${sms}. Available limit SAR 9,000.00.`,
+        'AlRajhiBank', `2026-09-${day}T10:00:00Z`)], ledger('SAR'));
+      const result = apply([fileRow('c', 0, `2026-09-${day}`, descriptor, 10000 + i * 100, { currency: 'SAR' })], live.state);
+      assert.equal(result.state.transactions.length, 1, `${sms} / ${descriptor}`);
+    });
+  } finally {
+    markets.setActiveMarket('AE'); markets.setLedgerCurrency('AED', 2);
+  }
+});
+
+test('a different business behind the same brand, or a different merchant, stays a second row', () => {
+  for (const [sms, descriptor] of [['AMAZON.AE', 'AMAZON CAFE DUBAI ARE'], ['NETFLIX.COM', 'NETFLIX CAR RENTAL DUBAI ARE'],
+    ['CARREFOUR MOE', 'CARREFOUR CAFE MOE DUBAI ARE'], ['NOON.COM', 'CARREFOUR MOE DUBAI ARE']]) {
+    const live = apply([enbd('55.00', sms, '10')], ledger());
+    const result = apply([fileRow('d', 0, '2026-09-10', descriptor, 5500)], live.state);
+    assert.equal(result.state.transactions.length, 2, `${sms} / ${descriptor}`);
+  }
+  for (const [a, b] of [['Amazon', 'AMAZON CAFE DUBAI ARE'], ['Urban Company', 'Urban Restaurant'],
+    ['KFC', 'KFC KITCHEN EQUIPMENT'], ['Salary', 'Card payment'], ['Purchase', 'NOON.COM DUBAI ARE'],
+    // Sub-brands are separate services, however the brand opens them.
+    ['Uber', 'UBER EATS'], ['Careem', 'CAREEM FOOD'], ['Amazon', 'AMAZON PRIME'], ['Noon', 'NOON FOOD'],
+    ['Emirates', 'EMIRATES NBD'],
+    // Location words never collapse two different names to a shared one.
+    ['AIR ARABIA', 'AIR KUWAIT'], ['FLY DUBAI', 'FLY EMIRATES'], ['Home Centre', 'HOME BOX'],
+    ['Toys Kingdom', 'TOYS R US'], ['CITY CENTRE DEIRA', 'CITY CENTRE MIRDIF'], ['Dubai Mall', 'DUBAI TAXI'],
+    ['Dubai Mall', 'DUBAI MALL PARKING'],
+    // Two different station numbers are two stations.
+    ['ENOC 1023', 'ENOC 1088 DUBAI ARE'],
+    // A purchase whose descriptor mentions a card payment is not a settlement.
+    ['Card payment', 'DEBIT CARD PAYMENT CARREFOUR'], ['ATM withdrawal', 'ATM DEPOSIT']]) {
+    assert.equal(statementDescriptorsAgree(a, b), false, `${a} / ${b}`);
+  }
+  for (const [a, b] of [['Noon', 'NOON.COM DUBAI ARE'], ['Salary', 'SALARY ACME TRADING LLC'],
+    ['ATM withdrawal', 'ATM WDL 0042 ADCB MARINA'], ['Incoming transfer', 'INWARD REMITTANCE FROM JOHN SMITH'],
+    ['Card •1234 payment', 'PAYMENT RECEIVED - THANK YOU'], ['Lulu Hypermarket', 'POS PURCHASE LULU HYPERMARKET'],
+    ['ENOC 1023', 'ENOC 1023 DUBAI ARE'], ['ENOC', 'ENOC 1023 DUBAI ARE'], ['Uber', 'UBER *TRIP'],
+    ['Panda', 'شراء نقاط بيع PANDA RIYADH']]) {
+    assert.equal(statementDescriptorsAgree(a, b), true, `${a} / ${b}`);
+  }
+});
+
+test('a PDF and a CSV of the same month add nothing, even when the CSV appends a country code', () => {
+  const pdf = [fileRow('e', 0, '2026-08-27', 'CARREFOUR MOE DUBAI', 24550),
+    fileRow('e', 1, '2026-09-05', 'NOON.COM DUBAI', 18900), fileRow('e', 2, '2026-09-20', 'TALABAT.COM DUBAI', 4500)];
+  const first = apply(pdf, ledger());
+  assert.equal(first.state.transactions.length, 3);
+  const csv = pdf.map((row, i) => ({ ...row, captureSource: 'csv', statementImportId: '6'.repeat(32),
+    statementRowIndex: i, merchant: `${row.merchant} ARE` }));
+  const second = apply(csv, first.state);
+  assert.equal(second.plan.txCount, 0);
+  assert.equal(spendOf(second.state), 24550 + 18900 + 4500);
+});
+
+const adcbAccount = { id: 'adcb-acct', name: 'ADCB Account •1001', kind: 'bank', bankName: 'ADCB', last4: '1001', openingFils: 0, color: '#000' };
+const accountRow = (index, date, merchant, amountFils, changes = {}) =>
+  fileRow('1', index, date, merchant, amountFils, { card: { kind: 'account', last4: '1001' }, ...changes });
+
+test('a salary SMS and the statement salary line are one income', () => {
+  const live = apply([alert('Salary of AED 15,000.00 has been credited to your account ending 1001', 'ADCBAlert', '2026-09-01T05:00:00Z')],
+    { ...ledger(), accounts: [adcbAccount] });
+  assert.equal(live.state.transactions.length, 1);
+  const result = apply([accountRow(0, '2026-09-01', 'SALARY ACME TRADING LLC', 1500000,
+    { type: 'income', categoryGuess: 'salary' })], live.state);
+  assert.equal(result.plan.txCount, 0);
+  const income = result.state.transactions.filter((t) => t.type === 'income');
+  assert.equal(income.length, 1);
+  assert.equal(income[0].amountFils, 1500000);
+});
+
+test('a debit-card purchase SMS and the account statement row for it are one purchase', () => {
+  const live = apply([alert('Purchase of AED 312.40 with Debit Card ending 5678 at LULU HYPERMARKET, DUBAI on 05/09/2026. Avl balance AED 22,187.60',
+    'ADCBAlert', '2026-09-05T14:00:00Z')], { ...ledger(), accounts: [adcbAccount] });
+  const card = live.state.accounts.find((a) => a.last4 === '5678');
+  assert.equal(card.cardType, 'debit');
+  const row = accountRow(0, '2026-09-06', 'POS PURCHASE LULU HYPERMARKET', 31240);
+  const result = apply([row], live.state);
+  assert.equal(result.plan.txCount, 0);
+  assert.equal(spendOf(result.state), 31240);
+  // A credit card is a separate liability: never paired with an account row.
+  const credit = { ...card, id: 'adcb-credit', cardType: 'credit' };
+  const onCredit = { ...live.state, accounts: [adcbAccount, credit], transactions: live.state.transactions.map((t) =>
+    ({ ...t, accountId: credit.id, captureInstrument: { ...t.captureInstrument, kind: 'credit' } })) };
+  assert.equal(apply([row], onCredit).state.transactions.length, 2, 'credit card');
+  // An untyped card with an untyped alert may be a credit card: no positive debit evidence.
+  const untyped = { ...card, id: 'adcb-card', cardType: undefined };
+  const onUntyped = { ...live.state, accounts: [adcbAccount, untyped], transactions: live.state.transactions.map((t) =>
+    ({ ...t, accountId: untyped.id, captureInstrument: { ...t.captureInstrument, kind: 'unknown' } })) };
+  assert.equal(apply([row], onUntyped).state.transactions.length, 2, 'untyped card');
+  // Another bank's account statement does not explain this bank's debit card.
+  const otherBank = { ...live.state, accounts: live.state.accounts.map((a) => a.id === adcbAccount.id ? { ...a, bankName: 'HSBC' } : a) };
+  assert.equal(apply([row], otherBank).state.transactions.length, 2, 'different bank');
+  // Equal money at a different merchant is a second purchase.
+  assert.equal(apply([accountRow(0, '2026-09-06', 'POS PURCHASE CARREFOUR', 31240)], live.state).state.transactions.length, 2);
+});
+
+test('an Al Rajhi mada purchase and the Al Rajhi account statement row are one purchase', () => {
+  markets.setActiveMarket('SA'); markets.setLedgerCurrency('SAR', 2);
+  try {
+    const rajhi = { id: 'rajhi-acct', name: 'Al Rajhi Account', kind: 'bank', bankName: 'Al Rajhi', last4: '7519', openingFils: 0, color: '#000' };
+    const live = apply([alert('Purchase of SAR 245.00 with Mada Card ending 5566 at PANDA, RIYADH. Available balance SAR 14,755.00.',
+      'AlRajhiBank', '2026-09-03T10:00:00Z')], { ...ledger('SAR'), accounts: [rajhi] });
+    assert.equal(live.state.transactions.length, 1);
+    const result = apply([fileRow('2', 0, '2026-09-03', 'شراء نقاط بيع PANDA RIYADH', 24500,
+      { currency: 'SAR', card: { kind: 'account', last4: '7519' }, bankHint: 'Al Rajhi' })], live.state);
+    assert.equal(result.plan.txCount, 0);
+    assert.equal(result.state.transactions.length, 1);
+  } finally {
+    markets.setActiveMarket('AE'); markets.setLedgerCurrency('AED', 2);
+  }
+});
+
+test('a statement posting date up to three days after the SMS is the same purchase; four is not', () => {
+  for (const lag of [0, 1, 2, 3, 4]) {
+    const live = apply([enbd('77.00', 'STARBUCKS', '10')], ledger());
+    const result = apply([fileRow('3', 0, `2026-09-${10 + lag}`, 'STARBUCKS DUBAI MALL DUBAI ARE', 7700)], live.state);
+    assert.equal(result.state.transactions.length, lag <= 3 ? 1 : 2, `lag ${lag}`);
+  }
+  // Two live alerts are never widened: equal coffees two days apart stay two.
+  const twoAlerts = apply([enbd('77.00', 'STARBUCKS', '10'), enbd('77.00', 'STARBUCKS', '12')], ledger());
+  assert.equal(twoAlerts.state.transactions.length, 2);
+});
+
+test('two genuine identical purchases on one day stay two rows on both channels', () => {
+  const coffee = (hour) => alert('Purchase of AED 18.00 with Credit Card ending 1234 at STARBUCKS on 10/09/2026. Avl Cr. Limit AED 20,000.00',
+    'EmiratesNBD', `2026-09-10T${hour}:00:00Z`);
+  const rows = [fileRow('4', 0, '2026-09-10', 'STARBUCKS DUBAI ARE', 1800), fileRow('4', 1, '2026-09-10', 'STARBUCKS DUBAI ARE', 1800)];
+  const both = apply(rows, apply([coffee('05'), coffee('09')], ledger()).state);
+  assert.equal(both.state.transactions.length, 2);
+  const oneAlert = apply(rows, apply([coffee('05')], ledger()).state);
+  assert.equal(oneAlert.state.transactions.length, 2, 'the statement adds the coffee the SMS missed');
+  // Three days of posting lag cannot let one alert absorb two statement rows.
+  const lagged = apply([fileRow('5', 0, '2026-09-11', 'STARBUCKS', 1800), fileRow('5', 1, '2026-09-13', 'STARBUCKS', 1800)],
+    apply([coffee('05')], ledger()).state);
+  assert.equal(lagged.state.transactions.length, 2);
+});
+
+test('statement first, debit-card SMS later, then the same statement again: one row, no conflict', () => {
+  const debit = { id: 'adcb-debit', name: 'ADCB Debit •5678', kind: 'card', cardType: 'debit', bankName: 'ADCB',
+    last4: '5678', openingFils: 0, color: '#000' };
+  const row = accountRow(0, '2026-09-06', 'POS PURCHASE LULU HYPERMARKET', 31240);
+  const filed = apply([row], { ...ledger(), accounts: [adcbAccount, debit] });
+  const sms = alert('Purchase of AED 312.40 with Debit Card ending 5678 at LULU HYPERMARKET, DUBAI on 05/09/2026. Avl balance AED 22,187.60',
+    'ADCBAlert', '2026-09-05T14:00:00Z');
+  const live = apply([sms], filed.state);
+  assert.equal(live.state.transactions.length, 1);
+  // The file row is never re-homed onto the card by the alert.
+  assert.equal(live.state.transactions[0].accountId, adcbAccount.id);
+  const again = apply([row], JSON.parse(JSON.stringify(live.state)));
+  assert.equal(again.plan.txCount, 0);
+  assert.equal(again.state.transactions.length, 1);
+  // Forward order: SMS, statement, the same statement again.
+  const forward = apply([row], apply([sms], { ...ledger(), accounts: [adcbAccount, debit] }).state);
+  assert.equal(forward.state.transactions.length, 1);
+  const forwardAgain = apply([row], JSON.parse(JSON.stringify(forward.state)));
+  assert.equal(forwardAgain.plan.txCount, 0);
+  assert.equal(forwardAgain.state.transactions.length, 1);
+});
+
+test('one alert is never claimed by rows from two different statements', () => {
+  const live = apply([enbd('77.00', 'STARBUCKS', '28')], ledger());
+  // September's file posts it on the 29th; October's file has another AED 77
+  // posted on the 1st whose SMS was missed. Both are in each one's window.
+  const september = apply([fileRow('7', 0, '2026-09-29', 'STARBUCKS DUBAI MALL DUBAI ARE', 7700)], live.state);
+  assert.equal(september.state.transactions.length, 1);
+  const october = apply([fileRow('8', 0, '2026-10-01', 'STARBUCKS DUBAI MALL DUBAI ARE', 7700)],
+    JSON.parse(JSON.stringify(september.state)));
+  assert.equal(october.state.transactions.length, 2, 'the October purchase is not erased');
+  // A CSV reprint of the September row keeps its date and adds nothing.
+  const reprint = apply([fileRow('9', 0, '2026-09-29', 'STARBUCKS DUBAI MALL DUBAI ARE', 7700, { captureSource: 'csv' })],
+    JSON.parse(JSON.stringify(september.state)));
+  assert.equal(reprint.plan.txCount, 0);
+});

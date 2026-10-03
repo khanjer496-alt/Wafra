@@ -65,6 +65,7 @@ import {
   normalizeEmailContent,
   parseRawEmail,
   legacyStatementDateHint,
+  looksLikeStatementBody,
   parseStatementCsv,
   parseStatementLines,
   statementDateHintFrom,
@@ -373,10 +374,12 @@ function validMarket(id: unknown): string | null {
   return MARKETS.some((market) => market.id === up) ? up : null;
 }
 
-async function statementCoverage(rows: ReadonlyArray<{ date?: string | null; card?: { last4: string; kind: string } | null; bankHint?: string }>): Promise<{
+async function statementCoverage(rows: ReadonlyArray<{ kind?: string; date?: string | null; card?: { last4: string; kind: string } | null; bankHint?: string }>): Promise<{
   sourceKey: string; label: string; startDate: string; endDate: string;
 } | null> {
-  const dates = rows.map((row) => row.date).filter((date): date is string =>
+  // A statement's summary row is dated by its DUE date, which is not a day
+  // the statement covers.
+  const dates = rows.filter((row) => row.kind !== 'cardStatement').map((row) => row.date).filter((date): date is string =>
     typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date));
   if (dates.length === 0) return null;
   dates.sort();
@@ -1324,16 +1327,37 @@ async function queueEmailRows(
   // Shortcut. The paired device market remains the default only for
   // currency-less statement rows and older evidence-free templates.
   const alertMarket = detectLaunchMarketFromAlert(normalized) ?? device.market;
-  const alertInterpretation = interpretBankAlert({
+  // A forwarded STATEMENT body is read as a statement first. Its summary
+  // (total, minimum, due date) also satisfies the alert reader, and taking
+  // that one card-statement alert dropped every transaction row below it.
+  // Once it reads rows, rows it could not read are reported, never dropped:
+  // the same incomplete_statement refusal as any other partial statement. A
+  // body it reads nothing from, or refuses outright, is still offered to the
+  // alert reader exactly as before (which then falls back to this parser).
+  const statementBody = looksLikeStatementBody(normalized);
+  const bodyLocale = statementBody ? await emailStatementLocale(env, device) : null;
+  let bodyStatement: ReturnType<typeof parseStatementLines> | null = null;
+  if (bodyLocale) {
+    try {
+      bodyStatement = parseStatementLines(normalized, bodyLocale.currency, { card: null }, bodyLocale.hint);
+    } catch {
+      bodyStatement = null;
+    }
+  }
+  const readAsStatement = bodyStatement !== null && bodyStatement.rows.length > 0;
+  if (readAsStatement && (bodyStatement!.rejectedRows > 0 || !bodyStatement!.completeRowAccounting)) {
+    throw new Error('incomplete_statement');
+  }
+  const alertInterpretation = readAsStatement ? null : interpretBankAlert({
     source: normalized,
     sender: '',
     market: alertMarket as 'AE' | 'SA',
   });
-  const alert = alertInterpretation.outcome === 'parsed'
+  const alert = alertInterpretation?.outcome === 'parsed'
     ? alertInterpretation.parsed
     : null;
-  const statementLocale = alert ? null : await emailStatementLocale(env, device);
-  const statement = alert ? null
+  const statementLocale = alert || readAsStatement ? bodyLocale : await emailStatementLocale(env, device);
+  const statement = alert ? null : readAsStatement ? bodyStatement
     : parseStatementLines(normalized, statementLocale!.currency, { card: null }, statementLocale!.hint);
   if (statement && statement.rows.length > 0 &&
       (statement.rejectedRows > 0 || !statement.completeRowAccounting)) throw new Error('incomplete_statement');

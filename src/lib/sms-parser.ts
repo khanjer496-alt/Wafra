@@ -432,8 +432,29 @@ export interface ParsedCard {
  * "Pay min. AED..." supplies its minimum. Neither the minimum nor the late
  * fee can replace an unreadable total. Future captures plus the bounded recent reread;
  * PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 58: accuracy pass. Credits FROM a person or employer are income, never an
+ * own-account transfer; moves to your own account at another bank or in
+ * another currency are transfers; OTPs naming a merchant domain, dated balance
+ * enquiries and "If unauthorised" footers no longer post or delete money; the
+ * account balance on an account-side card payment is no longer the card's
+ * limit; Saudi labelled transfers/bill payments, Arabic card payments and
+ * statements, wallet "sent" transfers and labelled field lists are read;
+ * statements carry their stated issue date; subscription and channel-label
+ * categories corrected. Future captures plus the bounded recent reread;
+ * PARSER_BACKFILL_VERSION remains 49.
+ * 59: e&'s amount-first receipt ("your payment of AED X for account N has been
+ * received" + Amount Paid / Payment Channel lines) joins the biller-portal
+ * receipt family: Etisalat / Telecom / receipt side / account bill identity,
+ * no snapshot of the paying account, and never a "Transaction #:" title. A
+ * loyalty paragraph after the receipt block no longer decides its category.
+ * A biller's own customer number in a settlement ("received towards your
+ * Etisalat account 9876") is no longer read as the user's bank account — it
+ * minted a phantom "Account •9876" — and is kept as the bill identity instead.
+ * Future captures plus the bounded recent reread; PARSER_BACKFILL_VERSION
+ * remains 49.
  */
-export const PARSER_VERSION = 57;
+export const PARSER_VERSION = 59;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -507,6 +528,14 @@ export interface ParsedSms {
    * Consumers must keep treating that as "unknown", not as one side.
    */
   cardPaymentSide?: 'debit' | 'receipt';
+  /**
+   * For `cardStatement`: the ISO date the bank says the statement was ISSUED
+   * ("Statement date 20/10/26"), never the due date. Payment allocation needs
+   * it: a payment made before the statement was issued is already inside its
+   * total and must not be counted against it a second time. Absent when the
+   * message does not state it.
+   */
+  statementDate?: string;
   /** Bank transaction/reference identifier, with surrounding prose removed. */
   reference: string | null;
   /** Privacy-safe provider/account tail for a bill reminder, when stated. */
@@ -677,7 +706,11 @@ export interface ParseOptions {
  * words. Only the anchored forms are safe.
  */
 const AR_CREDIT_WORDS =
-  'ايداع|اودع|قيد داين|راتب|مرتب|رواتب|استرداد|استرجاع|مسترد|اضيف|اضافه مبلغ|حواله وارده|تحويل وارد';
+  'ايداع|اودع|قيد داين|راتب|مرتب|رواتب|استرداد|استرجاع|مسترد|اضيف|اضافه مبلغ|' +
+  // The labelled Saudi header names the transfer's scope between the noun and
+  // its direction: "حوالة محلية واردة" / "حوالة داخلية واردة". The adjacent
+  // pair alone never matched it, so an incoming transfer had no direction.
+  'حواله (?:(?:محليه|داخليه|دوليه|سريعه|فوريه) )?وارده|تحويل وارد';
 // The BARE NOUN "credit" is stated positively rather than fenced off with a
 // list of the nouns it must not precede. That list — card|limit|line|score|
 // facility — was a list of the collisions someone had already been bitten by,
@@ -720,8 +753,10 @@ const CREDIT_TRANSACTION_PURCHASE_RE = /\b(?:card|visa|mastercard|merchant|pos)\
  * booked it as a AED 10,000 EXPENSE carrying the income-only salary category —
  * one message, a AED 20,000 swing in the month.
  */
+// "...has been transferred from JOHN DOE to your account XXXX9876" puts the
+// sender between the verb and the destination; it is money arriving.
 const CREDIT_CLAUSE_RE =
-  /(?:credited|deposited|paid|transferred|remitted|added)\s+(?:back\s+)?(?:in)?to\s+(?:your|the|a\/?c)|credited\s+(?:with|back)\b|received\s+(?:from|(?:a\s+)?(?:payment|transfer|amount))|\bcash\s+deposit(?:ed)?\b|refunded\s+to\s+your|reversed\s+to\s+your|\binward\s+remittance\b|(?:الي|في)\s+حسابك|لحسابك/i;
+  /(?:credited|deposited|paid|transferred|remitted|added)\s+(?:back\s+)?(?:in)?to\s+(?:your|the|a\/?c)|\b(?:transferred|remitted|sent)\s+from\s+(?!your\b|my\b|the\b)(?:(?!\b(?:account|a\/c|ac|acc|acct|card|ending|wallet)\b)[^\d.\n*•·]){2,60}?\s+(?:in)?to\s+your\s+(?:\w+\s+){0,2}(?:account|a\/?c)\b|credited\s+(?:with|back)\b|received\s+(?:from|(?:a\s+)?(?:payment|transfer|amount))|\bcash\s+deposit(?:ed)?\b|refunded\s+to\s+your|reversed\s+to\s+your|\binward\s+remittance\b|(?:الي|في)\s+حسابك|لحسابك/i;
 const DEBIT_CLAUSE_RE =
   /(?:debited|deducted|withdrawn|charged|paid|spent|transferred)\s+from\s+your|charged\s+to\s+your\s+(?:card|account)|من\s+حسابك|من\s+بطاقتك|من\s+رصيدك/i;
 /**
@@ -792,12 +827,43 @@ function billerSettlement(prose: string): string | null {
   if (PAYMENT_SUBJECT_RE.test(prose)) return name;
   return BILLER_CATEGORIES.includes(guessCategory(name, 'expense')) ? name : null;
 }
+/**
+ * THE BILLER'S OWN ACCOUNT NUMBER, when a settlement names one.
+ *
+ * "We have received AED 350.00 towards your Etisalat account 9876." — 9876 is
+ * the customer's number AT ETISALAT. extractCard reads any "account NNNN" as
+ * the user's own bank account, so the row carried card {9876, account} and the
+ * import planner minted a phantom "Account •9876" from it. The digits belong to
+ * the biller and are kept only as the privacy-safe bill identity, exactly as
+ * the portal-receipt family does with its "account number ····2543".
+ *
+ * Narrow on purpose: only the verb-first settlement order, only digits that sit
+ * directly after "<biller> account", and only a payee the category vocabulary
+ * recognises as a biller (telecom, utilities, transport, government) — never
+ * merely "a payee after `your payment`", which is how an unlisted bank's name
+ * could otherwise reach here. A bank or an account type is refused upstream by
+ * billerSettlement itself.
+ */
+function billerOwnAccountTail(raw: string, biller: string): string | null {
+  if (!BILLER_CATEGORIES.includes(guessCategory(biller, 'expense'))) return null;
+  const m = raw.match(BILLER_SETTLED_RE);
+  if (!m || m.index === undefined || !m[1]) return null;
+  const after = raw.slice(m.index + m[0].length)
+    .match(/^\s*(?:(?:number|no\.?)\s*)?[:#-]?\s*[·•X*]*(\d{4,})(?![\dX*·•])/i);
+  return after ? after[1].slice(-4) : null;
+}
 // DEBIT_WORDS is market-compiled below (its payment guard embeds the currency).
 // "صرف" is deliberately absent — it is the stem of "مصرف" (BANK), which
 // appears in almost every alert, and it would have made hasDebit permanently
 // true on Arabic messages the way "credit" did on English credit cards.
 const AR_DEBIT_WORDS =
-  'شراء|مشتريات|خصم|خصمت|سحب|قيد مدين|تم دفع|تم الدفع|عمليه دفع|دفعه بمبلغ|تم سداد|سداد بمبلغ|تسديد|تحويل صادر|حواله صادره|تم تحويل|استخدمت|استخدام';
+  'شراء|مشتريات|خصم|خصمت|سحب|قيد مدين|تم دفع|تم الدفع|عمليه دفع|دفعه بمبلغ|تم سداد|سداد بمبلغ|تسديد|تحويل صادر|' +
+  'حواله (?:(?:محليه|داخليه|دوليه|سريعه|فوريه) )?صادره|تم تحويل|استخدمت|استخدام|' +
+  // A labelled bill-payment receipt opens with its event on a line of its own
+  // ("سداد فاتورة" then "المفوتر: STC"). Only that standalone header line is
+  // a settled payment; "يرجى سداد فاتورة" in a reminder is a sentence, not a
+  // header, and must keep reading as a bill due.
+  '(?:^|\\n)\\s*سداد(?: فاتوره)?[ \\t]*(?=\\n)(?![\\s\\S]*(?:استحقاق|مستحق|يرجي|يرجى|جديده|قبل تاريخ|اخر موعد))';
 // Bare "دفع" is NOT a debit verb anywhere in this file, and this is why:
 // "مستحقة الدفع" ("due for payment") contains it, and isBillDue requires
 // !hasDebit — so a bare pay-verb turned every Arabic bill REMINDER into a real
@@ -864,7 +930,7 @@ const STATEMENT_RE =
   // anchored to their qualifier and not left as bare "stmt": a purchase alert
   // ends "Pls refer stmt for exact amt", and a bare stem there would turn
   // every one of those purchases into a statement.
-  /statement|\blast\s+stmt\b|\bstmt\s+(?:date|bal(?:ance)?)\b|total\s+(?:amount\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+(?:payment|amount\s+due|due)\b|\bmin\s+amt\b|outstanding\s+(?:amount|balance)\s+of|كشف الحساب|كشف حساب|اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق/i;
+  /statement|\blast\s+stmt\b|\bstmt\s+(?:date|bal(?:ance)?)\b|total\s+(?:amount\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+(?:payment|amount\s+due|due)\b|\bmin\s+amt\b|outstanding\s+(?:amount|balance)\s+of|كشف الحساب|كشف حساب|اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق|الحد الادني للدفع/i;
 /** "Your statement is ready / has been generated" — the announcement itself. */
 const STATEMENT_ANNOUNCEMENT_RE =
   /\bstatement\b(?:[^.\n]|\.\d){0,60}?\b(?:is\s+(?:now\s+)?(?:ready|available)|has\s+been\s+(?:generated|issued|prepared|sent|emailed|dispatched))\b/i;
@@ -886,6 +952,45 @@ const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent
  */
 const PORTAL_RECEIPT_RE =
   /(?:payment\s+to\s+(?:the\s+)?account\s+(?:number|no\.?)|لحساب رقم)\s*:?\s*[·•X*]*(\d{4,})[\s\S]*?(?:amount\s+paid|المبلغ المدفوع)\s*:?\s*(?:[A-Z]{3}|Dhs?)?\s*([\d,]+(?:\.\d{1,2})?)/i;
+/**
+ * THE SAME RECEIPT, OPENED THE OTHER WAY ROUND.
+ *
+ * e& (sender "eandINF") now heads the identical labelled block with the amount
+ * first: "Hello, your payment of AED 313.95 for account 065000000 has been
+ * received." followed by the same Amount Due / Amount Paid / Remaining Balance
+ * / Payment Channel / Card Number lines as PORTAL_RECEIPT_RE's family. Without
+ * this head it fell to the generic path, which titled the row with its
+ * "Transaction #:" line, snapshotted the paying account to the biller's
+ * "Remaining Balance: AED 0", and carried no payment-flow side.
+ *
+ * Three things are REQUIRED, and together they keep bank card repayments out:
+ * a bare "account" + digits as the object of "payment ... for" (never "credit
+ * card", "card no." or "towards your ..."), the "has been received" verb
+ * directly after those digits, and the biller's own "Amount Paid:" label later
+ * in the body — which is where the amount is read from, exactly as in the
+ * original family. "Payment of AED 351.35 ... has been received and posted to
+ * your account no 5552906" (an AutoPay echo) and "Your payment of AED 9251
+ * against Credit Card no. XXX9426 was received" both fail it.
+ */
+const PORTAL_RECEIVED_RE =
+  /\bpayment\s+of\s+(?:[A-Z]{3}|Dhs?)\.?\s*[\d,]+(?:\.\d{1,2})?\s+for\s+account\s+(?:(?:number|no\.?)\s*:?\s*)?[·•X*]*(\d{4,})\s+has\s+been\s+received\b[\s\S]*?\bamount\s+paid\s*:?\s*(?:[A-Z]{3}|Dhs?)?\s*([\d,]+(?:\.\d{1,2})?)/i;
+/**
+ * Where the receipt's own labelled block ends and marketing begins.
+ *
+ * e& appends a loyalty paragraph after a blank line — "You've earned Smiles
+ * points on this payment. Redeem them for savings on food, groceries,
+ * shopping, travel, e& add-ons ..." — and the category vocabulary read
+ * "groceries" out of it and filed a phone bill as Groceries. The category is
+ * asked about the receipt alone: everything up to the first blank line after
+ * the Amount Paid label, or up to the Smiles lead-in should a capture ever
+ * arrive with its paragraphs flattened.
+ */
+// A card repayment or a loan, never a biller's receipt. "Outstanding Balance:
+// AED 0" is how a receipt may label what is left on the biller account, so a
+// zero outstanding is not a refusal.
+const PORTAL_RECEIVED_REFUSE_RE =
+  /\bcredit\s+card\b|\bmin(?:imum)?\.?\s+(?:amount\s+|payment\s+)?due\b|\boutstanding(?:\s+balance)?\s*:?\s*(?:[A-Z]{3}|Dhs?)?\.?\s*(?!0+(?:\.0+)?\b)\d|\bloan\b/i;
+const PORTAL_RECEIPT_TAIL_RE = /\n[ \t]*\r?\n|\bYou['’]ve\s+earned\s+Smiles\b/i;
 /** The line that says how the receipt was paid — and, very often, to whom. */
 const PORTAL_CHANNEL_RE = /(?:payment\s+channel|تم الدفع عن طريق)\s*:?\s*([^\n]{2,60})/i;
 /**
@@ -923,7 +1028,7 @@ const RECEIPT_BILLERS: [RegExp, string][] = [
 const CARD_PAYMENT_DEBIT_LEG_RE =
   /payment\s+instructions?|(?:debited|deducted)\b[\s\S]*towards?\s+(?:the\s+)?(?:payment|settlement|repayment)|\bpayment\b[\s\S]{0,100}?\b(?:card|covered\s+card|credit\s+card|charge\s+card)\b[\s\S]{0,80}?\b(?:was|has\s+been|is)\s+(?:debited|deducted)\s+from\s+your\s+(?:account|a\/?c)\b/i;
 const CARD_PAYMENT_RECEIPT_LEG_RE =
-  /(?:payment|amount)\b[\s\S]*(?:received|credited)|received\s+payment|has\s+been\s+paid|thank you for (?:your )?payment/i;
+  /(?:payment|amount)\b[\s\S]*(?:received|credited)|received\s+(?:your\s+)?payment|has\s+been\s+paid|thank you for (?:your )?payment/i;
 
 /** Undefined means the message named neither leg — never a guess. */
 function cardPaymentLeg(raw: string): 'debit' | 'receipt' | undefined {
@@ -989,7 +1094,12 @@ const OTP_RE = new RegExp(
     // was read as a code challenge and deleted, while the same message with the
     // reference written without a colon was imported. `\.\d` is still allowed
     // through so the gap can cross a decimal point inside an amount.
-    `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
+    // A merchant's DOMAIN is not a sentence end either: "Your OTP for purchase
+    // of AED 250.00 at NOON.COM ... is 482913" stopped at ".COM" and the
+    // challenge was imported as a real AED 250 purchase. Only a known TLD may
+    // be crossed, so "anyone.Ref: 123456" still cannot bind a footer to a
+    // reference number.
+    `|${OTP_CODE_WORD}(?:[^.\\n]|\\.\\d|\\.(?=(?:com|ae|sa|net|org|io|co|in|me)\\b)){0,80}?(?:\\bis\\b|[:=]|هو)\\s*${OTP_CODE_DIGITS}` +
     `|\\b\\d{4,8}\\s+is\\s+(?:your|the)\\s+(?:[a-z]+[\\s-]?){0,2}(?:code|otp|pin|password|passcode)\\b` +
     `|\\b(?:use|enter)\\s+\\d{4,8}\\s+to\\b` +
     `|(?:code|otp|password|pin)\\s+(?:for|to\\s+complete)\\s+(?:your\\s+)?3-?d\\s*secure`,
@@ -1259,8 +1369,11 @@ const HOLD_RELEASE_RE =
 const CONTACT_FOOTER_RE =
   /\(?\s*(?:\+?[\d·•X][\d·•X\s-]{4,})?\s*if\s+(?:calling|dialing|dialling)\s+from\s+(?:overseas|abroad|outside[^).\n]{0,20})\s*\)?/gi;
 
+// "If unauthorised, call 1800 111 1111" and "If not you, call ..." are the
+// same footer in two words. Unblanked, "unauthorised" read as a refusal and a
+// completed purchase that carried it was deleted as declined.
 const FRAUD_FOOTER_RE =
-  /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b/gi;
+  /\bif\s+(?:this|that|it|the\s+(?:above\s+)?(?:transaction|purchase|payment))\b[^.\n]{0,90}|\bif\s+you\s+(?:have\s*n[o']t|did\s*n[o']t|do\s*n[o']t|didn'?t|haven'?t|don'?t)\b[^.\n]{0,90}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoris\w*[^.\n]{0,60}|\b(?:to\s+report|report|reporting)\s+(?:an?\s+|any\s+)?unauthoriz\w*[^.\n]{0,60}|\bunauthoris\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bunauthoriz\w*\s+(?:use|transactions?|access|activity)\b[^.\n]{0,40}|\bin\s+case\s+of\s+(?:any\s+)?unauthoris\w*[^.\n]{0,60}|\bnot\s+(?:done|made|initiated|authoris\w*|authoriz\w*)\s+by\s+you\b|\bif\s+(?:unauthoris\w*|unauthoriz\w*|not\s+(?:you|recogni[sz]ed|authoris\w*|authoriz\w*))\b[^.\n]{0,90}/gi;
 /**
  * The refusal stated as something that happened TO the transaction.
  *
@@ -1764,6 +1877,7 @@ let CARD_RECEIPT_DATE_RE = /x^/;
 let FIELD_LIST_DATE_RE = /x^/;
 let FIRST_LOCAL_AMOUNT_RE = /x^/;
 let DEBIT_WORDS = /x^/;
+let SENT_MONEY_RE = /x^/;
 let PAYMENT_FOR_RE = /x^/;
 let FX_PREFIX_RE = /x^/;
 let FX_SUFFIX_RE = /x^/;
@@ -1853,9 +1967,16 @@ const CARD_GAP =
  */
 const ACCOUNT_GAP =
   String.raw`(?:(?!(?:bill|invoice|loan|finance|mortgage|utility|electricity|water|instal?ment|using|via|with|through|from|to|for|by|on|at|and|of)\b)\w+\s+){0,2}?(?:a\/?c|acct?|account)`;
+// "Your available balance on account XXX2501 as of 02/10/2026 is AED 5,450"
+// is a balance enquiry reply. The dated qualifier sat between the noun and its
+// figure, so the figure was not read as a balance and became an AED 5,450
+// expense titled "Account debit".
+const BALANCE_AS_OF =
+  String.raw`(?:\s*,?\s*as\s+(?:of|on|at)\s+\d{1,2}[/.\-](?:\d{1,2}|[A-Za-z]{3})[/.\-]\d{2,4}` +
+  String.raw`(?:\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?)?)?`;
 const BALANCE_REF_CLAUSE =
   String.raw`(?:\s*(?:on|for|of|in)\s+(?:your\s+)?(?:${CARD_GAP}|${ACCOUNT_GAP})` +
-  String.raw`\s*(?:no\.?|number|ending(?:\s+(?:in|with))?)?\s*[\dXx*•\-]{0,16})?`;
+  String.raw`\s*(?:no\.?|number|ending(?:\s+(?:in|with))?)?\s*[\dXx*•\-]{0,16})?` + BALANCE_AS_OF;
 
 /**
  * Units of each currency per 1 USD — cross rates derive from this table.
@@ -1958,6 +2079,10 @@ function ensureCurrencyPatterns(): void {
     // "minimum payment for credit card bill" cannot masquerade as a total.
     `|(?:^|[.!?;\\n]\\s*)(?:your\\s+)?(?:credit|covered)\\s+card\\s+bill` +
     `|closing\\s+balance|statement\\s+balance|new\\s+balance|statement\\s+amount` +
+    // "Your statement for September 2026 is AED 8,900.40" states the total as
+    // the statement's own amount. Anchored to a month name, so a sentence
+    // about a statement in general cannot lend its figure to the total.
+    `|statement\\s+(?:for|of)\\s+(?:the\\s+month\\s+(?:of\\s+)?)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?(?:[\\s,]+\\d{2,4})?` +
     // Emirates NBD's due reminder writes "Total Amt - AED 2,345.67; Min Amt -
     // AED 117.28". The bare abbreviation is a total only with that dash
     // label, so a purchase that merely mentions a "total amt" is untouched.
@@ -1980,7 +2105,11 @@ function ensureCurrencyPatterns(): void {
     `(?:اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق|اجمالي المستحق` +
     // The existing Arabic statement heading names amount due immediately
     // after the card. A minimum qualifier in between must not match it.
-    `|كشف حساب البطاقه(?: الايتمانيه)?\\s+\\d{4}\\s+المبلغ المستحق)`;
+    `|كشف حساب البطاقه(?: الايتمانيه)?\\s+\\d{4}\\s+المبلغ المستحق` +
+    // The same heading worded with the card's own label: "كشف حساب البطاقة
+    // المنتهية 4833: المبلغ المستحق" / "بطاقة الائتمان المنتهية بـ 1234:
+    // المبلغ المستحق". Still anchored to the card digits immediately before.
+    `|(?:كشف حساب\\s+)?(?:ال)?بطاقه(?:\\s+(?:ال)?(?:ايتمانيه|ايتمان))?\\s+المنتهيه(?:\\s+بـ*)?\\s*\\d{4}\\s*[:،,]?\\s*المبلغ المستحق)`;
   AR_TOTAL_DUE_RE = new RegExp(
     `${AR_TOTAL_DUE_LABEL}\\s*(?:هو|:)?\\s*(?:${PREFIX})?\\s*(${FIGURE})`, 'i');
   AR_TOTAL_DUE_LABEL_RE = new RegExp(AR_TOTAL_DUE_LABEL, 'i');
@@ -2134,6 +2263,15 @@ function ensureCurrencyPatterns(): void {
       // by the clause (transferred FROM your / TO your), never by this word.
       `|transferr(?:ed|ing)` +
       `|${AR_DEBIT_WORDS}`, 'i');
+  // Wallets say SENT: "You have sent SAR 150.00 to Abdullah via stc pay".
+  // Only the two money-subject forms — a bare "sent" is also the OTP and
+  // statement notice ("sent to your mobile/email"). Read against the unmasked
+  // prose, never the merchant-masked text: masking blanks "your email" after
+  // "sent to" exactly as it blanks a payee, and the guard could not see it.
+  SENT_MONEY_RE = new RegExp(
+    `\\byou\\s+(?:have\\s+|just\\s+)?sent\\s+(?:${CUR})\\s*\\d` +
+      `|(?:${CUR})\\s*[\\d,.]+\\s+(?:has\\s+been\\s+|was\\s+)?sent\\s+to\\b(?!\\s+(?:you|your|yours)\\b)`,
+    'i');
   const codes = Object.keys(UNITS_PER_USD).filter((c) => c !== m.currency.code).join('|');
   // A foreign figure may carry its own currency's third decimal (KWD 12.345,
   // BHD, OMR, JOD). Reading only two decimals silently dropped it. Whether
@@ -2399,10 +2537,13 @@ const CARD_KIND_WORDS = /credit|covered|charge/i;
 // alternation could only ever match one of the two, so both real corpus
 // messages in that format lost their card identity entirely and their rows
 // could not be attached to any account.
+// The labelled field-list form puts a colon after the noun — "Card: **4321
+// (mada)", "Account: ***2501" — and without it the line named no card at all,
+// so the row attached to no account.
 const CARD_RE =
-  /(credit|debit|covered|charge|prepaid)?\s*card(?:\s*(?:no\.?|number))?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
+  /(credit|debit|covered|charge|prepaid)?\s*card(?:\s*(?:no\.?|number))?\s*:?\s*(?:ending(?:\s+(?:in|with))?)?\s*(?:\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
 const ACCOUNT_RE =
-  /a\/?c(?:count)?\s*(?:no\.?|number)?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
+  /a\/?c(?:count)?\s*(?:no\.?|number)?\s*:?\s*(?:ending(?:\s+(?:in|with))?|\.\.+|x+|\*+|[·•]+)?\s*(\d{4})\b/i;
 /** Account identity with a formatted masked middle: "095-XXX11XXX-0001". */
 // FAB writes its account numbers this way, and the plain ACCOUNT_RE below
 // stops at the first mask run — so "account no. 095-XXX11XXX-0001" either
@@ -2411,7 +2552,8 @@ const ACCOUNT_RE =
 const MASKED_ACCOUNT_RE =
   /(?:a\/?c(?:count)?|acct?|account)\s*(?:no\.?|number)?\s+(?:\d{1,4}[- ]?)?(?:[Xx*·•]+\d*)+(?:[- ]+)?(\d{4})\b/i;
 /** Fully masked PAN like "4782********4833" — the LAST four digits identify the card. */
-const MASKED_PAN_RE = /\b\d{4,6}[Xx*•]{2,}(\d{4})\b/;
+// Spaced or dashed groups too: "4567 XXXX XXXX 1234" is card •1234, never •4567.
+const MASKED_PAN_RE = /\b\d{4,6}(?:[\s-]?[Xx*•]{2,}){1,3}[\s-]?(\d{4})\b/;
 /**
  * ADIB's compact alert omits the word "card": "XXX456789 was used for AED
  * ...". Restrict the shorter masked form to the completed-use phrase so a
@@ -2664,7 +2806,9 @@ const AR_CONNECTOR = 'من|باستخدام|بواسطه|علي|عبر|عن طر
 // already failed on the same body (see the merchant block in parseSms). On a
 // bilingual alert the English clause still wins.
 const AR_MERCHANT_RE = new RegExp(
-  `(?:^|[^${AR_LETTER}])(?:لدي|في|الي|عند|من)\\s*:?\\s+(?!(?:${AR_NOT_MERCHANT}))` +
+  // "المفوتر:" is the biller label on a labelled bill-payment receipt; the
+  // payee of a "سداد فاتورة" is named there, never after لدى.
+  `(?:^|[^${AR_LETTER}])(?:لدي|في|الي|عند|من|(?:ال)?مفوتر)\\s*:?\\s+(?!(?:${AR_NOT_MERCHANT}))` +
     `([${AR_LETTER}A-Za-z][${AR_LETTER}A-Za-z0-9 '\\-&.]{1,40}?)` +
     `(?=\\s*(?:[,.;:\\n]|بالبطاق|بطاقت|البطاق|بطاق|حساب|بتاريخ|بمبلغ|الرصيد|رصيد|المتاح|(?:${AR_CONNECTOR})\\s+(?:${AR_NOT_MERCHANT})|$))`,
   'g',
@@ -2776,7 +2920,7 @@ const MOBILE_RECHARGE_RE =
 // ("WL *STEAM PURCHASE"), and dropping those lines cost the merchant. The
 // plural form and the "card purchase" header are the noise.
 const LINE_NOISE_RE =
-  /\bcard\b|a\/?c\b|\baccount\s+(?:no|number|xx)|\bbal(?:ance)?\b|\blimit\b|statement|\bdue\b|payment\s+channel|\bpayment\b(?!\s*[A-Za-z])|purchases\b|purchase\s+of\b|debited|credited|\botp\b|\bref(?:erence)?\b|\btxn\b|\bavl\b|avail|value date|^date\b|paid upto|transaction\s+(?:date|time|id|ref)|mode\s+of\s+payment|amount\s+(?:due|paid)|^remaining\b/i;
+  /\bcard\b|a\/?c\b|\baccount\s+(?:no|number|xx)|\bbal(?:ance)?\b|\blimit\b|statement|\bdue\b|payment\s+channel|\bpayment\b(?!\s*[A-Za-z])|purchases\b|purchase\s+of\b|debited|credited|\botp\b|\bref(?:erence)?\b|\btxn\b|\bavl\b|avail|value date|^date\b|paid upto|transaction\s+(?:date|time|id|ref)|^transaction\s*(?:#|no\b|number\b)|mode\s+of\s+payment|amount\s+(?:due|paid)|^remaining\b/i;
 /**
  * A REWARD BADGE printed on its own line, which is not the acquirer descriptor.
  *
@@ -2916,6 +3060,11 @@ function cleanDescriptor(name: string): string {
   return out.replace(/(?:\s+COM|\.(?:com|ae|net|org|io|co|ai))$/i, '').trim();
 }
 
+const MERCHANT_FIELD_LINE_RE =
+  /^(?:merchant(?:\s+name)?|payee|beneficiary(?:\s+name)?|biller|vendor|store|shop|at|paid\s+to|to)\s*:\s*(.+)$/i;
+const NON_MERCHANT_FIELD_LINE_RE =
+  /^(?:ref(?:erence)?(?:\s+no\.?)?|txn\s+(?:id|ref)|transaction\s+(?:id|type|ref)|type|channel|mode|status|terminal(?:\s+id)?|auth(?:ori[sz]ation)?(?:\s+code)?|approval(?:\s+code)?|country|city|time|card(?:\s+(?:no\.?|number))?|account(?:\s+(?:no\.?|number))?|a\/c|from|balance|avl\.?\s*bal(?:ance)?|available\s+(?:balance|limit)|limit)\s*:/i;
+
 function merchantFromLines(raw: string): string {
   if (!raw.includes('\n')) return '';
   const codes = [
@@ -2928,7 +3077,22 @@ function merchantFromLines(raw: string): string {
   const lines = raw.split(/\r?\n+/).map((l) => l.trim()).filter(Boolean);
   const amountIdx = lines.findIndex((l) => amountLineRe.test(l));
   if (amountIdx < 0) return '';
+  // A labelled block names its payee outright ("Merchant: TAMIMI MARKETS").
+  // Read that field wherever it sits, label removed; the label must never
+  // become part of the name the user sees and overrides by.
+  for (const line of lines) {
+    const labelled = line.match(MERCHANT_FIELD_LINE_RE);
+    if (!labelled) continue;
+    const value = labelled[1].trim();
+    if ((value.match(/[A-Za-z]/g) ?? []).length < 3) continue;
+    const service = normalizeServiceName(value);
+    if (service) return service;
+    const cleaned = cleanDescriptor(value.replace(/\s{2,}/g, ' '));
+    if (cleaned.length >= 2 && cleaned.length <= 48) return cleaned;
+  }
   for (const line of lines.slice(amountIdx + 1)) {
+    // Any other labelled field (Ref:, Type:, Channel:, Balance:) is plumbing.
+    if (NON_MERCHANT_FIELD_LINE_RE.test(line)) continue;
     if (LINE_DATE_RE.test(line)) continue;
     if (LINE_NOISE_RE.test(line)) continue;
     if (LINE_PROMO_RE.test(line)) continue;
@@ -2983,10 +3147,26 @@ function merchantFromLines(raw: string): string {
 // as a transfer too ("AED 5,000 credited to your account 1234"), which strips
 // real income out of the ledger — the same error pointed the other way. Money
 // has to be leaving somewhere AND arriving somewhere the user owns.
-const OWN_DESTINATION_RE =
-  /\bto\s+your\s+(?:own\s+)?(?:savings?|current|deposit|call|salary|joint|linked|other|second(?:ary)?|new)?\s*(?:account|a\/c|wallet|pot|goal|credit\s+card|debit\s+card|card)\b/i;
+// A bank or currency name may sit between "your" and the account noun: "to
+// your Wio Account ending 5678", "to your USD Account XXX7777". Without them
+// a move into the user's own account at another bank, or into their own
+// currency account, was AED 2,500 of spending. The names are a closed list,
+// never a free word: "to your du account" is a phone bill being paid, and a
+// free qualifier would have hidden it as a transfer.
+const OWN_ACCOUNT_QUALIFIER =
+  String.raw`(?:savings?|current|deposit|call|salary|joint|linked|other|second(?:ary)?|new|` +
+  String.raw`wio|liv|mashreq(?:\s+neo)?|neo|emirates\s+nbd|enbd|adcb|fab|adib|dib|rak\s?bank|cbd|hsbc|citi(?:bank)?|` +
+  String.raw`emirates\s+islamic|al\s*rajhi|snb|alinma|riyad\s+bank|stc\s*pay|urpay|d360|revolut|wise|payoneer|zand|` +
+  String.raw`usd|eur|gbp|aed|sar|inr|pkr|egp|qar|kwd|bhd|omr|jod|cad|aud|chf|jpy|cny|try|foreign\s+currency)`;
+const OWN_DESTINATION_RE = new RegExp(
+  String.raw`\bto\s+your\s+(?:own\s+)?(?:${OWN_ACCOUNT_QUALIFIER}\s+){0,2}(?:account|a\/c|wallet|pot|goal|credit\s+card|debit\s+card|card)\b`,
+  'i');
+// The money must leave the USER: "from your account", "from a/c XX12".
+// "Salary transfer of AED 15,000.00 from ACME LLC has been credited to your
+// account" moves money FROM someone else, and reading any "from" here marked
+// salaries and repayments as own-account transfers, hidden from income.
 const OUTGOING_MOVE_RE =
-  /\b(?:transferred|transfer|debited|deducted|withdrawn|moved|sent|paid)\b(?:[^.\n]|\.\d){0,40}?\bfrom\b/i;
+  /\b(?:transferred|transfer|debited|deducted|withdrawn|moved|sent|paid)\b(?:[^.\n]|\.\d){0,40}?\bfrom\s+(?:your\b|my\b|the\s+(?:account|a\/?c)\b|(?:(?:[A-Za-z]+\s+){0,2}(?:a\/?c|acc(?:oun)?t?|card)\b\s*(?:no\.?|number|ending(?:\s+(?:in|with))?)?\s*[:#]?\s*[\dXx*•·])|(?:(?:current|savings?|salary|checking|call|deposit|joint)\s+(?:a\/?c|acc(?:oun)?t?)\b)|(?:x+|\*+|[•·]+)\d{3,})/i;
 // `Cr.Card` is listed explicitly alongside the spelled-out forms. This is the
 // DEBIT leg of the same settlement CARD_GAP handles on the receipt side —
 // "debited from your account 1234 towards Cr.Card XXX7720" — and with only the
@@ -2994,7 +3174,7 @@ const OUTGOING_MOVE_RE =
 // have to carry the hint, because it is the pair of them sharing a dedupe key
 // that stops one payment landing on the ledger twice.
 const TRANSFER_HINT_RE =
-  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:(?:credit|covered|charge|prepaid)\s+)?card|(?:credit|covered|charge|prepaid)\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|(?:credit|covered|charge)\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
+  /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:(?:credit|covered|charge|prepaid)\s+)?card|(?:credit|covered|charge|prepaid)\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|(?:credit|covered|charge)\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|سداد مبلغ(?:[^.\n]|\.\d){0,40}?ل(?:ل)?بطاق\S*\s+(?:ال)?ايتمان|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
 
 /**
  * A payee that is a BNPL provider and nothing else: the brand, its domain
@@ -3065,15 +3245,22 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // was filed as a phone bill. The shop is what was bought from; the plastic it
   // was bought with is not. Both halves must therefore stay ABOVE telecom.
   [/meraas|al zajil fairs|tickets fy events|mushrif national|al safa park|global village|majid al futtaim cinemas?|al futtaim cin/i, 'entertainment'],
-  [/splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|adobe|\bcanva\b|linkedin|\bzoho\b|\bcraft\s+docs?\b|google\s*\*?\s*domains|domains?\s+g\.co/i, 'software'],
+  // iCloud storage and Microsoft 365 / Gemini / Workspace seats are tools,
+  // and the first two arrive under billing names (APPLE.COM/BILL, MSBILL) the
+  // entertainment rule below would otherwise claim or nothing would.
+  [/splitwise|camscanner|pixocial|pixelcut|\bfinart\b|scaleup|ar ruler|adobe|\bcanva\b|linkedin|\bzoho\b|\bcraft\s+docs?\b|google\s*\*?\s*domains|domains?\s+g\.co|icloud|microsoft(?!\s*\*?\s*(?:xbox|store\s+games))|msbill|office\s*365|google\s*\*?\s*(?:gemini|workspace|gsuite|cloud)|\bgemini\s+(?:advanced|pro|ultra)\b|\bfigma\b|\bnotion\b|\bdropbox\b|1password|lastpass|nordvpn|expressvpn|surfshark|grammarly|evernote|todoist|calendly|mailchimp|\bshopify\b|squarespace|\bwix\.com|godaddy|\bslack\b|zoom\.us|\bjetbrains\b|\bgithub\b/i, 'software'],
+  // Language and learning apps are education, not entertainment.
+  [/duolingo|babbel|rosetta\s*stone|\bbusuu\b|brilliant\.org|masterclass|\bblinkist\b/i, 'education'],
+  // Paid social and dating subscriptions are leisure spending.
+  [/snapchat|\btinder\b|\bbumble\s*(?:app|boost|premium|inc|holding|trading\s+ltd)\b|\bhinge\s*(?:app|dating|\+|plus|premium|x)\b|x\s+corp\.?\s+paid|twitter\s+blue|\bx\s+premium\b/i, 'entertainment'],
   [/etoro|capital\.com|bfinity|bitfi|binance|crypto\.com|interactive brokers|saxo|exinity|banxa|trustwallet|national bonds|iqoption|vibed\.inc/i, 'investing'],
-  [/netflix|spotify|anghami|shahid|\bosn\b|starz|disney\+?|amazon\s*prime|prime\s*video|you\s*tube\s*premium/i, 'entertainment'],
+  [/netflix|spotify|anghami|shahid|\bosn\b|starz|disney(?!\s+(?:store|shop))\+?|amazon\s*prime|prime\s*video|you\s*tube\s*premium/i, 'entertainment'],
   [/\bunigaz\b/i, 'utilities'],
   // `lulu` carries a negative lookahead because Lulu Exchange is a
   // remittance house, not the hypermarket — a money transfer was being
   // filed as a grocery shop, which overstates consumption for exactly the
   // users who send money home every month.
-  [/carrefour|\blulu\b(?!\s*(?:exchange|money|intl|international))|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|family\s*mart|lawson|\b7-?11\b|\b7[ -]?eleven\b|mini ?mart\b|shams al buhaira super|hypermarket|superm\w*|grocer|fresh market|baqala/i, 'groceries'],
+  [/carrefour|\blulu\b(?!\s*(?:exchange|money|intl|international))|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|kibsons|barakat|el\s?grocer|freshtohome|fresh\s+to\s+home|family\s*mart|lawson|\b7-?11\b|\b7[ -]?eleven\b|mini ?mart\b|shams al buhaira super|hypermarket|superm\w*|grocer|fresh market|baqala/i, 'groceries'],
   [/karam al sham gents/i, 'personal-care'],
   [/uber\s*eats|talabat|deliveroo|zomato|noon food|careem food|eateasy|\bwolt\b|mamaesh|al deek al soori|restaurant|restoran|cafe|coffee|starbucks|costa|tim hortons|mc\s*donald|kfc|hardee|subway|shawarma|shaurma|cafeteria|dining|bakery|baklava|\bpide\b|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|galitos|\bfoods?\b|beverages/i, 'dining'],
   // `toll` carries a NEGATIVE LOOKAHEAD and it is not decoration: "call our
@@ -3082,8 +3269,8 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // as transport. What the rule is actually for is the road toll itself —
   // "deducted ... for VAT on toll transaction(s)", which is a Salik charge and
   // belongs beside Salik.
-  [/careem(?!\s*food)|uber|yango|bolt\b|udrive|ekar|taxi|\brta\b|road\s*(?:&|and)\s*transport|\bnol\b|salik|darb|mawaqif|mawgif|parkin\b|enoc|eppco|adnoc(?!\s*(?:oasis|coop))|emarat|petrol|fuel|tyre|tire|car wash|autopro|quicklube|oil change|metro|tram|parking|valet|careem bike|\bgrab\b|moi traffic|traffic fines|\brafid\b|cafu\b|cafuae|www cafu|refueled|car cent(?:er|re)|\bdott\b|garage|spare parts|\bcar\s+rentals?\b|\brent-?\s?a-?\s?car\b|\bprkn\b|\bmetro\b|\bmotors\b|\bauto\s+(?:s|se|serv\w*|ac|repair|care|centre|center)\b|\btier\s+(?:[a-z]{2}\s+)?ride\b|mena mobility|cars\s?24|\bferr(?:y|ies)\b|\btolls?\b(?!\s*-?\s*free)/i, 'transport'],
-  [/\b(?:dewa|sewa|sewapayment|fewa|addc|aadc|empower|lootah|tabreed|btu)\b|chilled water|electricity|cooling|utility|sewerage|ajmansewerage|\blpg\b|gas cylinder|\bwater\b(?!\s*park)/i, 'utilities'],
+  [/careem(?!\s*food)|uber|yango|\btfl\b|transport\s+for\s+london|bolt\b|udrive|ekar|taxi|\brta\b|road\s*(?:&|and)\s*transport|\bnol\b|salik|darb|mawaqif|mawgif|parkin\b|enoc|eppco|adnoc(?!\s*(?:oasis|coop))|emarat|petrol|fuel|tyre|tire|car wash|autopro|quicklube|oil change|metro|tram|parking|valet|careem bike|\bgrab\b|moi traffic|traffic fines|\brafid\b|cafu\b|cafuae|www cafu|refueled|car cent(?:er|re)|\bdott\b|garage|spare parts|\bcar\s+rentals?\b|\brent-?\s?a-?\s?car\b|\bprkn\b|\bmetro\b|\bmotors\b|\bauto\s+(?:s|se|serv\w*|ac|repair|care|centre|center)\b|\btier\s+(?:[a-z]{2}\s+)?ride\b|mena mobility|cars\s?24|\bferr(?:y|ies)\b|\btolls?\b(?!\s*-?\s*free)/i, 'transport'],
+  [/\b(?:dewa|sewa|sewapayment|fewa|addc|aadc|empower|lootah|tabreed|btu)\b|\b(?:saudi|federal|kuwait|qatar)\s+elec\w*|\bmarafiq\b|chilled water|electricity|cooling|utility|sewerage|ajmansewerage|\blpg\b|gas cylinder|\bwater\b(?!\s*park)/i, 'utilities'],
   // "out of credit call service" is Etisalat's own product name for the
   // airtime overdraft a top-up settles; a bare "recharge" is deliberately NOT
   // here, because Salik and nol are recharged too and those are transport.
@@ -3239,7 +3426,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // the corpus is the other one — "DEPARTMENT OF ECONOMIC". `department(s) of`
   // generalises it: in a UAE card descriptor that phrase is a government body,
   // and requiring the "of" is what keeps it off a DEPARTMENT STORE.
-  [/smart dubai|smartdxbgov|digital sharjah|sharjah finance|govt of|government|ministry|ministries|municipality|sharjah police|dubai police|abu dhabi police|noqodi|ica smart|vfs global|\bukvi\b|tasheel|amer cent|federal authority|immigration|dubai courts|al etihad credit|tahseel|dubai pay|\bmoi\b|\bmofa\b|emirates id|residency|prosecution|notary|\bgdrfa\b|economic depart|\bdep(?:t|artment)s?\s+of\b|\bded\b|governmen|muncipal|economic zone|free ?zone|\bdmcc\b|\bjafza\b|\bdafza\b|\bifza\b|\bshams\b|masdar city|dubai integrated eco/i, 'government'],
+  [/smart dubai|smartdxbgov|digital sharjah|sharjah finance|govt of|government|ministry|ministries|municipality|sharjah police|dubai police|abu dhabi police|noqodi|ica smart|\bicp\b|vfs global|\bukvi\b|tasheel|amer cent|federal authority|immigration|dubai courts|al etihad credit|tahseel|dubai pay|\bmoi\b|\bmofa\b|emirates id|residency|prosecution|notary|\bgdrfa\b|economic depart|\bdep(?:t|artment)s?\s+of\b|\bded\b|governmen|muncipal|economic zone|free ?zone|\bdmcc\b|\bjafza\b|\bdafza\b|\bifza\b|\bshams\b|masdar city|dubai integrated eco/i, 'government'],
   [/salary|payroll|wages/i, 'salary'],
   // ── acquirer prefixes ──
   //
@@ -3384,6 +3571,10 @@ const TRUNCATED_DESCRIPTOR_KEYWORDS: [RegExp, CategoryId][] = [
   // Cotton On's stationery brand, whole-name anchored: "typo" is an English
   // word, and only a descriptor that OPENS with it is the shop.
   [/^typo\b/i, 'shopping'],
+  // An electronics or electrical-goods shop, as the acquirer truncates it:
+  // "SALIM AL SHAMSI ELECT", "AL NOOR ELECTR". Merchant-only and run last, so
+  // a utility ("DUBAI ELECTRICITY") or an electrician has already been claimed.
+  [/\belect(?:r|ro|ron|roni|ronics?|rical)?$|\belectronics?\b/i, 'shopping'],
 ];
 
 /**
@@ -3487,7 +3678,10 @@ function categoryOf(
       return { id: 'salary', deliberate: true };
     }
     if (
-      /refund|revers(?:al|ed)|charge-?\s?back|credited back|re-?credited|adjustment|waive[rd]|cashback|\binterest\b|\bprofit\b|\bcredited\s+(?:to|into)\s+your\s+(?:credit\s+|debit\s+)?card\b/i.test(
+      // The Arabic half is the same offset vocabulary, post-fold: a refund
+      // (استرداد/استرجاع/مسترد) or a reversal (عكس/ارجاع) arriving on an
+      // Arabic-locale handset was filed as Business revenue.
+      /refund|revers(?:al|ed)|charge-?\s?back|credited back|re-?credited|adjustment|waive[rd]|cashback|\binterest\b|\bprofit\b|\bcredited\s+(?:to|into)\s+your\s+(?:credit\s+|debit\s+)?card\b|استرداد|استرجاع|مسترد|ارجاع|عكس\s+(?:ال)?عمليه|كاش\s*باك|ارباح|عوائد/i.test(
         text,
       )
     ) {
@@ -3527,9 +3721,12 @@ function categoryOf(
     if (
       !ORIGINATOR_RE.test(text) &&
       !BUSINESS_INCOME_EVIDENCE_RE.test(text) &&
-      /(?:\b(?:credited|transferred|sent)\b(?:[^.\n]|\.\d){0,100}?\b(?:to|into)\s+your\b(?:[^.\n]|\.\d){0,60}?\baccount\b(?:[^.\n]|\.\d){0,80}?|\breceived\b(?:[^.\n]|\.\d){0,100}?)\bfrom\s+[a-z]/i.test(
+      (/(?:\b(?:credited|transferred|sent)\b(?:[^.\n]|\.\d){0,100}?\b(?:to|into)\s+your\b(?:[^.\n]|\.\d){0,60}?\baccount\b(?:[^.\n]|\.\d){0,80}?|\breceived\b(?:[^.\n]|\.\d){0,100}?)\bfrom\s+[a-z]/i.test(
         text,
-      )
+      ) ||
+        // The labelled Arabic incoming-transfer header ("حوالة محلية واردة"
+        // ... "من: <name>") is the same person-to-person wording.
+        /حواله\s+(?:(?:محليه|داخليه|دوليه|سريعه|فوريه)\s+)?وارده|تحويل\s+وارد/.test(text))
     ) {
       return { id: 'other', deliberate: false };
     }
@@ -3541,6 +3738,14 @@ function categoryOf(
   // The bank's delivery/channel vocabulary is not the merchant's business.
   // In particular Internet Banking must never turn an account debit into Telecom.
   text = text.replace(/\b(?:(?:personal|business|corporate)\s+)?(?:internet|online|mobile|digital|telephone)\s+banking\b/gi, ' ');
+  // ...and neither is the purchase CHANNEL. Al Rajhi heads every online card
+  // purchase "شراء انترنت" (internet purchase); the Arabic telecom rule read
+  // that label and filed a Netflix subscription as a phone bill.
+  text = text.replace(/(?:شراء|مشتريات|عمليه\s+شراء)\s+(?:عبر\s+)?(?:ال)?(?:انترنت|اونلاين)|\b(?:internet|online)\s+(?:purchase|transaction|txn|payment|shopping)\b/gi, ' ');
+  // A wallet is the rail, not the payee: "sent SAR 150.00 to Abdullah via stc
+  // pay" read the wallet's "stc" as the phone company. A purchase whose PAYEE
+  // is the wallet itself is still caught by the merchant guard below.
+  text = text.replace(/\bstc\s*pay\b|\burpay\b|\b(?:apple|google|samsung)\s*pay\b|ابل\s*باي/gi, ' ');
   text = text.replace(/\betisalat(?=\s+(?:(?:credit|debit|covered)\s+)?card\s+(?:ending\b|no\.?\b|number\b|[Xx*\d]))/gi, ' ')
     .replace(/\bpaypal\s*\*\s*/gi, ' ');
   const merchantText = normalizeArabic(merchant ?? text);
@@ -3708,11 +3913,12 @@ const SERVICE_NAMES: [RegExp, string][] = [
   // ("AMZ*Centraldereservasc") — the money still went to Amazon, and the
   // gibberish sub-merchant reference is not a name anyone can recognise.
   [/\bamz\s*\*|\bamzn\b|\bamazon\b/i, 'Amazon'],
-  [/\bdisney\b/i, 'Disney+'],
+  // Not the Disney Store: a shop is not the streaming subscription.
+  [/\bdisney(?!\s+(?:store|shop|land|world|resort|park))(?:\s*\+|\s*plus\b)?|\bdisneyplus\b/i, 'Disney+'],
   [/\banghami\b/i, 'Anghami'],
   [/\bshahid\b/i, 'Shahid'],
   [/\bosn\b/i, 'OSN+'],
-  [/\bstarz\b/i, 'StarzPlay'],
+  [/\bstarz(?:\s*play)?\b/i, 'StarzPlay'],
   [/\bdeezer\b/i, 'Deezer'],
   [/\baudible\b/i, 'Audible'],
   [/\bdropbox\b/i, 'Dropbox'],
@@ -3744,6 +3950,13 @@ const SERVICE_NAMES: [RegExp, string][] = [
   [/\bfiverr\b/i, 'Fiverr'],
   [/\bdiscord\b/i, 'Discord'],
   [/\bnotion\b/i, 'Notion'],
+  [/\bmidjourney\b/i, 'Midjourney'],
+  [/\bperplexity\b/i, 'Perplexity'],
+  [/\bfigma\b/i, 'Figma'],
+  [/\bduolingo\b/i, 'Duolingo'],
+  [/\bsnapchat\b/i, 'Snapchat+'],
+  [/google\s*\*?\s*gemini|\bgemini\s+(?:advanced|pro|ultra)\b/i, 'Google Gemini'],
+  [/x\s+corp\.?\s+paid\s+features|twitter\s+blue/i, 'X Premium'],
   [/\bgithub\b/i, 'GitHub'],
   [/\btelegram\b/i, 'Telegram Premium'],
   [/xbox\s*game\s*pass/i, 'Xbox Game Pass'],
@@ -4512,7 +4725,8 @@ function saysCredit(raw: string): boolean {
   return (
     /(?:credit|covered|charge)\s+card/i.test(raw) ||
     /\bcr\.?\s*card\b/i.test(raw) ||
-    /\d{4}\s*[;,]\s*credit\b/i.test(raw)
+    /\d{4}\s*[;,]\s*credit\b/i.test(raw) ||
+    /\d{4}\s*\(\s*credit\s*\)/i.test(raw)
   );
 }
 
@@ -4531,7 +4745,9 @@ function saysDebit(raw: string): boolean {
   return (
     /\bdebit\s+card\b/i.test(raw) ||
     /\bmada\s+card\b/i.test(raw) ||
-    /\d{4}\s*[;,]\s*(?:debit|mada)\b/i.test(raw)
+    /\d{4}\s*[;,]\s*(?:debit|mada)\b/i.test(raw) ||
+    // The English labelled line: "Card: **4321 (mada)".
+    /\d{4}\s*\(\s*(?:debit|mada)\s*\)/i.test(raw)
   );
 }
 
@@ -4964,6 +5180,25 @@ function numericDate(d: string, m: string, yRaw: string): string | null {
   return isoDate(y, second, first) ?? isoDate(y, first, second);
 }
 
+/**
+ * The ISSUE date a card statement states, read only off an explicit
+ * statement-date label. Never the due date and never a generic "on <date>".
+ */
+const STATEMENT_ISSUE_DATE_RE =
+  /\b(?:statement|stmt)\s*(?:date|dt\.?|dated|generated\s+on|issued\s+on|prepared\s+on)\s*(?:is|:|-|on)?\s*(\d{1,2})[/.-](\d{1,2}|[A-Za-z]{3,9})[/.-](\d{2,4})(?!\d)|تاريخ\s+(?:ال)?كشف\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/i;
+function extractStatementIssueDate(raw: string, dueDate: string | null): string | null {
+  const m = raw.match(STATEMENT_ISSUE_DATE_RE);
+  if (!m) return null;
+  const [d, mo, y] = m[1] !== undefined ? [m[1], m[2], m[3]] : [m[4], m[5], m[6]];
+  const named = MONTH_NAMES[mo.slice(0, 3).toLowerCase()];
+  const date = /^\d+$/.test(mo)
+    ? numericDate(d, mo, y)
+    : named ? isoDate(y.length === 2 ? 2000 + Number(y) : Number(y), named, Number(d)) : null;
+  // An issue date on or after the deadline is not an issue date.
+  if (!date || (dueDate && date >= dueDate)) return null;
+  return date;
+}
+
 /** The ADIB receipt template is MM/DD; unknown senders need original-day proof. */
 function sourceBackedReceiptDate(
   raw: string,
@@ -5196,10 +5431,20 @@ function parseSmsInner(
   // forecast its own evidence of settlement and nothing was ever suppressed.
   {
     const settled = blank(blank(raw, FUTURE_CLAUSE_RE), SCHEDULED_CLAUSE_RE);
+    // A posting-noun clause opening a sentence ("Cash advance of AED 1,000.00
+    // on your Credit Card 9876 at ATM") is the alert's own completed event; a
+    // fee FOOTER forecasting a separate charge ("Cash advance fee AED 105.00
+    // will be charged") must not make it a forecast too.
+    // The forecast must sit in ANOTHER sentence: "Your purchase of AED 55.75
+    // at TALABAT ... will be reversed tomorrow" forecasts the purchase itself.
+    const postingNounClause = raw.split(/\n|[.!?](?=\s|$)/).some((sentence) =>
+      /^\s*(?:(?:your|a)\s+)?(?:purchase|cash\s+advance|cash\s+withdrawal|withdrawal|transaction)\s+of\s+(?:[A-Z]{3}|Dhs?\.?)\s*[\d,]+(?:\.\d{1,3})?/i.test(sentence) &&
+      !new RegExp(FUTURE_CLAUSE_RE.source, 'i').test(sentence) &&
+      !new RegExp(SCHEDULED_CLAUSE_RE.source, 'i').test(sentence));
     const settledFieldList =
       card !== null &&
       extractAmountFils(settled) !== null &&
-      extractDate(settled) !== null &&
+      (extractDate(settled) !== null || postingNounClause) &&
       (/\bcredit\s+card\s+purchase\b/i.test(settled) ||
         !!extractMerchant(settled, MERCHANT_RE) ||
         !!extractArabicMerchant(settled, settled));
@@ -5886,7 +6131,25 @@ function parseSmsInner(
   // If a bank ever does send a card settlement in this template, the rule that
   // catches it must key on the body NAMING a credit card as the payee, and it
   // needs a real sample first.
-  const portalPay = raw.match(PORTAL_RECEIPT_RE);
+  // The amount-first opening is ordinary bank wording on its own ("your
+  // payment of AED 3,000.00 for account 4711 has been received" is also how a
+  // card repayment can read), so it joins the family only when the channel
+  // line names a known biller and the body says nothing about a card, a
+  // minimum due, an outstanding balance or a loan.
+  const portalPay = raw.match(PORTAL_RECEIPT_RE) ?? (() => {
+    const received = raw.match(PORTAL_RECEIVED_RE);
+    if (!received) return null;
+    // Only the receipt's own block is asked: an advert after it may say
+    // "credit card", and the funding lines ("Mode of Payment : Credit Card",
+    // "Card Number: 4111XXXXXXXX2518") say how the user paid, not what was paid.
+    const blockEnd = (received.index ?? 0) + received[0].length;
+    const tail = raw.slice(blockEnd).search(PORTAL_RECEIPT_TAIL_RE);
+    const block = (tail < 0 ? raw : raw.slice(0, blockEnd + tail))
+      .split('\n').filter((line) => !/^\s*(?:mode\s+of\s+payment|card\s+(?:no\.?|number))\b/i.test(line)).join('\n');
+    if (PORTAL_RECEIVED_REFUSE_RE.test(block)) return null;
+    const channel = raw.match(PORTAL_CHANNEL_RE)?.[1] ?? '';
+    return RECEIPT_BILLERS.some(([re]) => re.test(channel)) ? received : null;
+  })();
   if (portalPay) {
     // Last four, not first four: an unmasked account number would otherwise
     // label the row with its leading digits.
@@ -5903,7 +6166,12 @@ function parseSmsInner(
     const biller = channel ? (RECEIPT_BILLERS.find(([re]) => re.test(channel))?.[1] ?? null) : null;
     const merchant = biller ?? `Payment to •${last4}`;
     if (amountFils > 0) {
-      const cat = categoryOf(raw, 'expense', overrides, merchant);
+      // The receipt block only; see PORTAL_RECEIPT_TAIL_RE. A user's merchant
+      // override still wins, because categoryOf reads it off `merchant`.
+      const blockEnd = (portalPay.index ?? 0) + portalPay[0].length;
+      const tail = raw.slice(blockEnd).search(PORTAL_RECEIPT_TAIL_RE);
+      const receiptText = tail < 0 ? raw : raw.slice(0, blockEnd + tail);
+      const cat = categoryOf(receiptText, 'expense', overrides, merchant);
       /**
        * A RECEIPT IN THIS TEMPLATE IS A POSTPAID TELECOM BILL, EVEN WHEN THE
        * CHANNEL LINE NAMES NOBODY.
@@ -5961,7 +6229,9 @@ function parseSmsInner(
         date,
         dueDay: null,
         minDueFils: null,
-        card,
+        // The account number in this template is the BILLER's ("for account
+        // XXXXX2543"), so a card read from those same digits is not the user's.
+        card: card && card.last4 === last4 ? null : card,
         transferHint: false,
         // This is biller-side evidence for a payment. It remains useful when
         // captured alone, while payment-flow reconciliation can fold multiple
@@ -6261,6 +6531,7 @@ function parseSmsInner(
       merchant: 'Card statement',
       date: dueDate,
       dueDay: dueDate ? Number(dueDate.slice(8)) : extractDueDay(raw),
+      ...(() => { const issued = extractStatementIssueDate(raw, dueDate); return issued ? { statementDate: issued } : {}; })(),
       minDueFils,
       card: null,
       transferHint: false,
@@ -6303,6 +6574,7 @@ function parseSmsInner(
       // keep losing to the transaction's own timestamp.
       date: statementDue,
       dueDay: statementDue ? Number(statementDue.slice(8)) : extractDueDay(raw),
+      ...(() => { const issued = extractStatementIssueDate(raw, statementDue); return issued ? { statementDate: issued } : {}; })(),
       minDueFils,
       card: { ...card, kind: 'credit' },
       transferHint: false,
@@ -6364,7 +6636,7 @@ function parseSmsInner(
   const creditTransactionOnly =
     CREDIT_TRANSACTION_RE.test(stated) && !CREDIT_TRANSACTION_PURCHASE_RE.test(prose) &&
     !DEBIT_WORDS.test(blank(stated, CREDIT_TRANSACTION_ALL_RE));
-  const hasDebit = !creditTransactionOnly && DEBIT_WORDS.test(stated);
+  const hasDebit = !creditTransactionOnly && (DEBIT_WORDS.test(stated) || SENT_MONEY_RE.test(prose));
   const hasCredit = CREDIT_WORDS.test(stated);
   // Carrier-billed store purchases ("App Store & Google Play bill") are
   // receipts, never utility bills — treating them as dues produced garbage
@@ -6776,6 +7048,21 @@ function parseSmsInner(
   // borrowed from an advert. It is the same sentence and the same argument.
   const cat = categoryOf(titlePinned ? merchant : payeeText, type, overrides, merchant);
   const billDueDate = isBillDue ? extractDueDate(raw) ?? statedDate : null;
+  // The same funding-account trap as the cardPayment branch above, on the
+  // wording that stays a transfer-hinted transaction: "AED 3,120.55 debited
+  // from Acc XXX1122 towards Credit Card XXX2518 payment ... Avl.Bal is AED
+  // 9,872.30". `card` is the card being paid, and the balance is the ACCOUNT's;
+  // relabelled as that card's limit it replaced the card's real headroom.
+  const fundingBalance =
+    transferHint && snapshot?.kind === 'balance' && card?.kind === 'credit' &&
+    /\b(?:debited|deducted|transferred|paid)\b(?:[^.\n]|\.\d){0,40}?\bfrom\s+(?:your\s+)?(?:(?:savings?|current)\s+)?(?:a\/?c|acc(?:oun)?t?)\b/i.test(raw);
+  // A biller's customer number is not the user's account; see
+  // billerOwnAccountTail. Only the instrument extractCard took FROM that
+  // number is dropped — a real card or account named elsewhere in the body
+  // (different digits) is kept. The number itself survives as the bill
+  // identity whether or not extractCard had picked it up.
+  const billerAccount = billerPaid && !isBillDue ? billerOwnAccountTail(raw, billerPaid) : null;
+  const billerOwnsCard = billerAccount !== null && card?.kind === 'account' && card.last4 === billerAccount;
 
   return {
     kind: isBillDue ? 'billDue' : 'transaction',
@@ -6787,10 +7074,11 @@ function parseSmsInner(
     date: isBillDue ? billDueDate : date,
     dueDay: billDueDate ? Number(billDueDate.slice(8)) : null,
     minDueFils: null,
-    card,
+    card: billerOwnsCard ? null : card,
+    ...(billerAccount ? { billIdentity: `account:${billerAccount}` } : {}),
     transferHint,
-    snapshotFils,
-    snapshotKind,
+    snapshotFils: fundingBalance ? null : snapshotFils,
+    snapshotKind: fundingBalance ? null : snapshotKind,
     // When the title is pinned, the TITLE is all guessCategory gets to read —
     // not the message, whose ATM address would otherwise decide it. A user
     // override on that title still wins, which is the one thing that should

@@ -123,7 +123,7 @@ export function widgetUpcomingForLedger(state: AppState, now: Date, detected: re
         isPaid: date => bill.paidMonths.includes(monthKey(date)) };
     }
     const cadence = recurringById.get(item.id)?.cadence;
-    return cadence === 'weekly' || cadence === 'monthly' || cadence === 'yearly' ? { cadence } : null;
+    return cadence && cadence !== 'as-needed' ? { cadence } : null;
   };
   const todayISO = toISODate(now);
   return upcomingWindowItems(items, recurrenceOf, todayISO, WIDGET_UPCOMING_DAYS)

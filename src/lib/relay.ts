@@ -1595,6 +1595,12 @@ export type ParsedRelayRow = Omit<ParsedSms, 'raw'> & {
 };
 
 const MAX_RELAY_SENDER_LENGTH = 80;
+/**
+ * The Worker's statement parser accepts descriptions up to 180 characters
+ * (server/src/imports.ts). A lower cap here acknowledged and then silently
+ * dropped a long POS row the server had already accepted, so the two match.
+ */
+export const MAX_RELAY_MERCHANT_LENGTH = 180;
 const RELAY_CATEGORIES = new Set([
   'groceries',
   'dining',
@@ -1681,7 +1687,7 @@ export function isParsedRelayRow(
     typeof row.merchant !== 'string' ||
     row.merchant !== row.merchant.trim() ||
     row.merchant.length < 1 ||
-    row.merchant.length > 160 ||
+    row.merchant.length > MAX_RELAY_MERCHANT_LENGTH ||
     /[\u0000-\u001F\u007F-\u009F]/u.test(row.merchant)
   ) return false;
   if (!validIsoDate(row.date)) return false;
@@ -1729,6 +1735,11 @@ export function isParsedRelayRow(
   if (dueKind && row.date !== null && row.dueDay !== Number(row.date.slice(8))) return false;
   if (!validNullableSafeFils(row.minDueFils)) return false;
   if (row.kind !== 'cardStatement' && row.minDueFils !== null) return false;
+  // The statement's issue date (payment allocation evidence); statements only,
+  // ISO, and strictly before the due date the row carries.
+  if (row.statementDate !== undefined && (row.kind !== 'cardStatement' ||
+    typeof row.statementDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.statementDate) ||
+    (row.date !== null && row.statementDate >= (row.date as string)))) return false;
 
   if (!validNullableSafeFils(row.snapshotFils)) return false;
   if (

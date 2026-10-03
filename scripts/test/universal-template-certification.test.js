@@ -24,13 +24,12 @@ ok('official-derived Chase purchase grammar is automatic',
   chase.decision === 'automatic' && chase.templateId === 'us-chase-purchase-v1', JSON.stringify(chase));
 
 const zelle = certify('Bank of America: Zelle payment USD 95.00 to SAMPLE PERSON is paid.', 'US', 'bank-of-america');
-// The shipped generic reader still classifies "Zelle ... is paid" as a
-// purchase, so the certified transfer grammar cannot match and the alert stays
-// in Review. That is the fail-closed direction; it flips to automatic only
-// once the semantic layer reads Zelle settlement as a transfer.
-ok('a Zelle settlement the parser reads as a purchase stays in Review, never automatic',
-  zelle.decision === 'review' && zelle.templateId === null &&
-    zelle.reason === 'uncertified-template', JSON.stringify(zelle));
+// The generic reader now classifies "Zelle ... is paid" as the transfer it
+// is (Zelle is a US-pack transfer term), so the certified transfer grammar
+// matches and the alert is automatic at its certified institution.
+ok('a completed Zelle settlement at a certified institution matches its transfer template',
+  zelle.decision === 'automatic' && zelle.templateId === 'us-bofa-zelle-paid-v1' &&
+    zelle.reason === 'certified-template', JSON.stringify(zelle));
 
 const pending = certify('Bank of America: Zelle payment USD 125.00 is pending acceptance by the recipient.', 'US', 'bank-of-america');
 ok('pending Zelle can never post even at a certified institution',

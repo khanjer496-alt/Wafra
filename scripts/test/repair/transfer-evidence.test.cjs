@@ -67,6 +67,30 @@ test('structured evidence keeps original currency and actual source confidence',
   assert.equal(evidence(row({ originalCurrency: 'bad currency' })), undefined);
 });
 
+test('a credit retains the payer it names, never a bank, channel or own account', () => {
+  const credit = (raw, sender = 'Wio') => evidence(row({ type: 'income', merchant: 'Incoming transfer',
+    transferHint: false, sender, card: { last4: '5678', kind: 'account' }, raw }));
+  for (const [raw, name, sender] of [
+    ['AED 700.00 received from AHMED ALI to your account ending 5678 via instant transfer.', 'AHMED ALI'],
+    ['AED 3,000.00 credited to your account XXXX5678 via funds transfer from AHMED ALI', 'AHMED ALI'],
+    ['AED 2,000.00 has been credited to your account XXX5678 through IPP transfer from JOHN DOE.', 'JOHN DOE', 'EmiratesNBD'],
+    ['AED 900.00 credited to your account XXXX5678 B/O ACME TRADING LLC ref 77881234', 'ACME TRADING LLC'],
+    ['تم استلام حوالة واردة بمبلغ 500.00 درهم من أحمد علي في حسابك رقم XXX5678', 'احمد علي'],
+    ['حوالة واردة من محمد علي على حسابك رقم XXX5678 بمبلغ 500.00 درهم', 'محمد علي'],
+  ]) assert.equal(credit(raw, sender)?.counterpartyName, name, raw);
+  for (const raw of [
+    'AED 2,500.00 has been credited to your account XXXX5678 via funds transfer from EMIRATES NBD',
+    'AED 2,500.00 has been credited to your account XXXX5678 via transfer from Emirates NBD Bank PJSC.',
+    'AED 2,500.00 credited to your account XXXX5678 from your account XXX1234.',
+    'AED 2,500.00 credited to your account XXXX5678 from mobile banking.',
+    'AED 700.00 has been credited to your account XXXX5678. Available balance AED 1,400.00',
+    'تم ايداع حوالة بمبلغ 500.00 درهم من حسابك رقم XXX1234 في حسابك رقم XXX5678',
+  ]) assert.equal(credit(raw)?.counterpartyName, undefined, raw);
+  // An outgoing alert's own source clause is never read as a payer.
+  assert.equal(evidence(row({ raw: 'AED 100.00 transferred from AHMED ALI account to beneficiary.' }))?.counterpartyName,
+    undefined);
+});
+
 test('only structural transfer rows acquire ownership evidence', () => {
   for (const override of [
     { kind: 'cardPayment' }, { cardPaymentSide: 'receipt' }, { paymentFlowSide: 'funding' },

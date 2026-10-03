@@ -151,6 +151,16 @@ export function buildPaymentReminders(
   for (const { due, remainingFils, minimumKnown } of openDues(state, now)) {
     const account = state.accounts.find((a) => a.id === due.accountId);
     const name = account?.name ?? t('creditCard');
+    // What is still needed to reach the stated minimum, the same figure the
+    // payment sheet offers as "minimum" (money-places `cardPaymentOptions`).
+    // After a partial payment the original minimum overstates it — AED 300
+    // paid against a 500 minimum leaves 200 to pay, not 500. Once the minimum
+    // is met, or covers the whole remainder, only the outstanding is quoted.
+    const paidFils = Math.max(0, due.totalDueFils - remainingFils);
+    const minimumLeftFils = minimumKnown && due.minDueFils > 0
+      ? Math.max(0, due.minDueFils - paidFils)
+      : 0;
+    const quoteMinimum = minimumLeftFils > 0 && minimumLeftFils < remainingFils;
     for (const [offset, label] of [
       [-3, tf('inDaysPhrase', { days: 3 })],
       [0, todayWord],
@@ -165,10 +175,10 @@ export function buildPaymentReminders(
         // sentinel meaning "not stated". A push notification is the last place
         // to hand someone a number the bank did not provide — it arrives with
         // no screen around it to qualify it.
-        minimumKnown
+        quoteMinimum
           ? tf('notificationOutstandingMinimum', {
               amount: formatAED(remainingFils, { decimals: false }),
-              minimum: formatAED(due.minDueFils, { decimals: false }),
+              minimum: formatAED(minimumLeftFils, { decimals: false }),
             })
           : tf('notificationOutstanding', {
               amount: formatAED(remainingFils, { decimals: false }),
@@ -197,6 +207,11 @@ export function buildPaymentReminders(
     // see the recurring cash requirement, but predicting a day would create a
     // false reminder.
     if (sub.cadence === 'as-needed') continue;
+    // A generic commitment is a pattern of spending, not a renewal: weekly
+    // AED 100 at ENOC recurs, but "ENOC renews tomorrow" is a push about a
+    // charge nobody has agreed to. Only subscriptions, bills (utility, rent,
+    // loan) and registered-biller payments renew.
+    if (sub.group === 'commitment' && sub.category !== 'loan' && !sub.paymentHistory) continue;
     if (state.bills.some(bill => subscriptionMatchesBill(sub, bill))) continue;
     const days = daysUntilNext(sub, now);
     if (days < 1 || days > 30) continue;
