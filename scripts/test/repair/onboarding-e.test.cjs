@@ -33,6 +33,8 @@ const ARABIC = /[؀-ۿ]/;
 const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const DEFAULT = ['due', 'assistant', 'insight', 'activity', 'upcoming'];
 const TOP = ['greeting', 'overview', 'today', 'week'];
+// What the band draws: the month line (overview) right under Today (splitHomeWidgetLayout).
+const BAND = ['greeting', 'today', 'overview', 'week'];
 const EXPANDED_DEFAULT = [...TOP, ...DEFAULT, 'capture'];
 
 /* ── copy ─────────────────────────────────────────────────────────────── */
@@ -140,7 +142,7 @@ test('goals reorder Home through the Customize Home preference', () => {
 test('goals reorder the sheet and never take the band away', () => {
   for (const goals of [['bills'], ['subscriptions'], ['spend-less'], ['salary'], ['cash-cards'], ['bills', 'salary', 'spend-less']]) {
     const next = e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: [] });
-    assert.deepEqual(JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(next).band)), TOP, goals.join());
+    assert.deepEqual(JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(next).band)), BAND, goals.join());
   }
   // A Home whose owner already moved a band section down keeps that choice.
   const moved = { order: ['greeting', 'due', 'overview', 'today', 'week', 'upcoming', 'activity', 'assistant', 'insight', 'capture'], hidden: [] };
@@ -149,7 +151,7 @@ test('goals reorder the sheet and never take the band away', () => {
   // A hidden section ahead of the band is invisible to the split, so it does not end the band either.
   const hiddenFirst = { order: ['due', ...TOP, 'upcoming', 'activity', 'assistant', 'insight', 'capture'], hidden: ['due'] };
   const next = e.homeOrderForGoals(['subscriptions'], hiddenFirst);
-  assert.deepEqual(JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(next).band)), TOP);
+  assert.deepEqual(JSON.parse(JSON.stringify(prefs.splitHomeWidgetLayout(next).band)), BAND);
   assert.deepEqual(next.order, ['due', ...TOP, 'upcoming', 'activity', 'assistant', 'insight', 'capture']);
 });
 
@@ -382,7 +384,7 @@ test('a Home saved by the earlier goal-first Goals step gets its band back', () 
     assert.deepEqual(shown(saved).band, [], `${goals.join()}: the earlier step emptied the band`);
     const repaired = e.repairGoalOrderedHome(saved);
     assert.deepEqual(repaired, e.homeOrderForGoals(goals, { order: [...DEFAULT], hidden: ['assistant'] }), `${goals.join()}: same as today's Goals step`);
-    assert.deepEqual(shown(repaired).band, TOP);
+    assert.deepEqual(shown(repaired).band, BAND);
     assert.equal(e.repairGoalOrderedHome(repaired), null, 'a repaired Home is left alone');
   }
 });
@@ -392,7 +394,7 @@ test('going Back and choosing again stacked the runs; the repair still restores 
   for (const second of [['salary'], ['bills', 'salary'], ['subscriptions']]) {
     const twice = earlierGoals(second, once);
     const repaired = e.repairGoalOrderedHome(twice);
-    assert.deepEqual(shown(repaired).band, TOP, second.join());
+    assert.deepEqual(shown(repaired).band, BAND, second.join());
     assert.deepEqual(repaired.order.slice(TOP.length, twice.order.indexOf('greeting') + TOP.length),
       twice.order.slice(0, twice.order.indexOf('greeting')), 'the goal sections keep their order under the band');
     assert.deepEqual([...repaired.order].sort(), [...EXPANDED_DEFAULT].sort());
@@ -410,5 +412,5 @@ test('the repair leaves every other layout alone', () => {
   assert.equal(e.repairGoalOrderedHome(e.homeOrderForGoals(['bills'], { order: [...DEFAULT], hidden: [] })), null);
   // Accepted: a Customize Home layout with only goal sections above the band
   // is indistinguishable from the earlier step's output and is repaired once.
-  assert.deepEqual(shown(e.repairGoalOrderedHome({ order: ['insight', ...TOP, 'due', 'upcoming', 'assistant', 'activity', 'capture'], hidden: [] })).band, TOP);
+  assert.deepEqual(shown(e.repairGoalOrderedHome({ order: ['insight', ...TOP, 'due', 'upcoming', 'assistant', 'activity', 'capture'], hidden: [] })).band, BAND);
 });

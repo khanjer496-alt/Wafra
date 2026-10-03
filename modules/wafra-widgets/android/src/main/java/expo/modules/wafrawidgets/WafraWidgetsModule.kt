@@ -53,6 +53,7 @@ class WafraWidgetsModule : Module() {
       val provider = when (kind) {
         "today" -> TodayWidgetProvider::class.java
         "upcoming" -> UpcomingWidgetProvider::class.java
+        "spending" -> SpendingWidgetProvider::class.java
         else -> return@AsyncFunction false
       }
       try {

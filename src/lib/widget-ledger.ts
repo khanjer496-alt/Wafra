@@ -1,8 +1,9 @@
-import { isFixedCommitment } from '@/lib/categories';
+import { categoryLabel, isFixedCommitment } from '@/lib/categories';
 import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { monthEndISO, monthKey, monthStartISO, toISODate } from '@/lib/format';
 import { summarizeHomeToday, type HomeToday } from '@/lib/home-today';
+import { summarizeMonth } from '@/lib/insights';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 import type { LedgerMoneySpec } from '@/lib/ledger-money';
 import { inPeriod } from '@/lib/period';
@@ -10,7 +11,7 @@ import { allocationsOf } from '@/lib/splits';
 import { activeSubscriptions, billCommitments, daysUntilNext, fixedCommitments, isSubscriptionDismissed, subscriptionKey, subscriptionLabel, subscriptionMatchesBill, trueSubscriptions, withoutCancelled, type Subscription } from '@/lib/subscriptions';
 import { futureAnnualBillAgendaItems } from '@/lib/upcoming-bills';
 import { upcomingWindowItems, type AgendaRecurrence } from '@/lib/upcoming-window';
-import type { PaymentAgendaItem } from '@/lib/reference-presentation';
+import { spendingCategoryRows, type PaymentAgendaItem } from '@/lib/reference-presentation';
 import type { AppState, Budget, Transaction } from '@/lib/types';
 import { buildWidgetSnapshot, WIDGET_UPCOMING_DAYS, type WidgetSnapshot, type WidgetSnapshotInput } from '@/lib/widget-snapshot';
 
@@ -49,6 +50,33 @@ export function widgetMonthToday(input: {
     isFixedCommitment,
     averageWindow: null,
   });
+}
+
+/**
+ * This month as the Spending tab shows it on its first open: the live month,
+ * summarizeMonth's definition of spending and spendingCategoryRows' order,
+ * with each category named in the widget's language. Limits are left out:
+ * the widget draws shares of what was spent.
+ */
+export function widgetMonthSpending(input: {
+  state: Pick<AppState, 'transactions' | 'budgets' | 'customCategories'>;
+  now: Date;
+  liveAccounts: ReadonlySet<string>;
+  internalIds: ReadonlySet<string>;
+  language: 'en' | 'ar';
+}): NonNullable<WidgetSnapshotInput['spending']> {
+  const key = monthKey(input.now);
+  const summary = summarizeMonth(input.state.transactions as Transaction[], { mode: 'month', key },
+    input.liveAccounts as Set<string>, input.internalIds as Set<string>);
+  const rows = spendingCategoryRows(summary, input.state.budgets, true).filter((row) => row.spentFils > 0);
+  return {
+    monthKey: key,
+    totalFils: summary.expenseFils,
+    categories: rows.map((row) => ({
+      label: categoryLabel(row.category, input.language, input.state.customCategories ?? []),
+      fils: row.spentFils,
+    })),
+  };
 }
 
 export interface WidgetLedgerInput {
@@ -111,13 +139,15 @@ export function widgetUpcomingForLedger(state: AppState, now: Date, detected: re
 export function widgetSnapshotForLedger(input: WidgetLedgerInput, detectedSubscriptions: readonly Subscription[]): WidgetSnapshot | null {
   const { state, now } = input;
   if (!state.hydrated || !state.onboarded || state.privateMode) return null;
+  const liveAccounts = liveAccountIds(state.accounts);
+  const internalIds = internalTransferIdsForState(state);
   const today = widgetMonthToday({
-    transactions: state.transactions, budgets: state.budgets, now,
-    liveAccounts: liveAccountIds(state.accounts), internalIds: internalTransferIdsForState(state),
+    transactions: state.transactions, budgets: state.budgets, now, liveAccounts, internalIds,
   });
   return buildWidgetSnapshot({
     today, currency: input.moneySpec.currency, exponent: input.moneySpec.exponent, now,
     upcoming: widgetUpcomingForLedger(state, now, detectedSubscriptions),
     hideAmounts: false, language: input.language,
+    spending: widgetMonthSpending({ state, now, liveAccounts, internalIds, language: input.language }),
   });
 }

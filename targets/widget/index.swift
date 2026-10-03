@@ -10,6 +10,7 @@ struct WafraWidgetBundle: WidgetBundle {
   var body: some Widget {
     WafraTodayWidget()
     WafraComingUpWidget()
+    WafraSpendingWidget()
     WafraLockScreenWidget()
   }
 }
@@ -73,6 +74,21 @@ struct WafraComingUpWidget: Widget {
     }
     .configurationDisplayName(strings.comingUpWidgetName)
     .description(strings.comingUpWidgetDescription)
+    .supportedFamilies([.systemSmall, .systemMedium])
+  }
+}
+
+struct WafraSpendingWidget: Widget {
+  let kind = "WafraSpending"
+
+  var body: some WidgetConfiguration {
+    let strings = WafraStrings.gallery
+    return StaticConfiguration(kind: kind, provider: WafraProvider()) { entry in
+      WafraSpendingView(entry: entry)
+        .redacted(reason: entry.isPlaceholder ? .placeholder : [])
+    }
+    .configurationDisplayName(strings.spendingWidgetName)
+    .description(strings.spendingWidgetDescription)
     .supportedFamilies([.systemMedium])
   }
 }

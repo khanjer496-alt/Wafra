@@ -5,7 +5,7 @@ import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
 import { buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
 import { leavingSoon, type Outgoing } from '@/lib/leaving-soon';
-import { countsInCashflowTotals, internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
+import { countsInCashflowTotals, internalTransferIdsForState, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
 import { inPeriod, isCurrentMonth, type Period } from '@/lib/period';
 import { duplicateTransactionIds, isListedExternalTransfer } from '@/lib/transfer-activity';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
@@ -56,9 +56,21 @@ export interface HomeDashboardProjection extends Pick<DashboardProjection,
   hasPeriodRecords: boolean;
   /** Null when a higher-priority prompt hides this calculation. */
   unreadFormats: DashboardProjection['unreadFormats'] | null;
+  /** Each recent-activity day's whole total on the month line's terms (income +, spending −); absent when unfinished. */
+  activityDayTotals: ReadonlyMap<string, number>;
 }
 
 const UPCOMING_WITHIN_DAYS = 9;
+/** Rows Home may read past its sixth to finish the last listed day's total. */
+const DAY_TOTAL_LOOKAHEAD = 50;
+
+/** Date-only probe; a sorted prefix is not enough to stop a day's scan early. */
+function datesAreNewestFirst(transactions: readonly Transaction[]): boolean {
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1]!.date < transactions[index]!.date) return false;
+  }
+  return true;
+}
 
 /**
  * The Home insight widget needs one ranked observation, not the entire dashboard
@@ -125,15 +137,33 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   // unconfirmed transfers (whose listing depends on the whole ledger, e.g. a
   // likely card repayment) stay in recent activity rather than disappear.
   const activityRows: Transaction[] = [];
+  // Home only: each listed day's total on the month line's own terms
+  // (isIncome +, isSpending −), so the days reconcile with Spent · In · Net;
+  // transfers, withdrawals and other movements stay listed but add nothing.
+  // The whole day counts, not just the rows shown: after the sixth row the
+  // scan goes on to finish that row's day, for at most DAY_TOTAL_LOOKAHEAD
+  // more rows. A day it cannot finish gets no total rather than a partial
+  // one, and an out-of-order ledger gets none at all.
+  const activityDayTotals = new Map<string, number>();
+  const dayTotals = homeOnly && datesAreNewestFirst(state.transactions);
+  const addToDay = (transaction: Transaction) => {
+    const signed = isIncome(transaction, liveAccounts, internal) ? transaction.amountFils
+      : isSpending(transaction, liveAccounts, internal) ? -transaction.amountFils : 0;
+    activityDayTotals.set(transaction.date, (activityDayTotals.get(transaction.date) ?? 0) + signed);
+  };
+  let lookahead = 0;
   let duplicates: ReadonlySet<string> | undefined;
   for (const transaction of state.transactions) {
+    const full = activityRows.length === 6;
+    if (full && (!dayTotals || transaction.date < activityRows[5]!.date)) break;
+    if (full && ++lookahead > DAY_TOTAL_LOOKAHEAD) { activityDayTotals.delete(activityRows[5]!.date); break; }
     if (countsInCashflowTotals(transaction, liveAccounts, internal) && inPeriod(transaction.date, period)) {
       if (homeOnly && isTransferCandidate(transaction)) {
         if (!duplicates) duplicates = duplicateTransactionIds(state.transactions);
         if (isListedExternalTransfer(transaction, duplicates)) continue;
       }
-      activityRows.push(transaction);
-      if (activityRows.length === 6) break;
+      if (!full) activityRows.push(transaction);
+      if (dayTotals && (!full || activityDayTotals.has(transaction.date))) addToDay(transaction);
     }
   }
 
@@ -152,7 +182,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
         inPeriod(transaction.date, period) && isTransferCandidate(transaction)),
       hasPeriodRecords: activityRows.length > 0 || state.transactions.some(transaction =>
         liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
-      upcoming, activityRows, accountById, internalTransactionIds: internal,
+      upcoming, activityRows, activityDayTotals, accountById, internalTransactionIds: internal,
       unreadFormats, uncategorised,
     };
   }

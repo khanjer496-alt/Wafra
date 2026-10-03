@@ -16,11 +16,27 @@ import { PatternMosaic } from '@/components/ui/pattern-mosaic';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { bandCopy } from '@/lib/band-copy';
 import { tapped } from '@/lib/haptics';
 import { firstHomeSectionForGoals } from '@/lib/onboarding-e';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import type { PatternTile } from '@/lib/pattern';
 import { GOAL_IDS, type GoalId } from '@/lib/types';
+
+/** Tray tiles: loose ~40pt shapes, three across, as on board E3. */
+const TRAY_TILE = 38;
+const TRAY_GAP = 5;
+const TRAY_COLUMNS = 3;
+
+/**
+ * The pattern's tiles in its reading order (row, then column, as Home packs
+ * them). The band here is the pattern's own green, so a green shape takes
+ * the board's on-band tones instead: mint for a solid, cream for a ring.
+ */
+export function trayTiles(tiles: readonly PatternTile[]): PatternTile[] {
+  return [...tiles].sort((a, b) => a.row - b.row || a.col - b.col)
+    .map((tile) => tile.color === 'green' ? { ...tile, color: tile.kind === 'ring' ? 'cream' : 'mint' } : tile);
+}
 
 /** Board E3's order: salary, bills, subscriptions, spend less, cash and cards. */
 const SHOWN: readonly GoalId[] = ['salary', 'bills', 'subscriptions', 'spend-less', 'cash-cards'];
@@ -35,7 +51,9 @@ export function GoalsStep({ goals, onToggle, onContinue, onBack, onClose, tiles,
   tiles: readonly PatternTile[];
   disabled: boolean;
 }) {
-  const words = onboardingECopy(useLanguage());
+  const language = useLanguage();
+  const words = onboardingECopy(language);
+  const bandWords = bandCopy(language);
   const band = useBand('flow');
   const largeText = useLargeTextLayout();
   const first = firstHomeSectionForGoals(goals);
@@ -44,9 +62,14 @@ export function GoalsStep({ goals, onToggle, onContinue, onBack, onClose, tiles,
       disabled={disabled} testID="onboarding-goals-continue" />}>
     <View style={[styles.head, largeText && styles.headStacked]}>
       <View style={styles.headline}><EHeadline palette={band} size={42}>{words.goalsTitle}</EHeadline></View>
-      {/* On a sheet-coloured card: the goal shapes include the band's own green. */}
-      <View style={[styles.patternCard, { backgroundColor: band.sheet }]}>
-        <PatternMosaic tiles={tiles} tile={largeText ? 22 : 18} animate testID="onboarding-goals-pattern" />
+      {/* Loose tiles straight on the band, as on the board: a fixed-width
+          tray of three across, so picking a goal never reflows the headline. */}
+      <View testID="onboarding-goals-pattern" accessible accessibilityRole="image" accessibilityLabel={bandWords.pattern}
+        style={styles.tray}>
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden style={styles.trayTiles}>
+          {trayTiles(tiles).map((tile) =>
+            <PatternMosaic key={tile.key} tiles={[tile]} tile={TRAY_TILE} compact animate />)}
+        </View>
       </View>
     </View>
     <View style={styles.list} testID="onboarding-goal-options">
@@ -72,10 +95,11 @@ export function GoalsStep({ goals, onToggle, onContinue, onBack, onClose, tiles,
 }
 
 const styles = StyleSheet.create({
-  head: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 },
-  headStacked: { flexDirection: 'column', alignItems: 'flex-start' },
+  head: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 },
+  headStacked: { flexDirection: 'column', alignItems: 'flex-start', gap: 12 },
   headline: { flex: 1, minWidth: 0 },
-  patternCard: { padding: 8, borderRadius: 14 },
+  tray: { width: TRAY_TILE * TRAY_COLUMNS + TRAY_GAP * (TRAY_COLUMNS - 1), paddingBottom: 6 },
+  trayTiles: { flexDirection: 'row', flexWrap: 'wrap', gap: TRAY_GAP },
   list: { gap: 10 },
   pill: {
     minHeight: 60, borderRadius: 30, borderWidth: 1.5, paddingHorizontal: 20, paddingVertical: 12,

@@ -7,7 +7,7 @@ import { BandTitle } from '@/components/settings-band/band-title';
 import { ThemedText } from '@/components/themed-text';
 import { BandScaffold } from '@/components/ui/band-scaffold';
 import { EButton } from '@/components/ui/band/e-button';
-import { TodayWidgetPreview, UpcomingWidgetPreview } from '@/components/widgets/widget-previews';
+import { SpendingWidgetPreview, TodayWidgetPreview, UpcomingWidgetPreview } from '@/components/widgets/widget-previews';
 import { WidgetHistory } from '@/components/widgets/widget-history';
 import { useBand, useBandScheme } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
@@ -24,7 +24,7 @@ import { widgetsCopy } from '@/lib/widgets-copy';
 import { canPinWidgets, pinWidget, type PinnableWidget } from '../../modules/wafra-widgets';
 
 /**
- * Widgets, on Home's ink band: what the two real widgets show right now,
+ * Widgets, on Home's ink band: what the three real widgets show right now,
  * drawn from the same snapshot Home hands them (`prepareWidgetSnapshot`),
  * and how to add them.
  *
@@ -107,6 +107,10 @@ export default function WidgetsScreen() {
       kind: 'upcoming', name: words.upcomingName, about: words.upcomingAbout,
       preview: <UpcomingWidgetPreview testID="widgets-preview-upcoming" snapshot={snapshot} palette={palettes.bills}
         words={words} platform={platform} />,
+    },
+    {
+      kind: 'spending', name: words.spendingName, about: words.spendingAbout,
+      preview: <SpendingWidgetPreview testID="widgets-preview-spending" snapshot={snapshot} palette={palettes.spending} words={words} />,
     },
   ];
 

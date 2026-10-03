@@ -8,8 +8,10 @@ import {
 export {
   DEFAULT_HOME_WIDGETS,
   defaultHomeWidgetPreferences,
+  drawnHomeWidgetOrder,
   homeWidgetVisible,
   moveHomeWidget,
+  moveHomeWidgetDrawn,
   normalizeHomeWidgetPreferences,
   setHomeWidgetVisible,
   splitHomeWidgetLayout,

@@ -132,6 +132,12 @@ const LANGUAGE_NAMES = { en: 'English', ar: 'العربية' } as const;
 /** The language row's tile glyph: the same letter in either interface language. */
 const LANGUAGE_GLYPH = 'ع';
 
+/** Splits reviewed copy at sentence ends so each statement reads as one point. */
+function privacySentences(text: string): string[] {
+  const parts = text.split(/\.\s+/);
+  return parts.map((part, index) => (index < parts.length - 1 ? `${part}.` : part)).filter((part) => part.trim().length > 0);
+}
+
 export default function SettingsScreen() {
   // Design language E: Settings wears the sand band.
   const band = useBand('settings');
@@ -1197,11 +1203,20 @@ export default function SettingsScreen() {
 
       <BottomSheet visible={privacyDetailsVisible} onClose={() => setPrivacyDetailsVisible(false)}
         title={t('messagesPrivacy')} palette={band}>
-        <View style={{ gap: Spacing.three }}>
-          <ThemedText style={{ color: band.textSecondary }}>{t('privacyBuiltInBody')}</ThemedText>
-          <ThemedText style={{ color: band.textSecondary }}>{t('privacyRetentionExact')}</ThemedText>
-          <ThemedText style={{ color: band.textSecondary }}>{t('privacySecurityExact')}</ThemedText>
-          <ThemedText style={{ color: band.textSecondary }}>{t('privacyLogosBody')}</ThemedText>
+        {/* The same statements, word for word, as short headed points: each
+            reviewed paragraph leads with its first sentence, and every other
+            sentence is one line under it. None is dropped or reworded. */}
+        <View style={styles.privacySheet} testID="settings-privacy-sheet">
+          {[t('privacyBuiltInBody'), t('privacyRetentionExact'), t('privacySecurityExact'), t('privacyLogosBody')].map((body) => {
+            const [lead, ...points] = privacySentences(body);
+            return <View key={lead} style={styles.privacySection}>
+              <ThemedText type="smallBold" accessibilityRole="header" style={{ color: band.text }}>{lead}</ThemedText>
+              {points.map((line, index) => <View key={index} style={styles.privacyPoint}>
+                <View style={[styles.privacyDot, { backgroundColor: band.textSecondary }]} />
+                <ThemedText type="small" style={[styles.privacyPointText, { color: band.textSecondary }]}>{line}</ThemedText>
+              </View>)}
+            </View>;
+          })}
           {state.privateMode && <Block>
             <ThemedText type="smallBold" style={{ color: band.text }}>{t('privacyLegacyTitle')}</ThemedText>
             <ThemedText style={{ color: band.textSecondary }}>{t('privacyLegacyBody')}</ThemedText>
@@ -1307,6 +1322,12 @@ const styles = StyleSheet.create({
   // grid was removed from Settings AND onboarding at the owner's request
   // (961684b). `monthStartDay` stays in state at its default so the setting
   // can come back as an INFERRED value rather than as a prompt.
+  privacySheet: { gap: Spacing.three + 2 },
+  privacySection: { gap: Spacing.one + 2 },
+  privacyPoint: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.two + 2 },
+  // Centred on the first line of `small` text (lineHeight ~20).
+  privacyDot: { width: 5, height: 5, borderRadius: 2.5, marginTop: 8 },
+  privacyPointText: { flex: 1, minWidth: 0 },
   privacyCopy: {
     flexDirection: 'row',
     alignItems: 'flex-start',

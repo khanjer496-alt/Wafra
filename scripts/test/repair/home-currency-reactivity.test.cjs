@@ -114,7 +114,7 @@ function harness() {
   // Today's figure is the real RollingMoney, rendered as Reduce Motion shows it (no roll), so this
   // test still proves the figure re-formats when the denomination changes.
   deps['react-native'].Platform = { OS: 'ios' };
-  Object.assign(deps['@/constants/theme'], { EASE: [0.2, 0.8, 0.2, 1], Motion: { digitStagger: 60, change: 240 } });
+  Object.assign(deps['@/constants/theme'], { EASE: [0.2, 0.8, 0.2, 1], Motion: { digitStagger: 60, change: 240 }, BandLayout: { chipHeight: 38 } });
   deps['react-native-reanimated'] = { __esModule: true, default: { View: 'Animated.View', Text: 'Animated.Text' },
     Easing: { bezier: () => (t) => t }, useAnimatedStyle: () => ({}), useSharedValue: (value) => ({ value }),
     withDelay: (_delay, value) => value, withTiming: (value) => value };

@@ -610,7 +610,10 @@ for (const [name, enter] of [
     const label = await row.getAttribute('aria-label');
     const shown = await row.innerText();
     const amount = minor(label);
-    ok(`Home ${name} has the same exact visible and accessible amount`, amount > 0 && minor(shown) === amount);
+    // The month line names its currency once, in its header, not per figure.
+    const currency = (await page.getByTestId('home-line-currency').innerText()).trim();
+    ok(`Home ${name} has the same exact visible and accessible amount`,
+      amount > 0 && minor(`${currency} ${shown.replace(/^\D+/, '')}`) === amount);
     return amount;
   };
   const income = await readFact('Income');

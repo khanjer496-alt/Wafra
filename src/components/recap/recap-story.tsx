@@ -156,7 +156,7 @@ function CoverScene({ snapshot, moneySpec, palette, w, compact, name }: ScenePro
       <ThemedText testID={change !== null ? 'recap-spend-change' : undefined} maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX}
         style={[styles.coverLine, compact && styles.coverLineCompact, { color: palette.onBand }]}>{line}</ThemedText>
     </Animated.View>
-    <View style={[styles.tiles, styles.pushBottom]}>
+    <View style={styles.tiles}>
       <TileRow stacked={large} testID="recap-spend-counts">
         <CountTile palette={palette} stacked={large} label={w.payments} value={snapshot.spendingCount} />
         <CountTile palette={palette} stacked={large} label={w.merchants} value={snapshot.merchantCount} />
@@ -225,7 +225,7 @@ function WhereWhenScene({ snapshot, moneySpec, palette, w, compact }: SceneProps
     </Animated.View>
     {timed ? <TimeOfDay snapshot={snapshot} palette={palette} w={w} compact={compact} /> : null}
     {/* The runners-up stay while there is room; the time of day comes first. */}
-    {!(timed && large) && snapshot.topMerchants.length > 1 ? <View testID="recap-runners-up" style={[styles.merchantList, styles.pushBottom]}>
+    {!(timed && large) && snapshot.topMerchants.length > 1 ? <View testID="recap-runners-up" style={styles.merchantList}>
       {snapshot.topMerchants.slice(1, 3).map((merchant, index) =>
         <Animated.View key={merchant.key} entering={enter(FadeInUp.delay(120 + index * 50).duration(320))}
           style={[styles.merchantRow, { borderTopColor: palette.bandRule }]}>
@@ -266,7 +266,7 @@ function CategoryScene({ snapshot, moneySpec, palette, w }: SceneProps) {
       }]} />)}
       {rest > 0 ? <View style={[styles.shareSegment, { flex: rest, backgroundColor: palette.onBand, opacity: REST_OPACITY }]} /> : null}
     </Animated.View>
-    <View style={[styles.categoryList, styles.pushBottom]}>
+    <View style={styles.categoryList}>
       {rows.slice(0, 4).map((row, index) =>
         <Animated.View key={row.category} entering={enter(FadeInUp.delay(100 + index * 50).duration(320))}
           style={[styles.categoryRow, { borderTopColor: palette.bandRule }]}>
@@ -291,7 +291,6 @@ function AccountScene({ snapshot, moneySpec, palette, w, compact }: SceneProps) 
       <BankAvatar account={row.account} size={compact || large ? 52 : 64} />
       <ThemedText maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX} numberOfLines={2}
         style={[styles.cardTitle, { color: palette.onBand }]}>{row.label}</ThemedText>
-      {row.account.last4 && <ThemedText type="meta" tabular style={{ color: palette.onBandSecondary }}>•••• {row.account.last4}</ThemedText>}
     </Animated.View>
     <TileRow stacked={large} testID="recap-account-tiles">
       <CountTile palette={palette} stacked={large} label={w.payments} value={row.count} />
@@ -324,7 +323,7 @@ function RhythmScene({ snapshot, moneySpec, palette, w }: SceneProps) {
         </Animated.View>;
       })}
     </View>
-    <View style={[styles.tiles, styles.pushBottom]}>
+    <View style={styles.tiles}>
       <TileRow stacked={large}>
         <CountTile palette={palette} stacked={large} label={w.noSpend} value={snapshot.noSpendDays} />
         <MoneyTile palette={palette} moneySpec={moneySpec} stacked={large} label={w.average} fils={snapshot.averagePurchaseFils} />
@@ -403,15 +402,18 @@ function FinaleScene({ snapshot, moneySpec, palette, w, onDone }: SceneProps & {
         style={[styles.coverTitleLarge, { color: palette.onBand }]}>{snapshot.descriptor.label}</ThemedText>
       <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{shortDate(snapshot.from)} — {shortDate(snapshot.to)}</ThemedText>
     </View>
-    <Animated.View entering={enter(FadeInUp.delay(80).duration(420))} style={[styles.finalBoard, styles.pushBottom]}>
+    <Animated.View entering={enter(FadeInUp.delay(80).duration(420))} style={styles.finalBoard}>
       {facts.map(([label, value], index) => <View key={label} accessible accessibilityRole="text" accessibilityLabel={`${label}, ${value}`}
         style={[styles.finalFact, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.bandRule }]}>
         <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{label}</ThemedText>
         <ThemedText type="smallBold" tabular style={[styles.finalValue, { color: palette.onBand, textAlign: alignEnd() }]}>{value}</ThemedText>
       </View>)}
     </Animated.View>
-    <EButton testID="recap-done" palette={palette} label={w.done} onPress={onDone}
-      color={{ fill: palette.onBand, text: palette.band }} />
+    {/* The facts sit under the headline like every card; only the action keeps to the foot. */}
+    <View style={styles.finalAction}>
+      <EButton testID="recap-done" palette={palette} label={w.done} onPress={onDone}
+        color={{ fill: palette.onBand, text: palette.band }} />
+    </View>
   </View>;
 }
 
@@ -530,7 +532,6 @@ const styles = StyleSheet.create({
   slideCompact: { paddingBottom: 8 },
   scene: { flex: 1, paddingTop: 4, paddingBottom: 8, gap: 22 },
   heading: { gap: 8 },
-  pushBottom: { marginTop: 'auto' },
   flex: { flex: 1, minWidth: 0 },
   tabularSans: { fontVariant: ['tabular-nums'] },
   coverTitle: { fontFamily: Fonts.sansSemi, fontSize: 22, lineHeight: 28, letterSpacing: -0.4 },
@@ -568,7 +569,7 @@ const styles = StyleSheet.create({
   dayTapeWrap: { flexWrap: 'wrap' },
   dayCell: { flex: 1, minHeight: 52, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2 },
   dayCellLarge: { flexBasis: '22%', flexGrow: 1 },
-  bigPurchase: { flex: 1, justifyContent: 'center', gap: 16, paddingBottom: 24 },
+  bigPurchase: { gap: 16 },
   bigPurchaseTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   yearScroll: { flexGrow: 1 },
   readingSlide: { flex: 0 },
@@ -582,6 +583,7 @@ const styles = StyleSheet.create({
   yearBarTrack: { height: 8, width: '100%', borderRadius: 4 },
   yearBar: { height: 8, borderRadius: 4 },
   finalBoard: { paddingVertical: 4 },
+  finalAction: { marginTop: 'auto' },
   finalFact: { minHeight: 52, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 8 },
   finalValue: { flexShrink: 1 },
 });

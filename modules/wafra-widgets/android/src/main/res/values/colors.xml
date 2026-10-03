@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Design language E: each widget wears its tab's band from
      src/constants/theme.ts (BandPalettes). Today is Home's ink band; Coming up
-     is Bills' ochre band (ink text on it). values-night deepens both. Kept in
+     is Bills' ochre band (ink text on it); Spending this month is Spending's
+     clay band. values-night deepens both. Kept in
      step with theme.ts by scripts/test/repair/widget-native-e.test.cjs. -->
 <resources>
   <color name="wafra_widget_today_band">#16130F</color>
@@ -13,4 +14,10 @@
   <color name="wafra_widget_upcoming_text">#16130F</color>
   <color name="wafra_widget_upcoming_secondary">#574727</color>
   <color name="wafra_widget_upcoming_tile">#E9CC94</color>
+  <color name="wafra_widget_today_tile">#282521</color>
+  <!-- Over budget on the ink band: the light status-over tint, readable on ink in both schemes. -->
+  <color name="wafra_widget_today_over">#E08A70</color>
+  <color name="wafra_widget_spending_band">#A4432F</color>
+  <color name="wafra_widget_spending_text">#F4F1EA</color>
+  <color name="wafra_widget_spending_secondary">#EBDED5</color>
 </resources>

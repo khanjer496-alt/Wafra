@@ -94,7 +94,8 @@ for (const platform of ['ios', 'android']) {
         const widget = walk(tree).find(node => node.props?.testID === `home-widget-${id}`);
         assert.ok(widget, `the ${id} widget is visible`);
         const action = walk(widget).find(node => node.props?.accessibilityRole === 'button');
-        assert.equal(action.props.accessibilityLabel, language === 'ar' ? 'عرض كل الدفعات' : 'View all payments');
+        // The named action, then the count and total the heading shows.
+        assert.ok(action.props.accessibilityLabel.startsWith(language === 'ar' ? 'عرض كل الدفعات. ' : 'View all payments. '), action.props.accessibilityLabel);
         action.props.onPress();
       }
       assert.deepEqual(h.events, [['route', '/bills'], ['route', '/bills']]);

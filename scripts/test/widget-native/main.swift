@@ -29,8 +29,9 @@ check(WafraDates.dueLabel(day("2026-09-29"), now: now, strings: en) == "Tomorrow
 check(WafraDates.dueLabel(day("2026-09-30"), now: now, strings: en) == "Wednesday", "two days ahead is a weekday")
 check(WafraDates.dueLabel(day("2026-10-04"), now: now, strings: en) == "Sunday", "six days ahead is a weekday")
 let weekOut = WafraDates.dueLabel(day("2026-10-05"), now: now, strings: en)
-check(weekOut != "Monday" && weekOut.contains("5") && weekOut.contains("Oct"),
-      "seven days ahead is a date, never this Monday's name: \(weekOut)")
+check(weekOut == "in 7 days", "seven days ahead counts days, never this Monday's name: \(weekOut)")
+check(WafraDates.dueLabel(day("2026-10-07"), now: now, strings: ar) == "بعد 9 أيام", "Arabic 3–10 days")
+check(WafraDates.dueLabel(day("2026-10-12"), now: now, strings: ar) == "بعد 14 يومًا", "Arabic 11+ days")
 check(WafraDates.dueLabel(day("2026-09-28"), now: now, strings: ar) == "اليوم", "Arabic today")
 check(WafraDates.dueLabel(day("2026-09-29"), now: now, strings: ar) == "غداً", "Arabic tomorrow")
 let arWeekday = WafraDates.dueLabel(day("2026-09-30"), now: now, strings: ar)
@@ -48,7 +49,16 @@ check(WafraDates.dueLabel(day("2026-10-01"), now: lateNight, strings: en) == "To
 check(WafraInitial.of("DEWA") == "D", "initial of DEWA")
 check(WafraInitial.of("  netflix") == "N", "initial skips spaces and uppercases")
 check(WafraInitial.of("•••• 1234") == nil, "masked card has no letter, so no digit tile")
-check(WafraInitial.of("الكهرباء") == "ا", "Arabic initial")
+check(WafraInitial.of("كهرباء") == "ك", "Arabic initial")
+check(WafraInitial.of("الكهرباء") == "ك", "Arabic initial skips the article")
+check(WafraInitial.of("الإيجار") == "إ", "Arabic initial skips the article before a hamza")
+check(WafraInitial.of("ال") == "ا", "a bare article keeps its first letter")
+check(WafraInitial.of("Allianz") == "A", "Latin titles are untouched")
+
+// Masked card titles hold left to right inside Arabic only.
+check(WafraTitle.display("•••• 1234", .ar) == "\u{200E}•••• 1234\u{200E}", "masked card title is isolated in Arabic")
+check(WafraTitle.display("•••• 1234", .en) == "•••• 1234", "English titles are unchanged")
+check(WafraTitle.display("الكهرباء", .ar) == "الكهرباء", "Arabic titles with letters are unchanged")
 check(WafraInitial.of("") == nil, "empty title")
 
 // Snapshot decoding and money parts.
@@ -94,6 +104,39 @@ check(snapshot(hidden: false, week: "[9007199254740991,1,0,0,0,0,0]")?.weekTotal
 check(snapshot(hidden: false, billLogo: "\"logoId\":\"dewa\",")?.bills.first?.logoId == "dewa", "bundled logo id decodes")
 check(snapshot(hidden: false, billLogo: "\"logoId\":\"../../dewa\",")?.bills.first?.logoId == nil, "paths cannot select a logo")
 check(snapshot(hidden: false)?.bills.first?.logoId == nil, "older snapshots retain fallback")
+
+// The Spending month: optional, validated, hidden-safe.
+check(snapshot(hidden: false)?.spending == nil, "an older snapshot has no month")
+let month = ",\"spending\":{\"monthKey\":\"2026-09\",\"totalMinor\":548000,\"categories\":[{\"label\":\"Groceries\",\"amountMinor\":183600},{\"label\":\" \",\"amountMinor\":1},{\"label\":\"Dining\",\"amountMinor\":100400}],\"otherMinor\":264000}"
+if let spent = snapshot(hidden: false, extra: month)?.spending {
+  check(spent.month == 9 && spent.totalMinor == 548000, "month and total")
+  check(spent.categories.map(\.label) == ["Groceries", "Dining"], "blank labels are dropped")
+  let segments = spent.segments(hidden: false)
+  check(segments.map(\.alpha) == [0.92, 0.7, 0.24], "named segments then the quiet rest: \(segments)")
+  check(abs(segments.map(\.share).reduce(0, +) - 1) < 0.000001, "shares fill the bar")
+  check(spent.segments(hidden: true).isEmpty, "hidden draws no shares")
+} else {
+  check(false, "month decodes")
+}
+if let hiddenMonth = snapshot(hidden: true, extra: month)?.spending {
+  check(hiddenMonth.totalMinor == nil && hiddenMonth.categories.allSatisfy { $0.amountMinor == nil }, "hidden month has names only")
+} else {
+  check(false, "hidden month decodes")
+}
+check(snapshot(hidden: false, extra: ",\"spending\":{\"monthKey\":\"2026-13\"}")?.spending == nil, "bad month is no month")
+check(snapshot(hidden: false, extra: ",\"spending\":7") != nil, "a wrong-typed month never breaks the snapshot")
+check(WafraMoney.whole(183650, exponent: 2) == "1,837" && WafraMoney.whole(183649, exponent: 2) == "1,836", "whole units half up")
+check(WafraMoney.whole(1234, exponent: 0) == "1,234" && WafraMoney.whole(-40, exponent: 2) == "0", "whole edge cases")
+check(WafraDates.monthName(9, language: .en) == "September", "month name")
+check(WafraDates.monthName(9, language: .ar) == "سبتمبر", "Arabic month name: \(WafraDates.monthName(9, language: .ar))")
+if let shown = snapshot(hidden: false) {
+  let listed = shown.upcomingBills(at: now)
+  check(WafraMoney.billsTotal(listed, in: shown) == "≈ AED 1,650.00", "total due: \(String(describing: WafraMoney.billsTotal(listed, in: shown)))")
+  check(shown.budgetFraction == nil, "no limits, no budget bar")
+}
+if let budgeted = snapshot(hidden: false, extra: ",\"budgetTotalMinor\":100000") {
+  check(budgeted.budgetFraction == 0.64, "budget used: \(String(describing: budgeted.budgetFraction))")
+}
 
 if failures == 0 {
   print("widget logic: all checks passed")

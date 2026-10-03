@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
-import { BandFigure } from '@/components/ui/band/band-figure';
+import { BandFigure, figureEms } from '@/components/ui/band/band-figure';
 import { StatTile, statTileColors } from '@/components/ui/band/stat-tile';
 import { WeekTiles } from '@/components/ui/band/week-tiles';
 import { Fonts, type BandPalette, type Colors } from '@/constants/theme';
@@ -199,8 +199,80 @@ export function ReferenceHomeWeek(p: BandProps) {
   return p.today ? <TodayTiles p={p} today={p.today} part="week" /> : null;
 }
 
-/** One period, three reconciled figures, on Home's sheet. Account balances belong in Accounts. */
+/**
+ * Home v2's month line on the band, under the Today tiles: the period (a
+ * button that opens the period picker), then Spent · In · Net for it. The
+ * same three reconciled figures as the full card, exact and spoken with
+ * their currency; each is sized to fit its third of the line, and Larger
+ * Text stacks them.
+ */
+function MonthLine(p: Props & { band: BandPalette }) {
+  const w = copy[p.language === 'ar' ? 'ar' : 'en'];
+  const { width, fontScale } = useWindowDimensions();
+  const band = p.band;
+  const currency = p.moneySpec.currency;
+  const exact = (fils: number) => formatMinorUnits(Math.round(Math.abs(fils)), p.moneySpec);
+  const netSign = p.netFils < 0 ? '−' : p.netFils > 0 ? '+' : '';
+  const cells = [
+    { id: 'home-spending-total', label: w.lineSpent, value: exact(p.expenseFils), color: band.onBand, onPress: p.onSpending,
+      spoken: `${w.moneyOut}, ${currency} ${formatMinorUnits(Math.round(p.expenseFils), p.moneySpec)}. ${w.viewSpending}` },
+    { id: 'home-income-summary', label: w.lineIn, value: exact(p.incomeFils), color: band.onBand, onPress: p.onIncome,
+      spoken: `${w.moneyIn}, ${currency} ${formatMinorUnits(Math.round(p.incomeFils), p.moneySpec)}` },
+    { id: 'home-net-summary', label: w.lineNet, value: `${netSign}${exact(p.netFils)}`,
+      color: p.netFils > 0 ? band.accent : band.onBand, onPress: undefined,
+      spoken: `${w.netLabel}, ${currency} ${netSign}${exact(p.netFils)}` },
+  ];
+  // The period heads the strip; each figure takes a third of the row under
+  // it, set smaller to fit rather than clipped, and stacks when even 12pt
+  // would not fit. `fitted` is the size drawn after the system text scale,
+  // so the style size divides it back out.
+  const lineWidth = width - 40 - 24;
+  const cellWidth = (lineWidth - 2 * 10) / 3;
+  const ems = Math.max(1, ...cells.map(cell => figureEms(cell.value)));
+  const fitted = Math.min(15, cellWidth / ems);
+  const stacked = p.largeText || fitted < 12 || fontScale > 1.3;
+  // Stacked, each figure has the whole line under its label: the person's
+  // text size, unless even that would run past the edge.
+  const scale = Math.max(1, fontScale);
+  const size = stacked ? Math.min(15, lineWidth / (ems * scale)) : fitted / scale;
+  return <View style={styles.root} testID="reference-home-summary">
+    <View testID="journal-summary" style={[styles.line, stacked && styles.lineStacked, { backgroundColor: band.tile }]}>
+      <View style={styles.lineHeader}>
+        <Pressable testID="home-period" accessibilityRole="button" accessibilityLabel={`${w.choosePeriod}, ${p.periodLabel}`}
+          onPress={p.onPeriod} hitSlop={6} style={({ pressed }) => [styles.linePeriod, { opacity: pressed ? 0.7 : 1 }]}>
+          <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{p.periodLabel}</ThemedText>
+          <Icon name="chevron-down" size={14} color={band.onBandSecondary} />
+        </Pressable>
+        {/* The figures' currency, once for the line; each figure speaks its own. */}
+        <ThemedText type="meta" testID="home-line-currency" importantForAccessibility="no" accessibilityElementsHidden
+          style={{ color: band.onBandSecondary }}>{currency}</ThemedText>
+      </View>
+      <View style={[styles.lineCells, stacked && styles.stack]}>
+        {cells.map(cell => {
+          const body = <>
+            <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{cell.label}</ThemedText>
+            <ThemedText style={[styles.lineValue, { color: cell.color, fontSize: size, lineHeight: Math.round(size * 1.3) }]}>{cell.value}</ThemedText>
+          </>;
+          const style = [styles.lineCell, stacked && styles.lineCellStacked];
+          return cell.onPress
+            ? <Pressable key={cell.id} testID={cell.id} accessibilityRole="button" accessibilityLabel={cell.spoken} onPress={cell.onPress}
+                style={({ pressed }) => [...style, { opacity: pressed ? 0.7 : 1 }]}>{body}</Pressable>
+            : <View key={cell.id} testID={cell.id} accessible accessibilityRole="text" accessibilityLabel={cell.spoken} style={style}>{body}</View>;
+        })}
+      </View>
+    </View>
+    {p.incomeFils === 0 && <ThemedText type="meta" style={{ color: band.onBandSecondary }} testID="home-no-income-note">
+      {w.noIncome}</ThemedText>}
+  </View>;
+}
+
+/** One period, three reconciled figures: the month line on the band, the full card on the sheet. */
 export function ReferenceHomeSummary(p: Props) {
+  return p.onBand && p.band ? <MonthLine {...p} band={p.band} /> : <SummaryCard {...p} />;
+}
+
+/** The full card, where the person placed the overview on the sheet. Account balances belong in Accounts. */
+function SummaryCard(p: Props) {
   const w = copy[p.language === 'ar' ? 'ar' : 'en'];
   const { width } = useWindowDimensions();
   const stackMetrics = p.largeText || width - 40 - (p.figureInset ?? 0) < 256;
@@ -277,4 +349,12 @@ const styles = StyleSheet.create({
   metric: { flexGrow: 1, flexShrink: 1, flexBasis: '42%', minWidth: 120, minHeight: 48, gap: 6 },
   metricStacked: { flexBasis: 'auto', alignSelf: 'stretch' },
   stack: { flexDirection: 'column', alignItems: 'stretch' },
+  line: { borderRadius: 18, paddingTop: 2, paddingBottom: 10, paddingHorizontal: 12, gap: 2 },
+  lineStacked: { gap: 6 },
+  lineHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  linePeriod: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  lineCells: { flexDirection: 'row', gap: 10 },
+  lineCell: { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 48, justifyContent: 'center' },
+  lineCellStacked: { flexBasis: 'auto', alignItems: 'flex-start' },
+  lineValue: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], letterSpacing: -0.2, writingDirection: 'ltr' },
 });

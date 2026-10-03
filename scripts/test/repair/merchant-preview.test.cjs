@@ -34,7 +34,7 @@ function renderMerchant({ name = 'Cedar & Cafe', type, language = 'en', hydrated
         return [hooks[index], next => { hooks[index] = next; events.push(['state', next]); }];
       } },
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
-    'react-native': { Platform: { OS: 'android' },
+    'react-native': { Platform: { OS: 'android' }, useWindowDimensions: () => ({ width: 390, fontScale: 1 }),
       View: 'View', StyleSheet: { create: s => s, hairlineWidth: 1 } },
     'expo-router': { useLocalSearchParams: () => params, useRouter: () => ({
       push: href => events.push(['route', href]), back: () => events.push(['back']),

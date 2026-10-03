@@ -52,8 +52,8 @@ const S = {
     ar: 'إضافة رسائل البنوك غير المُتحقَّق منها تلقائيًا',
   },
   autoAddedSettingBody: {
-    en: 'On: a clearly completed payment in a bank format Wafra has not verified is added and marked “Auto-added — check”. Off: those alerts wait in Review. Verified UAE and Saudi bank alerts are not affected.',
-    ar: 'عند التشغيل: تُضاف الدفعة المكتملة بوضوح من صيغة بنكية لم يتحقق منها وفرة وتُعلَّم بـ«أُضيفت تلقائيًا — راجِعها». عند الإيقاف: تنتظر هذه الرسائل في المراجعة. لا يتأثر ذلك برسائل بنوك الإمارات والسعودية المُتحقَّق منها.',
+    en: 'On: completed payments in these formats are added, marked “Auto-added — check”. Off: they wait in Review.',
+    ar: 'التشغيل: تُضاف الدفعات المكتملة من هذه الصيغ بعلامة «أُضيفت تلقائيًا — راجِعها». الإيقاف: تبقى للمراجعة.',
   },
   rememberThisBill: { en: 'Remember this bill?', ar: 'تذكّر هذه الفاتورة؟' },
   billAliasAlso: {
@@ -721,14 +721,17 @@ const S = {
   refDuesAndMovements: { en: 'Dues & money movements', ar: 'الدفعات وحركة الأموال' },
   refUpcoming: { en: 'Upcoming', ar: 'القادمة' },
   refAll: { en: 'All', ar: 'الكل' },
-  refUnscheduled: { en: 'No fixed schedule', ar: 'بلا موعد ثابت' },
+  // Regular spending that is not a bill (a grocer, toll top-ups). Some show a
+  // usual next date, so the heading says what they are, not that they have no
+  // schedule; they stay out of the bills total either way.
+  refUnscheduled: { en: 'Other regular spending', ar: 'مصروفات متكررة أخرى' },
   refStopped: { en: 'Stopped recurring payments', ar: 'الدفعات المتكررة المتوقفة' },
   refHideStopped: { en: 'Hide stopped payments', ar: 'إخفاء الدفعات المتوقفة' },
   refShowStopped: { en: 'Show stopped payments', ar: 'عرض الدفعات المتوقفة' },
   showMoreRecurring: { en: 'Show {count} more', ar: 'عرض {count} أخرى' },
   balanceCoverage: {
-    en: 'Balances recorded for {known} of {total} active accounts',
-    ar: 'أرصدة مسجلة لـ {known} من أصل {total} حسابات نشطة',
+    en: '{known} of {total} balances recorded',
+    ar: 'أرصدة مسجلة: {known} من {total}',
   },
   addAccountForBalances: {
     en: 'Add an account to see its latest reported balance.',
@@ -2466,7 +2469,7 @@ const S = {
     en: 'The same spent as {period}',
     ar: 'الصرف نفسه مقارنةً بـ{period}',
   },
-  allTime: { en: 'all time', ar: 'كل الفترات' },
+  allTime: { en: 'All time', ar: 'كل الفترات' },
   inWord: { en: 'in', ar: 'في' },
   inMinusOut: { en: 'in minus out', ar: 'الدخل ناقص المصروف' },
 

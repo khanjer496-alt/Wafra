@@ -122,8 +122,11 @@ test('Coming up lists bills from today on, at most three, with the native due wo
   assert.equal(preview.widgetDueLabel('2026-09-26', s.todayISO, words), 'Today');
   assert.equal(preview.widgetDueLabel('2026-09-27', s.todayISO, words), 'Tomorrow');
   assert.equal(preview.widgetDueLabel('2026-09-29', s.todayISO, words), 'Tuesday');
-  assert.equal(preview.widgetDueLabel('2026-10-05', s.todayISO, words), 'Mon 5 Oct', 'a weekday never means next week');
-  assert.equal(preview.widgetDueLabel('2026-10-05', s.todayISO, widgetsCopy('ar')), 'الاثنين 5 أكتوبر');
+  assert.equal(preview.widgetDueLabel('2026-10-05', s.todayISO, words), 'in 9 days', 'a weekday never means next week');
+  assert.equal(preview.widgetDueLabel('2026-10-03', s.todayISO, words), 'in 7 days');
+  assert.equal(preview.widgetDueLabel('2026-10-05', s.todayISO, widgetsCopy('ar')), 'بعد 9 أيام');
+  assert.equal(preview.widgetDueLabel('2026-10-12', s.todayISO, widgetsCopy('ar')), 'بعد 16 يومًا');
+  assert.equal(preview.widgetDueLabel('2026-10-05', 'bad', words), 'Mon 5 Oct', 'an uncountable day keeps its date');
   assert.equal(preview.widgetInitial('DEWA'), 'D');
   assert.equal(preview.widgetInitial('•••• 1234'), null, 'a masked card gets the calendar glyph, not a digit');
   assert.equal(preview.widgetInitial('كهرباء'), 'ك');
@@ -236,8 +239,9 @@ test('previews draw the snapshot’s own figures in the widgets’ bands', async
   assert.match(upcomingText, /AED 380\.00/);
   // Every figure on the screen is one the snapshot carries.
   const figures = s.text().match(/\d[\d,]*\.\d{2}/g) ?? [];
-  const allowed = new Set([snapshot.todayMinor, preview.widgetWeekTotal(snapshot), ...snapshot.bills.map((b) => b.amountMinor)]
-    .map((minor) => preview.widgetNumber(minor, 2)));
+  const listed = preview.widgetUpcomingBills(snapshot);
+  const allowed = new Set([snapshot.todayMinor, preview.widgetWeekTotal(snapshot), ...snapshot.bills.map((b) => b.amountMinor),
+    listed.reduce((sum, b) => sum + b.amountMinor, 0)].map((minor) => preview.widgetNumber(minor, 2)));
   for (const figure of figures) assert.ok(allowed.has(figure), `${figure} comes from the snapshot`);
   assert.ok(today.props.accessibilityLabel.includes('AED 244.35'), 'the preview speaks its figure');
 });
@@ -246,12 +250,14 @@ test('dark scheme previews use the deepened bands', async () => {
   const s = await screen({ scheme: 'dark' });
   assert.equal(s.find('widgets-preview-today').props.style[1].backgroundColor, theme.BandPalettes.dark.home.band);
   assert.equal(s.find('widgets-preview-upcoming').props.style[1].backgroundColor, theme.BandPalettes.dark.bills.band);
+  assert.equal(s.find('widgets-preview-spending').props.style[1].backgroundColor, theme.BandPalettes.dark.spending.band);
 });
 
 test('with no snapshot (private mode) the previews show the widgets’ own update state and say why', async () => {
   const s = await screen({ realLedger: true, state: ledgerState({ privateMode: true }) });
   assert.match(s.text(s.find('widgets-preview-today')), /Open Wafra to update/);
   assert.match(s.text(s.find('widgets-preview-upcoming')), /Open Wafra to update/);
+  assert.match(s.text(s.find('widgets-preview-spending')), /Open Wafra to update/);
   assert.ok(s.find('widgets-private-note'));
   assert.equal((s.text().match(/\d[\d,]*\.\d{2}/g) ?? []).length, 0, 'no figure at all');
 });
@@ -271,7 +277,7 @@ test('iOS: three honest steps, the Lock Screen note, and no add button', async (
 
 test('Android with a pinning launcher: one add button per widget, each pins its own provider', async () => {
   const s = await screen({ platform: 'android', pinnable: true });
-  assert.deepEqual(s.buttons().map((b) => b.props.testID), ['widgets-pin-today', 'widgets-pin-upcoming']);
+  assert.deepEqual(s.buttons().map((b) => b.props.testID), ['widgets-pin-today', 'widgets-pin-upcoming', 'widgets-pin-spending']);
   assert.equal(s.find('widgets-how-to'), undefined, 'the launcher’s own dialog replaces the manual steps');
   assert.equal(s.find('widgets-lock-note'), undefined, 'StandBy and the Lock Screen are iPhone words');
   s.find('widgets-pin-upcoming').props.onPress();
@@ -325,12 +331,13 @@ test('the JS bridge returns false wherever pinning is not available', async () =
   assert.deepEqual(calls, ['upcoming']);
 });
 
-test('Kotlin pins exactly the two providers, only where the launcher supports it', () => {
+test('Kotlin pins exactly the three providers, only where the launcher supports it', () => {
   const kotlin = read('modules/wafra-widgets/android/src/main/java/expo/modules/wafrawidgets/WafraWidgetsModule.kt');
   assert.match(kotlin, /Function\("canPinWidgets"\)/);
   assert.match(kotlin, /AsyncFunction\("pinWidget"\) \{ kind: String ->/);
   assert.match(kotlin, /"today" -> TodayWidgetProvider::class\.java/);
   assert.match(kotlin, /"upcoming" -> UpcomingWidgetProvider::class\.java/);
+  assert.match(kotlin, /"spending" -> SpendingWidgetProvider::class\.java/);
   assert.match(kotlin, /else -> return@AsyncFunction false/);
   assert.match(kotlin, /isRequestPinAppWidgetSupported/);
   assert.match(kotlin, /Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.O\) return@AsyncFunction false/);
@@ -445,7 +452,7 @@ test('every Arabic string is Arabic and every English string is not', () => {
   }
 });
 
-test('the small Today widget shows an exact complete seven-day total without an unlabeled graph', () => {
+test('the small Today widget labels its seven bars with the exact complete seven-day total', () => {
   const snapshot = fixtureSnapshot({ last7Minor: [1, 2, 3, 4, 5, 6, 7] });
   assert.equal(preview.widgetWeekTotal(snapshot), 28);
   assert.equal(preview.widgetMoneyText(preview.widgetWeekTotal(snapshot), snapshot), 'AED 0.28');
@@ -454,8 +461,9 @@ test('the small Today widget shows an exact complete seven-day total without an 
   assert.equal(preview.widgetWeekTotal({ ...snapshot, last7Minor: [1, 2, 3, null, 5, 6, 7] }), null);
   assert.equal(preview.widgetWeekTotal({ ...snapshot, last7Minor: [Number.MAX_SAFE_INTEGER, 1, 0, 0, 0, 0, 0] }), null);
   const source = read('src/components/widgets/widget-previews.tsx');
-  assert.doesNotMatch(source, /WeekBars|styles\.bars/);
-  assert.match(source, /widgetLast7Total/);
+  // The bars are never alone: the labelled exact total sits right under them.
+  assert.match(source, /words\.widgetLast7Total[\s\S]{0,400}<WeekBars snapshot=\{snapshot\}[\s\S]{0,400}\{weekShown\}/);
+  assert.deepEqual(preview.widgetWeekShares(snapshot).map((v) => Math.round(v * 7)), [1, 2, 3, 4, 5, 6, 7]);
   assert.match(source, /Image source=\{row\.logo\.source\}/);
 });
 

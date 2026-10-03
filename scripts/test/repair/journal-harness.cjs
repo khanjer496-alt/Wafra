@@ -1,4 +1,7 @@
 'use strict';
+/** Each listed day's cash-flow total, income + and spending − (dashboard-projection activityDayTotals). */
+const dayTotals = (rows) => rows.reduce((map, row) => map.set(row.date, (map.get(row.date) ?? 0)
+  + (row.type === 'income' ? row.amountFils : -row.amountFils)), new Map());
 // Source-component contract harness, NOT React Native or a device renderer.
 // It deliberately substitutes the OS, store and primitives. Real source owns
 // composition and handlers; fixtures contain no personal data.
@@ -44,6 +47,7 @@ function harness(options = {}) {
   const dashboard = {
     hero: { netFils: 941300, incomeFils: 1450000, expenseFils: 508700 }, live: true,
     activityRows: state.transactions, accountById: new Map([['bank', account]]), internalTransactionIds: new Set(),
+    activityDayTotals: options.dayTotals ?? dayTotals(state.transactions),
     unreadFormats: { count: 0, shouldPrompt: false }, uncategorised: { shouldPrompt: false, summary: { merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 } },
     upcoming: { items: options.empty ? [] : [{ id: 'utility', title: 'Electricity', kind: 'bill',
       dateISO: '2026-09-09', daysLeft: 3, amountFils: 38000, overdue: false, urgent: false }] },
@@ -86,7 +90,8 @@ function harness(options = {}) {
     '@/lib/categories': { getCategory: (category) => category, categoryLabel: (category) => category, isFixedCommitment: (category) => category === 'rent' || category === 'business' },
     '@/lib/format': { formatAmount: amount, clockTime: () => '', monthKey: (d) => String(d instanceof Date ? d.toISOString() : d).slice(0, 7),
       monthStartISO: (key) => `${key}-01`, monthEndISO: (key) => { const [y, m] = key.split('-').map(Number); return `${key}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`; },
-      shortDate: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short' }) },
+      shortDate: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short' }),
+      friendlyDate: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'short' }) },
     '@/lib/markets': { ledgerCurrencyCode: () => 'AED', ledgerCurrencyDisplay: () => 'AED' },
     '@/lib/i18n': { t, hasArabicScript: (s) => /[\u0600-\u06ff]/.test(s), tf: (key, values) => key === 'balanceCoverage' ? `${values.known} of ${values.total} account balances recorded` : key === 'historyImportLiveProgress' ? `${values.scanned} read · ${values.found} found` : `${key} ${values.count ?? ''}` },
     '@/lib/dashboard-projection': { projectDashboard: (request) => {

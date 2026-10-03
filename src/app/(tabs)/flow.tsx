@@ -44,7 +44,7 @@ import { usePeriod } from '@/lib/period-context';
 import { periodDayProgress } from '@/lib/period-pace';
 import { spendingTrendsCopy } from '@/lib/reference-copy';
 import { spendingDailyView } from '@/lib/spending-daily';
-import { spendingCategoryRows } from '@/lib/reference-presentation';
+import { spendingCategoryRows, spendingShare, spendingShareLabel } from '@/lib/reference-presentation';
 import { useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
 import { t, tf } from '@/lib/i18n';
@@ -157,9 +157,9 @@ export default function FlowScreen() {
     [category, state.transactions, categoryHistoryAnchor, live, internal]);
   const categoryHistoryMax = Math.max(1, ...categoryHistory.map((month) => month.fils));
   const categorySpentFils = selectedCategory?.spentFils ?? 0;
-  const categorySharePercent = summary.expenseFils > 0
-    ? Math.round(categorySpentFils / summary.expenseFils * 100)
-    : 0;
+  // The same share and label the category list prints, so the sheet can never
+  // say "0%" beside a row that says "0.4%" for the same category and period.
+  const categoryShareLabel = spendingShareLabel(spendingShare(categorySpentFils, summary.expenseFils), language);
   const categoryHistoryAverage = categoryHistory.length > 0
     ? Math.round(categoryHistory.reduce((total, month) => total + month.fils, 0) / categoryHistory.length)
     : 0;
@@ -280,13 +280,15 @@ export default function FlowScreen() {
     : dailyView?.paged ? `${words.calendarRecent} · ${monthLabel(dailyView.monthKey, true)}` : words.calendarRecent;
   const trendsWords = spendingTrendsCopy[language === 'ar' ? 'ar' : 'en'];
 
+  // The period sits in the nav row beside search, as the design draws it,
+  // rather than taking a row of its own above the figure.
+  const periodPill = <Pressable testID="spending-period" accessibilityRole="button" accessibilityLabel={words.choosePeriod(currentPeriodName)}
+    onPress={() => setPeriodOpen(true)} style={[styles.periodChip, { backgroundColor: band.tile }]}>
+    <ThemedText type="smallBold" style={{ color: band.onBand }}>{currentPeriodName}</ThemedText>
+    <Icon name="chevron-down" size={16} color={band.onBand} />
+  </Pressable>;
   const bandContent = <View style={styles.band}>
     <View style={styles.periodSummary} testID="spending-period-summary">
-      <Pressable testID="spending-period" accessibilityRole="button" accessibilityLabel={words.choosePeriod(currentPeriodName)}
-        onPress={() => setPeriodOpen(true)} style={[styles.periodChip, { backgroundColor: band.tile }]}>
-        <ThemedText type="smallBold" style={{ color: band.onBand }}>{currentPeriodName}</ThemedText>
-        <Icon name="chevron-down" size={16} color={band.onBand} />
-      </Pressable>
       {periodRange(period) ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{periodRange(period)}</ThemedText> : null}
       <BandFigure testID="spending-total" palette={band} label={words.totalSpent} fils={summary.expenseFils} />
     </View>
@@ -324,7 +326,7 @@ export default function FlowScreen() {
 
   return <>
     <BandScaffold band="spending" tabbed testID="reference-spending-screen" contentStyle={styles.sheet}
-      nav={{ title: t('tabFlow'), actions: [
+      nav={{ title: t('tabFlow'), trailing: periodPill, actions: [
         { icon: 'search', label: w.search, onPress: () => setViewMode('calendar'), testID: 'spending-search' },
       ] }}
       refreshControl={<CaptureRefreshControl />}
@@ -411,7 +413,7 @@ export default function FlowScreen() {
           <Money fils={categorySpentFils} type="amount" />
           <View style={styles.categoryHeroMeta}>
             <ThemedText type="meta" style={{ color: band.textSecondary }}>
-              {categorySharePercent}% {w.share}
+              {categoryShareLabel} {w.share}
             </ThemedText>
             {categoryMonthDeltaPercent != null && categoryPreviousMonth ? (
               <ThemedText type="meta" style={{ color: band.textSecondary }}>

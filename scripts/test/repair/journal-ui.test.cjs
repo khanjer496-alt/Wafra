@@ -11,17 +11,20 @@ const periodMinor = (nodes) => {
   return Math.round(Number(match[1].replace(/,/g,''))*100);
 };
 
-test('Home leads with one selected-period summary before daily spending and activity', () => {
+test('Home draws one selected-period month line on its band, then the week, then activity', () => {
   const h = harness();
   const nodes = walk(h.tree);
   const section = (id) => nodes.findIndex((node) => node.props.testID === id);
   for (const id of ['journal-summary', 'home-widget-activity', 'journal-import-controls']) {
     assert.notEqual(section(id), -1, `${id} is rendered`);
   }
+  // Home v2: the band holds the greeting, the Today tiles, the month line
+  // (Spent · In · Net for the selected period) and the week.
   assert.ok(section('journal-summary') < section('home-week') && section('home-week') < section('home-widget-activity'));
   assert.ok(section('home-widget-activity') < section('journal-import-controls'));
   assert.equal(periodMinor(nodes), 508700);
-  assert.match(text(h.tree), /View spending breakdown/);
+  // The Spent figure is the button into the breakdown, and says so.
+  assert.match(nodes.find((node) => node.props.testID === 'home-spending-total').props.accessibilityLabel, /View spending breakdown/);
   assert.match(text(nodes.find((node) => node.props.testID === 'home-widget-activity')), /Recent transactions/);
 });
 test('settings and explicit manual entry remain working visible quick actions', () => {
@@ -76,7 +79,7 @@ test('Founder logo unlock exists only in founder-enabled internal builds', async
 test('activity search and full bills remain reachable without duplicate Accounts shortcuts', () => {
   const h = harness();
   for (const node of walk(h.tree)) {
-    if (node.type === 'Pressable' && (text(node.props.children).trim() === 'See all' || node.props.accessibilityLabel === 'View all payments')) node.props.onPress();
+    if (node.type === 'Pressable' && (text(node.props.children).trim() === 'See all' || String(node.props.accessibilityLabel).startsWith('View all payments'))) node.props.onPress();
   }
   assert.ok(h.events.some((e) => e[1] === '/transactions'));
   assert.ok(h.events.some((e) => e[1] === '/bills'));
@@ -124,7 +127,9 @@ test('incoming transfer remains positive but not coloured as earned income', () 
     category: 'other', type: 'income' }, internal: true });
   const amount = walk(row).find((node) => node.type === 'Text' && text(node.props.children).startsWith('+'));
   assert.ok(amount);
-  assert.equal(amount.props.style[1].color, h.theme.text);
+  // Never income green; a transfer's amount is the quieter secondary tone.
+  assert.notEqual(amount.props.style[1].color, h.theme.income);
+  assert.equal(amount.props.style[1].color, h.theme.textSecondary);
 });
 test('Arabic and larger text render the same controls without English journal headings', () => {
   const h = harness({ language: 'ar', largeText: true, theme: 'dark' });
@@ -185,4 +190,19 @@ test('projected Home bills keep an explicit estimate and exact denominated amoun
   assert.equal(amount.props.fils, 38000);
   assert.equal(amount.props.moneySpec.currency, 'AED');
   assert.equal(amount.props.decimals, true);
+});
+test('payment headings show their count and total; an estimate is marked and spoken as one', () => {
+  const nodes = walk(harness().tree);
+  const total = nodes.find((node) => node.props.testID === 'home-widget-upcoming-total');
+  assert.equal(text(total).trim(), '≈ AED 380.00');
+  assert.equal(total.props.accessibilityLabel, 'View all payments. 1 payment, Estimated AED 380.00');
+});
+test('activity days carry their whole total, signed when spoken, and none when unfinished', () => {
+  const nodes = walk(harness({ dayTotals: new Map([['2026-09-06', -24435]]) }).tree);
+  const heading = (date) => walk(nodes.find((node) => node.props.testID === `home-activity-day-${date}`))
+    .find((node) => node.props.accessibilityRole === 'header');
+  assert.equal(heading('2026-09-06').props.accessibilityLabel, 'Sunday 6 Sept, −AED 244.35');
+  assert.equal(heading('2026-09-05').props.accessibilityLabel, 'Saturday 5 Sept', 'an unfinished day shows no partial total');
+  assert.equal(walk(heading('2026-09-06')).some((node) => node.type === 'Money'), true);
+  assert.equal(walk(heading('2026-09-05')).some((node) => node.type === 'Money'), false);
 });

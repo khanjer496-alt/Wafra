@@ -4,7 +4,7 @@
  * Everything that works ON the ledger rather than configuring the app moved
  * here from Settings: exports, the plain-JSON backup and its restore, the
  * category and format clean-ups, feedback, the public links, the founder mark
- * and version, and — alone at the bottom, with distance above it — Erase.
+ * and version, and — last, under its own Danger zone heading — Erase.
  * Nothing was dropped on the way; the capability inventory test reads both
  * screens together.
  *
@@ -577,10 +577,8 @@ export default function SettingsDataScreen() {
           {linkRow(t('exportExpensePdf'), copy.exportPdfDetail, () => setReportScopeSheet(true), { icon: 'receipt' })}
           {linkRow(t('exportCsv'), copy.exportCsvDetail, exportCsv, { icon: 'download' })}
           {linkRow(copy.backupTitle, copy.backupDetail, backupJson, { icon: 'upload' })}
-          {linkRow(copy.restoreTitle, copy.restoreDetail, restoreFromFile, {
-            icon: 'repeat',
-            last: !isSmsCorpusExportAvailable() && !isInternalLaunchDiagnosticsEnabled(),
-          })}
+          {/* The diagnosis export row always follows, so Restore keeps its rule. */}
+          {linkRow(copy.restoreTitle, copy.restoreDetail, restoreFromFile, { icon: 'repeat' })}
           {restoreError && <ThemedText type="small" accessibilityRole="alert"
             testID="settings-restore-error">{restoreError}</ThemedText>}
           {isSmsCorpusExportAvailable() && (
@@ -600,7 +598,7 @@ export default function SettingsDataScreen() {
               </ThemedText>
             </View>
           )}
-          <DiagnosticExportControl />
+          <DiagnosticExportControl palette={band} last={!isInternalLaunchDiagnosticsEnabled()} />
           {isInternalLaunchDiagnosticsEnabled() &&
             linkRow(t('launchMetricsInternal'), t('launchMetricsDetail'), exportLaunchMetrics, { last: true, icon: 'code' })}
         </View>
@@ -678,17 +676,18 @@ export default function SettingsDataScreen() {
           <TesterDiagnosticsControl />
         </View>
 
-        {/* Twice the gap every other group gets, and nothing routine beside
-            it: Erase is the only control here that cannot be undone. */}
-        <View testID="settings-data-erase" style={styles.danger}>
+        {/* Last, under its own heading, and nothing routine beside it: Erase
+            is the only control here that cannot be undone. It is a row like
+            its neighbours, told apart by the destructive tone, and it only
+            ever opens the confirmation below. */}
+        <View testID="settings-data-erase" style={styles.panel}>
           <SettingsGroupTitle title={t('settingsDangerHeader')} palette={band} />
-          <EButton
-            label={t('eraseAll')}
-            palette={band}
+          <SettingsLinkRow
+            title={t('eraseAll')}
             icon="trash"
-            // Destructive: the status-over tone, with the text colour the
-            // band's own fill takes, which reads on it in both schemes.
-            color={{ fill: band.statusOver, text: band.onFill }}
+            tone="danger"
+            last
+            palette={band}
             onPress={confirmErase}
           />
           <ThemedText
@@ -752,8 +751,9 @@ export default function SettingsDataScreen() {
  * method and an erase that silently does nothing gets tapped twice. Modal's
  * fade is a cross-fade, which is also what Reduce Motion asks for.
  *
- * Design language E: a card of the lifted surface (card tone), with the sheet's
- * 28pt radius. "Keep my data" is the primary (filled) action and comes
+ * Design language E: a card of the lifted surface (the card tone in light;
+ * the band's tile tone in dark, where the card would vanish into the scrim),
+ * with the sheet's 28pt radius. "Keep my data" is the primary (filled) action and comes
  * first; Erase is the destructive one under it. At the accessibility text
  * sizes the card scrolls rather than pushing its buttons off screen.
  */
@@ -794,7 +794,11 @@ function EraseDialog({
           accessibilityViewIsModal
           onAccessibilityEscape={onKeep}
           testID="settings-erase-dialog"
-          style={[styles.dialog, { backgroundColor: palette.card, borderColor: palette.rule }]}>
+          style={[styles.dialog, palette.scheme === 'dark'
+            // Dark: the sheet's card is within a shade of the dimmed page, so
+            // the dialog takes the band's lifted tone and its stronger rule.
+            ? { backgroundColor: palette.tile, borderColor: palette.bandRule }
+            : { backgroundColor: palette.card, borderColor: palette.rule }]}>
           {/* Always scrollable: near the large-text threshold the buttons
               could otherwise be clipped below the card's 90% height. */}
           <ScrollView bounces={false} contentContainerStyle={styles.dialogBody}
@@ -847,12 +851,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: Spacing.two,
     paddingTop: Spacing.two,
-  },
-  // Twice the gap every other group gets. Erase is the only control here
-  // that cannot be undone, and the distance is the point.
-  danger: {
-    paddingTop: Spacing.five,
-    gap: Spacing.two,
   },
   footer: {
     textAlign: 'center',

@@ -53,17 +53,19 @@ test('Categories: the band holds the selected period, total and one-tone share b
   assert.equal(scaffold.props.tabbed, true);
   assert.equal(scaffold.props.nav.title, 'Spending');
   assert.deepEqual([...scaffold.props.nav.actions.map((a) => a.testID)], ['spending-search']);
-  assert.match(byId(tree, 'spending-period').props.accessibilityLabel, /^Choose period, Sept? 2026$/);
+  // The period sits in the nav row beside search, not on a row of its own.
+  assert.match(byId(scaffold.props.nav.trailing, 'spending-period').props.accessibilityLabel, /^Choose period, Sept? 2026$/);
   const band = scaffold.props.bandContent;
   const total = byId(band, 'spending-total');
   assert.match(total.props.accessibilityLabel, /^Total spent, AED 5,360\.00$/);
   assert.equal(byId(band, 'spending-pace'), undefined, 'day progress is not repeated above the daily details');
   assert.ok(byId(band, 'spending-share-bar'));
   // A past month names itself instead of "this month", with no pace.
-  const past = walk(createHarness({ period: { mode: 'month', key: '2026-08' } }).render('flow'))
-    .find((node) => node.type === 'BandScaffold').props.bandContent;
+  const pastScaffold = walk(createHarness({ period: { mode: 'month', key: '2026-08' } }).render('flow'))
+    .find((node) => node.type === 'BandScaffold');
+  const past = pastScaffold.props.bandContent;
   assert.match(byId(past, 'spending-total').props.accessibilityLabel, /^Total spent, AED /);
-  assert.match(text(byId(past, 'spending-period')), /Aug 2026/);
+  assert.match(text(byId(pastScaffold.props.nav.trailing, 'spending-period')), /Aug 2026/);
   assert.equal(byId(past, 'spending-pace'), undefined);
 });
 

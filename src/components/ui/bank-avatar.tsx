@@ -40,6 +40,9 @@ function BankAvatarInner({ account, size = 36 }: { account: Account; size?: numb
 
   const credit = account.cardType === 'credit';
   const fallbackColor = credit ? theme.expenseSoftBg : theme.primarySoft;
+  // In dark mode the credit tile's soft red is nearly the sheet's own colour;
+  // its edge keeps the tile visible.
+  const fallbackEdge = dark && credit ? { borderWidth: 1, borderColor: theme.expenseSoftBorder } : null;
   const fallback = <Icon
     name={account.kind === 'card' || account.cardType ? 'wallet' : 'bank'}
     size={Math.round(size * 0.5)}
@@ -55,6 +58,7 @@ function BankAvatarInner({ account, size = 36 }: { account: Account; size?: numb
         borderRadius: Radius.tile,
         backgroundColor: fallbackColor,
       },
+      fallbackEdge,
     ]}>
       {fallback}
     </View>;
@@ -75,7 +79,7 @@ function BankAvatarInner({ account, size = 36 }: { account: Account; size?: numb
     style={[styles.tile, { width: size, height: size, borderRadius: radius, overflow: 'hidden' },
       imageReady
         ? dark ? { borderWidth: StyleSheet.hairlineWidth, borderColor: theme.cardBorder } : null
-        : { backgroundColor: fallbackColor }]}>
+        : [{ backgroundColor: fallbackColor }, fallbackEdge]]}>
     {/* Resolution supplies a URL, not decoded artwork. Keep identity visible
         while artwork loads instead of showing an empty tile. */}
     {!imageReady && fallback}

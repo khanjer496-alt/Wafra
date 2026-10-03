@@ -17,6 +17,8 @@ import type { HomeToday } from '@/lib/home-today';
  */
 export const WIDGET_SNAPSHOT_VERSION = 1;
 export const WIDGET_UPCOMING_DAYS = 30;
+/** Categories the Spending widget names or draws as their own segment. */
+export const WIDGET_SPENDING_CATEGORIES = 6;
 
 export interface WidgetBill {
   /** Optional, bundled artwork id. Older snapshots safely fall back to an initial. */
@@ -27,6 +29,30 @@ export interface WidgetBill {
   estimated: boolean;
   /** YYYY-MM-DD */
   dueISO: string;
+}
+
+export interface WidgetSpendingCategory {
+  /** The category's name in the snapshot language, as Spending shows it. */
+  label: string;
+  /** Minor units spent this month; null when amounts are hidden. */
+  amountMinor: number | null;
+}
+
+/**
+ * This month on the Spending tab: the same period, the same definition of
+ * spending and the same category totals (summarizeMonth + spendingCategoryRows).
+ * Optional in version 1: older snapshots carry none, and the Spending widget
+ * then asks the person to open Wafra.
+ */
+export interface WidgetSpending {
+  /** YYYY-MM of the live (money) month. */
+  monthKey: string;
+  /** Total spent; null when amounts are hidden. */
+  totalMinor: number | null;
+  /** Largest first; at most WIDGET_SPENDING_CATEGORIES with spending. */
+  categories: WidgetSpendingCategory[];
+  /** Every category after those, together; null when hidden. */
+  otherMinor: number | null;
 }
 
 export interface WidgetSnapshot {
@@ -48,9 +74,17 @@ export interface WidgetSnapshot {
   /** Seven days ending today, oldest first. */
   last7Minor: (number | null)[];
   leftInBudgetsMinor: number | null;
+  /**
+   * Sum of this month's budget limits, so widgets can draw how much of them
+   * is used ((total - left) / total). Null without budgets or when hidden;
+   * absent from older snapshots.
+   */
+  budgetTotalMinor: number | null;
   perDayMinor: number | null;
   budgetsOver: number;
   bills: WidgetBill[];
+  /** Null when the caller supplied no month (older callers and snapshots). */
+  spending: WidgetSpending | null;
 }
 
 export interface WidgetSnapshotInput {
@@ -62,6 +96,8 @@ export interface WidgetSnapshotInput {
   /** The user turned widget amounts off entirely. */
   hideAmounts: boolean;
   language: 'en' | 'ar';
+  /** This month's spending by category, largest first, already labelled. */
+  spending?: { monthKey: string; totalFils: number; categories: readonly { label: string; fils: number }[] } | null;
 }
 
 export function buildWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot {
@@ -83,6 +119,7 @@ export function buildWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot 
     todayCount: input.today.todayCount,
     last7Minor: input.today.week.map((day) => money(day.fils)),
     leftInBudgetsMinor: budget ? money(budget.leftFils) : null,
+    budgetTotalMinor: budget ? money(budget.limitFils) : null,
     perDayMinor: budget ? money(budget.perDayFils) : null,
     budgetsOver: budget?.overCount ?? 0,
     bills: input.upcoming
@@ -96,5 +133,21 @@ export function buildWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot 
         estimated: item.estimated ?? false,
         dueISO: item.dateISO,
       })),
+    spending: input.spending ? widgetSpending(input.spending, money) : null,
+  };
+}
+
+function widgetSpending(
+  spending: NonNullable<WidgetSnapshotInput['spending']>,
+  money: (value: number) => number | null,
+): WidgetSpending {
+  const spent = spending.categories.filter((row) => row.fils > 0);
+  const named = spent.slice(0, WIDGET_SPENDING_CATEGORIES);
+  const rest = spent.slice(WIDGET_SPENDING_CATEGORIES).reduce((sum, row) => sum + row.fils, 0);
+  return {
+    monthKey: spending.monthKey,
+    totalMinor: money(spending.totalFils),
+    categories: named.map((row) => ({ label: row.label, amountMinor: money(row.fils) })),
+    otherMinor: money(rest),
   };
 }

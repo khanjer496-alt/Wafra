@@ -226,7 +226,8 @@ const homePayments = await page.evaluate(() => {
   const now = new Date();
   return [...document.querySelectorAll('[data-testid="home-widget-due"], [data-testid="home-widget-upcoming"]')]
     .flatMap(section => [...section.querySelectorAll('[role="button"]')])
-    .filter(node => (node.textContent || '').trim()) // exclude empty section chevrons
+    // Exclude the heading's count-and-total action; it is checked below.
+    .filter(node => (node.textContent || '').trim() && !(node.getAttribute('data-testid') || '').endsWith('-total'))
     .map(node => {
       const leaves = [...node.querySelectorAll('div,span')].filter(n => !n.children.length && n.textContent.trim());
       const text = leaves.map(n => n.textContent.trim());
@@ -249,6 +250,20 @@ ok(`home: every payment exposes a readable date and exact amount (${homePayments
   homePayments.length > 0 && homePayments.every(({ fields, clipped }) =>
     fields.length === 3 && fields[0] && Number.isFinite(paymentDayOffset(fields[1])) &&
     /^(?:≈\s*)?AED\s*[\d,]+(?:\.\d{1,2})?$/.test(fields[2].replace(/[\u200e\u200f]/g, '')) && !clipped));
+
+// Each payments heading totals its group; with every row shown, the rows add up to it.
+const paymentHeadings = await page.evaluate(() => [...document.querySelectorAll('[data-testid="home-widget-due"], [data-testid="home-widget-upcoming"]')]
+  .map(section => {
+    const minor = text => Math.round(Number((text.replace(/[\u200e\u200f]/g, '').match(/[\d,]+(?:\.\d{1,2})?/) || ['NaN'])[0].replace(/,/g, '')) * 100);
+    const heading = section.querySelector('[data-testid$="-total"]');
+    const rows = [...section.querySelectorAll('[role="button"]')].filter(node => node !== heading && (node.textContent || '').trim());
+    const count = Number((heading?.getAttribute('aria-label') || '').match(/(\d+) payments?/)?.[1]);
+    return { total: heading ? minor(heading.textContent) : NaN, count,
+      rows: rows.map(node => minor((node.getAttribute('aria-label') || '').split('. ').pop())) };
+  }));
+ok(`home: payment headings total their groups (${paymentHeadings.length} groups)`,
+  paymentHeadings.length > 0 && paymentHeadings.every(({ total, count, rows }) => Number.isFinite(total) &&
+    rows.length === Math.min(count, 3) && (count > 3 || rows.reduce((sum, value) => sum + value, 0) === total)));
 
 // Entry detail sheet.
 //
