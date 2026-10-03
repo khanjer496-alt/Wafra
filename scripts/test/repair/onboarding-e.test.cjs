@@ -59,8 +59,6 @@ test('E copy: every Arabic line is Arabic and every English line is not', () => 
     const english = typeof en === 'function' ? sample(en) : en;
     const arabic = typeof ar === 'function' ? sample(ar) : ar;
     assert.ok(String(english).trim() && !ARABIC.test(String(english)), `${key} en`);
-    // A pure join of its arguments ("Dining · AED 600") has no words of its own.
-    if (key === 'copy.watchLimitSummary') return;
     assert.ok(ARABIC.test(String(arabic)), `${key} ar: ${arabic}`);
   };
   walk(ONBOARDING_E_COPY.en, ONBOARDING_E_COPY.ar, 'copy');
@@ -210,13 +208,35 @@ test('watched categories with a limit become budgets; unpicked limits are remove
 test('watch drafts round-trip the ledger and keep the Watch order', () => {
   const budgets = [{ category: 'shopping', limitFils: 10000 }, { category: 'dining', limitFils: 5000 }, { category: 'rent', limitFils: 1 }];
   assert.deepEqual(e.watchDraftFromBudgets(budgets), [{ category: 'dining', limitMinor: 5000 }, { category: 'shopping', limitMinor: 10000 }]);
-  let draft = e.toggleWatch([], 'health');
-  draft = e.toggleWatch(draft, 'dining');
-  assert.deepEqual(draft.map((item) => item.category), ['dining', 'health']);
-  assert.deepEqual(draft.map((item) => item.limitMinor), [0, 0], 'a picked category starts with no limit');
-  draft = e.setWatchLimit(draft, 'dining', 25000);
-  assert.deepEqual(e.toggleWatch(draft, 'health'), [{ category: 'dining', limitMinor: 25000 }]);
-  assert.equal(e.setWatchLimit(draft, 'dining', -5)[0].limitMinor, 0);
+});
+
+test('watch rows: a category is in the draft exactly when it has a limit', () => {
+  let draft = e.withWatchLimit([], 'health', 20000);
+  draft = e.withWatchLimit(draft, 'dining', 50000);
+  assert.deepEqual(draft, [{ category: 'dining', limitMinor: 50000 }, { category: 'health', limitMinor: 20000 }],
+    'the board order, whatever order they were set in');
+  assert.deepEqual(e.withWatchLimit(draft, 'dining', 80000)[0], { category: 'dining', limitMinor: 80000 });
+  assert.deepEqual(e.withWatchLimit(draft, 'dining', 0), [{ category: 'health', limitMinor: 20000 }], 'nothing removes it');
+  assert.deepEqual(e.withWatchLimit(draft, 'dining', 1.5), [{ category: 'health', limitMinor: 20000 }], 'only whole minor units');
+  assert.deepEqual(e.withWatchLimit([{ category: 'transport', limitMinor: 0 }], 'dining', 100),
+    [{ category: 'dining', limitMinor: 100 }], 'an old picked-but-empty entry is not carried');
+  assert.deepEqual(e.WATCH_QUICK_REFERENCES, [250, 500, 1000, 2000]);
+});
+
+test('watch button: save N, continue after a removal, otherwise skip', () => {
+  const existing = [{ category: 'dining', limitFils: 60000 }, { category: 'rent', limitFils: 1 }];
+  assert.deepEqual(e.watchFooterAction([], []), { kind: 'skip' });
+  assert.deepEqual(e.watchFooterAction([], [{ category: 'rent', limitFils: 1 }]), { kind: 'skip' },
+    'a budget outside the Watch list is never removed here');
+  assert.deepEqual(e.watchFooterAction([], existing), { kind: 'continue' }, 'removing the last limit is a change to apply');
+  assert.deepEqual(e.watchFooterAction([{ category: 'dining', limitMinor: 60000 }, { category: 'health', limitMinor: 100 }], existing),
+    { kind: 'save', count: 2 });
+  const { en, ar } = ONBOARDING_E_COPY;
+  assert.equal(en.watchSave(1), 'Save 1 limit');
+  assert.equal(en.watchSave(3), 'Save 3 limits');
+  assert.equal(ar.watchSave(1), 'احفظ حداً واحداً');
+  assert.equal(ar.watchSave(2), 'احفظ حدّين');
+  assert.equal(ar.watchSave(4), 'احفظ 4 حدود');
 });
 
 test('the gate pins the ledger currency before it writes a budget', () => {
@@ -224,11 +244,12 @@ test('the gate pins the ledger currency before it writes a budget', () => {
   const save = gate.slice(gate.indexOf('const saveWatch'), gate.indexOf('const finishNotificationChoice'));
   assert.ok(save.includes('watchBudgetChanges(watchDraft, state.budgets)'));
   assert.ok(save.indexOf('setLedgerMoney(shownCurrency)') < save.indexOf('upsertBudget(budget)'));
-  assert.match(save, /if \(save && !previewMode\)/, 'Not now and the preview write nothing');
-  // The dial is the foundation's, with currency-scaled steps for the shown currency.
+  assert.match(save, /if \(!previewMode\)/, 'the preview writes nothing');
+  // Quick amounts and ± steps are scaled to the shown currency, never AED literals.
   const step = read('src/components/onboarding/e-watch.tsx');
-  assert.match(step, /<DialLimit[\s\S]{0,300}stepMinor=\{step\}/);
-  assert.match(step, /typicalMinorAmount\(moneySpec, 25\)/);
+  assert.match(step, /WATCH_QUICK_REFERENCES\.map\(\(major\) => typicalMinorAmount\(spec, major\)\)/);
+  assert.match(step, /typicalMinorAmount\(spec, 50\)/);
+  assert.match(step, /parseAmountWithMoneySpec\(text, spec\)/, 'typed figures use the app amount reading (Arabic digits, device marks)');
   // It starts at nothing: no invented starting limit.
   assert.doesNotMatch(read('src/lib/onboarding-e.ts'), /limitMinor: [1-9]/);
 });

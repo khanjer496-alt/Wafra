@@ -189,11 +189,15 @@ function createWorkflowHarness(options={}) {
    d['react-native-safe-area-context'].useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});
    d['@/components/ui/pattern-mosaic']={PatternMosaic:p=>jsx('PatternMosaic',p)};
    d['@/components/ui/band/dial-limit']={DialLimit:p=>jsx('DialLimit',p)};
+   // The Watch amount field's readers: Arabic digits and the device's marks.
+   d['@/lib/arabic-sms']=d['@/lib/arabic-sms']??{normalizeArabicNumerals:t=>t.replace(/[٠-٩]/g,c=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(c)))};
+   d['@/lib/format']=Object.assign({},d['@/lib/format'],{parseAmountWithMoneySpec:d['@/lib/format']?.parseAmountWithMoneySpec??
+    (t=>/^\d+(\.\d{1,2})?$/.test(t)?Math.round(Number(t)*100):null)});
    d['@/components/ui/band/status-bar']={StatusBar:p=>jsx('LimitBar',p)};
    d['@/components/superwall-billing-context']={useWafraBilling:()=>({available:false,configured:false,configurationError:null,
     fetchProOffers:async()=>[],purchasePro:async()=>'unavailable',restorePro:async()=>null})};
    h.local('@/components/ui/band/e-button');
-   for(const name of ['e-motion','e-frame','e-welcome','e-name','e-goals','e-watch','e-reminders','e-first-payment','e-pattern','e-paywall','e-handoff'])h.local('@/components/onboarding/'+name);
+   for(const name of ['e-motion','e-frame','e-choice-row','e-welcome','e-name','e-goals','e-watch','e-reminders','e-first-payment','e-pattern','e-paywall','e-handoff'])h.local('@/components/onboarding/'+name);
    for(const name of ['capture-checklist','ready-summary','sms-explainer'])h.local('@/components/onboarding/'+name);
   }
   const file=screen==='onboarding'?'src/components/onboarding-gate.tsx':`src/app/${screen}.tsx`;

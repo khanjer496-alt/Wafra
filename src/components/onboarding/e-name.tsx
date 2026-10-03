@@ -31,22 +31,27 @@ import { MAX_PREFERRED_NAME_LENGTH, normalizePreferredName } from '@/lib/onboard
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import { patternInitial } from '@/lib/pattern';
 
-function ConfirmRow({ label, value, spoken, onPress, palette, testID }: {
+function ConfirmRow({ label, value, spoken, onPress, palette, testID, missing = false }: {
   label: string;
   value: string;
   spoken: string;
   onPress: () => void;
   palette: BandPalette;
   testID: string;
+  /** Nothing chosen yet: the value is the action itself, outlined in full. */
+  missing?: boolean;
 }) {
   const largeText = useLargeTextLayout();
   const words = onboardingECopy(useLanguage());
   return <Pressable accessibilityRole="button" accessibilityLabel={spoken} testID={testID}
     onPress={() => { tapped(); onPress(); }}
-    style={({ pressed }) => [styles.row, largeText && styles.rowStacked, { borderColor: palette.bandRule, opacity: pressed ? 0.7 : 1 }]}>
+    style={({ pressed }) => [styles.row, largeText && styles.rowStacked, {
+      borderColor: missing ? palette.onBand : palette.bandRule, opacity: pressed ? 0.7 : 1,
+    }]}>
     <ThemedText type="meta" style={[styles.rowLabel, { color: palette.onBandSecondary }]}>{label}</ThemedText>
     <ThemedText type="smallBold" style={[styles.rowValue, largeText && styles.rowValueStacked, { color: palette.onBand }]}>{value}</ThemedText>
-    <ThemedText type="smallBold" style={{ color: palette.onBand }}>{words.change}</ThemedText>
+    {missing ? <Icon name="chevron-right" size={18} color={palette.onBand} />
+      : <ThemedText type="smallBold" style={{ color: palette.onBand }}>{words.change}</ThemedText>}
   </Pressable>;
 }
 
@@ -80,7 +85,7 @@ export function NameStep({ nameDraft, onChangeName, onContinue, onSkip, onBack, 
   const greeting = words.greeting(new Date().getHours(), trimmed || null);
   const countryName = countryPickerName(country, language === 'ar' ? 'ar' : 'en');
   const countryValue = countryName ? `${countryFlag(country)} ${countryName}` : words.notSet;
-  const currencyValue = currency ?? words.notSet;
+  const currencyValue = currency ?? words.chooseCurrency;
   return <EStepFrame palette={band} step={1} onBack={onBack} onClose={onClose} backDisabled={busy} testID="onboarding-name"
     footer={<>
       <EButton palette={band} color={bandButtonColor(band)} label={words.continue} onPress={onContinue}
@@ -133,7 +138,8 @@ export function NameStep({ nameDraft, onChangeName, onContinue, onSkip, onBack, 
       <ConfirmRow palette={band} label={words.countryLabel} value={countryValue} testID="onboarding-country-confirm"
         spoken={words.countryChange(countryName ?? words.notSet)} onPress={() => setCountryOpen(true)} />
       <ConfirmRow palette={band} label={words.currencyLabel} value={currencyValue} testID="onboarding-currency-confirm"
-        spoken={words.currencyChange(currencyValue)} onPress={() => setCurrencyOpen(true)} />
+        missing={!currency}
+        spoken={currency ? words.currencyChange(currency) : words.chooseCurrency} onPress={() => setCurrencyOpen(true)} />
     </View>
     <CountryPickerSheet
       visible={countryOpen}
