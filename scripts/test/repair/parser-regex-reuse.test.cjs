@@ -21,6 +21,7 @@ test('market vocabulary compiles once, keeps the exact result and never uses mes
     '@/lib/alert-event-evidence': compiled('alert-event-evidence'),
     '@/lib/alert-institution-grammars': compiled('alert-institution-grammars'),
     '@/lib/alert-market-packs': compiled('alert-market-packs'),
+    '@/lib/bank-alert-semantic-rules': compiled('bank-alert-semantic-rules'),
   });
   const markets = ['US','GB','FR','DE','ES','IT','NL','IN','QA','KW','BH','OM','EG','JO'];
   const source = 'Unknown event with PRIVATE_SOURCE_SENTINEL_9385. Account ending 1234 balance AED 12.50';
