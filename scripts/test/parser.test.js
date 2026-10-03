@@ -6428,6 +6428,26 @@ for (const [desc, merchant, category] of [
 
 {
   const stmt = parseSms('Mini Stmt for Card ending 8575: Statement date 20/10/26. Total Amt Due AED 3,000.00, Due Date 14/11/26. Min Amt Due AED 150.00');
+  // More issue-date wordings (from #82), and a range is a period, not a day.
+  for (const [label, body, want] of [
+    ['an ISO statement date is not read day-first', 'Credit Card ending 8575 statement date 2026-08-28. Total Amt Due AED 2469.92, Due Date 22/09/26.', '2026-08-28'],
+    ['a named-month statement date is read', 'Credit Card ending 8575. Stmt date 28Aug26. Total Amt Due AED 2469.92, Due Date 22/09/26.', '2026-08-28'],
+    ['a statement dated in words is read', 'Your Credit Card ending 3749 statement dated 01 Aug 2026. Total amount due AED 5,645.07. Due date is 26Aug26', '2026-08-01'],
+    ['a FAB statement names its date through the card it belongs to', 'Your statement of the card ending with 3749 dated 01Aug26 has been sent to you and can also be viewed in the new FAB mobile banking app, download it from the App Store goo.gl/FB7qEZ. The total amount due is AED 5,645.07. Minimum due is AED 282.25. Due date is 26Aug26', '2026-08-01'],
+    ['a generated-on date is the statement date', 'Your Credit Card ending 4821 statement is generated on 20/12/2026. Total due AED 3,240.00, minimum due AED 162.00. Payment due on 05/01/2027.', '2026-12-20'],
+    ['the ENBD mini statement keeps its statement date', 'Emirates NBD Credit Card Mini Stmt for Card ending 8575: Statement date 28/08/26. Total Amt Due AED 2469.92, Due Date 22/09/26. Min Amt Due AED 513.62', '2026-08-28'],
+    ['a due date is never read as the statement date', 'Credit Card ending 8575: Due Date 22/09/26. Total Amt Due AED 2469.92. Min Amt Due AED 513.62', undefined],
+    ['a statement date range states a period, not a closing day', 'Credit Card ending 8575. Statement Date: 01/08/26 - 31/08/26. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
+    ['a countdown after the statement date is not a range', 'Credit Card ending 8575. Statement Date: 01/08/26 - 21 days to pay. Total Amt Due AED 100.00, Due Date 22/08/26', '2026-08-01'],
+    ['...and the same range in words', 'Credit Card ending 8575. Statement dated 01 Aug 2026 to 31 Aug 2026. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
+    ['a clock after a year-less month is not a year', 'Credit Card ending 8575. Statement date 28 Aug 15:30. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
+    ['a count after a year-less month is not a year', 'Credit Card ending 8575. Statement date 28 Aug, 21 days to pay. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
+    ['a statement announcing only its deadline states no statement date', 'Your Credit Card statement for card ending 1234 is ready. Total amount due AED 714.74, minimum due AED 100.00. Due date 15/10/2026.', undefined],
+  ]) {
+    const r = parseSms(body);
+    if (r && r.kind === 'cardStatement' && r.statementDate === want) { pass++; console.log(`✓ ${label}`); }
+    else { fail++; console.log(`✗ ${label}`, JSON.stringify(r && { k: r.kind, s: r.statementDate, d: r.date })); }
+  }
   if (stmt && stmt.kind === 'cardStatement' && stmt.statementDate === '2026-10-20' && stmt.date === '2026-11-14') { pass++; console.log('✓ a statement carries its stated issue date apart from its due date'); }
   else { fail++; console.log('✗ a statement carries its stated issue date apart from its due date', JSON.stringify(stmt && { k: stmt.kind, s: stmt.statementDate, d: stmt.date })); }
   const noIssue = parseSms('Your Credit Card ending 4844 statement has been generated. Total Amount Due AED 5,234.10. Minimum Amount Due AED 261.70. Payment Due Date 25/10/2026.');

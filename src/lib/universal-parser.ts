@@ -3,7 +3,11 @@ import { inspectMarketAlert } from '@/lib/alert-semantics';
 import type { MoneyDirection, PostingStatus, UniversalMarket } from '@/lib/alert-market-pack-types';
 import { extractUniversalFields } from '@/lib/universal-fields';
 import { extractUniversalMoney, inspectUniversalMoneyDraft } from '@/lib/universal-money';
-import { isApplicationPurchaseOffer, isExpectedFutureMoneyNotice } from '@/lib/bank-alert-semantic-rules';
+import {
+  isApplicationPurchaseOffer,
+  isExpectedFutureMoneyNotice,
+  isTransactionVerificationChallenge,
+} from '@/lib/bank-alert-semantic-rules';
 
 const emptyEvent = (issue: string): UniversalBankEvent => ({
     version: 1, decision: 'ignore', family: 'unknown', status: 'unknown', direction: 'unknown',
@@ -300,6 +304,15 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   ));
   if (challenge || pending) status = 'informational';
   if (explicitlyUnsuccessful) status = 'failed';
+  // A bank ASKING whether you made a payment has not told you that you did.
+  // "Did you attempt a USD 1,299.00 purchase at TECH OUTLET? Reply YES or NO."
+  // read as a posted purchase because the disclaimer after it sits outside the
+  // amount's clause; widening that scope would let a disclaimer about one
+  // transaction hide a second one, so the question itself is the evidence.
+  // `unknown` keeps it reviewable while making it unpostable.
+  if (!challenge && isTransactionVerificationChallenge(wholeContext) && status === 'posted') {
+    status = 'unknown';
+  }
   if (sourceControl) {
     status = sourceControl.status;
     if (sourceControl.family) family = sourceControl.family;
