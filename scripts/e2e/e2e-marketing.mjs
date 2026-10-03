@@ -67,12 +67,12 @@ try {
     assert.ok(metrics.mono, 'Geist Mono must load for ledger labels');
     assert.ok(metrics.arabic, 'Noto Kufi Arabic must load for the Arabic wordmark');
     assert.equal(metrics.background, 'rgb(244, 241, 234)');
-    assert.equal(metrics.images.length, 5);
+    assert.equal(metrics.images.length, 3);
     assert.ok(metrics.images.every((img) => img.loaded && img.alt.length > 20));
 
     if (out) await page.screenshot({ path: path.join(out, `landing-${width}.png`) });
     if (out && [390, 1440].includes(width)) {
-      for (const id of ['inside-wafra', 'how-it-works', 'privacy', 'questions']) {
+      for (const id of ['how-it-works', 'categories', 'subscriptions', 'inside-wafra', 'privacy', 'questions']) {
         await page.locator(`#${id}`).evaluate((el) => el.scrollIntoView({ block: 'start' }));
         await page.screenshot({ path: path.join(out, `landing-${width}-${id}.png`) });
       }
