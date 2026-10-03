@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Live "Spending this month" widget on Spending's clay band: the month and
+     its total, a share bar of the categories (three named in falling
+     strength, the rest quiet) and the three largest with whole-unit amounts.
+     The share bar is a white mask drawn in code (WidgetGraphics.shareBar) and
+     tinted here, so it follows night mode. Without a month in the snapshot
+     (older app, stale) it asks to open Wafra. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:id="@android:id/background"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="@drawable/wafra_widget_spending_background"
+  android:clipToOutline="true">
+
+  <LinearLayout
+    android:id="@+id/wafra_widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <LinearLayout
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:gravity="center_vertical"
+      android:orientation="horizontal">
+      <TextView
+        android:id="@+id/wafra_spending_month"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:fontFamily="sans-serif-medium"
+        android:maxLines="1"
+        android:text="@string/wafra_widget_spending_name"
+        android:textAlignment="viewStart"
+        android:textColor="@color/wafra_widget_spending_text"
+        android:textSize="13sp" />
+      <TextView
+        android:id="@+id/wafra_spending_total"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:fontFamily="sans-serif-medium"
+        android:fontFeatureSettings="tnum"
+        android:maxLines="1"
+        android:textDirection="firstStrongLtr"
+        android:textColor="@color/wafra_widget_spending_text"
+        android:textSize="13sp"
+        android:visibility="gone" />
+    </LinearLayout>
+
+    <TextView
+      android:id="@+id/wafra_spending_empty"
+      android:layout_width="match_parent"
+      android:layout_height="0dp"
+      android:layout_weight="1"
+      android:fontFamily="sans-serif-medium"
+      android:gravity="center"
+      android:text="@string/wafra_widget_open_to_update"
+      android:textAlignment="center"
+      android:textColor="@color/wafra_widget_spending_text"
+      android:textSize="14sp" />
+
+    <LinearLayout
+      android:id="@+id/wafra_spending_content"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:orientation="vertical"
+      android:visibility="gone">
+
+      <ImageView
+        android:id="@+id/wafra_spending_bar"
+        android:layout_width="match_parent"
+        android:layout_height="26dp"
+        android:layout_marginTop="14dp"
+        android:importantForAccessibility="no"
+        android:scaleType="fitXY"
+        android:tint="@color/wafra_widget_spending_text" />
+
+      <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
+        <TextView
+          android:id="@+id/wafra_spending_top_1"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_weight="1"
+          android:ellipsize="end"
+          android:maxLines="1"
+          android:textAlignment="viewStart"
+          android:textColor="@color/wafra_widget_spending_secondary"
+          android:textSize="12sp" />
+        <TextView
+          android:id="@+id/wafra_spending_top_2"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_marginStart="6dp"
+          android:layout_weight="1"
+          android:ellipsize="end"
+          android:maxLines="1"
+          android:textAlignment="center"
+          android:textColor="@color/wafra_widget_spending_secondary"
+          android:textSize="12sp" />
+        <TextView
+          android:id="@+id/wafra_spending_top_3"
+          android:layout_width="0dp"
+          android:layout_height="wrap_content"
+          android:layout_marginStart="6dp"
+          android:layout_weight="1"
+          android:ellipsize="end"
+          android:maxLines="1"
+          android:textAlignment="viewEnd"
+          android:textColor="@color/wafra_widget_spending_secondary"
+          android:textSize="12sp" />
+      </LinearLayout>
+    </LinearLayout>
+  </LinearLayout>
+</FrameLayout>

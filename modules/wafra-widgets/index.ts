@@ -18,7 +18,7 @@ type NativeWidgets = {
   pinWidget?(kind: string): Promise<boolean>;
 };
 
-export type PinnableWidget = 'today' | 'upcoming';
+export type PinnableWidget = 'today' | 'upcoming' | 'spending';
 
 const native = Platform.OS === 'web' ? null : requireOptionalNativeModule<NativeWidgets>('WafraWidgets');
 
@@ -42,7 +42,8 @@ export function canPinWidgets(): boolean {
 
 /**
  * Asks the launcher to show its "add widget" dialog for Today
- * (TodayWidgetProvider) or Coming up (UpcomingWidgetProvider). True means the
+ * (TodayWidgetProvider), Coming up (UpcomingWidgetProvider) or Spending this
+ * month (SpendingWidgetProvider). True means the
  * launcher took the request, not that the person placed the widget.
  */
 export async function pinWidget(kind: PinnableWidget): Promise<boolean> {

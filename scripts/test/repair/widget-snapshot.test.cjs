@@ -32,8 +32,10 @@ test('the snapshot carries only summary figures, marked sensitive', () => {
   assert.equal(s.perDayMinor, 4333);
   assert.equal(s.budgetsOver, 1);
   assert.equal(s.last7Minor.length, 7);
-  assert.deepEqual(Object.keys(s).sort(), ['amountsSensitive', 'bills', 'budgetsOver', 'currency', 'exponent', 'generatedAt', 'hidden',
-    'language', 'last7Minor', 'leftInBudgetsMinor', 'perDayMinor', 'todayCount', 'todayISO', 'todayMinor', 'version'].sort(), 'no extra fields leak out');
+  assert.deepEqual(Object.keys(s).sort(), ['amountsSensitive', 'bills', 'budgetTotalMinor', 'budgetsOver', 'currency', 'exponent', 'generatedAt', 'hidden',
+    'language', 'last7Minor', 'leftInBudgetsMinor', 'perDayMinor', 'spending', 'todayCount', 'todayISO', 'todayMinor', 'version'].sort(), 'no extra fields leak out');
+  assert.equal(s.budgetTotalMinor, 100000, 'the limits behind the budget bar');
+  assert.equal(s.spending, null, 'no month supplied, no Spending figures');
   assert.equal(s.todayISO, '2026-09-25');
 });
 
@@ -50,6 +52,7 @@ test('hidden amounts are null everywhere, never zero', () => {
   assert.equal(s.todayCount, 2, 'counts and dates still help');
   assert.ok(s.last7Minor.every(v => v === null));
   assert.equal(s.leftInBudgetsMinor, null);
+  assert.equal(s.budgetTotalMinor, null);
   assert.equal(s.perDayMinor, null);
   assert.ok(s.bills.every(b => b.amountMinor === null && b.dueISO));
 });
@@ -57,8 +60,40 @@ test('hidden amounts are null everywhere, never zero', () => {
 test('no budgets means no pace figures', () => {
   const s = buildWidgetSnapshot({ ...base, today: { ...today, budget: null } });
   assert.equal(s.leftInBudgetsMinor, null);
+  assert.equal(s.budgetTotalMinor, null);
   assert.equal(s.perDayMinor, null);
   assert.equal(s.budgetsOver, 0);
+});
+
+const spending = { monthKey: '2026-09', totalFils: 548000, categories: [
+  ['Groceries', 183600], ['Dining', 100400], ['Shopping', 88000], ['Transport', 56200], ['Utilities', 43800],
+  ['Telecom', 21400], ['Health', 18000], ['Travel', 36600], ['Gifts', 0],
+].map(([label, fils]) => ({ label, fils })) };
+
+test('Spending: this month by category, six named, the rest together, nothing at zero', () => {
+  const s = buildWidgetSnapshot({ ...base, spending });
+  assert.deepEqual(Object.keys(s.spending).sort(), ['categories', 'monthKey', 'otherMinor', 'totalMinor']);
+  assert.equal(s.spending.monthKey, '2026-09');
+  assert.equal(s.spending.totalMinor, 548000);
+  assert.deepEqual(s.spending.categories.map(c => [c.label, c.amountMinor]), [
+    ['Groceries', 183600], ['Dining', 100400], ['Shopping', 88000], ['Transport', 56200], ['Utilities', 43800], ['Telecom', 21400],
+  ]);
+  assert.equal(s.spending.otherMinor, 18000 + 36600, 'the remainder is one figure; a zero category adds nothing');
+  assert.deepEqual(Object.keys(s.spending.categories[0]).sort(), ['amountMinor', 'label'], 'names and amounts only');
+});
+
+test('Spending in hidden mode keeps names and the month, never an amount', () => {
+  const s = buildWidgetSnapshot({ ...base, spending, hideAmounts: true });
+  assert.equal(s.spending.monthKey, '2026-09');
+  assert.equal(s.spending.totalMinor, null);
+  assert.equal(s.spending.otherMinor, null);
+  assert.ok(s.spending.categories.length === 6 && s.spending.categories.every(c => c.amountMinor === null && c.label));
+  assert.doesNotMatch(JSON.stringify(s.spending), /183600|548000/);
+});
+
+test('a month without spending is an empty month, not a missing one', () => {
+  const s = buildWidgetSnapshot({ ...base, spending: { monthKey: '2026-09', totalFils: 0, categories: [] } });
+  assert.deepEqual(JSON.parse(JSON.stringify(s.spending)), { monthKey: '2026-09', totalMinor: 0, categories: [], otherMinor: 0 });
 });
 
 test('only exact bundled identities enter the widget snapshot; no paths or network hints', () => {

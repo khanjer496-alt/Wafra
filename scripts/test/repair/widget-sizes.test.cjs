@@ -74,11 +74,12 @@ test('Android Today never cuts a number: the figures shrink and the budget amoun
     return layout.slice(start, layout.indexOf('/>', start));
   };
   assert.match(view('wafra_today_amount'), /autoSizeMinTextSize="11sp"/);
+  // The week total is whole units on one line; its label gives way instead.
   const week = view('wafra_today_week_amount');
   assert.match(week, /layout_height="18dp"/);
   assert.match(week, /maxLines="1"/);
-  assert.match(week, /autoSizeMinTextSize="9sp"/);
-  assert.match(week, /autoSizeMaxTextSize="13sp"/);
+  assert.match(view('wafra_today_week_label'), /ellipsize="end"/);
+  assert.match(kotlin, /WidgetGraphics\.wholeNumber\(weekTotal, snapshot\.exponent\)/);
   assert.match(view('wafra_today_budget_amount'), /maxLines="1"/);
   for (const id of ['wafra_today_budget_lead', 'wafra_today_budget_trail']) {
     assert.match(view(id), /ellipsize="end"/, `${id} gives way to the amount`);
@@ -181,11 +182,11 @@ test('Android 12+ corners follow the launcher, and single-ink logos follow dark 
     assert.match(upcoming.slice(start, upcoming.indexOf('/>', start)), /android:tint="@color\/wafra_widget_upcoming_text"/);
   }
   // No bitmap with the ink colour baked in at render time.
-  assert.doesNotMatch(kotlin, /setImageViewBitmap|tintedLogo|PorterDuff/);
+  assert.doesNotMatch(kotlin, /setImageViewBitmap\(BILL_|tintedLogo|PorterDuff/);
 });
 
 test('iOS caps Dynamic Type, keeps figures whole and tints only tiles and initials', () => {
-  assert.equal((swiftViews.match(/\.dynamicTypeSize\(\.\.\.DynamicTypeSize\.xxLarge\)/g) || []).length, 2);
+  assert.equal((swiftViews.match(/\.dynamicTypeSize\(\.\.\.DynamicTypeSize\.xxLarge\)/g) || []).length, 3);
   assert.match(swiftViews, /\.lineLimit\(1\)\s+\.minimumScaleFactor\(0\.75\)/, 'the week total stays on one line');
   assert.match(swiftViews, /WafraBandFigure\([^)]*\)\s+\.layoutPriority\(1\)/);
   assert.match(swiftViews, /\.minimumScaleFactor\(0\.6\)\s+\.layoutPriority\(1\)\s+\.wafraAmount\(snapshot\)/, 'Coming up amounts win space');

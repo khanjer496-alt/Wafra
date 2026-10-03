@@ -17,6 +17,8 @@ struct WafraBand {
   let mark: Color
   /// Mint: today's bar, the one good-news mark.
   let accent: Color
+  /// Over budget: the light status-over tint, readable on every dark band.
+  var over: Color = Color(hex: 0xE08A70)
 
   static func home(_ scheme: ColorScheme) -> WafraBand {
     if scheme == .dark {
@@ -45,6 +47,20 @@ struct WafraBand {
     )
   }
 
+  /// Spending's clay band, light text in both schemes.
+  static func spending(_ scheme: ColorScheme) -> WafraBand {
+    if scheme == .dark {
+      return WafraBand(
+        band: Color(hex: 0x6E2B1E), onBand: Color(hex: 0xF2EFE8), onBandSecondary: Color(hex: 0xD0BCB3),
+        tile: Color(hex: 0x793B2E), mark: Color(hex: 0xA98379), accent: Color(hex: 0xF2EFE8)
+      )
+    }
+    return WafraBand(
+      band: Color(hex: 0xA4432F), onBand: Color(hex: 0xF4F1EA), onBandSecondary: Color(hex: 0xEBDED5),
+      tile: Color(hex: 0x8D3B2A), mark: Color(hex: 0xD5ADA1), accent: Color(hex: 0xF4F1EA)
+    )
+  }
+
   /// When iOS does not draw the band (tinted or clear Home Screen, StandBy,
   /// the iPad Lock Screen) the system recolours content to one tone and keeps
   /// only opacity. Solid tiles would then swallow the letters on them and ink
@@ -58,7 +74,8 @@ struct WafraBand {
       onBandSecondary: Color.primary.opacity(0.72),
       tile: Color.primary.opacity(0.16),
       mark: Color.primary.opacity(0.35),
-      accent: fullColor ? accent : .primary
+      accent: fullColor ? accent : .primary,
+      over: fullColor ? over : .primary
     )
   }
 }
@@ -220,22 +237,47 @@ struct WafraTodayView: View {
     .widgetURL(WafraShared.appURL)
   }
 
-  // A readable exact seven-day total replaces the unlabeled miniature graph.
+  // The week where it fits (its bars, a pattern corner and the exact
+  // seven-day total that labels them); at the largest text sizes the figure
+  // and its line alone, as Android does below 152dp.
   private func content(_ snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand) -> some View {
+    ViewThatFits(in: .vertical) {
+      layout(snapshot, strings: strings, band: band, week: true)
+      layout(snapshot, strings: strings, band: band, week: false)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+
+  private func layout(_ snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand, week: Bool) -> some View {
     VStack(alignment: .leading, spacing: 0) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(strings.last7Total)
-          .font(.caption)
-          .foregroundColor(band.onBandSecondary)
-        Text(WafraMoney.format(snapshot.weekTotalMinor, in: snapshot))
-          .font(.caption.weight(.semibold).monospacedDigit())
-          .foregroundColor(band.onBand)
-          .lineLimit(1)
-          .minimumScaleFactor(0.75)
-          .wafraAmount(snapshot)
-          .modifier(HiddenAmountLabel(label: snapshot.weekTotalMinor == nil ? strings.amountHidden : nil))
+      if week {
+        // The label with, in the corner, the pattern; then the bars it names
+        // and their total in whole units (spoken exactly), which never breaks.
+        HStack(alignment: .center, spacing: 8) {
+          Text(strings.last7Total)
+            .font(.caption)
+            .foregroundColor(band.onBandSecondary)
+            .lineLimit(1)
+          Spacer(minLength: 0)
+          WafraPatternCorner(band: band)
+        }
+        HStack(alignment: .bottom, spacing: 8) {
+          WafraWeekBars(snapshot: snapshot, band: band)
+            .frame(maxWidth: 96)
+            .frame(height: 20)
+          Spacer(minLength: 0)
+          Text(weekTotal(snapshot))
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundColor(band.onBand)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .layoutPriority(1)
+            .wafraAmount(snapshot)
+            .accessibilityLabel(snapshot.weekTotalMinor == nil ? strings.amountHidden : WafraMoney.format(snapshot.weekTotalMinor, in: snapshot))
+        }
+        .padding(.top, 4)
       }
-      Spacer(minLength: 6)
+      Spacer(minLength: 4)
       VStack(alignment: .leading, spacing: 0) {
         Text(strings.today)
           .font(.caption.weight(.medium))
@@ -244,10 +286,109 @@ struct WafraTodayView: View {
         WafraBandFigure(minor: snapshot.todayMinor, snapshot: snapshot, strings: strings, band: band)
           .layoutPriority(1)
       }
+      if let fraction = snapshot.budgetFraction {
+        WafraBudgetBar(fraction: fraction, over: snapshot.budgetsOver > 0, band: band)
+          .padding(.top, 2)
+          .padding(.bottom, 3)
+      }
       WafraTodayLine(snapshot: snapshot, strings: strings, band: band)
-        .padding(.top, 2)
+        .padding(.top, snapshot.budgetFraction == nil ? 2 : 0)
     }
-    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+}
+
+private func weekTotal(_ snapshot: WafraSnapshot) -> String {
+  guard !snapshot.hidden, let total = snapshot.weekTotalMinor else { return "—" }
+  return WafraMoney.isolate("\(snapshot.currency) \(WafraMoney.whole(total, exponent: snapshot.exponent))", snapshot.language)
+}
+
+/// Seven bars, oldest first, on the week's own scale: today in the accent,
+/// earlier days in the band's mark tone, and a day with nothing (or any day
+/// when amounts are hidden) a thin baseline. Shapes only; the labelled total
+/// beside them carries the figure.
+struct WafraWeekBars: View {
+  let snapshot: WafraSnapshot
+  let band: WafraBand
+
+  private var values: [Int64] {
+    guard !snapshot.hidden, snapshot.last7Minor.count == 7 else { return Array(repeating: 0, count: 7) }
+    return snapshot.last7Minor.map { max(0, $0 ?? 0) }
+  }
+
+  var body: some View {
+    let days = values
+    let peak = days.max() ?? 0
+    GeometryReader { geometry in
+      HStack(alignment: .bottom, spacing: 3) {
+        ForEach(0..<days.count, id: \.self) { index in
+          let value = days[index]
+          let height: CGFloat = peak > 0 && value > 0
+            ? max(4, CGFloat(Double(value) / Double(peak)) * geometry.size.height)
+            : 2
+          RoundedRectangle(cornerRadius: 2, style: .continuous)
+            .fill(index == days.count - 1 && value > 0 ? band.accent : band.mark.opacity(value > 0 ? 1 : 0.6))
+            .frame(height: height)
+        }
+      }
+      .frame(maxHeight: .infinity, alignment: .bottom)
+    }
+    .accessibilityHidden(true)
+  }
+}
+
+/// Three of the pattern's shapes (src/components/ui/pattern-mosaic.tsx),
+/// small, in the band's own tones: a quarter circle, a ring and a dot.
+struct WafraPatternCorner: View {
+  let band: WafraBand
+
+  var body: some View {
+    HStack(alignment: .bottom, spacing: 3) {
+      WafraQuarter()
+        .fill(band.tile)
+        .frame(width: 12, height: 12)
+      Circle()
+        .strokeBorder(band.mark, lineWidth: 2)
+        .frame(width: 10, height: 10)
+      Circle()
+        .fill(band.accent)
+        .frame(width: 5, height: 5)
+        .padding(.bottom, 2)
+    }
+    .accessibilityHidden(true)
+  }
+}
+
+/// A square whose top leading corner is a full quarter circle.
+struct WafraQuarter: Shape {
+  func path(in rect: CGRect) -> Path {
+    var path = Path()
+    path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+    path.addArc(center: CGPoint(x: rect.maxX, y: rect.maxY), radius: min(rect.width, rect.height),
+                startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
+    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+    path.closeSubpath()
+    return path
+  }
+}
+
+/// How much of the month's budgets is used, from the reading start: the
+/// accent, or the over colour once any budget is past its limit.
+struct WafraBudgetBar: View {
+  let fraction: Double
+  let over: Bool
+  let band: WafraBand
+
+  var body: some View {
+    GeometryReader { geometry in
+      ZStack(alignment: .leading) {
+        Capsule().fill(band.tile)
+        Capsule()
+          .fill(over ? band.over : band.accent)
+          .frame(width: fraction > 0 ? max(4, geometry.size.width * CGFloat(fraction)) : 0)
+      }
+    }
+    .frame(height: 4)
+    .accessibilityHidden(true)
   }
 }
 
@@ -358,11 +499,12 @@ struct WafraLeftLine: View {
   }
 }
 
-// MARK: - Coming up (systemMedium, ochre band)
+// MARK: - Coming up (systemSmall and systemMedium, ochre band)
 
 struct WafraComingUpView: View {
   let entry: WafraEntry
   @Environment(\.colorScheme) private var colorScheme
+  @Environment(\.widgetFamily) private var family
 
   var body: some View {
     let strings = entry.strings
@@ -383,33 +525,76 @@ struct WafraComingUpView: View {
 
   private func content(_ snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand) -> some View {
     let bills = snapshot.upcomingBills(at: entry.date)
-    return VStack(alignment: .leading, spacing: 0) {
-      Text(strings.comingUp)
-        .font(.caption.weight(.semibold))
-        .foregroundColor(band.onBand)
-        .lineLimit(1)
-        .padding(.bottom, 8)
+    // The small size lists two bills without amounts, as the design draws it.
+    let small = family == .systemSmall
+    return Group {
       if bills.isEmpty {
-        Spacer(minLength: 0)
-        Text(strings.nothingComingUp)
-          .font(.subheadline.weight(.medium))
-          .foregroundColor(band.onBand)
-        Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 0) {
+          header(nil, strings: strings, band: band, snapshot: snapshot)
+          Spacer(minLength: 0)
+          VStack(spacing: 6) {
+            Image(systemName: "calendar")
+              .font(.title3.weight(.semibold))
+              .foregroundColor(band.onBand)
+              .accessibilityHidden(true)
+            Text(strings.nothingComingUp)
+              .font(.subheadline.weight(.medium))
+              .foregroundColor(band.onBand)
+              .multilineTextAlignment(.center)
+              .minimumScaleFactor(0.8)
+          }
+          .frame(maxWidth: .infinity)
+          Spacer(minLength: 0)
+        }
       } else {
         // Three rows where they fit; the smallest phones and the largest
-        // text sizes show the first two (or one) instead of clipping.
+        // text sizes show the first two (or one) instead of clipping. The
+        // header's total is always the total of the rows shown.
         ViewThatFits(in: .vertical) {
-          rows(bills, snapshot: snapshot, strings: strings, band: band)
-          rows(Array(bills.prefix(2)), snapshot: snapshot, strings: strings, band: band)
-          rows(Array(bills.prefix(1)), snapshot: snapshot, strings: strings, band: band)
+          if !small {
+            listing(bills, snapshot: snapshot, strings: strings, band: band, amounts: true)
+          }
+          listing(Array(bills.prefix(2)), snapshot: snapshot, strings: strings, band: band, amounts: !small)
+          listing(Array(bills.prefix(1)), snapshot: snapshot, strings: strings, band: band, amounts: !small)
         }
-        Spacer(minLength: 0)
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 
-  private func rows(_ bills: [WafraBill], snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand) -> some View {
+  private func listing(_ bills: [WafraBill], snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand, amounts: Bool) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
+      header(WafraMoney.billsTotal(bills, in: snapshot), strings: strings, band: band, snapshot: snapshot)
+      rows(bills, snapshot: snapshot, strings: strings, band: band, amounts: amounts)
+      Spacer(minLength: 0)
+    }
+  }
+
+  /// "Coming up" and, where it fits, what the listed bills add up to.
+  private func header(_ total: String?, strings: WafraStrings, band: WafraBand, snapshot: WafraSnapshot) -> some View {
+    let title = Text(strings.comingUp)
+      .font(.caption.weight(.semibold))
+      .foregroundColor(band.onBand)
+      .lineLimit(1)
+    return ViewThatFits(in: .horizontal) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        title
+        Spacer(minLength: 0)
+        if let total {
+          Text(total)
+            .font(.caption.weight(.semibold).monospacedDigit())
+            .foregroundColor(band.onBand)
+            .lineLimit(1)
+            .wafraAmount(snapshot)
+            .accessibilityLabel(strings.totalDue(total))
+        }
+      }
+      title.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    .padding(.bottom, 8)
+  }
+
+  private func rows(_ bills: [WafraBill], snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand, amounts: Bool) -> some View {
     VStack(alignment: .leading, spacing: 6) {
       ForEach(bills, id: \.self) { bill in
         HStack(spacing: 10) {
@@ -419,20 +604,27 @@ struct WafraComingUpView: View {
               .font(.footnote.weight(.semibold))
               .foregroundColor(band.onBand)
               .lineLimit(1)
+            // The due pill: Today, Tomorrow, a weekday, then "in 9 days".
             Text(WafraDates.dueLabel(bill.due, now: entry.date, strings: strings))
-              .font(.caption)
-              .foregroundColor(band.onBandSecondary)
+              .font(.caption2.weight(.medium))
+              .foregroundColor(band.onBand)
               .lineLimit(1)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 1)
+              .background(Capsule().fill(band.tile))
+              .padding(.top, 2)
           }
           Spacer(minLength: 6)
-          Text(amountText(bill, snapshot: snapshot, strings: strings))
-            .font(.footnote.weight(.semibold).monospacedDigit())
-            .foregroundColor(band.onBand)
-            .lineLimit(1)
-            .minimumScaleFactor(0.6)
-            .layoutPriority(1)
-            .wafraAmount(snapshot)
-            .modifier(HiddenAmountLabel(label: bill.amountMinor == nil || snapshot.hidden ? strings.amountHidden : nil))
+          if amounts {
+            Text(amountText(bill, snapshot: snapshot, strings: strings))
+              .font(.footnote.weight(.semibold).monospacedDigit())
+              .foregroundColor(band.onBand)
+              .lineLimit(1)
+              .minimumScaleFactor(0.6)
+              .layoutPriority(1)
+              .wafraAmount(snapshot)
+              .modifier(HiddenAmountLabel(label: bill.amountMinor == nil || snapshot.hidden ? strings.amountHidden : nil))
+          }
         }
         // Children stay separate accessibility elements: combining them would
         // fold the privacy-sensitive amount into one label with the title.
@@ -638,5 +830,108 @@ struct WafraLockScreenView: View {
           let left = snapshot.leftInBudgetsMinor else { return nil }
     let used = Double(total - left) / Double(total)
     return min(1, max(0, used))
+  }
+}
+
+// MARK: - Spending this month (systemMedium, clay band)
+
+/// This month as the Spending tab shows it: the month and its total, a share
+/// bar of the categories (three named in falling strength, the rest quiet)
+/// and the three largest with whole-unit amounts. A snapshot written before
+/// this widget existed has no month, so the widget asks to open Wafra.
+struct WafraSpendingView: View {
+  let entry: WafraEntry
+  @Environment(\.colorScheme) private var colorScheme
+
+  var body: some View {
+    let strings = entry.strings
+    WafraBandReader(palette: WafraBand.spending) { band in
+      Group {
+        if let snapshot = entry.freshSnapshot, let spending = snapshot.spending {
+          content(snapshot, spending: spending, strings: strings, band: band)
+        } else {
+          WafraUpdateNeededView(title: strings.spendingWidgetName, strings: strings, band: band)
+        }
+      }
+    }
+    .wafraDirection(entry.language)
+    .dynamicTypeSize(...DynamicTypeSize.xxLarge)
+    .wafraWidgetBackground(WafraBand.spending(colorScheme).band)
+    .widgetURL(WafraShared.appURL)
+  }
+
+  private func content(_ snapshot: WafraSnapshot, spending: WafraSpending, strings: WafraStrings, band: WafraBand) -> some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Text(WafraDates.monthName(spending.month, language: snapshot.language))
+          .font(.footnote.weight(.semibold))
+          .foregroundColor(band.onBand)
+          .lineLimit(1)
+        Spacer(minLength: 0)
+        if !snapshot.hidden, !spending.categories.isEmpty, let total = spending.totalMinor {
+          Text(WafraMoney.isolate("\(snapshot.currency) \(WafraMoney.whole(total, exponent: snapshot.exponent))", snapshot.language))
+            .font(.footnote.weight(.medium).monospacedDigit())
+            .foregroundColor(band.onBand)
+            .lineLimit(1)
+            .wafraAmount(snapshot)
+            .accessibilityLabel(WafraMoney.format(total, in: snapshot))
+        }
+      }
+      if spending.categories.isEmpty {
+        Spacer(minLength: 0)
+        Text(strings.spendingEmpty)
+          .font(.subheadline.weight(.medium))
+          .foregroundColor(band.onBand)
+          .frame(maxWidth: .infinity)
+          .multilineTextAlignment(.center)
+        Spacer(minLength: 0)
+      } else {
+        WafraShareBar(segments: spending.segments(hidden: snapshot.hidden), band: band)
+          .frame(height: 26)
+          .padding(.top, 14)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+          ForEach(Array(spending.categories.prefix(3).enumerated()), id: \.offset) { index, category in
+            if index > 0 { Spacer(minLength: 0) }
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+              Text(category.label)
+                .lineLimit(1)
+              if !snapshot.hidden, let amount = category.amountMinor {
+                Text(WafraMoney.whole(amount, exponent: snapshot.exponent))
+                  .monospacedDigit()
+                  .lineLimit(1)
+                  .wafraAmount(snapshot)
+              }
+            }
+          }
+        }
+        .font(.caption)
+        .foregroundColor(band.onBand.opacity(0.9))
+        .padding(.top, 12)
+        Spacer(minLength: 0)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+}
+
+/// The share bar: rounded segments in the band's text tone at falling
+/// opacity. Without shares (hidden amounts) it is one quiet bar.
+struct WafraShareBar: View {
+  let segments: [(share: Double, alpha: Double)]
+  let band: WafraBand
+
+  var body: some View {
+    GeometryReader { geometry in
+      let parts = segments.isEmpty ? [(share: 1.0, alpha: WafraSpending.restAlpha)] : segments
+      let available = max(0, geometry.size.width - 3 * CGFloat(parts.count - 1))
+      HStack(spacing: 3) {
+        ForEach(0..<parts.count, id: \.self) { index in
+          RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .fill(band.onBand.opacity(parts[index].alpha))
+            .frame(width: max(2, available * CGFloat(parts[index].share)))
+        }
+      }
+    }
+    .accessibilityHidden(true)
   }
 }

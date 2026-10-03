@@ -1,7 +1,7 @@
 # Wafra Android widgets
 
-Two classic `AppWidgetProvider` widgets built with `RemoteViews` (no Glance or
-Compose):
+Three classic `AppWidgetProvider` widgets built with `RemoteViews` (no Glance
+or Compose):
 
 - **Today** (`TodayWidgetProvider`, 2x2): on Home's ink band, the exact total
   for the last 7 days, then today's spending as the band figure
@@ -12,6 +12,21 @@ Compose):
   when unknown; a calendar glyph when the title has no letter), a due word
   ("Today", "Tomorrow", the weekday within the coming week, otherwise
   "Mon 5 Oct") and the amount (`≈` when estimated).
+- **Spending this month** (`SpendingWidgetProvider`, 4x2): on Spending's clay
+  band, the month and its total, a share bar of the categories (three named in
+  falling strength, the rest quiet) and the three largest with whole-unit
+  amounts. The figures are the Spending tab's own for the live month
+  (`summarizeMonth` + `spendingCategoryRows`, via `widgetMonthSpending`).
+  A snapshot without a month (written by an older app) asks to open Wafra.
+
+Today also draws the week as seven bars (today in mint, a zero day a thin
+baseline), a corner of three pattern shapes, and a bar of how much of the
+budgets is used (the over colour once any budget is past its limit). Coming up
+heads its list with the listed bills' total (`≈` when any is an estimate), sets
+each due word in a pill ("in 9 days" past the coming week), and shows a
+calendar glyph over its empty state. Bars and share bars are white masks drawn
+in `WidgetGraphics` and tinted by colour resources in the layout, so they
+follow the launcher's light or dark mode.
 
 Colours follow design language E (`docs/design/language-e.md`): `values/` and
 `values-night/` carry the light and deepened dark bands from
@@ -55,8 +70,10 @@ The widgets never read the ledger, SMS, notifications or any other app data.
 Contract (version 1; anything else shows the empty state):
 `version, generatedAt (ms), language ('en'|'ar'), todayISO, currency, exponent,
 amountsSensitive, hidden, todayMinor, todayCount, last7Minor[7] (oldest first),
-leftInBudgetsMinor, perDayMinor, budgetsOver, bills[{title, amountMinor,
-estimated, dueISO, logoId?}]`. Amounts are whole minor units shown as
+leftInBudgetsMinor, budgetTotalMinor?, perDayMinor, budgetsOver, bills[{title,
+amountMinor, estimated, dueISO, logoId?}], spending?{monthKey, totalMinor,
+categories[{label, amountMinor}] (largest first, at most six), otherMinor}`.
+Fields marked `?` are absent from older snapshots and are optional. Amounts are whole minor units shown as
 `<CURRENCY> 1,234.56` with exactly `exponent` decimals and Latin digits.
 
 ## Safety rules

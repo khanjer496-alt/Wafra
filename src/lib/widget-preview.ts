@@ -1,4 +1,4 @@
-import type { WidgetBill, WidgetSnapshot } from '@/lib/widget-snapshot';
+import type { WidgetBill, WidgetSnapshot, WidgetSpending } from '@/lib/widget-snapshot';
 import type { WidgetsCopy } from '@/lib/widgets-copy';
 
 /**
@@ -78,8 +78,9 @@ function dayNumber(iso: string): number | null {
 }
 
 /**
- * "Today", "Tomorrow", the weekday within the coming week ("Monday"), or
- * "Mon 5 Oct" further out, so a weekday never means next week's.
+ * The due pill: "Today", "Tomorrow", the weekday within the coming week
+ * ("Monday"), then "in 9 days", so a weekday never means next week's. A date
+ * that cannot be counted from today falls back to "Mon 5 Oct".
  */
 export function widgetDueLabel(dueISO: string, todayISO: string, words: WidgetsCopy): string {
   const due = dayNumber(dueISO);
@@ -90,6 +91,7 @@ export function widgetDueLabel(dueISO: string, todayISO: string, words: WidgetsC
   if (ahead === 0) return words.widgetToday;
   if (ahead === 1) return words.widgetTomorrow;
   if (ahead >= 2 && ahead <= 6) return words.weekdays[date.getUTCDay()]!;
+  if (ahead >= 7) return words.widgetInDays(ahead);
   return `${words.weekdaysShort[date.getUTCDay()]} ${date.getUTCDate()} ${words.monthsShort[date.getUTCMonth()]}`;
 }
 
@@ -108,6 +110,104 @@ export function widgetBillAmount(bill: WidgetBill, snapshot: WidgetSnapshot): st
   if (amount === WIDGET_DASH) return amount;
   const text = bill.estimated ? `≈ ${amount}` : amount;
   return snapshot.language === 'ar' ? `${LRM}${text}${LRM}` : text;
+}
+
+/**
+ * What the listed bills add up to, for Coming up's header: "≈" when any of
+ * them is an estimate, null when an amount is hidden or unknown (a partial
+ * sum would understate what is due).
+ */
+export function widgetBillsTotal(bills: readonly WidgetBill[], snapshot: WidgetSnapshot): string | null {
+  if (snapshot.hidden || bills.length === 0) return null;
+  let total = 0;
+  for (const bill of bills) {
+    if (bill.amountMinor === null || !Number.isSafeInteger(bill.amountMinor)) return null;
+    total += bill.amountMinor;
+    if (!Number.isSafeInteger(total)) return null;
+  }
+  const amount = widgetMoneyText(total, snapshot);
+  if (amount === WIDGET_DASH) return null;
+  const text = bills.some((bill) => bill.estimated) ? `≈ ${amount}` : amount;
+  return snapshot.language === 'ar' ? `${LRM}${text}${LRM}` : text;
+}
+
+/**
+ * How much of this month's budgets is used, for the bar under Today's
+ * figure: (limits - left) / limits, clamped to 0..1, as the Lock Screen
+ * gauge reads it. `over` when any budget is past its limit. Null without
+ * budgets, when hidden, or for an older snapshot without the limits.
+ */
+export function widgetBudgetProgress(snapshot: WidgetSnapshot): { fraction: number; over: boolean } | null {
+  const total = snapshot.budgetTotalMinor ?? null;
+  const left = snapshot.leftInBudgetsMinor;
+  if (snapshot.hidden || total === null || left === null || total <= 0) return null;
+  const fraction = Math.min(1, Math.max(0, (total - left) / total));
+  return { fraction, over: snapshot.budgetsOver > 0 };
+}
+
+/** "1,836": whole major units, half up, as Home's week columns print them. */
+export function widgetWholeNumber(minor: number, exponent: number): string | null {
+  if (!Number.isSafeInteger(minor) || !Number.isInteger(exponent) || exponent < 0 || exponent > 4) return null;
+  const scale = 10 ** exponent;
+  const whole = Math.floor((Math.abs(minor) + Math.floor(scale / 2)) / scale);
+  const grouped = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${minor < 0 && whole > 0 ? '-' : ''}${grouped}`;
+}
+
+/**
+ * "AED 6,656": an amount in whole units for a tight line (the week under
+ * Today's bars, Spending's total), "—" when hidden or unknown. Isolated
+ * left to right inside Arabic. Spoken labels keep the exact amount.
+ */
+export function widgetWholeMoney(minor: number | null, snapshot: WidgetSnapshot): string {
+  if (snapshot.hidden || minor === null) return WIDGET_DASH;
+  const number = widgetWholeNumber(minor, snapshot.exponent);
+  if (number === null) return WIDGET_DASH;
+  const text = `${snapshot.currency} ${number}`;
+  return snapshot.language === 'ar' ? `${LRM}${text}${LRM}` : text;
+}
+
+/** Opacity of each share-bar segment on the Spending band: three named, the rest quiet. */
+export const WIDGET_SEGMENT_ALPHAS = [0.92, 0.7, 0.5] as const;
+export const WIDGET_SEGMENT_REST_ALPHA = 0.24;
+
+export interface WidgetSpendingView {
+  month: string;
+  /** "AED 5,480", or null when hidden. */
+  total: string | null;
+  /** Share-bar segments in order; empty when hidden or nothing was spent. */
+  segments: { share: number; alpha: number }[];
+  /** The three largest categories: name and whole-unit amount (null when hidden). */
+  top: { label: string; amount: string | null }[];
+}
+
+/**
+ * What the Spending widget draws from the snapshot's month. Null for a
+ * snapshot without it (written before the widget existed), so the widget
+ * asks the person to open Wafra instead of drawing an empty month.
+ */
+export function widgetSpendingView(snapshot: WidgetSnapshot, words: WidgetsCopy): WidgetSpendingView | null {
+  const spending: WidgetSpending | null | undefined = snapshot.spending;
+  if (!spending || !/^\d{4}-(0[1-9]|1[0-2])$/.test(spending.monthKey)) return null;
+  const month = words.months[Number(spending.monthKey.slice(5, 7)) - 1]!;
+  const whole = (minor: number | null) => snapshot.hidden || minor === null ? null : widgetWholeNumber(minor, snapshot.exponent);
+  const totalNumber = whole(spending.totalMinor);
+  const amounts = [...spending.categories.map((row) => row.amountMinor), spending.otherMinor];
+  const known = !snapshot.hidden && amounts.every((value) => value !== null && Number.isSafeInteger(value) && value >= 0);
+  const sum = known ? amounts.reduce<number>((acc, value) => acc + (value ?? 0), 0) : 0;
+  const named = spending.categories.length;
+  const segments = known && sum > 0
+    ? amounts.map((value, index) => ({ share: (value ?? 0) / sum,
+      // "Other" is always quiet, however few categories precede it.
+      alpha: index < named ? WIDGET_SEGMENT_ALPHAS[index] ?? WIDGET_SEGMENT_REST_ALPHA : WIDGET_SEGMENT_REST_ALPHA }))
+      .filter((segment) => segment.share > 0)
+    : [];
+  return {
+    month,
+    total: totalNumber === null ? null : widgetWholeMoney(spending.totalMinor, snapshot),
+    segments,
+    top: spending.categories.slice(0, 3).map((row) => ({ label: row.label, amount: whole(row.amountMinor) })),
+  };
 }
 
 /**

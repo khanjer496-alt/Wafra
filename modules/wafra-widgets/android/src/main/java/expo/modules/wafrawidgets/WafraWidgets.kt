@@ -24,7 +24,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * Stores the snapshot and renders both widgets from it. Nothing here reads the
+ * Stores the snapshot and renders the three widgets from it. Nothing here reads the
  * ledger, messages or any other app data: the snapshot JSON is the only input.
  */
 internal object WafraWidgets {
@@ -48,6 +48,7 @@ internal object WafraWidgets {
   private val BILL_GLYPHS = intArrayOf(R.id.wafra_bill_glyph_1, R.id.wafra_bill_glyph_2, R.id.wafra_bill_glyph_3)
   private val BILL_LOGOS = intArrayOf(R.id.wafra_bill_logo_1, R.id.wafra_bill_logo_2, R.id.wafra_bill_logo_3)
   private val BILL_MONO_LOGOS = intArrayOf(R.id.wafra_bill_logo_mono_1, R.id.wafra_bill_logo_mono_2, R.id.wafra_bill_logo_mono_3)
+  private val SPENDING_TOP = intArrayOf(R.id.wafra_spending_top_1, R.id.wafra_spending_top_2, R.id.wafra_spending_top_3)
   private val LOGO_DRAWABLES = mapOf(
     "amazon" to R.drawable.wafra_logo_amazon,
     "netflix" to R.drawable.wafra_logo_netflix,
@@ -129,7 +130,8 @@ internal object WafraWidgets {
       val manager = AppWidgetManager.getInstance(app) ?: return
       val todayIds = manager.getAppWidgetIds(ComponentName(app, TodayWidgetProvider::class.java)) ?: IntArray(0)
       val upcomingIds = manager.getAppWidgetIds(ComponentName(app, UpcomingWidgetProvider::class.java)) ?: IntArray(0)
-      if (todayIds.isEmpty() && upcomingIds.isEmpty()) return
+      val spendingIds = manager.getAppWidgetIds(ComponentName(app, SpendingWidgetProvider::class.java)) ?: IntArray(0)
+      if (todayIds.isEmpty() && upcomingIds.isEmpty() && spendingIds.isEmpty()) return
 
       val snapshot = WidgetSnapshot.parse(
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)
@@ -137,14 +139,18 @@ internal object WafraWidgets {
       val now = System.currentTimeMillis()
       val todayISO = isoDate(Calendar.getInstance())
       for (id in todayIds) {
+        val width = widgetWidthDp(manager, id)
         manager.updateAppWidget(id, sized(manager, id, TODAY_BREAKPOINTS) { height ->
-          renderToday(app, snapshot, now, todayISO, todayIsCompact(height))
+          renderToday(app, snapshot, now, todayISO, todayIsCompact(height), width)
         })
       }
       for (id in upcomingIds) {
         manager.updateAppWidget(id, sized(manager, id, UPCOMING_BREAKPOINTS) { height ->
           renderUpcoming(app, snapshot, now, todayISO, upcomingRowsFor(height))
         })
+      }
+      for (id in spendingIds) {
+        manager.updateAppWidget(id, renderSpending(app, snapshot, now, widgetWidthDp(manager, id)))
       }
       scheduleNextRefresh(app, snapshot, now)
     } catch (error: Exception) {
@@ -173,12 +179,19 @@ internal object WafraWidgets {
     return render(if (height > 0) height else Int.MAX_VALUE)
   }
 
+  /** The widget's portrait width in dp as the launcher reports it; 0 when unknown. */
+  private fun widgetWidthDp(manager: AppWidgetManager, appWidgetId: Int): Int =
+    manager.getAppWidgetOptions(appWidgetId)?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) ?: 0
+
+  private fun px(dp: Float, density: Float): Int = maxOf(1, Math.round(dp * density))
+
   private fun renderToday(
     context: Context,
     snapshot: WidgetSnapshot?,
     now: Long,
     todayISO: String,
     compact: Boolean,
+    widthDp: Int,
   ): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.wafra_widget_today)
     attachLaunch(context, views)
@@ -206,9 +219,29 @@ internal object WafraWidgets {
     )
 
     views.setViewVisibility(R.id.wafra_today_week, if (compact) View.GONE else View.VISIBLE)
+    val density = context.resources.displayMetrics.density
+    val rtl = snapshot.language == "ar"
+    if (!compact) {
+      // Seven bars, oldest first, on the week's own scale; today in the accent.
+      val chartWidth = px(WidgetGraphics.weekChartWidthDp(widthDp).toFloat(), density)
+      val chartHeight = px(WidgetGraphics.WEEK_CHART_HEIGHT_DP.toFloat(), density)
+      val heights = WidgetGraphics.weekBarHeights(
+        snapshot.last7Minor, snapshot.hidden, chartHeight.toFloat(),
+        WidgetGraphics.MIN_BAR_DP * density, WidgetGraphics.BASELINE_DP * density,
+      )
+      val (others, today) = WidgetGraphics.weekBars(
+        heights, WidgetGraphics.todayHasBar(snapshot.last7Minor, snapshot.hidden), chartWidth, chartHeight, density, rtl,
+      )
+      views.setImageViewBitmap(R.id.wafra_today_bars, others)
+      views.setImageViewBitmap(R.id.wafra_today_bars_today, today)
+    }
     views.setTextViewText(R.id.wafra_today_week_label, res.getString(R.string.wafra_widget_last_7_total))
-    val weekAmount = snapshot.formatMinor(snapshot.weekTotalMinor())
-    views.setTextViewText(R.id.wafra_today_week_amount, isolate(weekAmount, snapshot.language))
+    // The bars' label: whole units so it holds one line; spoken exactly.
+    val weekTotal = snapshot.weekTotalMinor()
+    val weekAmount = snapshot.formatMinor(weekTotal)
+    val weekShown = if (weekTotal == null || weekAmount == WidgetSnapshot.DASH) WidgetSnapshot.DASH
+    else "${snapshot.currency} ${WidgetGraphics.wholeNumber(weekTotal, snapshot.exponent)}"
+    views.setTextViewText(R.id.wafra_today_week_amount, isolate(weekShown, snapshot.language))
     views.setContentDescription(R.id.wafra_today_week_amount,
       if (weekAmount == WidgetSnapshot.DASH) res.getString(R.string.wafra_widget_amount_hidden) else weekAmount)
 
@@ -230,7 +263,26 @@ internal object WafraWidgets {
         R.id.wafra_today_budget_amount,
         isolate(snapshot.formatMinor(Math.abs(left)), snapshot.language),
       )
+      // How much of the budgets is used, in the accent, or the over colour
+      // once any budget is past its limit.
+      val fraction = WidgetGraphics.budgetFraction(snapshot.budgetTotalMinor, left, snapshot.hidden)
+      if (fraction != null) {
+        val over = snapshot.budgetsOver > 0
+        val fill = WidgetGraphics.progressFill(
+          fraction,
+          px(WidgetGraphics.contentWidthDp(widthDp).toFloat(), density),
+          px(WidgetGraphics.PROGRESS_HEIGHT_DP.toFloat(), density),
+          rtl,
+        )
+        views.setViewVisibility(R.id.wafra_today_progress, View.VISIBLE)
+        views.setViewVisibility(R.id.wafra_today_progress_fill, if (over) View.GONE else View.VISIBLE)
+        views.setViewVisibility(R.id.wafra_today_progress_over, if (over) View.VISIBLE else View.GONE)
+        views.setImageViewBitmap(if (over) R.id.wafra_today_progress_over else R.id.wafra_today_progress_fill, fill)
+      } else {
+        views.setViewVisibility(R.id.wafra_today_progress, View.GONE)
+      }
     } else {
+      views.setViewVisibility(R.id.wafra_today_progress, View.GONE)
       views.setViewVisibility(R.id.wafra_today_budget, View.GONE)
       views.setViewVisibility(R.id.wafra_today_count, View.VISIBLE)
       views.setTextViewText(R.id.wafra_today_count, paymentsText(res, snapshot.todayCount))
@@ -300,16 +352,27 @@ internal object WafraWidgets {
       null
     }
     for (i in BILL_ROWS.indices) views.setViewVisibility(BILL_ROWS[i], View.GONE)
+    views.setViewVisibility(R.id.wafra_upcoming_total, View.GONE)
 
     if (snapshot == null || bills == null || bills.isEmpty()) {
-      views.setViewVisibility(R.id.wafra_upcoming_empty, View.VISIBLE)
+      views.setViewVisibility(R.id.wafra_upcoming_empty_block, View.VISIBLE)
+      // The calendar glyph marks a clear month; a stale widget only asks to open Wafra.
+      views.setViewVisibility(R.id.wafra_upcoming_empty_glyph, if (bills == null) View.GONE else View.VISIBLE)
       views.setTextViewText(
         R.id.wafra_upcoming_empty,
         res.getString(if (bills == null) R.string.wafra_widget_open_to_update else R.string.wafra_widget_no_bills),
       )
       return views
     }
-    views.setViewVisibility(R.id.wafra_upcoming_empty, View.GONE)
+    views.setViewVisibility(R.id.wafra_upcoming_empty_block, View.GONE)
+
+    // What the listed bills add up to; "≈" when any is an estimate.
+    val total = billsTotal(bills, snapshot)
+    if (total != null) {
+      views.setViewVisibility(R.id.wafra_upcoming_total, View.VISIBLE)
+      views.setTextViewText(R.id.wafra_upcoming_total, isolate(total, snapshot.language))
+      views.setContentDescription(R.id.wafra_upcoming_total, res.getString(R.string.wafra_widget_total_due, total))
+    }
 
     val locale = if (snapshot.language == "ar") Locale.forLanguageTag("ar") else Locale.US
     for ((i, bill) in bills.withIndex()) {
@@ -349,6 +412,85 @@ internal object WafraWidgets {
     }
     return views
   }
+
+  /**
+   * The listed bills' sum, "≈ AED 1,234.00" when any is an estimate; null when
+   * an amount is hidden or unknown, since a partial sum would understate it.
+   */
+  internal fun billsTotal(bills: List<WidgetBill>, snapshot: WidgetSnapshot): String? {
+    if (snapshot.hidden || bills.isEmpty()) return null
+    var total = 0L
+    for (bill in bills) {
+      val amount = bill.amountMinor ?: return null
+      total = try { Math.addExact(total, amount) } catch (_: ArithmeticException) { return null }
+    }
+    val formatted = snapshot.formatMinor(total)
+    if (formatted == WidgetSnapshot.DASH) return null
+    return if (bills.any { it.estimated }) "≈ $formatted" else formatted
+  }
+
+  private fun renderSpending(context: Context, snapshot: WidgetSnapshot?, now: Long, widthDp: Int): RemoteViews {
+    val views = RemoteViews(context.packageName, R.layout.wafra_widget_spending)
+    attachLaunch(context, views)
+    applyLanguageDirection(context, views, snapshot?.language)
+    val res = resourcesFor(context, snapshot?.language)
+    val spending = snapshot?.spending?.takeIf { snapshot.isFresh(now) }
+    views.setViewVisibility(R.id.wafra_spending_total, View.GONE)
+    if (snapshot == null || spending == null) {
+      // No month in the snapshot (written before this widget, or stale).
+      views.setTextViewText(R.id.wafra_spending_month, res.getString(R.string.wafra_widget_spending_name))
+      views.setViewVisibility(R.id.wafra_spending_content, View.GONE)
+      views.setViewVisibility(R.id.wafra_spending_empty, View.VISIBLE)
+      views.setTextViewText(R.id.wafra_spending_empty, res.getString(R.string.wafra_widget_open_to_update))
+      return views
+    }
+    val locale = if (snapshot.language == "ar") Locale.forLanguageTag("ar") else Locale.US
+    views.setTextViewText(R.id.wafra_spending_month, monthName(spending.month, locale))
+    if (spending.categories.isEmpty()) {
+      views.setViewVisibility(R.id.wafra_spending_content, View.GONE)
+      views.setViewVisibility(R.id.wafra_spending_empty, View.VISIBLE)
+      views.setTextViewText(R.id.wafra_spending_empty, res.getString(R.string.wafra_widget_spending_empty))
+      return views
+    }
+    views.setViewVisibility(R.id.wafra_spending_empty, View.GONE)
+    views.setViewVisibility(R.id.wafra_spending_content, View.VISIBLE)
+    val total = spending.totalMinor
+    if (!snapshot.hidden && total != null) {
+      val text = "${snapshot.currency} ${WidgetGraphics.wholeNumber(total, snapshot.exponent)}"
+      views.setViewVisibility(R.id.wafra_spending_total, View.VISIBLE)
+      views.setTextViewText(R.id.wafra_spending_total, isolate(text, snapshot.language))
+      views.setContentDescription(R.id.wafra_spending_total, snapshot.formatMinor(total))
+    }
+    val density = context.resources.displayMetrics.density
+    val width = px(WidgetGraphics.contentWidthDp(widthDp).toFloat(), density)
+    val height = px(WidgetGraphics.SHARE_BAR_HEIGHT_DP.toFloat(), density)
+    val segments = WidgetGraphics.shareSegments(
+      spending.categories.map { it.amountMinor } + spending.otherMinor,
+      spending.categories.size, snapshot.hidden, width.toFloat(), WidgetGraphics.SHARE_GAP_DP * density,
+      snapshot.language == "ar",
+    )
+    views.setImageViewBitmap(R.id.wafra_spending_bar, WidgetGraphics.shareBar(segments, width, height, density))
+    for (i in SPENDING_TOP.indices) {
+      val category = spending.categories.getOrNull(i)
+      views.setViewVisibility(SPENDING_TOP[i], if (category == null) View.INVISIBLE else View.VISIBLE)
+      if (category == null) continue
+      val amount = category.amountMinor
+      views.setTextViewText(
+        SPENDING_TOP[i],
+        if (snapshot.hidden || amount == null) category.label
+        else "${category.label} ${WidgetGraphics.wholeNumber(amount, snapshot.exponent)}",
+      )
+      views.setContentDescription(
+        SPENDING_TOP[i],
+        if (snapshot.hidden || amount == null) category.label else "${category.label} ${snapshot.formatMinor(amount)}",
+      )
+    }
+    return views
+  }
+
+  /** "September" / "سبتمبر": the month's full name in the widget's language. */
+  internal fun monthName(month: Int, locale: Locale): String =
+    DateFormatSymbols.getInstance(locale).months[(month - 1).coerceIn(0, 11)]
 
   /** Follow Wafra's chosen language even when the launcher uses another one. */
   private fun applyLanguageDirection(context: Context, views: RemoteViews, language: String?) {
@@ -412,16 +554,21 @@ internal object WafraWidgets {
 
 
   /**
-   * "Today", "Tomorrow", the weekday within the coming week ("Monday"), or
-   * "Mon 5 Oct" further out, so a weekday never means next week's.
+   * The due pill: "Today", "Tomorrow", the weekday within the coming week
+   * ("Monday"), then "in 9 days", so a weekday never means next week's. A day
+   * that cannot be counted from today keeps its date ("Mon 5 Oct").
    */
   internal fun dueWord(res: Resources, dueISO: String, todayISO: String, locale: Locale): String {
     val due = parseDay(dueISO) ?: return dueISO
     val today = parseDay(todayISO) ?: return shortDate(dueISO, locale)
-    return when ((due.timeInMillis - today.timeInMillis) / DAY_MS) {
-      0L -> res.getString(R.string.wafra_widget_today)
-      1L -> res.getString(R.string.wafra_widget_tomorrow)
-      in 2L..6L -> DateFormatSymbols.getInstance(locale).weekdays[due.get(Calendar.DAY_OF_WEEK)]
+    val ahead = (due.timeInMillis - today.timeInMillis) / DAY_MS
+    return when {
+      ahead == 0L -> res.getString(R.string.wafra_widget_today)
+      ahead == 1L -> res.getString(R.string.wafra_widget_tomorrow)
+      ahead in 2L..6L -> DateFormatSymbols.getInstance(locale).weekdays[due.get(Calendar.DAY_OF_WEEK)]
+      ahead >= 7L && ahead <= 9_999L -> String.format(
+        Locale.US, res.getQuantityString(R.plurals.wafra_widget_in_days, ahead.toInt()), ahead.toInt(),
+      )
       else -> shortDate(dueISO, locale)
     }
   }

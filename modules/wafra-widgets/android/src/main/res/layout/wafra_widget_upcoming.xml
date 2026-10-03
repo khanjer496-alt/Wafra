@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Live "Coming up" widget on Bills' ochre band: up to three bills from the
      snapshot, each with its bundled merchant logo (initial fallback),
-     due word and amount. Short widgets list fewer rows instead of clipping:
+     due pill and amount, under a header with their total. Short widgets list fewer rows instead of clipping:
      three from 170dp of height, two from 130dp, otherwise one
      (WafraWidgets.upcomingRowsFor).
 
@@ -24,30 +24,66 @@
     android:orientation="vertical"
     android:padding="16dp">
 
-    <TextView
-      android:id="@+id/wafra_upcoming_label"
+    <!-- "Coming up" and what the listed bills add up to. -->
+    <LinearLayout
       android:layout_width="match_parent"
       android:layout_height="wrap_content"
-      android:fontFamily="sans-serif-medium"
-      android:maxLines="1"
-      android:ellipsize="end"
-      android:text="@string/wafra_widget_upcoming"
-      android:textAlignment="viewStart"
-      android:textColor="@color/wafra_widget_upcoming_text"
-      android:textSize="12sp" />
+      android:gravity="center_vertical"
+      android:orientation="horizontal">
+      <TextView
+        android:id="@+id/wafra_upcoming_label"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:fontFamily="sans-serif-medium"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:text="@string/wafra_widget_upcoming"
+        android:textAlignment="viewStart"
+        android:textColor="@color/wafra_widget_upcoming_text"
+        android:textSize="12sp" />
+      <TextView
+        android:id="@+id/wafra_upcoming_total"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:fontFamily="sans-serif-medium"
+        android:fontFeatureSettings="tnum"
+        android:maxLines="1"
+        android:textDirection="firstStrongLtr"
+        android:textColor="@color/wafra_widget_upcoming_text"
+        android:textSize="12sp"
+        android:visibility="gone" />
+    </LinearLayout>
 
-    <!-- Empty and stale states sit centred in the space under the header. -->
-    <TextView
-      android:id="@+id/wafra_upcoming_empty"
+    <!-- Empty and stale states sit centred in the space under the header;
+         a clear month also shows the calendar glyph. -->
+    <LinearLayout
+      android:id="@+id/wafra_upcoming_empty_block"
       android:layout_width="match_parent"
       android:layout_height="0dp"
       android:layout_weight="1"
-      android:fontFamily="sans-serif-medium"
-      android:gravity="center_vertical|start"
-      android:text="@string/wafra_widget_open_to_update"
-      android:textAlignment="viewStart"
-      android:textColor="@color/wafra_widget_upcoming_text"
-      android:textSize="15sp" />
+      android:gravity="center"
+      android:orientation="vertical">
+      <ImageView
+        android:id="@+id/wafra_upcoming_empty_glyph"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_marginBottom="6dp"
+        android:importantForAccessibility="no"
+        android:src="@drawable/wafra_widget_glyph_calendar"
+        android:visibility="gone" />
+      <TextView
+        android:id="@+id/wafra_upcoming_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium"
+        android:gravity="center"
+        android:text="@string/wafra_widget_open_to_update"
+        android:textAlignment="center"
+        android:textColor="@color/wafra_widget_upcoming_text"
+        android:textSize="14sp" />
+    </LinearLayout>
 
     <LinearLayout
       android:id="@+id/wafra_bill_row_1"
@@ -124,13 +160,17 @@
 
         <TextView
           android:id="@+id/wafra_bill_date_1"
-          android:layout_width="match_parent"
+          android:layout_width="wrap_content"
           android:layout_height="wrap_content"
+          android:layout_gravity="start"
+          android:layout_marginTop="2dp"
+          android:background="@drawable/wafra_widget_pill"
           android:maxLines="1"
           android:ellipsize="end"
-          android:textAlignment="viewStart"
-          android:textColor="@color/wafra_widget_upcoming_secondary"
-          android:textSize="12sp" />
+          android:paddingStart="7dp"
+          android:paddingEnd="7dp"
+          android:textColor="@color/wafra_widget_upcoming_text"
+          android:textSize="11sp" />
       </LinearLayout>
 
       <TextView
@@ -221,13 +261,17 @@
 
         <TextView
           android:id="@+id/wafra_bill_date_2"
-          android:layout_width="match_parent"
+          android:layout_width="wrap_content"
           android:layout_height="wrap_content"
+          android:layout_gravity="start"
+          android:layout_marginTop="2dp"
+          android:background="@drawable/wafra_widget_pill"
           android:maxLines="1"
           android:ellipsize="end"
-          android:textAlignment="viewStart"
-          android:textColor="@color/wafra_widget_upcoming_secondary"
-          android:textSize="12sp" />
+          android:paddingStart="7dp"
+          android:paddingEnd="7dp"
+          android:textColor="@color/wafra_widget_upcoming_text"
+          android:textSize="11sp" />
       </LinearLayout>
 
       <TextView
@@ -318,13 +362,17 @@
 
         <TextView
           android:id="@+id/wafra_bill_date_3"
-          android:layout_width="match_parent"
+          android:layout_width="wrap_content"
           android:layout_height="wrap_content"
+          android:layout_gravity="start"
+          android:layout_marginTop="2dp"
+          android:background="@drawable/wafra_widget_pill"
           android:maxLines="1"
           android:ellipsize="end"
-          android:textAlignment="viewStart"
-          android:textColor="@color/wafra_widget_upcoming_secondary"
-          android:textSize="12sp" />
+          android:paddingStart="7dp"
+          android:paddingEnd="7dp"
+          android:textColor="@color/wafra_widget_upcoming_text"
+          android:textSize="11sp" />
       </LinearLayout>
 
       <TextView
