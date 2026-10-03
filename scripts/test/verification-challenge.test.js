@@ -133,5 +133,17 @@ ok('still posts: a plain unfamiliar-bank charge on the generic path',
   postable(genericStatus('ZABank: Card purchase of ZAR 389.45 at KLOOF GROCER on card ending 4412.', 'ZABANK')),
   JSON.stringify(genericStatus('ZABank: Card purchase of ZAR 389.45 at KLOOF GROCER on card ending 4412.', 'ZABANK')));
 
+// A yes/no reply that is an OFFER, not a confirmation, never refuses the charge.
+{
+  const offer = 'Chase: Your card ending 1005 was charged USD 50.00 at SHOP. Reply YES/NO to convert to installments.';
+  ok('still posts: a charge with an instalment-offer Reply YES/NO footer (market path)',
+    postable(marketStatus(offer)), JSON.stringify(marketStatus(offer)));
+  ok('still posts: a charge with an instalment-offer Reply YES/NO footer (generic path)',
+    postable(genericStatus(offer, 'CHASE')), JSON.stringify(genericStatus(offer, 'CHASE')));
+  const confirm = 'Chase: A charge of USD 50.00 at SHOP on card ending 1005. To confirm it was you, reply YES or NO.';
+  ok('refuses: a reply YES/NO that asks to confirm the transaction',
+    !postable(marketStatus(confirm)), JSON.stringify(marketStatus(confirm)));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

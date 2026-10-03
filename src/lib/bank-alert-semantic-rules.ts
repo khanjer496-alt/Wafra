@@ -136,10 +136,12 @@ export const automaticMeaning = (
  * question it expects an answer to: an interrogative about whether the
  * customer made a transaction (it must name one, or an amount, so a marketing
  * tail such as "Have you tried our new app?" never qualifies), or an explicit
- * instruction to reply yes/no.
+ * instruction to reply yes/no ABOUT confirming the transaction. A bare
+ * "Reply YES/NO to convert to installments" footer on a posted charge is an
+ * offer, not a challenge, and must not refuse the spending.
  */
 const VERIFICATION_CHALLENGE =
-  /\b(?:did|have)\s+you\s+(?:recently\s+)?(?:attempt|attempted|make|made|try|tried|authori[sz]e|authori[sz]ed|initiate|initiated|use|used)\b[^.?!\n]{0,60}?(?:\b(?:transaction|purchase|payment|charge|withdrawal|transfer)\b|\b[A-Z]{3}\s?\d|\d[\d,]*\.\d{2})|\bwas\s+(?:this|that)\s+(?:transaction\s+)?you\b|\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s*(?:or|\/|,)\s*(?:"|')?(?:no|n)(?:"|')?\b|(?:^|[^\p{L}\p{M}])هل\s+(?:قمت|أجريت|حاولت|استخدمت)(?=$|[^\p{L}\p{M}])/iu;
+  /\b(?:did|have)\s+you\s+(?:recently\s+)?(?:attempt|attempted|make|made|try|tried|authori[sz]e|authori[sz]ed|initiate|initiated|use|used)\b[^.?!\n]{0,60}?(?:\b(?:transaction|purchase|payment|charge|withdrawal|transfer)\b|\b[A-Z]{3}\s?\d|\d[\d,]*\.\d{2})|\bwas\s+(?:this|that)\s+(?:transaction\s+)?you\b|\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s*(?:or|\/|,)\s*(?:"|')?(?:no|n)(?:"|')?\b(?=[^.?!\n]{0,80}?\b(?:if\s+you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|to\s+confirm|confirm(?:ing)?\s+(?:this|the|it)|was\s+(?:this|it)\s+you|genuine|fraud)\b)|\b(?:to\s+confirm|confirm(?:ing)?\s+(?:this|the|it)|if\s+you\s+(?:made|did|authori[sz]ed|recogni[sz]e)|was\s+(?:this|it)\s+you|genuine|fraud)\b[^.?!\n]{0,80}?\breply\s+(?:with\s+)?(?:"|')?(?:yes|y)(?:"|')?\s*(?:or|\/|,)\s*(?:"|')?(?:no|n)(?:"|')?\b|(?:^|[^\p{L}\p{M}])هل\s+(?:قمت|أجريت|حاولت|استخدمت)(?=$|[^\p{L}\p{M}])/iu;
 
 /**
  * True when the bank is ASKING whether the customer made a transaction.

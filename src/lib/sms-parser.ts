@@ -5211,7 +5211,15 @@ const STATEMENT_ISSUE_LABEL_RE =
   /\b(?:statement|stmt)(?:\s+of\s+(?:the\s+|your\s+)?(?:credit\s+)?card\s+(?:no\.?\s+|number\s+)?(?:ending\s+(?:with|in)\s+)?[X*•·\d]{4,})?\s*(?:is\s+)?(?:dated|date|dt\.?|generated\s+on|issued\s+on|prepared\s+on)\s*(?:is|:|-|on)?\s*/gi;
 const STATEMENT_DATE_TOKEN_RE =
   /^(?:(\d{4})-(\d{2})-(\d{2})(?!\d)|(\d{1,2})[/.-](\d{1,2}|[A-Za-z]{3,9})[/.-](\d{2,4})(?!\d)|(\d{1,2})\s*([A-Za-z]{3,9})(?:\s*,?\s*(\d{4})(?![\d:])|(\d{2})(?![\d:])|\s*,?\s+(\d{2})(?![\d:])(?!\s*[A-Za-z])))/;
-const STATEMENT_DATE_RANGE_RE = /^\s*(?:-|–|—|to|till|until)\s*\d/i;
+// A range needs a full second DATE after the separator: "01/08/26 - 21 days
+// to pay" is a countdown, and treating it as a range lost the issue date.
+const STATEMENT_DATE_RANGE_SEPARATOR_RE = /^\s*(?:-|–|—|to|till|until)\s*/i;
+const isStatementDateRange = (after: string): boolean => {
+  const separator = after.match(STATEMENT_DATE_RANGE_SEPARATOR_RE);
+  if (!separator) return false;
+  const second = after.slice(separator[0].length).match(STATEMENT_DATE_TOKEN_RE);
+  return !!second && statementTokenDate(second) !== null;
+};
 const STATEMENT_ISSUE_DATE_AR_RE = /تاريخ\s+(?:ال)?كشف\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/;
 function statementTokenDate(m: RegExpMatchArray): string | null {
   if (m[1] !== undefined) return isoDate(Number(m[1]), Number(m[2]), Number(m[3]));
@@ -5228,7 +5236,7 @@ function extractStatementIssueDate(raw: string, dueDate: string | null): string 
     const rest = raw.slice(label.index + label[0].length);
     const token = rest.match(STATEMENT_DATE_TOKEN_RE);
     if (!token) continue;
-    if (STATEMENT_DATE_RANGE_RE.test(rest.slice(token[0].length))) return null;
+    if (isStatementDateRange(rest.slice(token[0].length))) return null;
     date = statementTokenDate(token);
     break;
   }

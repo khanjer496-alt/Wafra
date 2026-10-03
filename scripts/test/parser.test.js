@@ -6438,6 +6438,7 @@ for (const [desc, merchant, category] of [
     ['the ENBD mini statement keeps its statement date', 'Emirates NBD Credit Card Mini Stmt for Card ending 8575: Statement date 28/08/26. Total Amt Due AED 2469.92, Due Date 22/09/26. Min Amt Due AED 513.62', '2026-08-28'],
     ['a due date is never read as the statement date', 'Credit Card ending 8575: Due Date 22/09/26. Total Amt Due AED 2469.92. Min Amt Due AED 513.62', undefined],
     ['a statement date range states a period, not a closing day', 'Credit Card ending 8575. Statement Date: 01/08/26 - 31/08/26. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
+    ['a countdown after the statement date is not a range', 'Credit Card ending 8575. Statement Date: 01/08/26 - 21 days to pay. Total Amt Due AED 100.00, Due Date 22/08/26', '2026-08-01'],
     ['...and the same range in words', 'Credit Card ending 8575. Statement dated 01 Aug 2026 to 31 Aug 2026. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
     ['a clock after a year-less month is not a year', 'Credit Card ending 8575. Statement date 28 Aug 15:30. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
     ['a count after a year-less month is not a year', 'Credit Card ending 8575. Statement date 28 Aug, 21 days to pay. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
