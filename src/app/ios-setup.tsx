@@ -1083,7 +1083,7 @@ export default function IosSetupScreen() {
         ? rawSetup.bundledHistorySupported === true && <IosSetupVideoCard kind="history" language={language} compact disabled={busy} />
         : applePayMode && rawSetup.bundledApplePaySupported === true
           ? <IosSetupVideoCard kind="apple-pay" language={language} compact disabled={busy} />
-          : messageMode && setup.shortcutVersion === 3 && <IosSetupVideoCard kind="capture" language={language} compact disabled={busy} />)}
+          : null)}
           {!progressLoaded || setup.loading ? (
             <ThemedText type="meta" style={{ color: band.textSecondary }}>{t('stillLoading')}</ThemedText>
           ) : historyMode ? (
@@ -1222,14 +1222,20 @@ export default function IosSetupScreen() {
                     disabled={busy || !setup.shortcutAvailable} />
                 </SetupStep>
               ) : showingAutomation && automationRelink ? (
-                <SetupStep palette={band} badge="3" title={shortcutCopy.relinkTitle}
-                  body={shortcutCopy.relinkBody.replace('{shortcut}', shortcutName)}>
-                  <EButton palette={band} label={shortcutCopy.editExisting} onPress={openExistingAutomation} disabled={busy} />
-                  <EButton palette={band} label={shortcutCopy.relinkConfirm} variant="secondary" onPress={confirmAutomation}
-                    disabled={busy} />
-                </SetupStep>
+                <>
+                  {setup.shortcutVersion === 3 && <IosSetupVideoCard kind="capture" language={language} compact disabled={busy} />}
+                  <SetupStep palette={band} badge="3" title={shortcutCopy.relinkTitle}
+                    body={shortcutCopy.relinkBody.replace('{shortcut}', shortcutName)}>
+                    <EButton palette={band} label={shortcutCopy.editExisting} onPress={openExistingAutomation} disabled={busy} />
+                    <EButton palette={band} label={shortcutCopy.relinkConfirm} variant="secondary" onPress={confirmAutomation}
+                      disabled={busy} />
+                  </SetupStep>
+                </>
               ) : showingAutomation ? (
                 <>
+                  {/* The recording shows the automation only, so it appears at
+                      this step: after the shortcut is added and tested. */}
+                  {setup.shortcutVersion === 3 && <IosSetupVideoCard kind="capture" language={language} compact disabled={busy} />}
                   <SetupStep palette={band} testID="ios-automation-guide-step" badge={`3.${guideShown + 1}`}
                     badgeLabel={shortcutCopy.screenOf.replace('{screen}', String(guideShown + 1))
                       .replace('{total}', String(shortcutCopy.guide.length))}

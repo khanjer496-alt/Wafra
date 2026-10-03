@@ -96,7 +96,11 @@ export function ScreenScaffold({
 }: ScreenScaffoldProps) {
   const safeAreaInsets = useSafeAreaInsets();
   const contentInsets = useScreenContentInsets({ tabbed, hasFooter: footer !== undefined, floatingClearance });
-  const keyboardHeight = useKeyboardHeight(keyboardAware && Platform.OS !== 'ios');
+  // iOS subscribes too: KeyboardAvoidingView's own update is async, so a show
+  // update that resolves after the hide (a quick type-and-submit) re-applies
+  // the keyboard's padding and leaves a keyboard-sized blank under the screen.
+  // Our listener resets reliably, so the view only pads while it says shown.
+  const keyboardHeight = useKeyboardHeight(keyboardAware);
   const resolvedHeaderMode = headerMode === 'auto'
     ? (tabbed ? 'inline' : 'native')
     : headerMode;
@@ -208,7 +212,8 @@ export function ScreenScaffold({
         <KeyboardAvoidingView
           style={styles.flex}
           keyboardVerticalOffset={keyboardVerticalOffset}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          enabled={Platform.OS !== 'ios' || keyboardHeight > 0}>
           {frame}
         </KeyboardAvoidingView>
       ) : frame}
