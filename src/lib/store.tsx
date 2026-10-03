@@ -2326,22 +2326,6 @@ const E2E_DEMO_LEDGER =
   Platform.OS === 'web' && process.env.EXPO_PUBLIC_WAFRA_E2E_DEMO === '1';
 
 /**
- * Screenmap needs real post-onboarding screens, not twelve screenshots of the
- * first-run overlay. Its CI job runs an iOS development simulator with a
- * synthetic ledger. Keep this opt-in behind BOTH the dedicated flag and the
- * development-only founder flag so a production build cannot accidentally
- * seed sample money even if one environment variable is misconfigured.
- *
- * The data itself is the same deterministic demoState() used by browser QA;
- * no phone backup, SMS body, account number or customer data is involved.
- */
-const SCREENMAP_DEMO_LEDGER =
-  Platform.OS === 'ios' &&
-  process.env.EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO === '1' &&
-  process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
-const SYNTHETIC_DEMO_LEDGER = E2E_DEMO_LEDGER || SCREENMAP_DEMO_LEDGER;
-
-/**
  * `transactions` cut into chunk bodies, chunk 0 holding the OLDEST rows.
  *
  * Exported for the perf suite, which asserts the property the whole scheme
@@ -2517,22 +2501,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const run = ++hydrationRun.current;
     markLaunchPhase('ledger-load-start');
     try {
-      // Screenmap is a simulator-only visual review harness. Its synthetic
-      // ledger must not depend on SQLCipher/keychain availability: a clean CI
-      // simulator can legitimately have no usable encrypted store yet, and a
-      // storage failure would place the recovery gate over every deep link.
-      // The guard itself is iOS-only and requires the dedicated Screenmap flag
-      // plus the development founder flag, so production and ordinary dev
-      // builds still exercise the real encrypted hydration path below.
-      if (SCREENMAP_DEMO_LEDGER) {
-        if (hydrationRun.current !== run) return false;
-        setHydrationFailed(false);
-        setStorageFailure(null);
-        setStorageRecoveryState(null);
-        dispatch({ type: 'hydrate', state: demoState() });
-        markLaunchPhase('ledger-load-complete');
-        return true;
-      }
       // A killed-process SMS/push wake can be finishing a short encrypted write
       // at the exact moment the user opens Wafra. Join that event-driven tail
       // before reading so hydration never presents the snapshot from one write
@@ -2559,7 +2527,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       if (hydrationRun.current !== run) return false;
       markLaunchPhase('ledger-read-complete');
-      let next: Partial<Omit<AppState, 'hydrated'>> = SYNTHETIC_DEMO_LEDGER
+      let next: Partial<Omit<AppState, 'hydrated'>> = E2E_DEMO_LEDGER
         ? demoState()
         : { onboarded: false };
       if (loaded) {
@@ -2686,13 +2654,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       return ok;
     };
-    // Screenmap state exists only for screenshots and is intentionally
-    // ephemeral. Do not touch SQLCipher/keychain in this dedicated CI mode.
-    // Left exactly as it was, and deliberately NOT marking the revision
-    // durable: `screenmap-demo-safety.test.cjs` pins this line as the promise
-    // that Screenmap never reaches encrypted persistence. The debounce may
-    // then call this again, which costs nothing — it returns here too.
-    if (SCREENMAP_DEMO_LEDGER) return Promise.resolve(true);
     return persistence.save(snapshot).then(commit).catch((error) => {
       setStorageFailure(recordStorageFailure('write', error));
       return false;
