@@ -1800,6 +1800,50 @@ function isCardStatement(text: string): boolean {
 }
 
 /**
+ * One statement, not two bound into one PDF: it states a payment due date,
+ * and every due date, statement date and minimum it prints agrees. A
+ * repeated page header prints the same values again, so it still counts as one.
+ */
+function singleStatementSummary(text: string): boolean {
+  const distinct = (pattern: RegExp) => new Set(
+    text.split(/\n+/)
+      .map((line) => pattern.exec(line.replace(/\s+/g, ' '))?.[1]?.replace(/\s+/g, ''))
+      .filter((value): value is string => !!value),
+  );
+  const dues = distinct(SUMMARY_DUE_DATE);
+  if (dues.size !== 1) return false;
+  if (distinct(SUMMARY_STATEMENT_DATE).size > 1) return false;
+  const minimums = new Set(
+    text.split(/\n+/)
+      .map((line) => SUMMARY_MINIMUM.exec(line.replace(/\s+/g, ' '))?.[0]?.replace(/^\D+/, '').replace(/\s+/g, ''))
+      .filter((value): value is string => !!value),
+  );
+  return minimums.size <= 1;
+}
+
+/**
+ * The one card a card statement belongs to: exactly one distinct top-level
+ * "Card Number" / "Credit Card Number" in the whole file, and the same card is
+ * the first one its header names. Cardholder sections ("Card No : XXXX - NAME")
+ * are not top-level labels. Null whenever that is not proven.
+ */
+function soleStatementCard(text: string): StatementInstrument | null {
+  const topLevel = /\b(?:credit\s+)?card\s+number\b|\bnumber\s+card\s+credit\b|رقم\s+البطاقة/iu;
+  const tails = new Set<string>();
+  let card: StatementInstrument | null = null;
+  for (const line of normalizeDigits(text).split(/\n+/)) {
+    if (!topLevel.test(line)) continue;
+    const instrument = statementInstrument(line, { iban: false });
+    if (!instrument || instrument.kind === 'account') continue;
+    tails.add(instrument.last4);
+    card ??= instrument;
+  }
+  if (tails.size !== 1 || !card) return null;
+  const header = statementInstrument(documentHeader(text), { iban: false });
+  return header && header.kind !== 'account' && header.last4 === card.last4 ? card : null;
+}
+
+/**
  * Credit-card transaction tables that expose both the original and posted
  * total amount need different semantics from an account Debit/Credit table.
  * The card itself is the direction authority: ordinary rows are charges and
@@ -2314,16 +2358,29 @@ export function parseStatementLines(
   // A flattened document has no safe table-to-account mapping. Repeated page
   // headers are fine; distinct labelled statement accounts must be split before
   // import instead of silently routing every section to the first account.
+  //
+  // One exception: a credit-card statement with a single summary. Its
+  // "Card No : XXXX7316 - NAME" sections are the supplementary or replacement
+  // cards billed on that one card account (ADCB prints one per cardholder),
+  // and the statement's one total, minimum and due date cover all of them.
+  // It needs a positive single-account signal, not just agreeing dates: one
+  // top-level card number in the whole file, the one its header prints. Two
+  // card numbers, or two different ACCOUNT numbers, still refuse.
+  const singleCardAccount = isCardStatement(text) && singleStatementSummary(text) ? soleStatementCard(text) : null;
   const sectionInstruments = new Set<string>();
   for (const line of text.split(/\n+/)) {
     if (!/^\s*(?:credit\s+card|card|account|a\/c)\s+(?:number|no\.?|ending)\b/i.test(line) &&
         !/^\s*(?:account|acct|a\/c|iban|card)\s*[:#-]?\s*[*xX•·\d]/i.test(line) &&
         !/^\s*number\s+card\s+credit\b/i.test(line)) continue;
     const instrument = statementInstrument(line, { iban: false }) ?? statementHeaderInstrument(line);
-    if (instrument) sectionInstruments.add(`${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`);
+    if (!instrument) continue;
+    if (instrument.kind !== 'account' && singleCardAccount) continue;
+    sectionInstruments.add(`${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`);
   }
   if (sectionInstruments.size > 1) throw new Error('multiple_statement_accounts');
-  const statedInstrument = identity.card ?? statementInstrument(text) ?? statementHeaderInstrument(text);
+  // Every row of a single card account goes to the statement's own card, never
+  // to whichever cardholder section happens to come first.
+  const statedInstrument = identity.card ?? singleCardAccount ?? statementInstrument(text) ?? statementHeaderInstrument(text);
   const bankHint = identity.bankHint ?? statementBankHint(text);
   const hsbcRepaymentCard = hsbcStatementRepaymentCard(text);
   const rawLines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());

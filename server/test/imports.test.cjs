@@ -1527,6 +1527,46 @@ function pagedPdf(pages) {
   ok('multi-account PDF refuses instead of assigning all sections to the first account', multiRejected);
   const repeatedAccount = parseStatementLines('Account Number XXXX1234\n2026-09-01 SHOP 10.00 DR\nAccount Number XXXX1234\n2026-09-02 SHOP 20.00 DR', 'AED');
   ok('repeated same-account page headers remain supported', repeatedAccount.rows.length === 2 && repeatedAccount.rows.every(row => row.card?.last4 === '1234'));
+  // An ADCB card statement prints one "Card No : XXXX - NAME" section per
+  // cardholder. A supplementary card is billed on the same card account, under
+  // the statement's one total and due date, so it is not a second statement.
+  const adcbHead = [
+    'Statement of account', 'Card Number XXXXXXXXXXXX2280',
+    'Statement Date 05/08/26', 'Payment Due Date 30/08/26', 'Minimum Payment Due 189.16',
+    'Total Outstanding 838.14', 'Total Credit Limit 16,100.00', 'Available Credit Limit 15,261.86',
+    'Transaction Date Transaction Description Amount in AED', 'PREVIOUS BALANCE OUTSTANDING 0.00',
+    'Card No : XXXXXXXXXXXX2280 - PRIMARY HOLDER',
+    '26/07/2026 DING MIDDLE EAST DUBAI ARE 27.99', '04/08/2026 E& DIGITAL APP ABU DHABI ARE 313.95',
+  ];
+  const adcbSupp = ['Card No : XXXXXXXXXXXX7316 - SUPPLEMENTARY HOLDER', '02/08/2026 AL SABAH SUPERMARKET AJMAN ARE 496.20'];
+  const adcbTail = ['05/08/2026 NEW BALANCE OUTSTANDING 838.14'];
+  const supplementary = parseStatementLines([...adcbHead, ...adcbSupp, ...adcbTail].join('\n'), 'AED');
+  const suppPurchases = supplementary.rows.filter(row => row.kind === 'transaction');
+  ok('a supplementary card section on one card statement imports onto the statement card',
+    suppPurchases.length === 3 && suppPurchases.every(row => row.card?.last4 === '2280' && row.type === 'expense') &&
+    supplementary.rows.some(row => row.kind === 'cardStatement' && row.amountFils === 83814) && supplementary.rejectedRows === 0);
+  let boundStatements = '';
+  try {
+    parseStatementLines([...adcbHead, ...adcbTail, 'Card Number XXXXXXXXXXXX9911', 'Statement Date 05/09/26',
+      'Payment Due Date 30/09/26', 'Minimum Payment Due 50.00', 'Card No : XXXXXXXXXXXX9911 - OTHER', '02/09/2026 SHOP ARE 80.00'].join('\n'), 'AED');
+  } catch (error) { boundStatements = error.message; }
+  ok('two card statements bound into one PDF still refuse', boundStatements === 'multiple_statement_accounts');
+  let cardTwoAccounts = '';
+  try {
+    parseStatementLines([...adcbHead, 'Account Number XXXX1234', ...adcbSupp, 'Account Number XXXX5678', ...adcbTail].join('\n'), 'AED');
+  } catch (error) { cardTwoAccounts = error.message; }
+  ok('a card statement naming two different accounts still refuses', cardTwoAccounts === 'multiple_statement_accounts');
+  // Agreeing dates and a common minimum floor are not proof of one account.
+  const refuses = (lines) => { try { parseStatementLines(lines.join('\n'), 'AED'); return ''; } catch (error) { return error.message; } };
+  ok('a second "Credit Card Number" on the same cycle still refuses',
+    refuses([...adcbHead, 'Credit Card Number XXXXXXXXXXXX9911', 'Card No : XXXXXXXXXXXX9911 - OTHER', '03/08/2026 SHOP ARE 80.00', ...adcbTail]) === 'multiple_statement_accounts');
+  ok('two card accounts with the same due date and minimum still refuse',
+    refuses([...adcbHead, ...adcbTail, 'Card Number XXXXXXXXXXXX9911', 'Statement Date 05/08/26', 'Payment Due Date 30/08/26',
+      'Minimum Payment Due 189.16', 'Card No : XXXXXXXXXXXX9911 - OTHER', '03/08/2026 SHOP ARE 80.00']) === 'multiple_statement_accounts');
+  ok('cardholder sections with no top-level card number still refuse',
+    refuses(['Statement Date 05/08/26', 'Payment Due Date 30/08/26', 'Minimum Payment Due 189.16', 'Total Outstanding 838.14',
+      'Total Credit Limit 16,100.00', 'Card No : XXXXXXXXXXXX7316 - SUPPLEMENTARY HOLDER', '02/08/2026 SHOP ARE 496.20',
+      'Card No : XXXXXXXXXXXX2280 - PRIMARY HOLDER', '04/08/2026 SHOP ARE 341.94']) === 'multiple_statement_accounts');
   const longAudit = parseStatementLines(`2026-09-01 ${'A'.repeat(410)} 10.00 DR\n2026-09-02 SHOP 5.00 DR`, 'AED');
   ok('overlong transaction lines are counted as rejected instead of complete coverage', longAudit.rows.length === 1 && longAudit.totalRows === 2 && longAudit.rejectedRows === 1);
   const arabicAudit = parseStatementLines('٢٠٢٦-٠٩-٠١ SHOP ١٠٫٠٠ DR', 'AED');
