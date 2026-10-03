@@ -65,6 +65,8 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     // Indonesian "transaksi ... berhasil" (transaction ... successful), a
     // card "charged to card ... at" shop, and Japan's card-usage notice.
     phrase(String.raw`transaksi[\s\S]{0,100}berhasil`),
+    // Indian UPI account alerts: "A/C X1234 debited by 450.0 ... trf to ZOMATO".
+    phrase(String.raw`debited\s+by[\s\S]{0,80}?\btrf\s+to`),
     phrase(String.raw`charged\s+to\s+(?:your\s+)?card[\s\S]{0,60}\bat`),
     /カード利用のお知らせ[\s\S]{0,40}ご利用金額/u,
     /(?:カード利用|購入)が完了しました/u,

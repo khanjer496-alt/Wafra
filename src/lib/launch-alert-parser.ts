@@ -21,7 +21,9 @@ import { inspectUniversalBankEvent } from '@/lib/universal-parser';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { FxQuote } from '@/lib/fx';
 import { cachedReferenceQuote, convertForeignConfirmation, quoteFitsDay } from '@/lib/fx-rates';
-import type { UniversalBankEvent } from '@/lib/universal-types';
+import type { UniversalBankEvent, UniversalParseContext } from '@/lib/universal-types';
+
+type CurrencyAliasMap = NonNullable<UniversalParseContext['currencyAliases']>;
 
 // Cheap supersets used only to decide whether market routing must run. The
 // parser/reviewer remains the authority; matching one of these never imports.
@@ -128,6 +130,31 @@ const universalRowCategory = (
     merchant: explicit ? suggestion.merchant || explicit : '',
   };
 };
+
+/**
+ * COUNTRY CONVENTIONS FOR MONEY WITHOUT AN ISO CODE.
+ *
+ * Both apply only when the PERSON's country states the convention; nothing
+ * here reads the ledger currency, and no other country is affected.
+ *  - South Africa prints the rand as a bare "R" ("R450.00 paid from Cheq
+ *    a/c"). A letter on its own is not a currency anywhere else.
+ *  - Indian UPI/IMPS/NEFT account alerts often state no currency at all
+ *    ("A/C X1234 debited by 450.0 ... trf to ZOMATO"). Only that exact shape
+ *    is read as rupees: an account reference, a payment rail, a debited/
+ *    credited-by figure, and no other money in the text.
+ */
+const COUNTRY_CURRENCY_ALIASES: Readonly<Record<string, CurrencyAliasMap>> = {
+  ZA: { R: ['ZAR'] },
+};
+const ZA_RAND_HINT = /(?<![\p{L}\p{N}])R\s?\d/u;
+const IN_IMPLICIT_RUPEE_RE = /\b(debited|credited)\s+(by|for|with)\s+(?=\d[\d,]*(?:\.\d{1,2})?\b)/i;
+const countryReadSource = (source: string, country: string | null): string => {
+  if (country !== 'IN' || hasBankAlertMoneyHint(source)) return source;
+  if (!/\b(?:a\/c|acct?|account)\b/i.test(source) || !/\b(?:upi|imps|neft|rtgs)\b/i.test(source)) return source;
+  return source.replace(IN_IMPLICIT_RUPEE_RE, '$1 $2 INR ');
+};
+const countryMoneyHint = (source: string, country: string | null): boolean =>
+  (country === 'ZA' && ZA_RAND_HINT.test(source)) || countryReadSource(source, country) !== source;
 
 const localIsoDay = (epochMs: number | undefined): string | null => {
   if (epochMs === undefined || !Number.isFinite(epochMs)) return null;
@@ -296,9 +323,14 @@ const parseUniversalPostedEvent = (
   // A best-effort row is only ever written in the pinned ledger currency; an
   // unpinned ledger waits for Review (or a proven alert) to choose it.
   if (!pinnedCurrency) return null;
-  const event = inspectUniversalBankEvent(source, { sender, dateOrder: activeCountryDateOrder() });
+  const readSource = countryReadSource(source, context.country);
+  const aliases = context.country ? COUNTRY_CURRENCY_ALIASES[context.country] : undefined;
+  const event = inspectUniversalBankEvent(readSource, {
+    sender, dateOrder: activeCountryDateOrder(),
+    ...(aliases ? { currencyAliases: aliases } : {}),
+  });
   const decision = decideBestEffortAutoPost({
-    source,
+    source: readSource,
     event,
     enabled: context.enabled,
     country: context.country,
@@ -527,8 +559,9 @@ export const createLaunchAlertSession = ({
     // bank-agnostic universal seam for unknown institutions and countries.
     // Same rule for the worldwide parser: without explicit money it cannot
     // create a valid ledger row. Bank context is still consumed by the review
-    // pipeline after this function returns null.
-    if (!hasBankAlertMoneyHint(source)) return null;
+    // pipeline after this function returns null. The person's own country
+    // may supply money a bare "R" or a currency-less UPI alert states.
+    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country)) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
     /**
      * ONE PUBLIC PARSER, WITH A MATURE LOCAL EVIDENCE PACK.
@@ -590,7 +623,7 @@ export const createLaunchAlertSession = ({
     observedAt?: number,
   ): ParsedSms | null => {
     if (!bestEffort.enabled) return null;
-    if (!hasBankAlertMoneyHint(source)) return null;
+    if (!hasBankAlertMoneyHint(source) && !countryMoneyHint(source, bestEffort.country)) return null;
     if (!shouldTryUniversalPosting(source, sender)) return null;
     const routedMarket = inspection?.route.decision === 'single' ? inspection.route.market : null;
     // Same rule as parse(): see sharedSenderOutsideGulf.

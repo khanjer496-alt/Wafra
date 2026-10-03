@@ -468,6 +468,8 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     ['MYR', 'MY', 'Maybank', 'Maybank: RM45.90 charged to card ending 1234 at TESCO PUCHONG on 02/10/2026.', 4590, 'expense', 'groceries'],
     ['SGD', 'SG', 'OCBC', 'OCBC: You have sent SGD 50.00 via PayNow to JOHN TAN on 02 Oct 2026.', 5000, 'expense', 'other'],
     ['BDT', 'BD', 'bKash', 'You have received Tk 1,000.00 from 01712345678. Fee Tk 0.00. Balance Tk 2,500.00. TrxID ABC123 at 02/10/2026 10:15', 100000, 'income', 'other'],
+    ['ZAR', 'ZA', 'FNB', 'FNB: R450.00 paid from Cheq a/c..1234 @ CHECKERS SANDTON. Avail R5,200.00. 02Oct 10:15', 45000, 'expense', 'groceries'],
+    ['INR', 'IN', 'AD-SBIINB', 'Dear UPI user A/C X1234 debited by 450.0 on date 02Oct26 trf to ZOMATO Refno 627512345678. If not u? call 1800111109 -SBI', 45000, 'expense', 'dining'],
     ['NGN', 'NG', 'GTBank', 'Acct: ****1234 Amt: NGN5,000.00 DR Desc: POS PURCHASE SHOPRITE LEKKI Avail Bal: NGN45,000.00 Date: 02-Oct-2026', 500000, 'expense', 'groceries'],
   ]) {
     const row = worldwide(currency, cc, sender, body, exponent);
@@ -493,6 +495,11 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     ['EGP', 'EG', 'CIB', 'تم خصم 100.00 جنيه استرليني من بطاقتك رقم 1234 لدى AMAZON UK'],
     // A "compra aprobada" heading also opens holds and fraud questions; it stays in Review.
     ['MXN', 'MX', 'BBVA', 'BBVA: Compra aprobada por $350.00 MXN en OXXO con tu tarjeta terminación 1234.'],
+    // A bare "R" is the rand only for a person in South Africa.
+    ['USD', 'US', 'FNB', 'FNB: R450.00 paid from Cheq a/c..1234 @ CHECKERS SANDTON. Avail R5,200.00. 02Oct 10:15'],
+    // A currency-less figure is rupees only in India, and only on a UPI/IMPS/NEFT account alert.
+    ['USD', 'US', 'AD-SBIINB', 'Dear UPI user A/C X1234 debited by 450.0 on date 02Oct26 trf to ZOMATO Refno 627512345678.'],
+    ['INR', 'IN', 'AD-SBIINB', 'Your A/C X1234 debited by 450.0 on 02Oct26 at ZOMATO.'],
     // "يتم" is in progress, not completed.
     ['EGP', 'EG', 'NBE', 'يتم تحويل مبلغ 1,500.00 جنيه من حسابك رقم ***1234 إلى أحمد محمد'],
   ]) {
