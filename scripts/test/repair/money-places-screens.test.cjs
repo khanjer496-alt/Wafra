@@ -270,9 +270,11 @@ test('the 30-day timeline speaks its pins and leaves out anything beyond the win
   // spoken with its amount; an estimate says so.
   assert.match(label, /^Next 30 days: Netflix in 5 days About AED 15.49, Etisalat in 22 days AED 200.00, DEWA in 23 days AED 320.00$/);
   assert.doesNotMatch(label, /Spotify/);
-  // Merchant-logo pins, drawn where their day falls on the strip.
-  const pins = walk(byId(tree, 'bills-timeline')).filter((n) => n.type === 'View' && typeof n.key === 'string');
-  assert.equal(pins.length, 3);
+  // The band shows the next two as cards (the list below has them all).
+  const cards = walk(byId(tree, 'bills-timeline')).filter((n) => String(n.props?.testID ?? '').startsWith('bills-timeline-payment-'));
+  assert.equal(cards.length, 2);
+  assert.match(text(cards[0]).replace(/\s+/g, ' '), /Netflix .*in 5 days ≈ AED 15.49/);
+  assert.match(text(byId(tree, 'bills-timeline-more')), /and 1 more/);
   // A payment due today pins at the start; nothing due leaves the strip out and says so.
   const today = billsWith([{ ...netflix, nextExpectedISO: '2026-09-15' }]).render('bills');
   assert.match(byId(today, 'bills-timeline').props.accessibilityLabel, /Netflix today/);

@@ -61,7 +61,8 @@ for (const language of ['en', 'ar']) test(`bill history draws six short amounts 
   const months = fils.map((value, index) => ({ label: `M${index}`, fils: value, current: index === 5 }));
   const tree = BillHistoryTiles({ months, palette, label: 'History' });
   const format = h.deps['@/lib/format'];
-  for (const value of fils) assert.ok(text(tree).includes(format.formatAmount(value)), 'every exact amount stays visible');
+  for (const value of fils.slice(0, 5)) assert.ok(text(tree).includes(format.formatAmount(value)), 'every exact amount stays visible');
+  assert.ok(text(tree).includes('—'), 'this month before its charge is a dash, not a 0');
   for (const value of fils) assert.match(tree.props.accessibilityLabel, new RegExp(format.formatAED(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   const bars = walk(tree).filter(node => node.type === 'GrowBar');
   assert.equal(bars.length, 5, 'a month with no charge draws no bar');

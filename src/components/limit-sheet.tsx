@@ -367,7 +367,10 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                     <View style={[styles.historyTrack, { backgroundColor: band.card }]}>
                       <View style={[styles.bar, {
                         width: `${Math.max(0, bar.fils) / barMax * 100}%`,
-                        backgroundColor: limitFils && bar.fils > limitFils ? band.statusOver : bar.current ? band.tint : band.rule,
+                        // Past months in the tint at half strength: the rule tone
+                        // all but vanished on the card track.
+                        backgroundColor: limitFils && bar.fils > limitFils ? band.statusOver : band.tint,
+                        opacity: limitFils && bar.fils > limitFils ? 1 : bar.current ? 1 : 0.5,
                       }]} />
                       {limitFils ? <View pointerEvents="none" testID="limit-line"
                         style={[styles.limitLine, { start: `${limitFils / barMax * 100}%`, borderColor: band.tint }]} /> : null}

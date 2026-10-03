@@ -788,20 +788,20 @@ export default function BillsScreen() {
       style={[styles.row, largeText && styles.rowLarge,
         i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
       <Pressable accessibilityRole="button"
-        accessibilityLabel={`${subscriptionLabel(sub)}. ${w.likelyStopped}. ${tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })}`}
+        accessibilityLabel={`${subscriptionLabel(sub)}. ${w.likelyStopped}. ${w.lastChargedOn(shortDate(sub.lastChargedISO))}`}
         onPress={() => setDetail(sub)}
         style={[styles.recurringIdentity, largeText && styles.rowIdentityLarge]}>
-        <MerchantAvatar title={sub.title} category={sub.category} size={32} />
+        <MerchantAvatar title={sub.title} category={sub.category} size={40} />
         <View style={styles.rowInfo}>
           <ThemedText type="smallBold" numberOfLines={largeText ? undefined : 1}>{subscriptionLabel(sub)}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary">
-            {`${w.likelyStopped} · ${tf('stoppedLast', { date: shortDate(sub.lastChargedISO) })}`}
+            {`${w.likelyStopped} · ${w.lastChargedOn(shortDate(sub.lastChargedISO))}`}
           </ThemedText>
         </View>
       </Pressable>
       <Pressable accessibilityRole="button" accessibilityLabel={`${w.markCancelled}: ${subscriptionLabel(sub)}`}
         testID={`bills-mark-cancelled-${subscriptionKey(sub)}`}
-        onPress={() => onMarkCancelled(sub)}
+        onPress={() => onMarkCancelled(sub)} hitSlop={4}
         style={({ pressed }) => [styles.pill, { borderColor: band.rule,
           backgroundColor: band.card, opacity: pressed ? 0.75 : 1 }]}>
         <ThemedText type="smallBold">{w.markCancelled}</ThemedText>
@@ -948,7 +948,7 @@ export default function BillsScreen() {
                     </Pressable>
                     <Pressable accessibilityRole="button" accessibilityLabel={w.stillPayingA11y(subscriptionLabel(sub))}
                       testID={`bills-still-paying-${subscriptionKey(sub)}`}
-                      onPress={() => undoCancelled(subscriptionKey(sub))}
+                      onPress={() => undoCancelled(subscriptionKey(sub))} hitSlop={4}
                       style={({ pressed }) => [styles.pill, { borderColor: band.rule,
                         backgroundColor: band.sheet, opacity: pressed ? 0.75 : 1 }]}>
                       <ThemedText type="smallBold">{w.stillPaying}</ThemedText>
@@ -1144,8 +1144,9 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet,
   },
   noticeAction: { minHeight: 44, minWidth: 64, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.two },
+  // 36pt plus the 4pt hit slop each side keeps the 44pt target.
   pill: {
-    minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.three,
+    minHeight: 36, justifyContent: 'center', paddingHorizontal: 14,
     borderRadius: Radius.full, borderWidth: 1,
   },
   row: {

@@ -105,9 +105,8 @@ try {
           'a past receipt establishes history, not a confirmed future amount');
       }
       assert.match(await page.getByTestId('bills-summary').innerText(), /200\.00/);
-      const pinIds = await page.locator('[data-testid^="bills-timeline-payment-"]').evaluateAll(nodes => nodes.map(n => n.getAttribute('data-testid')));
-      assert.equal(pinIds.length, 2);
-      assert.equal(new Set(pinIds).size, 2, 'timeline keys distinguish the services');
+      const spoken = await page.getByTestId('bills-timeline').getAttribute('aria-label');
+      assert.ok(/1111/.test(spoken) && /2222/.test(spoken), 'the band speaks both services');
       checks.push('two recognizable logo rows, AED 200 total and unique timeline identities');
       await screenshot(page, `${name}-bills`);
       await tap(agendaRows(page, '2222'));

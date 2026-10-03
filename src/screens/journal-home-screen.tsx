@@ -1,6 +1,6 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
 import { MoneyPictureProgress } from '@/components/money-picture-progress';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from '@/hooks/use-app-router';
 import { Fonts } from '@/constants/theme';
@@ -37,11 +37,11 @@ import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { openSmsPermissionSettings } from '@/lib/auto-import';
 import { buildReferenceFxUpdates } from '@/lib/fx';
 import { friendlyDate, monthEndISO, monthKey, monthStartISO } from '@/lib/format';
-import { daysPhrase, type Outgoing } from '@/lib/leaving-soon';
+import { daysPhrase, leavingSoon, type Outgoing } from '@/lib/leaving-soon';
 import { markLaunchPhase } from '@/lib/launch-performance';
 import { ledgerCurrencyCode, marketCurrencyCode } from '@/lib/markets';
 import { formatMinorUnits, formatMoneyText, ledgerMoneySpec } from '@/lib/ledger-money';
-import { isSpending, liveAccountIds, transferReconciliationForState } from '@/lib/ledger';
+import { internalTransferIdsForState, isSpending, liveAccountIds, transferReconciliationForState } from '@/lib/ledger';
 import { hasRecordsBefore, liveCaptureTimes, pendingTransferSummary, summarizeHomeToday, type PendingTransferSummary } from '@/lib/home-today';
 import { detectCapturePause } from '@/lib/capture-pause';
 import { loadCapturePauseSnooze, saveCapturePauseSnooze } from '@/lib/capture-pause-state';
@@ -59,7 +59,7 @@ import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { fieldsEqual } from '@/lib/store-selection';
-import type { Subscription } from '@/lib/subscriptions';
+import { detectSubscriptionsCooperatively, peekSubscriptionDetection, subscriptionDetectionRunning, type Subscription } from '@/lib/subscriptions';
 import type { AppState as LedgerState, CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 import { homeWidgetVisible, loadHomeWidgetPreferences, splitHomeWidgetLayout, subscribeHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
@@ -318,8 +318,72 @@ export default function JournalHomeScreen() {
       state.cardDues, state.notSubscriptions, state.merchantOverrides, state.language,
       state.ledgerMoney, state.transferInternalIds, state.transferNormalizationVersion,
       state.historyImport?.status, state.marketId, state.customCategories, period, projectionDay]);
-  const payments = dashboard.upcoming.items;
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
+  // Coming up also lists detected subscriptions, as Bills does. Home never
+  // starts the full-history recurrence scan itself (it is the launch screen);
+  // it reads the shared answer once the widget or reminder sync, or Bills,
+  // has it, or joins that scan while it runs. Until then it shows bills and
+  // card dues alone, as before.
+  const [homeRecurring, setHomeRecurring] = useState<{
+    value: Subscription[]; transactions: Transaction[]; notSubscriptions: string[]; day: string;
+    liveAccounts: Set<string>; internal: Set<string>;
+  } | null>(null);
+  // The answer belongs to exactly one ledger, scope and day (the shared
+  // cache's own key). Archiving a card or a finished history import can
+  // change the scope while the transactions array stays the same.
+  const homeInternal = useMemo(() => internalTransferIdsForState(state),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.transactions, state.accounts, state.transferInternalIds, state.transferNormalizationVersion, state.historyImport?.status]);
+  const recurringCurrent = homeRecurring !== null && homeRecurring.transactions === state.transactions
+    && homeRecurring.notSubscriptions === state.notSubscriptions && homeRecurring.day === projectionDay
+    && homeRecurring.liveAccounts === liveAccounts && homeRecurring.internal === homeInternal;
+  useEffect(() => {
+    // A stale answer is dropped at once: it must not hold an old ledger while
+    // Home is hidden, nor show another scope's renewals.
+    if (homeRecurring !== null && !recurringCurrent) setHomeRecurring(null);
+    if (!focused || !state.hydrated || !state.onboarded || state.privateMode || recurringCurrent) return;
+    const { transactions, notSubscriptions } = state;
+    let cancelled = false;
+    const today = new Date(`${projectionDay}T12:00:00`);
+    const internal = homeInternal;
+    const accept = (value: Subscription[] | null) => {
+      if (cancelled || value === null) return;
+      startTransition(() => setHomeRecurring({ value, transactions, notSubscriptions, day: projectionDay, liveAccounts, internal }));
+    };
+    const look = () => {
+      if (cancelled) return false;
+      const cached = peekSubscriptionDetection(transactions, notSubscriptions, today, liveAccounts, internal);
+      if (cached) { accept(cached); return true; }
+      if (!subscriptionDetectionRunning(transactions, notSubscriptions, today, liveAccounts, internal)) return false;
+      void detectSubscriptionsCooperatively(transactions, notSubscriptions, today, liveAccounts, internal, () => cancelled)
+        .then(accept);
+      return true;
+    };
+    // The syncs start after interactions too; look again once they have had
+    // time to begin.
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const task = InteractionManager.runAfterInteractions(() => {
+      timers.push(setTimeout(() => { if (!look()) timers.push(setTimeout(look, 6000)); }, 1500));
+    });
+    return () => { cancelled = true; task.cancel(); timers.forEach(clearTimeout); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focused, state.hydrated, state.onboarded, state.privateMode, recurringCurrent, state.transactions,
+    state.notSubscriptions, liveAccounts, homeInternal, projectionDay]);
+  const payments = useMemo(() => {
+    if (!homeRecurring || !recurringCurrent) return dashboard.upcoming.items;
+    // A renewal that has not shown up yet is an estimate running late, not a
+    // bill past due: Bills files it under Expected earlier, so Home leaves it
+    // out of Due soon rather than calling it days late.
+    const subscriptions = leavingSoon(state as LedgerState, now, {
+      withinDays: dashboard.upcoming.withinDays, kinds: ['subscription'], detectedSubscriptions: homeRecurring.value,
+    }).filter((item) => item.daysLeft >= 0);
+    if (subscriptions.length === 0) return dashboard.upcoming.items;
+    // The same order leavingSoon gives one combined list.
+    return [...dashboard.upcoming.items, ...subscriptions]
+      .sort((a, b) => a.daysLeft - b.daysLeft || b.amountFils - a.amountFils);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboard.upcoming, homeRecurring, recurringCurrent, state.bills, state.notSubscriptions,
+    state.cancelledSubscriptions, state.customCategories]);
   // Today and this week use the same spending definition and transfer scope as
   // the period totals below them. Budget pace applies only to the live month.
   const homeToday = useMemo(() => {
@@ -343,7 +407,8 @@ export default function JournalHomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.transactions, state.budgets, liveAccounts, dashboard.internalTransactionIds, period, projectionDay]);
   // Native widgets use Bills' complete 30-day recurring projection, never
-  // Home's deliberately shorter, subscription-free first-paint list.
+  // Home's deliberately shorter 9-day list (which adds detected subscriptions
+  // only once that shared projection has an answer).
   useEffect(() => {
     if (!state.hydrated || !state.onboarded || state.privateMode) {
       void invalidateWidgetSnapshotSync();

@@ -40,7 +40,8 @@ export function BillHistoryTiles({ months, palette, label, testID }: {
       {months.map((month, index) => <View key={`${month.label}-${index}`} style={styles.cell}
         importantForAccessibility="no-hide-descendants">
         <ThemedText type="meta" tabular style={[styles.value, { color: month.fils > 0 ? palette.text : palette.textSecondary }]}>
-          {values[index]}
+          {/* This month before its charge: a dash, not a 0 that reads as missed. */}
+          {month.current && month.fils === 0 ? '—' : values[index]}
         </ThemedText>
         <View style={styles.well}>
           {month.fils > 0
