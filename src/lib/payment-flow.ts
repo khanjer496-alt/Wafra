@@ -10,16 +10,18 @@ import { UNASSIGNED_INCOME_ACCOUNT_ID, UNASSIGNED_TRANSACTION_ACCOUNT_ID } from 
 const PAYMENT_FLOW_WINDOW_MS = 5 * 60_000;
 const COMPOUND_BILL_WINDOW_MS = 3 * 24 * 60 * 60_000;
 /**
- * How far apart a biller's own receipt and the bank's alert for the same
- * payment may be. The card alert and the e& receipt normally land within a
- * minute, but the owner's corpus has an e& receipt two days after the card
- * debit it confirms (the compound-bill fixture), and a PDF/CSV statement row
- * carries only a posting DATE that can trail the payment by a weekend. Three
- * days is the window the bundle rule already uses for the same biller; the
- * one-candidate-on-each-side rule, not the window, is what refuses a guess.
+ * How far apart a biller's own receipt and the bank's LIVE alert for the same
+ * payment may be, by their clocks. The card alert and the e& receipt normally
+ * land within a minute; a day covers a delayed delivery without reaching the
+ * neighbouring month's equal bill.
  */
-const BILLER_RECEIPT_WINDOW_MS = COMPOUND_BILL_WINDOW_MS;
-const BILLER_RECEIPT_WINDOW_DAYS = 3;
+const LIVE_RECEIPT_WINDOW_MS = 24 * 60 * 60_000;
+/**
+ * How many days after the receipt's own day a PDF/CSV statement row may be
+ * posted. A statement states only a posting date, which trails the payment by
+ * up to a weekend and never precedes it.
+ */
+const STATEMENT_POSTING_LAG_DAYS = 3;
 const DAY_MS = 24 * 60 * 60_000;
 
 interface MatchScore {
@@ -223,22 +225,6 @@ const dayNumber = (iso: string): number | null => {
   return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) / DAY_MS : null;
 };
 
-/**
- * A statement row's clock is synthetic (midday of the posting date), so a
- * pair involving one is compared by calendar day. Two live alerts compare by
- * their own clocks.
- */
-const withinReceiptWindow = (receipt: Transaction, bank: Transaction): boolean => {
-  const a = eventTime(receipt);
-  const b = eventTime(bank);
-  if (a !== null && b !== null && !isStatementRow(receipt) && !isStatementRow(bank)) {
-    return Math.abs(a - b) <= BILLER_RECEIPT_WINDOW_MS;
-  }
-  const da = dayNumber(receipt.date);
-  const db = dayNumber(bank.date);
-  return da !== null && db !== null && Math.abs(da - db) <= BILLER_RECEIPT_WINDOW_DAYS;
-};
-
 /** Same ledger amount AND the same stated original money, to the minor unit. */
 const sameMoney = (a: Transaction, b: Transaction): boolean => {
   if (a.amountFils !== b.amountFils) return false;
@@ -260,10 +246,54 @@ const conflictingBillIdentity = (a: Transaction, b: Transaction): boolean => {
   return ta !== null && tb !== null ? ta !== tb : a.billIdentity.toLowerCase() !== b.billIdentity.toLowerCase();
 };
 
-/** Anything a person decided about the row. Such a row is never removed here. */
+/**
+ * Anything a person decided about the row. A pinned RECEIPT is never removed
+ * here; a pinned BANK row may be the kept side, but nothing is merged into it.
+ * `paymentInstrumentSource: 'user'` is the person choosing the receipt's
+ * account, which is a decision about that row like any other edit.
+ */
 const pinned = (row: Transaction): boolean =>
   row.userEdited === true || row.titleEdited === true || row.transferDecision !== undefined ||
-  row.billPayment !== undefined || (row.splits?.length ?? 0) > 0;
+  row.billPayment !== undefined || (row.splits?.length ?? 0) > 0 || row.paymentInstrumentSource === 'user';
+
+/**
+ * The instrument the import stored is the BILLER's own account number.
+ *
+ * e&'s portal receipt ("Your payment to the account number ····2543 has been
+ * processed … Payment Channel: Etisalat Mobile App") names no paying card;
+ * its only number is the e& account. The importer can still record that
+ * number as an `account`-kind instrument with no issuer, and route the row to
+ * an account resolved from it. That instrument says nothing about who paid,
+ * so it is recognised here for exactly that shape: kind `account`, no bank,
+ * and the same four digits as the receipt's own bill identity.
+ */
+const instrumentIsBillerAccount = (row: Transaction): boolean => {
+  const instrument = row.captureInstrument;
+  if (!instrument || instrument.kind !== 'account' || instrument.bankIdentity != null) return false;
+  const tail = row.billIdentity ? billTail(row.billIdentity) : null;
+  return tail !== null && tail === instrument.last4.toUpperCase();
+};
+
+/**
+ * Whether a receipt row is the BILLER's own confirmation, not a bank's.
+ *
+ * A bank confirms its own bill-pay ("Your payment instructions of AED 313.95
+ * to Etisalat for consumer number 4026 has been processed"). That message IS
+ * the bank's record of a debit from the user's account; folding it into a
+ * same-amount card row of another bank deletes a genuine payment. The row
+ * carries no sender, so the evidence used is what the bank grammar leaves:
+ *   - a `consumer:` identity: the bank bill-pay grammar's label ("consumer
+ *     number"); a biller's own receipt calls it the account;
+ *   - a stated paying instrument (`captureInstrument`, `paymentInstrumentSource
+ *     'alert'`) other than the biller's own account number above.
+ */
+const billerSentReceipt = (row: Transaction): boolean => {
+  if (row.billIdentity !== undefined && /^consumer:/i.test(row.billIdentity)) return false;
+  const billerInstrument = instrumentIsBillerAccount(row);
+  if (row.captureInstrument !== undefined && !billerInstrument) return false;
+  if (row.paymentInstrumentSource === 'alert' && !billerInstrument) return false;
+  return true;
+};
 
 /**
  * A bank descriptor that still reads as raw text, padded for whole-word tests.
@@ -277,8 +307,126 @@ const pinned = (row: Transaction): boolean =>
 const bankBillerKey = (key: string): string =>
   ` ${key} `.replace(/ e and digital app /g, ' etisalat ');
 
+/**
+ * Receipt biller keys allowed to match as a whole word INSIDE a longer bank
+ * descriptor ("mb bill dr etisalat telep dubai"). Any other receipt must equal
+ * the bank row's payee exactly. A receipt's title can be a person's bill alias
+ * — free text such as "Home" — and whole-word containment on free text would
+ * pair it with "HOME CENTRE"; only a canonical biller name providerKey itself
+ * produces is safe to search for. Add a biller here only with a real sample of
+ * its receipt and of the bank descriptor it must match.
+ */
+const CONTAINMENT_BILLER_KEYS: ReadonlySet<string> = new Set(['etisalat']);
+
 /** A receipt titled only by an account fragment names no biller to compare. */
 const UNNAMED_RECEIPT_RE = /^payment\s+to\b/i;
+
+interface ReceiptEntry {
+  row: Transaction;
+  day: number;
+  key: string;
+  paddedKey: string;
+  /** A biller-sent (and biller-own), unpinned, live receipt: the only kind ever removed. */
+  removable: boolean;
+}
+
+interface BankEntry {
+  row: Transaction;
+  day: number;
+  /**
+   * A bank-sent receipt, or a row on a holding account: competes for a biller
+   * receipt, is never the kept side.
+   */
+  blockOnly: boolean;
+}
+
+/**
+ * The window is asymmetric because the two clocks are different things.
+ *
+ * Two live alerts compare by their own clocks: the card alert and the e&
+ * receipt for one payment land within a minute, so ±1 day (and at most one
+ * calendar day apart) leaves room for delivery delay without reaching the
+ * previous or next month's equal bill.
+ *
+ * A PDF/CSV statement row carries only a posting DATE, which can trail the
+ * payment by a weekend but never precede it. So it PAIRS from the receipt's
+ * own day to STATEMENT_POSTING_LAG_DAYS after, never earlier: a charge posted
+ * before the receipt was sent cannot be the payment the receipt confirms, and
+ * pairing with it would move the bill into an earlier day (or month).
+ *
+ * A same-amount, same-biller statement row up to STATEMENT_POSTING_LAG_DAYS
+ * BEFORE the receipt still COMPETES: it is never kept in the receipt's place,
+ * but it says this biller is being paid that amount repeatedly (e&'s AED 30
+ * add-ons on 27/07, 29/07 and 02/08), and with several lookalikes about the
+ * one-candidate rule refuses to guess rather than pairing with whichever
+ * happens to sit on the right side of the receipt.
+ */
+type WindowFit = 'pair' | 'compete' | null;
+const receiptWindowFit = (receipt: ReceiptEntry, bank: BankEntry): WindowFit => {
+  const delta = bank.day - receipt.day;
+  if (isStatementRow(bank.row) || isStatementRow(receipt.row)) {
+    if (delta >= 0 && delta <= STATEMENT_POSTING_LAG_DAYS) return 'pair';
+    return delta < 0 && delta >= -STATEMENT_POSTING_LAG_DAYS ? 'compete' : null;
+  }
+  if (delta < -1 || delta > 1) return null;
+  const a = eventTime(receipt.row);
+  const b = eventTime(bank.row);
+  return a === null || b === null || Math.abs(a - b) <= LIVE_RECEIPT_WINDOW_MS ? 'pair' : null;
+};
+
+/** `paddedReceiptKey` is ` ${key} `; `bankKey` comes from bankBillerKey. */
+const sameBiller = (receiptKey: string, paddedReceiptKey: string, bankKey: string): boolean =>
+  bankKey === paddedReceiptKey ||
+  (CONTAINMENT_BILLER_KEYS.has(receiptKey) && bankKey.includes(paddedReceiptKey));
+
+interface CandidateLink {
+  bank: BankEntry;
+  /** False for a competitor-only fit (see receiptWindowFit). */
+  pairs: boolean;
+}
+
+/** First index in a day-sorted bucket whose day is >= `day`. */
+const lowerBound = (bucket: BankEntry[], day: number): number => {
+  let lo = 0;
+  let hi = bucket.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (bucket[mid].day < day) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+};
+
+/**
+ * The biller's OWN receipt ("your payment of AED X for account N has been
+ * received"), recognised by what it is rather than where it landed. Its bill
+ * identity is the biller's account number (`account:NNNN`). A bank's bill-pay
+ * instruction is receipt-side too, but it carries a `consumer:` number and a
+ * nickname the user chose, and it is the bank's record of money leaving one of
+ * the user's accounts, so it is never folded. Only a row that passes BOTH this
+ * and billerSentReceipt is ever removed; any other receipt-side row competes
+ * (see BankEntry.blockOnly) and so can only stop a fold, never cause one.
+ */
+const isBillerOwnReceipt = (row: Transaction): boolean =>
+  /^account:[A-Z0-9]{4}$/i.test(row.billIdentity ?? '');
+
+/**
+ * Where the receipt sits must not contradict the bank row: the unassigned
+ * holding, an account the import made from the biller's own number (the older
+ * parser read "account number ····2543" as the user's account), or the very
+ * account the bank row is on. Anywhere else says another account paid.
+ */
+const receiptPlacedFor = (receipt: Transaction, bank: Transaction): boolean =>
+  receipt.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID || receipt.accountId === bank.accountId ||
+  instrumentIsBillerAccount(receipt);
+
+/**
+ * A holding account is no evidence of who paid. A row there may still compete
+ * for a receipt, but it is never the kept side: the kept row must carry the
+ * card or account that paid (a biller's settlement message names none).
+ */
+const isHoldingAccount = (accountId: string): boolean =>
+  accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID || accountId === UNASSIGNED_INCOME_ACCOUNT_ID;
 
 /**
  * Pair a biller's own receipt with the bank's alert for the SAME payment.
@@ -287,51 +435,39 @@ const UNNAMED_RECEIPT_RE = /^payment\s+to\b/i;
  * 450.45 / Payment Channel: Etisalat Mobile App"), and the card that paid it
  * alerts too ("ADCB Credit Card XXX2518 has been used for AED 450.45 at MB
  * BILL DR:ETISALAT TELEP"). Both are expenses, so Spent counted the bill
- * twice. The receipt usually names no paying card and lands on the
- * unassigned account; the bank row has the real card. Keep the bank row,
- * carry the receipt's bill identity onto it (so an account-exact bill still
- * settles, and two e& lines are not confused), and drop the receipt.
+ * twice. The receipt names no paying card; the bank row has the real card.
+ * Keep the bank row, carry the receipt's bill identity onto it (so an
+ * account-exact bill still settles, and two e& lines are not confused), and
+ * drop the receipt.
  *
  * Deliberately narrow:
+ *   - only a receipt the BILLER sent (billerSentReceipt) that carries the
+ *     biller's own account number (isBillerOwnReceipt) is ever removed; a
+ *     bank's own bill-pay confirmation is its record of a real debit;
+ *   - the receipt sits where it cannot contradict the bank row
+ *     (receiptPlacedFor);
+ *   - the kept row is never on a holding account (isHoldingAccount);
  *   - exactly the same amount and original currency;
- *   - the bank row's payee resolves to the receipt's biller (providerKey
- *     equality, or the receipt's biller as a whole word of the bank
- *     descriptor: "mb bill dr etisalat telep dubai" names "etisalat");
- *   - within BILLER_RECEIPT_WINDOW of each other, in either order;
- *   - exactly ONE candidate on each side. A second receipt or a second bank
- *     row — including a user-edited one, which is never itself removed — makes
- *     the evidence ambiguous and nothing is paired;
+ *   - the bank row's payee resolves to the receipt's biller (sameBiller);
+ *   - inside the asymmetric window (receiptWindowFit);
+ *   - exactly ONE candidate on each side. A second receipt (edited or not), a
+ *     second bank row, or a bank's own confirmation of a same-amount payment
+ *     to the same biller makes the evidence ambiguous and nothing is paired;
  *   - never against income, a transfer, a card settlement, a funding leg, a
  *     receipt already explained by a funding alert, or a bundle parent;
- *   - neither row edited by the user. Pinned rows still count as competitors.
+ *   - a pinned receipt is never removed. A pinned bank row may be the kept
+ *     side, unchanged: dropping an unpinned copy of its payment changes
+ *     nothing the person decided, and refusing would let every re-read of the
+ *     receipt SMS recreate the duplicate for good.
  *
  * The rule is stateless like the two above: it is re-derived over the whole
  * ledger on every reconciliation, so a re-imported receipt is folded again.
+ *
+ * Cost: one pass to find receipts (and nothing more when none can be
+ * removed), one pass to bucket same-amount bank rows by day, then a binary
+ * search per receipt over its few days of window — never receipts × every
+ * same-amount row.
  */
-/**
- * The biller's OWN receipt ("your payment of AED X for account N has been
- * received"), recognised by what it is rather than where it landed. Its bill
- * identity is the biller's account number (`account:NNNN`). A bank's bill-pay
- * instruction is receipt-side too, but it carries a `consumer:` number and a
- * nickname the user chose, and it is the bank's record of money leaving one of
- * the user's accounts, so it is never folded. Where it may sit is checked per
- * pair (receiptPlacedFor): the older parser read "account number ····2543" as
- * the user's account, and e& may print the paying card's number.
- */
-const isBillerOwnReceipt = (row: Transaction): boolean =>
-  /^account:[A-Z0-9]{4}$/i.test(row.billIdentity ?? '');
-
-/**
- * Where the receipt sits must not contradict the bank row: unassigned, an
- * account made from the biller's own number, or the very account the bank row
- * is on (e& printing the paying card's number puts both on that card).
- */
-const receiptPlacedFor = (receipt: Transaction, bank: Transaction): boolean => {
-  if (receipt.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID || receipt.accountId === bank.accountId) return true;
-  const tail = receipt.billIdentity?.match(/^account:([A-Z0-9]{4})$/i)?.[1];
-  return receipt.captureInstrument?.kind === 'account' && receipt.captureInstrument.last4 === tail;
-};
-
 const pairBillerReceipts = (
   transactions: Transaction[],
   removed: Set<string>,
@@ -340,59 +476,108 @@ const pairBillerReceipts = (
   providerKeyOf: (title: string) => string,
 ): Map<string, Transaction> => {
   const merged = new Map<string, Transaction>();
-  const receiptsByAmount = new Map<number, Transaction[]>();
+  // Dates repeat across thousands of rows; parse each calendar day once.
+  const days = new Map<string, number | null>();
+  const dayOf = (iso: string): number | null => {
+    let day = days.get(iso);
+    if (day === undefined) {
+      day = dayNumber(iso);
+      days.set(iso, day);
+    }
+    return day;
+  };
+  const receipts: ReceiptEntry[] = [];
+  const blockers: Transaction[] = [];
+  let anyRemovable = false;
   for (const row of transactions) {
-    if (!isBillerOwnReceipt(row)) continue;
-    if (row.source !== 'sms' || row.type !== 'expense' || row.paymentFlowSide !== 'receipt' ||
+    if (row.paymentFlowSide !== 'receipt' || row.source !== 'sms' || row.type !== 'expense' ||
       row.isTransfer === true || row.cardPaymentSide !== undefined || !(row.amountFils > 0) ||
       removed.has(row.id) || fundedReceipts.has(row.id) || UNNAMED_RECEIPT_RE.test(row.title.trim())) continue;
-    if (providerKeyOf(row.title).length < 2) continue;
-    const group = receiptsByAmount.get(row.amountFils);
-    if (group) group.push(row);
-    else receiptsByAmount.set(row.amountFils, [row]);
+    if (!billerSentReceipt(row)) {
+      blockers.push(row);
+      continue;
+    }
+    const key = providerKeyOf(row.title);
+    const day = dayOf(row.date);
+    if (key.length < 2 || day === null) continue;
+    // A receipt without the biller's account number (isBillerOwnReceipt) is
+    // kept like a pinned one: it still claims the bank rows it matches, so it
+    // can make a fold ambiguous, but it is never removed itself.
+    const removable = isBillerOwnReceipt(row) && !pinned(row) && !isStatementRow(row);
+    if (removable) anyRemovable = true;
+    receipts.push({ row, day, key, paddedKey: ` ${key} `, removable });
   }
-  if (receiptsByAmount.size === 0) return merged;
+  if (!anyRemovable) return merged;
 
-  const banksOfReceipt = new Map<Transaction, Transaction[]>();
-  const receiptsOfBank = new Map<Transaction, Transaction[]>();
-  for (const bank of transactions) {
-    const group = receiptsByAmount.get(bank.amountFils);
-    if (!group) continue;
-    // The kept row is the bank's: it must carry the card or account that paid.
-    // A biller's settlement message with no instrument is never the keeper.
-    if (bank.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID || bank.accountId === UNASSIGNED_INCOME_ACCOUNT_ID) continue;
-    if (bank.source !== 'sms' || bank.type !== 'expense' || bank.paymentFlowSide !== undefined ||
-      bank.isTransfer === true || bank.cardPaymentSide !== undefined || bank.transferMatch !== undefined ||
-      removed.has(bank.id) || bundleParents.has(bank.id)) continue;
-    const bankKey = bankBillerKey(providerKeyOf(bank.title));
-    for (const receipt of group) {
-      const receiptKey = providerKeyOf(receipt.title);
-      const sameBiller = bankKey === ` ${receiptKey} ` ||
-        (receiptKey.length >= 4 && bankKey.includes(` ${receiptKey} `));
-      if (!sameBiller || !receiptPlacedFor(receipt, bank) || !sameMoney(receipt, bank) || conflictingBillIdentity(receipt, bank) ||
-        !withinReceiptWindow(receipt, bank)) continue;
+  const amounts = new Set<number>();
+  for (const entry of receipts) amounts.add(entry.row.amountFils);
+  const bankKeys = new Map<string, string>();
+  const bankKeyOf = (title: string): string => {
+    let key = bankKeys.get(title);
+    if (key === undefined) {
+      key = bankBillerKey(providerKeyOf(title));
+      bankKeys.set(title, key);
+    }
+    return key;
+  };
+  const banksByAmount = new Map<number, BankEntry[]>();
+  const addBank = (row: Transaction, blockOnly: boolean) => {
+    const day = dayOf(row.date);
+    if (day === null) return;
+    const entry: BankEntry = { row, day, blockOnly };
+    const bucket = banksByAmount.get(row.amountFils);
+    if (bucket) bucket.push(entry);
+    else banksByAmount.set(row.amountFils, [entry]);
+  };
+  for (const row of transactions) {
+    if (!amounts.has(row.amountFils)) continue;
+    if (row.source !== 'sms' || row.type !== 'expense' || row.paymentFlowSide !== undefined ||
+      row.isTransfer === true || row.cardPaymentSide !== undefined || row.transferMatch !== undefined ||
+      removed.has(row.id) || bundleParents.has(row.id)) continue;
+    addBank(row, isHoldingAccount(row.accountId));
+  }
+  for (const row of blockers) if (amounts.has(row.amountFils)) addBank(row, true);
+  if (banksByAmount.size === 0) return merged;
+  for (const bucket of banksByAmount.values()) if (bucket.length > 1) bucket.sort((a, b) => a.day - b.day);
+
+  const banksOfReceipt = new Map<ReceiptEntry, CandidateLink[]>();
+  const receiptCount = new Map<BankEntry, number>();
+  for (const receipt of receipts) {
+    const bucket = banksByAmount.get(receipt.row.amountFils);
+    if (!bucket) continue;
+    const last = receipt.day + STATEMENT_POSTING_LAG_DAYS;
+    const first = receipt.day - STATEMENT_POSTING_LAG_DAYS;
+    for (let i = lowerBound(bucket, first); i < bucket.length && bucket[i].day <= last; i++) {
+      const bank = bucket[i];
+      if (bank.row === receipt.row) continue;
+      if (!receiptPlacedFor(receipt.row, bank.row)) continue;
+      if (!sameBiller(receipt.key, receipt.paddedKey, bankKeyOf(bank.row.title)) || !sameMoney(receipt.row, bank.row) ||
+        conflictingBillIdentity(receipt.row, bank.row)) continue;
+      const fit = receiptWindowFit(receipt, bank);
+      if (fit === null) continue;
+      // A competitor is recorded with the same weight as a candidate: either
+      // makes the count two. Only a 'pair' fit can ever be the kept side.
+      const link: CandidateLink = { bank, pairs: fit === 'pair' };
       const banks = banksOfReceipt.get(receipt);
-      if (banks) banks.push(bank);
-      else banksOfReceipt.set(receipt, [bank]);
-      const receipts = receiptsOfBank.get(bank);
-      if (receipts) receipts.push(receipt);
-      else receiptsOfBank.set(bank, [receipt]);
+      if (banks) banks.push(link);
+      else banksOfReceipt.set(receipt, [link]);
+      receiptCount.set(bank, (receiptCount.get(bank) ?? 0) + 1);
     }
   }
 
   for (const [receipt, banks] of banksOfReceipt) {
-    if (banks.length !== 1) continue;
-    const bank = banks[0];
-    if (receiptsOfBank.get(bank)?.length !== 1) continue;
-    if (pinned(receipt) || pinned(bank)) continue;
-    removed.add(receipt.id);
-    const carryIdentity = bank.billIdentity === undefined && receipt.billIdentity !== undefined;
-    const carryNote = bank.note === undefined && receipt.note !== undefined;
+    if (!receipt.removable || banks.length !== 1 || !banks[0].pairs) continue;
+    const bank = banks[0].bank;
+    if (bank.blockOnly || receiptCount.get(bank) !== 1) continue;
+    removed.add(receipt.row.id);
+    if (pinned(bank.row)) continue;
+    const carryIdentity = bank.row.billIdentity === undefined && receipt.row.billIdentity !== undefined;
+    const carryNote = bank.row.note === undefined && receipt.row.note !== undefined;
     if (carryIdentity || carryNote) {
-      merged.set(bank.id, {
-        ...bank,
-        ...(carryIdentity ? { billIdentity: receipt.billIdentity } : {}),
-        ...(carryNote ? { note: receipt.note } : {}),
+      merged.set(bank.row.id, {
+        ...bank.row,
+        ...(carryIdentity ? { billIdentity: receipt.row.billIdentity } : {}),
+        ...(carryNote ? { note: receipt.row.note } : {}),
       });
     }
   }
