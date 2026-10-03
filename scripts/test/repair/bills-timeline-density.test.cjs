@@ -17,48 +17,35 @@ function render(options = {}, input = items, money = null) {
   const tree = h.deps['@/components/bills/bills-timeline'].BillsTimeline({ items: input, todayISO: '2026-09-15', palette });
   return { h, tree };
 }
-const cards = tree => walk(tree).filter(node => String(node.props?.testID ?? '').startsWith('bills-timeline-payment-'));
+const pins = tree => walk(tree).filter(node => String(node.props?.testID ?? '').startsWith('bills-timeline-payment-'));
 for (const language of ['en', 'ar']) for (const largeText of [false, true]) {
-  test(`the next two payments sit side by side without sideways scrolling (${language}, large=${largeText})`, () => {
+  test(`every payment in the window is on the band, wrapping instead of scrolling or "and N more" (${language}, large=${largeText})`, () => {
     const { tree } = render({ language, largeText, width: 320, theme: 'dark' });
-    assert.equal(tree.props.accessible, false, 'payment descriptions remain individually reachable');
-    assert.equal(walk(tree).some(node => node.type === 'ScrollView'), false, 'nothing on the band scrolls sideways');
-    const shown = cards(tree);
-    // Same-day payments sort by title: Apple Music, then Netflix.
-    assert.deepEqual(shown.map(node => node.props.testID), ['bills-timeline-payment-Apple Music', 'bills-timeline-payment-Netflix']);
-    for (const card of shown) {
-      assert.equal(flat(card.props.style).position, undefined);
-      assert.equal(flat(card.props.style).flex, largeText ? 0 : 1, 'two cards share the width; large text stacks them');
-      assert.equal(card.props.accessibilityRole, 'text');
-      const due = walk(card).find(node => String(node.props.testID ?? '').startsWith('bills-payment-due-'));
-      assert.ok(due && text(due).includes('·'), 'each card keeps its date');
-      assert.match(card.props.accessibilityLabel, /12\.34|١٢٫٣٤/);
-      assert.ok(!walk(card).some(node => node.type === 'Text' && node.props.numberOfLines), 'names and money never truncate');
-    }
-    const more = walk(tree).find(node => node.props.testID === 'bills-timeline-more');
-    assert.ok(more, 'the remaining count is said under the cards');
-    for (const name of ['Spotify', 'YouTube Premium', 'Due tomorrow', 'Later this week']) {
-      assert.match(tree.props.accessibilityLabel, new RegExp(name), 'the whole window is still spoken');
+    assert.equal(tree.props.accessible, false, 'each payment remains individually reachable');
+    assert.equal(walk(tree).some(node => node.type === 'ScrollView'), false, 'nothing scrolls sideways');
+    assert.equal(flat(tree.props.style).flexWrap, 'wrap');
+    assert.equal(walk(tree).some(node => node.props?.testID === 'bills-timeline-more'), false, 'no "and N more"');
+    const shown = pins(tree);
+    assert.deepEqual(shown.map(node => node.props.testID.slice('bills-timeline-payment-'.length)),
+      ['Apple Music', 'Netflix', 'Spotify', 'YouTube Premium', 'Due tomorrow', 'Later this week'], 'all six, in date order');
+    for (const pin of shown) {
+      assert.equal(pin.props.accessibilityRole, 'text');
+      assert.ok(walk(pin).some(node => String(node.props?.testID ?? '').startsWith('bills-payment-due-')), 'each logo keeps its date');
+      assert.match(pin.props.accessibilityLabel, /12\.34|١٢٫٣٤/);
+      assert.ok(!walk(pin).some(node => node.type === 'Text' && node.props.numberOfLines), 'dates never truncate');
     }
     assert.doesNotMatch(tree.props.accessibilityLabel, /Paid|Overdue|Beyond window/);
+    const estimated = shown.find(node => node.props.testID.endsWith('YouTube Premium'));
+    assert.ok(estimated.props.accessibilityLabel.includes(language === 'ar' ? 'حوالي' : 'About'), 'an estimate is spoken as one');
   });
 }
-test('an estimate is marked ≈ on its card and spoken as About', () => {
-  const { tree } = render({}, [item('Synthetic', '2026-09-16', { estimated: true })]);
-  const [card] = cards(tree);
-  assert.match(text(card), /≈ AED 12\.34/);
-  assert.match(card.props.accessibilityLabel, /About AED 12\.34/);
-  assert.equal(walk(tree).find(node => node.props.testID === 'bills-timeline-more'), undefined);
-});
-test('the remaining count names how many are not on the cards', () => {
-  const { tree } = render({}, Array.from({ length: 6 }, (_, index) => item(`Payee ${index}`, '2026-09-15')));
-  assert.equal(cards(tree).length, 2);
-  assert.equal(text(walk(tree).find(node => node.props.testID === 'bills-timeline-more')), 'and 4 more');
+test('a long month shows every payment, however many', () => {
+  const { tree } = render({}, Array.from({ length: 14 }, (_, index) => item(`Payee ${index}`, '2026-09-20')));
+  assert.equal(pins(tree).length, 14);
 });
 test('payment amount and currency remain exact in a three-decimal ledger', () => {
   const { tree } = render({}, [item('Synthetic', '2026-09-15')], { schemaVersion: 2, currency: 'KWD', exponent: 3 });
-  assert.match(cards(tree)[0].props.accessibilityLabel, /KWD 1\.234/);
-  assert.match(text(cards(tree)[0]), /1\.234/);
+  assert.match(pins(tree)[0].props.accessibilityLabel, /KWD 1\.234/);
 });
 test('empty upcoming window retains the existing honest empty state', () => {
   const { tree } = render({}, items.filter(item => item.paid || item.id === 'Overdue' || item.id === 'Beyond window'));

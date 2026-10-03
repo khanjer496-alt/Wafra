@@ -190,7 +190,7 @@ try {
       await page.getByRole('tab', { name: label('Bills', 'الفواتير'), exact: true }).click();
       const tiles = page.locator('[data-testid^="bills-timeline-payment-"]');
       await tiles.first().waitFor({ state: 'visible' });
-      check(await tiles.count(), 2, 'the band shows the next two payments side by side; the list holds the rest');
+      check(await page.getByTestId('bills-timeline-more').count(), 0, 'the band shows every payment, with no "and N more"');
       for (const tile of await tiles.all()) {
         await tile.scrollIntoViewIfNeeded();
         check(await tile.evaluate(node => {
