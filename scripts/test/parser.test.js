@@ -6177,5 +6177,162 @@ t('a mixed-language alert with an unconfirmed corrected amount is not posted',
   'تم تسجيل عملية شراء لدى Harbor Lamp Bakery. Amount: AED 45.00 or AED 145.00; corrected amount not confirmed.',
   null);
 
+
+// ── 2026-10 accuracy pass: synthetic grammar probes (not customer evidence) ──
+// Each case below was a confirmed wrong answer before the pass.
+t('an OTP whose merchant is a domain is still a challenge, never a purchase',
+  'Your OTP for purchase of AED 250.00 at NOON.COM with card ending 4844 is 482913. Do not share it with anyone.', null);
+t('a footer that runs into a reference still cannot make an OTP challenge',
+  'AED 89.50 spent at CARREFOUR using Debit Card 1234. Do not share your OTP with anyone.Ref: 123456',
+  { amountFils: 8950, type: 'expense' });
+t('a dated balance enquiry reply is not an expense',
+  'Your available balance on account XXX2501 as of 02/10/2026 is AED 5,450.00.', null);
+t('"If unauthorised, call" is a fraud footer, not a decline',
+  'Purchase of AED 50.00 with Credit Card ending 1234 at CARREFOUR. If unauthorised, call 600 54 0000.',
+  { amountFils: 5000, type: 'expense', category: 'groceries' });
+t('"If not you" is a fraud footer, not a decline',
+  'AED 50.00 spent at CARREFOUR with Credit Card 1234. If not you, call 800 123.',
+  { amountFils: 5000, type: 'expense' });
+t('a statement that states its total as "statement for <month> is" is a card statement',
+  'FAB Credit Card XXXX3749: Your statement for September 2026 is AED 8,900.40. Minimum due AED 445.02 by 26/10/2026. Pay on time to avoid late payment fee.',
+  { kind: 'cardStatement', amountFils: 890040, minDueFils: 44502, dueDay: 26 });
+t('"received your payment" is the receipt leg of a card payment',
+  'Thank you. We have received your payment of AED 2,045.00 towards your Mashreq Credit Card ending 1234.',
+  { kind: 'cardPayment', amountFils: 204500, side: 'receipt' });
+t('the funding account balance on an account-side card payment is not the card limit',
+  'AED3120.55 debited from Acc XXX1122 towards Credit Card XXX2518 payment on 20-10-2026 through ADCB Mobile App. Avl.Bal is AED 9,872.30',
+  { amountFils: 312055, transfer: true, snapshotKind: null, snapshotFils: null });
+t('a salary transfer FROM an employer is income, not an own-account transfer',
+  'Salary transfer of AED 15,000.00 from ACME LLC has been credited to your account XXX1234.',
+  { type: 'income', category: 'salary', transfer: false });
+t('money credited via transfer from a person is income, not an own-account transfer',
+  'AED 3,000.00 credited to your account XXXX5678 via funds transfer from AHMED ALI',
+  { type: 'income', transfer: false, merchant: 'Ahmed Ali' });
+t('"transferred from <person> to your account" is money arriving',
+  'An amount of AED 2,000.00 has been transferred from JOHN DOE to your account XXXX9876.',
+  { type: 'income', transfer: false });
+t('a move to your own account at another bank is a transfer, not spending',
+  'AED 2,500.00 has been transferred from your Account XXX1234 to your Wio Account ending 5678 on 10/09/2026.',
+  { type: 'expense', transfer: true, merchant: 'Own account transfer' });
+t('a move to your own currency account is a transfer, not spending',
+  'AED 3,672.50 has been transferred from your Account XXX1234 to your USD Account XXX7777 on 10/09/2026.',
+  { transfer: true, merchant: 'Own account transfer' });
+t('paying a biller account is not hidden as an own transfer',
+  'AED 500.00 has been transferred from your account XXX1234 to your du account 0551234567.',
+  { type: 'expense', transfer: false });
+// Categories and canonical subscription names.
+for (const [desc, merchant, category] of [
+  ['MICROSOFT*MICROSOFT 365 P, MSBILL.INFO', 'Microsoft 365', 'software'],
+  ['APPLE.COM/BILL ICLOUD, CORK', undefined, 'software'],
+  ['GOOGLE *Gemini Advanced, g.co/helppay#', undefined, 'software'],
+  ['FIGMA MONTHLY RENEWAL, SAN FRANCISCO', 'Figma', 'software'],
+  ['MIDJOURNEY INC., SOUTH SAN FRAN', 'Midjourney', 'software'],
+  ['PERPLEXITY AI, SAN FRANCISCO', 'Perplexity', 'software'],
+  ['DUOLINGO, PITTSBURGH', 'Duolingo', 'education'],
+  ['SNAPCHAT+ SUBSCRIPTION, SANTA MONICA', undefined, 'entertainment'],
+  ['DisneyPlus, BURBANK', 'Disney+', 'entertainment'],
+  ['STARZPLAY, DUBAI', 'StarzPlay', 'entertainment'],
+  ['KIBSONS INTERNATIONAL, DUBAI', undefined, 'groceries'],
+  ['ICP SMART SERVICES, ABU DHABI', undefined, 'government'],
+  ['SALIM AL SHAMSI ELECT, SHARJAH', undefined, 'shopping'],
+]) {
+  t(`category: ${desc}`, `Purchase of AED 35.00 with Credit Card ending 4844 at ${desc}. Avl Cr. Limit AED 14,600.00`,
+    { amountFils: 3500, type: 'expense', category, ...(merchant ? { merchant } : {}) });
+}
+
+{
+  const stmt = parseSms('Mini Stmt for Card ending 8575: Statement date 20/10/26. Total Amt Due AED 3,000.00, Due Date 14/11/26. Min Amt Due AED 150.00');
+  if (stmt && stmt.kind === 'cardStatement' && stmt.statementDate === '2026-10-20' && stmt.date === '2026-11-14') { pass++; console.log('✓ a statement carries its stated issue date apart from its due date'); }
+  else { fail++; console.log('✗ a statement carries its stated issue date apart from its due date', JSON.stringify(stmt && { k: stmt.kind, s: stmt.statementDate, d: stmt.date })); }
+  const noIssue = parseSms('Your Credit Card ending 4844 statement has been generated. Total Amount Due AED 5,234.10. Minimum Amount Due AED 261.70. Payment Due Date 25/10/2026.');
+  if (noIssue && noIssue.kind === 'cardStatement' && noIssue.statementDate === undefined) { pass++; console.log('✓ a due date is never mistaken for the issue date'); }
+  else { fail++; console.log('✗ a due date is never mistaken for the issue date', JSON.stringify(noIssue && noIssue.statementDate)); }
+}
+t('an Arabic card payment stated amount-first is a settlement, not spending',
+  'تم سداد مبلغ 2,000.00 درهم لبطاقة الائتمان المنتهية بـ 5678',
+  { type: 'expense', amountFils: 200000, transfer: true, card: { last4: '5678', kind: 'credit' } });
+t('an Arabic statement heading without اجمالي is still a card statement',
+  'كشف حساب البطاقة المنتهية 4833: المبلغ المستحق 3,240.00 درهم، الحد الأدنى للدفع 162.00 درهم، تاريخ الاستحقاق 05/08/2026',
+  { kind: 'cardStatement', amountFils: 324000, minDueFils: 16200, dueDay: 5 });
+t('an Arabic card-labelled statement is a card statement, not a generic bill',
+  'بطاقة الائتمان المنتهية بـ 1234: المبلغ المستحق 3,240.00 درهم، الحد الأدنى للدفع 162.00 درهم، تاريخ الاستحقاق 05/08/2026',
+  { kind: 'cardStatement', amountFils: 324000, minDueFils: 16200 });
+t('a fee forecast footer does not drop the cash advance it follows',
+  'Cash advance of AED 1,000.00 on your Mashreq Credit Card ending 9876 at ATM. Cash advance fee AED 105.00 will be charged. Avl limit AED 9,000.00',
+  { type: 'expense', amountFils: 100000, category: 'cash-withdrawal' });
+t('the Disney Store is a shop, not the Disney+ subscription',
+  'Purchase of AED 120.00 with Credit Card ending 4844 at DISNEY STORE DUBAI MALL, DUBAI. Avl Cr. Limit AED 14,600.00',
+  { amountFils: 12000, category: 'shopping', merchant: 'Disney Store Dubai Mall' });
+// Independent-review regressions: none of these may change direction or hide money.
+for (const body of [
+  'AED 2,000.00 has been transferred from Current Account XXX1234 to your Savings Account XXX5678 on 02/10/2026.',
+  'AED 500.00 sent from Current A/C XXX1234 to your Savings Account XXX5678',
+  'AED 500.00 transferred from card ending 1234 to your account XXX5678',
+  'AED 500.00 transferred from XXX1234 to your Wio account XXX5678',
+  'Funds of AED 500.00 have been transferred from Acc No. XXX1234 to your account XXX5678',
+]) t(`an own-account move named by its source account stays an own transfer: ${body.slice(0, 48)}`, body,
+  { type: 'expense', transfer: true, merchant: 'Own account transfer' });
+for (const body of [
+  'AED 500.00 has been sent to you by AHMED ALI. Avl Bal AED 1,500.00',
+  'AED 500.00 was sent to your account XXX1234 by AHMED ALI.',
+]) {
+  const p = parseSms(body);
+  if (!p || p.type !== 'expense') { pass++; console.log(`✓ money sent TO you is never an expense: ${body.slice(0, 40)}`); }
+  else { fail++; console.log(`✗ money sent TO you is never an expense: ${body.slice(0, 40)}`, JSON.stringify(p.merchant)); }
+}
+t('a recharge card bought with "سداد مبلغ" is spending, not a card settlement',
+  'تم سداد مبلغ 100 درهم لبطاقة شحن سوا', { type: 'expense', transfer: false });
+t('a nursery named Bumble Bee is not a dating app', 'Purchase of AED 50.00 with Debit Card ending 1354 at BUMBLE BEE NURSERY, DUBAI. Avl Balance is AED 5,168.85.',
+  { category: 'education' });
+t('a hardware shop named Hinge is not a dating app', 'Purchase of AED 50.00 with Debit Card ending 1354 at HINGE HARDWARE TRADING, DUBAI. Avl Balance is AED 5,168.85.',
+  { category: 'shopping' });
+t('a national electricity company abbreviated ELECT is a utility', 'Purchase of AED 50.00 with Debit Card ending 1354 at SAUDI ELECT, DUBAI. Avl Balance is AED 5,168.85.',
+  { category: 'utilities' });
+t('a reversal forecast for the purchase itself is never posted',
+  'Your purchase of AED 55.75 at TALABAT with card ending 1234 will be reversed tomorrow.', null);
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  t('a labelled bill notice with a due date is a reminder, not a payment',
+    'سداد فاتورة\nالمفوتر: STC\nالمبلغ: 230 SAR\nتاريخ الاستحقاق: 15/10/2026\nيرجى السداد قبل تاريخ الاستحقاق', { kind: 'billDue' });
+  {
+    const p = parseSms('سداد\nفاتورة جديدة\nالمفوتر: STC\nمبلغ: 230 SAR');
+    if (!p || p.kind !== 'transaction') { pass++; console.log('✓ a new-bill notice is never a posted payment'); }
+    else { fail++; console.log('✗ a new-bill notice is never a posted payment', JSON.stringify(p.kind)); }
+  }
+  setActiveMarket('AE');
+}
+// Saudi labelled field-list families (synthetic grammar probes).
+{
+  const { setActiveMarket } = require('./build/markets');
+  setActiveMarket('SA');
+  t('an Al Rajhi online purchase label is a channel, never a phone bill',
+    'شراء انترنت\nبطاقة: 4321;فيزا\nمبلغ: 39.99 SAR\nلدى: NETFLIX.COM\nفي: 2026-10-01 01:10',
+    { amountFils: 3999, merchant: 'Netflix', category: 'entertainment', date: '2026-10-01' });
+  t('a labelled bill payment names its biller and is a posted expense',
+    'سداد فاتورة\nالمفوتر: STC\nرقم الفاتورة: 1234\nمبلغ: 230 SAR\nمن: 4455\nفي: 2026-10-02 09:00',
+    { type: 'expense', amountFils: 23000, category: 'telecom' });
+  t('a labelled outgoing local transfer is money leaving',
+    'حوالة محلية صادرة\nمن: 4455\nإلى: محمد أحمد\nمبلغ: 1500 SAR\nفي: 2026-10-02 10:30',
+    { type: 'expense', amountFils: 150000, merchant: 'محمد أحمد' });
+  t('a labelled incoming local transfer from a person is income, not business revenue',
+    'حوالة محلية واردة\nإلى: 4455\nمن: خالد سعيد\nمبلغ: 700 SAR\nفي: 2026-10-02 10:30',
+    { type: 'income', amountFils: 70000, category: 'other' });
+  t('an Arabic refund is an offset, not business revenue',
+    'استرداد مبلغ\nبطاقة: 4321;مدى\nمبلغ: 120 SAR\nمن: NOON\nفي: 2026-10-02 18:00',
+    { type: 'income', amountFils: 12000, category: 'other' });
+  t('a bill reminder sentence is still not a bill-payment header',
+    'يرجى سداد فاتورة STC بمبلغ 230 SAR قبل تاريخ الاستحقاق 25/10/2026', { kind: 'billDue' });
+  t('an English labelled block reads its Merchant: field without the label',
+    'Purchase\nCard: **4321 (mada)\nAmount: SAR 89.00\nMerchant: TAMIMI MARKETS\nDate: 02/10/2026 19:20',
+    { amountFils: 8900, merchant: 'Tamimi Markets', category: 'groceries', card: { last4: '4321', kind: 'debit' } });
+  t('a wallet transfer to a person is spending, and the wallet is not the phone company',
+    'You have sent SAR 150.00 to Abdullah via stc pay on 02/10/2026. Balance SAR 340.00',
+    { type: 'expense', amountFils: 15000, merchant: 'Abdullah', category: 'other' });
+  t('a statement emailed notice with an amount is not money sent',
+    'Your e-statement of SAR 4,210.00 has been sent to your email', null);
+  setActiveMarket('AE');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
