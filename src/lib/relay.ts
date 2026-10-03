@@ -1729,6 +1729,11 @@ export function isParsedRelayRow(
   if (dueKind && row.date !== null && row.dueDay !== Number(row.date.slice(8))) return false;
   if (!validNullableSafeFils(row.minDueFils)) return false;
   if (row.kind !== 'cardStatement' && row.minDueFils !== null) return false;
+  // The statement's issue date (payment allocation evidence); statements only,
+  // ISO, and strictly before the due date the row carries.
+  if (row.statementDate !== undefined && (row.kind !== 'cardStatement' ||
+    typeof row.statementDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.statementDate) ||
+    (row.date !== null && row.statementDate >= (row.date as string)))) return false;
 
   if (!validNullableSafeFils(row.snapshotFils)) return false;
   if (

@@ -190,9 +190,22 @@ export function mergeImportedCardDues(
               : Math.max(prior.minDueFils, due.minDueFils);
     const settlement = due.settledAt && (!prior.settledAt || due.settledAt > prior.settledAt)
       ? due : prior;
+    // Issue evidence: the earliest observation and the latest stated issue
+    // date are each the reading that credits fewer pre-issue payments.
+    const priorEvidence = prior as CardDueWithEvidence;
+    const nextEvidence = due as CardDueWithEvidence;
+    const observed = [validObservedAt(priorEvidence), validObservedAt(nextEvidence)]
+      .filter((at): at is number => at !== undefined);
+    const stated = [validStatementDate(priorEvidence), validStatementDate(nextEvidence)]
+      .filter((date): date is string => date !== undefined)
+      .sort();
+    const evidence: StatementIssueEvidence = {};
+    if (observed.length) evidence.observedAt = Math.min(...observed);
+    if (stated.length) evidence.statementDate = stated[stated.length - 1];
 
     merged[at] = {
       ...prior,
+      ...evidence,
       totalDueFils: Math.max(prior.totalDueFils, due.totalDueFils),
       minDueFils: minimum,
       minDueEstimated: repairsContradictoryMinimum
@@ -352,6 +365,8 @@ function cardPaymentsOf(state: CardState, ids: Set<string>): Transaction[] {
    * payments, and this direction of error is the cheap one — dropping a real
    * second payment leaves a balance showing that the user can clear with Mark
    * paid, while counting one twice quietly settles a bill they still owe.
+   * The one dated exception is an income-side unsided row beside a debit leg
+   * that has no receipt of its own; see `unsidedReceiptsOfDebits`.
    */
   const value = canonicalCardPayments(matched);
   paymentsCache.byKey.set(key, value);
@@ -497,7 +512,7 @@ export function cardPaymentRows(state: CardState): Transaction[] {
     }
     for (const debit of debits) {
       const day = isoDay(debit.date);
-      for (let offset = -OBSERVED_COLLAPSE_DAYS; offset <= OBSERVED_COLLAPSE_DAYS; offset++) {
+      for (let offset = -OBSERVED_COLLAPSE_DAYS; offset <= RECEIPT_LAG_DAYS; offset++) {
         for (const receipt of receiptsByDay.get(day + offset) ?? []) {
           if (!compatibleExternalCardPayment(debit, receipt, accountsById.get(receipt.accountId))) continue;
           const eligible = candidates.get(debit.id) ?? new Set<string>();
@@ -609,15 +624,79 @@ function canonicalCardPaymentsWithEvidence(rows: Transaction[]): CanonicalCardPa
   const compatCopiesToConsume = new Map(
     [...sidedCounts].map(([key, counts]) => [key, Math.max(counts.debit, counts.receipt)]),
   );
+  const consumedByKey = new Map<string, number>();
   const retained = rows.filter((row) => {
     if (row.cardPaymentSide !== undefined || settlementLeg(row) === 'manual') return true;
     const key = `${row.date}|${row.amountFils}`;
     const remaining = compatCopiesToConsume.get(key) ?? 0;
     if (remaining <= 0) return true;
     compatCopiesToConsume.set(key, remaining - 1);
+    consumedByKey.set(key, (consumedByKey.get(key) ?? 0) + 1);
     return false;
   });
-  return collapseSettlementLegsWithEvidence(retained);
+  const absorbed = unsidedReceiptsOfDebits(retained, consumedByKey);
+  return collapseSettlementLegsWithEvidence(
+    absorbed.size ? retained.filter((row) => !absorbed.has(row.id)) : retained,
+  );
+}
+
+/**
+ * Unsided receipts that are the missing half of a debit leg on another day.
+ *
+ * The same-date rule above is all an unsided row used to get, and the collapse
+ * below never folds one in. A RAKBANK payment debited on the 17th in the
+ * evening and acknowledged on the 18th as "We have received your payment of
+ * AED 4,120.55 towards your RAKBANK Credit Card ending 7712" — wording older
+ * parsers could not side — was two payments, and the second AED 4,120.55
+ * settled the following month's AED 3,500 statement.
+ *
+ * Only an income-side unsided row can be a receipt, and only a debit leg with
+ * no receipt of its own (sided, or an unsided copy already consumed on its own
+ * date) can absorb one; one debit absorbs at most one. Pairing is the same
+ * maximum-cardinality, least-skew matcher, so two genuine same-amount payments
+ * that both left their debit and receipt behind stay two.
+ */
+function unsidedReceiptsOfDebits(
+  rows: Transaction[],
+  consumedByKey: ReadonlyMap<string, number>,
+): Set<string> {
+  const absorbed = new Set<string>();
+  if (!rows.some((row) => settlementLeg(row) === 'unsided' && row.type === 'income')) return absorbed;
+  const paired = preferredObservedMatches(rows);
+  const consumed = new Map(consumedByKey);
+  const byAmount = new Map<number, { debits: Transaction[]; unsided: Transaction[] }>();
+  const ordered = rows.slice().sort(
+    (a, b) => a.date.localeCompare(b.date) || (a.ts ?? 0) - (b.ts ?? 0) || a.id.localeCompare(b.id),
+  );
+  for (const row of ordered) {
+    const leg = settlementLeg(row);
+    const isLoneDebit = leg === 'debit' && !paired.has(row.id);
+    const isUnsidedReceipt = leg === 'unsided' && row.type === 'income';
+    if (!isLoneDebit && !isUnsidedReceipt) continue;
+    if (isLoneDebit) {
+      // The same-date rule already gave this debit its compat copy.
+      const key = `${row.date}|${row.amountFils}`;
+      const used = consumed.get(key) ?? 0;
+      if (used > 0) { consumed.set(key, used - 1); continue; }
+    }
+    const bucket = byAmount.get(row.amountFils) ?? { debits: [], unsided: [] };
+    (isLoneDebit ? bucket.debits : bucket.unsided).push(row);
+    byAmount.set(row.amountFils, bucket);
+  }
+  for (const { debits, unsided } of byAmount.values()) {
+    if (!debits.length || !unsided.length) continue;
+    const pairs = preferredDatedPairs(
+      debits.map((row) => [isoDay(row.date)]),
+      unsided.map((row) => [isoDay(row.date)]),
+      Math.max(UNSIDED_BEFORE_DEBIT_DAYS, RECEIPT_LAG_DAYS),
+      (left, right) => {
+        const lag = isoDay(unsided[right].date) - isoDay(debits[left].date);
+        return lag >= -UNSIDED_BEFORE_DEBIT_DAYS && lag <= RECEIPT_LAG_DAYS;
+      },
+    );
+    for (const [, unsidedIndex] of pairs) absorbed.add(unsided[unsidedIndex].id);
+  }
+  return absorbed;
 }
 
 /** Which half of a settlement a row is: the parser's answer, or its origin. */
@@ -704,8 +783,33 @@ interface OpenSettlement {
  */
 /** Two bank alerts describing one movement. Deliberately tight — see above. */
 const OBSERVED_COLLAPSE_DAYS = 1;
+/**
+ * The one asymmetric exception: a card's receipt may trail the funding debit.
+ *
+ * A payment from another bank leaves the account on day 0 and the card issuer
+ * acknowledges it when the transfer clears — two or three days later across a
+ * weekend. Read at ±1 day those were two payments, and the second copy settled
+ * the next statement. Only receipt-AFTER-debit widens: a receipt cannot
+ * acknowledge money that has not left yet, so the other direction stays at 1,
+ * and the pair matcher still maximises pairs first, so two genuine same-amount
+ * payments that each arrive in two legs remain two.
+ */
+const RECEIPT_LAG_DAYS = 3;
+/**
+ * An unsided receipt (a confirmation wording older parsers could not place)
+ * beside a debit leg that has no receipt of its own. Same reasoning as above,
+ * one day looser before the debit because the unsided row's date is the
+ * provider's, not a parsed transaction date.
+ */
+const UNSIDED_BEFORE_DEBIT_DAYS = 2;
 /** A manual claim and the bank's confirmation of it. */
 const ASSERTED_COLLAPSE_DAYS = 7;
+
+/** May a receipt dated `receiptDay` acknowledge a debit dated `debitDay`? */
+function observedLegsFit(debitDay: number, receiptDay: number): boolean {
+  const lag = receiptDay - debitDay;
+  return lag >= -OBSERVED_COLLAPSE_DAYS && lag <= RECEIPT_LAG_DAYS;
+}
 
 interface ObservedSettlementCluster {
   debit?: Transaction;
@@ -837,8 +941,10 @@ function preferredObservedPairs(
   return preferredDatedPairs(
     debits.map((row) => [isoDay(row.date)]),
     receipts.map((row) => [isoDay(row.date)]),
-    OBSERVED_COLLAPSE_DAYS,
-    compatible ? (left, right) => compatible(debits[left], receipts[right]) : undefined,
+    RECEIPT_LAG_DAYS,
+    (left, right) =>
+      observedLegsFit(isoDay(debits[left].date), isoDay(receipts[right].date)) &&
+      (!compatible || compatible(debits[left], receipts[right])),
   );
 }
 
@@ -958,8 +1064,8 @@ function collapseSettlementLegsWithEvidence(rows: Transaction[]): CanonicalCardP
 
   for (const row of ordered) {
     const leg = settlementLeg(row);
-    // 'unsided' is a compat row the same-day rule above already had its say
-    // about; nothing else may fold it in on a guess.
+    // 'unsided' is a compat row the same-day rule and `unsidedReceiptsOfDebits`
+    // already had their say about; nothing else may fold it in on a guess.
     if (leg === 'unsided') {
       kept.push(row);
       continue;
@@ -971,23 +1077,26 @@ function collapseSettlementLegsWithEvidence(rows: Transaction[]): CanonicalCardP
     const bucket = (open.get(row.amountFils) ?? []).filter((s) => {
       if (s.row.date >= shiftISO(row.date, -ASSERTED_COLLAPSE_DAYS)) return true;
       const opposite = oppositeObserved(s);
-      return opposite !== undefined && opposite.date >= shiftISO(row.date, -OBSERVED_COLLAPSE_DAYS);
+      return opposite !== undefined && opposite.date >= shiftISO(row.date, -RECEIPT_LAG_DAYS);
     });
     const fits = (s: OpenSettlement) => {
       if (s.leg === leg || s.leg === 'unsided' || s.absorbed.has(leg)) return false;
       // A manual claim explains bank alerts; two bank alerts explain each
       // other. Two manual rows are two deliberate taps, not one movement.
       if (s.leg === 'manual' && leg === 'manual') return false;
+      // Rows are walked oldest-first, so `s` is the earlier leg: a receipt
+      // trailing its debit may do so by RECEIPT_LAG_DAYS.
+      const observedSpan = leg === 'receipt' ? RECEIPT_LAG_DAYS : OBSERVED_COLLAPSE_DAYS;
       const span = s.leg === 'manual' || leg === 'manual'
         ? ASSERTED_COLLAPSE_DAYS
-        : OBSERVED_COLLAPSE_DAYS;
+        : observedSpan;
       if (s.row.date >= shiftISO(row.date, -span)) return true;
       // A manual assertion can be a week before the bank confirms it. Once
       // one observed side is attached, the opposite side may arrive the next
       // day and must join that evidence rather than be measured again from the
       // older manual date.
       const opposite = oppositeObserved(s);
-      return opposite !== undefined && opposite.date >= shiftISO(row.date, -OBSERVED_COLLAPSE_DAYS);
+      return opposite !== undefined && opposite.date >= shiftISO(row.date, -observedSpan);
     };
     const fitting = bucket.filter(fits);
     const preferredManualId =
@@ -1069,9 +1178,56 @@ function collapseSettlementLegsWithEvidence(rows: Transaction[]): CanonicalCardP
   return { rows: kept, receiptByCanonicalId };
 }
 
+/**
+ * Issue-date evidence a statement row may carry.
+ *
+ * Neither field is in `CardDue` in types.ts yet, so both are read here as
+ * optional extras. `statementDate` is the bank's own "Statement date", once the
+ * parser captures it. `observedAt` is the epoch-ms timestamp of the earliest
+ * SMS that described this statement: a bank cannot announce a statement before
+ * issuing it, so that moment is a hard upper bound on the issue date.
+ */
+export interface StatementIssueEvidence {
+  statementDate?: string;
+  observedAt?: number;
+}
+
+type CardDueWithEvidence = CardDue & StatementIssueEvidence;
+
+/**
+ * How long before its due date a statement is assumed to have been issued when
+ * nothing better is known. UAE grace periods are ~25 days and 21 is the
+ * shortest common one; the later estimate is the conservative one, because
+ * crediting a payment the bank had already netted into the total settles a
+ * bill the user still owes, while missing one leaves a balance they can clear
+ * with Mark paid.
+ */
+const ESTIMATED_ISSUE_LEAD_DAYS = 21;
+/** The pre-evidence matching window, kept for dues stored without issue evidence. */
+const LEGACY_WINDOW_DAYS = 40;
+/** A stated statement date further than this before the due date is a misread. */
+const MAX_STATEMENT_LEAD_DAYS = 62;
+
+function validStatementDate(due: CardDueWithEvidence): string | undefined {
+  const date = due.statementDate;
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined;
+  if (!Number.isFinite(Date.parse(`${date}T12:00:00Z`))) return undefined;
+  if (date >= due.dueDate || date < shiftISO(due.dueDate, -MAX_STATEMENT_LEAD_DAYS)) return undefined;
+  return date;
+}
+
+function validObservedAt(due: CardDueWithEvidence): number | undefined {
+  const at = due.observedAt;
+  return typeof at === 'number' && Number.isFinite(at) && at > 0 ? at : undefined;
+}
+
 /** A card's statements: one per due date, however many rows describe each. */
 interface Statement {
   dueDate: string;
+  /** Latest valid bank-stated statement date across copies. */
+  statementDate: string | null;
+  /** Earliest observation of any copy, epoch ms. */
+  observedAt: number | null;
   /** The largest figure any copy of this statement quotes. */
   totalFils: number;
   /** Allocated so far — seeded with manual "Mark paid" amounts. */
@@ -1081,6 +1237,47 @@ interface Statement {
   dueIds: string[];
   /** The payment rows any part of which was credited to this statement. */
   rows: Transaction[];
+}
+
+/**
+ * Could `payment` have reduced what `s` says is owed?
+ *
+ * A statement's total is the card balance on its issue date, so it already
+ * nets every payment the bank received before then. Crediting such a payment
+ * again counted it twice: a fresh install that saw AED 3,000 paid on 12 Oct
+ * and then the 20 Oct statement for AED 3,000 showed the card settled while
+ * the whole AED 3,000 was owed. Only payments after issue can count.
+ *
+ *  - A bank-stated statement date is the issue date. A payment ON that day
+ *    may already be inside the total, so only later days count.
+ *  - Otherwise the issue date is bounded from above by the earliest SMS that
+ *    described the statement, and estimated at `ESTIMATED_ISSUE_LEAD_DAYS`
+ *    before the due date; a payment after either counts. On the observation
+ *    day itself the clocks decide: a payment alert that arrived after the
+ *    statement alert was made after the statement existed.
+ *  - An estimated issue date never reaches back to the previous statement's
+ *    due date or earlier.
+ *  - A manual payment on a statement with no evidence at all is trusted
+ *    against the estimate (see below), never against the bounds above.
+ */
+function paymentCanReduce(s: Statement, payment: Transaction, previousDue: string | undefined): boolean {
+  if (s.statementDate) return payment.date > s.statementDate;
+  if (previousDue && payment.date <= previousDue) return false;
+  if (payment.date >= shiftISO(s.dueDate, -ESTIMATED_ISSUE_LEAD_DAYS)) return true;
+  // With no evidence at all — a due stored before observation was recorded,
+  // or a pasted statement — keep the window that due was created under
+  // (LEGACY_WINDOW_DAYS before the due date). Tightening it retroactively
+  // un-settled statements that existing users had already seen paid, the
+  // moment they upgraded. A manual Mark paid always counts: the app only
+  // offers it on a statement it already shows, so the tap postdates it.
+  if (s.observedAt === null) {
+    return payment.source === 'manual' || payment.date >= shiftISO(s.dueDate, -LEGACY_WINDOW_DAYS);
+  }
+  const observedOn = toISODate(new Date(s.observedAt));
+  if (payment.date !== observedOn) return payment.date > observedOn;
+  // A manual Mark paid is a tap made while looking at this statement.
+  const paidAt = payment.ts ?? (payment.source === 'manual' ? Infinity : -Infinity);
+  return paidAt > s.observedAt;
 }
 
 /** What allocation concluded about one statement. */
@@ -1110,10 +1307,19 @@ interface Allocation {
  *    full balance. Copies are one statement here, and share one allocation.
  *
  *  - A statement stops taking payments once the next one has been issued
- *    (~25 days before ITS due date, the same approximation used throughout).
- *    Without that the June statement was still eligible three weeks into July
- *    and swallowed the payment made for the July bill, leaving July unpaid —
- *    and June's balance is inside July's total anyway.
+ *    (see `paymentCanReduce`). Without that the June statement was still
+ *    eligible three weeks into July and swallowed the payment made for the
+ *    July bill, leaving July unpaid — and June's balance is inside July's
+ *    total anyway.
+ *
+ *  - A statement only takes payments made after it was issued. Its total
+ *    already nets everything earlier, so the old window opening 40 days
+ *    before the due date credited those payments a second time — and an
+ *    overpayment made before the next statement poured into a total the bank
+ *    had already reduced by it. Together with the rule above this partitions
+ *    time: a payment can reach a later statement only when it postdates that
+ *    statement's issue, and then it no longer belongs to the earlier one
+ *    unless the user marked the earlier one paid on or after that day.
  *
  *  - "Mark paid" on a statement already a month late records the transfer
  *    dated today, which fell outside that statement's window and landed on the
@@ -1133,8 +1339,10 @@ function computePaymentAllocations(
   const payments = cardPaymentsOf(state, ids);
 
   const byDate = new Map<string, Statement>();
-  for (const d of dues) {
+  for (const d of dues as CardDueWithEvidence[]) {
     const s = byDate.get(d.dueDate);
+    const statementDate = validStatementDate(d) ?? null;
+    const observedAt = validObservedAt(d) ?? null;
     const owner = d.settledByTransactionId ? paymentsCache?.byId.get(d.settledByTransactionId) : undefined;
     // An ISO timestamp is UTC; the ledger payment day is the bank/user's local
     // calendar day. Use the linked receipt so a just-after-midnight payment
@@ -1145,6 +1353,8 @@ function computePaymentAllocations(
     if (!s) {
       byDate.set(d.dueDate, {
         dueDate: d.dueDate,
+        statementDate,
+        observedAt,
         totalFils: d.totalDueFils,
         paidFils: d.paidFils,
         settledOn,
@@ -1157,6 +1367,10 @@ function computePaymentAllocations(
     // Manual "Mark paid" happened once, to the statement, not to each copy.
     s.paidFils = Math.max(s.paidFils, d.paidFils);
     if (settledOn && (!s.settledOn || settledOn > s.settledOn)) s.settledOn = settledOn;
+    // Copies of one statement: the later stated issue date and the earliest
+    // observation are each the conservative reading.
+    if (statementDate && (!s.statementDate || statementDate > s.statementDate)) s.statementDate = statementDate;
+    if (observedAt !== null && (s.observedAt === null || observedAt < s.observedAt)) s.observedAt = observedAt;
     s.dueIds.push(d.id);
   }
   const statements = [...byDate.values()].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
@@ -1167,15 +1381,17 @@ function computePaymentAllocations(
       const s = statements[i];
       const outstanding = s.totalFils - s.paidFils;
       if (outstanding <= 0) continue;
-      if (payment.date < shiftISO(s.dueDate, -40)) continue;
-      const next = statements[i + 1]?.dueDate;
+      if (!paymentCanReduce(s, payment, statements[i - 1]?.dueDate)) continue;
+      const next = statements[i + 1];
       // A newer statement closes this one's allocation window when it was
       // issued. The newest known statement has no arbitrary +20-day cutoff:
       // people pay late, and until a replacement exists that payment still
-      // settles the only balance Wafra knows about.
-      let until = next ? shiftISO(next, -25) : null;
-      if (s.settledOn && (!until || s.settledOn > until)) until = s.settledOn;
-      if (until && payment.date > until) continue;
+      // settles the only balance Wafra knows about. A statement the user
+      // marked paid keeps taking payments up to the day they marked it.
+      if (
+        next && paymentCanReduce(next, payment, s.dueDate) &&
+        !(s.settledOn && payment.date <= s.settledOn)
+      ) continue;
       const take = Math.min(outstanding, left);
       s.paidFils += take;
       s.rows.push(payment);

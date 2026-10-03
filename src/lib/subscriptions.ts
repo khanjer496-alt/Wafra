@@ -1,9 +1,9 @@
 import { daysBetweenISO, shiftISO, toISODate } from '@/lib/format';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
-import { isSpending } from '@/lib/ledger';
+import { isIncome, isSpending } from '@/lib/ledger';
 import type { Account, Bill, CategoryId, Transaction } from '@/lib/types';
 
-export type Cadence = 'weekly' | 'monthly' | 'yearly' | 'as-needed';
+export type Cadence = 'weekly' | 'biweekly' | 'monthly' | 'quarterly' | 'yearly' | 'as-needed';
 
 /**
  * subscription — cancellable online/lifestyle services (streaming, apps, gym);
@@ -23,6 +23,12 @@ export interface Subscription {
   status: 'active' | 'stopped';
   cadence: Cadence;
   avgAmountFils: number;
+  /**
+   * The latest charge at the plan's price. A lone outlier — a misparse, a
+   * one-off purchase on the same descriptor, or the first charge of an annual
+   * plan after months of monthly ones — is not what the plan will charge next,
+   * so it is skipped here exactly as it is in `priceIncreased`.
+   */
   lastAmountFils: number;
   lastChargedISO: string;
   nextExpectedISO: string;
@@ -39,8 +45,16 @@ export interface Subscription {
    * against a number that had already absorbed it.
    */
   priorTypicalFils: number;
-  /** Monthly-equivalent cost for totals (yearly/12, weekly*4.33). */
+  /** Monthly-equivalent cost for totals (yearly/12, quarterly/3, weekly*4.33). */
   monthlyEquivalentFils: number;
+  /**
+   * Present only when one billing descriptor carries several concurrent plans
+   * (Apple bills iCloud+ and Apple Music alike as "Apple"): the stable price
+   * points of the plan this row describes, oldest first. The first one is part
+   * of `subscriptionKey`, so the plans keep separate reminders, dismissals and
+   * cancellations; `matchesRecurringTransaction` uses all of them.
+   */
+  priceTrackFils?: number[];
 }
 
 /**
@@ -68,13 +82,37 @@ interface CadenceWindow {
   minDays: number;
   maxDays: number;
   typicalDays: number;
+  /**
+   * Days past the expected renewal before a silent subscription reads as
+   * stopped. One whole missed cycle plus this grace is the evidence; the old
+   * "2.2 cycles" rule kept a cancelled yearly plan active for 26 months.
+   */
+  graceDays: number;
+  /** Bills are paid by hand, early or late, so they get a longer grace. */
+  billGraceDays: number;
 }
 
 const WINDOWS: CadenceWindow[] = [
-  { cadence: 'weekly', minDays: 6, maxDays: 8, typicalDays: 7 },
-  { cadence: 'monthly', minDays: 26, maxDays: 35, typicalDays: 30 },
-  { cadence: 'yearly', minDays: 350, maxDays: 380, typicalDays: 365 },
+  { cadence: 'weekly', minDays: 6, maxDays: 8, typicalDays: 7, graceDays: 10, billGraceDays: 10 },
+  { cadence: 'biweekly', minDays: 13, maxDays: 15, typicalDays: 14, graceDays: 14, billGraceDays: 14 },
+  { cadence: 'monthly', minDays: 26, maxDays: 35, typicalDays: 30, graceDays: 15, billGraceDays: 30 },
+  { cadence: 'quarterly', minDays: 84, maxDays: 97, typicalDays: 91, graceDays: 30, billGraceDays: 45 },
+  { cadence: 'yearly', minDays: 350, maxDays: 380, typicalDays: 365, graceDays: 45, billGraceDays: 60 },
 ];
+
+/**
+ * A gap of two or three cycles is a skipped renewal (a declined card, a month
+ * paused), not a different cadence. Without this, a third charge after one
+ * skipped month ERASED a subscription that two charges had already proven.
+ *
+ * Only where there is subscription evidence (a named service or a software
+ * category). For an ordinary merchant a long gap is just a gap: counting it
+ * made irregular pharmacy visits a "monthly commitment".
+ */
+const SKIPPED_CYCLE_MULTIPLES = [2, 3];
+
+/** Silence after which an as-needed top-up reads as stopped. */
+const AS_NEEDED_STOP_DAYS = 75;
 
 const monthOrdinal = (iso: string): number =>
   Number(iso.slice(0, 4)) * 12 + Number(iso.slice(5, 7)) - 1;
@@ -97,10 +135,29 @@ const latestMonthlyReceiptRun = (charges: Transaction[]): Transaction[] => {
   }
   const lastMonth = Math.max(...byMonth.keys());
   const descending: Transaction[] = [];
+  // One early or late payment moves a bill into its neighbouring month: two
+  // payments in August and none in September is still one per month. Accept
+  // exactly one such pair per run; a wallet topped up at will produces more.
+  let pairAllowance = 1;
   for (let month = lastMonth; ; month -= 1) {
-    const rows = byMonth.get(month);
-    if (!rows || rows.length !== 1) break;
-    descending.push(rows[0]);
+    const rows = byMonth.get(month) ?? [];
+    if (rows.length === 1) {
+      descending.push(rows[0]);
+      continue;
+    }
+    if (pairAllowance === 0) break;
+    const earlier = byMonth.get(month - 1) ?? [];
+    if (rows.length === 0 && earlier.length === 2) {
+      // This month's payment was made early, at the end of the month before.
+      descending.push(earlier[1], earlier[0]);
+    } else if (rows.length === 2 && earlier.length === 0) {
+      // Last month's payment was made late, in this month.
+      descending.push(rows[1], rows[0]);
+    } else {
+      break;
+    }
+    pairAllowance -= 1;
+    month -= 1;
   }
   return descending.length >= 3 ? descending.reverse() : [];
 };
@@ -126,7 +183,23 @@ const latestAsNeededReceiptRun = (charges: Transaction[]): Transaction[] => {
  * single charge for monthly staples) is enough to surface them.
  */
 const KNOWN_SUBSCRIPTION_MERCHANTS =
-  /netflix|spotify|anghami|osn|shahid|starz|youtube|yt premium|apple\.com|apple services|icloud|google one|google storage|amazon prime|prime video|openai|chat\s*gpt|claude|anthropic|real-?debrid|all-?debrid|disney|hbo|deezer|audible|kindle|linkedin|dropbox|adobe|canva|microsoft 365|office 365|discord|notion|github|telegram premium|xbox game pass|playstation plus|psn plus|fitness first|gymnation|fitness time|classpass|etisalat postpaid|du postpaid|home internet/i;
+  // Word-bounded: an unbounded /canva/ made "Canvas Home Llc" a subscription
+  // at AED 1,290 a month. The optional suffixes keep the parser's own joined
+  // canonical names ("StarzPlay", "OSN+", "Disney+") matching.
+  /\b(?:netflix|spotify|anghami|osn|shahid|starz(?:play)?|you\s*tube|yt premium|apple\.com|apple services|icloud|google one|google storage|amazon prime|prime video|openai|chat\s*gpt|claude|anthropic|real-?debrid|all-?debrid|disney(?:plus)?|hbo(?:\s*max)?|deezer|audible|kindle|linkedin|dropbox|adobe|canva|microsoft 365|office 365|discord|notion|github|telegram premium|xbox game pass|playstation plus|psn plus|fitness first|gymnation|fitness time|classpass|etisalat postpaid|du postpaid|home internet)\b/i;
+
+/**
+ * The parser titles every APPLE.COM/BILL and ITUNES charge "Apple", so this is
+ * where iCloud+, Apple Music and Apple One arrive. It is ALSO where an Apple
+ * Store purchase arrives, so the title alone is not enough: it counts as a
+ * known service only once its price is stable (see `analyzeRecurringCharges`).
+ */
+const APPLE_BILLING_TITLE = /^\s*apple\s*$/i;
+
+/** A title that names a subscription service (Apple subject to price stability). */
+function isKnownServiceTitle(title: string): boolean {
+  return KNOWN_SUBSCRIPTION_MERCHANTS.test(title) || APPLE_BILLING_TITLE.test(title);
+}
 
 // Both of these used to be local copies. Date arithmetic re-implemented per
 // module is how the app ended up with two different answers for "when is this
@@ -138,7 +211,9 @@ const addDays = shiftISO;
 /** Calendar renewals preserve their billing day instead of drifting by 30/365 days. */
 function nextRenewalISO(charges: Transaction[], window: CadenceWindow): string {
   const last = charges[charges.length - 1].date;
-  if (window.cadence !== 'monthly' && window.cadence !== 'yearly') {
+  const monthsAhead =
+    window.cadence === 'monthly' ? 1 : window.cadence === 'quarterly' ? 3 : window.cadence === 'yearly' ? 12 : 0;
+  if (monthsAhead === 0) {
     return addDays(last, window.typicalDays);
   }
   const [year, month, day] = last.split('-').map(Number);
@@ -153,11 +228,7 @@ function nextRenewalISO(charges: Transaction[], window: CadenceWindow): string {
       : charges.slice(-3);
     billingDay = Math.max(day, ...recent.map((charge) => Number(charge.date.slice(8, 10))));
   }
-  const target = new Date(Date.UTC(
-    year + (window.cadence === 'yearly' ? 1 : 0),
-    month - 1 + (window.cadence === 'monthly' ? 1 : 0),
-    1,
-  ));
+  const target = new Date(Date.UTC(year, month - 1 + monthsAhead, 1));
   const targetLastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
   target.setUTCDate(Math.min(billingDay, targetLastDay));
   return target.toISOString().slice(0, 10);
@@ -252,7 +323,7 @@ export function recurringProviderTitle(transaction: Pick<Transaction, 'title' | 
   return title;
 }
 
-type RecurringIdentity = Pick<Subscription, 'title' | 'billIdentity'>;
+type RecurringIdentity = Pick<Subscription, 'title' | 'billIdentity' | 'priceTrackFils'>;
 
 /** Keep kinds distinct: a matching last four alone does not prove one service. */
 function normalizedBillIdentity(identity: string | undefined): string | undefined {
@@ -261,18 +332,50 @@ function normalizedBillIdentity(identity: string | undefined): string | undefine
     : undefined;
 }
 
+/** The plan anchor of a concurrent-plan row: its oldest stable price. */
+function priceTrackAnchor(sub: RecurringIdentity): number | undefined {
+  const anchor = sub.priceTrackFils?.[0];
+  return typeof anchor === 'number' && Number.isSafeInteger(anchor) && anchor > 0 ? anchor : undefined;
+}
+
 /** Stable persistence/navigation key; legacy unidentified providers keep their old key. */
 export function subscriptionKey(sub: RecurringIdentity): string {
   const provider = sub.title.trim().toLowerCase();
   const identity = normalizedBillIdentity(sub.billIdentity);
+  const anchor = priceTrackAnchor(sub);
+  if (anchor !== undefined) return `track:${JSON.stringify([provider, identity ?? null, anchor])}`;
   if (identity) return `service:${JSON.stringify([provider, identity])}`;
   // Raw merchant names are user-editable. Keep their namespace separate from
   // encoded service keys, including names resembling another escaped name.
-  return /^(?:service|provider):/.test(provider) ? `provider:${JSON.stringify(provider)}` : provider;
+  return /^(?:service|provider|track):/.test(provider) ? `provider:${JSON.stringify(provider)}` : provider;
 }
 
-/** Only canonical service keys may persist scoped undo markers. */
+/** The same provider/service key with any concurrent-plan anchor removed. */
+function serviceKey(sub: RecurringIdentity): string {
+  return subscriptionKey({ title: sub.title, billIdentity: sub.billIdentity });
+}
+
+/** Only canonical service (and concurrent-plan) keys may persist scoped undo markers. */
 export function isScopedSubscriptionKey(key: string): boolean {
+  if (key.startsWith('track:')) {
+    try {
+      const value: unknown = JSON.parse(key.slice('track:'.length));
+      if (!Array.isArray(value) || value.length !== 3) return false;
+      const [title, identity, anchor] = value as unknown[];
+      if (typeof title !== 'string' || title.trim().length === 0) return false;
+      if (typeof anchor !== 'number' || !Number.isSafeInteger(anchor) || anchor <= 0) return false;
+      let billIdentity: string | undefined;
+      if (typeof identity === 'string') {
+        if (normalizedBillIdentity(identity) === undefined) return false;
+        billIdentity = identity;
+      } else if (identity !== null) {
+        return false;
+      }
+      return subscriptionKey({ title, billIdentity, priceTrackFils: [anchor] }) === key;
+    } catch {
+      return false;
+    }
+  }
   if (!key.startsWith('service:')) return false;
   try {
     const value: unknown = JSON.parse(key.slice('service:'.length));
@@ -293,10 +396,13 @@ export function subscriptionLabel(sub: RecurringIdentity): string {
 
 /** The detail history uses exactly the same provider/service boundary as detection. */
 export function matchesRecurringTransaction(sub: RecurringIdentity, transaction: Transaction): boolean {
-  return subscriptionKey(sub) === subscriptionKey({
+  if (serviceKey(sub) !== subscriptionKey({
     title: recurringProviderTitle(transaction),
     billIdentity: transaction.billIdentity,
-  });
+  })) return false;
+  // One of several plans on a shared descriptor owns only its own prices.
+  const track = sub.priceTrackFils;
+  return !track?.length || track.some((price) => !differs(price, transaction.amountFils));
 }
 
 /** An identified bill replaces only its own service; old manual reminders cover the provider. */
@@ -319,7 +425,8 @@ export function isSubscriptionDismissed(
   const keys: ReadonlySet<string> = Array.isArray(dismissed)
     ? new Set(dismissed.map((key) => key.trim().toLowerCase()))
     : dismissed as ReadonlySet<string>;
-  return keys.has(subscriptionKey(sub)) || keys.has(subscriptionKey({ title: sub.title }));
+  return keys.has(subscriptionKey(sub)) || keys.has(serviceKey(sub)) ||
+    keys.has(subscriptionKey({ title: sub.title }));
 }
 
 type SubscriptionDetectionKey = {
@@ -449,6 +556,376 @@ export function subscriptionDetectionRunning(
     sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
 }
 
+/** Categories whose recurring charges are bills: their amounts are never stable. */
+const isBillLikeCategory = (category: CategoryId): boolean =>
+  category === 'utilities' || category === 'telecom' || category === 'rent' || category === 'loan';
+
+const byDate = (a: Transaction, b: Transaction): number => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+
+/** How long after a charge a same-merchant credit of the same amount is its refund. */
+const REFUND_MATCH_DAYS = 10;
+
+/**
+ * The charges left once each same-merchant refund has cancelled the charge it
+ * returned. A duplicate charge refunded two days later otherwise read as a
+ * price rise (AED 78 against the usual 39), and a final charge refunded after
+ * cancelling kept predicting a renewal the user had already stopped.
+ *
+ * Deliberately narrow: a credit nets out one charge of the same amount (within
+ * 2% for card FX) from the preceding ten days, latest first. Partial refunds
+ * and credits with no matching charge change nothing.
+ */
+function withoutRefundedCharges(charges: Transaction[], refunds: Transaction[] | undefined): Transaction[] {
+  if (!refunds || refunds.length === 0) return charges;
+  const refunded = new Set<Transaction>();
+  for (const refund of [...refunds].sort(byDate)) {
+    let match: Transaction | undefined;
+    for (const charge of charges) {
+      if (refunded.has(charge) || charge.date > refund.date) continue;
+      if (daysBetween(charge.date, refund.date) > REFUND_MATCH_DAYS) continue;
+      const tolerance = Math.max(1, Math.round(charge.amountFils * 0.02));
+      if (Math.abs(charge.amountFils - refund.amountFils) > tolerance) continue;
+      if (!match || charge.date > match.date) match = charge;
+    }
+    if (match) refunded.add(match);
+  }
+  return refunded.size === 0 ? charges : charges.filter((charge) => !refunded.has(charge));
+}
+
+/**
+ * Whether the amounts are a short sequence of stable prices: every price held
+ * for at least two charges, and the current one for `minCurrentRun`. That is
+ * what a plan with a price change looks like — 36.73 four times, then 110.19 —
+ * and what a shop visited at random amounts does not. A whole-history ±15%
+ * test hid every subscription whose price had ever moved.
+ */
+function stableByPriceRuns(amounts: number[], minCurrentRun: number): boolean {
+  const runs: number[][] = [];
+  for (const amount of amounts) {
+    const run = runs[runs.length - 1];
+    if (run && amount >= run[0] * 0.85 && amount <= run[0] * 1.15) run.push(amount);
+    else runs.push([amount]);
+  }
+  return runs.length > 0 && runs.length <= 3 &&
+    runs.every((run) => run.length >= 2) &&
+    runs[runs.length - 1].length >= minCurrentRun;
+}
+
+interface PriceTrack {
+  charges: Transaction[];
+  prices: number[];
+}
+
+/** Both plans were charged at least twice while the other one was running. */
+function interleaved(a: Transaction[], b: Transaction[]): boolean {
+  const from = a[0].date > b[0].date ? a[0].date : b[0].date;
+  const aEnd = a[a.length - 1].date;
+  const bEnd = b[b.length - 1].date;
+  const to = aEnd < bEnd ? aEnd : bEnd;
+  if (from > to) return false;
+  const inside = (rows: Transaction[]) => rows.filter((row) => row.date >= from && row.date <= to).length;
+  return inside(a) >= 2 && inside(b) >= 2;
+}
+
+/**
+ * Separate plans billed under one descriptor, or null when there is only one.
+ *
+ * Apple bills iCloud+ (3.69) and Apple Music (21.99) both as "Apple". Mixed
+ * together, two different days a month read as a 14/16-day rhythm and nothing
+ * was detected; on the same day they merged into one 25.68 charge.
+ *
+ * Charges are clustered by stable price (within the 10% `differs` threshold).
+ * A price that follows another one's last charge is the same plan repriced, so
+ * it extends that plan rather than starting a new one. Only clusters of two or
+ * more charges take part, so a one-off purchase on the descriptor is ignored,
+ * and the split happens only when two plans genuinely ran side by side.
+ */
+function concurrentPriceTracks(charges: Transaction[]): PriceTrack[] | null {
+  const byAmount = [...charges].sort((a, b) => a.amountFils - b.amountFils);
+  const clusters: Transaction[][] = [];
+  for (const charge of byAmount) {
+    const cluster = clusters[clusters.length - 1];
+    if (cluster && !differs(cluster[0].amountFils, charge.amountFils)) cluster.push(charge);
+    else clusters.push([charge]);
+  }
+  const priced = clusters.filter((cluster) => cluster.length >= 2).map((cluster) => cluster.sort(byDate));
+  if (priced.length < 2) return null;
+  priced.sort((a, b) => byDate(a[0], b[0]));
+
+  const tracks: PriceTrack[] = [];
+  for (const cluster of priced) {
+    let target: PriceTrack | undefined;
+    for (const track of tracks) {
+      const end = track.charges[track.charges.length - 1].date;
+      if (end < cluster[0].date &&
+        (!target || end > target.charges[target.charges.length - 1].date)) target = track;
+    }
+    const price = median(cluster.map((charge) => charge.amountFils));
+    if (target) {
+      target.charges.push(...cluster);
+      target.prices.push(price);
+    } else {
+      tracks.push({ charges: [...cluster], prices: [price] });
+    }
+  }
+  if (tracks.length < 2) return null;
+  const concurrent = tracks.some((a, i) =>
+    tracks.some((b, j) => j > i && interleaved(a.charges, b.charges)));
+  return concurrent ? tracks : null;
+}
+
+/**
+ * Analyse one merchant/service group (oldest first) as a recurring payment.
+ * Returns null when the charges are not evidence of recurrence.
+ */
+function* analyzeRecurringCharges(
+  txs: Transaction[],
+  todayISO: string,
+  priceTrackFils?: number[],
+): Generator<void, Subscription | null, void> {
+  const title = txs[txs.length - 1].title;
+  const knownService = KNOWN_SUBSCRIPTION_MERCHANTS.test(title);
+  const appleBilling = APPLE_BILLING_TITLE.test(title);
+  // This evidence belongs to every source observation, not to the collapsed
+  // row below. A receipt and an ordinary purchase on the same day are mixed
+  // evidence; whichever happens to sort first must not decide for both.
+  const registeredReceipt =
+    txs.length > 0 && txs.every((transaction) => transaction.paymentFlowSide === 'receipt');
+
+  // Collapse same-day duplicates (split payments) into one charge.
+  const charges: Transaction[] = [];
+  for (let index = 0; index < txs.length; index += 1) {
+    if (index > 0 && (index & 127) === 0) yield;
+    const t = txs[index];
+    const prev = charges[charges.length - 1];
+    if (prev && prev.date === t.date) prev.amountFils += t.amountFils;
+    else charges.push({ ...t });
+  }
+
+  const monthlyReceiptRun = registeredReceipt ? latestMonthlyReceiptRun(charges) : [];
+  const asNeededReceiptRun =
+    registeredReceipt && monthlyReceiptRun.length === 0
+      ? latestAsNeededReceiptRun(charges)
+      : [];
+  const cadenceCharges = monthlyReceiptRun.length > 0
+    ? monthlyReceiptRun
+    : asNeededReceiptRun.length > 0
+      ? asNeededReceiptRun
+      : charges;
+  const latestCategory = cadenceCharges[cadenceCharges.length - 1].category;
+
+  // A utility bill is recurring precisely BECAUSE it is a bill, and its
+  // amount is never stable — SEWA is 280 one month and 450 the next. The
+  // ±15% gate below is the right test for a subscription and the wrong one
+  // for a bill, and applying it to both left the Utilities tab empty for a
+  // user who pays four of them every month. For these, cadence alone is the
+  // evidence.
+  const billLike = isBillLikeCategory(latestCategory);
+  const softwareService = SUBSCRIPTION_CATEGORIES.has(latestCategory);
+
+  const amounts = cadenceCharges.map((c) => c.amountFils);
+  const mid = median(amounts);
+  if (mid <= 0) return null;
+
+  // Known merchants skip the stability gate, which let a single misparsed
+  // charge set the price: one bad row put Canva on the list at AED 18,313 a
+  // month. The typical charge is what the subscription costs, so a LONE charge
+  // more than 3x or less than a third of the median is an outlier and takes
+  // no part in the price, the average or the price-rise comparison. A charge
+  // repeated at the next renewal is a real new price (a tier upgrade), not an
+  // outlier, however far it moved.
+  const loneOutlier = (amount: number, index: number) =>
+    (amount < mid / 3 || amount > mid * 3) &&
+    !(index > 0 && !differs(amounts[index - 1], amount)) &&
+    !(index < amounts.length - 1 && !differs(amounts[index + 1], amount));
+  const steadySeries = amounts.filter((amount, index) => !loneOutlier(amount, index));
+  // A sharp DROP on the latest charge is kept as the price: a plan downgraded
+  // from 399 to 89 renews at 89, and quoting the old price would overstate
+  // the next charge. A sharp latest RISE is the annual-plan / misparse shape
+  // and waits for a second charge to confirm it.
+  const latestIndex = amounts.length - 1;
+  const priceSeries = amounts.filter((amount, index) =>
+    !loneOutlier(amount, index) || (index === latestIndex && amount < mid / 3));
+  if (steadySeries.length === 0 || priceSeries.length === 0) return null;
+
+  // Stability is judged on the current price, not the whole history: a plan
+  // that moved from 36.73 to 110.19 is as stable as one that never moved.
+  const wholeStable = amounts.every((a) => a >= mid * 0.85 && a <= mid * 1.15);
+  const stable = wholeStable || stableByPriceRuns(amounts, 3);
+  // "Apple" is a service only at a stable price; the Apple Store shares it.
+  const known = knownService || (appleBilling && stableByPriceRuns(steadySeries, 2));
+
+  // A bill varies, but it varies like a bill. Waiving the ±15% gate for
+  // anything the parser called a utility waived it entirely, so a merchant
+  // that happened to be charged twice a month apart became a standing
+  // monthly commitment at whatever the larger charge was — one shop was
+  // listed at AED 20,918/mo on two unrelated payments.
+  //
+  // Same band the outlier guard uses: a third to triple the median. SEWA at
+  // 280 one month and 450 the next passes; two payments that have nothing to
+  // do with each other do not.
+  const billShaped = amounts.every((a) => a >= mid / 3 && a <= mid * 3);
+  if (
+    !stable &&
+    !known &&
+    !(billLike && billShaped) &&
+    !((monthlyReceiptRun.length > 0 || asNeededReceiptRun.length > 0) && billShaped)
+  ) return null;
+
+  const gaps: number[] = [];
+  for (let i = 1; i < cadenceCharges.length; i++) {
+    if ((i & 127) === 0) yield;
+    gaps.push(daysBetween(cadenceCharges[i - 1].date, cadenceCharges[i].date));
+  }
+
+  let window: CadenceWindow | null = null;
+  // Intervals that are exactly one cycle long. Skipped cycles support a
+  // cadence but never prove one on their own.
+  let cycleIntervals = gaps.length;
+  if (monthlyReceiptRun.length > 0) {
+    window = WINDOWS.find((candidate) => candidate.cadence === 'monthly') ?? null;
+  } else if (asNeededReceiptRun.length > 0) {
+    window = {
+      cadence: 'as-needed',
+      minDays: 0,
+      maxDays: Number.POSITIVE_INFINITY,
+      typicalDays: median(gaps.filter((gap) => gap > 0)),
+      graceDays: 0,
+      billGraceDays: 0,
+    };
+  } else if (gaps.length > 0) {
+    const skipsAllowed = known || softwareService;
+    for (const w of WINDOWS) {
+      let exact = 0;
+      let consistent = 0;
+      for (const gap of gaps) {
+        if (gap >= w.minDays && gap <= w.maxDays) {
+          exact += 1;
+          consistent += 1;
+        } else if (skipsAllowed &&
+          SKIPPED_CYCLE_MULTIPLES.some((k) => gap >= w.minDays * k && gap <= w.maxDays * k)) {
+          consistent += 1;
+        }
+      }
+      if (exact >= 1 && consistent >= Math.max(1, Math.ceil(gaps.length * 0.6))) {
+        window = w;
+        cycleIntervals = exact;
+        break;
+      }
+    }
+  }
+
+  // One charge is not evidence of recurrence, however well-known the
+  // merchant is. Treating it as one invented subscriptions from a single
+  // Prime Video rental or a one-off app-store purchase, and an imaginary
+  // monthly commitment is worse than a real one surfacing a cycle late.
+  // Known merchants still get the easier bar: one interval rather than two.
+  // So does a yearly software renewal (a domain, a licence): waiting for a
+  // third year of evidence hid it for two years.
+  if (!window) return null;
+  const requiredIntervals =
+    known || billLike || (softwareService && window.cadence === 'yearly') ? 1 : 2;
+  if (cycleIntervals < requiredIntervals) return null;
+
+  const last = cadenceCharges[cadenceCharges.length - 1];
+  // The price the plan charges now: the latest charge that is not a lone
+  // outlier. An annual plan's first charge after six monthly ones is not the
+  // monthly price, and is not a monthly price RISE either.
+  const lastPriceFils = priceSeries[priceSeries.length - 1];
+  // Compare against the MEDIAN of prior charges, and only once there are at
+  // least two of them. A mean over one prorated first charge made every
+  // steady subscription look like a price rise — Google One was flagged
+  // "price up" in a month its price went down.
+  // The latest charge against THE PRICE IT WAS BEFORE — the most recent
+  // run of charges that differed from what is being paid now.
+  //
+  // Neither obvious window works. A lifetime median answers the wrong
+  // question: Google One ran at AED 7.99 for a year, went to 76.99 on a
+  // tier change, then down to 37, and the median of all sixteen prior
+  // charges is still the 7.99 era — so a price that had just HALVED wore a
+  // "price up" badge. A fixed window of the last three is no better: it
+  // hides a rise that happened three charges ago, which is a rise the user
+  // has been paying ever since.
+  //
+  // Walking back to the previous distinct price answers what was actually
+  // asked. 37 after a run of 77 is a fall. 76.99 after a run of 7.99 is a
+  // rise, however long ago it started. And a steady price has no previous
+  // run at all, so there is nothing to announce.
+  //
+  // The run is taken whole rather than a single charge, so one bad parse
+  // cannot masquerade as the old price.
+  const priorAmounts = previousPriceRun(priceSeries);
+  const priorTypical = priorAmounts.length ? median(priorAmounts) : lastPriceFils;
+  // What it costs NOW, not what it averaged over its life. A lifetime average
+  // reports a price the user no longer pays: Google One went from AED 7.99
+  // to AED 76.99 on a tier upgrade and the app kept showing 7, because the
+  // outlier guard treats a genuine new price the same as a misparse.
+  //
+  // The median of the last three charges tracks an upgrade immediately —
+  // once two of the three are the new amount — while still absorbing a
+  // single bad parse, which is all the outlier guard was ever needed for.
+  const recent = priceSeries.slice(-3);
+  const avg = median(recent);
+  const monthlyEquivalentFils =
+    window.cadence === 'as-needed'
+      ? Math.round(
+          amounts.reduce((sum, amount) => sum + amount, 0) /
+            (120 / 30.4375),
+        )
+      : window.cadence === 'monthly'
+      ? avg
+      : window.cadence === 'weekly'
+        ? Math.round(avg * 4.33)
+        : window.cadence === 'biweekly'
+          ? Math.round((avg * 30.4375) / 14)
+          : window.cadence === 'quarterly'
+            ? Math.round(avg / 3)
+            : Math.round(avg / 12);
+
+  const group: RecurringGroup =
+    last.category === 'rent'
+      ? 'housing'
+      : last.category === 'utilities' || last.category === 'telecom'
+        ? 'utility'
+        : known || SUBSCRIPTION_CATEGORIES.has(last.category)
+          ? 'subscription'
+          : 'commitment';
+
+  // Stopped once a whole cycle has been missed and its grace has run out: a
+  // monthly plan is stopped about 45 days after its last charge, a yearly
+  // one about 410. Bills, which are paid by hand, get a longer grace.
+  const nextExpectedISO = nextRenewalISO(cadenceCharges, window);
+  const status: Subscription['status'] =
+    window.cadence === 'as-needed'
+      ? daysBetween(last.date, todayISO) > AS_NEEDED_STOP_DAYS ? 'stopped' : 'active'
+      : daysBetween(nextExpectedISO, todayISO) >
+          (billLike || registeredReceipt ? window.billGraceDays : window.graceDays)
+        ? 'stopped'
+        : 'active';
+
+  return {
+    title,
+    ...(normalizedBillIdentity(last.billIdentity) ? { billIdentity: normalizedBillIdentity(last.billIdentity) } : {}),
+    category: last.category,
+    group,
+    status,
+    cadence: window.cadence,
+    avgAmountFils: avg,
+    lastAmountFils: lastPriceFils,
+    lastChargedISO: last.date,
+    nextExpectedISO,
+    chargeCount: cadenceCharges.length,
+    paymentHistory: registeredReceipt,
+    priceIncreased:
+      window.cadence !== 'as-needed' &&
+      priorAmounts.length >= 2 &&
+      lastPriceFils > priorTypical * 1.1,
+    priorTypicalFils: priorTypical,
+    monthlyEquivalentFils,
+    ...(priceTrackFils ? { priceTrackFils } : {}),
+  };
+}
+
 /**
  * The recurrence projection is deliberately expressed as a cooperative worker.
  * A 15k-row imported ledger is normal on Android, and running the complete scan
@@ -465,7 +942,10 @@ function* subscriptionDetectionWorker(
   internalTransfers?: Set<string>,
 ): Generator<void, Subscription[], void> {
   const dismissed = new Set(notSubscriptions.map((s) => s.trim().toLowerCase()));
+  const todayISO = toISODate(today);
   const groups = new Map<string, Transaction[]>();
+  // Same-merchant credits, keyed exactly like the charge groups they refund.
+  const refunds = new Map<string, Transaction[]>();
   // Persisted/store transaction order is newest-first. Remember whether this
   // input has that invariant so each merchant group can be reversed in O(n)
   // rather than independently sorted. Callers with arbitrary arrays still get
@@ -481,7 +961,8 @@ function* subscriptionDetectionWorker(
   for (let index = 0; index < transactions.length; index += 1) {
     if ((index & 127) === 0) yield;
     const t = transactions[index];
-    if (!isSpending(t, liveAccounts, internalTransfers)) continue;
+    const spending = isSpending(t, liveAccounts, internalTransfers);
+    if (!spending && !isIncome(t, liveAccounts, internalTransfers)) continue;
     const providerTitle = recurringProviderTitle(t);
     const providerKey = providerTitle.toLowerCase();
     const service = { title: providerTitle, billIdentity: normalizedBillIdentity(t.billIdentity) };
@@ -489,6 +970,12 @@ function* subscriptionDetectionWorker(
     // partition structurally distinct so such a title cannot merge ledger rows.
     const k = JSON.stringify([providerKey, service.billIdentity ?? null]);
     if (!providerKey || isSubscriptionDismissed(service, dismissed)) continue;
+    if (!spending) {
+      const list = refunds.get(k) ?? [];
+      list.push(t);
+      refunds.set(k, list);
+      continue;
+    }
     // A fee alert proves a posted fee, not a future commitment. Even an annual
     // fee needs stable card/account identity carried through the Subscription
     // model before it can safely become a recurring bill. Until then every
@@ -500,7 +987,8 @@ function* subscriptionDetectionWorker(
   }
 
   const subs: Subscription[] = [];
-  for (const txs of groups.values()) {
+  for (const [key, grouped] of groups) {
+    const txs = withoutRefundedCharges(grouped, refunds.get(key));
     // A single observation can never satisfy the recurrence rules below, even
     // for a known subscription provider. Skip it before yielding into the
     // expensive per-merchant cadence path. Large imported ledgers contain
@@ -510,209 +998,42 @@ function* subscriptionDetectionWorker(
 
     // Unknown ordinary merchants need two intervals (three charges). With only
     // two observations the only groups that can possibly qualify are known
-    // subscription providers or bill-like categories, whose existing rule uses
-    // a single interval. This is a conservative prefilter: checking ANY row for
-    // a bill-like category cannot drop a group whose latest row would qualify.
+    // subscription providers, bill-like categories, whose existing rule uses
+    // a single interval, and yearly software renewals. This is a conservative
+    // prefilter: checking ANY row for a category cannot drop a group whose
+    // latest row would qualify.
     if (txs.length === 2) {
-      const knownTwoChargeProvider = KNOWN_SUBSCRIPTION_MERCHANTS.test(txs[0].title);
+      const knownTwoChargeProvider = isKnownServiceTitle(txs[0].title);
+      // Bill-like or software: the software case is a yearly renewal.
       const billLikeTwoChargeGroup = txs.some((transaction) =>
-        transaction.category === 'utilities' ||
-        transaction.category === 'telecom' ||
-        transaction.category === 'rent' ||
-        transaction.category === 'loan');
+        isBillLikeCategory(transaction.category) || SUBSCRIPTION_CATEGORIES.has(transaction.category));
       if (!knownTwoChargeProvider && !billLikeTwoChargeGroup) continue;
     }
 
     yield;
     if (newestFirst) txs.reverse();
-    else txs.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    const title = txs[txs.length - 1].title;
-    const known = KNOWN_SUBSCRIPTION_MERCHANTS.test(title);
-    // This evidence belongs to every source observation, not to the collapsed
-    // row below. A receipt and an ordinary purchase on the same day are mixed
-    // evidence; whichever happens to sort first must not decide for both.
-    const registeredReceipt =
-      txs.length > 0 && txs.every((transaction) => transaction.paymentFlowSide === 'receipt');
+    else txs.sort(byDate);
 
-    // Collapse same-day duplicates (split payments) into one charge.
-    const charges: Transaction[] = [];
-    for (let index = 0; index < txs.length; index += 1) {
-      if (index > 0 && (index & 127) === 0) yield;
-      const t = txs[index];
-      const prev = charges[charges.length - 1];
-      if (prev && prev.date === t.date) prev.amountFils += t.amountFils;
-      else charges.push({ ...t });
+    // Several concurrent plans on one descriptor are analysed one plan at a
+    // time. Only where there is subscription evidence (a named service or a
+    // software category) and never for bills, whose amounts vary by nature.
+    const latest = txs[txs.length - 1];
+    const tracks =
+      (isKnownServiceTitle(latest.title) || SUBSCRIPTION_CATEGORIES.has(latest.category)) &&
+      !isBillLikeCategory(latest.category) &&
+      !txs.every((transaction) => transaction.paymentFlowSide === 'receipt')
+        ? concurrentPriceTracks(txs)
+        : null;
+    if (!tracks) {
+      const sub = yield* analyzeRecurringCharges(txs, todayISO);
+      if (sub) subs.push(sub);
+      continue;
     }
-
-    const monthlyReceiptRun = registeredReceipt ? latestMonthlyReceiptRun(charges) : [];
-    const asNeededReceiptRun =
-      registeredReceipt && monthlyReceiptRun.length === 0
-        ? latestAsNeededReceiptRun(charges)
-        : [];
-    const cadenceCharges = monthlyReceiptRun.length > 0
-      ? monthlyReceiptRun
-      : asNeededReceiptRun.length > 0
-        ? asNeededReceiptRun
-        : charges;
-
-    // A utility bill is recurring precisely BECAUSE it is a bill, and its
-    // amount is never stable — SEWA is 280 one month and 450 the next. The
-    // ±15% gate below is the right test for a subscription and the wrong one
-    // for a bill, and applying it to both left the Utilities tab empty for a
-    // user who pays four of them every month. For these, cadence alone is the
-    // evidence.
-    const billLike =
-      cadenceCharges[cadenceCharges.length - 1].category === 'utilities' ||
-      cadenceCharges[cadenceCharges.length - 1].category === 'telecom' ||
-      cadenceCharges[cadenceCharges.length - 1].category === 'rent' ||
-      cadenceCharges[cadenceCharges.length - 1].category === 'loan';
-
-    const amounts = cadenceCharges.map((c) => c.amountFils);
-    const mid = median(amounts);
-    if (mid <= 0) continue;
-    const stable = amounts.every((a) => a >= mid * 0.85 && a <= mid * 1.15);
-    // A bill varies, but it varies like a bill. Waiving the ±15% gate for
-    // anything the parser called a utility waived it entirely, so a merchant
-    // that happened to be charged twice a month apart became a standing
-    // monthly commitment at whatever the larger charge was — one shop was
-    // listed at AED 20,918/mo on two unrelated payments.
-    //
-    // Same band the outlier guard below already uses: a third to triple the
-    // median. SEWA at 280 one month and 450 the next passes; two payments that
-    // have nothing to do with each other do not.
-    const billShaped = amounts.every((a) => a >= mid / 3 && a <= mid * 3);
-    if (
-      !stable &&
-      !known &&
-      !(billLike && billShaped) &&
-      !((monthlyReceiptRun.length > 0 || asNeededReceiptRun.length > 0) && billShaped)
-    ) continue;
-
-    // Known merchants skip the stability gate, which let a single misparsed
-    // charge set the price: one bad row put Canva on the list at AED 18,313 a
-    // month. The typical charge is what the subscription costs, so anything
-    // more than 3x or less than a third of the median is an outlier and takes
-    // no part in the average or the price-rise comparison.
-    const typical = amounts.filter((a) => a >= mid / 3 && a <= mid * 3);
-    if (typical.length === 0) continue;
-
-    const gaps: number[] = [];
-    for (let i = 1; i < cadenceCharges.length; i++) {
-      if ((i & 127) === 0) yield;
-      gaps.push(daysBetween(cadenceCharges[i - 1].date, cadenceCharges[i].date));
+    for (const track of tracks) {
+      const sub = yield* analyzeRecurringCharges(track.charges, todayISO, track.prices);
+      // A plan the user dismissed on its own key stays dismissed.
+      if (sub && !isSubscriptionDismissed(sub, dismissed)) subs.push(sub);
     }
-
-    let window: CadenceWindow | null = null;
-    if (monthlyReceiptRun.length > 0) {
-      window = WINDOWS.find((candidate) => candidate.cadence === 'monthly') ?? null;
-    } else if (asNeededReceiptRun.length > 0) {
-      window = {
-        cadence: 'as-needed',
-        minDays: 0,
-        maxDays: Number.POSITIVE_INFINITY,
-        typicalDays: median(gaps.filter((gap) => gap > 0)),
-      };
-    } else if (gaps.length > 0) {
-      for (const w of WINDOWS) {
-        const inWindow = gaps.filter((g) => g >= w.minDays && g <= w.maxDays).length;
-        if (inWindow >= Math.max(1, Math.ceil(gaps.length * 0.6))) {
-          window = w;
-          break;
-        }
-      }
-    }
-
-    // One charge is not evidence of recurrence, however well-known the
-    // merchant is. Treating it as one invented subscriptions from a single
-    // Prime Video rental or a one-off app-store purchase, and an imaginary
-    // monthly commitment is worse than a real one surfacing a cycle late.
-    // Known merchants still get the easier bar: one interval rather than two.
-    const requiredIntervals = known || billLike ? 1 : 2;
-    if (!window || gaps.length < requiredIntervals) continue;
-
-    const last = cadenceCharges[cadenceCharges.length - 1];
-    // Compare against the MEDIAN of prior charges, and only once there are at
-    // least two of them. A mean over one prorated first charge made every
-    // steady subscription look like a price rise — Google One was flagged
-    // "price up" in a month its price went down.
-    // The latest charge against THE PRICE IT WAS BEFORE — the most recent
-    // run of charges that differed from what is being paid now.
-    //
-    // Neither obvious window works. A lifetime median answers the wrong
-    // question: Google One ran at AED 7.99 for a year, went to 76.99 on a
-    // tier change, then down to 37, and the median of all sixteen prior
-    // charges is still the 7.99 era — so a price that had just HALVED wore a
-    // "price up" badge. A fixed window of the last three is no better: it
-    // hides a rise that happened three charges ago, which is a rise the user
-    // has been paying ever since.
-    //
-    // Walking back to the previous distinct price answers what was actually
-    // asked. 37 after a run of 77 is a fall. 76.99 after a run of 7.99 is a
-    // rise, however long ago it started. And a steady price has no previous
-    // run at all, so there is nothing to announce.
-    //
-    // The run is taken whole rather than a single charge, so one bad parse
-    // cannot masquerade as the old price.
-    const priorAmounts = previousPriceRun(amounts);
-    const priorTypical = priorAmounts.length ? median(priorAmounts) : last.amountFils;
-    // What it costs NOW, not what it averaged over its life. A lifetime average
-    // reports a price the user no longer pays: Google One went from AED 7.99
-    // to AED 76.99 on a tier upgrade and the app kept showing 7, because the
-    // outlier guard below treats a genuine new price the same as a misparse.
-    //
-    // The median of the last three charges tracks an upgrade immediately —
-    // once two of the three are the new amount — while still absorbing a
-    // single bad parse, which is all the outlier guard was ever needed for.
-    const recent = amounts.slice(-3);
-    const avg = median(recent);
-    const monthlyEquivalentFils =
-      window.cadence === 'as-needed'
-        ? Math.round(
-            amounts.reduce((sum, amount) => sum + amount, 0) /
-              (120 / 30.4375),
-          )
-        : window.cadence === 'monthly'
-        ? avg
-        : window.cadence === 'weekly'
-          ? Math.round(avg * 4.33)
-          : Math.round(avg / 12);
-
-    const group: RecurringGroup =
-      last.category === 'rent'
-        ? 'housing'
-        : last.category === 'utilities' || last.category === 'telecom'
-          ? 'utility'
-          : known || SUBSCRIPTION_CATEGORIES.has(last.category)
-            ? 'subscription'
-            : 'commitment';
-
-    // Silence for ~2 cycles past the last charge means it was cancelled.
-    const silentDays = daysBetween(last.date, toISODate(today));
-    const status: Subscription['status'] =
-      silentDays > (window.cadence === 'as-needed' ? 75 : window.typicalDays * 2.2 + 5)
-        ? 'stopped'
-        : 'active';
-
-    subs.push({
-      title,
-      ...(normalizedBillIdentity(last.billIdentity) ? { billIdentity: normalizedBillIdentity(last.billIdentity) } : {}),
-      category: last.category,
-      group,
-      status,
-      cadence: window.cadence,
-      avgAmountFils: avg,
-      lastAmountFils: last.amountFils,
-      lastChargedISO: last.date,
-      nextExpectedISO: nextRenewalISO(cadenceCharges, window),
-      chargeCount: cadenceCharges.length,
-      paymentHistory: registeredReceipt,
-      priceIncreased:
-        window.cadence !== 'as-needed' &&
-        priorAmounts.length >= 2 &&
-        last.amountFils > priorTypical * 1.1,
-      priorTypicalFils: priorTypical,
-      monthlyEquivalentFils,
-    });
   }
 
   subs.sort((a, b) => b.monthlyEquivalentFils - a.monthlyEquivalentFils);
@@ -882,7 +1203,7 @@ export function activeSubscriptions(subs: Subscription[]): Subscription[] {
  * cancelled subscription, and listing it as one reads as a bug.
  */
 export function stoppedSubscriptions(subs: Subscription[]): Subscription[] {
-  return subs.filter((s) => s.status === 'stopped' && KNOWN_SUBSCRIPTION_MERCHANTS.test(s.title));
+  return subs.filter((s) => s.status === 'stopped' && isKnownServiceTitle(s.title));
 }
 
 /** Rent + utilities/telecom recurring commitments. */
@@ -938,12 +1259,13 @@ export function subscriptionCancellationDate(
   cancelled: Readonly<Record<string, string | null>> | undefined,
 ): string | null {
   if (!cancelled) return null;
-  const key = subscriptionKey(sub);
-  const provider = subscriptionKey({ title: sub.title });
-  const on = Object.prototype.hasOwnProperty.call(cancelled, key)
-    ? cancelled[key]
-    : Object.prototype.hasOwnProperty.call(cancelled, provider) ? cancelled[provider] : null;
-  return typeof on === 'string' ? on : null;
+  // Most specific first: one plan, then its service, then the provider.
+  for (const key of [subscriptionKey(sub), serviceKey(sub), subscriptionKey({ title: sub.title })]) {
+    if (!Object.prototype.hasOwnProperty.call(cancelled, key)) continue;
+    const on = cancelled[key];
+    return typeof on === 'string' ? on : null;
+  }
+  return null;
 }
 
 /** Subscriptions still in play: the user has not marked them cancelled. */

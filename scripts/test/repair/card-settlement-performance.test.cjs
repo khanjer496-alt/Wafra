@@ -32,6 +32,9 @@ function load(text, date = Date) {
 }
 // Frozen pre-fix exhaustive matchers are an independent equivalence oracle.
 // They exercise the same public pipeline, including manual receipt evidence.
+// The observed oracle uses the shipped leg window (observedLegsFit: a receipt
+// may precede its debit by a day or trail it by RECEIPT_LAG_DAYS); only the
+// search strategy is the exhaustive one being checked against.
 const oldObserved = `function preferredObservedPairs(
   debits: Transaction[],
   receipts: Transaction[],
@@ -47,7 +50,7 @@ const oldObserved = `function preferredObservedPairs(
 
     const distance = isoDayDistance(debits[debitIndex].date, receipts[receiptIndex].date);
     let best: MatchScore | null = null;
-    if (distance <= OBSERVED_COLLAPSE_DAYS) {
+    if (observedLegsFit(isoDay(debits[debitIndex].date), isoDay(receipts[receiptIndex].date))) {
       const tail = solve(debitIndex + 1, receiptIndex + 1);
       best = {
         count: tail.count + 1,

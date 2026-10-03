@@ -1,5 +1,5 @@
 import { alertTextClock, canonicalCaptureSourceKey, isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
-import { cardAccountName, colorForHint, estimatedMinimumFils } from '@/lib/cards';
+import { cardAccountName, colorForHint, estimatedMinimumFils, type StatementIssueEvidence } from '@/lib/cards';
 import {
   bankBrandForName,
   bankFromSender,
@@ -223,6 +223,104 @@ const OBSERVATION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 function liveMessageObservation(p: ScannedSms): boolean {
   return p.channel !== 'push' && p.sourceEventId === undefined && p.captureSource === undefined &&
     typeof p.messageObservationId === 'string' && OBSERVATION_UUID_RE.test(p.messageObservationId);
+}
+
+/**
+ * How far past the message a yearless due date may resolve. A statement is
+ * due within a cycle of being announced; anything further is a misread.
+ */
+const YEARLESS_DUE_HORIZON_DAYS = 60;
+
+const DUE_MONTHS: Readonly<Record<string, number>> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+function localISO(year: number, month: number, day: number): string | null {
+  if (!(month >= 1 && month <= 12 && day >= 1)) return null;
+  const date = new Date(year, month - 1, day, 12);
+  return date.getMonth() === month - 1 && date.getDate() === day ? toISODate(date) : null;
+}
+
+/**
+ * The month a yearless due date names, when the body states one beside the
+ * parsed due day ("due on 25-Sep", "due on 25 Aug", "due by Sep 25",
+ * "due on 25/09"). Read only in the few characters after a due cue, and only
+ * when the day there IS the day the parser returned, so an amount such as
+ * "1,234.56" or another date elsewhere in the body cannot supply it.
+ */
+function yearlessDueMonth(raw: string | undefined, day: number): number | null {
+  if (!raw) return null;
+  const cue = /\b(?:due|pay(?:ment)?\s+by|before)\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = cue.exec(raw))) {
+    const tail = raw.slice(match.index + match[0].length, match.index + match[0].length + 32);
+    const dayFirst = tail.match(/^[\s:,-]*(?:on\s+|by\s+|date\s*:?\s*)?(\d{1,2})(?:st|nd|rd|th)?[-\s/.]+([A-Za-z]{3,9})\b/i);
+    if (dayFirst && Number(dayFirst[1]) === day) {
+      const month = DUE_MONTHS[dayFirst[2].slice(0, 3).toLowerCase()];
+      if (month) return month;
+    }
+    const monthFirst = tail.match(/^[\s:,-]*(?:on\s+|by\s+|date\s*:?\s*)?([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i);
+    if (monthFirst && Number(monthFirst[2]) === day) {
+      const month = DUE_MONTHS[monthFirst[1].slice(0, 3).toLowerCase()];
+      if (month) return month;
+    }
+    const numeric = tail.match(/^[\s:,-]*(?:on\s+|by\s+|date\s*:?\s*)?(\d{1,2})[/.-](\d{1,2})(?![\d/.-])/i);
+    if (numeric && Number(numeric[1]) === day && Number(numeric[2]) >= 1 && Number(numeric[2]) <= 12) {
+      return Number(numeric[2]);
+    }
+  }
+  return null;
+}
+
+/**
+ * A statement whose due date has no year, resolved against when it arrived.
+ *
+ * The parser returns `date: null` and only `dueDay` for "payment is due on
+ * 25-Sep" (SIB) or "due on 25 Aug" (FAB), and the planner used to drop those
+ * statements outright, so the card showed nothing owed. The deadline is the
+ * next such day on or after the message was observed — a bank announces a bill
+ * before it is due — and never more than `YEARLESS_DUE_HORIZON_DAYS` ahead.
+ * Without an observation time there is nothing to anchor a year to, and the
+ * statement stays dropped.
+ */
+export function resolveYearlessDueDate(
+  p: Pick<ScannedSms, 'date' | 'dueDay' | 'smsTs' | 'raw'>,
+): string | null {
+  if (p.date) return p.date;
+  const day = p.dueDay;
+  if (!Number.isInteger(day) || day! < 1 || day! > 31) return null;
+  if (!Number.isFinite(p.smsTs) || p.smsTs! <= 0) return null;
+  const observed = new Date(p.smsTs!);
+  const observedISO = toISODate(observed);
+  const horizon = toISODate(new Date(observed.getFullYear(), observed.getMonth(),
+    observed.getDate() + YEARLESS_DUE_HORIZON_DAYS, 12));
+  const year = observed.getFullYear();
+  const month = yearlessDueMonth(p.raw, day!);
+  const candidates: (string | null)[] = month
+    ? [localISO(year, month, day!), localISO(year + 1, month, day!)]
+    : [0, 1, 2, 3].map((ahead) => {
+      const anchor = new Date(year, observed.getMonth() + ahead, 1, 12);
+      return localISO(anchor.getFullYear(), anchor.getMonth() + 1, day!);
+    });
+  const resolved = candidates.find((date): date is string => date !== null && date >= observedISO);
+  return resolved && resolved <= horizon ? resolved : null;
+}
+
+/**
+ * A statement total the bank marks as a CREDIT balance ("Total due AED
+ * 150.00 CR") is money the bank owes the user, not a bill. The parser reads
+ * the figure and drops the marker, so it is checked here against the body: the
+ * same figure as the parsed total, immediately followed by CR/Cr (and not the
+ * "Cr.Card" abbreviation). A leading minus is not read here: the parser already
+ * refuses "AED -150.00", and a hyphen before digits is as often a card mask.
+ */
+function statementTotalIsCredit(p: Pick<ScannedSms, 'raw' | 'amountFils'>): boolean {
+  if (!p.raw) return false;
+  const fils = (figure: string) => Math.round(Number(figure.replace(/,/g, '')) * 100);
+  for (const [, figure] of p.raw.matchAll(/(\d[\d,]*(?:\.\d{1,3})?)\s*(?:CR|Cr)\b(?!\.?\s*(?:Card|Limit|Lmt|Bal|Balance|Avl|Available))/gi)) {
+    if (fils(figure) === p.amountFils) return true;
+  }
+  return false;
 }
 
 function emptyPlan(): ImportPlan {
@@ -1198,7 +1296,17 @@ function buildImportPlanInMarket(
     // real cards sharing their last four digits at different banks — one user
     // holds a Liv card and an ENBD card both ending 8575, and payments were
     // settling against the wrong one.
-    const bank = bankFromHint(p) ?? bankFromSender(p.sender);
+    // THE ACCOUNT SIDE OF A CARD PAYMENT IS SENT BY THE FUNDING BANK. "AED
+    // 1,000.00 has been debited from your account XXXX5678 towards payment of
+    // Credit Card ending 4321" arrives from Wio when the card is ENBD's; the
+    // sender names the account's bank, not the card's issuer. Treating it as
+    // the issuer minted a phantom "Wio credit card 4321", posted the payment
+    // there and counted it a second time beside the ENBD receipt. Without an
+    // issuer stated in the text, match the card by its own identity instead.
+    const fundingLeg = !p.bankHint && kind === 'credit' &&
+      (p.cardPaymentSide === 'debit' ||
+        (p.kind === 'transaction' && p.transferHint === true && p.type === 'expense'));
+    const bank = bankFromHint(p) ?? (fundingLeg ? null : bankFromSender(p.sender));
     const scoped = hintKey(bank?.name, last4, kind);
     const noteType = (ref: string) => {
       if (kind === 'account' || kind === 'unknown') return;
@@ -1390,7 +1498,7 @@ function buildImportPlanInMarket(
       )
     ) return 'debit';
     if (
-      /(?:payment|amount)\b[\s\S]*(?:received|credited)|received\s+payment|has\s+been\s+paid|thank you for (?:your )?payment/i.test(
+      /(?:payment|amount)\b[\s\S]*(?:received|credited)|received\s+(?:your\s+)?payment|has\s+been\s+paid|thank you for (?:your )?payment/i.test(
         p.raw,
       )
     ) return 'receipt';
@@ -1525,8 +1633,23 @@ function buildImportPlanInMarket(
       if (misread && !misread.isTransfer && !misread.userEdited && !misread.transferDecision) {
         updates.push({ id: misread.id, remove: true });
       }
-      if (!p.date) continue;
-      if (p.date < staleDueCutoff) continue;
+      const dueDate = resolveYearlessDueDate(p);
+      if (!dueDate) continue;
+      if (dueDate < staleDueCutoff) continue;
+      // A credit balance is a statement that says nothing is owed. It is kept
+      // (it supersedes the previous statement) at a zero total.
+      const creditBalance = statementTotalIsCredit(p);
+      const totalDueFils = creditBalance ? 0 : p.amountFils;
+      // Issue evidence for payment allocation: the observation time bounds the
+      // issue date from above; a bank-stated statement date is exact. The
+      // parser states it only when the SMS labels it ("Statement date ...");
+      // it is still validated here because relay and backup rows reach this too.
+      const statedIssue: unknown = p.statementDate;
+      const evidence: StatementIssueEvidence = {};
+      if (Number.isFinite(p.smsTs) && p.smsTs! > 0) evidence.observedAt = p.smsTs!;
+      if (typeof statedIssue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(statedIssue) && statedIssue < dueDate) {
+        evidence.statementDate = statedIssue;
+      }
       const statementBank = bankFromHint(p) ?? bankFromSender(p.sender);
       const bankOnlyCandidates = !p.card && statementBank
         ? accountCandidates.filter(
@@ -1545,8 +1668,8 @@ function buildImportPlanInMarket(
       const bankOnlyAccountId = bankOnlyCandidates[0]?.ref;
       const matchingDues = state.cardDues.filter(
         (due) =>
-          due.dueDate === p.date &&
-          due.totalDueFils === p.amountFils &&
+          due.dueDate === dueDate &&
+          due.totalDueFils === totalDueFils &&
           (p.card
             ? matchesCard(
                 due.accountId,
@@ -1592,19 +1715,23 @@ function buildImportPlanInMarket(
       // The parser reaches this branch only with statement structure and
       // forces card.kind=credit. That is authoritative evidence which upgrades
       // a debit fallback; rejecting it is what stranded real statements.
-      newDues.push({
+      const statementDue: Omit<CardDue, 'id'> & StatementIssueEvidence = {
         accountId,
-        totalDueFils: p.amountFils,
+        totalDueFils,
         // 5% is a common UAE card minimum, but it is not this card's minimum
         // unless the bank said so. A Saudi statement gets no UAE-derived
         // placeholder at all. Both remain flagged so nothing quotes an
-        // unstated value back as the bank's figure.
-        minDueFils:
-          p.minDueFils ?? (p.currency === 'AED' ? estimatedMinimumFils(p.amountFils) : 0),
-        minDueEstimated: p.minDueFils === null ? true : undefined,
-        dueDate: p.date,
+        // unstated value back as the bank's figure. A credit balance has
+        // nothing to pay, so nothing to estimate.
+        minDueFils: creditBalance
+          ? 0
+          : p.minDueFils ?? (p.currency === 'AED' ? estimatedMinimumFils(p.amountFils) : 0),
+        minDueEstimated: creditBalance ? undefined : p.minDueFils === null ? true : undefined,
+        dueDate,
         paidFils: 0,
-      });
+        ...evidence,
+      };
+      newDues.push(statementDue);
       continue;
     }
     if (p.kind === 'cardPayment') {

@@ -437,6 +437,10 @@ export interface CardDue {
   settledAt?: string;
   /** The manual receipt owning settledAt, when that time was recorded with a transaction. */
   settledByTransactionId?: string;
+  /** The bank-stated statement ISSUE date, when the SMS stated one. */
+  statementDate?: string;
+  /** Epoch ms the statement alert was first observed; bounds the issue date from above. */
+  observedAt?: number;
 }
 
 export interface Goal {

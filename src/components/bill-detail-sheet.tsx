@@ -131,17 +131,25 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
   const cadenceLabel = (cadence: Subscription['cadence']): string =>
     cadence === 'weekly'
       ? t('cadenceWeekly')
-      : cadence === 'monthly'
-        ? t('cadenceMonthly')
-        : cadence === 'yearly'
-          ? t('cadenceYearly')
-          : t('cadenceAsNeeded');
+      : cadence === 'biweekly'
+        ? t('cadenceBiweekly')
+        : cadence === 'monthly'
+          ? t('cadenceMonthly')
+          : cadence === 'quarterly'
+            ? t('cadenceQuarterly')
+            : cadence === 'yearly'
+              ? t('cadenceYearly')
+              : t('cadenceAsNeeded');
   const cadencePeriod = (cadence: Subscription['cadence']): string =>
     cadence === 'weekly'
       ? t('cadencePeriodWeek')
-      : cadence === 'monthly'
-        ? t('cadencePeriodMonth')
-        : t('cadencePeriodYear');
+      : cadence === 'biweekly'
+        ? t('cadencePeriodTwoWeeks')
+        : cadence === 'monthly'
+          ? t('cadencePeriodMonth')
+          : cadence === 'quarterly'
+            ? t('cadencePeriodQuarter')
+            : t('cadencePeriodYear');
 
   const data = useMemo(() => {
     if (!subscription) return null;

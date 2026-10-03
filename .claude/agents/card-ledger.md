@@ -26,20 +26,29 @@ sound derivation; anything else is a guess.
 ## The allocation rule, and why it is what it is
 
 `allocatePayments` in `src/lib/cards.ts` walks payments oldest-first and
-pours each into the oldest statement it could belong to, so an overpayment
-spills onto the next. The matching window is ~40 days before the due date to
-20 after.
+pours each into the oldest statement it could belong to (`paymentCanReduce`).
+A payment counts toward a statement only if it was made AFTER that statement
+was issued — the bank's stated statement date (`statementDate`, parsed from
+"Statement date ..."), otherwise the earlier of the statement SMS's arrival
+(`observedAt`) and due − 21 days — and before the next statement was issued.
+A payment made before issue is already inside the statement's total; counting
+it again showed AED 3,000 cards as settled. An overpayment spills onto the next
+statement only when it was made after that statement's issue date. The upper
+bound is still ~20 days after the due date. A due with NO issue evidence (stored
+before `observedAt` existed, or pasted) keeps the old 40-day window, so an
+upgrade never un-settles a statement the user already saw paid.
 
-That window is **wider than the statement cycle**, so consecutive statements
-overlap. Crediting every payment inside the window to each due independently
+Consecutive statements' windows can still meet at their boundaries. Crediting every payment inside the window to each due independently
 settled two statements with one payment and silently vanished a real balance.
 Any change here must keep each payment counted exactly once — prove it with a
 test that has two overlapping statements and one payment.
 
 Known rough edges, all real, none yet fixed:
 
-- Payments are matched by a date window rather than by statement date,
-  because the parser does not capture a statement date.
+- The parser captures a statement date only when the SMS labels one; the
+  rest fall back to the arrival/due − 21 estimate, so a payment made between
+  an unlabelled statement's issue and its SMS arriving reads as owed until
+  marked paid (the deliberately safe direction).
 - `minDueFils` falls back to a hardcoded 5% of the balance when the SMS does
   not state one. That is a guess presented as a figure.
 - `STALE_OVERDUE_DAYS = 30` drops an unpaid statement after a month, on the
