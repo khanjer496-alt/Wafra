@@ -10,6 +10,7 @@
  * Widget"; Android launchers say "home screen" and "Widgets".
  */
 type Platform = 'ios' | 'android';
+export type WidgetKind = 'today' | 'upcoming' | 'spending';
 
 /** Arabic count of payments, as the iOS widget and the Android plurals say it. */
 function arabicPayments(count: number): string {
@@ -31,10 +32,12 @@ export const widgetsCopyTables = {
     todayName: 'Today',
     todayAbout: 'What you spent today, the last 7 days and what is left in budgets.',
     upcomingName: 'Coming up',
-    upcomingAbout: 'Your next three bills and card payments, and when they are due.',
+    upcomingAbout: 'Your next three bills and card payments, what they add up to, and when they are due.',
+    spendingName: 'Spending this month',
+    spendingAbout: 'This month’s spending and the categories that take most of it.',
     /** The widget's size as the widget gallery or picker names it. */
-    size: (platform: Platform, kind: 'today' | 'upcoming'): string => platform === 'ios'
-      ? kind === 'today' ? 'Small' : 'Medium'
+    size: (platform: Platform, kind: WidgetKind): string => platform === 'ios'
+      ? kind === 'today' ? 'Small' : kind === 'upcoming' ? 'Small or medium' : 'Medium'
       : kind === 'today' ? '2 × 2' : '4 × 2',
     previewLabel: (name: string) => `${name} widget preview`,
     lockNote: 'On the Lock Screen and in StandBy the amounts are hidden; the words stay.',
@@ -68,7 +71,11 @@ export const widgetsCopyTables = {
     widgetToday: 'Today',
     widgetTomorrow: 'Tomorrow',
     widgetComingUp: 'Coming up',
-    widgetNothingComingUp: (platform: Platform): string => platform === 'ios' ? 'Nothing coming up' : 'No upcoming bills',
+    widgetNothingComingUp: 'All clear for the next 30 days',
+    widgetTotalDue: (amount: string) => `Total due ${amount}`,
+    widgetInDays: (days: number) => `in ${days} days`,
+    widgetSpendingEmpty: 'No spending yet this month',
+    widgetOther: 'Other',
     widgetOpenToUpdate: 'Open Wafra to update',
     widgetLeftInBudgets: (amount: string) => `${amount} left in budgets`,
     widgetOverBudgets: (amount: string) => `${amount} over budgets`,
@@ -79,6 +86,7 @@ export const widgetsCopyTables = {
     weekdays: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
     weekdaysShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
     monthsShort: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    months: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
   },
   ar: {
     title: 'الأدوات',
@@ -88,9 +96,11 @@ export const widgetsCopyTables = {
     todayName: 'اليوم',
     todayAbout: 'ما أنفقته اليوم وخلال آخر 7 أيام، والمتبقي في الميزانيات.',
     upcomingName: 'القادم',
-    upcomingAbout: 'فواتيرك ودفعات بطاقاتك الثلاث القادمة ومواعيد استحقاقها.',
-    size: (platform: Platform, kind: 'today' | 'upcoming') => platform === 'ios'
-      ? kind === 'today' ? 'صغيرة' : 'متوسطة'
+    upcomingAbout: 'فواتيرك ودفعات بطاقاتك الثلاث القادمة ومجموعها ومواعيد استحقاقها.',
+    spendingName: 'الإنفاق هذا الشهر',
+    spendingAbout: 'إنفاق هذا الشهر والفئات التي تأخذ معظمه.',
+    size: (platform: Platform, kind: WidgetKind) => platform === 'ios'
+      ? kind === 'today' ? 'صغيرة' : kind === 'upcoming' ? 'صغيرة أو متوسطة' : 'متوسطة'
       : kind === 'today' ? '2 × 2' : '4 × 2',
     previewLabel: (name: string) => `معاينة أداة ${name}`,
     lockNote: 'على شاشة القفل وفي وضع الاستعداد تُخفى المبالغ وتبقى الكلمات.',
@@ -119,7 +129,11 @@ export const widgetsCopyTables = {
     widgetToday: 'اليوم',
     widgetTomorrow: 'غداً',
     widgetComingUp: 'القادم',
-    widgetNothingComingUp: (platform: Platform) => platform === 'ios' ? 'لا توجد دفعات قادمة' : 'لا توجد فواتير قادمة',
+    widgetNothingComingUp: 'لا مدفوعات مستحقة خلال 30 يومًا',
+    widgetTotalDue: (amount: string) => `المستحق ${amount}`,
+    widgetInDays: (days: number) => days <= 10 ? `بعد ${days} أيام` : `بعد ${days} يومًا`,
+    widgetSpendingEmpty: 'لا إنفاق بعد هذا الشهر',
+    widgetOther: 'أخرى',
     widgetOpenToUpdate: 'افتح وفرة للتحديث',
     widgetLeftInBudgets: (amount: string) => `المتبقي في الميزانيات ${amount}`,
     widgetOverBudgets: (amount: string) => `تجاوز الميزانيات ${amount}`,
@@ -130,6 +144,7 @@ export const widgetsCopyTables = {
     weekdays: ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'],
     weekdaysShort: ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'],
     monthsShort: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
+    months: ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'],
   },
 };
 

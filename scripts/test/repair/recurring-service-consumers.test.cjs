@@ -110,8 +110,9 @@ test('the second Bills row opens its own history and creates only its scoped rem
   const h = harness({}, states);
   const tree = h.render('bills');
   const timeline = byId(tree, 'bills-timeline');
-  assert.match(text(timeline), /1111/);
-  assert.match(text(timeline), /2222/);
+  // The band shows the next payment; it speaks every one in the window.
+  assert.match(timeline.props.accessibilityLabel, /1111/);
+  assert.match(timeline.props.accessibilityLabel, /2222/);
   const row = walk(tree).find(node => node.type === 'Pressable' && /2222/.test(node.props?.accessibilityLabel ?? ''));
   assert.ok(row, 'second service must have a separately labelled row');
   row.props.onPress();

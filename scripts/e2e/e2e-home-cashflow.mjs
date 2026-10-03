@@ -57,11 +57,12 @@ try {
             }
             return null;
           });
-          // The selected total now leads Home on its ink band in both themes.
+          // Home v2: the selected total is the month line on the ink band,
+          // under the Today tiles and above the week.
           assert.equal(background, mode === 'dark' ? 'rgb(11, 10, 8)' : 'rgb(22, 19, 15)');
           const weekBox = await page.getByTestId('home-week').boundingBox();
           const totalBox = await outgoing.boundingBox();
-          assert.ok(totalBox.y < weekBox.y, 'selected total is above daily spending');
+          assert.ok(totalBox.y < weekBox.y, 'the month line sits above the week on the band');
           const days = page.locator('[data-testid^="week-value-"]');
           assert.equal(await days.count(), 7, 'the entire week is present');
           for (const day of await days.all()) {

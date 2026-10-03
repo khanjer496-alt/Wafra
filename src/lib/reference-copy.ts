@@ -31,10 +31,10 @@ export const paymentAgendaCopy = {
 export const accountGroupsCopy = {
   en: { bank: 'Bank accounts', credit: 'Credit cards', debit: 'Other cards', cash: 'Cash',
     unknown: 'No recorded figure', manage: 'Manage account', empty: 'No accounts yet',
-    sourceNote: 'Your accounts, clearly separated', sourceBody: 'Recorded balances are not a live bank connection. Credit-card dues are shown separately.' },
+    sourceNote: 'Your accounts, clearly separated', sourceBody: 'What your banks last reported, plus cash · not live' },
   ar: { bank: 'الحسابات المصرفية', credit: 'البطاقات الائتمانية', debit: 'بطاقات أخرى', cash: 'النقد',
     unknown: 'لا يوجد مبلغ مسجل', manage: 'إدارة الحساب', empty: 'لا توجد حسابات بعد',
-    sourceNote: 'حساباتك بوضوح', sourceBody: 'الأرصدة المسجلة ليست اتصالاً مباشراً بالبنك. تظهر استحقاقات البطاقات الائتمانية منفصلة.' },
+    sourceNote: 'حساباتك بوضوح', sourceBody: 'آخر ما أبلغت به بنوكك، مع النقد · ليس مباشراً' },
 };
 
 export const spendingCopy = {
@@ -104,6 +104,7 @@ export const spendingTrendsCopy = {
 export const homeSummaryCopy = {
   en: { balance: 'Recorded balances', net: 'Net after spending', notBalance: 'Income minus spending · not your bank balance',
     moneyIn: 'Income', moneyOut: 'Spending', netLabel: 'Net', totalSpent: 'Total spent',
+    lineSpent: 'Spent', lineIn: 'In', lineNet: 'Net', choosePeriod: 'Choose period',
     cashflowNote: 'Income minus spending',
     noIncome: 'No income recorded for this period.',
     add: 'Add', import: 'Import', accounts: 'Accounts', settings: 'Settings',
@@ -136,6 +137,7 @@ export const homeSummaryCopy = {
     transfersNotCounted: 'Not counted in spending or income until you confirm.' },
   ar: { balance: 'الأرصدة المسجلة', net: 'الصافي بعد الإنفاق', notBalance: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
     moneyIn: 'الدخل', moneyOut: 'المصروفات', netLabel: 'الصافي', totalSpent: 'إجمالي الإنفاق',
+    lineSpent: 'المصروف', lineIn: 'الدخل', lineNet: 'الصافي', choosePeriod: 'اختر الفترة',
     cashflowNote: 'الدخل ناقص المصروفات',
     noIncome: 'لا يوجد دخل مسجل لهذه الفترة.',
     add: 'إضافة', import: 'استيراد', accounts: 'الحسابات', settings: 'الإعدادات',

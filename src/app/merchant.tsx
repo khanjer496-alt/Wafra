@@ -2,7 +2,7 @@ import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, View, useWindowDimensions } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { MerchantCategoryRule } from '@/components/merchant-category-rule';
@@ -24,6 +24,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { assistantCopy } from '@/lib/assistant-copy';
 
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
+import { friendlyDate, toISODate } from '@/lib/format';
 import { countsInTotals, internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { projectMerchantSpending } from '@/lib/merchant-spending';
 import { merchantSpendingCopy } from '@/lib/merchant-spending-copy';
@@ -89,6 +90,10 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
   const countLabel = income ? w.incomeCount : w.purchases;
   const averageLabel = `${income ? w.averageReceived : w.average}${approximate ? ' ≈' : ''}`;
   const tileText = statTileColors(band, 'band');
+  const todayISO = toISODate(new Date());
+  // Two tiles share the band: the other tile, the 10pt gap and this tile's padding are the figure's inset.
+  const { width } = useWindowDimensions();
+  const tileInset = large ? 28 : Math.ceil((width - 40) / 2 + 5 + 28);
 
   const bandContent = state.hydrated ? <View style={styles.band}>
     <View style={[styles.identity, large && styles.stack]}>
@@ -111,7 +116,7 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
       </StatTile>
       {average !== null && <StatTile palette={band} label={averageLabel} style={large ? styles.tileFull : undefined}>
         <BandFigure palette={band} size="medium" fils={average} color={tileText.fg} secondaryColor={tileText.fgSecondary}
-          fitInset={large ? 28 : 200} />
+          fitInset={tileInset} />
       </StatTile>}
     </View>
     {merchant ? <MerchantMonthBars transactions={state.transactions} merchant={merchant} period={period}
@@ -158,7 +163,7 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
         </View> : <View testID="merchant-recent-rows">
           {data.map((item, index) => <View key={item.id} testID="merchant-recent-row"
             style={[styles.transaction, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
-            <ThemedText type="meta" style={{ color: band.textSecondary }}>{item.date}</ThemedText>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{friendlyDate(item.date, todayISO)}</ThemedText>
             <TransactionRow transaction={item} account={accountById.get(item.accountId)} internal={internal.has(item.id)}
               onPress={openEntry} merchantLinks={false} />
             {!countsInTotals(item, live, internal) && <ThemedText type="meta" style={{ color: band.textSecondary }}>

@@ -62,7 +62,8 @@ try {
       assert.equal(minor(await page.getByTestId('merchant-directory-total').innerText()), 11001);
       await page.evaluate(() => document.fonts.ready);
       await page.screenshot({ path: path.join(out, `directory-${name}.png`) });
-      const search = page.getByRole('textbox', { name: language === 'ar' ? 'البحث عن تاجر' : 'Search merchants', exact: true });
+      // The search pill is a search field (role searchbox), named for what it searches.
+      const search = page.getByRole('searchbox', { name: language === 'ar' ? 'البحث عن تاجر' : 'Search merchants', exact: true });
       await search.fill('Careem');
       await page.waitForFunction(() => document.querySelectorAll('[data-testid="merchant-spending-row"]').length === 1);
       assert.equal(minor(await page.getByTestId('merchant-directory-total').innerText()), 3501);

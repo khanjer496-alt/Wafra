@@ -46,6 +46,11 @@ export interface AccountDisplayRow {
 
 type GroupKey = 'bank' | 'credit' | 'debit' | 'cash';
 
+/** Width a card's name keeps beside its figure before the figure shrinks. */
+const CARD_NAME_MIN = 120;
+/** A card's side padding (2 × 16) plus its 36pt logo and 10pt gap. */
+const CARD_CHROME = 32 + 46;
+
 /**
  * The usage bar on the ink card: status colour only (within, near ≥85%, over
  * the user's own limit). The card is dark in both schemes, so it takes the
@@ -148,41 +153,46 @@ export function AccountGroups({ rows, onOpen, onManage, onUpdateBalance, onHide,
     const quietActions = row.quiet && onHide;
     // Status tints read on the ink card in both schemes (it is dark in both).
     const quietColor = BandPalettes.dark.home.statusNear;
+    // One compact head, as on the design: logo, name and caption, the figure
+    // at the end. Manage moves into the action row so the figure keeps the
+    // head's width; Larger Text stacks the figure under the name.
     return <View key={row.account.id} testID={`wallet-card-${row.account.id}`}
       style={[styles.card, { backgroundColor: ink.band, borderColor: ink.bandRule }]}>
-      <View style={styles.rowWrapper}>
-        <Pressable accessibilityRole="button" onPress={() => onOpen(row.account)}
-          accessibilityLabel={`${row.account.name}. ${row.figureFils === null ? w.unknown : formatAED(row.figureFils)}. ${row.caption}. ${row.freshness}`}
-          style={({ pressed }) => [styles.cardHead, large && styles.stack, { opacity: pressed ? 0.8 : 1 }]}>
-          <View style={styles.cardIdentity}>
-            <AccountTile account={row.account} size={36} />
-            <View style={styles.grow}>
-              <ThemedText type="smallBold" style={{ color: ink.onBand }} numberOfLines={large ? undefined : 2}>{row.account.name}</ThemedText>
-              <ThemedText type="meta" testID={row.quiet ? 'wallet-quiet-line' : undefined}
-                style={{ color: row.quiet ? quietColor : ink.onBandSecondary }}>{sub}</ThemedText>
-            </View>
+      <Pressable accessibilityRole="button" onPress={() => onOpen(row.account)}
+        accessibilityLabel={`${row.account.name}. ${row.figureFils === null ? w.unknown : formatAED(row.figureFils)}. ${row.caption}. ${row.freshness}`}
+        style={({ pressed }) => [styles.cardHead, { opacity: pressed ? 0.8 : 1 }]}>
+        <AccountTile account={row.account} size={36} />
+        <View style={styles.cardBody}>
+          <View style={[styles.cardTitleRow, large && styles.stack]}>
+            <ThemedText type="smallBold" style={[styles.grow, { color: ink.onBand }]}>{row.account.name}</ThemedText>
+            {row.figureFils === null
+              ? <ThemedText type="heading" style={{ color: ink.onBandSecondary }}>—</ThemedText>
+              // Inline, the figure fits what is left beside the logo and a
+              // readable name column; stacked, beside the logo only.
+              : <BandFigure fils={row.figureFils} decimals palette={ink} size="medium"
+                  fitInset={CARD_CHROME + (large ? 0 : CARD_NAME_MIN)} />}
           </View>
-          {row.figureFils === null
-            ? <ThemedText type="heading" style={{ color: ink.onBandSecondary }}>—</ThemedText>
-            : <BandFigure fils={row.figureFils} decimals palette={ink} size="medium" fitInset={72} />}
-        </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel={`${w.manage}: ${row.account.name}`} onPress={() => onManage(row.account)} style={styles.manage}>
-          <Icon name="sliders" size={17} color={ink.onBandSecondary} />
-        </Pressable>
-      </View>
-      {usage && <View style={styles.usage} testID="wallet-card-usage">
-        <View style={[styles.track, { backgroundColor: ink.bandRule }]} importantForAccessibility="no-hide-descendants">
-          <GrowBar axis="width" size={limitFillPercent(usage.usedFils, usage.limitFils)} delay={200}
-            style={[styles.fill, { backgroundColor: usageColor(cardUsageStatus(usage)) }]} />
+          {/* The caption runs under the name and the figure, so it keeps one
+              line where it can instead of wrapping in a narrow column. */}
+          <ThemedText type="meta" testID={row.quiet ? 'wallet-quiet-line' : undefined}
+            style={{ color: row.quiet ? quietColor : ink.onBandSecondary }}>{sub}</ThemedText>
         </View>
-        <ThemedText type="meta" style={{ color: ink.onBandSecondary }}>
-          {m.usedOfLimit(formatAED(usage.usedFils, { decimals: false }), formatAED(usage.limitFils, { decimals: false }))}
-        </ThemedText>
-      </View>}
-      {statement && <ThemedText type="meta" style={{ color: ink.onBandSecondary }} testID="wallet-card-statement">
-        {m.statementTotal(formatAED(statement.totalFils, { decimals: false }))}
-        {statement.capturedFils > 0 ? ` · ${m.capturedThisMonth(formatAED(statement.capturedFils, { decimals: false }))}` : ''}
-      </ThemedText>}
+      </Pressable>
+      {usage || statement ? <View style={styles.cardFacts}>
+        {usage && <View style={styles.usage} testID="wallet-card-usage">
+          <View style={[styles.track, { backgroundColor: ink.bandRule }]} importantForAccessibility="no-hide-descendants">
+            <GrowBar axis="width" size={limitFillPercent(usage.usedFils, usage.limitFils)} delay={200}
+              style={[styles.fill, { backgroundColor: usageColor(cardUsageStatus(usage)) }]} />
+          </View>
+          <ThemedText type="meta" style={{ color: ink.onBandSecondary }}>
+            {m.usedOfLimit(formatAED(usage.usedFils, { decimals: false }), formatAED(usage.limitFils, { decimals: false }))}
+          </ThemedText>
+        </View>}
+        {statement && <ThemedText type="meta" style={{ color: ink.onBandSecondary }} testID="wallet-card-statement">
+          {m.statementTotal(formatAED(statement.totalFils, { decimals: false }))}
+          {statement.capturedFils > 0 ? ` · ${m.capturedThisMonth(formatAED(statement.capturedFils, { decimals: false }))}` : ''}
+        </ThemedText>}
+      </View> : null}
       <View style={styles.cardActions} testID={statement && onMarkPaid ? 'wallet-card-actions' : undefined}>
         {statement && onMarkPaid && pill(m.markPaid, m.markPaidA11y(row.account.name), () => onMarkPaid(statement.due, 'full'),
           `wallet-mark-paid-${row.account.id}`, { bg: ink.accent, fg: ink.onAccent })}
@@ -192,6 +202,10 @@ export function AccountGroups({ rows, onOpen, onManage, onUpdateBalance, onHide,
           { bg: ink.tile, fg: ink.onBand })}
         {quietActions && pill(m.hide, `${m.hide}: ${row.account.name}`, () => onHide(row.account), `wallet-hide-${row.account.id}`,
           { bg: 'transparent', fg: ink.onBand, border: ink.bandRule })}
+        <Pressable accessibilityRole="button" accessibilityLabel={`${w.manage}: ${row.account.name}`} onPress={() => onManage(row.account)}
+          style={[styles.manage, styles.cardManage]}>
+          <Icon name="sliders" size={17} color={ink.onBandSecondary} />
+        </Pressable>
       </View>
     </View>;
   };
@@ -223,10 +237,14 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingStart: 54, paddingBottom: 12 },
   pill: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 22, borderWidth: 1 },
   cards: { gap: 10 },
-  card: { borderRadius: 22, padding: 16, gap: 12, borderWidth: StyleSheet.hairlineWidth },
-  cardHead: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' },
-  cardIdentity: { flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1, minWidth: 0 },
-  usage: { gap: 6 },
+  card: { borderRadius: 22, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 12, gap: 10, borderWidth: StyleSheet.hairlineWidth },
+  cardHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  cardBody: { flex: 1, minWidth: 0, gap: 2 },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
+  cardFacts: { gap: 6 },
+  // Manage sits at the end of the action row, after Mark paid and Details.
+  cardManage: { marginStart: 'auto' },
+  usage: { gap: 4 },
   track: { height: 8, borderRadius: 4, overflow: 'hidden', width: '100%' },
   fill: { height: '100%', borderRadius: 4 },
   cardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

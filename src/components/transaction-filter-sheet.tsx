@@ -12,7 +12,7 @@ import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
-import { formatAmount, ledgerTypicalMinor, shortDate, toISODate } from '@/lib/format';
+import { formatAmount, ledgerTypicalMinor, shiftMonthKey, shortDate, toISODate } from '@/lib/format';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
 import { periodLabel } from '@/lib/period';
@@ -82,11 +82,26 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
   const { filtered } = preview;
   const resultsPending = appliedFilters !== filters;
   const period = options.period;
-  const presetLabel: Record<DatePreset, string> = {
+  // The screen's period ("Oct 2026") often IS one of the fixed presets: this
+  // month, last month, or all time. Two chips for one range read as two
+  // choices, so the pair shows once: the preset's words with the month named
+  // ("This month · Oct 2026"). Whichever of the pair is active stays.
+  const sameAsSelected: DatePreset | null = period.mode === 'all' ? 'all'
+    : period.mode !== 'month' ? null
+      : period.key === options.currentKey ? 'month'
+        : period.key === shiftMonthKey(options.currentKey, -1) ? 'lastMonth' : null;
+  const hiddenPreset: DatePreset | null = sameAsSelected === null ? null
+    : filters.datePreset === sameAsSelected ? 'selected' : sameAsSelected;
+  const presetWords: Record<DatePreset, string> = {
     selected: period.mode === 'all' ? tr('selectedPeriod') : periodLabel(period),
     all: tr('allTime'), month: tr('thisMonth'), lastMonth: tr('lastMonth'),
     '3months': tr('lastThreeMonths'), custom: tr('dateRange'),
   };
+  const mergedLabel = sameAsSelected === null ? null
+    : sameAsSelected === 'all' ? presetWords.all : `${presetWords[sameAsSelected]} · ${presetWords.selected}`;
+  const presetLabel: Record<DatePreset, string> = mergedLabel === null ? presetWords
+    : { ...presetWords, selected: mergedLabel, [sameAsSelected!]: mergedLabel };
+  const presets = (Object.keys(presetLabel) as DatePreset[]).filter((preset) => preset !== hiddenPreset);
   const toggleCategory = (id: CategoryId) => setFilters(current => {
     const categories = new Set(current.categories);
     if (categories.has(id)) categories.delete(id); else categories.add(id);
@@ -148,7 +163,7 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
             {tr('periodFilter')}
           </ThemedText>
           <View style={styles.chipRow}>
-            {(Object.keys(presetLabel) as DatePreset[]).map((preset) => (
+            {presets.map((preset) => (
               <Chip
                 key={preset}
                 label={presetLabel[preset]}

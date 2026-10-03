@@ -11,4 +11,9 @@
   <color name="wafra_widget_upcoming_text">#F2EFE8</color>
   <color name="wafra_widget_upcoming_secondary">#D6CFC1</color>
   <color name="wafra_widget_upcoming_tile">#6A542A</color>
+  <color name="wafra_widget_today_tile">#1D1C1A</color>
+  <color name="wafra_widget_today_over">#E08A70</color>
+  <color name="wafra_widget_spending_band">#6E2B1E</color>
+  <color name="wafra_widget_spending_text">#F2EFE8</color>
+  <color name="wafra_widget_spending_secondary">#D0BCB3</color>
 </resources>

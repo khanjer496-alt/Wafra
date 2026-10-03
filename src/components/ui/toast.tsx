@@ -17,6 +17,7 @@ import { Icon, type IconName } from '@/components/ui/icon';
 import { Colors, EASE, Motion, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { failed } from '@/lib/haptics';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
 
@@ -108,7 +109,7 @@ function toastEntering(placement: ToastPlacement, reducedMotion: boolean) {
 
 function toastExiting(placement: ToastPlacement, reducedMotion: boolean) {
   if (reducedMotion) return FadeOut.duration(Motion.tap).reduceMotion(ReduceMotion.Never);
-  return placement === 'top' ? FadeOutUp.duration(200) : FadeOutDown.duration(200);
+  return placement === 'top' ? FadeOutUp.duration(Motion.change) : FadeOutDown.duration(Motion.change);
 }
 
 /** A compact status surface with an optional, time-sensitive action. */
@@ -136,6 +137,8 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     const announcement = options.announcement?.trim() || undefined;
 
     if (timer.current) clearTimeout(timer.current);
+    // Something the person should notice went wrong: the one long pattern.
+    if (tone === 'error') failed();
     setToast({ message, actions, tone, placement, trailing, announcement });
     timer.current = setTimeout(() => setToast(null), durationMs);
 

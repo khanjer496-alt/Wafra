@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget-picker preview only: an illustrative share bar (three named
+     categories in falling strength, the rest quiet), 300 x 26dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+  android:width="300dp"
+  android:height="26dp"
+  android:viewportWidth="300"
+  android:viewportHeight="26"
+  android:autoMirrored="true">
+  <path android:fillColor="@color/wafra_widget_spending_text" android:fillAlpha="0.92"
+    android:pathData="M6,0 H96 A6,6 0 0,1 102,6 V20 A6,6 0 0,1 96,26 H6 A6,6 0 0,1 0,20 V6 A6,6 0 0,1 6,0 Z" />
+  <path android:fillColor="@color/wafra_widget_spending_text" android:fillAlpha="0.7"
+    android:pathData="M111,0 H153 A6,6 0 0,1 159,6 V20 A6,6 0 0,1 153,26 H111 A6,6 0 0,1 105,20 V6 A6,6 0 0,1 111,0 Z" />
+  <path android:fillColor="@color/wafra_widget_spending_text" android:fillAlpha="0.5"
+    android:pathData="M168,0 H202 A6,6 0 0,1 208,6 V20 A6,6 0 0,1 202,26 H168 A6,6 0 0,1 162,20 V6 A6,6 0 0,1 168,0 Z" />
+  <path android:fillColor="@color/wafra_widget_spending_text" android:fillAlpha="0.24"
+    android:pathData="M217,0 H294 A6,6 0 0,1 300,6 V20 A6,6 0 0,1 294,26 H217 A6,6 0 0,1 211,20 V6 A6,6 0 0,1 217,0 Z" />
+</vector>

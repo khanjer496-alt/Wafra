@@ -440,11 +440,9 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
     editBill(reminder.id, { title: nameText.trim(), amountFils: draftAmount, dueDay: draftDay });
     setEditing(false);
   };
-  const status = row.status === 'paid'
-    ? t('paid')
-    : row.status === 'overdue'
-      ? tf('overdueDays', { days: -row.daysLeft })
-      : row.daysLeft === 0 ? t('dueToday') : tf('dueInDays', { days: row.daysLeft });
+  // The due date and days are the line under the figure; the head says only
+  // what kind of bill it is, and Paid once it is.
+  const status = row.status === 'paid' ? ` · ${t('paid')}` : '';
 
   return (
     <BottomSheet visible onClose={onClose} title={w.billTitle} footer={footer}>
@@ -453,7 +451,7 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
         <View style={styles.headText}>
           <ThemedText type="heading" accessibilityRole="header">{subscriptionLabel({ title: reminder.title, billIdentity: reminder.importIdentity })}</ThemedText>
           <ThemedText type="meta" themeColor="textSecondary">
-            {`${categoryLabel(getCategory(reminder.category))} · ${status}`}
+            {`${categoryLabel(getCategory(reminder.category))}${status}`}
           </ThemedText>
         </View>
       </View>
@@ -497,7 +495,8 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
             </View>
           </View>
         ) : (
-          <EButton palette={band} label={w.editBill} onPress={openEdit} testID="bill-detail-edit-button" />
+          // Secondary: the footer's Mark as paid is the sheet's one primary action.
+          <EButton palette={band} variant="secondary" label={w.editBill} onPress={openEdit} testID="bill-detail-edit-button" />
         )
       ) : (
         <ThemedText type="meta" themeColor="textSecondary">{w.detectedCannotEdit}</ThemedText>

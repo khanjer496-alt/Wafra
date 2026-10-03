@@ -27,7 +27,7 @@ for (const language of ['en', 'ar']) for (const fontScale of [1, 1.3, 3.1]) {
       assert.equal(metrics.writingDirection, 'ltr');
       assert.equal(digits.props.ellipsizeMode, undefined);
       assert.equal(digits.props.numberOfLines, undefined);
-      if (fontScale === 1 && size === 'hero') assert.ok(metrics.fontSize < 56, 'base size itself shrinks at default scale');
+      if (fontScale === 1 && size === 'hero') assert.ok(metrics.fontSize < 48, 'base size itself shrinks at default scale');
       const staticInline = walk(staticTree).find(node => flat(node.props.style).direction === 'ltr');
       assert.equal(flat(staticInline.props.style).flexDirection, 'column', 'currency gets its own line when needed');
       const rollingTree = BandFigure({ ...props, rolling: true });
@@ -47,6 +47,6 @@ test('short amounts retain their intended size and locale currency placement', (
   const tree = BandFigure({ fils: 4200, moneySpec: { currency: 'AED', exponent: 2 }, palette: h.deps['@/constants/theme'].bandPalette('home', 'light') });
   const digits = walk(tree).find(node => node.type === 'Text' && text(node) === '42');
   assert.ok(digits);
-  assert.equal(flat(digits.props.style).fontSize, 56);
+  assert.equal(flat(digits.props.style).fontSize, 48);
   assert.equal(flat(walk(tree).find(node => flat(node.props.style).direction === 'ltr').props.style).flexDirection, 'row');
 });

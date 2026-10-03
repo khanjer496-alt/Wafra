@@ -14,6 +14,23 @@ internal data class WidgetBill(
   val dueISO: String,
 )
 
+internal data class WidgetSpendingCategory(val label: String, val amountMinor: Long?)
+
+/**
+ * This month as the Spending tab shows it (src/lib/widget-snapshot.ts,
+ * WidgetSpending). Optional in version 1: older snapshots carry none.
+ */
+internal data class WidgetSpending(
+  /** YYYY-MM. */
+  val monthKey: String,
+  val totalMinor: Long?,
+  /** Largest first, at most six. */
+  val categories: List<WidgetSpendingCategory>,
+  val otherMinor: Long?,
+) {
+  val month: Int get() = monthKey.substring(5, 7).toInt()
+}
+
 /**
  * The summary written by src/lib/widget-snapshot.ts (version 1). It is the only
  * data the widgets read. Anything malformed parses to null (empty state) or to
@@ -31,6 +48,12 @@ internal data class WidgetSnapshot(
   val last7Minor: List<Long?>,
   val leftInBudgetsMinor: Long?,
   val bills: List<WidgetBill>,
+  /** Sum of the month's budget limits; null without budgets, when hidden, or in older snapshots. */
+  val budgetTotalMinor: Long? = null,
+  /** Budgets already past their limit. */
+  val budgetsOver: Int = 0,
+  /** Null in snapshots written before the Spending widget existed. */
+  val spending: WidgetSpending? = null,
 ) {
   /** Fresh means generated within the last 36 hours and not from the future. */
   fun isFresh(nowMs: Long): Boolean =
@@ -65,6 +88,9 @@ internal data class WidgetSnapshot(
     const val MAX_AGE_MS = 36L * 60L * 60L * 1000L
     private const val FUTURE_SKEW_MS = 60L * 60L * 1000L
     private val ISO_DATE = Regex("^\\d{4}-\\d{2}-\\d{2}$")
+    private val MONTH_KEY = Regex("^\\d{4}-(0[1-9]|1[0-2])$")
+    private const val MAX_SPENDING_CATEGORIES = 6
+    private const val MAX_LABEL_LENGTH = 60
     private val CURRENCY = Regex("^[A-Z]{3}$")
 
     fun parse(json: String?): WidgetSnapshot? {
@@ -119,10 +145,37 @@ internal data class WidgetSnapshot(
           last7Minor = last7,
           leftInBudgetsMinor = integerOrNull(root, "leftInBudgetsMinor"),
           bills = bills,
+          budgetTotalMinor = integerOrNull(root, "budgetTotalMinor"),
+          budgetsOver = (integerOrNull(root, "budgetsOver") ?: 0L).coerceIn(0L, 9_999L).toInt(),
+          spending = parseSpending(root.optJSONObject("spending")),
         )
       } catch (error: Exception) {
         null
       }
+    }
+
+    /** A malformed month is no month: the Spending widget then asks to open Wafra. */
+    internal fun parseSpending(source: JSONObject?): WidgetSpending? {
+      if (source == null) return null
+      val monthKey = source.optString("monthKey", "")
+      if (!MONTH_KEY.matches(monthKey)) return null
+      val categories = ArrayList<WidgetSpendingCategory>()
+      val list = source.optJSONArray("categories")
+      if (list != null) {
+        for (i in 0 until list.length()) {
+          if (categories.size == MAX_SPENDING_CATEGORIES) break
+          val item = list.optJSONObject(i) ?: continue
+          val label = item.optString("label", "").trim().take(MAX_LABEL_LENGTH)
+          if (label.isEmpty()) continue
+          categories.add(WidgetSpendingCategory(label, integerOrNull(item, "amountMinor")))
+        }
+      }
+      return WidgetSpending(
+        monthKey = monthKey,
+        totalMinor = integerOrNull(source, "totalMinor"),
+        categories = categories,
+        otherMinor = integerOrNull(source, "otherMinor"),
+      )
     }
 
     private fun integerOrNull(source: JSONObject, key: String): Long? =

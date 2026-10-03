@@ -295,6 +295,29 @@ setActiveMarket('AE');
     projected.activityRows.map((row) => row.id), rows.slice(0, 6).map((row) => row.id));
 }
 
+{
+  // Home's day totals reconcile with Spent · In · Net: an unconfirmed
+  // transfer and a cash withdrawal stay listed but add nothing to the day.
+  const rows = [
+    tx('coffee', { title: 'Coffee', category: 'dining', amountFils: 4000, source: 'sms' }),
+    tx('repayment', { title: 'Outgoing transfer', category: 'other', amountFils: 500000, source: 'sms' }),
+    tx('atm', { title: 'ATM', category: 'cash-withdrawal', amountFils: 20000, source: 'sms' }),
+    tx('refund', { type: 'income', title: 'Refund', category: 'other', amountFils: 1500, source: 'sms' }),
+    tx('lunch', { title: 'Lunch', category: 'dining', amountFils: 3000, date: '2026-07-08', source: 'sms' }),
+  ];
+  const home = projectDashboard(request(state(rows), { surface: 'home' }));
+  eq('the unconfirmed transfer and the withdrawal are still listed',
+    home.activityRows.map((row) => row.id), ['coffee', 'repayment', 'atm', 'refund', 'lunch']);
+  eq('each day totals only what the month line counts (income +, spending −)',
+    [...home.activityDayTotals], [['2026-07-09', 1500 - 4000], ['2026-07-08', -3000]]);
+  eq('the day totals add up to the month line net',
+    [...home.activityDayTotals.values()].reduce((sum, value) => sum + value, 0), home.hero.netFils);
+  const unsorted = projectDashboard(request(state([rows[4], ...rows.slice(0, 4)]), { surface: 'home' }));
+  eq('an out-of-order ledger shows no day totals rather than partial ones', unsorted.activityDayTotals.size, 0);
+  ok('the full dashboard does not compute day totals',
+    projectDashboard(request(state(rows))).activityDayTotals === undefined);
+}
+
 for (const [currency, exponent, amounts] of [
   ['AED', 2, [49, 49]],
   ['AED', 2, [51, 51]],

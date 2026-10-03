@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Spending this month wears Spending's clay band. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+  <corners android:radius="24dp" />
+  <solid android:color="@color/wafra_widget_spending_band" />
+</shape>

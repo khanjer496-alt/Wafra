@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget-picker preview only: an illustrative week, today in the accent. 96 x 24dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+  android:width="96dp"
+  android:height="24dp"
+  android:viewportWidth="96"
+  android:viewportHeight="24"
+  android:autoMirrored="true">
+  <path android:fillColor="@color/wafra_widget_today_mark" android:pathData="M0,14 H11 V24 H0 Z" />
+  <path android:fillColor="@color/wafra_widget_today_mark" android:pathData="M14,4 H25 V24 H14 Z" />
+  <path android:fillColor="@color/wafra_widget_today_mark" android:pathData="M28,22 H39 V24 H28 Z" />
+  <path android:fillColor="@color/wafra_widget_today_mark" android:pathData="M42,12 H53 V24 H42 Z" />
+  <path android:fillColor="@color/wafra_widget_today_mark" android:pathData="M56,8 H67 V24 H56 Z" />
+  <path android:fillColor="@color/wafra_widget_today_mark" android:pathData="M70,16 H81 V24 H70 Z" />
+  <path android:fillColor="@color/wafra_widget_today_accent" android:pathData="M84,10 H96 V24 H84 Z" />
+</vector>

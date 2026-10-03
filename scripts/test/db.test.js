@@ -734,7 +734,7 @@ ok('hydration clears the latch only AFTER a successful read',
 
 ok('an empty database counts as a successful read',
   !!hydrateBody &&
-    /loaded = await persistence\.load\(\)[\s\S]*?let next: [^=]*= SYNTHETIC_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
+    /loaded = await persistence\.load\(\)[\s\S]*?let next: [^=]*= E2E_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
     /loaded = await persistence\.load\(\)[\s\S]*?if \(loaded\)[\s\S]*?setHydrationFailed\(false\)[\s\S]*?dispatch\(\{ type: 'hydrate', state: next \}\)/.test(hydrateBody),
   'a legitimately empty ledger and an unreadable one must not share a code path, but they ' +
     'must share the SUCCESS path — one `storageBlocked = false` reached by both, not a ' +

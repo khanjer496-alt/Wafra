@@ -132,8 +132,11 @@ test('BandSegmented: a tablist of tabs, the selected one on the sheet surface', 
   assert.equal(tree.props.accessibilityRole, 'tablist');
   const tabs = walk(tree).filter((node) => node.props?.accessibilityRole === 'tab');
   assert.deepEqual(tabs.map((tab) => tab.props.accessibilityState.selected), [false, true, false]);
-  assert.equal(flat(tabs[1].props.style).backgroundColor, palette.selected);
-  assert.equal(flat(tabs[0].props.style).backgroundColor, 'transparent');
+  // The 44pt cell is the target; the selected pill is drawn inset inside it.
+  const pill = (tab) => flat(tab.props.children.props.style);
+  assert.ok(flat(tabs[1].props.style).minHeight >= 44);
+  assert.equal(pill(tabs[1]).backgroundColor, palette.selected);
+  assert.equal(pill(tabs[0]).backgroundColor, 'transparent');
   assert.equal(flat(walk(tabs[1]).find((node) => node.type === 'Text').props.style).color, palette.onSelected);
   tabs[2].props.onPress();
   assert.deepEqual(changed, ['calendar']);

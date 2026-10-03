@@ -97,7 +97,7 @@ test('iOS keeps Lock Screen and StandBy redaction, deep links and tinted legibil
   assert.doesNotMatch(swiftViews, /accessibilityElement\(children: \.combine\)/);
   // The one-line inline family cannot redact part of itself: amounts only when not sensitive.
   assert.match(structBody('WafraLockScreenView'), /if !snapshot\.amountsSensitive, !snapshot\.hidden/);
-  assert.equal((swiftViews.match(/\.widgetURL\(WafraShared\.appURL\)/g) || []).length, 3, 'every widget opens the app');
+  assert.equal((swiftViews.match(/\.widgetURL\(WafraShared\.appURL\)/g) || []).length, 4, 'every widget opens the app');
   // Tinted / clear Home Screen and StandBy: translucent tiles, system text.
   assert.match(swiftViews, /showsWidgetContainerBackground/);
   assert.match(swiftViews, /widgetRenderingMode/);
@@ -215,6 +215,7 @@ test('native logo allowlists have exactly the bundled JS identities and identica
   }
   assert.match(swiftSnapshot, /WafraLogo.validated\(bill.logoId\)/);
   assert.match(kotlin, /takeIf \{ it in LOGO_IDS \}/);
-  assert.doesNotMatch(swiftViews, /WafraWeekBars/);
-  assert.match(swiftViews, /snapshot.weekTotalMinor/);
+  // The week's bars never stand alone: the exact, labelled total sits under them.
+  assert.match(swiftViews, /strings\.last7Total[\s\S]{0,600}WafraWeekBars\(snapshot: snapshot, band: band\)[\s\S]{0,400}Text\(weekTotal\(snapshot\)\)/);
+  assert.match(swiftViews, /guard !snapshot\.hidden, let total = snapshot\.weekTotalMinor else \{ return "—" \}/);
 });

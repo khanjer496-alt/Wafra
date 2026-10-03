@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, StyleSheet, type StyleProp, type ViewStyl
 import { ThemedText } from '@/components/themed-text';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { BandLayout, type BandPalette } from '@/constants/theme';
+import { committed, tapped } from '@/lib/haptics';
 
 export type EButtonVariant = 'primary' | 'secondary' | 'quiet';
 
@@ -15,7 +16,7 @@ export type EButtonVariant = 'primary' | 'secondary' | 'quiet';
  * nothing moves.
  */
 export function EButton({ label, onPress, variant = 'primary', palette, color, icon, disabled = false, busy = false,
-  accessibilityHint, testID, style }: {
+  accessibilityHint, testID, style, haptic = 'tap' }: {
   label: string;
   onPress: () => void;
   variant?: EButtonVariant;
@@ -29,13 +30,16 @@ export function EButton({ label, onPress, variant = 'primary', palette, color, i
   accessibilityHint?: string;
   testID?: string;
   style?: StyleProp<ViewStyle>;
+  /** A tick for the press (default), a firmer tap when the press itself commits, or none. */
+  haptic?: 'tap' | 'commit' | 'none';
 }) {
   const fill = variant === 'primary' ? (color?.fill ?? palette.fill) : variant === 'secondary' ? palette.card : 'transparent';
   const fg = variant === 'primary' ? (color?.text ?? palette.onFill) : variant === 'secondary' ? palette.text : palette.tint;
   const border = variant === 'secondary' ? palette.rule : 'transparent';
   const inactive = disabled || busy;
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} accessibilityHint={accessibilityHint}
-    accessibilityState={{ disabled: inactive, busy }} disabled={inactive} onPress={onPress}
+    accessibilityState={{ disabled: inactive, busy }} disabled={inactive}
+    onPress={() => { if (haptic === 'commit') committed(); else if (haptic === 'tap') tapped(); onPress(); }}
     style={({ pressed }) => [styles.button, { backgroundColor: fill, borderColor: border, opacity: disabled ? 0.45 : pressed ? 0.85 : 1 }, style]}>
     {busy ? <ActivityIndicator color={fg} /> : <>
       {icon ? <Icon name={icon} size={20} color={fg} strokeWidth={2} /> : null}

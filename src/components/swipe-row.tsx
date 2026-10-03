@@ -6,13 +6,14 @@ import { ReduceMotion } from 'react-native-reanimated';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import type { IconName } from '@/components/ui/icon.types';
-import { BandPalettes, type BandId } from '@/constants/theme';
+import { BandPalettes, MotionSpring, type BandId } from '@/constants/theme';
 import { useBandScheme } from '@/hooks/use-band';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { tapped } from '@/lib/haptics';
 import { isRTL } from '@/lib/i18n';
 
-const SPRING = { stiffness: 260, damping: 24 };
+const SPRING = MotionSpring;
 const NO_MOTION = { reduceMotion: ReduceMotion.Always };
 
 export interface SwipeAction {
@@ -53,7 +54,7 @@ export function SwipeRow({ actions, children, testID }: { actions: readonly Swip
       const ink = palette ? palette.onBand : theme.text;
       return <Pressable key={action.name} testID={`swipe-action-${action.name}`}
         accessibilityRole="button" accessibilityLabel={action.label}
-        onPress={() => { methods.current?.close(); action.onPress(); }}
+        onPress={() => { tapped(); methods.current?.close(); action.onPress(); }}
         style={({ pressed }) => [styles.action, { backgroundColor: fill, opacity: pressed ? 0.8 : 1 }]}>
         <Icon name={action.icon} size={18} color={ink} />
         <ThemedText type="meta" style={[styles.label, { color: ink }]}>{action.label}</ThemedText>
@@ -65,6 +66,8 @@ export function SwipeRow({ actions, children, testID }: { actions: readonly Swip
   return <ReanimatedSwipeable ref={methods} testID={testID} friction={2} overshootLeft={false} overshootRight={false}
     rightThreshold={40} leftThreshold={40}
     animationOptions={reducedMotion ? NO_MOTION : SPRING}
+    // A tick when the actions snap open: the row has registered the swipe.
+    onSwipeableWillOpen={() => tapped()}
     renderRightActions={rtl ? undefined : renderActions}
     renderLeftActions={rtl ? renderActions : undefined}>
     {children}

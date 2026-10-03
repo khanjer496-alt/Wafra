@@ -8,7 +8,7 @@ import { GlyphTile } from '@/components/ui/band/glyph-tile';
 import { LimitStatusBar, limitStatusColor } from '@/components/ui/band/status-bar';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
-import { Fonts } from '@/constants/theme';
+import { BandLayout, Fonts } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -62,15 +62,18 @@ export function SpendingOverview(p: Props) {
   const rows = p.rows.filter((row) => p.filter === 'all' ||
     (p.filter === 'limited' ? row.limitFils !== null : row.limitFils === null));
   return <View style={styles.root} testID="spending-categories">
-    {p.assistantSlot}
-    <View style={[styles.heading, large && styles.stack]}>
-      <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionTitle}>{w.breakdown}</ThemedText>
+    <View style={styles.head}>
+      {/* The heading and its follow-up (Explain this) share one line. */}
+      <View style={[styles.heading, large && styles.stack]}>
+        <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionTitle}>{w.breakdown}</ThemedText>
+        {p.assistantSlot}
+      </View>
       {p.monthScoped && <View style={styles.filters} accessibilityLabel={w.categories}>
         {([{ key: 'all', label: w.all }, { key: 'limited', label: w.withLimits }, { key: 'unlimited', label: w.noLimits }] as const)
           .map(({ key, label }) => {
             const on = p.filter === key;
             return <Pressable key={key} accessibilityRole="button" accessibilityLabel={label}
-              accessibilityState={{ selected: on }} aria-pressed={on} onPress={() => p.onFilter(key)}
+              accessibilityState={{ selected: on }} aria-pressed={on} onPress={() => p.onFilter(key)} hitSlop={3}
               style={({ pressed }) => [styles.filter, {
                 backgroundColor: on ? band.text : band.card, borderColor: on ? band.text : band.rule, opacity: pressed ? 0.8 : 1,
               }]}>
@@ -136,12 +139,14 @@ export function SpendingOverview(p: Props) {
 }
 const styles = StyleSheet.create({
   root: { gap: 12 },
+  head: { gap: 4 },
   heading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' },
   sectionTitle: { fontSize: 17, lineHeight: 24 },
   budgetSummary: { gap: 10, paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
   summaryLine: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  filter: { paddingHorizontal: 14, minHeight: 44, borderRadius: 22, borderWidth: 1, justifyContent: 'center' },
+  // Bills' chip size: 38pt plus the 3pt hit slop on each side is 44pt.
+  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 3 },
+  filter: { paddingHorizontal: 14, minHeight: BandLayout.chipHeight, borderRadius: BandLayout.chipHeight / 2, borderWidth: 1, justifyContent: 'center' },
   category: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
   // At the accessibility sizes the tile sits above the name, so a long
   // single word ("Entertainment") gets the row's full width instead of

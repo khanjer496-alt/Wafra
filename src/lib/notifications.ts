@@ -142,6 +142,15 @@ export async function requestVisibleNotificationPermission(): Promise<boolean> {
 export async function requestNotificationPermission(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
   configureHandler();
+  // Android 13+ needs a channel before the OS can show its permission prompt.
+  // Waiting until reminder sync creates it leaves first-time opt-in unable to
+  // grant delivery permission (and sync itself exits without permission).
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
+      name: t('notificationChannelPayments'),
+      importance: Notifications.AndroidImportance.DEFAULT,
+    });
+  }
   const current = await Notifications.getPermissionsAsync();
   if (notificationsAllowed(current)) return true;
   const asked = await Notifications.requestPermissionsAsync();
@@ -308,10 +317,9 @@ export const SUMMARY_HOUR = 21;
  * A repeating daily trigger cannot carry today's figures — a local
  * notification's content is fixed when it is scheduled, and no OS recomputes
  * it at fire time. So this schedules ONE dated notification for tonight and
- * replaces it every time the ledger changes, which on Android is every scan.
- * The consequence is worth stating plainly: the summary is accurate as of the
- * last time the app ran an import, so a charge that arrives after the last
- * scan of the day is in tomorrow's summary, not tonight's.
+ * replaces it after foreground or background imports change the ledger.
+ * It includes only charges durably captured before the last refresh; delayed
+ * bank alerts cannot be included retroactively in a notification already sent.
  *
  * Replaced under one fixed identifier rather than updated, for the same reason
  * payment reminders are: scheduling again under the same identifier swaps the

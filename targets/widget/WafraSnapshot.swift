@@ -48,6 +48,49 @@ struct WafraBill: Hashable {
   let due: Date
 }
 
+struct WafraSpendingCategory: Hashable {
+  let label: String
+  let amountMinor: Int64?
+}
+
+/// This month as the Spending tab shows it (src/lib/widget-snapshot.ts,
+/// WidgetSpending). Optional in version 1: older snapshots carry none, and
+/// the Spending widget then asks the person to open Wafra.
+struct WafraSpending {
+  /// YYYY-MM.
+  let monthKey: String
+  let totalMinor: Int64?
+  /// Largest first, at most six.
+  let categories: [WafraSpendingCategory]
+  let otherMinor: Int64?
+
+  var month: Int { Int(monthKey.suffix(2)) ?? 1 }
+
+  static let segmentAlphas: [Double] = [0.92, 0.7, 0.5]
+  static let restAlpha: Double = 0.24
+
+  /// Share-bar segments in order (each category, then the rest together),
+  /// as fractions of the bar with their opacity. Hidden or unknown amounts
+  /// give no shares: the bar is then one quiet segment.
+  func segments(hidden: Bool) -> [(share: Double, alpha: Double)] {
+    let amounts = categories.map(\.amountMinor) + [otherMinor]
+    guard !hidden, amounts.allSatisfy({ ($0 ?? -1) >= 0 }) else { return [] }
+    let values = amounts.map { $0 ?? 0 }
+    var sum: Int64 = 0
+    for value in values {
+      let next = sum.addingReportingOverflow(value)
+      guard !next.overflow else { return [] }
+      sum = next.partialValue
+    }
+    guard sum > 0 else { return [] }
+    return values.enumerated().compactMap { index, value in
+      guard value > 0 else { return nil }
+      let alpha = index < categories.count && index < Self.segmentAlphas.count ? Self.segmentAlphas[index] : Self.restAlpha
+      return (Double(value) / Double(sum), alpha)
+    }
+  }
+}
+
 struct WafraSnapshot {
   let generatedAt: Date
   let language: WafraLanguage
@@ -67,6 +110,15 @@ struct WafraSnapshot {
   /// Screen widget draws a budget-used gauge; until then it shows the count.
   let budgetTotalMinor: Int64?
   let bills: [WafraBill]
+  /// Nil in snapshots written before the Spending widget existed.
+  let spending: WafraSpending?
+
+  /// How much of the budgets is used: (limits - left) / limits in 0...1, as
+  /// the Lock Screen gauge reads it. Nil without limits or when hidden.
+  var budgetFraction: Double? {
+    guard !hidden, let total = budgetTotalMinor, total > 0, let left = leftInBudgetsMinor else { return nil }
+    return min(1, max(0, Double(total - left) / Double(total)))
+  }
 
   /// Exact seven-day total; partial/hidden/overflowed data cannot invent a total.
   var weekTotalMinor: Int64? {
@@ -170,6 +222,50 @@ private struct RawBill: Decodable {
   }
 }
 
+private struct RawSpendingCategory: Decodable {
+  let label: String?
+  let amountMinor: Double?
+
+  enum CodingKeys: String, CodingKey { case label, amountMinor }
+
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    label = try? c.decodeIfPresent(String.self, forKey: .label)
+    amountMinor = (try? c.decodeIfPresent(LenientNumber.self, forKey: .amountMinor))?.value
+  }
+}
+
+private struct RawSpending: Decodable {
+  let monthKey: String?
+  let totalMinor: Double?
+  let categories: [Tolerant<RawSpendingCategory>]?
+  let otherMinor: Double?
+
+  enum CodingKeys: String, CodingKey { case monthKey, totalMinor, categories, otherMinor }
+
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    monthKey = try? c.decodeIfPresent(String.self, forKey: .monthKey)
+    totalMinor = (try? c.decodeIfPresent(LenientNumber.self, forKey: .totalMinor))?.value
+    categories = try? c.decodeIfPresent([Tolerant<RawSpendingCategory>].self, forKey: .categories)
+    otherMinor = (try? c.decodeIfPresent(LenientNumber.self, forKey: .otherMinor))?.value
+  }
+
+  /// A malformed month is no month.
+  func validated(amount: (Double?) -> Int64?) -> WafraSpending? {
+    guard let monthKey, monthKey.count == 7, monthKey.utf8.enumerated().allSatisfy({ index, char in
+      index == 4 ? char == 45 : (char >= 48 && char <= 57)
+    }), let month = Int(monthKey.suffix(2)), (1...12).contains(month) else { return nil }
+    let named: [WafraSpendingCategory] = (categories ?? []).compactMap { entry in
+      guard let row = entry.value, let label = row.label?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !label.isEmpty else { return nil }
+      return WafraSpendingCategory(label: String(label.prefix(60)), amountMinor: amount(row.amountMinor))
+    }
+    return WafraSpending(monthKey: monthKey, totalMinor: amount(totalMinor),
+                         categories: Array(named.prefix(6)), otherMinor: amount(otherMinor))
+  }
+}
+
 private struct RawSnapshot: Decodable {
   let version: Double?
   let generatedAt: Double?
@@ -187,11 +283,12 @@ private struct RawSnapshot: Decodable {
   let budgetsOver: Double?
   let budgetTotalMinor: Double?
   let bills: [Tolerant<RawBill>]?
+  let spending: RawSpending?
 
   enum CodingKeys: String, CodingKey {
     case version, generatedAt, language, todayISO, currency, exponent
     case amountsSensitive, hidden, todayMinor, todayCount, last7Minor
-    case leftInBudgetsMinor, perDayMinor, budgetsOver, budgetTotalMinor, bills
+    case leftInBudgetsMinor, perDayMinor, budgetsOver, budgetTotalMinor, bills, spending
   }
 
   init(from decoder: Decoder) throws {
@@ -212,6 +309,7 @@ private struct RawSnapshot: Decodable {
     budgetsOver = try? c.decodeIfPresent(Double.self, forKey: .budgetsOver)
     budgetTotalMinor = (try? c.decodeIfPresent(LenientNumber.self, forKey: .budgetTotalMinor))?.value
     bills = try? c.decodeIfPresent([Tolerant<RawBill>].self, forKey: .bills)
+    spending = try? c.decodeIfPresent(RawSpending.self, forKey: .spending)
   }
 
   func validated() -> WafraSnapshot? {
@@ -266,7 +364,8 @@ private struct RawSnapshot: Decodable {
       perDayMinor: amount(perDayMinor),
       budgetsOver: max(0, Self.wholeNumber(budgetsOver) ?? 0),
       budgetTotalMinor: amount(budgetTotalMinor),
-      bills: parsedBills
+      bills: parsedBills,
+      spending: spending?.validated(amount: amount)
     )
   }
 
@@ -339,8 +438,9 @@ enum WafraDates {
     return formatter
   }
 
-  /// "Today", "Tomorrow", the weekday within the coming week ("Monday"), or
-  /// e.g. "Mon 15 Sep" further out, so a weekday never means next week's.
+  /// The due pill: "Today", "Tomorrow", the weekday within the coming week
+  /// ("Monday"), then "in 9 days", so a weekday never means next week's. A
+  /// day before today keeps its date (e.g. "Mon 15 Sep").
   static func dueLabel(_ due: Date, now: Date, strings: WafraStrings) -> String {
     let calendar = self.calendar
     let today = calendar.startOfDay(for: now)
@@ -350,8 +450,20 @@ enum WafraDates {
     case 0: return strings.today
     case 1: return strings.tomorrow
     case 2...6: return formatter(strings.language, template: "EEEE").string(from: due)
+    case 7...: return strings.inDays(ahead)
     default: return formatter(strings.language, template: "EEEdMMM").string(from: due)
     }
+  }
+
+  /// "September" / "سبتمبر".
+  static func monthName(_ month: Int, language: WafraLanguage) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: language == .ar ? "ar@numbers=latn" : "en_US_POSIX")
+    // Optional on purpose: an implicitly unwrapped array on Apple platforms.
+    let symbols: [String]? = formatter.standaloneMonthSymbols
+    let names = symbols ?? []
+    let index = min(max(month - 1, 0), 11)
+    return index < names.count ? names[index] : String(month)
   }
 
   /// Short weekday, e.g. "Mon".
@@ -404,6 +516,38 @@ enum WafraMoney {
     return formatter.string(from: NSDecimalNumber(decimal: value))
   }
 
+  /// "1,836": whole major units, half up, as the preview and Home's week
+  /// columns print them.
+  static func whole(_ minor: Int64, exponent: Int) -> String {
+    var scale: Int64 = 1
+    for _ in 0..<max(0, min(exponent, 4)) { scale *= 10 }
+    let magnitude = minor.magnitude
+    let whole = (magnitude / UInt64(scale)) + ((magnitude % UInt64(scale)) * 2 >= UInt64(scale) && scale > 1 ? 1 : 0)
+    let formatter = NumberFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.numberStyle = .decimal
+    formatter.usesGroupingSeparator = true
+    formatter.groupingSeparator = ","
+    formatter.groupingSize = 3
+    let text = formatter.string(from: NSNumber(value: whole)) ?? String(whole)
+    return minor < 0 && whole > 0 ? "-" + text : text
+  }
+
+  /// What the listed bills add up to, "≈" when any is an estimate. Nil when an
+  /// amount is hidden or unknown: a partial sum would understate what is due.
+  static func billsTotal(_ bills: [WafraBill], in snapshot: WafraSnapshot) -> String? {
+    guard !snapshot.hidden, !bills.isEmpty else { return nil }
+    var total: Int64 = 0
+    for bill in bills {
+      guard let amount = bill.amountMinor else { return nil }
+      let next = total.addingReportingOverflow(amount)
+      guard !next.overflow else { return nil }
+      total = next.partialValue
+    }
+    guard let text = format(total, currency: snapshot.currency, exponent: snapshot.exponent) else { return nil }
+    return isolate(bills.contains(where: \.estimated) ? "≈ " + text : text, snapshot.language)
+  }
+
   /// Keeps "≈ USD 15.49" in reading order inside Arabic (right-to-left) text.
   static func isolate(_ text: String, _ language: WafraLanguage) -> String {
     language == .ar ? "\u{200E}\(text)\u{200E}" : text
@@ -416,9 +560,28 @@ enum WafraInitial {
   /// The first letter of a bill's title for its tile ("DEWA" -> "D"). Nil when
   /// the title has no letter (a masked card such as "•••• 1234"); the tile
   /// then shows a plain glyph rather than a digit that reads like a figure.
+  /// The Arabic article is skipped ("الكهرباء" -> "ك"), as on Android and in
+  /// the app's preview.
   static func of(_ title: String) -> String? {
-    guard let letter = title.first(where: { $0.isLetter }) else { return nil }
+    guard let start = title.firstIndex(where: { $0.isLetter }) else { return nil }
+    var letter = title[start]
+    let word = title[start...]
+    if word.hasPrefix(arabicArticle), let next = word.dropFirst(arabicArticle.count).first, next.isLetter {
+      letter = next
+    }
     return String(letter).uppercased()
+  }
+
+  private static let arabicArticle = "\u{0627}\u{0644}"
+}
+
+enum WafraTitle {
+  /// A bill title as the widget sets it. A title without a letter (a masked
+  /// card such as "•••• 1234") is held left to right inside Arabic, so its
+  /// digits and dots do not swap sides.
+  static func display(_ title: String, _ language: WafraLanguage) -> String {
+    guard language == .ar, WafraInitial.of(title) == nil else { return title }
+    return "\u{200E}\(title)\u{200E}"
   }
 }
 
@@ -433,7 +596,14 @@ struct WafraStrings {
   var today: String { pick("Today", "اليوم") }
   var tomorrow: String { pick("Tomorrow", "غداً") }
   var comingUp: String { pick("Coming up", "القادم") }
-  var nothingComingUp: String { pick("Nothing coming up", "لا توجد دفعات قادمة") }
+  var nothingComingUp: String { pick("All clear for the next 30 days", "لا مدفوعات مستحقة خلال 30 يومًا") }
+  var spendingEmpty: String { pick("No spending yet this month", "لا إنفاق بعد هذا الشهر") }
+  func totalDue(_ amount: String) -> String { language == .ar ? "المستحق \(amount)" : "Total due \(amount)" }
+  /// "in 9 days" / "بعد 9 أيام" (3–10) / "بعد 16 يومًا" (11 and up), Latin digits.
+  func inDays(_ days: Int) -> String {
+    guard language == .ar else { return days == 1 ? "in 1 day" : "in \(days) days" }
+    return days <= 10 ? "بعد \(days) أيام" : "بعد \(days) يومًا"
+  }
   var left: String { pick("Left", "المتبقي") }
   var over: String { pick("Over", "تجاوز") }
   var openToUpdate: String { pick("Open Wafra to update", "افتح وفرة للتحديث") }
@@ -474,6 +644,10 @@ struct WafraStrings {
   var comingUpWidgetName: String { pick("Coming up", "القادم") }
   var comingUpWidgetDescription: String {
     pick("The next bills and renewals Wafra knows about.", "الفواتير والتجديدات القادمة المعروفة لوفرة.")
+  }
+  var spendingWidgetName: String { pick("Spending this month", "الإنفاق هذا الشهر") }
+  var spendingWidgetDescription: String {
+    pick("This month’s spending and the categories that take most of it.", "إنفاق هذا الشهر والفئات التي تأخذ معظمه.")
   }
   var lockWidgetName: String { pick("Wafra", "وفرة") }
   var lockWidgetDescription: String {

@@ -176,8 +176,9 @@ function sources(dir = SRC) {
  * None of that is reachable from a unit test — it is layout, and the failure
  * is a user's thumb. What IS reachable is the shape of the file, so this
  * checks the shape: that the mutating cycles are gone, that the destructive
- * action is a button standing alone at the end, and that a row which leads to
- * the paywall says so before it is tapped rather than after.
+ * action stands at the end under its own heading and only opens a
+ * confirmation, and that a row which leads to the paywall says so before it
+ * is tapped rather than after.
  */
 {
   // Settings is the main list plus its Data and help sub-screen, drawn with
@@ -212,7 +213,7 @@ function sources(dir = SRC) {
     ['feedback', /router\.push\('\/feedback'\)/],
     ['public links', /configuredPublicUrl\('privacyPolicyUrl'\)[\s\S]*configuredPublicUrl\('termsOfUseUrl'\)[\s\S]*configuredPublicUrl\('supportUrl'\)/],
     ['founder brand gate', /isFounderUnlockBuild\(\)[\s\S]*onFounderLogoTap\(\)[\s\S]*<WafraMark/],
-    ['destructive erase', /<EButton\s+label=\{t\('eraseAll'\)\}[\s\S]{0,300}color=\{\{ fill: band\.statusOver, text: band\.onFill \}\}[\s\S]{0,40}onPress=\{confirmErase\}/],
+    ['destructive erase', /<SettingsLinkRow\s+title=\{t\('eraseAll'\)\}[\s\S]{0,200}tone="danger"[\s\S]{0,120}onPress=\{confirmErase\}/],
   ];
   const missingSettingsInventory = settingsInventory
     .filter(([, pattern]) => !pattern.test(settings))
@@ -284,9 +285,14 @@ function sources(dir = SRC) {
   ok('empty large-text months are no-data rather than zero balances',
     /month\.incomeFils !== 0 \|\| month\.expenseFils !== 0/.test(trends) && /— \{w\.noData\}/.test(trends));
 
-  ok('erase is a destructive button, not a chevron row',
+  // Erase is a row like its neighbours (the design's "Erase everything"),
+  // told apart by the destructive tone on its glyph and title, under its own
+  // Danger zone heading, and it only opens the confirmation dialog.
+  ok('erase is a destructive-toned row that only opens the confirmation',
     !/linkRow\(t\('eraseAll'\)/.test(settings) &&
-      /<EButton\s+label=\{t\('eraseAll'\)\}[\s\S]{0,300}color=\{\{ fill: band\.statusOver, text: band\.onFill \}\}/.test(settings));
+      /<SettingsLinkRow\s+title=\{t\('eraseAll'\)\}[\s\S]{0,200}icon="trash"[\s\S]{0,40}tone="danger"[\s\S]{0,120}onPress=\{confirmErase\}/.test(settings) &&
+      /color: tone === 'danger' \? band\.statusOver : band\.text/.test(settings) &&
+      /const confirmErase = \(\) => \{[\s\S]{0,700}setEraseDialogVisible\(true\)/.test(settings));
 
   // Alone at the end: nothing routine may sit against it. "Sort your shops"
   // was its immediate neighbour.

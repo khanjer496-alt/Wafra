@@ -1792,7 +1792,8 @@ ok('ordinary movement signs follow direction; only confirmed repayments are unsi
   /const arrived = transaction\.type === 'income';/.test(txRow) && /\{presentation\.repayment \? '' : arrived \? '\+' : '−'\}/.test(txRow),
   'an arriving transfer was rendered with a minus');
 ok('green is still reserved for money actually earned',
-  /color: isIncome \? theme\.income : theme\.text/.test(txRow),
+  /const amountColor = isIncome \? theme\.income : isTransfer \|\| pending \? theme\.textSecondary : theme\.text;/.test(txRow) &&
+    /color: amountColor/.test(txRow),
   'painting transfer arrivals green made the list read as income landing twice');
 ok('the spoken label matches the visible repayment exception and direction',
   /\$\{presentation\.repayment \? '' : arrived \? t\('plusWord', language\) : t\('minusWord', language\)\}/.test(txRow),
