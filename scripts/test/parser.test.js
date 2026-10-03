@@ -6302,6 +6302,9 @@ t('a reversal forecast for the purchase itself is never posted',
   }
   setActiveMarket('AE');
 }
+t('a spaced masked card number keeps its LAST four digits',
+  'Your Credit Card 4567 XXXX XXXX 1234 statement: Total Amount Due AED 3,456.78, Minimum Amount Due AED 172.84, Due Date 20/10/2026.',
+  { kind: 'cardStatement', card: { last4: '1234', kind: 'credit' } });
 // Saudi labelled field-list families (synthetic grammar probes).
 {
   const { setActiveMarket } = require('./build/markets');

@@ -165,5 +165,14 @@ for (const [label, source, reason] of [
     Date.now() - started < 250 && draft.decision === 'refuse');
 }
 
+{
+  const draft = inspectAlertDraft('Compra aprobada por $350.00 MXN en OXXO');
+  ok('a symbol and ISO code on one figure are one amount, not two',
+    draft.candidates.length === 1 && draft.candidates[0].interpretations.length === 1 &&
+      draft.candidates[0].interpretations[0].currency === 'MXN', draft.candidates);
+  const two = inspectAlertDraft('Paid $20.00 and USD 35.00 later');
+  ok('two different figures stay two amounts', two.candidates.length === 2, two.candidates);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

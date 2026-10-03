@@ -75,6 +75,11 @@ export const CURRENCY_SYMBOL_CANDIDATES: Readonly<Record<string, readonly Curren
   'Rs.': ['INR', 'PKR', 'LKR', 'NPR', 'MUR', 'SCR'],
   // Turkish banks print the lira as TL ("456,75 TL"), never TRY.
   TL: ['TRY'],
+  // Bangladesh taka as wallets print it ("Tk 1,000.00"); Japanese yen suffix.
+  Tk: ['BDT'],
+  'Tk.': ['BDT'],
+  '৳': ['BDT'],
+  '円': ['JPY'],
   // The Arabic word for pound, as Egyptian banks write it ("1,500.00 جنيه").
   'جنيه': ['EGP', 'SDG', 'SSP'],
 };

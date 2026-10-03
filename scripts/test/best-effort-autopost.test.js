@@ -458,6 +458,17 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     ['TRY', 'TR', 'GARANTI BBVA', '1234 ile biten kartınızla 02.10.2026 tarihinde MIGROS işyerinden 456,75 TL tutarında alışverişiniz gerçekleşmiştir.', 45675, 'expense', 'groceries'],
     ['PKR', 'PK', 'HBL', 'HBL: PKR 3,500.00 has been debited from your A/C ****1234 at FOODPANDA on 02-Oct-2026. Avl Bal PKR 45,210.50', 350000, 'expense', 'dining'],
     ['SGD', 'SG', 'DBS', 'DBS: A transaction of SGD 18.50 was made with your DBS/POSB card ending 1234 on 02 Oct 2026 at GRAB*FOOD. If unauthorised, call 1800 111 1111.', 1850, 'expense', undefined],
+    ['EUR', 'FR', 'SG', 'Société Générale : Virement reçu de 1 250,00 EUR de la part de EMPLOYEUR SA, libellé SALAIRE SEPTEMBRE.', 125000, 'income', 'salary'],
+    ['EUR', 'NL', 'ING', 'ING: Kaartbetaling voltooid: EUR 12,95 bij ALBERT HEIJN 1234 op 02-10-2026.', 1295, 'expense', 'groceries'],
+    ['BRL', 'BR', 'Nubank', 'Nubank: Pix enviado de R$ 150,00 para JOAO SILVA.', 15000, 'expense', 'other'],
+    ['BRL', 'BR', 'Itau', 'Itaú: Você recebeu um Pix de R$ 200,00 de MARIA SOUZA.', 20000, 'income', 'other'],
+    ['TRY', 'TR', 'Ziraat', 'Hesabınıza 1.500,00 TL tutarında havale gelmiştir. Gönderen: AHMET YILMAZ', 150000, 'income', 'other'],
+    ['IDR', 'ID', 'BCA', 'BCA: Transaksi Rp 125.000 di INDOMARET pada 02/10/2026 dengan kartu ****1234 berhasil.', 12500000, 'expense', undefined],
+    ['THB', 'TH', 'KBank', 'KBank: Payment THB 320.00 at 7-ELEVEN with card x1234 on 02/10/26.', 32000, 'expense', 'groceries'],
+    ['MYR', 'MY', 'Maybank', 'Maybank: RM45.90 charged to card ending 1234 at TESCO PUCHONG on 02/10/2026.', 4590, 'expense', 'groceries'],
+    ['SGD', 'SG', 'OCBC', 'OCBC: You have sent SGD 50.00 via PayNow to JOHN TAN on 02 Oct 2026.', 5000, 'expense', 'other'],
+    ['BDT', 'BD', 'bKash', 'You have received Tk 1,000.00 from 01712345678. Fee Tk 0.00. Balance Tk 2,500.00. TrxID ABC123 at 02/10/2026 10:15', 100000, 'income', 'other'],
+    ['NGN', 'NG', 'GTBank', 'Acct: ****1234 Amt: NGN5,000.00 DR Desc: POS PURCHASE SHOPRITE LEKKI Avail Bal: NGN45,000.00 Date: 02-Oct-2026', 500000, 'expense', 'groceries'],
   ]) {
     const row = worldwide(currency, cc, sender, body, exponent);
     ok(`${cc}: ${body.slice(0, 56)}… posts ${type}${category ? ` / ${category}` : ''}`,
@@ -480,6 +491,8 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     ['KWD', 'DE', 'MYBANK', 'MYBANK: Purchase of KWD 12.500 with card ending 1234 at TALABAT KUWAIT on 02/10/2026.'],
     // Pound STERLING written in Arabic is not the Egyptian pound.
     ['EGP', 'EG', 'CIB', 'تم خصم 100.00 جنيه استرليني من بطاقتك رقم 1234 لدى AMAZON UK'],
+    // A "compra aprobada" heading also opens holds and fraud questions; it stays in Review.
+    ['MXN', 'MX', 'BBVA', 'BBVA: Compra aprobada por $350.00 MXN en OXXO con tu tarjeta terminación 1234.'],
     // "يتم" is in progress, not completed.
     ['EGP', 'EG', 'NBE', 'يتم تحويل مبلغ 1,500.00 جنيه من حسابك رقم ***1234 إلى أحمد محمد'],
   ]) {

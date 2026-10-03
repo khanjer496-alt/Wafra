@@ -15,10 +15,10 @@ const resolve = <T>(items: Observation<T>[]): UniversalField<T> => {
   };
 };
 
-const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|beneficiario|esercente|begunstigde|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
+const MERCHANT_LABEL = /(?:^|[^\p{L}\p{N}])(?:desc(?:ription)?|narration|merchant|payee|beneficiary|seller|commerçant|bénéficiaire|händler|empfänger|comercio|beneficiario|esercente|begunstigde|利用先|التاجر|المستفيد)\s*[:：=-]\s*/giu;
 const MERCHANT_PREPOSITION = /(?:^|[^\p{L}\p{N}])(?:at|to|from|chez|bei|en|em|an|presso|bij|لدى|عند|لصالح)\s+/giu;
-const MERCHANT_TAIL = /\s+(?:(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will)\b|بتاريخ|رقم\s+(?:المرجع|العملية))/iu;
-const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|avl\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|الرصيد(?:\s+(?:المتاح|الحالي))?)\s*[:=-]?\s*$/iu;
+const MERCHANT_TAIL = /\s+(?:(?:avl|avail(?:able)?)\.?\s*(?:bal(?:ance)?|lmt|limit)\b|(?:on|le|am|el|il|op|em)\s+\d|on\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|from\s+(?:your\s+)?(?:account|a\/?c|card|checking|savings)\b|posted\b|(?:with|using|via|über)\b|to\s+(?:(?:your|the)\s+)?(?:card|account)\b|\d{1,2}:\d{2}\b|(?:ref(?:erence)?|txn|transaction\s+(?:id|date))\b|(?:was|has|have|is|were|will)\b|بتاريخ|رقم\s+(?:المرجع|العملية))/iu;
+const BALANCE_FIELD_TAIL = /\s+(?:(?:available|current|remaining|closing)\s+(?:credit\s+)?(?:balance|limit)|(?:avl|avail)\.?\s*(?:bal(?:ance)?|limit)|balance|credit\s+limit|الرصيد(?:\s+(?:المتاح|الحالي))?)\s*[:=-]?\s*$/iu;
 const BALANCE_FIELD_BEFORE_MONEY = new RegExp(
   BALANCE_FIELD_TAIL.source.replace(/\$$/u, '') + String.raw`(?=(?:[A-Z]{3}\s*[+-]?\d|[+-]?\d[\d.,]*\s*[A-Z]{3}\b))`, 'iu');
 // These are clauses about the payment, not words in its seller's name. Keep
@@ -61,10 +61,20 @@ const merchantFields = (text: string, moneySpans: readonly SourceSpan[]): Univer
       if (pattern === billSupplier && /\b(?:call|contact|visit|log\s*in|for\s+help)\b/iu.test(
         text.slice(Math.max(0, match.index! - 160), match.index!).split(/[.!?;。।\n]/u).at(-1) ?? '',
       )) continue;
-      const start = match.index! + match[0].length;
-      const candidate = text.slice(start, start + 97).match(/^[\p{L}%][\p{L}\p{M}\p{N}% &'’*/+()._-]{0,95}/u)?.[0];
+      const labelEnd = match.index! + match[0].length;
+      // A chain may open with digits: "7-ELEVEN", "24 SEVEN" — but only when letters follow.
+      const candidate = text.slice(labelEnd, labelEnd + 97).match(/^(?:[\p{L}%]|\d{1,3}[- ]?(?=\p{L}))[\p{L}\p{M}\p{N}% &'’*/+()._-]{0,95}/u)?.[0];
       if (!candidate) continue;
       let value = candidate.split(/\.(?=\s|$)/u)[0];
+      // A labelled description opens with the channel, not the seller:
+      // "Desc: POS PURCHASE SHOPRITE LEKKI". The channel words stay outside the
+      // merchant span so the posting evidence they carry is still read.
+      let lead = 0;
+      if (pattern === MERCHANT_LABEL) {
+        const channel = value.match(/^(?:pos\s+purchase|pos|purchase|card\s+purchase|online\s+purchase)\s+(?=\p{L})/iu);
+        if (channel) { lead = channel[0].length; value = value.slice(lead); }
+      }
+      const start = labelEnd + lead;
       const tails = [pattern === billSupplier ? value.search(/\s+(?:(?:no|não|será|está)\s+)?(?:pagada|paga)(?=\s*$)|\s+será\s+(?:cobrada|renovada)\b/iu) : -1, value.search(MERCHANT_TAIL), value.search(MERCHANT_STATUS_TAIL), value.search(BALANCE_FIELD_BEFORE_MONEY)]
         .filter((index) => index >= 0);
       const timeTail = text.slice(start, start + 97).search(/\s+\d{1,2}:\d{2}(?=\s|[.。।!?;]|$)/u);

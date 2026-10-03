@@ -62,6 +62,11 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     phrase(String.raw`alışveriş(?:iniz)?\s+(?:gerçekleşmiştir|tamamlandı)`),
     phrase(String.raw`تم\s+(?:سداد|خصم)`),
     /भुगतान\s+सफल\s+हुआ/u,
+    // Indonesian "transaksi ... berhasil" (transaction ... successful), a
+    // card "charged to card ... at" shop, and Japan's card-usage notice.
+    phrase(String.raw`transaksi[\s\S]{0,100}berhasil`),
+    phrase(String.raw`charged\s+to\s+(?:your\s+)?card[\s\S]{0,60}\bat`),
+    /カード利用のお知らせ[\s\S]{0,40}ご利用金額/u,
     /(?:カード利用|購入)が完了しました/u,
     /(?:消费|支付|付款)(?:成功|已完成)/u,
   ];
@@ -80,6 +85,11 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
   // `تم` stands alone: "يتم" (is being) and "سيتم" (will be) are not done.
   const arabicTransferOut = /(?<!\p{L})تم\s+تحويل[\s\S]{0,80}?من\s+حسابك/u;
   const arabicTransferIn = /(?<!\p{L})تم\s+(?:تحويل|إيداع|ايداع)[\s\S]{0,80}?(?:إلى|الى|في)\s+حسابك/u;
+  // Completed person-to-person transfers in other languages and wallets. Each
+  // is a finished verb, never a heading: "Pix enviado", "Você recebeu um Pix",
+  // "Virement reçu", "havale gelmiştir" (has arrived), "You have sent/received".
+  const transferOutWords = /(?<!\p{L})(?:pix\s+enviado|você\s+enviou\s+um\s+pix|you\s+have\s+sent|^\s*sent\s+(?:rs\.?|inr|₹))(?!\p{L})/iu;
+  const transferInWords = /(?<!\p{L})(?:virement\s+reçu|você\s+recebeu\s+um\s+pix|pix\s+recebido|havale\s+gelmiştir|eft\s+gelmiştir|you\s+have\s+received)(?!\p{L})/iu;
   const statuses: PostingStatus[] = [];
   const matches = (pattern: RegExp): boolean => {
     let found = false;
@@ -104,8 +114,8 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
   const debit = debitPatterns.map(matches).some(Boolean);
   const refund = refundPatterns.map(matches).some(Boolean);
   const deposit = matches(depositPattern);
-  const transferOut = matches(arabicTransferOut);
-  const transferIn = matches(arabicTransferIn);
+  const transferOut = matches(arabicTransferOut) || matches(transferOutWords);
+  const transferIn = matches(arabicTransferIn) || matches(transferInWords);
   if (transferOut !== transferIn && !debit && !refund && !deposit) {
     const status = conservativeStatus(statuses);
     return { status, direction: transferOut ? 'debit' : 'credit', family: status === 'posted' ? 'transfer' : 'unknown' };

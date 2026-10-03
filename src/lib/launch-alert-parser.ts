@@ -48,7 +48,7 @@ export const hasBankAlertMoneyHint = (source: string): boolean =>
  * bank phrasing from a supported institution still reaches the full parser.
  */
 const UNIVERSAL_POSTED_EVENT_HINT =
-  /\b(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+of|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|gerçekleşmiştir|alışveriş\w*|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)\b|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم)/iu;
+  /\b(?:purchase|purchased|debit(?:ed)?|credit(?:ed)?|charged|charge\s+of|spent|paid|payment|received|refund(?:ed)?|reversal|withdraw(?:n|al)?|withdrew|made\s+an?|was\s+made|used\s+for|deposit(?:ed)?|transferr(?:ed|ing)|sent|gerçekleşmiştir|gelmiştir|alışveriş\w*|havale|virement|reçu|pix|enviado|enviou|recebeu|recebido|transaksi|berhasil|kaartbetaling|voltooid|cash\s+(?:withdrawal|advance)|used\s+(?:for|at|on)|transaction|completed|processed|successful|successfully|approved|authori[sz]ed|settled|posted|débité|crédité|effectué|payé|payée|belastet|abgebucht|bezahlt|gutgeschrieben|cargado|pagado|abonado|addebitato|pagata|accreditato|afgeschreven|betaald|bijgeschreven)\b|(?:خصم|دفع|شراء|سحب|تحويل|ايداع|إيداع|استرداد|استرجاع|تمت|تم|ご利用|利用金額)/iu;
 
 // A small family of real bank field-list alerts has amount + instrument +
 // merchant but no verb at all. The 30k Jev benchmark found one such rescued FAB
@@ -101,7 +101,7 @@ export type ParseFxLookup = (base: string, quote: string, date: string) => FxQuo
  * call. Transfers keep their structural title and stay uncategorized: whether
  * they are the user's own money is reconciliation's question, not a merchant's.
  */
-const WORLD_SALARY_RE = /\b(?:salary|payroll|wages?|pay\s*cheque|paycheck)\b|راتب|رواتب|वेतन/iu;
+const WORLD_SALARY_RE = /\b(?:salary|payroll|wages?|pay\s*cheque|paycheck|salaire|gehalt|lohn|salario|sueldo|n[óo]mina|sal[áa]rio|stipendio|salaris|maa[şs]|gaji)\b|راتب|رواتب|वेतन/iu;
 const universalRowCategory = (
   source: string,
   event: UniversalBankEvent,

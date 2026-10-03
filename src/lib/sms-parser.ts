@@ -2478,7 +2478,8 @@ const ACCOUNT_RE =
 const MASKED_ACCOUNT_RE =
   /(?:a\/?c(?:count)?|acct?|account)\s*(?:no\.?|number)?\s+(?:\d{1,4}[- ]?)?(?:[Xx*·•]+\d*)+(?:[- ]+)?(\d{4})\b/i;
 /** Fully masked PAN like "4782********4833" — the LAST four digits identify the card. */
-const MASKED_PAN_RE = /\b\d{4,6}[Xx*•]{2,}(\d{4})\b/;
+// Spaced or dashed groups too: "4567 XXXX XXXX 1234" is card •1234, never •4567.
+const MASKED_PAN_RE = /\b\d{4,6}(?:[\s-]?[Xx*•]{2,}){1,3}[\s-]?(\d{4})\b/;
 /**
  * ADIB's compact alert omits the word "card": "XXX456789 was used for AED
  * ...". Restrict the shorter masked form to the completed-use phrase so a
