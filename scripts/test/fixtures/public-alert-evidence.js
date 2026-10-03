@@ -21,8 +21,10 @@
  *
  * - The generic reader assigns transfer/utility/recurring families only to a
  *   completed posting, so pending/failed/scheduled/request rows read `unknown`.
- * - "Card charge ... was charged" reads as a fee, "Zelle ... is paid" as a
- *   purchase, and ACH/deposit-posted wording has no transfer term. Fixing any
+ * - "Card charge ... was charged" reads as a fee, and ACH/deposit-posted
+ *   wording has no transfer term. "Zelle ... is paid" now reads as the
+ *   transfer it is (the US pack names Zelle, Venmo and Cash App as transfer
+ *   terms), which is what lets its certified template post automatically. Fixing any
  *   of these would change first-wave routing/certification outcomes, which is
  *   a separate, reviewed change (see universal-template-certification.test.js).
  * - "was canceled" is not failure vocabulary; the alert is still refused.
@@ -31,7 +33,6 @@ const KNOWN_GAPS = Object.freeze({
   'us-chase-charge-alert': { family: 'fee' },
   'us-bofa-zelle-pending-acceptance': { family: 'unknown' },
   'us-bofa-zelle-pending-review': { family: 'unknown' },
-  'us-bofa-zelle-paid': { family: 'purchase' },
   'us-bofa-zelle-failed': { family: 'unknown' },
   'us-bofa-ach-debit': { family: 'unknown' },
   'us-wells-deposit-posted': { family: 'unknown' },

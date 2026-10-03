@@ -74,6 +74,12 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
     /退款到账|退款到賬|退款[^。]{0,90}已到账/u,
   ];
   const depositPattern = phrase(String.raw`deposit\s*\/\s*transfer\s+to\s+your\s+account|überweisung\s+eingegangen`);
+  // A completed transfer stated in Arabic names its source or destination
+  // account: "تم تحويل مبلغ ... من حسابك ... إلى أحمد" leaves the account,
+  // "... إلى حسابك" arrives in it. Only the possessive account decides.
+  // `تم` stands alone: "يتم" (is being) and "سيتم" (will be) are not done.
+  const arabicTransferOut = /(?<!\p{L})تم\s+تحويل[\s\S]{0,80}?من\s+حسابك/u;
+  const arabicTransferIn = /(?<!\p{L})تم\s+(?:تحويل|إيداع|ايداع)[\s\S]{0,80}?(?:إلى|الى|في)\s+حسابك/u;
   const statuses: PostingStatus[] = [];
   const matches = (pattern: RegExp): boolean => {
     let found = false;
@@ -98,6 +104,12 @@ const completedMovement = (source: string): { status: PostingStatus; direction: 
   const debit = debitPatterns.map(matches).some(Boolean);
   const refund = refundPatterns.map(matches).some(Boolean);
   const deposit = matches(depositPattern);
+  const transferOut = matches(arabicTransferOut);
+  const transferIn = matches(arabicTransferIn);
+  if (transferOut !== transferIn && !debit && !refund && !deposit) {
+    const status = conservativeStatus(statuses);
+    return { status, direction: transferOut ? 'debit' : 'credit', family: status === 'posted' ? 'transfer' : 'unknown' };
+  }
   const status = conservativeStatus(statuses);
   // Contradictory positive direction is unresolved; a negative qualification
   // still restricts posting even if another predicate appears in the clause.
@@ -329,6 +341,14 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     status = 'informational';
   }
   const knownDirection = commonDirection(readings.map((reading) => reading.direction));
+  // Money stated as CREDITED INTO the user's own account, with no purchase,
+  // refund or fee wording, is an incoming transfer ("£2,450.00 has been
+  // credited to your account ending 5678. Ref: SALARY OCT"). Left familyless
+  // it could never post, so every salary outside the Gulf waited in Review.
+  if (family === 'unknown' && status === 'posted' && knownDirection === 'credit' && !roleUnresolved &&
+    /\b(?:credited|deposited)\s+(?:to|into|in)\s+(?:your\s+)?(?:\w+\s+){0,2}(?:a\/?c|acct|account)\b|\b(?:a\/?c|acct|account)\b[^.;\n]{0,30}?\b(?:has\s+been\s+|is\s+)?credited\s+(?:with|by)\b|\bdirect\s+deposit\b/iu.test(maskedSource)) {
+    family = 'transfer';
+  }
   // Commas separate money fields, but a following opposite posting verb can
   // still qualify this same amount. Inspect through its sentence, stopping
   // before the next amount; never treat a conflict as absent direction.

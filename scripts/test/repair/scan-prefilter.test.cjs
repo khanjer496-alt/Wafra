@@ -32,6 +32,9 @@ function harness({ pinnedCurrency = 'AED', activeMarket = 'AE' } = {}) {
       CURRENCY_SYMBOL_CANDIDATES: { '$': ['USD'] },
       currencyMinorUnits: code => code === 'AED' || code === 'USD' ? 2 : null,
     },
+    '@/lib/universal-categorization': {
+      suggestUniversalCategory: () => ({ merchant: '', category: 'other', source: 'unresolved', reason: 'fixture', needsReview: true }),
+    },
     '@/lib/universal-parser': { inspectUniversalBankEvent: () => {
       universalCalls += 1;
       return { decision: 'ignored' };

@@ -66,6 +66,19 @@ const ACTIVITY: readonly [RegExp, CategoryId][] = [
   [/ソフトウェア|软件|軟體/u, 'software'],
 ];
 
+/**
+ * Does the vocabulary's reading come from a word OUTSIDE the brand's own name?
+ * KROGER FUEL, TESCO PETROL and TARGET OPTICAL state their activity beside the
+ * chain, and that word is the better evidence; WHOLE FOODS MARKET was read as
+ * dining only through the brand's own "foods". The brand's words come from its
+ * table pattern (letters only), removed whole-word from the descriptor.
+ */
+function vocabularyOutsideBrand(merchant: string, pattern: string, category: CategoryId, market: 'AE' | 'SA' | null): boolean {
+  const brandWords = new Set(pattern.replace(/\(\?:[^)]*\)\??/g, ' ').replace(/[^A-Za-z0-9]+/g, ' ').trim().toLowerCase().split(/\s+/).filter(Boolean));
+  const remainder = merchant.split(/\s+/).filter((word) => !brandWords.has(word.replace(/[^A-Za-z0-9]/g, '').toLowerCase())).join(' ').trim();
+  return !!remainder && classifyMerchantDescription(remainder, 'expense', market).categoryGuess === category;
+}
+
 const suggestion = (merchant: string, category: CategoryId, source: CategorySuggestion['source'], reason: string): CategorySuggestion => ({
   merchant, category, source, reason, needsReview: source === 'unresolved',
 });
@@ -160,15 +173,22 @@ export function categorizeMerchant(input: CategorizationInput): CategorySuggesti
   if (/\binterior\s+decor\b|\bmarketing\b/iu.test(merchant) && !canonical) {
     return suggestion(merchant, 'other', 'unresolved', 'merchant-activity-unresolved');
   }
+  // The curated brand table needs an explicit non-AE/SA market: AE/SA keep
+  // their launch-tested vocabulary untouched, and an absent market could
+  // still be an AE/SA user. Where it applies and CONTRADICTS the generic
+  // substring vocabulary, the whole named chain wins: WHOLE FOODS MARKET is a
+  // grocer, and the vocabulary's "food" read it as dining; TfL Travel Charge
+  // is transport, not travel. Where both agree the vocabulary answer stands,
+  // and every entry is a specific chain, never a bare activity word.
+  const brandMarket = typeof input.market === 'string' ? input.market.trim().toUpperCase() : '';
+  const brand = /^[A-Z]{2}$/.test(brandMarket) && brandMarket !== 'AE' && brandMarket !== 'SA'
+    ? matchBrandCategory(merchant, brandMarket) : null;
   const result = classifyMerchantDescription(merchant, 'expense', market);
+  if (brand && (result.categoryGuess === 'other' || (brand.category !== result.categoryGuess && !canonical &&
+    !vocabularyOutsideBrand(merchant, brand.pattern, result.categoryGuess, market)))) {
+    return suggestion(result.merchant, brand.category, 'merchant-vocabulary', 'curated-brand-table');
+  }
   if (result.categoryGuess === 'other') {
-    // Last resort only: every rule above declined. It needs an explicit
-    // non-AE/SA market: AE/SA keep their launch-tested vocabulary untouched,
-    // and an absent market could still be an AE/SA user.
-    const brandMarket = typeof input.market === 'string' ? input.market.trim().toUpperCase() : '';
-    const brand = /^[A-Z]{2}$/.test(brandMarket) && brandMarket !== 'AE' && brandMarket !== 'SA'
-      ? matchBrandCategory(merchant, brandMarket) : null;
-    if (brand) return suggestion(result.merchant, brand.category, 'merchant-vocabulary', 'curated-brand-table');
     return suggestion(result.merchant, 'other', 'unresolved', 'merchant-activity-unresolved');
   }
   if (result.categoryGuess === 'telecom' && market !== 'AE' && /\bdu\b/iu.test(merchant) &&

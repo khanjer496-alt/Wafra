@@ -422,5 +422,70 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     /launchParsed\?\.bestEffort && certification\?\.decision === 'automatic'/.test(autoImport));
 }
 
+
+/* ── 2026-10 worldwide accuracy pass (synthetic grammar probes) ───────────
+ * The production entry point (parse with inspect), a pinned non-Gulf ledger
+ * and the person's country, exactly as a phone outside the Gulf runs it.
+ * Every case was a refusal or a wrong category before the pass. */
+{
+  const country = require('./build/country');
+  const OBSERVED = Date.parse('2026-10-03T08:00:00Z');
+  const worldwide = (currency, cc, sender, body, exponent = 2) => {
+    markets.setActiveMarket('ZZ');
+    markets.setLedgerCurrency(currency, exponent);
+    country.setActiveCountry(cc);
+    const s = createLaunchAlertSession({ overrides: {}, regionHint: cc, fxLookup: () => null,
+      bestEffort: { enabled: true, country: cc } });
+    try { return s.parse(body, sender, s.inspect(body, sender), undefined, OBSERVED); }
+    finally { markets.setLedgerCurrency(null); country.setActiveCountry(null); markets.setActiveMarket('AE'); }
+  };
+  for (const [currency, cc, sender, body, minor, type, category, exponent] of [
+    ['USD', 'US', '24273', 'Chase: You made a $45.67 transaction with STARBUCKS STORE 1234 on Oct 2, 2026 at 8:14 AM ET.', 4567, 'expense', 'dining'],
+    ['USD', 'US', '24273', 'Chase Sapphire: A $15.49 transaction with NETFLIX.COM was made on Oct 1, 2026.', 1549, 'expense', 'entertainment'],
+    ['USD', 'US', '263978', 'American Express: A charge of $120.00 at WHOLE FOODS MARKET was made on your Card ending 1005 on 10/02/2026.', 12000, 'expense', 'groceries'],
+    ['USD', 'US', '24273', 'Chase: You withdrew $200.00 at ATM 5TH AVE NY from account ending 4321 on Oct 2, 2026.', 20000, 'expense', 'cash-withdrawal'],
+    ['USD', 'US', '73981', 'BofA: You sent $250.00 to JOHN SMITH with Zelle(R). Ref# ABC123.', 25000, 'expense', 'other'],
+    ['USD', 'US', '73981', 'BofA: JANE DOE sent you $80.00 with Zelle(R). It is in your account.', 8000, 'income', 'other'],
+    ['GBP', 'GB', 'Monzo', 'You spent £12.50 at Tesco Express', 1250, 'expense', 'groceries'],
+    ['GBP', 'GB', 'Monzo', 'You spent £2.80 at TfL Travel Charge', 280, 'expense', 'transport'],
+    ['GBP', 'GB', 'HSBC', 'HSBC UK: £2,450.00 has been credited to your account ending 5678. Ref: SALARY OCT.', 245000, 'income', 'salary'],
+    ['EUR', 'DE', 'Sparkasse', 'Kartenzahlung erfolgreich: 34,90 EUR bei REWE Markt GmbH am 02.10.2026.', 3490, 'expense', 'groceries'],
+    ['INR', 'IN', 'VM-HDFCBK', 'Rs.1,250.00 spent on HDFC Bank Card x1234 at SWIGGY on 2026-10-02:13:45:10. Avl Lmt: Rs.85,000.00', 125000, 'expense', 'dining'],
+    ['INR', 'IN', 'VK-ICICIB', 'ICICI Bank Acct XX123 credited with Rs 85,000.00 on 01-Oct-26; SALARY OCT 2026. Avl Bal Rs 1,02,345.67.', 8500000, 'income', 'salary'],
+    ['EGP', 'EG', 'CIB', 'Your CIB credit card ending with 1234 was charged for EGP 850.00 at CARREFOUR MAADI on 02/10/2026. Available limit EGP 40,150.00', 85000, 'expense', 'groceries'],
+    ['QAR', 'QA', 'QNB', 'Your QNB Debit Card ending 1234 was used for QAR 125.00 at LULU HYPERMARKET DOHA on 02/10/2026. Available balance QAR 8,450.00', 12500, 'expense', 'groceries'],
+    ['KWD', 'KW', 'NBK', 'NBK: Purchase of KWD 12.500 with card ending 1234 at TALABAT KUWAIT on 02/10/2026. Available balance KWD 845.250', 12500, 'expense', 'dining', 3],
+    ['TRY', 'TR', 'GARANTI BBVA', '1234 ile biten kartınızla 02.10.2026 tarihinde MIGROS işyerinden 456,75 TL tutarında alışverişiniz gerçekleşmiştir.', 45675, 'expense', 'groceries'],
+    ['PKR', 'PK', 'HBL', 'HBL: PKR 3,500.00 has been debited from your A/C ****1234 at FOODPANDA on 02-Oct-2026. Avl Bal PKR 45,210.50', 350000, 'expense', 'dining'],
+    ['SGD', 'SG', 'DBS', 'DBS: A transaction of SGD 18.50 was made with your DBS/POSB card ending 1234 on 02 Oct 2026 at GRAB*FOOD. If unauthorised, call 1800 111 1111.', 1850, 'expense', undefined],
+  ]) {
+    const row = worldwide(currency, cc, sender, body, exponent);
+    ok(`${cc}: ${body.slice(0, 56)}… posts ${type}${category ? ` / ${category}` : ''}`,
+      row?.kind === 'transaction' && row.amountFils === minor && row.currency === currency && row.type === type &&
+        (category === undefined || row.categoryGuess === category) && !!row.bestEffort, row);
+  }
+  {
+    const salary = worldwide('GBP', 'GB', 'HSBC', 'HSBC UK: £2,450.00 has been credited to your account ending 5678. Ref: SALARY OCT.');
+    ok('a worldwide salary is income, never a transfer kept out of Income',
+      salary?.type === 'income' && salary.categoryGuess === 'salary' && salary.transferHint === false, salary);
+  }
+  for (const [currency, cc, sender, body] of [
+    ['USD', 'US', '24273', 'Chase: A $500.00 transaction at BEST BUY was declined on your card ending 1005.'],
+    ['USD', 'US', '24273', "Chase: Your one-time code is 482913. Don't share it. We'll never call to ask for it."],
+    ['USD', 'US', '24273', 'Chase: Your credit card statement is ready. Statement balance $1,234.56, minimum payment $35.00 due 10/25/2026.'],
+    // A comma-written three-decimal figure stays ambiguous even in Kuwait.
+    ['KWD', 'KW', 'NBK', 'NBK: Purchase of KWD 12,500 with card ending 1234 at TALABAT KUWAIT on 02/10/2026.'],
+    // A dot-written KWD figure resolves only with dot-decimal locale evidence:
+    // the person's country or the issuer's routed market. Neither here.
+    ['KWD', 'DE', 'MYBANK', 'MYBANK: Purchase of KWD 12.500 with card ending 1234 at TALABAT KUWAIT on 02/10/2026.'],
+    // Pound STERLING written in Arabic is not the Egyptian pound.
+    ['EGP', 'EG', 'CIB', 'تم خصم 100.00 جنيه استرليني من بطاقتك رقم 1234 لدى AMAZON UK'],
+    // "يتم" is in progress, not completed.
+    ['EGP', 'EG', 'NBE', 'يتم تحويل مبلغ 1,500.00 جنيه من حسابك رقم ***1234 إلى أحمد محمد'],
+  ]) {
+    ok(`${cc}: never auto-posted — ${body.slice(0, 56)}…`, worldwide(currency, cc, sender, body, currency === 'KWD' ? 3 : 2) === null);
+  }
+}
+
 console.log(`\nbest-effort-autopost: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

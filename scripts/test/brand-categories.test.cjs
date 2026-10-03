@@ -80,14 +80,34 @@ test('the fallback never runs for AE/SA, a missing market or a malformed one', (
   }
 });
 
-test('the fallback never changes a result the rules already produced', () => {
+// A named chain may correct the generic substring vocabulary only where the
+// two DISAGREE (WHOLE FOODS MARKET read as dining through "food"). Where they
+// agree, the vocabulary's own result, reason included, is unchanged.
+test('the brand table changes a vocabulary result only to correct a contradiction', () => {
   for (const market of ['US', 'GB', 'FR', 'ES', 'TR', 'IN', 'ZZ']) {
     for (const d of corpus) {
       const before = expense(d, undefined);
       if (before.source === 'unresolved' || before.category === 'other') continue;
-      assert.deepEqual(expense(d, market), before, `${market}: ${d}`);
+      const after = expense(d, market);
+      if (after.reason === 'curated-brand-table') assert.notEqual(after.category, before.category, `${market}: ${d}`);
+      else assert.deepEqual(after, before, `${market}: ${d}`);
     }
   }
+});
+
+test('an activity word beside the chain outranks the chain', () => {
+  for (const [d, m, category] of [['KROGER FUEL', 'US', 'transport'], ['SAFEWAY FUEL', 'US', 'transport'],
+    ['TESCO PETROL', 'GB', 'transport'], ['SAINSBURYS PETROL', 'GB', 'transport'],
+    ['AMAZON PRIME', 'US', 'entertainment'], ['TARGET OPTICAL', 'US', 'health']]) {
+    assert.equal(expense(d, m).category, category, `${m}: ${d}`);
+  }
+});
+
+test('a named chain corrects a generic substring reading', () => {
+  assert.equal(expense('WHOLE FOODS MARKET', undefined).category, 'dining');
+  assert.equal(expense('WHOLE FOODS MARKET', 'US').category, 'groceries');
+  assert.equal(expense('WHOLE FOODS MARKET', 'US').reason, 'curated-brand-table');
+  assert.equal(expense('WHOLE FOODS MARKET', 'AE').category, 'dining', 'AE/SA vocabulary is untouched');
 });
 
 test('a brand hit is labelled as vocabulary and not queued for review', () => {

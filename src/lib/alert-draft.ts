@@ -256,6 +256,8 @@ function collectRaw(normalized: string, aliases: CurrencyAliasMap = {}): RawCand
       const token = prefix ? match[1] : match[2];
       const currencies = CURRENCY_SYMBOL_CANDIDATES[token];
       if (!currencies) continue;
+      // "جنيه استرليني" is pound STERLING, not the Egyptian pound.
+      if (token === 'جنيه' && /^\s*[اإأ]?سترلين/u.test(normalized.slice(matchEnd))) continue;
       found.push({
         start: match.index as number,
         end: (match.index as number) + match[0].length,

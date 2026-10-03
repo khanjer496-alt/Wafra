@@ -69,4 +69,12 @@ export const CURRENCY_SYMBOL_CANDIDATES: Readonly<Record<string, readonly Curren
   '$': ['USD', 'AUD', 'CAD', 'NZD', 'SGD', 'HKD', 'MXN', 'ARS', 'CLP', 'COP'],
   '¥': ['JPY', 'CNY'],
   Rs: ['INR', 'PKR', 'LKR', 'NPR', 'MUR', 'SCR'],
+  // The abbreviation with its full stop is how Indian, Pakistani and Sri
+  // Lankan banks print it ("Rs.1,250.00 spent on HDFC Bank Card"). Without it
+  // no amount was found at all and the alert was ignored, not even reviewed.
+  'Rs.': ['INR', 'PKR', 'LKR', 'NPR', 'MUR', 'SCR'],
+  // Turkish banks print the lira as TL ("456,75 TL"), never TRY.
+  TL: ['TRY'],
+  // The Arabic word for pound, as Egyptian banks write it ("1,500.00 جنيه").
+  'جنيه': ['EGP', 'SDG', 'SSP'],
 };
