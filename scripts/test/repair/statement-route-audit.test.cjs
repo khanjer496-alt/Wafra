@@ -191,6 +191,18 @@ test('observed statement ranges distinguish known issuers including Unicode iden
   assert.match(first.label, /ADCB/);
 });
 
+test('a statement due row never stretches the covered transaction range to its due date', async () => {
+  const coverage = source('index').__statementCoverage;
+  const card = { kind: 'credit', last4: '1234' };
+  const result = await coverage([
+    { kind: 'transaction', date: '2026-08-27', card },
+    { kind: 'transaction', date: '2026-09-20', card },
+    { kind: 'cardStatement', date: '2026-10-20', card },
+  ]);
+  assert.equal(result.startDate, '2026-08-27');
+  assert.equal(result.endDate, '2026-09-20');
+});
+
 test('forwarded attachment cannot silently skip a conflicting statement currency', async t => {
   const env = { DB: database(), EMAIL_DOMAIN: 'in.example.test' }; t.after(() => env.DB.handle.close());
   const device = await pair(env), email = await forwarding(env, device);

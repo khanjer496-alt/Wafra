@@ -1840,6 +1840,57 @@ const CARD_PAYMENT_DEBIT =
       (await call(env, 'POST', '/v1/email/ingest', { token: email.emailToken, body: { text: '' } }))
         .status === 400);
 
+    // A forwarded card STATEMENT body: its summary (total, minimum, due date)
+    // also reads as one statement alert, which used to win and drop every
+    // transaction row below it. The statement is read as a statement, and its
+    // summary arrives as the card's due beside the rows.
+    await drainOpened(env, me);
+    const forwardedStatement = await call(env, 'POST', '/v1/email/ingest', {
+      token: email.emailToken,
+      body: { text: [
+        'Emirates NBD', 'Credit Card Statement', 'Card Number: 4567 XXXX XXXX 1234',
+        'Statement Date: 25/09/2026', 'Payment Due Date: 20/10/2026',
+        'Total Amount Due: AED 3,456.78', 'Minimum Amount Due: AED 172.84', 'Credit Limit: AED 30,000.00',
+        'Transaction Date Description Amount (AED)',
+        '27/08/2026 CARREFOUR MOE DUBAI 245.50',
+        '29/08/2026 PAYMENT RECEIVED - THANK YOU 2,000.00 CR',
+        '05/09/2026 NOON.COM DUBAI 189.00',
+      ].join('\n') },
+    });
+    const statementRows = await drainOpened(env, me);
+    const { isParsedRelayRow } = require('./build/relay.cjs');
+    ok('email: a forwarded statement body imports its rows and its due, not one alert',
+      forwardedStatement.status === 202 && statementRows.length === 4 &&
+        statementRows.filter((row) => row.kind === 'transaction').length === 2 &&
+        statementRows.some((row) => row.kind === 'cardPayment') &&
+        statementRows.some((row) => row.kind === 'cardStatement' && row.amountFils === 345678 &&
+          row.minDueFils === 17284 && row.date === '2026-10-20') &&
+        statementRows.every((row) => row.captureSource === 'email' && isParsedRelayRow(row)),
+      JSON.stringify({ status: forwardedStatement.status, statementRows }));
+    const partialStatement = await call(env, 'POST', '/v1/email/ingest', {
+      token: email.emailToken,
+      body: { text: [
+        'Credit Card Statement', 'Card Number: 4567 XXXX XXXX 1234', 'Statement Date: 25/09/2026',
+        'Payment Due Date: 20/10/2026', 'Total Amount Due: AED 3,456.78', 'Minimum Amount Due: AED 172.84',
+        '27/08/2026 CARREFOUR MOE DUBAI 245.50',
+        '28/08/2026 FOREIGN SHOP 12.00 USD',
+        '05/09/2026 NOON.COM DUBAI 189.00',
+      ].join('\n') },
+    });
+    ok('email: a statement body with an unreadable row is refused and reported, not shrunk to one alert',
+      partialStatement.status === 422 && (await partialStatement.json()).error === 'incomplete_statement' &&
+        (await drainOpened(env, me)).length === 0);
+    // A plain alert whose footer happens to carry date-led figures the
+    // statement parser cannot read is still the one alert it always was.
+    const alertWithFooter = await call(env, 'POST', '/v1/email/ingest', {
+      token: email.emailToken,
+      body: { text: [AE_PURCHASE, '01/09/2026 Transaction Date ref 12,50', '02/09/2026 Statement Date ref 7,25'].join('\n') },
+    });
+    const footerRows = await drainOpened(env, me);
+    ok('email: an alert with unreadable dated footer lines still imports as one alert',
+      alertWithFooter.status === 202 && footerRows.length === 1 && footerRows[0].amountFils === 4000,
+      JSON.stringify({ status: alertWithFooter.status, footerRows }));
+
     const attachedCsv = Buffer.from([
       'Date,Description,Debit,Credit,Currency',
       '01/07/2026,Email attachment shop,31.25,,AED',
