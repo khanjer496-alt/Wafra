@@ -809,7 +809,10 @@ function suggestObservedPairs(ctx: Context, pending: Set<string>, internal: Set<
   for (const [id, otherId] of pairs) {
     if (!pending.has(id) || byId.get(id)?.status === 'ambiguous') continue;
     const row = observed.get(id)!, other = observed.get(otherId)!;
-    const maxDelay = evidenceOf(row.tx)?.counterpartyName || evidenceOf(other.tx)?.counterpartyName ? 90 * 60_000 : 30 * 60_000;
+    // A named outgoing recipient can be the person's own name at another bank,
+    // which settles more slowly. A payer named on a credit earns no extra time.
+    const namedRecipient = (tx: Transaction) => tx.type === 'expense' && !!evidenceOf(tx)?.counterpartyName;
+    const maxDelay = namedRecipient(row.tx) || namedRecipient(other.tx) ? 90 * 60_000 : 30 * 60_000;
     if (Math.abs(row.at - other.at) > maxDelay) continue;
     byId.set(id, { id, status: other.credit ? 'likely-card-repayment' : 'likely-own',
       reason: 'amount-time', counterpartId: otherId, candidateIds: [otherId] });
@@ -915,6 +918,49 @@ function reconcile(ctx: Context): TransferReconciliationResult {
       if (internalIds.has(tx.id) && rowLocalOwn && !isTransferMatch(tx.transferMatch)) ownRows.push(tx);
       else if (unresolvedIds.has(tx.id)) unresolvedRows.push(tx);
     }
+    // The other endpoint the explicit-own alert itself names. A credit card
+    // destination is a repayment, never a bank-account posting.
+    const statedEndpoint = (own: TransferRow): Instrument | undefined => {
+      const cp = evidenceOf(own)?.counterparty;
+      return cp && /^\d{4}$/.test(cp.last4) ? cp : undefined;
+    };
+    const endpointBank = (name: string | undefined): string | undefined => {
+      const bank = name ? bankIdentityForName(name) : undefined;
+      return bank && !/^(?:unknown|bank|unattributed|none|na|n a|unassigned)$/.test(bank) ? bank : undefined;
+    };
+    /** True when the candidate's own account positively is the stated endpoint. */
+    const landsOnEndpoint = (cp: Instrument, other: TransferRow): boolean => {
+      const account = ctx.accounts.get(other.accountId);
+      if (cp.kind === 'credit' || !account || account.last4 !== cp.last4) return false;
+      const capture = other.captureInstrument;
+      if (isInstrument(capture) && capture.last4 !== cp.last4) return false;
+      const stated = endpointBank(cp.bankIdentity);
+      return !stated || stated === endpointBank(account.bankName);
+    };
+    /** True when the candidate's account explicitly is NOT the stated endpoint. */
+    const contradictsEndpoint = (cp: Instrument, other: TransferRow): boolean => {
+      if (cp.kind === 'credit') return true;
+      const account = ctx.accounts.get(other.accountId);
+      const capture = other.captureInstrument;
+      // Either the routed account or the bank's own captured tail agreeing
+      // is enough; only a fully known, different tail is a contradiction.
+      const tails = [account?.last4, isInstrument(capture) ? capture.last4 : undefined]
+        .filter((tail): tail is string => typeof tail === 'string' && /^\d{4}$/.test(tail));
+      if (tails.length > 0 && !tails.includes(cp.last4)) return true;
+      const stated = endpointBank(cp.bankIdentity), actual = endpointBank(account?.bankName);
+      return stated !== undefined && actual !== undefined && stated !== actual;
+    };
+    const absorbed = new Set<string>();
+    const absorb = (own: TransferRow, counterpartId: string): void => {
+      absorbed.add(own.id); absorbed.add(counterpartId);
+      internalIds.add(counterpartId);
+      unresolvedIds.delete(counterpartId);
+      pendingIds.delete(counterpartId);
+      byId.set(own.id, { id: own.id, status: 'confirmed-own', reason: 'explicit-ownership',
+        counterpartId, candidateIds: [] });
+      byId.set(counterpartId, { id: counterpartId, status: 'confirmed-own', reason: 'explicit-ownership',
+        counterpartId: own.id, candidateIds: [] });
+    };
     interface AbsorptionBucket {
       timed: { tx: TransferRow; at: number }[];
       byDate: Map<string, TransferRow[]>;
@@ -966,14 +1012,74 @@ function reconcile(ctx: Context): TransferReconciliationResult {
       if (candidates.length !== 1 || reverseCount.get(candidates[0]) !== 1) continue;
       const counterpartId = candidates[0];
       const counterpart = ctx.rows.get(counterpartId);
-      if (!counterpart) continue;
-      internalIds.add(counterpartId);
-      unresolvedIds.delete(counterpartId);
-      pendingIds.delete(counterpartId);
-      byId.set(own.id, { id: own.id, status: 'confirmed-own', reason: 'explicit-ownership',
-        counterpartId, candidateIds: [] });
-      byId.set(counterpartId, { id: counterpartId, status: 'confirmed-own', reason: 'explicit-ownership',
-        counterpartId: own.id, candidateIds: [] });
+      const endpoint = statedEndpoint(own);
+      // The alert's own stated other account outranks amount and time.
+      if (!counterpart || (endpoint && contradictsEndpoint(endpoint, counterpart))) continue;
+      absorb(own, counterpartId);
+    }
+    // A delayed receiving leg. When the explicit-own alert names the other
+    // account's last four digits, the opposite posting can arrive up to the
+    // ordinary transfer window later (a day is common for savings and
+    // cross-bank moves). Only an own alert with no plausible near candidate
+    // is eligible; the candidate must be on the stated account, follow the
+    // outgoing leg, carry the same money, and be mutually unique. A row that
+    // was already a near candidate of another own alert is never taken.
+    const nearCandidates = new Set<string>();
+    for (const ids of possible.values()) for (const candidateId of ids) nearCandidates.add(candidateId);
+    const waiting = ownRows.filter(own => {
+      const endpoint = statedEndpoint(own);
+      return !absorbed.has(own.id) && !!endpoint && endpoint.kind !== 'credit' && sourceTime(own) !== undefined &&
+        !(possible.get(own.id) ?? []).some(candidateId => {
+          const candidate = ctx.rows.get(candidateId);
+          return !!candidate && !contradictsEndpoint(endpoint, candidate);
+        });
+    });
+    if (waiting.length > 0) {
+      // Indexed by stated account so unrelated equal amounts elsewhere in the
+      // ledger cannot exhaust the bounded scan.
+      const byAccount = new Map<string, { tx: TransferRow; at: number }[]>();
+      for (const tx of unresolvedRows) {
+        const at = sourceTime(tx);
+        if (at === undefined || absorbed.has(tx.id) || nearCandidates.has(tx.id)) continue;
+        const key = JSON.stringify([moneyKey(tx), tx.type, tx.accountId]);
+        const bucket = byAccount.get(key) ?? [];
+        bucket.push({ tx, at }); byAccount.set(key, bucket);
+      }
+      for (const bucket of byAccount.values()) bucket.sort((a, b) => a.at - b.at);
+      const endpointAccounts = new Map<string, string[]>();
+      for (const account of ctx.accounts.values()) {
+        if (!eligibleAccount(account) || typeof account.last4 !== 'string') continue;
+        endpointAccounts.set(account.last4, [...endpointAccounts.get(account.last4) ?? [], account.id]);
+      }
+      const delayed = new Map<string, string[]>();
+      const delayedReverse = new Map<string, number>();
+      for (const own of waiting) {
+        const endpoint = statedEndpoint(own)!;
+        const exact = sourceTime(own)!;
+        const opposite = own.type === 'income' ? 'expense' : 'income';
+        const ids: string[] = [];
+        let scanned = 0;
+        for (const accountId of endpointAccounts.get(endpoint.last4) ?? []) {
+          if (accountId === own.accountId) continue;
+          const bucket = byAccount.get(JSON.stringify([moneyKey(own), opposite, accountId])) ?? [];
+          for (let index = lowerBound(bucket, exact - WINDOW_MS);
+            index < bucket.length && bucket[index].at <= exact + WINDOW_MS; index++) {
+            if (++scanned > MAX_EVIDENCE_SCAN) break;
+            const { tx: other, at } = bucket[index];
+            const outAt = own.type === 'expense' ? exact : at;
+            const inAt = own.type === 'expense' ? at : exact;
+            if (inAt >= outAt - 5 * 60_000 && landsOnEndpoint(endpoint, other)) ids.push(other.id);
+          }
+        }
+        if (scanned > MAX_EVIDENCE_SCAN) ids.length = 0;
+        delayed.set(own.id, ids);
+        for (const candidateId of ids) delayedReverse.set(candidateId, (delayedReverse.get(candidateId) ?? 0) + 1);
+      }
+      for (const own of waiting) {
+        const ids = delayed.get(own.id)!;
+        if (ids.length !== 1 || delayedReverse.get(ids[0]) !== 1 || !ctx.rows.get(ids[0])) continue;
+        absorb(own, ids[0]);
+      }
     }
   }
   const indexes = new Map<string, Entry[]>();

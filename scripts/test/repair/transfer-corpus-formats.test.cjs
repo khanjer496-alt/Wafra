@@ -218,3 +218,37 @@ test('same-amount card purchases are never repayments; external user classificat
   assert.equal(summarizeCashOutflow(after, { mode: 'all' }).accountOutflowFils, 71300,
     'an external classification must not reactivate its duplicate bank confirmation');
 });
+
+test('an unnamed instant transfer and an equal credit naming its payer become a suggestion, not a hidden own move', () => {
+  const owned = [bank('enbd-cur', '1234', 'Emirates NBD'), bank('wio', '5678', 'Wio'), bank('fab', '9876', 'FAB')];
+  const debit = ['EmiratesNBD', 'Dear Customer, AED 700.00 has been debited from your account XXX1234 towards instant transfer. The available balance is AED 17,795.55.'];
+  const run = credit => {
+    const state = apply({ ...base(), accounts: structuredClone(owned) }, parse([debit, credit]));
+    return { state, result: core.reconcileTransfers(state.transactions, state.accounts) };
+  };
+  const named = run(['Wio', 'AED 700.00 received from AHMED ALI to your account ending 5678 via instant transfer.', 240000]);
+  const incoming = named.state.transactions.find(t => t.type === 'income');
+  assert.equal(incoming.transferEvidence?.counterpartyName, 'AHMED ALI');
+  assert.equal(named.result.internalIds.size, 0, 'a third-party credit is never auto-confirmed as internal');
+  assert.deepEqual([...named.result.byId.values()].map(a => a.status), ['likely-own', 'likely-own']);
+  assert.equal(named.result.pendingIds.size, 2);
+  // Two unnamed legs keep the deliberate amount-and-time heuristic.
+  const unnamed = run(['FAB', 'AED 700.00 has been credited to your account XXXX9876. Available balance AED 1,400.00', 240000]);
+  assert.equal(unnamed.result.internalIds.size, 2);
+});
+
+test('an explicit own transfer to a stated account pairs its receiving credit a day later', () => {
+  const owned = [bank('enbd-cur', '1234', 'Emirates NBD'), bank('enbd-sav', '5679', 'Emirates NBD')];
+  const state = apply({ ...base(), accounts: structuredClone(owned) }, parse([
+    ['EmiratesNBD', 'AED 5,000.00 transferred from your Current Account XXX1234 to your Savings Account XXX5679 on 08/09/2026.'],
+    ['EmiratesNBD', 'AED 5,000.00 has been credited to your account XXX5679 on 09/09/2026. Available balance AED 9,000.00', 86_400_000],
+  ]));
+  const result = core.reconcileTransfers(state.transactions, state.accounts);
+  const credit = state.transactions.find(t => t.type === 'income');
+  assert.equal(credit.accountId, 'enbd-sav');
+  assert.equal(result.internalIds.size, 2);
+  assert.equal(result.byId.get(credit.id).status, 'confirmed-own');
+  assert.equal(result.byId.get(credit.id).reason, 'explicit-ownership');
+  assert.equal(result.pendingIds.size, 0);
+  assert.equal(ledger.isIncome(credit, undefined, core.reconciliationInternalIds(result)), false);
+});
