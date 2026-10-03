@@ -100,13 +100,14 @@ export function EHeadline({ children, palette, size = 44, testID }: {
 }
 
 /** Body copy on the band. */
-export function EBody({ children, palette, secondary = true, style }: {
+export function EBody({ children, palette, secondary = true, style, testID }: {
   children: React.ReactNode;
   palette: BandPalette;
   secondary?: boolean;
   style?: StyleProp<TextStyle>;
+  testID?: string;
 }) {
-  return <ThemedText style={[styles.body, { color: secondary ? palette.onBandSecondary : palette.onBand }, style]}>
+  return <ThemedText testID={testID} style={[styles.body, { color: secondary ? palette.onBandSecondary : palette.onBand }, style]}>
     {children}
   </ThemedText>;
 }
@@ -148,7 +149,7 @@ export function EStepFrame({ palette, step, onBack, onClose, backDisabled, foote
     {onBack || onClose || step !== null
       ? <ETopRow palette={palette} step={step} onBack={onBack} onClose={onClose} disabled={backDisabled} />
       : null}
-    <ScrollView keyboardShouldPersistTaps="handled" bounces={largeText} alwaysBounceVertical={false}
+    <ScrollView keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets bounces={largeText} alwaysBounceVertical={false}
       showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
       <View style={[styles.body_, contentStyle]}>{children}</View>
       {footer ? <View style={styles.footer}>{footer}</View> : null}

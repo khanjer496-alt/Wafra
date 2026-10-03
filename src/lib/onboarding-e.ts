@@ -248,7 +248,7 @@ export const WATCH_CATEGORIES: readonly CategoryId[] = ['dining', 'groceries', '
 
 export interface WatchDraft {
   category: CategoryId;
-  /** Monthly limit in ledger minor units; 0 = picked but not set yet. */
+  /** Monthly limit in ledger minor units; a row without a limit is not in the draft. */
   limitMinor: number;
 }
 
@@ -286,21 +286,37 @@ export function watchBudgetChanges(
   return { upsert, remove };
 }
 
-/** Pick or unpick a category; a newly picked one starts with no limit. */
-export function toggleWatch(draft: readonly WatchDraft[], category: CategoryId): WatchDraft[] {
-  if (draft.some((item) => item.category === category)) {
-    return draft.filter((item) => item.category !== category);
-  }
+/**
+ * The Watch rows: a category is in the draft exactly when it has a limit.
+ * Setting one adds or replaces it in the board's order; nothing (or an
+ * unsafe figure) takes it out. Opening or closing a row never changes it.
+ */
+export function withWatchLimit(draft: readonly WatchDraft[], category: CategoryId, limitMinor: number): WatchDraft[] {
+  const safe = Number.isSafeInteger(limitMinor) && limitMinor > 0 ? limitMinor : 0;
   return WATCH_CATEGORIES.flatMap((id) => {
-    if (id === category) return [{ category, limitMinor: 0 }];
-    const kept = draft.find((item) => item.category === id);
+    if (id === category) return safe > 0 ? [{ category, limitMinor: safe }] : [];
+    const kept = draft.find((item) => item.category === id && item.limitMinor > 0);
     return kept ? [kept] : [];
   });
 }
 
-export function setWatchLimit(draft: readonly WatchDraft[], category: CategoryId, limitMinor: number): WatchDraft[] {
-  const safe = Number.isSafeInteger(limitMinor) && limitMinor > 0 ? limitMinor : 0;
-  return draft.map((item) => item.category === category ? { ...item, limitMinor: safe } : item);
+/**
+ * AED-sized references for the four quick amounts on an open Watch row; the
+ * row scales each with typicalMinorAmount (AED 500, ¥50,000, KWD 50.000).
+ */
+export const WATCH_QUICK_REFERENCES: readonly number[] = [250, 500, 1000, 2000];
+
+/**
+ * What the Watch step's one button does: save the limits that are set,
+ * apply a removal from an earlier pass, or skip a step left empty.
+ */
+export type WatchFooterAction = { kind: 'save'; count: number } | { kind: 'continue' } | { kind: 'skip' };
+
+export function watchFooterAction(draft: readonly WatchDraft[], existing: readonly Budget[]): WatchFooterAction {
+  const count = draft.filter((item) => item.limitMinor > 0).length;
+  if (count > 0) return { kind: 'save', count };
+  const { remove } = watchBudgetChanges(draft, existing);
+  return remove.length > 0 ? { kind: 'continue' } : { kind: 'skip' };
 }
 
 /* ── First payment → the alert-delivery answer ───────────────────────────

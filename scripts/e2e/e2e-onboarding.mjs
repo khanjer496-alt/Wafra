@@ -227,14 +227,22 @@ try {
         await press(page, 'onboarding-goals-continue');
         await stage(page, 'onboarding-watch', words.watchTitle, `${name}-restored`);
       }
-      await press(page, 'onboarding-watch-dining');
-      check(await page.getByTestId('onboarding-watch-dining').getAttribute('aria-checked') === 'true', 'Selected Watch category must expose checked state');
       if (explicitLimit) {
+        // The currency was confirmed on the Name step: the row opens in place.
+        await press(page, 'onboarding-watch-dining');
+        check(await page.getByTestId('onboarding-watch-dining').getAttribute('aria-expanded') === 'true', 'An open Watch row must expose expanded state');
+        await exposed(page.getByTestId('onboarding-watch-limit-quick-0'));
+        // One deliberate step of 50 in the currency's scale: AED 50.
         await press(page, 'onboarding-watch-limit-raise');
-        await press(page, 'onboarding-watch-limit-raise');
+        const typed = await page.getByTestId('onboarding-watch-limit-input').inputValue();
+        check(/^(50|٥٠)$/.test(typed), `The typed figure follows the step (${typed})`);
         await noClippedText(page);
-        await press(page, 'onboarding-watch-continue');
-      } else await press(page, 'onboarding-watch-skip');
+      } else {
+        // No currency yet: choosing one is offered here, not a dead end.
+        await exposed(page.getByTestId('onboarding-watch-currency'));
+      }
+      // One button: Save 1 limit, or Skip for now when nothing was set.
+      await press(page, 'onboarding-watch-continue');
       await stage(page, 'onboarding-reminders', words.remindersTitle, name);
       for (const id of ['onboarding-remind-bills', 'onboarding-remind-cards', 'onboarding-remind-daily']) await exposed(page.getByTestId(id));
       const dailySwitch = page.getByRole('switch', { name: `${words.remindDailyTitle}. ${words.remindDailyWhen}`, exact: true });
