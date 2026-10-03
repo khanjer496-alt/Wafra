@@ -80,6 +80,13 @@ export const CURRENCY_SYMBOL_CANDIDATES: Readonly<Record<string, readonly Curren
   'Tk.': ['BDT'],
   '৳': ['BDT'],
   '円': ['JPY'],
+  // Devanagari rupee abbreviation (India and Nepal both write it).
+  'रु': ['INR', 'NPR'],
+  // Korean won and Chinese yuan as card SMS print them; the Peruvian sol.
+  '원': ['KRW'],
+  '元': ['CNY'],
+  'S/': ['PEN'],
+  'रू': ['INR', 'NPR'],
   // The Arabic word for pound, as Egyptian banks write it ("1,500.00 جنيه").
   'جنيه': ['EGP', 'SDG', 'SSP'],
 };
