@@ -328,7 +328,7 @@ function labelledInstrumentValue(value: string, after = ''): string {
     const valid = first >= 1 && second >= 1 && first <= 31 && second <= 31 && (first <= 12 || second <= 12);
     if (valid) return trimmed.slice(0, wholeDate.index);
   }
-  if (/^(?:[\/.,:]\d|[-\/.\s](?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)/i.test(after)) {
+  if (/^(?:[\/.,:]\d|[-\/. ](?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)[-\/. ]?\d)/i.test(after)) {
     const partial = /\s+\d{1,3}$/.exec(trimmed);
     if (partial) return trimmed.slice(0, partial.index);
   }
@@ -1807,10 +1807,24 @@ function mayCarryTransactions(line: string): boolean {
   return DATE_LED_LINE.test(line) || (DATE_ANYWHERE.test(line) && LOOKS_LIKE_MONEY_LINE.test(line));
 }
 
+// Any date, including yearless `03 Sep` and date-led `01/09` row dates the
+// parser itself refuses: a page with one may hold transactions in a shape
+// (wrapped, packed, dash-led) the row reader reassembles.
+const ANY_DATE = new RegExp(String.raw`${DATE_TOKEN}|\b\d{1,2}[\s/-](?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|^\d{1,2}[/.-]\d{1,2}\s`, 'gi');
+// `Payment Due Date 30/08/26`, `Statement period from 01/08/26`: a date the
+// page labels as metadata, not a transaction's.
+const METADATA_DATE_LEAD = /\b(?:date|dated|period|from|to|till|until|by|before|as\s+(?:of|at))\s*[:-]?\s*$/i;
+function hasTransactionDate(line: string): boolean {
+  for (const match of line.matchAll(ANY_DATE)) {
+    if (!METADATA_DATE_LEAD.test(line.slice(0, match.index ?? 0))) return true;
+  }
+  return false;
+}
+
 /**
  * How many text lines at the end of a PDF belong to pages printed after the
- * last page that could hold a transaction: payment instructions, rewards
- * summaries, terms. Zero unless the per-page text maps exactly onto `lines`.
+ * last page that carries a date other than labelled metadata: payment
+ * instructions, rewards summaries, terms. Zero unless the per-page text maps exactly onto `lines`.
  */
 function trailingInformationLines(pages: readonly string[] | undefined, lines: string[]): number {
   if (!pages || pages.length < 2) return 0;
@@ -1819,7 +1833,7 @@ function trailingInformationLines(pages: readonly string[] | undefined, lines: s
   if (pageLines.reduce((count, page) => count + page.length, 0) !== lines.filter(Boolean).length) return 0;
   let lastTransactionPage = -1;
   pageLines.forEach((page, index) => {
-    if (page.some(mayCarryTransactions)) lastTransactionPage = index;
+    if (page.some(hasTransactionDate)) lastTransactionPage = index;
   });
   if (lastTransactionPage < 0) return 0;
   return pageLines.slice(lastTransactionPage + 1).reduce((count, page) => count + page.length, 0);
@@ -1827,30 +1841,38 @@ function trailingInformationLines(pages: readonly string[] | undefined, lines: s
 
 // The statement-level figures of one card account. Supplementary cards share
 // them; separate card accounts printed in one file each carry their own.
-const MINIMUM_DUE_LABEL = /\bmin(?:imum|\.)?\s+(?:amount\s+|payment\s+|pay\s+)?due\b/i;
-const CREDIT_LIMIT_LABEL = /(?<!\b(?:available|avail\.?|cash|over|remaining|unused)\s)\b(?:credit|card)\s+limit\b/i;
+// Each matched label must yield a readable figure, every reading of one label
+// must agree, and the minimum due must be present.
+const CARD_ACCOUNT_FIGURES: Array<{ label: RegExp; exclude?: RegExp; required?: boolean }> = [
+  { label: /\bmin(?:imum|\.)?\s+(?:amount\s+|payment\s+|pay\s+)?(?:due|payable)\b|\bminimum\s+(?:amount|payment)\b/i, required: true },
+  { label: /\b(?:total\s+)?amount\s+(?:due|payable)\b|\btotal\s+due\b/i },
+  { label: /\b(?:total\s+)?outstanding(?:\s+balance)?\b/i, exclude: /\b(?:previous|prior|last)\b/i },
+  { label: /\blimit\b/i, exclude: /\b(?:available|avail|cash|over|remaining|unused|utili[sz]\w*)\b|over-?limit/i },
+];
 
-/**
- * One minimum due and at most one credit limit across the file: one card
- * account. Fails closed on any such label whose figure it cannot read.
- */
+/** One card account's figures across the file; fails closed on any unread one. */
 function singleCardAccount(lines: string[]): boolean {
-  let minimumDue = false;
-  for (const label of [MINIMUM_DUE_LABEL, CREDIT_LIMIT_LABEL]) {
+  for (const { label, exclude, required } of CARD_ACCOUNT_FIGURES) {
     const values = new Set<string>();
     for (const line of lines) {
       const match = label.exec(line);
-      if (!match) continue;
+      if (!match || exclude?.test(line.slice(0, match.index + match[0].length))) continue;
       if (line.length > 160) return false;
       const figure = /^[^\d\n%]{0,40}?(\d[\d,]*(?:\.\d{1,3})?)(?![\d%])/.exec(line.slice(match.index + match[0].length));
       if (!figure) return false;
       values.add(figure[1].replace(/,/g, '').replace(/\.0+$/, ''));
     }
-    if (values.size > 1) return false;
-    if (label === MINIMUM_DUE_LABEL) minimumDue = values.size === 1;
+    if (values.size > 1 || (required && values.size === 0)) return false;
   }
-  return minimumDue;
+  return true;
 }
+
+// Positive evidence that another card on a card statement is a supplementary
+// card of the same account: its section says so, or every card's section is
+// headed by its cardholder (`Card No : XXXXXXXXXXXX5512 - CARDHOLDER NAME`).
+const SUPPLEMENTARY_WORDING = /\b(?:supplementary|supplemental|add-?on|additional|secondary)\s+card|بطاق(?:ة|ات)\s+(?:ال)?إضافية/iu;
+const ACCOUNT_FIGURE_WORDS = /\b(?:min(?:imum)?|due|limit|line|balance|outstanding|payable|pmt|payment|amount|total)\b/i;
+const CARDHOLDER_SECTION = /^\s*card\s+(?:no\.?|number)\s*[:#-]?\s*[*xX•\d][*xX•\d -]*\d{4}\s+-\s+[A-Za-z][A-Za-z.' ]{1,60}$/i;
 
 /**
  * Refuse a file that names more than one account.
@@ -1870,8 +1892,10 @@ function singleCardAccount(lines: string[]): boolean {
  *   labelled number is a card or is the primary, the primary is the first
  *   labelled number and appears before any transaction, it is the source the
  *   rows are filed to, no labelled number was unreadable or carries rows on
- *   its own line, and the file shows exactly one minimum due and at most one
- *   credit limit.
+ *   its own line, each other card's section positively reads as
+ *   supplementary (it says so, or every card section is headed by its
+ *   cardholder's name), and every statement-level figure the file prints
+ *   (minimum due, amount due, outstanding, limit) reads as one value.
  *
  * A genuinely mixed account statement, two card accounts with their own
  * figures, or a card statement with a bank account's section still refuses.
@@ -1890,6 +1914,7 @@ function assertSingleStatementInstrument(
     : `${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`;
   const isCard = (instrument: StatementInstrument) => instrument.kind !== 'account';
   const found = new Map<string, StatementInstrument>();
+  const sectionLines = new Map<string, string[]>();
   let primary: StatementInstrument | null = null;
   let primaryBeforeTransactions = false;
   let unreadable = false;
@@ -1901,7 +1926,7 @@ function assertSingleStatementInstrument(
       continue;
     }
     // Rows packed onto a label line are not rows the parser can see whole.
-    if (mayCarryTransactions(line)) labelCarriesRows = true;
+    if (hasTransactionDate(line)) labelCarriesRows = true;
     const instrument = statementInstrument(line) ?? statementHeaderInstrument(line);
     if (!instrument) {
       // `Card Number 4111XXXXXXXXXXXX` shows only a prefix. It was a distinct
@@ -1916,7 +1941,9 @@ function assertSingleStatementInstrument(
       if (mayCarryTransactions(line)) seenTransaction = true;
       continue;
     }
-    found.set(key(instrument), instrument);
+    const instrumentKey = key(instrument);
+    found.set(instrumentKey, instrument);
+    sectionLines.set(instrumentKey, [...(sectionLines.get(instrumentKey) ?? []), line]);
     if (!primary) {
       primary = instrument;
       primaryBeforeTransactions = !seenTransaction;
@@ -1924,8 +1951,26 @@ function assertSingleStatementInstrument(
     if (mayCarryTransactions(line)) seenTransaction = true;
   }
   if (found.size <= 1) return;
-  const supplementaryCards = cardStatement && !unreadable && !labelCarriesRows && primary !== null && isCard(primary) &&
-    primaryBeforeTransactions && source !== null && isCard(source) && source.last4 === primary.last4 &&
+  const primaryKey = primary ? key(primary) : null;
+  const others = [...sectionLines].filter(([instrumentKey]) => instrumentKey !== primaryKey);
+  const supplementaryEvidence = primaryKey !== null && others.length > 0 && (
+    others.every(([, sections]) => sections.some((line) => SUPPLEMENTARY_WORDING.test(line))) ||
+    ((sectionLines.get(primaryKey) ?? []).some((line) => CARDHOLDER_SECTION.test(line)) &&
+      others.every(([, sections]) => sections.every((line) => CARDHOLDER_SECTION.test(line))))
+  );
+  // Supplementary sections list rows only. A figure line (a due, a limit, a
+  // balance) after the first other card's section is that card's own
+  // account summary.
+  const firstOther = considered.findIndex((line) => {
+    if (!SECTION_LABEL.test(line)) return false;
+    const instrument = statementInstrument(line) ?? statementHeaderInstrument(line);
+    return instrument !== null && key(instrument) !== primaryKey;
+  });
+  const otherCardFigures = firstOther >= 0 && considered.slice(firstOther).some((line) =>
+    !DATE_LED_LINE.test(line) && ACCOUNT_FIGURE_WORDS.test(line) && /\d[\d,]*\.\d|\d,\d{3}/.test(line));
+  const supplementaryCards = cardStatement && !unreadable && !labelCarriesRows && !otherCardFigures && primary !== null &&
+    isCard(primary) && primaryBeforeTransactions && source !== null && isCard(source) &&
+    source.last4 === primary.last4 && supplementaryEvidence &&
     [...found.values()].every((instrument) => instrument.last4 === primary.last4 || isCard(instrument)) &&
     singleCardAccount(considered);
   if (!supplementaryCards) throw new Error('multiple_statement_accounts');
@@ -1951,17 +1996,23 @@ export function parseStatementLines(
   assertStatementCurrency(text, currency);
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
-  const sourceInstrument = identity.card ?? statementInstrument(text) ?? statementHeaderInstrument(text);
+  const rawLines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
+  // Information pages after the last dated page name no section, and so
+  // cannot name the statement's identity either.
+  const trailingLines = trailingInformationLines(pages, rawLines);
+  const identityText = trailingLines > 0
+    ? rawLines.filter(Boolean).slice(0, -trailingLines).join('\n')
+    : text;
+  const sourceInstrument = identity.card ?? statementInstrument(identityText) ?? statementHeaderInstrument(identityText);
   const bankHint = identity.bankHint ?? statementBankHint(text);
   const hsbcRepaymentCard = hsbcStatementRepaymentCard(text);
-  const rawLines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
   const cardStatement = isCardStatement(text);
   assertSingleStatementInstrument(
     rawLines,
     sourceInstrument,
     cardStatement,
     cardStatement || sourceInstrument?.kind === 'credit',
-    trailingInformationLines(pages, rawLines),
+    trailingLines,
   );
   // Refusing a bare sign needs less proof than reading every plain figure as
   // a charge does: one strong marker, or a header card explicitly labelled a
@@ -1986,13 +2037,17 @@ export function parseStatementLines(
   // currency: `Transaction Date | Transaction Description | Amount in AED`
   // (a translated header may follow). Any second amount, original or
   // currency column means a figure's column cannot be told from its place.
-  const ledgerAmountColumn = cardStatement && rawLines.some((line) => {
+  // Decided per table, by the nearest table header above the row.
+  const tableHeader = (line: string): string | null => {
     const english = line.replace(/[^\x20-\x7e]+/g, ' ').replace(/\s+/g, ' ').trim();
     return line.length <= 160 && !DATE_LED_LINE.test(line) && /\bdate\b/i.test(english) &&
-      (english.match(/\bamount\b/gi) ?? []).length === 1 &&
-      !/\b(?:balance|original|foreign|currency|debit|credit|fx|rate|vat)\b/i.test(english) &&
-      new RegExp(String.raw`\bamount\s*(?:in\s+${currency}|\(\s*${currency}\s*\))$`, 'i').test(english);
-  });
+      /\b(?:amount|description|details|particulars|narration)\b/i.test(english) ? english : null;
+  };
+  const ledgerOnlyHeader = (english: string): boolean =>
+    (english.match(/\bamount\b/gi) ?? []).length === 1 &&
+    !/\b(?:balance|original|foreign|currency|debit|credit|fx|rate|vat)\b/i.test(english) &&
+    new RegExp(String.raw`\bamount\s*(?:in\s+${currency}|\(\s*${currency}\s*\))$`, 'i').test(english);
+  let ledgerAmountColumn = false;
   const trailingBalanceHeader = rawLines.some((line) => line.length <= 120 &&
     line.split(' ').length <= 12 && !DATE_LED_LINE.test(line) &&
     /\bdate\b/i.test(line) && /\b(?:description|details|particulars|narration)\b/i.test(line) &&
@@ -2047,6 +2102,8 @@ export function parseStatementLines(
   };
   for (const line of lines) {
     if (!line) continue;
+    const header = cardStatement ? tableHeader(line) : null;
+    if (header !== null) ledgerAmountColumn = ledgerOnlyHeader(header);
     const prefixed = ROW_DATE_PREFIX.exec(line);
     if (prefixed && SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
     // Date-like rows with unsupported yearless/year-first spellings are still

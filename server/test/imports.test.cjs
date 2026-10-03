@@ -1683,7 +1683,7 @@ function pagedPdf(pages) {
     rowPageAccountError === 'multiple_statement_accounts');
 
   const supplementarySection = [
-    'Card No : XXXXXXXXXXXX5512 - SUPPLEMENTARY NAME',
+    'Card No : XXXXXXXXXXXX5512 - SECOND CARDHOLDER',
     '03/08/2026 NOON.COM DUBAI ARE 120.00',
     '04/08/2026 TALABAT DUBAI ARE 45.50',
   ];
@@ -1798,6 +1798,100 @@ function pagedPdf(pages) {
   ok('a label and a number on separate lines still name no identity',
     splitLabels.rows.length === 1 && splitLabels.rows[0].card === null, JSON.stringify(splitLabels.rows[0]?.card));
 
+  // Second review round: each of these must keep the old refusal.
+  const sHead = ['Credit Card Statement', 'Statement Date 05/08/26'];
+  const roundTwoRefusals = {
+    'a second card account whose figures use other labels': [...sHead,
+      'Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 189.16', 'Credit Limit 16,100.00', '26/07/2026 SHOP ONE ARE 27.99',
+      'Card Number XXXXXXXXXXXX7731', 'Minimum Amount Payable 52.00', 'Limit 5,000.00', '27/07/2026 SHOP TWO ARE 30.00'],
+    'two card accounts printing identical figures with no supplementary evidence': [...sHead,
+      'Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 100.00', 'Credit Limit 10,000.00', '26/07/2026 SHOP ONE ARE 27.99',
+      'Card Number XXXXXXXXXXXX7731', 'Minimum Payment Due 100.00', 'Credit Limit 10,000.00', '27/07/2026 SHOP TWO ARE 30.00'],
+    'a second card account showing only its amount due': [...sHead,
+      'Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 189.16', 'Credit Limit 16,100.00', '26/07/2026 SHOP ONE ARE 27.99',
+      'Card Number XXXXXXXXXXXX7731', 'Total Amount Due 300.00', '27/07/2026 SHOP TWO ARE 30.00'],
+    'a debit card section on a credit card statement': [...sHead,
+      'Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 189.16', '26/07/2026 SHOP ONE ARE 27.99',
+      'Card No: XXXX4444', '27/07/2026 ATM WITHDRAWAL 500.00 DR'],
+    'named cardholder sections of two card accounts with their own dues': [...sHead,
+      'Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 189.16',
+      'Card No : XXXXXXXXXXXX2280 - FIRST HOLDER', '26/07/2026 SHOP ONE ARE 27.99',
+      'Card No : XXXXXXXXXXXX7731 - SECOND HOLDER', 'Minimum Payment Due 52.00', '27/07/2026 SHOP TWO ARE 30.00'],
+  };
+  for (const [name, lines] of Object.entries(roundTwoRefusals)) {
+    ok(`still refuses: ${name}`, refusal(lines) === 'multiple_statement_accounts', refusal(lines));
+  }
+  const cardTable = 'TransactionDate PostingDate TransactionDetails Original Amount VAT Total Amount (AED)';
+  const firstCardPage = ['Credit Card Statement', 'Statement Date 05/08/26', 'Card Number XXXXXXXXXXXX2280',
+    'Minimum Payment Due 189.16', cardTable, '01-Aug-26 02-Aug-26 SHOP ONE DUBAI AE 10.00 10.00'];
+  for (const [name, lastPage] of Object.entries({
+    'dash-led wrapped rows': ['Card Number XXXXXXXXXXXX7731', 'Minimum Payment Due 52.00', cardTable,
+      '- 03-Aug-26 04-Aug-26 SHOP TWO LONG NAME DUBAI AE', '20.00 20.00'],
+    'a row packed onto the label with its amount wrapped': [
+      'Card Number XXXXXXXXXXXX7731 -03-Aug-26 04-Aug-26 SHOP TWO LONG NAME DUBAI AE', '20.00 20.00'],
+    'yearless row dates': ['Account Number XXXX2222', '03 Sep SALARY 20.00 CR'],
+  })) {
+    const pages = [firstCardPage, lastPage];
+    ok(`a last page holding another account's rows is not an information page: ${name}`,
+      refusal(pages.flat(), pages.map((page) => page.join('\n'))) === 'multiple_statement_accounts');
+  }
+
+  const offerPage = parseStatementLines(
+    [...adcbPage1, 'Balance transfer offer', 'Credit Card Number XXXXXXXXXXXX9999', 'Terms apply'].join('\n'), 'AED',
+    { card: null }, 'day-first',
+    [adcbPage1.join('\n'), ['Balance transfer offer', 'Credit Card Number XXXXXXXXXXXX9999', 'Terms apply'].join('\n')]);
+  ok('a card number on an information page never becomes the statement identity',
+    offerPage.rows.length === 4 && offerPage.rows.every((row) => row.card?.last4 === '2280'),
+    JSON.stringify(offerPage.rows.map((row) => row.card)));
+
+  const supplementaryWording = adcbParse([adcbPage1, [
+    ...adcbPage2.slice(0, -3), 'Supplementary Card Number XXXXXXXXXXXX5512', 'Card Number XXXXXXXXXXXX5512 Supplementary card',
+    '03/08/2026 NOON.COM DUBAI ARE 120.00', ...adcbPage2.slice(-3)], adcbPage3]);
+  ok('a section that says it is a supplementary card imports to the primary card',
+    supplementaryWording.rows.length === 7 && supplementaryWording.rows.every((row) => row.card?.last4 === '2280'),
+    JSON.stringify(supplementaryWording.rows.map((row) => row.card)));
+
+  ok('ordinary words after a labelled number are not month names',
+    identity('Account Number 1012 3456 789 Marina Branch') === '6789' &&
+      identity('Account Number 1012 3456 789 Market Rd') === '6789' &&
+      identity('Account Number 0123 4567 890 May Tower') === '7890' &&
+      identity('Card Number 4111 1111 1111 123 Junction') === '1123');
+  const twoTables = parseStatementLines(['Credit Card Statement', 'Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 189.16',
+    'Transaction Date Transaction Description Amount in AED', '26/07/2026 SHOP ONE ARE 27.99',
+    'Instalment Plans', 'Date Description Original Currency Amount (AED)', '01/08/2026 AMAZON 38.79 USD 10.14'].join('\n'),
+  'AED', { card: null }, 'day-first');
+  ok('the foreign-original reading holds only under the table header that allows it',
+    twoTables.rows.length === 1 && twoTables.rows[0].amountFils === 2799 && twoTables.rejectedRows === 1,
+    JSON.stringify(twoTables.rows));
+  // Third review round.
+  const midLineIdentity = parseStatementLines(['Credit Card Statement', 'Statement Date 05/08/26',
+    'رقم البطاقة Card Number XXXXXXXXXXXX2280', 'Minimum Payment Due 189.16',
+    'Transaction Date Transaction Description Amount in AED',
+    '26/07/2026 DING MIDDLE EAST DUBAI ARE 27.99', '27/07/2026 CARREFOUR ABU DHABI ARE 30.00',
+    'How to pay: transfer to', 'Account Number 12345678901234', 'IBAN AE070030012345678901234'].join('\n'),
+  'AED', { card: null }, 'day-first');
+  ok('a labelled pay-to account never takes over the card identity read from the header',
+    midLineIdentity.rows.length === 2 && midLineIdentity.rows.every((row) => row.card?.last4 === '2280'),
+    JSON.stringify(midLineIdentity.rows.map((row) => row.card)));
+  const payToAccount = parseStatementLines(['ABC Bank', 'Name JOHN DOE Primary Credit Card Number XXXXXXXXXXXX2280',
+    'Date Description Amount', '26/07/2026 DING MIDDLE EAST 27.99', '27/07/2026 PAYMENT RECEIVED THANK YOU 500.00 CR',
+    'Account Number 12345678901234 for payments'].join('\n'), 'AED', { card: null }, 'day-first');
+  ok('a pay-to account line never flips a card statement to the account convention',
+    payToAccount.rows.some((row) => row.kind === 'cardPayment' && row.card?.last4 === '2280') &&
+      !payToAccount.rows.some((row) => row.card?.last4 === '1234'),
+    JSON.stringify(payToAccount.rows.map((row) => [row.kind, row.type, row.card])));
+  const namedSections = (second) => ['Credit Card Statement', 'Statement Date 05/08/26', 'Card Number XXXXXXXXXXXX2280',
+    'Card No : XXXXXXXXXXXX2280 - JOHN DOE', 'Minimum Payment Due 100.00', 'Credit Limit 16,100.00', '26/07/2026 SHOP ONE ARE 27.99',
+    'Card No : XXXXXXXXXXXX7731 - JANE DOE', ...second, '27/07/2026 SHOP TWO ARE 30.00'];
+  ok('still refuses: a named second card section with its own differently labelled figures',
+    refusal(namedSections(['Min Pmt 52.00', 'Credit Line 5,000.00', 'Balance 300.00'])) === 'multiple_statement_accounts');
+  ok('still refuses: a second card limit printed beside its available amount',
+    refusal(namedSections(['Minimum Payment Due 100.00', 'Credit Limit 5,000.00 Available 4,970.00'])) === 'multiple_statement_accounts');
+  const datedInstructions = adcbParse([adcbPage1, adcbPage2,
+    ['Payment Due Date 30/08/26', 'Statement period from 06/07/26 to 05/08/26', ...adcbPage3]]);
+  ok('an instructions page that only prints labelled metadata dates still names no section',
+    datedInstructions.rows.length === 6 && datedInstructions.rows.every((row) => row.card?.last4 === '2280'),
+    JSON.stringify(datedInstructions.rows.length));
   const foreignCase = (header, row) => parseStatementLines([...adcbHeader, header, row].join('\n'), 'AED', { card: null }, 'day-first');
   const foreignRefused = [
     ['Date Description Amount', '01/08/2026 www*MobileRecharge.com ATLANTA USA 10.14 USD 38.79'],
