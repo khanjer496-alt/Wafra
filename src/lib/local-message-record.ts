@@ -1,11 +1,13 @@
 import {
   identifySourceFreeReviewAlert,
   inspectSourceFreeRefusedAlert,
+  parsedFinancialCandidateReview,
   shouldReviewParsedIncome,
 } from '@/lib/auto-import';
 import {
   appleMessageReviewIdentity,
   isUniversalReviewAlert,
+  prepareUniversalReviewAlert,
   type ReviewEntry,
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
@@ -25,11 +27,18 @@ import {
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import type { ParsedSms } from '@/lib/sms-parser';
 import { buildTransferEvidence } from '@/lib/transfer-evidence';
+import { parseIosApplePayRecord } from '@/lib/ios-apple-pay-record';
+import { parsedObligationReviewEvent } from '@/lib/parsed-review-event';
+import type { FxQuote, MinorExponent } from '@/lib/fx';
+import { convertWithReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
 
 export const LOCAL_MESSAGE_RECORD_VERSION = 1 as const;
 export const MAX_LOCAL_MESSAGE_TEXT_BYTES = 16 * 1024;
 export const MAX_LOCAL_MESSAGE_SENDER_CHARACTERS = 80;
 export const LOCAL_MESSAGE_FUTURE_SKEW_MS = 5 * 60_000;
+/** Shortcut input cannot attest which app actually delivered a notification. */
+export const LOCAL_NOTIFICATION_SENDER = 'Wafra Notification';
+export const LOCAL_APPLE_PAY_SENDER = 'Wafra Apple Pay';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256_EVENT_ID_RE = /^[0-9a-f]{64}$/;
@@ -46,7 +55,7 @@ interface LocalMessageEnvelope {
   text: string;
   sender: string;
   observedAt: string;
-  source: 'message';
+  source: 'message' | 'notification' | 'apple-pay';
 }
 
 export interface LocalMessageRecordPreflight {
@@ -55,6 +64,8 @@ export interface LocalMessageRecordPreflight {
   attribution: IosBankSenderAttribution | null;
   market: 'AE' | 'SA' | null;
   valid: boolean;
+  /** Kept even for malformed Wallet payloads so they are never invalid-ACKed. */
+  source?: 'apple-pay';
 }
 
 export interface IosBankSenderAttribution {
@@ -68,7 +79,12 @@ export type LocalMessageParseOutcome =
   | { kind: 'declined'; market: 'AE' | 'SA'; row: DeclinedSms; milestone: 'decline-candidate' }
   | { kind: 'review'; market: 'AE' | 'SA' | null; item: ReviewEntry; milestone: 'review-candidate' | 'none' }
   | { kind: 'ignored'; market: 'AE' | 'SA' | null; milestone: 'none' }
+  | { kind: 'held'; market: null; milestone: 'none' }
   | { kind: 'invalid'; milestone: 'none' };
+
+export type LocalApplePayParseOutcome =
+  | { kind: 'review'; market: null; item: ReviewEntry; milestone: 'none' }
+  | { kind: 'held'; market: null; milestone: 'none' };
 
 /** UTF-8 length with an explicit malformed-surrogate failure for Hermes. */
 export function localMessageUtf8Bytes(value: string): number | null {
@@ -124,7 +140,11 @@ function decodeLocalMessageEnvelope(
     !validLocalMessageId(value.id) ||
     typeof value.text !== 'string' ||
     typeof value.sender !== 'string' ||
-    value.source !== 'message') {
+    (value.source !== 'message' && value.source !== 'notification' && value.source !== 'apple-pay') ||
+    (value.source === 'notification' &&
+      (!UUID_RE.test(value.id) || value.sender !== LOCAL_NOTIFICATION_SENDER)) ||
+    (value.source === 'apple-pay' &&
+      (!UUID_RE.test(value.id) || value.sender !== LOCAL_APPLE_PAY_SENDER))) {
     return null;
   }
   const textBytes = localMessageUtf8Bytes(value.text);
@@ -183,7 +203,7 @@ export function preflightLocalMessageRecord(
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const object = value as Record<string, unknown>;
   if (!validLocalMessageId(object.id)) return null;
-  const attribution = typeof object.sender === 'string'
+  const attribution = object.source === 'message' && typeof object.sender === 'string'
     ? attributeIosBankSender(object.sender)
     : null;
   const decoded = decodeLocalMessageEnvelope(serialized, nowMs);
@@ -191,14 +211,27 @@ export function preflightLocalMessageRecord(
     id: object.id,
     observedAt: decoded?.observedAt ?? null,
     attribution,
-    market: decoded
+    market: decoded && decoded.envelope.source !== 'apple-pay'
       ? attribution?.market ?? detectLaunchMarketFromAlert(
           decoded.envelope.text,
           decoded.envelope.sender,
         )
       : null,
     valid: decoded !== null,
+    ...(object.source === 'apple-pay' ? { source: 'apple-pay' as const } : {}),
   };
+}
+
+/** Wallet observations are structured facts, never SMS text or bank attribution. */
+export function parseLocalApplePayRecord(serialized: string, now: Date): LocalApplePayParseOutcome {
+  const held: LocalApplePayParseOutcome = { kind: 'held', market: null, milestone: 'none' };
+  if (!Number.isFinite(now.getTime())) return held;
+  const decoded = decodeLocalMessageEnvelope(serialized, now.getTime());
+  if (!decoded || decoded.envelope.source !== 'apple-pay') return held;
+  const result = parseIosApplePayRecord(decoded.envelope.text, decoded.envelope.id, decoded.observedAt);
+  return result.kind === 'review'
+    ? { kind: 'review', market: null, item: result.item, milestone: 'none' }
+    : held;
 }
 
 function localReviewIdentity(id: string): { id: string; sourceKey: string } {
@@ -211,18 +244,116 @@ function localReviewIdentity(id: string): { id: string; sourceKey: string } {
   };
 }
 
+/** The pair and day a currency-conflict purchase needs converted, or null. */
+export function currencyConflictFxNeed(
+  outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
+  ledgerCurrency: string,
+): { base: string; quote: string; date: string } | null {
+  const { row } = outcome;
+  if (row.kind !== 'transaction' || row.currency === ledgerCurrency) return null;
+  // A local figure the parser derived from its OFFLINE table ("USD 20.00" with
+  // no AED stated) is an estimate, not the debit. Converting it again would
+  // post an invented rate under a reference label; it stays in Review.
+  if (row.fxSource === 'fallback') return null;
+  const date = row.date ?? (row.smsTs !== undefined && Number.isFinite(row.smsTs)
+    ? toISODate(new Date(row.smsTs)) : null);
+  return date ? { base: row.currency, quote: ledgerCurrency, date } : null;
+}
+
+/**
+ * CONVERT, DON'T REFUSE: a launch-market purchase on a ledger kept in another
+ * currency ("AED 73.45 at CARREFOUR" on a USD ledger).
+ *
+ * The amount that left the account is the one the alert states in its own
+ * currency, so that is the original recorded on the row, converted with the
+ * dated provider quote the caller obtained (`fxSource: 'reference'`, rate and
+ * effective date kept). The parser's own foreign annotation (a USD figure the
+ * AED card charged for) is replaced, because the AED debit is what moved.
+ * A row whose AED figure came from the parser's offline table is never
+ * converted: that figure is an estimate, not the debit.
+ * Account snapshots stated in the alert's currency describe a different money
+ * and are dropped rather than relabelled. Only ordinary transactions convert;
+ * card payments, statements and bills keep their existing handling. Without a
+ * valid quote this returns null and the caller keeps the Review item.
+ */
+export function convertCurrencyConflictRow(
+  outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
+  ledger: { currency: string; exponent: MinorExponent },
+  quote: FxQuote | null | undefined,
+): Extract<LocalMessageParseOutcome, { kind: 'parsed' }> | null {
+  const need = currencyConflictFxNeed(outcome, ledger.currency);
+  if (!need || !quoteFitsDay(quote, need.date)) return null;
+  const { row } = outcome;
+  // The Gulf parser's local figures are two-decimal fils by construction.
+  const conversion = convertWithReferenceQuote(
+    { currency: row.currency, minorUnits: row.amountFils, exponent: 2 },
+    ledger.currency,
+    ledger.exponent,
+    quote,
+  );
+  if (!conversion) return null;
+  const {
+    originalAmountMinor: _legacy,
+    originalCurrency: _currency,
+    originalMinorUnits: _minor,
+    originalExponent: _exponent,
+    fxRate: _rate,
+    fxRateDate: _rateDate,
+    fxSource: _source,
+    ...rest
+  } = row;
+  return {
+    ...outcome,
+    row: {
+      ...rest,
+      ...conversion.fields,
+      amountFils: conversion.amountFils,
+      currency: ledger.currency,
+      snapshotFils: null,
+      snapshotKind: null,
+    },
+  };
+}
+
+/**
+ * A parsed row whose own currency this ledger cannot hold. Money-moving rows
+ * (transactions and card payments) become a durable, source-free Universal
+ * Review under the record's own review identity. Purchases require a dated
+ * conversion at confirmation; card payments retain their settlement family
+ * and cannot become ordinary spending. Informational kinds (statement, bill reminder)
+ * move no money and return null for the caller to acknowledge as ignored.
+ */
+export function currencyConflictReview(
+  outcome: Extract<LocalMessageParseOutcome, { kind: 'parsed' }>,
+  recordId: string,
+): Extract<LocalMessageParseOutcome, { kind: 'review' }> | null {
+  const { row } = outcome;
+  if (row.kind !== 'transaction' && row.kind !== 'cardPayment') return null;
+  const observedAt = row.smsTs;
+  if (observedAt === undefined || !Number.isSafeInteger(observedAt)) return null;
+  const candidate = parsedFinancialCandidateReview(row, observedAt);
+  if (!candidate || !('kind' in candidate) || candidate.kind !== 'universal') return null;
+  const item = identifySourceFreeReviewAlert(
+    { ...candidate, channel: row.channel === 'push' ? 'push' : 'inbox' },
+    localReviewIdentity(recordId),
+  );
+  return item ? { kind: 'review', market: outcome.market, item, milestone: 'none' } : null;
+}
+
 function sanitizedRefusal(
   envelope: LocalMessageEnvelope,
   observedAt: number,
   market: 'AE' | 'SA' | null,
   session: LaunchAlertSession,
   inspection: ReturnType<LaunchAlertSession['inspect']>,
+  existingDecision?: ReturnType<typeof inspectSourceFreeRefusedAlert>,
 ): Exclude<LocalMessageParseOutcome, { kind: 'parsed' } | { kind: 'invalid' }> {
-  const decision = inspectSourceFreeRefusedAlert({
+  const channel = envelope.source === 'notification' ? 'push' : 'inbox';
+  const decision = existingDecision ?? inspectSourceFreeRefusedAlert({
     source: envelope.text,
     sender: envelope.sender,
     observedAt,
-    channel: 'inbox',
+    channel,
     session,
     existingInspection: inspection,
   });
@@ -233,10 +364,13 @@ function sanitizedRefusal(
       market,
       row: {
         smsTs: observedAt,
-        channel: 'inbox',
+        channel,
         // Message timestamps can collide at whole-second precision. Preserve
         // exact Apple identity so a decline cannot sweep an unrelated posting.
-        ...(SHA256_EVENT_ID_RE.test(envelope.id) ? { sourceEventId: envelope.id } : {}),
+        // A notification's arrival time is not the identity of any Message.
+        // Its UUID confines decline reconciliation to this exact queue record.
+        ...(envelope.source === 'notification' || SHA256_EVENT_ID_RE.test(envelope.id)
+          ? { sourceEventId: envelope.id } : {}),
         reason: decision.reason,
       },
       milestone: 'decline-candidate',
@@ -268,7 +402,9 @@ export function parseLocalMessageRecord(
   const decoded = decodeLocalMessageEnvelope(serialized, nowMs);
   if (!decoded) return { kind: 'invalid', milestone: 'none' };
   const { envelope, observedAt } = decoded;
-  const attribution = attributeIosBankSender(envelope.sender);
+  if (envelope.source === 'apple-pay') return parseLocalApplePayRecord(serialized, now);
+  const isNotification = envelope.source === 'notification';
+  const attribution = isNotification ? null : attributeIosBankSender(envelope.sender);
   const routedMarket = attribution?.market ??
     detectLaunchMarketFromAlert(envelope.text, envelope.sender);
   if (routedMarket !== expectedMarket) {
@@ -277,8 +413,26 @@ export function parseLocalMessageRecord(
 
   try {
     const inspection = session.inspect(envelope.text, envelope.sender);
+    // Apply the same push promotion/non-posting policy as Android before a
+    // permissive transaction grammar can mistake an offer for actual money.
+    // Reuse this source-free decision on refusal; source text is never retained.
+    const notificationDecision = isNotification ? inspectSourceFreeRefusedAlert({
+      source: envelope.text,
+      sender: envelope.sender,
+      observedAt,
+      channel: 'push',
+      session,
+      existingInspection: inspection,
+    }) : undefined;
+    if (notificationDecision?.kind === 'declined' && notificationDecision.reason === 'security-challenge') {
+      return { kind: 'ignored', market: expectedMarket, milestone: 'none' };
+    }
+    if (notificationDecision?.kind === 'declined' ||
+      (notificationDecision?.kind === 'ignored' && notificationDecision.reason !== 'unrecognized')) {
+      return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection, notificationDecision);
+    }
     if (expectedMarket === null) {
-      return sanitizedRefusal(envelope, observedAt, null, session, inspection);
+      return sanitizedRefusal(envelope, observedAt, null, session, inspection, notificationDecision);
     }
     const parsed = session.parse(
       envelope.text,
@@ -288,15 +442,32 @@ export function parseLocalMessageRecord(
       observedAt,
     );
     if (!parsed) {
-      return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection);
+      return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection, notificationDecision);
     }
-    if (shouldReviewParsedIncome(parsed)) {
+    // Statements and card payments have separate accounting mutations without
+    // a transaction observation receipt. Keep notification delivery on the
+    // durable source-free Review path until those kinds have end-to-end replay
+    // identity; authoritative Message capture retains its existing behavior.
+    if (isNotification && parsed.kind !== 'transaction') {
+      // Successful parser facts outrank an independent generic extractor's
+      // miss. Preserve the statement/settlement family without authorizing a
+      // card mutation or reinterpreting its total as a transaction amount.
+      const event = parsedObligationReviewEvent(parsed);
+      const item = event ? prepareUniversalReviewAlert({
+        ...localReviewIdentity(envelope.id), observedAt, channel: 'push', event,
+      }) : null;
+      if (item) return { kind: 'review', market: expectedMarket, item, milestone: 'none' };
+      return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection, notificationDecision);
+    }
+    if (shouldReviewParsedIncome(parsed) || (isNotification && parsed.type === 'income' &&
+      parsed.categoryGuess === 'other' && !parsed.transferHint)) {
       const refusal = sanitizedRefusal(
         envelope,
         observedAt,
         expectedMarket,
         session,
         inspection,
+        notificationDecision,
       );
       if (refusal.kind === 'review') return refusal;
     }
@@ -316,18 +487,39 @@ export function parseLocalMessageRecord(
     if (attribution && canonicalBankId(bankHint ?? '') !== attribution.bankId) {
       return { kind: 'invalid', milestone: 'none' };
     }
+    // Notification setup does not establish an issuer. Never let the planner
+    // fill an absent bank from a user's unrelated single known-bank answer.
+    // The existing review policy keeps grounded facts for account selection;
+    // if it cannot describe the alert safely, leave it unposted.
+    if (isNotification && canonicalBankId(bankHint ?? '') === null) {
+      return sanitizedRefusal(envelope, observedAt, expectedMarket, session, inspection, notificationDecision);
+    }
     const row: ScannedSms = {
       ...structured,
       // Capture only masked endpoints/reference before the body is discarded.
       // Import planning downgrades this if local source routing is ambiguous.
-      transferEvidence: buildTransferEvidence({ ...parsed, bankHint, sender: envelope.sender }, true),
+      transferEvidence: buildTransferEvidence({ ...parsed, bankHint, sender: envelope.sender }, !isNotification),
       ...(bankHint ? { bankHint } : {}),
       // Receipt time dates a transaction, never an unstated card deadline.
       date: structured.kind === 'cardStatement' ? structured.date : structured.date ?? toISODate(new Date(observedAt)),
       smsTs: observedAt,
-      channel: 'inbox',
+      channel: isNotification ? 'push' : 'inbox',
       market: expectedMarket,
-      sourceEventId: envelope.id,
+      // Notification UUIDs identify queue observations, not bank events. Keep
+      // them as ACK/review/decline receipts only; financial rows use existing push
+      // time/merchant/instrument dedupe, including repeated OS notifications.
+      // Only SHA-256(Message GUID) names a retained Apple Message. A Message
+      // staged under a queue UUID (Apple withheld the GUID or its date, or the
+      // automation passed plain text) is an observation like a notification:
+      // without a history identity it is keyed `s{time}-{amount}` and stays
+      // open to the same-event rule, so the History import copy of the same
+      // Message (its GUID and real date, seconds apart) merges with it.
+      ...(!isNotification && SHA256_EVENT_ID_RE.test(envelope.id) ? { sourceEventId: envelope.id } : {}),
+      // The queue delivers each such Message once. Its UUID is kept only as a
+      // durable "one live observation" marker so dedupe never folds a second
+      // genuine identical purchase into it and binds it one-to-one to History.
+      ...(!isNotification && UUID_RE.test(envelope.id) ? { messageObservationId: envelope.id } : {}),
+      ...(isNotification ? { notificationObservationId: envelope.id } : {}),
     };
     return {
       kind: 'parsed',

@@ -492,6 +492,19 @@ for (const asked of ['shapes', 'figures']) {
 {
   const p = build({ detail: 'figures' });
   const wire = toFeedbackWirePayload(p);
+  ok('wire: an untyped report sends a null type', wire.diagnostic.topic === null);
+  {
+    const typed = buildFeedbackPayload({ topic: 'broken', message: 'The add button does nothing', detail: 'none',
+      build: p.build, ledger: { accounts: [], transactions: [], cardDues: [], merchantOverrides: {} } });
+    ok('wire: the chosen type travels in the diagnostic',
+      typed.topic === 'broken' && toFeedbackWirePayload(typed).diagnostic.topic === 'broken');
+    ok('preview: the chosen type is shown in the outbound preview',
+      /\nTYPE\n  something broke\n/.test(formatFeedbackPayload(typed)));
+    const forged = buildFeedbackPayload({ topic: 'call me', message: 'x', detail: 'none',
+      build: p.build, ledger: { accounts: [], transactions: [], cardDues: [], merchantOverrides: {} } });
+    ok('payload: an unknown type is dropped, never sent as free text',
+      forged.topic === null && toFeedbackWirePayload(forged).diagnostic.topic === null);
+  }
   ok('the app and Worker share one versioned feedback contract',
     wire.schema === FEEDBACK_WIRE_SCHEMA && wire.diagnostic.reportSchema === FEEDBACK_SCHEMA);
   ok('feedback is retained for the disclosed maximum',
@@ -651,9 +664,10 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   ok('the route is declared', /'\/feedback'/.test(routes));
   ok('the screen file exists behind it', fs.existsSync(path.join(ROOT, 'src/app/feedback.tsx')));
 
-  const settings = read('src/app/settings.tsx');
+  // The feedback row moved to Settings → Data and help.
+  const settings = read('src/app/settings-data.tsx');
   const sourceFile = ts.createSourceFile(
-    'settings.tsx',
+    'settings-data.tsx',
     settings,
     ts.ScriptTarget.Latest,
     true,
@@ -682,7 +696,7 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   // checks this repo-wide; doing it here means a missing Arabic value fails in
   // the suite that owns the feature.
   const i18n = require('./build/i18n.js');
-  const source = read('src/app/feedback.tsx') + read('src/app/settings.tsx');
+  const source = read('src/app/feedback.tsx') + read('src/app/settings-data.tsx');
   const keys = [...source.matchAll(/\bt f?\('|\btf?\('([a-zA-Z0-9_]+)'/g)]
     .map((m) => m[1])
     .filter(Boolean)

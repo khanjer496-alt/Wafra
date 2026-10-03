@@ -3,18 +3,22 @@ import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
-import { Button, Chip } from '@/components/ui/controls';
+import { Chip } from '@/components/ui/controls';
+import { EButton } from '@/components/ui/band/e-button';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { Icon } from '@/components/ui/icon';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
-import { EXPENSE_CATEGORIES } from '@/lib/categories';
-import { shortDate, toISODate } from '@/lib/format';
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
+import { formatAmount, ledgerTypicalMinor, shiftMonthKey, shortDate, toISODate } from '@/lib/format';
 import { t, tf, type StringKey } from '@/lib/i18n';
 import { UNASSIGNED_INCOME_ACCOUNT_ID } from '@/lib/ledger';
 import { periodLabel } from '@/lib/period';
 import { projectTransactionFilter, type TransactionFilters as Filters, type DatePreset, type SortMode } from '@/lib/transaction-filter';
+import type { TransactionSourceKind } from '@/lib/transaction-source';
+import { transactionsWords } from '@/lib/transactions-copy';
 import type { Account, CategoryId, TransactionType } from '@/lib/types';
 
 type FilterIndex = Parameters<typeof projectTransactionFilter>[0];
@@ -26,6 +30,8 @@ export interface TransactionFilterSheetProps {
   hasUnassignedIncome: boolean;
   index: FilterIndex;
   options: FilterOptions;
+  /** Sources present in the ledger, in display order. Omitted: no Source section. */
+  sourceKinds?: readonly TransactionSourceKind[];
   onClose: () => void;
   onApply: (filters: Filters, resetScope: boolean) => void;
 }
@@ -33,7 +39,8 @@ export interface TransactionFilterSheetProps {
 function FilterSection({ title, summary, children }: { title: string; summary: string; children: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false);
   const theme = useTheme();
-  return <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: theme.cardBorder }}>
+  const band = useBand('home');
+  return <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: band.rule }}>
     <Pressable accessibilityRole="button" accessibilityLabel={title + ': ' + summary}
       accessibilityState={{ expanded }} onPress={() => setExpanded(value => !value)}
       style={{ minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 }}>
@@ -49,12 +56,23 @@ function FilterSection({ title, summary, children }: { title: string; summary: s
 
 /** Draft controls own their state. Editing a chip cannot rebuild the ledger behind
  * the modal. Close discards the draft; Show results applies it once. */
-export function TransactionFilterSheet({ initialFilters, resetFilters, accounts, hasUnassignedIncome, index, options, onClose, onApply }: TransactionFilterSheetProps) {
+export function TransactionFilterSheet({ initialFilters, resetFilters, accounts, hasUnassignedIncome, index, options, sourceKinds, onClose, onApply }: TransactionFilterSheetProps) {
   const theme = useTheme();
+  const { expenseCategories, incomeCategories } = useCategoryCatalog();
+  // Opens over Transactions: the ink band's sheet, lifted.
+  const band = useBand('home');
   const language = useLanguage();
+  const words = transactionsWords(language);
   const tr = useCallback((key: StringKey) => t(key, language), [language]);
   const trf = useCallback((key: StringKey, vars: Record<string, string | number>) => tf(key, vars, language), [language]);
-  const [filters, setFilters] = useState<Filters>(() => ({ ...initialFilters, categories: new Set(initialFilters.categories) }));
+  const [filters, setFilters] = useState<Filters>(() => ({ ...initialFilters, categories: new Set(initialFilters.categories),
+    sources: new Set(initialFilters.sources ?? []) }));
+  // Direction narrows suggestions, but an active filter must stay removable.
+  // Builtin purchase categories can also appear on income refunds.
+  const allCategories = [...expenseCategories, ...incomeCategories.filter(c => c.id !== 'other')];
+  const suggestedCategories = filters.type === 'income' ? incomeCategories : filters.type === 'expense' ? expenseCategories : allCategories;
+  const visibleCategories = [...suggestedCategories, ...allCategories.filter(c =>
+    filters.categories.has(c.id) && !suggestedCategories.some(suggested => suggested.id === c.id))];
   const [resetScope, setResetScope] = useState(false);
   const [picking, setPicking] = useState<'dateFrom' | 'dateTo' | null>(null);
   const [rangeDraft, setRangeDraft] = useState({ dateFrom: initialFilters.dateFrom ?? '', dateTo: initialFilters.dateTo ?? '' });
@@ -64,18 +82,39 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
   const { filtered } = preview;
   const resultsPending = appliedFilters !== filters;
   const period = options.period;
-  const presetLabel: Record<DatePreset, string> = {
+  // The screen's period ("Oct 2026") often IS one of the fixed presets: this
+  // month, last month, or all time. Two chips for one range read as two
+  // choices, so the pair shows once: the preset's words with the month named
+  // ("This month · Oct 2026"). Whichever of the pair is active stays.
+  const sameAsSelected: DatePreset | null = period.mode === 'all' ? 'all'
+    : period.mode !== 'month' ? null
+      : period.key === options.currentKey ? 'month'
+        : period.key === shiftMonthKey(options.currentKey, -1) ? 'lastMonth' : null;
+  const hiddenPreset: DatePreset | null = sameAsSelected === null ? null
+    : filters.datePreset === sameAsSelected ? 'selected' : sameAsSelected;
+  const presetWords: Record<DatePreset, string> = {
     selected: period.mode === 'all' ? tr('selectedPeriod') : periodLabel(period),
     all: tr('allTime'), month: tr('thisMonth'), lastMonth: tr('lastMonth'),
     '3months': tr('lastThreeMonths'), custom: tr('dateRange'),
   };
+  const mergedLabel = sameAsSelected === null ? null
+    : sameAsSelected === 'all' ? presetWords.all : `${presetWords[sameAsSelected]} · ${presetWords.selected}`;
+  const presetLabel: Record<DatePreset, string> = mergedLabel === null ? presetWords
+    : { ...presetWords, selected: mergedLabel, [sameAsSelected!]: mergedLabel };
+  const presets = (Object.keys(presetLabel) as DatePreset[]).filter((preset) => preset !== hiddenPreset);
   const toggleCategory = (id: CategoryId) => setFilters(current => {
     const categories = new Set(current.categories);
     if (categories.has(id)) categories.delete(id); else categories.add(id);
     return { ...current, categories };
   });
+  const toggleSource = (kind: TransactionSourceKind) => setFilters(current => {
+    const sources = new Set(current.sources ?? []);
+    if (sources.has(kind)) sources.delete(kind); else sources.add(kind);
+    return { ...current, sources };
+  });
+  const selectedSources = filters.sources ?? new Set<TransactionSourceKind>();
   const clearFilters = () => {
-    setFilters({ ...resetFilters, categories: new Set(resetFilters.categories) });
+    setFilters({ ...resetFilters, categories: new Set(resetFilters.categories), sources: new Set(resetFilters.sources ?? []) });
     setRangeDraft({ dateFrom: '', dateTo: '' });
     setPicking(null);
     setResetScope(true);
@@ -85,14 +124,18 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
         title={tr('filtersTitle')}
         onClose={onClose}
         testID="transaction-filter-sheet"
-        footer={<View style={styles.sheetActions}>
-          <Button inline variant="outline" label={tr('reset')} onPress={clearFilters} />
-          <Button inline wrapLabel disabled={resultsPending}
-            label={trf('showResults', { count: filtered.length, s: filtered.length === 1 ? '' : 's' })}
-            onPress={() => onApply(filters, resetScope)} />
-        </View>}>
+        palette={band}
+        footer={<EButton palette={band} disabled={resultsPending} testID="transaction-filter-apply"
+          label={trf('showResults', { count: filtered.length, s: filtered.length === 1 ? '' : 's' })}
+          onPress={() => onApply(filters, resetScope)} />}>
+        {/* Reset clears the draft, including the restrictions the screen was
+            opened with; nothing changes until Show is pressed. */}
+        <Pressable accessibilityRole="button" accessibilityLabel={tr('reset')} onPress={clearFilters}
+          testID="transaction-filter-reset" hitSlop={4} style={styles.reset}>
+          <ThemedText type="smallBold" style={{ color: band.statusOver }}>{tr('reset')}</ThemedText>
+        </Pressable>
         <View style={styles.filterGroup}>
-          <ThemedText type="micro" themeColor="textSecondary">
+          <ThemedText type="smallBold" style={{ color: band.textSecondary }}>
             {tr('typeFilter')}
           </ThemedText>
           <View style={styles.chipRow}>
@@ -107,8 +150,8 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
                 <Chip
                   key={String(type)}
                   label={label}
-                  active={filters.type === type}
-                  onPress={() => setFilters((current) => ({ ...current, type }))}
+                  active={filters.type === type && !(type === null && filters.kind)}
+                  onPress={() => setFilters((current) => ({ ...current, type, kind: null }))}
                 />
               );
             })}
@@ -116,11 +159,11 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
         </View>
 
         <View style={styles.filterGroup}>
-          <ThemedText type="micro" themeColor="textSecondary">
+          <ThemedText type="smallBold" style={{ color: band.textSecondary }}>
             {tr('periodFilter')}
           </ThemedText>
           <View style={styles.chipRow}>
-            {(Object.keys(presetLabel) as DatePreset[]).map((preset) => (
+            {presets.map((preset) => (
               <Chip
                 key={preset}
                 label={presetLabel[preset]}
@@ -265,19 +308,21 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
 
 <FilterSection title={tr('categoriesFilter')} summary={filters.categories.size > 0 ? String(filters.categories.size) : tr('allWord')}>
           <CategoryChips
-            categories={EXPENSE_CATEGORIES}
+            categories={visibleCategories}
             selected={filters.categories}
             onToggle={toggleCategory}
             layout="wrap"
           />
 </FilterSection>
 
-<FilterSection title={tr('minimumAmountFilter')} summary={filters.minFils ? `${filters.minFils / 100}+` : tr('anyLabel')}>
+<FilterSection title={tr('minimumAmountFilter')} summary={filters.minFils ? `${formatAmount(filters.minFils)}+` : tr('anyLabel')}>
           <View style={styles.chipRow}>
-            {[null, 10000, 50000, 100000].map((value) => (
+            {/* AED 100 / 500 / 1,000, sized to the ledger currency (¥10,000 /
+                ¥50,000 / ¥100,000 for JPY) and printed at its exponent. */}
+            {[null, ledgerTypicalMinor(100), ledgerTypicalMinor(500), ledgerTypicalMinor(1000)].map((value) => (
               <Chip
                 key={String(value)}
-                label={value === null ? tr('anyLabel') : `${value / 100}+`}
+                label={value === null ? tr('anyLabel') : `${formatAmount(value)}+`}
                 active={filters.minFils === value}
                 onPress={() =>
                   setFilters((current) => ({ ...current, minFils: value }))
@@ -286,6 +331,30 @@ export function TransactionFilterSheet({ initialFilters, resetFilters, accounts,
             ))}
           </View>
 </FilterSection>
+
+<FilterSection title={words.maxAmount} summary={filters.maxFils ? words.upTo(formatAmount(filters.maxFils)) : words.noMax}>
+          <View style={styles.chipRow} testID="transaction-filter-max">
+            {[null, ledgerTypicalMinor(50), ledgerTypicalMinor(100), ledgerTypicalMinor(500), ledgerTypicalMinor(1000)].map((value) => (
+              <Chip
+                key={String(value)}
+                label={value === null ? words.noMax : words.upTo(formatAmount(value))}
+                active={(filters.maxFils ?? null) === value}
+                onPress={() => setFilters((current) => ({ ...current, maxFils: value }))}
+              />
+            ))}
+          </View>
+</FilterSection>
+
+{sourceKinds && sourceKinds.length > 1 ? <FilterSection title={words.sourceFilter}
+  summary={selectedSources.size > 0 ? [...selectedSources].map((kind) => words.sourceTitle[kind]).join(', ') : tr('allWord')}>
+          <View style={styles.chipRow} testID="transaction-filter-source">
+            <Chip label={tr('allWord')} active={selectedSources.size === 0}
+              onPress={() => setFilters((current) => ({ ...current, sources: new Set() }))} />
+            {sourceKinds.map((kind) => (
+              <Chip key={kind} label={words.sourceTitle[kind]} active={selectedSources.has(kind)} onPress={() => toggleSource(kind)} />
+            ))}
+          </View>
+</FilterSection> : null}
 
 <FilterSection title={tr('sortFilter')} summary={tr(filters.sort === 'newest' ? 'newest' : filters.sort === 'oldest' ? 'oldest' : 'largest')}>
           <View style={styles.chipRow}>
@@ -347,9 +416,5 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     paddingBottom: Spacing.one,
   },
-  sheetActions: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    marginTop: Spacing.one,
-  }
+  reset: { alignSelf: 'flex-end', minHeight: 44, justifyContent: 'center', marginTop: -Spacing.two, marginBottom: -Spacing.two }
 });

@@ -1,6 +1,6 @@
 import type { IconName } from '@/components/ui/icon.types';
 import { getLanguage, type Lang } from '@/lib/i18n';
-import type { CategoryId, TransactionType } from '@/lib/types';
+import type { CategoryId, CustomCategory, CustomCategoryId, TransactionType } from '@/lib/types';
 
 /**
  * A category has a glyph, not a hue.
@@ -60,13 +60,32 @@ export const CATEGORIES: CategoryMeta[] = [
 
 const byId = new Map(CATEGORIES.map((c) => [c.id, c]));
 
-export function getCategory(id: CategoryId): CategoryMeta {
-  return byId.get(id) ?? byId.get('other')!;
+export function isCustomCategoryId(value: unknown): value is CustomCategoryId {
+  return typeof value === 'string' && /^custom:(expense|income):[a-f0-9]{32}$/.test(value);
 }
+
+/** Registration is ledger-local; structural validity alone never authorizes a write. */
+export function isRegisteredCategory(id: unknown, catalog: readonly CustomCategory[] = []): id is CategoryId {
+  return typeof id === 'string' && (byId.has(id as CategoryId) ||
+    (isCustomCategoryId(id) && catalog.some((category) => category.id === id && categorySupportsType(id, category.type))));
+}
+
+export function getCategory(id: CategoryId, catalog: readonly CustomCategory[] = []): CategoryMeta {
+  const builtin = byId.get(id);
+  if (builtin) return builtin;
+  if (isCustomCategoryId(id)) {
+    const saved = catalog.find((category) => category.id === id && categorySupportsType(id, category.type));
+    return { id, label: saved?.name ?? 'Custom category', labelAr: saved?.name ?? 'فئة مخصصة',
+      icon: 'receipt', type: id.startsWith('custom:income:') ? 'income' : 'expense' };
+  }
+  return byId.get('other')!;
+}
+
 
 /** Validate a category without turning an unknown id into the display fallback. */
 export function categorySupportsType(id: unknown, type: unknown): id is CategoryId {
   if (typeof id !== 'string' || (type !== 'income' && type !== 'expense')) return false;
+  if (isCustomCategoryId(id)) return id.startsWith(`custom:${type}:`);
   const category = byId.get(id as CategoryId);
   return Boolean(category && (category.id === 'other' || category.type === type));
 }
@@ -97,8 +116,8 @@ export function readMerchantCategoryOverride(
 }
 
 /** Localized category name without duplicating category dictionaries in UI. */
-export function categoryLabel(category: CategoryMeta | CategoryId, language: Lang = getLanguage()): string {
-  const meta = typeof category === 'string' ? getCategory(category) : category;
+export function categoryLabel(category: CategoryMeta | CategoryId, language: Lang = getLanguage(), catalog: readonly CustomCategory[] = []): string {
+  const meta = typeof category === 'string' ? getCategory(category, catalog) : category;
   return language === 'ar' ? meta.labelAr : meta.label;
 }
 
@@ -109,6 +128,13 @@ export const INCOME_CATEGORIES: CategoryMeta[] = [
   ...CATEGORIES.filter((c) => c.type === 'income'),
   { ...byId.get('other')!, type: 'income' },
 ];
+
+/** Present a catalog without mutating the process-wide builtin list. */
+export function categoriesForType(type: TransactionType, catalog: readonly CustomCategory[] = []): CategoryMeta[] {
+  return [...(type === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES),
+    ...catalog.filter((category) => isCustomCategoryId(category.id) && category.type === type &&
+      categorySupportsType(category.id, type)).map((category) => getCategory(category.id, catalog))];
+}
 
 /**
  * Money that leaves on a contract, not on a decision.

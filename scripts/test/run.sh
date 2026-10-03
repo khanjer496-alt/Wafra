@@ -110,7 +110,7 @@ done
 #   1. every name below must have a file  — catches a deleted suite
 #   2. the count of *.test.js on disk must match  — catches an unwired suite
 #   3. the count must equal EXPECTED_SUITES  — catches a suite dropped from both
-EXPECTED_SUITES=77
+EXPECTED_SUITES=86
 SUITES=(parser bank-corpus invariants unit worker relay import-plan arabic instant-alert \
         charge-alert kotlin-regex routes perf-config contracts onboarding report \
         trusted-devices cloud-import fx db uncategorised bills categories feedback alert-draft)
@@ -132,6 +132,7 @@ SUITES+=(review-source-bindings)
 SUITES+=(provider-source-identity)
 SUITES+=(home-presentation)
 SUITES+=(money-display)
+SUITES+=(money-locale)
 SUITES+=(merchant-logos)
 SUITES+=(merchant-logo-resolver)
 SUITES+=(bank-logo-resolver)
@@ -166,6 +167,14 @@ SUITES+=(wafra-assistant)
 SUITES+=(home-widget-preferences)
 SUITES+=(recap)
 SUITES+=(ledger-stress)
+SUITES+=(universal-confidence)
+SUITES+=(universal-template-certification)
+SUITES+=(country)
+SUITES+=(best-effort-autopost)
+SUITES+=(public-alert-evidence)
+SUITES+=(payment-reminders)
+SUITES+=(app-lock)
+SUITES+=(capture-event-identity)
 
 missing=""
 for t in "${SUITES[@]}"; do
@@ -196,7 +205,8 @@ done
 # Use two test-file workers on both developer and CI hosts. One worker per
 # available host CPU makes unrelated suites contend with bounded parser and
 # transfer benchmarks; their existing timing limits must remain unchanged.
-node --test --test-concurrency=2 repair/*.test.cjs workflows/*.test.cjs ios-journey/*.test.cjs ios-paging-shortcut.test.mjs ios-paging-loader.test.cjs ios-history-input-probe.test.mjs
+node --test --test-concurrency=2 repair/*.test.cjs workflows/*.test.cjs ios-journey/*.test.cjs ios-paging-shortcut.test.mjs ios-paging-loader.test.cjs ios-history-input-probe.test.mjs ios-notification-shortcut.test.mjs learned-alert-formats.test.cjs brand-categories.test.cjs ai-ask-understanding.test.cjs ai-alert-extractor.test.cjs
+node --test ../shortcut-videos/recorded/validation.test.mjs
 node numeric-input-regression.cjs
 
 echo "run.sh: ${#SUITES[@]} app suites + ${#SERVER_SUITES[@]} server suites + $NATIVE_SUITES native Swift suites ran."

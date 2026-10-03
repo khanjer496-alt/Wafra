@@ -1,6 +1,6 @@
 {
   "name": "wafra",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "version": "1.0.0",
   "packageManager": "npm@10.9.8",
   "engines": {
@@ -47,11 +47,17 @@
     "check:launch": "bash scripts/check-launch.sh",
     "benchmark:launch:fixtures": "bash scripts/generate-launch-benchmark-fixtures.sh",
     "report:parser-capabilities": "node scripts/generate-parser-capabilities.mjs",
+    "eval:parser:typesafe": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs",
+    "eval:parser:typesafe:all": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs --all",
+    "eval:parser:typesafe:risk": "node --env-file=.env.local scripts/typesafe-parser-eval.mjs --all --fail-on-risk",
+    "analyze:parser:jev": "node --env-file=.env.local scripts/jev-yellow-analyzer.mjs",
+    "analyze:parser:jev:all": "node --env-file=.env.local scripts/jev-yellow-analyzer.mjs --all",
     "release:check": "node scripts/check-release-config.mjs",
     "check:server": "npm --prefix server ci && npm --prefix server run typecheck && npm --prefix server test && bash scripts/test/worker-gate.sh && npm --prefix server run build:check",
     "check": "npm run doctor && npm run typecheck && npm run lint && npm run test && npm run check:store && npm run check:store-pricing && npm run check:server"
   },
   "dependencies": {
+    "@bacons/apple-targets": "^5.0.0",
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
@@ -91,6 +97,7 @@
     "expo-system-ui": "~55.0.22",
     "expo-task-manager": "~55.0.20",
     "expo-updates": "~55.0.30",
+    "expo-video": "~55.0.21",
     "expo-web-browser": "~55.0.20",
     "react": "19.2.0",
     "react-dom": "19.2.0",
@@ -105,6 +112,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260730.1",
+    "@huggingface/tokenizers": "^0.2.0",
     "@types/react": "~19.2.2",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~55.0.1",

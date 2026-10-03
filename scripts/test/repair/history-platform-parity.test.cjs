@@ -239,7 +239,30 @@ test('uncertain and unsupported messages enter the same source-free review while
   assert.equal(JSON.stringify(ios).includes('JOHN DOE'), false);
 });
 
-for (const unpinned of [false, true]) {
+test('a pinned USD ledger auto-adds the same clear global purchase on both platforms, marked for checking', async () => {
+  // Unverified formats may be auto-added only through the best-effort policy
+  // (src/lib/best-effort-autopost.ts), identically on Android SMS and iOS
+  // History, and always marked. The undirected transfer stays in Review.
+  const { android, ios, androidState, iosState } = await harness([
+    message('Chase', 'Chase Alert: Your card ending 1234 was charged USD 20.00 at TARGET.'),
+    message('Chase', 'USD 100.00 was debited from your account and credited to the beneficiary by bank transfer', '2026-09-08T12:01:00.000Z'),
+  ], 'US', { activeMarket: 'AE', currency: 'USD', unpinned: false }).run();
+  assert.equal(android.parsed.length, 1);
+  assert.equal(ios.parsed.length, 1);
+  for (const row of [android.parsed[0], ios.parsed[0]]) {
+    assert.equal(row.amountFils, 2000);
+    assert.equal(row.currency, 'USD');
+    assert.equal(row.bestEffort?.format, 'universal:purchase:debit');
+  }
+  assert.equal(ios.reviewCandidates.length, 1);
+  assert.deepEqual(businessReview(ios.reviewCandidates), businessReview(android.reviewCandidates));
+  assert.deepEqual(plain(ios.reviewCandidates.map(reviewMoney)), [
+    { currency: 'USD', minorUnits: '10000', exponent: 2 },
+  ]);
+  assert.deepEqual(businessState(iosState), businessState(androidState));
+});
+
+for (const unpinned of [true]) {
   test(`global bank purchase and transfer stay in the same review on ${unpinned ? 'an unpinned fresh' : 'a USD'} ledger`, async () => {
     // The app's two regional parser packs are AE/SA. A US locale and USD
     // ledger do not manufacture an unsupported US regional parser pack.

@@ -210,6 +210,15 @@ export function healPatch(
     }
   }
 
+  // An exact re-read can remove a category inferred from the bank's channel,
+  // but cannot infer a payment's purpose from its amount or generic title alone.
+  if (prior.title === 'Account debit' && prior.category === 'telecom' &&
+      p.kind === 'transaction' && p.merchant === 'Account debit' && p.type === 'expense' &&
+      p.categoryGuess === 'other' && !p.categoryPinned && !p.transferHint &&
+      p.raw && /\b(?:internet|online|mobile|digital|telephone)\s+banking\b/i.test(p.raw)) {
+    patch.category = 'other';
+  }
+
   // Keep the raw message on rows the parser still cannot read, so the accuracy
   // report has something to show. Only when it is still low-confidence AFTER
   // everything above, and only if it is not already stored.
@@ -221,10 +230,11 @@ export function healPatch(
     typeAfter === 'expense' &&
     !p.transferHint &&
     !transferAfter &&
-    (titleAfter === 'Card purchase' ||
+    (titleAfter === 'Card purchase' || (titleAfter === 'Account debit' && catAfter === 'other') ||
       (catAfter === 'other' && !p.categoryDeliberate && !STRUCTURAL_TITLES.has(titleAfter)));
   if (stillLow) {
-    if (!prior.raw && p.raw) patch.raw = p.raw.slice(0, 300);
+    // A best-effort row (or reading) never keeps message text.
+    if (!prior.raw && p.raw && !p.bestEffort && !prior.bestEffort) patch.raw = p.raw.slice(0, 300);
   } else if (prior.raw && !p.categoryPinned) {
     // The row is readable now — a name, a category, or a direction correction
     // landed above. Drop the source text, or the accuracy report keeps offering
@@ -262,6 +272,11 @@ export function healPatch(
  * `remove` is not handled here; a caller drops those rows before applying.
  */
 export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transaction {
+  const claims = patch.statementOccurrences ? [...new Map([
+    ...(tx.statementOccurrences ?? []), ...patch.statementOccurrences,
+  ].map((claim) => [`${claim.importId}:${claim.rowIndex}`, claim])).values()] : tx.statementOccurrences;
+  if (claims && claims.length > 64) throw new Error('Statement occurrence claim capacity exceeded');
+
   // This evidence class admits exactly one field. Never smuggle unrelated
   // account, ownership, source identity or classification edits with it.
   if (patch.sourceDateCorrection) {
@@ -280,15 +295,21 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
     const nextViaPush = patch.viaPush === undefined ? tx.viaPush : patch.viaPush || undefined;
     if (
       (patch.ts === undefined || patch.ts === tx.ts) &&
+      (patch.textClock === undefined || patch.textClock === tx.textClock) &&
       (patch.smsKey === undefined || patch.smsKey === tx.smsKey) &&
       (patch.captureInstrument === undefined ||
         JSON.stringify(patch.captureInstrument) === JSON.stringify(tx.captureInstrument)) &&
-      nextViaPush === tx.viaPush
+      nextViaPush === tx.viaPush &&
+      (patch.walletBound === undefined || tx.walletBound === true) &&
+      JSON.stringify(claims) === JSON.stringify(tx.statementOccurrences)
     ) {
       return tx;
     }
     const identified: Transaction = { ...tx };
+    if (claims) identified.statementOccurrences = claims;
+    if (patch.walletBound === true) identified.walletBound = true;
     if (patch.ts !== undefined) identified.ts = patch.ts;
+    if (patch.textClock !== undefined) identified.textClock = patch.textClock;
     if (patch.smsKey !== undefined) identified.smsKey = patch.smsKey;
     if (patch.captureInstrument !== undefined) identified.captureInstrument = patch.captureInstrument;
     if (patch.viaPush !== undefined) identified.viaPush = nextViaPush;
@@ -301,9 +322,11 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.isTransfer !== undefined) next.isTransfer = patch.isTransfer;
   if (patch.accountId !== undefined) next.accountId = patch.accountId;
   if (patch.ts !== undefined) next.ts = patch.ts;
+  if (patch.textClock !== undefined) next.textClock = patch.textClock;
   if (patch.smsKey !== undefined) next.smsKey = patch.smsKey;
   if (patch.captureInstrument !== undefined) next.captureInstrument = patch.captureInstrument;
   if (patch.viaPush !== undefined) next.viaPush = patch.viaPush || undefined;
+  if (patch.walletBound === true) next.walletBound = true;
   if (patch.cardPaymentSide !== undefined) next.cardPaymentSide = patch.cardPaymentSide;
   if (patch.paymentFlowSide !== undefined) next.paymentFlowSide = patch.paymentFlowSide;
   if (patch.billIdentity !== undefined) next.billIdentity = patch.billIdentity;
@@ -317,6 +340,8 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   }
   if (patch.transferEvidence !== undefined) next.transferEvidence = patch.transferEvidence;
   if (patch.clearTransferEvidence) delete next.transferEvidence;
+  if (claims) next.statementOccurrences = claims;
+  if (patch.clearBestEffort) delete next.bestEffort;
   if (patch.raw !== undefined) {
     if (patch.raw === null) delete next.raw;
     else next.raw = patch.raw;
@@ -334,7 +359,17 @@ export function applyHealUpdates(
   updates: TxHealUpdate[],
 ): Transaction[] {
   if (updates.length === 0) return transactions;
-  const patches = new Map(updates.map((update) => [update.id, update]));
+  const patches = new Map<string, TxHealUpdate>();
+  for (const update of updates) {
+    const prior = patches.get(update.id);
+    const claims = [...(prior?.statementOccurrences ?? []), ...(update.statementOccurrences ?? [])];
+    const claimOnly = update.statementOccurrences !== undefined &&
+      Object.keys(update).every((key) => key === 'id' || key === 'statementOccurrences');
+    patches.set(update.id, {
+      ...(claimOnly && prior ? prior : {}), ...update,
+      ...(claims.length ? { statementOccurrences: claims } : {}),
+    });
+  }
   const correctedSources = new Map<string, number>();
   for (const update of updates) {
     if (update.sourceDateCorrection) correctedSources.set(update.sourceDateCorrection.sourceKey, 0);

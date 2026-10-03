@@ -15,6 +15,10 @@ async function scan(initialState, returnToForegroundAt = Infinity) {
   const batch = Array.from({ length: 950 }, (_, i) => ({ id: 950 - i, date: 1000000 - i,
     address: 'SYNTHETIC', body: `Synthetic record ${i}` }));
   const scanner = load(path.join(root, 'src/lib/auto-import.ts'), {
+    '@/lib/local-semantic-review': load(path.join(root, 'src/lib/local-semantic-review.ts'), {
+      '@/lib/local-semantic-review-runtime': { evaluateLocalReviewWindow: async () => ({ kind: 'refused', reason: 'model-unavailable' }) },
+    }),
+    '@/lib/generic-review-entry': require('../build/generic-review-entry.js'),
     '@/lib/capture-trace': load(path.join(root, 'src/lib/capture-trace.ts')),
     '@/lib/foreground-history-priority': {
       waitForForegroundHistoryIdle: async () => { yields++; sliceEnds.push(parsed); },
@@ -32,7 +36,7 @@ async function scan(initialState, returnToForegroundAt = Infinity) {
     '@/lib/markets': { detectLaunchMarketFromSender: () => 'AE', pinnedLedgerCurrencyCode: () => null },
     '@/lib/universal-categorization': { suggestUniversalCategory: () => ({ merchant: '', category: 'other', deliberate: false }) },
     '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
-    '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
+    '@/lib/launch-alert-parser': { inspectGenericBankEventForReview: () => null, hasBankAlertMoneyHint: () => false, hasGenericBankAlertContext: () => false, createLaunchAlertSession: () => ({
       inspect: () => null, detectedMarket: () => null,
       parse: body => {
         parsed++;

@@ -106,6 +106,9 @@ export function Row({
   accessibilityLabel?: string;
 }) {
   const theme = useTheme();
+  // At the accessibility text sizes a trailing figure may need its own line
+  // rather than squeezing the row's title to a column of single letters.
+  const largeText = useLargeTextLayout();
   const border = {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.cardBorder,
@@ -115,7 +118,7 @@ export function Row({
   };
 
   if (!onPress && !onLongPress) {
-    return <View style={[styles.row, border, style]}>{children}</View>;
+    return <View style={[styles.row, largeText && styles.rowWrap, border, style]}>{children}</View>;
   }
   return (
     <SpringPressable
@@ -125,7 +128,7 @@ export function Row({
       onLongPress={onLongPress}
       opacityTo={1}
       scaleTo={0.985}
-      style={[styles.row, border, style]}>
+      style={[styles.row, largeText && styles.rowWrap, border, style]}>
       {children}
     </SpringPressable>
   );
@@ -192,7 +195,7 @@ export function LabelTable({ rows }: { rows: { label: string; value: React.React
   );
 }
 
-/** Back chevron + caps title, the header on every pushed screen. */
+/** Legacy screen shell, using the same readable title hierarchy as the scaffold. */
 export function ScreenHeader({ title, onBack }: { title: string; onBack: () => void }) {
   const theme = useTheme();
   const language = useLanguage();
@@ -211,7 +214,7 @@ export function ScreenHeader({ title, onBack }: { title: string; onBack: () => v
           color={theme.text}
         />
       </Pressable>
-      <ThemedText type="micro" themeColor="textTertiary" accessibilityRole="header">
+      <ThemedText type="heading" accessibilityRole="header" style={styles.screenTitle}>
         {title}
       </ThemedText>
     </View>
@@ -226,6 +229,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 11,
   },
+  rowWrap: { flexWrap: 'wrap' },
   block: {
     borderWidth: 1,
     borderRadius: Radius.sheet,
@@ -243,6 +247,7 @@ const styles = StyleSheet.create({
   },
   tableValue: {
     flex: 1,
+    minWidth: 0,
     gap: 2,
   },
   screenHeader: {
@@ -251,11 +256,12 @@ const styles = StyleSheet.create({
     gap: Spacing.three - 4,
     paddingVertical: Spacing.two,
   },
+  screenTitle: { flex: 1, minWidth: 0 },
   backButton: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: -12,
+    marginStart: -12,
   },
 });

@@ -83,6 +83,8 @@ function harness(options = {}) {
     react, 'expo-router': { useRouter: () => ({}), useFocusEffect: () => {} },
     'react-native': { AppState: appState, Platform: { OS: 'ios' } },
     '@/components/ui/toast': { useToast: () => ({ show: () => {} }) },
+    // The capture toast names nothing while App Lock is up; these runs have no lock.
+    '@/components/lock-gate': { usePrivacyGateCleared: () => true },
     '@/lib/auto-import': {},
     '@/lib/android-capture-sources': {
       androidSmsCaptureEnabled: current => !current.captureOptOut && (current.androidCaptureSources?.sms ?? true),
@@ -95,7 +97,7 @@ function harness(options = {}) {
     '@/lib/android-live-background': { installAndroidLiveCaptureLedger: () => () => {} },
     '../../modules/notification-reader': { __esModule: true, default: {} },
     '../../modules/sms-reader': { __esModule: true, default: {} },
-    '@/lib/haptics': {}, '@/lib/i18n': {},
+    '@/lib/haptics': {}, '@/lib/i18n': {}, '@/lib/capture-toast': { captureToastContent: () => null },
     '@/lib/notifications': { syncPaymentReminders: async () => {} },
     '@/lib/purchases': { isProActive: value => value.pro },
     '@/lib/trusted-bank-notification-packages': { bankNotificationAdmissionExpiresAt: () => 0 },

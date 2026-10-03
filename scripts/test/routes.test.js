@@ -63,7 +63,7 @@ ok('card and review routes retain their serializable IDs',
   ));
 
 ok('Wallet opens cards by serializable account ID on a normal row press',
-  /const openAccount = \(account: Account\)[\s\S]{0,240}router\.push\(`\/cards\?card=\$\{account\.id\}`\)/.test(
+  /const openAccount = \(account: Account\)[\s\S]{0,240}router\.push\(`\/card\?id=\$\{encodeURIComponent\(account\.id\)\}`\)/.test(
     fs.readFileSync(path.join(SRC, 'app/(tabs)/wallet.tsx'), 'utf8'),
   ));
 
@@ -85,11 +85,14 @@ ok('Wallet opens cards by serializable account ID on a normal row press',
   ok('Parser Research remains gated to internal and test builds',
     /isParserResearchBuild\(\)[\s\S]{0,500}router\.push\('\/parser-research'/.test(feedback));
 
-  const settings = fs.readFileSync(path.join(APP, 'settings.tsx'), 'utf8');
+  // Erase (and its last-owner recovery) moved to Settings → Data and help.
+  const settings = fs.readFileSync(path.join(APP, 'settings.tsx'), 'utf8') +
+    fs.readFileSync(path.join(APP, 'settings-data.tsx'), 'utf8');
   ok('last-owner recovery can still reach Trusted Devices',
     /last_owner[\s\S]{0,800}router\.push\('\/trusted-devices'/.test(settings));
-  ok('Trusted Devices remains absent from the ordinary Settings rows',
-    !/linkRow\(\s*t\('trustedSettingsRow'\)/.test(settings));
+  // The redesign gives Trusted devices & family an ordinary Privacy row.
+  ok('Trusted Devices is an ordinary Settings row on phones',
+    /Platform\.OS !== 'web' && linkRow\(\s*copy\.trustedRow[\s\S]{0,160}router\.push\('\/trusted-devices'\)/.test(settings));
 }
 
 /** Every file under src/, so nothing is missed by only checking screens. */
@@ -173,21 +176,28 @@ function sources(dir = SRC) {
  * None of that is reachable from a unit test — it is layout, and the failure
  * is a user's thumb. What IS reachable is the shape of the file, so this
  * checks the shape: that the mutating cycles are gone, that the destructive
- * action is a button standing alone at the end, and that a row which leads to
- * the paywall says so before it is tapped rather than after.
+ * action stands at the end under its own heading and only opens a
+ * confirmation, and that a row which leads to the paywall says so before it
+ * is tapped rather than after.
  */
 {
-  const settings = fs.readFileSync(path.join(SRC, 'app/settings.tsx'), 'utf8');
+  // Settings is the main list plus its Data and help sub-screen, drawn with
+  // the shared row shapes; the inventory holds across all three files.
+  const settings = fs.readFileSync(path.join(SRC, 'app/settings.tsx'), 'utf8') + '\n' +
+    fs.readFileSync(path.join(SRC, 'app/settings-data.tsx'), 'utf8') + '\n' +
+    fs.readFileSync(path.join(SRC, 'components/settings-rows.tsx'), 'utf8');
   const at = (needle) => settings.indexOf(needle);
 
   const settingsInventory = [
-    ['Pro summary', /<Block onPress=\{\(\) => router\.push\('\/pro'\)\}>/],
+    ['Pro summary', /testID="settings-pro-card"[\s\S]{0,300}router\.push\('\/pro'\)/],
     ['daily notifications', /toggleDailySummary\(next\)/],
     ['per-charge notifications', /requestInstantAlertsChange\(next\)[\s\S]*toggleChargeAlerts\(next\)/],
     ['SMS capture', /toggleSms/],
     ['iPhone local capture', /setIosAutomaticCapture/],
     ['history recovery', /beginHistoryImport\(\)[\s\S]*confirmIosCaptureRecovery/],
-    ['bank notification import', /gated\(onNotificationAccess\)/],
+    // Design language E: a gated row names its feature; a non-Pro tap opens
+    // the in-context Pro sheet instead of leaving for /pro (pro-gate.ts).
+    ['bank notification import', /gated\('notifications', onNotificationAccess\)/],
     ['saved privacy preference review', /reviewLegacyPrivacyPreference[\s\S]*privacyLegacyReview/],
     ['App Lock', /toggleAppLock/],
     ['retention and security', /privacyRetentionExact[\s\S]*privacySecurityExact/],
@@ -203,7 +213,7 @@ function sources(dir = SRC) {
     ['feedback', /router\.push\('\/feedback'\)/],
     ['public links', /configuredPublicUrl\('privacyPolicyUrl'\)[\s\S]*configuredPublicUrl\('termsOfUseUrl'\)[\s\S]*configuredPublicUrl\('supportUrl'\)/],
     ['founder brand gate', /isFounderUnlockBuild\(\)[\s\S]*onFounderLogoTap\(\)[\s\S]*<WafraMark/],
-    ['destructive erase', /<Button\s+label=\{t\('eraseAll'\)\}\s+variant="danger"/],
+    ['destructive erase', /<SettingsLinkRow\s+title=\{t\('eraseAll'\)\}[\s\S]{0,200}tone="danger"[\s\S]{0,120}onPress=\{confirmErase\}/],
   ];
   const missingSettingsInventory = settingsInventory
     .filter(([, pattern]) => !pattern.test(settings))
@@ -248,24 +258,25 @@ function sources(dir = SRC) {
   // The row now answers "which language am I in", which the old subtitle
   // ("English · العربية is available instantly") never did.
   ok('the language row shows the language that is on',
-    /linkRow\(t\('language'\), languagePreference === 'system'[\s\S]{0,180}LANGUAGE_NAMES\[language\]/
+    /linkRow\(t\('language'\)[\s\S]{0,400}value: languagePreference === 'system'[\s\S]{0,180}LANGUAGE_NAMES\[language\]/
       .test(settings));
 
   ok('ledger backup and restore remain available without Pro',
-    /linkRow\(t\('backupJson'\), null, backupJson\)/.test(settings) &&
-      /linkRow\(t\('restoreBackup'\), null, restoreFromFile\)/.test(settings));
+    /linkRow\(copy\.backupTitle, copy\.backupDetail, backupJson/.test(settings) &&
+      /linkRow\(copy\.restoreTitle, copy\.restoreDetail, restoreFromFile/.test(settings) &&
+      !/gated\(backupJson|gated\(restoreFromFile/.test(settings));
 
   const cards = fs.readFileSync(path.join(SRC, 'app/cards.tsx'), 'utf8');
   ok('Payment cards names stored instruments and keeps their details accessible',
-    /const cardsHeader: ScreenHeaderProps = \{[\s\S]{0,180}title: t\('cardsTitle'\)/.test(cards) &&
+    /const cardsNav: BandNav = \{[\s\S]{0,180}title: t\('cardsTitle'\)/.test(cards) &&
       /activeCards\.map/.test(cards) && /setDetail\(card\)/.test(cards) &&
       /<CardDetailSheet[\s\S]*?account=\{detail\}/.test(cards));
 
   const flow=fs.readFileSync(path.join(SRC,'app/(tabs)/flow.tsx'),'utf8');
   const trends=fs.readFileSync(path.join(SRC,'components/spending/spending-trends.tsx'),'utf8');
-  ok('large text moves six-month figures into a wrapping readable list',
+  ok('six-month figures stay visible in a wrapping readable list at every text size',
     /<SpendingTrends/.test(flow) && /useWindowDimensions\(\)/.test(trends) &&
-    /!showAllTrendLabels &&/.test(trends) && /cashflow-month-details/.test(trends) &&
+    !/!showAllTrendLabels &&/.test(trends) && /cashflow-month-details/.test(trends) &&
     /p\.months\.map/.test(trends) && /flexWrap: 'wrap'/.test(trends));
   ok('Arabic labels retain their language face and amounts stay tabular',
     /<ThemedText[^>]*>\{w\.income\}<\/ThemedText>[\s\S]*?<Money/.test(trends) &&
@@ -274,20 +285,26 @@ function sources(dir = SRC) {
   ok('empty large-text months are no-data rather than zero balances',
     /month\.incomeFils !== 0 \|\| month\.expenseFils !== 0/.test(trends) && /— \{w\.noData\}/.test(trends));
 
-  ok('erase is a destructive button, not a chevron row',
+  // Erase is a row like its neighbours (the design's "Erase everything"),
+  // told apart by the destructive tone on its glyph and title, under its own
+  // Danger zone heading, and it only opens the confirmation dialog.
+  ok('erase is a destructive-toned row that only opens the confirmation',
     !/linkRow\(t\('eraseAll'\)/.test(settings) &&
-      /<Button\s+label=\{t\('eraseAll'\)\}\s+variant="danger"/.test(settings));
+      /<SettingsLinkRow\s+title=\{t\('eraseAll'\)\}[\s\S]{0,200}icon="trash"[\s\S]{0,40}tone="danger"[\s\S]{0,120}onPress=\{confirmErase\}/.test(settings) &&
+      /color: tone === 'danger' \? band\.statusOver : band\.text/.test(settings) &&
+      /const confirmErase = \(\) => \{[\s\S]{0,700}setEraseDialogVisible\(true\)/.test(settings));
 
   // Alone at the end: nothing routine may sit against it. "Sort your shops"
   // was its immediate neighbour.
   ok('erase stands after everything else on the screen',
-    at("t('eraseAll')") > at("t('settingsTagline')") &&
+    at("t('eraseAll')") > at("publicLinkRow(t('supportWebsite')") &&
+      at("t('eraseAll')") > at('<TesterDiagnosticsControl />') &&
       at("t('eraseAll')") > at("t('sortShops')"));
 
   // Every gated() call site carries the lock, or a free user learns which
   // rows are paid by being thrown at the paywall.
   {
-    const gatedCalls = (settings.match(/\bgated\([a-zA-Z]/g) ?? []).length;
+    const gatedCalls = (settings.match(/\bgated\(['a-zA-Z]/g) ?? []).length;
     const marked = (settings.match(/pro: true/g) ?? []).length;
     ok(`every paywalled row is marked as one (${marked} of ${gatedCalls})`,
       gatedCalls > 0 && marked === gatedCalls);
@@ -298,7 +315,7 @@ function sources(dir = SRC) {
   // The navigation also uses privacyHeader; locate the actual section rather
   // than accidentally comparing notification content with its tab label.
   const notificationsAt = at("t('dailySummarySetting')");
-  const privacySectionAt = at("<SectionHeader title={t('privacyHeader')}");
+  const privacySectionAt = at("<SettingsGroupTitle title={copy.privacyAndSecurity}");
   ok('the notification switches are out of the Privacy group and above it',
     notificationsAt >= 0 && privacySectionAt > notificationsAt);
 
@@ -313,8 +330,9 @@ function sources(dir = SRC) {
       /Platform\.OS !== 'web' && isFounderUnlockBuild\(\)/.test(settings) &&
       /await unlockFounderPro\(\)/.test(settings));
 
-  ok('Trusted devices and family are hidden from Settings for now',
-    !/linkRow\(\s*t\('trustedSettingsRow'\)/.test(settings));
+  ok('Trusted devices and family has one Settings row, in Privacy and security',
+    (settings.match(/linkRow\(\s*copy\.trustedRow/g) ?? []).length === 1 &&
+      at('copy.trustedRow') > at('<SettingsGroupTitle title={copy.privacyAndSecurity}'));
 
   // A toggle row whose label and sub-line are dead text, beside link rows that
   // are tappable edge to edge, is a target the user has to find twice. The
@@ -397,12 +415,14 @@ function sources(dir = SRC) {
     'payCardDue',
     'deleteBill',
     'setNotSubscription',
+    'setSubscriptionCancelled',
     'addBill',
     'setPro',
   ];
 
   const screens = {
-    'app/(tabs)/bills.tsx': ['markBillPaid', 'payCardDue', 'deleteBill', 'setNotSubscription'],
+    // Card payments are recorded from the card's own payment sheet (below).
+    'app/(tabs)/bills.tsx': ['markBillPaid', 'deleteBill', 'setNotSubscription', 'setSubscriptionCancelled'],
     'components/card-payment-sheet.tsx': ['payCardDue'],
   };
 
@@ -461,9 +481,9 @@ function sources(dir = SRC) {
     // one sheet that renders them is handed that same callback.
     const wired = [
       /onConfirm: \(\) =>\s*markBillPaid\(/,
-      /onConfirm: \(\) =>\s*payCardDue\(/,
       /onConfirm: \(\) =>\s*deleteBill\(/,
       /onConfirm: \(\) =>\s*setNotSubscription\(/,
+      /onConfirm: \(\) => \{\s*setSubscriptionCancelled\(/,
     ].filter((re) => re.test(bills));
     ok(`every Bills commit hangs off a confirmation (${wired.length} of 4)`, wired.length === 4);
     ok('Bills draws the confirmation it gates on',
@@ -472,7 +492,7 @@ function sources(dir = SRC) {
     // The wording is the part of this that was never broken. Pin the keys so a
     // later rewrite of the mechanism cannot quietly take the copy with it.
     const keys = [
-      'markBillPaidTitle', 'billRecordsExpense', 'payAccountTitle', 'payAccountBody',
+      'markBillPaidTitle', 'billRecordsExpense',
       'deleteReminderTitle', 'deleteReminderBody', 'notASubscriptionQ', 'removeSubscriptionBody',
     ];
     const lost = keys.filter((k) => !bills.includes(`'${k}'`));
@@ -500,7 +520,9 @@ function sources(dir = SRC) {
   }
 
   {
-    const pro = code(read('app/pro.tsx'));
+    // The checkout moved verbatim into useProCheckout (shared with the Pro
+    // sheet); the screen and the hook are one surface.
+    const pro = code(read('app/pro.tsx') + '\n' + read('hooks/use-pro-checkout.ts'));
     // Superwall owns checkout; native fallback outcomes must still be visible.
     const outcomes = [
       "title: t('purchaseUnavailable')",

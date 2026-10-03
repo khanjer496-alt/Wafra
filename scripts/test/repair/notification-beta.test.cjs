@@ -209,7 +209,7 @@ test('the scanner reads only with native availability and granted notification a
     '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
     '@/lib/ledger-money': globalMoneyStub,
     '@/lib/universal-categorization': globalCategoryStub,
-    '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
+    '@/lib/launch-alert-parser': { inspectGenericBankEventForReview: () => null, hasBankAlertMoneyHint: () => false, hasGenericBankAlertContext: () => false, createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
   const run = async () => { const result = await scanner.scanInbox(0, {}, undefined, null); await result.commit(); };
@@ -243,7 +243,7 @@ test('notification-only scan drains without touching the SMS inbox', async () =>
     '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
     '@/lib/ledger-money': globalMoneyStub,
     '@/lib/universal-categorization': globalCategoryStub,
-    '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
+    '@/lib/launch-alert-parser': { inspectGenericBankEventForReview: () => null, hasBankAlertMoneyHint: () => false, hasGenericBankAlertContext: () => false, createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => null, parse: () => null }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
   });
   const result = await scanner.scanInbox(0, {}, undefined, null, { notificationOnly: true });
@@ -318,7 +318,7 @@ test('500 queued notification candidates process without touching SMS and ACK on
     '@/lib/markets': { detectLaunchMarketFromSender: () => null, pinnedLedgerCurrencyCode: () => null },
     '@/lib/ledger-money': globalMoneyStub,
     '@/lib/universal-categorization': globalCategoryStub,
-    '@/lib/launch-alert-parser': { createLaunchAlertSession: () => ({
+    '@/lib/launch-alert-parser': { inspectGenericBankEventForReview: () => null, hasBankAlertMoneyHint: () => false, hasGenericBankAlertContext: () => false, createLaunchAlertSession: () => ({
       inspect: () => null, detectedMarket: () => 'AE', parse: () => { parseCalls++; return parsed; },
     }) },
     '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
@@ -430,4 +430,66 @@ test('Wafra transaction alerts are visible and sounding rather than silent', () 
   assert.match(relay, /sound: 'default'/);
   assert.match(relay, /interruptionLevel: 'active'/);
   assert.match(notifications, /shouldPlaySound: true/);
+});
+
+for (const mode of ['ready', 'cold', 'inactive']) for (const transport of ['notification', 'sms'])
+test(`${transport} shadow ${mode}: no discarded inspection, admission delay, or money changes`, async () => {
+  let releaseShadow;
+  const pendingShadow = new Promise(resolve => { releaseShadow = resolve; });
+  let observed = 0, queued = 0, inspected = 0, acknowledgements = 0, completed = false;
+  const parsed = {
+    kind: 'transaction', type: 'expense', amountFils: 12345, currency: 'AED',
+    merchant: 'Test Shop', date: null, dueDay: null, minDueFils: null, card: '1234',
+    reference: null, transferHint: false, snapshotFils: null, snapshotKind: null,
+    categoryGuess: 'shopping', categoryDeliberate: false, raw: 'synthetic',
+  };
+  const scanner = load(path.join(root, 'src/lib/auto-import.ts'), {
+    '@/lib/capture-trace': { captureTrace: () => {}, captureTraceEnabled: () => false },
+    'react-native': { Platform: { OS: 'android' }, AppState: { currentState: mode === 'inactive' ? 'background' : 'active' } },
+    'expo-crypto': {}, 'expo-secure-store': {},
+    '../../modules/notification-reader': { __esModule: true, default: {
+      isAvailable: () => true, isEnabled: () => transport === 'notification',
+      getCaptured: async () => [{ id: 'shadow-delay-notification-001', pkg: 'com.adcb.nexgen', appLabel: 'ADCB',
+        title: 'Card purchase', text: 'AED 123.45 at TEST SHOP', ts: 1_800_000_000_000, sourceClass: 'trusted-bank' }],
+      ackCaptured: async ids => { acknowledgements += ids.length; return true; },
+    } },
+    '../../modules/sms-reader': { __esModule: true, default: { getInboxSms: async () => { assert.equal(transport, 'sms'); return [{ id: 123, address: 'ADCB', body: 'Card purchase AED 123.45 at TEST SHOP', date: 1_800_000_000_000 }]; } } },
+    '@/lib/local-semantic-shadow': {
+      canCollectLocalSemanticShadow: () => mode === 'ready',
+      observeLocalSemanticParserShadow: async () => { observed++; await pendingShadow; },
+      queueLocalSemanticParserShadow: () => { queued++; },
+      buildLocalParserSemanticWindow: () => null,
+    },
+    '@/lib/alert-review-tray': {}, '@/lib/format': { toISODate: () => '2026-09-08' },
+    '@/lib/dedupe': { bodyPrint: value => value }, '@/lib/sms-parser': {},
+    '@/lib/alert-institution-grammars': { hasUniversalInstitutionSender: () => false },
+    '@/lib/markets': { detectLaunchMarketFromSender: () => 'AE', pinnedLedgerCurrencyCode: () => null },
+    '@/lib/ledger-money': globalMoneyStub, '@/lib/universal-categorization': globalCategoryStub,
+    '@/lib/launch-alert-parser': {
+      inspectGenericBankEventForReview: () => { inspected++; return { decision: 'review' }; },
+      hasBankAlertMoneyHint: () => true, hasGenericBankAlertContext: () => true,
+      createLaunchAlertSession: () => ({ inspect: () => null, detectedMarket: () => 'AE', parse: () => parsed }),
+    },
+    '@/lib/unparsed-launch-alert': {}, '@/lib/trusted-bank-notification-packages': moduleFor({}), '@/lib/import-plan': {},
+  });
+  const scan = scanner.scanInbox(0, {}, undefined, null, { notificationOnly: transport === 'notification', maxInboxPages: 1 }).then(result => { completed = true; return result; });
+  try {
+    // Let the scanner's native-Promise continuations settle while inference is
+    // deliberately unresolved; there is no inference-speed timing threshold.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(completed, true, 'optional inference must not hold the admission result');
+    const result = await scan;
+    assert.equal(observed, 0);
+    assert.equal(inspected, mode === 'ready' ? 1 : 0, 'only collectible shadow work needs a second inspection');
+    assert.equal(queued, mode === 'ready' ? 1 : 0);
+    assert.equal(result.parsed.length, 1);
+    assert.equal(result.parsed[0].amountFils, 12345);
+    assert.equal(result.parsed[0].currency, 'AED');
+    assert.equal(acknowledgements, 0, 'queueing a metric cannot acknowledge native capture');
+    await result.commit();
+    assert.equal(acknowledgements, transport === 'notification' ? 1 : 0);
+  } finally {
+    releaseShadow();
+    await scan;
+  }
 });

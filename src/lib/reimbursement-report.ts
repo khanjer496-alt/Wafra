@@ -1,5 +1,6 @@
 import { internalTransferIds, isSpending, liveAccountIds } from '@/lib/ledger';
-import type { Account, CategoryId, Transaction } from '@/lib/types';
+import { categoryLabel } from '@/lib/categories';
+import type { Account, CategoryId, CustomCategory, Transaction } from '@/lib/types';
 
 export interface ExpenseReportOptions {
   transactions: Transaction[];
@@ -8,9 +9,12 @@ export interface ExpenseReportOptions {
   /** Persisted ISO minor-unit exponent for the ledger's integer amounts. */
   currencyExponent?: 0 | 2 | 3;
   language: 'en' | 'ar';
+  /** Device Region (expo-localization) for dates and numbers; en-AE/ar-AE without one. */
+  region?: string | null;
   from: string;
   to: string;
   generatedAt?: Date;
+  customCategories?: readonly CustomCategory[];
 }
 
 const ARABIC_CATEGORIES: Record<CategoryId, string> = {
@@ -101,6 +105,28 @@ export function reportExpenses(
 }
 
 /**
+ * The UI language in the device's Region: "en-DE", "ar-SA-u-nu-latn".
+ *
+ * `region` is expo-localization's device Region (ledger-money's
+ * displayRegion()), passed in by the caller — never derived from the
+ * language tag, so an English (US) phone in the UAE keeps day-first UAE
+ * dates. With no usable Region this is the launch-tested en-AE/ar-AE, exactly
+ * as before. Arabic keeps Latin digits, as everywhere else in the app.
+ * (statement-coverage.ts carries the same rule; both stay import-free.)
+ */
+export function reportLocale(language: string, region?: string | null): string {
+  const base = language === 'ar' ? 'ar' : 'en';
+  const code = region?.trim().toUpperCase();
+  if (!code || !/^[A-Z]{2}$/.test(code)) return `${base}-AE`;
+  const tag = `${base}-${code}${base === 'ar' ? '-u-nu-latn' : ''}`;
+  try {
+    return Intl.DateTimeFormat.supportedLocalesOf([tag]).length ? tag : `${base}-AE`;
+  } catch {
+    return `${base}-AE`;
+  }
+}
+
+/**
  * A print-native, self-contained expense report. It deliberately has no
  * network assets: iOS WKWebView cannot print local asset URLs, and a finance
  * export should not fetch a font or logo from the internet while rendering.
@@ -116,7 +142,7 @@ export function buildExpenseReportHtml(options: ExpenseReportOptions): string {
     generatedAt = new Date(),
   } = options;
   const arabic = language === 'ar';
-  const locale = arabic ? 'ar-AE' : 'en-AE';
+  const locale = reportLocale(language, options.region);
   const copy = arabic
     ? {
         title: 'تقرير مصروفات',
@@ -176,7 +202,7 @@ export function buildExpenseReportHtml(options: ExpenseReportOptions): string {
           return `<tr>
             <td class="nowrap">${escapeReportHtml(formatIso(tx.date))}</td>
             <td><strong>${escapeReportHtml(tx.title)}</strong>${note}</td>
-            <td>${escapeReportHtml(categories[tx.category])}</td>
+            <td>${escapeReportHtml(categories[tx.category] ?? categoryLabel(tx.category, language, options.customCategories))}</td>
             <td>${escapeReportHtml(account)}</td>
             <td class="money nowrap">${escapeReportHtml(formatMoney(tx.amountFils))}</td>
           </tr>`;

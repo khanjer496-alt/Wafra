@@ -68,6 +68,5 @@ artifacts/
 builds/
 /--output
 /validation/
-/.screenmap/
 /out/
 /modules/*/android/build/

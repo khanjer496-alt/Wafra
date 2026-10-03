@@ -1,6 +1,13 @@
 import { categoryLabel, getCategory, isFixedCommitment } from '@/lib/categories';
 import { isIncome, isSpending } from '@/lib/ledger';
-import { daysInMonth, formatAED, getMonthStartDay, shortDate } from '@/lib/format';
+import {
+  daysInMonth,
+  formatAED,
+  getMonthStartDay,
+  ledgerTypicalMinor,
+  ledgerWholeMajor,
+  shortDate,
+} from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import {
   elapsedDays,
@@ -17,8 +24,9 @@ import {
   detectSubscriptions,
   subscriptionsMonthlyTotal,
   trueSubscriptions,
+  withoutCancelled,
 } from '@/lib/subscriptions';
-import type { Budget, CategoryId, Transaction } from '@/lib/types';
+import type { CustomCategory, Budget, CategoryId, Transaction } from '@/lib/types';
 
 export interface MonthSummary {
   incomeFils: number;
@@ -227,7 +235,7 @@ export function buildInsights(
   notSubscriptions: string[] = [],
   liveAccounts?: Set<string>,
   internalTransfers?: Set<string>,
-  options: { includeRecurringAnalysis?: boolean } = {},
+  options: { customCategories?: readonly CustomCategory[]; includeRecurringAnalysis?: boolean; cancelledSubscriptions?: Readonly<Record<string, string | null>> } = {},
 ): Insight[] {
   const insights: Insight[] = [];
   const period = toPeriod(periodLike);
@@ -316,7 +324,7 @@ export function buildInsights(
     const spent = spentByCategory.get(b.category) ?? 0;
     if (b.limitFils <= 0) continue;
     const ratio = spent / b.limitFils;
-    const cat = getCategory(b.category);
+    const cat = getCategory(b.category, options.customCategories);
     if (ratio >= 1) {
       insights.push({
         id: `budget-over-${b.category}`,
@@ -351,7 +359,7 @@ export function buildInsights(
   // drift the moment a third fixed category is added.
   const top = current.byCategory.filter((c) => !isFixedCommitment(c.category))[0];
   if (top && top.share >= 0.15) {
-    const cat = getCategory(top.category);
+    const cat = getCategory(top.category, options.customCategories);
     insights.push({
       id: 'top-category',
       tone: 'neutral',
@@ -424,14 +432,16 @@ export function buildInsights(
     if (!isSpending(t, liveAccounts, internalTransfers) || isFixedCommitment(t.category)) continue;
     if (!largest || t.amountFils > largest.amountFils) largest = t;
   }
-  if (largest && largest.amountFils >= 20_000) {
+  // "Large" is about AED 200 in the ledger's currency: 20,000 fils, ¥20,000,
+  // KWD 20.000 — not 20,000 minor units of whatever the ledger holds.
+  if (largest && largest.amountFils >= ledgerTypicalMinor(200)) {
     insights.push({
       id: 'largest',
       tone: 'neutral',
       // The glyph of what was bought, not a decoration. `diamond` used to sit
       // here, and `diamond` is the Wafra Pro mark on Settings, Home and /pro —
       // one glyph cannot mean both "premium" and "largest transaction".
-      icon: getCategory(largest.category).icon,
+      icon: getCategory(largest.category, options.customCategories).icon,
       title: t('insightBiggestPurchase'),
       body: tf('insightBiggestPurchaseBody', {
         merchant: largest.title,
@@ -449,11 +459,11 @@ export function buildInsights(
   // card must never trigger that heavy history job just after launch.
   const subs = options.includeRecurringAnalysis === false
     ? []
-    : activeSubscriptions(
+    : withoutCancelled(activeSubscriptions(
         trueSubscriptions(
           detectSubscriptions(transactions, notSubscriptions, today, liveAccounts, internalTransfers),
         ),
-      );
+      ), options.cancelledSubscriptions);
   if (subs.length >= 2) {
     const monthly = subscriptionsMonthlyTotal(subs);
     if (isMonthMode && current.incomeFils > 0 && monthly / current.incomeFils >= 0.08) {
@@ -483,13 +493,14 @@ export function buildInsights(
       });
     }
   }
-  // Rounded to whole dirhams for display, so a rise that survives the test
-  // but not the rounding would print the same figure twice. If the user
-  // cannot see the difference, there is nothing to tell them.
+  // Compared in whole major units of the ledger currency (dirhams for AED,
+  // yen for JPY, dinars for KWD), so a rise too small to matter in that unit
+  // is not announced. If the user cannot see the difference, there is
+  // nothing to tell them.
   const increased = subs.find(
     (s) =>
       s.priceIncreased &&
-      Math.round(s.lastAmountFils / 100) !== Math.round(s.priorTypicalFils / 100),
+      ledgerWholeMajor(s.lastAmountFils) !== ledgerWholeMajor(s.priorTypicalFils),
   );
   if (increased) {
     insights.push({

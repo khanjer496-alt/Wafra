@@ -289,12 +289,15 @@ struct PagedHistoryTests {
         found: 2, guids: "a\(sep)b", bodies: "x\(sep)y\(sep)z", senders: "s\(sep)s", dates: "\(stamp(fixedNow))\(sep)\(stamp(fixedNow))")
     }
     try check("column refusal leaves the cursor untouched", try json(columnar.status()!)["checked"] as! Int == col["checked"] as! Int)
-    try rejected("a sender column that does not line up is refused, never silently blanked for the page") {
+    let beforePartialSender = try columnar.status()
+    try rejected("a partially missing sender column is refused, never padded or blanked for the page") {
       let next = page(rows(100), col); let (g2, b2, _, d2) = columns(next)
       _ = try columnar.stageColumns(sessionId: col["sessionId"] as! String,
         authorizationSecret: col["authorizationSecret"] as! String, revision: col["revision"] as! Int,
-        found: next.count, guids: g2, bodies: b2, senders: "", dates: d2)
+        found: next.count, guids: g2, bodies: b2, senders: "TEST", dates: d2)
     }
+    try check("a partial sender column leaves the entire saved checkpoint unchanged",
+      try columnar.status() == beforePartialSender)
     try rejected("a column larger than its records could carry is refused before splitting") {
       _ = try columnar.stageColumns(sessionId: col["sessionId"] as! String,
         authorizationSecret: col["authorizationSecret"] as! String, revision: col["revision"] as! Int,
@@ -311,6 +314,67 @@ struct PagedHistoryTests {
     let colRecord = try json(columnar.readChunk(sessionId: colSession, chunkIndex: 0)[0])
     try check("column-framed body survives the round trip unchanged", colRecord["text"] as! String == rows(100)[0].body)
     try check("column-framed sender survives the round trip unchanged", colRecord["sender"] as? String == "TEST")
+
+    // MessageEntity may expose no Sender property at all. Its list-wide
+    // extraction is then one empty string, while the typed-row fallback
+    // stages the same messages with an empty sender for every row.
+    let absentSource = rows(100)
+    let absentColumns = make("absent-sender-columns")
+    let absentTyped = make("absent-sender-typed")
+    var absentCol = try begin(absentColumns, absentSource)
+    var absentRow = try begin(absentTyped, absentSource)
+    while absentCol["status"] as! String != "complete" {
+      let next = page(absentSource, absentCol)
+      let (guids, bodies, _, dates) = columns(next)
+      absentCol = try json(absentColumns.stageColumns(sessionId: absentCol["sessionId"] as! String,
+        authorizationSecret: absentCol["authorizationSecret"] as! String,
+        revision: absentCol["revision"] as! Int, found: next.count,
+        guids: guids, bodies: bodies, senders: "", dates: dates))
+      for row in next {
+        _ = try absentTyped.stageRow(sessionId: absentRow["sessionId"] as! String,
+          authorizationSecret: absentRow["authorizationSecret"] as! String,
+          revision: absentRow["revision"] as! Int,
+          guid: row.guid, body: row.body, sender: "", instant: row.date)
+      }
+      absentRow = try json(absentTyped.commitRows(sessionId: absentRow["sessionId"] as! String,
+        authorizationSecret: absentRow["authorizationSecret"] as! String,
+        revision: absentRow["revision"] as! Int, found: next.count))
+      for key in ["revision", "before", "after", "limit", "status", "checked", "accepted", "skipped"] {
+        try check("all-absent sender columns preserve typed-row checkpoint \(key)",
+          (absentCol[key] as? NSObject) == (absentRow[key] as? NSObject))
+      }
+    }
+    try check("all-absent sender columns accept every source message without skipping",
+      absentCol["accepted"] as! Int == 100 && absentCol["skipped"] as! Int == 0)
+    let absentColId = absentCol["sessionId"] as! String
+    let absentRowId = absentRow["sessionId"] as! String
+    let absentSession = try absentColumns.completedSession(sessionId: absentColId)!
+    var absentRecords: [String] = []
+    for index in absentSession.chunkIndices {
+      let columnRecords = try absentColumns.readChunk(sessionId: absentColId, chunkIndex: index)
+      let typedRecords = try absentTyped.readChunk(sessionId: absentRowId, chunkIndex: index)
+      try check("all-absent sender columns preserve exact typed-row GUID identities, bodies and dates", columnRecords == typedRecords)
+      absentRecords += columnRecords
+    }
+    try check("all-absent sender round trip preserves the complete source count", absentRecords.count == 100)
+    for (index, value) in absentRecords.enumerated() {
+      let record = try json(value)
+      try check("all-absent sender records preserve source text and date without inventing sender identity",
+        record["text"] as? String == absentSource[index].body &&
+        record["receivedAt"] as? String == stamp(absentSource[index].date) && record["sender"] == nil)
+    }
+    let absentRefusal = make("absent-sender-refusal")
+    let absentRefusalState = try begin(absentRefusal, rows(2))
+    let beforeAbsentRefusal = try absentRefusal.status()
+    try rejected("all-absent senders do not permit a body sentinel to misalign records") {
+      let next = page(rows(2), absentRefusalState); let (guids, bodies, _, dates) = columns(next)
+      _ = try absentRefusal.stageColumns(sessionId: absentRefusalState["sessionId"] as! String,
+        authorizationSecret: absentRefusalState["authorizationSecret"] as! String,
+        revision: absentRefusalState["revision"] as! Int, found: next.count,
+        guids: guids, bodies: bodies + sep + "extra", senders: "", dates: dates)
+    }
+    try check("all-absent sender sentinel refusal leaves the entire checkpoint unchanged",
+      try absentRefusal.status() == beforeAbsentRefusal)
 
     // Typed-row path (v4): Begin with exact instants, one staged row per
     // Message, one commit per page. No Shortcuts-formatted date text exists.
@@ -511,6 +575,176 @@ struct PagedHistoryTests {
         revision: s["revision"] as! Int, guid: "old-5", body: "x", sender: "TEST", instant: windowSource[125].date)
       _ = try commitTyped(fresh, s, found: 1)
     }
+    // Replay the photographed failure using synthetic GUIDs/bodies only.
+    // Build the checkpoint through real commits rather than forging head.json:
+    // one equal-second boundary withholds two rows on page one, then 25 pages
+    // commit 50 each, reaching exactly 1,299 checked at revision 26.
+    let photoBefore = iso.date(from: "2024-09-25T13:33:29.000Z")!
+    let photoBadDate = iso.date(from: "2024-09-25T13:34:44.113Z")!
+    let photoOldest = iso.date(from: "2022-11-29T11:07:42.214Z")!
+    let photoBase = photoBefore.addingTimeInterval(1_297.8)
+    var photoRows: [Row] = []
+    for index in 0..<1_400 {
+      let seconds = Double(index > 49 ? index - 1 : index)
+      let body = index < 3 ? "" : "Synthetic screenshot regression \(index)"
+      photoRows.append(Row(guid: "photo-synthetic-\(index)",
+        date: photoBase.addingTimeInterval(-seconds), body: body))
+    }
+    photoRows.append(Row(guid: "photo-synthetic-oldest", date: photoOldest, body: "Synthetic anchor"))
+    func photoFixture(_ name: String) throws -> (WafraPagedHistoryStore, [String: Any]) {
+      let fixture = make(name)
+      var cursor = try begin(fixture, photoRows)
+      for _ in 0..<26 { cursor = try send(fixture, cursor, page(photoRows, cursor)) }
+      try check("photo fixture reaches revision 26 with exact saved counts",
+        cursor["revision"] as! Int == 26 && cursor["checked"] as! Int == 1_299 &&
+        cursor["accepted"] as! Int == 1_296 && cursor["skipped"] as! Int == 3)
+      try check("photo fixture reaches the exact photographed query bounds",
+        cursor["before"] as! String == "2024-09-25T13:33:29.000Z" &&
+        cursor["after"] as! String == "2024-06-27T13:33:29.000Z")
+      return (fixture, cursor)
+    }
+    func journalSnapshot(_ name: String) throws -> [String: Data] {
+      let directory = root.appendingPathComponent("\(name)/active")
+      let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+      return try Dictionary(uniqueKeysWithValues: files.filter {
+        $0.lastPathComponent == "head.json" || $0.lastPathComponent.hasPrefix("page-")
+      }.map { ($0.lastPathComponent, try Data(contentsOf: $0)) })
+    }
+    let (photoStore, photoState) = try photoFixture("photo-recovered")
+    let photoPage = page(photoRows, photoState)
+    let photoJournal = try journalSnapshot("photo-recovered")
+    let photoStatus = try photoStore.status()
+    let separator = String(WafraPagedHistoryStore.columnSeparator)
+    let photoReason = try rangeDetail("photo column date beyond the cursor") {
+      _ = try photoStore.stageColumns(sessionId: photoState["sessionId"] as! String,
+        authorizationSecret: photoState["authorizationSecret"] as! String, revision: 26, found: 51,
+        guids: photoPage.map(\.guid).joined(separator: separator),
+        bodies: photoPage.map(\.body).joined(separator: separator),
+        senders: Array(repeating: "TEST", count: 51).joined(separator: separator),
+        dates: photoPage.enumerated().map { stamp($0.offset == 0 ? photoBadDate : $0.element.date) }.joined(separator: separator))
+    }
+    try check("photo refusal reports the exact timestamp, cursor, anchor and revision",
+      photoReason.contains("row 1/51 at 2024-09-25T13:34:44.113Z is not before the cursor") &&
+      photoReason.contains("before=2024-09-25T13:33:29.000Z") &&
+      photoReason.contains("after=2024-06-27T13:33:29.000Z") &&
+      photoReason.contains("oldest=2022-11-29T11:07:42.214Z revision=26"))
+    try check("a refused column page preserves every committed journal byte and saved count",
+      try journalSnapshot("photo-recovered") == photoJournal && photoStore.status() == photoStatus)
+    for row in photoPage {
+      _ = try photoStore.stageRow(sessionId: photoState["sessionId"] as! String,
+        authorizationSecret: photoState["authorizationSecret"] as! String, revision: 26,
+        guid: row.guid, body: row.body, sender: "TEST", instant: row.date)
+    }
+    let photoRecovered = try commitTyped(photoStore, photoState, found: 51)
+    try check("same-page typed dates recover once without resetting previously saved rows",
+      photoRecovered["revision"] as! Int == 27 && photoRecovered["checked"] as! Int == 1_349 &&
+      photoRecovered["accepted"] as! Int == 1_346 && photoRecovered["skipped"] as! Int == 3)
+    let recoveredJournal = try journalSnapshot("photo-recovered")
+    try check("successful typed recovery leaves all 26 earlier page files byte-identical",
+      photoJournal.filter { $0.key.hasPrefix("page-") }.allSatisfy { recoveredJournal[$0.key] == $0.value })
+    let photoReplay = try commitTyped(photoStore, photoState, found: 51)
+    try check("lost typed acknowledgement cannot commit the recovered page twice",
+      photoReplay["revision"] as! Int == 27 && photoReplay["checked"] as! Int == 1_349)
+
+    let (persistentStore, persistentState) = try photoFixture("photo-persistent")
+    let persistentJournal = try journalSnapshot("photo-persistent")
+    let persistentStatus = try persistentStore.status()
+    for (index, row) in photoPage.enumerated() {
+      _ = try persistentStore.stageRow(sessionId: persistentState["sessionId"] as! String,
+        authorizationSecret: persistentState["authorizationSecret"] as! String, revision: 26,
+        guid: row.guid, body: row.body, sender: "TEST", instant: index == 0 ? photoBadDate : row.date)
+    }
+    for _ in 0..<2 {
+      _ = try rangeDetail("persistent typed date violation") {
+        _ = try commitTyped(persistentStore, persistentState, found: 51)
+      }
+      try check("persistent typed refusal retains all saved pages, cursor and counts",
+        try journalSnapshot("photo-persistent") == persistentJournal && persistentStore.status() == persistentStatus)
+    }
+    // Blank-GUID identity must not depend on which path staged the row. The
+    // column path receives Shortcuts' local-offset text, the typed-row path a
+    // Date; alternating them page by page crosses every overlap both ways.
+    func offsetStamp(_ date: Date) -> String {
+      let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      f.timeZone = TimeZone(secondsFromGMT: 4 * 3_600)!
+      return f.string(from: date)
+    }
+    try check("the column fixture really carries a local offset", offsetStamp(fixedNow).hasSuffix("+04:00"))
+    let mixedSource = rows(300).enumerated().map { index, row in
+      index == 0 || index == 299 ? row : Row(guid: "", date: row.date, body: row.body)
+    }
+    let mixed = make("blank-guid-mixed-paths")
+    var mixedState = try begin(mixed, mixedSource)
+    var mixedColumns = true
+    var mixedPages = 0
+    while mixedState["status"] as! String != "complete" {
+      let next = page(mixedSource, mixedState)
+      if mixedColumns {
+        mixedState = try json(mixed.stageColumns(sessionId: mixedState["sessionId"] as! String,
+          authorizationSecret: mixedState["authorizationSecret"] as! String, revision: mixedState["revision"] as! Int,
+          found: next.count, guids: next.map(\.guid).joined(separator: sep), bodies: next.map(\.body).joined(separator: sep),
+          senders: next.map { _ in "TEST" }.joined(separator: sep), dates: next.map { offsetStamp($0.date) }.joined(separator: sep)))
+      } else {
+        for row in next { _ = try stageTyped(mixed, mixedState, row) }
+        mixedState = try commitTyped(mixed, mixedState, found: next.count)
+      }
+      mixedColumns.toggle(); mixedPages += 1
+    }
+    try check("blank-GUID rows keep one UTC identity across column and typed-row overlaps",
+      mixedPages > 2 && mixedState["checked"] as! Int == mixedSource.count)
+    try check("the shared fallback identity ignores the offset the date was written in",
+      WafraPagedHistoryStore.fallbackIdentity(instant: ISO8601DateFormatter().date(from: "2026-09-12T21:22:05+04:00")!, sender: "S", body: "B")
+        == WafraPagedHistoryStore.fallbackIdentity(instant: ISO8601DateFormatter().date(from: "2026-09-12T17:22:05Z")!, sender: "S", body: "B"))
+
+    // The oldest anchor rolled off (Keep Messages) or was deleted: Begin must
+    // name the cause and status must carry it so Wafra offers a fresh start.
+    let rolledSource = rows(200)
+    let rolled = make("oldest-rolled-off")
+    var rolledState = try begin(rolled, rolledSource)
+    rolledState = try send(rolled, rolledState, page(rolledSource, rolledState))
+    try check("a healthy session reports no refusal", try json(rolled.status()!)["refusal"] == nil)
+    let rolledJournal = try journalSnapshot("oldest-rolled-off")
+    for _ in 0..<2 {
+      var cause: Error?
+      do { _ = try begin(rolled, Array(rolledSource.dropLast())) } catch { cause = error }
+      try check("Begin names a vanished oldest anchor as source-changed",
+        (cause as? WafraPagedHistoryStore.Failure) == .sourceChanged)
+      try check("status carries source-changed so the app can offer start over",
+        try json(rolled.status()!)["refusal"] as? String == "source-changed")
+    }
+    try check("a source-changed refusal keeps every saved page untouched",
+      try journalSnapshot("oldest-rolled-off") == rolledJournal)
+    try rolled.discard(sessionId: rolledState["sessionId"] as! String)
+    let restarted = try begin(rolled, Array(rolledSource.dropLast()))
+    try check("after discard the changed inbox starts a new session without the old refusal",
+      restarted["sessionId"] as! String != rolledState["sessionId"] as! String
+        && (try json(rolled.status()!))["refusal"] == nil)
+
+    // Expiry is "no session", not an error: status is nil and Start works.
+    var clock = fixedNow
+    let expiring = WafraPagedHistoryStore(root: root.appendingPathComponent("expiring"), now: { clock })
+    let expiringState = try begin(expiring, rows(100))
+    clock = fixedNow.addingTimeInterval(WafraPagedHistoryStore.lifetime + 1)
+    try check("an expired session reads as no session instead of throwing", try expiring.status() == nil)
+    let expiringFresh = try begin(expiring, rows(100))
+    try check("Begin after expiry starts a fresh session on the first attempt",
+      expiringFresh["sessionId"] as! String != expiringState["sessionId"] as! String)
+    let expiringAgain = WafraPagedHistoryStore(root: root.appendingPathComponent("expiring-begin"), now: { clock })
+    clock = fixedNow
+    let beforeExpiry = try begin(expiringAgain, rows(100))
+    clock = fixedNow.addingTimeInterval(WafraPagedHistoryStore.lifetime + 1)
+    let afterExpiry = try begin(expiringAgain, rows(100))
+    try check("Begin over an expired session (no status read first) starts fresh",
+      afterExpiry["sessionId"] as! String != beforeExpiry["sessionId"] as! String && afterExpiry["checked"] as! Int == 0)
+
+    // Corrupt staging cannot be read, so the app offers to erase it.
+    let corrupted = make("corrupt-erase")
+    _ = try begin(corrupted, rows(100))
+    try Data("{}".utf8).write(to: root.appendingPathComponent("corrupt-erase/active/head.json"))
+    try rejected("corrupt staging fails status rather than inventing progress") { _ = try corrupted.status() }
+    try corrupted.eraseAll()
+    try check("erasing corrupt staging leaves no session and allows a fresh Begin",
+      try corrupted.status() == nil && (try begin(corrupted, rows(100)))["checked"] as! Int == 0)
     print("\(passed) paging checks passed. Synthetic host tests; Apple Messages queries and iPhone encryption are NOT certified.")
   }
 }

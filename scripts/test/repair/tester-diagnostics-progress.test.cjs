@@ -6,6 +6,7 @@ const load = require('./load-typescript.cjs');
 
 function harness() {
   let scans = 0;
+  let shadowScans = 0;
   let submitted;
   let callback;
   let snapshotTaken = false;
@@ -20,6 +21,7 @@ function harness() {
     '@/lib/auto-import': { getAndroidNotificationImportDiagnostics: () => null,
       hasSmsPermission: async () => true, hasSmsDeliveryPermission: async () => true },
     '@/lib/capture-source-identity': { canonicalCaptureSourceKey: value => value },
+    '@/lib/local-semantic-inbox-shadow': { runLocalSemanticInboxShadow: async () => { shadowScans++; } },
     '@/lib/diagnostic-messages': { collectDiagnosticBankMessages: async (_read, options) => {
       scans++;
       assert.equal(snapshotTaken, true, 'runtime snapshot precedes diagnostic work');
@@ -49,7 +51,7 @@ function harness() {
     '@/lib/transfer-reconciliation': { isTransferCandidate: () => false, transferOwnership: () => 'unknown' },
   }, { TextEncoder });
   return { state, events, send: () => subject.sendAndroidTesterDiagnostic(state, event => events.push(event)),
-    scans: () => scans, submitted: () => submitted, callback: () => callback };
+    shadowScans: () => shadowScans, scans: () => scans, submitted: () => submitted, callback: () => callback };
 }
 
 test('bounded inbox counts reach the caller before upload without claiming completeness', async () => {
@@ -75,3 +77,11 @@ for (const skipped of ['privateMode', 'captureOptOut', 'historyImport']) {
     assert.equal(h.submitted().diagnostic.parser.inbox.scanPerformed, false);
   });
 }
+
+
+test('sending diagnostics performs only the requested bounded audit, not a separate AI inbox sweep', async () => {
+  const h = harness();
+  await h.send();
+  assert.equal(h.scans(), 1);
+  assert.equal(h.shadowScans(), 0);
+});

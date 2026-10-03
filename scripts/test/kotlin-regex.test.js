@@ -19,7 +19,7 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { constant, patternSource } = require('./kotlin-source');
+const { constant, patternSource, rawPatternSource } = require('./kotlin-source');
 
 let pass = 0;
 let fail = 0;
@@ -70,6 +70,7 @@ const PATTERNS = [
   ['SMS_MONEY_RE', patternSource('SmsDeliveryReceiver', 'MONEY_RE')],
   ['SMS_CREDENTIAL_RE', patternSource('SensitiveMessageFilter', 'CREDENTIAL_RE')],
   ['NOTIFICATION_CREDENTIAL_RE', patternSource('SensitiveNotificationFilter', 'CREDENTIAL_RE')],
+  ['CLOCK_RE', rawPatternSource('NotificationRepostIdentity', 'TRANSACTION_DATETIME_RE')],
 ];
 
 // Two gates decide whether a message is about money at all — one for SMS at
@@ -104,6 +105,34 @@ const AMOUNT_CASES = [
   ['Using your card for GHS 120.00 at SHOP. Avl Limit AED 5,000.00', '120.00'],
 ];
 
+/**
+ * The repost gate's clock, on the engine Android actually runs.
+ *
+ * This pattern decides whether a bank alert may be DISCARDED as a
+ * redelivery, so both directions are load-bearing and neither is a
+ * formatting preference:
+ *
+ *   accepted — every second-precision shape the corpus really contains.
+ *     ADCB alone sends two of them, and a slash-only pattern skipped the
+ *     guard for its own dash-separated alerts.
+ *   refused — minute precision. Two genuine charges at one terminal inside
+ *     one minute carry identical text, and suppressing the second would
+ *     delete a real charge. Seconds are the discriminator.
+ */
+const CLOCK_CASES = [
+  // Verbatim shapes from the corpus (parser.test.js:816 is the ADCB dash one).
+  ['AED300.00 debited from Acc/Cr.Card XXX7720 for Salik on 11-02-2025 09:03:37 through ADCB Mobile App.', true],
+  ['Purchase of AED 110.00 at TABBY with Credit Card 2518 on 11/09/2026 23:53:12.', true],
+  ['Purchase of AED 110.00 at TABBY on 03/07/26 05:53:12.', true],
+  ['Purchase of AED 110.00 at TABBY on 11.09.2026 17:10:20.', true],
+  ['Purchase of AED 110.00 at TABBY on 1/9/2026 7:10:20.', true],
+  // Minute precision is refused ON PURPOSE — see above.
+  ['Purchase of AED 110.00 at TABBY on 03/07/26 05:53.', false],
+  ['Purchase of AED 110.00 at TABBY on 11/09/2026 17:10.', false],
+  // No clause resembling a clock at all.
+  ['Purchase of AED 110.00 at TABBY with Credit Card 2518.', false],
+];
+
 const CREDENTIAL_CASES = [
   ['Use 458213 to authenticate your purchase of AED 500.00 at NOON.', true],
   ['Enter 458213 to confirm the payment of SAR 250.00.', true],
@@ -127,13 +156,22 @@ public class WafraRegexCheck {
     int bad = 0;
     Pattern amount = null;
     Pattern credential = null;
+    Pattern clock = null;
 ${PATTERNS.map(
   ([name, body]) => `    try {
       Pattern p = Pattern.compile(${javaString(body)}, Pattern.CASE_INSENSITIVE);
       if ("AMOUNT_RE".equals(${javaString(name)})) amount = p;
       if ("SMS_CREDENTIAL_RE".equals(${javaString(name)})) credential = p;
+      if ("CLOCK_RE".equals(${javaString(name)})) clock = p;
       System.out.println("COMPILES ${name}");
     } catch (Exception e) { bad++; System.out.println("BROKEN ${name} " + e.getMessage()); }`,
+).join('\n')}
+${CLOCK_CASES.map(
+  ([body, want], index) => `    {
+      boolean got = clock.matcher(${javaString(body)}).find();
+      if (got != ${want}) { bad++; System.out.println("CLOCK wrong ${index} " + got); }
+      else System.out.println("CLOCK ok ${index}");
+    }`,
 ).join('\n')}
 ${CREDENTIAL_CASES.map(
   ([body, want], index) => `    {
@@ -184,6 +222,36 @@ for (const [, want] of AMOUNT_CASES) {
     out.split('\n').filter((l) => l.startsWith('WRONG')));
 }
 
+for (let index = 0; index < CLOCK_CASES.length; index++) {
+  const [body, want] = CLOCK_CASES[index];
+  ok(`Java repost clock ${want ? 'accepts' : 'refuses'}: ${body.slice(-28)}`,
+    out.includes(`CLOCK ok ${index}`),
+    out.split('\n').filter((line) => line.startsWith(`CLOCK wrong ${index} `)));
+}
+
+// The SMS carrier-duplicate fold (auto-import.ts) decides whether to DISCARD
+// an identical SMS on the same clock the notification re-post guard uses. If
+// the two drifted, one channel would fold a same-minute double charge the
+// other keeps. Same source, same flags, same verdict on every clock case.
+{
+  const kotlin = PATTERNS.find(([n]) => n === 'CLOCK_RE')[1];
+  const { CARRIER_DUPLICATE_DATETIME_RE } = require('./build/auto-import.js');
+  ok('SMS carrier-duplicate clock is byte-identical to the notification re-post clock',
+    CARRIER_DUPLICATE_DATETIME_RE.source === kotlin && CARRIER_DUPLICATE_DATETIME_RE.flags === '',
+    { kotlin, js: CARRIER_DUPLICATE_DATETIME_RE.source, flags: CARRIER_DUPLICATE_DATETIME_RE.flags });
+  const disagreements = CLOCK_CASES.filter(([body, want]) =>
+    CARRIER_DUPLICATE_DATETIME_RE.test(body) !== want);
+  ok('SMS carrier-duplicate clock gives the JVM verdict on every clock case',
+    disagreements.length === 0, disagreements);
+  // The ledger's own event identity (dedupe.ts) reads the same clock, so a
+  // notification the native guard treats as clockless never gets a JS
+  // identity either, and vice versa.
+  const { CAPTURE_EVENT_CLOCK_RE } = require('./build/dedupe.js');
+  ok('ledger event-identity clock is byte-identical to the notification re-post clock',
+    CAPTURE_EVENT_CLOCK_RE.source === kotlin && CAPTURE_EVENT_CLOCK_RE.flags === '',
+    { kotlin, js: CAPTURE_EVENT_CLOCK_RE.source, flags: CAPTURE_EVENT_CLOCK_RE.flags });
+}
+
 for (let index = 0; index < CREDENTIAL_CASES.length; index++) {
   ok(`Java credential gate handles case ${index + 1}`,
     out.includes(`CREDENTIAL ok ${index}`),
@@ -191,6 +259,141 @@ for (let index = 0; index < CREDENTIAL_CASES.length; index++) {
 }
 
 fs.rmSync(dir, { recursive: true, force: true });
+
+/* ── the pure notification policies, compiled by kotlinc when present ── */
+//
+// NotificationTextSurfaces is deliberately free of Android types so its
+// DECISIONS — which conversation entry is the posting — run here as real
+// Kotlin, not as a restatement. kotlinc is not part of the usual toolchain, so
+// this section is skipped (loudly) without it; set KOTLINC to its path.
+function findKotlinc() {
+  for (const candidate of [process.env.KOTLINC, 'kotlinc'].filter(Boolean)) {
+    try {
+      execFileSync(candidate, ['-version'], { stdio: 'ignore' });
+      return candidate;
+    } catch {
+      // try the next
+    }
+  }
+  return null;
+}
+const kotlinc = findKotlinc();
+if (!kotlinc) {
+  console.log('— no kotlinc (set KOTLINC); pure notification policies not executed as Kotlin');
+} else {
+  const kdir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-ktc-'));
+  const cases = [
+    // [expression, expected printed value]
+    // History entries: the newest by its own timestamp; without one, never
+    // guess — only a single amount-bearing entry is used.
+    [`NotificationTextSurfaces.newest(listOf("old AED 900.00", "new AED 5.00"), emptyList(), amt)`, 'null'],
+    [`NotificationTextSurfaces.newest(listOf("Your statement is ready", "new AED 5.00"), emptyList(), amt)`, 'new AED 5.00'],
+    [`NotificationTextSurfaces.newest(listOf("line AED 1.00"), listOf(NotificationTextSurfaces.Message(200L, "newest AED 5.00"), NotificationTextSurfaces.Message(100L, "older and much longer AED 900.00")), amt)`, 'newest AED 5.00'],
+    [`NotificationTextSurfaces.newest(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "first AED 1.00"), NotificationTextSurfaces.Message(100L, "second AED 2.00")), amt)`, 'null'],
+    [`NotificationTextSurfaces.newest(emptyList(), listOf(NotificationTextSurfaces.Message(100L, "hello"), NotificationTextSurfaces.Message(100L, "second AED 2.00")), amt)`, 'second AED 2.00'],
+    [`NotificationTextSurfaces.newest(emptyList(), listOf(NotificationTextSurfaces.Message(0L, "a AED 1.00"), NotificationTextSurfaces.Message(0L, "b AED 2.00")), amt)`, 'null'],
+    [`NotificationTextSurfaces.newest(emptyList(), emptyList(), amt)`, 'null'],
+    // A group summary is redundant only while one of its children is visible.
+    [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true), NotificationTextSurfaces.Member("c", "g", false)))`, 'true'],
+    [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true)))`, 'false'],
+    [`NotificationTextSurfaces.summaryHasVisibleChild("s", "g", listOf(NotificationTextSurfaces.Member("s", "g", true), NotificationTextSurfaces.Member("c", "other", false), NotificationTextSurfaces.Member("t", "g", true)))`, 'false'],
+    [`NotificationTextSurfaces.summaryHasVisibleChild("s", null, listOf(NotificationTextSurfaces.Member("c", null, false)))`, 'false'],
+    // The re-post identity (NotificationRepostIdentity): an owner's ADCB app
+    // posted this alert three times and a byte-exact digest let a copy with
+    // another title/text surface through. Owner-consented, already masked.
+    [`same("ADCBAlert", ADCB, "ADCB", ADCB)`, 'true'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", "  " + ADCB.replace(" was used", "\\n was  used") + " ")`, 'true'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("AED290.00", "AED\\u00A0290.00").replace("Credit", "\\u200BCredit"))`, 'true'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", "ADCBAlert: " + ADCB)`, 'true'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.uppercase())`, 'true'],
+    // A copy cut off before the limit still states the same charge.
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.substringBefore(". Available"))`, 'true'],
+    // Two genuine charges: another second, or a same-second repeat whose
+    // limit moved, never collide.
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("17:38:39", "17:39:02"))`, 'false'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("58823.09", "58533.09"))`, 'false'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("AED290.00", "AED29.00"))`, 'false'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("XX2518", "XX2519"))`, 'false'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", "Reversal: " + ADCB)`, 'false'],
+    [`NotificationRepostIdentity.of("p", "a", ADCB) == NotificationRepostIdentity.of("q", "a", ADCB)`, 'false'],
+    // Financial facts alone are insufficient: retain merchant and movement words.
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("SOUTHERN FRIED CHICK", "TEST COFFEE HOUSE"))`, 'false'],
+    [`same("ADCBAlert", ADCB.substringBefore(". Available"), "ADCBAlert", ADCB.substringBefore(". Available").replace("SOUTHERN FRIED CHICK", "TEST COFFEE HOUSE"))`, 'false'],
+    [`same("ADCBAlert", ADCB, "ADCBAlert", ADCB.replace("was used for", "was credited with"))`, 'false'],
+    [`same("Merchant A", ADCB, "Merchant B", ADCB)`, 'false'],
+    [`NotificationRepostIdentity.of("com.adcb.nexgen", "ADCBAlert", ADCB.replace("XX2518", "card"))`, 'null'],
+    // Shared batch timestamps and multiple clocks do not identify one purchase.
+    [`NotificationRepostIdentity.of("p", "ADCBAlert", ADCB.replace("17:38:39", "00:00:00"))`, 'null'],
+    [`NotificationRepostIdentity.of("p", "ADCBAlert", ADCB.replace("17:38:39", "23:59:59"))`, 'null'],
+    [`NotificationRepostIdentity.of("p", "ADCBAlert", ADCB + " Processed 25/09/2026 18:02:11")`, 'null'],
+    [`NotificationRepostIdentity.of("p", "ADCBAlert", ADCB.replace("17:38:39", "05:38:39 PM"))`, 'null'],
+    // No clock with seconds, no identity: two same-minute charges both stand.
+    [`NotificationRepostIdentity.of("p", "ADCBAlert", ADCB.replace("17:38:39", "17:38"))`, 'null'],
+    [`NotificationRepostIdentity.of("p", "ADCBAlert", "Purchase on card XX2518 of AED 10.00 on 1-9-26 7:10:20")?.core?.contains("1/9/2026 7:10:20")`, 'true'],
+  ];
+  fs.writeFileSync(path.join(kdir, 'Check.kt'), `package expo.modules.notificationreader
+const val ADCB = "Credit Card XX2518 was used for AED290.00 on 25/09/2026 17:38:39 at SOUTHERN FRIED CHICK, Sharjah-AE. Available limit AED58823.09"
+fun same(titleA: String, textA: String, titleB: String, textB: String): Boolean {
+  val a = NotificationRepostIdentity.of("com.adcb.nexgen", titleA, textA) ?: return false
+  val b = NotificationRepostIdentity.of("com.adcb.nexgen", titleB, textB) ?: return false
+  return NotificationRepostIdentity.samePosting(a.core, a.extra, b.core, b.extra)
+}
+fun main() {
+  val amt: (String) -> Boolean = { it.contains("AED") }
+${cases.map(([expr], index) => `  println("CASE ${index} " + (${expr}).toString())`).join('\n')}
+}
+`, 'utf8');
+  let kout = '';
+  let kcompiled = false;
+  try {
+    execFileSync(kotlinc, [
+      path.join(__dirname, '../../modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationTextSurfaces.kt'),
+      path.join(__dirname, '../../modules/notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationRepostIdentity.kt'),
+      path.join(kdir, 'Check.kt'),
+      '-include-runtime', '-d', path.join(kdir, 'check.jar'),
+    ], { cwd: kdir, stdio: 'pipe' });
+    kcompiled = true;
+    kout = execFileSync('java', ['-Dfile.encoding=UTF-8', '-cp', path.join(kdir, 'check.jar'),
+      'expo.modules.notificationreader.CheckKt'], { cwd: kdir, encoding: 'utf8' });
+  } catch (e) {
+    kout = `${e.stdout ?? ''}${e.stderr ?? ''}`;
+  }
+  ok('the pure notification policies compile as Kotlin', kcompiled, kout.slice(0, 400));
+  cases.forEach(([expr, want], index) => {
+    const line = kout.split('\n').find((l) => l.startsWith(`CASE ${index} `));
+    ok(`Kotlin: ${expr.slice(0, 70)} → ${want}`, line === `CASE ${index} ${want}`, line);
+  });
+  fs.rmSync(kdir, { recursive: true, force: true });
+
+  // The real NotificationCaptureStore, run against small Android/org.json
+  // stubs and an in-memory "AndroidKeyStore" JCA provider, so the re-post
+  // guard's append()/admissionBlockReason() decisions — not a restatement of
+  // them — are exercised here. See kotlin-harness/notification-store.
+  const sdir = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-kts-'));
+  const nr = path.join(__dirname, '../../modules/notification-reader/android/src/main/java/expo/modules/notificationreader');
+  const harness = path.join(__dirname, 'kotlin-harness/notification-store');
+  let sout = '';
+  let scompiled = false;
+  try {
+    execFileSync(kotlinc, [
+      ...fs.readdirSync(harness).filter((f) => f.endsWith('.kt')).map((f) => path.join(harness, f)),
+      ...['NotificationCaptureStore.kt', 'NotificationRepostIdentity.kt', 'NotificationCapturePolicy.kt',
+        'SensitiveNotificationFilter.kt'].map((f) => path.join(nr, f)),
+      '-include-runtime', '-d', path.join(sdir, 'store.jar'),
+    ], { cwd: sdir, stdio: 'pipe' });
+    scompiled = true;
+    sout = execFileSync('java', ['-Dfile.encoding=UTF-8', '-cp', path.join(sdir, 'store.jar'),
+      'expo.modules.notificationreader.NotificationCaptureStoreCheckKt'],
+    { cwd: sdir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (e) {
+    sout = `${e.stdout ?? ''}${e.stderr ?? ''}`;
+  }
+  ok('NotificationCaptureStore compiles and runs against the off-device stubs', scompiled, sout.slice(-600));
+  const storeLines = sout.split('\n').filter((line) => /^(ok|FAIL) /.test(line));
+  ok('the store harness ran every case', storeLines.length >= 17 && sout.includes('STORE ALL OK'), storeLines);
+  for (const line of storeLines) ok(`Kotlin store: ${line.replace(/^(ok|FAIL)\s+/, '')}`, line.startsWith('ok '));
+  fs.rmSync(sdir, { recursive: true, force: true });
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

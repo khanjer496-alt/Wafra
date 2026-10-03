@@ -98,14 +98,14 @@ const InlineHeader = (props: ScreenHeaderProps) => (
           style={[styles.title, hasArabicScript(props.title) && (props.back ? styles.arabicDetailTitle : styles.arabicTitle)]}>
           {props.title}
         </ThemedText>
-        {props.subtitle ? (
-          <ThemedText type="default" themeColor="textSecondary" style={styles.subtitle}>
-            {props.subtitle}
-          </ThemedText>
-        ) : null}
       </View>
       <HeaderActions actions={props.actions} />
     </View>
+    {props.subtitle ? (
+      <ThemedText type="meta" themeColor="textSecondary" style={styles.subtitle}>
+        {props.subtitle}
+      </ThemedText>
+    ) : null}
     {props.leading !== undefined ? <View style={styles.contextRow}>{props.leading}</View> : null}
   </View>
 );
@@ -163,7 +163,7 @@ export function ScreenHeader({ mode = 'inline', ...props }: ScreenHeaderRenderer
 }
 
 const styles = StyleSheet.create({
-  inlineHeader: { width: '100%', gap: 6 },
+  inlineHeader: { width: '100%', gap: Spacing.two, paddingBottom: Spacing.two },
   contextRow: { alignItems: 'flex-start' },
   headerRow: {
     minHeight: 44,
@@ -172,7 +172,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   leadingGroup: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
-  actionGroup: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  actionGroup: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexShrink: 0 },
   titleGroup: { flex: 1, minWidth: 0, gap: 2 },
   title: { flexShrink: 1 },
   // Plex Arabic needs 1.5em for its full vertical metrics.

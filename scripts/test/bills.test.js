@@ -307,14 +307,11 @@ eq(
     (src.match(/addBill\(billFromSubscription\(/g) ?? []).length,
     1,
   );
-  // The raw charge is read in ONE place — the helper, where the cadence that
-  // qualifies it is read too. A second reading is a second call site that has
-  // forgotten about yearly.
-  eq(
-    'bills.tsx: the raw subscription charge is read exactly once',
-    (src.match(/\.avgAmountFils/g) ?? []).length -
-      (src.match(/formatAED\(sub\.avgAmountFils/g) ?? []).length,
-    1,
+  // The shared conversion keeps the latest observed price. The executable
+  // subscription-payment-actions regression also exercises its result.
+  ok(
+    'bills.tsx: the shared reminder conversion reads the latest charge',
+    /const billFromSubscription =[\s\S]*?amountFils: sub\.lastAmountFils/.test(src),
   );
   ok(
     'bills.tsx: the remind affordance is gated on a representable cadence',
@@ -324,11 +321,12 @@ eq(
   const manualRows = fs.readFileSync(path.join(__dirname, '../../src/components/bills/payment-agenda.tsx'), 'utf8');
   ok('manual reminders keep one detail target without a nested payment/deletion action',
     /onPress=\{\(\) => onOpen\(item\)\}/.test(manualRows) &&
-    /setSelectedReminderId\(item\.id\.slice\(5\)\)/.test(src) &&
+    /setSelectedBill\(\{ id: \(item\.repeatOf \?\? item\.id\)\.slice\(5\), dueISO: item\.dateISO \}\)/.test(src) &&
     !/onLongPress|t\('markPaid'\)|<Button/.test(manualRows));
   ok(
     'manual reminder detail owns visible payment and delete footer actions',
-    /\{selectedReminder && \([\s\S]*?<BottomSheet[\s\S]*?footer=\{\([\s\S]*?t\('markPaid'\)[\s\S]*?t\('delete'\)/.test(src),
+    // One detail sheet for every bill (bill-detail-sheet.tsx); Bills hands it the footer.
+    /\{selectedReminder && \([\s\S]*?<BillDetailSheet[\s\S]*?footer=\{\([\s\S]*?t\('markPaid'\)[\s\S]*?t\('delete'\)/.test(src),
   );
   // Save was enabled for "45", "0" and "12.5" — values saveBill rejects — so
   // the tap silently did nothing with the sheet still open.
@@ -344,7 +342,8 @@ eq(
   );
   ok(
     'subscription history E2E is scoped to the sheet instead of a mounted page scroller',
-    /testID="subscription-history-scroll"/.test(src) &&
+    // The history now lives in the one shared bill detail sheet.
+    /testID="subscription-history-scroll"/.test(fs.readFileSync(path.join(__dirname, '../../src/components/bill-detail-sheet.tsx'), 'utf8')) &&
       /\[data-testid="subscription-history-scroll"\]/.test(e2e) &&
       !/while \(block\)/.test(e2e),
   );

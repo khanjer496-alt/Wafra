@@ -25,6 +25,10 @@ const normalize = (text) => text.replace(/\d+/g, '#').toLowerCase();
 function harness(fail = () => false) {
   const calls = [];
   const api = load(path.join(root, 'src/lib/auto-import.ts'), {
+    '@/lib/local-semantic-review': load(path.join(root, 'src/lib/local-semantic-review.ts'), {
+      '@/lib/local-semantic-review-runtime': { evaluateLocalReviewWindow: async () => ({ kind: 'refused', reason: 'model-unavailable' }) },
+    }),
+    '@/lib/generic-review-entry': require('../build/generic-review-entry.js'),
     '@/lib/capture-trace': load(path.join(root, 'src/lib/capture-trace.ts')),
     'react-native': { Platform: { OS: 'android' } },
     'expo-crypto': { CryptoDigestAlgorithm: { SHA256: 'sha256' }, digestStringAsync: async (_, data) => {

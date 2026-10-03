@@ -22,13 +22,14 @@ const expandGroups = h => {
 const openEntry = h => { expandGroups(h); byId(h.render(), 'transfer-review-entry').props.onPress(); };
 
 function createUI({ language = 'en', transactions = [row('one'), row('two')], bulk = false,
-  params = {}, resolveTransfers, ensureDurable, groupDefinitions, assessments = {} } = {}) {
+  params = {}, resolveTransfers, resolveTransferBatch, ensureDurable, groupDefinitions, assessments = {}, pending = [] } = {}) {
   const events = [], slots = [], refs = [];
   let cursor = 0, refCursor = 0, generation = 1;
   const state = { language, hydrated: true, transactions,
     accounts: [{ id: 'bank', name: 'Synthetic bank', last4: '1234' }, { id: 'other', name: 'Other bank', last4: '5678' }] };
   const store = { state, getStateGeneration: () => generation, getStateSnapshot: () => state,
     resolveTransfers: async request => { events.push(['resolve', plain(request)]); return resolveTransfers?.(request, state); },
+    resolveTransferBatch: async request => { events.push(['batch', plain(request)]); return resolveTransferBatch?.(request, state); },
     ensureDurable: async () => { events.push(['durable']); return ensureDurable?.(state); },
   };
   const react = { useDeferredValue: value => value, useMemo: fn => fn(), useRef: initial => {
@@ -45,39 +46,53 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
   const reconcile = txs => {
     const definitions = groupDefinitions ?? [{ id: 'group', transactionIds: txs.map(tx => tx.id), bulkEligible: bulk }];
     const groups = definitions.flatMap(definition => {
-      const rows = txs.filter(tx => definition.transactionIds.includes(tx.id) && !tx.transferDecision && !assessments[tx.id]);
+      const rows = txs.filter(tx => definition.transactionIds.includes(tx.id) && !tx.transferDecision &&
+        (!assessments[tx.id] || pending.includes(tx.id)));
       return rows.length ? [{ id: definition.id, transactionIds: rows.map(tx => tx.id), accountId: rows[0].accountId,
         direction: rows[0].type, status: 'ownership-unknown', bulkEligible: definition.bulkEligible,
         counterparty: definition.bulkEligible ? { last4: '9876', kind: 'account', bankIdentity: 'synthetic-bank' } : undefined }] : [];
     });
-    return { groups, pendingIds: new Set(groups.flatMap(group => group.transactionIds)), internalIds: new Set(),
+    return { groups, pendingIds: new Set([...groups.flatMap(group => group.transactionIds), ...pending]), internalIds: new Set(),
       byId: new Map(txs.map(tx => [tx.id, { status: tx.transferDecision
         ? tx.transferDecision.ownership === 'own' ? 'counterpart-missing' : 'confirmed-external' : 'ownership-unknown', ...assessments[tx.id] }])) };
   };
   const deps = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' }, 'react-native': native,
-    'expo-router': { useLocalSearchParams: () => params, useRouter: () => ({ back: () => events.push(['back']) }) },
-    '@/lib/store': { useStore: () => store }, '@/lib/i18n': { getLanguage: () => language },
+    'expo-router': { useLocalSearchParams: () => params, useRouter: () => ({ back: () => events.push(['back']), push: route => events.push(['route', route]) }) },
+    '@/lib/store': { useStore: () => store, useStoreSelector: select => select(store), useStoreActions: () => store }, '@/lib/i18n': { getLanguage: () => language },
     '@/lib/markets': load(path.join(root, 'src/lib/markets.ts')),
     // Formatting is a boundary stub here, as with formatAED below; monetary implementation has its own suites.
     '@/lib/ledger-money': { formatMinorUnits: (amount, spec) => (amount / 10 ** spec.exponent).toFixed(spec.exponent) },
     '@/lib/format': { formatAED: amount => `AED ${(amount / 100).toFixed(2)}`, fullDateTime: tx => `${tx.date} ${tx.ts}`,
       shortDate: date => date, toISODate: () => '2026-09-09' },
-    '@/lib/transfer-reconciliation': { reconcileTransfers: reconcile, transferFingerprint: fingerprint },
+    '@/lib/transfer-reconciliation': { reconcileTransfers: reconcile, transferFingerprint: fingerprint,
+      isTransferCandidate: require('../build/transfer-reconciliation.js').isTransferCandidate },
     '@/hooks/use-language': { useLanguage: () => language },
     '@/hooks/use-theme': { useTheme: () => ({ cardBorder: '#ccc', primary: '#147', textSecondary: '#555' }) },
-    '@/constants/theme': { Spacing: { one: 4, two: 8, three: 12, four: 16, six: 24 } },
+    '@/constants/theme': { Fonts: { sansSemi: 'Geist-SemiBold' }, Spacing: { one: 4, two: 8, three: 12, four: 16, six: 24 } },
     '@/components/themed-text': { ThemedText: props => jsx('Text', props) },
     '@/components/ui/icon': { Icon: props => jsx('Icon', props) },
     '@/components/ui/controls': { Button: props => jsx('Button', { ...props, accessibilityLabel: props.label, children: props.label }) },
     '@/components/ui/text-field': { TextField: props => jsx('TextInput', props) },
     '@/components/ui/toast': { useToast: () => ({ show: message => events.push(['toast', message]) }) },
     '@/components/ui/bottom-sheet': { BottomSheet: props => props.visible ? jsx('Sheet', props) : null },
-    '@/components/ui/screen-scaffold': { ScreenScaffold: props => jsx('Scaffold', props),
-      useScreenContentInsets: () => ({ contentContainerStyle: {}, contentInset: { top: 12, bottom: 20 }, scrollIndicatorInsets: { top: 12, bottom: 20 } }) },
+    // Design language E: the slate band scaffold renders its band, then the sheet.
+    '@/components/ui/band-scaffold': { BandScaffold: props => jsx('Scaffold', { ...props, children: [props.bandContent, props.children, props.footer] }),
+      useBandBottomInset: () => 20 },
+    '@/hooks/use-band': { useBand: id => ({ id, band: '#2F6577', onBand: '#F4F1EA', onBandSecondary: '#D6DCD9', sheet: '#F4F1EA',
+      card: '#FBF9F4', rule: '#E3DED2', text: '#16130F', textSecondary: '#57524A', tint: '#2F6577', fill: '#2F6577', onFill: '#F4F1EA' }) },
+    '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
+    // The current money month; the matched-pairs tests below decide membership themselves.
+    '@/lib/period': { currentMonthPeriod: () => ({ mode: 'month', key: '2026-09' }), inPeriod: date => date.startsWith('2026-09') },
   };
+  deps['@/lib/review-band-copy'] = load(path.join(root, 'src/lib/review-band-copy.ts'));
+  deps['@/components/transfer-pair-accounts'] = load(path.join(root, 'src/components/transfer-pair-accounts.tsx'), deps);
+  deps['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'), deps);
   deps['@/lib/transfer-review-copy'] = load(path.join(root, 'src/lib/transfer-review-copy.ts'), deps);
+  deps['@/lib/reference-copy'] = load(path.join(root, 'src/lib/reference-copy.ts'));
   deps['@/lib/transfer-review-presentation'] = load(path.join(root, 'src/lib/transfer-review-presentation.ts'), deps);
+  deps['@/lib/details-copy'] = load(path.join(root, 'src/lib/details-copy.ts'));
+  deps['@/lib/transfer-pairs'] = load(path.join(root, 'src/lib/transfer-pairs.ts'), deps);
   const screen = load(path.join(root, 'src/app/review-transfers.tsx'), deps).default;
   const notice = load(path.join(root, 'src/components/transfer-review-notice.tsx'), deps).TransferReviewNotice;
   const render = () => { cursor = 0; refCursor = 0; return screen(); };
@@ -112,7 +127,9 @@ for (const language of ['en', 'ar']) {
     assert.equal(h.notice({ pendingCount: 0, incomingFils: 0, outgoingFils: 0, onPress() {} }), null);
     const notice = h.notice({ pendingCount: 2, incomingFils: 12345, outgoingFils: 6789, onPress: () => h.events.push(['open']) });
     assert.ok(notice.props.accessibilityLabel.includes(h.words.noticeBody));
-    assert.ok(text(notice).includes(h.words.noticeCount(2)));
+    const homeWords = load(path.join(root, 'src/lib/reference-copy.ts')).homeSummaryCopy[language];
+    assert.ok(text(notice).includes(homeWords.transfersToConfirm(2)));
+    assert.ok(text(notice).includes(homeWords.transfersNotCounted));
     assert.ok(!text(notice).includes('AED'));
     notice.props.onPress(); assert.deepEqual(h.events, [['open']]);
   });
@@ -121,7 +138,8 @@ for (const language of ['en', 'ar']) {
     assert.equal(walk(h.render()).filter(n => n.props?.testID === 'transfer-review-entry').length, 0);
     expandGroups(h);
     const tree = h.render();
-    assert.equal(walk(tree).find(n => n.type === 'Scaffold').props.virtualized, true);
+    assert.equal(walk(tree).find(n => n.type === 'Scaffold').props.band, 'accounts');
+    assert.ok(walk(tree).find(n => n.type === 'FlatList'), 'the sheet holds one virtualized list');
     assert.equal(walk(tree).find(n => n.type === 'Scaffold').props.scroll, false);
     assert.equal(walk(tree).filter(n => n.props?.testID === 'transfer-review-entry').length, 2);
     assert.equal(byLabel(tree, h.words.reviewGroup(2)), undefined);
@@ -163,6 +181,25 @@ test('eligible group freezes count, sum, account and masked counterparty before 
     expectedFingerprints: { one: fingerprint(h.state.transactions[0]), two: fingerprint(h.state.transactions[1]) }, expectedGeneration: 1 });
   pending.resolve(); await flush();
   assert.deepEqual(h.events.at(-1), ['toast', h.words.saved]);
+  assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
+});
+
+test('save submits the latest preview choice explicitly, including a changed choice', async () => {
+  // The production transform misbound a default parameter that shared the
+  // body-local `selection` name. Source execution alone did not catch it.
+  const source = require('node:fs').readFileSync(path.join(root, 'src/app/review-transfers.tsx'), 'utf8');
+  assert.match(source, /const save = async \(target: Selection \| null, oneTap = false\)/);
+  assert.match(source, /onPress=\{\(\) => void save\(selection\)\}/);
+  const h = createUI();
+  openEntry(h);
+  byId(h.render(), 'transfer-choice-own').props.onPress();
+  byId(h.render(), 'transfer-choice-external').props.onPress();
+  byLabel(h.render(), h.words.confirm).props.onPress();
+  await flush();
+  const resolved = h.events.filter(event => event[0] === 'resolve');
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0][1].ownership, 'external');
+  assert.deepEqual(resolved[0][1].ids, ['one']);
   assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
 });
 
@@ -284,6 +321,40 @@ test('leaving an uncertain entry unclassified does not write, dismiss, or announ
   assert.deepEqual(h.events, []);
 });
 
+test('focused low-signal transfers open a guarded review without adding generic unknowns to the default queue', async () => {
+  const tx = row('low-signal');
+  const h = createUI({ transactions: [tx], params: { transactionId: tx.id }, groupDefinitions: [] });
+  const first = h.render();
+  assert.ok(byId(first, 'transfer-review-entry'), 'explicitly requested unknown record is reachable despite no pending group');
+  assert.deepEqual(h.events, [], 'opening the route cannot classify a record');
+  openEntry(h);
+  assert.equal(byLabel(h.render(), h.words.confirm).props.disabled, true);
+  byId(h.render(), 'transfer-choice-external').props.onPress();
+  assert.deepEqual(h.events, [], 'choosing ownership is only a preview');
+  byLabel(h.render(), h.words.confirm).props.onPress();
+  await flush();
+  assert.deepEqual(h.events[0], ['resolve', { ids: [tx.id], ownership: 'external',
+    expectedFingerprints: { [tx.id]: fingerprint(tx) }, expectedGeneration: 1 }]);
+  const general = createUI({ transactions: [tx], groupDefinitions: [] });
+  assert.equal(byId(general.render(), 'transfer-review-entry'), undefined, 'default queue remains unchanged');
+  const focused = createUI({ transactions: [tx], params: { transactionId: tx.id }, groupDefinitions: [] });
+  byLabel(focused.render(), focused.words.showAll).props.onPress();
+  assert.equal(byId(focused.render(), 'transfer-review-entry'), undefined, 'Show all returns only mandatory review groups');
+});
+
+test('focused low-signal review retains stale fingerprint protection and rejects non-transfer route targets', () => {
+  const h = createUI({ transactions: [row('low-signal')], params: { transactionId: 'low-signal' }, groupDefinitions: [] });
+  openEntry(h);
+  byId(h.render(), 'transfer-choice-own').props.onPress();
+  h.state.transactions = h.state.transactions.map(tx => ({ ...tx, amountFils: 55500 }));
+  assert.equal(byLabel(h.render(), h.words.confirm).props.disabled, true);
+  byLabel(h.render(), h.words.confirm).props.onPress();
+  assert.deepEqual(h.events, []);
+  const salary = createUI({ transactions: [row('salary', { title: 'Salary', category: 'salary' })],
+    params: { transactionId: 'salary' }, groupDefinitions: [] });
+  assert.equal(byId(salary.render(), 'transfer-review-entry'), undefined);
+});
+
 test('3,106 unresolved entries stay bounded without exposing a second transfer-history mode', () => {
   const h = createUI({ transactions: Array.from({ length: 3106 }, (_, i) => row(`old-${i}`, { date: '2022-11-05' })) });
   let tree = h.render();
@@ -298,4 +369,276 @@ test('3,106 unresolved entries stay bounded without exposing a second transfer-h
   byId(h.render(), 'transfer-search').props.onChangeText('old');
   assert.deepEqual(h.events, []);
   assert.equal(h.state.transactions.length, 3106);
+});
+
+// Suggested own-account pairs (redesign): one card per Out/In pair, answered
+// with one tap through the same link request and change checks as the sheet.
+const pairLegs = () => [row('out'), row('in', { type: 'income', accountId: 'other' })];
+const pairAssessments = {
+  out: { status: 'likely-own', reason: 'amount-time', counterpartId: 'in', candidateIds: ['in'] },
+  in: { status: 'likely-own', reason: 'amount-time', counterpartId: 'out', candidateIds: ['out'] },
+};
+test('external classification of a suggested leg can retry storage without requiring an unchanged counterpart receipt', async () => {
+  const h = createUI({ transactions: pairLegs(),
+    groupDefinitions: [{ id: 'out-group', transactionIds: ['out'], bulkEligible: false }], params: { transactionId: 'out' },
+    pending: ['out', 'in'], assessments: pairAssessments,
+    resolveTransfers: async (request, state) => {
+      state.transactions = state.transactions.map(tx => tx.id === 'out'
+        ? { ...tx, transferDecision: { version: 1, ownership: request.ownership, decidedAt: 1 } } : tx);
+      throw Object.assign(new Error('write failed'), { code: 'transfer-durability',
+        expectedFingerprints: { out: fingerprint(state.transactions.find(tx => tx.id === 'out')) } });
+    } });
+  const screen = h.render();
+  const entry = byId(screen, 'transfer-review-entry');
+  assert.ok(entry, 'the suggested outgoing entry is available for individual review');
+  entry.props.onPress();
+  byId(h.render(), 'transfer-choice-external').props.onPress();
+  byLabel(h.render(), h.words.confirm).props.onPress();
+  await flush();
+  const retry = byLabel(h.render(), h.words.retrySave);
+  assert.equal(retry.props.disabled, false);
+  retry.props.onPress();
+  await flush();
+  assert.equal(h.events.filter(event => event[0] === 'resolve').length, 1);
+  assert.equal(h.events.filter(event => event[0] === 'durable').length, 1);
+  assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
+});
+
+test('an active transfer search remains clearable when the pending count drops below the search threshold', () => {
+  const h = createUI({ transactions: Array.from({ length: 10 }, (_, i) => row(`search-${i}`)) });
+  byId(h.render(), 'transfer-search').props.onChangeText('Bank');
+  h.state.transactions = h.state.transactions.slice(0, 3);
+  const search = byId(h.render(), 'transfer-search');
+  assert.ok(search);
+  assert.equal(search.props.value, 'Bank');
+  search.props.onChangeText('');
+  assert.equal(byId(h.render(), 'transfer-search'), undefined);
+});
+const pairCopy = language => load(path.join(root, 'src/lib/details-copy.ts')).detailsCopy[language];
+const bandCopy = language => load(path.join(root, 'src/lib/review-band-copy.ts')).reviewBandCopy(language);
+
+for (const language of ['en', 'ar']) {
+  test(`${language}: a suggested pair is one card and Match links both legs with their fingerprints`, async () => {
+    const h = createUI({ language, transactions: pairLegs(), groupDefinitions: [], pending: ['out', 'in'], assessments: pairAssessments });
+    const words = pairCopy(language);
+    const tree = h.render();
+    assert.equal(walk(tree).filter(n => n.props?.testID === 'transfer-pair-card').length, 1);
+    // Out of <account> / swap / Into <account>, one amount (the legs agree), the date.
+    const band = bandCopy(language);
+    const card = text(byId(tree, 'transfer-pair-card'));
+    for (const part of [band.outOf, 'Synthetic bank', band.into, 'Other bank', 'AED 123.45']) assert.ok(card.includes(part), part);
+    assert.ok(!card.includes(words.transfers.in + ':'), 'equal legs show one amount');
+    // The band counts what is left to check: one suggested pair here.
+    assert.ok(text(byId(tree, 'transfer-review-band')).includes(band.toCheck(1)));
+    // The legs are one labelled, focusable element; Match stays outside it.
+    const legs = byId(tree, 'transfer-pair-legs');
+    assert.equal(legs.props.accessible, true);
+    assert.match(legs.props.accessibilityLabel, /\S/);
+    assert.equal(byId(legs, 'transfer-pair-match'), undefined);
+    byLabel(tree, words.transfers.match).props.onPress();
+    await flush();
+    const resolved = h.events.filter(event => event[0] === 'resolve');
+    assert.equal(resolved.length, 1);
+    const request = resolved[0][1];
+    assert.equal(request.ownership, 'own');
+    assert.deepEqual([request.ids.length, request.ids[0] === 'out' ? request.counterpartId : request.ids[0]], [1, 'in']);
+    assert.deepEqual(Object.keys(request.expectedFingerprints).sort(), ['in', 'out']);
+    assert.equal(request.expectedGeneration, 1);
+    assert.ok(h.events.some(event => event[0] === 'toast' && event[1] === words.transfers.matched));
+  });
+}
+
+test('a pair that changed before Match is refused without a write', async () => {
+  const h = createUI({ transactions: pairLegs(), groupDefinitions: [], pending: ['out', 'in'], assessments: pairAssessments });
+  const words = pairCopy('en');
+  const tree = h.render();
+  h.state.transactions = h.state.transactions.map(tx => tx.id === 'in' ? { ...tx, amountFils: 99 } : tx);
+  byLabel(tree, words.transfers.match).props.onPress();
+  await flush();
+  assert.equal(h.events.some(event => event[0] === 'resolve'), false);
+  assert.ok(h.events.some(event => event[0] === 'toast' && event[1] === h.words.changed));
+});
+
+test('a rejected Match opens the review sheet with the error instead of announcing success', async () => {
+  const h = createUI({ transactions: pairLegs(), groupDefinitions: [], pending: ['out', 'in'], assessments: pairAssessments,
+    resolveTransfers: () => { throw new Error('rejected'); } });
+  const words = pairCopy('en');
+  byLabel(h.render(), words.transfers.match).props.onPress();
+  await flush();
+  const tree = h.render();
+  assert.ok(byId(tree, 'transfer-review-confirmation'), 'the sheet shows the failed decision');
+  assert.ok(text(byId(tree, 'transfer-review-error')).includes(h.words.saveFailed));
+  assert.equal(h.events.some(event => event[0] === 'toast' && event[1] === words.transfers.matched), false);
+});
+
+test('Not a pair writes nothing and removes only the suggestion', () => {
+  const h = createUI({ transactions: pairLegs(), groupDefinitions: [], pending: ['out', 'in'], assessments: pairAssessments });
+  const words = pairCopy('en');
+  byLabel(h.render(), words.transfers.notPair).props.onPress();
+  assert.equal(byId(h.render(), 'transfer-pair-card'), undefined);
+  assert.deepEqual(h.events, [['toast', words.transfers.notPairDone]]);
+  assert.equal(h.state.transactions.length, 2);
+});
+
+test('card repayments are never offered as a transfer pair', () => {
+  const h = createUI({ transactions: pairLegs(), groupDefinitions: [], pending: ['out', 'in'],
+    assessments: { out: { ...pairAssessments.out, status: 'likely-card-repayment' }, in: { ...pairAssessments.in, status: 'likely-card-repayment' } } });
+  assert.equal(byId(h.render(), 'transfer-pair-card'), undefined);
+});
+
+// "Matched this month" (slate band): only pairs the reconciler confirmed,
+// both legs naming each other, in the current money month. Never a suggestion.
+const confirmedPair = (outId, inId, date) => [row(outId, { date }), row(inId, { type: 'income', accountId: 'other', date })];
+const confirmedAssessments = (outId, inId) => ({
+  [outId]: { status: 'confirmed-own', counterpartId: inId }, [inId]: { status: 'confirmed-own', counterpartId: outId },
+});
+for (const language of ['en', 'ar']) {
+  test(`${language}: matched this month lists confirmed pairs only and links to Transfers`, () => {
+    const h = createUI({ language, groupDefinitions: [],
+      transactions: [...confirmedPair('m-out', 'm-in', '2026-09-03'), ...confirmedPair('old-out', 'old-in', '2026-08-20'), ...pairLegs()],
+      pending: ['out', 'in'],
+      assessments: { ...confirmedAssessments('m-out', 'm-in'), ...confirmedAssessments('old-out', 'old-in'), ...pairAssessments } });
+    const tree = h.render();
+    const section = byId(tree, 'transfer-matched-pairs');
+    assert.ok(text(section).includes(bandCopy(language).matchedThisMonth));
+    const rows = walk(section).filter(node => node.props?.testID === 'transfer-matched-pair');
+    assert.equal(rows.length, 1, 'last month and the open suggestion are not "matched this month"');
+    assert.ok(rows[0].props.accessibilityLabel.includes('2026-09-03'));
+    byId(section, 'transfer-matched-all').props.onPress();
+    assert.deepEqual(h.events, [['route', '/transfers']]);
+  });
+}
+test('a pair whose legs no longer name each other is not shown as matched', () => {
+  const h = createUI({ groupDefinitions: [], transactions: confirmedPair('m-out', 'm-in', '2026-09-03'),
+    assessments: { 'm-out': { status: 'confirmed-own', counterpartId: 'm-in' }, 'm-in': { status: 'confirmed-own', counterpartId: 'elsewhere' } } });
+  assert.equal(byId(h.render(), 'transfer-matched-pairs'), undefined);
+});
+test('pair legs with different amounts show both, never one merged figure', () => {
+  const legs = [row('out'), row('in', { type: 'income', accountId: 'other', amountFils: 12000 })];
+  const h = createUI({ transactions: legs, groupDefinitions: [], pending: ['out', 'in'], assessments: pairAssessments });
+  const card = text(byId(h.render(), 'transfer-pair-card'));
+  assert.ok(card.includes('AED 123.45') && card.includes('AED 120.00'));
+});
+
+function manyPairs(count = 2) {
+  const transactions = [], assessments = {}, pending = [];
+  for (let i = 0; i < count; i++) {
+    const out = `out-${i}`, into = `in-${i}`, amountFils = 12345 + i * 100;
+    transactions.push(row(out, { amountFils }), row(into, { type: 'income', accountId: 'other', amountFils }));
+    assessments[out] = { status: 'likely-own', reason: 'amount-time', counterpartId: into, candidateIds: [into] };
+    assessments[into] = { status: 'likely-own', reason: 'amount-time', counterpartId: out, candidateIds: [out] };
+    pending.push(out, into);
+  }
+  return { transactions, assessments, pending, groupDefinitions: [] };
+}
+const startSelecting = h => byLabel(h.render(), h.words.selectTransfers).props.onPress();
+const checks = h => walk(h.render()).filter(n => n.props?.testID === 'transfer-pair-select');
+const reviewSelected = (h, count) => byLabel(h.render(), h.words.reviewSelected(count)).props.onPress();
+
+for (const language of ['en', 'ar']) {
+  test(`${language}: selected pairs confirm in one durable batch, with reciprocal targets and a repeated-tap guard`, async () => {
+    const pending = deferred();
+    const h = createUI({ ...manyPairs(), language, resolveTransferBatch: () => pending.promise });
+    startSelecting(h);
+    checks(h)[0].props.onPress(); checks(h)[1].props.onPress();
+    assert.equal(checks(h).every(n => n.props.accessibilityState.checked), true);
+    assert.equal(checks(h).every(n => n.props['aria-checked']), true, 'web exposes the checked state');
+    assert.deepEqual(h.events, [], 'checking a row never changes the ledger');
+    reviewSelected(h, 2);
+    const sheet = byId(h.render(), 'transfer-review-confirmation');
+    assert.equal(walk(sheet).filter(n => n.props?.testID === 'transfer-batch-preview-item').length, 2);
+    assert.ok(text(sheet).includes(h.words.ownBody));
+    assert.equal(byId(sheet, 'transfer-choice-external'), undefined, 'the batch action explicitly confirms own-account transfers');
+    const confirm = byLabel(sheet, h.words.confirmSelected(2));
+    confirm.props.onPress(); confirm.props.onPress();
+    assert.equal(h.events.filter(e => e[0] === 'batch').length, 1);
+    const request = h.events[0][1];
+    assert.equal(request.decisions.length, 2);
+    assert.deepEqual(request.decisions.map(d => [d.ids[0], d.counterpartId]).sort(), [['out-0', 'in-0'], ['out-1', 'in-1']]);
+    assert.deepEqual(Object.keys(request.expectedFingerprints).sort(), ['in-0', 'in-1', 'out-0', 'out-1']);
+    assert.equal(request.expectedGeneration, 1);
+    assert.equal(h.events.some(e => e[0] === 'toast'), false);
+    pending.resolve(); await flush();
+    assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
+    assert.equal(byId(h.render(), 'transfer-selection-footer'), undefined);
+    assert.deepEqual(h.events.at(-1), ['toast', h.words.batchSaved(2)]);
+  });
+}
+
+test('individual entries from different groups can be selected without applying a catchall group decision', async () => {
+  const h = createUI({ transactions: [row('a'), row('b', { accountId: 'other' }), row('untouched')],
+    groupDefinitions: [{ id: 'a', transactionIds: ['a', 'untouched'], bulkEligible: false },
+      { id: 'b', transactionIds: ['b'], bulkEligible: false }] });
+  startSelecting(h); expandGroups(h);
+  const entries = walk(h.render()).filter(n => n.props?.testID === 'transfer-review-entry');
+  entries[0].props.onPress(); entries[2].props.onPress();
+  reviewSelected(h, 2);
+  byLabel(byId(h.render(), 'transfer-review-confirmation'), h.words.confirmSelected(2)).props.onPress(); await flush();
+  assert.equal(h.events.filter(e => e[0] === 'batch').length, 1);
+  const request = h.events[0][1];
+  assert.equal(request.decisions.every(d => d.ids.length === 1 && !d.counterpartId), true);
+  assert.equal(request.decisions.length, 2);
+  assert.deepEqual(request.decisions.flatMap(d => d.ids).sort(), ['a', 'b']);
+  assert.equal(Object.keys(request.expectedFingerprints).length, 2);
+});
+
+test('Select all shown obeys pair search and clear selection leaves the ledger unchanged', () => {
+  const h = createUI(manyPairs(12));
+  startSelecting(h);
+  byId(h.render(), 'transfer-search').props.onChangeText('124.45');
+  assert.equal(checks(h).length, 1);
+  byId(h.render(), 'transfer-select-shown').props.onPress();
+  assert.equal(checks(h)[0].props.accessibilityState.checked, true);
+  byId(h.render(), 'transfer-search').props.onChangeText('');
+  assert.equal(checks(h).filter(n => n.props.accessibilityState.checked).length, 1);
+  byId(h.render(), 'transfer-clear-selection').props.onPress();
+  assert.equal(byLabel(h.render(), h.words.reviewSelected(0)).props.disabled, true);
+  assert.deepEqual(h.events, []);
+});
+
+test('300 suggested pair cards are list items, never eagerly mounted in the list header', () => {
+  const h = createUI(manyPairs(300));
+  const list = walk(h.render()).find(n => n.type === 'FlatList');
+  assert.equal(list.props.data.filter(item => item.kind === 'pair').length, 300);
+  assert.equal(walk(list.props.ListHeaderComponent).filter(n => n.props?.testID === 'transfer-pair-card').length, 0);
+  assert.equal(list.props.initialNumToRender, 8);
+  assert.equal(list.props.maxToRenderPerBatch, 8);
+});
+
+test('a checked transfer keeps its original preview and blocks the entire batch if a leg changes', async () => {
+  const h = createUI(manyPairs());
+  startSelecting(h); byId(h.render(), 'transfer-select-shown').props.onPress();
+  h.state.transactions = h.state.transactions.map(tx => tx.id === 'in-1' ? { ...tx, amountFils: 99999 } : tx);
+  reviewSelected(h, 2);
+  const sheet = byId(h.render(), 'transfer-review-confirmation');
+  assert.ok(text(sheet).includes('AED 124.45'));
+  assert.ok(!text(sheet).includes('AED 999.99'));
+  assert.equal(byLabel(sheet, h.words.confirmSelected(2)).props.disabled, true);
+  byLabel(sheet, h.words.confirmSelected(2)).props.onPress(); await flush();
+  assert.equal(h.events.some(e => e[0] === 'batch'), false);
+});
+
+test('restore between checking and opening confirmation invalidates the selected ledger', () => {
+  const h = createUI(manyPairs());
+  startSelecting(h); byId(h.render(), 'transfer-select-shown').props.onPress();
+  h.setGeneration(2); reviewSelected(h, 2);
+  assert.equal(byId(h.render(), 'transfer-review-confirmation'), undefined);
+  assert.deepEqual(h.events, [['toast', h.words.changed]]);
+});
+
+test('batch storage failure retries the write once without reapplying any selected decisions', async () => {
+  const h = createUI({ ...manyPairs(), resolveTransferBatch: async (request, state) => {
+    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 1 } }));
+    throw Object.assign(new Error('write failed'), { code: 'transfer-durability',
+      expectedFingerprints: Object.fromEntries(state.transactions.map(tx => [tx.id, fingerprint(tx)])) });
+  } });
+  startSelecting(h); byId(h.render(), 'transfer-select-shown').props.onPress(); reviewSelected(h, 2);
+  byLabel(byId(h.render(), 'transfer-review-confirmation'), h.words.confirmSelected(2)).props.onPress(); await flush();
+  const sheet = byId(h.render(), 'transfer-review-confirmation');
+  assert.equal(sheet.props.dismissible, false);
+  assert.equal(byLabel(sheet, h.words.cancel).props.disabled, true);
+  byLabel(sheet, h.words.retrySave).props.onPress(); await flush();
+  assert.equal(h.events.filter(e => e[0] === 'batch').length, 1);
+  assert.equal(h.events.filter(e => e[0] === 'durable').length, 1);
+  assert.deepEqual(h.events.at(-1), ['toast', h.words.batchSaved(2)]);
 });

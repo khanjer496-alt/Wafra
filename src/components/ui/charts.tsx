@@ -1,20 +1,14 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import Animated, {
-  FadeIn,
-  ReduceMotion,
-  useAnimatedStyle,
-  useSharedValue,
-  withDelay,
-  withSpring,
-} from 'react-native-reanimated';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import { ThemedText } from '@/components/themed-text';
+import { GrowBar } from '@/components/ui/grow-bar';
 import { rampColor } from '@/components/ui/data-viz';
 import { DataViz, Motion, Radius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { donutSliceAtPoint } from '@/lib/donut-hit-test';
 import { formatAED } from '@/lib/format';
@@ -266,6 +260,10 @@ export function CompositionBar({
   const dark = useColorScheme() === 'dark';
   const dataViz = DataViz[dark ? 'dark' : 'light'];
   const ramp = useRamp();
+  // The app-wide policy (Reduce Motion OR a running screen reader), not
+  // Reanimated's default, which only reads the OS setting.
+  // Android draws layout animations at a measured cost; it shows the bar in place.
+  const enter = useScreenEntering();
   const total = segments.reduce((s, x) => s + x.value, 0);
   if (total <= 0) {
     return (
@@ -297,7 +295,7 @@ export function CompositionBar({
         <Animated.View
           key={s.key}
           accessible={false}
-          entering={FadeIn.delay(i * 60).duration(Motion.sectionEnter)}
+          entering={enter(FadeIn.delay(i * Motion.digitStagger).duration(Motion.change))}
           style={{
             flexGrow: s.value,
             flexBasis: 0,
@@ -319,6 +317,9 @@ export function CompositionBar({
 
 /* ── In vs out, six months ───────────────────────────────────────────── */
 
+/** Bars and pins grow 50ms apart (design language E motion). */
+const BAR_STAGGER = 50;
+
 export interface MonthPair {
   label: string;
   inFils: number;
@@ -326,14 +327,11 @@ export interface MonthPair {
   current?: boolean;
 }
 
-const BAR_SPRING = {
-  damping: 23,
-  stiffness: 250,
-  mass: 0.82,
-  overshootClamping: true,
-  reduceMotion: ReduceMotion.System,
-} as const;
-
+/**
+ * A chart bar grows from its baseline on the shared rule: 420ms on the
+ * standard curve the first time, staggered 50ms by the caller, static under
+ * Reduce Motion, a screen reader, or Android's measured bypass (GrowBar).
+ */
 function AnimatedChartBar({
   color,
   delay,
@@ -345,23 +343,7 @@ function AnimatedChartBar({
   height: number;
   style: object;
 }) {
-  const reducedMotion = useReducedMotion();
-  const animatedHeight = useSharedValue(reducedMotion ? height : 0);
-
-  useEffect(() => {
-    animatedHeight.value = reducedMotion
-      ? height
-      : withDelay(delay, withSpring(height, BAR_SPRING), ReduceMotion.System);
-  }, [animatedHeight, delay, height, reducedMotion]);
-
-  const animatedStyle = useAnimatedStyle(() => ({ height: animatedHeight.value }));
-
-  return (
-    <Animated.View
-      accessible={false}
-      style={[style, { backgroundColor: color }, animatedStyle]}
-    />
-  );
+  return <GrowBar axis="height" size={height} delay={delay} style={[style, { backgroundColor: color }]} />;
 }
 
 /** A colour and what it means. Two bars per column need saying out loud. */
@@ -435,13 +417,13 @@ export function PairedBars({
             <View style={[styles.pairBars, { height }]}>
               <AnimatedChartBar
                 color={inColor}
-                delay={i * 36}
+                delay={i * BAR_STAGGER}
                 height={Math.max(3, (m.inFils / max) * height)}
                 style={styles.pairBar}
               />
               <AnimatedChartBar
                 color={outColor}
-                delay={i * 36 + 24}
+                delay={i * BAR_STAGGER + 24}
                 height={Math.max(3, (m.outFils / max) * height)}
                 style={styles.pairBar}
               />
@@ -602,7 +584,7 @@ export function HistoryStrip({
           <View style={[styles.historyBarWrap, { height }]}>
             <AnimatedChartBar
               color={m.current ? theme.primary : theme.track}
-              delay={i * 36}
+              delay={i * BAR_STAGGER}
               height={Math.max(4, (m.fils / max) * height)}
               style={[styles.bar, styles.historyBar]}
             />

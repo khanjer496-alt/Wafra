@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "candidates": [
+    {
+      "id": "qwen3-4b-instruct-q4km",
+      "baseModel": "Qwen/Qwen3-4B-Instruct-2507",
+      "repo": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+      "revision": "a06e946bb6b655725eafa393f4a9745d460374c9",
+      "file": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+      "bytes": 2497281120,
+      "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+      "provenance": "Unsloth quantization of official instruction-only Qwen model. Added after the 2B candidate failed; uses the same frozen v2 protocol. Not an official Qwen GGUF release.",
+      "license": "Apache-2.0"
+    },
+    {
+      "id": "qwen35-2b-q4km",
+      "baseModel": "Qwen/Qwen3.5-2B",
+      "repo": "unsloth/Qwen3.5-2B-GGUF",
+      "revision": "f6d5376be1edb4d416d56da11e5397a961aca8ae",
+      "file": "Qwen3.5-2B-Q4_K_M.gguf",
+      "bytes": 1280835840,
+      "sha256": "aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223",
+      "provenance": "Unsloth quantization of the official Qwen model; repository LFS hash and immutable revision verified before download. Not an official Qwen GGUF release.",
+      "license": "Apache-2.0"
+    },
+    {
+      "id": "qwen3-06b-q8-control",
+      "baseModel": "Qwen/Qwen3-0.6B",
+      "repo": "Qwen/Qwen3-0.6B-GGUF",
+      "revision": "23749fefcc72300e3a2ad315e1317431b06b590a",
+      "file": "Qwen3-0.6B-Q8_0.gguf",
+      "bytes": 639446688,
+      "sha256": "9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031",
+      "provenance": "Previously verified official artifact, rerun with the same v2 contract to separate model improvement from prompt improvement.",
+      "license": "Apache-2.0"
+    }
+  ]
+}

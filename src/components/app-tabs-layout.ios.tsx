@@ -2,10 +2,11 @@ import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import React, { useRef } from 'react';
 
 import { TabBarMetricsProvider } from '@/components/ui/tab-bar-metrics';
+import { BandPalettes } from '@/constants/theme';
+import { useBandScheme } from '@/hooks/use-band';
 import { useAutoImport } from '@/hooks/use-auto-import';
 import { useHistoryImport } from '@/hooks/use-history-import';
 import { useLanguage } from '@/hooks/use-language';
-import { useTheme } from '@/hooks/use-theme';
 import { prioritizeForegroundNavigation } from '@/lib/foreground-history-priority';
 import { tapped } from '@/lib/haptics';
 import { t } from '@/lib/i18n';
@@ -38,15 +39,22 @@ function CaptureOwner() {
   return null;
 }
 
+/**
+ * Each trigger carries its tab's colour (design language E) as its selected
+ * icon and label colour — `NativeTabs.Trigger.Icon selectedColor` and
+ * `NativeTabs.Trigger.Label selectedStyle` set a per-item UITabBarItem
+ * appearance in expo-router 55. The system bar itself stays native. The
+ * light-mode ochre is the text-grade ochre so it reads on the glass.
+ */
 const TABS = [
-  { name: 'index', label: 'tabHome', sf: { default: 'house', selected: 'house.fill' } },
-  { name: 'flow', label: 'tabFlow', sf: { default: 'chart.bar.xaxis', selected: 'chart.bar.xaxis' } },
-  { name: 'bills', label: 'tabBills', sf: { default: 'doc.text', selected: 'doc.text.fill' } },
-  { name: 'wallet', label: 'tabWallet', sf: { default: 'wallet.pass', selected: 'wallet.pass.fill' } },
+  { name: 'index', band: 'home', label: 'tabHome', sf: { default: 'house', selected: 'house.fill' } },
+  { name: 'flow', band: 'spending', label: 'tabFlow', sf: { default: 'chart.bar.xaxis', selected: 'chart.bar.xaxis' } },
+  { name: 'bills', band: 'bills', label: 'tabBills', sf: { default: 'doc.text', selected: 'doc.text.fill' } },
+  { name: 'wallet', band: 'accounts', label: 'tabWallet', sf: { default: 'wallet.pass', selected: 'wallet.pass.fill' } },
 ] as const;
 
 export default function TabsLayout() {
-  const theme = useTheme();
+  const bands = BandPalettes[useBandScheme()];
   const lang = useLanguage();
   // `focus` fires once per actual switch and never for a tap on the tab that
   // is already selected, which is exactly when the custom bar ticks. The
@@ -56,7 +64,9 @@ export default function TabsLayout() {
   return (
     <TabBarMetricsProvider nativeChrome>
       <CaptureOwner />
-      <NativeTabs tintColor={theme.primary}>
+      {/* The bar-wide tint is only the fallback for anything a trigger does
+          not colour itself; it is Home's ink (light) or light text (dark). */}
+      <NativeTabs tintColor={bands.home.tabTint}>
         {TABS.map((tab) => (
           <NativeTabs.Trigger
             key={tab.name}
@@ -69,8 +79,8 @@ export default function TabsLayout() {
                 focusedTab.current = tab.name;
               },
             }}>
-            <NativeTabs.Trigger.Icon sf={tab.sf} />
-            <NativeTabs.Trigger.Label>{t(tab.label, lang)}</NativeTabs.Trigger.Label>
+            <NativeTabs.Trigger.Icon sf={tab.sf} selectedColor={bands[tab.band].tabTint} />
+            <NativeTabs.Trigger.Label selectedStyle={{ color: bands[tab.band].tabTint }}>{t(tab.label, lang)}</NativeTabs.Trigger.Label>
           </NativeTabs.Trigger>
         ))}
       </NativeTabs>

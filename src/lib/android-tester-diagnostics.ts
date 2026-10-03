@@ -284,6 +284,12 @@ export async function buildAndroidTesterDiagnostic(
   } catch {
     instantAlertsPreference = false;
   }
+  let smsStartupCleanup: unknown = null;
+  try {
+    smsStartupCleanup = SmsReader?.getStartupCleanupDiagnostics?.() ?? null;
+  } catch {
+    smsStartupCleanup = null;
+  }
   const smsReader = SmsReader;
   const parser: Record<string, unknown> = {
     currentVersion: PARSER_VERSION,
@@ -490,6 +496,7 @@ export async function buildAndroidTesterDiagnostic(
         receivePermission: receiveSmsGranted,
         appNotificationPermission: appNotificationGranted,
         instantAlertsPreference,
+        startupCleanup: smsStartupCleanup,
       },
       native: notificationDiagnostics,
       lastImport: getAndroidNotificationImportDiagnostics(),

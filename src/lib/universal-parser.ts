@@ -146,6 +146,9 @@ const explicitNonPosting = (source: string, includeLifecycle = true): {
     return { status: 'informational', family: 'statement' };
   }
   const declined = [
+    // Explicit completed rejection, anchored to a clause so conditional advice
+    // such as `إذا تم رفض السحب النقدي` cannot negate an unrelated purchase.
+    /(?:^|[.!?;؟])\s*تم\s+رفض\s+(?:عملية\s+)?السحب\s+النقدي(?=\s|[.!?;؟]|$)/u,
     /(?:^|[.!?;])\s*(?:your\s+)?(?:card\s+)?(?:payment|transaction|purchase)\s+(?:(?:was|is|has\s+been)\s+)?(?:declined|failed|rejected|not\s+approved)(?=\s*(?:[.!?;]|$))/iu,
     /\b(?:kartenzahlung|zahlung)\b[^!?]{0,180}\babgelehnt(?=\s*(?:[.!?]|$))/iu,
     /\b(?:betaling|kaartbetaling)\b[^!?]{0,180}\bgeweigerd(?=\s*(?:op\b|[.!?]|$))/iu,
@@ -268,6 +271,12 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     status = 'unknown';
     family = 'unknown';
   }
+  // "Pending" ANYWHERE in the message means the money has not settled yet
+  // ("… received from JOHN, pending confirmation", "… recebido de JOAO,
+  // pendente"). It is never a posting; the alert stays reviewable.
+  const pendingAnywhere = /(?<!\p{L})(?:pending|pendente|pendiente|ausstehend|en\s+attente|in\s+attesa|in\s+behandeling|em\s+processamento|awaiting)(?!\p{L})|معلق/iu
+    .test(source);
+  if (pendingAnywhere && (status === 'posted' || status === 'unknown')) status = 'informational';
   const hasStatement = money.statementTotal.evidence !== 'missing' || money.minimumDue.evidence !== 'missing';
   const hasBalance = money.balance.evidence !== 'missing' || money.creditLimit.evidence !== 'missing';
   const hasAmount = money.amount.evidence !== 'missing';
@@ -281,7 +290,12 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
       if (end > start) header = header.slice(0, start) + ' '.repeat(end - start) + header.slice(end);
     }
   }
-  const statementHeader = sourceControl?.family === 'statement' ||
+  // ADCB's supplied billing alert has no word "statement". Its document
+  // heading still proves an obligation when its total is masked/unreadable;
+  // neither the minimum nor the threatened late fee is a purchase choice.
+  // Anchor to the start and the card so a purchase's reminder footer loses.
+  const cardBillingHeader = /^\s*cr\.\s*card\s+[x*•·]*\d{4}\s+billing\s+alert\s*:/iu.test(source);
+  const statementHeader = cardBillingHeader || sourceControl?.family === 'statement' ||
     inspectMarketAlert(header, context.market ?? 'US').family === 'statement';
   if (statementHeader || (hasStatement && (!hasAmount || status !== 'posted'))) {
     family = 'statement';
@@ -297,7 +311,14 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   // Preserve it as a distinct fact until a settlement-specific adapter can
   // reconcile its bank/card sides. Generic "card payment at SHOP" is excluded.
   const cardSettlement = /\bpayment\b[\s\S]{0,100}\b(?:towards?|against)\s+(?:your\s+)?(?:(?:credit|covered|charge)\s+)?card\b|\bpayment\b[\s\S]{0,100}\b(?:received|credited)\s+(?:to|on|for)\s+(?:your\s+)?(?:credit|covered|charge)\s+card\b/iu.test(semanticSource);
-  if (cardSettlement && status === 'posted') family = 'card-payment';
+  // The exact supplied ADCB receipt places the amount before "against";
+  // money ownership can leave that completed receipt's clause unresolved.
+  // It still cannot be offered as a new expense/income in ordinary Review.
+  const cardPaymentReceipt = /^\s*your\s+payment\b[^\n]{0,96}\bagainst\s+(?:your\s+)?(?:credit|covered)\s+card\b[^\n]{0,96}\bwas\s+received\b/iu.test(source);
+  if (!statementHeader && (cardPaymentReceipt || (cardSettlement && status === 'posted'))) {
+    family = 'card-payment';
+    if (cardPaymentReceipt && status === 'unknown') status = 'posted';
+  }
   // Multiple independently owned principal amounts are distinct movements or
   // unresolved event attribution, not alternative spellings of one amount.
   // A single candidate with multiple currency/decimal interpretations remains
@@ -321,8 +342,14 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
   const directionConflict = (explicitDebit && (explicitCredit || completion?.direction === 'credit')) ||
     (explicitCredit && completion?.direction === 'debit') ||
     new Set(readings.map((reading) => reading.direction).filter((value) => value === 'debit' || value === 'credit')).size > 1;
-  const direction = status === 'posted' || status === 'unknown'
+  // "Your payment to Jane was received by her bank" is the RECIPIENT's
+  // receipt: never money arriving here. Without an explicit outgoing verb the
+  // direction is left for the person to decide.
+  const counterpartyReceipt = /\b(?:received|credited|accepted)\s+(?:by|to|at|in(?:to)?)\s+(?:her|his|their|the\s+(?:recipient|payee|beneficiary|receiver)(?:['’]s)?)\s+(?:bank|account)\b/iu
+    .test(source);
+  const readDirection = status === 'posted' || status === 'unknown'
     ? roleUnresolved || directionConflict ? 'unknown' : knownDirection === 'unknown' && completion ? completion.direction : knownDirection : 'none';
+  const direction = counterpartyReceipt && readDirection === 'credit' ? 'unknown' : readDirection;
   const authentication = challenge || readings.some((reading) => reading.family === 'authentication');
   const promotion = [...readings, ...wholeReadings].some((reading) => reading.draft.reasons.includes('promotion'));
   const reviewable = hasAmount || hasStatement || hasBalance;
@@ -340,7 +367,7 @@ export function inspectUniversalBankEvent(source: string, context: UniversalPars
     ...(family === 'statement' && money.statementTotal.evidence === 'missing' ? ['statement-total-unresolved'] : []),
     ...(family === 'statement' && fields.dueDate.evidence === 'missing' ? ['due-date-unresolved'] : []),
     ...(authentication ? ['authentication-not-posting'] : []),
-    ...(pending ? ['pending-not-posting'] : []),
+    ...(pending || pendingAnywhere ? ['pending-not-posting'] : []),
     ...(cardSettlement ? ['settlement-adapter-required'] : []),
     ...(status === 'failed' ? ['failed-not-posting'] : []),
     ...(promotion ? ['promotion-not-posting'] : []),

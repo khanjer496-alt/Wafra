@@ -1,28 +1,39 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useDeferredValue, useMemo, useRef, useState } from 'react';
 import { FlatList, Keyboard, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { TransferPairAccounts } from '@/components/transfer-pair-accounts';
+import { BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
 import { TextField } from '@/components/ui/text-field';
-import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import { useToast } from '@/components/ui/toast';
-import { Spacing } from '@/constants/theme';
+import { Fonts, Spacing, type BandPalette } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
-import { useTheme } from '@/hooks/use-theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { formatAED, fullDateTime, shortDate, toISODate } from '@/lib/format';
 import { bankBrandForName } from '@/lib/markets';
 import { formatMinorUnits } from '@/lib/ledger-money';
-import { useStore } from '@/lib/store';
+import { currentMonthPeriod, inPeriod } from '@/lib/period';
+import { useStoreActions, useStoreSelector } from '@/lib/store';
+import { detailsWords } from '@/lib/details-copy';
+import { reviewBandCopy } from '@/lib/review-band-copy';
+import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { matchedTransferPairs, suggestedTransferPairs, type TransferPair } from '@/lib/transfer-pairs';
 import { isTransferCandidate, reconcileTransfers, transferFingerprint } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
-import { indexTransferHistory, projectTransferHistory, transferAccountLabel, transferHistoryItems, TRANSFER_HISTORY_PAGE_SIZE,
+import { indexTransferHistory, projectTransferHistory, transferAccountLabel, transferHistoryItems, transferSearchText, TRANSFER_HISTORY_PAGE_SIZE,
   type TransferHistoryScope, type TransferHistoryItem } from '@/lib/transfer-review-presentation';
 import type { Transaction } from '@/lib/types';
 
 type Group = ReturnType<typeof reconcileTransfers>['groups'][number];
+/** Matched pairs shown here before "View all transfers". */
+const MATCHED_PREVIEW = 3;
+const unresolvedStatuses = new Set<Group['status']>(['ownership-unknown', 'ambiguous', 'likely-own', 'likely-card-repayment']);
 type Words = ReturnType<typeof transferReviewCopy>;
 type Ownership = 'own' | 'external' | null;
 type Summary = {
@@ -34,7 +45,7 @@ type Summary = {
   dates: string;
 };
 type DisplayGroup = Group & { rows: Transaction[]; summary: Summary };
-type ListItem = TransferHistoryItem<DisplayGroup>;
+type ListItem = TransferHistoryItem<DisplayGroup> | { kind: 'pair'; key: string; pair: TransferPair };
 type Selection = {
   ids: string[];
   expectedFingerprints: Record<string, string>;
@@ -47,6 +58,7 @@ type Selection = {
   status?: Group['status'];
   ownershipExplanation?: string;
   readOnly?: boolean;
+  batch?: Selection[];
 };
 
 function counterpartLabel(counterparty: Group['counterparty'], words: Words): string {
@@ -92,17 +104,89 @@ function SummaryFacts({ summary, words }: { summary: Summary; words: Words }) {
   </View>;
 }
 
+/** A pill answer on a pair card: 44pt tall, full radius, band fill or the sheet's rule tone. */
+function PairPill({ label, primary, disabled, onPress, palette, testID }: {
+  label: string; primary: boolean; disabled: boolean; onPress: () => void; palette: BandPalette; testID: string;
+}) {
+  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} disabled={disabled}
+    accessibilityState={{ disabled }} onPress={onPress}
+    style={({ pressed }) => [styles.pill, { backgroundColor: primary ? palette.fill : palette.rule, opacity: disabled ? 0.45 : pressed ? 0.8 : 1 }]}>
+    <ThemedText type="smallBold" style={[styles.pillLabel, { color: primary ? palette.onFill : palette.text }]}>{label}</ThemedText>
+  </Pressable>;
+}
+
+/** Both legs of one suggested own-account transfer, answered with one tap. */
+function PairCard({ pair, outAccount, inAccount, busy, onMatch, onSeparate, palette, stacked, checked, onSelect }: {
+  pair: TransferPair; outAccount: string; inAccount: string; busy: boolean;
+  onMatch: () => void; onSeparate: () => void; palette: BandPalette; stacked: boolean;
+  checked?: boolean; onSelect?: () => void;
+}) {
+  const language = useLanguage();
+  const d = detailsWords(language);
+  const words = transferReviewCopy(language);
+  const amount = formatAED(pair.out.amountFils, { decimals: true });
+  const incoming = formatAED(pair.in.amountFils, { decimals: true });
+  // The two legs are read as one sentence; the pills stay their own stops
+  // (an `accessible` card would swallow them).
+  return <View testID="transfer-pair-card" style={[styles.pairCard, { borderColor: palette.rule, backgroundColor: palette.card }]}>
+    <View testID="transfer-pair-legs" style={styles.pairLegs} accessible accessibilityRole="text"
+      accessibilityLabel={[d.transfers.pairA11y(outAccount, inAccount, amount), fullDateTime(pair.out),
+        pair.in.amountFils !== pair.out.amountFils ? `${d.transfers.in}: ${incoming}` : null].filter(Boolean).join('. ')}>
+      <TransferPairAccounts outAccount={outAccount} inAccount={inAccount} palette={palette} stacked={stacked} />
+      <View style={styles.pairFigure}>
+        <ThemedText tabular style={[styles.pairAmount, { color: palette.text }]}>{amount}</ThemedText>
+        <ThemedText type="meta" style={{ color: palette.textSecondary }}>{fullDateTime(pair.out)}</ThemedText>
+      </View>
+      {/* A pair whose legs differ in amount says so; the two are never merged. */}
+      {pair.in.amountFils !== pair.out.amountFils ? (
+        <ThemedText type="meta" style={{ color: palette.textSecondary }}>{d.transfers.in}: {incoming} · {fullDateTime(pair.in)}</ThemedText>
+      ) : null}
+    </View>
+    {onSelect ? <Pressable testID="transfer-pair-select" accessibilityRole="checkbox"
+      accessibilityLabel={`${words.selectItem}. ${d.transfers.pairA11y(outAccount, inAccount, amount)}. ${fullDateTime(pair.out)}`}
+      accessibilityState={{ checked: !!checked, disabled: busy }} aria-checked={!!checked}
+      disabled={busy} onPress={onSelect} style={styles.selectControl}>
+      <SelectionMark checked={!!checked} palette={palette} />
+      <ThemedText type="smallBold" style={styles.flexText}>{checked ? words.selectedCount(1) : words.selectItem}</ThemedText>
+    </Pressable> : <View style={styles.pairActions}>
+      <PairPill testID="transfer-pair-match" primary label={d.transfers.match} disabled={busy} onPress={onMatch} palette={palette} />
+      <PairPill testID="transfer-pair-separate" primary={false} label={d.transfers.notPair} disabled={busy} onPress={onSeparate} palette={palette} />
+    </View>}
+  </View>;
+}
+
+function SelectionMark({ checked, palette }: { checked: boolean; palette: BandPalette }) {
+  return <View importantForAccessibility="no" style={[styles.checkbox,
+    { borderColor: checked ? palette.tint : palette.textSecondary, backgroundColor: checked ? palette.fill : 'transparent' }]}>
+    {checked ? <Icon name="check" size={17} color={palette.onFill} /> : null}
+  </View>;
+}
+
 export default function ReviewTransfersScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ transactionId?: string | string[] }>();
   const transactionId = Array.isArray(params.transactionId) ? params.transactionId[0] : params.transactionId;
-  const theme = useTheme();
+  const band = useBand('accounts');
+  const largeText = useLargeTextLayout();
   const language = useLanguage();
+  const bandWords = reviewBandCopy(language);
+  const activityWords = transferActivityCopy(language);
   const words = transferReviewCopy(language);
+  const d = detailsWords(language);
+  // "Not a pair" hides the suggestion for this visit only; both entries stay
+  // in the ordinary queue below. Persisting a rejected pairing needs a store
+  // decision this screen does not have.
+  const [separated, setSeparated] = useState<Set<string>>(() => new Set());
   const toast = useToast();
-  const { state, resolveTransfers, getStateGeneration, getStateSnapshot, ensureDurable } = useStore();
-  const [filter, setFilter] = useState<'pending' | 'reviewed'>(() =>
-    transactionId && !reconcileTransfers(state.transactions, state.accounts).pendingIds.has(transactionId) ? 'reviewed' : 'pending');
+  const state = useStoreSelector(store => ({ transactions: store.state.transactions, accounts: store.state.accounts,
+    ledgerMoney: store.state.ledgerMoney, monthStartDay: store.state.monthStartDay, generation: store.getStateGeneration() }));
+  const { resolveTransfers, resolveTransferBatch, getStateGeneration, getStateSnapshot, ensureDurable } = useStoreActions();
+  const [filter, setFilter] = useState<'pending' | 'reviewed'>(() => {
+    if (!transactionId) return 'pending';
+    const current = reconcileTransfers(state.transactions, state.accounts);
+    const assessment = current.byId.get(transactionId);
+    return current.pendingIds.has(transactionId) || (assessment && unresolvedStatuses.has(assessment.status)) ? 'pending' : 'reviewed';
+  });
   const [showAll, setShowAll] = useState(false);
   // This screen is an exception handler, not a second transaction-history
   // browser. Show every unresolved item and keep ordinary/confirmed transfers
@@ -113,11 +197,14 @@ export default function ReviewTransfersScreen() {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [limits, setLimits] = useState<Record<string, number>>({});
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Map<string, Selection>>(() => new Map());
+  const [previewLimit, setPreviewLimit] = useState(TRANSFER_HISTORY_PAGE_SIZE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsDurability, setNeedsDurability] = useState(false);
   const saving = useRef(false);
-  const insets = useScreenContentInsets({ hasFooter: false });
+  const listBottom = useBandBottomInset();
   const reconciliation = useMemo(() => reconcileTransfers(state.transactions, state.accounts), [state.transactions, state.accounts]);
   const transactionsById = useMemo(() => new Map(state.transactions.map((row) => [row.id, row])), [state.transactions]);
   const accountLabels = useMemo(() => {
@@ -130,11 +217,29 @@ export default function ReviewTransfersScreen() {
   }, [state.accounts, state.transactions, words]);
   const focusedId = showAll ? undefined : transactionId;
   const todayISO = toISODate(new Date());
+  const pairs = useMemo<TransferPair[]>(() => filter === 'pending' && !focusedId
+    ? suggestedTransferPairs(reconciliation, transactionsById).filter(pair => !separated.has(pair.key))
+    : [], [filter, focusedId, reconciliation, transactionsById, separated]);
+  const pairedIds = useMemo(() => new Set(pairs.flatMap(pair => [pair.out.id, pair.in.id])), [pairs]);
+  // A person can explicitly review an uncertain transfer even when it has too
+  // little evidence to warrant a mandatory task. This local display group does
+  // not add it to the queue or classify it; opening the entry uses the existing
+  // fingerprinted preview and confirmation flow below.
+  const focusedPendingGroup = useMemo<Group | null>(() => {
+    if (!focusedId || reconciliation.pendingIds.has(focusedId)) return null;
+    const row = transactionsById.get(focusedId);
+    const assessment = reconciliation.byId.get(focusedId);
+    if (!row || !assessment || !unresolvedStatuses.has(assessment.status) || !isTransferCandidate(row)) return null;
+    return { id: `focused:${row.id}`, transactionIds: [row.id], accountId: row.accountId, direction: row.type,
+      status: assessment.status, counterparty: row.transferEvidence?.counterparty,
+      counterpartyName: row.transferEvidence?.counterpartyName, bulkEligible: false };
+  }, [focusedId, reconciliation, transactionsById]);
   const candidates = useMemo<Group[]>(() => filter === 'pending'
-    ? reconciliation.groups.flatMap((group) => {
-        const transactionIds = group.transactionIds.filter((id) => reconciliation.pendingIds.has(id));
+    ? [...reconciliation.groups.flatMap((group) => {
+        // A leg shown on a pair card above is not listed a second time.
+        const transactionIds = group.transactionIds.filter((id) => reconciliation.pendingIds.has(id) && !pairedIds.has(id));
         return transactionIds.length > 0 ? [{ ...group, transactionIds }] : [];
-      })
+      }), ...(focusedPendingGroup ? [focusedPendingGroup] : [])]
     : state.transactions
       .filter((row) => {
         if (row.transferDecision) return true;
@@ -149,11 +254,21 @@ export default function ReviewTransfersScreen() {
         status: reconciliation.byId.get(row.id)?.status ?? (row.transferDecision?.ownership === 'own' ? 'confirmed-own' : 'confirmed-external'),
         counterparty: row.transferEvidence?.counterparty, bulkEligible: false,
         counterpartyName: row.transferEvidence?.counterpartyName,
-      })), [filter, reconciliation, state.transactions]);
+      })), [filter, reconciliation, state.transactions, focusedPendingGroup, pairedIds]);
   const candidateTransactionCount = useMemo(
     () => candidates.reduce((count, group) => count + group.transactionIds.length, 0),
     [candidates],
   );
+  // Only real matches: pairs the reconciler has confirmed, both legs naming
+  // each other, in the current money month. Never a suggestion.
+  const matched = useMemo(() => filter === 'pending' && !focusedId
+    ? matchedTransferPairs(reconciliation, transactionsById, pair => inPeriod(pair.out.date, currentMonthPeriod()))
+    : [],
+    // monthKey reads the StoreProvider's active salary-day setting.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filter, focusedId, reconciliation, transactionsById, state.monthStartDay]);
+  // The band's figure: suggested pairs plus the single entries still unanswered.
+  const toCheck = filter === 'pending' && !focusedId ? pairs.length + candidateTransactionCount : 0;
   const searching = deferredQuery.trim().length > 0;
   const searchIndex = useMemo(() => searching
     ? indexTransferHistory(candidates, transactionsById, accountLabels, amount => state.ledgerMoney
@@ -168,8 +283,23 @@ export default function ReviewTransfersScreen() {
     summary: summarize(group.rows, accountLabels.get(group.accountId) ?? words.accountUnknown,
       group.counterpartyName ?? counterpartLabel(group.counterparty, words)),
   })), [projection.groups, accountLabels, words]);
-  const listItems = useMemo<ListItem[]>(() => transferHistoryItems(groups, expanded, limits, !!focusedId),
-    [groups, expanded, limits, focusedId]);
+  const visiblePairs = useMemo(() => {
+    const terms = transferSearchText(deferredQuery).split(/\s+/).filter(Boolean);
+    if (!terms.length) return pairs;
+    return pairs.filter(pair => {
+      const label = transferSearchText([pair.out, pair.in].map(row => [row.title, row.date,
+        accountLabels.get(row.accountId), row.transferEvidence?.counterpartyName, row.transferEvidence?.reference,
+        formatAED(row.amountFils, { decimals: true })].filter(Boolean).join(' ')).join(' '));
+      return terms.every(term => label.includes(term));
+    });
+  }, [pairs, deferredQuery, accountLabels]);
+  const listItems = useMemo<ListItem[]>(() => [
+    ...visiblePairs.map(pair => ({ kind: 'pair' as const, key: `pair:${pair.key}`, pair })),
+    ...transferHistoryItems(groups, expanded, limits, !!focusedId),
+  ], [visiblePairs, groups, expanded, limits, focusedId]);
+  const selectableItems = useMemo(() => filter === 'pending' && !focusedId
+    ? listItems.filter(item => item.kind === 'pair' || (item.kind === 'entry' && !item.transaction.transferDecision))
+    : [], [listItems, filter, focusedId]);
   const browse = (next: TransferHistoryScope) => {
     Keyboard.dismiss();
     setScope(next); setExpanded(new Set()); setLimits({});
@@ -178,16 +308,14 @@ export default function ReviewTransfersScreen() {
     Keyboard.dismiss();
     setExpanded(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   };
-  const stale = !!selection && (
-    getStateGeneration() !== selection.expectedGeneration || Object.entries(selection.expectedFingerprints).some(([id, expected]) => {
+  const stale = useMemo(() => !!selection && (
+    state.generation !== selection.expectedGeneration || Object.entries(selection.expectedFingerprints).some(([id, expected]) => {
       const current = transactionsById.get(id);
       return !current || transferFingerprint(current) !== expected;
     })
-  );
+  ), [selection, state.generation, transactionsById]);
 
-  const openReview = (group: DisplayGroup, row?: Transaction) => {
-    if (saving.current || (!row && !group.bulkEligible)) return;
-    Keyboard.dismiss();
+  const entrySelection = (group: DisplayGroup, row?: Transaction): Selection => {
     const rows = row ? [row] : group.rows;
     const assessment = row ? reconciliation.byId.get(row.id) : undefined;
     const counterpart = assessment?.counterpartId ? transactionsById.get(assessment.counterpartId) : undefined;
@@ -195,10 +323,10 @@ export default function ReviewTransfersScreen() {
       (assessment?.status === 'likely-own' || assessment?.status === 'confirmed-own') && !row?.transferDecision;
     // Freeze exactly what the person is about to see. Reconciliation may change
     // while the panel is open; the store rechecks these fingerprints at save.
-    setSelection({
+    return {
       ids: rows.map((entry) => entry.id),
       expectedFingerprints: Object.fromEntries([...rows, ...(linkable && counterpart ? [counterpart] : [])].map((entry) => [entry.id, transferFingerprint(entry)])),
-      expectedGeneration: getStateGeneration(),
+      expectedGeneration: state.generation,
       summary: row ? summarize(rows, group.summary.account, group.summary.counterparty) : group.summary,
       ownership: row?.transferDecision ? null : undefined, undo: !!row?.transferDecision,
       status: assessment?.status,
@@ -211,9 +339,84 @@ export default function ReviewTransfersScreen() {
         date: fullDateTime(counterpart), amount: counterpart.amountFils, linkable } } : {}),
       ...(row ? { record: { title: row.title, reference: row.transferEvidence?.reference,
         source: row.source === 'sms' || row.smsKey ? words.bankRecord : words.manualRecord } } : {}),
-    });
+    };
+  };
+  const openReview = (group: DisplayGroup, row?: Transaction) => {
+    if (saving.current || (!row && !group.bulkEligible)) return;
+    Keyboard.dismiss();
+    setSelection(entrySelection(group, row));
     setError(null);
     setNeedsDurability(false);
+  };
+
+  const pairSelection = (pair: TransferPair): Selection => {
+    const anchor = pair.anchorId === pair.out.id ? pair.out : pair.in;
+    const other = anchor.id === pair.out.id ? pair.in : pair.out;
+    return {
+      ids: [anchor.id],
+      expectedFingerprints: { [anchor.id]: transferFingerprint(anchor), [other.id]: transferFingerprint(other) },
+      expectedGeneration: state.generation,
+      summary: summarize([anchor], accountLabels.get(anchor.accountId) ?? words.accountUnknown,
+        anchor.transferEvidence?.counterpartyName ?? counterpartLabel(anchor.transferEvidence?.counterparty, words)),
+      ownership: 'own', undo: false, status: 'likely-own',
+      counterpart: { id: other.id, title: other.title, account: accountLabels.get(other.accountId) ?? words.accountUnknown,
+        date: fullDateTime(other), amount: other.amountFils, linkable: true },
+      record: { title: anchor.title, reference: anchor.transferEvidence?.reference,
+        source: anchor.source === 'sms' || anchor.smsKey ? words.bankRecord : words.manualRecord },
+    };
+  };
+  const pickItem = (item: ListItem): Selection | null => item.kind === 'pair' ? pairSelection(item.pair)
+    : item.kind === 'entry' ? { ...entrySelection(item.group, item.transaction), counterpart: undefined, ownership: 'own',
+      expectedFingerprints: { [item.transaction.id]: transferFingerprint(item.transaction) } } : null;
+  const togglePicked = (item: ListItem) => {
+    if (saving.current) return;
+    Keyboard.dismiss();
+    const preview = pickItem(item);
+    if (!preview || preview.readOnly) return;
+    setPicked(current => {
+      const next = new Map(current);
+      if (next.has(item.key)) next.delete(item.key); else next.set(item.key, preview);
+      return next;
+    });
+  };
+  const selectShown = () => {
+    if (saving.current) return;
+    Keyboard.dismiss();
+    setPicked(current => {
+      const next = new Map(current);
+      for (const item of selectableItems) if (!next.has(item.key)) {
+        const preview = pickItem(item);
+        if (preview && !preview.readOnly) next.set(item.key, preview);
+      }
+      return next;
+    });
+  };
+  const openBatch = () => {
+    if (saving.current || picked.size === 0) return;
+    Keyboard.dismiss();
+    const batch = [...picked.values()];
+    // Keep the details and fingerprints captured at selection time. Never
+    // replace a checked item with a newer import while opening confirmation.
+    if (batch.some(item => item.expectedGeneration !== getStateGeneration())) {
+      toast.show(words.changed, { tone: 'error' });
+      return;
+    }
+    setSelection({ ids: batch.flatMap(item => item.ids),
+      expectedFingerprints: Object.fromEntries(batch.flatMap(item => Object.entries(item.expectedFingerprints))),
+      expectedGeneration: batch[0].expectedGeneration, summary: batch[0].summary, ownership: 'own', undo: false, batch });
+    setPreviewLimit(TRANSFER_HISTORY_PAGE_SIZE);
+    setError(null); setNeedsDurability(false);
+  };
+  // One tap, the same request and the same change checks as the sheet's
+  // "link" path. A failure opens the sheet on this pair with the error.
+  const matchPair = (pair: TransferPair) => {
+    if (saving.current) return;
+    Keyboard.dismiss();
+    void save(pairSelection(pair), true);
+  };
+  const separatePair = (pair: TransferPair) => {
+    setSeparated(current => new Set(current).add(pair.key));
+    toast.show(d.transfers.notPairDone, { tone: 'info' });
   };
 
   const closeReview = () => {
@@ -223,8 +426,11 @@ export default function ReviewTransfersScreen() {
     setNeedsDurability(false);
   };
 
-  const save = async () => {
-    if (!selection || selection.ownership === undefined || saving.current || stale) return;
+  // Pass the current preview explicitly. A default named `selection` plus the
+  // body-local binding below was misbound by the production web transform.
+  const save = async (target: Selection | null, oneTap = false) => {
+    const selection = target;
+    if (!selection || selection.ownership === undefined || saving.current || (!oneTap && stale)) return;
     // A retry does not enter the resolver again. Check its post-decision
     // fingerprints against authoritative state, even before React re-renders.
     const latest = new Map(getStateSnapshot().transactions.map((row) => [row.id, row]));
@@ -233,7 +439,8 @@ export default function ReviewTransfersScreen() {
         const current = latest.get(id);
         return !current || transferFingerprint(current) !== expected;
       })) {
-      setError(words.changed);
+      if (oneTap) toast.show(words.changed, { tone: 'error' });
+      else setError(words.changed);
       return;
     }
     saving.current = true;
@@ -241,10 +448,16 @@ export default function ReviewTransfersScreen() {
     setError(null);
     try {
       if (needsDurability) await ensureDurable();
+      else if (selection.batch) await resolveTransferBatch({
+        decisions: selection.batch.map(item => ({ ids: item.ids, ownership: 'own',
+          ...(item.counterpart?.linkable ? { counterpartId: item.counterpart.id } : {}) })),
+        expectedFingerprints: selection.expectedFingerprints, expectedGeneration: selection.expectedGeneration,
+      });
       else await resolveTransfers({ ids: selection.ids, ownership: selection.ownership,
         ...(selection.ownership === 'own' && selection.counterpart?.linkable ? { counterpartId: selection.counterpart.id } : {}),
         expectedFingerprints: selection.expectedFingerprints, expectedGeneration: selection.expectedGeneration });
-      toast.show(selection.undo ? words.undone : words.saved, { tone: 'success' });
+      toast.show(selection.batch ? words.batchSaved(selection.batch.length) : oneTap ? d.transfers.matched : selection.undo ? words.undone : words.saved, { tone: 'success' });
+      if (selection.batch) { setPicked(new Map()); setSelecting(false); }
       setSelection(null);
       setNeedsDurability(false);
       // Keep the current browsing position; classifying one row is not a
@@ -255,13 +468,24 @@ export default function ReviewTransfersScreen() {
       const code = 'code' in details ? details.code : undefined;
       if (code === 'transfer-durability') {
         const fingerprints = 'expectedFingerprints' in details ? details.expectedFingerprints : undefined;
+        const changedIds = selection.batch
+          ? selection.batch.flatMap(item => [...item.ids, ...(item.counterpart?.linkable ? [item.counterpart.id] : [])])
+          : [...selection.ids, ...(selection.ownership === 'own' && selection.counterpart?.linkable ? [selection.counterpart.id] : [])];
         if (fingerprints && typeof fingerprints === 'object' && !Array.isArray(fingerprints) &&
           Object.values(fingerprints).every((value) => typeof value === 'string') &&
-          selection.ids.every((id) => id in fingerprints)) {
-          setSelection({ ...selection, expectedFingerprints: fingerprints as Record<string, string> });
+          changedIds.every((id) => id in fingerprints)) {
+          // An external decision changes only its selected row, even when the
+          // preview also showed a possible counterpart. Retain that unchanged
+          // counterpart's guard while advancing the rows the store did change.
+          setSelection({ ...selection, expectedFingerprints: {
+            ...selection.expectedFingerprints, ...fingerprints as Record<string, string>,
+          } });
         }
         setNeedsDurability(true);
       }
+      // A one-tap match that failed continues in the sheet, where retry and
+      // cancel already exist.
+      if (oneTap && code !== 'transfer-durability') setSelection(selection);
       setError(code === 'transfer-durability' || needsDurability ? words.durabilityFailed : words.saveFailed);
     } finally {
       saving.current = false;
@@ -269,27 +493,85 @@ export default function ReviewTransfersScreen() {
     }
   };
 
+  const matchedSection = matched.length > 0 ? <View testID="transfer-matched-pairs" style={styles.matched}>
+    <View style={styles.matchedHead} accessible accessibilityRole="header" accessibilityLabel={`${bandWords.matchedThisMonth}, ${matched.length}`}>
+      <ThemedText type="smallBold" style={[styles.flexText, { color: band.text }]}>{bandWords.matchedThisMonth}</ThemedText>
+      <ThemedText type="smallBold" style={{ color: band.textSecondary }}>{matched.length}</ThemedText>
+    </View>
+    {matched.slice(0, MATCHED_PREVIEW).map(pair => {
+      const outAccount = accountLabels.get(pair.out.accountId) ?? words.accountUnknown;
+      const inAccount = accountLabels.get(pair.in.accountId) ?? words.accountUnknown;
+      const amount = formatAED(pair.out.amountFils, { decimals: true });
+      return <View key={pair.key} testID="transfer-matched-pair" accessible accessibilityRole="text"
+        accessibilityLabel={`${d.transfers.pairA11y(outAccount, inAccount, amount)}. ${shortDate(pair.out.date)}`}
+        style={[styles.matchedRow, largeText && styles.matchedRowStacked, { borderTopColor: band.rule }]}>
+        <View style={largeText ? styles.stretch : styles.flexText}>
+          <TransferPairAccounts outAccount={outAccount} inAccount={inAccount} palette={band} stacked={largeText} />
+        </View>
+        <View style={[styles.matchedFigure, largeText && styles.matchedFigureStacked]}>
+          <ThemedText type="smallBold" tabular style={{ color: band.text }}>{amount}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDate(pair.out.date)}</ThemedText>
+        </View>
+      </View>;
+    })}
+    <Pressable testID="transfer-matched-all" accessibilityRole="button" accessibilityLabel={activityWords.viewAll}
+      onPress={() => router.push('/transfers')} style={styles.matchedLink}>
+      <ThemedText type="smallBold" style={{ color: band.tint }}>{activityWords.viewAll}</ThemedText>
+    </Pressable>
+  </View> : null;
+
   return <>
-    <ScreenScaffold scroll={false} virtualized headerMode="native"
-      header={{ title: words.title, back: { label: words.back, onPress: () => router.back() } }}>
+    <BandScaffold band="accounts" scroll={false} testID="review-transfers-screen" contentStyle={styles.sheet}
+      nav={{ back: true, backDisabled: busy || (needsDurability && !stale), title: activityWords.title }}
+      footer={selecting ? <View testID="transfer-selection-footer" accessibilityLiveRegion="polite">
+        <Button wrapLabel label={words.reviewSelected(picked.size)} disabled={busy || picked.size === 0} onPress={openBatch} />
+      </View> : undefined}
+      bandContent={<View testID="transfer-review-band" style={styles.bandIntro}>
+        <ThemedText accessibilityRole="header" accessibilityLiveRegion="polite" style={[styles.headline, { color: band.onBand }]}>
+          {toCheck > 0 ? bandWords.toCheck(toCheck) : words.title}
+        </ThemedText>
+        {/* The band stays put over the list, so at large text the explanation moves onto the sheet. */}
+        {!focusedId && toCheck > 0 && !largeText ? (
+          <ThemedText type="small" style={{ color: band.onBandSecondary }}>{words.intro}</ThemedText>
+        ) : null}
+      </View>}>
       <FlatList data={listItems} keyExtractor={(item) => item.key}
         keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
         initialNumToRender={8} maxToRenderPerBatch={8} windowSize={7}
-        contentContainerStyle={insets.contentContainerStyle} contentInset={insets.contentInset}
-        scrollIndicatorInsets={insets.scrollIndicatorInsets} contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[styles.listContent, { paddingBottom: listBottom }]}
+        scrollIndicatorInsets={{ top: 0, bottom: listBottom }} contentInsetAdjustmentBehavior="never"
+        ListFooterComponent={matchedSection}
         ListHeaderComponent={<View style={styles.intro}>
-          {!focusedId && candidates.length > 0 ? (
-            <ThemedText type="small" themeColor="textSecondary">{words.intro}</ThemedText>
+          {!focusedId && filter === 'pending' && (toCheck > 0 || selecting) ? <View style={styles.actions}>
+            {selecting ? <>
+              <ThemedText type="meta" themeColor="textSecondary">{words.selectionHint}</ThemedText>
+              <View style={styles.pairActions}>
+                <PairPill testID="transfer-select-shown" primary={false} label={words.selectShown(selectableItems.length)}
+                  disabled={busy || selectableItems.length === 0} onPress={selectShown} palette={band} />
+                {picked.size > 0 ? <PairPill testID="transfer-clear-selection" primary={false} label={words.clearSelection}
+                  disabled={busy} onPress={() => { if (!saving.current) setPicked(new Map()); }} palette={band} /> : null}
+                <PairPill testID="transfer-cancel-selection" primary={false} label={words.cancel} disabled={busy || needsDurability}
+                  onPress={() => { if (!saving.current) { setSelecting(false); setPicked(new Map()); } }} palette={band} />
+              </View>
+            </> : <Button variant="outline" label={words.selectTransfers} disabled={busy}
+              onPress={() => { Keyboard.dismiss(); setSelecting(true); }} />}
+          </View> : null}
+          {!focusedId && toCheck > 0 && largeText ? (
+            <ThemedText type="small" style={{ color: band.textSecondary }}>{words.intro}</ThemedText>
           ) : null}
+          {visiblePairs.length > 0 ? <View testID="transfer-pairs" style={styles.pairs}>
+            <ThemedText type="smallBold" accessibilityRole="header" style={{ color: band.text }}>{d.transfers.pairsTitle(visiblePairs.length)}</ThemedText>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{d.transfers.pairsBody}</ThemedText>
+          </View> : null}
           {focusedId ? (
             <Button variant="ghost" label={words.showAll} onPress={() => { setShowAll(true); browse('all'); }} />
-          ) : candidateTransactionCount > 8 ? (
+          ) : toCheck > 8 || query.length > 0 ? (
             <TextField testID="transfer-search" label={words.search} value={query} onChangeText={setQuery}
               autoCapitalize="none" autoCorrect={false} returnKeyType="search" onSubmitEditing={() => Keyboard.dismiss()}
-              leading={<Icon name="search" size={16} color={theme.textSecondary} />}
+              leading={<Icon name="search" size={16} color={band.textSecondary} />}
               trailing={query ? <Pressable accessibilityRole="button" accessibilityLabel={words.clearSearch}
                 onPress={() => setQuery('')} style={styles.clearSearch}>
-                <Icon name="close" size={16} color={theme.textSecondary} />
+                <Icon name="close" size={16} color={band.textSecondary} />
               </Pressable> : undefined} />
           ) : null}
         </View>}
@@ -298,16 +580,21 @@ export default function ReviewTransfersScreen() {
           {focusedId && reconciliation.byId.get(focusedId) ? <ThemedText type="small" themeColor="textSecondary">{statusLabel(reconciliation.byId.get(focusedId)!.status, words)}</ThemedText> : null}
           {!focusedId && deferredQuery.trim() ? <ThemedText type="small" themeColor="textSecondary">{words.searchEmptyBody}</ThemedText> : null}
         </View>}
-        renderItem={({ item }) => item.kind === 'group' ? <View testID="transfer-review-group"
-          style={[styles.group, { borderTopColor: theme.cardBorder }]}>
+        renderItem={({ item }) => item.kind === 'pair' ? <PairCard pair={item.pair} busy={busy} palette={band} stacked={largeText}
+          outAccount={accountLabels.get(item.pair.out.accountId) ?? words.accountUnknown}
+          inAccount={accountLabels.get(item.pair.in.accountId) ?? words.accountUnknown}
+          onMatch={() => matchPair(item.pair)} onSeparate={() => separatePair(item.pair)}
+          checked={picked.has(item.key)} onSelect={selecting ? () => togglePicked(item) : undefined} />
+          : item.kind === 'group' ? <View testID="transfer-review-group"
+          style={[styles.group, { borderTopColor: band.rule }]}>
           <Pressable testID="transfer-group-toggle" accessibilityRole="button"
             accessibilityLabel={`${item.group.summary.account}. ${item.group.summary.counterparty}. ${expanded.has(item.group.id) ? words.collapse : words.expand(item.group.rows.length)}`}
             accessibilityState={{ expanded: !!focusedId || expanded.has(item.group.id), disabled: !!focusedId }}
             disabled={!!focusedId} onPress={() => toggleGroup(item.group.id)} style={styles.groupToggle}>
             <View style={styles.groupHeading}>
-              <Icon name="bank" size={18} color={theme.textSecondary} />
+              <Icon name="bank" size={18} color={band.textSecondary} />
               <ThemedText type="smallBold" style={styles.flexText}>{item.group.summary.account}</ThemedText>
-              {!focusedId && <Icon name={expanded.has(item.group.id) ? 'chevron-down' : language === 'ar' ? 'chevron-left' : 'chevron-right'} size={16} color={theme.textSecondary} />}
+              {!focusedId && <Icon name={expanded.has(item.group.id) ? 'chevron-down' : 'chevron-right'} size={16} color={band.textSecondary} />}
             </View>
             <ThemedText type="meta" themeColor="textSecondary">{item.group.summary.counterparty}</ThemedText>
             {(filter === 'reviewed' || item.group.status.startsWith('likely-')) && <ThemedText type="meta" themeColor="textSecondary">{statusLabel(item.group.status, words)}</ThemedText>}
@@ -316,15 +603,20 @@ export default function ReviewTransfersScreen() {
               <ThemedText type="meta" themeColor="textSecondary">{words.count(item.group.rows.length)} · {shortDate(item.group.rows[0].date)}</ThemedText>
             </View>
           </Pressable>
-          {(expanded.has(item.group.id) || focusedId) && filter === 'pending' && item.group.bulkEligible && item.group.rows.length > 1
+          {!selecting && (expanded.has(item.group.id) || focusedId) && filter === 'pending' && item.group.bulkEligible && item.group.rows.length > 1
             ? <Button variant="outline" wrapLabel label={words.reviewGroup(item.group.rows.length)} onPress={() => openReview(item.group)} />
             : (expanded.has(item.group.id) || focusedId) && filter === 'pending' && item.group.rows.length > 1
               ? <ThemedText type="meta" themeColor="textSecondary">{words.individualOnly}</ThemedText> : null}
         </View> : item.kind === 'more' ? <Button variant="ghost" wrapLabel label={words.more(item.shown, item.group.rows.length)}
-          onPress={() => setLimits(current => ({ ...current, [item.group.id]: item.shown + TRANSFER_HISTORY_PAGE_SIZE }))} /> : <Pressable testID="transfer-review-entry" accessibilityRole="button"
-          accessibilityLabel={`${item.transaction.transferDecision ? words.undo : words.review}. ${item.transaction.title}. ${fullDateTime(item.transaction)}. ${formatAED(item.transaction.amountFils, { decimals: true })}`}
-          onPress={() => openReview(item.group, item.transaction)} style={[styles.entry, { borderColor: theme.cardBorder }]}>
-          <ThemedText type="small" selectable>{item.transaction.title}</ThemedText>
+          onPress={() => setLimits(current => ({ ...current, [item.group.id]: item.shown + TRANSFER_HISTORY_PAGE_SIZE }))} /> : <Pressable testID="transfer-review-entry" accessibilityRole={selecting ? 'checkbox' : 'button'}
+          accessibilityState={selecting ? { checked: picked.has(item.key), disabled: busy } : { disabled: busy }}
+          aria-checked={selecting ? picked.has(item.key) : undefined} disabled={busy}
+          accessibilityLabel={`${selecting ? words.selectItem : item.transaction.transferDecision ? words.undo : words.review}. ${item.transaction.title}. ${fullDateTime(item.transaction)}. ${formatAED(item.transaction.amountFils, { decimals: true })}`}
+          onPress={() => selecting ? togglePicked(item) : openReview(item.group, item.transaction)} style={[styles.entry, { borderColor: band.rule }]}>
+          <View style={styles.groupHeading}>
+            {selecting ? <SelectionMark checked={picked.has(item.key)} palette={band} /> : null}
+            <ThemedText type="small" style={styles.flexText}>{item.transaction.title}</ThemedText>
+          </View>
           <View style={styles.groupMeta}>
             <ThemedText type="smallBold" tabular>{formatAED(item.transaction.amountFils, { decimals: true })}</ThemedText>
             <ThemedText type="meta" themeColor="textSecondary" selectable>{fullDateTime(item.transaction)}</ThemedText>
@@ -332,15 +624,33 @@ export default function ReviewTransfersScreen() {
           {item.transaction.transferEvidence?.reference ? <ThemedText type="meta" themeColor="textSecondary" selectable>{words.reference}: {item.transaction.transferEvidence.reference}</ThemedText> : null}
         </Pressable>}
       />
-    </ScreenScaffold>
-    {selection ? <BottomSheet visible title={selection.undo ? words.undo : words.title}
+    </BandScaffold>
+    {selection ? <BottomSheet visible palette={band} title={selection.batch ? words.batchTitle : selection.undo ? words.undo : words.title}
       testID="transfer-review-confirmation" onClose={closeReview} dismissible={!busy && (!needsDurability || stale)}
       footer={<View style={styles.actions}>
-        {!selection.readOnly && <Button wrapLabel label={busy ? words.saving : needsDurability ? words.retrySave : selection.undo ? words.undo : selection.ownership === 'own' && selection.counterpart?.linkable ? words.linkOwn : words.confirm}
-          disabled={busy || stale || selection.ownership === undefined} onPress={() => void save()} />
+        {!selection.readOnly && <Button wrapLabel label={busy ? words.saving : needsDurability ? words.retrySave : selection.batch ? words.confirmSelected(selection.batch.length) : selection.undo ? words.undo : selection.ownership === 'own' && selection.counterpart?.linkable ? words.linkOwn : words.confirm}
+          disabled={busy || stale || selection.ownership === undefined} onPress={() => void save(selection)} />
         }
-        <Button variant="ghost" label={selection.readOnly || selection.undo || needsDurability ? words.cancel : words.keepSeparate} disabled={busy || (needsDurability && !stale)} onPress={closeReview} />
+        <Button variant="ghost" label={selection.batch || selection.readOnly || selection.undo || needsDurability ? words.cancel : words.keepSeparate} disabled={busy || (needsDurability && !stale)} onPress={closeReview} />
       </View>}>
+      {selection.batch ? <View testID="transfer-batch-preview" style={styles.choices}>
+        <ThemedText type="subtitle" accessibilityRole="header">{words.selectedCount(selection.batch.length)}</ThemedText>
+        <ThemedText type="small">{words.batchBody}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">{words.ownBody}</ThemedText>
+        {selection.batch.slice(0, previewLimit).map((item, index) => <View key={index} testID="transfer-batch-preview-item"
+          style={[styles.choice, { borderColor: band.rule }]}>
+          <ThemedText type="smallBold">{item.summary.account} · {item.summary.direction === 'income' ? words.received : words.sent}</ThemedText>
+          <ThemedText type="small" tabular>{formatAED(item.summary.total, { decimals: true })}</ThemedText>
+          <ThemedText type="meta">{item.summary.dates}</ThemedText>
+          {item.counterpart ? <>
+            <ThemedText type="smallBold">{item.counterpart.account} · {item.summary.direction === 'income' ? words.sent : words.received}</ThemedText>
+            <ThemedText type="small" tabular>{formatAED(item.counterpart.amount, { decimals: true })}</ThemedText>
+            <ThemedText type="meta">{item.counterpart.date}</ThemedText>
+          </> : <ThemedText type="small">{item.record?.title}</ThemedText>}
+        </View>)}
+        {selection.batch.length > previewLimit ? <Button variant="ghost" wrapLabel
+          label={words.more(previewLimit, selection.batch.length)} onPress={() => setPreviewLimit(value => value + TRANSFER_HISTORY_PAGE_SIZE)} /> : null}
+      </View> : <>
       <ThemedText type="subtitle" accessibilityRole="header">{selection.undo ? words.undoTitle : selection.ids.length > 1 ? words.groupChoose : words.choose}</ThemedText>
       <SummaryFacts summary={selection.summary} words={words} />
       {selection.status && <ThemedText type="smallBold">{statusLabel(selection.status, words)}</ThemedText>}
@@ -369,19 +679,44 @@ export default function ReviewTransfersScreen() {
             accessibilityState={{ checked: selection.ownership === ownership, disabled: busy || needsDurability }}
             disabled={busy || needsDurability}
             onPress={() => setSelection({ ...selection, ownership })}
-            style={[styles.choice, { borderColor: selection.ownership === ownership ? theme.primary : theme.cardBorder }]}>
+            style={[styles.choice, { borderColor: selection.ownership === ownership ? band.tint : band.rule }]}>
             <ThemedText type="smallBold">{label}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">{detail}</ThemedText>
           </Pressable>;
         })}
       </View>}
+      </>}
       {stale || error ? <ThemedText testID="transfer-review-error" type="small" themeColor="expense" accessibilityRole="alert" accessibilityLiveRegion="polite" selectable>{stale ? words.changed : error}</ThemedText> : null}
     </BottomSheet> : null}
   </>;
 }
 
 const styles = StyleSheet.create({
+  bandIntro: { gap: Spacing.two },
+  // The band's headline: Geist SemiBold with tabular digits, never Geist Mono.
+  headline: { fontFamily: Fonts.sansSemi, fontSize: 34, lineHeight: 40, letterSpacing: -1.2, fontVariant: ['tabular-nums'] },
+  sheet: { paddingTop: Spacing.two },
+  listContent: { gap: 0 },
   intro: { gap: Spacing.three, paddingBottom: Spacing.three },
+  pairs: { gap: 10 },
+  pairCard: { borderWidth: 1, borderRadius: 22, padding: Spacing.three, gap: Spacing.three, marginBottom: Spacing.three },
+  selectControl: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  checkbox: { width: 24, height: 24, borderWidth: 2, borderRadius: 6, justifyContent: 'center', alignItems: 'center' },
+  pairLegs: { gap: Spacing.two },
+  pairFigure: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.two },
+  pairAmount: { fontFamily: Fonts.sansSemi, fontSize: 26, lineHeight: 32, letterSpacing: -1, fontVariant: ['tabular-nums'] },
+  pairActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  pill: { minHeight: 44, maxWidth: '100%', flexShrink: 1, borderRadius: 22, paddingHorizontal: 18, paddingVertical: 8, justifyContent: 'center', alignItems: 'center' },
+  pillLabel: { textAlign: 'center' },
+  matched: { paddingTop: Spacing.four },
+  matchedHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingBottom: Spacing.two },
+  matchedRow: { minHeight: 60, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.three,
+    paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
+  matchedFigure: { alignItems: 'flex-end', gap: 2 },
+  matchedRowStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  matchedFigureStacked: { alignItems: 'flex-start' },
+  stretch: { alignSelf: 'stretch' },
+  matchedLink: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   filter: { minHeight: 48, justifyContent: 'center', paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, borderBottomWidth: 2 },
   facts: { gap: Spacing.one },

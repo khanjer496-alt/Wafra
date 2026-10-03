@@ -2,26 +2,68 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { harness, walk, text } = require('./journal-harness.cjs');
+// The same exact selected-period amount is visible and spoken above daily spending.
+const periodMinor = (nodes) => {
+  const amount=nodes.find(node=>node.props.testID==='home-spending-total');
+  const match=amount.props.accessibilityLabel.match(/AED ([\d,]+(?:\.\d+)?)/);
+  assert.ok(match);
+  assert.ok(text(amount).includes(match[1]),'visible amount matches the spoken amount');
+  return Math.round(Number(match[1].replace(/,/g,''))*100);
+};
 
-test('Home puts one spending summary and recent activity before capture controls', () => {
+test('Home draws one selected-period month line on its band, then the week, then activity', () => {
   const h = harness();
   const nodes = walk(h.tree);
   const section = (id) => nodes.findIndex((node) => node.props.testID === id);
   for (const id of ['journal-summary', 'home-widget-activity', 'journal-import-controls']) {
     assert.notEqual(section(id), -1, `${id} is rendered`);
   }
-  assert.ok(section('journal-summary') < section('home-widget-activity'));
+  // Home v2: the band holds the greeting, the Today tiles, the month line
+  // (Spent · In · Net for the selected period) and the week.
+  assert.ok(section('journal-summary') < section('home-week') && section('home-week') < section('home-widget-activity'));
   assert.ok(section('home-widget-activity') < section('journal-import-controls'));
-  assert.equal(nodes.find((node) => node.type === 'Money').props.fils, 508700);
-  assert.match(text(h.tree), /View spending breakdown/);
+  assert.equal(periodMinor(nodes), 508700);
+  // The Spent figure is the button into the breakdown, and says so.
+  assert.match(nodes.find((node) => node.props.testID === 'home-spending-total').props.accessibilityLabel, /View spending breakdown/);
   assert.match(text(nodes.find((node) => node.props.testID === 'home-widget-activity')), /Recent transactions/);
 });
 test('settings and explicit manual entry remain working visible quick actions', () => {
-  const h = harness();
-  const nodes = walk(h.tree);
+  const ios = harness({ platform: 'ios' });
+  const nodes = walk(ios.tree);
   nodes.find((n) => n.type === 'Pressable' && n.props.accessibilityLabel === 'Add').props.onPress();
   nodes.find((n) => n.type === 'Pressable' && n.props.accessibilityLabel === 'Settings').props.onPress();
-  assert.deepEqual(h.events.filter((e) => e[0] === 'route'), [['route', '/add-transaction'], ['route', '/settings']]);
+  assert.deepEqual(ios.events.filter((e) => e[0] === 'route'), [['route', '/add-transaction'], ['route', '/settings']]);
+  // Android keeps manual entry as the floating Add above the tab bar.
+  const android = harness({ platform: 'android' });
+  const fab = walk(android.tree).find((n) => n.type === 'HomeAddButton');
+  assert.equal(walk(android.tree).some((n) => n.type === 'Pressable' && n.props.accessibilityLabel === 'Add'), false);
+  fab.props.onPress();
+  assert.deepEqual(android.events.filter((e) => e[0] === 'route'), [['route', '/add-transaction']]);
+});
+test('Android Home reserves room under its last row for the floating Add; iOS does not', () => {
+  // Home is a design-language-E band screen: BandScaffold, the ink band.
+  const scaffold = (platform) => walk(harness({ platform }).tree).find((n) => n.type === 'BandScaffold');
+  assert.equal(scaffold('ios').props.band, 'home');
+  assert.equal(scaffold('ios').props.tabbed, true);
+  // The 56pt button plus a gap, on top of the tab-bar clearance the scaffold adds.
+  assert.ok(scaffold('android').props.floatingClearance >= 56 + 8);
+  assert.equal(scaffold('ios').props.floatingClearance, 0);
+  // ...and the scaffold adds it to the tab screen's bottom padding.
+  const path = require('node:path');
+  const load = require('./load-typescript.cjs');
+  const { useBandBottomInset } = load(path.join(__dirname, '../../../src/components/ui/band-scaffold.tsx'), {
+    react: { useEffect() {}, useRef: (v) => ({ current: v }) }, 'react/jsx-runtime': { jsx() {}, jsxs() {}, Fragment: 'Fragment' },
+    'react-native': { Platform: { OS: 'android' }, StyleSheet: { create: (s) => s }, ScrollView: 'ScrollView', View: 'View', Pressable: 'Pressable', KeyboardAvoidingView: 'KAV' },
+    'react-native-reanimated': { __esModule: true, default: { View: 'View' }, useAnimatedStyle: (f) => f(), useSharedValue: (v) => ({ value: v }), withSpring: (v) => v },
+    'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 24, bottom: 16 }) },
+    '@react-navigation/native': { useIsFocused: () => true }, 'expo-status-bar': { StatusBar: 'StatusBar' }, 'expo-router': { useRouter: () => ({}) },
+    '@/components/themed-text': {}, '@/components/ui/icon': {}, '@/hooks/use-band': {}, '@/hooks/use-keyboard-height': {},
+    '@/hooks/use-language': {}, '@/hooks/use-large-text-layout': {}, '@/hooks/use-reduced-motion': {}, '@/lib/band-copy': {},
+    '@/constants/theme': { BandLayout: { sheetOverlap: 28, sheetRadius: 28, buttonHeight: 56 }, MaxContentWidth: 800, MotionSpring: {}, Spacing: { one: 4, two: 8, three: 16, four: 24 } },
+    '@/hooks/use-tab-bar-clearance': { useTabBarClearance: () => 90 },
+  });
+  assert.equal(useBandBottomInset({ tabbed: true }), 90);
+  assert.equal(useBandBottomInset({ tabbed: true, floatingClearance: 72 }), 162);
 });
 test('Founder logo unlock exists only in founder-enabled internal builds', async () => {
   const production = harness();
@@ -37,7 +79,7 @@ test('Founder logo unlock exists only in founder-enabled internal builds', async
 test('activity search and full bills remain reachable without duplicate Accounts shortcuts', () => {
   const h = harness();
   for (const node of walk(h.tree)) {
-    if (node.type === 'Pressable' && (text(node.props.children).trim() === 'See all' || node.props.accessibilityLabel === 'View all payments')) node.props.onPress();
+    if (node.type === 'Pressable' && (text(node.props.children).trim() === 'See all' || String(node.props.accessibilityLabel).startsWith('View all payments'))) node.props.onPress();
   }
   assert.ok(h.events.some((e) => e[1] === '/transactions'));
   assert.ok(h.events.some((e) => e[1] === '/bills'));
@@ -85,7 +127,9 @@ test('incoming transfer remains positive but not coloured as earned income', () 
     category: 'other', type: 'income' }, internal: true });
   const amount = walk(row).find((node) => node.type === 'Text' && text(node.props.children).startsWith('+'));
   assert.ok(amount);
-  assert.equal(amount.props.style[1].color, h.theme.text);
+  // Never income green; a transfer's amount is the quieter secondary tone.
+  assert.notEqual(amount.props.style[1].color, h.theme.income);
+  assert.equal(amount.props.style[1].color, h.theme.textSecondary);
 });
 test('Arabic and larger text render the same controls without English journal headings', () => {
   const h = harness({ language: 'ar', largeText: true, theme: 'dark' });
@@ -94,30 +138,30 @@ test('Arabic and larger text render the same controls without English journal he
   assert.ok(walk(h.tree).some((node) => node.props.testID === 'journal-import-controls'));
 });
 
-test('Home places nonurgent upcoming payments after recent activity', () => {
+test('E Home keeps the period summary above coming-up payments and activity', () => {
   const nodes = walk(harness().tree);
   const at = (id) => nodes.findIndex((node) => node.props.testID === id);
   for (const id of ['journal-summary', 'home-widget-activity', 'home-widget-upcoming']) {
     assert.notEqual(at(id), -1, `${id} is rendered`);
   }
-  assert.ok(at('journal-summary') < at('home-widget-activity'));
+  assert.ok(at('journal-summary') < at('home-widget-upcoming'));
   assert.equal(at('reference-quick-actions'), -1);
   assert.equal(at('reference-month-cards'), -1);
   assert.equal(at('home-widget-due'), -1, 'the nonurgent fixture has no due-now payment');
-  assert.ok(at('home-widget-activity') < at('home-widget-upcoming'));
+  assert.ok(at('home-widget-upcoming') < at('home-widget-activity'));
 });
 test('known balances never replace spending or add another summary on Home', () => {
   const h = harness({ knownBalance: 3870000 });
-  assert.equal(walk(h.tree).find((node) => node.type === 'Money').props.fils, 508700);
+  assert.equal(periodMinor(walk(h.tree)), 508700);
   assert.doesNotMatch(text(h.tree), /Recorded balances|Net after spending/);
   assert.doesNotMatch(text(h.tree), /6%|on track|safe to spend/i);
 });
 test('zero and unknown account balances do not change the Home spending figure', () => {
   const zero = harness({ knownBalance: 0 });
-  assert.equal(walk(zero.tree).find((node) => node.type === 'Money').props.fils, 508700);
+  assert.equal(periodMinor(walk(zero.tree)), 508700);
   assert.doesNotMatch(text(zero.tree), /Recorded balances/);
   const unknown = harness();
-  assert.equal(walk(unknown.tree).find((node) => node.type === 'Money').props.fils, 508700);
+  assert.equal(periodMinor(walk(unknown.tree)), 508700);
   assert.doesNotMatch(text(unknown.tree), /Recorded balances/);
 });
 test('Home does not duplicate import shortcuts; explicit capture control remains accessible', () => {
@@ -127,4 +171,38 @@ test('Home does not duplicate import shortcuts; explicit capture control remains
     assert.equal(walk(h.tree).filter((n) => n.props.testID === 'reference-quick-actions').length, 0);
     assert.deepEqual(h.events, []);
   }
+});
+
+test('Home activity keeps its selected period visible below the primary summary', () => {
+  const nodes = walk(harness().tree);
+  const scope = nodes.find(node => node.props.testID === 'home-activity-period');
+  assert.match(text(scope), /September 2026/);
+  assert.ok(nodes.indexOf(scope) > nodes.findIndex(node => node.props.testID === 'journal-summary'));
+});
+
+test('projected Home bills keep an explicit estimate and exact denominated amount', () => {
+  const nodes = walk(harness().tree);
+  const upcoming = nodes.find(node => node.props.testID === 'home-widget-upcoming');
+  const rows = walk(upcoming);
+  assert.match(text(upcoming), /≈/);
+  assert.ok(rows.some(node => node.type === 'Pressable' && /Estimated/.test(node.props.accessibilityLabel ?? '')));
+  const amount = rows.find(node => node.type === 'Money');
+  assert.equal(amount.props.fils, 38000);
+  assert.equal(amount.props.moneySpec.currency, 'AED');
+  assert.equal(amount.props.decimals, true);
+});
+test('payment headings show their count and total; an estimate is marked and spoken as one', () => {
+  const nodes = walk(harness().tree);
+  const total = nodes.find((node) => node.props.testID === 'home-widget-upcoming-total');
+  assert.equal(text(total).trim(), '≈ AED 380.00');
+  assert.equal(total.props.accessibilityLabel, 'View all payments. 1 payment, Estimated AED 380.00');
+});
+test('activity days carry their whole total, signed when spoken, and none when unfinished', () => {
+  const nodes = walk(harness({ dayTotals: new Map([['2026-09-06', -24435]]) }).tree);
+  const heading = (date) => walk(nodes.find((node) => node.props.testID === `home-activity-day-${date}`))
+    .find((node) => node.props.accessibilityRole === 'header');
+  assert.equal(heading('2026-09-06').props.accessibilityLabel, 'Sunday 6 Sept, −AED 244.35');
+  assert.equal(heading('2026-09-05').props.accessibilityLabel, 'Saturday 5 Sept', 'an unfinished day shows no partial total');
+  assert.equal(walk(heading('2026-09-06')).some((node) => node.type === 'Money'), true);
+  assert.equal(walk(heading('2026-09-05')).some((node) => node.type === 'Money'), false);
 });

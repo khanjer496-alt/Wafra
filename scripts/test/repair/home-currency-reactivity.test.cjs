@@ -17,10 +17,14 @@ function harness() {
     '@/lib/ledger-money': money, '@/lib/markets': markets });
   const caches = new Map();
   let currentFiber = null;
+  // Like React, each compiled function (the component and every compiled
+  // custom hook it calls) gets its own cache slot, in call order per render.
+  let cacheCall = 0;
   const runtime = { c(size) {
     assert.ok(currentFiber, 'compiled memo cache must belong to the rendered component');
-    let value = caches.get(currentFiber);
-    if (!value) { value = Array(size).fill(Symbol.for('react.memo_cache_sentinel')); caches.set(currentFiber, value); }
+    const key = `${currentFiber}#${cacheCall++}`;
+    let value = caches.get(key);
+    if (!value) { value = Array(size).fill(Symbol.for('react.memo_cache_sentinel')); caches.set(key, value); }
     assert.equal(value.length, size);
     return value;
   } };
@@ -28,6 +32,7 @@ function harness() {
   const contexts = [];
   let providerMemo;
   const theme = { text: 'black', primary: 'green', expense: 'red', textSecondary: 'gray' };
+  let state = { customCategories: [] };
   const deps = {
     react: {
       createContext: value => { const context = { value, Provider: 'ContextProvider' }; contexts.push(context); return context; },
@@ -38,11 +43,25 @@ function harness() {
       },
       useState: initial => [initial, () => {}],
       useEffect: () => {},
+      // PaymentAgenda is React.memo-wrapped; render it as the plain component.
+      memo: component => component,
     }, 'react/compiler-runtime': runtime, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { Pressable: 'Pressable', View: 'View', TextInput: 'TextInput', StyleSheet: { create: value => value },
       useWindowDimensions: () => ({ width: 390, fontScale: 1 }) },
     '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/icon': { Icon: 'Icon' },
-    '@/components/wafra-logo': { WafraMark: 'Mark' }, '@/constants/theme': { Fonts: {}, Spacing: { two: 8 },
+    '@/components/wafra-logo': { WafraMark: 'Mark' },
+    // Home's band pieces are presentational boundaries here; the period
+    // summary under test is the sheet half of reference-home-summary.
+    '@/components/ui/band/band-figure': { BandFigure: 'BandFigure' },
+    '@/components/ui/band/stat-tile': { StatTile: 'StatTile', statTileColors: () => ({}) },
+    '@/components/ui/band/week-tiles': { WeekTiles: 'WeekTiles' },
+    // Spending's sheet pieces in language E: the tiles and bars carry no money
+    // text of their own; the rows' Money and spoken labels are under test.
+    '@/components/ui/band/e-button': { EButton: 'EButton' }, '@/components/ui/band/glyph-tile': { GlyphTile: 'GlyphTile' },
+    '@/components/ui/band/status-bar': { LimitStatusBar: 'LimitStatusBar', limitStatusColor: () => 'status' },
+    '@/hooks/use-band': { useBand: () => ({ text: 'ink', textSecondary: 'gray', rule: 'rule', card: 'card', sheet: 'sheet', tint: 'clay', statusOver: 'red' }) },
+    '@/lib/everyday-band-copy': local('everyday-band-copy'), '@/lib/limit-status': local('limit-status'),
+    '@/constants/theme': { Fonts: {}, Spacing: { two: 8 },
       DataViz: { light: { neutral: '#E3DED2' }, dark: { neutral: '#3B362E' } } },
     '@/hooks/use-theme': { useTheme: () => theme }, '@/lib/reference-copy': local('reference-copy'),
     '@/hooks/use-language': { useLanguage: () => i18n.getLanguage() },
@@ -54,13 +73,16 @@ function harness() {
     '@/components/ui/bank-avatar': { BankAvatar: 'BankAvatar' },
     '@/components/ui/merchant-avatar': { MerchantAvatar: 'MerchantAvatar' },
     '@/components/ui/progress-bar': { ProgressBar: 'ProgressBar' },
+    '@/components/ui/period-pill': { PeriodPill: 'PeriodPill' },
     '@/components/ui/controls': { Button: 'Button' },
-    '@/lib/categories': { categoryLabel: category => category },
+    '@/lib/categories': local('categories', { '@/lib/i18n': i18n }),
+    '@/lib/store': { useStoreSelector: selector => selector({ state }) },
     '@/lib/reference-presentation': local('reference-presentation'),
     '@/lib/runtime-performance': { measureRuntimeOperation: (_tag, work) => work() },
     '@/lib/format': format, '@/lib/markets': markets, '@/lib/ledger-money': money,
   };
   const denomination = load(path.join(root, 'src/hooks/use-ledger-money.tsx'), deps);
+  deps['@/hooks/use-category-catalog'] = load(path.join(root, 'src/hooks/use-category-catalog.ts'), deps);
   deps['@/hooks/use-ledger-money'] = denomination;
   const setDenomination = moneySpec => {
     const provider = denomination.LedgerMoneyProvider({ moneySpec, children: null });
@@ -82,14 +104,31 @@ function harness() {
     }, module.exports, module);
     return module.exports;
   };
+  // Bars render at their final size, as Reduce Motion shows them.
+  deps['@/components/ui/grow-bar'] = { GrowBar: (p) => ({ type: 'View', props: { style: [p.style, p.axis === 'width' ? { width: `${p.size}%` } : { height: p.size }] } }) };
+  // Large-text helpers used by Money: the E2E font scale is inert here; the
+  // figure-fitting rule is pure and compiled for real.
+  deps['@/lib/e2e-font-scale'] = { E2E_FONT_SCALE: null, scaleTextStyleForE2E: style => style };
+  deps['@/lib/large-text-figure'] = compile('src/lib/large-text-figure.ts', false);
   deps['@/components/ui/money'] = compile('src/components/ui/money.tsx');
+  // Today's figure is the real RollingMoney, rendered as Reduce Motion shows it (no roll), so this
+  // test still proves the figure re-formats when the denomination changes.
+  deps['react-native'].Platform = { OS: 'ios' };
+  Object.assign(deps['@/constants/theme'], { EASE: [0.2, 0.8, 0.2, 1], Motion: { digitStagger: 60, change: 240 }, BandLayout: { chipHeight: 38 } });
+  deps['react-native-reanimated'] = { __esModule: true, default: { View: 'Animated.View', Text: 'Animated.Text' },
+    Easing: { bezier: () => (t) => t }, useAnimatedStyle: () => ({}), useSharedValue: (value) => ({ value }),
+    withDelay: (_delay, value) => value, withTiming: (value) => value };
+  deps['@/hooks/use-reduced-motion'] = { useReducedMotion: () => true };
+  deps['@/lib/rolling-digits'] = local('rolling-digits');
+  deps['@/components/ui/rolling-money'] = compile('src/components/ui/rolling-money.tsx', false);
   const { ReferenceHomeSummary } = compile('src/components/reference-home-summary.tsx');
   const renderNode = (node, position) => {
     if (Array.isArray(node)) return node.map((child, index) => renderNode(child, `${position}/${index}`));
     if (!node || typeof node !== 'object') return node;
     if (typeof node.type === 'function') {
-      const previous = currentFiber; currentFiber = `${position}:${node.type.name}`;
-      const output = node.type(node.props); currentFiber = previous;
+      const previous = currentFiber; const previousCall = cacheCall;
+      currentFiber = `${position}:${node.type.name}`; cacheCall = 0;
+      const output = node.type(node.props); currentFiber = previous; cacheCall = previousCall;
       return renderNode(output, `${position}/child`);
     }
     return { ...node, props: { ...node.props, children: renderNode(node.props.children, `${position}/children`) } };
@@ -113,7 +152,15 @@ function harness() {
   const props = { theme: { expense: 'red', income: 'green', text: 'black' }, language: 'en', largeText: false,
     greeting: 'Hello', dateLabel: 'Today', periodLabel: 'September', incomeFils: 0, expenseFils: 828, netFils: -828,
     onPeriod: noop, onAdd: noop, onSettings: noop, onIncome: noop, onSpending: noop };
-  return { render, renderMoney, renderAmountField, renderSurface, setDenomination, props, markets, money, i18n };
+  // What StoreProvider publishes after applying the device conventions.
+  const setMoneyLocale = (input) => {
+    money.setDisplayMoneyLocale(input);
+    const provider = denomination.MoneyLocaleProvider({ localeKey: JSON.stringify(input), children: null });
+    contexts.find(context => context.value === '' || context.isMoneyLocale).value = provider.props.value;
+    contexts.find(context => context.value === provider.props.value).isMoneyLocale = true;
+  };
+  return { render, renderMoney, renderAmountField, renderSurface, setDenomination, setMoneyLocale,
+    setCatalog: customCategories => { state = { ...state, customCategories }; }, props, markets, money, i18n };
 }
 function nodes(tree, output = []) {
   if (Array.isArray(tree)) tree.forEach(node => nodes(node, output));
@@ -209,9 +256,40 @@ test('retained Spending, Trends and Bills keep visible and accessible money in t
   }
 });
 
+test('retained compiled Spending reads custom labels from the restored ledger catalog', () => {
+  const h = harness(); h.setDenomination(h.money.ledgerMoneySpec('AED'));
+  const id = 'custom:expense:' + 'a'.repeat(32);
+  const props = { totalFils: 828, rows: [{ category: id, spentFils: 828, limitFils: null, remainingFils: null, ratio: null }],
+    monthScoped: true, filter: 'all', onFilter() {}, onCategory() {}, onNewLimit() {} };
+  h.setCatalog([{ id, name: 'Synthetic hobby', type: 'expense' }]);
+  assert.match(strings(h.renderSurface('SpendingOverview', props)), /Synthetic hobby/);
+  h.setCatalog([{ id, name: 'Restored hobby', type: 'expense' }]);
+  const restored = h.renderSurface('SpendingOverview', props);
+  assert.match(strings(restored), /Restored hobby/);
+  assert.doesNotMatch(strings(restored), /Synthetic hobby/);
+  assert.ok(nodes(restored).some(node => node.props.accessibilityLabel?.includes('Restored hobby')));
+});
+
 test('the application provides denomination inside the existing reactive store boundary without a currency navigation remount', () => {
   const source = fs.readFileSync(path.join(root, 'src/components/app-root-layout.tsx'), 'utf8');
   assert.match(source, /const moneySpec = state\.ledgerMoney \?\? ledgerMoneySpec\(marketCurrencyCode\(state\.marketId\)\)/);
   assert.match(source, /<LedgerMoneyProvider moneySpec=\{moneySpec\}>[\s\S]*?\{children\}[\s\S]*?<\/LedgerMoneyProvider>/);
   assert.match(source, /key=\{language\}/);
+});
+
+test('compiled Money re-formats identical props when the device number conventions change', () => {
+  const h = harness(); h.markets.setLedgerCurrency('EUR', 2); h.i18n.setLanguage('en');
+  h.setDenomination(h.money.ledgerMoneySpec('EUR'));
+  const props = { fils: 123456 };
+  try {
+    h.setMoneyLocale({ locale: 'en-US', decimalSeparator: '.', groupSeparator: ',' });
+    assert.match(strings(h.renderMoney(props)), /1,234\.56/);
+    // Same element props, same compiled memo cache: only the published key changed.
+    h.setMoneyLocale({ locale: 'de-DE', decimalSeparator: ',', groupSeparator: '.' });
+    const german = h.renderMoney(props);
+    assert.match(strings(german), /1\.234,56/, 'a memoized figure must not keep the previous device format');
+    assert.match(german.props.accessibilityLabel, /1\.234,56/);
+  } finally {
+    h.money.setDisplayMoneyLocale(null);
+  }
 });

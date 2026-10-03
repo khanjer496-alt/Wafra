@@ -1,41 +1,64 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  InteractionManager,
   Keyboard,
   Platform,
   Pressable,
+  ScrollView,
   SectionList,
   StyleSheet,
+  TextInput,
   View,
   useWindowDimensions,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { ThemedText } from '@/components/themed-text';
-import { EntryDetailSheet } from '@/components/entry-detail-sheet';
+import { EntryDetailSheet, type EntryDetailMode } from '@/components/entry-detail-sheet';
+import { SwipeRow, type SwipeAction } from '@/components/swipe-row';
 import { TransactionRow } from '@/components/transaction-row';
+import { ConfirmSheet } from '@/components/ui/confirm-sheet';
+import { Chip } from '@/components/ui/controls';
 import { ActionIconButton } from '@/components/ui/action-icon-button';
 import { TransactionFilterSheet } from '@/components/transaction-filter-sheet';
+import { BAND_GUTTER, BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold';
+import { BandChip } from '@/components/ui/band/band-chip';
 import { Icon } from '@/components/ui/icon';
-import { ScreenScaffold, useScreenContentInsets } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
-import { Fonts, Radius, ScreenPadding, Spacing } from '@/constants/theme';
+import { Fonts, Radius, Spacing, type BandPalette } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { CATEGORIES } from '@/lib/categories';
-import { formatAED, friendlyDate, monthKey, toISODate } from '@/lib/format';
+import { isRegisteredCategory } from '@/lib/categories';
+import { formatAED, formatAmount, friendlyDate, monthKey, toISODate } from '@/lib/format';
 import { periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import {
+  accountDisplayName,
   corroboratingTransferIdsForState,
   internalTransferIdsForState,
+  isTransfer as isLedgerTransfer,
+  isUnassignedIncome,
   liveAccountIds,
+  transferReconciliationForState,
   UNASSIGNED_INCOME_ACCOUNT_ID,
+  UNASSIGNED_TRANSACTION_ACCOUNT_ID,
 } from '@/lib/ledger';
 import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
-import { useStore } from '@/lib/store';
-import type { CategoryId, Transaction } from '@/lib/types';
+import { TRANSACTION_SOURCE_KINDS, transactionSource, type TransactionSourceKind } from '@/lib/transaction-source';
+import { transactionsWords } from '@/lib/transactions-copy';
+import { getTransferActivity } from '@/lib/transfer-activity';
+import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
+import { useStoreActions, useStoreSelector } from '@/lib/store';
+import { historyStatusOnly } from '@/lib/store-selection';
+import type { Account, CategoryId, Transaction } from '@/lib/types';
 import { t, tf, type StringKey } from '@/lib/i18n';
+
+const NO_IDS: ReadonlySet<string> = new Set();
 
 const DEFAULT_FILTERS: Filters = {
   type: null,
@@ -46,7 +69,22 @@ const DEFAULT_FILTERS: Filters = {
   dateTo: null,
   minFils: null,
   sort: 'newest',
+  maxFils: null,
+  sources: new Set<TransactionSourceKind>(),
+  kind: null,
 };
+
+type TypeChip = 'all' | 'spending' | 'income' | 'transfers' | 'review';
+const TYPE_CHIPS: readonly TypeChip[] = ['all', 'spending', 'income', 'transfers', 'review'];
+const chipOf = (filters: Filters): TypeChip => filters.kind === 'transfers' ? 'transfers'
+  : filters.kind === 'review' ? 'review'
+    : filters.type === 'expense' ? 'spending' : filters.type === 'income' ? 'income' : 'all';
+/** One chip is one filter: direction chips set `type`, the others set `kind`. */
+const withChip = (filters: Filters, chip: TypeChip): Filters => ({
+  ...filters,
+  type: chip === 'spending' ? 'expense' : chip === 'income' ? 'income' : null,
+  kind: chip === 'transfers' ? 'transfers' : chip === 'review' ? 'review' : null,
+});
 
 interface DaySection {
   title: string;
@@ -56,20 +94,131 @@ interface DaySection {
 
 const transactionKey = (transaction: Transaction) => transaction.id;
 
+/**
+ * The search field set on the ink band: a 48pt pill in the band's own tone,
+ * light text, the search glyph at its start and a clear control at its end.
+ * The label is spoken; the placeholder names what it matches.
+ */
+function BandSearchField({ palette, value, onChangeText, label, placeholder, clearLabel, arabic }: {
+  palette: BandPalette;
+  value: string;
+  onChangeText: (value: string) => void;
+  label: string;
+  placeholder: string;
+  clearLabel: string;
+  arabic: boolean;
+}) {
+  return <View style={[styles.bandSearch, { backgroundColor: palette.tile }]}>
+    <Icon name="search" size={18} color={palette.onBandSecondary} strokeWidth={2} />
+    <TextInput
+      accessibilityLabel={label}
+      value={value}
+      onChangeText={onChangeText}
+      inputMode="search"
+      returnKeyType="search"
+      placeholder={placeholder}
+      placeholderTextColor={palette.onBandSecondary}
+      selectionColor={palette.onBand}
+      onSubmitEditing={() => Keyboard.dismiss()}
+      style={[styles.bandSearchInput, { color: palette.onBand, fontFamily: arabic ? Fonts.arabic : Fonts.sans,
+        textAlign: arabic ? 'right' : 'left' }]}
+    />
+    {value.length > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={clearLabel} hitSlop={8}
+      onPress={() => onChangeText('')} style={styles.bandSearchClear}>
+      <Icon name="close" size={16} color={palette.onBand} strokeWidth={2.2} />
+    </Pressable> : null}
+  </View>;
+}
+
+type TransferSeparationState = Parameters<typeof transferReconciliationForState>[0];
+
+interface TransferSeparation {
+  separateTransferIds: ReadonlySet<string>;
+  /** Separated records the reconciler queued for an ownership decision. */
+  reviewTransferIds: ReadonlySet<string>;
+  /** Transfer legs still waiting for their other side (the Needs review chip). */
+  pendingTransferIds: ReadonlySet<string>;
+}
+
+const NO_SEPARATION: TransferSeparation = { separateTransferIds: NO_IDS, reviewTransferIds: NO_IDS, pendingTransferIds: NO_IDS };
+
+/**
+ * Rows the Transfers screen owns, which of those the reconciler queued for
+ * review, and transfer legs still waiting for their other side. The reconciliation itself is cached per stored transfer receipt
+ * (transferReconciliationForState); the activity walk on top of it is
+ * remembered per ledger so reopening the screen is instant. Once the screen
+ * is showing, a ledger change recomputes after interactions settle and keeps
+ * the previous answer meanwhile, instead of freezing the list on every edit,
+ * capture or history-import page.
+ */
+let separateTransferCache: {
+  transactions: Transaction[]; accounts: Account[]; reconciliation: unknown; value: TransferSeparation;
+} | null = null;
+
+function computeSeparateTransferIds(state: TransferSeparationState): TransferSeparation {
+  const reconciliation = transferReconciliationForState(state);
+  if (!reconciliation) return NO_SEPARATION;
+  const { transactions, accounts } = state;
+  if (separateTransferCache?.transactions === transactions && separateTransferCache.accounts === accounts &&
+    separateTransferCache.reconciliation === reconciliation) {
+    return separateTransferCache.value;
+  }
+  const records = getTransferActivity(transactions, accounts, reconciliation);
+  const value: TransferSeparation = {
+    separateTransferIds: new Set(records.map(item => item.transaction.id)),
+    reviewTransferIds: new Set(records.filter(item => item.needsReview).map(item => item.transaction.id)),
+    pendingTransferIds: reconciliation.pendingIds,
+  };
+  separateTransferCache = { transactions, accounts, reconciliation, value };
+  return value;
+}
+
+function useSeparateTransferIds(state: TransferSeparationState): TransferSeparation {
+  const { transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport } = state;
+  const [separation, setSeparation] = useState(() => computeSeparateTransferIds(state));
+  const importing = historyImport?.status === 'running';
+  useEffect(() => {
+    // A running history import replaces its page within moments; the page
+    // that ends the run (complete, paused or failed) triggers the recompute.
+    if (importing) return;
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!cancelled) {
+        setSeparation(computeSeparateTransferIds({
+          transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport,
+        }));
+      }
+    });
+    return () => { cancelled = true; task.cancel(); };
+  }, [transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport, importing]);
+  return separation;
+}
+
 export default function TransactionsScreen() {
   const theme = useTheme();
+  // Design language E: Transactions is a Home detail and wears the ink band.
+  const band = useBand('home');
   const largeText = useLargeTextLayout();
   const { width, fontScale } = useWindowDimensions();
   // Give the search field the full width before its placeholder gets clipped.
   const narrowSearch = width / Math.max(fontScale, 1) < 360;
   const language = useLanguage();
+  const transferWords = transferActivityCopy(language);
+  const words = transactionsWords(language);
   const tr = useCallback((key: StringKey) => t(key, language), [language]);
   const trf = useCallback(
     (key: StringKey, vars: Record<string, string | number>) => tf(key, vars, language),
     [language],
   );
   const router = useRouter();
-  const { state } = useStore();
+  // Only what the list reads; scan timestamps and import progress no longer
+  // re-render a 20k-row screen.
+  const state = useStoreSelector(({ state: s }) => ({
+    transactions: s.transactions, accounts: s.accounts, monthStartDay: s.monthStartDay,
+    transferInternalIds: s.transferInternalIds, transferNormalizationVersion: s.transferNormalizationVersion,
+    historyImport: historyStatusOnly(s.historyImport), ledgerMoney: s.ledgerMoney, customCategories: s.customCategories,
+  }));
+  const { deleteTransaction } = useStoreActions();
   const { period } = usePeriod();
   const {
     source,
@@ -77,18 +226,22 @@ export default function TransactionsScreen() {
     category: categoryParam,
     merchant: merchantParam,
     q: queryParam,
+    account: accountParam,
   } = useLocalSearchParams<{
     source?: string;
     type?: string;
     category?: string;
     merchant?: string;
     q?: string;
+    /** `/transactions?account=<id>` from an account: that account, all time. */
+    account?: string;
   }>();
+  const accountFromLink = typeof accountParam === 'string' && accountParam.trim() ? accountParam.trim() : null;
   // One category, or several — Flow's pooled "N more" slice hands over every
   // category behind it, so the drill-down covers exactly what the row totalled.
   const deepCategories = (categoryParam ?? '')
     .split(',')
-    .map((c) => CATEGORIES.find((x) => x.id === c.trim())?.id)
+    .map((c) => isRegisteredCategory(c.trim(), state.customCategories) ? c.trim() as CategoryId : undefined)
     .filter((c): c is CategoryId => !!c);
 
   const [query, setQuery] = useState(typeof queryParam === 'string' ? queryParam : '');
@@ -124,7 +277,8 @@ export default function TransactionsScreen() {
     // The category path was corrected first; the merchant path was left
     // all-time and disagreed exactly the same way, by a factor of five on a
     // busy merchant.
-    datePreset: source === 'sms' ? 'all' : 'selected',
+    datePreset: source === 'sms' || accountFromLink ? 'all' : 'selected',
+    accountId: accountFromLink,
     // Home's In/Out figures deep-link here pre-filtered by type.
     //
     // A category or merchant drill-down carries no type, and both of the rows
@@ -150,10 +304,24 @@ export default function TransactionsScreen() {
    * counted, shown as a chip, and clearable like the rest.
    */
   const [smsOnly, setSmsOnly] = useState(source === 'sms');
+  // Rows auto-added from an unverified bank-alert format, still unchecked.
+  // `?source=auto-added` (Review's link) opens the list already scoped.
+  const [autoAddedOnly, setAutoAddedOnly] = useState(source === 'auto-added');
+  const autoAddedCount = useMemo(() => state.transactions.reduce((n, tx) => (tx.bestEffort ? n + 1 : n), 0),
+    [state.transactions]);
+  const autoAddedActive = autoAddedOnly && autoAddedCount > 0;
   const [sheetVisible, setSheetVisible] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
+  const [entryMode, setEntryMode] = useState<EntryDetailMode>('read');
+  const [deleting, setDeleting] = useState<Transaction | null>(null);
+  // A later account link (same screen, new param) scopes to that account.
+  useEffect(() => {
+    if (!accountFromLink) return;
+    setFilters((current) => current.accountId === accountFromLink ? current
+      : { ...current, accountId: accountFromLink, datePreset: 'all' });
+  }, [accountFromLink]);
   const pendingFilterFrame = useRef<number | null>(null);
-  const listInsets = useScreenContentInsets({ hasFooter: false });
+  const listBottom = useBandBottomInset();
 
   useEffect(() => () => {
     if (pendingFilterFrame.current !== null) cancelAnimationFrame(pendingFilterFrame.current);
@@ -163,63 +331,158 @@ export default function TransactionsScreen() {
   const currentKey = monthKey(new Date());
 
   const activeFilterCount =
-    (filters.type ? 1 : 0) +
+    (filters.type || filters.kind ? 1 : 0) +
+    (filters.maxFils ? 1 : 0) +
+    (filters.sources && filters.sources.size > 0 ? 1 : 0) +
     (filters.accountId ? 1 : 0) +
     (filters.categories.size > 0 ? 1 : 0) +
     (filters.datePreset !== 'selected' ? 1 : 0) +
     (filters.minFils ? 1 : 0) +
     (merchantFilter ? 1 : 0) +
-    (smsOnly ? 1 : 0);
+    (smsOnly ? 1 : 0) +
+    (autoAddedActive ? 1 : 0);
 
   const appliedFilters = useDeferredValue(filters);
-  const filterIndex = useMemo(() => createTransactionFilterIndex(state.transactions, language),
+  // Search also matches the account a row belongs to.
+  const accountNames = useMemo(() => new Map(state.accounts.map((account) => [account.id,
+    [account.name, account.bankName].filter(Boolean).join(' ')] as const)), [state.accounts]);
+  const filterIndex = useMemo(() => createTransactionFilterIndex(state.transactions, language, accountNames, state.customCategories),
     // monthKey follows the current stored salary-day boundary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.transactions, language, state.monthStartDay]);
+    [state.transactions, language, state.monthStartDay, accountNames, state.customCategories]);
   const hasUnassignedIncome = useMemo(() => state.transactions.some(tx => tx.accountId === UNASSIGNED_INCOME_ACCOUNT_ID), [state.transactions]);
+  // Only the sources this ledger actually has, in display order.
+  const sourceKinds = useMemo(() => {
+    const present = new Set<TransactionSourceKind>();
+    for (const tx of state.transactions) present.add(transactionSource(tx));
+    return TRANSACTION_SOURCE_KINDS.filter((kind) => present.has(kind));
+  }, [state.transactions]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
   // Both legs of a move between the user's own accounts, so the arriving one
   // is not painted as income it never was.
   const internal = internalTransferIdsForState(state);
   const corroborating = corroboratingTransferIdsForState(state);
+  // Separation reuses the reconciliation cached per stored transfer receipt
+  // and stays empty while a history import only has a provisional receipt.
+  // Unlike `internal` it may lag one ledger change behind: it recomputes after
+  // interactions settle and holds its last answer during a running import.
+  const { separateTransferIds, reviewTransferIds, pendingTransferIds } = useSeparateTransferIds(state);
+  // The Transfers and Needs review chips, from the predicates the rows and
+  // the review screens already use: one pass over the ledger.
+  const { transferIds, reviewIds } = useMemo(() => {
+    const transfers = new Set<string>();
+    const review = new Set<string>();
+    for (const row of state.transactions) {
+      if (isLedgerTransfer(row) || internal.has(row.id) || separateTransferIds.has(row.id) || isTransferCandidate(row)) transfers.add(row.id);
+      if (row.bestEffort || pendingTransferIds.has(row.id) ||
+        isUnassignedIncome(row) || row.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) review.add(row.id);
+    }
+    return { transferIds: transfers, reviewIds: review };
+  }, [state.transactions, internal, separateTransferIds, pendingTransferIds]);
 
   const accountById = useMemo(
     () => new Map(state.accounts.map((a) => [a.id, a] as const)),
     [state.accounts],
   );
+  // Rows keep one stable action builder; the router object itself may not be stable.
+  const routerRef = useRef(router);
+  routerRef.current = router;
+  // Stable, because the memoized list header names the account filter.
+  const accountLabelFor = useCallback((id: string) => {
+    const account = accountById.get(id);
+    return account ? accountDisplayName(account) : tr('incomeAccountReview');
+  }, [accountById, tr]);
   // One stable handler for the whole list. An inline `() => setEditing(item)`
   // is a new function per row per render, which defeats TransactionRow's memo
   // and re-renders every visible row on each keystroke in the search field.
   const openEntry = useCallback((tx: Transaction) => {
     Keyboard.dismiss();
+    setEntryMode('read');
     setEditing(tx);
   }, []);
+  /**
+   * Row actions, by swipe or by the screen reader's actions menu. None acts
+   * silently: Category and Transfer open the entry sheet in that state (a
+   * transfer still unresolved opens its review), Delete asks first.
+   */
+  const rowActions = useCallback((tx: Transaction) => {
+    const confirmedTransfer = isLedgerTransfer(tx) || internal.has(tx.id) || transferOwnership(tx) === 'own';
+    const candidate = isTransferCandidate(tx);
+    const actions: SwipeAction[] = [];
+    if (!confirmedTransfer && !candidate) {
+      actions.push({ name: 'category', label: words.category, icon: 'receipt', band: 'bills',
+        onPress: () => { Keyboard.dismiss(); setEntryMode('category'); setEditing(tx); } });
+    }
+    if (!confirmedTransfer) {
+      actions.push({ name: 'transfer', label: words.transfer, icon: 'repeat', band: 'accounts',
+        onPress: () => {
+          Keyboard.dismiss();
+          if (candidate) routerRef.current.push({ pathname: '/review-transfers', params: { transactionId: tx.id } });
+          else { setEntryMode('transfer'); setEditing(tx); }
+        } });
+    }
+    actions.push({ name: 'delete', label: words.delete, icon: 'trash', destructive: true, band: 'spending',
+      onPress: () => { Keyboard.dismiss(); setDeleting(tx); } });
+    return actions;
+  }, [internal, words]);
+  // One stable action set per row object, so a search keystroke does not hand
+  // every visible TransactionRow new props and defeat its memo.
+  const rowActionCache = useMemo(() => new WeakMap<Transaction, {
+    actions: SwipeAction[];
+    spoken: { name: string; label: string }[];
+    onAction: (name: string) => void;
+  }>(),
+  // A new action builder (new transfer scope or language) starts a new cache.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [rowActions]);
+  const actionsFor = useCallback((tx: Transaction) => {
+    let entry = rowActionCache.get(tx);
+    if (!entry) {
+      const actions = rowActions(tx);
+      entry = { actions, spoken: actions.map(({ name, label }) => ({ name, label })),
+        onAction: (name) => actions.find((action) => action.name === name)?.onPress() };
+      rowActionCache.set(tx, entry);
+    }
+    return entry;
+  }, [rowActionCache, rowActions]);
   const renderRow = useCallback(
-    ({ item, index }: { item: Transaction; index: number }) => (
-      <View
-        style={index > 0 ? [styles.rowDivider, { borderTopColor: theme.cardBorder }] : undefined}>
-        <TransactionRow
-          transaction={item}
-          account={accountById.get(item.accountId)}
-          onPress={openEntry}
-          internal={internal.has(item.id)}
-        />
-      </View>
-    ),
-    [accountById, openEntry, theme.cardBorder, internal],
+    ({ item, index }: { item: Transaction; index: number }) => {
+      const { actions, spoken, onAction } = actionsFor(item);
+      return (
+        <SwipeRow actions={actions} testID={`transaction-swipe-${item.id}`}>
+          <View style={[styles.rowSurface, { backgroundColor: band.sheet }]}>
+            <View style={index > 0 ? [styles.rowDivider, { borderTopColor: band.rule }] : undefined}>
+              <TransactionRow
+                transaction={item}
+                account={accountById.get(item.accountId)}
+                onPress={openEntry}
+                internal={internal.has(item.id)}
+                accessibilityActions={spoken}
+                onAccessibilityAction={onAction}
+              />
+            </View>
+          </View>
+        </SwipeRow>
+      );
+    },
+    [accountById, openEntry, band.rule, band.sheet, internal, actionsFor],
   );
 
-  const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly, currentKey, period,
-    live: liveAccounts, internal, corroborating }),
-  [appliedQuery, merchantFilter, smsOnly, currentKey, period, liveAccounts, internal, corroborating]);
+  const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly,
+    bestEffortOnly: autoAddedActive, currentKey, period,
+    live: liveAccounts, internal, corroborating, separateTransferIds, reviewTransferIds, transferIds, reviewIds,
+    amountExponent: state.ledgerMoney?.exponent ?? 2 }),
+  [appliedQuery, merchantFilter, smsOnly, autoAddedActive, currentKey, period, liveAccounts, internal, corroborating,
+    separateTransferIds, reviewTransferIds, transferIds, reviewIds, state.ledgerMoney?.exponent]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
-  const { filtered, totalShown, excluded } = projection;
+  const { filtered, totalShown, excluded, separatedTransfers } = projection;
+  const transferContributes = separatedTransfers.incomeFils > 0 || separatedTransfers.expenseFils > 0;
   // A single ordinary row already displays its amount. Keep a separate total
   // only when it conveys different information (for example a transfer excluded
   // from totals or a category filter showing part of a split purchase).
   const singleRow = filtered.length === 1 ? filtered[0] : null;
-  const showResultTotal = filtered.length > 1 ||
+  const showResultTotal = transferContributes || filtered.length > 1 ||
     (singleRow !== null && Math.abs(totalShown) !== singleRow.amountFils);
   const resultsPending = appliedFilters !== filters || appliedQuery !== query;
   const sections = useMemo<DaySection[]>(() => appliedFilters.sort === 'largest'
@@ -230,6 +493,7 @@ export default function TransactionsScreen() {
   const clearFilters = useCallback(() => {
     setMerchantFilter(null);
     setSmsOnly(false);
+    setAutoAddedOnly(false);
     setFilters({ ...DEFAULT_FILTERS, categories: new Set() });
   }, []);
 
@@ -242,7 +506,7 @@ export default function TransactionsScreen() {
     setSheetVisible(false);
     const commit = () => {
       pendingFilterFrame.current = null;
-      if (resetScope) { setMerchantFilter(null); setSmsOnly(false); }
+      if (resetScope) { setMerchantFilter(null); setSmsOnly(false); setAutoAddedOnly(false); }
       setFilters(nextFilters);
     };
     if (Platform.OS !== 'android') { commit(); return; }
@@ -250,34 +514,129 @@ export default function TransactionsScreen() {
     pendingFilterFrame.current = requestAnimationFrame(commit);
   }, []);
 
+  // At the default sizes the search field, filter button and type chips sit
+  // on the ink band above the sheet. At the accessibility text sizes they fill
+  // most of a phone screen on their own: pinned there they left the results a
+  // 44pt strip to scroll in, so there they move onto the sheet and scroll away
+  // with the list as its first cell.
+  const onBand = !largeText;
+  const filterActive = activeFilterCount > 0;
+  const filterButton = (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={tr('filtersButton')}
+      accessibilityState={{ selected: filterActive }}
+      hitSlop={6}
+      testID="transactions-filter-button"
+      onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
+      style={({ pressed }) => [
+        styles.filterBtn,
+        (largeText || narrowSearch) && styles.filterBtnStacked,
+        {
+          backgroundColor: filterActive
+            ? (onBand ? band.selected : band.fill)
+            : (onBand ? band.tile : band.card),
+          borderColor: onBand || filterActive ? 'transparent' : band.rule,
+          opacity: pressed ? 0.72 : 1,
+        },
+      ]}>
+      <Icon
+        name="filter"
+        size={18}
+        color={filterActive ? (onBand ? band.onSelected : band.onFill) : (onBand ? band.onBand : band.text)}
+      />
+    </Pressable>
+  );
+  const typeChip = (chip: TypeChip) => <View key={chip} testID={`transactions-chip-${chip}`}>
+    {onBand
+      ? <BandChip palette={band} label={words[chip]} selected={chipOf(filters) === chip}
+        onPress={() => setFilters((current) => withChip(current, chip))} />
+      : <Chip label={words[chip]} active={chipOf(filters) === chip}
+        onPress={() => setFilters((current) => withChip(current, chip))} />}
+  </View>;
+  const searchControls = (
+    <View style={[styles.searchContainer, !onBand && styles.searchContainerInList]} accessibilityState={{ busy: resultsPending }}>
+      <View testID="transaction-search-toolbar" style={[styles.searchToolbar, (largeText || narrowSearch) && styles.searchToolbarLarge]}>
+        <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
+          {onBand ? <BandSearchField palette={band} value={query} onChangeText={setQuery}
+            label={tr('searchMerchants')} placeholder={tr('transactionSearchPlaceholder')}
+            clearLabel={tr('clearSearch')} arabic={language === 'ar'} /> : <TextField
+            label={tr('transactionSearchLabel')}
+            accessibilityLabel={tr('searchMerchants')}
+            value={query}
+            onChangeText={setQuery}
+            inputMode="search"
+            returnKeyType="search"
+            placeholder={tr('transactionSearchPlaceholder')}
+            onSubmitEditing={() => Keyboard.dismiss()}
+            leading={<Icon name="search" size={17} color={theme.textSecondary} />}
+            trailing={query.length > 0 ? (
+              <ActionIconButton
+                icon="close"
+                label={tr('clearSearch')}
+                variant="plain"
+                onPress={() => setQuery('')}
+              />
+            ) : undefined}
+          />}
+        </View>
+        {filterButton}
+      </View>
+      {/* At the accessibility text sizes the chips wrap onto lines rather
+          than scrolling most of them off screen sideways. */}
+      {largeText ? <View style={[styles.typeChips, styles.typeChipsWrap]}
+        accessibilityLabel={words.types} testID="transactions-type-chips">
+        {TYPE_CHIPS.map(typeChip)}
+      </View> : <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeChips}
+        keyboardShouldPersistTaps="handled" accessibilityLabel={words.types} testID="transactions-type-chips">
+        {TYPE_CHIPS.map(typeChip)}
+      </ScrollView>}
+      {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite"
+        style={{ color: onBand ? band.onBandSecondary : band.textSecondary }}>{tr('filterUpdating')}</ThemedText>}
+    </View>
+  );
+  const scrollingSearchControls = largeText ? searchControls : null;
+
   const transactionResults = useMemo(() => (
+        <GestureHandlerRootView style={styles.gestureRoot}>
         <SectionList
           sections={sections}
           keyExtractor={transactionKey}
           stickySectionHeadersEnabled={false}
-          contentContainerStyle={[listInsets.contentContainerStyle, styles.listContent]}
-          contentInset={listInsets.contentInset}
-          scrollIndicatorInsets={listInsets.scrollIndicatorInsets}
-          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={[styles.listContent, { paddingBottom: listBottom }]}
+          scrollIndicatorInsets={{ top: 0, bottom: listBottom }}
+          contentInsetAdjustmentBehavior="never"
           ListHeaderComponent={(
             <View style={styles.controls}>
+              {scrollingSearchControls}
+              {filters.accountId ? <View style={styles.chipRow}>
+                <Pressable testID="transactions-account-filter" accessibilityRole="button"
+                  accessibilityLabel={`${tr('clearFilter')}: ${words.accountFilter(accountLabelFor(filters.accountId))}`}
+                  onPress={() => setFilters((current) => ({ ...current, accountId: null }))}
+                  style={[styles.merchantChip, { backgroundColor: band.card, borderColor: band.rule }]}>
+                  <ThemedText type="small" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>
+                    {words.accountFilter(accountLabelFor(filters.accountId))}
+                  </ThemedText>
+                  <Icon name="close" size={13} color={band.text} />
+                </Pressable>
+              </View> : null}
 
 
               {/* The restrictions that came from the link that opened this screen.
               Both are removable here, which is the only thing that explains an
               otherwise inexplicably short list. */}
-              {(merchantFilter || smsOnly) && (
+              {(merchantFilter || smsOnly || autoAddedCount > 0) && (
                 <View style={styles.chipRow}>
                   {merchantFilter && (
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel={`${tr('clearFilter')}: ${merchantFilter}`}
                       onPress={() => setMerchantFilter(null)}
-                      style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                      <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
+                      style={[styles.merchantChip, { backgroundColor: band.card, borderColor: band.rule }]}>
+                      <ThemedText type="small" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>
                         {merchantFilter}
                       </ThemedText>
-                      <Icon name="close" size={13} color={theme.primary} />
+                      <Icon name="close" size={13} color={band.text} />
                     </Pressable>
                   )}
                   {smsOnly && (
@@ -285,19 +644,46 @@ export default function TransactionsScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`${tr('clearFilter')}: ${tr('smsImportsOnly')}`}
                       onPress={() => setSmsOnly(false)}
-                      style={[styles.merchantChip, { backgroundColor: `${theme.primary}1c` }]}>
-                      <ThemedText type="small" style={{ color: theme.primary, fontFamily: Fonts.sansSemi }}>
+                      style={[styles.merchantChip, { backgroundColor: band.card, borderColor: band.rule }]}>
+                      <ThemedText type="small" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>
                         {tr('smsImportsOnly')}
                       </ThemedText>
-                      <Icon name="close" size={13} color={theme.primary} />
+                      <Icon name="close" size={13} color={band.text} />
                     </Pressable>
                   )}
+                  {autoAddedCount > 0 && (autoAddedActive ? (
+                    <Pressable
+                      testID="auto-added-filter-active"
+                      accessibilityRole="button"
+                      accessibilityLabel={`${tr('clearFilter')}: ${tr('autoAddedFilter')}`}
+                      onPress={() => setAutoAddedOnly(false)}
+                      style={[styles.merchantChip, { backgroundColor: band.card, borderColor: band.rule }]}>
+                      <ThemedText type="small" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>
+                        {tr('autoAddedFilter')}
+                      </ThemedText>
+                      <Icon name="close" size={13} color={band.text} />
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      testID="auto-added-filter"
+                      accessibilityRole="button"
+                      accessibilityLabel={trf('autoAddedCount', { count: autoAddedCount })}
+                      onPress={() => setAutoAddedOnly(true)}
+                      style={[styles.merchantChip, { borderWidth: 1, borderColor: theme.warning }]}>
+                      <ThemedText type="small" style={{ color: theme.warning, fontFamily: Fonts.sansSemi }}>
+                        {trf('autoAddedCount', { count: autoAddedCount })}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
                 </View>
               )}
 
               <View testID="transactions-summary" style={styles.summaryRow}>
-            {/* Full-width metadata; money and exclusions have their own lines. */}
-            <ThemedText type="small" themeColor="textSecondary" style={styles.summaryText}>
+            {/* One line: what is listed (and what is left out of the total)
+                on the start side, the net on the end side. At the
+                accessibility sizes the net takes its own line. */}
+            <View style={[styles.summaryTop, largeText && styles.summaryTopLarge]}>
+            <ThemedText type="small" themeColor="textSecondary" style={[styles.summaryText, largeText && styles.summaryTextLarge]}>
               {trf('transactionsCount', {
                 count: filtered.length,
                 s: filtered.length === 1 ? '' : 's',
@@ -316,12 +702,31 @@ export default function TransactionsScreen() {
                     s: activeFilterCount === 1 ? '' : 's',
                   })}`
                 : ''}
-
+              {(excluded.transfers > 0 || excluded.movements > 0 || excluded.hidden > 0) && (
+                <ThemedText testID="transactions-exclusions" type="small" themeColor="textSecondary">
+              {' · '}
+              {excluded.transfers > 0
+                ? `${trf('transfersExcluded', {
+                    count: excluded.transfers,
+                    s: excluded.transfers === 1 ? '' : 's',
+                  })}`
+                : ''}
+              {excluded.movements > 0
+                ? `${excluded.transfers > 0 ? ' · ' : ''}${trf('movementsExcluded', {
+                    count: excluded.movements,
+                    s: excluded.movements === 1 ? '' : 's',
+                  })}`
+                : ''}
+              {excluded.hidden > 0
+                ? `${excluded.transfers > 0 || excluded.movements > 0 ? ' · ' : ''}${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
+                : ''}
+                </ThemedText>
+              )}
             </ThemedText>
             {(showResultTotal || activeFilterCount > 0) && <View style={styles.summaryRight}>
               {showResultTotal && <View testID="transactions-net-total" style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
                 <ThemedText type="small" themeColor="textSecondary">
-                  {tr('transactionNetTotal')}
+                  {transferContributes ? transferWords.netIncluding : tr('transactionNetTotal')}
                 </ThemedText>
               <ThemedText
                 type="smallBold"
@@ -343,25 +748,35 @@ export default function TransactionsScreen() {
                 </Pressable>
               )}
             </View>}
-              {(excluded.transfers > 0 || excluded.movements > 0 || excluded.hidden > 0) && (
-                <ThemedText testID="transactions-exclusions" type="meta" themeColor="textSecondary">
-              {excluded.transfers > 0
-                ? `${trf('transfersExcluded', {
-                    count: excluded.transfers,
-                    s: excluded.transfers === 1 ? '' : 's',
-                  })}`
-                : ''}
-              {excluded.movements > 0
-                ? `${excluded.transfers > 0 ? ' · ' : ''}${trf('movementsExcluded', {
-                    count: excluded.movements,
-                    s: excluded.movements === 1 ? '' : 's',
-                  })}`
-                : ''}
-              {excluded.hidden > 0
-                ? `${excluded.transfers > 0 || excluded.movements > 0 ? ' · ' : ''}${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
-                : ''}
-                </ThemedText>
-              )}
+            </View>
+              {/* The separated-transfers note and the way to them share a line. */}
+              <View style={[styles.transferRow, largeText && styles.transferRowLarge]}>
+              {separatedTransfers.count > 0 && <View testID="transactions-separated-transfers" style={styles.transferNotice}>
+                <ThemedText type="meta" themeColor="textSecondary">{transferWords.separated(separatedTransfers.count)}</ThemedText>
+                {separatedTransfers.reviewCount > 0 &&
+                  <ThemedText type="meta" themeColor="textSecondary">{transferWords.reviewNote}</ThemedText>}
+                {transferContributes && <>
+                  <View style={styles.summaryValue}>
+                    <ThemedText type="meta" themeColor="textSecondary">{transferWords.transferIncome}</ThemedText>
+                    <ThemedText type="meta" tabular>{formatAED(separatedTransfers.incomeFils, { decimals: true })}</ThemedText>
+                  </View>
+                  <View style={styles.summaryValue}>
+                    <ThemedText type="meta" themeColor="textSecondary">{transferWords.transferSpending}</ThemedText>
+                    <ThemedText type="meta" tabular>{formatAED(separatedTransfers.expenseFils, { decimals: true })}</ThemedText>
+                  </View>
+                  <ThemedText type="meta" themeColor="textSecondary">{transferWords.countsNote}</ThemedText>
+                </>}
+              </View>}
+              {/* Short visible label ("Transfers ›") so it fits beside the note;
+                  the spoken label keeps the full action. */}
+              <Pressable accessibilityRole="button" accessibilityLabel={transferWords.viewAll}
+                onPress={() => routerRef.current.push('/transfers')}
+                hitSlop={4} style={styles.transferLink} testID="transactions-transfers-link">
+                <Icon name="repeat" size={15} color={band.tint} />
+                <ThemedText type="small" style={{ color: band.tint, fontFamily: Fonts.sansSemi }}>{transferWords.title}</ThemedText>
+                <Icon name="chevron-right" size={14} color={band.tint} />
+              </Pressable>
+              </View>
               </View>
             </View>
           )}
@@ -374,7 +789,7 @@ export default function TransactionsScreen() {
           keyboardShouldPersistTaps="handled"
           renderSectionHeader={({ section }) => (
             <View style={[styles.sectionHeader, largeText && styles.sectionHeaderLarge]}>
-              <ThemedText type="micro" themeColor="textSecondary">
+              <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionTitle}>
                 {section.title}
               </ThemedText>
               {sections.length > 1 && section.data.length > 1 && <View testID="transaction-day-total"
@@ -383,7 +798,7 @@ export default function TransactionsScreen() {
               <ThemedText
                 type="small"
                 tabular
-                style={{ color: section.totalFils >= 0 ? theme.income : theme.textSecondary }}>
+                style={{ color: section.totalFils >= 0 ? theme.income : band.textSecondary }}>
                 {section.totalFils >= 0 ? '+' : '−'}
                 {formatAED(Math.abs(section.totalFils), { decimals: false })}
               </ThemedText>
@@ -393,127 +808,113 @@ export default function TransactionsScreen() {
           renderItem={renderRow}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundSelected }]}>
-                <Icon name="search" size={24} color={theme.textSecondary} strokeWidth={1.7} />
+              <View style={[styles.emptyIcon, { backgroundColor: band.glyphGround }]}>
+                <Icon name={separatedTransfers.count > 0 ? 'repeat' : 'search'} size={24} color={theme.textSecondary} strokeWidth={1.7} />
               </View>
               <ThemedText type="small" themeColor="textSecondary">
-                {tr('nothingMatches')}
+                {separatedTransfers.count > 0 ? transferWords.separated(separatedTransfers.count) : tr('nothingMatches')}
               </ThemedText>
             </View>
           }
         />
-  ), [sections, listInsets, largeText, merchantFilter, smsOnly, theme, tr, trf, filtered.length,
-    filters.datePreset, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow]);
+        </GestureHandlerRootView>
+  ), [sections, listBottom, band, largeText, merchantFilter, smsOnly, autoAddedCount, autoAddedActive, theme, tr, trf, filtered.length,
+    filters.datePreset, filters.accountId, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
+    separatedTransfers, transferContributes, transferWords, scrollingSearchControls, words, accountLabelFor]);
 
   return (
     <>
-      <ScreenScaffold
+      <BandScaffold
+        band="home"
         scroll={false}
-        virtualized
-        headerMode="native"
-        header={{
+        testID="transactions-screen"
+        contentStyle={styles.sheetContent}
+        nav={{
+          back: true,
           title: tr('transactionsTitle'),
-          back: { label: tr('back'), onPress: () => router.back() },
           actions: [{
             label: tr('addTransactionTitle'),
             icon: 'plus',
             onPress: () => router.push('/add-transaction'),
+            testID: 'transactions-add',
           }],
-        }}>
-        <View style={styles.searchContainer} accessibilityState={{ busy: resultsPending }}>
-              <View testID="transaction-search-toolbar" style={[styles.searchToolbar, largeText && styles.searchToolbarLarge, narrowSearch && styles.searchToolbarLarge]}>
-                <View style={largeText || narrowSearch ? styles.searchFieldLarge : styles.searchField}>
-                  <TextField
-                    label={tr('transactionSearchLabel')}
-                    accessibilityLabel={tr('searchMerchants')}
-                    value={query}
-                    onChangeText={setQuery}
-                    inputMode="search"
-                    returnKeyType="search"
-                    placeholder={tr('transactionSearchPlaceholder')}
-                    onSubmitEditing={() => Keyboard.dismiss()}
-                    leading={<Icon name="search" size={17} color={theme.textSecondary} />}
-                    trailing={query.length > 0 ? (
-                      <ActionIconButton
-                        icon="close"
-                        label={tr('clearSearch')}
-                        variant="plain"
-                        onPress={() => setQuery('')}
-                      />
-                    ) : undefined}
-                  />
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={tr('filtersButton')}
-                  accessibilityState={{ selected: activeFilterCount > 0 }}
-                  hitSlop={6}
-                  onPress={() => { Keyboard.dismiss(); setSheetVisible(true); }}
-                  style={({ pressed }) => [
-                    styles.filterBtn,
-                    (largeText || narrowSearch) && styles.filterBtnStacked,
-                    {
-                      backgroundColor: activeFilterCount > 0
-                        ? theme.primary
-                        : theme.backgroundSelected,
-                      opacity: pressed ? 0.72 : 1,
-                    },
-                  ]}>
-                  <Icon
-                    name="filter"
-                    size={17}
-                    color={activeFilterCount > 0 ? theme.onPrimary : theme.text}
-                  />
-                </Pressable>
-              </View>
-          {resultsPending && <ThemedText type="meta" accessibilityLiveRegion="polite">{tr('filterUpdating')}</ThemedText>}
-        </View>
+        }}
+        bandContent={onBand ? searchControls : undefined}>
         {transactionResults}
-      </ScreenScaffold>
+      </BandScaffold>
 
       {sheetVisible && <TransactionFilterSheet initialFilters={filters} resetFilters={DEFAULT_FILTERS}
         accounts={state.accounts} hasUnassignedIncome={hasUnassignedIncome} index={filterIndex} options={filterOptions}
+        sourceKinds={sourceKinds}
         onClose={() => setSheetVisible(false)} onApply={applyFilters} />}
 
-      <EntryDetailSheet transaction={editing} onClose={() => setEditing(null)} />
+      <EntryDetailSheet transaction={editing} initialMode={entryMode} onClose={() => { setEditing(null); setEntryMode('read'); }} />
+      {deleting ? <ConfirmSheet
+        visible
+        onClose={() => setDeleting(null)}
+        question={tr('deleteThisEntry')}
+        body={`${deleting.title} · ${formatAmount(deleting.amountFils)}`}
+        confirmLabel={tr('delete')}
+        destructive
+        onConfirm={() => deleteTransaction(deleting.id)}
+      /> : null}
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  transferNotice: { gap: 2, flexShrink: 1, minWidth: 0 },
+  // 36pt plus the 4pt hit slop on each side keeps the 44pt target.
+  transferLink: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
+  transferRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', columnGap: Spacing.two },
+  transferRowLarge: { flexDirection: 'column', alignItems: 'flex-start' },
+  // The sheet holds the list edge to edge, so a swiped row's actions reach the
+  // screen edge; header, section and row cells carry the gutter themselves.
+  sheetContent: { paddingHorizontal: 0, paddingTop: Spacing.two },
   // Screen sections have a gap; virtualized header/row/footer cells must not.
   listContent: { gap: 0 },
-  searchContainer: { paddingHorizontal: ScreenPadding, paddingVertical: Spacing.two, gap: Spacing.one },
+  searchContainer: { gap: 12 },
+  // On the sheet at large text: the list header already carries the gutter.
+  searchContainerInList: { paddingTop: Spacing.two },
+  bandSearch: { minHeight: 48, borderRadius: 24, flexDirection: 'row', alignItems: 'center', gap: 10, paddingStart: 16, paddingEnd: 6 },
+  bandSearchInput: { flex: 1, minWidth: 0, fontSize: 17, minHeight: 48, paddingVertical: 10 },
+  bandSearchClear: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   filterBtnStacked: { alignSelf: 'flex-end' },
   filterBtn: {
     width: 48,
     height: 48,
-    borderRadius: Radius.control,
+    borderRadius: 24,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   controls: {
     gap: Spacing.two,
     paddingBottom: Spacing.one,
+    paddingHorizontal: BAND_GUTTER,
   },
-  searchToolbar: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.two },
+  searchToolbar: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   searchToolbarLarge: { flexDirection: 'column', alignItems: 'stretch' },
   searchField: { flex: 1, minWidth: 0 },
   searchFieldLarge: { width: '100%' },
   summaryRow: {
     flexDirection: 'column',
     alignItems: 'stretch',
-    gap: Spacing.two,
+    gap: 2,
   },
+  summaryTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', columnGap: Spacing.two, rowGap: 2 },
+  summaryTopLarge: { flexDirection: 'column', alignItems: 'stretch' },
   summaryValue: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two, minWidth: 0, flexShrink: 1 },
   summaryValueLarge: { flexDirection: 'column', alignItems: 'flex-start' },
-  summaryText: {
-    flexShrink: 1,
-  },
+  // Shares the line with the net while at least 140pt is left for it, then
+  // wraps inside that space.
+  summaryText: { flexGrow: 1, flexShrink: 1, flexBasis: 140, minWidth: 0 },
+  summaryTextLarge: { flexBasis: 'auto' },
   merchantChip: {
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 44,
+    borderWidth: StyleSheet.hairlineWidth,
     gap: 6,
     paddingHorizontal: Spacing.two + 2,
     paddingVertical: Spacing.one + 1,
@@ -529,7 +930,9 @@ const styles = StyleSheet.create({
   },
   compactTransferNote: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexWrap: 'wrap' },
   sectionHeaderLarge: { flexDirection: 'column', alignItems: 'flex-start' },
+  sectionTitle: { fontSize: 16, lineHeight: 22 },
   sectionHeader: {
+    paddingHorizontal: BAND_GUTTER,
     flexWrap: 'wrap',
     gap: Spacing.two,
     flexDirection: 'row',
@@ -538,6 +941,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.three,
     paddingBottom: Spacing.one,
   },
+  rowSurface: { paddingHorizontal: BAND_GUTTER },
   rowDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
   },
@@ -557,5 +961,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two,
-  }
+  },
+  typeChips: { gap: Spacing.two, paddingVertical: Spacing.one },
+  typeChipsWrap: { flexDirection: 'row', flexWrap: 'wrap' },
+  gestureRoot: { flex: 1 },
 });

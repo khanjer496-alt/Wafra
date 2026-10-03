@@ -17,8 +17,10 @@ for(const theme of ['light','dark']) {
   for(const focused of [false,true]) {
    const h=createHarness({theme,states:{0:focused}});
    const tree=h.deps['@/components/ui/text-field'].TextField({label:'Amount',value:'12.50',numeric:true,onChangeText(){}},null);
-   const frames=walk(tree).filter(n=>style(n).borderColor===h.theme.controlBorder);
-   assert.equal(frames.length,1);assert.ok(contrast(style(frames[0]).borderColor,style(frames[0]).backgroundColor)>=3);
+   // Focus is signalled by the primary accent border; both states must stay above the 3:1 non-text floor.
+   const border=focused?h.theme.primary:h.theme.controlBorder;
+   const frames=walk(tree).filter(n=>style(n).borderColor===border&&style(n).backgroundColor);
+   assert.equal(frames.length,1,`${focused?'focused':'unfocused'} frame`);assert.ok(contrast(style(frames[0]).borderColor,style(frames[0]).backgroundColor)>=3,`${focused?'focused':'unfocused'} contrast`);
   }
  });
  test(`${theme}: segment selection, labels and touch targets survive large text`,()=>{
@@ -36,13 +38,13 @@ for(const language of ['en','ar']) {
  test(`${language}: unknown balance differs from an exact known zero`,()=>{
   const make=known=>{
    const h=createHarness({language});
-   return h.deps['@/components/wallet/balance-overview'].BalanceOverview({theme:h.theme,largeText:true,balanceCoverageText:'Coverage fixture',balanceFils:0,knownBalanceCount:known,duesTotalFils:0,cashOutTotalFils:0,cashOutCardPaymentsFils:0,cashOutAccountOutflowFils:0,currencies:[],currenciesTotalFils:0,activeSourceCount:1,onOpenBills(){},onOpenCurrency(){},onAddAccount(){}});
+   return h.deps['@/components/wallet/balance-overview'].BalanceOverview({palette:h.deps['@/hooks/use-band'].useBand('accounts'),language,sourceNote:'Source fixture',creditCardCount:0,largeText:true,balanceCoverageText:'Coverage fixture',balanceFils:0,knownBalanceCount:known,activeSourceCount:1,onAddAccount(){}});
   };
   assert.match(text(make(0)),/—/);assert.doesNotMatch(text(make(1)),/—/);assert.match(text(make(1)),/0\.00/);
  });
  test(`${language}: balance overview stays focused on recorded account balances`,()=>{
   const h=createHarness({language,largeText:true});
-  const tree=h.deps['@/components/wallet/balance-overview'].BalanceOverview({theme:h.theme,largeText:true,balanceCoverageText:'Coverage fixture',balanceFils:125,knownBalanceCount:1,activeSourceCount:1,onAddAccount(){}});
+  const tree=h.deps['@/components/wallet/balance-overview'].BalanceOverview({palette:h.deps['@/hooks/use-band'].useBand('accounts'),language,sourceNote:'Source fixture',creditCardCount:1,largeText:true,balanceCoverageText:'Coverage fixture',balanceFils:125,knownBalanceCount:1,activeSourceCount:1,onAddAccount(){}});
   assert.equal(walk(tree).filter(n=>n.props.onPress).length,0,'an existing account should not expose unrelated dues/cash-flow navigation inside the balance hero');
   assert.match(text(tree),/1\.25/);
   assert.match(text(tree),/Coverage fixture/);
@@ -50,34 +52,35 @@ for(const language of ['en','ar']) {
  test(`${language}: setup checklist exposes status and a usable hit target`,()=>{
   const h=createHarness({language});const C=h.local('@/components/ios-message-setup/checklist-row').ChecklistRow;
   for(const status of ['not-started','in-progress','complete','skipped']) {
-   const tree=C({title:'Fixture',status,expanded:true,step:1,onPress:()=>h.events.push(['open']),children:null});
+   const tree=C({title:'Fixture',status,expanded:true,onPress:()=>h.events.push(['open']),children:null});
    const b=walk(tree).find(n=>n.props.onPress);assert.ok(style(b).minHeight>=44);
-   assert.ok(b.props.accessibilityLabel.includes(b.props.accessibilityValue.text));assert.equal(b.props.accessibilityState.expanded,true);
+   // VoiceOver reads the status once, as the value; the label carries title and detail only.
+   assert.ok(b.props.accessibilityValue.text.length>0);assert.equal(b.props.accessibilityLabel,'Fixture');
+   assert.equal(b.props.accessibilityState.expanded,true);
    b.props.onPress();
   }
   assert.equal(h.events.length,4);
+  const deferred=walk(C({title:'Fixture',status:'skipped',statusLabel:'Skipped',expanded:false,onPress(){}})).find(n=>n.props.onPress);
+  assert.equal(deferred.props.accessibilityValue.text,'Skipped');
  });
- test(`${language}: welcome money scene is display-only and never writes the ledger`,()=>{
-  // Name personalization plus focus/tracking/intention now sit ahead of
-  // resumeReady; slot 8 represents the hydrated/resume-ready gate in this
-  // source-executed harness.
-  // states[10] is the gate's `resumeReady`, by hook order — see workflow-ui.test.cjs.
-  const h=createWorkflowHarness({language,state:{onboarded:false,marketId:'AE'},states:{10:true}}),tree=h.renderScreen('onboarding'),t=h.deps['@/lib/i18n'].t;
-  const scene=walk(tree).find(n=>n.props.testID==='onboarding-market-money-scene');assert.ok(scene);
-  assert.ok(walk(tree).some(n=>n.props.accessibilityLabel===t('onboardChooseStart')));
-  // Region-aware examples come from the market pack, not an invented partner list.
-  for(const bank of ['Emirates NBD','FAB','ADCB'])assert.ok(text(scene).includes(bank),bank);
-  assert.match(text(scene),/120\.00/);
-  assert.match(text(scene),/7,062\.00/);
-  assert.ok(text(scene).includes(t('onboardSceneAlertsToPicture')));
-  // Nothing inside the scene is pressable, so the example cannot reach the store.
-  assert.ok(!walk(scene).some(n=>n.props.onPress));
+ test(`${language}: welcome example pattern is display-only and never writes the ledger`,()=>{
+  // Design language E: Welcome shows an example pattern (labelled and spoken
+  // as an example) instead of the regional money scene.
+  // states[6] is the gate's `resumeReady`, by hook order — see workflow-ui.test.cjs.
+  const h=createWorkflowHarness({language,state:{onboarded:false,marketId:'AE'},states:{6:true}}),tree=h.renderScreen('onboarding');
+  const words=h.deps['@/lib/onboarding-e-copy'].onboardingECopy(language);
+  const example=walk(tree).find(n=>n.props.testID==='onboarding-example-pattern');assert.ok(example);
+  assert.ok(walk(tree).some(n=>n.props.accessibilityLabel===words.getStarted));
+  assert.ok(text(example).includes(words.exampleLabel));
+  // The example carries no money and nothing in it is pressable.
+  assert.ok(!/\d[\d,]*\.\d\d/.test(text(example)));
+  assert.ok(!walk(example).some(n=>n.props.onPress));
   assert.deepEqual(h.events,[]);
  });
 }
 test('centralized reference translations have equal, nonempty EN/AR keys',()=>{
  const h=createHarness();const tables=h.deps['@/lib/reference-copy'];
- assert.equal(Object.keys(tables).length,5);
+ assert.equal(Object.keys(tables).length,7);
  for(const[name,table]of Object.entries(tables)){
   assert.deepEqual(Object.keys(table.en).sort(),Object.keys(table.ar).sort(),name);
   for(const value of Object.values(table.ar))assert.match(typeof value==='function'?value(2):value,/[\u0600-\u06ff]/);

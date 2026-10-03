@@ -367,6 +367,36 @@ ok('subscription: irregular merchant rejected',
     subTx('Random Shop', '2026-07-29', 2000, 'shopping'),
   ]).length === 0);
 
+// ── BNPL instalments (Shopping) and the recurring-bill paths ──
+// A payment to a BNPL provider is Shopping, so it no longer takes the relaxed
+// Loan path (one interval, amount stability waived within 3x). Intended:
+//  - a steady monthly instalment of one purchase is still found by the
+//    ordinary path (three charges, ±15%), as a commitment rather than a bill;
+//  - two charges alone are not enough evidence of a standing commitment;
+//  - instalments of DIFFERENT purchases that merely share the provider do not
+//    become one monthly bill — the Loan path used to mint exactly that.
+{
+  const today = new Date(2026, 6, 20);
+  const steady = subsLib.detectSubscriptions(
+    ['2026-04-14', '2026-05-14', '2026-06-14', '2026-07-14'].map((date) =>
+      subTx('Tabby', date, 21450, 'shopping')), [], today);
+  ok('a steady monthly BNPL instalment is still detected as recurring',
+    steady.length === 1 && steady[0].cadence === 'monthly', steady);
+  ok('...as a commitment, not a bill',
+    steady.length === 1 && subsLib.billCommitments(steady).length === 0, steady);
+  ok('two BNPL charges alone do not mint a recurring commitment',
+    subsLib.detectSubscriptions([
+      subTx('Tabby', '2026-06-14', 21450, 'shopping'),
+      subTx('Tabby', '2026-07-14', 21450, 'shopping'),
+    ], [], today).length === 0);
+  ok('instalments of different purchases do not become one monthly bill',
+    subsLib.detectSubscriptions([
+      subTx('Tabby', '2026-05-14', 12000, 'shopping'),
+      subTx('Tabby', '2026-06-14', 34000, 'shopping'),
+      subTx('Tabby', '2026-07-14', 9000, 'shopping'),
+    ], [], today).length === 0);
+}
+
 // ── recurring group classification ──
 const rentSubs = subsLib.detectSubscriptions([
   subTx('Apartment Rent', '2026-05-01', 550000, 'rent'),
@@ -845,8 +875,12 @@ const recon1 = bills.billsForMonth([dewaBill], dewaTx, new Date(2026, 6, 18))[0]
 ok('reconcile: imported DEWA debit marks bill paid', recon1.status === 'paid' && recon1.autoReconciled === true);
 const eandBill = { id: 'b-eand', title: 'E&', category: 'telecom', amountFils: 45045, dueDay: 15, importIdentity: 'account:1849', paidMonths: [] };
 const namedReceipt = [{ id: 'x-nazem', type: 'expense', amountFils: 45045, category: 'other', accountId: 'a', title: 'Nazemhome', date: '2026-08-03', source: 'sms', paymentFlowSide: 'receipt', billIdentity: 'consumer:1849' }];
-ok('reconcile: consumer receipt settles differently named provider account',
-  bills.billsForMonth([eandBill], namedReceipt, new Date(2026, 7, 14))[0].status === 'paid');
+ok('reconcile: a matching consumer tail does not prove an unknown nickname is the provider',
+  bills.billsForMonth([eandBill], namedReceipt, new Date(2026, 7, 14))[0].status !== 'paid');
+ok('reconcile: a user-confirmed provider alias supplies the missing payment evidence',
+  bills.billsForMonth([eandBill], require('./build/bill-alias').applyBillAliasToTransactions(
+    namedReceipt, 'Nazemhome', 'consumer:1849', { title: 'E&', category: 'telecom' },
+  ), new Date(2026, 7, 14))[0].status === 'paid');
 ok('reconcile: prior-month consumer receipt cannot settle current bill',
   bills.billsForMonth([eandBill], [{ ...namedReceipt[0], date: '2026-07-10' }], new Date(2026, 7, 14))[0].status !== 'paid');
 ok('reconcile: matching amount without bill identity cannot settle a differently named bill',
@@ -908,6 +942,51 @@ const tm = an.topMerchants(aTx, '2026-07');
 ok('analytics: top merchant aggregated', tm[0].title === 'Talabat' && tm[0].totalFils === 80000 && tm[0].count === 2);
 const mv = an.categoryMovers(aTx, '2026-07');
 ok('analytics: dining moved down vs June', mv.some(m => m.category === 'dining' && m.deltaFils === -10000));
+// Compare headline: everyday spending in two comparable windows, fixed costs left out.
+{
+  const rent = [
+    { id: 'r7', type: 'expense', amountFils: 550000, category: 'rent', accountId: 'a', title: 'Landlord', date: '2026-07-01' },
+    { id: 'r6', type: 'expense', amountFils: 550000, category: 'rent', accountId: 'a', title: 'Landlord', date: '2026-06-01' },
+    { id: 's7', type: 'expense', amountFils: 10000, category: 'rent', accountId: 'a', title: 'Mixed', date: '2026-07-02',
+      splits: [{ category: 'rent', amountFils: 6000 }, { category: 'home-services', amountFils: 4000 }] },
+  ];
+  const cs = an.comparableSpend([...aTx, ...rent], '2026-07', undefined, undefined, new Date('2026-09-25T12:00:00Z'));
+  ok('analytics: compare leaves rent and rent split shares out', cs.currentFils === 104000 && cs.previousFils === 90000 && cs.deltaFils === 14000);
+  const early = an.comparableSpend(aTx, '2026-07', undefined, undefined, new Date('2026-07-11T12:00:00Z'));
+  ok('analytics: compare uses the same elapsed window as movers', early.currentFils === 100000 && early.previousFils === 90000);
+  const cut = an.comparableSpend(aTx, '2026-07', undefined, undefined, new Date('2026-07-05T12:00:00Z'));
+  ok('analytics: compare excludes the previous period beyond the elapsed day', cut.previousFils === 0 && cut.currentFils === 100000);
+  ok('analytics: compare has nothing for all time', an.comparableSpend(aTx, { mode: 'all' }) === null);
+  ok('analytics: compare ignores transfers', an.comparableSpend(aTx, '2026-07', undefined, undefined, new Date('2026-09-25T12:00:00Z')).currentFils === 100000);
+}
+{
+  const days = an.dailySpendForMonth([...aTx,
+    { id: 'rent', type: 'expense', amountFils: 550000, category: 'rent', accountId: 'a', title: 'Landlord', date: '2026-07-01' }], '2026-07');
+  ok('calendar: every day of the month is present', days.length === 31 && days[0].dateISO === '2026-07-01' && days[30].dateISO === '2026-07-31');
+  ok('calendar: spending lands on its own day', days[3].fils === 50000 && days[4].fils === 20000 && days[10].fils === 30000);
+  ok('calendar: rent is kept apart and transfers never count', days[0].fils === 0 && days[0].fixedFils === 550000);
+  ok('calendar: February has its own length', an.dailySpendForMonth([], '2027-02').length === 28);
+  const listed = an.dailySpendForMonth(aTx, '2026-07', undefined, undefined, t => t.id !== '2');
+  ok('calendar: follows the same row filter as the list', listed[10].fils === 0 && listed[3].fils === 50000);
+  const fmt = require('./build/format');
+  fmt.setMonthStartDay(25);
+  try {
+    const salary = an.dailySpendForMonth([
+      { id: 'a', type: 'expense', amountFils: 100, category: 'dining', accountId: 'a', title: 'A', date: '2026-07-24' },
+      { id: 'b', type: 'expense', amountFils: 200, category: 'dining', accountId: 'a', title: 'B', date: '2026-07-25' },
+      { id: 'c', type: 'expense', amountFils: 300, category: 'dining', accountId: 'a', title: 'C', date: '2026-08-24' },
+    ], '2026-07');
+    ok('calendar: a salary month runs 25th to 24th across two calendar months',
+      salary[0].dateISO === '2026-07-25' && salary.at(-1).dateISO === '2026-08-24' && salary.length === 31 &&
+      salary[0].fils === 200 && salary.at(-1).fils === 300 && salary.reduce((n, d) => n + d.fils, 0) === 500);
+    const cs = an.comparableSpend([
+      { id: 'n', type: 'expense', amountFils: 700, category: 'dining', accountId: 'a', title: 'N', date: '2026-07-27' },
+      { id: 'p', type: 'expense', amountFils: 400, category: 'dining', accountId: 'a', title: 'P', date: '2026-06-27' },
+      { id: 'x', type: 'expense', amountFils: 900, category: 'dining', accountId: 'a', title: 'X', date: '2026-07-10' },
+    ], '2026-07', undefined, undefined, new Date('2026-07-28T12:00:00Z'));
+    ok('compare: salary months compare the same elapsed days', cs.currentFils === 700 && cs.previousFils === 400);
+  } finally { fmt.setMonthStartDay(1); }
+}
 const dw = an.dayOfWeekSpend(aTx, '2026-07');
 ok('analytics: transfers excluded from weekday spend', dw.reduce((a, b) => a + b, 0) === 100000);
 
@@ -1107,6 +1186,12 @@ const legacyCaptureBalanceState = {
 ok('net worth preserves legacy captured-row balance semantics without the modern source marker',
   bal.netWorthBreakdown(legacyCaptureBalanceState).balanceByAccountId['legacy-captured'] ===
     bal.reliableBalanceFils(legacyCaptureBalanceState, legacyCaptureBalanceState.accounts[0]));
+// A row with only a durable smsKey is a bank row: its account's running sum is
+// as partial as any other captured account's, so it is unknown, not a figure.
+ok('a legacy smsKey-only captured account is unknown, like any bank-fed account',
+  bal.isCapturedRow({ smsKey: 's1-1' }) && bal.isCapturedRow({ source: 'sms' }) && !bal.isCapturedRow({ source: 'manual' }) &&
+    bal.reliableBalanceFils(legacyCaptureBalanceState, legacyCaptureBalanceState.accounts[0]) === null &&
+    bal.netWorthBreakdown(legacyCaptureBalanceState).balanceByAccountId['legacy-captured'] === null);
 
 // ── One payment must not settle two overlapping statements ──
 const allocLib = require('./build/cards');
@@ -1589,6 +1674,21 @@ const lsLate = leaving.leavingSoon(
   lsToday,
 );
 ok('leavingSoon keeps an overdue statement', lsLate.some((r) => r.overdue && r.kind === 'card'));
+
+// A subscription the user marked cancelled is not "coming up" until it charges again.
+{
+  const netflix = {
+    title: 'Netflix', category: 'entertainment', group: 'subscription', status: 'active', cadence: 'monthly',
+    avgAmountFils: 1549, lastAmountFils: 1549, lastChargedISO: '2026-06-24', nextExpectedISO: '2026-07-24',
+    chargeCount: 4, paymentHistory: false, priceIncreased: false, priorTypicalFils: 1549, monthlyEquivalentFils: 1549,
+  };
+  const subsOnly = { kinds: ['subscription'], detectedSubscriptions: [netflix] };
+  eq('leavingSoon lists an active subscription', leaving.leavingSoon(lsBase, lsToday, subsOnly).length, 1);
+  eq('leavingSoon leaves out a subscription cancelled after its last charge',
+    leaving.leavingSoon({ ...lsBase, cancelledSubscriptions: { netflix: '2026-07-01' } }, lsToday, subsOnly).length, 0);
+  eq('leavingSoon brings it back once it charges after the cancel date',
+    leaving.leavingSoon({ ...lsBase, cancelledSubscriptions: { netflix: '2026-06-01' } }, lsToday, subsOnly).length, 1);
+}
 eq('daysPhrase late', leaving.daysPhrase(-3), '3 days late');
 eq('daysPhrase today', leaving.daysPhrase(0), 'today');
 eq('daysPhrase tomorrow', leaving.daysPhrase(1), 'tomorrow');
@@ -3136,6 +3236,19 @@ ok('stale: a stale statement that gets paid leaves openDues',
     accuracy.unreadFormats([{ ...named, title: 'Transfer to Ahmed' }], label).length === 0);
   ok('accuracy: unread formats sort ahead of uncategorized ones',
     accuracy.unreadFormats([named, named, unread], label)[0].reason === 'unread');
+  // "Open entry" opens the newest row of a listed format — never an own
+  // transfer that shares the format, even when it is newer.
+  {
+    const transfer = { ...named, id: 'own-move', title: 'Transfer to Ahmed', date: '2026-07-20' };
+    const newest = accuracy.newestRowOfFormat([named, transfer]);
+    const key = accuracy.formatKey(named.raw);
+    ok('accuracy: Open entry skips a deliberate Other row of the same format',
+      newest.get(key)?.id === named.id && newest.size === 1);
+    ok('accuracy: Open entry has nothing to open when only the deliberate row remains',
+      accuracy.newestRowOfFormat([transfer]).size === 0);
+    ok('accuracy: Open entry picks the newest listed row',
+      accuracy.newestRowOfFormat([named, { ...named, id: 'later', date: '2026-07-15' }]).get(key)?.id === 'later');
+  }
 
   const patch = heal.healPatch(unread, parsed);
   ok('accuracy: the rescan names it', !!patch && patch.title === parsed.merchant);
@@ -5036,8 +5149,10 @@ eq('analytics: the category trend follows the split too',
         transactions: [{ id: 'd', type: 'expense', amountFils: 45000, category: 'utilities', accountId: 'a', title: 'DEWA Bill', date: '2026-02-14' }],
       }), febNow).length === 0);
 
-    ok('reminders: a due date already gone is not scheduled',
-      remind.buildPaymentReminders(remState({ bills: [mkRemBill('Salik', 5)] }), febNow).length === 0);
+    // Feb 5 is gone; next month's 4th/5th are inside the 30-day window.
+    eq('reminders: a due date already gone is not scheduled, next month\'s is',
+      remind.buildPaymentReminders(remState({ bills: [mkRemBill('Salik', 5)] }), febNow)
+        .map((r) => r.dateISO), ['2026-03-04', '2026-03-05']);
 
     const cardRem = remind.buildPaymentReminders(remState({
       accounts: [{ id: 'cc', name: 'FAB Credit Card', kind: 'card', cardType: 'credit', openingFils: 0, color: '#fff' }],
@@ -5067,10 +5182,12 @@ eq('analytics: the category trend follows the split too',
     eq('reminders: precomputed recurrence produces the same notification plan',
       precomputedSubRem.map((r) => ({ kind: r.kind, dateISO: r.dateISO, title: r.title, body: r.body })),
       subRem.map((r) => ({ kind: r.kind, dateISO: r.dateISO, title: r.title, body: r.body })));
+    // The bill itself (due 5 March) is reminded; the detected subscription for
+    // the same merchant is not reminded on top of it.
     ok('reminders: a merchant already tracked as a bill is not reminded twice',
       remind.buildPaymentReminders(
         remState({ transactions: subTxs, bills: [mkRemBill('Netflix', 5)] }), febNow,
-      ).length === 0);
+      ).every((r) => r.kind === 'bill'));
 
     const manyRem = remind.buildPaymentReminders(
       remState({ bills: Array.from({ length: 40 }, (_, i) => mkRemBill(`B${i}`, 28)) }), febNow, 24);
@@ -5224,14 +5341,22 @@ eq('analytics: the category trend follows the split too',
         salaryRow('late').dueISO === '2026-07-20' && salaryRow('late').daysLeft === 10,
         JSON.stringify(salaryRow('late') && [salaryRow('late').dueISO, salaryRow('late').daysLeft]));
 
-      // Only 'late' is still ahead, and it is reminded on the pair of days
-      // either side of the date the Bills screen prints — not on the 19th/20th
-      // of June, which is where the raw calendar month would have put it.
+      // In this money month only 'late' is still ahead, and it is reminded on
+      // the pair of days either side of the date the Bills screen prints — not
+      // on the 19th/20th of June, which is where the raw calendar month would
+      // have put it. The NEXT money month (25 Jul – 24 Aug) is projected too:
+      // 'early' falls on 30 July there, inside the 30-day window, while next
+      // month's 'late' (20 Aug) is beyond it.
       const salaryReminders = remind.buildPaymentReminders(
         { accounts: [], transactions: [], cardDues: [], bills: salaryBills, notSubscriptions: [] },
         salaryNow);
       eq('salary month: reminders land either side of the date Bills shows',
-        salaryReminders.map((r) => r.dateISO), ['2026-07-19', '2026-07-20']);
+        salaryReminders.map((r) => [r.id, r.dateISO]), [
+          ['bill-late-2026-07-20--1', '2026-07-19'],
+          ['bill-late-2026-07-20-0', '2026-07-20'],
+          ['bill-early-2026-07-30--1', '2026-07-29'],
+          ['bill-early-2026-07-30-0', '2026-07-30'],
+        ]);
     } finally {
       fmt.setMonthStartDay(1);
     }

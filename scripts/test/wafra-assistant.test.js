@@ -766,6 +766,23 @@ console.log('✓ Ask Wafra exact scopes, evidence, global currency and contextua
   assert.equal(due.tool, 'upcoming-payments');
   assert.equal(due.destination, '/bills');
   assert.equal(due.evidence, undefined);
+  // Additive rows behind the facts, for logos in the answer; same order and amounts.
+  assert.equal(due.payments.length, due.facts.length);
+  const withBill = { ...state, bills: [{ id: 'dewa-due', title: 'DEWA', category: 'utilities', amountFils: 1_200,
+    dueDay: 24, paidMonths: [] }] };
+  const billDue = answerWafraQuestion(withBill, 'What is due in the next 7 days?', now);
+  assert.equal(billDue.tool, 'upcoming-payments');
+  assert.ok(billDue.payments.length > 0, 'an unpaid bill due within the window is listed');
+  assert.equal(billDue.payments.length, billDue.facts.length);
+  billDue.payments.forEach((payment, index) => {
+    assert.ok(billDue.facts[index].label.startsWith(payment.title));
+    assert.match(payment.dateISO, /^\d{4}-\d{2}-\d{2}$/);
+  });
+  const dewaRow = billDue.payments.find((payment) => payment.title === 'DEWA');
+  assert.ok(dewaRow);
+  assert.equal(dewaRow.category, 'utilities', 'the bill carries its own category for the logo fallback');
+  assert.equal(dewaRow.kind, 'bill');
+  assert.equal(dewaRow.amountFils, 1_200);
   assert.match(due.body, /predicted/);
   const subscriptions = answerWafraQuestion(state, 'What are my biggest subscriptions?', now);
   assert.equal(subscriptions.destination, '/bills');
@@ -1175,6 +1192,32 @@ console.log('✓ Local Ask unions, exclusions, frozen comparisons, driver proof,
   assert.equal(typical.data.monthsAnalyzed, 3);
   assert.equal(typical.data.baselineFils, 2_000);
   assert.equal(typical.data.currentFils, 5_000);
+  // The chart series is the recorded months the answer was computed from,
+  // never a zero-filled calendar.
+  assert.deepEqual(highest.monthlySeries, [
+    { month: '2026-06', totalFils: 1_000 }, { month: '2026-07', totalFils: 3_000 },
+    { month: '2026-08', totalFils: 2_000 }, { month: '2026-09', totalFils: 5_000 },
+  ]);
+  assert.equal(highest.monthlySeriesHighlight, '2026-09');
+  assert.deepEqual(typical.monthlySeries.map((month) => month.month), ['2026-06', '2026-07', '2026-08']);
+  assert.equal(typical.monthlySeriesHighlight, undefined, 'a median is not a month, so no bar is emphasised');
+  const longHistory = { ...state, transactions: [
+    tx('peak', '2025-11-05', 'Market', 90_000, 'groceries'),
+    ...['2026-04', '2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-03'].map((month, index) =>
+      tx(`m-${month}`, `${month}-05`, 'Market', 1_000 + index, 'groceries')),
+  ] };
+  const longHighest = answerWafraQuestion(longHistory, 'Is this my highest month?', now);
+  assert.equal(longHighest.monthlySeriesHighlight, '2025-11');
+  assert.equal(longHighest.monthlySeries.length, 6);
+  assert.equal(longHighest.monthlySeries[0].month, '2025-11', 'the answer month is kept even when older than the window');
+  assert.deepEqual(longHighest.monthlySeries.slice(1).map((month) => month.month),
+    ['2026-05', '2026-06', '2026-07', '2026-08', '2026-09']);
+  const gappy = { ...state, transactions: [tx('may', '2026-05-05', 'Market', 1_000, 'groceries'),
+    tx('sep-only', '2026-09-05', 'Market', 5_000, 'groceries')] };
+  assert.deepEqual(answerWafraQuestion(gappy, 'Is this my highest month?', now).monthlySeries.map((month) => month.month),
+    ['2026-05', '2026-09'], 'months without recorded spending are absent, not zero');
+  assert.equal(answerWafraQuestion(history, 'How much did I spend?', now).monthlySeries, undefined,
+    'answers without a monthly grouping carry no series');
 
   const similar = answerWafraQuestion(history, 'When did I last spend this much?', now);
   assert.equal(similar.tool, 'historical-baseline');

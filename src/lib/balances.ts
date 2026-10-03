@@ -1,4 +1,4 @@
-import type { Account, AppState } from './types';
+import type { Account, AppState, Transaction } from './types';
 import { reconcileTransfers } from '@/lib/transfer-reconciliation';
 
 /**
@@ -31,6 +31,17 @@ let netWorthBreakdownCache: {
   value: NetWorthBreakdown;
 } | null = null;
 
+/**
+ * Whether a row came from the bank rather than the user. Rows captured before
+ * the explicit `source: 'sms'` field existed carry only their durable
+ * `smsKey`; they are bank rows all the same. One predicate, so "does Wafra
+ * hear about this account from the bank" has one answer everywhere: the
+ * balance shown here and "Set today's balance" in the store.
+ */
+export function isCapturedRow(t: Pick<Transaction, 'source' | 'smsKey'>): boolean {
+  return t.source === 'sms' || Boolean(t.smsKey);
+}
+
 /** Current balance of an account: opening balance plus all its transactions. */
 export function accountBalanceFils(state: BalanceState, accountId: string): number {
   const account = state.accounts.find((a) => a.id === accountId);
@@ -43,7 +54,7 @@ export function accountBalanceFils(state: BalanceState, accountId: string): numb
   // captured-bank evidence; skip it only where it provably cannot affect the
   // answer.
   const hasCapturedRows = state.transactions.some(
-    (t) => t.accountId === accountId && (t.source === 'sms' || Boolean(t.smsKey)),
+    (t) => t.accountId === accountId && isCapturedRow(t),
   );
   const secondary = hasCapturedRows
     ? reconcileTransfers(state.transactions, state.accounts).corroboratingIds
@@ -75,7 +86,7 @@ export function reliableBalanceFils(state: BalanceState, account: Account): numb
     return account.snapshotFils;
   }
   const hasSmsRows = state.transactions.some(
-    (t) => t.accountId === account.id && t.source === 'sms',
+    (t) => t.accountId === account.id && isCapturedRow(t),
   );
   return hasSmsRows ? null : accountBalanceFils(state, account.id);
 }
@@ -100,11 +111,6 @@ export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
   }
   const runningByAccount = new Map<string, number>();
   const smsAccountIds = new Set<string>();
-  // Legacy captured rows can carry a durable smsKey even if an old snapshot
-  // predates the explicit `source: 'sms'` field. Keep track of those accounts
-  // so the rare legacy case can fall back to the exact reconciled balance
-  // without charging every modern Wallet paint for a full transfer-graph walk.
-  const capturedIdentityAccountIds = new Set<string>();
 
   for (const account of state.accounts) {
     if (!account.archived) runningByAccount.set(account.id, account.openingFils ?? 0);
@@ -118,8 +124,7 @@ export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
     // old unconditional reconcileTransfers() therefore spent seconds rebuilding
     // a 10k+ row transfer graph on the first Accounts paint for a result that
     // could not affect the value shown.
-    if (transaction.source === 'sms') smsAccountIds.add(transaction.accountId);
-    if (transaction.smsKey) capturedIdentityAccountIds.add(transaction.accountId);
+    if (isCapturedRow(transaction)) smsAccountIds.add(transaction.accountId);
     runningByAccount.set(
       transaction.accountId,
       (runningByAccount.get(transaction.accountId) ?? 0) +
@@ -146,12 +151,6 @@ export function netWorthBreakdown(state: BalanceState): NetWorthBreakdown {
       reliable = account.snapshotFils;
     } else if (smsAccountIds.has(account.id)) {
       reliable = null;
-    } else if (capturedIdentityAccountIds.has(account.id)) {
-      // Preserve the pre-`source` legacy edge exactly. accountBalanceFils pays
-      // for reconciliation only on this captured account, while ordinary modern
-      // SMS accounts above remain unknown and fully-manual accounts below use
-      // the already-built running index.
-      reliable = accountBalanceFils(state, account.id);
     } else {
       reliable = runningByAccount.get(account.id) ?? 0;
     }

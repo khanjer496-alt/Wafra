@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, '../../..');
 const dependencies = Object.fromEntries([
   'capture-source-identity', 'cards', 'markets', 'dedupe', 'bill-alias', 'format', 'heal',
   'transfer-evidence', 'transfer-reconciliation', 'ledger', 'ledger-money', 'sms-parser', 'balances', 'i18n',
+  'alert-review-tray', 'parsed-review-event',
 ].map(name => [`@/lib/${name}`, require(`../build/${name}`)]));
 const { buildImportPlan } = load(path.join(root, 'src/lib/import-plan.ts'), dependencies);
 const { mergeImportedCardDues } = load(path.join(root, 'src/lib/cards.ts'), dependencies);

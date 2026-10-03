@@ -22,6 +22,9 @@ module.exports = defineConfig([
       "ios/*",
       "server/*",
       ".claude/worktrees/**",
+      // Local preserved checkouts and generated evidence bundles are not source.
+      ".worktrees/**",
+      "artifacts/**",
       ".superpowers/**",
     ],
   },

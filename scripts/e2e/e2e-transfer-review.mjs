@@ -10,6 +10,7 @@ const BASE = process.env.BASE ?? 'http://127.0.0.1:8134';
 assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(new URL(BASE).hostname));
 const OUT = process.env.E2E_ARTIFACT_DIR ?? path.join(tmpdir(), 'wafra-transfer-review-e2e');
 const KEY = 'wafra/state/v1';
+const HISTORICAL_PENDING_COUNT = 3106;
 const now = Date.now();
 const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(now);
 const accounts = [
@@ -35,7 +36,7 @@ const rows = [
   })),
   tx('legacy-own', 'expense', 4000, { title: 'Own account transfer', isTransfer: true, transferEvidence: undefined }),
   // Reproduce the reported backlog size using synthetic old records, not a private inbox.
-  ...Array.from({ length: 3106 }, (_, i) => tx(`historical-${String(i).padStart(4, '0')}`, 'expense', 10000 + i, {
+  ...Array.from({ length: HISTORICAL_PENDING_COUNT }, (_, i) => tx(`historical-${String(i).padStart(4, '0')}`, 'expense', 10000 + i, {
     accountId: accounts[1].id, date: '2022-11-05', ts: Date.parse('2022-11-05T10:00:00Z') + i,
     smsKey: `hqa-history-${i}`, captureInstrument: { last4: '4222', kind: 'account', bankIdentity: 'adcb' },
   })),
@@ -56,8 +57,8 @@ function seed(language, mode) {
   };
 }
 const labels = {
-  en: { transferEntry: 'Check a transfer', save: 'Save classification', undo: 'Undo decision', group: 'Classify these 2 transfers', backup: 'Back up everything (JSON)', leave: 'Leave as recorded' },
-  ar: { transferEntry: 'مراجعة تحويل', save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'تصنيف هذه التحويلات وعددها 2', backup: 'نسخ احتياطي كامل (JSON)', leave: 'تركه كما هو مسجل' },
+  en: { transferEntry: 'Check a transfer', save: 'Save classification', undo: 'Undo decision', group: 'Classify these 2 transfers', backup: 'Back up to a file', leave: 'Leave as recorded' },
+  ar: { transferEntry: 'مراجعة تحويل', save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'تصنيف هذه التحويلات وعددها 2', backup: 'نسخ احتياطي إلى ملف', leave: 'تركه كما هو مسجل' },
 };
 function minor(value) {
   const normalized = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
@@ -112,7 +113,7 @@ async function fits(locator) {
     }).map(n => n.textContent));
   assert.deepEqual(bad, [], 'complete text fits without horizontal clipping');
 }
-async function home(page, expected, pendingCount) {
+async function home(page, expected, currentPendingCount, historicalPendingCount = HISTORICAL_PENDING_COUNT) {
   await page.goto(BASE + '/', { waitUntil: 'networkidle' });
   const ids = ['home-income-summary', 'home-spending-total', 'home-net-summary'];
   const amounts = [];
@@ -121,10 +122,24 @@ async function home(page, expected, pendingCount) {
     amounts.push(minor(await item.getAttribute('aria-label')));
   }
   assert.deepEqual(amounts, expected, 'confirmed Home income, spending and Net');
-  // Pending transfer review no longer interrupts Home. The shipping flow keeps
-  // review contextual to a transaction detail instead of a permanent Wallet row,
-  // while Home remains focused on confirmed Income / Spending / Net.
-  assert.equal(await page.getByTestId('transfer-review-notice').count(), 0);
+  // Home counts the entire review queue, including the intentionally unresolved
+  // historical collision backlog. Completing today's four decisions does not
+  // silently classify those 3,106 old records. Wait for the deferred projection,
+  // then assert its exact count in either language.
+  const pendingCount = historicalPendingCount + currentPendingCount;
+  await page.waitForFunction(expectedCount => {
+    const notices = [...document.querySelectorAll('[data-testid="transfer-review-notice"]')];
+    if (expectedCount === 0) return notices.length === 0;
+    if (notices.length !== 1) return false;
+    const label = (notices[0].getAttribute('aria-label') ?? '')
+      .replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
+      .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/[,٬]/g, '');
+    return Number(label.match(/\d+/)?.[0]) === expectedCount;
+  }, pendingCount, { timeout: 10000 });
+  const notice = page.getByTestId('transfer-review-notice');
+  assert.equal(await notice.count(), pendingCount === 0 ? 0 : 1);
+  if (pendingCount > 0) assert.equal(minor(await notice.getAttribute('aria-label')) / 100, pendingCount,
+    'Home names the exact full review queue, including historical entries');
 }
 async function choose(page, words, id, ownership) {
   await page.goto(`${BASE}/review-transfers?transactionId=${id}`, { waitUntil: 'networkidle' });
@@ -145,12 +160,13 @@ try {
   ]) {
     const name = `${language}-${mode}-${width}`;
     const words = labels[language];
-    const context = await browser.newContext({ viewport: { width, height },
+    const contextOptions = { viewport: { width, height },
       // The fixture date above is Dubai-local; a UTC browser treats these rows
       // as tomorrow between 20:00 and midnight UTC and correctly hides them
       // from a recent-through-today view. Test in the same explicit timezone.
       timezoneId: 'Asia/Dubai',
-      locale: language === 'ar' ? 'ar-AE' : 'en-AE', colorScheme: mode, reducedMotion: 'reduce', acceptDownloads: true });
+      locale: language === 'ar' ? 'ar-AE' : 'en-AE', colorScheme: mode, reducedMotion: 'reduce', acceptDownloads: true };
+    const context = await browser.newContext(contextOptions);
     await context.route('**/*', route => {
       const url = route.request().url();
       return url.startsWith(BASE + '/') || url.startsWith('data:') || url.startsWith('blob:') ? route.continue() : route.abort();
@@ -167,11 +183,14 @@ try {
     try {
       await home(page, [200000, 10000, 190000], 4);
       await page.screenshot({ path: path.join(OUT, `${name}-home-pending.png`) });
-      // Transfer review is contextual now: open a pending transfer's details,
-      // then take its explicit review action. Wallet intentionally has no
-      // permanent Transfers section between the balance hero and accounts.
+      // Transfer review is contextual: open a pending transfer's details, then
+      // take its explicit review action. Transfer records live in their own
+      // history (docs/design/transfers.md), not among regular transactions.
       await page.goto(`${BASE}/transactions`, { waitUntil: 'networkidle' });
-      await click(page.getByRole('button', { name: /^Outgoing transfer,/ }).first());
+      assert.equal(await page.getByRole('button', { name: /^Outgoing transfer,/ }).count(), 0,
+        'transfer records are not regular transaction rows');
+      await page.goto(`${BASE}/transfers`, { waitUntil: 'networkidle' });
+      await click(page.getByTestId('transfer-record-unknown-out').getByRole('button').first());
       await fits(page.getByTestId('entry-transfer-review'));
       await click(page.getByRole('button', { name: words.transferEntry, exact: true }));
       await page.waitForURL(/review-transfers/);
@@ -213,8 +232,10 @@ try {
         const current = savedById.get(original.id);
         assert.deepEqual([current.amountFils, current.type, current.accountId], [original.amountFils, original.type, original.accountId]);
       }
-      await page.goto(BASE + '/settings?section=data', { waitUntil: 'networkidle' });
-      const backupButton = await exposed(page.getByRole('button', { name: words.backup, exact: true }));
+      await page.goto(BASE + '/settings', { waitUntil: 'networkidle' });
+      await click(page.getByTestId('settings-data-and-help'));
+      await page.waitForURL('**/settings-data');
+      const backupButton = await exposed(page.getByRole('button', { name: words.backup, exact: false }));
       const [download] = await Promise.all([page.waitForEvent('download'), backupButton.click()]);
       const backup = JSON.parse(await readFile(await download.path(), 'utf8'));
       assert.equal(backup.app, 'wafra');
@@ -247,6 +268,33 @@ try {
       await click(page.getByRole('button', { name: words.leave, exact: true }));
       assert.deepEqual((await stored(page)).transactions.map(t => [t.id, t.transferDecision ?? null]), beforeLeave,
         'leaving unclassified does not apply or dismiss any decision');
+      // A separate reviewed-current-ledger fixture has genuinely no pending
+      // queue. Keep the backlog scenario above intact, including its untouched
+      // history and Undo checks; do not fake completion of those old records.
+      const settledContext = await browser.newContext(contextOptions);
+      try {
+        await settledContext.route('**/*', route => {
+          const url = route.request().url();
+          return url.startsWith(BASE + '/') || url.startsWith('data:') || url.startsWith('blob:') ? route.continue() : route.abort();
+        });
+        const settledRows = saved.transactions.filter(t => !t.id.startsWith('historical-'));
+        assert.equal(settledRows.length, 7);
+        for (const id of ['group-a', 'group-b', 'unknown-in', 'unknown-out', 'legacy-own']) {
+          assert.ok(settledRows.find(t => t.id === id)?.transferDecision, `reviewed fixture retains ${id}'s saved decision`);
+        }
+        await settledContext.addInitScript(({ key, state }) => {
+          if (localStorage.getItem('wafra/e2e-transfer-seeded')) return;
+          localStorage.setItem(key, JSON.stringify(state));
+          localStorage.setItem('wafra/e2e-transfer-seeded', '1');
+        }, { key: KEY, state: { ...seed(language, mode), transactions: settledRows } });
+        const settledPage = await settledContext.newPage();
+        settledPage.on('pageerror', error => errors.push(String(error)));
+        await home(settledPage, [230000, 21000, 209000], 0, 0);
+        const settledStored = await stored(settledPage);
+        assert.deepEqual(settledStored.transactions.map(t => [t.id, t.transferDecision ?? null]).sort(),
+          settledRows.map(t => [t.id, t.transferDecision ?? null]).sort(), 'empty-queue fixture preserves all reviewed decisions');
+        await settledPage.screenshot({ path: path.join(OUT, `${name}-empty-review-queue.png`) });
+      } finally { await settledContext.close(); }
       assert.deepEqual(errors, []);
       await rm(path.join(OUT, `${name}-failure.png`), { force: true });
       results.push({ name, passed: true });

@@ -1,4 +1,5 @@
 import { Linking, Platform } from 'react-native';
+import { iosSupportsApplePayAutomation } from './ios-setup-availability';
 
 import type {
   WafraLiveCaptureNativeModule,
@@ -10,6 +11,7 @@ import {
 } from '@/lib/capture';
 import {
   IOS_LOCAL_CAPTURE_SHORTCUT_URL,
+  IOS_BUNDLED_CAPTURE_SHORTCUT_NAME,
   iosLocalCaptureTestUrl,
   normalizeIosLocalCaptureShortcutUrl,
 } from '@/lib/ios-local-capture-protocol';
@@ -19,6 +21,8 @@ import {
   readIosCaptureHealth,
   type IosCaptureHealth,
 } from './ios-capture-health';
+
+export { iosSupportsApplePayAutomation } from './ios-setup-availability';
 
 export const SHORTCUTS_APP_STORE_URL =
   'https://apps.apple.com/app/shortcuts/id1462947752';
@@ -66,6 +70,20 @@ export interface IosSetupModel {
   opening: boolean;
   failure: IosSetupFailure;
   captureHealth: IosCaptureHealth | null;
+  /** Separate proof: an SMS Shortcut check cannot prove notification input. */
+  notificationReadiness?: IosSetupReadiness;
+  notificationSupported?: boolean;
+  applePayReadiness?: IosSetupReadiness;
+  applePaySupported?: boolean;
+  shortcutName?: string;
+  shortcutVersion?: 3;
+  bundledHistorySupported?: boolean;
+  bundledApplePaySupported?: boolean;
+  /** Raw native Message proof. Only compared with setup attempts, never shown as capture proof. */
+  setupProofVersion?: number | null;
+  setupProofAt?: number | null;
+  /** Latest queue receipt that did not come from Apple Pay or notification input. */
+  lastMessageReceivedAt?: number | null;
 }
 
 export type IosSetupIntent =
@@ -73,7 +91,8 @@ export type IosSetupIntent =
   | { type: 'refresh-status' }
   | { type: 'install-shortcut' }
   | { type: 'shortcut-added' }
-  | { type: 'open-automation' }
+  | { type: 'check-shortcut' }
+  | { type: 'open-automation'; existing?: boolean }
   | { type: 'automation-added' }
   | { type: 'shortcut-callback'; result: IosShortcutCallbackResult }
   | { type: 'go-to-stage'; stage: IosSetupStage }
@@ -92,11 +111,12 @@ export interface IosSetupDependencies {
   isSupported(): boolean;
   getNativeModule(): Pick<
     WafraLiveCaptureNativeModule,
-    'getCaptureStatus' | 'setCaptureEnabled'
+    'getCaptureStatus' | 'setCaptureEnabled' | 'notificationCaptureSupported' | 'applePayCaptureSupported' | 'getMessageShortcutURL' | 'getHistoryShortcutURL' | 'getApplePayShortcutURL'
   > | null;
   shortcutUrl: string | null;
   canOpenUrl(url: string): Promise<boolean>;
   openUrl(url: string): Promise<void>;
+  shareShortcut(url: string): Promise<void>;
   subscribeCaptureStatus?(listener: () => void): () => void;
 }
 
@@ -115,6 +135,10 @@ export const INITIAL_IOS_SETUP_MODEL: IosSetupModel = {
   opening: false,
   failure: null,
   captureHealth: null,
+  notificationReadiness: 'not-added',
+  notificationSupported: false,
+        applePaySupported: false,
+        applePayReadiness: 'not-added',
 };
 
 const iosVersionMajor = (): number => {
@@ -123,6 +147,71 @@ const iosVersionMajor = (): number => {
   const parsed = Number.parseInt(String(value), 10);
   return Number.isFinite(parsed) ? parsed : 0;
 };
+
+export function iosSupportsNotificationAutomation(version: unknown): boolean {
+  const value = String(version);
+  return /^\d+(?:\.\d+)*$/.test(value) && Number(value.split('.')[0]) >= 27;
+}
+
+export function resolveIosNotificationReadiness(status: Pick<WafraLiveCaptureStatus,
+  'enabled' | 'entitled' | 'notificationSetupProofAt' | 'firstNotificationReceivedAt'>): IosSetupReadiness {
+  if (!status.enabled || !status.entitled) return 'not-added';
+  // A receipt proves delivery to the protected queue, not a posted transaction.
+  return isCaptureTimestamp(status.notificationSetupProofAt) || isCaptureTimestamp(status.firstNotificationReceivedAt)
+    ? 'shortcut-proven' : 'not-added';
+}
+
+export function resolveIosApplePayReadiness(status: Pick<WafraLiveCaptureStatus,
+  'enabled' | 'entitled' | 'applePaySetupProofAt' | 'firstApplePayReceivedAt'>): IosSetupReadiness {
+  if (!status.enabled || !status.entitled) return 'not-added';
+  return isCaptureTimestamp(status.applePaySetupProofAt) || isCaptureTimestamp(status.firstApplePayReceivedAt)
+    ? 'shortcut-proven' : 'not-added';
+}
+
+/**
+ * Readiness of one capture source as setup presents it. For Message capture a
+ * started install or check (`attemptStartedAt`) makes older native proof
+ * belong to an earlier attempt: only proof recorded since then counts.
+ */
+export function resolveIosSelectedReadiness(source: unknown, model: Pick<IosSetupModel,
+  'readiness' | 'notificationReadiness' | 'applePayReadiness' | 'shortcutVersion'> & Partial<Pick<IosSetupModel, 'setupProofAt'>> | null | undefined,
+installedVersion?: number, attemptStartedAt?: number): IosSetupReadiness {
+  if (source === 'apple-pay') return model?.applePayReadiness ?? 'not-added';
+  if (source === 'notification') return model?.notificationReadiness ?? 'not-added';
+  if (model?.shortcutVersion && installedVersion !== model.shortcutVersion) return 'not-added';
+  if (attemptStartedAt !== undefined &&
+    !(isCaptureTimestamp(model?.setupProofAt) && model.setupProofAt >= attemptStartedAt)) return 'not-added';
+  return model?.readiness ?? 'not-added';
+}
+
+/**
+ * A working setup from the previous bundled Shortcut (proof version 1 with a
+ * confirmed automation) on a build that ships Capture v3. It keeps capturing:
+ * show an upgrade, not a broken setup.
+ */
+export function isIosLegacyCaptureUpgrade(
+  progress: { futureShortcutVersion?: number; futureAutomationConfirmed: boolean },
+  model: Pick<IosSetupModel, 'shortcutVersion'> & Partial<Pick<IosSetupModel, 'setupProofVersion' | 'captureHealth'>>,
+): boolean {
+  return model.shortcutVersion === 3 && progress.futureShortcutVersion !== 3 &&
+    progress.futureAutomationConfirmed && model.setupProofVersion === 1 &&
+    model.captureHealth?.enabled === true;
+}
+
+/**
+ * A bank-message claim needs a qualified financial capture, not merely a queue
+ * receipt: manually supplied ordinary text advances the same receipt clock.
+ * Neither signal alone attests that a particular automation fired.
+ */
+export function iosMessageAutomationVerified(
+  progress: { futureAutomationConfirmedAt?: number },
+  model: Partial<Pick<IosSetupModel, 'lastMessageReceivedAt' | 'setupProofAt' | 'captureHealth'>>,
+): boolean {
+  const baseline = progress.futureAutomationConfirmedAt ?? model.setupProofAt;
+  return isCaptureTimestamp(model.captureHealth?.firstCapturedAt) &&
+    isCaptureTimestamp(baseline) && isCaptureTimestamp(model.lastMessageReceivedAt) &&
+    model.lastMessageReceivedAt > baseline;
+}
 
 // The guided automation. Apple's Sender picker lists Contacts only and bank
 // SMS IDs are not Contacts. iOS 26 refuses a Message automation with neither
@@ -145,15 +234,29 @@ const defaultDependencies = (): IosSetupDependencies => ({
   openUrl: async (url) => {
     await Linking.openURL(url);
   },
+  shareShortcut: async (url) => {
+    const sharing = await import('expo-sharing');
+    if (!await sharing.isAvailableAsync()) throw new Error('shortcut_sharing_unavailable');
+    await sharing.shareAsync(url, { UTI: 'com.apple.shortcut' });
+  },
   subscribeCaptureStatus: subscribeIosCaptureStatusRefresh,
 });
 
+/** The shared receipt clock covers every source; attribute it only when no other source owns it. */
+const lastMessageReceipt = (status: Partial<WafraLiveCaptureStatus>): number | null => {
+  const last = status.lastReceivedAt;
+  if (!isCaptureTimestamp(last)) return null;
+  return last === status.lastApplePayReceivedAt || last === status.lastNotificationReceivedAt ? null : last;
+};
+
 export function resolveIosSetupReadiness(
   status: Pick<WafraLiveCaptureStatus, 'enabled' | 'setupProofVersion' | 'firstCapturedAt'>,
+  requiredProofVersion = 1,
 ): IosSetupReadiness {
   if (status.enabled !== true) return 'not-added';
+  if (requiredProofVersion === 3 && status.setupProofVersion !== 3) return 'not-added';
   if (isCaptureTimestamp(status.firstCapturedAt)) return 'first-alert-captured';
-  if (status.setupProofVersion === 1) return 'shortcut-proven';
+  if (status.setupProofVersion === requiredProofVersion) return 'shortcut-proven';
   return 'not-added';
 }
 
@@ -179,22 +282,76 @@ export const resolveIosFutureSetupStep = (
     futureShortcutConfirmed: boolean;
     futureAutomationConfirmed: boolean;
     futureStatus: string;
+    futureShortcutVersion?: number;
+    futureAutomationRelink?: boolean;
   },
   readiness: IosSetupReadiness,
+  requiredVersion?: 3,
 ): IosFutureSetupStep => {
+  if (requiredVersion && progress.futureShortcutVersion !== requiredVersion) return 'add-shortcut';
+  if (requiredVersion && !progress.futureShortcutConfirmed) return 'confirm-shortcut';
   // Running the no-input Shortcut proves the local action, not the personal
   // Message automation. Keep its instructions until the user confirms them.
   if (readiness !== 'not-added') {
-    return progress.futureAutomationConfirmed ? 'ready' : 'create-automation';
+    return progress.futureAutomationConfirmed && !progress.futureAutomationRelink ? 'ready' : 'create-automation';
   }
   if (!progress.futureShortcutConfirmed) {
     return progress.futureStatus === 'not-started' || progress.futureStatus === 'skipped'
       ? 'add-shortcut'
       : 'confirm-shortcut';
   }
-  if (!progress.futureAutomationConfirmed) return 'create-automation';
+  // Resolve first-run app permissions while Shortcuts is in the foreground.
+  // Otherwise the first background trigger may fail before it can ask.
   return 'prove-shortcut';
 };
+
+/** The numbered step the guided setup shows: Add → Test → Automate, then done. */
+export type IosCaptureGuideStage = 1 | 2 | 3 | 'done';
+
+/**
+ * Presentation only. The order and gates stay those of
+ * `resolveIosFutureSetupStep`: the local test still precedes the automation
+ * because it resolves Apple's permission prompt while Shortcuts is in front.
+ */
+export const iosCaptureGuideStage = (step: IosFutureSetupStep): IosCaptureGuideStage => {
+  switch (step) {
+    case 'add-shortcut':
+    case 'confirm-shortcut':
+      return 1;
+    case 'prove-shortcut':
+      return 2;
+    case 'create-automation':
+      return 3;
+    default:
+      return 'done';
+  }
+};
+
+/** Screens in the Message automation walkthrough (one Apple screen each). */
+export const IOS_AUTOMATION_GUIDE_SCREENS = 5;
+
+/**
+ * iOS 27 one-toggle capture: a bundled Shortcut that carries its own
+ * automation, so setup becomes "Add Wafra Capture (iOS 27) → turn on its
+ * automation toggle". That Shortcut has to be authored and verified on a
+ * physical iOS 27 iPhone, and it is not in this build. The branch stays off
+ * until the file ships; flipping this flag without the file would send people
+ * to a Shortcut that does not exist.
+ */
+export const IOS_ONE_TOGGLE_CAPTURE_SHORTCUT_BUNDLED = false;
+
+export const iosMajorVersion = (version: unknown): number => {
+  const value = String(version);
+  return /^\d+(?:\.\d+)*$/.test(value) ? Number(value.split('.')[0]) : 0;
+};
+
+/** Capability check plus the feature flag; false on every current build. */
+export function iosOneToggleCaptureAvailable(
+  version: unknown,
+  shortcutBundled: boolean = IOS_ONE_TOGGLE_CAPTURE_SHORTCUT_BUNDLED,
+): boolean {
+  return shortcutBundled && iosMajorVersion(version) >= 27;
+}
 
 export const completeIosMessageOnboardingAttempt = async (
   input: IosMessageOnboardingCompletionInput,
@@ -246,6 +403,10 @@ export function createIosCaptureSetup({
         shortcutAvailable: false,
         readiness: 'not-added',
         captureHealth: null,
+        notificationReadiness: 'not-added',
+        notificationSupported: false,
+        applePaySupported: false,
+        applePayReadiness: 'not-added',
         stage: 'shortcut',
         opening: false,
         failure: null,
@@ -261,9 +422,14 @@ export function createIosCaptureSetup({
         shortcutAvailable: false,
         readiness: 'not-added',
         captureHealth: null,
+        setupProofVersion: null, setupProofAt: null, lastMessageReceivedAt: null,
         stage: 'shortcut',
         opening: false,
         failure: 'load',
+        notificationReadiness: 'not-added',
+        notificationSupported: false,
+        applePaySupported: false,
+        applePayReadiness: 'not-added',
       });
       return;
     }
@@ -271,13 +437,27 @@ export function createIosCaptureSetup({
     try {
       const status = await native.getCaptureStatus();
       if (disposed) return;
-      const readiness = resolveIosSetupReadiness(status);
+      const readiness = resolveIosSetupReadiness(status, native.getMessageShortcutURL ? 3 : 1);
+      const notificationSupported = Platform.OS === 'ios' && iosSupportsNotificationAutomation(Platform.Version) &&
+        native.notificationCaptureSupported === true;
+      const applePaySupported = Platform.OS === 'ios' && iosSupportsApplePayAutomation(Platform.Version) &&
+        native.applePayCaptureSupported === true;
       publish({
+        applePaySupported,
+        bundledApplePaySupported: applePaySupported && typeof native.getApplePayShortcutURL === 'function',
+        applePayReadiness: applePaySupported ? resolveIosApplePayReadiness(status) : 'not-added',
         loading: false,
         supported: true,
-        shortcutAvailable: shortcutUrl !== null,
+        shortcutAvailable: shortcutUrl !== null || typeof native.getMessageShortcutURL === 'function',
+        ...(native.getMessageShortcutURL ? { shortcutName: IOS_BUNDLED_CAPTURE_SHORTCUT_NAME, shortcutVersion: 3 as const } : {}),
+        ...(native.getHistoryShortcutURL ? { bundledHistorySupported: true } : {}),
         readiness,
         captureHealth: readIosCaptureHealth(status),
+        setupProofVersion: typeof status.setupProofVersion === 'number' ? status.setupProofVersion : null,
+        setupProofAt: isCaptureTimestamp(status.setupProofAt) ? status.setupProofAt : null,
+        lastMessageReceivedAt: lastMessageReceipt(status),
+        notificationSupported,
+        notificationReadiness: notificationSupported ? resolveIosNotificationReadiness(status) : 'not-added',
         stage:
           readiness !== 'not-added' || (!initial && model.stage === 'automation')
             ? 'automation'
@@ -291,7 +471,12 @@ export function createIosCaptureSetup({
         shortcutAvailable: false,
         readiness: 'not-added',
         captureHealth: null,
+        setupProofVersion: null, setupProofAt: null, lastMessageReceivedAt: null,
         failure: 'load',
+        notificationReadiness: 'not-added',
+        notificationSupported: false,
+        applePaySupported: false,
+        applePayReadiness: 'not-added',
       });
     }
   };
@@ -341,6 +526,19 @@ export function createIosCaptureSetup({
   };
 
   const installShortcut = (): Promise<void> => joinOpening(async (generation) => {
+    const native = dependencies.getNativeModule();
+    if (native?.getMessageShortcutURL) {
+      try {
+        const local = await native.getMessageShortcutURL();
+        if (disposed || generation !== operationGeneration) return;
+        if (!local.startsWith('file:') || !local.endsWith('.shortcut')) throw new Error('invalid_shortcut_asset');
+        await dependencies.shareShortcut(local);
+        if (!disposed && generation === operationGeneration) publish({ stage: 'shortcut', failure: null });
+      } catch {
+        if (!disposed && generation === operationGeneration) publish({ failure: 'shortcut-install' });
+      }
+      return;
+    }
     const url = shortcutUrl;
     if (!url) {
       publish({ failure: 'shortcut-install' });
@@ -362,7 +560,7 @@ export function createIosCaptureSetup({
     }
   });
 
-  const openAutomation = (): Promise<void> => joinOpening(async (generation) => {
+  const openAutomation = (existing = false): Promise<void> => joinOpening(async (generation) => {
     if (!(await canUseShortcuts(generation))) {
       if (!disposed && generation === operationGeneration) {
         publish({ failure: 'shortcuts-missing' });
@@ -375,7 +573,7 @@ export function createIosCaptureSetup({
     // no way to pre-fill a trigger or create the automation itself. Fall back
     // to plainly opening Shortcuts if the route is refused.
     try {
-      await dependencies.openUrl(IOS_CREATE_AUTOMATION_URL);
+      await dependencies.openUrl(existing ? 'shortcuts://' : IOS_CREATE_AUTOMATION_URL);
     } catch {
       try {
         await dependencies.openUrl('shortcuts://');
@@ -387,7 +585,13 @@ export function createIosCaptureSetup({
     }
   });
 
-  const confirmAutomation = (): Promise<void> => joinOpening(async (generation) => {
+  const checkShortcut = (skipProven = false): Promise<void> => joinOpening(async (generation) => {
+    if (skipProven) {
+      await refreshStatus();
+      if (disposed || generation !== operationGeneration) return;
+      if (model.failure === 'load') return;
+      if (model.readiness !== 'not-added') return;
+    }
     if (!isSupportedIosMessageAutomationTrigger(UNFILTERED_MESSAGE_TRIGGER)) {
       publish({ failure: 'shortcut-run' });
       return;
@@ -408,7 +612,7 @@ export function createIosCaptureSetup({
     try {
       await native.setCaptureEnabled(true);
       if (disposed || generation !== operationGeneration) return;
-      await dependencies.openUrl(iosLocalCaptureTestUrl(fromOnboarding));
+      await dependencies.openUrl(iosLocalCaptureTestUrl(fromOnboarding, !!native.getMessageShortcutURL));
     } catch {
       if (!disposed && generation === operationGeneration) {
         publish({ failure: 'shortcut-run' });
@@ -486,11 +690,14 @@ export function createIosCaptureSetup({
         case 'shortcut-added':
           publish({ stage: 'automation', failure: null });
           return;
+        case 'check-shortcut':
+          await checkShortcut();
+          return;
         case 'open-automation':
-          await openAutomation();
+          await openAutomation(intent.existing);
           return;
         case 'automation-added':
-          await confirmAutomation();
+          await checkShortcut(true);
           return;
         case 'shortcut-callback':
           await refreshStatus(false);

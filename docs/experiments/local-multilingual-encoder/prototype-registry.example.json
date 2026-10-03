@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "prototypes": {
+    "ask.help": {
+      "kind": "assistant-intent",
+      "tool": "help",
+      "policy": "no-arguments"
+    },
+    "ask.spending.total.current-scope": {
+      "kind": "assistant-intent",
+      "tool": "spending-total",
+      "policy": "default-period"
+    },
+    "ask.spending.total.current-month": {
+      "kind": "assistant-intent",
+      "tool": "spending-total",
+      "policy": "current-calendar-month"
+    },
+    "ask.income.total.current-scope": {
+      "kind": "assistant-intent",
+      "tool": "income-total",
+      "policy": "default-period"
+    },
+    "ask.subscriptions.active": {
+      "kind": "assistant-intent",
+      "tool": "subscriptions",
+      "policy": "no-arguments"
+    },
+    "ask.upcoming.default-window": {
+      "kind": "assistant-intent",
+      "tool": "upcoming-payments",
+      "policy": "default-30-days"
+    },
+    "ask.top-merchants.current-scope": {
+      "kind": "assistant-intent",
+      "tool": "top-merchants",
+      "policy": "default-period-default-limit"
+    },
+    "ask.top-categories.current-scope": {
+      "kind": "assistant-intent",
+      "tool": "top-categories",
+      "policy": "default-period-default-limit"
+    },
+    "ask.duplicates.current-scope": {
+      "kind": "assistant-intent",
+      "tool": "possible-duplicates",
+      "policy": "default-period"
+    },
+    "ask.money-review.current-scope": {
+      "kind": "assistant-intent",
+      "tool": "money-review",
+      "policy": "default-period"
+    },
+    "ask.data-coverage.current-scope": {
+      "kind": "assistant-intent",
+      "tool": "data-coverage",
+      "policy": "default-period"
+    },
+    "parser.family.purchase": {
+      "kind": "parser-family",
+      "family": "purchase"
+    },
+    "parser.family.transfer": {
+      "kind": "parser-family",
+      "family": "transfer"
+    },
+    "parser.family.cash-withdrawal": {
+      "kind": "parser-family",
+      "family": "cash-withdrawal"
+    },
+    "parser.family.refund": {
+      "kind": "parser-family",
+      "family": "refund"
+    },
+    "parser.family.fee": {
+      "kind": "parser-family",
+      "family": "fee"
+    },
+    "parser.family.utility": {
+      "kind": "parser-family",
+      "family": "utility"
+    },
+    "parser.family.recurring-payment": {
+      "kind": "parser-family",
+      "family": "recurring-payment"
+    },
+    "parser.family.statement": {
+      "kind": "parser-family",
+      "family": "statement"
+    },
+    "parser.family.balance": {
+      "kind": "parser-family",
+      "family": "balance"
+    },
+    "parser.family.bill": {
+      "kind": "parser-family",
+      "family": "bill"
+    },
+    "parser.family.card-payment": {
+      "kind": "parser-family",
+      "family": "card-payment"
+    }
+  }
+}

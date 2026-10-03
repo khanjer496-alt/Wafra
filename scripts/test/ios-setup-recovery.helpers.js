@@ -2,6 +2,7 @@
 // React-host boundaries replaced. The assertions cover user actions and state,
 // not source spelling or callback mock counts.
 module.exports = async ({ execute, ok, eq, translated }) => {
+  const guideCopy = execute('src/lib/ios-shortcut-setup-copy.ts').iosShortcutSetupCopy('en');
   const disposers = [];
   const makeScreen = async ({ fresh = false, available = true, progress: restored = {}, historyAvailable = true, historyInFlight = false, captureOptOut = false, optInFails = false, skipSaveFails = false, knownBanks = ['Emirates NBD'], params = { fromOnboarding: '1' } } = {}) => {
     const slots = [];
@@ -128,10 +129,12 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
       'react-native': platform,
       'expo-router': { Stack: { Screen: 'StackScreen' }, useRouter: () => router, useLocalSearchParams: () => params },
+      '@/hooks/use-app-router': { useRouter: () => router },
       'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
       '@/components/ios-message-setup/checklist-row': { ChecklistRow: 'ChecklistRow' },
       '@/components/ios-message-setup/details-sheet': { DetailsSheet: 'DetailsSheet' },
       '@/components/ios-message-setup/automation-guide': { AutomationGuide: 'AutomationGuide' },
+      '@/components/ios-message-setup/setup-step': { SetupStep: 'SetupStep', SetupResult: 'SetupResult', StepProgress: 'StepProgress' },
       '@/components/themed-text': { ThemedText: 'ThemedText' },
       '@/components/themed-view': { ThemedView: 'ThemedView' },
       '@/components/ui/controls': { Button: 'Button', Chip: 'Chip' },
@@ -139,7 +142,10 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/components/ui/layout': { Block: 'Block' },
       '@/components/ui/screen-header': { ScreenHeader: 'ScreenHeader' },
       '@/components/onboarding/setup-shell': { SetupShell: 'SetupShell', SetupHeader: 'ScreenHeader' },
-      '@/constants/theme': { Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
+      '@/constants/theme': { Fonts: { sansSemi: 'Geist-SemiBold' }, Spacing: {}, Radius: {}, ScreenPadding: 20, MaxContentWidth: 600 },
+      '@/components/ui/band-scaffold': { BandScaffold: 'BandScaffold' },
+      '@/components/ui/band/e-button': { EButton: 'Button' },
+      '@/hooks/use-band': { useBand: () => ({}) },
       '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
       '@/components/workflows/workflow-copy': execute('src/lib/workflow-copy.ts'),
       '@/components/workflows/workflow-surfaces': { WorkflowHero: 'WorkflowHero' },
@@ -147,6 +153,7 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       '@/hooks/use-language': { useLanguage: () => 'en' },
       '@/components/ios-message-setup/setup-journey': { IosSetupJourney: 'IosSetupJourney' },
       '@/lib/ios-setup-journey': execute('src/lib/ios-setup-journey.ts'),
+      '@/lib/ios-shortcut-setup-copy': execute('src/lib/ios-shortcut-setup-copy.ts'),
       '@/lib/i18n': execute('src/lib/i18n.ts'),
       '@/lib/ios-capture-setup': { ...controller, createIosCaptureSetup: (options) => controller.createIosCaptureSetup({
         ...options, dependencies: { shortcutUrl: 'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef' },
@@ -194,7 +201,12 @@ module.exports = async ({ execute, ok, eq, translated }) => {
         result.push(node);
         if (node.type === 'DetailsSheet') { visit(details(node.props)); return; }
         if (node.type === 'ChecklistRow' && !node.props.expanded) return;
+        if (node.type === 'BandScaffold') {
+          visit(node.props.bandContent);
+          visit(node.props.nav?.trailing);
+        }
         visit(node.props?.children);
+        if (node.type === 'BandScaffold') visit(node.props.footer);
       };
       visit(tree);
       return result;
@@ -205,6 +217,10 @@ module.exports = async ({ execute, ok, eq, translated }) => {
       const rendered = nodes.find((node) => (node.type === 'Button' && node.props.label === label) ||
         (node.type === 'Pressable' && node.props.accessibilityLabel === label));
       if (rendered) return rendered;
+      const band = nodes.find(node => node.type === 'BandScaffold');
+      if (label === translated('back', 'en') && typeof band?.props.nav?.back === 'function') {
+        return { type: 'Button', props: { label, onPress: band.props.nav.back } };
+      }
       const header = nodes.find((node) => node.type === 'ScreenHeader');
       const action = [header?.props.back, ...(header?.props.actions ?? [])].find((item) => item?.label === label);
       return action ? { type: 'Button', props: action } : undefined;
@@ -244,18 +260,29 @@ module.exports = async ({ execute, ok, eq, translated }) => {
         return true;
       },
       failStatus: () => { statusFailure = true; },
-      selectHistory: async () => { all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessagePastTitle', 'en')).props.onPress(); await settle(); },
+      // Past SMS is reached as Settings → Advanced links it: `section=history`.
+      selectHistory: async () => { params.section = 'history'; await settle(); },
       saved: () => JSON.parse(values.get('wafra/ios-message-setup-progress/v1')),
+      /** Walks the one-screen-per-step automation guide to its confirmation. */
+      automate: async () => {
+        for (let n = 0; n < 4 && !button('iosLocalAutomationAdded'); n += 1) {
+          const next = all().find((node) => node.type === 'Button' && node.props.label === guideCopy.next);
+          if (!next) return false;
+          await next.props.onPress();
+          await settle();
+        }
+        return press('iosLocalAutomationAdded');
+      },
       handoffPreserved: () => values.get('wafra/ios-history-handoff-started-at/v1') === String(startedAt) &&
         values.get('wafra/ios-history-return-origin/v1') === 'onboarding',
     };
   };
 
   const fresh = await makeScreen({ fresh: true });
-  eq('iOS setup: a fresh start opens Future first and keeps History collapsed second',
-    fresh.all().filter((node) => node.type === 'ChecklistRow').map((node) =>
-      [node.props.title, node.props.step, node.props.expanded]),
-    [[translated('iosMessageFutureTitle', 'en'), 1, true], [translated('iosMessagePastTitle', 'en'), 2, false]]);
+  eq('iOS setup: a fresh start opens the Messages guide at Step 1 of 3, with no History row',
+    [fresh.all().find((node) => node.type === 'StepProgress')?.props.current,
+      fresh.all().some((node) => node.type === 'ChecklistRow')],
+    [1, false]);
   eq('iOS setup: Future-first arrival neither opens Shortcuts nor fills setup or history evidence',
     [fresh.saved().activeSection, fresh.saved().futureAutomationConfirmed, fresh.saved().historyStatus,
       fresh.saved().historySkippedForNow, fresh.nativeStatus.firstCapturedAt, fresh.urls, fresh.onboarded()],
@@ -287,21 +314,23 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   fresh.nativeStatus.setupProofVersion = 1;
   await fresh.foreground();
   ok('iOS setup: local proof still requires the explicit automation confirmation action',
-    await fresh.press('iosLocalAutomationAdded'));
+    !fresh.button('iosLocalAutomationAdded') && await fresh.automate());
   await fresh.foreground();
-  eq('iOS setup: confirmation leaves Future selected and keeps the direct manual exit visible',
+  eq('iOS setup: confirmation leaves Future selected and makes Finish the last, primary action',
     [fresh.saved().activeSection, fresh.saved().futureAutomationConfirmed, fresh.saved().historyStatus,
       fresh.all().filter((node) => node.type === 'Button').at(-1)?.props.label],
-    ['future', true, 'not-started', translated('iosMessageContinueManual', 'en')]);
-  ok('iOS setup: History remains a secondary deliberate choice after Future confirmation',
-    !!fresh.button('iosMessageNextHistory'));
-  ok('iOS setup: Future-first primary action opens the existing explicit history-deferral confirmation',
-    await fresh.press('iosMessageSkipHistory'));
-  eq('iOS setup: opening Future-only confirmation does not import, defer or finish anything',
+    ['future', true, 'not-started', translated('iosMessageContinue', 'en')]);
+  // 2026-09-25: statements bring in the past; SMS history is not offered here.
+  ok('iOS setup: first-run setup does not offer past SMS import after Future confirmation',
+    !fresh.button('iosMessageNextHistory') && !fresh.all().some((node) => node.type === 'ChecklistRow'));
+  eq('iOS setup: finishing never requires the destructive-sounding history skip',
+    [!!fresh.button('iosMessageSkipHistory'), fresh.all().some((node) => node.type === 'ConfirmSheet' && node.props.visible)],
+    [false, false]);
+  eq('iOS setup: offering Finish does not import, defer or finish anything by itself',
     [fresh.saved().historyStatus, fresh.saved().historySkippedForNow, fresh.onboarded()], ['not-started', undefined, false]);
-  ok('iOS setup: confirming Future-only keeps history unimported and enables the normal finish',
-    await fresh.confirmSkip() && fresh.saved().historySkippedForNow === true &&
-      fresh.saved().historyStatus === 'skipped' && !!fresh.button('iosMessageContinue'));
+  ok('iOS setup: one Finish tap completes onboarding with history left optional and unimported',
+    await fresh.press('iosMessageContinue') && fresh.onboarded() && fresh.saved().historySkippedForNow === undefined &&
+      fresh.saved().historyStatus === 'not-started' && fresh.saved().returnToOnboarding === false);
   eq('iOS setup: Future-only consent never manufactures an actual bank alert', fresh.nativeStatus.firstCapturedAt, null);
 
   const future = await makeScreen();
@@ -362,24 +391,23 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   ok('iOS recovery: continuing history preserves the original timestamp and return origin', runningHistory.handoffPreserved());
   eq('iOS recovery: active history does not offer a competing new import', await runningHistory.press('historyStartAction'), false);
 
-  const skipped = await makeScreen({ progress: { futureStatus: 'skipped', historyStatus: 'skipped' } });
-  ok('iOS recovery: individual statuses describe setup without a misleading aggregate score',
-    !skipped.all().some((node) => node.props.accessibilityRole === 'progressbar'));
-  eq('iOS recovery: skipped choices retain individual truthful statuses',
-    skipped.all().filter((node) => node.type === 'ChecklistRow').map((node) => node.props.status), ['skipped', 'skipped']);
+  const skipped = await makeScreen({ params: { fromOnboarding: '1', section: 'history' },
+    progress: { futureStatus: 'skipped', historyStatus: 'skipped' } });
+  ok('iOS recovery: the past-SMS section describes itself without a misleading aggregate score',
+    !skipped.all().some((node) => node.props.accessibilityRole === 'progressbar' || node.type === 'StepProgress'));
+  eq('iOS recovery: a skipped history retains its individual truthful status',
+    skipped.all().filter((node) => node.type === 'ChecklistRow').map((node) => node.props.status), ['skipped']);
 
   const disabled = await makeScreen({ progress: { futureShortcutConfirmed: true, futureAutomationConfirmed: true, futureStatus: 'complete' } });
-  eq('iOS recovery: disabled native capture cannot leave a completed Future row',
-    disabled.all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessageFutureTitle', 'en')).props.status, 'in-progress');
+  const doneCard = (screen) => screen.all().some((node) => node.type === 'SetupStep' && node.props.testID === 'ios-capture-ready');
+  eq('iOS recovery: disabled native capture cannot leave a completed (done) setup', doneCard(disabled), false);
   disabled.nativeStatus.enabled = true;
   disabled.nativeStatus.setupProofVersion = 1;
   await disabled.foreground();
-  eq('iOS recovery: harmless native proof restores readiness after enable',
-    disabled.all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessageFutureTitle', 'en')).props.status, 'complete');
+  eq('iOS recovery: harmless native proof restores readiness after enable', doneCard(disabled), true);
   disabled.failStatus();
   await disabled.foreground();
-  eq('iOS recovery: a failed native refresh cannot keep advertising readiness',
-    disabled.all().find((node) => node.type === 'ChecklistRow' && node.props.title === translated('iosMessageFutureTitle', 'en')).props.status, 'in-progress');
+  eq('iOS recovery: a failed native refresh cannot keep advertising readiness', doneCard(disabled), false);
   const directHistory = await makeScreen({ params: { section: 'history' } });
   eq('iOS setup: a Settings history link opens the requested section without starting onboarding',
     [directHistory.saved().activeSection, directHistory.urls.length, directHistory.saved().returnToOnboarding], ['history', 0, false]);
@@ -399,21 +427,32 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   eq('iOS setup: local proof cannot bypass user automation confirmation',
     [!!proofOnly.button('iosMessageContinue'), proofOnly.saved().futureStatus, proofOnly.onboarded()],
     [false, 'not-started', false]);
+  // The confirmation sits on the last screen of the one-step-per-screen guide.
   ok('iOS setup: local proof keeps the automation confirmation action reachable',
-    !!proofOnly.button('iosLocalAutomationAdded'));
+    await proofOnly.automate() && proofOnly.saved().futureAutomationConfirmed === true);
 
   const ready = await makeScreen({ progress: { futureAutomationConfirmed: true } });
   ready.nativeStatus.enabled = true;
   ready.nativeStatus.setupProofVersion = 1;
   await ready.foreground();
-  ok('iOS setup: future-ready users can choose history as their next action',
-    await ready.press('iosMessageNextHistory') && ready.saved().activeSection === 'history');
-  eq('iOS setup: future capture alone cannot finish onboarding before history',
-    await ready.press('iosMessageContinue'), false);
-  await ready.button('iosMessageContinue')?.props.onPress(); // Exercise the callback even if a caller bypasses disabled UI.
-  eq('iOS setup: guarded completion rejects incomplete history even when invoked directly',
-    [ready.saved().futureStatus, ready.saved().historyStatus, ready.saved().returnToOnboarding, ready.onboarded()],
-    ['complete', 'not-started', true, false]);
+  // 2026-09-25: first-run setup ends at Finish; past SMS is a Settings → Advanced experiment.
+  ok('iOS setup: future-ready first-run setup offers Finish and no past-SMS step',
+    !ready.button('iosMessageNextHistory') && !!ready.button('iosMessageContinue'));
+  await ready.selectHistory();
+  ok('iOS setup: Settings → Advanced still opens past SMS for future-ready users',
+    ready.saved().activeSection === 'history' && ready.all().some((node) => node.type === 'ChecklistRow'));
+  ok('iOS setup: new-alert capture alone offers Finish while history is expanded',
+    !!ready.button('iosMessageContinue'));
+  const futureOnly = await makeScreen({ progress: { futureAutomationConfirmed: true } });
+  futureOnly.nativeStatus.enabled = true;
+  futureOnly.nativeStatus.setupProofVersion = 1;
+  await futureOnly.foreground();
+  ok('iOS setup: future capture alone finishes onboarding; history is optional',
+    await futureOnly.press('iosMessageContinue'));
+  eq('iOS setup: finishing without history keeps its status truthful and records no skip',
+    [futureOnly.saved().futureStatus, futureOnly.saved().historyStatus, futureOnly.saved().historySkippedForNow,
+      futureOnly.saved().returnToOnboarding, futureOnly.onboarded()],
+    ['complete', 'not-started', undefined, false, true]);
 
   eq('iOS setup: skipping history is unavailable without configured future capture',
     await noHistoryBridge.press('iosMessageSkipHistory'), false);
@@ -472,10 +511,10 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   await failedSkipSave.foreground();
   await failedSkipSave.press('iosMessageSkipHistory');
   await failedSkipSave.confirmSkip();
-  eq('iOS setup: a failed skip save cannot finish setup or change capture opt-in',
+  eq('iOS setup: a failed skip save records nothing and changes no opt-in; Finish never depended on it',
     [failedSkipSave.saved().historySkippedForNow, failedSkipSave.saved().historyStatus,
       !!failedSkipSave.button('iosMessageDone'), failedSkipSave.preferenceEvents],
-    [undefined, 'not-started', false, []]);
+    [undefined, 'not-started', true, []]);
 
   const futureWithoutHistory = await makeScreen({ historyAvailable: false, params: { section: 'history' },
     progress: { futureAutomationConfirmed: true } });
@@ -560,8 +599,9 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   skippedHistory.nativeStatus.enabled = true;
   skippedHistory.nativeStatus.setupProofVersion = 1;
   await skippedHistory.foreground();
-  eq('iOS setup: previously skipped history does not satisfy required setup',
-    await skippedHistory.press('iosMessageContinue'), false);
+  ok('iOS setup: a declined history review does not block finishing new-alert setup',
+    await skippedHistory.press('iosMessageContinue') && skippedHistory.onboarded() &&
+      skippedHistory.saved().historyStatus === 'skipped' && skippedHistory.saved().historySkippedForNow === undefined);
 
   const bothReady = await makeScreen({ progress: { historyStatus: 'complete', futureAutomationConfirmed: true } });
   bothReady.nativeStatus.enabled = true;
@@ -631,14 +671,14 @@ module.exports = async ({ execute, ok, eq, translated }) => {
     ['in-progress', 'not-started', false]);
   const manualToAutomatic = await makeScreen({ captureOptOut: true, progress: { futureShortcutConfirmed: true } });
   eq('iOS setup: opening setup never opts manual users into capture', manualToAutomatic.preferenceEvents, []);
-  await manualToAutomatic.press('iosLocalAutomationAdded');
-  eq('iOS setup: explicit automation confirmation saves opt-in before enabling native capture',
+  ok('iOS setup: permission preflight is offered before automation setup', await manualToAutomatic.press('iosMessageRunPermissionCheck'));
+  eq('iOS setup: explicit permission preflight saves opt-in before enabling native capture',
     manualToAutomatic.preferenceEvents, ['opt-out:false', 'preference-saved', 'native:true']);
   eq('iOS setup: a manual user can explicitly enable automatic capture',
     [manualToAutomatic.optedOut(), manualToAutomatic.nativeStatus.enabled], [false, true]);
 
   const failedOptIn = await makeScreen({ captureOptOut: true, optInFails: true, progress: { futureShortcutConfirmed: true } });
-  await failedOptIn.press('iosLocalAutomationAdded');
+  ok('iOS setup: failed opt-in exercises the actual permission-check action', await failedOptIn.press('iosMessageRunPermissionCheck'));
   eq('iOS setup: failed preference save cannot enable capture or run its check',
     [failedOptIn.nativeStatus.enabled, failedOptIn.urls, failedOptIn.saved().futureAutomationConfirmed],
     [false, [], false]);
@@ -660,32 +700,14 @@ module.exports = async ({ execute, ok, eq, translated }) => {
   eq('iOS setup: privacy disclosure collapses without changing capture consent',
     [hasPrivacy(), privacyHelp.preferenceEvents], [false, []]);
 
-  // The bank question itself, which gates both sections. Untested when it
-  // landed: the harness answered nothing and the screen only crashed on an
-  // undefined knownBankOptions, so none of these behaviours were pinned.
   const banks = await makeScreen({ fresh: true, knownBanks: [] });
-  const chips = () => banks.all().filter((node) => node.type === 'Chip');
-  eq('iOS setup: an unanswered bank question replaces the checklist, not sits beside it',
-    [banks.all().some((node) => node.props?.testID === 'ios-message-setup-banks'),
-      banks.all().some((node) => node.type === 'ChecklistRow'),
-      chips().length > 0],
-    [true, false, true]);
-  eq('iOS setup: no bank is pre-picked and Next stays unavailable until one is',
-    [chips().some((chip) => chip.props.active), banks.button('iosBanksNext').props.disabled], [false, true]);
-  const first = chips()[0].props.label;
-  await banks.pressChip(first);
-  await banks.press('iosBanksNext');
-  eq('iOS setup: answering the bank question saves exactly the picks and reveals the checklist',
-    [banks.bankSaves, banks.all().some((node) => node.type === 'ChecklistRow'),
-      banks.all().some((node) => node.props?.testID === 'ios-message-setup-banks')],
-    [[[first]], true, false]);
-  eq('iOS setup: answering banks starts no import and opens nothing',
-    [banks.urls, banks.routes, banks.historyChunkReads()], [[], [], 0]);
-
-  const skippedBanks = await makeScreen({ fresh: true, knownBanks: [] });
-  await skippedBanks.press('iosBanksSkip');
-  eq('iOS setup: skipping the bank question saves no bank and still reveals the checklist',
-    [skippedBanks.bankSaves, skippedBanks.all().some((node) => node.type === 'ChecklistRow')], [[], true]);
+  eq('iOS setup: new users reach capture setup without choosing a bank',
+    [banks.all().some(node => node.props?.testID === 'ios-message-setup-banks'),
+      banks.all().some(node => node.props?.testID === 'ios-message-setup-guide'),
+      banks.all().filter(node => node.type === 'Chip').length], [false, true, 0]);
+  eq('iOS setup: no bank is inferred or saved by entering setup', banks.bankSaves, []);
+  await banks.press('iosLocalInstallShortcut');
+  eq('iOS setup: bank-free setup can install the Shortcut', banks.urls.length, 1);
 
   disposers.forEach((dispose) => dispose());
 

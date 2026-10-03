@@ -52,14 +52,20 @@ export const IOS_LOCAL_CAPTURE_SHORTCUT_NAME = IOS_LOCAL_CAPTURE_SHORTCUT_URL ==
   : 'Wafra Capture v2';
 
 const IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER = 'WAFRA_SETUP_CHECK_V1';
+export const IOS_BUNDLED_CAPTURE_SHORTCUT_NAME = 'Wafra Capture v3';
 // Configure this version only with the verified share containing the control
 // branch. Never send its marker into a legacy graph's plain-text capture path.
 const hasSetupCheckBranch = IOS_LOCAL_CAPTURE_SHORTCUT_URL !== null &&
   IOS_LOCAL_CAPTURE_SHORTCUT_URL !== 'https://www.icloud.com/shortcuts/9a85d5f8b44d416181a76e68fcdf569d' &&
   process.env.EXPO_PUBLIC_WAFRA_SHORTCUT_SETUP_CHECK_VERSION === '1';
 
-/** New graphs check setup without scanning Messages; legacy shares keep their no-input contract. */
-export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
+/**
+ * Bundled v3's no-input branch records only its versioned setup proof and stops.
+ * Use that path: the marker/type-comparison path returned errors on iOS 26.1
+ * even after permission was granted, while the no-input native proof worked.
+ * Older published shares retain their existing marker opt-in contract.
+ */
+export function iosLocalCaptureTestUrl(fromOnboarding = false, bundled = false): string {
   const callback = (result: 'success' | 'cancel' | 'error') =>
     encodeURIComponent(
       `wafra://ios-setup?shortcutResult=${result}${
@@ -68,23 +74,24 @@ export function iosLocalCaptureTestUrl(fromOnboarding = false): string {
     );
 
   return `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(
-    IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
+    bundled ? IOS_BUNDLED_CAPTURE_SHORTCUT_NAME : IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
   )}` +
-    (hasSetupCheckBranch ? `&input=text&text=${encodeURIComponent(IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER)}` : '') +
+    (!bundled && hasSetupCheckBranch ? `&input=text&text=${encodeURIComponent(IOS_LOCAL_CAPTURE_SETUP_CHECK_MARKER)}` : '') +
     `&x-success=${callback('success')}` +
     `&x-cancel=${callback('cancel')}` +
     `&x-error=${callback('error')}`;
 }
 
 /**
- * User-initiated recovery run. The Shortcut's no-input branch rereads a
- * bounded recent overlap and stages it through the same GUID-keyed live queue.
- * The callback only returns to Wafra; the foreground listener owns the drain.
+ * Legacy catch-up URL helper. The app no longer calls this helper: bundled v3
+ * uses its no-input lane only for the setup check above, and v2 recovery reads a
+ * Content field those rows never carry. Explicit History import is the recovery
+ * path. Kept for the URL-shape tests of the published v2 contract.
  */
-export function iosLocalCaptureCatchupUrl(): string {
+export function iosLocalCaptureCatchupUrl(bundled = false): string {
   const callback = encodeURIComponent('wafra://');
   return `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(
-    IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
+    bundled ? IOS_BUNDLED_CAPTURE_SHORTCUT_NAME : IOS_LOCAL_CAPTURE_SHORTCUT_NAME,
   )}` +
     `&x-success=${callback}` +
     `&x-cancel=${callback}` +

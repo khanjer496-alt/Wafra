@@ -11,10 +11,57 @@ const MAX_NORMALIZED_CHARS = 128_000;
 const MAX_CSV_RECORD_CHARS = 8_192;
 /** How many leading CSV records may precede the header row (bank preambles). */
 const MAX_CSV_PREAMBLE_RECORDS = 10;
-const MONTH_NAME = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
-// ISO, numeric day/month (order inferred per file, see inferDateOrder), and the
-// `03-Apr-2026` / `3 Apr 2026` spelling many Gulf bank PDFs print.
-const DATE_TOKEN = String.raw`(?:\d{4}-\d{2}-\d{2}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{1,2}[\s-]${MONTH_NAME}[\s-]\d{2,4})`;
+/**
+ * Month names a statement may print, per language, 1-based. English short and
+ * long forms, then French, German, Spanish, Portuguese, Italian, Dutch,
+ * Turkish, Indonesian and Arabic (Egyptian/Gulf and Levantine names).
+ * Accented words are also listed without their accents, as exports often
+ * strip them. Every spelling maps to exactly one month in every language
+ * listed, so the table can be one flat lookup.
+ */
+const MONTH_WORDS: readonly (readonly string[])[] = [
+  ['jan', 'january', 'janv', 'janvier', 'januar', 'jänner', 'jaenner', 'ene', 'enero', 'janeiro', 'gen', 'gennaio', 'januari', 'ocak', 'oca', 'يناير', 'كانون الثاني'],
+  ['feb', 'february', 'févr', 'fevr', 'février', 'fevrier', 'februar', 'febrero', 'fev', 'fevereiro', 'febbraio', 'februari', 'şubat', 'subat', 'şub', 'sub', 'فبراير', 'شباط'],
+  ['mar', 'march', 'mars', 'märz', 'maerz', 'marz', 'mär', 'mrz', 'marzo', 'março', 'marco', 'maart', 'mrt', 'mart', 'maret', 'مارس', 'آذار', 'اذار'],
+  ['apr', 'april', 'avr', 'avril', 'abr', 'abril', 'aprile', 'nisan', 'nis', 'أبريل', 'ابريل', 'نيسان'],
+  ['may', 'mai', 'mayo', 'maio', 'mag', 'maggio', 'mei', 'mayıs', 'mayis', 'مايو', 'أيار', 'ايار'],
+  ['jun', 'june', 'juin', 'juni', 'junio', 'junho', 'giu', 'giugno', 'haziran', 'haz', 'يونيو', 'حزيران'],
+  ['jul', 'july', 'juil', 'juillet', 'juli', 'julio', 'julho', 'lug', 'luglio', 'temmuz', 'tem', 'يوليو', 'تموز'],
+  ['aug', 'august', 'août', 'aout', 'ago', 'agosto', 'augustus', 'ağustos', 'agustos', 'ağu', 'agu', 'agustus', 'agt', 'أغسطس', 'اغسطس', 'آب'],
+  ['sep', 'sept', 'september', 'septembre', 'septiembre', 'setiembre', 'set', 'setembro', 'settembre', 'eylül', 'eylul', 'eyl', 'سبتمبر', 'أيلول', 'ايلول'],
+  ['oct', 'october', 'octobre', 'okt', 'oktober', 'octubre', 'out', 'outubro', 'ott', 'ottobre', 'ekim', 'eki', 'أكتوبر', 'اكتوبر', 'تشرين الأول', 'تشرين الاول'],
+  ['nov', 'november', 'novembre', 'noviembre', 'novembro', 'kasım', 'kasim', 'kas', 'نوفمبر', 'تشرين الثاني'],
+  ['dec', 'december', 'déc', 'décembre', 'decembre', 'dez', 'dezember', 'dic', 'diciembre', 'dezembro', 'dicembre', 'aralık', 'aralik', 'ara', 'des', 'desember', 'ديسمبر', 'كانون الأول', 'كانون الاول'],
+];
+/** Fold a month word for lookup: case, accents and Turkish dotted/dotless i. */
+function foldMonth(word: string): string {
+  return word.normalize('NFD').replace(/\p{M}+/gu, '').replace(/İ/g, 'i').replace(/ı/g, 'i').toLowerCase();
+}
+const MONTH_INDEX = new Map<string, number>(
+  MONTH_WORDS.flatMap((words, index) => words.map((word) => [foldMonth(word), index + 1] as const)),
+);
+/**
+ * Regex alternation for every month word, longest first. Written against NFC
+ * text; `i` without `u` folds Latin case, but not Turkish capital İ, so each
+ * `i` also accepts İ.
+ */
+const escapeMonth = (word: string): string =>
+  word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/i/g, '[iİ]');
+const MONTH_NAME = `(?:${[...new Set(MONTH_WORDS.flat())]
+  .sort((left, right) => right.length - left.length)
+  .map(escapeMonth)
+  .join('|')})`;
+const ENGLISH_MONTH_NAME = String.raw`(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)`;
+// The named forms a statement date cell may take:
+//   `03-Apr-2026`, `3 Apr 2026`, `3. März 2026`, `1er mars 2026`, `3 janv. 2026`
+//   `3 de marzo de 2026`, `3 de março 2026`        (Spanish, Portuguese)
+//   `Apr 3, 2026`, `April 3 2026`                   (English month-first)
+const NAMED_DAY_FIRST = String.raw`\d{1,2}(?:er|\.)?[\s-]${MONTH_NAME}\.?[\s-]\d{2,4}`;
+const NAMED_DE = String.raw`\d{1,2}\s+de\s+${MONTH_NAME}\.?\s+(?:de\s+)?\d{4}`;
+const NAMED_MONTH_FIRST = String.raw`${ENGLISH_MONTH_NAME}\.?\s+\d{1,2},?\s+\d{4}`;
+// ISO, numeric day/month with `/`, `-` or `.` (order inferred per file, see
+// inferDateOrder), and the named forms above.
+const DATE_TOKEN = `(?:\\d{4}-\\d{2}-\\d{2}|\\d{1,2}[\\/.-]\\d{1,2}[\\/.-]\\d{2,4}|${NAMED_DE}|${NAMED_DAY_FIRST}|${NAMED_MONTH_FIRST})`;
 const DATE_LED_LINE = new RegExp(`^${DATE_TOKEN}\\s`, 'i');
 // Statement money follows the ledger's ISO exponent (0, 2 or 3), not a Gulf
 // hard-code. This permissive row lexer is narrowed again by amountMinor(),
@@ -29,13 +76,16 @@ const ROW_MIDDLE_DIRECTION = new RegExp(
   'i',
 );
 const ROW_DATE_PREFIX = new RegExp(`^(${DATE_TOKEN})\\s+(.+)$`, 'i');
+const DOTTED_DATE = /^\d{1,2}\.\d{1,2}\.\d{2,4}$/;
 // The column branch (parseColumnTail) insists on a decimal point: a bare
 // integer at the end of a flattened PDF row is as likely a cheque or reference
 // number as money. One decimal place is still money — real statements print
 // `32.8` and `715.0`, and requiring two rejected every such row.
 // What an empty debit or credit cell becomes once a PDF table is flattened.
 const MONEY_PLACEHOLDER = /^(?:-|--|0|0\.0|0\.00|0\.000)$/;
-const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,3}(?:\\D|$)|\\b(?:DR|CR|DEBIT|CREDIT)\\b|\\b[A-Z]{3}\\s+\\d+`, 'i');
+// `\d,\d{1,2}` is a decimal-comma figure a decimal-point file refused: still
+// money, so still counted rather than silently dropped.
+const LOOKS_LIKE_MONEY_LINE = new RegExp(`\\d\\.\\d{1,3}(?:\\D|$)|\\d,\\d{1,2}(?!\\d)|\\b(?:DR|CR|DEBIT|CREDIT)\\b|\\b[A-Z]{3}\\s+\\d+`, 'i');
 // Opening/closing balance, brought/carried forward and total lines carry money
 // but are not transactions. A "Balance B/F 1,000.00 CR" would otherwise file
 // as income and a "Total 40.00 0.00" as a second expense, and counting them as
@@ -127,6 +177,16 @@ export interface StatementCsvResult {
   rows: StatementParsedRow[];
   totalRows: number;
   rejectedRows: number;
+  /**
+   * Rejected rows whose only direction evidence was a bare sign on a card
+   * statement that never says what its signs mean. Counted inside rejectedRows.
+   */
+  ambiguousCardSignRows: number;
+  /**
+   * Rejected rows whose numeric date reads as either day/month or month/day,
+   * in a file that never settles which. Counted inside rejectedRows.
+   */
+  ambiguousDateRows: number;
 }
 
 const HEADER_ALIASES = {
@@ -151,6 +211,7 @@ const HEADER_ALIASES = {
     'debit credit', 'dr cr', 'transaction type', 'direction', 'type',
     'نوع العملية', 'نوع القيد', 'النوع',
   ],
+  status: ['transaction status', 'status'],
   currency: ['currency code', 'transaction currency', 'currency', 'ccy', 'curr', 'العملة'],
   sourceAccount: [
     'source account number', 'source account no', 'from account number', 'from account no',
@@ -362,6 +423,93 @@ function statementTransferMeaning(
   };
 }
 
+/**
+ * A credit-card settlement on a statement, read the way the SMS parser reads
+ * the same event: a transfer onto the card, never spending and never income.
+ *
+ *   account side  `CREDIT CARD PAYMENT 4111XXXXXXXX4821 1,500.00 DR` — money
+ *                 leaving the current account towards a card. Only the explicit
+ *                 "credit card"/"CC" wording counts: "CARD PAYMENT TO TESCO" is
+ *                 how many banks describe an ordinary POS purchase.
+ *   card side     `PAYMENT RECEIVED - THANK YOU 1,500.00 CR` — a payment credit
+ *                 on a statement already proven to be a card's.
+ *
+ * With card digits the row becomes the same `cardPayment` leg the SMS parser
+ * emits, so import-plan files it into the card and pairs it with its other
+ * leg. Without them it stays an ordinary row flagged as a transfer.
+ */
+const CARD_SETTLEMENT_EXCLUSION = /\b(?:fees?|charges?|interest|vat|commission|late|annual|penalty|cash\s*back|refund|reversal|return)\b|رسوم|فائدة|استرداد|عمولة/iu;
+const ACCOUNT_SIDE_CARD_SETTLEMENT = /\b(?:credit\s+card|cc)\s+(?:bill\s+)?(?:payment|repayment|settlement)\b|\bpayment\s+(?:to|towards)\s+(?:your\s+|the\s+)?credit\s+card\b|سداد\s+(?:ال)?بطاقة\s+(?:ال)?ائتمان/iu;
+const CARD_SIDE_SETTLEMENT = /\b(?:payment|pymt)\s+(?:received|recd|thank)|\bthank\s+you\b|^\s*(?:payment|pymt)\b|\b(?:auto\s*pay(?:ment)?|direct\s+debit)\b|سداد|دفعة\s+مستلمة/iu;
+// Payment companies are merchants: their credits are refunds, not settlements.
+const PAYMENT_COMPANY = /\b(?:paypal|amazon\s+payments?|apple\s+pay|google\s+pay|samsung\s+pay|stripe|checkout\.com|payfort|tabby|tamara)\b/i;
+
+type StatementSettlement = Pick<StatementParsedRow,
+  'kind' | 'type' | 'merchant' | 'card' | 'transferHint' | 'categoryGuess' | 'categoryDeliberate'
+> & { cardPaymentSide?: 'debit' | 'receipt' };
+
+/** HSBC's terse repayment description names the card, not a merchant.
+ * Compare full labelled header digits ephemerally; last-four equality alone
+ * could mistake a different card for this one. Never persist this number.
+ */
+function hsbcStatementRepaymentCard(text: string): string | undefined {
+  const header = normalizeDigits(text).normalize('NFKC').split(/\n/).slice(0, 80).join('\n');
+  if (!/\bHSBC\b/i.test(header)) return undefined;
+  const cards = new Set([...header.matchAll(
+    /\b(?:credit\s+card\s+(?:number|no\.?)|number\s+card\s+credit)\b[^A-Za-z0-9]{0,96}((?:\d[ \t-]*){15}\d)(?!\d)/gi,
+  )].map((match) => match[1].replace(/[ \t-]/g, '')));
+  return cards.size === 1 ? [...cards][0] : undefined;
+}
+
+
+/** An exact source-labelled HSBC card match, shared by money and meaning guards. */
+function isHsbcStatementRepayment(
+  description: string,
+  source: ParsedSms['card'],
+  headerCard: string | undefined,
+): boolean {
+  // The full, explicitly credit-card-labelled HSBC header is stronger than an
+  // older generic-card reader's unknown kind (for example at a line break).
+  // Never override an explicitly account/debit-labelled source.
+  if (!headerCard || (source?.kind !== 'credit' && source?.kind !== 'unknown') ||
+      source.last4 !== headerCard.slice(-4)) return false;
+  const match = /^\s*TO\s+((?:\d[ \t-]*){15}\d)\s*$/i.exec(normalizeDigits(description).normalize('NFKC'));
+  return match?.[1].replace(/[ \t-]/g, '') === headerCard;
+}
+
+function statementCardSettlement(
+  description: string,
+  type: 'expense' | 'income',
+  cardEvidence: boolean,
+  source: ParsedSms['card'],
+  hsbcRepaymentCard?: string,
+): StatementSettlement | null {
+  const text = normalizeDigits(description).normalize('NFKC');
+  if (CARD_SETTLEMENT_EXCLUSION.test(text)) return null;
+  const transfer = { transferHint: true, categoryGuess: 'other' as const, categoryDeliberate: true };
+  // The account side stays an outflow of the paying account. Turning it into
+  // the card's receipt leg lost the account's debit, and with statement clocks
+  // at midday a one-day posting lag never paired it with the card statement's
+  // own receipt row, so one payment credited the card twice.
+  if (!cardEvidence && type === 'expense' && ACCOUNT_SIDE_CARD_SETTLEMENT.test(text)) {
+    return { kind: 'transaction', type, merchant: 'Card payment', card: source, ...transfer };
+  }
+  const toThisHsbcCard = isHsbcStatementRepayment(text, source, hsbcRepaymentCard);
+  if (cardEvidence && type === 'income' &&
+      (toThisHsbcCard || CARD_SIDE_SETTLEMENT.test(text)) && !PAYMENT_COMPANY.test(text)) {
+    // A card statement's own number is a credit card's: debit cards receive
+    // no payments. An account-labelled number is not a card at all.
+    const last4 = source && (source.kind === 'credit' || source.kind === 'unknown') ? source.last4 : null;
+    return last4
+      ? {
+          kind: 'cardPayment', type: 'expense', merchant: `Card •${last4} payment`,
+          card: { last4, kind: 'credit' }, cardPaymentSide: 'receipt', ...transfer,
+        }
+      : { kind: 'transaction', type, merchant: 'Card payment', card: source, ...transfer };
+  }
+  return null;
+}
+
 function uniqueColumnInstrument(
   records: string[][],
   index: number,
@@ -400,13 +548,125 @@ function statementCurrency(value: string): StatementCurrency | null {
   return /^[A-Z]{3}$/.test(normalized) && ledgerMoneySpec(normalized) ? normalized : null;
 }
 
-function amountMinor(value: string, currency: StatementCurrency, signed: boolean): number | null {
+/** Only document metadata labels establish a statement-wide currency. */
+function assertStatementCurrency(text: string, currency: StatementCurrency): void {
+  for (const line of text.split(/\n+/)) {
+    const labelled = /^\s*(?:(?:account|statement)\s+)?currency(?:\s*[:=-]\s*|\s+)([A-Z]{3})\b/i.exec(line);
+    if (!labelled) continue;
+    const stated = statementCurrency(labelled[1]);
+    if (stated && stated !== currency) throw new Error('statement_currency_mismatch');
+  }
+}
+
+/**
+ * Which character separates a file's decimals.
+ *
+ * `point`  1,234.56 · 1'234.56 · 12.50 — the launch-tested reading, and the
+ *          reading of every file that does not prove otherwise.
+ * `comma`  1.234,56 · 1 234,56 · 12,50 — only when the file's own figures say
+ *          so and none of them contradicts it (see inferDecimalConvention).
+ */
+type DecimalConvention = 'point' | 'comma';
+
+/** Thousands separators besides the opposite decimal mark: apostrophes and (no-break) spaces. */
+const GROUP_MARKS = String.raw`'’\u00a0\u202f`;
+
+/**
+ * What one figure proves about the decimal mark, or null when it proves
+ * nothing. `12,345` proves nothing — twelve thousand, or 12.345 of a
+ * three-decimal currency — and neither does `1.234`. `12,50`, `1.234,56` and
+ * `1 234,5` can only be decimal-comma; `12.50` and `1,234.56` only
+ * decimal-point.
+ */
+function decimalEvidence(token: string, exponent: number): DecimalConvention | null {
+  if (exponent === 0) return null;
+  const comma = new RegExp(
+    `^(?:\\d{1,3}([.${GROUP_MARKS} ])\\d{3}(?:\\1\\d{3})*|\\d+),(\\d{1,${exponent}})$`,
+  ).exec(token);
+  if (comma && (comma[1] || comma[2].length !== 3)) return 'comma';
+  const point = new RegExp(
+    `^(?:\\d{1,3}([,'’])\\d{3}(?:\\1\\d{3})*|\\d+)\\.(\\d{1,${exponent}})$`,
+  ).exec(token);
+  if (point && (point[1] || point[2].length !== 3)) return 'point';
+  return null;
+}
+
+/**
+ * A file's decimal mark from its own figures. Decimal-comma needs positive
+ * evidence and no figure contradicting it; anything else — including a file
+ * with both kinds, which is not a file whose convention is known — keeps the
+ * decimal-point reading, under which a decimal-comma figure never parses.
+ * Zero-decimal currencies have no decimal mark to decide.
+ */
+function inferDecimalConvention(tokens: Iterable<string>, currency: StatementCurrency): DecimalConvention {
+  const exponent = ledgerMoneySpec(currency)?.exponent ?? 0;
+  let comma = 0;
+  let point = 0;
+  for (const token of tokens) {
+    const evidence = decimalEvidence(token, exponent);
+    if (evidence === 'comma') comma += 1;
+    else if (evidence === 'point') point += 1;
+  }
+  return comma > 0 && point === 0 ? 'comma' : 'point';
+}
+
+/** Figure-shaped runs in free text: digits joined by separators, never by a space. */
+const TEXT_FIGURE = new RegExp(`\\d[\\d.,${GROUP_MARKS}]*\\d`, 'g');
+
+/**
+ * Rewrite a flattened PDF's figures into the one spelling the row parser
+ * reads (`1234.56`), so the column, balance and card-table logic below stays
+ * the launch-tested code. Only a decimal-comma file changes materially; a
+ * decimal-point file only loses apostrophe grouping (`1'234.56`), which it
+ * could not parse at all before. Dates are untouched: `03.04.2026` is neither
+ * a decimal nor a three-digit group.
+ *
+ * A plain space is never a thousands mark here — in flattened text it is as
+ * likely a column boundary — but a no-break space is.
+ */
+function normalizeStatementFigures(text: string, currency: StatementCurrency): string {
+  // `RUE 12 345,00` is either 12 345,00 or a 12 beside 345,00. No row of a
+  // file that prints such a figure can be read with confidence, so the whole
+  // file keeps the decimal-point reading and its comma figures are refused
+  // (and counted) rather than half-read.
+  const spaceGrouped = /(?<![\d.,])\d{1,3}(?: \d{3})+,\d{1,3}(?!\d)/.test(text);
+  const convention = spaceGrouped ? 'point' : inferDecimalConvention(text.match(TEXT_FIGURE) ?? [], currency);
+  if (convention === 'point') {
+    return text.replace(
+      new RegExp(`(?<![\\d.,'’])\\d{1,3}(?:(['’])\\d{3})(?:\\1\\d{3})*(?=\\.\\d|(?![\\d.,'’]))`, 'g'),
+      (figure) => figure.replace(/['’]/g, ''),
+    );
+  }
+  return text
+    .replace(
+      new RegExp(`(?<![\\d.,${GROUP_MARKS}])(\\d{1,3}(?:([.${GROUP_MARKS}])\\d{3})(?:\\2\\d{3})*|\\d+),(\\d{1,3})(?![\\d]|[.,${GROUP_MARKS}]\\d)`, 'g'),
+      (_figure, whole: string, _group: string, fraction: string) => `${whole.replace(/\D/g, '')}.${fraction}`,
+    )
+    .replace(
+      new RegExp(`(?<![\\d.,${GROUP_MARKS}])\\d{1,3}(?:([.${GROUP_MARKS}])\\d{3})(?:\\1\\d{3})*(?![\\d]|[.,${GROUP_MARKS}]\\d)`, 'g'),
+      (figure) => figure.replace(/\D/g, ''),
+    );
+}
+
+/** The figure inside one CSV money cell, for inferDecimalConvention. */
+function cellFigure(value: string): string {
+  return normalizeDigits(value).normalize('NFKC').replace(/[\s\u00a0\u202f]+/g, ' ')
+    .replace(/[^\d.,'’ ]/g, '').trim();
+}
+
+function amountMinor(
+  value: string,
+  currency: StatementCurrency,
+  signed: boolean,
+  decimal: DecimalConvention = 'point',
+): number | null {
   let normalized = normalizeDigits(value).normalize('NFKC').replace(/[\s\u00a0]+/g, ' ').trim();
   const spec = ledgerMoneySpec(currency);
-  if (!spec || !normalized || /^(?:-|--|N\/?A|0(?:\.0{1,3})?)$/i.test(normalized)) return null;
+  if (!spec || !normalized || /^(?:-|--|N\/?A|0(?:[.,]0{1,3})?)$/i.test(normalized)) return null;
 
   let negative = false;
   let explicitSign = false;
+  let contradictorySign = false;
   if (/^\(.+\)$/.test(normalized)) {
     negative = true;
     explicitSign = true;
@@ -417,6 +677,7 @@ function amountMinor(value: string, currency: StatementCurrency, signed: boolean
     const suffix = /([+-])$/.exec(normalized)?.[1];
     const sign = prefix ?? suffix;
     if (!sign) return;
+    if (explicitSign || (prefix && suffix)) contradictorySign = true;
     explicitSign = true;
     negative = sign === '-';
     normalized = prefix ? normalized.slice(1).trim() : normalized.slice(0, -1).trim();
@@ -440,13 +701,19 @@ function amountMinor(value: string, currency: StatementCurrency, signed: boolean
   }
   // Also accept sign placement immediately after/before a currency code.
   takeSign();
-  if (signed !== explicitSign) return null;
+  if (contradictorySign || signed !== explicitSign) return null;
 
-  const fractionPattern = spec.exponent === 0 ? '' : `(?:\\.(\\d{1,${spec.exponent}}))?`;
-  const match = new RegExp(`^((?:\\d{1,3}(?:,\\d{3})+|\\d+))${fractionPattern}$`).exec(normalized);
+  // One grouping mark per figure, three digits per group. Decimal-point files
+  // group with `,` or an apostrophe; decimal-comma files with `.`, an
+  // apostrophe or a space. Zero-decimal currencies read as decimal-point.
+  const comma = decimal === 'comma' && spec.exponent > 0;
+  const group = comma ? `[.'’ ]` : `[,'’]`;
+  const mark = comma ? ',' : '\\.';
+  const fractionPattern = spec.exponent === 0 ? '' : `(?:${mark}(\\d{1,${spec.exponent}}))?`;
+  const match = new RegExp(`^(\\d{1,3}(${group})\\d{3}(?:\\2\\d{3})*|\\d+)${fractionPattern}$`).exec(normalized);
   if (!match) return null;
-  const whole = match[1].replace(/,/g, '');
-  const fraction = spec.exponent === 0 ? '' : (match[2] ?? '');
+  const whole = match[1].replace(/\D/g, '');
+  const fraction = spec.exponent === 0 ? '' : (match[3] ?? '');
   let minor: bigint;
   try {
     minor = BigInt(whole) * BigInt(10 ** spec.exponent) +
@@ -464,6 +731,71 @@ function rowDirection(value: string): 'expense' | 'income' | null {
   if (/^(?:dr|d|debit|withdrawal|withdrawn|paid out|مدين|خصم|سحب)$/.test(normalized)) return 'expense';
   if (/^(?:cr|c|credit|deposit|deposited|paid in|دائن|إيداع)$/.test(normalized)) return 'income';
   return null;
+}
+
+/**
+ * How a statement's bare signs read.
+ *
+ * `account`      minus is money out, plus/unsigned-with-sign is money in — the
+ *                account-statement convention, and the only one assumed.
+ * `minus-credit` the card statement SAYS a minus marks a credit (payment,
+ *                refund, cashback); plain and plus figures are charges.
+ * `minus-debit`  the card statement SAYS charges carry the minus; plain and
+ *                plus figures are credits.
+ * `refuse`       a card statement that says neither. Card issuers use both
+ *                conventions, so a bare sign there is not a direction.
+ */
+type SignConvention = 'account' | 'minus-credit' | 'minus-debit' | 'refuse';
+
+const SIGN_VERB = String.raw`(?:denotes?|indicates?|represents?|means?|shows?|=)`;
+const SIGN_MARK = String.raw`(?:minus|negative)(?:\s+sign)?\s*(?:\(\s*-\s*\)\s*)?(?:amounts?|figures?|values?|entries|transactions)?`;
+const CREDIT_WORDS = String.raw`(?:credits?|payments?|refunds?)`;
+const DEBIT_WORDS = String.raw`(?:debits?|charges?|purchases?|spend(?:ing)?)`;
+const SHOWN_AS = String.raw`(?:are\s+)?(?:shown|marked|displayed|printed|indicated|listed)\s+(?:with|by|as|in)\s+(?:a\s+)?(?:minus|negative|\(\s*-\s*\))`;
+function legendPatterns(words: string): RegExp[] {
+  // "A negative amount indicates a credit BALANCE" describes the balance line,
+  // not how transaction rows are signed.
+  const notBalance = String.raw`(?!\s+balances?\b)`;
+  return [
+    new RegExp(String.raw`\b${SIGN_MARK}\s*${SIGN_VERB}\s+(?:a\s+|an\s+)?${words}\b${notBalance}`, 'i'),
+    new RegExp(String.raw`\(\s*-\s*\)\s*${SIGN_VERB}\s*(?:a\s+|an\s+)?${words}\b${notBalance}`, 'i'),
+    new RegExp(String.raw`\b${words}(?:\s+(?:and|&|\/)\s+(?:${CREDIT_WORDS}|${DEBIT_WORDS}))?\s+${SHOWN_AS}`, 'i'),
+  ];
+}
+const MINUS_CREDIT_LEGEND = legendPatterns(CREDIT_WORDS);
+const MINUS_DEBIT_LEGEND = legendPatterns(DEBIT_WORDS);
+
+/** The sign legend a card statement prints, when it prints exactly one. */
+function cardSignLegend(text: string): 'minus-credit' | 'minus-debit' | null {
+  const flat = text.replace(/\s+/g, ' ');
+  const credit = MINUS_CREDIT_LEGEND.some((pattern) => pattern.test(flat));
+  const debit = MINUS_DEBIT_LEGEND.some((pattern) => pattern.test(flat));
+  if (credit === debit) return null;
+  return credit ? 'minus-credit' : 'minus-debit';
+}
+
+/** Strong single markers that a document is a card statement. */
+const CARD_STATEMENT_MARKER = /\bcredit\s+card\s+statement\b|\bminimum\s+(?:amount|payment)\s+due\b|\b(?:available\s+)?credit\s+limit\b/i;
+
+function signConvention(cardEvidence: boolean, text: string): SignConvention {
+  if (!cardEvidence) return 'account';
+  return cardSignLegend(text) ?? 'refuse';
+}
+
+/**
+ * Direction of one figure under a convention. `sign` is the explicit sign the
+ * cell carried, or null for a plain figure. Null means "not decidable".
+ */
+function directionFromSign(
+  sign: '-' | '+' | null,
+  convention: SignConvention,
+): 'expense' | 'income' | null {
+  switch (convention) {
+    case 'account': return sign === '-' ? 'expense' : sign === '+' ? 'income' : null;
+    case 'minus-credit': return sign === '-' ? 'income' : 'expense';
+    case 'minus-debit': return sign === '-' ? 'expense' : 'income';
+    default: return null;
+  }
 }
 
 /**
@@ -505,6 +837,7 @@ export function parseStatementCsv(
   text: string,
   defaultCurrency: StatementCurrency,
   maxRows = 200,
+  dateHint: StatementDateHint = legacyStatementDateHint(defaultCurrency),
 ): StatementCsvResult {
   if (!ledgerMoneySpec(defaultCurrency)) throw new Error('unsupported_statement_currency');
   const delimiter = csvDelimiter(text);
@@ -538,9 +871,10 @@ export function parseStatementCsv(
   if (headerRow < 0 || records.length < headerRow + 2) {
     throw new Error('unsupported_statement_format');
   }
-  const dataRecords = records.slice(headerRow + 1);
-  const totalRows = dataRecords.length;
-  if (totalRows > maxRows) throw new Error('too_many_rows');
+  let dataRecords = records.slice(headerRow + 1);
+  // Apply the resource limit to every record, including summaries and headers.
+  const inputRows = dataRecords.length;
+  if (inputRows > maxRows) throw new Error('too_many_rows');
   const headers = records[headerRow].map(normalizedHeader);
   const dateIndex = headerIndex(headers, HEADER_ALIASES.date);
   const descriptionIndex = headerIndex(headers, HEADER_ALIASES.description);
@@ -549,6 +883,7 @@ export function parseStatementCsv(
   const amountIndex = headerIndex(headers, HEADER_ALIASES.amount);
   const directionIndex = headerIndex(headers, HEADER_ALIASES.direction);
   const currencyIndex = headerIndex(headers, HEADER_ALIASES.currency);
+  const statusIndex = headerIndex(headers, HEADER_ALIASES.status);
   const sourceAccountIndex = headerIndex(headers, HEADER_ALIASES.sourceAccount);
   const sourceCardIndex = headerIndex(headers, HEADER_ALIASES.sourceCard);
   const referenceIndex = headerIndex(headers, HEADER_ALIASES.reference);
@@ -558,6 +893,26 @@ export function parseStatementCsv(
   if (dateIndex < 0 || descriptionIndex < 0 || (!splitColumns && !directedAmount && !signedAmount)) {
     throw new Error('unsupported_statement_format');
   }
+  // Competing monetary/identity columns have no safe first-column default.
+  for (const role of ['debit', 'credit', 'amount', 'direction', 'currency', 'sourceAccount', 'sourceCard', 'status'] as const) {
+    const aliases = new Set(HEADER_ALIASES[role].map(normalizedHeader));
+    if (headers.filter((header) => aliases.has(header)).length > 1) {
+      throw new Error('unsupported_statement_format');
+    }
+  }
+  dataRecords = dataRecords.filter((record) => {
+    if (record.length !== headers.length) return true;
+    if (record.every((cell, index) => normalizedHeader(cell) === headers[index])) return false;
+    const candidate = record.map(normalizedHeader);
+    if (headerIndex(candidate, HEADER_ALIASES.date) >= 0 &&
+        headerIndex(candidate, HEADER_ALIASES.description) >= 0 &&
+        (['debit', 'credit', 'amount'] as const).some((role) =>
+          headerIndex(candidate, HEADER_ALIASES[role]) >= 0)) {
+      throw new Error('unsupported_statement_format');
+    }
+    return !SUMMARY_DESCRIPTION.test((record[descriptionIndex] ?? '').trim());
+  });
+  const totalRows = dataRecords.length;
   // A source instrument column is useful only when the whole export identifies
   // one statement account/card. A varying column is transaction metadata, not
   // authority to route every row to a different local account.
@@ -566,12 +921,37 @@ export function parseStatementCsv(
     : sourceAccountIndex >= 0
       ? uniqueColumnInstrument(dataRecords, sourceAccountIndex, 'account')
       : uniqueColumnInstrument(dataRecords, sourceCardIndex, 'unknown');
-  const dateOrder = inferDateOrder(dataRecords.map((record) => record[dateIndex] ?? ''));
+  const dateOrder = inferDateOrder(dataRecords.map((record) => record[dateIndex] ?? ''), dateHint);
+  const decimal = inferDecimalConvention(
+    dataRecords.flatMap((record) => [debitIndex, creditIndex, amountIndex]
+      .filter((index) => index >= 0)
+      .map((index) => cellFigure(record[index] ?? ''))),
+    defaultCurrency,
+  );
+  // Card exports carry their identity, when they carry it at all, in the
+  // preamble above the table or in a card-number column name. A signed amount
+  // column is then only a direction when the preamble says what a minus means.
+  const preamble = records.slice(0, headerRow).map((record) => record.join(' ')).join('\n');
+  assertStatementCurrency(preamble, defaultCurrency);
+  const cardEvidence = isCardStatement(preamble) || headers.includes(normalizedHeader('credit card number'));
+  const signEvidence = cardEvidence || (sourceAccountIndex < 0 && CARD_STATEMENT_MARKER.test(preamble));
+  const convention = signConvention(signEvidence, preamble);
 
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
+  let ambiguousCardSignRows = 0;
+  let ambiguousDateRows = 0;
   for (const record of dataRecords) {
     if (record.length !== headers.length) {
+      rejectedRows += 1;
+      continue;
+    }
+    // An export may include authorisations, rejected requests and cancelled
+    // entries beside posted transactions. Explicit status must establish a
+    // completed posting; absent status keeps the supported legacy format.
+    if (statusIndex >= 0 && !/^(?:posted|completed|cleared|settled)$/.test(
+      normalizedHeader(record[statusIndex] ?? ''),
+    )) {
       rejectedRows += 1;
       continue;
     }
@@ -585,9 +965,15 @@ export function parseStatementCsv(
     let type: 'expense' | 'income' | null = null;
     let minor: number | null = null;
     if (currency === defaultCurrency && splitColumns) {
-      const debit = amountMinor(record[debitIndex] ?? '', currency, false);
-      const credit = amountMinor(record[creditIndex] ?? '', currency, false);
-      if ((debit === null) !== (credit === null)) {
+      const debit = amountMinor(record[debitIndex] ?? '', currency, false, decimal);
+      const credit = amountMinor(record[creditIndex] ?? '', currency, false, decimal);
+      // A failed parse is not an empty cell: foreign amounts, bad precision,
+      // signs or corrupt data on the other side make the row contradictory.
+      const emptyMoney = (cell: string) => /^(?:|--?|N\/?A|0+(?:[.,]0{1,3})?)$/i.test(
+        normalizeDigits(cell).normalize('NFKC').trim(),
+      );
+      if ((debit !== null && emptyMoney(record[creditIndex] ?? '')) ||
+          (credit !== null && emptyMoney(record[debitIndex] ?? ''))) {
         type = debit === null ? 'income' : 'expense';
         minor = debit ?? credit;
       }
@@ -597,11 +983,14 @@ export function parseStatementCsv(
       // amount carries a sign, the sign is the explicit marker; when both
       // speak and disagree, neither is trusted.
       const labelled = rowDirection(record[directionIndex] ?? '');
-      const unsignedMinor = amountMinor(record[amountIndex] ?? '', currency, false);
+      const unsignedMinor = amountMinor(record[amountIndex] ?? '', currency, false, decimal);
       const signedMinor = unsignedMinor === null
-        ? amountMinor(record[amountIndex] ?? '', currency, true)
+        ? amountMinor(record[amountIndex] ?? '', currency, true, decimal)
         : null;
-      const signedType = signedMinor === null ? null : signedMinor < 0 ? 'expense' : 'income';
+      const signedType = signedMinor === null
+        ? null
+        : directionFromSign(signedMinor < 0 ? '-' : '+', convention);
+      if (!labelled && signedMinor !== null && convention === 'refuse') ambiguousCardSignRows += 1;
       if (labelled && signedType && labelled !== signedType) {
         type = null;
       } else {
@@ -609,16 +998,30 @@ export function parseStatementCsv(
         minor = unsignedMinor ?? (signedMinor === null ? null : Math.abs(signedMinor));
       }
     } else if (currency === defaultCurrency && signedAmount) {
-      const signedMinor = amountMinor(record[amountIndex] ?? '', currency, true);
+      const signedMinor = amountMinor(record[amountIndex] ?? '', currency, true, decimal);
+      // A stated card convention also gives a plain figure its meaning; the
+      // account convention and an unstated card one never do.
+      const plainMinor = signedMinor === null && (convention === 'minus-credit' || convention === 'minus-debit')
+        ? amountMinor(record[amountIndex] ?? '', currency, false, decimal)
+        : null;
       if (signedMinor !== null) {
-        type = signedMinor < 0 ? 'expense' : 'income';
-        minor = Math.abs(signedMinor);
+        type = directionFromSign(signedMinor < 0 ? '-' : '+', convention);
+        minor = type ? Math.abs(signedMinor) : null;
+        if (convention === 'refuse') ambiguousCardSignRows += 1;
+      } else if (plainMinor !== null) {
+        type = directionFromSign(null, convention);
+        minor = plainMinor;
+      } else if (convention === 'refuse' && amountMinor(record[amountIndex] ?? '', currency, false, decimal) !== null) {
+        ambiguousCardSignRows += 1;
       }
     }
     if (
       !date || unsafeDescription || merchant.length < 2 || merchant.length > 180 ||
       !type || !minor
     ) {
+      if (!date && dateOrder === 'unknown' && ambiguousLocalDate(record[dateIndex] ?? '')) {
+        ambiguousDateRows += 1;
+      }
       rejectedRows += 1;
       continue;
     }
@@ -637,6 +1040,17 @@ export function parseStatementCsv(
       : rowAccountTail
         ? { last4: rowAccountTail, kind: 'account' }
         : null;
+    const settlement = statementCardSettlement(merchant, type, cardEvidence, rowInstrument ?? sourceInstrument);
+    if (settlement) {
+      rows.push({
+        amountFils: minor, currency: defaultCurrency, date,
+        dueDay: null, minDueFils: null, reference,
+        snapshotFils: null, snapshotKind: null,
+        ...settlement,
+        raw: record.join(delimiter),
+      });
+      continue;
+    }
     const transfer = statementTransferMeaning(
       merchant,
       type,
@@ -656,49 +1070,98 @@ export function parseStatementCsv(
       raw: record.join(delimiter),
     });
   }
-  return { rows, totalRows, rejectedRows };
+  return { rows, totalRows, rejectedRows, ambiguousCardSignRows, ambiguousDateRows };
 }
 
-type DateOrder = 'day-first' | 'month-first';
+type DateOrder = 'day-first' | 'month-first' | 'unknown';
+
+/**
+ * How the user's country writes a bare numeric date, as the app sends it
+ * (`x-wafra-date-order`, or stored with the email forwarding address). Null
+ * means the country is unknown or does not settle it.
+ */
+export type StatementDateHint = 'day-first' | 'month-first' | null;
+
+/**
+ * The hint for a caller that sent none: a client that predates the header,
+ * or an email address minted before its country was recorded. Those ledgers
+ * could only ever be AED or SAR for a numeric date to be read, and both are
+ * day-first; anything else stays undecided. This is the launch behaviour,
+ * kept byte-for-byte for those callers.
+ */
+export function legacyStatementDateHint(currency: StatementCurrency): StatementDateHint {
+  return currency === 'AED' || currency === 'SAR' ? 'day-first' : null;
+}
+
+/** Parse a hint from a header or stored column; undefined when it is not one. */
+export function statementDateHintFrom(value: unknown): StatementDateHint | undefined {
+  if (value === 'day-first' || value === 'month-first') return value;
+  if (value === 'unknown') return null;
+  return undefined;
+}
+
+const LOCAL_NUMERIC_DATE = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/;
 
 /**
  * Decide how a file's numeric dates read. A first field above 12 can only be
- * a day; a second field above 12 can only be a month-first export. With no
- * evidence, or with contradictory evidence, keep the launch-tested UAE/KSA
- * DD/MM reading — the ambiguous rows then parse exactly as they did before.
+ * a day; a second field above 12 can only be a month-first export. File
+ * evidence always wins over the country. Contradictory evidence leaves the
+ * order unknown: individually unambiguous dates can still be read, but the
+ * country cannot resolve a file that contradicts itself. With no evidence the
+ * country decides; with no country the order is `unknown` and isoDate refuses every date whose day and
+ * month could swap.
  */
-function inferDateOrder(values: Iterable<string>): DateOrder {
+function inferDateOrder(values: Iterable<string>, hint: StatementDateHint): DateOrder {
   let dayFirst = false;
   let monthFirst = false;
   for (const value of values) {
-    const local = /^(\d{1,2})[\/-](\d{1,2})[\/-]\d{2,4}$/.exec(normalizeDigits(value).trim());
+    const local = LOCAL_NUMERIC_DATE.exec(normalizeDigits(value).trim());
     if (!local) continue;
     if (Number(local[1]) > 12) dayFirst = true;
     if (Number(local[2]) > 12) monthFirst = true;
   }
-  return monthFirst && !dayFirst ? 'month-first' : 'day-first';
+  if (monthFirst && !dayFirst) return 'month-first';
+  if (dayFirst && !monthFirst) return 'day-first';
+  if (dayFirst && monthFirst) return 'unknown';
+  return hint ?? 'unknown';
 }
 
-const MONTH_INDEX: Record<string, number> = {
-  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
-};
+/** A numeric date whose day and month are both ≤ 12 and differ. */
+function ambiguousLocalDate(value: string): boolean {
+  const local = LOCAL_NUMERIC_DATE.exec(normalizeDigits(value).replace(/\s+/g, ' ').trim());
+  if (!local) return false;
+  const first = Number(local[1]);
+  const second = Number(local[2]);
+  return first <= 12 && second <= 12 && first !== second;
+}
+
+const NAMED_DAY_FIRST_DATE = new RegExp(`^(\\d{1,2})(?:er|\\.)?[\\s-](${MONTH_NAME})\\.?[\\s-](\\d{2,4})$`, 'i');
+const NAMED_DE_DATE = new RegExp(`^(\\d{1,2})\\s+de\\s+(${MONTH_NAME})\\.?\\s+(?:de\\s+)?(\\d{4})$`, 'i');
+const NAMED_MONTH_FIRST_DATE = new RegExp(`^(${ENGLISH_MONTH_NAME})\\.?\\s+(\\d{1,2}),?\\s+(\\d{4})$`, 'i');
 
 function isoDate(value: string, order: DateOrder = 'day-first'): string | null {
-  value = normalizeDigits(value).replace(/\s+/g, ' ').trim();
+  value = normalizeDigits(value).normalize('NFC').replace(/\s+/g, ' ').trim();
   let year: number;
   let month: number;
   let day: number;
   const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  const named = new RegExp(`^(\\d{1,2})[\\s-](${MONTH_NAME})[\\s-](\\d{2,4})$`, 'i').exec(value);
+  const named = NAMED_DAY_FIRST_DATE.exec(value) ?? NAMED_DE_DATE.exec(value);
+  const monthFirstNamed = named ? null : NAMED_MONTH_FIRST_DATE.exec(value);
   if (iso) {
     year = Number(iso[1]); month = Number(iso[2]); day = Number(iso[3]);
-  } else if (named) {
-    day = Number(named[1]); month = MONTH_INDEX[named[2].slice(0, 3).toLowerCase()]; year = Number(named[3]);
+  } else if (named || monthFirstNamed) {
+    const [dayText, monthText, yearText] = named
+      ? [named[1], named[2], named[3]]
+      : [monthFirstNamed![2], monthFirstNamed![1], monthFirstNamed![3]];
+    const index = MONTH_INDEX.get(foldMonth(monthText));
+    if (!index) return null;
+    day = Number(dayText); month = index; year = Number(yearText);
     if (year < 100) year += 2000;
   } else {
-    const local = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/.exec(value);
+    const local = LOCAL_NUMERIC_DATE.exec(value);
     if (!local) return null;
-    if (order === 'month-first') {
+    if (order === 'unknown' && ambiguousLocalDate(value)) return null;
+    if (order === 'month-first' || (order === 'unknown' && Number(local[2]) > 12)) {
       month = Number(local[1]); day = Number(local[2]);
     } else {
       day = Number(local[1]); month = Number(local[2]);
@@ -714,7 +1177,7 @@ function isoDate(value: string, order: DateOrder = 'day-first'): string | null {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-type ColumnOrder = 'debit-first' | 'credit-first';
+type ColumnOrder = 'debit-first' | 'credit-first' | 'unknown';
 
 /**
  * Which of the two money columns comes first in this statement's table. Gulf
@@ -722,7 +1185,8 @@ type ColumnOrder = 'debit-first' | 'credit-first';
  * line is checked anyway so the rare Credit | Debit layout is not read inverted.
  */
 function statementColumnOrder(text: string): ColumnOrder {
-  for (const original of text.split(/\n+/).slice(0, 120)) {
+  const orders = new Set<ColumnOrder>();
+  for (const original of text.split(/\n+/)) {
     const line = original.replace(/\s+/g, ' ').trim();
     // Only a table header counts. A header is a short run of column names —
     // date, a debit word, a credit word and at least one more column such as
@@ -737,9 +1201,9 @@ function statementColumnOrder(text: string): ColumnOrder {
     const debit = line.search(/\b(?:debits?|withdrawals?|paid out)\b|مدين|سحب/iu);
     const credit = line.search(/\b(?:credits?|deposits?|paid in)\b|دائن|إيداع/iu);
     if (debit < 0 || credit < 0) continue;
-    return credit < debit ? 'credit-first' : 'debit-first';
+    orders.add(credit < debit ? 'credit-first' : 'debit-first');
   }
-  return 'debit-first';
+  return orders.size > 1 ? 'unknown' : [...orders][0] ?? 'debit-first';
 }
 
 type MoneyToken =
@@ -1084,7 +1548,8 @@ function parseColumnTail(
   currency: StatementCurrency,
   order: ColumnOrder,
   loneAmountIsCharge = false,
-): { merchant: string; amountFils: number; type: 'expense' | 'income' } | null {
+  convention: SignConvention = 'account',
+): { merchant: string; amountFils: number; type: 'expense' | 'income' } | 'ambiguous-card-sign' | null {
   const words = rest.split(' ');
   const tail: MoneyToken[] = [];
   let cut = words.length;
@@ -1107,15 +1572,27 @@ function parseColumnTail(
   if (merchant.length < 2 || merchant.length > 180 || tail.length === 0 || tail.length > 3) return null;
   const [first, second] = tail;
   if (first.kind === 'signed') {
-    return tail.length <= 2 ? { merchant, amountFils: first.minor, type: first.type } : null;
+    if (tail.length > 2) return null;
+    // classifyMoneyToken reports a minus (or parentheses) as `expense` and a
+    // plus as `income`: that IS the account convention. A card statement
+    // reads the same mark through what it says its signs mean, or not at all.
+    const type = directionFromSign(first.type === 'expense' ? '-' : '+', convention);
+    if (!type) return 'ambiguous-card-sign';
+    return { merchant, amountFils: first.minor, type };
   }
   // `03/08/2026 NOON.COM DUBAI ARE 68.93` — the whole body of a card
   // statement. One figure, no label, no second column, because a charge is
   // what the statement is for; the CR rows are handled by the branch above.
+  // A statement that says its CHARGES carry the minus has told us the
+  // opposite: there a plain figure is the credit.
   if (loneAmountIsCharge && tail.length === 1 && first.kind === 'unsigned') {
-    return { merchant, amountFils: first.minor, type: 'expense' };
+    return {
+      merchant,
+      amountFils: first.minor,
+      type: convention === 'minus-debit' ? 'income' : 'expense',
+    };
   }
-  if (tail.length < 2 || second.kind === 'signed') return null;
+  if (tail.length < 2 || second.kind === 'signed' || order === 'unknown') return null;
   const [debit, credit] = order === 'debit-first' ? [first, second] : [second, first];
   if (debit.kind === 'unsigned' && credit.kind === 'placeholder') {
     return { merchant, amountFils: debit.minor, type: 'expense' };
@@ -1220,8 +1697,19 @@ function statementLines(
   currency: StatementCurrency,
   cardTotalAmountTable: boolean,
 ): string[] {
-  const rawLines = text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
-  return cardTotalAmountTable ? coalesceCardTotalAmountRows(rawLines, currency) : rawLines;
+  const raw = rawStatementLines(text);
+  return cardTotalAmountTable ? coalesceCardTotalAmountRows(raw, currency) : raw;
+}
+
+/**
+ * The statement's lines before any row coalescing.
+ *
+ * Header detection wants these rather than `statementLines`: coalescing glues a
+ * card row to its continuation, which can only hide a header line, never reveal
+ * one.
+ */
+function rawStatementLines(text: string): string[] {
+  return text.split(/\n+/).map((original) => original.replace(/\s+/g, ' ').trim());
 }
 
 /**
@@ -1686,6 +2174,36 @@ export function statementLayoutFingerprint(
   };
 }
 
+/** A final DR/CR may label the transaction OR the balance's polarity. */
+function labelledBalanceConvention(
+  lines: string[], currency: StatementCurrency,
+): 'transaction' | 'balance' | null {
+  let previous: { numeric: number; polarity: number } | null = null;
+  let checked = 0;
+  let transactionAgrees = true;
+  let balanceAgrees = true;
+  for (const line of lines) {
+    const prefixed = ROW_DATE_PREFIX.exec(line);
+    if (!prefixed || SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
+    const label = /\s(DR|CR|DEBIT|CREDIT)$/i.exec(line)?.[1];
+    const figures = label ? rowBalanceFigures(prefixed[2], currency) : null;
+    if (!figures || !label) { previous = null; continue; }
+    const credit = /^(?:CR|CREDIT)$/i.test(label);
+    const polarity = Math.abs(figures.balanceMinor) * (credit ? 1 : -1);
+    if (previous) {
+      checked += 1;
+      const delta = figures.balanceMinor - previous.numeric;
+      transactionAgrees &&= delta === figures.amountMinor * (credit ? 1 : -1);
+      balanceAgrees &&= Math.abs(polarity - previous.polarity) === figures.amountMinor;
+    }
+    previous = { numeric: figures.balanceMinor, polarity };
+  }
+  // Do not choose between two valid financial interpretations of identical
+  // flattened text. Four exact comparisons are the existing minimum proof.
+  if (checked < 4 || transactionAgrees === balanceAgrees) return null;
+  return transactionAgrees ? 'transaction' : 'balance';
+}
+
 export interface StatementTextResult {
   rows: StatementParsedRow[];
   /** Every date-led money row this parser accounted for, accepted or rejected. */
@@ -1696,6 +2214,13 @@ export interface StatementTextResult {
   completeRowAccounting: boolean;
   /** Whether the rows add up to the balances the statement states for itself. */
   reconciliation: StatementReconciliation;
+  /**
+   * Rejected rows whose only direction evidence was a bare sign on a card
+   * statement that never says what its signs mean. Counted inside rejectedRows.
+   */
+  ambiguousCardSignRows: number;
+  /** Rejected rows whose numeric date the file never settles as day- or month-first. */
+  ambiguousDateRows: number;
 }
 
 /**
@@ -1708,22 +2233,63 @@ export interface StatementTextResult {
  */
 export function parseStatementLines(
   text: string,
-  currency: StatementCurrency = 'AED',
+  currency: StatementCurrency,
   identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
+  dateHint: StatementDateHint = legacyStatementDateHint(currency),
 ): StatementTextResult {
   if (!ledgerMoneySpec(currency)) throw new Error('unsupported_statement_currency');
+  text = normalizeStatementFigures(normalizeDigits(text).normalize('NFC'), currency);
+  assertStatementCurrency(text, currency);
   const rows: StatementParsedRow[] = [];
   let rejectedRows = 0;
+  // A flattened document has no safe table-to-account mapping. Repeated page
+  // headers are fine; distinct labelled statement accounts must be split before
+  // import instead of silently routing every section to the first account.
+  const sectionInstruments = new Set<string>();
+  for (const line of text.split(/\n+/)) {
+    if (!/^\s*(?:credit\s+card|card|account|a\/c)\s+(?:number|no\.?|ending)\b/i.test(line) &&
+        !/^\s*(?:account|acct|a\/c|iban|card)\s*[:#-]?\s*[*xX•·\d]/i.test(line) &&
+        !/^\s*number\s+card\s+credit\b/i.test(line)) continue;
+    const instrument = statementInstrument(line) ?? statementHeaderInstrument(line);
+    if (instrument) sectionInstruments.add(`${instrument.kind === 'account' ? 'account' : 'card'}:${instrument.last4}`);
+  }
+  if (sectionInstruments.size > 1) throw new Error('multiple_statement_accounts');
   const sourceInstrument = identity.card ?? statementInstrument(text) ?? statementHeaderInstrument(text);
   const bankHint = identity.bankHint ?? statementBankHint(text);
+  const hsbcRepaymentCard = hsbcStatementRepaymentCard(text);
+  const rawLines = rawStatementLines(text);
   const cardStatement = isCardStatement(text);
+  // Refusing a bare sign needs less proof than reading every plain figure as
+  // a charge does: one strong marker, or a header card explicitly labelled a
+  // credit card, is enough to stop the account convention being assumed.
+  // Two proofs, for two jobs. Reading a row as a card SETTLEMENT or switching
+  // off the balance chain needs the card statement proved (two markers, or a
+  // header number labelled credit card). Refusing a bare sign needs less —
+  // one strong marker — but never on a statement labelled with an ACCOUNT
+  // number: "Available Credit Limit" on an overdrawn current account is not a
+  // card statement.
+  const cardEvidence = cardStatement || sourceInstrument?.kind === 'credit';
+  const signEvidence = cardEvidence || (sourceInstrument?.kind !== 'account' &&
+    CARD_STATEMENT_MARKER.test(rawLines.slice(0, 60).join('\n')));
+  const convention = signConvention(signEvidence, text);
+  let ambiguousCardSignRows = 0;
   const cardTotalAmountTable = hasCardTotalAmountTable(text, cardStatement);
   const lines = statementLines(text, currency, cardTotalAmountTable);
-  const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''));
+  const dateOrder = inferDateOrder(lines.map((line) => ROW_DATE_PREFIX.exec(line)?.[1] ?? ''), dateHint);
+  let ambiguousDateRows = 0;
   const columnOrder = statementColumnOrder(text);
+  const trailingBalanceHeader = rawLines.some((line) => line.length <= 120 &&
+    line.split(' ').length <= 12 && !DATE_LED_LINE.test(line) &&
+    /\bdate\b/i.test(line) && /\b(?:description|details|particulars|narration)\b/i.test(line) &&
+    /\bbalance\s*$/i.test(line));
   // Proven once for the whole file, then used to resolve rows the branches
   // below would otherwise have to reject as ambiguous.
-  const balanceTrailing = trailingBalanceRuns(lines, currency);
+  // Not on a card statement: its running figure is what is OWED, which rises
+  // with a charge, and whether it prints as positive or negative varies by
+  // issuer. Reading its steps with the account direction filed every charge
+  // as money in.
+  const balanceLabels = !cardEvidence ? labelledBalanceConvention(lines, currency) : null;
+  const balanceTrailing = !cardEvidence && (balanceLabels === 'balance' || trailingBalanceRuns(lines, currency));
   let previousBalance: number | null = null;
   const push = (
     date: string,
@@ -1738,6 +2304,18 @@ export function parseStatementLines(
       currency === 'AED' ? 'AE' : currency === 'SAR' ? 'SA' : null,
     );
     const reference = referenceFromDescription(merchant);
+    const settlement = statementCardSettlement(merchant, type, cardEvidence, sourceInstrument, hsbcRepaymentCard);
+    if (settlement) {
+      rows.push({
+        amountFils, currency, date,
+        dueDay: null, minDueFils: null, reference,
+        ...(bankHint ? { bankHint } : {}),
+        snapshotFils: null, snapshotKind: null,
+        ...settlement,
+        raw: line,
+      });
+      return;
+    }
     const transfer = statementTransferMeaning(merchant, type, currency, sourceInstrument, reference);
     rows.push({
       kind: 'transaction', type, amountFils, currency,
@@ -1753,14 +2331,35 @@ export function parseStatementLines(
     });
   };
   for (const line of lines) {
-    if (!line || line.length > 400) continue;
+    if (!line) continue;
     const prefixed = ROW_DATE_PREFIX.exec(line);
     if (prefixed && SUMMARY_DESCRIPTION.test(prefixed[2])) continue;
-    const countable = prefixed !== null && LOOKS_LIKE_MONEY_LINE.test(line);
+    // Date-like rows with unsupported yearless/year-first spellings are still
+    // missing transactions, not evidence of complete coverage.
+    if (!prefixed && /^\d{1,4}[/.\-]\d{1,2}(?:[/.\-]\d{1,4})?\s/.test(line) &&
+        LOOKS_LIKE_MONEY_LINE.test(line)) {
+      rejectedRows += 1;
+      previousBalance = null;
+      continue;
+    }
+    // Tested on the row after its date: `03.04.2026` itself looks like a
+    // decimal. Every other date spelling is tested with its line, as before.
+    const countable = prefixed !== null && (
+      LOOKS_LIKE_MONEY_LINE.test(DOTTED_DATE.test(prefixed[1]) ? prefixed[2] : line) ||
+      (ledgerMoneySpec(currency)?.exponent === 0 && /\s[\d,]+$/.test(prefixed[2]))
+    );
+    if (line.length > 400) {
+      if (countable) rejectedRows += 1;
+      if (prefixed) previousBalance = null;
+      continue;
+    }
     const accepted = rows.length;
     // Read before either branch and carried forward whether or not this row is
     // accepted, so one unreadable row cannot break the chain for the next.
     const figures = balanceTrailing && prefixed ? rowBalanceFigures(prefixed[2], currency) : null;
+    if (figures && balanceLabels === 'balance' && /\s(?:DR|DEBIT)$/i.test(line)) {
+      figures.balanceMinor = -Math.abs(figures.balanceMinor);
+    }
     const priorBalance = previousBalance;
     // Same hole rule as the proving pass, and here it is a correctness one:
     // a delta measured across a row that was skipped could carry the wrong
@@ -1786,7 +2385,7 @@ export function parseStatementLines(
       // such as `PARKING RTA 4.00 DR` are common statement text and must not
       // be mistaken for a foreign-currency marker just because they are three
       // uppercase letters.
-      const explicitCurrencyToken = /\s([A-Z]{3})\s+[\d,]+(?:\.\d{1,3})?(?:\s+(?:DR|CR|DEBIT|CREDIT))?$/i
+      const explicitCurrencyToken = /\s([A-Z]{3})\s*[\d,]+(?:\.\d{1,3})?(?:\s+(?:DR|CR|DEBIT|CREDIT))?$/i
         .exec(line)?.[1]?.toUpperCase();
       const explicitCurrency = explicitCurrencyToken ? statementCurrency(explicitCurrencyToken) : null;
       const date = isoDate(match[1], dateOrder);
@@ -1819,11 +2418,20 @@ export function parseStatementLines(
       // DR` and `SPINNEYS JLT 120.00 27,890.00 DR` read their SECOND figure as
       // a currency marker under `[A-Z]{3}`, which switched this guard off and
       // imported the running balance as the amount.
-      const balanceLabelled = classifyMoneyToken(descriptionWords.at(-1) ?? '', currency)?.kind === 'unsigned' &&
-        statementCurrency(descriptionWords.at(-2) ?? '') === null;
       const credit = direction === 'CR' || direction === 'CREDIT';
+      // In a zero-decimal currency a card's digits also look like unsigned
+      // money. Exempt only the exact, source-labelled repayment description;
+      // arbitrary numeric merchants and running balances remain ambiguous.
+      const exactRepayment = credit && cardEvidence &&
+        isHsbcStatementRepayment(merchant, sourceInstrument, hsbcRepaymentCard);
+      const descriptionCurrency = /(?:^|\s)([A-Z]{3})\s*[\d,]+(?:\.\d{1,3})?$/.exec(merchant)?.[1];
+      const foreignBeforeBalance = trailingBalanceHeader && descriptionCurrency !== undefined &&
+        statementCurrency(descriptionCurrency) !== null && statementCurrency(descriptionCurrency) !== currency;
+      const balanceLabelled = !exactRepayment &&
+        classifyMoneyToken(descriptionWords.at(-1) ?? '', currency)?.kind === 'unsigned' &&
+        statementCurrency(descriptionWords.at(-2) ?? '') === null;
       if (
-        (!explicitCurrency || explicitCurrency === currency) && date && !balanceLabelled &&
+        (!explicitCurrency || explicitCurrency === currency) && date && !balanceLabelled && !foreignBeforeBalance &&
         amountFils !== null && merchant
       ) {
         push(date, merchant, amountFils, credit ? 'income' : 'expense', line);
@@ -1831,16 +2439,22 @@ export function parseStatementLines(
         balanceLabelled && date && figures &&
         (!explicitCurrency || explicitCurrency === currency)
       ) {
-        // The label belongs to the balance; the charge is the figure before it,
-        // which is where this row's description was made to end. Only reachable
-        // once the file has proved its last column reconciles.
-        push(date, figures.merchant, figures.amountMinor, credit ? 'income' : 'expense', line);
+        if (balanceLabels === 'transaction') {
+          push(date, figures.merchant, figures.amountMinor, credit ? 'income' : 'expense', line);
+        } else if (balanceLabels === 'balance' && priorBalance !== null) {
+          const delta = figures.balanceMinor - priorBalance;
+          if (delta !== 0 && Math.abs(delta) === figures.amountMinor) {
+            push(date, figures.merchant, figures.amountMinor, delta < 0 ? 'expense' : 'income', line);
+          }
+        }
       }
     } else {
       const date = prefixed ? isoDate(prefixed[1], dateOrder) : null;
-      const column = prefixed && date
-        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement)
+      const tail = prefixed && date
+        ? parseColumnTail(prefixed[2], currency, columnOrder, cardStatement, convention)
         : null;
+      if (tail === 'ambiguous-card-sign') ambiguousCardSignRows += 1;
+      const column = tail === 'ambiguous-card-sign' ? null : tail;
       if (date && column) push(date, column.merchant, column.amountFils, column.type, line);
       else if (date && figures && priorBalance !== null) {
         // No label and no placeholder to say which column is populated: the
@@ -1852,7 +2466,10 @@ export function parseStatementLines(
         }
       }
     }
-    if (countable && rows.length === accepted) rejectedRows += 1;
+    if (countable && rows.length === accepted) {
+      rejectedRows += 1;
+      if (dateOrder === 'unknown' && prefixed && ambiguousLocalDate(prefixed[1])) ambiguousDateRows += 1;
+    }
   }
   return {
     rows,
@@ -1860,21 +2477,25 @@ export function parseStatementLines(
     rejectedRows,
     completeRowAccounting: true,
     reconciliation: reconcileStatement(rows, lines, text, currency, rejectedRows),
+    ambiguousCardSignRows,
+    ambiguousDateRows,
   };
 }
 
 export function parseStatementText(
   text: string,
-  currency: StatementCurrency = 'AED',
+  currency: StatementCurrency,
   identity: { card: ParsedSms['card']; bankHint?: string } = { card: null },
+  dateHint: StatementDateHint = legacyStatementDateHint(currency),
 ): StatementParsedRow[] {
-  return parseStatementLines(text, currency, identity).rows;
+  return parseStatementLines(text, currency, identity, dateHint).rows;
 }
 
 export async function extractPdfStatementRows(
   bytes: Uint8Array,
-  currency: StatementCurrency = 'AED',
+  currency: StatementCurrency,
   password?: string,
+  dateHint: StatementDateHint = legacyStatementDateHint(currency),
 ): Promise<{
   pages: number;
   rows: ParsedSms[];
@@ -1889,24 +2510,31 @@ export async function extractPdfStatementRows(
    * that read a row: there is nothing to diagnose, and it costs a pass to build.
    */
   layout: StatementLayoutFingerprint | null;
+  ambiguousCardSignRows: number;
+  ambiguousDateRows: number;
 }> {
   const document = await getDocumentProxy(bytes, password ? { password } : undefined);
   try {
-    const extracted = await extractText(document, { mergePages: true });
+    const extracted = await extractText(document, { mergePages: false });
+    const text = extracted.text.join('\n');
     // Its own code, not the generic unreadable one: a long text statement is
     // not a scan, and telling the user it is sends them the wrong way.
-    if (extracted.text.length > MAX_NORMALIZED_CHARS) throw new Error('pdf_too_long');
-    const parsed = parseStatementLines(extracted.text, currency);
+    if (text.length > MAX_NORMALIZED_CHARS) throw new Error('pdf_too_long');
+    const parsed = parseStatementLines(text, currency, { card: null }, dateHint);
     return {
       pages: extracted.totalPages,
       rows: parsed.rows,
       totalRows: parsed.totalRows,
       rejectedRows: parsed.rejectedRows,
-      completeRowAccounting: parsed.completeRowAccounting,
+      // A blank text layer may be a scanned transaction page. It cannot
+      // establish coverage even when other pages yielded valid transactions.
+      completeRowAccounting: parsed.completeRowAccounting && extracted.text.every((page) => page.trim().length > 0),
       reconciliation: parsed.reconciliation,
       layout: parsed.rows.length === 0
-        ? statementLayoutFingerprint(extracted.text, currency)
+        ? statementLayoutFingerprint(text, currency)
         : null,
+      ambiguousCardSignRows: parsed.ambiguousCardSignRows,
+      ambiguousDateRows: parsed.ambiguousDateRows,
     };
   } finally {
     const disposable = document as unknown as {

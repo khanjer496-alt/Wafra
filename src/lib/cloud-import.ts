@@ -1,6 +1,6 @@
 /** Native transport for forwarded-email and statement-file supplements. */
 import { fetch as expoFetch } from 'expo/fetch';
-import { File } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 
 import {
   CloudImportError,
@@ -24,6 +24,8 @@ export interface PickedStatement {
   name: string;
   mimeType?: string | null;
   size?: number;
+  /** Expo DocumentPicker supplies the browser File on web. */
+  file?: Blob;
 }
 
 async function safeJson(response: Response): Promise<unknown> {
@@ -77,6 +79,17 @@ async function relayFetch(
   }
 }
 
+/**
+ * How the user's country writes a bare numeric date (country.ts
+ * statementDateOrderForCountry); null when the country does not settle it.
+ */
+export type StatementDateOrder = 'day-first' | 'month-first' | null;
+
+/** Omitted entirely when the caller did not say, so the relay applies its legacy rule. */
+function dateOrderHeader(dateOrder: StatementDateOrder | undefined): Record<string, string> {
+  return dateOrder === undefined ? {} : { 'x-wafra-date-order': dateOrder ?? 'unknown' };
+}
+
 export async function getImportCapabilities(cfg: RelayConfig): Promise<ImportCapabilities> {
   const { response, body } = await relayFetch(
     `${cfg.baseUrl}/v1/import/capabilities`,
@@ -89,11 +102,25 @@ export async function getImportCapabilities(cfg: RelayConfig): Promise<ImportCap
   return capabilities;
 }
 
+/**
+ * Mint a forwarding address. `locale` records the ledger currency and the
+ * country's numeric date order the relay reads forwarded statements under;
+ * without it the relay keeps the launch rule (AED/SAR from the market pack).
+ */
 export async function createEmailForwardingAddress(
   cfg: RelayConfig,
+  locale?: { ledgerMoney: LedgerMoneySpec; dateOrder: StatementDateOrder },
 ): Promise<EmailForwardingCredential> {
   const { response, body } = await relayFetch(`${cfg.baseUrl}/v1/email-token`, cfg.adminToken, {
     method: 'POST',
+    ...(locale ? {
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ledgerCurrency: locale.ledgerMoney.currency,
+        ledgerExponent: locale.ledgerMoney.exponent,
+        dateOrder: locale.dateOrder ?? 'unknown',
+      }),
+    } : {}),
   });
   if (!response.ok) throw pdfImportError(response.status, body);
   const credential = parseEmailForwardingCredential(body);
@@ -112,6 +139,38 @@ export async function revokeEmailForwardingAddress(cfg: RelayConfig): Promise<vo
 }
 
 /**
+ * Delete statement copies expo-document-picker left in its cache folder.
+ *
+ * `copyToCacheDirectory: true` writes each picked file to
+ * `<cache>/DocumentPicker/<uuid>.<ext>` (both platforms, SDK 55). The import
+ * deletes its copies when it finishes, but a session that ends mid-import —
+ * the app killed while a statement uploads — leaves a readable bank statement
+ * in the cache until the OS reclaims it. Only statement extensions are
+ * touched, so a backup file picked from Settings is never removed from under
+ * a restore, and `keep` spares a copy an upload is still reading.
+ */
+export function clearStatementPickerCache(keep: ReadonlySet<string> = new Set()): void {
+  try {
+    const directory = new Directory(Paths.cache, 'DocumentPicker');
+    if (!directory.exists) return;
+    // Compared by file name: the picker names each copy with a fresh UUID, and
+    // the picker's URI and the directory listing's may spell the scheme apart.
+    const baseName = (uri: string) => decodeURIComponent(uri.split('/').pop() ?? '');
+    const kept = new Set([...keep].map(baseName));
+    for (const entry of directory.list()) {
+      if (!(entry instanceof File) || !/\.(?:pdf|csv|tsv)$/i.test(entry.uri) || kept.has(baseName(entry.uri))) continue;
+      try {
+        entry.delete();
+      } catch {
+        // Best effort: the OS may already have reclaimed it.
+      }
+    }
+  } catch {
+    // A missing or unreadable cache folder has nothing to clear.
+  }
+}
+
+/**
  * Upload the picked cache copy as the request body itself. SDK 55's File
  * implements Blob, so no base64 conversion, multipart envelope, or deprecated
  * FileSystem upload API is involved.
@@ -122,13 +181,14 @@ export async function uploadPdfStatement(
   capabilities: ImportCapabilities,
   ledgerMoney: LedgerMoneySpec,
   password?: string,
+  dateOrder?: StatementDateOrder,
 ): Promise<PdfImportAccepted> {
   if (!capabilities.pdf.enabled || !capabilities.pdf.accepts.includes('application/pdf')) {
     throw new CloudImportError('service');
   }
-  const file = new File(picked.uri);
-  if (!file.exists) throw new CloudImportError('invalid_pdf');
-  const size = picked.size ?? file.size;
+  const file = picked.file ?? new File(picked.uri);
+  if (!picked.file && !(file as File).exists) throw new CloudImportError('invalid_pdf');
+  const size = file.size;
   if (!Number.isFinite(size) || size <= 0) throw new CloudImportError('invalid_pdf');
   if (size > capabilities.pdf.maxBytes) throw new CloudImportError('too_large', 413);
 
@@ -138,6 +198,7 @@ export async function uploadPdfStatement(
       'content-type': 'application/pdf',
       'x-wafra-ledger-currency': ledgerMoney.currency,
       'x-wafra-ledger-exponent': String(ledgerMoney.exponent),
+      ...dateOrderHeader(dateOrder),
       ...(password ? { 'x-wafra-pdf-password': password } : {}),
     },
     body: file,
@@ -154,11 +215,12 @@ export async function uploadCsvStatement(
   picked: PickedStatement,
   capabilities: ImportCapabilities,
   ledgerMoney: LedgerMoneySpec,
+  dateOrder?: StatementDateOrder,
 ): Promise<CsvImportAccepted> {
   if (!capabilities.csv.enabled) throw new CloudImportError('service');
-  const file = new File(picked.uri);
-  if (!file.exists) throw new CloudImportError('invalid_csv');
-  const size = picked.size ?? file.size;
+  const file = picked.file ?? new File(picked.uri);
+  if (!picked.file && !(file as File).exists) throw new CloudImportError('invalid_csv');
+  const size = file.size;
   if (!Number.isFinite(size) || size <= 0) throw new CloudImportError('invalid_csv');
   if (size > capabilities.csv.maxBytes) throw new CloudImportError('too_large', 413);
 
@@ -177,6 +239,7 @@ export async function uploadCsvStatement(
       'content-type': contentType,
       'x-wafra-ledger-currency': ledgerMoney.currency,
       'x-wafra-ledger-exponent': String(ledgerMoney.exponent),
+      ...dateOrderHeader(dateOrder),
     },
     body: file,
   });

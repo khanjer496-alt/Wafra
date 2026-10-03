@@ -14,6 +14,9 @@ function createWorkflowHarness(options={}) {
  native.Share={share:record('share')};native.AccessibilityInfo={announceForAccessibility:record('announce')};
  d['@/hooks/use-reduced-motion']={useReducedMotion:()=>true,useMotionPreference:()=>({ready:true,reducedMotion:true})};
  d.react.useLayoutEffect=()=>{};
+ // This harness renders explicitly; each render reads the current external
+ // store snapshot. Async subscription/cancellation behavior has its own suite.
+ d.react.useSyncExternalStore=(_subscribe,getSnapshot)=>getSnapshot();
  d['expo-router'].useFocusEffect=()=>{};
  d['expo-router'].useGlobalSearchParams=()=>options.params??{};
  d['expo-router'].usePathname=()=>options.path??'/';
@@ -37,7 +40,10 @@ function createWorkflowHarness(options={}) {
  // The country control renders for real; only its sheet chrome is a boundary,
  // so the closed state renders exactly the row a first-run user sees.
  d['@/components/ui/bottom-sheet']={BottomSheet:p=>p.visible?jsx('BottomSheet',p):null};
+ h.local('@/lib/country-names','src/lib/country-names.ts');h.local('@/lib/country','src/lib/country.ts');
+ h.local('@/components/country-picker-sheet');
  h.local('@/components/onboarding/country-confirm');
+ d['./alive-scenes']=d['@/components/onboarding/alive-scenes'];h.local('@/components/onboarding/statement-scene');h.local('@/components/onboarding/setup-intro-step');
  const copy=h.local('@/components/workflows/workflow-copy','src/components/workflows/workflow-copy.ts');
  d['./workflow-copy']=copy;h.local('@/components/workflows/workflow-surfaces');
  h.local('@/components/ui/action-icon-button');h.local('@/components/ui/screen-header');
@@ -54,11 +60,16 @@ function createWorkflowHarness(options={}) {
  Object.assign(d['@/lib/purchases'],{trialDaysLeft:()=>0});
  Object.assign(d['@/lib/markets'],{MARKETS:[{id:'AE',name:'United Arab Emirates',currency:{display:'AED',code:'AED'},banks:[{name:'Emirates NBD',domain:'emiratesnbd.com',color:'#2B4C9B'},{name:'FAB',domain:'bankfab.com',color:'#00A3E0'},{name:'ADCB',domain:'adcb.com',color:'#E4032E'}]}],canSelectMarket:()=>true});
  d['@/lib/uncategorised']={uncategorisedMerchants:()=>options.merchantSummary??{merchants:[],paymentPurposes:[],rowCount:0,totalFils:0},overrideAppliesTo:()=>false};
- d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal'};
+ d['@/lib/alert-review-tray']={isUniversalReviewAlert:item=>item.kind==='universal',
+  isIosApplePayReview:require('../build/alert-review-tray.js').isIosApplePayReview,
+  isIosNotificationReview:require('../build/alert-review-tray.js').isIosNotificationReview,
+  ...Object.fromEntries(['isCurrencyConflictReview','recentlyExpiredReviewCount','recentlyLostReviewCount','reviewCaptureBacklog','reviewExpiresInDays','reviewTrayCapacity']
+   .map(name=>[name,require('../build/alert-review-tray.js')[name]]))};
  d['@/components/universal-review-fields']={universalMoneyLabel:v=>v?`${v.currency} ${v.amountMinor/100}`:''};
  d['@/components/diagnostic-export-control']={DiagnosticExportControl:()=>null};
  d['@/components/tester-diagnostics-control']={TesterDiagnosticsControl:()=>null};
  d['@/lib/ledger-export']={buildLedgerCsv:()=>''};
+ d['@/lib/app-lock']=require('../build/app-lock.js');
  d['@/lib/sms-corpus-export']={isSmsCorpusExportAvailable:()=>false,sharePersonalDataForReview:record('sharePersonalDataForReview')};
  d['@/lib/share-text']={readBackupPickerCopy:async()=>null,shareText:record('shareText'),shareTextFile:record('shareTextFile')};
  d['@/lib/accuracy']={unreadFormatCount:()=>0,noFormatsReason:()=>null};
@@ -69,7 +80,7 @@ function createWorkflowHarness(options={}) {
  d['@/lib/public-links']={configuredPublicUrl:()=>null};
  d['@/lib/relay']={getRelayConfig:async()=>null,getRelayConfigStrict:async()=>null,isLegacyShortcutCaptureActive:()=>false,isRelayPlatform:()=>false,RelayError:class extends Error{},unpairDevice:record('unpairDevice')};
  d['@/lib/capture']={eraseIosCaptureStore:record('eraseIosCaptureStore'),isCaptureAvailable:()=>false,setIosCaptureEnabled:record('setIosCaptureEnabled')};
- d['@/lib/ios-history-setup']={createIosHistoryPostEraseCleanup:()=>()=>{},eraseIosHistorySessions:record('eraseIosHistorySessions')};
+ d['@/lib/ios-history-setup']={createIosHistoryPostEraseCleanup:()=>()=>{},eraseIosHistorySessions:record('eraseIosHistorySessions'),iosSupportsMessageHistory:()=>true};
  d['@/lib/ios-message-onboarding']={clearIosMessageSetupProgress:record('clearIosMessageSetupProgress'),dispatchIosMessageSetup:record('dispatchIosMessageSetup'),loadIosMessageSetupProgress:async()=>null};
  d['@/lib/shortcut-cleanup']={openShortcutsApp:record('openShortcutsApp'),shortcutCleanupApplies:()=>false};
  d['@/lib/growth-funnel']={
@@ -84,14 +95,33 @@ function createWorkflowHarness(options={}) {
  // The real preference preset module has no native runtime; keep it source-executing.
  h.local('@/lib/onboarding','src/lib/onboarding.ts');
  h.local('@/lib/android-capture-sources','src/lib/android-capture-sources.ts');
+ // Settings and Data and help: the real copy, status helpers and row shapes.
+ // Only the biometric probe is a native boundary; `null` is "not known yet".
+ h.local('@/lib/biometric-kind','src/lib/biometric-kind.ts');
+ h.local('@/lib/settings-copy','src/lib/settings-copy.ts');
+ h.local('@/lib/settings-status','src/lib/settings-status.ts');
+ d['@/components/biometric-glyph']={useBiometricKind:()=>options.biometricKind??null,BiometricGlyph:p=>jsx('BiometricGlyph',p)};
+ h.local('@/components/settings-rows');
+ // Design language E (settings side): the band title, the Pro gate rules,
+ // the layout figures and the new copy run from source. The Pro sheet is a
+ // boundary here (its own suite renders it); its open feature is a prop.
+ h.local('@/lib/settings-e-copy','src/lib/settings-e-copy.ts');
+ h.local('@/lib/widgets-copy','src/lib/widgets-copy.ts');
+ h.local('@/lib/pro-gate','src/lib/pro-gate.ts');
+ h.local('@/lib/settings-layout','src/lib/settings-layout.ts');
+ h.local('@/components/settings-band/band-title');
+ d['@/components/pro/pro-sheet']={ProSheet:p=>jsx('Boundary',{...p,name:'ProSheet'})};
  function renderScreen(screen,props={}){
   if(screen==='review-alerts'){
    h.local('@/lib/review-alert-copy','src/lib/review-alert-copy.ts');
+   h.local('@/lib/review-reasons','src/lib/review-reasons.ts');
    h.local('@/components/universal-review-fields');
   }
+  if(screen==='categorise')h.local('@/lib/review-band-copy','src/lib/review-band-copy.ts');
   if(screen==='feedback'){
    d['@/lib/sms-parser']={STRUCTURAL_TITLES:new Set()};
    d['@/lib/feedback-wire']=load(path.join(root,'src/lib/feedback-wire.ts'),d,{TextEncoder});
+   h.local('@/lib/feedback-copy','src/lib/feedback-copy.ts');
    h.local('@/lib/feedback','src/lib/feedback.ts');
    d['@/lib/feedback'].submitFeedback=async payload=>{h.events.push(['submitFeedback',payload]);return {id:'fixture-receipt'}};
    d['@/lib/feedback-transport']={FeedbackSendError:class extends Error{}};
@@ -99,6 +129,7 @@ function createWorkflowHarness(options={}) {
   }
   if(screen==='pro'){
    h.local('@/lib/purchases','src/lib/purchases.ts');
+   h.local('@/lib/pro-copy','src/lib/pro-copy.ts');
    d['@/lib/billing']={isBillingAvailable:()=>false,loadStorePrices:async()=>null,purchasePro:record('purchasePro'),restorePro:record('restorePro'),subscriptionManagementUrl:async()=>null};
    d['@/components/superwall-billing-context']={useWafraBilling:()=>({
     available:false,configured:false,configurationError:null,paywallStatus:'idle',
@@ -106,6 +137,9 @@ function createWorkflowHarness(options={}) {
     presentProPaywall:async()=>{},restorePro:async()=>null,
    })};
    store.setPro=record('setPro');
+   // The shared checkout and plan radios run from source, over the stubbed store.
+   h.local('@/hooks/use-pro-checkout','src/hooks/use-pro-checkout.ts');
+   h.local('@/components/pro/pro-plan-options');
   }
   if(screen==='trusted-devices')h.local('@/lib/trusted-device-contract','src/lib/trusted-device-contract.ts');
   if(screen==='ios-setup'){
@@ -116,13 +150,52 @@ function createWorkflowHarness(options={}) {
    // services remain substituted; UI and completion logic are never mocked.
    d['./ios-capture-health']=h.local('@/lib/ios-capture-health','src/lib/ios-capture-health.ts');
    h.local('@/lib/ios-setup-journey','src/lib/ios-setup-journey.ts');
+   h.local('@/lib/ios-shortcut-setup-copy','src/lib/ios-shortcut-setup-copy.ts');
    d['./capture-health']=h.local('@/components/ios-message-setup/capture-health');
    h.local('@/components/ios-message-setup/setup-journey');
    h.local('@/lib/ios-capture-setup','src/lib/ios-capture-setup.ts');
+   // The actual pure per-source progress projections; storage stays recorded.
+   const progressModule=load(path.join(root,'src/lib/ios-message-onboarding.ts'),{'@react-native-async-storage/async-storage':{},
+    './ios-setup-journey':load(path.join(root,'src/lib/ios-setup-journey.ts')),'./ios-history-setup':{isIosHistoryShortcutInstalled:async()=>false}});
+   Object.assign(d['@/lib/ios-message-onboarding'],{progressForSource:progressModule.progressForSource,recordedIosCaptureSource:progressModule.recordedIosCaptureSource});
    Object.assign(d['@/lib/ios-history-setup'],{historyShortcutInstallUrl:()=>null,iosSupportsMessageHistory:()=>true});
-   for(const name of ['checklist-row','automation-guide','details-sheet'])h.local('@/components/ios-message-setup/'+name);
+   for(const name of ['checklist-row','automation-guide','details-sheet','setup-step'])h.local('@/components/ios-message-setup/'+name);
   }
 
+  if(screen==='onboarding'){
+   h.local('@/lib/ios-statement-handoff','src/lib/ios-statement-handoff.ts');
+   // Redesign additions run from source; the native capture status, the
+   // backup picker and the ledger analytics are explicit boundaries.
+   d['@/lib/capture']={...d['@/lib/capture'],getIosCaptureNativeModule:()=>null};
+   d['@/lib/ios-capture-setup']=d['@/lib/ios-capture-setup']??{resolveIosSetupReadiness:()=>'not-added'};
+   d['@/lib/subscriptions']={detectSubscriptions:()=>[]};
+   d['@/lib/ledger']={...(d['@/lib/ledger']??{}),liveAccountIds:()=>new Set(),internalTransferIdsForState:()=>new Set(),isSpending:tx=>tx.type==='expense'};
+   h.local('@/lib/splits','src/lib/splits.ts');
+   h.local('@/lib/onboarding-ready','src/lib/onboarding-ready.ts');
+   h.local('@/lib/ios-capture-checklist','src/lib/ios-capture-checklist.ts');
+   h.local('@/lib/ios-shortcut-setup-copy','src/lib/ios-shortcut-setup-copy.ts');
+   h.local('@/lib/onboarding-copy','src/lib/onboarding-copy.ts');
+   d['@/components/ui/grow-bar']={GrowBar:p=>jsx('GrowBar',p)};
+   // Design language E: the journey rules, copy and every step run from
+   // source; drawn-only pieces (pattern, dial, limit bar) and billing are boundaries.
+   h.local('@/lib/types','src/lib/types.ts');
+   h.local('@/lib/onboarding-e','src/lib/onboarding-e.ts');
+   h.local('@/lib/onboarding-e-copy','src/lib/onboarding-e-copy.ts');
+   h.local('@/lib/band-copy','src/lib/band-copy.ts');
+   h.local('@/lib/pattern','src/lib/pattern.ts');
+   Object.assign(d['@/lib/purchases'],{billingStore:()=>'play'});
+   Object.assign(d['react-native-reanimated'],{ZoomIn:d['react-native-reanimated'].FadeInDown,useAnimatedProps:f=>f()});
+   Object.assign(d['react-native-reanimated'].Easing,{bezier:()=>value=>value});
+   d['react-native-safe-area-context'].useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});
+   d['@/components/ui/pattern-mosaic']={PatternMosaic:p=>jsx('PatternMosaic',p)};
+   d['@/components/ui/band/dial-limit']={DialLimit:p=>jsx('DialLimit',p)};
+   d['@/components/ui/band/status-bar']={StatusBar:p=>jsx('LimitBar',p)};
+   d['@/components/superwall-billing-context']={useWafraBilling:()=>({available:false,configured:false,configurationError:null,
+    fetchProOffers:async()=>[],purchasePro:async()=>'unavailable',restorePro:async()=>null})};
+   h.local('@/components/ui/band/e-button');
+   for(const name of ['e-motion','e-frame','e-welcome','e-name','e-goals','e-watch','e-reminders','e-first-payment','e-pattern','e-paywall','e-handoff'])h.local('@/components/onboarding/'+name);
+   for(const name of ['capture-checklist','ready-summary','sms-explainer'])h.local('@/components/onboarding/'+name);
+  }
   const file=screen==='onboarding'?'src/components/onboarding-gate.tsx':`src/app/${screen}.tsx`;
   const module=load(path.join(root,file),d,{process:{env:{EXPO_PUBLIC_WAFRA_E2E_DEMO:'1'}},__DEV__:false});
   return screen==='onboarding'?module.OnboardingGate({children:null,...props}):module.default(props);

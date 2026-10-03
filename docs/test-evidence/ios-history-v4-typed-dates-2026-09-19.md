@@ -207,13 +207,14 @@ history one was); it was installed from the production record `9a85d5f8…`
 of a real bank SMS through that automation has not yet been observed in this
 session.
 
-## Not verified here
+## Remaining qualification (reconciled 23 September)
 
-- No iPhone run of v4: build 150 does not contain the v4 intents, so the
-  signed v4 record cannot execute until the next TestFlight build. The first
-  device run must confirm that `StageWafraPagedRowIntent` receives exact
-  instants (seconds present in the saved cursor) and record the page timing.
+- The earlier build-150 restriction was superseded by the completed v4 phone
+  run recorded above (1,694 Messages, 262 matched alerts, about 17 minutes).
+  That result does not establish successful v6 import on the second, larger
+  inbox. A completed large-inbox v6 run is still not recorded here.
 - Per-message native calls are slower than a text frame; the legacy graph
   measured about 0.6 s per Message. v4 is built for correctness first.
-- The Apple Messages query and the Message automation for new transactions are
-  unchanged by this work.
+- v6 changed the query windows as described above. Live arrival through the
+  Message automation still needs physical proof; host tests and a manual
+  Shortcut run do not provide it.

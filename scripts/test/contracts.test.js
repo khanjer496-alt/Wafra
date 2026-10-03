@@ -29,6 +29,14 @@ function ok(name, cond, detail) {
 
 const ROOT = path.join(__dirname, '../..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+// Settings is two screens since the redesign: the main list and Data and help
+// (exports, backup, erase). Every Settings contract reads both together.
+const settingsSurface = () => read('src/app/settings.tsx') + '\n' + read('src/app/settings-data.tsx');
+// Pro is one checkout surface since design language E: the screen, the
+// checkout it shares verbatim with the in-context Pro sheet, and the shared
+// plan radios. Every Pro contract reads the three together.
+const proSurface = () => ['src/app/pro.tsx', 'src/hooks/use-pro-checkout.ts', 'src/components/pro/pro-plan-options.tsx']
+  .map(read).join('\n');
 /**
  * Source with its comments removed.
  *
@@ -169,7 +177,7 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     'modules/sms-reader/android/src/main/java/expo/modules/smsreader/SmsReaderModule.kt',
   ));
   const scanner = code(read('src/lib/auto-import.ts'));
-  const settings = code(read('src/app/settings.tsx'));
+  const settings = code(settingsSurface());
   ok('SMS delivery never writes a second raw-message buffer',
     !receiver.includes('putString(') && !receiver.includes('JSONObject(') &&
       receiver.includes('SensitiveMessageFilter.shouldReject(body)') &&
@@ -181,6 +189,15 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
       nativeModule.includes('InstantAlert.clear(context)') &&
       read('modules/sms-reader/android/src/main/java/expo/modules/smsreader/InstantAlert.kt')
         .includes('cancelAll()'));
+  const smsOnCreate = nativeModule.slice(nativeModule.indexOf('OnCreate {'),
+    nativeModule.indexOf('Function("getStartupCleanupDiagnostics")'));
+  ok('a failed legacy SMS cleanup never crashes startup and is recorded for diagnostics',
+    smsOnCreate.length > 0 && !smsOnCreate.includes('throw') &&
+      smsOnCreate.includes('legacyDeliveryBufferCleanupPending = try') &&
+      smsOnCreate.includes('staleCorpusCleanupPending = try') &&
+      smsOnCreate.includes('return@OnCreate') &&
+      /AsyncFunction\("getReceived"\)[\s\S]*?if \(!clearLegacyDeliveryBuffer\(context\)\) \{\s*throw/.test(nativeModule) &&
+      code(read('src/lib/android-tester-diagnostics.ts')).includes('getStartupCleanupDiagnostics?.()'));
   ok('incoming SMS permission is requested only for the optional instant banner',
     /requestSmsPermission\(\)[\s\S]*PermissionsAndroid\.request\(PermissionsAndroid\.PERMISSIONS\.READ_SMS\)/
       .test(scanner) &&
@@ -266,18 +283,25 @@ const quoted = (s) => [...s.matchAll(/'([^']+)'/g)].map((m) => m[1]);
     store.indexOf('val secretKey = key()') < store.indexOf('for (index in 0 until envelopes.length())') &&
       store.includes('catch (_: AEADBadTagException)') &&
       !/private fun decrypt[\s\S]*?catch \(_: Exception\)/.test(store));
+  const notificationOnCreate = nativeModule.slice(nativeModule.indexOf('OnCreate {'),
+    nativeModule.indexOf('OnDestroy {'));
+  ok('a failed legacy notification erase never crashes startup but still gates the queue',
+    !notificationOnCreate.includes('throw') &&
+      notificationOnCreate.includes('NotificationCaptureStore.purgeLegacyPlaintextAtStartup(context)') &&
+      /fun purgeLegacyPlaintextAtStartup[\s\S]*?catch \(_: Exception\)[\s\S]*?legacyCleanupPending = true/.test(store) &&
+      nativeModule.includes('"legacyCleanupPending" to NotificationCaptureStore.legacyCleanupPending') &&
+      (store.match(/^    purgeLegacyPlaintext\(context\)$/gm) || []).length >= 5);
   ok('the old plaintext notification preference is erased instead of migrated',
     store.includes('LEGACY_PREFS') && store.includes('legacy.edit().clear().commit()') &&
       store.includes('Legacy notification queue could not be erased') &&
       nativeModule.includes('OnCreate {') &&
-      nativeModule.includes('NotificationCaptureStore.purgeLegacyPlaintext(context)'));
+      nativeModule.includes('NotificationCaptureStore.purgeLegacyPlaintextAtStartup(context)'));
   ok('notification capture exposes separate read, acknowledge and erase operations',
     nativeModule.includes('AsyncFunction("getCaptured")') &&
       nativeModule.includes('AsyncFunction("ackCaptured")') &&
       nativeModule.includes('AsyncFunction("clearCaptured")'));
-  ok('notification rows are acknowledged only through the scan commit boundary',
-    scanner.includes('commit: notificationIds.size > 0') &&
-      scanner.includes('notificationReader.ackCaptured([...notificationIds])'));
+  // ACK ordering, partial admission and failed durability execute against the
+  // shipping scanner/executor in repair/capture-review-admission.test.cjs.
 }
 
 /* ── One definition of spending ───────────────────────────────────────── */
@@ -369,12 +393,12 @@ function ktSources(dir) {
  * prices beside it. Founder access is isolated to explicitly enabled native
  * test builds and never changes the store receipt. */
 {
-  const pro = fs.readFileSync(path.join(ROOT, 'src/app/pro.tsx'), 'utf8');
+  const pro = proSurface();
 
   ok('the paywall gives away no free unlock',
     !/onLongPress/.test(pro) && !/setPro\(next\)/.test(pro));
 
-  const settings = fs.readFileSync(path.join(ROOT, 'src/app/settings.tsx'), 'utf8');
+  const settings = settingsSurface();
   ok('Settings founder access cannot forge a store entitlement or reach production',
     !/\bsetPro\b/.test(settings) &&
       /isFounderUnlockBuild\(\)/.test(settings) &&
@@ -656,7 +680,7 @@ function ktSources(dir) {
   const store = read('src/lib/store.tsx');
   const ledgerImport = read('src/lib/ledger-import.ts');
   const capture = read('src/lib/capture.ts');
-  const settings = read('src/app/settings.tsx');
+  const settings = settingsSurface();
   const copy = read('src/lib/i18n.ts');
 
   ok('Private Mode is persisted as part of app state', /privateMode: boolean/.test(types));
@@ -690,24 +714,14 @@ function ktSources(dir) {
 /* ── relay acknowledgement follows encrypted durability ─────────────── */
 {
   const store = read('src/lib/store.tsx');
-  const executor = read('src/lib/capture-executor.ts');
-  const routineDurableAt = executor.indexOf('await receipt.durable');
-  const setupSlice = executor.slice(
-    executor.indexOf('const executeSetupVerification'),
-    executor.indexOf("return {\n    execute:"),
-  );
-  const setupDurableAt = setupSlice.indexOf("await activeLedger.importBatch(plan.batch).durable");
   ok('an import exposes an encrypted-write durability promise',
     /interface ImportReceipt[\s\S]*durable: Promise<void>/.test(store) &&
       /const next = dispatch\(action\)/.test(store) &&
       /persist\(next\)/.test(store));
-  ok('routine relay sync waits for SQLCipher before commit',
-    routineDurableAt > executor.indexOf('importBatch(collected.plan.batch)') &&
-      executor.indexOf('await collected.commit()', routineDurableAt) > routineDurableAt);
-  ok('setup test waits for SQLCipher before acknowledging',
-    setupDurableAt >= 0 &&
-      setupSlice.indexOf('await dependencies.acknowledge(cfg, queued.ids)', setupDurableAt) >
-        setupDurableAt);
+  // Actual setup/routine persistence failures and ACK ordering are exercised
+  // in relay.test.js and repair/capture-review-admission.test.cjs. Source
+  // spelling cannot prove async durability or selective acknowledgement.
+
 }
 
 /* ── iOS relay wakes the app without carrying financial data ───────── */
@@ -748,9 +762,7 @@ function ktSources(dir) {
         'await dependencies.acknowledge(cfg, acknowledge)',
         executor.indexOf('const executeBackground'),
       ));
-  ok('background sync reserves setup proof markers for the foreground verifier',
-    /const reserved = new Set\(queued\.testIds\)/.test(executor) &&
-      /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(executor));
+
   ok('only a parsed Messages-automation delivery records proof after durable storage',
     executor.indexOf('await background.stage(queued.parsed)') <
       executor.indexOf('await background.recordAutomationProof(cfg, marker)') &&
@@ -837,15 +849,14 @@ function ktSources(dir) {
 //
 // background-relay.ts got this right on its own; capture.ts and
 // supplement-imports.tsx did not, and neither failed any test. This is the
-// assertion that stops the fourth collector from repeating it.
+// behavior is exercised across executor intents in relay.test.js; these
+// checks retain the screen/adapter boundary assertions.
 {
-  const executor = read('src/lib/capture-executor.ts');
+  // Probe ownership across every executor intent is covered in relay.test.js.
   const capture = read('src/lib/capture.ts');
   const background = read('src/lib/background-relay.ts');
   const supplemental = read('src/components/supplement-imports.tsx');
-  ok('non-setup executor intents reserve setup probe ids',
-    /new Set\(queued\.testIds\)/.test(executor) &&
-      /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(executor));
+
   ok('the foreground collector still reserves setup probe ids internally',
     /new Set\(testIds\)/.test(capture) &&
       /ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(capture));
@@ -857,9 +868,7 @@ function ktSources(dir) {
       /if \(loadingConfig \|\| busy !== null\) return/.test(supplemental) &&
       supplemental.indexOf('const existing = await getRelayConfig()') <
         supplemental.indexOf('const connected = await pairDevice(DEFAULT_RELAY_URL)'));
-  const setupSlice = executor.slice(executor.indexOf('const executeSetupVerification'));
-  ok('the setup intent is still the one place that acknowledges probe ids',
-    /acknowledge\(cfg, queued\.ids\)/.test(setupSlice) && /testReceived/.test(setupSlice));
+
 }
 
 /* ── the staging queue is cleared by snapshot, never by key ──────────── */
@@ -915,8 +924,11 @@ function ktSources(dir) {
   ok('iOS setup shows the exact local Shortcut action with complete Received Message input',
     /<AutomationGuide/.test(setup) &&
       automationGuide.includes("'iosMessageGuideRunShortcut'") &&
-      /tf\(step, \{ shortcut: IOS_LOCAL_CAPTURE_SHORTCUT_NAME \}\)/.test(automationGuide) &&
-      /iosMessageGuideRunShortcut:\s*\{ en: 'Pick \{shortcut\} from the list \(not New Blank Automation\), then Done'/.test(copy));
+      /shortcutName = IOS_LOCAL_CAPTURE_SHORTCUT_NAME/.test(automationGuide) &&
+      /tf\(step, \{ shortcut: shortcutName \}\)/.test(automationGuide) &&
+      /iosMessageGuideRunShortcut:\s*\{ en: 'Pick \{shortcut\} from the list \(not New Blank Automation\)\. Tap Done if it appears\.'/.test(copy) &&
+      /iosMessageGuideImmediate:\s*\{ en: 'Choose Run Immediately, turn off Notify When Run if shown, then Next'/.test(copy) &&
+      /complete \*\*Received Message\*\*/.test(shortcutSpec));
   ok('the installed Shortcut uses Message input and a separate no-input setup proof',
     /accepts only Messages/.test(shortcutSpec) &&
       /run with no input invokes the native setup-proof action/.test(shortcutSpec));
@@ -930,7 +942,8 @@ function ktSources(dir) {
     !/(?:captured \|\| captureOn|iosTestLimit|refresh-proof|relay)/.test(
       `${setup}\n${setupWorkflow}`) &&
       /isCaptureTimestamp\(status\.firstCapturedAt\)/.test(setupWorkflow) &&
-      /setupProofVersion === 1/.test(setupWorkflow));
+      /requiredProofVersion = 1/.test(setupWorkflow) &&
+      /status\.setupProofVersion === requiredProofVersion/.test(setupWorkflow));
   const shortcutCallback = code(setupWorkflow.match(
     /case 'shortcut-callback':([\s\S]*?)case 'go-to-stage':/,
   )?.[1] ?? '').replace(/\s+/g, ' ').trim();
@@ -947,8 +960,10 @@ function ktSources(dir) {
     !/\b(?:Clipboard|setupCode|tokenPreview|sensitiveCopyPending|writeClipboard|credential)\b/.test(
       `${setup}\n${setupWorkflow}`));
   ok('the Message-object and setup instructions have first-class Arabic copy',
-    /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'اختر \{shortcut\} من القائمة \(وليس أتمتة جديدة فارغة\)، ثم تم'/.test(copy) &&
-      /أكملت الإعداد/.test(copy) &&
+    /iosMessageGuideRunShortcut:\s*\{ en: '[^']*', ar: 'اختر \{shortcut\} من القائمة \(وليس أتمتة جديدة فارغة\)\. اضغط «تم» إن ظهر\.'/.test(copy) &&
+      /iosMessageGuideImmediate:\s*\{ en: '[^']*', ar: 'اختر تشغيل فوراً، وأوقف الإشعار عند التشغيل إن ظهر، ثم اضغط التالي'/.test(copy) &&
+      /الإدخال: «الرسالة المستلمة» \(وليس «المحتوى» فقط\)/.test(copy) &&
+      /iosLocalAutomationAdded:[\s\S]{0,80}ar: 'فعّلتها'/.test(copy) &&
       /جهات الاتصال فقط/.test(copy) &&
       /معرّفات رسائل البنوك ليست جهات اتصال/.test(copy) &&
       /صف وفرة المحمي/.test(copy) &&
@@ -1073,11 +1088,16 @@ function ktSources(dir) {
   ok('Home rechecks Android permission as soon as onboarding enables capture',
     /\[\s*entitlementActive,[\s\S]{0,80}refreshCaptureStatus,[\s\S]{0,80}sharedAccessUnavailable,[\s\S]{0,80}state\.captureOptOut,[\s\S]{0,80}state\.hydrated,[\s\S]{0,80}state\.onboarded,[\s\S]{0,80}watchStatus,?\s*\]/
       .test(hook));
+  // The scan hook reads the whole store, so it lives in its own control and
+  // only that control re-renders on store updates, not the tab.
+  const refreshControl = read('src/components/capture-refresh-control.tsx');
+  ok('the capture refresh control runs the pull-to-refresh scan',
+    /usePullToRefresh\(\)/.test(refreshControl) &&
+      /<RefreshControl \{\.\.\.props\} refreshing=\{refreshing\} onRefresh=\{onRefresh\}/.test(refreshControl));
   for (const tab of ['bills', 'wallet', 'flow']) {
     const src = read(`src/app/(tabs)/${tab}.tsx`);
     ok(`${tab} can pull to refresh`,
-      /usePullToRefresh\(\)/.test(src) &&
-        /<RefreshControl refreshing=\{refreshing\} onRefresh=\{onRefresh\}/.test(src));
+      /refreshControl=\{\s*<CaptureRefreshControl /.test(src) && !/usePullToRefresh\(\)/.test(src));
   }
   // The tabs shell keeps the mount + foreground watch regardless of which tab
   // Android restores after an update. Home separately owns the visible status
@@ -1152,7 +1172,10 @@ function ktSources(dir) {
   // The other half of the same contract, in capture.ts: a zero watermark is
   // what turns the next scan into a full-history re-read.
   ok('a zero watermark reads the whole inbox, not just what is new',
-    /state\.lastScanTs <= 0\s*\?\s*0\s*:\s*state\.lastScanTs \+ 1/.test(read('src/lib/capture.ts')));
+    // (A parser release may reach back over the recent window instead, but
+    // only ever further back than lastScanTs + 1, never past zero's full read.)
+    /state\.lastScanTs <= 0\s*\?\s*0\s*:\s*(?:recentRereadDue\s*\?\s*Math\.min\(state\.lastScanTs \+ 1, recoveryFloor\)\s*:\s*)?state\.lastScanTs \+ 1/
+      .test(read('src/lib/capture.ts')));
   ok('the foreground watch re-runs when the ledger is wiped',
     /if \(!state\.hydrated\) return;/.test(hook) &&
       /Platform\.OS !== 'ios' && !state\.onboarded/.test(hook) &&
@@ -1178,7 +1201,7 @@ function ktSources(dir) {
   // wake has already parsed are in a SECOND one, with its own key, that
   // `stateStorage.destroy` has never heard of. The iOS confirmation says
   // "this iPhone's relay queue will be permanently deleted" — so it has to be.
-  const settings = read('src/app/settings.tsx');
+  const settings = settingsSurface();
   const staged = read('src/lib/background-relay-storage.native.ts');
   const ledger = read('src/lib/state-storage.native.ts');
   const nameOf = (src) => src.match(/const DATABASE_NAME = '([^']+)'/)?.[1];
@@ -1192,7 +1215,7 @@ function ktSources(dir) {
 }
 
 {
-  const settings = read('src/app/settings.tsx');
+  const settings = settingsSurface();
   const recovery = code(read('src/components/storage-recovery.tsx'));
   const store = read('src/lib/store.tsx');
   const copy = read('src/lib/i18n.ts');
@@ -1222,7 +1245,7 @@ function ktSources(dir) {
   const types = read('src/lib/types.ts');
   const store = code(read('src/lib/store.tsx'));
   const home = read('src/screens/ledger-home-screen.tsx');
-  const settingsSource = read('src/app/settings.tsx');
+  const settingsSource = settingsSurface();
   const settings = code(settingsSource);
   const recovery = code(read('src/components/storage-recovery.tsx'));
   const layout = code(read('src/components/app-root-layout.tsx'));
@@ -1460,7 +1483,7 @@ function ktSources(dir) {
       /٣٠ يوماً/.test(iosAccuracyCopy));
 
   const purchases = read('src/lib/purchases.ts');
-  const proScreen = read('src/app/pro.tsx');
+  const proScreen = proSurface();
   const proIosCopy = copy.match(
     /featAutoTrackingIosText:\s*\{[^\n]*\}/,
   )?.[0] || '';
@@ -1515,7 +1538,7 @@ function ktSources(dir) {
     `${picker}, ${current}, ${amount}, ${suggestions}, ${merchants}`);
   ok('the limit editor keeps shared footer actions and existing delete behavior',
     /const removeExisting = \(\) => \{[\s\S]*?deleteBudget\(existing\.category\);[\s\S]*?onClose\(\)/.test(sheet) &&
-      /footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('remove'\)\}[\s\S]*?variant="danger"[\s\S]*?<Button[\s\S]*?label=\{t\('saveLimit'\)\}[\s\S]*?disabled=\{!picked \|\| !limitFils\}/.test(sheet));
+      /footer=\{\([\s\S]*?<EButton[\s\S]*?label=\{t\('remove'\)\}[\s\S]*?onPress=\{removeExisting\}[\s\S]*?<EButton[\s\S]*?label=\{t\('saveLimit'\)\}[\s\S]*?disabled=\{!picked \|\| !limitFils\}/.test(sheet));
 }
 
 /* ── one card's obligation is decided in one place ──────────────────── */
@@ -1589,7 +1612,10 @@ function ktSources(dir) {
   // code would force that explanation to be deleted to stay green.
   const billsCode = bills.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
   ok('Bills agenda and detail use allocated remainder, never manual-only paid values',
-    /amountFils: remainingFils/.test(billsCode) && /due\.remainingFils/.test(billsCode) &&
+    // Recording a payment moved into the card's own payment sheet, which
+    // offers amounts from the same allocated remainder.
+    /amountFils: remainingFils/.test(billsCode) &&
+    /remainingFils: status\.remainingFils/.test(read('src/components/card-payment-sheet.tsx')) &&
     /<CardDetailSheet/.test(billsCode) && !/\bdue\.paidFils\b/.test(billsCode), billsCode.match(/\bdue\.paidFils\b/g));
 }
 
@@ -1628,10 +1654,12 @@ function ktSources(dir) {
   // who should be asked whether their new total counts transfers.
   //
   // 5 since periodComparison, which powers the "vs last month" line on Home.
+  // 7 since comparableSpend (the Compare headline) and dailySpendForMonth (the
+  // Spending calendar); both take live and internal and pass both through.
   const an = read('src/lib/analytics.ts');
   const calls = an.match(/isSpending\([^)]*\)/g) ?? [];
   ok('every analytics rollup applies both exclusions',
-    calls.length === 5 && calls.every((c) => c === 'isSpending(t, live, internal)'),
+    calls.length === 7 && calls.every((c) => c === 'isSpending(t, live, internal)'),
     calls.join(' | '));
 
   // The one insight that names a single row rather than a total. It sits on
@@ -1709,7 +1737,8 @@ for (const rel of ['src/app/cards.tsx']) {
   // AppState has to derive both sets and thread them through, or the merchant
   // it drops is the one on this list, not the one under test above.
   for (const [rel, callNeedle] of [
-    ['src/app/settings.tsx', 'reportExpenses(expenses,from,to,liveAccounts,internal)'],
+    // The expense report moved with the other exports to Settings → Data and help.
+    ['src/app/settings-data.tsx', 'reportExpenses(expenses,from,to,liveAccounts,internal)'],
     ["src/app/(tabs)/bills.tsx", 'detectSubscriptions(state.transactions,state.notSubscriptions,now,liveAccounts,internal)'],
     ['src/lib/leaving-soon.ts', 'detectSubscriptions(state.transactions,state.notSubscriptions,today,liveAccounts,internal)'],
     // The planning half of the reminder set moved out of notifications.ts into
@@ -1757,14 +1786,17 @@ ok('a period the user picked is not overwritten by that recompute',
 // for money that had just landed. The sign follows the type; the colour is
 // what separates earned from merely moved.
 const txRow = read('src/components/transaction-row.tsx');
-ok('the sign follows the direction of the money, not whether it counts as income',
-  /\{arrived \? '\+' : '−'\}/.test(txRow),
+// Confirmed repayments are unsigned; ordinary movements still follow direction.
+// Executed row/speech regressions also live in transaction-presentation.test.cjs.
+ok('ordinary movement signs follow direction; only confirmed repayments are unsigned',
+  /const arrived = transaction\.type === 'income';/.test(txRow) && /\{presentation\.repayment \? '' : arrived \? '\+' : '−'\}/.test(txRow),
   'an arriving transfer was rendered with a minus');
 ok('green is still reserved for money actually earned',
-  /color: isIncome \? theme\.income : theme\.text/.test(txRow),
+  /const amountColor = isIncome \? theme\.income : isTransfer \|\| pending \? theme\.textSecondary : theme\.text;/.test(txRow) &&
+    /color: amountColor/.test(txRow),
   'painting transfer arrivals green made the list read as income landing twice');
-ok('the spoken label agrees with the sign on screen',
-  /\$\{arrived \? t\('plusWord'/.test(txRow),
+ok('the spoken label matches the visible repayment exception and direction',
+  /\$\{presentation\.repayment \? '' : arrived \? t\('plusWord', language\) : t\('minusWord', language\)\}/.test(txRow),
   'a screen reader saying "minus" over a plus is worse than either alone');
 
 // ---------------------------------------------------------------------------
@@ -1892,7 +1924,7 @@ ok('the spoken label agrees with the sign on screen',
     'a bill dated next month was listed and totalled under it');
 
   ok('a merchant drill-down opens in the period the figure was read in',
-    /datePreset: source === 'sms' \? 'all' : 'selected'/.test(tx),
+    /datePreset: source === 'sms' \|\| accountFromLink \? 'all' : 'selected'/.test(tx) && !/merchantParam[^\n]*\? 'all'/.test(tx),
     'topMerchants is period-scoped; the drill-down was all-time');
 
   ok('a category or merchant drill-down is scoped to spending',
@@ -1996,7 +2028,7 @@ ok('the spoken label agrees with the sign on screen',
 /* ── a store that cannot be reached is not a customer who never paid ─── */
 {
   const provider = read('src/components/superwall-billing-provider.native.tsx');
-  const pro = read('src/app/pro.tsx');
+  const pro = proSurface();
   const strings = read('src/lib/i18n.ts');
 
   ok('restorePro keeps failure distinct from no active purchase',
@@ -2324,6 +2356,16 @@ ok('the spoken label agrees with the sign on screen',
   const reviewDraftModules = new Set([
     'unparsed-launch-alert.ts', 'parser-research.ts', 'universal-dates.ts',
     'universal-fields.ts', 'universal-money.ts', 'universal-types.ts',
+    // The on-device semantic layer sees deterministic spans only to replace
+    // them with typed placeholders before anything is embedded; it is a
+    // redactor, and its own contract below keeps it away from ledger writers.
+    'local-semantic-model.ts',
+    // Type-only: the AI gate's country-scoped currency aliases share the
+    // draft's alias-map type. Neither module writes the ledger.
+    'ai-alert-cues.ts',
+    // Per-user learned formats ground the confirmed amount on a draft money
+    // token; they store slot types and anchors only, never message text.
+    'learned-alert-formats.ts',
   ]);
   ok('drafts reach only the reviewed extraction modules and isolated research redactor',
     alertConsumers.length === reviewDraftModules.size &&
@@ -2346,14 +2388,32 @@ ok('the spoken label agrees with the sign on screen',
     'launch-alert-parser.ts',
     'universal-money.ts',
     'transfer-reconciliation.ts',
+    // Exponent-correct foreign originals and exact FX conversion.
+    'fx.ts',
+    // The unproven-format policy validates the principal amount's exponent.
+    'best-effort-autopost.ts',
+    // Any ISO purchase currency is read at its own exponent; outside the
+    // offline table it converts only with a dated rate or waits in Review.
+    'sms-parser.ts',
+    // The AI-reading gate checks a grounded amount's exponent; the cue module
+    // types its country-scoped aliases; learned formats re-check exponents.
+    'ai-alert-extractor.ts',
+    'ai-alert-cues.ts',
+    'learned-alert-formats.ts',
   ]);
   ok('ISO metadata is confined to currency routing, exact money and transfer evidence validation',
     metadataConsumers.length === extraMetadataConsumers.size && metadataConsumers.every((file) => extraMetadataConsumers.has(path.basename(file))),
     metadataConsumers.join(' | '));
-  const globalExtractor = read('src/lib/universal-parser.ts');
+  // The universal extractor reads market packs to inspect alerts; template
+  // certification reads them only to refuse a market-inconsistent currency;
+  // the money extractor reads only a routed pack's own transaction labels.
+  // None may write the ledger or reach the network.
+  const marketReviewModules = new Set(['universal-parser.ts', 'universal-template-certification.ts', 'universal-money.ts']);
+  const directWriterOrTransport = /(?:fetch\s*\(|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/;
   ok('global review semantics have no direct ledger writer or network transport',
-    marketReviewConsumers.length === 1 && marketReviewConsumers[0].endsWith(`${path.sep}universal-parser.ts`) &&
-    !/(?:fetch\s*\(|XMLHttpRequest|WebSocket|(?:from\s+|require\(\s*|import\(\s*)['"][^'"]*(?:store|import-plan|ledger-import))/.test(globalExtractor) &&
+    marketReviewConsumers.length === marketReviewModules.size &&
+    marketReviewConsumers.every((file) => marketReviewModules.has(path.basename(file)) &&
+      !directWriterOrTransport.test(fs.readFileSync(file, 'utf8'))) &&
     /decision: 'review' \| 'ignore'/.test(read('src/lib/universal-types.ts')),
     marketReviewConsumers.join(' | '));
 }

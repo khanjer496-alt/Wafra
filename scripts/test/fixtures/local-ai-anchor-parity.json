@@ -1,0 +1,45 @@
+{
+  "provenance": "Public app-owned exact shipped training anchors from benchmark-config.json used by original package-runtime-artifacts.py; parity diagnostic only, NOT held-out quality evidence.",
+  "anchors": [
+    [
+      "ask.help",
+      "What can you help me with?"
+    ],
+    [
+      "ask.spending.total.current-month",
+      "How much did I spend this month?"
+    ],
+    [
+      "ask.income.total.current-scope",
+      "How much income did I receive?"
+    ],
+    [
+      "ask.subscriptions.active",
+      "Show my active subscriptions."
+    ],
+    [
+      "ask.upcoming.default-window",
+      "What payments are due soon?"
+    ],
+    [
+      "ask.top-merchants.current-scope",
+      "Which merchants did I spend the most at?"
+    ],
+    [
+      "ask.top-categories.current-scope",
+      "Which spending categories are highest?"
+    ],
+    [
+      "ask.duplicates.current-scope",
+      "Was I charged twice for anything?"
+    ],
+    [
+      "ask.money-review.current-scope",
+      "Is there anything unusual in my spending?"
+    ],
+    [
+      "ask.data-coverage.current-scope",
+      "Is my transaction history complete?"
+    ]
+  ]
+}

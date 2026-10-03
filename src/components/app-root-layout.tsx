@@ -4,7 +4,7 @@ import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { AppState, Platform, StyleSheet, View } from 'react-native';
 
 import { LockGate } from '@/components/lock-gate';
 import { SuperwallBillingProvider } from '@/components/superwall-billing-provider';
@@ -19,15 +19,19 @@ import { PeriodProvider } from '@/lib/period-context';
 import { StoreProvider, useStore } from '@/lib/store';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import { marketCurrencyCode } from '@/lib/markets';
-// Required at module scope so expo-task-manager can load the wake-only relay
-// handler when iOS launches the JS bundle in the background.
+// index.js registers both tasks before Router for screenless native wakes.
+// These cached imports also retain registration when this layout is mounted
+// directly by a development or test harness.
 import '@/lib/background-relay';
-// Android SMS_RECEIVED / bank-app notification events can launch the JS bundle
-// without mounting a React tree. Register that short headless task at module
-// scope for the same reason the iOS relay handler above is registered here.
 import '@/lib/android-live-background';
 import { installFeedbackTransport } from '@/lib/feedback-transport';
 import { markLaunchPhase } from '@/lib/launch-performance';
+import { localSemanticBackgroundCancellation, setLocalSemanticAppActive } from '@/lib/local-semantic-background-policy';
+import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
+import { hydrateLocalSemanticInboxShadow } from '@/lib/local-semantic-inbox-shadow';
+import { LOCAL_SEMANTIC_E5_ENABLED } from '@/lib/local-semantic-flags';
+import { getLocalSemanticEncoder, purgeLocalSemanticArtifacts } from '@/lib/local-semantic-runtime';
+import { hydrateLocalSemanticShadow } from '@/lib/local-semantic-shadow';
 import { startRuntimePerformanceMonitor } from '@/lib/runtime-performance';
 
 // Installed once, at module load, before any screen can offer to send. The
@@ -56,6 +60,48 @@ installFeedbackTransport();
  */
 function Direction({ children }: { children: React.ReactNode }) {
   const { state } = useStore();
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!LOCAL_SEMANTIC_E5_ENABLED && state.hydrated) {
+      // Reclaim the E5 files earlier builds downloaded; nothing re-downloads them.
+      try { purgeLocalSemanticArtifacts(); } catch { /* optional cleanup */ }
+    }
+    let disposed = false;
+    let warmStarted = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onState = (next: string) => {
+      const active = next === 'active';
+      setLocalSemanticAppActive(active);
+      if (timer !== null) { clearTimeout(timer); timer = null; }
+      // E5 is off by default: no model download or session on install or
+      // launch. Only an explicit research build (EXPO_PUBLIC_WAFRA_LOCAL_E5=1)
+      // warms it; Ask Wafra and category suggestions use the platform model.
+      if (!LOCAL_SEMANTIC_E5_ENABLED || !active || !state.hydrated || warmStarted) return;
+      const cancelled = localSemanticBackgroundCancellation();
+      // Fonts and ledger hydration have completed; give the first screen a
+      // quiet turn before parsing the tokenizer or creating the native session.
+      timer = setTimeout(() => {
+        timer = null;
+        void waitForForegroundHistoryIdle().then(() => {
+          if (disposed || cancelled()) return;
+          warmStarted = true;
+          return getLocalSemanticEncoder({ background: true });
+        }).catch(() => {
+          if (!cancelled()) return;
+          warmStarted = false;
+          if (!disposed && AppState.currentState === 'active') onState('active');
+        });
+      }, 1500);
+    };
+    onState(AppState.currentState);
+    const listener = AppState.addEventListener('change', onState);
+    return () => {
+      disposed = true;
+      setLocalSemanticAppActive(false);
+      if (timer !== null) clearTimeout(timer);
+      listener.remove();
+    };
+  }, [state.hydrated]);
   const language = state.language === 'ar' ? 'ar' : 'en';
   const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId));
   return (
@@ -108,6 +154,14 @@ export default function RootLayout() {
   const ready = Platform.OS === 'web' || fontsLoaded || !!fontError;
 
   useEffect(() => startRuntimePerformanceMonitor(), []);
+
+  // Restore lightweight counters at launch. Optional native model preparation
+  // waits for fonts, ledger hydration and an idle navigation window in Direction.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    void hydrateLocalSemanticShadow().catch(() => undefined);
+    void hydrateLocalSemanticInboxShadow().catch(() => undefined);
+  }, []);
 
   // Ask the OS about Reduce Motion and the screen reader once, here, while
   // the fonts are still loading. Both answers are app-wide and asynchronous,
@@ -168,6 +222,7 @@ export default function RootLayout() {
               options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
             />
             <Stack.Screen name="transactions" options={{ animation: 'slide_from_right' }} />
+            <Stack.Screen name="transfers" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="stats" options={{ animation: 'slide_from_right' }} />
             <Stack.Screen name="recap" options={{ animation: 'fade' }} />
             <Stack.Screen name="import-sms" options={{ animation: 'slide_from_right' }} />
@@ -194,6 +249,8 @@ export default function RootLayout() {
                 a Stack.Screen for a deleted file is exactly the fileless-name
                 bug described above. */}
             <Stack.Screen name="ios-setup" options={{ animation: 'slide_from_right' }} />
+            {/* Home Screen widgets: previews and how to add them (Settings, Home's hint). */}
+            <Stack.Screen name="widgets" options={{ animation: 'slide_from_right' }} />
             {/* Reachable only from a hand-typed deep link; it must still look
                 like the app rather than like a crash. */}
             <Stack.Screen name="+not-found" options={{ animation: 'fade' }} />

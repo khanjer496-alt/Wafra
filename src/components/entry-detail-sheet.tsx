@@ -1,40 +1,64 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React, { useEffect, useState } from 'react';
-import { useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useRouter } from '@/hooks/use-app-router';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
-import { accountDisplayName, isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
-import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
+import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
+import { isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
+import { CategoryChips } from '@/components/ui/category-chips';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Button, Chip, Toggle } from '@/components/ui/controls';
+import { Toggle } from '@/components/ui/controls';
+import { BandFigure } from '@/components/ui/band/band-figure';
+import { EButton } from '@/components/ui/band/e-button';
 import { Icon } from '@/components/ui/icon';
 import { LabelTable } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { TextField } from '@/components/ui/text-field';
-import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { BandLayout, Fonts, Radius, Spacing, type BandId } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
+import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
-import { formatAmount, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
-import { formatOriginalCurrency } from '@/lib/fx';
+
+import { formatAmount, formatAmountForInput, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import { formatOriginalCurrency, originalMoneyOf } from '@/lib/fx';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
 import { useStore } from '@/lib/store';
 import { overrideAppliesTo } from '@/lib/uncategorised';
+import { entryDetailCopy } from '@/lib/reference-copy';
+import { transactionSource } from '@/lib/transaction-source';
+import { maskLedgerIdentifiers, transactionPresentation, transactionPresentationWords } from '@/lib/transaction-presentation';
 import { billAliasAppliesTo } from '@/lib/bill-alias';
 import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
+
+/**
+ * Which state the sheet opens in: reading the entry, choosing its category,
+ * or confirming it as a transfer (the row swipe actions open the last two).
+ */
+export type EntryDetailMode = 'read' | 'category' | 'transfer';
 
 interface EntryDetailSheetProps {
   /** The entry to show, or null to keep the sheet closed. */
   transaction: Transaction | null;
   onClose: () => void;
   showMerchantLink?: boolean;
+  /** Current ledger assessment for transfer-history presentation, never a saved decision. */
+  transferAssessment?: TransferAssessment;
+  initialMode?: EntryDetailMode;
+  /**
+   * The band of the screen it opens over (design language E): the sheet is
+   * that screen's sheet, lifted, and its Done button takes the band colour.
+   * Transactions and Home are ink.
+   */
+  band?: BandId;
 }
 
 /**
@@ -44,11 +68,15 @@ interface EntryDetailSheetProps {
  * row — "what actually was this?" — was answered by six input boxes. Reading
  * comes first now; editing is one tap away.
  */
-export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true }: EntryDetailSheetProps) {
+export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment, initialMode = 'read', band: bandId = 'home' }: EntryDetailSheetProps) {
+  const { getCategory, categoryLabel, expenseCategories, incomeCategories } = useCategoryCatalog();
   const router = useRouter();
   const theme = useTheme();
+  const band = useBand(bandId);
+  const language = useLanguage();
+  const extra = entryDetailCopy[language === 'ar' ? 'ar' : 'en'];
   const largeText = useLargeTextLayout();
-  const { state, editTransaction, deleteTransaction, setMerchantOverride, setBillAlias } = useStore();
+  const { state, editTransaction, deleteTransaction, resolveBestEffort, setMerchantOverride, setBillAlias } = useStore();
   const [editing, setEditing] = useState(false);
 
   const [title, setTitle] = useState('');
@@ -59,6 +87,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const [isTransfer, setIsTransfer] = useState(false);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingUndo, setConfirmingUndo] = useState(false);
   const [accountPickerOpen, setAccountPickerOpen] = useState(false);
   const [accountSearch, setAccountSearch] = useState('');
   /**
@@ -82,6 +111,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     category: CategoryId;
     count: number;
   } | null>(null);
+  // The category sheet state (a clear Cancel/Done choice) and the direct
+  // "Mark as transfer" confirmation. Declared after the older states.
+  const [categoryPicking, setCategoryPicking] = useState(false);
+  const [pickedCategory, setPickedCategory] = useState<CategoryId>('other');
+  const [confirmingTransfer, setConfirmingTransfer] = useState(false);
 
   useEffect(() => {
     if (!transaction) return;
@@ -89,6 +123,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     setConfirmingDelete(false);
     setRuleAsk(null);
     setBillRuleAsk(null);
+    setPickedCategory(transaction.category);
+    setCategoryPicking(initialMode === 'category');
+    setConfirmingTransfer(initialMode === 'transfer');
     setTitle(transaction.title);
     // The FULL amount, fils included. Seeding the field from the display
     // string — which hides the fils — meant opening an entry and saving any
@@ -96,7 +133,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     // was stamped userEdited, so no re-parse could ever heal it. Below a
     // dirham it was worse; 0.49 seeded "0", which fails validation, and the
     // entry could not be saved at all.
-    setAmountText(formatAmount(transaction.amountFils, { decimals: true }).replace(/,/g, ''));
+    setAmountText(formatAmountForInput(transaction.amountFils, { decimals: true }));
     setCategory(transaction.category);
     setAccountId(transaction.accountId);
     setDateText(transaction.date);
@@ -141,19 +178,25 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   if (!transaction) return null;
 
   const meta = getCategory(transaction.category);
-  const transferReview = isTransferCandidate(transaction);
+  const sourceKind = transactionSource(transaction);
+  const transferReview = isTransferCandidate(transaction) || transferAssessment !== undefined;
   const transferWords = transferReviewCopy();
-  const ownership = transferOwnership(transaction);
-  const confirmedTransfer = isLedgerTransfer(transaction);
+  const ownership = transferAssessment?.status === 'confirmed-own' ? 'own'
+    : transferAssessment?.status === 'confirmed-external' ? 'external'
+      : transferOwnership(transaction);
+  const confirmedTransfer = ownership === 'own' || isLedgerTransfer(transaction);
   const confirmedOwnTransfer = ownership === 'own';
+  const presentation = transactionPresentation(transaction, language, confirmedOwnTransfer);
+  const presentationWords = transactionPresentationWords(language);
   const pendingTransfer = !confirmedTransfer && isTransferCandidate(transaction) && ownership === 'unknown';
   const account = state.accounts.find((a) => a.id === transaction.accountId);
   const income = transaction.type === 'income';
-  const categories = income ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  const categories = income ? incomeCategories : expenseCategories;
 
   const amountFils = parseAmountToFils(amountText);
   const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(dateText);
-  const stamp = transaction ? fullDateTime(transaction) : '';
+  // PDF/CSV relay clocks are synthetic. Show the recorded date, not a fake time.
+  const stamp = fullDateTime(sourceKind === 'statement' ? { date: transaction.date } : transaction);
   const canSave = !!amountFils && !!title.trim() && dateValid;
 
   const save = () => {
@@ -169,6 +212,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       date: dateText,
       ...(!transferReview ? { isTransfer: isTransfer || undefined } : {}),
       ...(receiptAccountChanged ? { paymentInstrumentSource: 'user' as const } : {}),
+      // Saving a correction is the person checking the row.
+      ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
     });
     const merchant = title.trim();
     const billChanged = transaction.paymentFlowSide === 'receipt' && !!transaction.billIdentity &&
@@ -214,63 +259,182 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     onClose();
   };
 
-  const sourceLabel = transaction.source === 'sms' ? t('bankSmsSource') : t('addedByHand');
+  // The category sheet commits through the same edit and the same
+  // remember-for-merchant question as Save, with its future-only / update-all
+  // choice and the count of other entries it would move.
+  const cancelCategory = () => {
+    setCategoryPicking(false);
+    setPickedCategory(transaction.category);
+    if (initialMode === 'category') onClose();
+  };
+  const commitCategory = () => {
+    setCategoryPicking(false);
+    const next = pickedCategory;
+    if (next === transaction.category) {
+      if (initialMode === 'category') onClose();
+      return;
+    }
+    editTransaction(transaction.id, {
+      category: next,
+      ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
+    });
+    const merchant = transaction.title.trim();
+    if (transaction.paymentFlowSide === 'receipt' && transaction.billIdentity) {
+      setBillRuleAsk({
+        sourceTitle: transaction.title,
+        billIdentity: transaction.billIdentity,
+        title: merchant,
+        category: next,
+        count: state.transactions.filter((candidate) =>
+          candidate.id !== transaction.id &&
+          billAliasAppliesTo(candidate, transaction.title, transaction.billIdentity!)).length,
+      });
+      return;
+    }
+    if (merchant.length > 2) {
+      setRuleAsk({ merchant, category: next, type: transaction.type, count: countMerchantMatches(merchant, next) });
+      return;
+    }
+    onClose();
+  };
+  // The same flag the edit form's transfer toggle writes, after a confirm.
+  const markAsTransfer = () => {
+    editTransaction(transaction.id, {
+      isTransfer: true,
+      ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
+    });
+    onClose();
+  };
+
+  // A notification capture is stored with `source: 'sms'` and `viaPush`, so
+  // reading `source` alone called every bank-app alert an SMS. That is not
+  // cosmetic: which channel a row came from is the first thing anyone asks
+  // when a charge looks wrong, and the wrong answer sends them looking for a
+  // message their bank never sent.
+  const sourceLabel = sourceKind === 'notification' ? t('bankNotificationSource')
+    : sourceKind === 'bank-text' ? t('bankSmsSource')
+      : sourceKind === 'apple-pay' ? extra.applePay
+        : sourceKind === 'statement' ? transaction.captureSource === 'csv' ? extra.statementCsv : extra.statementPdf
+          : sourceKind === 'email' ? extra.bankEmail
+            : t('addedByHand');
+  // Marking a transfer directly is offered only where the edit form's toggle
+  // would be: not for rows the transfer review owns, not for transfers.
+  const canMarkTransfer = !transferReview && !confirmedTransfer && !pendingTransfer;
+  const originalMoney = originalMoneyOf(transaction);
   const fxSourceLabel =
     transaction.fxSource === 'bank'
       ? tf('bankQuotedRate', { currency: ledgerCurrencyCode() })
       : transaction.fxSource === 'reference' && transaction.fxRateDate
         ? tf('datedReferenceRate', { date: shortDate(transaction.fxRateDate) })
         : t('offlineFxEstimate');
+  // The original amount and the rate under the headline figure, labelled by
+  // where the rate came from (bank-stated, dated reference, or an estimate).
+  const fxLine = originalMoney && transaction.fxRate !== undefined
+    ? `${formatOriginalCurrency(originalMoney.minorUnits, originalMoney.currency, state.language === 'ar' ? 'ar' : 'en', originalMoney.exponent)} · ${tf('fxRateValue', {
+      from: originalMoney.currency,
+      to: ledgerCurrencyCode(),
+      rate: transaction.fxRate >= 0.01 ? transaction.fxRate.toFixed(4) : String(Number(transaction.fxRate.toPrecision(4))),
+      source: fxSourceLabel,
+    })}`
+    : null;
 
   return (
     <BottomSheet
       visible
       testID="entry-detail-sheet"
       onClose={onClose}
-      title={editing ? t('editEntry') : t('entryDetail')}
-      footer={editing ? (
+      title={categoryPicking ? t('category') : editing ? t('editEntry') : t('entryDetail')}
+      palette={band}
+      footer={categoryPicking ? (
           <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-            <Button inline={!largeText} wrapLabel label={t('saveChanges')} onPress={save} disabled={!canSave} />
-            <Button inline={!largeText} wrapLabel variant="outline" label={t('cancel')} onPress={() => setEditing(false)} />
+            <EButton palette={band} variant="secondary" label={t('cancel')} onPress={cancelCategory} style={styles.action} />
+            <EButton palette={band} label={extra.done} onPress={commitCategory} style={styles.action} />
+          </View>
+      ) : editing ? (
+          <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
+            <EButton palette={band} label={t('saveChanges')} onPress={save} disabled={!canSave} style={styles.action} />
+            <EButton palette={band} variant="secondary" label={t('cancel')} onPress={() => setEditing(false)} style={styles.action} />
           </View>
       ) : (
-          <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-            <Button inline={!largeText} wrapLabel label={t('editEntry')} onPress={() => setEditing(true)} />
-            <Button
-              inline={!largeText}
-              wrapLabel
-              variant="danger"
-              label={t('delete')}
-              onPress={() => setConfirmingDelete(true)}
-            />
+          <View style={styles.footerStack}>
+            {/* Reading an entry ends with Done; changing it is one step aside. */}
+            <EButton palette={band} label={extra.done} onPress={onClose} testID="entry-detail-done" />
+            <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
+              <EButton palette={band} variant="secondary" label={t('editEntry')} onPress={() => setEditing(true)} style={styles.action} />
+              <EButton palette={{ ...band, tint: band.statusOver }} variant="quiet" label={t('delete')}
+                onPress={() => setConfirmingDelete(true)} style={styles.action} />
+            </View>
           </View>
       )}>
-      <View style={[styles.head, { borderColor: theme.cardBorder }]}>
-        <MerchantAvatar title={transaction.title} category={transaction.category} size={52} />
-        <ThemedText type="heading" style={styles.headTitle} numberOfLines={2}>
-          {transaction.title}
-        </ThemedText>
-        <ThemedText type="meta" themeColor="textTertiary" style={styles.headDate}>
-          {friendlyDate(transaction.date, toISODate(new Date()))}
-        </ThemedText>
-        {/* Decimals on. This sheet exists to answer "what exactly was this",
-            and it sat above an edit field showing 72.73 while itself reading
-            −73. Lists round; the place you go to check does not. */}
+      {editing ? <View style={[styles.head, styles.editHead, { borderColor: band.rule }]}>
+        <ThemedText type="smallBold" style={styles.editHeadTitle}>{presentation.title}</ThemedText>
         <Money
           fils={transaction.amountFils}
-          type="sheetAmount"
-          sign={income ? 'plus' : 'minus'}
+          type="smallBold"
+          sign={presentation.sign}
           prefix
           decimals
-          color={income && !pendingTransfer && !confirmedTransfer ? theme.income : theme.text}
-          style={styles.headAmount}
+          color={income && !pendingTransfer && !confirmedTransfer ? theme.income : band.text}
+          style={styles.editHeadAmount}
         />
-      </View>
+      </View> : <View style={styles.head} testID="entry-detail-head">
+        <MerchantAvatar title={transaction.title} category={transaction.category} size={64} />
+        <ThemedText type="heading" style={styles.headTitle}>{presentation.title}</ThemedText>
+        {/* Decimals on. This sheet exists to answer "what exactly was this",
+            and it sat above an edit field showing 72.73 while itself reading
+            −73. Both the list and details now retain the exact minor units. */}
+        <BandFigure testID="entry-detail-amount" fils={transaction.amountFils} sign={presentation.sign} decimals
+          palette={band} size="hero" fitInset={8}
+          color={income && !pendingTransfer && !confirmedTransfer ? theme.income : band.text}
+          secondaryColor={band.textSecondary} style={styles.headAmount} />
+        <ThemedText type="meta" style={[styles.headDate, { color: band.textSecondary }]}>
+          {friendlyDate(transaction.date, toISODate(new Date()))}
+        </ThemedText>
+        {fxLine ? <ThemedText type="meta" tabular testID="entry-fx-line" style={[styles.fxLine, { color: band.textSecondary }]}>
+          {fxLine}</ThemedText> : null}
+      </View>}
+
+      {/* What it was, as chips: its category (opens the picker) and, where a
+          transfer is possible, Mark as transfer (asks first). */}
+      {!editing && !categoryPicking ? <View style={styles.chips} testID="entry-detail-chips">
+        {confirmedTransfer || pendingTransfer ? <View accessible accessibilityRole="text" style={[styles.chip, { backgroundColor: band.card, borderColor: band.rule }]}>
+          <Icon name="repeat" size={16} color={band.text} />
+          <ThemedText type="small" style={{ color: band.text }}>{presentation.repayment ? presentation.tag : pendingTransfer ? transferWords.ownershipUnknown
+            : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel')}</ThemedText>
+        </View> : <Pressable accessibilityRole="button" testID="entry-category-chip"
+          accessibilityLabel={`${t('category')}: ${categoryLabel(meta)}`}
+          onPress={() => { setPickedCategory(transaction.category); setCategoryPicking(true); }}
+          style={({ pressed }) => [styles.chip, { backgroundColor: band.fill, borderColor: band.fill, opacity: pressed ? 0.8 : 1 }]}>
+          <Icon name={meta.icon} size={16} color={band.onFill} />
+          <ThemedText type="smallBold" style={{ color: band.onFill }}>{categoryLabel(meta)}</ThemedText>
+        </Pressable>}
+        {canMarkTransfer ? <Pressable accessibilityRole="button" testID="entry-mark-transfer"
+          accessibilityLabel={extra.markTransfer}
+          onPress={() => setConfirmingTransfer(true)}
+          style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
+          <Icon name="repeat" size={16} color={band.text} />
+          <ThemedText type="small" style={{ color: band.text }}>{extra.markTransfer}</ThemedText>
+        </Pressable> : null}
+      </View> : null}
+
+      {categoryPicking ? (
+        <View style={styles.field} testID="entry-category-picker">
+          <ThemedText type="meta" themeColor="textTertiary">{extra.chooseCategory}</ThemedText>
+          <CategoryChips createType={income ? 'income' : 'expense'} categories={categories} selected={pickedCategory} onToggle={setPickedCategory} layout="wrap" />
+        </View>
+      ) : null}
+      {!categoryPicking && <>
+
+      {!editing && presentation.explanation ? <View testID="entry-purpose-explainer"
+        style={[styles.transferMeaning, { borderColor: band.rule, backgroundColor: band.card }]}>
+        <ThemedText type="smallBold">{presentation.note}</ThemedText>
+        <ThemedText type="small" themeColor="textSecondary">{presentation.explanation}</ThemedText>
+      </View> : null}
 
       {(confirmedOwnTransfer || pendingTransfer) && (
         <View
           testID={confirmedOwnTransfer ? 'own-transfer-explainer' : 'pending-transfer-explainer'}
-          style={[styles.transferMeaning, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
+          style={[styles.transferMeaning, { borderColor: band.rule, backgroundColor: band.card }]}>
           <ThemedText type="smallBold">
             {confirmedOwnTransfer ? transferWords.confirmedOwn : transferWords.ownershipUnknown}
           </ThemedText>
@@ -280,15 +444,31 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         </View>
       )}
 
+      {!editing && transaction.bestEffort && (
+        <View
+          testID="best-effort-check"
+          style={[styles.transferMeaning, { borderColor: band.rule, backgroundColor: band.card }]}>
+          <ThemedText type="smallBold">{t('autoAddedCheck')}</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">{t('autoAddedExplain')}</ThemedText>
+          <View style={[styles.actions, largeText && styles.actionsLarge]}>
+            <EButton palette={band} label={t('autoAddedLooksRight')} style={styles.action}
+              onPress={() => resolveBestEffort(transaction.id, 'confirm')} />
+            <EButton palette={band} variant="secondary" label={t('autoAddedUndo')} style={styles.action}
+              onPress={() => setConfirmingUndo(true)} />
+          </View>
+          <ThemedText type="meta" themeColor="textTertiary">{t('autoAddedUndoHint')}</ThemedText>
+        </View>
+      )}
+
       {transferReview && <View style={styles.field} testID="entry-transfer-review">
         {pendingTransfer && <ThemedText type="small" themeColor="textSecondary">{transferWords.noticeBody}</ThemedText>}
-        <Button variant="outline" wrapLabel label={transferWords.title} onPress={() => {
+        <EButton palette={band} variant="secondary" label={transferWords.title} onPress={() => {
           onClose();
           router.push({ pathname: '/review-transfers', params: { transactionId: transaction.id } });
         }} />
       </View>}
-      {!editing && showMerchantLink && !confirmedTransfer && !pendingTransfer && transaction.title.trim() &&
-        <MerchantSpendingLink merchant={transaction.title} type={transaction.type} onClose={onClose} />}
+      {!editing && showMerchantLink && !presentation.purposeUnclear && !confirmedTransfer && !pendingTransfer && !isMoneyMovementOnly(transaction) && transaction.title.trim() &&
+        <MerchantSpendingLink merchant={transaction.title} displayName={presentation.title} type={transaction.type} onClose={onClose} />}
       {isUnassignedIncome(transaction) && <ThemedText type="small" themeColor="textSecondary" testID="income-account-review">
         {t('incomeAccountReviewBody')}</ThemedText>}
 
@@ -361,16 +541,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
               <ThemedText type="meta" themeColor="textTertiary">
                 {t('category')}
               </ThemedText>
-              <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-                {categories.map((c) => (
-                  <Chip
-                    key={c.id}
-                    label={categoryLabel(c)}
-                    active={category === c.id}
-                    onPress={() => setCategory(c.id)}
-                  />
-                ))}
-              </ScrollView>
+              <CategoryChips createType={income ? 'income' : 'expense'} categories={categories} selected={category} onToggle={setCategory} layout="wrap" />
             </View>
           )}
 
@@ -425,21 +596,6 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           <LabelTable
             rows={[
               {
-                label: t('category'),
-                value: confirmedTransfer || pendingTransfer ? (
-                  <ThemedText type="small">{pendingTransfer ? transferWords.ownershipUnknown
-                    : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel')}</ThemedText>
-                ) : (
-                  <ThemedText
-                    type="small"
-                    accessibilityRole="button"
-                    onPress={() => setEditing(true)}
-                    style={{ color: theme.primary }}>
-                    {categoryLabel(meta)}
-                  </ThemedText>
-                ),
-              },
-              {
                 label: t('account'),
                 value: <ThemedText type="small">{account ? accountDisplayName(account) : t('unassigned')}</ThemedText>,
               },
@@ -447,48 +603,25 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
                 label: t('source'),
                 value: <ThemedText type="small">{sourceLabel}</ThemedText>,
               },
+              ...(presentation.recordedDescription ? [{
+                label: presentationWords.recordedDescription,
+                value: <ThemedText testID="entry-recorded-description" type="small" themeColor="textSecondary">{presentation.recordedDescription}</ThemedText>,
+              }] : []),
+              ...(presentation.tag && !confirmedTransfer && !pendingTransfer ? [{
+                label: presentationWords.kind,
+                value: <ThemedText type="small">{presentation.tag}</ThemedText>,
+              }] : []),
               {
                 label: t('transactionDateLabel'),
                 value: <ThemedText type="small">{stamp}</ThemedText>,
               },
-              ...(transaction.originalCurrency &&
-              transaction.originalAmountMinor !== undefined &&
-              transaction.fxRate !== undefined
-                ? [
-                    {
-                      label: t('originalAmount'),
-                      value: (
-                        <ThemedText type="small" tabular>
-                          {formatOriginalCurrency(
-                            transaction.originalAmountMinor,
-                            transaction.originalCurrency,
-                            state.language === 'ar' ? 'ar' : 'en',
-                          )}
-                        </ThemedText>
-                      ),
-                    },
-                    {
-                      label: t('exchangeRate'),
-                      value: (
-                        <ThemedText type="small" themeColor="textSecondary">
-                          {tf('fxRateValue', {
-                            from: transaction.originalCurrency,
-                            to: ledgerCurrencyCode(),
-                            rate: transaction.fxRate.toFixed(4),
-                            source: fxSourceLabel,
-                          })}
-                        </ThemedText>
-                      ),
-                    },
-                  ]
-                : []),
               ...(transaction.raw
                 ? [
                     {
                       label: t('retainedBankMessage'),
                       value: (
                         <ThemedText type="default" themeColor="textSecondary" style={styles.raw}>
-                          “{transaction.raw}”
+                          “{maskLedgerIdentifiers(transaction.raw)}”
                         </ThemedText>
                       ),
                     },
@@ -503,17 +636,40 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         </>
       )}
 
+      </>}
+
       {/* Both of these are nested inside this sheet rather than rendered beside
           it: a Modal presented from within the presented one stacks, where
           dismissing this sheet and presenting another in the same frame does
           not. Each is mounted only while it has something to ask, so the entry
           animation runs on every open. */}
+      {confirmingUndo && (
+        <ConfirmSheet
+          visible
+          onClose={() => setConfirmingUndo(false)}
+          question={t('autoAddedUndoConfirm')}
+          body={`${presentation.title} · ${formatAmount(transaction.amountFils)}. ${t('autoAddedUndoHint')}`}
+          confirmLabel={t('autoAddedUndo')}
+          destructive
+          onConfirm={() => { resolveBestEffort(transaction.id, 'undo'); onClose(); }}
+        />
+      )}
+      {confirmingTransfer && canMarkTransfer && (
+        <ConfirmSheet
+          visible
+          onClose={() => { setConfirmingTransfer(false); if (initialMode === 'transfer') onClose(); }}
+          question={extra.markTransferQuestion}
+          body={`${presentation.title} · ${formatAmount(transaction.amountFils)}. ${extra.markTransferBody}`}
+          confirmLabel={extra.markTransfer}
+          onConfirm={markAsTransfer}
+        />
+      )}
       {confirmingDelete && (
         <ConfirmSheet
           visible
           onClose={() => setConfirmingDelete(false)}
           question={t('deleteThisEntry')}
-          body={`${transaction.title} · ${formatAmount(transaction.amountFils)}`}
+          body={`${presentation.title} · ${formatAmount(transaction.amountFils)}`}
           confirmLabel={t('delete')}
           destructive
           onConfirm={removeEntry}
@@ -650,13 +806,15 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
 const styles = StyleSheet.create({
   head: {
     flexDirection: 'column',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 4,
     alignItems: 'center',
     gap: 4,
-    borderWidth: 1,
-    borderRadius: Radius.sheet,
   },
+  editHead: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.two, paddingHorizontal: 0,
+    paddingVertical: Spacing.two, alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
+  editHeadTitle: { flexShrink: 1 },
+  editHeadAmount: { alignSelf: 'center' },
   headTitle: {
     textAlign: 'center',
     marginTop: 8,
@@ -666,9 +824,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   headAmount: {
+    alignItems: 'center',
     alignSelf: 'center',
-    marginTop: 8,
+    marginTop: 2,
   },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: Spacing.two },
+  chip: {
+    minHeight: BandLayout.chipHeight, borderRadius: BandLayout.chipHeight / 2, paddingHorizontal: 14,
+    flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1,
+  },
+  fxLine: { textAlign: 'center' },
   field: {
     gap: Spacing.two,
   },
@@ -713,6 +878,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.two + 2,
   },
+  // Side by side the two buttons share the row; stacked they take its width.
+  action: { flexGrow: 1, flexBasis: 0, alignSelf: 'auto' },
+  footerStack: { gap: Spacing.two },
   raw: {
     fontSize: 12.5,
     lineHeight: 18,

@@ -16,6 +16,9 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/** One accepted posting's re-post identity: digests only, never text. */
+internal data class RepostReceipt(val core: String, val extra: String, val ts: Long)
+
 data class CapturedBankNotification(
   val id: String,
   val pkg: String,
@@ -43,6 +46,39 @@ object NotificationCaptureStore {
   private const val RETENTION_MS = 7L * 24 * 60 * 60 * 1000
   private const val VERSION = 1
 
+  /**
+   * A BANK APP RE-POSTING ONE ALERT IS NOT A SECOND CHARGE.
+   *
+   * Identity here used to be (package, post time) alone, and every other layer
+   * trusted it: the JS capture key for a notification is `s{postTime}-{amount}`
+   * and the ledger's cross-channel test only pairs a push with an SMS, never a
+   * push with a push. So when an issuer re-posted the same notification with a
+   * fresh postTime — FCM redelivering after a doze window, a background sync,
+   * or the app updating its own shade entry — nothing downstream could see the
+   * two copies as one event, and the charge was counted twice. ADCB is
+   * notification-only for some users, which makes this every alert they get.
+   *
+   * The content is an identity only when the bank includes an explicit
+   * transaction date and time. Without that clock, two equal purchases can
+   * legitimately produce identical text within minutes of each other.
+   *
+   * The identity is NotificationRepostIdentity's normalized essentials, not
+   * the raw bytes. A byte-exact hash of `pkg\0title\0text` let an ADCB
+   * alert that the bank re-posted three times reach the ledger twice: the
+   * listener's surface selection (BIG_TEXT/TEXT/vendor extras/composed body,
+   * whichever that copy's builder populated) and the title are not stable
+   * across copies of one posting, even when the shade shows the same words.
+   *
+   * THE WINDOW IS THE WHOLE SAFETY ARGUMENT and must stay short. Two genuinely
+   * identical charges — the same amount at the same merchant, worded the same
+   * way down to the balance — are a real thing, and beyond this window they
+   * must both survive. Thirty minutes covers redelivery and sync retries while
+   * leaving a repeat purchase later in the day untouched.
+   */
+  private const val REPOST_WINDOW_MS = 30L * 60 * 1000
+  private const val RECENT_CONTENT = "recent_content"
+  private const val MAX_RECENT_CONTENT = 200
+
   @Synchronized
   fun append(context: Context, pkg: String, title: String, text: String, ts: Long): String {
     // Recheck while holding the queue lock: an opt-out racing a callback must
@@ -51,12 +87,22 @@ object NotificationCaptureStore {
     purgeLegacyPlaintext(context)
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return "cleared-through"
-    if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) return "acknowledged"
+    val eventIdentity = repostReceipt(pkg, title, text, ts)
+    if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) {
+      // A shade sweep re-reading a posting that was already imported. Its
+      // receipt may predate this identity format (or have failed to
+      // persist); re-arm it so a re-post of the same alert is still caught.
+      eventIdentity?.let { ensureRecentContent(prefs, it) }
+      return "acknowledged"
+    }
     val current = readAll(context).filter { it.ts >= System.currentTimeMillis() - RETENTION_MS }
     val samePostedNotification = current.indexOfFirst { it.pkg == pkg && it.ts == ts }
     if (samePostedNotification >= 0) {
       val prior = current[samePostedNotification]
-      if (prior.title == title && prior.text == text) return "duplicate"
+      if (prior.title == title && prior.text == text) {
+        eventIdentity?.let { ensureRecentContent(prefs, it) }
+        return "duplicate"
+      }
       // A newer app version may learn how an OEM actually exposes the visible
       // body (for example ColorOS moved ADCB's amount out of EXTRA_TEXT). A
       // shade re-sweep must HEAL the retained encrypted row rather than append
@@ -64,7 +110,15 @@ object NotificationCaptureStore {
       val repaired = current.toMutableList()
       repaired[samePostedNotification] = prior.copy(title = title, text = text)
       writeAll(context, repaired.sortedBy { it.ts }.takeLast(MAX_ROWS))
+      eventIdentity?.let { recordRecentContent(prefs, it) }
       return "repaired"
+    }
+    // The re-post guard, which has to outlive the queue row itself: by the time
+    // an issuer redelivers, the first copy is normally drained and acknowledged
+    // and `current` is empty, so comparing against the queue alone would see
+    // nothing. Recent content receipts are the only record left of it.
+    if (eventIdentity != null && isRecentRepost(recentContent(prefs), eventIdentity)) {
+      return "repost"
     }
     val next = (current + CapturedBankNotification(
       id = UUID.randomUUID().toString(),
@@ -74,18 +128,23 @@ object NotificationCaptureStore {
       ts = ts,
     )).sortedBy { it.ts }.takeLast(MAX_ROWS)
     writeAll(context, next)
+    if (eventIdentity != null) recordRecentContent(prefs, eventIdentity)
     return "appended"
   }
 
   /** Source-free reason helper for admission diagnostics; never returns queue text. */
   @Synchronized
-  fun admissionBlockReason(context: Context, pkg: String, text: String, ts: Long): String? {
+  fun admissionBlockReason(context: Context, pkg: String, title: String, text: String, ts: Long): String? {
     if (!NotificationCapturePolicy.isEnabled(context)) return "policy"
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     if (ts <= prefs.getLong(CLEARED_THROUGH, 0L)) return "cleared-through"
     if (readAcked(prefs).contains(notificationFingerprint(pkg, ts))) return "acknowledged"
     return try {
-      if (readAll(context).any { it.pkg == pkg && it.text == text && it.ts == ts }) "duplicate" else null
+      if (readAll(context).any { it.pkg == pkg && it.text == text && it.ts == ts }) return "duplicate"
+      // Same test append() applies, so diagnostics name a suppressed re-post
+      // instead of reporting an admissible notification.
+      val eventIdentity = repostReceipt(pkg, title, text, ts)
+      if (eventIdentity != null && isRecentRepost(recentContent(prefs), eventIdentity)) "repost" else null
     } catch (_: Exception) {
       "store-error"
     }
@@ -161,21 +220,60 @@ object NotificationCaptureStore {
     val ok = prefs.edit()
       .remove(QUEUE)
       .remove(ACKED)
+      .remove(RECENT_CONTENT)
       .putLong(CLEARED_THROUGH, clearedThrough)
       .commit()
     if (!ok) throw IllegalStateException("Notification queue could not be cleared")
   }
+
+  /**
+   * Source-free diagnostic: the legacy plaintext preference is known to still
+   * exist because the last erase attempt failed. Cleared by the next success.
+   */
+  @Volatile var legacyCleanupPending: Boolean = false
+    private set
 
   @Synchronized
   fun purgeLegacyPlaintext(context: Context) {
     // Previous releases stored raw package/title/text JSON here. Never migrate
     // it through application memory; delete it before any v2 queue operation.
     val legacy = context.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE)
-    if (legacy.all.isEmpty()) return
+    // SharedPreferences clears its in-memory map BEFORE reporting a failed
+    // disk commit. After a failure, an empty map is not proof of erasure:
+    // force another synchronous write until durable cleanup succeeds.
+    if (!legacyCleanupPending && legacy.all.isEmpty()) {
+      legacyCleanupPending = false
+      return
+    }
+    // Set before editing so a thrown storage error also keeps the retry armed.
+    legacyCleanupPending = true
     if (!legacy.edit().clear().commit()) {
       throw IllegalStateException("Legacy notification queue could not be erased")
     }
+    legacyCleanupPending = false
   }
+
+  /**
+   * The module-load variant. Startup must never crash on this: a throw from an
+   * Expo module's OnCreate aborts the React host, and a commit that failed
+   * once tends to fail on every relaunch. Queue operations still call
+   * [purgeLegacyPlaintext] first and refuse to run until it succeeds, so the
+   * privacy guarantee — no v2 queue work alongside the plaintext archive — is
+   * unchanged; only the launch stops depending on it.
+   */
+  /** No context at module load: the erase was not verified, so report it pending until a queue operation runs it. */
+  fun recordStartupCleanupSkipped() {
+    legacyCleanupPending = true
+  }
+
+  fun purgeLegacyPlaintextAtStartup(context: Context): Boolean =
+    try {
+      purgeLegacyPlaintext(context)
+      true
+    } catch (_: Exception) {
+      legacyCleanupPending = true
+      false
+    }
 
   private fun readAll(context: Context): List<CapturedBankNotification> {
     val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(QUEUE, null)
@@ -238,6 +336,155 @@ object NotificationCaptureStore {
     val digest = MessageDigest.getInstance("SHA-256")
       .digest("$pkg\u0000$ts".toByteArray(Charsets.UTF_8))
     return Base64.encodeToString(digest, Base64.NO_WRAP or Base64.URL_SAFE)
+  }
+
+  /**
+   * The identity of what the issuer actually SHOWED, independent of when:
+   * NotificationRepostIdentity's normalized essentials (clock with seconds,
+   * money, card digits), not the raw title/text bytes, so the same posting
+   * delivered through a different builder or text surface still collides.
+   *
+   * Only the digest is ever retained, and it is retained encrypted like every
+   * other value in this store — the class invariant is that SharedPreferences
+   * holds opaque ids, IVs and ciphertext, and a bare hash of a bank alert
+   * would weaken it, since an attacker holding the file could confirm a
+   * guessed body by hashing it.
+   */
+  private fun repostReceipt(pkg: String, title: String, text: String, ts: Long): RepostReceipt? {
+    val identity = NotificationRepostIdentity.of(pkg, title, text) ?: return null
+    return RepostReceipt(digest(identity.core), identity.extra.takeIf { it.isNotEmpty() }?.let(::digest) ?: "", ts)
+  }
+
+  private fun digest(value: String): String {
+    val bytes = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+    return Base64.encodeToString(bytes, Base64.NO_WRAP or Base64.URL_SAFE)
+  }
+
+  /** The re-post test every admission path applies: same posting, inside the window. */
+  private fun isRecentRepost(recent: List<RepostReceipt>, candidate: RepostReceipt): Boolean =
+    recent.any {
+      NotificationRepostIdentity.samePosting(it.core, it.extra, candidate.core, candidate.extra) &&
+        kotlin.math.abs(it.ts - candidate.ts) <= REPOST_WINDOW_MS
+    }
+
+  /**
+   * Recent content receipts as (fingerprint, post time), already windowed.
+   *
+   * Every failure here returns an EMPTY list, which degrades to the old
+   * behaviour of letting the posting through. A KeyStore that will not open,
+   * ciphertext that will not authenticate and malformed JSON all mean the
+   * guard is missing — none of them is evidence that a charge is a duplicate,
+   * and refusing money on a storage error is the one outcome worse than a
+   * duplicate row.
+   */
+  private fun recentContent(prefs: android.content.SharedPreferences): List<RepostReceipt> {
+    val stored = prefs.getString(RECENT_CONTENT, null) ?: return emptyList()
+    val cutoff = System.currentTimeMillis() - REPOST_WINDOW_MS
+    return try {
+      val plaintext = decryptPayload(stored)
+      if (plaintext == null) {
+        // Unreadable receipts occupy the slot forever otherwise; the next
+        // append rewrites them from scratch.
+        prefs.edit().remove(RECENT_CONTENT).commit()
+        return emptyList()
+      }
+      val array = JSONArray(plaintext)
+      buildList {
+        for (index in 0 until array.length()) {
+          val value = array.optJSONObject(index) ?: continue
+          val fingerprint = value.optString("f")
+          val ts = value.optLong("t", 0L)
+          // Receipts written before the normalized identity have no "x" and
+          // a raw-byte "f" that no longer matches anything; they age out
+          // within the window.
+          if (fingerprint.isNotBlank() && ts >= cutoff) add(RepostReceipt(fingerprint, value.optString("x"), ts))
+        }
+      }
+    } catch (_: Exception) {
+      emptyList()
+    }
+  }
+
+  /**
+   * Remember that this content was accepted, so a later redelivery can be
+   * recognised once the queue row itself is drained.
+   *
+   * The caller has ALREADY committed the queue row, so this must never throw:
+   * a receipt that fails to persist costs the next re-post guard, while an
+   * exception escaping here would abort the listener's wake-up and strand a
+   * charge that is already stored.
+   */
+  private fun recordRecentContent(
+    prefs: android.content.SharedPreferences,
+    receipt: RepostReceipt,
+    recent: List<RepostReceipt>? = null,
+  ) {
+    try {
+      val retained = ((recent ?: recentContent(prefs)) + receipt)
+        .distinct().takeLast(MAX_RECENT_CONTENT)
+      val array = JSONArray()
+      retained.forEach {
+        val entry = JSONObject().put("f", it.core).put("t", it.ts)
+        if (it.extra.isNotEmpty()) entry.put("x", it.extra)
+        array.put(entry)
+      }
+      prefs.edit().putString(RECENT_CONTENT, encryptPayload(array.toString())).commit()
+    } catch (_: Exception) {
+      // Guard lost, charge kept.
+    }
+  }
+
+  /**
+   * Record [receipt] unless an equal one is already held. Used by the paths
+   * that re-see a posting (shade sweeps, repairs of an acknowledged row), so
+   * a still-visible alert keeps guarding against its own re-posts without a
+   * write on every sweep. Outside the window there is nothing to guard.
+   */
+  private fun ensureRecentContent(prefs: android.content.SharedPreferences, receipt: RepostReceipt) {
+    if (kotlin.math.abs(System.currentTimeMillis() - receipt.ts) > REPOST_WINDOW_MS) return
+    try {
+      val recent = recentContent(prefs)
+      if (recent.none { it.core == receipt.core && it.extra == receipt.extra && it.ts == receipt.ts }) {
+        recordRecentContent(prefs, receipt, recent)
+      }
+    } catch (_: Exception) {
+      // Guard lost, charge kept.
+    }
+  }
+
+  private fun encryptPayload(plaintext: String): String {
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, key())
+    return JSONObject()
+      .put("v", VERSION)
+      .put("iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+      .put("ct", Base64.encodeToString(
+        cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP,
+      ))
+      .toString()
+  }
+
+  private fun decryptPayload(stored: String): String? {
+    val envelope = try { JSONObject(stored) } catch (_: JSONException) { return null }
+    if (envelope.optInt("v") != VERSION) return null
+    val iv: ByteArray
+    val bytes: ByteArray
+    try {
+      iv = Base64.decode(envelope.getString("iv"), Base64.NO_WRAP)
+      bytes = Base64.decode(envelope.getString("ct"), Base64.NO_WRAP)
+    } catch (_: JSONException) {
+      return null
+    } catch (_: IllegalArgumentException) {
+      return null
+    }
+    if (iv.size != 12 || bytes.size < 16) return null
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
+    return try {
+      String(cipher.doFinal(bytes), Charsets.UTF_8)
+    } catch (_: AEADBadTagException) {
+      null
+    }
   }
 
   private fun encrypt(row: CapturedBankNotification, secretKey: SecretKey): JSONObject {

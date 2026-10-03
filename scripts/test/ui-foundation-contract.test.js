@@ -29,9 +29,20 @@ const modalOwners = sourceFiles()
   .filter((file) => fs.readFileSync(file, 'utf8').includes('<Modal'))
   .map((file) => path.relative(ROOT, file));
 assert.ok(modalOwners.includes('src/components/ui/bottom-sheet.tsx'));
+// The Erase confirmation is the one centred alert-style dialog (redesign
+// board iOS-EraseConfirm). It may own a Modal only because it carries the
+// same modal accessibility contract the bottom sheet does.
+const centredDialogs = ['src/app/settings-data.tsx'];
 assert.ok(modalOwners.every((relative) =>
   relative === 'src/components/ui/bottom-sheet.tsx' ||
-  relative === 'src/components/limit-sheet.tsx'));
+  relative === 'src/components/limit-sheet.tsx' ||
+  centredDialogs.includes(relative)), modalOwners.join(', '));
+for (const relative of centredDialogs) {
+  const dialog = read(relative);
+  assert.match(dialog, /accessibilityViewIsModal/, `${relative} dialog is modal to assistive tech`);
+  assert.match(dialog, /onAccessibilityEscape=\{onKeep\}/, `${relative} dialog closes on the escape gesture`);
+  assert.match(dialog, /onRequestClose=\{onKeep\}/, `${relative} dialog closes on Android back`);
+}
 
 for (const token of ['inverseSurface', 'inverseText', 'scrim']) {
   assert.equal(
@@ -95,7 +106,7 @@ assert.match(field, /accessibilityHint=\{resolvedHint\}/);
 assert.match(field, /'aria-labelledby': resolvedWebLabelledBy/);
 assert.match(field, /'aria-describedby': activeDescription \? descriptionId : undefined/);
 assert.match(field, /const hasError = invalid \|\| !!errorText/);
-assert.match(field, /borderColor: hasError \? theme\.expense : theme\.controlBorder/);
+assert.match(field, /borderColor: hasError \? theme\.expense : focused \? theme\.primary : theme\.controlBorder/);
 assert.match(field, /'aria-invalid': hasError/);
 assert.match(field, /Platform\.OS === 'web' \? webAriaProps : \{\}/);
 
@@ -153,7 +164,11 @@ assert.match(finalSheet, /onAccessibilityEscape=\{dismissible \? requestDismiss 
 assert.match(finalSheet, /backgroundColor: theme\.scrim/);
 assert.match(finalSheet, /testID=\{testID\}/);
 assert.match(finalSheet, /\{dismissible \? \([\s\S]*styles\.grabber/);
-assert.match(finalSheet, /\{dismissible \? \([\s\S]*accessibilityLabel=\{t\('close', language\)\}/);
+// The labelled close button renders only on a dismissible sheet: in the header
+// normally, on its own row above the title at the accessibility text sizes.
+assert.match(finalSheet, /const closeButton = \([\s\S]*accessibilityLabel=\{t\('close', language\)\}/);
+assert.match(finalSheet, /\{dismissible && !largeText \? closeButton : null\}/);
+assert.match(finalSheet, /\{dismissible && largeText \? <View style=\{styles\.closeRow\}>\{closeButton\}<\/View> : null\}/);
 assert.match(finalSheet, /close: \{[\s\S]*width: 44,[\s\S]*height: 44/);
 assert.match(finalSheet, /Platform\.OS === 'android' && styles\.androidClose/);
 assert.match(finalSheet, /androidClose: \{ width: 48, height: 48/);
@@ -165,8 +180,11 @@ assert.match(finalSheet, /const hasFooter = footer !== null && footer !== undefi
 assert.match(finalSheet, /paddingBottom: hasFooter \? 0 : bottomClearance/);
 assert.match(finalSheet, /styles\.footer[\s\S]*paddingBottom: bottomClearance/);
 const scrollEnd = finalSheet.indexOf('</ScrollView>');
-const footerStart = finalSheet.indexOf('{hasFooter ? (', scrollEnd);
+const footerStart = finalSheet.indexOf('{pinFooter ? footerNode : null}', scrollEnd);
 assert.ok(scrollEnd >= 0 && footerStart > scrollEnd, 'fixed footer must follow and sit outside the ScrollView');
+// Only at the accessibility text sizes does the footer scroll with the content.
+assert.match(finalSheet, /const pinFooter = hasFooter && !largeText;/);
+assert.match(finalSheet, /\{children\}\n\s+\{pinFooter \? null : footerNode\}\n\s+<\/ScrollView>/);
 assert.doesNotMatch(finalSheet, /footer \?/);
 
 const confirmSheet = read('src/components/ui/confirm-sheet.tsx');

@@ -17,21 +17,23 @@ async function visibleAction(button, page) {
 try {
   for (const theme of ['light', 'dark']) {
     const page = await browser.newPage({ viewport: { width: 390, height: 844 }, colorScheme: theme, reducedMotion: 'reduce' });
+    await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
     const routes = [
       ['home', '/'], ['spending', '/flow'], ['bills', '/bills'], ['accounts', '/wallet'],
       ['settings', '/settings'], ['capture-settings', '/settings?section=imports'],
-      ['privacy', '/settings?section=privacy'], ['data', '/settings?section=data'],
-      ['help', '/settings?section=help'], ['transactions', '/transactions'],
+      ['privacy', '/settings', 'settings-privacy'], ['data', '/settings-data', 'settings-data-your-data'],
+      ['help', '/settings-data', 'settings-data-help'], ['transactions', '/transactions'], ['transfers', '/transfers'],
       ['merchant', '/merchant?name=Talabat'], ['merchants', '/merchants'],
       ['add-transaction', '/add-transaction'], ['imports', '/import-sms'],
       ['review-alerts', '/review-alerts'], ['review-transfers', '/review-transfers'],
       ['categories', '/categorise'], ['accuracy', '/accuracy'], ['feedback', '/feedback'],
       ['currency', '/currency'], ['cards', '/cards'], ['trusted-devices', '/trusted-devices'],
     ];
-    for (const [name, route] of routes) {
+    for (const [name, route, target] of routes) {
       await page.goto(BASE + route, { waitUntil: 'networkidle' });
+      if (target) await page.getByTestId(target).scrollIntoViewIfNeeded();
       await page.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(100);
       const metrics = await page.evaluate(() => ({ width: innerWidth, scrollWidth: document.documentElement.scrollWidth, text: document.body.innerText.length }));

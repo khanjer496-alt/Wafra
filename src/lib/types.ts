@@ -8,7 +8,11 @@ export type TransactionType = 'expense' | 'income';
 /** How an automatically captured bank event reached the parser. */
 export type CaptureSource = 'shortcut' | 'email' | 'pdf' | 'csv';
 
+export type CustomCategoryId = `custom:${TransactionType}:${string}`;
+export interface CustomCategory { id: CustomCategoryId; name: string; type: TransactionType }
+
 export type CategoryId =
+  | CustomCategoryId
   | 'groceries'
   | 'dining'
   | 'transport'
@@ -81,6 +85,18 @@ export interface Account {
   creditLimitFils?: number;
   /** Timestamp (ms) of the SMS the snapshot came from — newest wins. */
   snapshotTs?: number;
+  /**
+   * The `snapshotTs` of a balance the user typed in themselves ("Set today's
+   * balance"), so the figure is labelled as theirs and never as a bank alert.
+   *
+   * Stored as a timestamp rather than an origin flag on purpose: the snapshot
+   * is the user's own only while `snapshotTs` still equals this value. A newer
+   * bank alert replaces `snapshotTs` through the import path, which knows
+   * nothing about this field, and the figure then reads as the bank's again
+   * without any writer having to remember to clear a flag. Absent on every
+   * account written before this existed, which is exactly "bank-reported".
+   */
+  manualSnapshotTs?: number;
   /** Hidden from lists (expired/unused card). Data stays; a new charge keeps it hidden until unhidden. */
   archived?: boolean;
   /**
@@ -102,6 +118,30 @@ export interface CaptureInstrument {
   bankIdentity?: string;
 }
 
+/**
+ * Provenance of a row added automatically from an UNPROVEN bank-alert format
+ * (anything other than the UAE/Saudi launch grammar or a certified template).
+ * Code-owned identifiers only; never message text. Cleared when the person
+ * confirms the row ("Looks right"). See best-effort-autopost.ts.
+ */
+export interface BestEffortMarker {
+  v: 1;
+  /** e.g. `universal:purchase:debit` or `semantic:refund:credit`. */
+  format: string;
+  /** Routed market or the user's country (ISO 3166-1 alpha-2), `ZZ` if unknown. */
+  market: string;
+}
+
+export interface StatementOccurrence {
+  importId: string;
+  rowIndex: number;
+  /** Original statement facts may differ from the live alert's posting facts. */
+  date?: string;
+  amountFils?: number;
+  type?: TransactionType;
+  title?: string;
+}
+
 export interface Transaction {
   /** Bounded bank evidence and explicit user choices, persisted with the encrypted row. */
   transferEvidence?: TransferEvidence;
@@ -111,17 +151,30 @@ export interface Transaction {
   type: TransactionType;
   /** Amount in fils, always positive. */
   amountFils: number;
-  /** Original bank-alert amount when the charge was denominated outside AED. */
+  /**
+   * Original amount when the charge was denominated outside the ledger
+   * currency, ALWAYS as two-decimal minor units (major × 100) whatever the
+   * currency — the legacy representation. Omitted on new rows whose exact
+   * amount it cannot hold (KWD 12.345). Read through fx.ts originalMoneyOf.
+   */
   originalAmountMinor?: number;
-  /** ISO 4217 code for `originalAmountMinor` (for example USD or EUR). */
+  /** ISO 4217 code of the original amount (for example USD or EUR). */
   originalCurrency?: string;
-  /** AED units per one unit of the original currency. */
+  /** Exact original amount in `originalExponent` minor units (JPY 1500 = 1500). */
+  originalMinorUnits?: number;
+  /**
+   * ISO exponent of `originalMinorUnits`. Its absence marks a legacy row whose
+   * only original figure is the two-decimal `originalAmountMinor`.
+   */
+  originalExponent?: 0 | 2 | 3;
+  /** Ledger-currency units per one unit of the original currency. */
   fxRate?: number;
   /** Effective date of a fetched reference rate. */
   fxRateDate?: string;
   /**
-   * `bank`: the alert included its own AED equivalent; `reference`: a dated
-   * public rate was fetched; `fallback`: parser used its offline approximation.
+   * `bank`: the alert stated the charged ledger-currency amount itself;
+   * `reference`: a dated public rate was fetched; `fallback`: parser used its
+   * offline approximation (AED/SAR parser only, revalued later).
    */
   fxSource?: 'bank' | 'reference' | 'fallback';
   category: CategoryId;
@@ -139,8 +192,21 @@ export interface Transaction {
    * fingerprint, which has always had the timestamp baked into it.
    */
   ts?: number;
+  /**
+   * The second-precision event clock the alert TEXT stated (epoch ms), when it
+   * stated exactly one — see capture-source-identity.ts alertTextClock.
+   *
+   * Unlike `ts`, which may be a provider/post time bound into an SMS source
+   * identity, this is the event's own identity: every re-post of one bank
+   * notification carries the same value, and two genuine identical purchases
+   * carry two. Absent on rows captured before it existed and on alerts that
+   * state no seconds; nothing may be inferred from its absence.
+   */
+  textClock?: number;
   /** Where this entry came from. Undefined = manual (pre-v2 data). */
   source?: 'sms' | 'manual';
+  /** Explicit claim created by Mark paid; removed when its expense is undone. */
+  billPayment?: { billId: string; month: string };
   /**
    * Fingerprint of the source SMS (timestamp + amount). Parser updates change
    * titles/accounts, so re-scans dedupe on this instead of parsed fields.
@@ -155,12 +221,52 @@ export interface Transaction {
    * beside it as a second charge.
    */
   viaPush?: boolean;
+  /** Local notification queue receipt, never a bank-event/deduplication identity. */
+  notificationObservationId?: string;
+  /**
+   * Opaque digest of the bank event the alert text stated to the second
+   * (dedupe.ts captureEventIdentity: bank, card, direction, amount, explicit
+   * clock with seconds, remaining money figures). Lets a re-posted bank-app
+   * notification, or the SMS about it, be recognised as the same event
+   * whenever it arrives. Absent on rows whose alert stated no such clock and
+   * on every row imported before it existed.
+   */
+  captureEventIdentity?: string;
+  /**
+   * An Apple Pay (Wallet) row the user confirmed ("Already recorded") is the
+   * same purchase as a bank Message, whose identity it now carries. It stays
+   * in the ten-minute possible-duplicate net for that purchase's other alerts
+   * and is never folded by amount/time heuristics.
+   */
+  walletBound?: true;
+  /**
+   * iOS live-queue UUID of a Message captured without Apple's GUID. Never a
+   * bank-event identity: it records that this row is one delivered Message,
+   * so dedupe never folds another live Message into it and binds it to at
+   * most one History copy.
+   */
+  messageObservationId?: string;
   /**
    * Structured ingest provenance. PDF/CSV identify statement rows whose event
    * time and merchant wording are intentionally coarser than a live capture.
    */
   captureSource?: CaptureSource;
+  /**
+   * Opaque relay id of the statement upload a PDF/CSV row came from (32 hex,
+   * random per upload, carries no content). Two rows of one upload are never
+   * duplicates of each other; rows of different uploads are matched
+   * one-to-one by day, amount, direction and account.
+   */
+  statementImportId?: string;
+  /** Stable occurrence within the source file, independent of delivery time. */
+  statementRowIndex?: number;
+  /** Durable one-to-one overlaps with other statement file occurrences (max 64). */
+  statementOccurrences?: StatementOccurrence[];
+  /** Canonical issuer stated by a PDF/CSV, retained even without account digits. */
+  statementBank?: string;
   captureInstrument?: CaptureInstrument;
+  /** Auto-added from an unproven alert format; shown as "Auto-added — check". */
+  bestEffort?: BestEffortMarker;
   /**
    * A card settlement can generate two bank alerts: money leaving the current
    * account and the card acknowledging receipt. Keeping the side lets import
@@ -269,6 +375,10 @@ export interface Bill {
   importIdentity?: string;
   /** Expected amount in fils. */
   amountFils: number;
+  /** A notice stated this total for this due date; other cycles remain estimates. */
+  statedDueDate?: string;
+  /** Original source observation time used to order corrections within a cycle. */
+  noticeObservedAt?: number;
   /** Day of month the bill is due (1–31). */
   dueDay: number;
   /**
@@ -325,6 +435,8 @@ export interface CardDue {
   paidFils: number;
   /** User-recorded payment time; allocation evidence, never proof that the current total is paid. */
   settledAt?: string;
+  /** The manual receipt owning settledAt, when that time was recorded with a transaction. */
+  settledByTransactionId?: string;
 }
 
 export interface Goal {
@@ -345,6 +457,23 @@ export interface Goal {
 export interface OnboardingPlanPreferences {
   goalIds: ('emergency' | 'travel' | 'home')[];
   budgetId: 'essentials' | 'balanced' | 'flexible';
+}
+
+/**
+ * What the person asked Wafra to do (onboarding E3, "What should Wafra do?").
+ * Not savings goals — those are `Goal`. No money, no provider identity: only
+ * these five code-owned ids. They shape the personal pattern and may order
+ * Home; nothing else reads them.
+ */
+export type GoalId = 'salary' | 'bills' | 'subscriptions' | 'spend-less' | 'cash-cards';
+export const GOAL_IDS: readonly GoalId[] = ['salary', 'bills', 'subscriptions', 'spend-less', 'cash-cards'];
+
+/** Known ids only, once each, in canonical order; anything else is dropped. */
+export function sanitizeGoalIds(value: unknown): GoalId[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const chosen = new Set(value.filter((item): item is GoalId =>
+    typeof item === 'string' && (GOAL_IDS as readonly string[]).includes(item)));
+  return GOAL_IDS.filter((id) => chosen.has(id));
 }
 
 /** What the person wants Wafra to make clearer first. No financial data. */
@@ -403,17 +532,24 @@ export interface OnboardingProfile {
   /** Optional for ledgers created before the alert-delivery step existed. */
   alerts?: OnboardingAlertDelivery | null;
   /**
-   * The country the user says they bank in, as an ISO 3166-1 alpha-2 code.
+   * The country the user picked while onboarding, as an ISO 3166-1 alpha-2
+   * code, kept so an interrupted setup resumes showing the same examples.
    *
-   * DISPLAY ONLY. It chooses which example banks and alert wording onboarding
-   * draws, and nothing else — it never selects a parser market pack, never
-   * pins `ledgerCurrency`, and never decides how a message is read. Those
-   * follow evidence from the alerts themselves, which is why a UAE resident
-   * whose phone is set to another country still parses as UAE.
+   * The authoritative setting is `AppState.country`, which the same picker
+   * writes. This copy never pins `ledgerCurrency` and never moves an AED/SAR
+   * ledger off its Gulf pack; alert evidence still decides which launch
+   * grammar reads a message.
    *
    * Absent means nobody has said, and the device locale is still the guess.
    */
   country?: string | null;
+  /**
+   * iPhone only: the statement step ("Bring in your past spending") is behind
+   * the user — they chose Later or opened the importer. That step and live
+   * capture share the `capture` stage, so without this a relaunch replayed
+   * the statement offer. Absent on older ledgers and on every other platform.
+   */
+  statementStepDone?: boolean;
   startedAt: number;
 }
 
@@ -636,6 +772,8 @@ export interface StatementCoverageEntry {
 }
 
 export interface AppState {
+  /** Private, ledger-local names; IDs contain no user text. */
+  customCategories?: CustomCategory[];
   hydrated: boolean;
   /** Accounting currency/exponent for every legacy `*Fils` integer; null only until one is chosen or imported. */
   ledgerMoney: LedgerMoneySpec | null;
@@ -653,6 +791,12 @@ export interface AppState {
   /** Structured statement date ranges already imported; files/passwords are never retained. */
   statementCoverage: StatementCoverageEntry[];
   goals: Goal[];
+  /**
+   * What the person asked Wafra to do (`GoalId`), from onboarding. Named apart
+   * from `goals`, which are savings goals with money in them. Optional: absent
+   * on every ledger written before it existed, and nothing requires it.
+   */
+  wafraGoals?: GoalId[];
   /** First-run plan waiting for a real ledger currency before activation. */
   onboardingPlan: OnboardingPlanPreferences | null;
   /** Source-free first-run choices and resume position. */
@@ -672,8 +816,20 @@ export interface AppState {
   accountHints: Record<string, string>;
   /** User-confirmed Google Play packages learned from notification Review. */
   trustedNotificationPackages: string[];
-  /** Merchants (lowercased) the user marked as NOT a subscription. */
+  /** Legacy provider or scoped service keys marked as NOT recurring. */
   notSubscriptions: string[];
+  /**
+   * Subscriptions the user told Wafra they cancelled: provider/service key →
+   * the ISO date they said so. Different from `notSubscriptions` (which says
+   * the pattern was never a subscription): a cancelled one IS a subscription
+   * that stopped, so it leaves upcoming renewals and monthly totals but keeps
+   * its history. A charge dated after the cancellation brings it back, since
+   * the bank then says it is still being paid. Optional so ledgers written
+   * before it existed need no migration.
+   * A scoped null overrides an inherited provider-wide cancellation for just
+   * that service. Legacy provider-wide keys keep their existing semantics.
+   */
+  cancelledSubscriptions?: Record<string, string | null>;
   /** Epoch ms of the newest SMS already scanned. */
   lastScanTs: number;
   /** Body-free, resumable progress for Android's first full history import. */
@@ -686,6 +842,17 @@ export interface AppState {
    * must be re-read; only an explicit backfill-version bump does.
    */
   parserVersion?: number;
+  /**
+   * Recent-window re-read receipt: the PARSER_VERSION whose bounded Android
+   * inbox re-read (capture.ts PARSER_RECOVERY_WINDOW_MS) completed.
+   *
+   * The routine scan starts after lastScanTs, so a message an older parser
+   * sent to Review or refused — and that Review then lost — was never read
+   * again, even by the parser that now reads it. Unlike parserVersion this is
+   * never a full-inbox migration: it re-evaluates only the last two weeks
+   * through the normal import pipeline, once per parser release.
+   */
+  recentRereadParserVersion?: number;
   /** Local saved-SMS repair receipt; separate from full-inbox parserVersion. */
   hydrationReparseKey?: string;
   /**
@@ -695,6 +862,12 @@ export interface AppState {
    * do not walk the entire ledger for maintenance that already persisted.
    */
   hydrationFinalizeVersion?: number;
+  /**
+   * Receipt for the one-time repair of stored rows a body-wide BNPL keyword
+   * filed as Loan (bnpl-category-repair.ts). Hydration trusts it; a backup
+   * restore always re-runs the idempotent repair instead.
+   */
+  bnplCategoryRepairVersion?: number;
   /**
    * Receipt proving the persisted transaction/account graph was normalized by
    * the current transfer matcher before it was saved. Missing/older values
@@ -729,6 +902,17 @@ export interface AppState {
    */
   captureOptOut: boolean;
   /**
+   * "Auto-add alerts from unverified bank formats". Undefined = ON (product
+   * default). OFF restores review-first for every unproven format; the
+   * UAE/Saudi launch grammar and certified templates are unaffected.
+   */
+  bestEffortAutoPost?: boolean;
+  /**
+   * Identities (smsKey / `t{timestamp}`) of auto-added rows the person undid.
+   * Bounded; rescans and history re-reads never re-add these alerts.
+   */
+  bestEffortUndone?: string[];
+  /**
    * Android source selection. Optional for legacy ledgers: absence means the
    * historical behavior (both sources allowed whenever captureOptOut=false).
    */
@@ -741,8 +925,21 @@ export interface AppState {
   dailySummary: boolean;
   /** Epoch ms when the free Pro trial started (first launch). */
   trialStartTs: number;
-  /** Market pack id (country). Auto-detected on first launch; user-changeable. */
+  /**
+   * Parser market pack: 'AE' or 'SA' (launch-tested grammars with bank
+   * registries) or 'ZZ' (the neutral pack every other country uses). NOT the
+   * user's country — see `country`. Follows the country, except that an
+   * AED/SAR ledger always keeps its Gulf pack, and alert evidence may move it
+   * between AE and SA.
+   */
   marketId: string;
+  /**
+   * The user's country (ISO 3166-1 alpha-2), or 'ZZ' when unknown. Defaults
+   * from the device Region; changeable in onboarding and Settings. Decides
+   * country conventions such as numeric date order. Optional only for ledgers
+   * written before it existed; hydration always fills it.
+   */
+  country?: string;
   /** UI language ('en' | 'ar'). Auto-detected on first launch. */
   language: string;
   /** Whether UI language follows the OS/app locale or is explicitly pinned. */
@@ -762,6 +959,8 @@ export interface AppState {
  * genuinely changed are present; an absent field is left alone.
  */
 export interface TxHealUpdate {
+  /** Technical source claims; never replaces a user-facing financial field. */
+  statementOccurrences?: StatementOccurrence[];
   /** Exact original Message proof for the reproduced transposed receipt date. */
   sourceDateCorrection?: {
     from: string;
@@ -774,6 +973,8 @@ export interface TxHealUpdate {
   };
   transferEvidence?: TransferEvidence;
   clearTransferEvidence?: true;
+  /** A proven reading of the same alert replaced the best-effort one. */
+  clearBestEffort?: true;
   id: string;
   title?: string;
   category?: CategoryId;
@@ -793,8 +994,12 @@ export interface TxHealUpdate {
   accountId?: string;
   /** Replace the push clock/fingerprint with the bank SMS identity. */
   ts?: number;
+  /** The replacing alert's own stated event clock; identity-only, like ts. */
+  textClock?: number;
   smsKey?: string;
   viaPush?: boolean;
+  /** Set by the strict Wallet binding: identity-only, like smsKey/ts. */
+  walletBound?: true;
   captureInstrument?: CaptureInstrument;
   cardPaymentSide?: 'debit' | 'receipt';
   paymentFlowSide?: 'funding' | 'receipt';
@@ -852,6 +1057,12 @@ export interface ImportBatchInput {
    * partial scan as migration proof permanently strands older messages.
    */
   parserRereadComplete?: boolean;
+  /**
+   * Set only by a collection that re-read the whole recent window for this
+   * parser (see AppState.recentRereadParserVersion); stamped atomically with
+   * the rows that re-read produced.
+   */
+  recentRereadParserVersion?: number;
   /** Applied atomically with this page so its cursor can never outrun its rows. */
   historyImport?: HistoryImportProgress;
   lastScanTs: number;

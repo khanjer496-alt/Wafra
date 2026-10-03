@@ -42,20 +42,32 @@ curl -sf "http://localhost:$PORT" >/dev/null || { echo "server never came up"; e
 
 node scripts/e2e/e2e-diagnostic-export.mjs
 node scripts/e2e/e2e-transaction-ui.mjs
+node scripts/e2e/e2e-custom-categories.mjs
 node scripts/e2e/e2e-ui-cleanup.mjs
 node scripts/e2e/e2e-home-cashflow.mjs
+node scripts/e2e/e2e-home-pattern.mjs
+node scripts/e2e/e2e-home-layout.mjs
 node scripts/e2e/e2e-merchant-spending.mjs
 node scripts/e2e/e2e-merchant-entrypoints.mjs
 node scripts/e2e/e2e-smoke.mjs
 node scripts/e2e/e2e-period.mjs
+node scripts/e2e/e2e-spending-period-details.mjs
+node scripts/e2e/e2e-card-activity.mjs
+node scripts/e2e/e2e-recurring-services.mjs
+node scripts/e2e/e2e-statement-import.mjs
 node scripts/e2e/e2e-assistant.mjs
 node scripts/e2e/e2e-assistant-analysis.mjs
+node scripts/e2e/e2e-large-ledger.mjs
 node scripts/e2e/e2e-persist.mjs
+node scripts/e2e/e2e-backup-restore.mjs
 node scripts/e2e/e2e-navigation.mjs
+node scripts/e2e/e2e-repeat-navigation.mjs
 
 node scripts/e2e/e2e-universal-review.mjs
 node scripts/e2e/e2e-transfer-review.mjs
+node scripts/e2e/e2e-transfer-batch.mjs
 node scripts/e2e/e2e-redesign.mjs
 node scripts/e2e/e2e-merchant-logos.mjs
 
 node scripts/e2e/e2e-onboarding.mjs
+node scripts/e2e/e2e-ios-setup-videos.mjs

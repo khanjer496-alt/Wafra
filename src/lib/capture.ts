@@ -37,11 +37,17 @@ import {
   isRelayRevokedError,
   syncRelay,
 } from '@/lib/relay';
-import { PARSER_BACKFILL_VERSION } from '@/lib/sms-parser';
+import { PARSER_BACKFILL_VERSION, PARSER_VERSION } from '@/lib/sms-parser';
 import type { ReviewEntry } from '@/lib/alert-review-tray';
-import { collectLegacyReviewSourceKeys, type ReviewSourceBinding } from '@/lib/review-source-bindings';
+import {
+  collectLegacyReviewSourceKeys,
+  withoutRecordedReviews,
+  type ReviewSourceBinding,
+} from '@/lib/review-source-bindings';
 import type { AppState } from '@/lib/types';
 import type { HistoryImportProgress } from '@/lib/history-import';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
+import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 
 export type CaptureSource = 'sms' | 'push' | 'relay' | 'none';
 
@@ -72,11 +78,20 @@ export interface CaptureResult {
   historicalReread?: boolean;
   /** Hand an incomplete parser migration to the existing resumable owner. */
   historyImport?: HistoryImportProgress;
+  /**
+   * PARSER_VERSION whose recent-window re-read this collection completed; the
+   * executor stamps it with the batch. See PARSER_RECOVERY_WINDOW_MS.
+   */
+  recentRereadParserVersion?: number;
   /** Strong per-alert evidence for the launch-tested UAE/Saudi parser pack. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
   source: CaptureSource;
   /** Acknowledge collected rows. Safe to call when there is nothing to ack. */
-  commit: () => Promise<void>;
+  commit: (deferredReviewSourceKeys?: readonly string[]) => Promise<void>;
+  /** Inbox review evidence omitted by bounded collection must be re-read. */
+  deferredInboxReviews?: boolean;
+  /** Inbox reviews omitted through a claim that must survive cursor completion. */
+  skippedKnownInboxReviewSourceKeys?: readonly string[];
   /** Native queue rows need a durability flush even when planning is a no-op. */
   requiresDurableCommit?: boolean;
   /**
@@ -88,6 +103,27 @@ export interface CaptureResult {
 }
 
 const NOOP = async () => {};
+
+/**
+ * How far back the one-time re-read after a parser release reaches.
+ *
+ * The routine Android scan starts after lastScanTs, so every message is parsed
+ * exactly once, by whichever parser was installed when it arrived. When that
+ * parser sent it to Review and Review lost it, or refused it outright, nothing
+ * ever read it again: an owner's salary credit, routed to Review by the older
+ * parser and absent from both Review and the ledger, was still missing after
+ * installing v54, which reads it as Salary, because the cursor was past it.
+ *
+ * So the first scan under a new PARSER_VERSION reaches back this far instead
+ * of to lastScanTs, through the normal pipeline: rows already in the ledger
+ * match their exact source identity (and the cross-channel guard), Review
+ * decisions keep their tombstones, and only messages with no outcome at all
+ * are added. Two weeks is a few hundred messages at most, so it stays cheap on
+ * a years-long inbox; a full-history repair remains PARSER_BACKFILL_VERSION's
+ * job. It also covers a message a stale cursor skipped.
+ */
+export const PARSER_RECOVERY_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+
 
 const iosCaptureStatusListeners = new Set<() => void>();
 const iosCaptureEntitlementResetListeners = new Set<() => void>();
@@ -312,7 +348,7 @@ function relayLaunchMarket(
  */
 export async function collectNewMessages(
   state: AppState,
-  options: { notificationOnly?: boolean } = {},
+  options: { notificationOnly?: boolean; knownReviewSourceKeys?: readonly string[] } = {},
 ): Promise<CaptureResult> {
   // An Android runtime permission can remain granted after the user turns
   // capture off inside Wafra, so the durable app preference must stop before
@@ -335,9 +371,16 @@ export async function collectNewMessages(
     // one is present. Keep routine foreground capture incremental so it does
     // not race the history coordinator through the same inbox.
     const fullHistoricalReread = reread && state.historyImport == null;
+    // Once per parser release, reach back over the recent window (see
+    // PARSER_RECOVERY_WINDOW_MS). A full-history read covers it anyway.
+    const recoveryFloor = Math.max(0, Date.now() - PARSER_RECOVERY_WINDOW_MS);
+    const recentRereadDue = !notificationOnly &&
+      (state.recentRereadParserVersion ?? 0) < PARSER_VERSION;
     const sinceMs = notificationOnly || fullHistoricalReread || state.lastScanTs <= 0
       ? 0
-      : state.lastScanTs + 1;
+      : recentRereadDue
+        ? Math.min(state.lastScanTs + 1, recoveryFloor)
+        : state.lastScanTs + 1;
     // `declined` is the other half of that re-read. A decline the old parser
     // booked as an expense cannot be healed into anything — the money never
     // moved — so the row has to be retired, and the proof is the message
@@ -345,7 +388,9 @@ export async function collectNewMessages(
     // only place that proof exists. The default covers a stubbed scanInbox.
     const {
       parsed,
-      reviewCandidates = [],
+      reviewCandidates: scannedReviewCandidates = [],
+      deferredInboxReviews,
+      skippedKnownInboxReviewSourceKeys,
       reviewSourceBindings = [],
       declined = [],
       newestTs,
@@ -359,7 +404,7 @@ export async function collectNewMessages(
     } = await scanInbox(
       sinceMs,
       state.merchantOverrides,
-      undefined, undefined, { legacyReviewSourceKeys: collectLegacyReviewSourceKeys(state),
+      undefined, undefined, { legacyReviewSourceKeys: measureRuntimeOperation('capture-source-keys', () => collectLegacyReviewSourceKeys(state)),
         // The first page brings newest activity forward. Older pages belong
         // to the durable, resumable history coordinator, not one giant refresh.
         maxInboxPages: fullHistoricalReread ? 1 : undefined,
@@ -368,6 +413,7 @@ export async function collectNewMessages(
         // it just yields between 128-row provider reads.
         pageSize: 128,
         notificationOnly,
+        knownReviewSourceKeys: options.knownReviewSourceKeys,
         learnedNotificationPackages: state.trustedNotificationPackages },
     );
     // A parser migration is only complete when Android actually yielded the
@@ -376,6 +422,12 @@ export async function collectNewMessages(
     // that a successful zero-change scan stamps the backfill receipt and strands all
     // older Fishbasket/Fbinter/Nazemhome receipts forever. An established SMS
     // ledger proves that zero rows is not a credible full-history result.
+    // A re-read meets messages the ledger already booked. When the current
+    // parser would park one of those in Review, the ledger row IS its outcome;
+    // offering it again invites the same money to be added twice.
+    const reviewCandidates = recentRereadDue
+      ? withoutRecordedReviews(scannedReviewCandidates, state.transactions)
+      : scannedReviewCandidates;
     const hasStoredInboxHistory = state.transactions.some(
       (row) => row.source === 'sms' && row.viaPush !== true,
     );
@@ -397,6 +449,8 @@ export async function collectNewMessages(
     return {
       parsed,
       reviewCandidates,
+      deferredInboxReviews,
+      skippedKnownInboxReviewSourceKeys,
       reviewSourceBindings,
       declined,
       // Push rows carry their own event timestamp. Never use them to skip SMS
@@ -405,6 +459,10 @@ export async function collectNewMessages(
       inboxScannedCount,
       scannedCount,
       historicalReread: fullHistoricalReread && inboxHistoryComplete,
+      // Only a read that started at or before the window floor and reached its
+      // end proves the window was re-evaluated by this parser.
+      ...(recentRereadDue && sinceMs <= recoveryFloor && inboxHistoryComplete
+        ? { recentRereadParserVersion: PARSER_VERSION } : {}),
       ...(fullHistoricalReread && !inboxHistoryComplete && nextCursor ? { historyImport: {
         status: 'paused' as const, cursor: nextCursor, scanned: scannedCount,
         found: parsed.length + reviewCandidates.length, startedAt: migrationTime,
@@ -472,7 +530,7 @@ export async function collectNewMessages(
       throw error;
     });
     if (!queued) return stagedOnly();
-    const { parsed, reviewCandidates = [], ids, testIds } = queued;
+    const { parsed, reviewCandidates = [], ids, testIds, reviewIds = [], reviewSourceKeysById } = queued;
     const collected = [...staged.rows, ...parsed];
     const detectedLaunchMarket = relayLaunchMarket(collected, cfg.market);
     const newestTs = collected.reduce((max, p) => Math.max(max, p.smsTs ?? 0), state.lastScanTs);
@@ -484,7 +542,7 @@ export async function collectNewMessages(
       newestTs,
       detectedLaunchMarket,
       source: 'relay',
-      commit: async () => {
+      commit: async (deferredReviewSourceKeys = []) => {
         // The setup probe is addressed to /ios-setup and to nobody else.
         // syncRelay() reports its id in BOTH `ids` and `testIds` — it does have
         // to be acknowledged eventually, but only by the screen that is polling
@@ -496,6 +554,17 @@ export async function collectNewMessages(
         // extended the block. background-relay.ts reserves these ids the same
         // way; this is the second of the three collectors, not a special case.
         const reserved = new Set(testIds);
+        if (deferredReviewSourceKeys.length > 0) {
+          const deferred = new Set(deferredReviewSourceKeys.map(key => canonicalCaptureSourceKey(key)));
+          const reviewsBySource = new Map(reviewCandidates.map(item => [item.sourceKey, item]));
+          for (const id of reviewIds) {
+            const sourceKey = reviewSourceKeysById?.get(id);
+            const review = sourceKey ? reviewsBySource.get(sourceKey) : undefined;
+            // An older adapter without identity mapping cannot prove which
+            // review was retained. Keep those sealed rows for a safe retry.
+            if (!sourceKey || !review || deferred.has(canonicalCaptureSourceKey(sourceKey, review.observedAt))) reserved.add(id);
+          }
+        }
         const acknowledge = ids.filter((id) => !reserved.has(id));
         if (acknowledge.length > 0) await ackRelay(cfg, acknowledge);
         await clearStagedRows(staged.snapshot);

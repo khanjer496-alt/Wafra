@@ -15,9 +15,9 @@ const STEPS: readonly StringKey[] = [
 ];
 
 /** A compact visual checklist, not a simulated Apple UI or an install proof. */
-export function AutomationGuide() {
+export function AutomationGuide({ shortcutName = IOS_LOCAL_CAPTURE_SHORTCUT_NAME }: { shortcutName?: string } = {}) {
   const theme = useTheme();
-  const stepLabel = (step: StringKey) => tf(step, { shortcut: IOS_LOCAL_CAPTURE_SHORTCUT_NAME });
+  const stepLabel = (step: StringKey) => tf(step, { shortcut: shortcutName });
   return (
     <View style={styles.guide}>
       <ThemedText type="smallBold">{t('iosMessageGuideTitle')}</ThemedText>

@@ -113,7 +113,7 @@ const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$
  */
 async function tapPeriod(page, periodText, settle = 1200) {
   const name = new RegExp(
-    `^(?:Reporting period:\\s*)?${escapeRegex(periodText)}(?:\\.\\s*Tap to change\\.)?$`,
+    `^(?:(?:Reporting period:|Choose period,)\\s*)?${escapeRegex(periodText)}(?:\\.\\s*Tap to change\\.)?$`,
     'i',
   );
   const deadline = Date.now() + 8000;
@@ -140,6 +140,7 @@ const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
 const page = await browser.newPage({ viewport: { width: 412, height: 915 } });
+await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 
@@ -173,7 +174,8 @@ ok('home: past month applies beside the hero',
 // 3) Spending follows the same period.
 await tapTab(page, 'Spending');
 ok('spending: pill carries the selected month', !!(await visibleText(page, shortMonth(-1))));
-ok('spending: summary rail states total spending', !!(await visibleText(page, /^Total spent$/i)));
+ok('spending: band states total spending for the selected period',
+  await page.getByTestId('spending-total').isVisible() && /AED\s*[\d,]+/.test(await page.getByTestId('spending-total').innerText()));
 
 // 4) All time from Spending's own pill.
 await tapPeriod(page, monthPeriod(-1), 1200);
@@ -196,7 +198,7 @@ await tapLabel(page, 'Back', 1200);
 await page.getByTestId('home-spending-total').click();
 await page.waitForTimeout(1000);
 ok('Home spending opens the category breakdown', /\/flow/.test(page.url()));
-await tapText(page, /^Activity$/, 800);
+await tapText(page, /^Calendar$/, 800);
 await tapText(page, 'View all spending', 1600);
 ok('activity: the spending drill-down arrives pre-filtered', /type=expense/.test(page.url()) &&
   !!(await visibleText(page, /\d+ filters?/i)));

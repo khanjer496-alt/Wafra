@@ -9,6 +9,11 @@ import {
   activeSubscriptions,
   daysUntilNext,
   detectSubscriptions,
+  isSubscriptionDismissed,
+  subscriptionKey,
+  subscriptionLabel,
+  subscriptionMatchesBill,
+  withoutCancelled,
   type Subscription,
 } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
@@ -19,6 +24,8 @@ export interface Outgoing {
   id: string;
   kind: OutgoingKind;
   title: string;
+  /** Service label for display; title remains the canonical merchant for logos. */
+  displayLabel?: string;
   icon: IconName;
   amountFils: number;
   /** ISO date the money is expected to leave. */
@@ -105,7 +112,8 @@ export function leavingSoon(
         id: `bill-${bill.id}`,
         kind: 'bill',
         title: bill.title,
-        icon: getCategory(bill.category).icon,
+        displayLabel: subscriptionLabel({ title: bill.title, billIdentity: bill.importIdentity }),
+        icon: getCategory(bill.category, state.customCategories).icon,
         amountFils: bill.amountFils,
         // The real date, not one reconstructed from a day count. This used to
         // be `today + daysLeft`, which printed a date derived from calendar
@@ -122,26 +130,29 @@ export function leavingSoon(
   }
 
   if (kinds.has('subscription')) {
-    const subs = activeSubscriptions(
+    // A subscription the user marked cancelled stops being "coming up" until it charges again.
+    const subs = withoutCancelled(activeSubscriptions(
       opts.detectedSubscriptions
         ? [...opts.detectedSubscriptions]
         : detectSubscriptions(state.transactions, state.notSubscriptions, today, liveAccounts, internal),
-    );
+    ), state.cancelledSubscriptions);
     for (const sub of subs) {
+      if (isSubscriptionDismissed(sub, state.notSubscriptions ?? [])) continue;
       // Frequent prepaid top-ups are real commitments without a schedule.
       // They stay visible in Bills but cannot honestly be placed on a
       // "leaving soon" timeline.
       if (sub.cadence === 'as-needed') continue;
       // A bill and a detected subscription can describe the same debit; the
       // bill wins, because the user set it up by hand.
-      const key = sub.title.trim().toLowerCase();
-      if (state.bills.some((b) => b.title.trim().toLowerCase() === key)) continue;
+      const key = subscriptionKey(sub);
+      if (state.bills.some((bill) => subscriptionMatchesBill(sub, bill))) continue;
       const daysLeft = daysUntilNext(sub, today);
       items.push({
         id: `sub-${key}`,
         kind: 'subscription',
         title: sub.title,
-        icon: getCategory(sub.category).icon,
+        displayLabel: subscriptionLabel(sub),
+        icon: getCategory(sub.category, state.customCategories).icon,
         amountFils: sub.lastAmountFils,
         dateISO: sub.nextExpectedISO,
         daysLeft,

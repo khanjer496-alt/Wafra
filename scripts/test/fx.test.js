@@ -189,6 +189,346 @@ async function main() {
   setLedgerCurrency(null);
   setActiveMarket('AE');
 
+  // ── Any ledger converts foreign spending with a recorded, dated rate ────
+  //
+  // The user decision: a USD, INR or EUR ledger accepts travel and online
+  // spending in any currency the way AED/SAR ledgers always have — the
+  // original amount and currency are kept, the ledger amount is converted
+  // with a reference rate, and the rate, its date and its source are stored
+  // on the row. No rate, no converted posting.
+  const {
+    convertMinorUnits,
+    originalMoneyFields,
+    originalMoneyOf,
+  } = require('./build/fx.js');
+  const fxRates = require('./build/fx-rates.js');
+
+  ok('KWD 12.345 at 3.26 USD/KWD is USD 40.24 (third decimal kept, one rounding)',
+    convertMinorUnits(12345, 3, 3.26, 2) === 4024);
+  ok('JPY 1,500 at 0.0068 USD/JPY is USD 10.20 (zero-decimal original)',
+    convertMinorUnits(1500, 0, 0.0068, 2) === 1020);
+  ok('USD 19.99 into a zero-decimal JPY ledger rounds half-up once',
+    convertMinorUnits(1999, 2, 147.25, 0) === 2944);
+  ok('EUR 45.00 at 110.12 INR/EUR into an INR ledger is exact decimal arithmetic',
+    convertMinorUnits(4500, 2, 110.12, 2) === 495540);
+  ok('an exact half minor unit rounds up, not to a binary hair below',
+    convertMinorUnits(50, 2, 0.01, 2) === 1 && convertMinorUnits(17, 2, 0.5, 2) === 9);
+  ok('tiny e-notation rates still convert exactly',
+    convertMinorUnits(1_000_000_000, 2, 1e-7, 2) === 100);
+  ok('a conversion that rounds to nothing is refused, never posted as zero',
+    (() => { try { convertMinorUnits(1, 2, 0.001, 2); return false; } catch { return true; } })());
+
+  // Exponent-correct originals, with the legacy two-decimal field kept only
+  // where it is exact so an older reader never misreads the amount.
+  const kwd = originalMoneyFields({ currency: 'KWD', minorUnits: 12345, exponent: 3 });
+  ok('KWD 12.345 is stored in thousandths with no inexact legacy figure',
+    kwd.originalMinorUnits === 12345 && kwd.originalExponent === 3 && kwd.originalAmountMinor === undefined);
+  const kwdRound = originalMoneyFields({ currency: 'KWD', minorUnits: 12340, exponent: 3 });
+  ok('KWD 12.340 also keeps its exact legacy hundredths',
+    kwdRound.originalAmountMinor === 1234 && kwdRound.originalMinorUnits === 12340);
+  const jpy = originalMoneyFields({ currency: 'JPY', minorUnits: 1500, exponent: 0 });
+  ok('JPY 1,500 is stored as 1500 yen, legacy as 150000 hundredths',
+    jpy.originalMinorUnits === 1500 && jpy.originalExponent === 0 && jpy.originalAmountMinor === 150000);
+  ok('a legacy row without an exponent is read exactly as it was written (two decimals)',
+    JSON.stringify(originalMoneyOf({ originalCurrency: 'JPY', originalAmountMinor: 150000 })) ===
+      JSON.stringify({ currency: 'JPY', minorUnits: 150000, exponent: 2 }) &&
+    formatOriginalCurrency(150000, 'JPY', 'en') === 'JPY 1,500.00');
+  ok('new originals format in their own exponent',
+    formatOriginalCurrency(1500, 'JPY', 'en', 0) === 'JPY 1,500' &&
+    formatOriginalCurrency(12345, 'KWD', 'ar', 3) === 'KWD 12.345');
+
+  const legacyKwd = { ...base, id: 'legacy-kwd', originalCurrency: 'KWD', originalAmountMinor: 1235,
+    fxSource: 'fallback', amountFils: 14700 };
+  const newKwd = { ...base, id: 'new-kwd', originalCurrency: 'KWD', originalMinorUnits: 12345,
+    originalExponent: 3, fxSource: 'fallback', amountFils: 14768 };
+  const kwdUpdates = await buildReferenceFxUpdates([legacyKwd, newKwd], 'AED', async (from, to, date) =>
+    ({ base: from, quote: to, date, rate: 11.95 }));
+  ok('reference revaluation reads each row in its own exponent',
+    kwdUpdates.find((u) => u.id === 'new-kwd')?.amountFils === 14752 &&
+    kwdUpdates.find((u) => u.id === 'legacy-kwd')?.amountFils === 14758, JSON.stringify(kwdUpdates));
+
+  // Existing AED-ledger foreign rows: summaries of legacy and new rows add
+  // one currency at one exponent, and a legacy row is never rescaled wrongly.
+  const legacyJpy = charge('lj', 'JPY', 150000, 3673);
+  const newJpy = { ...charge('nj', 'JPY', 150000, 3673), originalMinorUnits: 1500, originalExponent: 0 };
+  const newKwdCharge = { ...charge('nk', 'KWD', undefined, 14768), originalMinorUnits: 12345, originalExponent: 3 };
+  delete newKwdCharge.originalAmountMinor;
+  const summary = summarizeForeignActivity([legacyJpy, newJpy, charge('lk', 'KWD', 1235, 14700), newKwdCharge],
+    () => true, 'AED');
+  const jpyGroup = summary.groups.find((g) => g.currency === 'JPY');
+  const kwdGroup = summary.groups.find((g) => g.currency === 'KWD');
+  ok('legacy and exponent-correct JPY rows sum to JPY 3,000.00',
+    jpyGroup.originalMinor === 300000 && jpyGroup.originalExponent === 2 &&
+    formatOriginalCurrency(jpyGroup.originalMinor, 'JPY', 'en', jpyGroup.originalExponent) === 'JPY 3,000.00');
+  ok('legacy KWD 12.35 and new KWD 12.345 sum at three decimals to KWD 24.695',
+    kwdGroup.originalMinor === 24695 && kwdGroup.originalExponent === 3 && kwdGroup.count === 2);
+  ok('the foreign screen works for any ledger: EUR on an INR ledger is foreign',
+    summarizeForeignActivity([{ ...charge('e', 'EUR', 4500, 495540), fxSource: 'reference' }], () => true, 'INR')
+      .groups[0]?.referenceCount === 1);
+
+  // ── Gulf SMS parser: exponent-correct originals, card amount wins ───────
+  const { parseSms } = require('./build/sms-parser.js');
+  setLedgerCurrency('AED');
+  setActiveMarket('AE');
+  const kwdSms = parseSms('Purchase of KWD 12.345 at AVENUES MALL with your Credit Card ending 1234 on 05/09/2026.');
+  ok('a KWD alert keeps all three decimals of its original',
+    kwdSms?.originalCurrency === 'KWD' && kwdSms.originalMinorUnits === 12345 &&
+    kwdSms.originalExponent === 3 && kwdSms.originalAmountMinor === undefined && kwdSms.fxSource === 'fallback',
+    JSON.stringify(kwdSms));
+  const jpySms = parseSms('Purchase of JPY 1,500 at LAWSON TOKYO with your Credit Card ending 1234 on 05/09/2026.');
+  ok('a JPY alert stores 1500 yen with exponent 0 (and the exact legacy figure)',
+    jpySms?.originalMinorUnits === 1500 && jpySms.originalExponent === 0 && jpySms.originalAmountMinor === 150000 &&
+    jpySms.amountFils === 3673);
+  const statedSms = parseSms('Purchase of KWD 12.345 (AED 148.20) at AVENUES MALL with your Credit Card ending 1234 on 05/09/2026.');
+  ok('when the alert states both amounts the card-charged AED figure wins',
+    statedSms?.amountFils === 14820 && statedSms.fxSource === 'bank' && statedSms.originalMinorUnits === 12345 &&
+    Math.abs(statedSms.fxRate - 148.20 / 12.345) < 1e-9, JSON.stringify(statedSms));
+  const usdSms = parseSms('Purchase of USD 20.00 at OPENAI with your Credit Card ending 1234 on 05/09/2026.');
+  ok('existing two-decimal AED-ledger conversions are unchanged',
+    usdSms?.amountFils === 7345 && usdSms.originalAmountMinor === 2000 && usdSms.fxRate === 3.6725 &&
+    usdSms.fxSource === 'fallback');
+  setLedgerCurrency(null);
+
+  // ── Universal parser: convert on a pinned non-Gulf ledger ──────────────
+  const { createLaunchAlertSession } = require('./build/launch-alert-parser.js');
+  const eurQuote = { base: 'EUR', quote: 'INR', rate: 110.12, date: '2026-09-04' };
+  const lookups = [];
+  const inrSession = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'INR',
+    fxLookup: (b, q, d) => { lookups.push(`${b}|${q}|${d}`); return b === 'EUR' && q === 'INR' ? eurQuote : null; } });
+  const eurParsed = inrSession.parse('Card purchase EUR 45.00 at CAFE DE FLORE on 2026-09-05.', 'CARD-ALERT');
+  ok('a EUR purchase on an INR ledger posts in INR with rate, date and source recorded',
+    eurParsed?.currency === 'INR' && eurParsed.amountFils === 495540 && eurParsed.originalCurrency === 'EUR' &&
+    eurParsed.originalMinorUnits === 4500 && eurParsed.fxRate === 110.12 && eurParsed.fxRateDate === '2026-09-04' &&
+    eurParsed.fxSource === 'reference', JSON.stringify(eurParsed));
+  ok('the parser asked for the transaction day only, never an amount', lookups[0] === 'EUR|INR|2026-09-05',
+    JSON.stringify(lookups));
+  const offlineSession = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'INR', fxLookup: () => null });
+  ok('offline / no rate: nothing posts (the alert goes to Review instead)',
+    offlineSession.parse('Card purchase EUR 45.00 at CAFE DE FLORE on 2026-09-05.', 'CARD-ALERT') === null);
+  const usdInr = { base: 'USD', quote: 'INR', rate: 88.5, date: '2026-09-05' };
+  const dualSession = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'INR', fxLookup: () => usdInr });
+  const dual = dualSession.parse('Card purchase USD 12.00 (INR 1,003.50) at AMAZON US on 2026-09-05.', 'CARD-ALERT');
+  ok('an alert stating both amounts posts the card-charged INR figure, not the reference conversion',
+    dual?.amountFils === 100350 && dual.fxSource === 'bank' && dual.originalMinorUnits === 1200 &&
+    dual.currency === 'INR', JSON.stringify(dual));
+  const implausible = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'INR',
+    fxLookup: () => ({ ...usdInr, rate: 8850 }) })
+    .parse('Card purchase USD 12.00 (INR 1,003.50) at AMAZON US on 2026-09-05.', 'CARD-ALERT');
+  ok('a stated figure no plausible rate explains is discarded for the reference conversion',
+    implausible?.fxSource === 'reference' && implausible.amountFils === 10620000, JSON.stringify(implausible));
+  ok('without a quote to sanity-check it, automatic capture does not trust a stated figure',
+    offlineSession.parse('Card purchase USD 12.00 (INR 1,003.50) at AMAZON US on 2026-09-05.', 'CARD-ALERT') === null);
+  const sameCurrency = createLaunchAlertSession({ overrides: {}, pinnedCurrency: 'EUR', fxLookup: () => null })
+    .parse('Card purchase EUR 45.00 at CAFE DE FLORE on 2026-09-05.', 'CARD-ALERT');
+  ok('ledger-currency money still posts without any rate',
+    sameCurrency?.currency === 'EUR' && sameCurrency.amountFils === 4500 && sameCurrency.fxSource === undefined,
+    JSON.stringify(sameCurrency));
+
+  // ── Review promotion: universal foreign purchases convert ──────────────
+  const { planReviewPromotion, reviewPromotionFxNeed } = require('./build/review-promotion.js');
+  const { prepareUniversalReviewAlert, emptyAlertReviewTray } = require('./build/alert-review-tray.js');
+  const { inspectUniversalBankEvent } = require('./build/universal-parser.js');
+  const { ledgerMoneySpec } = require('./build/ledger-money.js');
+  const NOW = Date.UTC(2026, 8, 5, 12);
+  const reviewOf = (text) => prepareUniversalReviewAlert({
+    id: 'universal_review_id_00001', sourceKey: 'android_message_review_source_a123',
+    observedAt: NOW, channel: 'inbox', parserVersion: 32, event: inspectUniversalBankEvent(text),
+  });
+  const ledgerState = (item, currency) => ({
+    hydrated: true, ledgerMoney: ledgerMoneySpec(currency),
+    reviewTray: { ...emptyAlertReviewTray(), pending: [item] },
+    accounts: [{ id: 'acc-1', name: 'Card', kind: 'card', openingFils: 0, color: '#000', last4: '1234' }],
+    transactions: [{ id: 'seed', type: 'expense', amountFils: 100, category: 'other', accountId: 'acc-1',
+      title: 'Seed', date: '2026-09-01' }],
+    budgets: [], bills: [], cardDues: [], goals: [], merchantOverrides: {}, accountHints: {},
+    trustedNotificationPackages: [], notSubscriptions: [], lastScanTs: 0, onboarded: true, privateMode: false,
+    marketId: 'AE', language: 'en',
+  });
+  const confirmOf = (item, amount) => ({
+    reviewId: item.id, type: 'expense', title: 'Shop', category: 'shopping', accountId: 'acc-1',
+    date: '2026-09-05', betweenOwnAccounts: false,
+    universal: { confirmed: true, postingStatus: 'posted', amount,
+      expectedSourceKey: item.sourceKey, expectedObservedAt: item.observedAt },
+  });
+  const kwdItem = reviewOf('Card purchase KWD 12.345 at AVENUES on 2026-09-05.');
+  const kwdMoney = { currency: 'KWD', minorUnits: '12345', exponent: 3 };
+  const kwdState = ledgerState(kwdItem, 'USD');
+  const kwdNeed = reviewPromotionFxNeed(kwdState, confirmOf(kwdItem, kwdMoney));
+  ok('promotion asks the host for exactly one pair and day',
+    JSON.stringify(kwdNeed) === JSON.stringify({ base: 'KWD', quote: 'USD', date: '2026-09-05' }));
+  const kwdPlan = planReviewPromotion(kwdState, confirmOf(kwdItem, kwdMoney), 'tx-kwd', NOW + 1,
+    { base: 'KWD', quote: 'USD', rate: 3.2488, date: '2026-09-05' });
+  ok('KWD original on a USD ledger: 3 decimals preserved, USD 40.11 posted with its rate',
+    kwdPlan.outcome === 'added' && kwdPlan.transaction.amountFils === 4011 &&
+    kwdPlan.transaction.originalMinorUnits === 12345 && kwdPlan.transaction.originalExponent === 3 &&
+    kwdPlan.transaction.originalAmountMinor === undefined && kwdPlan.transaction.fxSource === 'reference' &&
+    kwdPlan.transaction.fxRateDate === '2026-09-05' && kwdPlan.ledgerMoney.currency === 'USD',
+    JSON.stringify(kwdPlan));
+  const jpyItem = reviewOf('Card purchase JPY 2400 at LAWSON on 2026-09-05.');
+  const jpyPlan = planReviewPromotion(ledgerState(jpyItem, 'USD'),
+    confirmOf(jpyItem, jpyItem.event.amount.value), 'tx-jpy', NOW + 1,
+    { base: 'JPY', quote: 'USD', rate: 0.0068, date: '2026-09-05' });
+  ok('JPY original (0 decimals) on a USD ledger converts to USD 16.32',
+    jpyPlan.outcome === 'added' && jpyPlan.transaction.amountFils === 1632 &&
+    jpyPlan.transaction.originalMinorUnits === 2400 && jpyPlan.transaction.originalExponent === 0,
+    JSON.stringify(jpyPlan));
+  const eurItem = reviewOf('Card purchase EUR 45.00 at CAFE DE FLORE on 2026-09-05.');
+  const eurPlan = planReviewPromotion(ledgerState(eurItem, 'INR'),
+    confirmOf(eurItem, eurItem.event.amount.value), 'tx-eur', NOW + 1, eurQuote);
+  ok('EUR purchase on an INR ledger is converted with the recorded rate and source',
+    eurPlan.outcome === 'added' && eurPlan.transaction.amountFils === 495540 &&
+    eurPlan.transaction.fxRate === 110.12 && eurPlan.transaction.fxSource === 'reference' &&
+    eurPlan.transaction.originalCurrency === 'EUR', JSON.stringify(eurPlan));
+  ok('currency mismatch no longer refuses when convertible; without a rate the review stays',
+    planReviewPromotion(ledgerState(eurItem, 'INR'), confirmOf(eurItem, eurItem.event.amount.value),
+      'tx-eur-offline', NOW + 1, null).reason === 'fx-rate-unavailable');
+  const dualItem = reviewOf('Card purchase USD 12.00 (INR 1,003.50) at AMAZON US on 2026-09-05.');
+  const dualConfirm = confirmOf(dualItem, dualItem.event.amount.value);
+  const dualPlan = planReviewPromotion(ledgerState(dualItem, 'INR'), dualConfirm, 'tx-dual', NOW + 1, usdInr);
+  ok('a confirmed review stating both amounts records the card-charged INR figure, not the reference rate',
+    dualPlan.outcome === 'added' && dualPlan.transaction.amountFils === 100350 &&
+    dualPlan.transaction.fxSource === 'bank' && dualPlan.transaction.originalMinorUnits === 1200,
+    JSON.stringify(dualPlan));
+  ok('an unlabelled stated figure is not trusted without a rate to check it (review stays)',
+    planReviewPromotion(ledgerState(dualItem, 'INR'), dualConfirm, 'tx-dual-offline', NOW + 1, null)
+      .reason === 'fx-rate-unavailable');
+
+  // ── iPhone currency-conflict rows convert when a rate exists ───────────
+  const { convertCurrencyConflictRow } = require('./build/local-message-record.js');
+  const conflict = {
+    kind: 'parsed', market: 'AE', milestone: 'financial',
+    row: { kind: 'transaction', type: 'expense', amountFils: 7345, currency: 'AED', merchant: 'ChatGPT',
+      date: '2026-09-05', dueDay: null, minDueFils: null, card: null, reference: null, transferHint: false,
+      snapshotFils: 500000, snapshotKind: 'balance', categoryGuess: 'software', smsTs: NOW,
+      // The AED debit is bank-stated ("USD 20.00 (AED 73.45)"): a real debit.
+      originalCurrency: 'USD', originalAmountMinor: 2000, fxRate: 3.6725, fxSource: 'bank' },
+  };
+  const aedUsd = { base: 'AED', quote: 'USD', rate: 0.2723, date: '2026-09-05' };
+  const convertedRow = convertCurrencyConflictRow(conflict, { currency: 'USD', exponent: 2 }, aedUsd);
+  ok('an AED purchase on a USD ledger converts the AED debit with the dated rate',
+    convertedRow?.row.currency === 'USD' && convertedRow.row.amountFils === 2000 &&
+    convertedRow.row.originalCurrency === 'AED' && convertedRow.row.originalMinorUnits === 7345 &&
+    convertedRow.row.fxSource === 'reference' && convertedRow.row.fxRateDate === '2026-09-05',
+    JSON.stringify(convertedRow));
+  ok('its AED balance snapshot is dropped, never relabelled as USD',
+    convertedRow?.row.snapshotFils === null && convertedRow.row.snapshotKind === null);
+  ok('no rate, a wrong pair or a later day keeps the purchase in Review',
+    convertCurrencyConflictRow(conflict, { currency: 'USD', exponent: 2 }, null) === null &&
+    convertCurrencyConflictRow(conflict, { currency: 'USD', exponent: 2 }, { ...aedUsd, base: 'SAR' }) === null &&
+    convertCurrencyConflictRow(conflict, { currency: 'USD', exponent: 2 }, { ...aedUsd, date: '2026-09-06' }) === null);
+  ok('card payments are never converted here',
+    convertCurrencyConflictRow({ ...conflict, row: { ...conflict.row, kind: 'cardPayment' } },
+      { currency: 'USD', exponent: 2 }, aedUsd) === null);
+
+  // ── Review findings: no estimate, fee or stray figure becomes the charge ─
+  ok('an AED figure the Gulf parser ESTIMATED offline is never re-converted as if it were the debit',
+    convertCurrencyConflictRow({ ...conflict, row: { ...conflict.row, fxSource: 'fallback' } },
+      { currency: 'USD', exponent: 2 }, aedUsd) === null);
+  const feeEvent = inspectUniversalBankEvent('Bank fee INR 120.00 charged. Card purchase USD 50.00 at BESTBUY on 2026-09-05.');
+  const usdSel = { currency: 'USD', minorUnits: 5000, exponent: 2 };
+  const feeOnline = fxRates.convertForeignConfirmation(feeEvent, usdSel, { currency: 'INR', exponent: 2 }, usdInr);
+  ok('a ledger-currency fee in the same alert is not the charged amount',
+    feeOnline.fxSource === undefined && feeOnline.fields?.fxSource === 'reference' && feeOnline.amountFils === 442500 &&
+    fxRates.convertForeignConfirmation(feeEvent, usdSel, { currency: 'INR', exponent: 2 }, null) === 'fx-rate-unavailable',
+    JSON.stringify(feeOnline));
+  const ambiguousAlternatives = { amount: { value: null, evidence: 'ambiguous', spans: [], issues: [],
+    alternatives: [{ currency: 'INR', minorUnits: '12000', exponent: 2 }, { currency: 'USD', minorUnits: '5000', exponent: 2 }] },
+    observations: [] };
+  ok('amount alternatives alone never supply a charged figure',
+    fxRates.statedLedgerAmount(ambiguousAlternatives, 'INR', 2) === null);
+  const offBand = { amount: { value: { currency: 'USD', minorUnits: '1200', exponent: 2 }, evidence: 'explicit',
+    spans: [], issues: [], alternatives: [] },
+    observations: [{ role: 'transaction', field: { value: { currency: 'INR', minorUnits: '140000', exponent: 2 },
+      evidence: 'explicit', spans: [], issues: [], alternatives: [] } }] };
+  const offBandResult = fxRates.convertForeignConfirmation(offBand, { currency: 'USD', minorUnits: 1200, exponent: 2 },
+    { currency: 'INR', exponent: 2 }, usdInr);
+  ok('a stated figure 1.3x away from the reference rate is not the card charge',
+    offBandResult.fields?.fxSource === 'reference' && offBandResult.amountFils === 106200, JSON.stringify(offBandResult));
+  ok('a quote older than a week, or from a later day, is not the purchase day\'s rate',
+    !fxRates.quoteFitsDay({ ...usdInr, date: '2026-08-28' }, '2026-09-05') &&
+    fxRates.quoteFitsDay({ ...usdInr, date: '2026-08-29' }, '2026-09-05') &&
+    !fxRates.quoteFitsDay({ ...usdInr, date: '2026-09-06' }, '2026-09-05'));
+
+  // ── Gulf parser: currencies outside the offline table are never dropped ─
+  {
+    const { parseForeignAwaitingRate } = require('./build/sms-parser.js');
+    const { inspectSourceFreeRefusedAlert } = require('./build/auto-import.js');
+    setLedgerCurrency('AED');
+    setActiveMarket('AE');
+    const cases = [
+      ['NGN', 'Purchase of NGN 15,000.00 at SHOPRITE LAGOS with your Credit Card ending 1234 on 05/09/2026.', 1500000, 2, 0.00238, 3570],
+      ['ISK', 'Purchase of ISK 4,500 at BONUS REYKJAVIK with your Credit Card ending 1234 on 05/09/2026.', 4500, 0, 0.0294, 13230],
+      ['UZS', 'Purchase of UZS 125,000.00 at KORZINKA with your Credit Card ending 1234 on 05/09/2026.', 12500000, 2, 0.00029, 3625],
+    ];
+    fxRates.clearReferenceQuoteCache();
+    for (const [code, text, minor, exponent, rate, fils] of cases) {
+      ok(`${code} on an AED ledger with no rate does not post a guessed amount`, parseSms(text) === null);
+      const waiting = parseForeignAwaitingRate(text);
+      ok(`${code} purchase waits for a rate in its own currency and exponent`,
+        waiting?.kind === 'transaction' && waiting.currency === code && waiting.amountFils === minor &&
+        waiting.fxSource === undefined && waiting.snapshotFils === null && waiting.date === '2026-09-05',
+        JSON.stringify(waiting));
+      const decision = inspectSourceFreeRefusedAlert({ source: text, sender: 'EmiratesNBD',
+        observedAt: Date.UTC(2026, 8, 5, 12), channel: 'inbox', session: { inspect: () => null },
+        skipUniversalFallback: true });
+      ok(`${code} alert becomes a Review item even when the worldwide fallback is skipped`,
+        decision.kind === 'review' && decision.candidate.event.amount.value.currency === code &&
+        decision.candidate.event.amount.value.minorUnits === String(minor) &&
+        decision.candidate.event.amount.value.exponent === exponent && decision.candidate.channel === 'inbox',
+        JSON.stringify(decision));
+      fxRates.rememberReferenceQuote('2026-09-05', { base: code, quote: 'AED', rate, date: '2026-09-04' });
+      const priced = parseSms(text);
+      ok(`${code} converts with a dated rate already known on the device`,
+        priced?.currency === 'AED' && priced.amountFils === fils && priced.fxSource === 'reference' &&
+        priced.fxRateDate === '2026-09-04' && priced.originalCurrency === code &&
+        priced.originalMinorUnits === minor && priced.originalExponent === exponent,
+        JSON.stringify(priced));
+      ok(`${code} no longer waits once it can post`, parseForeignAwaitingRate(text) === null);
+    }
+    fxRates.clearReferenceQuoteCache();
+    const thb = parseSms('Purchase of THB 1,850.00 at SIAM PARAGON with your Credit Card ending 1234 on 05/09/2026.');
+    ok('a currency in the offline table is unchanged (fallback estimate, revalued later)',
+      thb?.amountFils === 19983 && thb.fxSource === 'fallback' && thb.originalAmountMinor === 185000);
+    ok('an extended code that is also a word is not read as money',
+      parseForeignAwaitingRate('Purchase of ALL 500 at SHOP with your Credit Card ending 1234 on 05/09/2026.') === null);
+    ok('lowercase prose is not a currency',
+      parseForeignAwaitingRate('Purchase of ngn 15,000.00 at SHOP with your Credit Card ending 1234 on 05/09/2026.') === null);
+    setLedgerCurrency(null);
+  }
+
+  // ── Rate loading: privacy, cache, offline ──────────────────────────────
+  fxRates.clearReferenceQuoteCache();
+  const requested = [];
+  const rateFetch = async (url) => {
+    requested.push(String(url));
+    return { ok: true, status: 200, json: async () => ({ base: 'EUR', quote: 'INR', rate: 110.12, date: '2026-09-04' }) };
+  };
+  const loaded = await fxRates.loadReferenceQuote('eur', 'inr', '2026-09-05', { fetchImpl: rateFetch });
+  const again = await fxRates.loadReferenceQuote('EUR', 'INR', '2026-09-05', { fetchImpl: rateFetch });
+  ok('a rate request carries only two currency codes and a day',
+    requested.length === 1 && requested[0] === 'https://api.frankfurter.dev/v2/rate/EUR/INR?date=2026-09-05');
+  ok('the quote is cached for the pair and day (no second request)',
+    loaded?.rate === 110.12 && again?.date === '2026-09-04' &&
+    fxRates.cachedReferenceQuote('EUR', 'INR', '2026-09-05')?.rate === 110.12);
+  let offlineCalls = 0;
+  const offline = async () => { offlineCalls += 1; throw new TypeError('Network request failed'); };
+  const none = await fxRates.loadReferenceQuote('GBP', 'INR', '2026-09-05', { fetchImpl: offline, now: 1000 });
+  const retry = await fxRates.loadReferenceQuote('GBP', 'INR', '2026-09-05', { fetchImpl: offline, now: 2000 });
+  ok('offline resolves null (never an invented rate) and backs off',
+    none === null && retry === null && offlineCalls === 1);
+  const badPair = await fxRates.loadReferenceQuote('CHF', 'INR', '2026-09-05', {
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ base: 'USD', quote: 'INR', rate: 88, date: '2026-09-05' }) }),
+  });
+  ok('a provider answer for another pair is rejected', badPair === null);
+  ok('a rate the encrypted ledger recorded is reused without a request',
+    fxRates.cachedReferenceQuote('EUR', 'USD', '2026-08-01', [
+      { id: 'b', type: 'expense', amountFils: 1, category: 'other', accountId: 'a', title: 't', date: '2026-08-01',
+        originalCurrency: 'EUR', originalAmountMinor: 100, fxRate: 1.25, fxSource: 'bank' },
+      { id: 'r', type: 'expense', amountFils: 1, category: 'other', accountId: 'a', title: 't', date: '2026-08-01',
+        originalCurrency: 'EUR', originalAmountMinor: 100, fxRate: 1.17, fxRateDate: '2026-07-31', fxSource: 'reference' },
+    ])?.rate === 1.17);
+  fxRates.clearReferenceQuoteCache();
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 }

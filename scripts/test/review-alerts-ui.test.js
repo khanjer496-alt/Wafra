@@ -55,14 +55,15 @@ ok('a review-only cash event defaults to the cash-withdrawal category',
 ok('review amounts stay exact instead of crossing floating point',
   /minorUnits\.padStart/.test(route) &&
     !/Number\(minorUnits\)|parseFloat\(minorUnits\)|parseInt\(minorUnits\)/.test(route));
-ok('review list follows native safe-area and scalable-list conventions',
-  /<ScreenScaffold[\s\S]*scroll=\{false\}[\s\S]*virtualized[\s\S]*headerMode="native"/.test(route) &&
-    /useScreenContentInsets\(\{ hasFooter: false \}\)/.test(route) &&
+// Design language E: the green band scaffold owns the safe areas; the full
+// list is still one virtualized FlatList that clears the home indicator.
+ok('review list follows the band safe-area and scalable-list conventions',
+  /<BandScaffold[\s\S]*band="flow"[\s\S]*scroll=\{stepMode\}/.test(route) &&
+    /useBandBottomInset\(\)/.test(route) &&
     /<FlatList/.test(route) && /keyExtractor=/.test(route) &&
-    /contentContainerStyle=\{\[listInsets\.contentContainerStyle,/.test(route) &&
-    /contentInset=\{listInsets\.contentInset\}/.test(route) &&
-    /scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}/.test(route) &&
-    /contentInsetAdjustmentBehavior="automatic"/.test(route));
+    /contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}/.test(route) &&
+    /scrollIndicatorInsets=\{\{ top: 0, bottom: listBottom \}\}/.test(route) &&
+    /contentInsetAdjustmentBehavior="never"/.test(route));
 ok('dismissal is an accessible 44-point confirmed action',
   /accessibilityRole="button"/.test(route) &&
     /accessibilityLabel=/.test(route) &&
@@ -89,10 +90,19 @@ ok('Settings exposes pending reviews without promoting an empty destination',
 ok('review copy is localized in both supported UI languages',
   /reviewAlertsTitle:\s*\{\s*en:[^\n]+ar:/.test(copy) &&
     /reviewAlertDismissQuestion:\s*\{\s*en:[^\n]+ar:/.test(copy));
+ok('capacity, expiry and currency-skip notices are localized and counted, never silent',
+  ['reviewAlertsFullWaiting', 'reviewAlertsExpiredCount', 'reviewAlertsCurrencySkipped', 'reviewAlertExpiresIn']
+    .every((key) => new RegExp(`${key}:\\s*\\{\\s*en: '[^'\\n]*\\{count\\}[^'\\n]*', ar: '[^'\\n]*\\{count\\}[^'\\n]*'`).test(copy)) &&
+    /reviewCaptureBacklog\.subscribe/.test(route) && /reviewTrayCapacity\(state\.reviewTray, now\)/.test(route) &&
+    /recentlyExpiredReviewCount\(state\.reviewTray, now\)/.test(route) &&
+    /reviewExpiresInDays\(item, Date\.now\(\)\)/.test(route) &&
+    /accessibilityLiveRegion="polite"/.test(route));
 
+// Design language E: "I'll add by hand" sits beside every automatic source on
+// the first-payment step, and says there is no message access.
 ok('SMS access is visibly optional and the no-access path is explicit',
-  /<StartOption automatic=\{false\}/.test(onboarding) &&
-    /onboardManualChoice/.test(onboarding) &&
+  /<SourceRow palette=\{stepBand\} icon="plus" title=\{words\.addByHand\} body=\{words\.addByHandBody\}[\s\S]{0,160}runSetupAction\(continueManually\)/.test(onboarding) &&
+    /addByHandBody: 'No message access\./.test(read('src/lib/onboarding-e-copy.ts')) &&
     /continueManually/.test(onboarding) &&
     /onboardManualChoiceBody:[\s\S]{0,180}No SMS access/.test(copy) &&
     /onboardManualChoiceIosBody:[\s\S]{0,180}No Messages access/.test(copy) &&

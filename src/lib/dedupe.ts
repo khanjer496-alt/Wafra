@@ -22,9 +22,155 @@ import type { CaptureInstrument, CaptureSource, Transaction, TransactionType } f
  * third is the same event. Hence three.
  */
 
+/**
+ * A ledger row promoted from an Apple Pay (Wallet) review.
+ *
+ * Wallet's observation UUID is not the bank's message identity, and the row's
+ * title/account/date are explicit user decisions. Such a row may only ever be
+ * matched by its exact receipt identity; import-plan binds it to a later bank
+ * SMS under its own strict one-to-one rule. Generic title, cross-channel,
+ * statement and hydration heuristics must never pair or delete it.
+ */
+export const APPLE_PAY_REVIEW_SOURCE_KEY = /^apple_pay_review_source_[a-f0-9]{32}$/;
+export function isApplePayWalletRow(t: Pick<Transaction, 'source' | 'smsKey'>): boolean {
+  return t.source === 'sms' && typeof t.smsKey === 'string' && APPLE_PAY_REVIEW_SOURCE_KEY.test(t.smsKey);
+}
+
 /** Message text reduced to what two captures of the same SMS must agree on. */
 export function bodyPrint(body: string): string {
   return body.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * An explicit transaction clock at SECOND precision — the same source as the
+ * Android re-post guard (NotificationRepostIdentity.TRANSACTION_DATETIME_RE)
+ * and auto-import's CARRIER_DUPLICATE_DATETIME_RE; kotlin-regex.test.js pins
+ * all three byte-for-byte. Minute precision is refused on purpose: a terminal
+ * double-tap inside one minute is two real charges with identical text.
+ */
+export const CAPTURE_EVENT_CLOCK_RE = /\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s+\d{1,2}:\d{2}:\d{2}\b/;
+const CAPTURE_EVENT_CLOCKS = new RegExp(CAPTURE_EVENT_CLOCK_RE.source, 'g');
+const CAPTURE_EVENT_MONEY_BEFORE =
+  /(?<![\p{L}\p{N}])(aed|dhs?|sar|sr|qar|kwd|bhd|omr|egp|inr|pkr|php|usd|eur|gbp|cad|aud|jpy|cny|chf|try|ghs|د\.إ|ر\.س|درهم|ريال)\s*([0-9][0-9,]*(?:\.[0-9]+)?)/gu;
+const CAPTURE_EVENT_MONEY_AFTER = /(?<![0-9.,])([0-9][0-9,]*(?:\.[0-9]+)?)\s*(د\.إ|ر\.س|درهم|ريال)/gu;
+const CAPTURE_EVENT_IDENTITY = /^e1:([0-9a-f]{16}):([0-9a-f]{16}|-)$/;
+
+/** NFKC, ASCII digits, no invisible format characters, single spaces, lower case. */
+function normalizeAlertText(value: string): string {
+  return value.normalize('NFKC')
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
+    .replace(/٫/g, '.')
+    .replace(/٬/g, ',')
+    .replace(/\p{Cf}+/gu, '')
+    .replace(/[\s\p{Z}]+/gu, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function canonicalAlertNumber(value: string): string {
+  let number = value.replace(/,/g, '');
+  if (number.includes('.')) number = number.replace(/0+$/, '').replace(/\.$/, '');
+  number = number.replace(/^0+/, '');
+  return !number || number.startsWith('.') ? `0${number}` : number;
+}
+
+function canonicalAlertCurrency(value: string): string {
+  if (value === 'dh' || value === 'dhs' || value === 'د.إ' || value === 'درهم') return 'aed';
+  if (value === 'sr' || value === 'ر.س') return 'sar';
+  return value;
+}
+
+/** 64-bit non-cryptographic digest (cyrb53-style, two 32-bit lanes) as 16 hex. */
+function alertDigest(value: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * The bank event an alert describes, independent of when it was delivered.
+ *
+ * A bank app can post one alert several times (an owner's ADCB app posted
+ * the same charge three times, minutes apart). Each copy's capture key is
+ * `s{postTime}-{amount}`, and the push↔push title rule stops at two minutes,
+ * so a copy that slipped past the native re-post guard became a second row.
+ * When the alert text states its own transaction clock to the second, that
+ * clock plus the parsed money and card IS the event, whatever the delivery
+ * time: `e1:<core>:<extra>`, where
+ *
+ *   core  = bank identity | card last4 | direction | currency | amount |
+ *           every explicit clock with seconds
+ *   extra = the alert's remaining money figures (typically the available
+ *           balance or limit), `-` when it states none
+ *
+ * Both parts are opaque digests: the identity is only ever compared for
+ * equality and must not add readable balances to the ledger or backups.
+ * Undefined — no identity, old behaviour — without a clock at second
+ * precision, a stated bank and card, or local source text.
+ */
+export function captureEventIdentity(input: {
+  raw?: string;
+  amountFils: number;
+  type: TransactionType;
+  currency?: string;
+  captureInstrument?: CaptureInstrument;
+}): string | undefined {
+  const instrument = input.captureInstrument;
+  if (typeof input.raw !== 'string' || !instrument?.bankIdentity || !/^\d{4}$/.test(instrument.last4) ||
+    !Number.isSafeInteger(input.amountFils) || input.amountFils <= 0) return undefined;
+  const surface = normalizeAlertText(input.raw);
+  const clocks = new Set<string>();
+  for (const match of surface.matchAll(CAPTURE_EVENT_CLOCKS)) {
+    const [d, m, y, hh, mm, ss] = match[0].split(/[^0-9]+/).map(Number);
+    // Batch stamps and ambiguous AM/PM clocks cannot prove a unique charge.
+    if ((hh === 0 && mm === 0 && ss === 0) || (hh === 23 && mm === 59 && ss === 59) ||
+      hh > 23 || mm > 59 || ss > 59 || d < 1 || d > 31 || m < 1 || m > 12 ||
+      /^\s*[ap]\.?m\.?\b/.test(surface.slice((match.index ?? 0) + match[0].length))) return undefined;
+    clocks.add(`${d}/${m}/${y < 100 ? y + 2000 : y} ${hh}:${mm}:${ss}`);
+  }
+  if (clocks.size !== 1) return undefined;
+  const money: { at: number; token: string }[] = [];
+  for (const match of surface.matchAll(CAPTURE_EVENT_MONEY_BEFORE)) {
+    money.push({ at: match.index ?? 0, token: `${canonicalAlertCurrency(match[1])}:${canonicalAlertNumber(match[2])}` });
+  }
+  for (const match of surface.matchAll(CAPTURE_EVENT_MONEY_AFTER)) {
+    money.push({ at: match.index ?? 0, token: `${canonicalAlertCurrency(match[2])}:${canonicalAlertNumber(match[1])}` });
+  }
+  money.sort((a, b) => a.at - b.at);
+  // The first figure is the charge, already held to by amountFils; the rest
+  // is what a same-second repeat cannot share and a truncated copy may lack.
+  const others = [...new Set(money.slice(1).map((m) => m.token).filter((t) => t !== money[0]?.token))].sort();
+  const core = [instrument.bankIdentity, instrument.last4, input.type, input.currency ?? '', input.amountFils,
+    [...clocks].sort().join(',')].join('|');
+  return `e1:${alertDigest(core)}:${others.length ? alertDigest(others.join(',')) : '-'}`;
+}
+
+/** The same bank event: equal core, and equal remaining money unless one side states none. */
+export function sameCaptureEvent(a: string | undefined, b: string | undefined): boolean {
+  const x = a ? CAPTURE_EVENT_IDENTITY.exec(a) : null;
+  const y = b ? CAPTURE_EVENT_IDENTITY.exec(b) : null;
+  return !!x && !!y && x[1] === y[1] && (x[2] === '-' || y[2] === '-' || x[2] === y[2]);
+}
+
+/**
+ * Both alerts state their event, and they are different events: another
+ * clock/amount/card, or the same one with different remaining money (a
+ * same-second repeat). Used only between two copies from the SAME bank app,
+ * whose clocks come from one generator; an SMS and a push may stamp one event
+ * a few seconds apart, so this is never a veto across channels.
+ */
+export function distinctCaptureEvents(a: string | undefined, b: string | undefined): boolean {
+  const x = a ? CAPTURE_EVENT_IDENTITY.exec(a) : null;
+  const y = b ? CAPTURE_EVENT_IDENTITY.exec(b) : null;
+  return !!x && !!y && !(x[1] === y[1] && (x[2] === '-' || y[2] === '-' || x[2] === y[2]));
 }
 
 /** Day, amount and name — the everyday duplicate check. */
@@ -117,6 +263,9 @@ export function sameMerchantCapture(a: string, b: string): boolean {
 export type CaptureChannel = 'inbox' | 'delivery' | 'push';
 
 export interface DuplicateCandidate {
+  /** Stored user decisions survive replay of their authoritative source row. */
+  userEdited?: boolean;
+  titleEdited?: boolean;
   date: string;
   amountFils: number;
   title: string;
@@ -127,9 +276,22 @@ export interface DuplicateCandidate {
   smsKey?: string;
   /** Capture time, independent of the channel-specific SMS fingerprint. */
   ts?: number;
+  /** Parsed second-precision event time; different instants veto loose matches. */
+  textClock?: number;
   channel?: CaptureChannel;
   /** Structured ingest provenance; PDF/CSV are statement rows. */
   captureSource?: CaptureSource;
+  /**
+   * Opaque id of the one statement upload a PDF/CSV row came from. Rows of the
+   * same upload are never duplicates of each other (a statement lists a
+   * genuine repeat twice); rows of different uploads are matched one-to-one.
+   */
+  statementImportId?: string;
+  /** Stable zero-based row within a validated statement file. */
+  statementRowIndex?: number;
+  statementOccurrences?: Transaction['statementOccurrences'];
+  /** Bank identity a statement named for itself, when it named one. */
+  statementBank?: string;
   /** Resolved account/card. Required for high-confidence settlement pairing. */
   accountId?: string;
   captureInstrument?: CaptureInstrument;
@@ -138,6 +300,13 @@ export interface DuplicateCandidate {
   cardPaymentSide?: 'debit' | 'receipt';
   /** Set only for rows already in the ledger, so a later SMS can replace them. */
   id?: string;
+  /**
+   * One GUID-less iOS live Message (queue-UUID observation). Never merged with
+   * another live observation; bound to at most one History copy.
+   */
+  liveObservation?: boolean;
+  /** captureEventIdentity() of the alert, when its text stated a clock with seconds. */
+  eventIdentity?: string;
 }
 
 export interface DuplicateGuard {
@@ -188,8 +357,27 @@ export interface DuplicateGuard {
 const SAME_EVENT_MS = 120_000;
 /** Push and SMS clocks may drift, but a day-wide match erases real purchases. */
 const CROSS_CHANNEL_EVENT_MS = 120_000;
+/**
+ * The same card event on the OTHER channel, when the alerts prove it.
+ *
+ * A bank app does not always post its notification when the SMS lands: an
+ * owner's ADCB credit-card push arrived 10 min 48 s after the SMS about the
+ * same charge (same card digits, amount and merchant), so the two-minute
+ * window above booked it twice. Beyond two minutes a push and an SMS pair only
+ * on evidence the bare money cannot supply: both alerts state the SAME card or
+ * account digits, both NAME the same merchant (a generic "Card purchase" never
+ * qualifies), neither row was edited, and the match is nearest-first and
+ * one-to-one. Two identical charges on one channel never use this path; they
+ * keep the two-minute same-event rule, so two equal coffees stay two.
+ */
+export const CROSS_CHANNEL_INSTRUMENT_EVENT_MS = 15 * 60_000;
 /** Debit-account confirmation and card receipt can be several minutes apart. */
 const CARD_PAYMENT_PAIR_MS = 30 * 60_000;
+
+/** Explicitly different bank event clocks must survive every loose match. */
+function differentTextClock(a: number | undefined, b: number | undefined): boolean {
+  return Number.isSafeInteger(a) && Number.isSafeInteger(b) && a! >= 0 && b! >= 0 && a !== b;
+}
 
 /** The timestamp inside `s{ts}-{amount}`, or null if there isn't one. */
 function keyTime(smsKey: string | undefined): number | null {
@@ -202,13 +390,16 @@ function candidateTime(c: Pick<DuplicateCandidate, 'ts' | 'smsKey'>): number | n
 }
 
 interface SeenEvent {
+  /** Only a changed title makes the stored merchant unavailable for matching. */
+  titleEdited?: boolean;
+  textClock?: number;
   ts: number | null;
   channel: CaptureChannel;
   id?: string;
   /** What this capture called the merchant, for the compatibility test above. */
   title: string;
   captureInstrument?: CaptureInstrument;
-  /** A title the user typed says nothing about the merchant; skip the test. */
+  /** Any manual edit protects the row from lagged heuristic pairing. */
   userEdited?: boolean;
   /** One capture explains one event on the other channel, not every one. */
   consumed?: boolean;
@@ -218,14 +409,20 @@ interface SeenStatementPairEvent {
   date: string;
   amountFils: number;
   type: TransactionType;
+  title: string;
   accountId?: string;
   captureInstrument?: CaptureInstrument;
   captureSource?: CaptureSource;
+  statementImportId?: string;
+  /** Stable zero-based row within a validated statement file. */
+  statementRowIndex?: number;
+  statementOccurrences?: Transaction['statementOccurrences'];
+  statementBank?: string;
   id?: string;
   consumed: boolean;
 }
 
-function isStatementCaptureSource(source: CaptureSource | undefined): boolean {
+export function isStatementCaptureSource(source: CaptureSource | undefined): boolean {
   return source === 'pdf' || source === 'csv';
 }
 
@@ -233,23 +430,93 @@ function isStatementCaptureSource(source: CaptureSource | undefined): boolean {
  * Whether a stored capture and an incoming one can be one event, merchant-wise.
  *
  * A title the user typed is not a merchant name at all — the ledger row may
- * read "Weekly shop" — so an edited row is held to the money and the clock
- * only, exactly as before.
+ * read "Weekly shop" — so only a title edit skips merchant comparison.
+ * Category/account edits retain the original merchant evidence.
  */
 function crossChannelPair(row: SeenEvent, title: string): boolean {
-  return row.userEdited === true || sameMerchantCapture(row.title, title);
+  return row.titleEdited === true || sameMerchantCapture(row.title, title);
+}
+
+/** Both alerts state the same card/account digits; absence proves nothing here. */
+function sameStatedInstrument(a?: CaptureInstrument, b?: CaptureInstrument): boolean {
+  return !!a && !!b && /^\d{4}$/.test(a.last4) && a.last4 === b.last4 &&
+    compatibleCaptureInstrument(a, b);
+}
+
+/** Both titles name a merchant, and the same one (whole-word prefix allowed). */
+function sameNamedMerchant(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  return !!x && !!y && !GENERIC_CAPTURE_TITLES.has(x) && !GENERIC_CAPTURE_TITLES.has(y) &&
+    sameMerchantCapture(x, y);
+}
+
+/**
+ * The strong-evidence push/SMS pairing beyond the two-minute window; see
+ * CROSS_CHANNEL_INSTRUMENT_EVENT_MS. Exported for the hydration repair and
+ * tests; callers still enforce opposite channels and one-to-one consumption.
+ */
+export function laggedCrossChannelEvent(
+  a: { ts: number | null; title: string; captureInstrument?: CaptureInstrument; userEdited?: boolean; textClock?: number },
+  b: { ts: number | null; title: string; captureInstrument?: CaptureInstrument; userEdited?: boolean; textClock?: number },
+): boolean {
+  return !differentTextClock(a.textClock, b.textClock) &&
+    a.userEdited !== true && b.userEdited !== true &&
+    sameStatedInstrument(a.captureInstrument, b.captureInstrument) &&
+    sameNamedMerchant(a.title, b.title) &&
+    closeEnough(a.ts, b.ts, CROSS_CHANNEL_INSTRUMENT_EVENT_MS);
+}
+
+/**
+ * Nearest unconsumed capture on the other channel that the lagged rule pairs
+ * with `c`: an SMS row for an incoming push (`wanted: 'inbox'`), or a stored
+ * push row for an incoming SMS (`wanted: 'push'`).
+ */
+function nearestLaggedCrossChannel(
+  rows: readonly SeenEvent[],
+  c: DuplicateCandidate,
+  mine: number | null,
+  wanted: 'inbox' | 'push',
+): SeenEvent | undefined {
+  if (mine === null) return undefined;
+  let best: SeenEvent | undefined;
+  for (const row of rows) {
+    if (row.consumed || row.ts === null) continue;
+    if (wanted === 'push' ? row.channel !== 'push' || !row.id : row.channel === 'push') continue;
+    if (!laggedCrossChannelEvent(row, { ts: mine, title: c.title, captureInstrument: c.captureInstrument, textClock: c.textClock })) continue;
+    if (!best || Math.abs(row.ts - mine) < Math.abs(best.ts! - mine)) best = row;
+  }
+  return best;
 }
 
 /** One occurrence filed under a day/amount/title fingerprint. */
 interface SeenOccurrence {
+  textClock?: number;
   ts: number | null;
   id?: string;
   /** A retained Apple Message has an exact, opaque GUID-derived identity. */
   historyIdentity: boolean;
+  /** One GUID-less iOS live Message; see DuplicateCandidate.liveObservation. */
+  liveObservation: boolean;
   /** A row with no event clock explains one later capture, not all of them. */
   consumed: boolean;
   captureInstrument?: CaptureInstrument;
   type: TransactionType;
+  /** Statement provenance, so a statement from another upload is left to its own matcher. */
+  statement?: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>;
+  /** A bank-app notification copy, and the event its text stated (captureEventIdentity). */
+  push?: boolean;
+  eventIdentity?: string;
+}
+
+/** One stored or batch capture filed under its stated bank event. */
+interface SeenIdentityEvent {
+  eventIdentity: string;
+  ts: number | null;
+  push: boolean;
+  id?: string;
+  /** Its cross-channel entry, so a push explained by an SMS consumes that SMS there too. */
+  cross?: SeenEvent;
 }
 
 /** Only facts from the alerts can prove two captures describe different instruments. */
@@ -306,9 +573,116 @@ function sameOrAdjacentDate(a: string, b: string): boolean {
   );
 }
 
+const OBSERVATION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A stored GUID-less iOS live Message that has not yet bound a History identity. */
+function hasMessageObservationId(t: Transaction): boolean {
+  return t.source === 'sms' && t.viaPush !== true &&
+    typeof t.messageObservationId === 'string' && OBSERVATION_UUID_RE.test(t.messageObservationId);
+}
+
+function isLiveMessageObservationRow(t: Transaction): boolean {
+  return hasMessageObservationId(t) && t.smsKey?.startsWith('h') !== true;
+}
+
+export interface DuplicateGuardOptions {
+  /** Issuer identity of a ledger account, for statement/alert compatibility. */
+  accountBankIdentity?: (accountId: string) => string | undefined;
+  /**
+   * An account reference that attributes nothing — the unassigned holdings a
+   * statement with no card/account digits lands on. Such a holding cannot
+   * establish ownership for matching different files or live alerts.
+   */
+  unresolvedAccount?: (accountId: string) => boolean;
+}
+
+const STATEMENT_IMPORT_ID = /^[a-f0-9]{32}$/;
+
+/** The upload a statement row came from, when the relay named one. */
+export function statementUploadOf(
+  row: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>,
+): string | undefined {
+  return isStatementCaptureSource(row.captureSource) && typeof row.statementImportId === 'string' &&
+    STATEMENT_IMPORT_ID.test(row.statementImportId) ? row.statementImportId : undefined;
+}
+
+/** Stable file occurrence identity; legacy rows intentionally have none. */
+export function statementRowKey(
+  row: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId' | 'statementRowIndex'>,
+): string | undefined {
+  const upload = statementUploadOf(row);
+  return upload && Number.isInteger(row.statementRowIndex) && row.statementRowIndex! >= 0 && row.statementRowIndex! < 200
+    ? `${upload}:${row.statementRowIndex}` : undefined;
+}
+
+function statementKeys(row: Pick<DuplicateCandidate,
+  'captureSource' | 'statementImportId' | 'statementRowIndex' | 'statementOccurrences'>): string[] {
+  const primary = statementRowKey(row);
+  return [...new Set([
+    ...(primary ? [primary] : []),
+    ...(row.statementOccurrences ?? []).flatMap((claim) => {
+      const key = statementRowKey({ captureSource: 'pdf', statementImportId: claim.importId, statementRowIndex: claim.rowIndex });
+      return key ? [key] : [];
+    }),
+  ])];
+}
+
+/**
+ * Two statement rows from different uploads. Their relay clocks are coarse
+ * and restart at midday for every file, so neither a shared `s{ts}-{amount}`
+ * nor a title within the event window says they are one event; only the
+ * one-to-one statement matcher may pair them. An untagged statement row
+ * predates upload ids and is necessarily from another upload than a tagged one.
+ */
+export function fromDifferentStatementUploads(
+  a: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>,
+  b: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>,
+): boolean {
+  if (!isStatementCaptureSource(a.captureSource) || !isStatementCaptureSource(b.captureSource)) return false;
+  const left = statementUploadOf(a);
+  const right = statementUploadOf(b);
+  return (left !== undefined || right !== undefined) && left !== right;
+}
+
+const sameDescriptor = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+/**
+ * Whether a statement descriptor and an alert title can name one merchant:
+ * normalized merchant words agree in order ("PAYPAL
+ * *ENDURANCEIN" / "Endurancein", "CARREFOUR HYPER 1234" / "Carrefour").
+ * Money and a day alone are not an identity, even when the statement names an
+ * account: "NOON.COM 50.00" and "Carrefour 50.00" are two purchases.
+ */
+const descriptorOverlap = (a: string, b: string): boolean => {
+  // Compare the merchant phrase, not any shared word: Dubai/Company/Pay
+  // occur on unrelated rows, and "Urban Company" is not "Urban Restaurant".
+  const words = (value: string) => value.toLowerCase().normalize('NFKC')
+    .replace(/^(?:nfc|iap)\s*-\s*\(g-pay\)\s*-\s*/i, '')
+    .replace(/^(?:paypal|gpay|pos)\s*\*\s*/i, '')
+    .replace(/\burbanclap\b/g, 'urban company')
+    .split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const left = words(a);
+  const right = words(b);
+  const [short, long] = left.length <= right.length ? [left, right] : [right, left];
+  if (short.length === 0 || !short.some((word) => /\p{L}/u.test(word)) ||
+      !short.every((word, index) => word === long[index])) return false;
+  // A day-level statement has no precise clock to support arbitrary prefix
+  // matching: Amazon Cafe and Amazon are different businesses. Only bounded
+  // branch/legal/location metadata may extend an otherwise equal phrase.
+  // Unknown extensions stay separate rather than silently deleting a charge.
+  return long.slice(short.length).every((word) =>
+    /^\d+$/.test(word) ||
+    /^(?:br|branch|site|no|llc|ltd|limited|fze|fzco|hyper|hypermarket|ae|uae|dubai|sharjah|ajman|abu|dhabi|dxb|auh|moe)$/.test(word));
+};
+const settlementTitle = (value: string) => /^card(?:\s*•\s*\d{4})?\s+payment$/i.test(value.trim());
+export const statementDescriptorsAgree = (a: string, b: string): boolean =>
+  sameDescriptor(a, b) || (settlementTitle(a) && settlementTitle(b)) ||
+  (!GENERIC_CAPTURE_TITLES.has(a.trim().toLowerCase()) &&
+    !GENERIC_CAPTURE_TITLES.has(b.trim().toLowerCase()) && descriptorOverlap(a, b));
+
 export function duplicateGuard(
   existing: Transaction[],
   sourceIdentityAlreadyValidated = false,
+  options: DuplicateGuardOptions = {},
 ): DuplicateGuard {
   if (!sourceIdentityAlreadyValidated) {
     existing = existing.filter((row) => isUsableCaptureSourceIdentity(row.smsKey, row.ts));
@@ -318,22 +692,95 @@ export function duplicateGuard(
   const seen = new Map<string, SeenOccurrence[]>();
   /** The same stored row can appear in title and cross-channel indexes. */
   const seenById = new Map<string, SeenOccurrence>();
-  const note = (key: string, ts: number | null, type: TransactionType, smsKey?: string, id?: string, captureInstrument?: CaptureInstrument) => {
+  /** User-renamed, still-unbound live observations, for the title-free bind. */
+  const renamedLiveObservations: { amountFils: number; occurrence: SeenOccurrence }[] = [];
+  const note = (
+    key: string, ts: number | null, type: TransactionType, amountFils: number, smsKey?: string,
+    id?: string, captureInstrument?: CaptureInstrument,
+    flags: {
+      liveObservation?: boolean; renamed?: boolean; boundLiveCopy?: boolean;
+      statement?: Pick<DuplicateCandidate, 'captureSource' | 'statementImportId'>;
+      push?: boolean; eventIdentity?: string; textClock?: number;
+    } = {},
+  ) => {
+    // File row clocks are synthetic; only statement matching may use these rows.
+    if (isStatementCaptureSource(flags.statement?.captureSource)) return;
     const at = seen.get(key);
-    const occurrence = { ts, id, type, captureInstrument, historyIdentity: smsKey?.startsWith('h') === true, consumed: false };
+    const historyIdentity = smsKey?.startsWith('h') === true;
+    const occurrence: SeenOccurrence = {
+      ts, id, type, captureInstrument, historyIdentity, textClock: flags.textClock,
+      ...(flags.push ? { push: true } : {}),
+      ...(flags.eventIdentity ? { eventIdentity: flags.eventIdentity } : {}),
+      ...(flags.statement && isStatementCaptureSource(flags.statement.captureSource)
+        ? { statement: { captureSource: flags.statement.captureSource,
+          statementImportId: flags.statement.statementImportId } } : {}),
+      liveObservation: flags.liveObservation === true && !historyIdentity,
+      // A History row promoted from a live observation has already explained
+      // its live copy; it can never absorb another live Message.
+      consumed: historyIdentity && flags.boundLiveCopy === true,
+    };
     if (at) at.push(occurrence);
     else seen.set(key, [occurrence]);
     if (id) seenById.set(id, occurrence);
+    if (occurrence.liveObservation && flags.renamed === true) {
+      renamedLiveObservations.push({ amountFils, occurrence });
+    }
   };
-  for (const t of existing) {
+  /**
+   * Bind one incoming History Message to one GUID-less live Message the user
+   * renamed. An unedited live row parses to the History copy's own title and
+   * pairs through the title rule; a renamed one cannot, and its s-key carries
+   * the receipt time rather than the Message's own. Match by money,
+   * direction, instrument and the same-event window, nearest first; the
+   * occurrence is consumed so it explains exactly one History copy. Never the
+   * reverse direction: a new live Message is not bound to History by money
+   * alone, since a different merchant at the same amount is a real purchase.
+   */
+  const titleFreeObservationMatch = (c: DuplicateCandidate, mine: number | null): SeenOccurrence | undefined => {
+    if (c.smsKey?.startsWith('h') !== true || mine === null) return undefined;
+    let best: SeenOccurrence | undefined;
+    for (const { amountFils, occurrence } of renamedLiveObservations) {
+      if (occurrence.consumed || occurrence.ts === null || amountFils !== c.amountFils ||
+        occurrence.type !== c.type) continue;
+      if (!compatibleCaptureInstrument(occurrence.captureInstrument, c.captureInstrument)) continue;
+      const distance = Math.abs(occurrence.ts - mine);
+      if (distance > SAME_EVENT_MS) continue;
+      if (!best || distance < Math.abs(best.ts! - mine)) best = occurrence;
+    }
+    return best;
+  };
+  // Wallet rows, unbound or bound to one bank alert, keep only their exact
+  // receipt identity (noteExact below). A non-exact alert near a bound row
+  // goes to the planner's possible-duplicate Review, never a silent merge.
+  const heuristicRows = existing.filter((t) => !isApplePayWalletRow(t) && t.walletBound !== true);
+  for (const t of heuristicRows) {
     // Locally-created and migrated rows may have no SMS fingerprint but still
     // carry a precise event clock. Treating those as timeless made every
     // identical purchase later that day look like the same event.
-    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t), t.type, t.smsKey, t.id, t.captureInstrument);
+    note(dedupeKey(t.date, t.amountFils, t.title), candidateTime(t), t.type, t.amountFils, t.smsKey, t.id,
+      t.captureInstrument, {
+        liveObservation: isLiveMessageObservationRow(t),
+        renamed: t.userEdited === true || t.titleEdited === true,
+        boundLiveCopy: hasMessageObservationId(t),
+        statement: t,
+        push: t.source === 'sms' && t.viaPush === true,
+        eventIdentity: t.captureEventIdentity, textClock: t.textClock,
+      });
   }
   // Delivery clocks can collide across cards; retain every candidate per key.
   const exactRows = new Map<string, DuplicateCandidate[]>();
+  const statementRows = new Map<string, DuplicateCandidate>();
   const noteExact = (c: DuplicateCandidate) => {
+    const primary = statementRowKey(c);
+    if (primary) statementRows.set(primary, c);
+    for (const claim of c.statementOccurrences ?? []) {
+      const key = statementRowKey({ captureSource: 'pdf', statementImportId: claim.importId, statementRowIndex: claim.rowIndex });
+      if (!key) continue;
+      statementRows.set(key, claim.date !== undefined && claim.amountFils !== undefined && claim.type !== undefined
+        ? { ...c, date: claim.date, amountFils: claim.amountFils, type: claim.type,
+            title: claim.title ?? c.title, userEdited: false, titleEdited: claim.title === undefined ? c.titleEdited : false }
+        : c);
+    }
     if (!c.smsKey) return;
     const key = canonicalCaptureSourceKey(c.smsKey, c.ts);
     if (isUnboundAndroidSourceKey(key)) return;
@@ -344,6 +791,9 @@ export function duplicateGuard(
   for (const t of existing) noteExact(t);
   const exactMatch = (key: string, c: DuplicateCandidate) =>
     (exactRows.get(canonicalCaptureSourceKey(key, c.ts)) ?? []).find((row) => key.startsWith('h') || (
+      isStatementCaptureSource(row.captureSource) === isStatementCaptureSource(c.captureSource) &&
+      !fromDifferentStatementUploads(row, c) &&
+      (!statementRowKey(row) || !statementRowKey(c) || statementRowKey(row) === statementRowKey(c)) &&
       (row.type === c.type || c.eventKind === 'cardPayment' ||
         (row.raw !== undefined && c.raw !== undefined && bodyPrint(row.raw) === bodyPrint(c.raw))) &&
       compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument)
@@ -359,40 +809,135 @@ export function duplicateGuard(
     if (event.id) crossById.set(event.id, event);
   };
   /**
+   * Captures whose alert text stated its own clock to the second, by the
+   * core of that event identity. A notification copy whose event is already
+   * here is that event again, however long after it was delivered.
+   */
+  const byEventIdentity = new Map<string, SeenIdentityEvent[]>();
+  const noteEventIdentity = (event: SeenIdentityEvent) => {
+    const core = event.eventIdentity.slice(0, 20);
+    const rows = byEventIdentity.get(core);
+    if (rows) rows.push(event);
+    else byEventIdentity.set(core, [event]);
+  };
+  /** Nearest capture of the same stated event; `pushOnly` limits it to unconsumed stored push rows. */
+  const nearestSameEvent = (
+    eventIdentity: string, mine: number | null, pushOnly: boolean, candidate: DuplicateCandidate,
+  ): SeenIdentityEvent | undefined => {
+    let best: SeenIdentityEvent | undefined;
+    for (const event of byEventIdentity.get(eventIdentity.slice(0, 20)) ?? []) {
+      if (!sameCaptureEvent(event.eventIdentity, eventIdentity) ||
+        (event.cross && (differentTextClock(event.cross.textClock, candidate.textClock) ||
+          !sameStatedInstrument(event.cross.captureInstrument, candidate.captureInstrument) ||
+          (event.cross.titleEdited !== true && !sameMerchantCapture(event.cross.title, candidate.title))))) continue;
+      if (pushOnly && (!event.push || !event.id || event.cross?.consumed)) continue;
+      if (!best) { best = event; continue; }
+      const distance = (e: SeenIdentityEvent) => e.ts === null || mine === null ? Number.POSITIVE_INFINITY : Math.abs(e.ts - mine);
+      if (distance(event) < distance(best)) best = event;
+    }
+    return best;
+  };
+  /**
    * Statement ↔ live-capture overlap cannot use the push/SMS clock/title rule.
    * Statements commonly provide a date-only timestamp and a card-network
    * descriptor while the live alert provides a real time and friendly merchant.
    * Match only when exactly one side is proven PDF/CSV and the resolved money
    * facts agree. Every row is consumable once, preserving repeated equal charges.
    */
-  const statementPairEvents: SeenStatementPairEvent[] = [];
+  //
+  // Every rule below needs the same or an adjacent day, so rows are bucketed
+  // by day and a candidate reads only the nearby buckets instead of every SMS
+  // row in the ledger. `seq` restores insertion order across buckets, so the
+  // first/best match is the one a full scan would have picked.
+  const statementPairByDay = new Map<string | number, SeenStatementPairEvent[]>();
+  const statementPairSeq = new Map<SeenStatementPairEvent, number>();
   const statementPairById = new Map<string, SeenStatementPairEvent>();
+  const statementPairDay = (date: string): string | number => {
+    const time = Date.parse(`${date}T12:00:00Z`);
+    return Number.isFinite(time) ? Math.floor(time / 86_400_000) : `raw:${date}`;
+  };
   const noteStatementPair = (event: SeenStatementPairEvent) => {
-    statementPairEvents.push(event);
+    const day = statementPairDay(event.date);
+    const rows = statementPairByDay.get(day);
+    if (rows) rows.push(event);
+    else statementPairByDay.set(day, [event]);
+    statementPairSeq.set(event, statementPairSeq.size);
     if (event.id) statementPairById.set(event.id, event);
   };
+  const statementPairNear = (date: string): SeenStatementPairEvent[] => {
+    const day = statementPairDay(date);
+    if (typeof day !== 'number') return statementPairByDay.get(day) ?? [];
+    const near: SeenStatementPairEvent[] = [];
+    for (let d = day - 2; d <= day + 2; d++) {
+      const rows = statementPairByDay.get(d);
+      if (rows) near.push(...rows);
+    }
+    return near.sort((a, b) => statementPairSeq.get(a)! - statementPairSeq.get(b)!);
+  };
+  const unresolvedAccount = (accountId: string | undefined): boolean =>
+    !accountId || options.unresolvedAccount?.(accountId) === true;
+  const bankOf = (row: Pick<SeenStatementPairEvent, 'statementBank' | 'captureInstrument' | 'accountId'>) =>
+    row.statementBank ?? row.captureInstrument?.bankIdentity ??
+      (row.accountId ? options.accountBankIdentity?.(row.accountId) : undefined);
+  const banksCompatible = (a: string | undefined, b: string | undefined) => !a || !b || a === b;
   const statementPairMatch = (c: DuplicateCandidate): SeenStatementPairEvent | undefined => {
-    if (!c.accountId) return undefined;
     const incomingStatement = isStatementCaptureSource(c.captureSource);
-    // Provenance is the permission to relax title/time. PDF/CSV on BOTH sides
-    // are two statement rows, and no statement on either side means this fuzzy
-    // matcher has no authority at all.
-    const matches = statementPairEvents.filter((row) =>
-      !row.consumed &&
-      !!row.accountId &&
-      row.accountId === c.accountId &&
-      row.type === c.type &&
-      isStatementCaptureSource(row.captureSource) !== incomingStatement &&
-      Math.abs(row.amountFils - c.amountFils) <= 1 &&
-      sameOrAdjacentDate(row.date, c.date) &&
-      compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument));
-    if (!matches.length) return undefined;
-    matches.sort((a, b) => {
-      const score = (row: SeenStatementPairEvent) =>
-        (row.date === c.date ? 0 : 10) + Math.abs(row.amountFils - c.amountFils);
-      return score(a) - score(b);
+    const incomingUpload = incomingStatement ? statementUploadOf(c) : undefined;
+    const occurrence = statementRowKey(c);
+    const open = statementPairNear(c.date).filter((row) => {
+      if (row.consumed || row.type !== c.type || !compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument)) return false;
+      if (!occurrence) return true;
+      const keys = statementKeys(row);
+      // An existing transaction can explain only one occurrence in this file,
+      // including when earlier occurrences arrived on a previous relay page.
+      if (keys.some((key) => key.startsWith(`${incomingUpload}:`) && key !== occurrence)) return false;
+      // A new overlap requires a durable row to receive its claim.
+      return !!row.id;
     });
-    return matches[0];
+    const claimable = (row: SeenStatementPairEvent): SeenStatementPairEvent => {
+      if (occurrence && !statementKeys(row).includes(occurrence) && (row.statementOccurrences?.length ?? 0) >= 64) {
+        throw new Error('Statement occurrence claim capacity exceeded');
+      }
+      return row;
+    };
+    // 1. Statement <-> live capture on the SAME resolved account. Provenance
+    // permits bounded posting drift, never a contradiction in merchant identity.
+    if (c.accountId && !unresolvedAccount(c.accountId)) {
+      const matches = open.filter((row) =>
+        !!row.accountId &&
+        row.accountId === c.accountId &&
+        isStatementCaptureSource(row.captureSource) !== incomingStatement &&
+        Math.abs(row.amountFils - c.amountFils) <= 1 &&
+        banksCompatible(bankOf(row), bankOf(c)) &&
+        statementDescriptorsAgree(row.title, c.title) &&
+        sameOrAdjacentDate(row.date, c.date));
+      if (matches.length) {
+        matches.sort((a, b) => {
+          const score = (row: SeenStatementPairEvent) =>
+            (row.date === c.date ? 0 : 10) + Math.abs(row.amountFils - c.amountFils);
+          return score(a) - score(b);
+        });
+        return claimable(matches[0]);
+      }
+    }
+    // 2. Statement <-> statement from ANOTHER upload: the same day, amount,
+    // direction and account, whatever each file's row order put on the clock.
+    // An unassigned holding or issuer name does not prove account ownership.
+    // Different files need a positively resolved account as well as row facts.
+    if (incomingUpload && c.accountId && !unresolvedAccount(c.accountId)) {
+      const match = open.find((row) =>
+        isStatementCaptureSource(row.captureSource) &&
+        fromDifferentStatementUploads(row, c) &&
+        row.accountId === c.accountId &&
+        row.amountFils === c.amountFils &&
+        row.date === c.date &&
+        banksCompatible(bankOf(row), bankOf(c)) &&
+        statementDescriptorsAgree(row.title, c.title));
+      if (match) return claimable(match);
+    }
+    // Bank/date/merchant/amount cannot identify which account an unlabelled
+    // file describes. Preserve an uncertain overlap instead of deleting money.
+    return undefined;
   };
   /** Opposite alerts for one card payment: bank-account debit + card receipt. */
   const cardPayments = new Map<string, SeenCardPayment[]>();
@@ -409,16 +954,24 @@ export function duplicateGuard(
     if (rows) rows.push({ consumedSides: new Set() });
     else manualPayments.set(key, [{ consumedSides: new Set() }]);
   };
-  for (const t of existing) {
-    if (t.source === 'sms') {
-      noteCross(crossChannelKey(t.date, t.amountFils, t.type), {
+  for (const t of heuristicRows) {
+    if (t.source === 'sms' && !isStatementCaptureSource(t.captureSource)) {
+      const cross: SeenEvent = {
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
         channel: t.viaPush ? 'push' : 'inbox',
         id: t.id,
         title: t.title,
         captureInstrument: t.captureInstrument,
         userEdited: t.userEdited,
-      });
+        textClock: t.textClock,
+        titleEdited: t.titleEdited,
+      };
+      noteCross(crossChannelKey(t.date, t.amountFils, t.type), cross);
+      if (typeof t.captureEventIdentity === 'string' && CAPTURE_EVENT_IDENTITY.test(t.captureEventIdentity)) {
+        noteEventIdentity({
+          eventIdentity: t.captureEventIdentity, ts: cross.ts, push: t.viaPush === true, id: t.id, cross,
+        });
+      }
     }
     // Statement provenance is persisted on parser-owned rows, but older live
     // SMS rows legitimately have no captureSource at all. Index both groups;
@@ -428,14 +981,19 @@ export function duplicateGuard(
         date: t.date,
         amountFils: t.amountFils,
         type: t.type,
+        title: t.title,
         accountId: t.accountId,
         captureInstrument: t.captureInstrument,
         captureSource: t.captureSource,
+        statementImportId: t.statementImportId,
+        statementRowIndex: t.statementRowIndex,
+        statementOccurrences: t.statementOccurrences,
+        statementBank: t.statementBank,
         id: t.id,
         consumed: false,
       });
     }
-    if (t.cardPaymentSide) {
+    if (t.cardPaymentSide && !isStatementCaptureSource(t.captureSource)) {
       noteCardPayment(`${t.amountFils}|${t.accountId}`, {
         date: t.date,
         ts: Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey),
@@ -450,13 +1008,55 @@ export function duplicateGuard(
       noteManualPayment(`${t.date}|${t.amountFils}|${t.accountId}`);
     }
   }
+  // Bound Wallet rows stay out of the loose indexes above, but a bank
+  // statement row for the same purchase must still pair with them one-to-one;
+  // otherwise the statement would add the purchase a second time.
+  for (const t of existing) {
+    if (t.walletBound !== true || t.source !== 'sms') continue;
+    noteStatementPair({
+      date: t.date,
+      amountFils: t.amountFils,
+      type: t.type,
+      title: t.title,
+      accountId: t.accountId,
+      captureInstrument: t.captureInstrument,
+      captureSource: t.captureSource,
+      statementImportId: t.statementImportId,
+      statementRowIndex: t.statementRowIndex,
+      statementOccurrences: t.statementOccurrences,
+      statementBank: t.statementBank,
+      id: t.id,
+      consumed: false,
+    });
+  }
 
   return {
     has(c) {
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) { lastMatchedId = null; return false; }
       lastMatchedId = null;
+      const statementKey = statementRowKey(c);
+      const statementRow = statementKey ? statementRows.get(statementKey) : undefined;
+      if (statementRow) {
+        // A file occurrence cannot change its posted financial facts on retry.
+        // Hold the source for recovery instead of editing money or adding a copy.
+        if ((!statementRow.userEdited && (statementRow.date !== c.date || statementRow.amountFils !== c.amountFils || statementRow.type !== c.type ||
+            !compatibleCaptureInstrument(statementRow.captureInstrument, c.captureInstrument))) ||
+            (!statementRow.userEdited && !statementRow.titleEdited && !statementDescriptorsAgree(statementRow.title, c.title))) {
+          throw new Error('Statement row identity conflicts with stored financial facts');
+        }
+        if (statementRow.id) {
+          const paired = statementPairById.get(statementRow.id);
+          if (paired) paired.consumed = true;
+        }
+        lastMatchedId = statementRow.id ?? null;
+        return true;
+      }
       const exact = c.smsKey ? exactMatch(c.smsKey, c) : undefined;
       if (exact) {
+        if (isStatementCaptureSource(c.captureSource) && exact.id) {
+          const paired = statementPairById.get(exact.id);
+          if (paired) paired.consumed = true;
+        }
         lastMatchedId = exact.id ?? null;
         return true;
       }
@@ -475,7 +1075,22 @@ export function duplicateGuard(
         }
       }
       const mine = candidateTime(c);
-      if (c.eventKind === 'cardPayment' && c.accountId) {
+      // A bank-app notification whose stated event (clock to the second,
+      // money, card) is already captured — as another copy of the same push
+      // or as the bank SMS about it — is that event again, whenever it was
+      // delivered. Many copies may fold into one row: they ARE one event.
+      if (c.channel === 'push' && c.eventIdentity) {
+        const same = nearestSameEvent(c.eventIdentity, mine, false, c);
+        if (same) {
+          // An SMS row now explains this push; it must not also explain a
+          // different push through the money/clock rule below.
+          if (!same.push && same.cross) same.cross.consumed = true;
+          // Only another copy of the same push may be healed from this parse.
+          lastMatchedId = same.push ? same.id ?? null : null;
+          return true;
+        }
+      }
+      if (c.eventKind === 'cardPayment' && c.accountId && !statementRowKey(c)) {
         const side = c.cardPaymentSide ?? 'unknown';
         const manual = (
           manualPayments.get(`${c.date}|${c.amountFils}|${c.accountId}`) ?? []
@@ -484,6 +1099,14 @@ export function duplicateGuard(
           manual.consumedSides.add(side);
           return true;
         }
+      }
+      if (isStatementCaptureSource(c.captureSource)) {
+        const statementMatch = statementPairMatch(c);
+        if (statementMatch) {
+          statementMatch.consumed = true;
+          if (statementRowKey(c)) lastMatchedId = statementMatch.id ?? null;
+        }
+        return statementMatch !== undefined;
       }
       if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
         const candidateIsHistory = c.smsKey?.startsWith('h') === true;
@@ -535,10 +1158,23 @@ export function duplicateGuard(
           // second. Exact re-imports were already caught by seenSms above.
           // Continue comparing against Android/live captures so importing
           // history after enabling live capture still removes overlap.
+          // Likewise two GUID-less live observations are two delivered
+          // Messages: the native queue stages each Message once.
+          const incomingLive = c.liveObservation === true && !c.smsKey?.startsWith('h');
+          // Two copies from the bank app that each state their event, and
+          // state different ones (another second, or a different balance at
+          // the same second), are two charges however close their delivery.
+          const incomingPush = c.channel === 'push';
           const comparable = at.filter((row) =>
+            !differentTextClock(row.textClock, c.textClock) &&
+            !(incomingPush && row.push === true && distinctCaptureEvents(row.eventIdentity, c.eventIdentity)) &&
             row.type === c.type &&
+            !(row.statement && fromDifferentStatementUploads(row.statement, c)) &&
             compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
-            !(c.smsKey?.startsWith('h') && row.historyIdentity));
+            !(c.smsKey?.startsWith('h') && row.historyIdentity) &&
+            !(incomingLive && row.liveObservation));
+          const oneToOne = (occurrence: SeenOccurrence) => c.smsKey?.startsWith('h') === true ||
+            incomingLive || occurrence.historyIdentity || occurrence.liveObservation;
           // Same day, same amount, same name. That is one event captured twice
           // UNLESS both sides carry a timestamp and those are far enough apart
           // to be two separate visits. Without this the second identical charge
@@ -547,8 +1183,7 @@ export function duplicateGuard(
           if (mine === null && comparable.length > 0) return true;
           const timed = comparable.find(
             (occurrence) =>
-              (!(c.smsKey?.startsWith('h') || occurrence.historyIdentity) ||
-                !occurrence.consumed) &&
+              (!oneToOne(occurrence) || !occurrence.consumed) &&
               occurrence.ts !== null &&
               Math.abs(occurrence.ts - mine!) <= SAME_EVENT_MS,
           );
@@ -556,7 +1191,7 @@ export function duplicateGuard(
             // Exact history/live overlap is one-to-one. Without consuming the
             // live occurrence it silences every distinct historical Message
             // the bank happened to timestamp in the same two-minute window.
-            if (c.smsKey?.startsWith('h') || timed.historyIdentity) timed.consumed = true;
+            if (oneToOne(timed)) timed.consumed = true;
             lastMatchedId = timed.id ?? null;
             return true;
           }
@@ -571,6 +1206,12 @@ export function duplicateGuard(
             lastMatchedId = timeless.id ?? null;
             return true;
           }
+        }
+        const observation = titleFreeObservationMatch(c, mine);
+        if (observation) {
+          observation.consumed = true;
+          lastMatchedId = observation.id ?? null;
+          return true;
         }
       }
       const statementMatch = statementPairMatch(c);
@@ -595,9 +1236,10 @@ export function duplicateGuard(
             row.channel !== 'push' &&
             !row.consumed &&
             compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) &&
+            !differentTextClock(row.textClock, c.textClock) &&
             crossChannelPair(row, c.title) &&
             closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS),
-        );
+        ) ?? nearestLaggedCrossChannel(rows, c, mine, 'inbox');
         if (match) {
           // One SMS row accounts for one notification. Left uncounted, a
           // single AED 25 SMS silenced every AED 25 push in the next two
@@ -616,8 +1258,14 @@ export function duplicateGuard(
     },
     supersedes(c) {
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return null;
-      if (c.channel === 'push') return null;
+      if (c.channel === 'push' || isStatementCaptureSource(c.captureSource)) return null;
       const mine = candidateTime(c);
+      // The SMS about an event a stored push row already stated replaces
+      // that row, however far apart they arrived; nearest first, one row.
+      if (c.eventIdentity) {
+        const same = nearestSameEvent(c.eventIdentity, mine, true, c);
+        if (same?.id) return same.id;
+      }
       const rows = crossChannel.get(crossChannelKey(c.date, c.amountFils, c.type)) ?? [];
       let best: SeenEvent | null = null;
       for (const row of rows) {
@@ -626,12 +1274,17 @@ export function duplicateGuard(
           !row.id ||
           row.consumed ||
           !compatibleCaptureInstrument(row.captureInstrument, c.captureInstrument) ||
+          differentTextClock(row.textClock, c.textClock) ||
           !crossChannelPair(row, c.title) ||
           !closeEnough(row.ts, mine, CROSS_CHANNEL_EVENT_MS)
         ) {
           continue;
         }
         if (!best || Math.abs(row.ts! - mine!) < Math.abs(best.ts! - mine!)) best = row;
+      }
+      if (!best) {
+        const lagged = nearestLaggedCrossChannel(rows, c, mine, 'push');
+        if (lagged?.id) best = lagged;
       }
       return best?.id ?? null;
     },
@@ -660,26 +1313,43 @@ export function duplicateGuard(
     add(c) {
       if (!isUsableCaptureSourceIdentity(c.smsKey, c.ts)) return;
       const ts = candidateTime(c);
-      note(dedupeKey(c.date, c.amountFils, c.title), ts, c.type, c.smsKey, c.id, c.captureInstrument);
+      note(dedupeKey(c.date, c.amountFils, c.title), ts, c.type, c.amountFils, c.smsKey, c.id,
+        c.captureInstrument, {
+          liveObservation: c.liveObservation === true, statement: c,
+          push: c.channel === 'push', eventIdentity: c.eventIdentity, textClock: c.textClock,
+        });
       noteExact(c);
-      noteCross(crossChannelKey(c.date, c.amountFils, c.type), {
+      const cross: SeenEvent = {
         ts,
         channel: c.channel ?? 'inbox',
+        textClock: c.textClock,
         id: c.id,
         title: c.title,
         captureInstrument: c.captureInstrument,
-      });
+      };
+      if (!isStatementCaptureSource(c.captureSource)) {
+        noteCross(crossChannelKey(c.date, c.amountFils, c.type), cross);
+      }
+      if (c.eventIdentity && CAPTURE_EVENT_IDENTITY.test(c.eventIdentity)) {
+        noteEventIdentity({ eventIdentity: c.eventIdentity, ts, push: c.channel === 'push', id: c.id, cross });
+      }
       noteStatementPair({
         date: c.date,
         amountFils: c.amountFils,
         type: c.type,
+        title: c.title,
         accountId: c.accountId,
         captureInstrument: c.captureInstrument,
         captureSource: c.captureSource,
+        statementImportId: c.statementImportId,
+        statementRowIndex: c.statementRowIndex,
+        statementOccurrences: c.statementOccurrences,
+        statementBank: c.statementBank,
         id: c.id,
         consumed: false,
       });
-      if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide) {
+      if (c.eventKind === 'cardPayment' && c.accountId && c.cardPaymentSide &&
+        !isStatementCaptureSource(c.captureSource)) {
         noteCardPayment(`${c.amountFils}|${c.accountId}`, {
           date: c.date,
           ts,
@@ -710,11 +1380,29 @@ export function duplicateGuard(
 export function reconcileCaptureDuplicates(transactions: Transaction[]): Transaction[] {
   const kept: Transaction[] = [];
   let changed = false;
+  // Every capture and every launch run this over the whole ledger, so the
+  // time-bucketed indexes are keyed on each row's own fingerprint alone and
+  // hold flat lists in insertion order instead of one composite
+  // `${fingerprint}|${bucket}` string per bucket. A bucket is an integer and
+  // holds no "|", so such a string names exactly one (fingerprint, bucket)
+  // pair: scanning a fingerprint's list for one bucket yields precisely the
+  // rows, in precisely the order, the composite keys did, without building and
+  // hashing a string per probe.
   const bySmsKey = new Map<string, number[]>();
-  const byCrossBucket = new Map<string, number[]>();
-  const byTitleBucket = new Map<string, number[]>();
-  const byCardPaymentBucket = new Map<string, number[]>();
+  /** crossChannelKey -> [crossBucket, laggedBucket, index, ...]. */
+  const byCross = new Map<string, number[]>();
+  /** dedupeKey -> [titleBucket, index, ...]. */
+  const byTitle = new Map<string, number[]>();
+  /** amount|account -> [cardPaymentBucket, index, ...]. */
+  const byCardPayment = new Map<string, number[]>();
+  /** captureEventIdentity core -> [index, ...], for rows whose alert stated its clock to the second. */
+  const byEventIdentity = new Map<string, number[]>();
+  const eventIdentityCore = (t: Transaction): string | undefined =>
+    typeof t.captureEventIdentity === 'string' && CAPTURE_EVENT_IDENTITY.test(t.captureEventIdentity)
+      ? t.captureEventIdentity.slice(0, 20) : undefined;
   const pairedCardPayments = new Set<number>();
+  /** A kept row that absorbed a lagged cross-channel copy explains exactly one. */
+  const laggedAbsorbed = new Set<number>();
 
   const timeOf = (t: Transaction): number | null =>
     Number.isFinite(t.ts) ? t.ts! : keyTime(t.smsKey);
@@ -724,19 +1412,52 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
     if (rows) rows.push(index);
     else map.set(key, [index]);
   };
+  const pushPair = (map: Map<string, number[]>, key: string, slot: number, index: number) => {
+    const rows = map.get(key);
+    if (rows) rows.push(slot, index);
+    else map.set(key, [slot, index]);
+  };
+  const pushTriple = (map: Map<string, number[]>, key: string, slot: number, lagged: number, index: number) => {
+    const rows = map.get(key);
+    if (rows) rows.push(slot, lagged, index);
+    else map.set(key, [slot, lagged, index]);
+  };
   const bucket = (ts: number, width: number) => Math.floor(ts / width);
-  const noteAt = (row: Transaction, index: number) => {
-    if (row.smsKey) pushIndex(bySmsKey, canonicalCaptureSourceKey(row.smsKey, row.ts), index);
+  /** `keys` are this row's own fingerprints when the caller already built them. */
+  const noteAt = (
+    row: Transaction,
+    index: number,
+    keys?: { source: string | undefined; cross: string; title: string },
+  ) => {
+    if (row.smsKey) pushIndex(bySmsKey, keys?.source ?? canonicalCaptureSourceKey(row.smsKey, row.ts), index);
+    if (row.source === 'sms') {
+      const core = eventIdentityCore(row);
+      if (core !== undefined) pushIndex(byEventIdentity, core, index);
+    }
     const ts = timeOf(row);
     if (ts === null || row.source !== 'sms') return;
-    const cross = crossChannelKey(row.date, row.amountFils, row.type);
-    pushIndex(byCrossBucket, `${cross}|${bucket(ts, CROSS_CHANNEL_EVENT_MS)}`, index);
-    const title = dedupeKey(row.date, row.amountFils, row.title);
-    pushIndex(byTitleBucket, `${title}|${bucket(ts, 30_000)}`, index);
+    pushTriple(byCross, keys?.cross ?? crossChannelKey(row.date, row.amountFils, row.type),
+      bucket(ts, CROSS_CHANNEL_EVENT_MS), bucket(ts, CROSS_CHANNEL_INSTRUMENT_EVENT_MS), index);
+    pushPair(byTitle, keys?.title ?? dedupeKey(row.date, row.amountFils, row.title), bucket(ts, 30_000), index);
     if (row.cardPaymentSide && row.isTransfer === true) {
-      const payment = `${row.amountFils}|${row.accountId}`;
-      pushIndex(byCardPaymentBucket, `${payment}|${bucket(ts, CARD_PAYMENT_PAIR_MS)}`, index);
+      pushPair(byCardPayment, `${row.amountFils}|${row.accountId}`, bucket(ts, CARD_PAYMENT_PAIR_MS), index);
     }
+  };
+  // Reusable, insertion-ordered, de-duplicated candidate lists: the Sets they
+  // replace were allocated for every row although most rows match nothing.
+  const candidates: number[] = [];
+  const seenCandidates = new Set<number>();
+  const laggedCandidates: number[] = [];
+  const seenLagged = new Set<number>();
+  const addCandidate = (index: number) => {
+    if (seenCandidates.has(index)) return;
+    seenCandidates.add(index);
+    candidates.push(index);
+  };
+  const addLagged = (index: number) => {
+    if (seenLagged.has(index)) return;
+    seenLagged.add(index);
+    laggedCandidates.push(index);
   };
   const isOppositeCardPaymentPair = (
     row: Transaction,
@@ -764,44 +1485,82 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
       continue;
     }
     const rowTime = timeOf(row);
-    const candidates = new Set<number>();
-    if (row.smsKey) for (const index of bySmsKey.get(canonicalCaptureSourceKey(row.smsKey, row.ts)) ?? []) candidates.add(index);
+    candidates.length = 0;
+    seenCandidates.clear();
+    laggedCandidates.length = 0;
+    seenLagged.clear();
+    const rowSourceKey = row.smsKey ? canonicalCaptureSourceKey(row.smsKey, row.ts) : undefined;
+    if (rowSourceKey !== undefined) {
+      for (const index of bySmsKey.get(rowSourceKey) ?? []) addCandidate(index);
+    }
+    const rowEventCore = eventIdentityCore(row);
+    if (rowEventCore !== undefined) {
+      for (const index of byEventIdentity.get(rowEventCore) ?? []) addCandidate(index);
+    }
+    let rowKeys: { source: string | undefined; cross: string; title: string } | undefined;
     if (rowTime !== null) {
-      const cross = crossChannelKey(row.date, row.amountFils, row.type);
-      const title = dedupeKey(row.date, row.amountFils, row.title);
-      for (const offset of [-1, 0, 1]) {
-        for (const index of
-          byCrossBucket.get(
-            `${cross}|${bucket(rowTime, CROSS_CHANNEL_EVENT_MS) + offset}`,
-          ) ?? []) candidates.add(index);
-        for (const index of
-          byTitleBucket.get(`${title}|${bucket(rowTime, 30_000) + offset}`) ?? []) {
-          candidates.add(index);
+      rowKeys = {
+        source: rowSourceKey,
+        cross: crossChannelKey(row.date, row.amountFils, row.type),
+        title: dedupeKey(row.date, row.amountFils, row.title),
+      };
+      const cross = byCross.get(rowKeys.cross);
+      const titled = byTitle.get(rowKeys.title);
+      const payments = row.cardPaymentSide && row.isTransfer === true
+        ? byCardPayment.get(`${row.amountFils}|${row.accountId}`)
+        : undefined;
+      const crossSlot = bucket(rowTime, CROSS_CHANNEL_EVENT_MS);
+      const laggedSlot = bucket(rowTime, CROSS_CHANNEL_INSTRUMENT_EVENT_MS);
+      const titleSlot = bucket(rowTime, 30_000);
+      const paymentSlot = bucket(rowTime, CARD_PAYMENT_PAIR_MS);
+      for (let offset = -1; offset <= 1; offset += 1) {
+        if (cross) {
+          for (let at = 0; at < cross.length; at += 3) {
+            if (cross[at] === crossSlot + offset) addCandidate(cross[at + 2]);
+          }
+          for (let at = 0; at < cross.length; at += 3) {
+            if (cross[at + 1] === laggedSlot + offset) addLagged(cross[at + 2]);
+          }
         }
-        if (row.cardPaymentSide && row.isTransfer === true) {
-          const payment = `${row.amountFils}|${row.accountId}`;
-          for (const index of
-            byCardPaymentBucket.get(
-              `${payment}|${bucket(rowTime, CARD_PAYMENT_PAIR_MS) + offset}`,
-            ) ?? []) candidates.add(index);
+        if (titled) {
+          for (let at = 0; at < titled.length; at += 2) {
+            if (titled[at] === titleSlot + offset) addCandidate(titled[at + 1]);
+          }
+        }
+        if (payments) {
+          for (let at = 0; at < payments.length; at += 2) {
+            if (payments[at] === paymentSlot + offset) addCandidate(payments[at + 1]);
+          }
         }
       }
     }
-    const duplicateAt = [...candidates].find((index) => {
+    const primaryAt = candidates.find((index) => {
       const prior = kept[index];
       if (prior.source !== 'sms') return false;
+      // Import already matched statement uploads one-to-one; a shared midday
+      // clock between two uploads is not an event identity.
+      if (fromDifferentStatementUploads(row, prior)) return false;
+      if (statementRowKey(row) && statementRowKey(prior) && statementRowKey(row) !== statementRowKey(prior)) return false;
+      const statementClock = isStatementCaptureSource(row.captureSource) || isStatementCaptureSource(prior.captureSource);
+      if (statementClock && isStatementCaptureSource(row.captureSource) !== isStatementCaptureSource(prior.captureSource) &&
+        !(row.smsKey?.startsWith('h') && rowSourceKey === prior.smsKey)) return false;
       const rowPinned = Boolean(row.userEdited || row.transferDecision);
       const priorPinned = Boolean(prior.userEdited || prior.transferDecision);
       const bothEdited = rowPinned && priorPinned;
-      const rowSource = row.smsKey ? canonicalCaptureSourceKey(row.smsKey, row.ts) : undefined;
+      const rowSource = rowSourceKey;
       const priorSource = prior.smsKey ? canonicalCaptureSourceKey(prior.smsKey, prior.ts) : undefined;
       if (row.smsKey && rowSource && !isUnboundAndroidSourceKey(rowSource) && rowSource === priorSource &&
         (row.smsKey.startsWith('h') || (row.type === prior.type &&
           compatibleCaptureInstrument(row.captureInstrument, prior.captureInstrument)))) return !bothEdited;
+      if (statementClock) return false;
       // A reviewed event may fold with its exact same provider identity, but
       // amount/time heuristics cannot delete a decision or attach it to a
       // different event. Two independently reviewed rows require user review.
       if (row.transferDecision || prior.transferDecision) return false;
+      // Likewise a Wallet review decision: only exact receipt identity (above)
+      // may fold it. Import binds a proven SMS counterpart explicitly.
+      if (isApplePayWalletRow(row) || isApplePayWalletRow(prior) ||
+        row.walletBound === true || prior.walletBound === true) return false;
       if (
         !pairedCardPayments.has(index) &&
         !row.userEdited &&
@@ -816,7 +1575,28 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
         prior.smsKey?.startsWith('h') &&
         rowSource !== priorSource
       ) return false;
+      // Two GUID-less iOS live Messages are two delivered Messages; the
+      // native queue stages each once, so heuristics must never fold them.
       if (
+        isLiveMessageObservationRow(row) &&
+        isLiveMessageObservationRow(prior) &&
+        row.messageObservationId!.toLowerCase() !== prior.messageObservationId!.toLowerCase()
+      ) return false;
+      // One stated bank event (explicit clock to the second, money, card)
+      // captured again from the bank app — a re-posted notification, or the
+      // push beside its SMS — whenever each copy was delivered. Two SMS rows
+      // keep the rules below; an edited copy is kept, never discarded.
+      if (
+        (row.viaPush === true || prior.viaPush === true) &&
+        row.type === prior.type &&
+        row.amountFils === prior.amountFils &&
+        !differentTextClock(row.textClock, prior.textClock) &&
+        sameMerchantCapture(row.title, prior.title) &&
+        sameStatedInstrument(row.captureInstrument, prior.captureInstrument) &&
+        sameCaptureEvent(row.captureEventIdentity, prior.captureEventIdentity)
+      ) return !row.userEdited && !prior.userEdited;
+      if (
+        differentTextClock(row.textClock, prior.textClock) ||
         row.date !== prior.date ||
         row.amountFils !== prior.amountFils ||
         row.type !== prior.type ||
@@ -830,8 +1610,8 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
           // A push that says only "Card purchase" pairs with any SMS title,
           // but two rows that each NAME a different merchant are two charges,
           // and this branch was deleting one of them on every hydrate.
-          (Boolean(row.userEdited) ||
-            Boolean(prior.userEdited) ||
+          (row.titleEdited === true ||
+            prior.titleEdited === true ||
             sameMerchantCapture(row.title, prior.title)) &&
           closeEnough(rowTime, priorTime, CROSS_CHANNEL_EVENT_MS)
         );
@@ -846,9 +1626,33 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
         closeEnough(rowTime, priorTime, 30_000)
       );
     });
+    // Second, narrower pass: only when nothing above matched may a push and an
+    // SMS for the same stated card and named merchant pair across the lagged
+    // window, nearest first and one-to-one. Neither row may be edited, so no
+    // user decision is ever folded by this rule.
+    let laggedAt: number | undefined;
+    if (primaryAt === undefined && rowTime !== null && !row.userEdited && !row.transferDecision &&
+      !isApplePayWalletRow(row) && row.walletBound !== true) {
+      for (const index of laggedCandidates) {
+        const prior = kept[index];
+        const priorTime = timeOf(prior);
+        if (laggedAbsorbed.has(index) || prior.source !== 'sms' || priorTime === null ||
+          prior.transferDecision || isApplePayWalletRow(prior) || prior.walletBound === true ||
+          fromDifferentStatementUploads(row, prior) ||
+          Boolean(row.viaPush) === Boolean(prior.viaPush) ||
+          row.date !== prior.date || row.amountFils !== prior.amountFils || row.type !== prior.type ||
+          !laggedCrossChannelEvent(
+            { ts: rowTime, title: row.title, captureInstrument: row.captureInstrument, userEdited: row.userEdited, textClock: row.textClock },
+            { ts: priorTime, title: prior.title, captureInstrument: prior.captureInstrument, userEdited: prior.userEdited, textClock: prior.textClock },
+          )) continue;
+        if (laggedAt === undefined ||
+          Math.abs(priorTime - rowTime) < Math.abs(timeOf(kept[laggedAt])! - rowTime)) laggedAt = index;
+      }
+    }
+    const duplicateAt = primaryAt ?? laggedAt;
     if (duplicateAt === undefined) {
       kept.push(row);
-      noteAt(row, kept.length - 1);
+      noteAt(row, kept.length - 1, rowKeys);
       continue;
     }
 
@@ -906,6 +1710,11 @@ export function reconcileCaptureDuplicates(transactions: Transaction[]): Transac
           }),
     };
     if (cardPaymentPair) pairedCardPayments.add(duplicateAt);
+    // Any push/SMS fold has explained its one cross-channel copy; the lagged
+    // rule may not attach a second, later push to the same row.
+    if (primaryAt === undefined || Boolean(row.viaPush) !== Boolean(prior.viaPush)) {
+      laggedAbsorbed.add(duplicateAt);
+    }
     // Maps may retain the old row's keys at this index; every candidate is
     // revalidated above, and adding the preferred keys keeps future lookups
     // complete without an O(n) map cleanup.

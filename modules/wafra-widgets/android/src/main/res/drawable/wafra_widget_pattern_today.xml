@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Today's corner: three of the pattern's shapes (src/components/ui/pattern-mosaic.tsx),
+     a quarter circle in the band's tile tone, a ring in its mark tone and a mint dot.
+     Mirrors with Arabic. 34 x 14dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+  android:width="34dp"
+  android:height="14dp"
+  android:viewportWidth="34"
+  android:viewportHeight="14"
+  android:autoMirrored="true">
+  <!-- Quarter: a 12dp square whose top-left corner is a full quarter circle. -->
+  <path
+    android:fillColor="@color/wafra_widget_today_tile"
+    android:pathData="M0,14 L0,14 A12,12 0 0,1 12,2 L12,14 Z" />
+  <!-- Ring: 10dp across, 2dp stroke. -->
+  <path
+    android:strokeColor="@color/wafra_widget_today_mark"
+    android:strokeWidth="2"
+    android:fillColor="#00000000"
+    android:pathData="M15,9 A4,4 0 1,1 23,9 A4,4 0 1,1 15,9 Z" />
+  <!-- Dot: 5dp across. -->
+  <path
+    android:fillColor="@color/wafra_widget_today_accent"
+    android:pathData="M27,11.5 A2.5,2.5 0 1,1 32,11.5 A2.5,2.5 0 1,1 27,11.5 Z" />
+</vector>

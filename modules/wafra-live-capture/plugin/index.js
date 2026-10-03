@@ -76,6 +76,11 @@ private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceCo
   case captureDisabled
   case invalidMessage
   case captureCapacityReached
+  case invalidNotification
+  case notificationFailed
+  case applePayInvalid
+  case applePayFailed
+  case applePaySetupFailed
 
   var localizedStringResource: LocalizedStringResource {
     switch self {
@@ -91,6 +96,16 @@ private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceCo
       return WafraLiveCaptureResources.localized("live.stage.invalid")
     case .captureCapacityReached:
       return WafraLiveCaptureResources.localized("live.stage.capacity")
+    case .invalidNotification:
+      return WafraLiveCaptureResources.localized("live.notification.invalid")
+    case .notificationFailed:
+      return WafraLiveCaptureResources.localized("live.notification.error")
+    case .applePayInvalid:
+      return WafraLiveCaptureResources.localized("live.apple_pay.invalid")
+    case .applePayFailed:
+      return WafraLiveCaptureResources.localized("live.apple_pay.error")
+    case .applePaySetupFailed:
+      return WafraLiveCaptureResources.localized("live.apple_pay.setup.error")
     }
   }
 }
@@ -117,6 +132,31 @@ struct RecordWafraCaptureSetupProofIntent: AppIntent {
 
 @available(iOS 26.0, *)
 extension RecordWafraCaptureSetupProofIntent {
+  static var supportedModes: IntentModes { .background }
+}
+
+@available(iOS 16.0, *)
+struct RecordWafraCaptureV3SetupProofIntent: AppIntent {
+  static let title = LocalizedStringResource(
+    "live.setup_v3.title",
+    table: "WafraIntents",
+    bundle: .main
+  )
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let openAppWhenRun = false
+
+  func perform() async throws -> some IntentResult {
+    do {
+      try WafraLiveCaptureStore.shared.recordSetupProof(version: 3, at: Date())
+      return .result()
+    } catch {
+      throw WafraLiveCaptureIntentError.setupProofFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+extension RecordWafraCaptureV3SetupProofIntent {
   static var supportedModes: IntentModes { .background }
 }
 
@@ -172,32 +212,41 @@ struct StageWafraLiveMessageIntent: AppIntent {
     table: "WafraIntents",
     bundle: .main
   ))
-  var sender: String
+  var sender: String?
 
   @Parameter(title: LocalizedStringResource(
     "live.stage.message.parameter",
     table: "WafraIntents",
     bundle: .main
   ))
-  var body: String
+  var body: String?
 
   @Parameter(title: LocalizedStringResource(
     "live.stage.event_id.parameter",
     table: "WafraIntents",
     bundle: .main
   ))
-  var eventId: String
+  var eventId: String?
 
   @Parameter(title: LocalizedStringResource(
     "live.stage.observed_at.parameter",
     table: "WafraIntents",
     bundle: .main
   ))
-  var observedAt: Date
+  var observedAt: Date?
 
+  // Every parameter is optional: on iOS 26.1 the automation's Message input
+  // has Sender and Content but no Date, and GUID is not listed, so Capture v3
+  // omits what Apple withholds. The store keeps SHA-256(GUID) only with the
+  // Message's own date, otherwise stamps a fresh queue UUID (dated by a
+  // supplied date or the receipt time), and ignores blank or expired rows.
+  // Published Capture v2 always binds all four: its complete, current inputs
+  // stage exactly as before; its empty-GUID/absent-date live input now stages
+  // a UUID row instead of failing, and its sender-less no-input rows (blank
+  // Content) are ignored instead of stopping the run.
   func perform() async throws -> some IntentResult & ReturnsValue<String> {
     do {
-      let result = try WafraLiveCaptureStore.shared.stage(
+      let result = try WafraLiveCaptureStore.shared.stageAutomationMessage(
         sender: sender,
         body: body,
         eventId: eventId,
@@ -280,6 +329,119 @@ struct StageWafraLiveTextIntent: AppIntent {
 extension StageWafraLiveTextIntent {
   static var supportedModes: IntentModes { .background }
 }
+/// Accepts only text explicitly supplied by the user's Shortcuts automation.
+/// The app cannot observe other apps' notifications or configure their triggers.
+@available(iOS 16.0, *)
+struct CaptureWafraNotificationIntent: AppIntent {
+  static let title = LocalizedStringResource(
+    "live.notification.title", table: "WafraIntents", bundle: .main
+  )
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let openAppWhenRun = false
+
+  @Parameter(
+    title: LocalizedStringResource(
+      "live.notification.text.parameter", table: "WafraIntents", bundle: .main
+    ),
+    inputConnectionBehavior: .connectToPreviousIntentResult
+  )
+  var text: String
+
+  func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    do {
+      if text.trimmingCharacters(in: .whitespacesAndNewlines) == WafraLiveCaptureStore.notificationSetupProbeText {
+        try WafraLiveCaptureStore.shared.recordNotificationSetupProof(at: Date())
+        return .result(value: "setup-checked")
+      }
+      let result = try WafraLiveCaptureStore.shared.stageNotification(
+        text: text, eventId: UUID().uuidString, observedAt: Date()
+      )
+      switch result {
+      case .accepted, .ignored:
+        return .result(value: result.rawValue)
+      case .disabled:
+        throw WafraLiveCaptureIntentError.captureDisabled
+      case .invalid:
+        throw WafraLiveCaptureIntentError.invalidNotification
+      case .capacityReached:
+        throw WafraLiveCaptureIntentError.captureCapacityReached
+      }
+    } catch let error as WafraLiveCaptureIntentError {
+      throw error
+    } catch WafraLiveCaptureStore.StoreError.entitlementRequired {
+      throw WafraLiveCaptureIntentError.captureDisabled
+    } catch {
+      throw WafraLiveCaptureIntentError.notificationFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+extension CaptureWafraNotificationIntent {
+  static var supportedModes: IntentModes { .background }
+}
+
+/// The Wallet Amount value carries a Decimal and currency together; never use Double.
+@available(iOS 16.0, *)
+struct CaptureWafraApplePayIntent: AppIntent {
+  static let title = LocalizedStringResource("live.apple_pay.title", table: "WafraIntents", bundle: .main)
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let openAppWhenRun = false
+
+  @Parameter(title: LocalizedStringResource("live.apple_pay.amount.parameter", table: "WafraIntents", bundle: .main))
+  var amount: IntentCurrencyAmount?
+  @Parameter(title: LocalizedStringResource("live.apple_pay.merchant.parameter", table: "WafraIntents", bundle: .main))
+  var merchant: String?
+
+  func perform() async throws -> some IntentResult & ReturnsValue<Bool> {
+    do {
+      let result = try WafraLiveCaptureStore.shared.stageApplePay(
+        amount: amount?.amount, currency: amount?.currencyCode ?? "", merchant: merchant,
+        eventId: UUID().uuidString, observedAt: Date()
+      )
+      switch result {
+      case .accepted: return .result(value: true)
+      case .ignored: return .result(value: false)
+      case .disabled: throw WafraLiveCaptureIntentError.captureDisabled
+      case .invalid: throw WafraLiveCaptureIntentError.applePayInvalid
+      case .capacityReached: throw WafraLiveCaptureIntentError.captureCapacityReached
+      }
+    } catch let error as WafraLiveCaptureIntentError {
+      throw error
+    } catch {
+      throw WafraLiveCaptureIntentError.applePayFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+extension CaptureWafraApplePayIntent {
+  static var supportedModes: IntentModes { .background }
+}
+
+@available(iOS 16.0, *)
+struct RecordWafraApplePaySetupProofIntent: AppIntent {
+  static let title = LocalizedStringResource("live.apple_pay.setup.title", table: "WafraIntents", bundle: .main)
+  static let authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+  static let openAppWhenRun = false
+
+  func perform() async throws -> some IntentResult {
+    do {
+      try WafraLiveCaptureStore.shared.recordApplePaySetupProof(at: Date())
+      return .result()
+    } catch WafraLiveCaptureStore.StoreError.entitlementRequired {
+      throw WafraLiveCaptureIntentError.captureDisabled
+    } catch {
+      throw WafraLiveCaptureIntentError.applePaySetupFailed
+    }
+  }
+}
+
+@available(iOS 26.0, *)
+extension RecordWafraApplePaySetupProofIntent {
+  static var supportedModes: IntentModes { .background }
+}
+
 `;
 
 function withWafraIntentResources(config) {

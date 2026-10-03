@@ -11,8 +11,8 @@ const results = []; const errors = []; const browser = await chromium.launch();
 const minor = value => {
   const text = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
     .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/٬/g, ',').replace(/٫/g, '.');
-  const match = text.match(/\d[\d,]*(?:\.\d+)?/); assert.ok(match, `Missing money: ${text}`);
-  return Math.round(Number(match[0].replace(/,/g, '')) * 100);
+  const match = text.match(/(?:\bAED\s*|^\s*)(\d[\d,]*(?:\.\d+)?)/); assert.ok(match, `Missing money: ${text}`);
+  return Math.round(Number(match[1].replace(/,/g, '')) * 100);
 };
 async function seed(page, language) {
   await page.goto(base, { waitUntil: 'networkidle' });
@@ -62,7 +62,8 @@ try {
       assert.equal(minor(await page.getByTestId('merchant-directory-total').innerText()), 11001);
       await page.evaluate(() => document.fonts.ready);
       await page.screenshot({ path: path.join(out, `directory-${name}.png`) });
-      const search = page.getByRole('textbox', { name: language === 'ar' ? 'البحث عن تاجر' : 'Search merchants', exact: true });
+      // The search pill is a search field (role searchbox), named for what it searches.
+      const search = page.getByRole('searchbox', { name: language === 'ar' ? 'البحث عن تاجر' : 'Search merchants', exact: true });
       await search.fill('Careem');
       await page.waitForFunction(() => document.querySelectorAll('[data-testid="merchant-spending-row"]').length === 1);
       assert.equal(minor(await page.getByTestId('merchant-directory-total').innerText()), 3501);
@@ -73,14 +74,16 @@ try {
       assert.equal((await page.getByTestId('merchant-purchase-count').innerText()).trim(), '2');
       assert.equal(minor(await page.getByTestId('merchant-money-received').innerText()), 501);
       assert.equal(await page.getByTestId('view-merchant-spending').count(), 0, 'No recursive merchant action in profile');
+      // Language E: a Spending detail wears the clay band (deepened in dark mode).
       const background = await page.getByTestId('merchant-detail').evaluate(el => getComputedStyle(el).backgroundColor);
-      assert.equal(background, mode === 'dark' ? 'rgb(20, 18, 15)' : 'rgb(244, 241, 234)');
+      assert.equal(background, mode === 'dark' ? 'rgb(110, 43, 30)' : 'rgb(164, 67, 47)');
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
       await page.screenshot({ path: path.join(out, `detail-${name}.png`) });
       await page.getByRole('tab', { name: language === 'ar' ? 'كل الحركات' : 'All activity', exact: true }).click();
       await page.getByText(language === 'ar' ? 'غير مشمولة في إجمالي الإنفاق' : 'Not included in spending totals', { exact: true }).first().waitFor({ state: 'visible' });
       assert.equal(minor(await page.getByTestId('merchant-total-spent').innerText()), 3501, 'Viewing transfers does not inflate spending');
-      await page.getByTestId('merchant-period').getByRole('button').click();
+      await page.getByTestId('merchant-detail').getByTestId('merchant-period').click();
+
       const dialog = page.locator('[role="dialog"]:visible').last();
       await dialog.getByRole('button', { name: language === 'ar' ? 'كل الفترات' : 'All time', exact: true }).click();
       await dialog.waitFor({ state: 'hidden' });

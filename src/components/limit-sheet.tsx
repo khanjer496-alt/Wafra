@@ -1,22 +1,32 @@
+import { CategoryChips } from '@/components/ui/category-chips';
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
-import { Button } from '@/components/ui/controls';
+import { DialLimit } from '@/components/ui/band/dial-limit';
+import { EButton } from '@/components/ui/band/e-button';
+import { GlyphTile } from '@/components/ui/band/glyph-tile';
+import { LimitStatusBar } from '@/components/ui/band/status-bar';
 import { SectionHeader } from '@/components/ui/period-pill';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
+import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
-import { categoryLabel, EXPENSE_CATEGORIES, getCategory } from '@/lib/categories';
-import { formatAED, formatAmount, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
+
+import { formatAED, formatAmountForInput, ledgerNiceMinor, ledgerTypicalMinor, monthLabel, monthStartISO, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 import { alignEnd, t, tf } from '@/lib/i18n';
+import { everydayBandCopy } from '@/lib/everyday-band-copy';
+import { limitSheetCopy } from '@/lib/reference-copy';
+import { usualMonthlyMinor } from '@/lib/reference-presentation';
 
 /** How many merchants the sheet names before pooling the rest. */
 const MERCHANT_ROWS = 4;
@@ -39,7 +49,13 @@ interface LimitSheetProps {
  * the figure — which is the question anyone types a number in here to answer.
  */
 export function LimitSheet({ category, open, monthKey: key, onClose }: LimitSheetProps) {
+  const { categoryLabel, getCategory, expenseCategories } = useCategoryCatalog();
   const theme = useTheme();
+  // Limits belong to Spending: the clay band's sheet, lifted.
+  const band = useBand('spending');
+  const language = useLanguage();
+  const words = limitSheetCopy[language === 'ar' ? 'ar' : 'en'];
+  const bandWords = everydayBandCopy(language);
   const { state, upsertBudget, deleteBudget, setLedgerMoney } = useStore();
 
   const [picked, setPicked] = useState<CategoryId | null>(category);
@@ -54,7 +70,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     if (!open) return;
     setPicked(category);
     const current = category ? state.budgets.find((b) => b.category === category) : undefined;
-    setText(current ? formatAmount(current.limitFils).replace(/,/g, '') : '');
+    setText(current ? formatAmountForInput(current.limitFils) : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, category]);
 
@@ -89,20 +105,39 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
    * limit of 1,400, and the chip that says "your 3-month average" was offering
    * a number the user had never once spent under.
    */
-  const threeMonthAverage = useMemo(() => {
-    if (!picked || !open) return 0;
-    let total = 0;
-    for (let i = 1; i <= 3; i++) {
-      total += spentInMonthForCategory(
-        state.transactions,
-        shiftMonthKey(key, -i),
-        picked,
-        liveAccounts,
-        internal,
-      );
+  const lastMonths = useMemo(() => {
+    if (!picked || !open) return [];
+    const months: { key: string; fils: number }[] = [];
+    for (let i = 3; i >= 1; i--) {
+      months.push({
+        key: shiftMonthKey(key, -i),
+        fils: spentInMonthForCategory(
+          state.transactions,
+          shiftMonthKey(key, -i),
+          picked,
+          liveAccounts,
+          internal,
+        ),
+      });
     }
-    return Math.round(total / 3);
+    return months;
   }, [state.transactions, key, picked, open, liveAccounts, internal]);
+  // Only months the ledger fully covers count: a ledger that began last month
+  // has one month of history, and averaging it with two empty months
+  // suggested a third of the real figure.
+  const ledgerStartISO = useMemo(() => {
+    if (!picked || !open) return null;
+    let earliest: string | null = null;
+    for (const transaction of state.transactions) {
+      if (earliest === null || transaction.date < earliest) earliest = transaction.date;
+    }
+    return earliest;
+  }, [state.transactions, picked, open]);
+  const usual = usualMonthlyMinor(
+    lastMonths.map((month) => ({ startISO: monthStartISO(month.key), fils: month.fils })),
+    ledgerStartISO,
+  );
+  const threeMonthAverage = usual?.averageFils ?? 0;
 
   /**
    * Who the money went to, so the number has something behind it.
@@ -172,7 +207,8 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
 
   const suggestions = useMemo(() => {
     const out: { fils: number; note: string; highlight: boolean }[] = [];
-    if (threeMonthAverage > 0) {
+    // The chip says "3-month average", so it needs three covered months.
+    if (threeMonthAverage > 0 && usual?.fullMonths === 3) {
       out.push({
         fils: roundToHundred(threeMonthAverage),
         note: t('threeMonthAverageNote'),
@@ -188,13 +224,30 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
       if (!out.some((s) => s.fils === fils)) out.push({ fils, note, highlight });
     };
     if (spent > 0) add(roundToHundred(spent * 0.9), t('tenPercentUnderMonth'));
-    for (const fils of [50_000, 100_000, 200_000]) add(fils, '');
+    // AED 500 / 1,000 / 2,000, sized to the ledger currency (¥50,000 for JPY,
+    // KWD 50 for KWD) rather than read as fils of whatever the ledger holds.
+    for (const major of [500, 1000, 2000]) add(ledgerTypicalMinor(major), '');
     return out.slice(0, 4);
-  }, [threeMonthAverage, spent]);
+    // The ledger currency changes the preset scale and rounding step.
+  }, [threeMonthAverage, usual?.fullMonths, spent, state.ledgerMoney]);
 
-  const available = EXPENSE_CATEGORIES.filter(
+  const available = expenseCategories.filter(
     (c) => !state.budgets.some((b) => b.category === c.id) || c.id === picked,
   );
+
+  // Steppers move the limit by a currency-sized step (25 in AED/USD terms,
+  // 2,500 for JPY), never below one step.
+  const step = ledgerTypicalMinor(25);
+  // The dial and its ± steppers move by that step and never set a limit
+  // below one step (zero is "no limit", which is Remove, not a value).
+  const setFromDial = (next: number) => setText(formatAmountForInput(Math.max(step, next)));
+  // The last three full months and this month, against the limit line.
+  const bars = picked ? [...lastMonths.map((month) => ({ ...month, current: false })), { key, fils: spent, current: true }] : [];
+  const barMax = Math.max(1, limitFils ?? 0, ...bars.map((bar) => bar.fils));
+  const usualAdvice = limitFils && threeMonthAverage > 0
+    ? limitFils >= threeMonthAverage * 1.1 ? words.roomy
+      : limitFils >= threeMonthAverage * 0.95 ? words.tight : words.below
+    : null;
 
   const save = () => {
     if (!picked || !limitFils) return;
@@ -213,50 +266,25 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     <BottomSheet
       visible={open}
       onClose={onClose}
-      title={
-        picked
-          ? tf('categoryLimit', { category: categoryLabel(getCategory(picked)) })
-          : t('newLimitTitle')
-      }
+      palette={band}
+      headerLeading={picked ? <GlyphTile category={picked} palette={band} size={44} /> : undefined}
+      title={picked ? categoryLabel(getCategory(picked)) : t('newLimitTitle')}
+      subtitle={picked ? bandWords.monthlyLimit : undefined}
+      testID="limit-sheet"
       footer={(
         <View style={styles.actions}>
           {existing ? (
-            <Button
-              inline
-              label={t('remove')}
-              variant="danger"
-              onPress={removeExisting}
-            />
+            <EButton palette={{ ...band, tint: band.statusOver }} variant="quiet" label={t('remove')}
+              onPress={removeExisting} style={styles.action} testID="limit-remove" />
           ) : null}
-          <Button
-            inline
-            label={t('saveLimit')}
-            disabled={!picked || !limitFils}
-            onPress={save}
-          />
+          <EButton palette={band} label={t('saveLimit')} disabled={!picked || !limitFils}
+            onPress={save} style={styles.action} testID="limit-save" />
         </View>
       )}>
             {!category && (
               <View style={styles.picker}>
-                {available.map((c) => {
-                  const on = picked === c.id;
-                  return (
-                    <Pressable
-                      key={c.id}
-                      onPress={() => setPicked(c.id)}
-                      style={[
-                        styles.chip,
-                        {
-                          backgroundColor: on ? theme.text : 'transparent',
-                          borderColor: on ? theme.text : theme.cardBorder,
-                        },
-                      ]}>
-                      <ThemedText type="meta" style={{ color: on ? theme.background : theme.text }}>
-                        {categoryLabel(c)}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
+                <CategoryChips categories={available} selected={picked} onToggle={setPicked}
+                  createType="expense" layout="wrap" />
               </View>
             )}
 
@@ -269,7 +297,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                   <ThemedText
                     type="smallBold"
                     tabular
-                    style={{ color: over ? theme.expense : theme.text }}>
+                    style={{ color: over ? band.statusOver : band.text }}>
                     {formatAED(shownTotalFils, { decimals: false })}
                     <ThemedText type="meta" themeColor="textTertiary" tabular>
                       {'  / '}
@@ -277,16 +305,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                     </ThemedText>
                   </ThemedText>
                 </View>
-                <View style={[styles.track, { backgroundColor: theme.track }]}>
-                  <View
-                    style={{
-                      width: `${Math.max(2, Math.min(100, ratio * 100))}%`,
-                      height: '100%',
-                      backgroundColor: over ? theme.expenseGraphic : theme.primary,
-                      borderRadius: 4,
-                    }}
-                  />
-                </View>
+                <LimitStatusBar spentMinor={spent} limitMinor={limitFils} palette={band} testID="limit-status-bar" />
                 <ThemedText type="meta" themeColor="textTertiary">
                   {over
                     ? tf('limitOverBy', { amount: formatAED(spent - limitFils, { decimals: false }) })
@@ -310,34 +329,72 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
                   <ThemedText type="smallBold" themeColor="textSecondary">›</ThemedText>
                 </Pressable>
               )}
+              {state.ledgerMoney && picked ? <DialLimit testID="limit-dial" palette={band} moneySpec={state.ledgerMoney}
+                label={categoryLabel(getCategory(picked))} valueMinor={limitFils ?? 0} stepMinor={step}
+                onChange={setFromDial} /> : null}
+              {/* The dial snaps to the step; an exact figure is typed here. */}
               <TextField
                 numeric
-                label={t('monthlyLimit')}
+                label={state.ledgerMoney ? bandWords.exactLimit : t('monthlyLimit')}
                 value={text}
                 onChangeText={setText}
                 placeholder="0"
                 placeholderTextColor={theme.textTertiary}
-                selectionColor={theme.primary}
+                selectionColor={band.tint}
                 leading={(
                 <ThemedText type="smallBold" themeColor="textSecondary" tabular style={styles.aed}>
                   {state.ledgerMoney?.currency ?? '—'}
                 </ThemedText>
                 )}
-                style={styles.amountInput}
               />
             </View>
+
+            {picked && threeMonthAverage > 0 && (
+              <View style={styles.history} testID="limit-history">
+                <SectionHeader title={words.lastMonths} />
+                {limitFils ? <ThemedText type="meta" tabular maxFontSizeMultiplier={1.5} testID="limit-history-reference">
+                  {words.limitLine}: {formatAED(limitFils)}
+                </ThemedText> : null}
+                <View style={styles.bars}>
+                  {bars.map((bar) => <View key={bar.key} style={styles.barColumn} accessible accessibilityRole="text"
+                    accessibilityLabel={words.month(bar.current ? `${monthLabel(bar.key)} ${words.thisMonth}` : monthLabel(bar.key), formatAED(bar.fils))}>
+                    <View style={styles.historyHeading}>
+                      <ThemedText type="meta" themeColor={bar.current ? 'text' : 'textSecondary'}>
+                        {monthLabel(bar.key)}{bar.current ? ` · ${words.thisMonth}` : ''}
+                      </ThemedText>
+                      <ThemedText type="meta" tabular maxFontSizeMultiplier={1.5} style={styles.historyValue}>{formatAED(bar.fils)}</ThemedText>
+                    </View>
+                    <View style={[styles.historyTrack, { backgroundColor: band.card }]}>
+                      <View style={[styles.bar, {
+                        width: `${Math.max(0, bar.fils) / barMax * 100}%`,
+                        // Past months in the tint at half strength: the rule tone
+                        // all but vanished on the card track.
+                        backgroundColor: limitFils && bar.fils > limitFils ? band.statusOver : band.tint,
+                        opacity: limitFils && bar.fils > limitFils ? 1 : bar.current ? 1 : 0.5,
+                      }]} />
+                      {limitFils ? <View pointerEvents="none" testID="limit-line"
+                        style={[styles.limitLine, { start: `${limitFils / barMax * 100}%`, borderColor: band.tint }]} /> : null}
+                    </View>
+                  </View>)}
+                </View>
+                <ThemedText type="meta" themeColor="textSecondary" testID="limit-usual">
+                  {words.usual(formatAED(threeMonthAverage))}{usualAdvice ? ` ${usualAdvice}` : ''}
+                </ThemedText>
+              </View>
+            )}
 
             {picked && (
               <View style={styles.suggestions}>
                 {suggestions.map((s) => (
                   <Pressable
                     key={`${s.fils}-${s.note}`}
-                    onPress={() => setText(formatAmount(s.fils).replace(/,/g, ''))}
+                    onPress={() => setText(formatAmountForInput(s.fils))}
+                    accessibilityRole="button"
                     style={[
                       styles.chip,
                       {
-                        backgroundColor: s.highlight ? theme.primarySoft : 'transparent',
-                        borderColor: s.highlight ? theme.primaryBorder : theme.cardBorder,
+                        backgroundColor: band.card,
+                        borderColor: s.highlight ? band.tint : band.rule,
                       },
                     ]}>
                     <ThemedText type="meta" tabular>
@@ -404,9 +461,12 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   );
 }
 
-/** Suggestions land on a round number — nobody budgets AED 1,247. */
+/**
+ * Suggestions land on a round number — nobody budgets AED 1,247. The step is
+ * AED 100 (unchanged), ¥10,000 for JPY, KWD 10 for KWD: see ledgerNiceMinor.
+ */
 function roundToHundred(fils: number): number {
-  return Math.max(10_000, Math.round(fils / 10_000) * 10_000);
+  return ledgerNiceMinor(fils);
 }
 
 const styles = StyleSheet.create({
@@ -423,7 +483,6 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     justifyContent: 'space-between',
   },
-  track: { height: 8, borderRadius: 4, overflow: 'hidden' },
   amountBlock: { marginTop: Spacing.four, gap: Spacing.two },
   currencyChoice: {
     minHeight: 56,
@@ -437,12 +496,15 @@ const styles = StyleSheet.create({
   },
   currencyChoiceCopy: { flex: 1, minWidth: 0, gap: 2 },
   aed: { fontSize: 15 },
-  amountInput: {
-    fontSize: 34,
-    lineHeight: 40,
-    letterSpacing: -0.7,
-  },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.three },
+  history: { marginTop: Spacing.four, gap: Spacing.two },
+  bars: { gap: 14 },
+  barColumn: { gap: 6 },
+  historyHeading: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 },
+  historyValue: { writingDirection: 'ltr', flexShrink: 1 },
+  historyTrack: { height: 8, width: '100%', position: 'relative', borderRadius: 4 },
+  bar: { height: 8, borderRadius: 4 },
+  limitLine: { position: 'absolute', top: -3, bottom: -3, borderStartWidth: 1, borderStyle: 'dashed' },
   where: { marginTop: Spacing.five },
   whereRow: {
     flexDirection: 'row',
@@ -452,5 +514,6 @@ const styles = StyleSheet.create({
   },
   whereName: { flex: 1 },
   whereFigure: { minWidth: 62 },
-  actions: { flexDirection: 'row', gap: Spacing.two },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  action: { flexGrow: 1, flexBasis: 0, alignSelf: 'auto', minWidth: 140 },
 });

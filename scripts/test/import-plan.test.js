@@ -829,6 +829,29 @@ const DECLINE_SMS = [{
     }]), plan);
 }
 
+/* A settled Arabic debit that also mentions something "قيد المعالجة" (a refund
+ * request, a transfer's onward status) is a real posting. The pending idiom is
+ * shared non-posting evidence, so if it fired here the re-read would sweep the
+ * genuine stored row — including one saved without its body. */
+{
+  const ts = DECLINE_TS + 60_000;
+  const body = 'تم خصم 100.00 درهم من بطاقتك 1234 لدى متجر النخلة. طلب الاسترداد الخاص بك قيد المعالجة.';
+  const stored = {
+    id: 'settled-ar-debit', type: 'expense', amountFils: 10000, category: 'shopping',
+    accountId: 'acc-main', title: 'متجر النخلة', date: new Date(ts).toISOString().slice(0, 10),
+    source: 'sms', ts, smsKey: `s${ts}-10000`,
+  };
+  const s = scan([{ body, ts }]);
+  ok('a settled Arabic debit beside a pending refund request is not scanned as non-posting',
+    s.declined.length === 0 && s.parsed.length === 1, s);
+  const plan = buildImportPlan(s.parsed, { ...BASE, transactions: [stored] }, s.newestTs, new Date(2026, 7, 2), s.declined);
+  ok('...and a re-import never removes its stored row (saved without raw)',
+    !plan.batch.updates.some((u) => u.remove), plan.batch.updates);
+  const withRaw = buildImportPlan(s.parsed, { ...BASE, transactions: [{ ...stored, raw: body }] }, s.newestTs, new Date(2026, 7, 2), s.declined);
+  ok('...nor the same row saved with its body',
+    !withRaw.batch.updates.some((u) => u.remove), withRaw.batch.updates);
+}
+
 /* Callers that cannot supply declines get the old behaviour, not a guess.
  * The relay is the real one: the Worker discards Message Content before
  * sealing a row, so no body ever reaches this device to be tested. */
@@ -1423,7 +1446,8 @@ const DECLINE_SMS = [{
       id: 'edited-push', type: 'expense', amountFils: 12000, category: 'utilities',
       accountId: 'corrected-account', title: 'My corrected title', date: '2026-07-20',
       source: 'sms', viaPush: true, smsKey: `s${pushTs}-12000`, ts: pushTs,
-      userEdited: true,
+      // A genuine title edit carries the reducer's explicit title marker.
+      userEdited: true, titleEdited: true,
     }],
   };
   const incoming = scan([{
@@ -1462,13 +1486,13 @@ const DECLINE_SMS = [{
   ok('two real same-amount charges on one day are two rows', plan.txCount === 2, plan.txCount);
 }
 
-/* ── statement rows reconcile with live captures by money facts, not title ──
+/* ── statement rows reconcile with compatible merchant and money facts ──
  *
  * A statement names the acquirer descriptor and usually has only a posting
  * date; the live alert names the friendly merchant and has the actual clock.
  * Treating those strings/timestamps as identity produced two rows for one
  * charge. The safe universal boundary is explicit PDF/CSV provenance + same
- * resolved account + direction + amount/date, consumed one-for-one.
+ * resolved account + direction + amount/date + compatible merchant, one-for-one.
  */
 {
   const { duplicateGuard } = require('./build/dedupe.js');
@@ -1527,8 +1551,15 @@ const DECLINE_SMS = [{
       ...firstStatement, title: 'NETWORK DESCRIPTOR B', ts: midnight + 1,
       smsKey: `s${midnight + 1}-3215`,
     };
-    ok('statement dedupe: two statement rows consume two equal live charges one-for-one',
-      repeated.has(firstStatement) && repeated.has(secondStatement));
+    ok('statement dedupe: unrelated descriptors do not consume equal-value live charges',
+      !repeated.has(firstStatement) && !repeated.has(secondStatement));
+    const sameMerchant = duplicateGuard([
+      live, { ...live, id: 'live-repeat', ts: liveTs + 3_600_000, smsKey: `s${liveTs + 3_600_000}-3215` },
+    ]);
+    ok('statement dedupe: two matching merchant rows consume equal live charges one-for-one',
+      sameMerchant.has({ ...firstStatement, title: 'PAYPAL *ENDURANCEIN' }) &&
+      sameMerchant.has({ ...secondStatement, title: 'PAYPAL *ENDURANCEIN' }) &&
+      !sameMerchant.has({ ...secondStatement, title: 'PAYPAL *ENDURANCEIN', ts: midnight + 2, smsKey: `s${midnight + 2}-3215` }));
   }
 
   {
@@ -2205,6 +2236,84 @@ const DECLINE_SMS = [{
       }));
   }
 
+  /* 3a — a bank app can post its notification many minutes after the SMS
+   *      (an ADCB credit-card push arrived 10 min 48 s later). Beyond two
+   *      minutes the pair must be proven by the alerts themselves: the same
+   *      stated card digits and the same NAMED merchant, one-to-one. */
+  {
+    const card = { last4: '4821', kind: 'credit', bankIdentity: 'adcb' };
+    const lag = 648_000;
+    const smsRow = (extra) => ({
+      id: 'sms-lag', type: 'expense', amountFils: 18_900, category: 'shopping',
+      accountId: 'adcb-card', title: 'Sample Store', date: '2026-07-10', source: 'sms',
+      smsKey: `ha41200t${D0}`, ts: D0, captureInstrument: card, ...extra,
+    });
+    const push = (extra) => ({
+      date: '2026-07-10', amountFils: 18_900, title: 'Sample Store', type: 'expense',
+      smsKey: `s${D0 + lag}-18900`, ts: D0 + lag, channel: 'push', captureInstrument: card, ...extra,
+    });
+    ok('lagged cross-channel: the late push for the same card and merchant is one event',
+      duplicateGuard([smsRow()]).has(push()));
+    ok('lagged cross-channel: a generic push title still needs the two-minute clock',
+      !duplicateGuard([smsRow()]).has(push({ title: 'Card purchase' })));
+    ok('lagged cross-channel: another card is another charge',
+      !duplicateGuard([smsRow()]).has(push({ captureInstrument: { ...card, last4: '4822' } })));
+    ok('lagged cross-channel: a push that states no card cannot use the wider window',
+      !duplicateGuard([smsRow()]).has(push({ captureInstrument: undefined })));
+    ok('lagged cross-channel: an edited SMS row is never matched on the wider window',
+      !duplicateGuard([smsRow({ userEdited: true, title: 'Gift' })]).has(push()));
+    ok('lagged cross-channel: beyond fifteen minutes they stay two',
+      !duplicateGuard([smsRow()]).has(push({ ts: D0 + 15 * 60_000 + 1_000,
+        smsKey: `s${D0 + 15 * 60_000 + 1_000}-18900` })));
+    {
+      const guard = duplicateGuard([smsRow()]);
+      guard.has(push());
+      ok('lagged cross-channel: one SMS explains one late push, not a second purchase',
+        !guard.has(push({ ts: D0 + lag + 60_000, smsKey: `s${D0 + lag + 60_000}-18900` })));
+    }
+    // Reverse order: the push was stored first; the SMS arrives 10 minutes later.
+    const storedPush = {
+      id: 'push-lag', type: 'expense', amountFils: 18_900, category: 'shopping',
+      accountId: 'adcb-card', title: 'Sample Store', date: '2026-07-10', source: 'sms', viaPush: true,
+      smsKey: `s${D0}-18900`, ts: D0, captureInstrument: card,
+    };
+    ok('lagged cross-channel: a late SMS replaces the stored push for the same card and merchant',
+      duplicateGuard([storedPush]).supersedes({
+        date: '2026-07-10', amountFils: 18_900, title: 'Sample Store', type: 'expense',
+        smsKey: `ha41201t${D0 + lag}`, ts: D0 + lag, channel: 'inbox', captureInstrument: card,
+      }) === 'push-lag');
+    // Two identical purchases on one channel keep the two-minute same-event rule.
+    const coffee = (id, ts, extra) => ({
+      id, type: 'expense', amountFils: 1_600, category: 'dining', accountId: 'adcb-card',
+      title: 'Corner Coffee', date: '2026-07-10', source: 'sms', smsKey: `s${ts}-1600`, ts,
+      captureInstrument: card, ...extra,
+    });
+    ok('lagged cross-channel: two equal SMS coffees five minutes apart stay two',
+      !duplicateGuard([coffee('c1', D0)]).has({
+        date: '2026-07-10', amountFils: 1_600, title: 'Corner Coffee', type: 'expense',
+        smsKey: `s${D0 + 300_000}-1600`, ts: D0 + 300_000, channel: 'inbox', captureInstrument: card,
+      }) && reconcileCaptureDuplicates([coffee('c1', D0), coffee('c2', D0 + 300_000)]).length === 2);
+    ok('lagged cross-channel: two equal push coffees five minutes apart stay two',
+      reconcileCaptureDuplicates([
+        coffee('p1', D0, { viaPush: true }), coffee('p2', D0 + 300_000, { viaPush: true }),
+      ]).length === 2);
+
+    // The stored pair an older build already booked twice: the hydration /
+    // import repair keeps the SMS, drops the unedited push, and stays one-to-one.
+    const laggedPush = { ...storedPush, id: 'push-late', ts: D0 + lag, smsKey: `s${D0 + lag}-18900` };
+    const repaired = reconcileCaptureDuplicates([smsRow(), laggedPush]);
+    ok('lagged repair: a stored SMS + late push pair becomes the one SMS row',
+      repaired.length === 1 && repaired[0].id === 'sms-lag' && repaired[0].viaPush !== true, repaired);
+    ok('lagged repair: an edited push is never removed by the wider window',
+      reconcileCaptureDuplicates([smsRow(), { ...laggedPush, userEdited: true }]).length === 2);
+    ok('lagged repair: one SMS absorbs one late push; a second genuine push survives',
+      reconcileCaptureDuplicates([smsRow(), laggedPush,
+        { ...laggedPush, id: 'push-later', ts: D0 + lag + 120_000, smsKey: `s${D0 + lag + 120_000}-18900` },
+      ]).length === 2);
+    ok('lagged repair: a generic push title is not folded across the wider window',
+      reconcileCaptureDuplicates([smsRow(), { ...laggedPush, title: 'Card purchase' }]).length === 2);
+  }
+
   /* 3b — dedupe.ts restates sms-parser's STRUCTURAL_TITLES rather than
    *      importing it (db.test.js pins that it has no dependencies), so the
    *      copy has to be held to the original. A title the parser assigns from
@@ -2821,7 +2930,7 @@ const DECLINE_SMS = [{
   const editedPushState = {
     ...prior,
     transactions: prior.transactions.map((t) => ({
-      ...t, title: 'Weekly groceries', viaPush: true, userEdited: true,
+      ...t, title: 'Weekly groceries', viaPush: true, userEdited: true, titleEdited: true,
     })),
   };
   const afterEditedPush = buildImportPlan([second], editedPushState, ts + 30000);
@@ -3198,6 +3307,265 @@ const DECLINE_SMS = [{
     corrected.batch.bankNames?.[account.id] === 'FAB', { newAccounts: corrected.batch.newAccounts, bankNames: corrected.batch.bankNames });
   ok('a resolving sender still outranks the known bank',
     sender.batch.newAccounts.length === 1 && sender.batch.newAccounts[0].bankName === 'Emirates NBD', sender.batch.newAccounts);
+}
+
+/* ── statements vs the alerts and statements already in the ledger ──────
+ *
+ * A statement row carries a date and a coarse relay clock (midday UTC,
+ * separated 121s per repeat inside one upload). Three defects followed from
+ * letting that clock and the resolved account decide overlap:
+ *   - an unlabelled statement does not prove account ownership, so matching
+ *     day, merchant and amount must preserve the uncertain overlap;
+ *   - two overlapping statements put the same row at different offsets from
+ *     midday, so the 120s window called them two events;
+ *   - two different uploads could share `s{midday}-{amount}` and one row was
+ *     healed into the other.
+ * Statement overlap is now matched one-to-one on day + amount + direction
+ * (+ account), independent of the clock and of file order. */
+{
+  const { duplicateGuard, reconcileCaptureDuplicates } = require('./build/dedupe.js');
+  const card = {
+    id: 'adcb-card', name: 'ADCB Credit •3215', kind: 'card', cardType: 'credit',
+    last4: '3215', bankName: 'ADCB', openingFils: 0, color: '#fff',
+  };
+  const other = {
+    id: 'hsbc-acct', name: 'HSBC Current •1111', kind: 'bank',
+    last4: '1111', bankName: 'HSBC', openingFils: 0, color: '#000',
+  };
+  const D = '2026-08-13';
+  const noon = Date.parse(`${D}T12:00:00Z`);
+  const alertAt = (hh, amount, title, id) => ({
+    id, type: 'expense', amountFils: amount, category: 'shopping', accountId: card.id, title,
+    date: D, source: 'sms', ts: Date.parse(`${D}T${hh}:00Z`), smsKey: `s${Date.parse(`${D}T${hh}:00Z`)}-${amount}`,
+    captureInstrument: { last4: '3215', kind: 'credit', bankIdentity: 'adcb' },
+  });
+  const upload = (n) => n.charCodeAt(0).toString(16).repeat(16);
+  const stmt = (merchant, amount, ts, tag, extra = {}) => ({
+    kind: 'transaction', type: 'expense', amountFils: amount, currency: 'AED', merchant, date: D,
+    dueDay: null, minDueFils: null, card: null, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'shopping', categoryDeliberate: true,
+    captureSource: 'pdf', smsTs: ts, statementImportId: tag, ...extra,
+  });
+  const ledger = (transactions, accounts = [card, other]) => ({
+    ...BASE, accounts, accountHints: { 3215: card.id, 1111: other.id }, transactions,
+  });
+
+  // Defect 2: unlabelled statement over already-captured alerts.
+  const alerts = [alertAt('09:10', 3215, 'Endurancein', 'a1'), alertAt('18:40', 4000, 'Carrefour', 'a2')];
+  const month = buildImportPlan([
+    stmt('PAYPAL *ENDURANCEIN', 3215, noon, upload('a')),
+    stmt('CARREFOUR HYPER 1234', 4000, noon - 121_000, upload('a')),
+  ], ledger(alerts), noon);
+  ok('statement vs alert: unlabelled file ownership remains unresolved despite matching alert descriptions',
+    month.txCount === 2, month.batch.transactions);
+
+  const twoGenuine = [alertAt('09:10', 2500, 'Talabat', 'g1'), alertAt('20:15', 2500, 'Talabat', 'g2')];
+  const threeRows = buildImportPlan([
+    stmt('TALABAT', 2500, noon, upload('b'), { card: { last4: '3215', kind: 'credit' }, bankHint: 'ADCB' }),
+    stmt('TALABAT', 2500, noon - 121_000, upload('b'), { card: { last4: '3215', kind: 'credit' }, bankHint: 'ADCB' }),
+    stmt('TALABAT', 2500, noon - 242_000, upload('b'), { card: { last4: '3215', kind: 'credit' }, bankHint: 'ADCB' }),
+  ], ledger(twoGenuine), noon);
+  ok('statement vs alert: matching is one-to-one — two alerts explain two statement rows, the third is new',
+    threeRows.txCount === 1, threeRows.batch.transactions);
+
+  const otherBank = buildImportPlan([
+    stmt('PAYPAL *ENDURANCEIN', 3215, noon, upload('c'), { bankHint: 'HSBC' }),
+  ], ledger([alertAt('09:10', 3215, 'Endurancein', 'x1')]), noon);
+  ok('statement vs alert: a statement naming another bank never absorbs this card\'s alert',
+    otherBank.txCount === 1, otherBank.batch.transactions);
+
+  const otherDay = buildImportPlan([
+    { ...stmt('PAYPAL *ENDURANCEIN', 3215, noon, upload('d')), date: '2026-08-14' },
+  ], ledger([alertAt('09:10', 3215, 'Endurancein', 'y1')]), noon);
+  ok('statement vs alert: an unresolved statement row matches only the same day',
+    otherDay.txCount === 1, otherDay.batch.transactions);
+
+  // The reverse arrival: an older alert read from history after the statement.
+  const storedStatement = {
+    id: 's1', type: 'expense', amountFils: 3215, category: 'shopping', accountId: '__unassigned-transaction__',
+    title: 'PAYPAL *ENDURANCEIN', date: D, source: 'sms', ts: noon, smsKey: `s${noon}-3215`,
+    captureSource: 'pdf', statementImportId: upload('e'),
+  };
+  const historyAlert = {
+    kind: 'transaction', type: 'expense', amountFils: 3215, currency: 'AED', merchant: 'Endurancein', date: D,
+    dueDay: null, minDueFils: null, card: { last4: '3215', kind: 'credit' }, reference: null, transferHint: false,
+    snapshotFils: null, snapshotKind: null, categoryGuess: 'software', categoryDeliberate: true,
+    smsTs: Date.parse(`${D}T09:10:00Z`), sender: 'ADCB', channel: 'inbox',
+  };
+  const reverse = buildImportPlan([historyAlert], ledger([storedStatement]), noon);
+  ok('statement vs alert: unidentified statement ownership cannot consume a later alert',
+    reverse.txCount === 1, reverse.batch.transactions);
+
+  // Review follow-up: an unresolved statement row names neither account nor
+  // (usually) bank, so money and day alone must not absorb a different
+  // merchant's alert — in either arrival order.
+  const otherMerchant = buildImportPlan([
+    stmt('NOON.COM DUBAI', 5000, noon, upload('n')),
+  ], ledger([alertAt('10:00', 5000, 'Carrefour', 'om1')]), noon);
+  ok('statement vs alert: an unlabelled row never absorbs another merchant\'s alert of the same money',
+    otherMerchant.txCount === 1, otherMerchant.batch.transactions);
+  const storedNoon = { ...storedStatement, id: 's9', title: 'NOON.COM DUBAI', amountFils: 5000, smsKey: `s${noon}-5000` };
+  const carrefourAlert = { ...historyAlert, amountFils: 5000, merchant: 'Carrefour', categoryGuess: 'groceries' };
+  const reverseOther = buildImportPlan([carrefourAlert], ledger([storedNoon]), noon);
+  ok('statement vs alert: a later alert for another merchant is not folded into an unlabelled statement row',
+    reverseOther.txCount === 1 && !reverseOther.batch.updates.some((u) => u.id === 's9'),
+    { tx: reverseOther.batch.transactions, updates: reverseOther.batch.updates });
+
+  // Defect 3: overlapping statements, rows in a different order.
+  const onCard = { card: { last4: '3215', kind: 'credit' } };
+  const firstUpload = [
+    { id: 'u1', type: 'expense', amountFils: 400, category: 'transport', accountId: card.id, title: 'SALIK',
+      date: D, source: 'sms', ts: noon, smsKey: `s${noon}-400`, captureSource: 'pdf', statementImportId: upload('f'),
+      captureInstrument: { last4: '3215', kind: 'credit' } },
+    { id: 'u2', type: 'expense', amountFils: 2000, category: 'dining', accountId: card.id, title: 'CAFE',
+      date: D, source: 'sms', ts: noon - 121_000, smsKey: `s${noon - 121_000}-2000`, captureSource: 'pdf',
+      statementImportId: upload('f'), captureInstrument: { last4: '3215', kind: 'credit' } },
+  ];
+  const overlap = buildImportPlan([
+    stmt('CAFE', 2000, noon, upload('g'), onCard),
+    stmt('SALIK', 400, noon - 121_000, upload('g'), onCard),
+    stmt('NEW SHOP', 900, noon - 242_000, upload('g'), onCard),
+  ], ledger(firstUpload), noon);
+  ok('statement vs statement: an overlapping statement in another order adds only its new row',
+    overlap.txCount === 1 && overlap.batch.transactions[0]?.title === 'NEW SHOP',
+    overlap.batch.transactions.map((t) => t.title));
+  ok('statement vs statement: and never rewrites a row from the other upload',
+    !overlap.batch.updates.some((u) => u.id === 'u1' || u.id === 'u2'), overlap.batch.updates);
+
+  const repeat = buildImportPlan([
+    stmt('SALIK', 400, noon, upload('h'), onCard),
+    stmt('SALIK', 400, noon - 121_000, upload('h'), onCard),
+  ], ledger([firstUpload[0]]), noon);
+  ok('statement vs statement: two genuine repeats against one known row import exactly one',
+    repeat.txCount === 1, repeat.batch.transactions);
+
+  const pageTwo = buildImportPlan([
+    stmt('SALIK', 400, noon - 121_000, upload('f'), onCard),
+  ], ledger([firstUpload[0]]), noon);
+  ok('statement vs statement: the second page of the SAME upload keeps its genuine repeat',
+    pageTwo.txCount === 1, pageTwo.batch.transactions);
+
+  const redelivered = buildImportPlan([
+    stmt('SALIK', 400, noon, upload('f'), onCard),
+  ], ledger([firstUpload[0]]), noon);
+  ok('statement vs statement: a row the relay re-delivers is still recognised exactly',
+    redelivered.txCount === 0, redelivered.batch.transactions);
+
+  const otherAccount = buildImportPlan([
+    stmt('SALIK', 400, noon, upload('i'), { card: { last4: '1111', kind: 'account' } }),
+  ], ledger([firstUpload[0]]), noon);
+  ok('statement vs statement: the same money on another account is never collapsed',
+    otherAccount.txCount === 1, otherAccount.batch.transactions);
+
+  const unlabelledStored = { ...storedStatement, id: 's2', title: 'SALIK', amountFils: 400, smsKey: `s${noon}-400`,
+    statementImportId: upload('j') };
+  const unlabelledDifferent = buildImportPlan([
+    stmt('PARKING RTA', 400, noon, upload('k')),
+  ], ledger([unlabelledStored]), noon);
+  ok('statement vs statement: two unlabelled statements need the same descriptor, not just the same money',
+    unlabelledDifferent.txCount === 1, unlabelledDifferent.batch.transactions);
+  const unlabelledSame = buildImportPlan([
+    stmt('SALIK', 400, noon - 121_000, upload('k')),
+  ], ledger([unlabelledStored]), noon);
+  ok('statement vs statement: a different unlabelled file cannot prove equal rows belong to one account',
+    unlabelledSame.txCount === 1, unlabelledSame.batch.transactions);
+
+  // Hydration repair must not fold two uploads' rows that share a relay clock.
+  const collided = reconcileCaptureDuplicates([
+    { ...firstUpload[0] },
+    { ...firstUpload[0], id: 'v1', title: 'PARKING RTA', statementImportId: upload('l') },
+  ]);
+  ok('reconciliation: two uploads\' rows that share s{midday}-{amount} are not one event',
+    collided.length === 2, collided.map((t) => t.title));
+  const sameUpload = reconcileCaptureDuplicates([{ ...firstUpload[0] }, { ...firstUpload[0], id: 'v2' }]);
+  ok('reconciliation: the same upload\'s row stored twice still folds by exact identity',
+    sameUpload.length === 1);
+
+  // The guard alone, without an options bag, keeps its old contract.
+  const bare = duplicateGuard([alertAt('09:10', 3215, 'Endurancein', 'z1')]);
+  ok('statement guard: without an unresolved-account rule, an account mismatch is not matched',
+    !bare.has({ date: D, amountFils: 3215, title: 'X', type: 'expense', accountId: 'somewhere',
+      ts: noon, smsKey: `s${noon}-3215`, captureSource: 'pdf', statementImportId: upload('m') }));
+}
+
+/* 13 — the stated bank event (dedupe.ts captureEventIdentity). A bank app
+ *      re-posting one alert must be one row whenever each copy arrives; two
+ *      genuine charges state different seconds or a moved balance. */
+{
+  const {
+    captureEventIdentity, sameCaptureEvent, distinctCaptureEvents, duplicateGuard,
+  } = require('./build/dedupe.js');
+  const { isValidBackupState } = require('./build/backup-validation.js');
+  const card = { last4: '2518', kind: 'credit', bankIdentity: 'adcb' };
+  const text = 'Credit Card XX2518 was used for AED290.00 on 25/09/2026 17:38:39 at SOUTHERN FRIED CHICK, Sharjah-AE. Available limit AED58823.09';
+  const id = (raw, extra = {}) => captureEventIdentity({
+    raw, amountFils: 29000, type: 'expense', currency: 'AED', captureInstrument: card, ...extra,
+  });
+  const base = id(`ADCBAlert ${text}`);
+  ok('event identity: an opaque digest, never the balance or the text',
+    /^e1:[0-9a-f]{16}:[0-9a-f]{16}$/.test(base) && !base.includes('58823') && !base.includes('2518'), base);
+  ok('event identity: title, whitespace, case, NBSP and zero-width variants are one event',
+    [`ADCB ${text}`, `  ADCBAlert\n${text.replace(/ /g, '  ')}  `, `ADCBALERT ${text.toUpperCase()}`,
+      `ADCBAlert ${text.replace('AED290.00', 'AED 290.00').replace('Credit', '​Credit')}`]
+      .every((raw) => id(raw) === base));
+  ok('event identity: Arabic-Indic digits read as the same clock',
+    id(`ADCBAlert ${text.replace('17:38:39', '١٧:٣٨:٣٩')}`) === base);
+  ok('event identity: a copy cut before the limit is the same event, not an equal digest',
+    sameCaptureEvent(id(text.split('. Available')[0]), base) && id(text.split('. Available')[0]) !== base);
+  ok('event identity: another second, amount, card, bank or direction is another event',
+    [id(text.replace('17:38:39', '17:39:02')), id(text, { amountFils: 29001 }),
+      id(text, { captureInstrument: { ...card, last4: '2519' } }),
+      id(text, { captureInstrument: { ...card, bankIdentity: 'fab' } }), id(text, { type: 'income' })]
+      .every((other) => distinctCaptureEvents(other, base) && !sameCaptureEvent(other, base)));
+  ok('event identity: a same-second repeat whose limit moved is another event',
+    distinctCaptureEvents(id(text.replace('58823.09', '58533.09')), base));
+  ok('event identity: none without seconds, a stated bank and card, or source text',
+    id(text.replace('17:38:39', '17:38')) === undefined &&
+      id(text, { captureInstrument: { last4: '2518', kind: 'credit' } }) === undefined &&
+      id(text, { captureInstrument: undefined }) === undefined && id(undefined) === undefined);
+  ok('event identity: an unparseable value matches nothing and vetoes nothing',
+    !sameCaptureEvent(base, 'e1:bogus') && !distinctCaptureEvents(base, 'e1:bogus') &&
+      !sameCaptureEvent(undefined, base) && !distinctCaptureEvents(undefined, base));
+
+  // The guard: a push copy of a stored event, however late; SMS copies do
+  // not use the identity against each other; the veto is push↔push only.
+  const D = '2026-09-25';
+  const T = 1790343524092;
+  const row = (extra) => ({ id: 'p1', type: 'expense', amountFils: 29000, category: 'dining', accountId: 'adcb-card',
+    title: 'Southern Fried Chick', date: D, source: 'sms', viaPush: true, smsKey: `s${T}-29000`, ts: T,
+    captureInstrument: card, captureEventIdentity: base, ...extra });
+  const push = (ts, extra) => ({ date: D, amountFils: 29000, title: 'Southern Fried Chick', type: 'expense',
+    smsKey: `s${ts}-29000`, ts, channel: 'push', captureInstrument: card, eventIdentity: base, ...extra });
+  ok('event guard: a push copy of a stored push, two hours later, is the same event',
+    duplicateGuard([row()]).has(push(T + 2 * 3_600_000)));
+  {
+    const guard = duplicateGuard([row()]);
+    ok('event guard: any number of copies fold into the one stored row',
+      guard.has(push(T + 160_000)) && guard.has(push(T + 300_000)) && guard.has(push(T + 900_000)));
+  }
+  ok('event guard: an SMS row with the same stated event explains a push hours away',
+    duplicateGuard([row({ viaPush: undefined })]).has(push(T + 3 * 3_600_000)));
+  ok('event guard: an incoming SMS never drops on the identity alone',
+    !duplicateGuard([row({ viaPush: undefined })]).has({ ...push(T + 3 * 3_600_000), channel: 'inbox' }));
+  ok('event guard: a late SMS supersedes the stored push of the same stated event',
+    duplicateGuard([row()]).supersedes({ ...push(T + 3 * 3_600_000), channel: 'inbox' }) === 'p1');
+  ok('event guard: another named merchant at the same stated second never supersedes the push',
+    duplicateGuard([row()]).supersedes({ ...push(T + 3 * 3_600_000), channel: 'inbox', title: 'Other merchant' }) === null);
+  ok('event guard: a genuine second push 23 s later is not a title-window duplicate',
+    !duplicateGuard([row()]).has(push(T + 23_000, { eventIdentity: id(text.replace('17:38:39', '17:39:02')) })));
+  ok('event guard: a push without an identity keeps the two-minute title rule',
+    duplicateGuard([row()]).has(push(T + 60_000, { eventIdentity: undefined })) &&
+      !duplicateGuard([row()]).has(push(T + 160_000, { eventIdentity: undefined })));
+  ok('event guard: a stored row without an identity is untouched by the new rule',
+    !duplicateGuard([row({ captureEventIdentity: undefined })]).has(push(T + 160_000)));
+
+  const tx = { id: 't1', type: 'expense', amountFils: 29000, category: 'dining', accountId: 'a1', title: 'X', date: D };
+  ok('backup: a row carrying its stated-event digest restores',
+    isValidBackupState({ transactions: [{ ...tx, captureEventIdentity: base }] }) &&
+      isValidBackupState({ transactions: [{ ...tx, captureEventIdentity: `${base.slice(0, 20)}-` }] }));
+  ok('backup: a malformed or readable event identity is refused',
+    !isValidBackupState({ transactions: [{ ...tx, captureEventIdentity: 'adcb|2518|290|25/09/2026 17:38:39' }] }) &&
+      !isValidBackupState({ transactions: [{ ...tx, captureEventIdentity: 7 }] }));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

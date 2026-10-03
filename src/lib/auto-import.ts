@@ -1,3 +1,4 @@
+import { aiReviewEventForRefusedAlert } from '@/lib/ai-alert-reader';
 import { AppState as RNAppState, Linking, PermissionsAndroid, Platform } from 'react-native';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -17,8 +18,11 @@ import {
 } from '@/lib/alert-review-tray';
 import { toISODate } from '@/lib/format';
 import { bodyPrint, type CaptureChannel } from '@/lib/dedupe';
+import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
+import { isBnplProviderSource } from '@/lib/bnpl-providers';
 import {
   nonPostingReason,
+  parseForeignAwaitingRate,
   PARSER_VERSION,
   type NonPostingReason,
   type ParsedSms,
@@ -42,12 +46,26 @@ import {
 } from '@/lib/trusted-bank-notification-packages';
 import type { DeclinedSms, ScannedSms } from '@/lib/import-plan';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
-import { detectLaunchMarketFromSender, pinnedLedgerCurrencyCode } from '@/lib/markets';
+import { parsedObligationReviewEvent, parsedTransactionReviewEvent } from '@/lib/parsed-review-event';
+import {
+  detectLaunchMarketFromAlert,
+  detectLaunchMarketFromSender,
+  pinnedLedgerCurrencyCode,
+  withMarketPackForParsing,
+} from '@/lib/markets';
+import { inspectUniversalBankEvent } from '@/lib/universal-parser';
+import { dateOrderForCountry, getActiveCountry } from '@/lib/country';
+import { bestEffortAutoPostEnabled, decideBestEffortAutoPost } from '@/lib/best-effort-autopost';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
 import type { UniversalBankEvent } from '@/lib/universal-types';
+import { certifyUniversalTemplate } from '@/lib/universal-template-certification';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
+import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
+import { canCollectLocalSemanticShadow, queueLocalSemanticParserShadow, buildLocalParserSemanticWindow } from '@/lib/local-semantic-shadow';
+import { eligibleLocalReviewEvent, localReviewAdvisor } from '@/lib/local-semantic-review';
+import { sanitizeUniversalReviewEvent } from '@/lib/generic-review-entry';
 
 const DEFAULT_PAGE_SIZE = 1_000;
 const MAX_PAGE_SIZE = 2_000;
@@ -66,6 +84,16 @@ export interface AndroidNotificationImportDiagnostics {
   unresolvedFinancialCandidate: number;
   unresolvedParserMiss: number;
   unresolvedReviewRefusal: number;
+  /** Source-free template-certification outcomes from the last native drain. */
+  certificationAutomatic: number;
+  semanticGeneralized: number;
+  certificationReview: number;
+  certificationNeverPost: number;
+  certificationAdapterRequired: number;
+  /** Counts by code-owned certification id only; never message-derived text. */
+  certificationTemplates: Record<string, number>;
+  /** Market/family buckets only; never merchant, amount, account or source text. */
+  semanticGeneralizedFamilies: Record<string, number>;
   acknowledgementPlanned: number;
   acknowledged: number;
 }
@@ -134,6 +162,74 @@ const FOREGROUND_PARSE_YIELD_MS = 16;
 // Some Android providers insert one SMS twice. Collapse only byte-identical,
 // same-sender, consecutive inbox rows delivered less than one second apart.
 const EXACT_PROVIDER_DUPLICATE_MS = 1_000;
+/**
+ * A carrier can also deliver one SMS twice minutes apart — a retry after a
+ * missed delivery report — and the provider stores both as ordinary rows with
+ * unrelated ids, so the adjacent-row rule above never sees them. Byte-identical
+ * text from one sender is NOT enough to call them one message on its own: two
+ * genuine charges of the same amount at the same shop read identically too,
+ * and so does a double tap or a merchant charging twice in the same minute.
+ * They are folded only inside this window AND only when the body carries
+ * something two real charges cannot share (hasCarrierDuplicateIdentity). A
+ * plain hh:mm is deliberately not enough. Everything else is left as before.
+ *
+ * The fold only ever declines an incoming copy within one scan. It never
+ * emits a retirement, so a row already in the ledger is never removed by it.
+ */
+const CARRIER_DUPLICATE_MS = 10 * 60_000;
+/**
+ * An explicit transaction date and time at SECOND precision. This is the rule
+ * the Android notification re-post guard uses, and it must stay identical:
+ * NotificationCaptureStore.TRANSACTION_DATETIME_RE (kotlin-regex.test.js
+ * compares the two sources). Seconds are what separate a second delivery of
+ * one alert from two real charges inside one minute.
+ */
+export const CARRIER_DUPLICATE_DATETIME_RE =
+  new RegExp(String.raw`\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\s+\d{1,2}:\d{2}:\d{2}\b`);
+/**
+ * A running-balance FIGURE after a balance label. The balance moves with
+ * every charge, so two real charges cannot share it. Only an amount-shaped
+ * figure counts (currency code or two decimals), and never "balance
+ * transfer", so an offer footer that is identical on every alert does not.
+ */
+export const CARRIER_DUPLICATE_BALANCE_RE =
+  /\b(?:(?:avl|avail(?:able)?|current|curr|ledger|closing|remaining)\.?\s*)?bal(?:ance)?\b(?!\s*transfer)[^0-9٠-٩\n]{0,20}?(?:(?:AED|Dhs?|SAR|SR|QAR|KWD|BHD|OMR|EGP|INR|PKR|PHP|USD|EUR|GBP|CAD|AUD|JPY|CNY|CHF|TRY|GHS|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?\s*(?:AED|SAR|QAR|KWD|BHD|OMR|USD|EUR|GBP|د\.إ|ر\.س|درهم|ريال))|رصيد[^0-9٠-٩\n]{0,20}?(?:(?:AED|SAR|د\.إ|ر\.س|درهم|ريال)\s*[0-9٠-٩][0-9٠-٩,٬]*(?:[.٫][0-9٠-٩]{1,3})?|[0-9٠-٩][0-9٠-٩,٬]*[.٫][0-9٠-٩]{2}(?![0-9٠-٩])|[0-9٠-٩][0-9٠-٩,٬]*\s*(?:AED|SAR|د\.إ|ر\.س|درهم|ريال))/i;
+
+/** Whether an identical copy of [body] can only be the same posting. */
+export const hasCarrierDuplicateIdentity = (body: string): boolean =>
+  CARRIER_DUPLICATE_DATETIME_RE.test(body) || CARRIER_DUPLICATE_BALANCE_RE.test(body);
+
+/**
+ * Indexes of [rows] that are later carrier re-deliveries of an earlier row in
+ * the same list: same sender, byte-identical identity-bearing body, within
+ * CARRIER_DUPLICATE_MS of the copy that is kept. The EARLIEST copy of each
+ * cluster is the one kept, whatever order the rows arrive in, because that is
+ * the copy an earlier scan is most likely to have stored already; keeping the
+ * later one would then import it beside the stored row.
+ */
+export const carrierRedeliveryIndexes = (
+  rows: readonly { address: string; body: string; date: number }[],
+): Set<number> => {
+  const skipped = new Set<number>();
+  const byKey = new Map<string, number[]>();
+  rows.forEach((row, index) => {
+    if (typeof row.body !== 'string' || !hasCarrierDuplicateIdentity(row.body)) return;
+    const key = `${row.address}\u0000${row.body}`;
+    const bucket = byKey.get(key);
+    if (bucket) bucket.push(index);
+    else byKey.set(key, [index]);
+  });
+  for (const indexes of byKey.values()) {
+    if (indexes.length < 2) continue;
+    indexes.sort((a, b) => rows[a].date - rows[b].date || a - b);
+    let keptDate = rows[indexes[0]].date;
+    for (const index of indexes.slice(1)) {
+      if (rows[index].date - keptDate <= CARRIER_DUPLICATE_MS) skipped.add(index);
+      else keptDate = rows[index].date;
+    }
+  }
+  return skipped;
+};
 
 interface ParseYieldState {
   startedAt: number;
@@ -285,6 +381,8 @@ export interface ScanInboxOptions {
   pageSize?: number;
   /** Exact old source hashes currently retained by the authoritative ledger/tray. */
   legacyReviewSourceKeys?: readonly string[];
+  /** Existing Review claims. The executor must flush and guard their generation before ACK. */
+  knownReviewSourceKeys?: readonly string[];
   /**
    * Bound bank-app queue work for short headless Android wakes. Foreground
    * drains omit this and keep the existing "read every retained row" behavior.
@@ -337,12 +435,63 @@ export interface ScanResult {
   /** Strong launch-pack evidence observed while parsing this scan. */
   detectedLaunchMarket: 'AE' | 'SA' | null;
   /** Retire native notification rows only after ledger/review durability. */
-  commit: () => Promise<void>;
+  commit: (deferredReviewSourceKeys?: readonly string[]) => Promise<void>;
+  /** The bounded collector omitted inbox reviews; do not advance their cursor. */
+  deferredInboxReviews?: boolean;
+  /** Inbox outcomes omitted using current Review claims; revalidate before cursor completion. */
+  skippedKnownInboxReviewSourceKeys?: readonly string[];
   /** Queue ACK requires a flush even when every candidate deduplicated. */
   requiresDurableCommit?: boolean;
+  /**
+   * Messages this scan read and set aside as promotions (bank-app offers,
+   * cashback/discount texts with no completed-payment wording). Counted only:
+   * the classification that skips them is unchanged. Absent on scans that
+   * never ran (non-Android).
+   */
+  promotionsSkipped?: number;
+}
+
+/** One transaction a running scan has just parsed, as display facts only. */
+export interface ScanFoundPreview {
+  merchant: string;
+  category: import('@/lib/types').CategoryId;
+  type: import('@/lib/types').TransactionType;
+  /** Minor units of `currency`, exactly as parsed. */
+  amountMinor: number;
+  currency: string;
+}
+
+/**
+ * Optional third argument to scanInbox's onProgress. Additive: callers that
+ * take (scanned, found) are unaffected. Nothing here carries message text,
+ * senders or provider ids.
+ */
+export interface ScanProgressDetail {
+  promotionsSkipped: number;
+  /** Date of the oldest inbox message read so far; null before the first page. */
+  oldestInboxDateMs: number | null;
+  /** Up to three most recently parsed transactions, newest parse first. */
+  recentFound: readonly ScanFoundPreview[];
 }
 
 const NOOP_SCAN_COMMIT = async () => {};
+
+/**
+ * How many messages the Android SMS inbox holds dated at or after
+ * max(sinceMs, atOrAfterMs), from a read-only COUNT-style provider query that
+ * reads no message bodies or senders. Null when unknown: another platform, an
+ * older native build without the query, no permission, or a provider error.
+ * Callers must then show an indeterminate indicator, never a guessed total.
+ */
+export async function countInboxMessages(sinceMs: number, atOrAfterMs = 0): Promise<number | null> {
+  if (Platform.OS !== 'android' || typeof SmsReader?.getInboxCount !== 'function') return null;
+  try {
+    const count = await SmsReader.getInboxCount(sinceMs, atOrAfterMs);
+    return Number.isSafeInteger(count) && count >= 0 ? count : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Best-effort locale region. Routing treats it only as supporting evidence. */
 function deviceRegionHint(): string | null {
@@ -487,6 +636,46 @@ export type SourceFreeRefusedAlertDecision =
 const unresolvedNotificationIdsThisSession = new Set<string>();
 let unresolvedNotificationSessionKey = '';
 
+/**
+ * Messaging apps are never a bank's own notification channel, and never a
+ * financial candidate. The default SMS app re-announces every bank SMS the
+ * SMS path already captures, so while Wafra can read SMS a Messages
+ * notification is only a second copy — and approving one in Review would
+ * teach Wafra to trust the Messages app, and anyone who can text the user.
+ * Without READ_SMS it is the user's only route to their bank SMS, so an SMS
+ * app's row then goes to Review only, with no learnable package identity.
+ * Chat apps carry money-looking text from anyone and are always ignored.
+ *
+ * Native classifies these rows (including the device's default SMS app,
+ * which only native can resolve) as `messaging-review`; these lists also
+ * cover rows an older native build queued as financial candidates. Keep
+ * aligned with TrustedBankNotificationPackages.smsAppPackages and
+ * chatAppPackages; android-review-capture compares them.
+ */
+export const SMS_APP_PACKAGES: ReadonlySet<string> = new Set([
+  'com.google.android.apps.messaging',
+  'com.samsung.android.messaging',
+  'com.android.mms',
+  'com.android.messaging',
+  'com.oneplus.mms',
+  'com.microsoft.android.smsorganizer',
+  'com.truecaller',
+]);
+export const CHAT_APP_PACKAGES: ReadonlySet<string> = new Set([
+  'com.whatsapp',
+  'com.whatsapp.w4b',
+  'org.telegram.messenger',
+  'org.thoughtcrime.securesms',
+  'com.facebook.orca',
+  'com.viber.voip',
+  'jp.naver.line.android',
+  'com.tencent.mm',
+  'com.imo.android.imoim',
+  'com.botim.im',
+]);
+export const MESSAGING_APP_PACKAGES: ReadonlySet<string> =
+  new Set([...SMS_APP_PACKAGES, ...CHAT_APP_PACKAGES]);
+
 const isPromotionalBankPush = (source: string): boolean =>
   /\b(?:get|earn|save|enjoy|redeem)\b.{0,100}\b(?:cashback|discount|offers?|off)\b/i.test(source) &&
   !/\b(?:has been used|was used|spent|charged|debited|credited|paid|completed|posted)\b/i.test(source);
@@ -505,72 +694,12 @@ const KNOWN_BANK_UNIVERSAL_INFO_HINT =
  * money automatically. Reconstruct only structured parser facts; no raw source
  * text or sender survives this boundary.
  */
-function parsedFinancialCandidateReview(
-  parsed: ParsedSms,
+export function parsedFinancialCandidateReview(
+  parsed: Omit<ParsedSms, 'raw'>,
   observedAt: number,
 ): SourceFreeReviewCandidate | null {
-  if (parsed.kind !== 'transaction' || !Number.isSafeInteger(parsed.amountFils) || parsed.amountFils <= 0) {
-    return null;
-  }
-  const money = ledgerMoneySpec(parsed.currency);
-  if (!money) return null;
-  const missingField = () => ({
-    value: null,
-    evidence: 'missing' as const,
-    alternatives: [],
-    spans: [],
-    issues: [],
-  });
-  const instrument = parsed.card
-    ? {
-        kind: parsed.card.kind === 'account' ? 'account' as const : 'card' as const,
-        last4: /^\d{4}$/.test(parsed.card.last4) ? parsed.card.last4 : null,
-      }
-    : null;
-  const amount = {
-    currency: money.currency,
-    minorUnits: String(parsed.amountFils),
-    exponent: money.exponent,
-  };
-  const explicitAmount = {
-    value: amount,
-    evidence: 'explicit' as const,
-    alternatives: [],
-    spans: [],
-    issues: [],
-  };
-  const merchant = parsed.merchant.trim();
-  const event: UniversalBankEvent = {
-    version: 1,
-    decision: 'review',
-    family: parsed.transferHint
-      ? 'transfer'
-      : parsed.categoryGuess === 'cash-withdrawal'
-        ? 'cash-withdrawal'
-        : parsed.type === 'income'
-          ? 'unknown'
-          : 'purchase',
-    status: 'posted',
-    direction: parsed.type === 'income' ? 'credit' : 'debit',
-    amount: explicitAmount,
-    statementTotal: missingField(),
-    minimumDue: missingField(),
-    balance: missingField(),
-    creditLimit: missingField(),
-    merchant: merchant
-      ? { value: merchant, evidence: 'explicit', alternatives: [], spans: [], issues: [] }
-      : missingField(),
-    transactionDate: parsed.date
-      ? { value: parsed.date, evidence: 'explicit', alternatives: [], spans: [], issues: [] }
-      : missingField(),
-    dueDate: missingField(),
-    statementDate: missingField(),
-    instrument: instrument
-      ? { value: instrument, evidence: 'explicit', alternatives: [], spans: [], issues: [] }
-      : missingField(),
-    observations: [{ role: 'transaction', field: explicitAmount }],
-    issues: [],
-  };
+  const event = parsedTransactionReviewEvent(parsed) ?? parsedObligationReviewEvent(parsed);
+  if (!event) return null;
   const prepared = prepareUniversalReviewAlert({
     id: 'capture_probe_id_0001',
     sourceKey: 'capture_probe_key_001',
@@ -596,12 +725,13 @@ function parsedFinancialCandidateReview(
 function universalEventReviewCandidate(
   event: UniversalBankEvent,
   observedAt: number,
+  channel: CaptureChannel = 'push',
 ): SourceFreeReviewCandidate | null {
   const prepared = prepareUniversalReviewAlert({
     id: 'capture_probe_id_0001',
     sourceKey: 'capture_probe_key_001',
     observedAt,
-    channel: 'push',
+    channel,
     event,
   });
   if (!prepared) return null;
@@ -610,14 +740,16 @@ function universalEventReviewCandidate(
 }
 
 const AUTOMATIC_UNIVERSAL_FAMILIES = new Set<UniversalBankEvent['family']>([
-  'purchase', 'refund', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment',
+  'purchase', 'refund', 'cash-withdrawal', 'fee', 'utility', 'recurring-payment', 'transfer',
 ]);
 
 /**
  * Convert one source-grounded worldwide event into the same structured row the
  * legacy launch parser emits. This is intentionally stricter than Review:
- * transfers, unknown direction/status, ambiguous money and statement/bill facts
- * remain review-only. Currency comes from ISO metadata, never a country default.
+ * unknown direction/status, ambiguous money and statement/bill facts remain
+ * review-only. Transfer rows are allowed only after template certification and
+ * retain transferHint so uncertain ownership is excluded from exact totals.
+ * Currency comes from ISO metadata, never a country default.
  */
 function parsedUniversalPosting(
   event: UniversalBankEvent,
@@ -631,7 +763,7 @@ function parsedUniversalPosting(
       event.amount.evidence !== 'explicit' || !event.amount.value) return null;
 
   if ((event.family === 'refund' && event.direction !== 'credit') ||
-      (event.family !== 'refund' && event.direction !== 'debit')) return null;
+      (event.family !== 'refund' && event.family !== 'transfer' && event.direction !== 'debit')) return null;
 
   const spec = ledgerMoneySpec(event.amount.value.currency);
   if (!spec || spec.exponent !== event.amount.value.exponent ||
@@ -641,11 +773,13 @@ function parsedUniversalPosting(
   if (minor <= 0n || minor > BigInt(Number.MAX_SAFE_INTEGER)) return null;
 
   const type = event.direction === 'credit' ? 'income' : 'expense';
-  const suggestion = suggestUniversalCategory(event, {
-    type,
-    overrides,
-    market: market ?? undefined,
-  });
+  const suggestion = event.family === 'transfer'
+    ? { category: 'other' as import('@/lib/types').CategoryId, merchant: '', needsReview: false }
+    : suggestUniversalCategory(event, {
+        type,
+        overrides,
+        market: market ?? undefined,
+      });
   const explicitMerchant = event.merchant.evidence === 'explicit'
     ? event.merchant.value?.trim() ?? ''
     : '';
@@ -654,8 +788,16 @@ function parsedUniversalPosting(
       : event.family === 'fee' ? 'Bank fee'
         : event.family === 'utility' ? 'Utility payment'
           : event.family === 'recurring-payment' ? 'Recurring payment'
+            : event.family === 'transfer'
+              ? event.direction === 'credit' ? 'Incoming transfer' : 'Outgoing transfer'
             : 'Card purchase';
-  const merchant = suggestion.merchant || explicitMerchant || fallbackTitle;
+  // Transfer ownership is a separate reconciliation question. Preserve a
+  // structural title so the ledger keeps this row in the unresolved-transfer
+  // bucket until it can prove own vs external; a recipient name must not turn a
+  // transfer into ordinary spending merely because merchant extraction found it.
+  const merchant = event.family === 'transfer'
+    ? fallbackTitle
+    : suggestion.merchant || explicitMerchant || fallbackTitle;
   const instrument = event.instrument.evidence === 'explicit' ? event.instrument.value : null;
   const card = instrument?.last4
     ? {
@@ -674,7 +816,7 @@ function parsedUniversalPosting(
     minDueFils: null,
     card,
     reference: null,
-    transferHint: false,
+    transferHint: event.family === 'transfer',
     snapshotFils: null,
     snapshotKind: null,
     categoryGuess: suggestion.category,
@@ -698,6 +840,9 @@ export function inspectSourceFreeRefusedAlert(input: {
   /** Known launch-bank package identity makes worldwide fallback unnecessary. */
   skipUniversalFallback?: boolean;
 }): SourceFreeRefusedAlertDecision {
+  // BNPL provider restatement (see bnpl-providers.ts): the bank's
+  // card alert is the transaction, so this source never earns a Review card.
+  if (isBnplProviderSource(input.sender)) return { kind: 'ignored', reason: 'non-financial' };
   const reason = nonPostingReason(input.source);
   if (reason) return { kind: 'declined', reason };
   // A generic amount detector can read "Get AED 50 cashback on your next
@@ -709,6 +854,22 @@ export function inspectSourceFreeRefusedAlert(input: {
   if (!hasBankAlertMoneyHint(input.source) &&
     !hasGenericBankAlertContext(input.source, input.sender)) {
     return { kind: 'ignored', reason: 'non-financial' };
+  }
+
+  // A launch-bank purchase in a currency the offline table cannot price
+  // (NGN, ISK, UZS ...) waits in Review in its own currency until a dated
+  // rate converts it at promotion. It is never dropped, even when the
+  // worldwide fallback below is skipped or cannot read the template.
+  const launchMarket = detectLaunchMarketFromAlert(input.source, input.sender);
+  const awaitingRate = launchMarket
+    ? withMarketPackForParsing(launchMarket, () => parseForeignAwaitingRate(input.source, undefined, {
+        sender: input.sender, observedAt: input.observedAt,
+      }))
+    : null;
+  if (awaitingRate) {
+    const { raw: _raw, ...facts } = awaitingRate;
+    const candidate = parsedFinancialCandidateReview(facts, input.observedAt);
+    if (candidate) return { kind: 'review', candidate: { ...candidate, channel: input.channel } };
   }
 
   const inspection = input.existingInspection ?? input.session.inspect(input.source, input.sender);
@@ -791,7 +952,7 @@ export const shouldReviewParsedIncome = (parsedAlert: ParsedSms): boolean =>
 export async function scanInbox(
   sinceMs: number,
   overrides: Record<string, import('@/lib/types').CategoryId>,
-  onProgress?: (scanned: number, found: number) => void,
+  onProgress?: (scanned: number, found: number, detail?: ScanProgressDetail) => void,
   regionHint: string | null = deviceRegionHint(),
   options: ScanInboxOptions = {},
 ): Promise<ScanResult> {
@@ -815,6 +976,7 @@ export async function scanInbox(
     sourceEventId?: string;
   })[] = [];
   const reviewCandidates: ReviewEntry[] = [];
+  let deferredInboxReviews = false;
   const reviewSourceBindings: ReviewSourceBinding[] = [];
   const requestedLegacySources = new Set((options.legacyReviewSourceKeys ?? [])
     .filter((value) => /^arc1_[0-9a-f]{64}$/.test(value)));
@@ -834,6 +996,8 @@ export async function scanInbox(
     });
   };
   const reviewSourceKeys = new Set<string>();
+  const knownReviewSourceKeys = new Set((options.knownReviewSourceKeys ?? []).map(key => canonicalCaptureSourceKey(key)));
+  const skippedKnownInboxReviewSourceKeys = new Set<string>();
   const reviewDiscoveredAt = Date.now();
   let databaseKeyPromise: Promise<string | null> | null = null;
   const databaseKey = (): Promise<string | null> => {
@@ -851,11 +1015,34 @@ export async function scanInbox(
     return identitySession(source, sender, observedAt, channel);
   };
   const declined: DeclinedSms[] = [];
+  // Display counters for a watched scan. They never change what is imported.
+  let promotionsSkipped = 0;
+  let oldestInboxDateMs: number | null = null;
+  const progressDetail = (): ScanProgressDetail => {
+    const recentFound: ScanFoundPreview[] = [];
+    for (let i = parsed.length - 1; i >= 0 && recentFound.length < 3; i--) {
+      const row = parsed[i];
+      if (row.kind !== 'transaction') continue;
+      recentFound.push({
+        merchant: row.merchant, category: row.categoryGuess, type: row.type,
+        amountMinor: row.amountFils, currency: row.currency,
+      });
+    }
+    return { promotionsSkipped, oldestInboxDateMs, recentFound };
+  };
   const notificationIds = new Set<string>();
+  // Native IDs name observations; several observations can resolve to one
+  // Review source. Only ACK those whose source survives the bounded collector.
+  const notificationReviewSources = new Map<string, string>();
   let notificationImportStats: AndroidNotificationImportDiagnostics | null = null;
   const launchSession = createLaunchAlertSession({ overrides, regionHint });
-  const inspectWorldwide = launchSession.inspect;
-  const parseLaunchAlert = launchSession.parse;
+  // Collection also includes native I/O and deliberate UI yields. Record the
+  // synchronous parser work separately so wall-clock waits cannot masquerade
+  // as parser CPU in a tester diagnostic. Tags contain no message content.
+  const inspectWorldwide: typeof launchSession.inspect = (...args) =>
+    measureRuntimeOperation('capture-inspect', () => launchSession.inspect(...args));
+  const parseLaunchAlert: typeof launchSession.parse = (...args) =>
+    measureRuntimeOperation('capture-parse', () => launchSession.parse(...args));
   /**
    * Called only where the launch parser returned null. Declines keep their
    * existing healing fingerprint and stop there. Every other refusal may be
@@ -875,6 +1062,9 @@ export async function scanInbox(
     },
     parsedFallback?: SourceFreeReviewCandidate | null,
     skipUniversalFallback = false,
+    /** Only for alerts NO parser read (`!p`); never for a parsed row under review. */
+    aiEligible = false,
+    notificationId?: string,
   ): Promise<SourceFreeRefusedAlertDecision> => {
     let decision = inspectSourceFreeRefusedAlert({
       source: body,
@@ -887,6 +1077,26 @@ export async function scanInbox(
     });
     if (decision.kind === 'ignored' && decision.reason === 'unrecognized' && parsedFallback) {
       decision = { kind: 'review', candidate: parsedFallback };
+    }
+    // AI reading (ai-alert-reader.ts): only for an alert every proven path and
+    // the refusal pipeline left unrecognised, only when the person downloaded
+    // the model, never for AE/SA senders. It can only add a Review item with
+    // suggested fields; with no model it resolves null and nothing changes.
+    if (aiEligible && !parsedFallback && !skipUniversalFallback &&
+      decision.kind === 'ignored' && decision.reason === 'unrecognized') {
+      const aiEvent = await aiReviewEventForRefusedAlert(body, sender, ts);
+      let aiCandidate: SourceFreeReviewCandidate | null = null;
+      try { aiCandidate = aiEvent ? universalEventReviewCandidate(aiEvent, ts, channel) : null; } catch { aiCandidate = null; }
+      if (aiCandidate) decision = { kind: 'review', candidate: aiCandidate };
+    }
+    // Counted, not classified: a text already set aside that reads as an
+    // offer (the same wording test the bank-app path uses to skip them) and
+    // came from a business sender ID. Letters in the sender mark an
+    // alphanumeric business ID; a person texting "20% off" from a phone
+    // number is not a bank promotion.
+    if (decision.kind === 'ignored' && (decision.reason === 'promotion' ||
+      (isPromotionalBankPush(body) && /[A-Za-z]/.test(sender)))) {
+      promotionsSkipped += 1;
     }
     if (decision.kind === 'declined') {
       declined.push({
@@ -921,8 +1131,24 @@ export async function scanInbox(
       // Keep event time and its stable identity; only review retention moves.
       expiresAt: Math.max(identified.expiresAt, reviewDiscoveredAt + REVIEW_ALERT_TTL_MS),
     };
+    if (notificationId) notificationReviewSources.set(notificationId, sourceIdentity.sourceKey);
+    if (knownReviewSourceKeys.has(canonicalCaptureSourceKey(sourceIdentity.sourceKey, ts))) {
+      if (channel !== 'push') skippedKnownInboxReviewSourceKeys.add(canonicalCaptureSourceKey(sourceIdentity.sourceKey, ts));
+      return decision;
+    }
     if (reviewSourceKeys.has(sourceIdentity.sourceKey)) return decision;
     reviewSourceKeys.add(sourceIdentity.sourceKey);
+    if (isUniversalReviewAlert(reviewPrepared) && eligibleLocalReviewEvent(reviewPrepared.event)) {
+      // The persisted tray intentionally has no source/spans. Reinspect while
+      // source is in hand, and bind only an exact match to this review entry.
+      const inspected = inspectGenericBankEventForReview(body, sender);
+      if (inspected && eligibleLocalReviewEvent(inspected) &&
+          JSON.stringify(sanitizeUniversalReviewEvent(inspected)) === JSON.stringify(reviewPrepared.event)) {
+        const window = buildLocalParserSemanticWindow(body, inspected);
+        if (window) void localReviewAdvisor.enqueue(reviewPrepared, inspected, window);
+      }
+    }
+
     // Keep the explicit encrypted-identity merge visible to the repository's
     // static safety contract even though the shared helper validated it too.
     if (universal) reviewCandidates.push(reviewPrepared);
@@ -932,7 +1158,8 @@ export async function scanInbox(
     // first—so a full inbox cannot crowd out a fresh bank-app alert.
     reviewCandidates.sort((a, b) => a.observedAt - b.observedAt);
     if (reviewCandidates.length > MAX_REVIEW_CANDIDATES) {
-      reviewCandidates.splice(0, reviewCandidates.length - MAX_REVIEW_CANDIDATES);
+      const omitted = reviewCandidates.splice(0, reviewCandidates.length - MAX_REVIEW_CANDIDATES);
+      if (omitted.some(item => item.channel !== 'push')) deferredInboxReviews = true;
     }
     return decision;
   };
@@ -979,6 +1206,7 @@ export async function scanInbox(
     inboxScannedCount += batch.length;
     scannedCount += batch.length;
     const pageYield = createParseYieldState();
+    const carrierCopies = carrierRedeliveryIndexes(batch);
     const pageStarted = tracing ? Date.now() : 0;
     let traceCheckpoint = pageStarted;
     for (let i = 0; i < batch.length; i++) {
@@ -1013,6 +1241,16 @@ export async function scanInbox(
         }
         continue;
       }
+      // A later carrier re-delivery of a copy on this page is declined here
+      // and only here: no `declined` record, because that would ask the plan
+      // to retire a stored row, and this fold must never remove one.
+      if (carrierCopies.has(i)) {
+        if (parseYieldDue(pageYield, i + 1 < batch.length)) {
+          await yieldToUi();
+          resetParseYieldState(pageYield);
+        }
+        continue;
+      }
       const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
       if (options.historyRepair) {
         // Every production parser path requires explicit money evidence before
@@ -1040,9 +1278,21 @@ export async function scanInbox(
       // issuer evidence, but unlike an Android package identity they are not a
       // device-installed trust anchor. UAE/Saudi retain their mature automatic
       // parser; other markets use the sanitized worldwide Review path below.
+      // Other senders stay review-first unless the one unproven-format policy
+      // (best-effort-autopost.ts) proves a completed movement; such a row is
+      // marked "Auto-added — check". It never runs for AE/SA senders/routes.
       const p = launchSenderMarket
         ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket, sms.date)
-        : null;
+        : launchSession.parseUnproven(sms.body, sms.address, worldwide, sms.date);
+      // Local-AI shadow evaluation over SMS history: the deterministic
+      // universal fact is built only for money-bearing bodies and its redacted
+      // window is queued for later scoring, so the scan never waits on the
+      // encoder. It can never replace `p`, review, money, status or direction.
+      // The parser-version repair pass at startup is excluded on purpose.
+      if (!options.historyRepair && canCollectLocalSemanticShadow() && (p || hasBankAlertMoneyHint(sms.body))) {
+        const shadowInspection = inspectGenericBankEventForReview(sms.body, sms.address);
+        if (shadowInspection) queueLocalSemanticParserShadow(sms.body, shadowInspection);
+      }
       const reviewDecision = p && shouldReviewParsedIncome(p)
         ? await inspectRefused(
             sms.body, sms.date, sms.address, 'inbox', worldwide, sourceEventId,
@@ -1076,6 +1326,10 @@ export async function scanInbox(
           'inbox',
           worldwide,
           sourceEventId,
+          undefined,
+          undefined,
+          false,
+          true,
         );
       }
       // The native inbox query is already asynchronous; the expensive part is
@@ -1087,7 +1341,8 @@ export async function scanInbox(
       }
     }
     captureTrace('page:done', batch.length, tracing ? Date.now() - pageStarted : 0, pagesRead);
-    onProgress?.(scannedCount, parsed.length);
+    oldestInboxDateMs = batch[batch.length - 1].date;
+    onProgress?.(scannedCount, parsed.length, progressDetail());
     const nextBeforeDateMs = batch[batch.length - 1].date;
     const nextBeforeId = batch[batch.length - 1].id;
     if (nextBeforeDateMs === beforeDateMs && nextBeforeId === beforeId) {
@@ -1125,10 +1380,20 @@ export async function scanInbox(
     try {
       const received = await SmsReader.getReceived(sinceMs);
       const deliveryYield = createParseYieldState();
+      const carrierCopies = carrierRedeliveryIndexes(received);
       for (let i = 0; i < received.length; i++) {
         const sms = received[i];
         scannedCount += 1;
         if (sms.date > newestTs) newestTs = sms.date;
+        // The same carrier double delivery, caught by the receiver twice
+        // while the provider kept neither copy.
+        if (carrierCopies.has(i)) {
+          if (parseYieldDue(deliveryYield, i + 1 < received.length)) {
+            await yieldToUi();
+            resetParseYieldState(deliveryYield);
+          }
+          continue;
+        }
         // The inbox pass above almost always found this same message. Its
         // copy carries the provider's timestamp and this one carries the
         // carrier's, which differ by seconds — enough for the fingerprint
@@ -1139,7 +1404,7 @@ export async function scanInbox(
           const launchSenderMarket = detectLaunchMarketFromSender(sms.address);
           const p = launchSenderMarket
             ? parseLaunchAlert(sms.body, sms.address, worldwide, launchSenderMarket, sms.date)
-            : null;
+            : launchSession.parseUnproven(sms.body, sms.address, worldwide, sms.date);
           const reviewDecision = p && shouldReviewParsedIncome(p)
             ? await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide)
             : null;
@@ -1153,7 +1418,7 @@ export async function scanInbox(
               channel: 'delivery',
             });
           } else if (!p) {
-            await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide);
+            await inspectRefused(sms.body, sms.date, sms.address, 'delivery', worldwide, undefined, undefined, undefined, false, true);
           }
         }
         if (parseYieldDue(deliveryYield, i + 1 < received.length)) {
@@ -1161,7 +1426,7 @@ export async function scanInbox(
           resetParseYieldState(deliveryYield);
         }
       }
-      onProgress?.(scannedCount, parsed.length);
+      onProgress?.(scannedCount, parsed.length, progressDetail());
     } catch (error) {
       if (error instanceof ReviewIdentityError) throw error;
       // Capture buffer is best-effort; the inbox results stand on their own.
@@ -1209,10 +1474,18 @@ export async function scanInbox(
         unresolvedFinancialCandidate: 0,
         unresolvedParserMiss: 0,
         unresolvedReviewRefusal: 0,
+        certificationAutomatic: 0,
+        semanticGeneralized: 0,
+        certificationReview: 0,
+        certificationNeverPost: 0,
+        certificationAdapterRequired: 0,
+        certificationTemplates: {},
+        semanticGeneralizedFamilies: {},
         acknowledgementPlanned: 0,
         acknowledged: 0,
       };
       const notificationYield = createParseYieldState();
+      let smsRouteForMessagingRows: boolean | undefined;
       for (let i = 0; i < captured.length; i++) {
         const n = captured[i];
         if (typeof n.id !== 'string' || !/^[A-Za-z0-9-]{16,128}$/.test(n.id)) continue;
@@ -1220,9 +1493,30 @@ export async function scanInbox(
         const knownLaunchBank = trustedMarket === 'AE' || trustedMarket === 'SA';
         const nativeSourceClass = n.sourceClass;
         if (nativeSourceClass !== 'trusted-bank' && nativeSourceClass !== 'play-finance' &&
-            nativeSourceClass !== 'financial-candidate') continue;
+            nativeSourceClass !== 'financial-candidate' && nativeSourceClass !== 'messaging-review') continue;
         scannedCount += 1;
         if (n.ts > newestTs) newestTs = n.ts;
+        // Curated bank packages are never messaging apps. Any other messaging
+        // row is decided here, before the learned-package check below, so an
+        // earlier Review approval can never make it trusted: acknowledged as
+        // ignored while Wafra can read SMS (or for a chat app), otherwise an
+        // SMS app's row continues as Review-only evidence.
+        const messagingRow = nativeSourceClass === 'messaging-review' ||
+          (nativeSourceClass !== 'trusted-bank' && MESSAGING_APP_PACKAGES.has(n.pkg));
+        if (messagingRow && smsRouteForMessagingRows === undefined) {
+          // A failed check counts as readable, as natively: at worst a
+          // missed Review card, never a duplicate of a captured SMS.
+          smsRouteForMessagingRows = await hasSmsPermission().catch(() => true);
+        }
+        if (messagingRow && (CHAT_APP_PACKAGES.has(n.pkg) || smsRouteForMessagingRows)) {
+          if (notificationImportStats) notificationImportStats.ignored += 1;
+          notificationIds.add(n.id);
+          if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
+            await yieldToUi();
+            resetParseYieldState(notificationYield);
+          }
+          continue;
+        }
         const source = `${n.title} ${n.text}`.trim();
         const skipKnownLaunchUniversal =
           knownLaunchBank && !KNOWN_BANK_UNIVERSAL_INFO_HINT.test(source);
@@ -1230,21 +1524,31 @@ export async function scanInbox(
         // money gates. Before forcing a first-transaction Review, also verify the
         // INSTALLED app's own Android label. A recognized bank alias or explicit
         // banking/finance identity is stronger than notification copy and can
-        // authorize a confident parser result immediately. Truly ambiguous apps
-        // remain review-first and may still be learned from an explicit user
-        // confirmation.
-        const verifiedSender = nativeSourceClass === 'financial-candidate'
+        // establish issuer trust. It still cannot authorize money by itself:
+        // worldwide automatic import additionally requires a certified template.
+        // Truly ambiguous apps remain review-first.
+        const verifiedSender = nativeSourceClass === 'financial-candidate' && !messagingRow
           ? verifiedFinancialAppSender(n.appLabel ?? '')
           : null;
-        const sourceClass = nativeSourceClass === 'financial-candidate' && verifiedSender
-          ? 'play-finance' as const
-          : nativeSourceClass;
-        const learned = sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
+        const sourceClass = nativeSourceClass === 'messaging-review'
+          ? 'financial-candidate' as const
+          : nativeSourceClass === 'financial-candidate' && verifiedSender
+            ? 'play-finance' as const
+            : nativeSourceClass;
+        const learned = !messagingRow && sourceClass === 'financial-candidate' && learnedPackages.has(n.pkg);
         const autoAuthorized = sourceClass === 'trusted-bank' || sourceClass === 'play-finance' || learned;
+        // Green semantic generalization needs independently verified installed-
+        // app identity. A user-learned package may still use an exact Gold
+        // certified template, but cannot generalize beyond what was confirmed.
+        const semanticGeneralizationAuthorized = sourceClass === 'trusted-bank' ||
+          (sourceClass === 'play-finance' && !!verifiedSender && hasUniversalInstitutionSender(verifiedSender));
         const sender = trustedBankNotificationSender(n.pkg) ?? verifiedSender ??
           (learned ? `${n.pkg} ${n.title}` : '');
-        if (isPromotionalBankPush(source)) {
+        // A BNPL provider app is gated on its PACKAGE: an unlearned candidate
+        // is parsed with no sender at all, so the parser cannot see it.
+        if (isPromotionalBankPush(source) || isBnplProviderSource(n.pkg)) {
           if (notificationImportStats) notificationImportStats.ignored += 1;
+          promotionsSkipped += 1;
           notificationIds.add(n.id);
           if (parseYieldDue(notificationYield, i + 1 < captured.length)) {
             await yieldToUi();
@@ -1259,22 +1563,107 @@ export async function scanInbox(
         // their mature regional grammar as a fast path. A curated, locally
         // verified Play-finance, or previously confirmed package from any other
         // country may then use the universal structured parser in native ISO
-        // currency. Only genuinely ambiguous app identity remains Review-first.
+        // currency. Gold certified templates auto-import directly; a strongly
+        // verified installed app may also use the stricter Green semantic path.
+        // Anything incomplete/ambiguous remains Review-first.
         const launchParsed = trustedMarket === 'AE' || trustedMarket === 'SA'
           ? parseLaunchAlert(source, sender, worldwide, trustedMarket, n.ts)
           : parseLaunchAlert(source, sender, worldwide, undefined, n.ts);
-        const universalEvent = !launchParsed && autoAuthorized
-          ? inspectGenericBankEventForReview(source, sender)
-          : null;
         const routedMarket = trustedMarket ??
           (worldwide?.route.decision === 'single' ? worldwide.route.market : null);
-        const universalParsed = universalEvent
+        const globalMarket = routedMarket && routedMarket !== 'AE' && routedMarket !== 'SA'
+          ? routedMarket
+          : null;
+        // Keep the full inspected fact for source-free certification metrics,
+        // even when it is deliberately non-reviewable (pending/failed/etc.).
+        // Review candidates still require event.decision === 'review'.
+        const universalInspection = !launchParsed && autoAuthorized
+          ? globalMarket
+            ? inspectUniversalBankEvent(source, {
+              sender,
+              market: globalMarket,
+              // A routed institution prints its own country's dates.
+              dateOrder: dateOrderForCountry(globalMarket) ?? undefined,
+            })
+            : inspectGenericBankEventForReview(source, sender)
+          : null;
+        // Local-AI shadow evaluation is deliberately outside import authority.
+        // For launch-parser successes, build the same source-grounded universal
+        // fact only for aggregate agreement metrics; its result can never
+        // replace `launchParsed`, certification, money, status or direction.
+        if (canCollectLocalSemanticShadow()) {
+          const semanticShadowInspection = universalInspection ?? (
+            launchParsed && autoAuthorized ? inspectGenericBankEventForReview(source, sender) : null
+          );
+          if (semanticShadowInspection) queueLocalSemanticParserShadow(source, semanticShadowInspection);
+        }
+        const universalEvent = universalInspection?.decision === 'review'
+          ? universalInspection
+          : null;
+        const certification = universalInspection && globalMarket
+          ? certifyUniversalTemplate({
+              market: globalMarket,
+              institution: worldwide?.review?.institution.institution ?? null,
+              source,
+              event: universalInspection,
+              rail: worldwide?.review?.rail ?? null,
+              allowSemanticGeneralization: semanticGeneralizationAuthorized,
+            })
+          : null;
+        if (notificationImportStats && certification) {
+          if (certification.decision === 'automatic') {
+            notificationImportStats.certificationAutomatic += 1;
+            if (certification.templateId) {
+              notificationImportStats.certificationTemplates[certification.templateId] =
+                (notificationImportStats.certificationTemplates[certification.templateId] ?? 0) + 1;
+            }
+          }
+          else if (certification.decision === 'semantic-generalized') {
+            notificationImportStats.semanticGeneralized += 1;
+            if (globalMarket && universalInspection) {
+              const bucket = `${globalMarket}:${universalInspection.family}`;
+              notificationImportStats.semanticGeneralizedFamilies[bucket] =
+                (notificationImportStats.semanticGeneralizedFamilies[bucket] ?? 0) + 1;
+            }
+          }
+          else if (certification.decision === 'never-post') notificationImportStats.certificationNeverPost += 1;
+          else if (certification.decision === 'adapter-required') notificationImportStats.certificationAdapterRequired += 1;
+          else notificationImportStats.certificationReview += 1;
+        }
+        // Green semantic generalization is an UNPROVEN format: it posts only
+        // through the same best-effort policy (and setting) as every other
+        // unproven alert, and carries the "Auto-added — check" marker. The
+        // ledger-currency gate below still refuses any foreign row here.
+        const semanticDecision = certification?.decision === 'semantic-generalized' && universalEvent
+          ? decideBestEffortAutoPost({
+              source,
+              event: universalEvent,
+              enabled: bestEffortAutoPostEnabled(),
+              country: getActiveCountry(),
+              routedMarket: globalMarket,
+              launchSenderMarket: null,
+              ledgerCurrency: null,
+              ledgerExponent: null,
+              observedAt: n.ts,
+              formatPrefix: 'semantic',
+            })
+          : null;
+        const universalPosting = universalEvent &&
+          (certification?.decision === 'automatic' || semanticDecision?.outcome === 'post')
           ? parsedUniversalPosting(universalEvent, source, overrides, routedMarket)
           : null;
+        const universalParsed = universalPosting && semanticDecision?.outcome === 'post'
+          ? { ...universalPosting, bestEffort: semanticDecision.marker }
+          : universalPosting;
         const parsedCurrencies = new Set(parsed.map((row) => row.currency));
         const batchCurrency = parsedCurrencies.size === 1 ? [...parsedCurrencies][0] : null;
         const requiredCurrency = pinnedLedgerCurrencyCode() ?? batchCurrency;
-        const parsedCandidate = launchParsed ?? universalParsed;
+        // A certified template is a PROVEN format: the universal reading of
+        // the same alert is not "best effort" and must not carry the marker.
+        const launchCandidate = launchParsed?.bestEffort && certification?.decision === 'automatic'
+          ? (({ bestEffort: _marker, ...proven }) => proven)(launchParsed)
+          : launchParsed;
+        const parsedCandidate = launchCandidate ?? universalParsed;
         // Parser success is not admission to the ledger. A trusted bank-app
         // package may auto-post globally, but only in the ledger's established
         // currency (or the single currency already established by this batch).
@@ -1283,7 +1672,9 @@ export async function scanInbox(
         const p = parsedCandidate && (!requiredCurrency || parsedCandidate.currency === requiredCurrency)
           ? parsedCandidate
           : null;
-        const pushSource = { packageName: n.pkg, sourceClass } as const;
+        // A messaging row carries no package identity into Review, so
+        // confirming it can never teach Wafra to trust the Messages app.
+        const pushSource = messagingRow ? undefined : { packageName: n.pkg, sourceClass } as const;
         const parsedCandidateFallback = p && !autoAuthorized
           ? parsedFinancialCandidateReview(p, n.ts)
           : null;
@@ -1295,6 +1686,7 @@ export async function scanInbox(
           ? await inspectRefused(
               source, n.ts, sender, 'push', worldwide, undefined, pushSource,
               reviewFallback, skipKnownLaunchUniversal,
+              false, n.id,
             )
           : null;
         const reviewed = refusal?.kind === 'review';
@@ -1320,6 +1712,8 @@ export async function scanInbox(
             pushSource,
             reviewFallback,
             skipKnownLaunchUniversal,
+            true,
+            n.id,
           );
         }
         if (refusal?.kind === 'review') {
@@ -1353,10 +1747,9 @@ export async function scanInbox(
         }
       }
       if (notificationImportStats) {
-        notificationImportStats.acknowledgementPlanned = notificationIds.size;
         latestAndroidNotificationImportDiagnostics = { ...notificationImportStats };
       }
-      onProgress?.(scannedCount, parsed.length);
+      onProgress?.(scannedCount, parsed.length, progressDetail());
     } catch (error) {
       if (error instanceof ReviewIdentityError) throw error;
       // Listener data is best-effort; SMS results stand on their own.
@@ -1366,10 +1759,20 @@ export async function scanInbox(
   // Oldest-first so account auto-creation sees the earliest occurrence first.
   parsed.sort((a, b) => a.smsTs - b.smsTs);
   reviewCandidates.sort((a, b) => a.observedAt - b.observedAt);
+  const retainedReviewSources = new Set(reviewCandidates.map(item => item.sourceKey));
+  for (const [id, sourceKey] of notificationReviewSources) {
+    if (!retainedReviewSources.has(sourceKey) && !knownReviewSourceKeys.has(sourceKey)) notificationIds.delete(id);
+  }
+  if (notificationImportStats) {
+    notificationImportStats.acknowledgementPlanned = notificationIds.size;
+    latestAndroidNotificationImportDiagnostics = { ...notificationImportStats };
+  }
   captureTrace('inbox:done', scannedCount, tracing ? Date.now() - traceStarted : 0, pagesRead);
   return {
     parsed,
     reviewCandidates,
+    deferredInboxReviews,
+    skippedKnownInboxReviewSourceKeys: [...skippedKnownInboxReviewSourceKeys],
     reviewSourceBindings,
     declined,
     newestTs,
@@ -1379,15 +1782,19 @@ export async function scanInbox(
     scannedCount,
     detectedLaunchMarket: launchSession.detectedMarket(),
     requiresDurableCommit: notificationIds.size > 0,
+    promotionsSkipped,
     commit: notificationIds.size > 0 && notificationReader
-      ? async () => {
-          const acknowledged = await notificationReader.ackCaptured([...notificationIds]);
+      ? async (deferredReviewSourceKeys = []) => {
+          const deferredSources = new Set(deferredReviewSourceKeys);
+          const ids = [...notificationIds].filter(id => !deferredSources.has(notificationReviewSources.get(id) ?? ''));
+          if (ids.length === 0) return;
+          const acknowledged = await notificationReader.ackCaptured(ids);
           if (!acknowledged) throw new Error('Notification capture acknowledgement failed');
           if (notificationImportStats &&
               latestAndroidNotificationImportDiagnostics?.attemptedAt === notificationImportStats.attemptedAt) {
             latestAndroidNotificationImportDiagnostics = {
               ...latestAndroidNotificationImportDiagnostics,
-              acknowledged: notificationIds.size,
+              acknowledged: ids.length,
             };
           }
         }

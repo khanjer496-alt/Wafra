@@ -163,7 +163,9 @@ const executeFile = (filename, requireModule) => {
   const loaded = { exports: {} };
   Function('require', 'module', 'exports', '__filename', '__dirname', output)(
     (id) => id === './ios-capture-health' || id === '@/lib/ios-capture-health'
-      ? execute('src/lib/ios-capture-health.ts', requireModule) : requireModule(id),
+      ? execute('src/lib/ios-capture-health.ts', requireModule)
+      : id === './ios-setup-availability' || id === '@/lib/ios-setup-availability'
+        ? execute('src/lib/ios-setup-availability.ts', requireModule) : requireModule(id),
     loaded, loaded.exports, filename, path.dirname(filename),
   );
   return loaded.exports;
@@ -271,8 +273,18 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       firstCapturedAt: number | null;
       lastReceivedAt?: number | null;
       lastHandledAt?: number | null;
+      notificationSetupProofAt?: number | null;
+      firstNotificationReceivedAt?: number | null;
+      lastNotificationReceivedAt?: number | null;
+      applePayPending?: number;
+      lastApplePayIncompleteAt?: number | null;
+      applePaySetupProofAt?: number | null;
+      firstApplePayReceivedAt?: number | null;
+      lastApplePayReceivedAt?: number | null;
     }`.replace(/\s+/g, ' ').trim();
     const exactNativeModule = `export interface WafraLiveCaptureNativeModule {
+      readonly notificationCaptureSupported?: boolean;
+      readonly applePayCaptureSupported?: boolean;
       readonly queueChangeEventsSupported?: boolean;
       addListener?(
         eventName: 'onQueueChanged',
@@ -286,9 +298,16 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       ): Promise<boolean>;
       setCaptureEnabled(enabled: boolean): Promise<void>;
       listPendingRecords(limit: number): Promise<string[]>;
+      listPendingRecordsIncludingNotifications?(limit: number): Promise<string[]>;
+      listPendingRecordsExcluding?(limit: number, excludeIds: string[]): Promise<string[]>;
+      listPendingApplePayRecords?(limit: number): Promise<string[]>;
       acknowledgeRecords(ids: string[]): Promise<void>;
       purgeExpired(): Promise<number>;
       getCaptureStatus(): Promise<WafraLiveCaptureStatus>;
+      getNotificationShortcutURL?(): Promise<string>;
+      getApplePayShortcutURL?(): Promise<string>;
+      getMessageShortcutURL?(): Promise<string>;
+      getHistoryShortcutURL?(): Promise<string>;
       getAutomationInputProbeAt(): Promise<number | null>;
       acknowledgeCaptureWarning(warningId: string): Promise<boolean>;
       recordFirstCapturedAt(observedAt: number): Promise<void>;
@@ -335,9 +354,15 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'setStoreCaptureEntitlementLease',
       'setCaptureEnabled',
       'listPendingRecords',
+      'listPendingRecordsIncludingNotifications',
+      'listPendingApplePayRecords',
       'acknowledgeRecords',
       'purgeExpired',
       'getCaptureStatus',
+      'getNotificationShortcutURL',
+      'getApplePayShortcutURL',
+      'getMessageShortcutURL',
+      'getHistoryShortcutURL',
       'getAutomationInputProbeAt',
       'acknowledgeCaptureWarning',
       'recordFirstCapturedAt',
@@ -358,9 +383,10 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /milliseconds\s*\/\s*1_000(?:\.0)?/.test(swiftModule) &&
         /seconds\s*\*\s*1_000(?:\.0)?/.test(swiftModule), swiftModule);
     ok('Swift bridge maps every operation directly to the singleton store',
-      nativeMethods.every((method) => {
+      nativeMethods.filter((method) => !['getNotificationShortcutURL', 'getApplePayShortcutURL', 'getMessageShortcutURL', 'getHistoryShortcutURL'].includes(method)).every((method) => {
         const storeMethod = {
           getCaptureStatus: 'status',
+          listPendingRecordsIncludingNotifications: 'listPendingRecords',
           getAutomationInputProbeAt: 'automationInputProbeAt',
           setLocalCaptureEntitlementLease: 'setLocalEntitlementLease',
           setStoreCaptureEntitlementLease: 'setStoreEntitlementLease',
@@ -368,6 +394,12 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         return new RegExp(`WafraLiveCaptureStore\\.shared\\.${storeMethod}\\(`).test(swiftModule);
       }),
       swiftModule);
+
+    ok('notification Shortcut asset bridge exposes only the fixed bundled local file',
+      /AsyncFunction\("getNotificationShortcutURL"\)\s*\{\s*\(\) -> String in/.test(swiftModule) &&
+        /WafraLiveCaptureResources\.bundle\(\)\.url\(\s*forResource: "Wafra Notifications v1",\s*withExtension: "shortcut"/.test(swiftModule) &&
+        /url\.isFileURL/.test(swiftModule) &&
+        /throw WafraLiveCaptureBridgeError\.notificationShortcutUnavailable/.test(swiftModule), swiftModule);
 
     ok('local module is autolinkable on Apple and web', (() => {
       try {
@@ -398,6 +430,7 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
 
     const expectedLocalizationKeys = [
       'live.setup_proof.title',
+      'live.setup_v3.title',
       'live.setup_proof.error',
       'live.automation_input_probe.title',
       'live.automation_input_probe.message.parameter',
@@ -413,6 +446,17 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'live.stage.capacity',
       'live.stage_text.title',
       'live.stage_text.message.parameter',
+      'live.notification.title',
+      'live.notification.text.parameter',
+      'live.notification.invalid',
+      'live.notification.error',
+      'live.apple_pay.title',
+      'live.apple_pay.amount.parameter',
+      'live.apple_pay.merchant.parameter',
+      'live.apple_pay.invalid',
+      'live.apple_pay.error',
+      'live.apple_pay.setup.title',
+      'live.apple_pay.setup.error',
     ];
     const localizationKeys = (source) => [...source.matchAll(/^\s*"([^"]+)"\s*=/gm)]
       .map((match) => match[1]).sort();
@@ -436,16 +480,20 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       appPlugins.indexOf(livePlugin) > appPlugins.indexOf('./modules/wafra-message-history/plugin'),
       JSON.stringify(appPlugins));
 
-    eq('generated source declares all four app-discoverable intents once', [
+    eq('generated source declares all eight app-discoverable intents once', [
       generatedIntent.match(/struct RecordWafraCaptureSetupProofIntent:\s*AppIntent/g)?.length || 0,
+      generatedIntent.match(/struct RecordWafraCaptureV3SetupProofIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct ProbeWafraAutomationInputIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct StageWafraLiveMessageIntent:\s*AppIntent/g)?.length || 0,
       generatedIntent.match(/struct StageWafraLiveTextIntent:\s*AppIntent/g)?.length || 0,
-    ], [1, 1, 1, 1]);
+      generatedIntent.match(/struct CaptureWafraNotificationIntent:\s*AppIntent/g)?.length || 0,
+      generatedIntent.match(/struct CaptureWafraApplePayIntent:\s*AppIntent/g)?.length || 0,
+      generatedIntent.match(/struct RecordWafraApplePaySetupProofIntent:\s*AppIntent/g)?.length || 0,
+    ], [1, 1, 1, 1, 1, 1, 1, 1]);
     eq('all intents are always allowed and do not launch Wafra', [
       generatedIntent.match(/authenticationPolicy:\s*IntentAuthenticationPolicy\s*=\s*\.alwaysAllowed/g)?.length || 0,
       generatedIntent.match(/openAppWhenRun\s*=\s*false/g)?.length || 0,
-    ], [4, 4]);
+    ], [8, 8]);
     ok('setup-proof intent has no parameters and records proof version 1', (() => {
       const match = generatedIntent.match(
         /struct RecordWafraCaptureSetupProofIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}/,
@@ -495,31 +543,46 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /observedAt:\s*Date\(\)/.test(match[1]) &&
         /case \.disabled:[\s\S]*captureDisabled/.test(match[1]);
     })(), generatedIntent);
-    eq('probe plus live paths expose the exact six parameters',
-      generatedIntent.match(/@Parameter\(/g)?.length || 0, 6);
+    ok('notification action accepts one required auto-connected String through the protected queue', (() => {
+      const match = generatedIntent.match(
+        /struct CaptureWafraNotificationIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension CaptureWafraNotificationIntent/,
+      );
+      return Boolean(match) && (match[1].match(/@Parameter\(/g) || []).length === 1 &&
+        /var text:\s*String\s*\n/.test(match[1]) &&
+        /inputConnectionBehavior:\s*\.connectToPreviousIntentResult/.test(match[1]) &&
+        /stageNotification\(\s*text:\s*text,\s*eventId:\s*UUID\(\)\.uuidString,\s*observedAt:\s*Date\(\)/.test(match[1]) &&
+        /case \.invalid:[\s\S]*invalidNotification/.test(match[1]) &&
+        /case \.disabled:[\s\S]*captureDisabled/.test(match[1]) &&
+        /case \.capacityReached:[\s\S]*captureCapacityReached/.test(match[1]);
+    })(), generatedIntent);
+    ok('legacy bridge excludes notifications and the additive reader explicitly opts in',
+      /AsyncFunction\("listPendingRecords"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: false\)/.test(swiftModule) &&
+        /AsyncFunction\("listPendingRecordsIncludingNotifications"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: true\)/.test(swiftModule), swiftModule);
+    eq('probe plus live paths expose the exact nine parameters',
+      generatedIntent.match(/@Parameter\(/g)?.length || 0, 9);
     eq('Apple-extracted titles and parameters initialize LocalizedStringResource directly', [
       generatedIntent.match(/static let title\s*=\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(/@Parameter\(\s*title:\s*LocalizedStringResource\(/g)?.length || 0,
       generatedIntent.match(
         /(?:static let title\s*=|@Parameter\(title:)\s*WafraLiveCaptureResources\.localized\(/g,
       )?.length || 0,
-    ], [4, 6, 0]);
+    ], [8, 9, 0]);
     eq('Apple-extracted title and parameter resources use the required main bundle', [
       generatedIntent.match(/bundle:\s*\.main/g)?.length || 0,
       generatedIntent.match(/bundle:\s*\.atURL/g)?.length || 0,
-    ], [10, 0]);
+    ], [17, 0]);
     ok('every intent title, parameter, and source-free error uses the closed localization keys',
       expectedLocalizationKeys.every((key) => generatedIntent.includes(`"${key}"`)) &&
         !/static let title[^\n]*=\s*"|@Parameter\(title:\s*"/.test(generatedIntent), generatedIntent);
     ok('iOS 26 supportedModes references occur only in availability extensions', (() => {
       const modes = generatedIntent.match(/supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}/g) || [];
       const extensions = generatedIntent.match(
-        /@available\(iOS 26\.0, \*\)\s*extension (?:RecordWafraCaptureSetupProofIntent|ProbeWafraAutomationInputIntent|StageWafraLiveMessageIntent|StageWafraLiveTextIntent)\s*\{\s*static var supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}\s*\}/g,
+        /@available\(iOS 26\.0, \*\)\s*extension (?:RecordWafraCaptureSetupProofIntent|RecordWafraCaptureV3SetupProofIntent|ProbeWafraAutomationInputIntent|StageWafraLiveMessageIntent|StageWafraLiveTextIntent|CaptureWafraNotificationIntent|CaptureWafraApplePayIntent|RecordWafraApplePaySetupProofIntent)\s*\{\s*static var supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}\s*\}/g,
       ) || [];
-      return modes.length === 4 && extensions.length === 4;
+      return modes.length === 8 && extensions.length === 8;
     })(), generatedIntent);
-    ok('generated intents contain no network, file, clipboard, log, notification, or dialog capability',
-      !/(?:https?:|URLSession|FileManager|NSFile|UIPasteboard|clipboard|\bprint\s*\(|os_log|Logger\s*\(|UNUserNotificationCenter|notification|ProvidesDialog|dialog:)/i
+    ok('generated intents contain no direct network, file, clipboard, log, notification-center or dialog APIs',
+      !/(?:https?:|URLSession|URLRequest|NWConnection|FileManager|FileHandle|NSFile|(?:Data|NSData)\(contentsOf:|\.write\(to:|UIPasteboard|clipboard|\bprint\s*\(|os_log|Logger\s*\(|import\s+UserNotifications|UNUserNotificationCenter|UNNotificationRequest|NotificationCenter\s*\.|ProvidesDialog|dialog:)/i
         .test(generatedIntent), generatedIntent);
     const pluginIntentSource = plugin.match(/const intentSource = `([\s\S]*?)`;\s*\n/)?.[1] || '';
     eq('generated intent source exactly matches the deterministic plugin template',
@@ -1329,9 +1392,11 @@ struct WafraBankSenderRegistryTests {
       parsed.kind === 'parsed' && !Object.hasOwn(parsed.row, 'raw') &&
         !Object.hasOwn(parsed.row, 'sender') && !JSON.stringify(parsed).includes(AE_BODY),
       JSON.stringify(parsed));
-    ok('local parser carries the stable native identity into planning',
-      parsed.kind === 'parsed' &&
-        parsed.row.sourceEventId === parsedId,
+    // A queue UUID names one observation, not a retained Apple Message: it
+    // carries no history identity, so the ledger's same-event rule can pair it
+    // with the History import copy (SHA-256(GUID)) of the same Message.
+    ok('local parser gives a queue-UUID Message row no history identity',
+      parsed.kind === 'parsed' && !Object.hasOwn(parsed.row, 'sourceEventId'),
       JSON.stringify(parsed));
     ok('local sender attribution agrees with the exact registry bank identity',
       parsed.kind === 'parsed' && parsed.row.bankHint === 'Emirates NBD', JSON.stringify(parsed));
@@ -1736,7 +1801,9 @@ struct WafraBankSenderRegistryTests {
               pending: [...state.reviewTray.pending, ...admittedItems],
             },
             localCaptureQualifications: mergeQualifications(
-              state.localCaptureQualifications, qualifications, NOW,
+              // The store merges at the real clock, as the coordinator's
+              // expiry check does; the fixed NOW expired on 2026-09-24.
+              state.localCaptureQualifications, qualifications, Date.now(),
             ),
           };
           return {
@@ -1766,7 +1833,9 @@ struct WafraBankSenderRegistryTests {
             ],
             lastScanTs: Math.max(state.lastScanTs, batch.lastScanTs),
             localCaptureQualifications: mergeQualifications(
-              state.localCaptureQualifications, qualifications, NOW,
+              // The store merges at the real clock, as the coordinator's
+              // expiry check does; the fixed NOW expired on 2026-09-24.
+              state.localCaptureQualifications, qualifications, Date.now(),
             ),
           };
           return {
@@ -1878,10 +1947,18 @@ struct WafraBankSenderRegistryTests {
       ]);
       const ledger = ledgerAdapter();
       const outcome = await coordinator(native, ledger).drain();
-      ok('a mixed-market page drains one currency partition at a time without wedging',
-        outcome.scanned === 2 && outcome.imported >= 1 &&
+      // Once the AED row lands, the ledger's money is AED. The Saudi purchase
+      // can never import into it, so it becomes a durable SAR Review item
+      // (acknowledged only behind it) instead of switching the market,
+      // wedging the queue, or being dropped.
+      const saReview = ledger.getState().reviewTray.pending
+        .find((item) => item.kind === 'universal' && item.event.amount.value?.currency === 'SAR');
+      ok('a mixed-market page drains without wedging or switching an AED ledger to SAR',
+        outcome.scanned === 2 && outcome.imported === 1 && outcome.reviews === 1 &&
+          !outcome.currencyConflicts && !!saReview &&
           native.acknowledged.includes(aeId) && native.acknowledged.includes(saId) &&
-          ledger.calls.includes('market:SA'),
+          !ledger.calls.includes('market:SA') && ledger.getState().marketId === 'AE' &&
+          ledger.getState().transactions.length === 1,
         JSON.stringify({ outcome, ledger: ledger.calls, native: native.calls }));
     }
 
@@ -1895,6 +1972,431 @@ struct WafraBankSenderRegistryTests {
       ok(`${name} setMarket leaves the complete Saudi page queued`,
         native.acknowledged.length === 0 && !ledger.calls.includes('import'),
         JSON.stringify({ ledger: ledger.calls, native: native.calls }));
+    }
+
+    const recentIso = (ageMs) => new Date(Date.now() - ageMs).toISOString();
+    const trayModule = requireBuild('@/lib/alert-review-tray');
+    const AED_MONEY = { schemaVersion: 2, currency: 'AED', exponent: 2 };
+    // Occupancy only: admission never re-validates entries already in the tray.
+    // Registered reviews always describe a possible money movement.
+    const BASE_REVIEW_FILLER = { kind: 'registered', parserVersion: 1 };
+
+    {
+      // H1: a real stored AED ledgerMoney with a full page of Saudi rows at
+      // the head. The old coordinator set marketId SA, then the planner threw
+      // ImportMoneyError on every drain and nothing behind the page moved.
+      trayModule.reviewCaptureBacklog.reset();
+      const saIds = Array.from({ length: 51 }, () => nextId());
+      const aeId = nextId();
+      const native = nativeQueue([
+        ...saIds.map((id, index) => envelope({
+          id, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(3_600_000 - index * 1000),
+        })),
+        envelope({ id: aeId, observedAt: recentIso(60_000) }),
+      ]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, ledgerMoney: AED_MONEY });
+      const outcome = await coordinator(native, ledger).drain();
+      ok('an AED ledger never switches to SAR and keeps capturing AED behind a Saudi page',
+        !ledger.calls.some((call) => call.startsWith('market:')) &&
+          ledger.getState().marketId === 'AE' && ledger.getState().ledgerMoney === AED_MONEY &&
+          outcome.imported === 1 && ledger.getState().transactions.length === 1 &&
+          native.acknowledged.includes(aeId),
+        JSON.stringify({ outcome, calls: ledger.calls, pending: native.pending().length }));
+      // B1: a conflicting-currency purchase is never acknowledged without a
+      // durable, user-visible record. Gap A: foreign-currency reviews use
+      // their own lane and never wait natively for Review space.
+      const tray = ledger.getState().reviewTray;
+      const sarReviews = tray.pending.filter((item) => item.kind === 'universal' &&
+        item.event.amount.value?.currency === 'SAR' && item.event.amount.value.exponent === 2);
+      const acknowledgedSa = saIds.filter((id) => native.acknowledged.includes(id));
+      ok('conflicting-currency purchases become durable SAR Review items, never silent acknowledgements',
+        outcome.reviews === 51 && sarReviews.length === 51 && acknowledgedSa.length === 51 &&
+          sarReviews.every((item) => item.currencyConflict === true) &&
+          !outcome.deferredReviews && native.pending().length === 0 &&
+          !outcome.currencyConflicts && trayModule.reviewCaptureBacklog.get().currencyConflicts === 0 &&
+          trayModule.reviewCaptureBacklog.get().waiting === 0,
+        JSON.stringify({ outcome, backlog: trayModule.reviewCaptureBacklog.get(), sar: sarReviews.length }));
+      const hydrated = trayModule.normalizeAlertReviewTray(JSON.parse(JSON.stringify(tray)), Date.now());
+      ok('SAR currency-conflict Review items survive persistence and hydration',
+        hydrated.pending.length === 50 && trayModule.recentlyLostReviewCount(hydrated, Date.now(), 'currency-evicted') === 1 &&
+          hydrated.pending.every((item) => item.kind === 'universal' &&
+            item.event.amount.value?.currency === 'SAR' && item.channel === 'inbox' &&
+            /^(?:apple_message_review_source_[0-9a-f]{64}|local_review_source_[0-9a-f]{32})$/.test(item.sourceKey)),
+        JSON.stringify(hydrated.pending.slice(0, 1)));
+      const promotion = requireBuild('@/lib/review-promotion');
+      const sampleReview = sarReviews.at(-1);
+      const plan = promotion.planReviewPromotion({
+        ...ledger.getState(),
+        reviewTray: hydrated,
+        accounts: [{ id: 'acct-aed', name: 'Card', kind: 'card', balanceFils: 0 }],
+      }, {
+        reviewId: sampleReview.id, type: 'expense', accountId: 'acct-aed', title: 'Coffee',
+        category: 'food', date: '2026-08-25',
+        universal: {
+          confirmed: true, postingStatus: 'posted',
+          amount: sampleReview.event.amount.value, instrument: null,
+          expectedSourceKey: sampleReview.sourceKey, expectedObservedAt: sampleReview.observedAt,
+        },
+      }, 'tx-promoted', Date.now());
+      // Without a dated SAR→AED rate nothing is posted or relabelled; the
+      // item stays in Review until the host obtains one.
+      ok('an SAR Review item cannot be posted into the AED ledger without a rate',
+        plan.outcome === 'refused' && plan.reason === 'fx-rate-unavailable',
+        JSON.stringify(plan));
+      const drainAgain = await coordinator(native, ledger).drain();
+      ok('a second drain finds nothing waiting behind foreign-currency reviews',
+        native.pending().length === 0 && drainAgain.imported === 0 && drainAgain.scanned === 0,
+        JSON.stringify({ drainAgain, pending: native.pending().length }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // Convert instead of review: with a dated SAR→AED reference rate the
+      // same Saudi purchase is imported into the AED ledger, keeping SAR
+      // 125.50 as its original with the rate, its date and its source. Its
+      // SAR balance is not relabelled as an AED balance.
+      trayModule.reviewCaptureBacklog.reset();
+      const saId = nextId();
+      const native = nativeQueue([envelope({ id: saId, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(60_000) })]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, ledgerMoney: AED_MONEY });
+      const asked = [];
+      const outcome = await localCapture.createIosLocalCaptureCoordinator({
+        native, ledger, retireShortcutCapture: async () => 'not-needed',
+        fxQuote: async (base, quote, date) => {
+          asked.push(`${base}|${quote}|${date}`);
+          return { base, quote, rate: 0.9793, date };
+        },
+      }).drain();
+      const row = ledger.getState().transactions[0];
+      ok('a Saudi purchase on an AED ledger converts with the dated rate instead of waiting in Review',
+        outcome.imported === 1 && outcome.reviews === 0 && native.acknowledged.includes(saId) &&
+          row?.amountFils === 12290 && row.originalCurrency === 'SAR' && row.originalMinorUnits === 12550 &&
+          row.fxSource === 'reference' && row.fxRate === 0.9793 && typeof row.fxRateDate === 'string' &&
+          ledger.getState().ledgerMoney === AED_MONEY && asked.length === 1 && /^SAR\|AED\|\d{4}-\d{2}-\d{2}$/.test(asked[0]),
+        JSON.stringify({ outcome, row, asked, calls: ledger.calls }));
+      const offlineNative = nativeQueue([envelope({ id: nextId(), sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(30_000) })]);
+      const offlineLedger = ledgerAdapter();
+      offlineLedger.setState({ ...BASE_STATE, ledgerMoney: AED_MONEY });
+      const offlineOutcome = await localCapture.createIosLocalCaptureCoordinator({
+        native: offlineNative, ledger: offlineLedger, retireShortcutCapture: async () => 'not-needed',
+        fxQuote: async () => null,
+      }).drain();
+      ok('offline, the same purchase keeps its original in Review and posts nothing',
+        offlineOutcome.imported === 0 && offlineOutcome.reviews === 1 &&
+          offlineLedger.getState().transactions.length === 0 &&
+          offlineLedger.getState().reviewTray.pending[0]?.currencyConflict === true,
+        JSON.stringify(offlineOutcome));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // B1: a record with no market of its own on a conflicting page is never
+      // converted by the currency conflict; only its own market can conflict.
+      trayModule.reviewCaptureBacklog.reset();
+      const saId = nextId();
+      const genericId = nextId();
+      const native = nativeQueue([
+        envelope({ id: saId, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(120_000) }),
+        envelope({ id: genericId, sender: 'UNLISTED-BANK', text: 'Card purchase CAD 24.90 at MAPLE CAFE on 2026-09-05. Available balance CAD 500.00.',
+          observedAt: recentIso(60_000) }),
+      ]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, ledgerMoney: AED_MONEY });
+      const outcome = await coordinator(native, ledger).drain();
+      const pending = ledger.getState().reviewTray.pending;
+      const genericReview = pending.find((item) => item.kind === 'universal' &&
+        item.event.amount.value?.currency === 'CAD');
+      const sarReview = pending.find((item) => item.kind === 'universal' &&
+        item.event.amount.value?.currency === 'SAR');
+      ok('a market-null record on a conflicting page keeps its own outcome and is not converted',
+        !!sarReview && !!genericReview && outcome.imported === 0 && !outcome.currencyConflicts &&
+          !ledger.calls.some((call) => call.startsWith('market:')),
+        JSON.stringify({ outcome, pending: pending.map((item) => item.kind === 'universal'
+          ? item.event.amount.value : item.amount) }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // A global review-only ledger (INR) cannot hold AED either; the row
+      // becomes a durable AED Review item instead of throwing ImportMoneyError
+      // forever or being dropped.
+      const aeId = nextId();
+      const native = nativeQueue([envelope({ id: aeId, observedAt: recentIso(60_000) })]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, ledgerMoney: { schemaVersion: 2, currency: 'INR', exponent: 2 } });
+      const outcome = await coordinator(native, ledger).drain();
+      ok('a non-launch ledger currency stages launch-market rows for Review without importing',
+        outcome.imported === 0 && outcome.reviews === 1 && !outcome.currencyConflicts &&
+          ledger.getState().reviewTray.pending.some((item) => item.kind === 'universal' &&
+            item.event.amount.value?.currency === 'AED') &&
+          native.acknowledged.includes(aeId) && ledger.getState().marketId === 'AE' &&
+          !ledger.calls.includes('import') && native.milestones.length === 0,
+        JSON.stringify({ outcome, calls: ledger.calls }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // A market switch is undone when planning throws after it.
+      const native = nativeQueue([envelope({ sender: 'ALRAJHI', text: SA_BODY })]);
+      const ledger = ledgerAdapter();
+      await rejects(() => coordinatorWithPlan(native, ledger, () => {
+        throw new Error('synthetic plan failure');
+      }).drain(), /synthetic plan failure/);
+      ok('a planning failure after alignment restores the previous market and acknowledges nothing',
+        ledger.getState().marketId === 'AE' &&
+          ledger.calls.indexOf('market:SA') >= 0 &&
+          ledger.calls.indexOf('market:AE') > ledger.calls.indexOf('market:SA') &&
+          native.acknowledged.length === 0 && !ledger.calls.includes('import'),
+        JSON.stringify({ calls: ledger.calls, native: native.calls }));
+      markets.setActiveMarket('AE');
+    }
+
+    const withNotificationLane = (native) => Object.assign(native, {
+      notificationCaptureSupported: true,
+      async listPendingRecordsIncludingNotifications(limit) {
+        native.calls.push(`listAll:${limit}`);
+        return native.pending().slice(0, limit);
+      },
+      async listPendingRecords(limit) {
+        native.calls.push(`listMessages:${limit}`);
+        return native.pending().filter((serialized) =>
+          JSON.parse(serialized).source !== 'notification').slice(0, limit);
+      },
+    });
+    const admittingLedger = (pending) => {
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, reviewTray: { ...BASE_STATE.reviewTray, pending } });
+      // Real admission, including the protected-lane capacity refusal.
+      ledger.stageReviewAlerts = (items, reviewQualifications = []) => {
+        ledger.calls.push(`review:${items.length}`);
+        let tray = ledger.getState().reviewTray;
+        const admittedIds = new Set();
+        for (const item of items) {
+          const result = trayModule.admitPreparedReviewAlert(tray, item, Date.now());
+          tray = result.state;
+          if (result.outcome === 'admitted') admittedIds.add(item.id);
+        }
+        const qualifications = reviewQualifications
+          .filter((candidate) => admittedIds.has(candidate.reviewId))
+          .map((candidate) => candidate.qualification);
+        ledger.setState({ ...ledger.getState(), reviewTray: tray,
+          localCaptureQualifications: mergeQualifications(
+            ledger.getState().localCaptureQualifications, qualifications, Date.now()) });
+        return { admitted: admittedIds.size,
+          qualificationIds: qualifications.map((candidate) => candidate.id),
+          durable: Promise.resolve() };
+      };
+      return ledger;
+    };
+    const fillerHex = (prefix, index) => `${prefix}${String(index).padStart(8, '0')}`.padStart(32, 'f');
+    const protectedFiller = (index) => ({
+      ...BASE_REVIEW_FILLER,
+      id: `local_review_id_${fillerHex('a', index)}`,
+      sourceKey: `local_review_source_${fillerHex('a', index)}`,
+      channel: 'push', observedAt: Date.now() - 10_000 + index,
+      expiresAt: Date.now() + 5 * 86_400_000,
+    });
+    const legacyFiller = (index) => ({
+      ...BASE_REVIEW_FILLER,
+      id: `legacy_review_id_${String(index).padStart(8, '0')}`,
+      sourceKey: `legacy_review_source_${String(index).padStart(8, '0')}`,
+      channel: 'inbox', observedAt: Date.now() - 10_000 + index,
+      expiresAt: Date.now() + 5 * 86_400_000,
+    });
+
+    {
+      // H3(a): fifty held notification reviews at the head of the native
+      // queue used to stop every later SMS page forever.
+      trayModule.reviewCaptureBacklog.reset();
+      const notificationIds = Array.from({ length: 50 }, () => nextId());
+      const aeId = nextId();
+      const native = withNotificationLane(nativeQueue([
+        ...notificationIds.map((id, index) => envelope({
+          id, source: 'notification', sender: 'Wafra Notification',
+          text: 'Your available balance is AED 5,000.00.',
+          observedAt: recentIso(3_600_000 - index * 1000),
+        })),
+        envelope({ id: aeId, observedAt: recentIso(60_000) }),
+      ]));
+      const ledger = admittingLedger(Array.from({ length: 50 }, (_, index) => protectedFiller(index)));
+      const outcome = await coordinator(native, ledger).drain();
+      ok('held notification reviews no longer block SMS behind them',
+        outcome.imported === 1 && native.acknowledged.includes(aeId) &&
+          native.calls.indexOf('listMessages:50') > native.calls.indexOf('listAll:50'),
+        JSON.stringify({ outcome, calls: native.calls }));
+      ok('held notification reviews stay native and are reported once as waiting for Review',
+        outcome.deferredReviews === 50 && notificationIds.every((id) => !native.acknowledged.includes(id)) &&
+          native.pending().length === 50 && trayModule.reviewCaptureBacklog.get().waiting === 50,
+        JSON.stringify({ outcome, backlog: trayModule.reviewCaptureBacklog.get() }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // Orchestrator rule: informational reviews keep the evicting policy and
+      // never block capture, however many arrive.
+      trayModule.reviewCaptureBacklog.reset();
+      const balanceIds = Array.from({ length: 60 }, () => nextId());
+      const purchaseId = nextId();
+      const native = nativeQueue([
+        ...balanceIds.map((id, index) => envelope({
+          id, text: 'Your available balance is AED 5,000.00.', observedAt: recentIso(3_600_000 - index * 1000),
+        })),
+        envelope({ id: purchaseId, observedAt: recentIso(60_000) }),
+      ]);
+      const ledger = admittingLedger([]);
+      const outcome = await coordinator(native, ledger).drain();
+      const legacy = ledger.getState().reviewTray.pending;
+      ok('sixty balance alerts never block a later purchase SMS',
+        outcome.imported === 1 && native.acknowledged.includes(purchaseId) &&
+          native.pending().length === 0 && !outcome.deferredReviews,
+        JSON.stringify({ outcome, pending: native.pending().length }));
+      ok('the informational lane keeps its newest fifty by eviction',
+        legacy.length === 50 && legacy.every((item) => item.kind === 'universal') &&
+          trayModule.reviewCaptureBacklog.get().waiting === 0, JSON.stringify(legacy.length));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // A lane full of possible money movements drops a new informational
+      // review instead of waiting or evicting a money movement.
+      const balanceId = nextId();
+      const native = nativeQueue([envelope({
+        id: balanceId, text: 'Your available balance is AED 5,000.00.', observedAt: recentIso(60_000),
+      })]);
+      const fillers = Array.from({ length: 50 }, (_, index) => legacyFiller(index));
+      const ledger = admittingLedger(fillers);
+      const outcome = await coordinator(native, ledger).drain();
+      ok('a new informational review cannot block or displace fifty pending money reviews',
+        native.acknowledged.includes(balanceId) && native.pending().length === 0 &&
+          !outcome.deferredReviews &&
+          fillers.every((item) => ledger.getState().reviewTray.pending.includes(item)) &&
+          ledger.getState().reviewTray.pending.length === 50,
+        JSON.stringify({ outcome, pending: ledger.getState().reviewTray.pending.length }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // M2: the Message review lane used to evict its oldest entry after the
+      // native record had already been acknowledged.
+      trayModule.reviewCaptureBacklog.reset();
+      const reviewId = nextId();
+      const aeId = nextId();
+      const native = nativeQueue([
+        envelope({ id: reviewId, text: REVIEW_BODY, sender: 'FAB', observedAt: recentIso(120_000) }),
+        envelope({ id: aeId, observedAt: recentIso(60_000) }),
+      ]);
+      const fillers = Array.from({ length: 50 }, (_, index) => legacyFiller(index));
+      const ledger = admittingLedger(fillers);
+      const outcome = await coordinator(native, ledger).drain();
+      ok('a full Message review lane refuses admission and keeps the record queued',
+        outcome.reviews === 0 && outcome.deferredReviews === 1 &&
+          !native.acknowledged.includes(reviewId) && native.pending().length === 1 &&
+          !ledger.calls.some((call) => call.startsWith('review:')) &&
+          fillers.every((item) => ledger.getState().reviewTray.pending.includes(item)),
+        JSON.stringify({ outcome, calls: ledger.calls }));
+      ok('Message backpressure does not stop automatic capture on the same page',
+        outcome.imported === 1 && native.acknowledged.includes(aeId) &&
+          trayModule.reviewCaptureBacklog.get().waiting === 1);
+      ledger.setState({ ...ledger.getState(), reviewTray: {
+        ...ledger.getState().reviewTray, pending: fillers.slice(1),
+      } });
+      const retry = await coordinator(native, ledger).drain();
+      ok('the deferred Message review is admitted and acknowledged once Review has room',
+        retry.reviews === 1 && native.acknowledged.includes(reviewId) && native.pending().length === 0 &&
+          ledger.getState().reviewTray.pending.length === 50 &&
+          trayModule.reviewCaptureBacklog.get().waiting === 0,
+        JSON.stringify({ retry, calls: ledger.calls }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // Gap A: fifty unresolved foreign-currency reviews plus a full queue
+      // page of further foreign rows used to stop the Message reader, so an
+      // AED purchase (and an AED review) behind them waited indefinitely.
+      trayModule.reviewCaptureBacklog.reset();
+      const seedIds = Array.from({ length: 50 }, () => nextId());
+      const seedNative = nativeQueue(seedIds.map((id, index) => envelope({
+        id, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(7_200_000 - index * 1000),
+      })));
+      const ledger = admittingLedger([]);
+      ledger.setState({ ...ledger.getState(), ledgerMoney: AED_MONEY });
+      const seeded = await coordinator(seedNative, ledger).drain();
+      const seededPending = ledger.getState().reviewTray.pending;
+      ok('fifty foreign-currency purchases fill their own Review lane',
+        seeded.reviews === 50 && seedNative.pending().length === 0 && seededPending.length === 50 &&
+          seededPending.every(trayModule.isCurrencyConflictReview) &&
+          trayModule.reviewTrayCapacity(ledger.getState().reviewTray, Date.now()).legacyFull === false,
+        JSON.stringify({ seeded, pending: seededPending.length }));
+      const moreSa = Array.from({ length: 50 }, () => nextId());
+      const aeId = nextId();
+      const aeReviewId = nextId();
+      const native = nativeQueue([
+        ...moreSa.map((id, index) => envelope({
+          id, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(3_600_000 - index * 1000),
+        })),
+        envelope({ id: aeReviewId, text: REVIEW_BODY, sender: 'FAB', observedAt: recentIso(120_000) }),
+        envelope({ id: aeId, observedAt: recentIso(60_000) }),
+      ]);
+      const outcome = await coordinator(native, ledger).drain();
+      const tray = ledger.getState().reviewTray;
+      ok('fifty unresolved foreign-currency reviews never block a later AED purchase or AED review',
+        outcome.imported === 1 && native.acknowledged.includes(aeId) &&
+          native.acknowledged.includes(aeReviewId) && native.pending().length === 0 &&
+          !outcome.deferredReviews && trayModule.reviewCaptureBacklog.get().waiting === 0 &&
+          tray.pending.some((item) => !trayModule.isCurrencyConflictReview(item)),
+        JSON.stringify({ outcome, pending: native.pending().length, calls: native.calls }));
+      ok('the foreign-currency overflow is kept as a visible count, never a silent acknowledgement',
+        moreSa.every((id) => native.acknowledged.includes(id)) &&
+          tray.pending.filter(trayModule.isCurrencyConflictReview).length === 50 &&
+          trayModule.recentlyLostReviewCount(tray, Date.now(), 'currency-evicted') === 50 &&
+          trayModule.recentlyLostReviewCount(tray, Date.now(), 'evicted') === 0,
+        JSON.stringify(tray.tombstones.slice(0, 2)));
+      const reloaded = trayModule.normalizeAlertReviewTray(JSON.parse(JSON.stringify(tray)), Date.now());
+      ok('reloading the tray keeps the foreign-currency count exactly once',
+        trayModule.recentlyLostReviewCount(reloaded, Date.now(), 'currency-evicted') === 50 &&
+          reloaded.pending.length === tray.pending.length);
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // Held rows: sixty same-currency money reviews waiting for Review space
+      // at the head of the queue used to stop the reader, so a newer purchase
+      // behind them was never captured.
+      trayModule.reviewCaptureBacklog.reset();
+      const heldIds = Array.from({ length: 60 }, () => nextId());
+      const purchaseId = nextId();
+      const native = withNotificationLane(nativeQueue([
+        ...heldIds.map((id, index) => envelope({
+          id, text: REVIEW_BODY, sender: 'FAB', observedAt: recentIso(3_600_000 - index * 1000),
+        })),
+        envelope({ id: purchaseId, observedAt: recentIso(60_000) }),
+      ]));
+      native.listPendingRecordsExcluding = async (limit, excludeIds) => {
+        native.calls.push(`listExcluding:${limit}:${excludeIds.length}`);
+        const excluded = new Set(excludeIds);
+        return native.pending().filter((serialized) => !excluded.has(JSON.parse(serialized).id)).slice(0, limit);
+      };
+      const fillers = Array.from({ length: 50 }, (_, index) => legacyFiller(index));
+      const ledger = admittingLedger(fillers);
+      const outcome = await coordinator(native, ledger).drain();
+      ok('sixty held money reviews at the head no longer stop capture of a newer purchase',
+        outcome.imported === 1 && native.acknowledged.includes(purchaseId) && native.acknowledged.length === 1,
+        JSON.stringify({ outcome, calls: native.calls }));
+      ok('held money reviews stay queued, unacknowledged and untouched',
+        heldIds.every((id) => !native.acknowledged.includes(id)) && native.pending().length === 60 &&
+          outcome.deferredReviews === 60 && trayModule.reviewCaptureBacklog.get().waiting === 60 &&
+          ledger.getState().reviewTray.pending.length === 50 &&
+          fillers.every((item) => ledger.getState().reviewTray.pending.includes(item)) &&
+          ledger.getState().reviewTray.tombstones.length === 0,
+        JSON.stringify({ outcome, pending: native.pending().length }));
+      ok('the reader pages past held records by naming them instead of re-reading one page',
+        native.calls.includes('listExcluding:50:50') && native.calls.includes('listExcluding:50:60'),
+        JSON.stringify(native.calls));
+      ok('a page of only held records skips the encrypted write it does not need',
+        !ledger.calls.includes('ensure'), JSON.stringify(ledger.calls));
+      trayModule.reviewCaptureBacklog.reset();
     }
 
     {
@@ -1943,16 +2445,18 @@ struct WafraBankSenderRegistryTests {
     {
       const firstId = nextId();
       const secondId = nextId();
-      const first = envelope({ id: firstId });
-      const second = envelope({ id: secondId });
+      const firstAt = '2026-08-25T11:00:00.000Z';
+      const secondAt = '2026-08-25T11:05:00.000Z';
+      const first = envelope({ id: firstId, observedAt: firstAt });
+      const second = envelope({ id: secondId, observedAt: secondAt });
       const native = nativeQueue([first, second]);
       const ledger = ledgerAdapter();
       const outcome = await coordinator(native, ledger).drain();
       const smsKeys = new Set(ledger.getState().transactions.map((row) => row.smsKey));
-      ok('distinct local UUIDs with the same financial semantics remain distinct events',
+      ok('queue-UUID purchases minutes apart remain distinct events under live-row keys',
         ledger.getState().transactions.length === 2 && outcome.scanned === 2 &&
           outcome.imported === 2 && smsKeys.size === 2 &&
-          smsKeys.has(`h${firstId}`) && smsKeys.has(`h${secondId}`),
+          smsKeys.has(`s${Date.parse(firstAt)}-12000`) && smsKeys.has(`s${Date.parse(secondAt)}-12000`),
         JSON.stringify({ state: ledger.getState(), outcome }));
       eq('acknowledgement names the exact page snapshot IDs', native.acknowledged, [firstId, secondId]);
     }
@@ -2537,6 +3041,82 @@ struct WafraBankSenderRegistryTests {
         JSON.stringify({ milestones: native.milestones, acknowledged: native.acknowledged }));
     }
 
+    // First capture is evidence of recognized bank information, not evidence
+    // that a new expense was added. Use the production sender registry,
+    // parser, planner and qualification policy; only storage durability waits.
+    for (const fixture of [
+      {
+        name: 'ADCB credit-card statement', kind: 'cardStatement',
+        text: 'Cr.Card XXX9426 Billing alert: Total due to avoid fin. charges: AED9249.64. Due date Sep 30 2026; Pay min. AED462.48 by due date to avoid AED241.50 late fees.',
+        observedAt: '2026-09-29T08:00:00.000Z',
+      },
+      {
+        name: 'ADCB credit-card payment receipt', kind: 'cardPayment',
+        text: 'Your payment of AED 9251 against Credit Card no. XXX9426 was received at 12:10 PM on 30/09/2026. Thank you.',
+        observedAt: '2026-09-30T08:10:00.000Z',
+      },
+    ]) {
+      const id = nextId();
+      const now = Date.parse('2026-09-30T08:30:00.000Z');
+      const serialized = envelope({ id, sender: 'ADCB', text: fixture.text, observedAt: fixture.observedAt });
+      const parsed = productionLocalMessage.parseLocalMessageRecord(serialized, new Date(now), 'AE', session('AE'));
+      ok(`${fixture.name} is recognized by the production parser as its own financial kind`,
+        parsed.kind === 'parsed' && parsed.row.kind === fixture.kind &&
+          parsed.row.card?.last4 === '9426', JSON.stringify(parsed));
+      if (parsed.kind !== 'parsed' || parsed.row.kind !== fixture.kind) {
+        throw new Error(`${fixture.name} did not reach the financial parser path`);
+      }
+      const native = nativeQueue([serialized]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...ledger.getState(), ledgerMoney: AED_MONEY,
+        accounts: [{ id: 'adcb-9426', name: 'ADCB Credit Card', kind: 'card', cardType: 'credit',
+          bankName: 'ADCB', last4: '9426', openingFils: 0, color: '#000000' }],
+      });
+      const staged = deferred();
+      const durable = deferred();
+      const importBatch = ledger.importBatch.bind(ledger);
+      ledger.importBatch = (batch, mappings) => {
+        const receipt = importBatch(batch, mappings);
+        staged.resolve();
+        return { ...receipt, durable: durable.promise };
+      };
+      const pending = productionLocalCapture.createIosLocalCaptureCoordinator({
+        native, ledger, now: () => now, retireShortcutCapture: async () => 'not-needed',
+      }).drain();
+      await Promise.race([staged.promise, pending.then(() => {
+        throw new Error(`${fixture.name} finished without a financial import`);
+      })]);
+      ok(`${fixture.name} cannot qualify or acknowledge before its financial write is durable`,
+        native.milestones.length === 0 && native.acknowledged.length === 0 && native.pending().length === 1,
+        JSON.stringify({ milestones: native.milestones, acknowledged: native.acknowledged }));
+      durable.resolve();
+      const outcome = await pending;
+      const stored = ledger.getState();
+      ok(`${fixture.name} qualifies the first bank capture after durable processing`,
+        outcome.firstCapturedAt === Date.parse(fixture.observedAt) && outcome.reviews === 0 &&
+          native.milestones.length === 1 && native.milestones[0] === Date.parse(fixture.observedAt) &&
+          native.acknowledged.length === 1 && native.acknowledged[0] === id && native.pending().length === 0,
+        JSON.stringify({ outcome, milestones: native.milestones, acknowledged: native.acknowledged }));
+      if (fixture.kind === 'cardStatement') {
+        const due = stored.cardDues[0];
+        ok('statement-only first capture records the stated due and minimum without inventing a transaction',
+          outcome.imported === 0 && stored.transactions.length === 0 && stored.cardDues.length === 1 &&
+            due.accountId === 'adcb-9426' && due.totalDueFils === 924964 && due.minDueFils === 46248 &&
+            due.minDueEstimated !== true && due.dueDate === '2026-09-30' &&
+            ledger.calls.indexOf('ensure') > ledger.calls.indexOf('import'),
+          JSON.stringify({ outcome, dues: stored.cardDues, calls: ledger.calls }));
+      } else {
+        const payment = stored.transactions[0];
+        const { isIncome, isSpending } = requireBuild('@/lib/ledger');
+        ok('payment-receipt first capture records a settlement rather than spending or earned income',
+          outcome.imported === 1 && stored.transactions.length === 1 && stored.cardDues.length === 0 &&
+            payment.accountId === 'adcb-9426' && payment.amountFils === 925100 && payment.type === 'income' &&
+            payment.isTransfer === true && payment.cardPaymentSide === 'receipt' &&
+            !isSpending(payment) && !isIncome(payment),
+          JSON.stringify({ outcome, payment }));
+      }
+    }
+
     {
       const native = nativeQueue([envelope({ text: 'Your available balance is AED 5,000.00.' })]);
       const ledger = ledgerAdapter();
@@ -2557,6 +3137,8 @@ struct WafraBankSenderRegistryTests {
     }
 
     {
+      // Informational balance reviews never wait for Review space, so the
+      // page bound alone stops this drain.
       const rows = Array.from({ length: 2050 }, (_, index) => envelope({
         id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
         text: 'Your available balance is AED 5,000.00.',
@@ -2852,7 +3434,7 @@ struct WafraBankSenderRegistryTests {
   {
     const hookModule = execute('src/hooks/use-auto-import.ts', (id) => {
       if (id === 'react') return require('react');
-      if (id === 'expo-router') {
+      if (id === 'expo-router' || id === '@/hooks/use-app-router') {
         return {
           useFocusEffect: () => {},
           useRouter: () => ({ push: () => {} }),
@@ -2868,6 +3450,18 @@ struct WafraBankSenderRegistryTests {
     });
     const resolveSurface = hookModule.resolveIosCaptureSurfaceState;
     const surfaceCases = [
+      ['Wallet selection cannot reuse a Message proof or financial milestone', {
+        enabled: true, setupProofVersion: 3, firstCapturedAt: 1, pending: 0, dropped: 0,
+        corrupt: false, retirementPending: false, futureAutomationConfirmed: true, captureSource: 'apple-pay',
+      }, 'needs-automation'],
+      ['Wallet setup proof waits for a real tap without claiming posted money', {
+        enabled: true, setupProofVersion: null, firstCapturedAt: null, pending: 0, dropped: 0,
+        corrupt: false, retirementPending: false, futureAutomationConfirmed: true, captureSource: 'apple-pay', sourceSetupProofAt: 1,
+      }, 'waiting-for-alert'],
+      ['bundled Message v3 proof is recognized by the Home capture surface', {
+        enabled: true, setupProofVersion: 3, firstCapturedAt: null, pending: 0, dropped: 0,
+        corrupt: false, retirementPending: false, futureAutomationConfirmed: true,
+      }, 'waiting-for-alert'],
       ['checking outranks every unread fact', {
         hydrated: false, supported: true, proActive: true, captureOptOut: false,
         enabled: true, setupProofVersion: 1, firstCapturedAt: 1, dropped: 1,
@@ -3507,7 +4101,7 @@ struct WafraBankSenderRegistryTests {
       };
       const mountedHookModule = execute('src/hooks/use-auto-import.ts', (id) => {
         if (id === 'react') return runtime.react;
-        if (id === 'expo-router') {
+        if (id === 'expo-router' || id === '@/hooks/use-app-router') {
           return {
             useFocusEffect: (effect) => {
               focusEnter = effect;
@@ -3526,6 +4120,7 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/components/ui/toast') return { useToast: () => ({ show: () => {} }) };
+        if (id === '@/components/lock-gate') return { usePrivacyGateCleared: () => true };
         if (id === '@/lib/auto-import') {
           return {
             hasBankNotificationAccess: () => false,
@@ -3602,8 +4197,10 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/lib/store') {
-          return { useStore: () => ({ state: storeState, ...storeMethods }) };
+          const store = () => ({ state: storeState, ...storeMethods });
+          return { useStore: store, useStoreSelector: (select) => select(store()), useStoreActions: store };
         }
+        if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => ({}));
         return {};
       });
       const render = () => runtime.render(() => mountedHookModule.useAutoImport(false, true));
@@ -3741,7 +4338,7 @@ struct WafraBankSenderRegistryTests {
       };
       const mountedAndroidHook = execute('src/hooks/use-auto-import.ts', (id) => {
         if (id === 'react') return runtime.react;
-        if (id === 'expo-router') {
+        if (id === 'expo-router' || id === '@/hooks/use-app-router') {
           return {
             useFocusEffect: (effect) => runtime.react.useEffect(effect, [effect]),
             useRouter: () => ({ push: () => {} }),
@@ -3759,6 +4356,7 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/components/ui/toast') return { useToast: () => ({ show: () => {} }) };
+        if (id === '@/components/lock-gate') return { usePrivacyGateCleared: () => true };
         if (id === '@/lib/auto-import') {
           return {
             hasBankNotificationAccess: () => false,
@@ -3824,8 +4422,10 @@ struct WafraBankSenderRegistryTests {
           return { getSharedIosLocalCaptureCoordinator: () => null };
         }
         if (id === '@/lib/store') {
-          return { useStore: () => ({ state: storeState, ...storeMethods }) };
+          const store = () => ({ state: storeState, ...storeMethods });
+          return { useStore: store, useStoreSelector: (select) => select(store()), useStoreActions: store };
         }
+        if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => ({}));
         return {};
       });
       const render = () => runtime.render(() => ({
@@ -4116,12 +4716,12 @@ struct WafraBankSenderRegistryTests {
       futureAutomationConfirmed: false,
       futureStatus: 'skipped',
     }, 'not-added'), 'add-shortcut');
-  eq('setup restoration: confirmed Shortcut progress resumes at Apple automation',
+  eq('setup restoration: confirmed Shortcut checks permissions before Apple automation',
     setupModule.resolveIosFutureSetupStep({
       futureShortcutConfirmed: true,
       futureAutomationConfirmed: false,
       futureStatus: 'in-progress',
-    }, 'not-added'), 'create-automation');
+    }, 'not-added'), 'prove-shortcut');
   eq('setup restoration: self-confirmed automation without native proof stays retryable',
     setupModule.resolveIosFutureSetupStep({
       futureShortcutConfirmed: true,
@@ -4134,6 +4734,24 @@ struct WafraBankSenderRegistryTests {
       futureAutomationConfirmed: true,
       futureStatus: 'in-progress',
     }, 'shortcut-proven'), 'ready');
+
+  // 2026-09-25 guided setup: numbered steps are presentation over the same
+  // step resolution; the local test still comes before the automation.
+  eq('guided setup: each resolved step maps to Add → Test → Automate → done',
+    ['add-shortcut', 'confirm-shortcut', 'prove-shortcut', 'create-automation', 'ready']
+      .map((step) => setupModule.iosCaptureGuideStage(step)),
+    [1, 1, 2, 3, 'done']);
+  eq('guided setup: the automation walkthrough is one Apple screen per step',
+    setupModule.IOS_AUTOMATION_GUIDE_SCREENS, 5);
+  eq('iOS 27 one-toggle hook: off in this build on every iOS version (no bundled Shortcut yet)',
+    ['26.4', '27', '27.1', 28].map((version) => setupModule.iosOneToggleCaptureAvailable(version)),
+    [false, false, false, false]);
+  eq('iOS 27 one-toggle hook: once the Shortcut ships, only iOS 27 or later qualifies',
+    ['16.7', '26.9', '27', '27.0.1', 28, 'x', ''].map((version) =>
+      setupModule.iosOneToggleCaptureAvailable(version, true)),
+    [false, false, true, true, true, false, false]);
+  eq('iOS 27 one-toggle hook: the shipping flag stays off until the Shortcut file exists',
+    setupModule.IOS_ONE_TOGGLE_CAPTURE_SHORTCUT_BUNDLED, false);
 
   eq('setup trigger guard: the guided empty-Sender trigger is supported (bank SMS IDs are not Contacts)',
     setupModule.isSupportedIosMessageAutomationTrigger({
@@ -4218,6 +4836,10 @@ struct WafraBankSenderRegistryTests {
       opening: false,
       failure: null,
       captureHealth: null,
+      notificationReadiness: 'not-added',
+      notificationSupported: false,
+      applePaySupported: false,
+      applePayReadiness: 'not-added',
     });
     ok('setup controller: unsupported platforms never resolve a native module',
       harness.statusReads() === 0);

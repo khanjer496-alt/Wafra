@@ -30,6 +30,7 @@
 import {
   FEEDBACK_DIAGNOSTIC_MAX_BYTES,
   FEEDBACK_WIRE_SCHEMA,
+  isFeedbackTopic,
   PARSER_RESEARCH_FEEDBACK_TEXT,
   type FeedbackWirePayload,
 } from '@/lib/feedback-wire';
@@ -278,6 +279,12 @@ export function validateFeedback(value: unknown): FeedbackRecord | FeedbackRejec
     }
     diagnostic = serialized;
     diagnosticValue = body.diagnostic as Record<string, unknown>;
+    // The report type is optional (older apps omit it) but, when present, it
+    // is one of the three the screen offers or null — never free text.
+    const topic = diagnosticValue.topic;
+    if (topic !== undefined && topic !== null && !isFeedbackTopic(topic)) {
+      return { error: 'bad_topic', status: 400 };
+    }
   }
 
   const aiReviewConsent = body.aiReviewConsent === true;

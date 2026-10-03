@@ -108,6 +108,12 @@ async function expectConfirmationRefusal(page) {
 
 async function scenario(name, fixtureName, run, route = '/review-alerts') {
   const context = await browser.newContext({ viewport: { width: 412, height: 915 }, colorScheme: 'light' });
+  // Synthetic ledgers only: block every non-local request (exchange rates included).
+  await context.route('**/*', (request) => {
+    const url = request.request().url();
+    return url.startsWith(new URL('/', BASE).href) || url.startsWith('data:') || url.startsWith('blob:')
+      ? request.continue() : request.abort();
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error)));
@@ -196,12 +202,15 @@ try {
     assert.equal(saved.transactions[0].type, 'expense');
   });
 
-  await scenario('a different currency is refused without losing the review', 'mismatch', async (page) => {
+  // Foreign money now converts with a dated reference rate. The context blocks
+  // every external request, so no rate exists: nothing is added and the review
+  // stays pending instead of posting a guessed conversion.
+  await scenario('a different currency waits for an exchange rate without losing the review', 'mismatch', async (page) => {
     await openReview(page);
     await visible(page.getByText('USD 15.00', { exact: true }));
     assert.equal(await button(page, 'Dining').count(), 0, 'known category is not re-confirmed');
     await click(page, CONFIRM);
-    await visible(page.getByText('Choose an amount in your ledger’s currency.', { exact: true }));
+    await visible(page.getByText('No exchange rate for that day yet. Nothing was added. Try again when you are online.', { exact: true }));
     await remainsPending(page);
     await page.reload({ waitUntil: 'networkidle' });
     const persisted = await waitForLedger(page, 0, 1);
@@ -274,7 +283,11 @@ try {
     const saved = await waitForLedger(page, 1, 0);
     assert.equal(saved.transactions[0].amountFils, 2786);
     assert.equal(saved.transactions[0].title, 'こもれび文具');
-    assert.equal(saved.transactions[0].date, new Date(fixture.review.observedAt).toISOString().slice(0, 10));
+    const observedLocalDay = await page.evaluate(timestamp => {
+      const date = new Date(timestamp);
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    }, fixture.review.observedAt);
+    assert.equal(saved.transactions[0].date, observedLocalDay);
     assert.equal(saved.ledgerMoney.currency, 'JPY');
     assert.equal(saved.ledgerMoney.exponent, 0);
     await page.reload({ waitUntil: 'networkidle' });

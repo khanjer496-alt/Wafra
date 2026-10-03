@@ -10,7 +10,9 @@ const jsx = (type, props = {}, key) => ({ type, props, key });
 function walk(node) {
   if (Array.isArray(node)) return node.flatMap(walk);
   if (!node || typeof node !== 'object') return [];
-  return [node, ...walk(node.props?.children), ...walk(node.props?.footer), ...walk(node.props?.ListHeaderComponent)];
+  // Band screens (design language E) carry their controls in `bandContent`.
+  return [node, ...walk(node.props?.children), ...walk(node.props?.footer), ...walk(node.props?.ListHeaderComponent),
+    ...walk(node.props?.bandContent)];
 }
 function hooks() {
   let cursor = 0;
@@ -34,18 +36,24 @@ function hooks() {
 const defaults = () => ({ type: null, accountId: null, categories: new Set(), datePreset: 'selected', dateFrom: null, dateTo: null, minFils: null, sort: 'newest' });
 function filterProbe(language = 'en', options = {}) {
   const deps = financialFixture(), react = hooks(), events = [];
+  const state = { customCategories: options.customCategories ?? [] };
   const native = { View: 'View', Pressable: 'Pressable', ScrollView: 'ScrollView', TextInput: 'TextInput',
     Platform: { OS: 'android' }, StyleSheet: { create: s => s, hairlineWidth: 1 } };
   Object.assign(deps, {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'react-native': native,
+    '@/lib/store': { useStoreSelector: selector => selector({ state }) },
     '@react-native-community/datetimepicker': { __esModule: true, default: 'DateTimePicker' },
     '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/icon': { Icon: 'Icon' },
     '@/components/ui/bottom-sheet': { BottomSheet: 'Sheet' },
     '@/components/ui/controls': { Button: 'Button', Chip: 'Chip' },
+    '@/components/ui/band/e-button': { EButton: 'EButton' },
+    '@/hooks/use-band': { useBand: () => ({ rule: 'rule', textSecondary: 'gray', statusOver: 'red' }) },
     '@/components/ui/category-chips': { CategoryChips: 'Categories' },
     '@/hooks/use-language': { useLanguage: () => language }, '@/hooks/use-theme': { useTheme: () => ({}) },
     '@/constants/theme': { Fonts: { sansMedium: 'Geist-Medium' }, Radius: { sm: 4 }, Spacing: { one: 4, two: 8, three: 12 } },
   });
+  deps['@/lib/transaction-source'] = load(path.join(root, 'src/lib/transaction-source.ts'));
+  deps['@/lib/transactions-copy'] = load(path.join(root, 'src/lib/transactions-copy.ts'), deps);
   const filters = load(path.join(root, 'src/lib/transaction-filter.ts'), deps);
   deps['@/lib/transaction-filter'] = filters;
   const rows = [
@@ -68,12 +76,12 @@ for (const language of ['en', 'ar']) {
     let tree = h.render();
     assert.equal(tree.type, 'Sheet');
     assert.ok(tree.props.footer);
-    assert.equal(walk(tree.props.children).some(n => n.type === 'Button'), false);
+    assert.equal(walk(tree.props.children).some(n => n.type === 'EButton'), false, 'Show is the pinned footer, not content');
     const income = walk(tree).find(n => n.type === 'Chip' && n.props.label === '+ ' + h.tr('incomeLabel'));
     income.props.onPress(); tree = h.render();
     assert.deepEqual(h.events, []);
     assert.equal(h.props.initialFilters.type, null);
-    const apply = walk(tree.props.footer).find(n => n.type === 'Button' && n.props.variant !== 'outline');
+    const apply = walk(tree.props.footer).find(n => n.type === 'EButton');
     assert.equal(apply.props.disabled, false);
     assert.ok(apply.props.label.includes('1'), 'canonical projection counts one matching income');
     apply.props.onPress();
@@ -82,9 +90,9 @@ for (const language of ['en', 'ar']) {
   test(`${language}: Close discards drafts; Reset clears deep-link restrictions only after Apply`, () => {
     const h = filterProbe(language, { merchant: 'Cafe', smsOnly: true });
     let tree = h.render();
-    walk(tree.props.footer).find(n => n.props.label === h.tr('reset')).props.onPress();
+    walk(tree.props.children).find(n => n.props?.accessibilityLabel === h.tr('reset')).props.onPress();
     tree = h.render(); assert.deepEqual(h.events, []);
-    const apply = walk(tree.props.footer).find(n => n.type === 'Button' && n.props.variant !== 'outline');
+    const apply = walk(tree.props.footer).find(n => n.type === 'EButton');
     assert.ok(apply.props.label.includes('2'), 'reset preview includes manual income as well as the SMS purchase');
     tree.props.onClose(); assert.deepEqual(h.events, [['close']]);
     apply.props.onPress(); assert.equal(h.events[1][2], true);
@@ -95,7 +103,7 @@ for (const language of ['en', 'ar']) {
     let tree = h.render();
     walk(tree).find(n => n.type === 'Categories').props.onToggle('dining'); tree = h.render();
     assert.equal(h.props.initialFilters.categories.size, 0);
-    const apply = walk(tree.props.footer).find(n => n.type === 'Button' && n.props.variant !== 'outline');
+    const apply = walk(tree.props.footer).find(n => n.type === 'EButton');
     apply.props.onPress(); assert.deepEqual([...h.events[0][1].categories], ['dining']);
   });
 }
@@ -127,7 +135,8 @@ test('typing and opening filters preserve the actual memoized SectionList elemen
   }).default;
   const render = () => { react.begin(); return Screen(); };
   let tree = render(); const original = walk(tree).find(n => n.type === 'SectionList'); assert.ok(original);
-  walk(tree).find(n => n.props?.inputMode === 'search').props.onChangeText('Cafe');
+  // The band's search field (its TextInput is inputMode="search").
+  walk(tree).find(n => n.props?.inputMode === 'search' || n.type?.name === 'BandSearchField').props.onChangeText('Cafe');
   tree = render(); assert.equal(walk(tree).find(n => n.type === 'SectionList'), original);
   walk(tree).find(n => n.props?.accessibilityLabel === h.deps['@/lib/i18n'].t('filtersButton')).props.onPress();
   tree = render(); assert.equal(walk(tree).find(n => n.type === 'SectionList'), original);

@@ -17,6 +17,11 @@ public enum WafraLiveStageResult: String {
 
 public final class WafraLiveCaptureStore {
   public static let shared = WafraLiveCaptureStore()
+  public static let notificationSetupProbeText = "Wafra notification setup check"
+  public enum StoreError: Error { case entitlementRequired }
+  public func recordNotificationSetupProof(at: Date) throws {}
+  public func recordApplePaySetupProof(at: Date) throws {}
+  public func stageApplePay(amount: Decimal?, currency: String, merchant: String?, eventId: String, observedAt: Date) throws -> WafraLiveStageResult { .accepted }
 
   public func recordSetupProof(version: Int, at: Date) throws {}
 
@@ -26,11 +31,22 @@ public final class WafraLiveCaptureStore {
   }
 #endif
 
+  public func stageNotification(text: String, eventId: String, observedAt: Date) throws -> WafraLiveStageResult { .accepted }
+
   public func stage(
     sender: String,
     body: String,
     eventId: String,
     observedAt: Date
+  ) throws -> WafraLiveStageResult {
+    .accepted
+  }
+
+  public func stageAutomationMessage(
+    sender: String?,
+    body: String?,
+    eventId: String?,
+    observedAt: Date?
   ) throws -> WafraLiveStageResult {
     .accepted
   }

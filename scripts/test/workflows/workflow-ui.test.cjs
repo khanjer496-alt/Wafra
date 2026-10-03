@@ -3,23 +3,34 @@ const test=require('node:test'),assert=require('node:assert/strict');
 const {createWorkflowHarness,walk,text}=require('./workflow-harness.cjs');
 const byLabel=(tree,label)=>walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===label);
 const boundary=(tree,name)=>walk(tree).find(n=>n.type==='Boundary'&&n.props.name===name);
+// Design language E: a settings group is headed by SettingsGroupTitle, which
+// renders a header-role text on the sheet.
+const isHeader=(node,title)=>walk(node).some(n=>n.props?.accessibilityRole==='header'&&text(n)===title);
 const pending=(id='pending',overrides={})=>({id,sourceKey:'test-fixture:'+id,observedAt:Date.now()-60000,expiresAt:Date.now()+86400000,channel:'inbox',parserVersion:1,market:'AE',institution:'emirates-nbd',grammar:'test-purchase',amount:{currency:'AED',minorUnits:'12345',exponent:2},direction:'debit',family:'purchase',rail:null,instrument:{kind:'card',last4:'1234'},...overrides});
 for(const language of ['en','ar'])for(const theme of ['light','dark']){
  test(`settings sections render with actual copy and no writes: ${language}/${theme}`,()=>{
   for(const section of ['preferences','imports','privacy','data','help']){
    const h=createWorkflowHarness({language,theme,params:{section}}),tree=h.renderScreen('settings');
    const t=h.deps['@/lib/i18n'].t;
-   const scaffold=walk(tree).find(n=>n.type==='Scaffold');
-   assert.equal(scaffold.props.header.title,t('settingsTitle'));
+   const scaffold=walk(tree).find(n=>n.type==='BandScaffold');
+   assert.equal(scaffold.props.band,'settings');
+   assert.ok(isHeader(walk(tree).find(n=>n.props?.testID==='settings-title'),t('settingsTitle')),'the plain title is on the band');
    assert.ok(scaffold.props.scrollRef,'continuous Settings supports targeted recovery scrolling');
    assert.ok(walk(tree).some(n=>n.props?.testID==='settings-imports'));
-   assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===t('settingsNotificationsHeader')));
-   assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===t('privacyHeader')));
+   assert.ok(isHeader(tree,t('settingsNotificationsHeader')));
+   const copy=h.deps['@/lib/settings-copy'].settingsCopy(language);
+   assert.ok(isHeader(tree,copy.privacyAndSecurity));
+   // The in-context Pro sheet is mounted closed: nothing gated was tapped.
+   assert.equal(boundary(tree,'ProSheet').props.feature,null);
+   // Exports, backup, the clean-ups and Erase moved one tap in, and the way
+   // there is a real row on the main screen.
+   assert.ok(walk(tree).some(n=>n.props?.testID==='settings-data-and-help'));
    assert.deepEqual(h.events,[]);
   }
  });
  test(`review separates unconfirmed entries: ${language}/${theme}`,()=>{
-  const h=createWorkflowHarness({language,theme,state:{reviewTray:{pending:[pending(),pending('expired',{expiresAt:Date.now()-1,amount:{currency:'AED',minorUnits:'99999',exponent:2}})]}}});
+  // State slot 2 is Review's one-at-a-time mode (the default); these read the list.
+  const h=createWorkflowHarness({language,theme,states:{2:false},state:{reviewTray:{pending:[pending(),pending('expired',{expiresAt:Date.now()-1,amount:{currency:'AED',minorUnits:'99999',exponent:2}})]}}});
   const tree=h.renderScreen('review-alerts'),words=h.deps['@/components/workflows/workflow-copy'].workflowCopy(language);
   assert.ok(text(tree).includes(words.reviewBody));assert.ok(text(tree).includes('123.45'));assert.ok(!text(tree).includes('999.99'));
   assert.deepEqual(h.events,[]);
@@ -40,7 +51,7 @@ test('privacy details open explicitly without changing saved preferences',()=>{
 test('Settings asks how the bank reaches you and says a statement fills the gap',()=>{
  const t=createWorkflowHarness().deps['@/lib/i18n'].t;
  const unset=createWorkflowHarness(),unsetTree=unset.renderScreen('settings');
- const row=walk(unsetTree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===t('settingsAlertDeliveryTitle'));
+ const row=walk(unsetTree).find(n=>n.props?.onPress&&n.props.accessibilityLabel?.startsWith(t('settingsAlertDeliveryTitle')));
  assert.ok(row,'the alert-delivery row is on the Settings screen');
  assert.ok(text(unsetTree).includes(t('settingsAlertDeliveryUnset')),'an unanswered question says so');
  assert.ok(text(unsetTree).includes(t('statementImportSettingsDetail')));
@@ -63,19 +74,46 @@ test('Settings asks how the bank reaches you and says a statement fills the gap'
 test('unknown settings deep-links retain the complete screen without acting on the value',()=>{
  const h=createWorkflowHarness({params:{section:'erase-now'}}),tree=h.renderScreen('settings');
  assert.ok(walk(tree).some(n=>n.props?.testID==='settings-imports'));
- assert.ok(walk(tree).some(n=>n.type==='SectionHeader'&&n.props.title===h.deps['@/lib/i18n'].t('settingsDangerHeader')));
+ const entry=walk(tree).find(n=>n.props?.testID==='settings-data-and-help');
+ assert.ok(entry,'the Data and help entry is always rendered');
  assert.deepEqual(h.events,[]);
+ // The danger zone lives on Data and help, and a deep link never reaches it.
+ const data=createWorkflowHarness({params:{section:'erase-now'}}),dataTree=data.renderScreen('settings-data');
+ assert.ok(walk(dataTree).some(n=>n.props?.testID==='settings-data-erase'),'Erase stands alone at the bottom of Data and help');
+ assert.ok(isHeader(walk(dataTree).find(n=>n.props?.testID==='settings-data-erase'),data.deps['@/lib/i18n'].t('settingsDangerHeader')),'Erase has its own heading');
+ assert.deepEqual(data.events,[]);
+});
+for(const language of ['en','ar'])test(`Data and help keeps every data row, with honest counts and backup wording: ${language}`,()=>{
+ const h=createWorkflowHarness({language});
+ const t=h.deps['@/lib/i18n'].t,copy=h.deps['@/lib/settings-copy'].settingsCopy(language);
+ const tree=h.renderScreen('settings-data'),all=text(tree);
+ for(const label of [t('exportExpensePdf'),t('exportCsv'),copy.backupTitle,copy.restoreTitle,t('sortShops'),copy.unreadAlerts,t('sendFeedback'),t('privacyPolicy'),t('termsOfUse'),t('eraseAll')])
+  assert.ok(all.includes(label),label);
+ // The two clean-up counts are full-ledger scans, deferred until after the
+ // first paint; until then each row keeps its plain description.
+ assert.ok(all.includes(t('sortShopsSettingsDetail')));
+ assert.ok(all.includes(t('improveAccuracySettingsDetail')));
+ assert.equal(copy.merchantsToPlace(4),language==='en'?'4 items to place':'4 عناصر بانتظار التصنيف');
+ assert.ok(all.includes(copy.backupDetail));
+ assert.ok(!/encrypt(ed)? backup/i.test(copy.backupDetail),'the plain JSON backup is never called encrypted');
+ assert.ok(all.includes(copy.versionFooter('test')));
+ assert.deepEqual(h.events,[]);
+ // Erase asks first, in a centred dialog whose way out keeps the data.
+ walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===t('eraseAll')).props.onPress();
+ const dialog=walk(tree).find(n=>n.props?.testID==='settings-erase-dialog');
+ assert.ok(dialog,'the erase dialog is drawn by the screen');
+ assert.ok(!h.events.some(e=>['unpairDevice','clearAll','setIosCaptureEnabled'].includes(e[0])),'asking to erase erases nothing');
 });
 test('review action preserves source reviewId rather than silently inserting money',()=>{
- const h=createWorkflowHarness({state:{reviewTray:{pending:[pending('source-identity')]}}}),tree=h.renderScreen('review-alerts');
+ const h=createWorkflowHarness({states:{2:false},state:{reviewTray:{pending:[pending('source-identity')]}}}),tree=h.renderScreen('review-alerts');
  const button=walk(tree).find(n=>n.props?.accessibilityLabel?.startsWith(h.deps['@/lib/i18n'].t('reviewAlertReview'))&&n.props.onPress);
  button.props.onPress();assert.deepEqual(JSON.parse(JSON.stringify(h.events)),[['route',{pathname:'/add-transaction',params:{reviewId:'source-identity'}}]]);
 });
 test('dismiss requests confirmation; confirmation alone calls retained dismissal handler',async()=>{
- const item=pending('review-to-dismiss'),h=createWorkflowHarness({state:{reviewTray:{pending:[item]}}}),tree=h.renderScreen('review-alerts');
+ const item=pending('review-to-dismiss'),h=createWorkflowHarness({states:{2:false},state:{reviewTray:{pending:[item]}}}),tree=h.renderScreen('review-alerts');
  walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel?.startsWith(h.deps['@/lib/i18n'].t('dismiss')+'.')).props.onPress();
  assert.deepEqual(h.events,[['state',0,item]]);assert.equal(boundary(tree,'ConfirmSheet').props.visible,false);
- const confirmed=createWorkflowHarness({state:{reviewTray:{pending:[item]}},states:{0:item}}),next=confirmed.renderScreen('review-alerts');
+ const confirmed=createWorkflowHarness({state:{reviewTray:{pending:[item]}},states:{0:item,2:false}}),next=confirmed.renderScreen('review-alerts');
  const sheet=boundary(next,'ConfirmSheet');assert.equal(sheet.props.visible,true);assert.equal(sheet.props.destructive,true);
  sheet.props.onConfirm();await Promise.resolve();await Promise.resolve();
  assert.ok(confirmed.events.some(e=>e[0]==='dismissReviewAlert'&&e[1]===item.id&&e[2]==='dismissed'));
@@ -91,41 +129,73 @@ test('review renders currency minor-unit exponents without truncating cents',()=
   assert.ok(text(h.renderScreen('review-alerts')).includes('TEST '+expected));
  }
 });
-test('categorisation displays affected count and applies merchant rule only after selection',()=>{
+// Answers are staged per row and written together by "Save N answers". State
+// slots: 0 = staged answers, 1 = the row whose full picker is open.
+const stagedSave=tree=>walk(walk(tree).find(n=>n.props?.testID==='categorise-save')??{}).find(n=>n.props?.onPress);
+test('categorisation displays affected count and applies merchant rule only after the staged answer is saved',()=>{
  const merchant={merchant:'Fixture Market',key:'fixture-market',count:7,totalFils:23456,lastDate:'2026-09-05'};
- const h=createWorkflowHarness({merchantSummary:{merchants:[merchant],paymentPurposes:[],rowCount:7,totalFils:23456},states:{0:merchant.key}}),tree=h.renderScreen('categorise');
- assert.ok(text(tree).includes('7'));assert.ok(text(tree).includes(merchant.merchant));assert.deepEqual(h.events,[]);
- const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===h.deps['@/lib/categories'].getCategory('dining').label);
+ const opened=createWorkflowHarness({merchantSummary:{merchants:[merchant],paymentPurposes:[],rowCount:7,totalFils:23456},states:{1:'merchant:'+merchant.key}});
+ const tree=opened.renderScreen('categorise');
+ assert.ok(text(tree).includes('7'));assert.ok(text(tree).includes(merchant.merchant));assert.deepEqual(opened.events,[]);
+ const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===opened.deps['@/lib/categories'].getCategory('dining').label);
  assert.ok(picker,'category choice exists');picker.props.onPress();
+ assert.ok(!opened.events.some(e=>e[0]==='setMerchantOverride'),'choosing only stages the answer');
+ const h=createWorkflowHarness({merchantSummary:{merchants:[merchant],paymentPurposes:[],rowCount:7,totalFils:23456},states:{0:{['merchant:'+merchant.key]:'dining'}}});
+ const staged=h.renderScreen('categorise');
+ assert.ok(text(walk(staged).find(n=>n.props?.testID==='categorise-save')).includes(h.deps['@/lib/details-copy'].detailsCopy.en.categorise.save(1)));
+ stagedSave(staged).props.onPress();
  assert.ok(h.events.some(e=>e[0]==='setMerchantOverride'&&e[1]===merchant.merchant&&e[2]==='dining'&&e[3]===true));
+});
+// Sand band (design language E): the band counts what waits and says what an
+// answer moves; each staged answer names the entries it will move.
+for(const language of ['en','ar'])test(`categorise band counts merchants and each answer shows its moved entries: ${language}`,()=>{
+ const merchant={merchant:'Fixture Market',key:'fixture-market',count:7,totalFils:23456,lastDate:'2026-09-05'};
+ const other={merchant:'Other Shop',key:'other-shop',count:1,totalFils:1000,lastDate:'2026-09-04'};
+ const h=createWorkflowHarness({language,merchantSummary:{merchants:[merchant,other],paymentPurposes:[],rowCount:8,totalFils:24456},states:{0:{['merchant:'+merchant.key]:'dining'}}});
+ const tree=h.renderScreen('categorise'),d=h.deps['@/lib/details-copy'].detailsCopy[language];
+ const band=h.deps['@/lib/review-band-copy'].reviewBandCopy(language);
+ const head=text(walk(tree).find(n=>n.props?.testID==='categorise-band'));
+ assert.ok(head.includes(d.merchants.count(2)));assert.ok(head.includes(band.placeLine(d.entries(8))));
+ const staged=walk(tree).filter(n=>n.props?.testID==='categorise-staged');
+ assert.equal(staged.length,1,'only the answered row carries a staged line');
+ assert.ok(text(staged[0]).includes(band.entriesMoved(d.entries(7))));
+ assert.deepEqual(h.events,[],'rendering stages nothing and writes nothing');
+ // A list with bank-payment nicknames counts names, not merchants.
+ const purpose={sourceTitle:'Fishbasket',billIdentity:'consumer:4036',key:'consumer:4036|fishbasket',count:5,totalFils:5350000,lastDate:'2026-09-05'};
+ const mixed=createWorkflowHarness({language,merchantSummary:{merchants:[merchant],paymentPurposes:[purpose],rowCount:12,totalFils:1}}).renderScreen('categorise');
+ assert.ok(text(walk(mixed).find(n=>n.props?.testID==='categorise-band')).includes(band.namesToPlace(2)));
 });
 test('bank-payment nicknames learn by bill identity and never write a merchant-wide rule',()=>{
  const purpose={sourceTitle:'Fishbasket',billIdentity:'consumer:4036',key:'consumer:4036|fishbasket',count:5,totalFils:5350000,lastDate:'2026-09-05'};
- const h=createWorkflowHarness({merchantSummary:{merchants:[],paymentPurposes:[purpose],rowCount:5,totalFils:5350000},states:{0:purpose.key}}),tree=h.renderScreen('categorise');
+ const opened=createWorkflowHarness({merchantSummary:{merchants:[],paymentPurposes:[purpose],rowCount:5,totalFils:5350000},states:{1:'payment-purpose:'+purpose.key}});
+ const tree=opened.renderScreen('categorise');
  assert.ok(text(tree).includes('Fishbasket'));
- assert.ok(text(tree).includes(h.deps['@/lib/i18n'].t('categorisePaymentPurpose')));
- const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===h.deps['@/lib/categories'].getCategory('utilities').label);
- assert.ok(picker,'purpose category choice exists');picker.props.onPress();
+ assert.ok(text(tree).includes(opened.deps['@/lib/i18n'].t('categorisePaymentPurpose')));
+ const picker=walk(tree).find(n=>n.props?.onPress&&n.props.accessibilityLabel===opened.deps['@/lib/categories'].getCategory('utilities').label);
+ assert.ok(picker,'purpose category choice exists');
+ assert.equal(walk(tree).some(n=>n.props?.testID==='category-suggestion'),false,'a bank nickname gets no name-based suggestion');
+ const h=createWorkflowHarness({merchantSummary:{merchants:[],paymentPurposes:[purpose],rowCount:5,totalFils:5350000},states:{0:{['payment-purpose:'+purpose.key]:'utilities'}}});
+ stagedSave(h.renderScreen('categorise')).props.onPress();
  assert.ok(h.events.some(e=>e[0]==='setBillAlias'&&e[1]==='Fishbasket'&&e[2]==='consumer:4036'&&e[3]==='Fishbasket'&&e[4]==='utilities'&&e[5]===true));
  assert.ok(!h.events.some(e=>e[0]==='setMerchantOverride'));
 });
-for(const language of ['en','ar'])test(`onboarding shows an inline labeled example without adding money: ${language}`,()=>{
- // states[10] is the gate's `resumeReady`, by hook order. Inserting a useState
+for(const language of ['en','ar'])test(`onboarding welcome shows a labeled example pattern without adding money: ${language}`,()=>{
+ // states[6] is the gate's `resumeReady`, by hook order. Inserting a useState
  // above it in onboarding-gate.tsx moves this index; the screen renders its
  // loading branch instead of Welcome when it is wrong.
- const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{10:true}}),tree=h.renderScreen('onboarding');
- const t=h.deps['@/lib/i18n'].t;
- assert.ok(text(tree).replace(/\s+/g,' ').includes(t('onboardHeadline').replace(/\s+/g,' ')));assert.ok(!text(tree).includes('42,500'));
- const example=walk(tree).find(n=>n.props?.testID==='onboarding-market-money-scene');
- assert.ok(example,'the real regional money scene is embedded on welcome');
- for(const bank of ['Emirates NBD','FAB','ADCB'])assert.ok(text(example).includes(bank),bank);
- assert.ok(text(example).includes('AED 120.00'));
- assert.ok(text(example).includes(t('onboardSceneAlertsToPicture')));
- assert.ok(!walk(example).some(n=>n.props?.onPress),'the poster scene is display-only');
- assert.ok(byLabel(tree,t('onboardChooseStart')),'setup remains available beside the visual story');
- assert.ok(!walk(tree).some(n=>n.props?.testID==='setup-illustration'));
+ const h=createWorkflowHarness({language,empty:true,state:{onboarded:false,onboardingPlan:null,onboardingProfile:null},states:{6:true}}),tree=h.renderScreen('onboarding');
+ const words=h.deps['@/lib/onboarding-e-copy'].onboardingECopy(language);
+ assert.ok(text(tree).includes(words.welcomeHeadline));
+ const example=walk(tree).find(n=>n.props?.testID==='onboarding-example-pattern');
+ assert.ok(example,'the example pattern is embedded on welcome');
+ const mosaic=walk(example).find(n=>n.type==='PatternMosaic');
+ assert.equal(mosaic.props.accessibilityLabel,words.exampleLabel,'it is spoken as an example, not as the person\'s pattern');
+ assert.ok(text(example).includes(words.exampleLabel),'and labelled as one on screen');
+ assert.ok(!walk(example).some(n=>n.props?.onPress),'the example is display-only');
+ assert.ok(byLabel(tree,words.getStarted),'Get started is the one primary action');
+ assert.ok(!walk(tree).some(n=>n.props?.testID==='onboarding-language-switch'),'no language button on the first page');
  assert.equal(h.state.transactions.length,0);assert.equal(h.state.accounts.length,0);
- assert.deepEqual(h.events,[],'rendering sample and setup controls performs no writes or setup actions');
+ assert.deepEqual(h.events,[],'rendering welcome performs no writes or setup actions');
 });
 test('import progress labels only the supplied current step',()=>{
  const h=createWorkflowHarness(),{ImportSteps}=h.deps['@/components/workflows/workflow-surfaces'];
@@ -160,11 +230,22 @@ for(const platform of ['android','ios'])test(`paywall does not manufacture a sto
 });
 test('unpaired trusted devices preserves privacy disclosure and makes no connection on render',()=>{
  const h=createWorkflowHarness({state:{privateMode:true},states:{2:false}}),tree=h.renderScreen('trusted-devices');
- assert.ok(text(tree).includes(h.deps['@/components/workflows/workflow-copy'].workflowCopy('en').devicesTitle));assert.deepEqual(h.events,[]);
+ const t=h.deps['@/lib/i18n'].t;
+ // No relay URL in this build: the screen is the labelled sample, and the
+ // band still states what a trusted device can and cannot receive.
+ assert.ok(text(tree).includes(t('trustedPreviewBody')),'the sample is labelled as a sample');
+ assert.ok(text(tree).includes(t('trustedAndroidTruth')),'the relay-only truth is on the band');
+ assert.ok(walk(tree).some(n=>n.props?.testID==='trusted-title'),'the plain title is the band headline');
+ assert.deepEqual(h.events,[]);
 });
-for(const language of ['en','ar'])test(`iOS setup renders actual checklist without invoking permission or install: ${language}`,()=>{
- const h=createWorkflowHarness({language,platform:'ios',states:{0:{loading:false,supported:true,shortcutAvailable:false,stage:'shortcut',readiness:'not-added',opening:false,failure:null},2:true,3:true}}),tree=h.renderScreen('ios-setup');
- assert.ok(walk(tree).some(n=>n.props?.testID==='ios-message-setup-checklist'));assert.deepEqual(h.events,[]);
+for(const language of ['en','ar'])test(`iOS setup renders the actual guided steps without invoking permission or install: ${language}`,()=>{
+ const h=createWorkflowHarness({language,platform:'ios',states:{0:{loading:false,supported:true,shortcutAvailable:false,stage:'shortcut',readiness:'not-added',opening:false,failure:null},3:true,4:true}}),tree=h.renderScreen('ios-setup'); // useState 3/4: progressLoaded/historyReady (2 is the viewed capture source)
+ // The guide (not the old two-row checklist) with Step 1 of 3 and the Add step.
+ assert.ok(walk(tree).some(n=>n.props?.testID==='ios-message-setup-guide'));
+ assert.ok(walk(tree).some(n=>n.props?.testID==='setup-step-progress'));
+ assert.ok(walk(tree).some(n=>n.props?.testID==='ios-add-shortcut-step'));
+ assert.equal(walk(tree).some(n=>n.props?.testID==='ios-message-setup-checklist'),false,'past SMS stays out of setup');
+ assert.deepEqual(h.events,[]);
 });
 
 for (const language of ['en', 'ar']) test(language + ': notification controls remain grouped independently from imports and privacy', () => {
@@ -175,7 +256,7 @@ for (const language of ['en', 'ar']) test(language + ': notification controls re
     // Locate the direct Section by its localized heading, independently of animations.
     const sections = walk(tree).filter(node => node.type === 'View' && Array.isArray(node.props?.children));
     const group = sections.find(node =>
-      node.props.children.some(child => child?.type === 'SectionHeader' && child.props.title === t('settingsNotificationsHeader')));
+      node.props.children.some(child => child && typeof child === 'object' && isHeader(child, t('settingsNotificationsHeader'))));
     assert.ok(group);
     assert.ok(text(group).includes(t('dailySummarySetting')));
     assert.ok(!text(group).includes(t('messagesPrivacy')));

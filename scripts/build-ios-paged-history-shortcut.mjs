@@ -44,13 +44,22 @@ export const FAST_SHORTCUT_NAME = 'Wafra History v5';
 // returns with the cursor (90 days behind it, never past the oldest anchor).
 // An empty window is committed as a page of zero rows and the cursor moves on.
 export const WINDOWED_SHORTCUT_NAME = 'Wafra History v6';
+// Unpublished v7 candidate: overlap the strict oldest-probe date bands so a
+// Message exactly on an age boundary cannot disappear from anchor selection.
+// Keep v6 byte-stable until a separately signed v7 artifact is qualified.
+export const BOUNDARY_SAFE_SHORTCUT_NAME = 'Wafra History v7';
+// Separate candidate: retry a refused column page once through typed rows.
+// Neither the saved request nor native cursor validation is relaxed.
+export const RECOVERY_SHORTCUT_NAME = 'Wafra History v8';
 export const WINDOW_DAYS = 90;
 export function buildPagedHistoryShortcut() { return buildPagedGraph({ columnar: false }); }
 export function buildColumnarHistoryShortcut() { return buildPagedGraph({ columnar: true }); }
 export function buildRowHistoryShortcut() { return buildPagedGraph({ columnar: false, rows: true }); }
 export function buildFastHistoryShortcut() { return buildPagedGraph({ columnar: true, rows: true }); }
 export function buildWindowedHistoryShortcut() { return buildPagedGraph({ columnar: true, rows: true, windowed: true }); }
-function buildPagedGraph({ columnar, rows = false, windowed = false }) {
+export function buildBoundarySafeHistoryShortcut() { return buildPagedGraph({ columnar: true, rows: true, windowed: true, overlapProbeBands: true }); }
+export function buildRecoveryHistoryShortcut() { return buildPagedGraph({ columnar: true, rows: true, windowed: true, overlapProbeBands: true, recoverColumnValidation: true }); }
+function buildPagedGraph({ columnar, rows = false, windowed = false, overlapProbeBands = false, recoverColumnValidation = false }) {
   let serial = 0;
   const actions = [];
   const uuid = () => `C17B0000-0000-4000-8000-${String(++serial).padStart(12, '0')}`;
@@ -132,6 +141,15 @@ function buildPagedGraph({ columnar, rows = false, windowed = false }) {
       WFDuration: { Value: { Magnitude: days, Unit: 'days' }, WFSerializationType: 'WFQuantityFieldValue' },
     }), 'Adjusted Date');
     const y1 = ago(365), y3 = ago(3 * 365), y10 = ago(10 * 365), d90 = ago(90);
+    // Both query operators are exclusive. Overlap adjacent bands by one
+    // second using the existing typed Date/Adjust Date scalar wrappers. A
+    // previous non-empty band already stops the ladder, so overlap cannot
+    // replace an older anchor with a newer one or duplicate imported rows.
+    const lowerBound = value => overlapProbeBands ? output(emit('is.workflow.actions.adjustdate', {
+      WFDate: scalar(value), WFAdjustOperation: 'Subtract',
+      WFDuration: { Value: { Magnitude: 1, Unit: 'sec' }, WFSerializationType: 'WFQuantityFieldValue' },
+    }), 'Adjusted Date') : value;
+    const afterY1 = lowerBound(y1), afterY3 = lowerBound(y3), afterY10 = lowerBound(y10);
     const probe = (name, bands) => {
       const empty = emit('is.workflow.actions.list', { WFItems: [] });
       set(name, output(empty, 'List'));
@@ -142,7 +160,7 @@ function buildPagedGraph({ columnar, rows = false, windowed = false }) {
         });
       }
     };
-    probe('Oldest Probe', [['Oldest First', y10, null], ['Oldest First', y3, y10], ['Oldest First', y1, y3], ['Oldest First', null, y1]]);
+    probe('Oldest Probe', [['Oldest First', y10, null], ['Oldest First', y3, afterY10], ['Oldest First', y1, afterY3], ['Oldest First', null, afterY1]]);
     probe('Newest Probe', [['Latest First', null, d90], ['Latest First', null, y1], ['Latest First', null, y3], ['Latest First', null, null]]);
     oldest = emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(variable('Oldest Probe')) });
     newest = emit('is.workflow.actions.getitemfromlist', { WFItemSpecifier: 'First Item', WFInput: attachment(variable('Newest Probe')) });
@@ -201,7 +219,9 @@ function buildPagedGraph({ columnar, rows = false, windowed = false }) {
     alert('History paused safely', text(`${prefix}\ufffc`, { [`{${prefix.length}, 1}`]: output(reason) }));
     open('wafra://ios-setup?section=history'); stop();
   });
-  const before = get('before', output(dictionary, 'Dictionary'));
+  // The value is unused, but the emitted Get Value action (and its UUID) is
+  // part of the shipped graph; keep the call so the artifact is unchanged.
+  get('before', output(dictionary, 'Dictionary'));
   const limit = get('limit', output(dictionary, 'Dictionary'));
   // Never ask Shortcuts to parse Wafra's ISO cursor string. iOS 26 has
   // produced both unresolved parameters and empty Detect Dates results for
@@ -268,6 +288,16 @@ function buildPagedGraph({ columnar, rows = false, windowed = false }) {
       // v5: every framing/field/date refusal of the column path (they carry
       // counts, e.g. `invalid-input-date bytes=…`) falls back to typed rows.
       if (rows) conditionContains(output(columnsReason), 'invalid-input-', () => { set('Frame Mode', literal('rows')); });
+      if (recoverColumnValidation) {
+        // Range/order failures share wrong-date-range; overlap compares exact
+        // GUID/date pairs. Re-read this SAME Page through typed Date parameters
+        // before blaming Apple's query. Request still holds its original
+        // revision/capability because the refused column call committed nothing.
+        for (const reason of ['wrong-date-range', 'missing-overlap']) {
+          condition(output(columnsReason), reason, () => { set('Frame Mode', literal('rows')); });
+        }
+        conditionContains(output(columnsReason), 'wrong-date-range; ', () => { set('Frame Mode', literal('rows')); });
+      }
     });
     condition(variable('Frame Mode'), 'columns', () => { set('Request', variable('Columns Result')); });
   }
@@ -307,6 +337,28 @@ function buildPagedGraph({ columnar, rows = false, windowed = false }) {
     emit('is.workflow.actions.repeat.each', { GroupingIdentifier: each, WFControlFlowMode: 2 });
     const committed = native('CommitWafraPagedPageIntent', { request: scalar(variable('Request')), found: attachment(output(found, 'Count')) });
     set('Request', output(committed));
+    if (recoverColumnValidation) {
+      const typedResult = emit('is.workflow.actions.detect.dictionary', { WFInput: attachment(variable('Request')) });
+      const typedStatus = get('status', output(typedResult, 'Dictionary'));
+      condition(output(typedStatus), 'blocked', () => {
+        // Only a genuine date/overlap refusal of this page is a page-validation
+        // block. This commit is also reached from framing fallbacks and can
+        // refuse for authorization, a stale request, capacity, corrupt staging
+        // or a device interruption (the phone locked mid-run): those keep the
+        // blocked Request and leave through the loop's ordinary paused route,
+        // so Wafra still offers Resume.
+        const typedReason = get('reason', output(typedResult, 'Dictionary'));
+        set('Page Verdict', literal('paused'));
+        for (const needle of ['wrong-date-range', 'missing-overlap', 'invalid-input-date']) {
+          conditionContains(output(typedReason), needle, () => { set('Page Verdict', literal('dates')); });
+        }
+        condition(variable('Page Verdict'), 'dates', () => {
+          alert('History needs attention', 'This page could not be verified even after retrying its dates. Your saved pages are still safe. Return to Wafra for recovery options.');
+          open('wafra://ios-paging-beta?blocked=1&reason=page-validation');
+          stop();
+        });
+      });
+    }
     if (columnar) emit('is.workflow.actions.conditional', { GroupingIdentifier: rowsGroup, WFControlFlowMode: 2 });
     if (windowed) emit('is.workflow.actions.conditional', { GroupingIdentifier: nonEmpty, WFControlFlowMode: 2 });
     const releasedPage = emit('is.workflow.actions.list', { WFItems: [] });
@@ -317,7 +369,7 @@ function buildPagedGraph({ columnar, rows = false, windowed = false }) {
     alert('History paused', 'The work budget was reached. Your saved pages are retained; resume from Wafra. This is not a completed history import.');
     open('wafra://ios-setup?section=history'); stop();
     const workflow = buildHistoryShortcut({ messageLimit: 1500, smoke: false });
-    workflow.WFWorkflowName = windowed ? WINDOWED_SHORTCUT_NAME : columnar ? FAST_SHORTCUT_NAME : ROW_SHORTCUT_NAME;
+    workflow.WFWorkflowName = recoverColumnValidation ? RECOVERY_SHORTCUT_NAME : overlapProbeBands ? BOUNDARY_SAFE_SHORTCUT_NAME : windowed ? WINDOWED_SHORTCUT_NAME : columnar ? FAST_SHORTCUT_NAME : ROW_SHORTCUT_NAME;
     workflow.WFWorkflowActions = actions;
     workflow.WFWorkflowImportQuestions = [];
     return workflow;
@@ -375,12 +427,21 @@ function verifyBoundedSourceFreeGraph(workflow, expected, label) {
   const text = JSON.stringify(workflow);
   if (/https?:|downloadurl|clipboard|savefile|appendfile|sendmessage|sendemail/.test(text)) throw new Error('Forbidden external/source-output action');
   const queries = workflow.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'com.apple.MobileSMS.MessageEntity');
-  const windowedGraph = workflow.WFWorkflowName === WINDOWED_SHORTCUT_NAME;
+  const windowedGraph = [WINDOWED_SHORTCUT_NAME, BOUNDARY_SAFE_SHORTCUT_NAME, RECOVERY_SHORTCUT_NAME].includes(workflow.WFWorkflowName);
   if (queries.length !== (windowedGraph ? 12 : 6) || queries.some(a => ![1, 51, 102, 204, 408].includes(a.WFWorkflowActionParameters.WFContentItemLimitNumber))) throw new Error('Unbounded query');
   return true;
 }
 export function verifyWindowedHistoryShortcut(workflow) {
-  verifyBoundedSourceFreeGraph(workflow, buildWindowedHistoryShortcut(), 'Windowed');
+  return verifyWindowedGraph(workflow, buildWindowedHistoryShortcut(), 'Windowed');
+}
+export function verifyBoundarySafeHistoryShortcut(workflow) {
+  return verifyWindowedGraph(workflow, buildBoundarySafeHistoryShortcut(), 'Boundary-safe');
+}
+export function verifyRecoveryHistoryShortcut(workflow) {
+  return verifyWindowedGraph(workflow, buildRecoveryHistoryShortcut(), 'Recovery');
+}
+function verifyWindowedGraph(workflow, expected, label) {
+  verifyBoundedSourceFreeGraph(workflow, expected, label);
   const text = JSON.stringify(workflow);
   if (/detect\.date|base64encode|appendvariable|StageWafraPagedImportIntent/.test(text)) throw new Error('Windowed graph must not use the v2 text frame');
   const pages = workflow.WFWorkflowActions.filter(a => a.WFWorkflowActionIdentifier === 'com.apple.MobileSMS.MessageEntity' && a.WFWorkflowActionParameters.WFContentItemLimitNumber > 1);
@@ -410,9 +471,11 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
   const rows = process.argv.includes('--rows');
   const fast = process.argv.includes('--fast');
   const windowedFlag = process.argv.includes('--windowed');
+  const boundarySafe = process.argv.includes('--boundary-safe');
+  const recovery = process.argv.includes('--recovery');
   const target = resolve(process.argv.filter(arg => !arg.startsWith('--'))[2]
-    ?? (windowedFlag ? '/tmp/WafraHistoryWindowed.json' : fast ? '/tmp/WafraHistoryFast.json' : rows ? '/tmp/WafraHistoryRows.json' : columnar ? '/tmp/WafraHistoryColumnar.json' : '/tmp/WafraHistoryImport.json'));
-  const workflow = windowedFlag ? buildWindowedHistoryShortcut() : fast ? buildFastHistoryShortcut() : rows ? buildRowHistoryShortcut() : columnar ? buildColumnarHistoryShortcut() : buildPagedHistoryShortcut();
-  (windowedFlag ? verifyWindowedHistoryShortcut : fast ? verifyFastHistoryShortcut : rows ? verifyRowHistoryShortcut : columnar ? verifyColumnarHistoryShortcut : verifyPagedHistoryShortcut)(workflow);
+    ?? (recovery ? '/tmp/WafraHistoryV8.json' : boundarySafe ? '/tmp/WafraHistoryV7.json' : windowedFlag ? '/tmp/WafraHistoryWindowed.json' : fast ? '/tmp/WafraHistoryFast.json' : rows ? '/tmp/WafraHistoryRows.json' : columnar ? '/tmp/WafraHistoryColumnar.json' : '/tmp/WafraHistoryImport.json'));
+  const workflow = recovery ? buildRecoveryHistoryShortcut() : boundarySafe ? buildBoundarySafeHistoryShortcut() : windowedFlag ? buildWindowedHistoryShortcut() : fast ? buildFastHistoryShortcut() : rows ? buildRowHistoryShortcut() : columnar ? buildColumnarHistoryShortcut() : buildPagedHistoryShortcut();
+  (recovery ? verifyRecoveryHistoryShortcut : boundarySafe ? verifyBoundarySafeHistoryShortcut : windowedFlag ? verifyWindowedHistoryShortcut : fast ? verifyFastHistoryShortcut : rows ? verifyRowHistoryShortcut : columnar ? verifyColumnarHistoryShortcut : verifyPagedHistoryShortcut)(workflow);
   writeFileSync(target, JSON.stringify(workflow, null, 2) + '\n'); console.log(target);
 }

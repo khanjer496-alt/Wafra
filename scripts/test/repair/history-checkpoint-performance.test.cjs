@@ -33,13 +33,16 @@ function harness() {
     return id === '@/lib/transfer-reconciliation' ? counted : require('../build/' + id.slice(6));
   } });
   const store = ts.createSourceFile('store.tsx', read('store.tsx'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const names = ['reducer', 'reduceState', 'actionMayChangeTransferLinks', 'transactionNeedsTransferNormalization'];
+  const names = ['reducer', 'reduceState', 'assertCategoryAssignments', 'applyTransactionEdit', 'reconcileBillPaymentClaims', 'reconcileCardSettlementClaims', 'actionMayChangeTransferLinks', 'transactionNeedsTransferNormalization'];
   const functions = names.map(name => {
     const node = store.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
     assert.ok(node, `shipping ${name} must exist`); return node.getText(store);
   }).join('\n');
   const { reducer } = evaluate(functions + '\nexports.reducer = reducer;', {
     ...counted, ...imports,
+    isSpending: require('../build/ledger').isSpending,
+    categoryAssignmentAllowed: require('../build/custom-categories').categoryAssignmentAllowed,
+    getCategory: require('../build/categories').getCategory,
     // UI preference and currency side effects do not participate in matching.
     captureMarketContext: () => () => {}, getMonthStartDay: () => 1,
     getThemePreference: () => 'light', getLanguage: () => 'en',
@@ -134,4 +137,26 @@ test('metadata-only running pages preserve facts and final receipts survive a pr
   const final = harness().reducer(resumed, complete());
   const uninterrupted = h.reducer(h.reducer(first, batch({ updates: [{ id: 'tx-0', title: 'Corrected shop' }] })), complete());
   assert.deepEqual(final, uninterrupted); assertReceipt(final);
+});
+
+
+test('history checkpoint harness enforces the shipping custom-category registration boundary', () => {
+  const h = harness(); const base = state();
+  const expense = `custom:expense:${'a'.repeat(32)}`;
+  const income = `custom:income:${'b'.repeat(32)}`;
+  base.customCategories = [
+    { id: expense, name: 'Pets', type: 'expense' },
+    { id: income, name: 'Freelance', type: 'income' },
+  ];
+  const before = JSON.stringify(base);
+  for (const category of [income, `custom:expense:${'c'.repeat(32)}`, 'custom:expense:invalid']) {
+    assert.throws(() => h.reducer(base, batch({ transactions: [row(100, { category })] })),
+      /Choose a registered category for this transaction type/);
+  }
+  assert.equal(JSON.stringify(base), before, 'rejected assignments cannot mutate a checkpoint');
+  assert.deepEqual(h.calls, { normalize: 0, reconcile: 0 });
+  const accepted = h.reducer(base, batch({ transactions: [row(100, { category: expense })] }));
+  assert.equal(accepted.transactions.find(tx => tx.id === 'tx-100').category, expense);
+  assert.equal(accepted.transactions.length, base.transactions.length + 1);
+  assert.deepEqual(h.calls, { normalize: 0, reconcile: 0 });
 });

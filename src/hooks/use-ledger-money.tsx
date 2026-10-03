@@ -20,3 +20,25 @@ export function LedgerMoneyProvider({ moneySpec, children }: {
 export function useLedgerMoney(): LedgerMoneySpec | null {
   return useContext(LedgerMoneyContext);
 }
+
+/**
+ * The device number conventions ledger-money.ts formats with, as render state.
+ *
+ * Those conventions are a module-level setting (setDisplayMoneyLocale), which
+ * React cannot see. Money is compiled and memoized on its props, so without
+ * this key a figure kept "1,234.56" after the phone switched to "1.234,56"
+ * until its amount happened to change. The store provider publishes the key
+ * it applied; it changes only when the device settings do.
+ */
+const MoneyLocaleContext = createContext<string>('');
+
+export function MoneyLocaleProvider({ localeKey, children }: {
+  localeKey: string;
+  children: React.ReactNode;
+}) {
+  return <MoneyLocaleContext.Provider value={localeKey}>{children}</MoneyLocaleContext.Provider>;
+}
+
+export function useMoneyLocaleKey(): string {
+  return useContext(MoneyLocaleContext);
+}

@@ -45,6 +45,7 @@ function harness(kind, { privateMode = false, bundled = null, merchantCategory =
     '@/lib/store': { useStore: () => ({ state }), usePrivateMode: () => state.privateMode },
     '@/hooks/use-theme': { useTheme: () => ({}) }, '@/components/ui/icon': { Icon: 'Icon' },
     '@/hooks/use-color-scheme': { useColorScheme: () => 'dark' },
+    '@/hooks/use-band': { useBand: () => ({ glyphGround: '#2E2A23' }) },
     '@/components/ui/category-avatar': { CategoryAvatar: 'Category' },
     '@/components/ui/merchant-logo-assets': { merchantLogoFor: () => bundled },
     '@/lib/merchant-logo-resolver': { resolveRemoteMerchantLogo: resolve },

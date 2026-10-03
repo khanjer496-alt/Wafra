@@ -6,12 +6,15 @@ const load = require('./load-typescript.cjs');
 
 // Execute the real row; only navigation, presentation and OS primitives are
 // substituted. This checks interaction contracts, not native frame timings.
-function rowFixture({ language = 'en', large = false } = {}) {
+const source = load(path.resolve(__dirname, '../../../src/lib/transaction-source.ts'));
+function rowFixture({ language = 'en', large = false, customCategories = [] } = {}) {
   const events = [];
+  const state = { customCategories };
   const jsx = (type, props) => typeof type === 'function' ? type(props) : ({ type, props });
   const theme = { text: 'ink', income: 'income', backgroundSelected: 'selected' };
   const { TransactionRow } = load(path.resolve(__dirname, '../../../src/components/transaction-row.tsx'), {
-    react: { memo: component => component }, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    react: { memo: component => component, useMemo: factory => factory() }, 'react/jsx-runtime': { jsx, jsxs: jsx },
+    '@/lib/store': { useStoreSelector: selector => selector({ state }) },
     'react-native': { Pressable: 'Pressable', View: 'View', StyleSheet: { create: value => value } },
     'expo-router': { useRouter: () => ({ navigate: href => events.push(['merchant', href]) }) },
     '@/components/themed-text': { ThemedText: props => jsx('Text', props) },
@@ -25,9 +28,11 @@ function rowFixture({ language = 'en', large = false } = {}) {
     '@/lib/ledger': require('./load-transfer-ledger.cjs').ledger,
     '@/lib/transfer-reconciliation': require('./load-transfer-ledger.cjs').core,
     '@/lib/transfer-review-copy': load(path.resolve(__dirname, '../../../src/lib/transfer-review-copy.ts'), { '@/lib/i18n': { getLanguage: () => language } }),
-    '@/lib/i18n': { t: (key, lang) => key === 'incomeAccountReview'
+    '@/lib/i18n': { getLanguage: () => language, t: (key, lang) => key === 'incomeAccountReview'
       ? (lang === 'ar' ? 'الحساب بحاجة إلى مراجعة' : 'Account needs review') : key },
     '@/lib/merchant-spending-copy': load(path.resolve(__dirname, '../../../src/lib/merchant-spending-copy.ts')),
+    '@/lib/transaction-source': source,
+    '@/lib/transactions-copy': load(path.resolve(__dirname, '../../../src/lib/transactions-copy.ts'), { '@/lib/transaction-source': source }),
   });
   const transaction = { id: 'fixture', title: 'Talabat', amountFils: 12345, type: 'expense',
     category: 'dining', accountId: 'card', date: '2026-09-07' };
@@ -142,4 +147,17 @@ test('Arabic and large text preserve both minimum-size touch targets and exact m
   }
   assert.ok(walk(tree).filter(n => n.type === 'Text').every(n => n.props.numberOfLines === undefined));
   assert.equal(tree.props.style[2].flexDirection, 'column');
+});
+test('money movements such as ATM cash do not open a merchant spending page', () => {
+  // Spending and merchant analytics exclude these by design, so the page
+  // would always report AED 0 and "no spending" for a row the user can see.
+  for (const overrides of [
+    { title: 'ATM withdrawal', category: 'cash-withdrawal' },
+    { title: 'Sarwa', category: 'investing' },
+    { title: 'Cash deposit', category: 'other', type: 'income' },
+  ]) {
+    const h = rowFixture(); const tree = h.render(overrides);
+    assert.equal(byId(tree, 'transaction-merchant-link'), undefined, overrides.title);
+    assert.equal(byId(tree, 'merchant-transaction-row'), undefined, overrides.title);
+  }
 });

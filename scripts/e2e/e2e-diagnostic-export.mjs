@@ -18,9 +18,12 @@ try {
     page.on('download', download => downloads.push(download));
     const name = `${lang}-${theme}-${width}`;
     try {
-      await page.goto(`${BASE}/settings?section=data`, { waitUntil: 'networkidle' });
+      await page.goto(`${BASE}/settings`, { waitUntil: 'networkidle' });
+      await page.getByTestId('settings-data-and-help').click();
+      await page.waitForURL('**/settings-data');
       const label = lang === 'ar' ? 'تصدير البيانات للتشخيص' : 'Export data for diagnosis';
-      await page.getByRole('button', { name: label, exact: true }).click();
+      // The row reads its title, then its line, like every Data and help row.
+      await page.getByRole('button', { name: new RegExp(`^${label}`) }).click();
       const sheet = page.getByTestId('diagnostic-export-sheet');
       await sheet.waitFor({ state: 'visible' });
       assert.equal(downloads.length, 0, 'opening Settings/consent never exports');

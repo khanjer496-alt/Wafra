@@ -11,7 +11,11 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '../..');
 const sections = [
-  ['src/components/onboarding/alive-scenes.tsx', 'WelcomeMoneyScene', 'src/components/onboarding-gate.tsx'],
+  // Design language E: each first-run step is its own section module.
+  ['src/components/onboarding/e-welcome.tsx', 'WelcomeStep', 'src/components/onboarding-gate.tsx'],
+  ['src/components/onboarding/e-goals.tsx', 'GoalsStep', 'src/components/onboarding-gate.tsx'],
+  ['src/components/onboarding/e-watch.tsx', 'WatchStep', 'src/components/onboarding-gate.tsx'],
+  ['src/components/onboarding/e-paywall.tsx', 'PaywallStep', 'src/components/onboarding-gate.tsx'],
   ['src/components/bills/payment-agenda.tsx', 'PaymentAgenda', 'src/app/(tabs)/bills.tsx'],
   ['src/components/spending/spending-overview.tsx', 'SpendingOverview', 'src/app/(tabs)/flow.tsx'],
   ['src/components/spending/spending-trends.tsx', 'SpendingTrends', 'src/app/(tabs)/flow.tsx'],

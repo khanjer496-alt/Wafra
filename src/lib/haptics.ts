@@ -57,6 +57,33 @@ export function committed(): void {
 }
 
 /**
+ * A transaction arrived by itself (a live capture). Light, because the user
+ * did nothing: it says "that landed", not "you committed something". Called
+ * outside any press, so there is no frame to defer to.
+ */
+export function captured(): void {
+  if (!native) return;
+  if (Platform.OS === 'android') {
+    Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Context_Click).catch(() => {});
+    return;
+  }
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+}
+
+/**
+ * One keypad key. The softest tick the platform has, because it fires for
+ * every digit and a firmer one would read as buzzing while typing.
+ */
+export function keyed(): void {
+  if (!native) return;
+  if (Platform.OS === 'android') {
+    Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Keyboard_Tap).catch(() => {});
+    return;
+  }
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {});
+}
+
+/**
  * Something the user should notice went wrong. The long pattern earns its
  * length here and nowhere else.
  */

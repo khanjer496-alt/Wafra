@@ -1,11 +1,19 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import Animated, {
+  ReduceMotion,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Icon } from '@/components/ui/icon';
-import { Radius, Spacing } from '@/constants/theme';
+import { Motion, MotionSpring, Radius, Spacing } from '@/constants/theme';
 import { tapped } from '@/lib/haptics';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 
 export interface Choice<T extends string> {
@@ -149,14 +157,43 @@ export function ChoiceSheet<T extends string>({
                 every label starts at the same x and the list does not jump
                 sideways when the selection moves.
               */}
-              <View style={{ opacity: active ? 1 : 0 }}>
-                <Icon name="check" size={16} color={theme.primary} />
-              </View>
+              <PopCheck active={active} color={theme.primary} />
             </Pressable>
           );
         })}
       </View>
     </BottomSheet>
+  );
+}
+
+/**
+ * The tick on the chosen row. It arrives with the one spring the motion rules
+ * allow (260/24: a small overshoot, settled in well under half a second) and
+ * leaves with a tap-length fade. Under Reduce Motion or a screen reader it
+ * only cross-fades: no scale, no movement. It starts at its resting state, so
+ * opening the sheet never replays the pop on the option that was already on.
+ */
+function PopCheck({ active, color }: { active: boolean; color: string }) {
+  const reducedMotion = useReducedMotion();
+  const shown = useSharedValue(active ? 1 : 0);
+
+  useEffect(() => {
+    const target = active ? 1 : 0;
+    if (reducedMotion || !active) {
+      shown.value = withTiming(target, { duration: Motion.tap, reduceMotion: ReduceMotion.Never });
+      return;
+    }
+    shown.value = withSpring(target, { ...MotionSpring, reduceMotion: ReduceMotion.System });
+  }, [active, reducedMotion, shown]);
+
+  const style = useAnimatedStyle(() => reducedMotion
+    ? { opacity: shown.value, transform: [{ scale: 1 }] }
+    : { opacity: Math.min(1, shown.value), transform: [{ scale: 0.5 + 0.5 * shown.value }] });
+
+  return (
+    <Animated.View style={style} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <Icon name="check" size={16} color={color} />
+    </Animated.View>
   );
 }
 

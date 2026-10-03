@@ -3,17 +3,19 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
-import { Radius, Spacing } from '@/constants/theme';
+import { Radius, Spacing, type BandPalette } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { tapped } from '@/lib/haptics';
 import { t, type StringKey } from '@/lib/i18n';
 import type { IosMessageSetupStatus } from '@/lib/ios-message-onboarding';
 
 export interface ChecklistRowProps {
+  palette?: BandPalette;
   title: string;
   detail?: string;
-  step: number;
   status: IosMessageSetupStatus;
+  /** Overrides the generic status word, e.g. "Skipped" for an explicit deferral. */
+  statusLabel?: string;
   expanded: boolean;
   onPress(): void;
   children?: React.ReactNode;
@@ -29,16 +31,22 @@ const STATUS_KEYS: Record<IosMessageSetupStatus, StringKey> = {
 export const ChecklistRow = ({
   title,
   detail,
-  step,
   status,
+  statusLabel,
   expanded,
   onPress,
   children,
+  palette,
 }: ChecklistRowProps) => {
-  const theme = useTheme();
+  const legacyTheme = useTheme();
+  const theme = palette ? { ...legacyTheme, card: palette.card, cardBorder: palette.rule,
+    primaryBorder: palette.rule, primary: palette.tint, onPrimary: palette.sheet,
+    primarySoft: palette.statusOkSoft, backgroundSelected: palette.glyphGround,
+    text: palette.text, textSecondary: palette.textSecondary, textTertiary: palette.textSecondary } : legacyTheme;
   const complete = status === 'complete';
   const skipped = status === 'skipped';
   const statusKey = STATUS_KEYS[status];
+  const statusText = statusLabel ?? t(statusKey);
 
   return (
     <View
@@ -51,9 +59,11 @@ export const ChecklistRow = ({
       ]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={[title, detail, t(statusKey)].filter(Boolean).join('. ')}
+        // Status is read once, as the value; repeating it in the label made
+        // VoiceOver announce it twice.
+        accessibilityLabel={[title, detail].filter(Boolean).join('. ')}
         accessibilityState={{ expanded }}
-        accessibilityValue={{ text: t(statusKey) }}
+        accessibilityValue={{ text: statusText }}
         onPress={() => {
           tapped();
           onPress();
@@ -76,15 +86,17 @@ export const ChecklistRow = ({
           {complete ? (
             <Icon name="check" size={15} color={theme.onPrimary} />
           ) : (
-            <ThemedText type="smallBold" themeColor={skipped ? 'textSecondary' : 'primary'}>{step}</ThemedText>
+            // No number: the rows are independent (history is optional) and
+            // the guide inside already numbers the Apple steps.
+            <View style={[styles.dot, { backgroundColor: skipped ? theme.textSecondary : theme.primary }]} />
           )}
         </View>
         <View style={styles.copy}>
-          <ThemedText type="smallBold">
+          <ThemedText type="smallBold" style={{ color: theme.text }}>
             {title}
           </ThemedText>
           {detail && (
-            <ThemedText type="meta" themeColor="textSecondary">{detail}</ThemedText>
+            <ThemedText type="meta" style={{ color: theme.textSecondary }}>{detail}</ThemedText>
           )}
         </View>
         <Icon
@@ -126,6 +138,11 @@ const styles = StyleSheet.create({
     borderRadius: Radius.full,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: Radius.full,
   },
   copy: {
     flex: 1,

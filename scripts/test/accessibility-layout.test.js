@@ -24,6 +24,13 @@ const navigationE2e = source('scripts/e2e/e2e-navigation.mjs');
 const themeTokens = source('src/constants/theme.ts');
 const themeHook = source('src/hooks/use-theme.ts');
 const onboardingGate = source('src/components/onboarding-gate.tsx');
+// Design language E (2026-09-26): each step is its own file beside the gate.
+const onboardingStepFiles = fs.readdirSync(path.join(__dirname, '../../src/components/onboarding'))
+  .filter((name) => /^e-.*\.tsx$/.test(name))
+  .map((name) => `src/components/onboarding/${name}`);
+const onboardingFrame = source('src/components/onboarding/e-frame.tsx');
+const onboardingSteps = onboardingStepFiles.map(source).join('\n');
+const eButton = source('src/components/ui/band/e-button.tsx');
 const onboardingExample = source('src/components/onboarding/money-preview.tsx');
 const controls = source('src/components/ui/controls.tsx');
 const addTransaction = source('src/app/add-transaction.tsx');
@@ -63,8 +70,11 @@ ok('Home stacks its hero breakdown for large text', /largeText && styles\.splitL
 ok('Flow stacks summary and category rows for large text', /large && styles\.stack/.test(spendingOverview) && /<SpendingOverview/.test(flow));
 ok('Bills reflows its header and segments for large text',
   /<BillsSegmentControl/.test(bills) && /<ScrollView[\s\S]*?horizontal/.test(billsSegments) && !/numberOfLines/.test(billsSegments));
+// Design language E: the headline is the slate band's BandFigure (which puts
+// the currency on its own line at large text) and its chips stack.
 ok('Wallet stacks its recorded-balance headline at accessibility text sizes',
-  /styles\.money, p\.largeText && styles\.stack/.test(walletOverview) &&
+  /<BandFigure/.test(walletOverview) &&
+    /styles\.chips, p\.largeText && styles\.stack/.test(walletOverview) &&
     /stack: \{ flexDirection: 'column', alignItems: 'flex-start' \}/.test(walletOverview));
 ok('Bills uses the shared accessible sheet contract',
   /<BottomSheet/.test(bills) && !/<Modal/.test(bills) && /accessibilityLabel=\{t\('reminderName/.test(bills));
@@ -74,7 +84,7 @@ ok('Wallet uses shared sheets and selected choice semantics',
 ok('the primary tab bar exposes tab-list and explicit web selected semantics',
   /role="tablist"/.test(tabBar) && /aria-selected=\{focused\}/.test(tabBar));
 ok('navigation E2E targets the exact actionable tab rather than duplicate body text',
-  /const tapTab[\s\S]{0,800}getByRole\('tab', \{ name, exact: true \}\)\.click\(\{ timeout: 8000 \}\)/.test(navigationE2e) &&
+  /const tapTab[\s\S]{0,800}getByRole\('tab', \{ name, exact: true \}\)\.click\(\{ timeout: (?:8000|30000) \}\)/.test(navigationE2e) &&
     !/force:\s*true/.test(navigationE2e));
 ok('navigation E2E waits for the tab selected state instead of animation stability',
   /const tapTab[\s\S]{0,1200}aria-selected/.test(navigationE2e) &&
@@ -96,38 +106,50 @@ const declaredStyleValue = (sourceText, style, property) => {
   if (!match) return NaN;
   return match[1] ? spacingValues[match[1]] : Number(match[2]);
 };
-// Normal onboarding is a fixed one-screen composition. Accessibility text sizes
-// keep the ScrollView escape hatch so content can grow without being clipped.
-ok('onboarding stays on one screen normally and only enables scrolling for accessibility text sizes',
-  /useLargeTextLayout/.test(onboardingGate) &&
-  /<Animated\.ScrollView[\s\S]*?contentContainerStyle=\{styles\.welcomeBody\}/.test(onboardingGate) &&
-    /<ScrollView key=\{activeStep\}[\s\S]*?contentContainerStyle=\{styles\.scrollContent\}/.test(onboardingGate) &&
-    (onboardingGate.match(/scrollEnabled=\{largeText\}/g) ?? []).length === 2 &&
-    /welcomeBody: \{[\s\S]*?flexGrow: 1/.test(onboardingGate) &&
-    /scrollContent: \{ flexGrow: 1/.test(onboardingGate) &&
-    /questionActions: \{ marginTop: 'auto'/.test(onboardingGate) &&
+// Every onboarding step is a one-screen composition (flexGrow + marginTop:auto
+// footer). 2026-09-25: it always scrolls instead of clipping — an iPhone SE
+// at the largest non-accessibility text size overflowed with scrolling off —
+// and only bounces at accessibility sizes, so a fitting screen stays still.
+// Design language E: one frame (e-frame.tsx) owns that scroll for every step,
+// and its footer scrolls with the content rather than pinning over it.
+ok('onboarding keeps a one-screen composition but scrolls instead of clipping at any text size',
+  /useLargeTextLayout/.test(onboardingFrame) &&
+    /<ScrollView[\s\S]{0,120}bounces=\{largeText\} alwaysBounceVertical=\{false\}[\s\S]{0,120}contentContainerStyle=\{styles\.scroll\}/.test(onboardingFrame) &&
+    ![onboardingGate, onboardingSteps].some((code) => /scrollEnabled=/.test(code)) &&
+    /scroll: \{ flexGrow: 1/.test(onboardingFrame) &&
+    /footer: \{ marginTop: 'auto'/.test(onboardingFrame) &&
+    onboardingStepFiles.filter((file) => /-(welcome|name|goals|watch|reminders|pattern|paywall)\.tsx$/.test(file))
+      .every((file) => /<EStepFrame\b/.test(source(file))) &&
     /<BottomSheet/.test(onboardingGate));
 ok('onboarding text and its sample can grow without truncation or a scale ceiling',
-  [onboardingGate, onboardingExample].every((code) =>
+  [onboardingGate, onboardingSteps, onboardingExample].every((code) =>
     !/numberOfLines|maxFontSizeMultiplier|adjustsFontSizeToFit|minimumFontScale/.test(code)));
-const onboardingButtons = onboardingGate.match(/<Button\b[^>]*>/g) ?? [];
-ok('every shared onboarding button permits its localized label to wrap',
-  onboardingButtons.length > 0 && onboardingButtons.every((button) => /\bwrapLabel\b/.test(button)));
+ok('every onboarding button permits its localized label to wrap',
+  !/<Button\b/.test(onboardingGate + onboardingSteps) &&
+    /<EButton\b/.test(onboardingGate) &&
+    /styles\.label, \{ color: fg \}/.test(eButton) && /label: \{[^}]*flexShrink: 1/.test(eButton) &&
+    !/numberOfLines/.test(eButton));
 ok('onboarding action targets retain native accessibility size floors',
-  declaredStyleValue(onboardingGate, 'startOption', 'minHeight') >= 48 &&
-    declaredStyleValue(onboardingGate, 'nameBack', 'minHeight') >= 44 &&
-    declaredStyleValue(onboardingGate, 'nameInput', 'minHeight') >= 48 &&
-    declaredStyleValue(onboardingGate, 'nameSkip', 'minHeight') >= 48 &&
-    declaredStyleValue(onboardingGate, 'back', 'minHeight') >= 44 &&
+  /minHeight: BandLayout\.buttonHeight/.test(eButton) &&
+    declaredStyleValue(onboardingFrame, 'textAction', 'minHeight') >= 48 &&
+    declaredStyleValue(onboardingFrame, 'iconButton', 'width') >= 44 &&
+    declaredStyleValue(onboardingFrame, 'iconButton', 'height') >= 44 &&
+    declaredStyleValue(source('src/components/onboarding/e-name.tsx'), 'input', 'minHeight') >= 48 &&
+    declaredStyleValue(source('src/components/onboarding/e-name.tsx'), 'row', 'minHeight') >= 44 &&
+    declaredStyleValue(source('src/components/onboarding/e-goals.tsx'), 'pill', 'minHeight') >= 48 &&
+    declaredStyleValue(source('src/components/onboarding/e-first-payment.tsx'), 'source', 'minHeight') >= 48 &&
     declaredStyleValue(onboardingExample, 'action', 'minHeight') >= 48 &&
     declaredStyleValue(controls, 'button', 'minHeight') >= 48);
 ok('name personalization exposes a labelled optional input and skip action to assistive technology',
-  /testID="onboarding-name-input"[\s\S]{0,260}accessibilityLabel=\{t\('onboardNamePlaceholder'\)\}/.test(onboardingGate) &&
-    /accessibilityRole="button"[\s\S]{0,180}accessibilityLabel=\{t\('onboardNameSkip'\)\}/.test(onboardingGate) &&
-    /onboardNamePrivacy/.test(onboardingGate));
+  /testID="onboarding-name-input"[\s\S]{0,260}accessibilityLabel=\{words\.namePlaceholder\}/.test(source('src/components/onboarding/e-name.tsx')) &&
+    /<ETextAction palette=\{band\} label=\{t\('onboardNameSkip'\)\}/.test(source('src/components/onboarding/e-name.tsx')) &&
+    /accessibilityRole="button" accessibilityLabel=\{label\}/.test(onboardingFrame) &&
+    /onboardNamePrivacy/.test(source('src/components/onboarding/e-name.tsx')));
 ok('selected tabs have contrasting fills and labels; input boundaries retain control tokens',
   tokenValues('inverseSurface').every((color,index)=>contrast(color,tokenValues('backgroundSelected')[index])>=3) &&
-  /theme\.inverseSurface/.test(billsSegments) && /theme\.inverseText/.test(billsSegments) &&
+  // Bills' views are the band's tablist (its pill contrast is tested with the
+  // band palette); the filter chips inside All fill the selected one.
+  /<BandSegmented/.test(billsSegments) && /palette\.fill/.test(billsSegments) && /palette\.onFill/.test(billsSegments) &&
   /const borderColor = accountInvalid \? theme\.expense : selected \? selected\.color : theme\.controlBorder/.test(addTransaction) &&
   /transferChoice[\s\S]{0,100}theme\.controlBorder/.test(addTransaction));
 
@@ -162,21 +184,27 @@ ok('virtualized screens can consume the same insets without nested scrolling',
     /virtualized/.test(scaffold) && /virtualized \? undefined : contentInsets/.test(scaffold));
 ok('tabbed footer clearance is not dropped',
   /tabBarClearance \+ footerClearance/.test(scaffold));
-ok('Not Found is the first scaffold adoption', /<ScreenScaffold/.test(notFound));
+// Design language E: Not Found is a plain sand screen that owns its own safe
+// area and content width, and scrolls rather than clipping at large text.
+ok('Not Found owns its safe area, width and large-text scrolling',
+  /useSafeAreaInsets/.test(notFound) && /MaxContentWidth/.test(notFound) && /<ScrollView/.test(notFound));
 
+// The recurring row is its own memoised component (RecurringRow) so Bills
+// re-renders do not redraw every row; check the row it actually renders.
 const recurringAccessibilityBlock = bills.match(
-  /const renderRecurringRow[\s\S]*?\n  \};\n\n  return \(/,
+  /const RecurringRow = React\.memo[\s\S]*?\n\}\);\n/,
 )?.[0] ?? '';
 ok('Bills recurring rows have one labelled primary target',
   recurringAccessibilityBlock.length > 0 &&
     !/remindAboutA11y/.test(recurringAccessibilityBlock) &&
     /accessibilityRole="button"/.test(recurringAccessibilityBlock) &&
     /accessibilityLabel=/.test(recurringAccessibilityBlock));
-ok('Bills card actions move to the labelled detail footer',
-  /<CardDetailSheet[\s\S]{0,900}footer=/.test(bills) &&
-    /<Button[\s\S]{0,120}label=\{t\('markPaid'\)\}/.test(bills));
+ok('Bills card actions live in the card sheet as one labelled button',
+  /<CardDetailSheet[\s\S]{0,200}account=\{cardDetail\}/.test(bills) &&
+    /<EButton palette=\{band\} label=\{w\.recordPayment\}/.test(cardDetail) &&
+    /<EButton[\s\S]{0,120}label=\{t\('markPaid'\)\}/.test(bills));
 ok('Bills manual reminder rows open one labelled detail target',
-  /setSelectedReminderId\(item\.id\.slice\(5\)\)/.test(bills) && /onPress=\{\(\) => onOpen\(item\)\}/.test(paymentAgenda) &&
+  /setSelectedBill\(\{ id: \(item\.repeatOf \?\? item\.id\)\.slice\(5\), dueISO: item\.dateISO \}\)/.test(bills) && /onPress=\{\(\) => onOpen\(item\)\}/.test(paymentAgenda) &&
     /accessibilityRole="button"/.test(bills) &&
     /accessibilityLabel=/.test(bills) &&
     !/onLongPress=\{\(\) => onLongPressBill/.test(bills));
@@ -188,10 +216,10 @@ ok('Wallet inactive disclosure exposes a localized expanded button',
   /accessibilityRole="button"[\s\S]{0,180}accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/.test(wallet));
 
 ok('transaction rows wrap merchant and complete category/account meaning at large text sizes',
-  !/<ThemedText[^>]*numberOfLines=\{1\}[^>]*>[\s\S]{0,100}\{transaction\.title\}/.test(transactionRow) &&
+  !/<ThemedText[^>]*numberOfLines=\{1\}[^>]*>[\s\S]{0,100}\{presentation\.title\}/.test(transactionRow) &&
     !/<ThemedText[^>]*numberOfLines=\{1\}[^>]*>[\s\S]{0,180}\{where\}/.test(transactionRow) &&
     /const accountLabel = accountReview \?\? account\?\.name/.test(transactionRow) &&
-    /const label = \[[\s\S]*?transaction\.title[\s\S]*?where[\s\S]*?accountLabel[\s\S]*?clock/.test(transactionRow));
+    /const label = \[[\s\S]*?presentation\.title[\s\S]*?where[\s\S]*?accountLabel[\s\S]*?clock/.test(transactionRow));
 ok('Add category and account containers expose labelled radio groups with hints',
   (addTransaction.match(/accessibilityRole="radiogroup"/g) ?? []).length === 2 &&
     /accessibilityLabel=\{tUi\('category'\)\}/.test(addTransaction) &&
@@ -221,56 +249,117 @@ ok('Spending categories provide localized spending and limit equivalents',
  /accessibilityLabel=\{`\$\{categoryLabel\(row\.category, language\)\}[\s\S]*?row\.spentFils[\s\S]*?row\.limitFils/.test(spendingOverview));
 ok('Flow trend months expose cashflow descriptions and selected state',
  /accessibilityLabel=\{monthDescription\(month\)\}/.test(spendingTrends) && /accessibilityState=\{\{ selected: month\.key === p\.selectedKey \}\}/.test(spendingTrends));
-ok('Flow retains selected month context and large-text list',
- /accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)[\s\S]*?monthFigures\(selected\)/.test(spendingTrends) && /!showAllTrendLabels &&[\s\S]*?p\.months\.map/.test(spendingTrends));
+ok('Flow retains selected month context and always-visible exact figures',
+ /accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)[\s\S]*?monthFigures\(selected\)/.test(spendingTrends) && /testID="cashflow-month-details"[\s\S]*?p\.months\.map/.test(spendingTrends));
 ok('Flow uses shared shell and Stats redirects into Trends',
- /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"/.test(flow) && /<Redirect href="\/flow\?view=trends"/.test(stats));
+ /<BandScaffold band="spending" tabbed/.test(flow) && /<Redirect href="\/flow\?view=trends"/.test(stats));
 ok('shared charts consume the semantic data-visualization palette',
   /import \{[^}]*\bDataViz\b[^}]*\} from '@\/constants\/theme'/.test(charts) &&
     /from '@\/components\/ui\/data-viz'/.test(charts));
 
-ok('Bills uses one scaffold scroller with an inline typed header',
-  /const billsHeader: ScreenHeaderProps = \{/.test(bills) &&
-    /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/.test(bills) &&
-    (bills.match(/<ScrollView/g) ?? []).length === 1 &&
-    /testID="subscription-history-scroll"/.test(bills));
+ok('Bills uses one band scaffold scroller with a typed nav row',
+  /const billsNav: BandNav = \{/.test(bills) &&
+    /<BandScaffold[\s\S]*?band="bills"[\s\S]*?tabbed[\s\S]*?nav=\{billsNav\}/.test(bills) &&
+    (bills.match(/<ScrollView/g) ?? []).length === 0 &&
+    /testID="subscription-history-scroll"/.test(source('src/components/bill-detail-sheet.tsx')));
+const bandSegmented = source('src/components/ui/band/band-segmented.tsx');
 ok('Bills uses canonical labelled control and selection semantics',
- /<BillsSegmentControl/.test(bills) && /accessibilityLabel=\{t\('billsTitle'\)\}/.test(billsSegments) && /role="tablist"/.test(billsSegments) && /accessibilityState=\{\{ selected:/.test(billsSegments));
-ok('Bills agenda tabs retain 48 point targets',Number(billsSegments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
+ /<BillsSegmentControl/.test(bills) && /<BandSegmented/.test(billsSegments) && /label=\{w\.billsViews\}/.test(billsSegments) &&
+   /role="tablist"/.test(bandSegmented) && /accessibilityState=\{\{ selected: active \}\}/.test(bandSegmented) &&
+   /accessibilityState=\{\{ selected: active \}\}/.test(billsSegments));
+// The band's segments are 44pt pills inside a 4pt track (52pt of track per row).
+ok('Bills agenda tabs retain 44 point targets',
+  Number(bandSegmented.match(/segment:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=44);
 ok('Bills reminder entry exposes three labelled shared fields and a disabled Save footer',
   (bills.match(/<TextField/g) ?? []).length === 3 &&
     !/<TextInput/.test(bills) &&
     /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/.test(bills));
 
-ok('Wallet uses the typed inline scaffold header and labels its remaining disclosure',
-  /const walletHeader: ScreenHeaderProps = \{/.test(wallet) &&
-    /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{walletHeader\}/.test(wallet) &&
+ok('Wallet uses the typed band nav row and labels its remaining disclosure',
+  /const walletNav: BandNav = \{/.test(wallet) &&
+    /<BandScaffold[\s\S]*?band="accounts"[\s\S]*?tabbed[\s\S]*?nav=\{walletNav\}/.test(wallet) &&
     !/detailsLabel|expanded: details/.test(walletOverview) &&
     /accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/.test(wallet));
-ok('Wallet starts its iOS inset scroller at the visible content origin',
-  /const walletInsets = useScreenContentInsets\(\{ tabbed: true \}\)/.test(wallet) &&
-    /scrollProps=\{\{[\s\S]{0,240}contentOffset: Platform\.OS === 'ios'[\s\S]{0,120}\{ x: 0, y: -walletInsets\.contentInset\.top \}[\s\S]{0,120}: undefined[\s\S]{0,240}showsVerticalScrollIndicator: false/.test(wallet));
+// BandScaffold's scroller never adjusts content insets (the band covers the
+// status bar), so Wallet no longer offsets its first frame by an inset.
+ok('Wallet starts its scroller at the visible content origin',
+  !/contentOffset:/.test(wallet) && !/useScreenContentInsets/.test(wallet) &&
+    /contentInsetAdjustmentBehavior="never"/.test(source('src/components/ui/band-scaffold.tsx')) &&
+    /scrollProps=\{\{ showsVerticalScrollIndicator: false \}\}/.test(wallet));
 const balanceHeadline = walletOverview.match(
-  /<View style=\{\[styles\.money[\s\S]*?(?=\n\s*\{p\.activeSourceCount === 0)/,
+  /\{p\.knownBalanceCount > 0[\s\S]*?(?=\n\s*\{p\.activeSourceCount === 0)/,
 )?.[0] ?? '';
 ok('Wallet headline amount wraps instead of shrinking at accessibility sizes',
   balanceHeadline.length > 0 &&
     !/numberOfLines=\{1\}|adjustsFontSizeToFit|minimumFontScale/.test(balanceHeadline));
-ok('Cards uses a typed native header and wraps card identity at large text sizes',
-  /const cardsHeader: ScreenHeaderProps = \{/.test(cards) &&
-    /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?header=\{cardsHeader\}/.test(cards) &&
+ok('Cards uses a typed band nav row and wraps card identity at large text sizes',
+  /const cardsNav: BandNav = \{/.test(cards) &&
+    /<BandScaffold[\s\S]*?band="accounts"[\s\S]*?nav=\{cardsNav\}/.test(cards) &&
     /useLargeTextLayout\(\)/.test(cards) &&
     /numberOfLines=\{largeText \? undefined : 1\}/.test(cards));
 ok('Cards inactive disclosure is labelled, expanded, and preserves platform touch floors',
   /accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/.test(cards) &&
     /disclosureAction: \{[\s\S]*?minWidth: 44[\s\S]*?minHeight: 44/.test(cards) &&
     /androidDisclosureAction: \{ minWidth: 48, minHeight: 48 \}/.test(cards));
-ok('Card detail presents billable obligations before identity and payment history',
-  /\{data\.billable && \([\s\S]*?styles\.summary[\s\S]*?title=\{t\('statements'\)\}[\s\S]*?styles\.head[\s\S]*?title=\{t\('paymentsMade'\)\}/.test(cardDetail) &&
+// Design language E: the statement balance sits on the ink card under the
+// card's name, then the due line and Record a payment, then the history.
+ok('Card detail presents billable obligations on the card before payment history',
+  /\{data\.billable && \([\s\S]*?styles\.inkCard[\s\S]*?testID="card-statement-hero"[\s\S]*?styles\.summary[\s\S]*?\{t\('statements'\)\}[\s\S]*?\{t\('paymentsMade'\)\}/.test(cardDetail) &&
     !/type="subtitle" numberOfLines=\{1\}/.test(cardDetail));
 ok('Limit editor delegates keyboard scrolling to the shared labelled sheet and field',
-  /<BottomSheet/.test(limitSheet) && /<TextField[\s\S]*?label=\{t\('monthlyLimit'\)\}/.test(limitSheet) &&
+  /<BottomSheet/.test(limitSheet) && /<TextField[\s\S]*?label=\{state\.ledgerMoney \? bandWords\.exactLimit : t\('monthlyLimit'\)\}/.test(limitSheet) &&
     !/<Modal/.test(limitSheet) && !/<ScrollView/.test(limitSheet) && !/useKeyboardHeight/.test(limitSheet));
+
+/* ── Larger Text (docs/design/2026-09-25-large-text-audit.md) ─────────── */
+const money = source('src/components/ui/money.tsx');
+const bottomSheet = source('src/components/ui/bottom-sheet.tsx');
+const fontScaleHarness = source('src/lib/e2e-font-scale.ts');
+const rampCaps = Object.fromEntries([...(themedText.match(/const RAMP_CAP[\s\S]*?\};/)?.[0] ?? '')
+  .matchAll(/^\s+(\w+): ([\d.]+),$/gm)].map((m) => [m[1], Number(m[2])]));
+ok('Only display sizes carry a Larger Text cap, and each still grows at least 1.75x',
+  Object.keys(rampCaps).sort().join() === 'amount,display,heading,sheetAmount,subtitle,title' &&
+    Object.values(rampCaps).every((cap) => cap >= 1.75));
+ok('A caller-supplied maxFontSizeMultiplier wins over the ramp cap',
+  /rest\.maxFontSizeMultiplier !== undefined\s*\? rest\.maxFontSizeMultiplier : RAMP_CAP\[type\]/.test(themedText) &&
+    /\{\.\.\.rest\}\s*maxFontSizeMultiplier=\{maxFontSizeMultiplier\}/.test(themedText));
+ok('Money keeps hero figures whole: fitted from the width, never truncated, full amount labelled',
+  /useHeroFigureMultiplier\(amount, type, fitInset\)/.test(money) &&
+    /large && styles\.valueWhole/.test(money) && /valueWhole: \{ flexShrink: 0, maxWidth: '100%' \}/.test(money) &&
+    /accessibilityLabel=\{label\}/.test(money) && !/numberOfLines/.test(money));
+// Design language E: the selected tab shows its name in its own colour; the
+// others are icons. At the accessibility sizes every tab is an icon. Every
+// unlabelled tab can be held to show its name, and every tab is spoken.
+ok('Tab bar goes icon-only at the accessibility sizes and keeps every label for assistive tech',
+  /const iconOnly = useLargeTextLayout\(\)/.test(tabBar) && /accessibilityLabel=\{label\}/.test(tabBar) &&
+    /const showLabel = focused && !iconOnly;/.test(tabBar) && /\{showLabel && <ThemedText/.test(tabBar) &&
+    /onLongPress=\{!showLabel \?/.test(tabBar));
+ok('Sheets scroll their footer with the content at the accessibility sizes',
+  /const pinFooter = hasFooter && !largeText;/.test(bottomSheet) &&
+    /\{pinFooter \? null : footerNode\}\s*<\/ScrollView>/.test(bottomSheet));
+ok('The font-scale emulation only exists in the seeded web E2E export',
+  /Platform\.OS !== 'web' \|\| process\.env\.EXPO_PUBLIC_WAFRA_E2E_DEMO !== '1'\) return null/.test(fontScaleHarness) &&
+    /E2E_FONT_SCALE === null\s*\? composed/.test(themedText));
+ok('Transactions scroll the search controls with the list at the accessibility sizes',
+  /bandContent=\{onBand \? searchControls : undefined\}/.test(source('src/app/transactions.tsx')) &&
+    /const onBand = !largeText;/.test(source('src/app/transactions.tsx')) &&
+    /\{scrollingSearchControls\}/.test(source('src/app/transactions.tsx')));
+{
+  // Behaviour of the figure fit, from the compiled module when the suite has
+  // built it (npm test); skipped when this file is run on its own.
+  const built = path.join(__dirname, 'build/large-text-figure.js');
+  if (fs.existsSync(built)) {
+    const { figureFontMultiplier } = require(built);
+    ok('Figure fit is inert at the default text size', figureFontMultiplier(9, 36, 1.75, 327, 1) === undefined);
+    ok('Figure fit keeps the requested size when the figure fits', figureFontMultiplier(6, 36, 1.75, 327, 1.35) === 1.35);
+    ok('Figure fit never exceeds its ramp cap', figureFontMultiplier(4, 36, 1.75, 1000, 3.1) === 1.75);
+    const tight = figureFontMultiplier(9, 36, 1.75, 327, 3.1);
+    ok(`Figure fit shrinks a wide figure to its width (${tight?.toFixed(3)})`,
+      tight !== undefined && tight < 1.75 && 9 * 36 * 0.62 * tight <= 327.01);
+    ok('Figure fit never goes under 60% of the requested size',
+      Math.abs(figureFontMultiplier(16, 36, 1.75, 200, 3.1) - 1.75 * 0.6) < 1e-9 &&
+        figureFontMultiplier(16, 36, 1.75, 50, 1.2) === 1);
+  }
+}
 
 console.log(`\naccessibility-layout: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

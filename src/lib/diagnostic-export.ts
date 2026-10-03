@@ -1,13 +1,18 @@
 /** Explicit, user-owned diagnostic export. No I/O, uploads, credentials or mutations. */
 import { normalizeAlertReviewTray } from '@/lib/alert-review-tray';
-import { categorySupportsType } from '@/lib/categories';
+import { categorySupportsType, categoryLabel, isCustomCategoryId, isRegisteredCategory } from '@/lib/categories';
 import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 import { captureTraceEnabled, captureTraceSnapshot } from '@/lib/capture-trace';
 import { getMonthStartDay, monthKey } from '@/lib/format';
+import { getGrowthFunnelDiagnostics } from '@/lib/growth-funnel-diagnostics';
 import { createLaunchAlertSession } from '@/lib/launch-alert-parser';
 import { getLaunchMetrics } from '@/lib/launch-performance';
 import { countsInTotals, internalTransferIdsForState, isIncome, isUnassignedIncome, liveAccountIds } from '@/lib/ledger';
 import { nonPostingReason, PARSER_BACKFILL_VERSION, PARSER_VERSION } from '@/lib/sms-parser';
+import { getStabilityDiagnostics } from '@/lib/stability-diagnostics';
+import { localSemanticInboxShadowStatus } from '@/lib/local-semantic-inbox-shadow';
+import { localSemanticRuntimeStatus } from '@/lib/local-semantic-runtime';
+import { localSemanticShadowSnapshot } from '@/lib/local-semantic-shadow';
 import { isTransferDecision, isTransferEvidence, isTransferMatch, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { AppState, Transaction } from '@/lib/types';
 
@@ -32,8 +37,8 @@ function fields(value: object, names: string): JsonRow {
 }
 const dictionary = (input: Record<string, string>) => Object.fromEntries(Object.entries(input ?? {})
   .filter(([key, value]) => !['__proto__', 'constructor', 'prototype'].includes(key) && typeof value === 'string'));
-const ACCOUNT_FIELDS = 'id name kind openingFils color last4 bankName cardType snapshotFils snapshotKind snapshotTs creditLimitFils archived renewedFrom';
-const TX_FIELDS = 'id type amountFils originalAmountMinor originalCurrency fxRate fxRateDate fxSource category accountId title note date ts source smsKey viaPush cardPaymentSide paymentFlowSide billIdentity paymentInstrumentSource cashOutDate cashOutAccountId isTransfer userEdited titleEdited';
+const ACCOUNT_FIELDS = 'id name kind openingFils color last4 bankName cardType snapshotFils snapshotKind snapshotTs manualSnapshotTs creditLimitFils archived renewedFrom';
+const TX_FIELDS = 'id type amountFils originalAmountMinor originalMinorUnits originalExponent originalCurrency fxRate fxRateDate fxSource category accountId title note date ts source smsKey viaPush cardPaymentSide paymentFlowSide billIdentity paymentInstrumentSource cashOutDate cashOutAccountId isTransfer userEdited titleEdited';
 
 export const assertDiagnosticContinues = (shouldContinue: () => boolean): void => {
   if (!shouldContinue()) throw new Error('diagnostic_cancelled');
@@ -90,6 +95,10 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     else if (!counted && (tx.isTransfer || internal.has(tx.id))) flags.push('transfer-excluded');
     if (!Number.isSafeInteger(tx.amountFils) || tx.amountFils <= 0) flags.push('invalid-amount');
     if (!categorySupportsType(tx.category, tx.type)) flags.push('category-direction-conflict');
+    if (isCustomCategoryId(tx.category)) {
+      row.categoryLabel = categoryLabel(tx.category, 'en', state.customCategories);
+      if (!isRegisteredCategory(tx.category, state.customCategories)) flags.push('missing-custom-category');
+    }
     if (tx.smsKey && (sourceCounts.get(canonicalCaptureSourceKey(tx.smsKey, tx.ts)) ?? 0) > 1) flags.push('repeated-source-identity');
     if (tx.splits && tx.splits.reduce((sum, part) => sum + part.amountFils, 0) !== tx.amountFils) flags.push('split-total-mismatch');
     const key = tx.title.trim().toLowerCase();
@@ -112,7 +121,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
         reparse = p ? fields(p, 'kind type amountFils currency merchant categoryGuess categoryDeliberate transferHint date') : { outcome: 'not-parsed' };
         reparse.senderAvailable = false;
         if (!p) flags.push('current-parser-refuses-retained-text');
-        if (p && (p.type !== tx.type || p.amountFils !== tx.amountFils || p.categoryGuess !== tx.category)) flags.push('current-parser-disagrees');
+        if (p && (p.type !== tx.type || p.amountFils !== tx.amountFils || (!isCustomCategoryId(tx.category) && p.categoryGuess !== tx.category))) flags.push('current-parser-disagrees');
         if (p && p.merchant !== tx.title) flags.push('current-parser-name-differs');
         if (options.includeRetainedMessages) { row.raw = tx.raw; retainedMessages++; }
       }
@@ -136,6 +145,11 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
   }
   assertDiagnosticContinues(active);
   options.onProgress?.(state.transactions.length, state.transactions.length);
+  const [growthFunnel, stability] = await Promise.all([
+    getGrowthFunnelDiagnostics(now).catch(() => null),
+    getStabilityDiagnostics(now).catch(() => null),
+  ]);
+  assertDiagnosticContinues(active);
   return {
     schema: 'wafra-diagnostics-v1', exportedAt: new Date(now).toISOString(),
     build: {
@@ -161,6 +175,7 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
       cursor: state.historyImport.cursor ? fields(state.historyImport.cursor, 'beforeDateMs beforeId') : null,
     } : null,
     accounts: state.accounts.map(account => fields(account, ACCOUNT_FIELDS)), transactions,
+    customCategories: (state.customCategories ?? []).map(row => fields(row, 'id name type')),
     budgets: state.budgets.map(row => fields(row, 'category limitFils')),
     bills: state.bills.map(row => ({ ...fields(row, 'id title category importIdentity amountFils dueDay yearlyOnISO accountId autoDetected'), paidMonths: row.paidMonths.filter(v => typeof v === 'string') })),
     cardDues: state.cardDues.map(row => fields(row, 'id accountId totalDueFils minDueFils minDueEstimated paidFils dueDate settledAt')),
@@ -172,6 +187,18 @@ export async function buildDiagnosticExport(state: AppState, build: DiagnosticBu
     merchants: [...merchantMap.values()].map(item => ({ ...item, categories: [...item.categories] })),
     monthlyTotals: [...monthly.entries()].map(([month, values]) => ({ month, ...values, netMinor: values.incomeMinor - values.spendingMinor })),
     issues,
+    operationalDiagnostics: {
+      // Both sources contain only closed event labels, timing/counter data and
+      // source-code crash frames. They are local until this user-owned export
+      // is explicitly shared by the user.
+      growthFunnel,
+      stability,
+      localSemantic: {
+        runtime: localSemanticRuntimeStatus(),
+        shadow: localSemanticShadowSnapshot(),
+        inboxPass: localSemanticInboxShadowStatus(),
+      },
+    },
     // Only in an internal capture-trace build: launch phases and capture page
     // timings as phase names, counts and milliseconds. No message content,
     // identifier or date is recorded by either sink.

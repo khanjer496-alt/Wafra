@@ -3,47 +3,136 @@ import { monthKey, shiftMonthKey } from '@/lib/format';
 import { countsInTotals, isMoneyMovementOnly } from '@/lib/ledger';
 import type { Period } from '@/lib/period';
 import { amountInCategories, touchesCategories } from '@/lib/splits';
-import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
+import { transactionSource, type TransactionSourceKind } from '@/lib/transaction-source';
+import { transactionPresentation } from '@/lib/transaction-presentation';
+import type { CategoryId, CustomCategory, Transaction, TransactionType } from '@/lib/types';
 
 export type DatePreset = 'selected' | 'all' | 'month' | 'lastMonth' | '3months' | 'custom';
 export type SortMode = 'newest' | 'oldest' | 'largest';
+/** The Transactions type chips beyond plain direction: transfers, and rows needing a check. */
+export type TransactionKind = 'transfers' | 'review';
 export interface TransactionFilters {
   type: TransactionType | null; accountId: string | null; categories: Set<CategoryId>;
   datePreset: DatePreset; dateFrom: string | null; dateTo: string | null;
   minFils: number | null; sort: SortMode;
+  /** Inclusive upper bound; null or absent = no maximum. */
+  maxFils?: number | null;
+  /** Empty or absent = every source. */
+  sources?: ReadonlySet<TransactionSourceKind>;
+  kind?: TransactionKind | null;
 }
-interface IndexedTransaction { row: Transaction; merchantKey: string; search: string; month: string }
+interface IndexedTransaction { row: Transaction; merchantKey: string; search: string | undefined; month: string }
 type TransactionFilterOptions = {
   query: string;
   merchant: string | null;
   smsOnly: boolean;
+  /** Only rows auto-added from an unverified alert format, still unchecked. */
+  bestEffortOnly?: boolean;
   currentKey: string;
   period: Period;
   live: Set<string>;
   internal: Set<string>;
   corroborating: Set<string>;
+  /** Confirmed transfer records have a separate browsing surface. Their
+   * existing financial contribution still belongs in the matching total. */
+  separateTransferIds?: ReadonlySet<string>;
+  /** Every row that is or may be a transfer (the Transfers chip). */
+  transferIds?: ReadonlySet<string>;
+  /** Rows waiting for the person: auto-added checks, transfer review, unassigned income (Needs review). */
+  reviewIds?: ReadonlySet<string>;
+  /** Ledger minor-unit exponent, for matching a typed amount. Defaults to 2. */
+  amountExponent?: number;
+  /** Separated records the reconciler queued for an ownership decision. */
+  reviewTransferIds?: ReadonlySet<string>;
 };
+
+const ARABIC_DIGITS = /[\u0660-\u0669\u06f0-\u06f9]/g;
+/**
+ * A query that is only a number ("45", "1,200", "٤٥.٥") matches amounts as
+ * well as names. Group marks are dropped; Arabic-Indic digits read as Latin.
+ * Null for anything else.
+ */
+export function numericAmountQuery(query: string): string | null {
+  const normalized = query.trim()
+    .replace(ARABIC_DIGITS, (digit) => String((digit.charCodeAt(0) & 0xf)))
+    .replace(/[\u066b]/g, '.')
+    .replace(/[\s,\u066c]/g, '');
+  return /^\d+(?:\.\d*)?$/.test(normalized) ? normalized : null;
+}
+
+/**
+ * A whole number matches that whole amount ("45" finds 45.00 and 45.62, not
+ * 450); a typed decimal matches as a prefix ("45.6" finds 45.60–45.69).
+ */
+export function amountMatches(amountFils: number, numeric: string, exponent = 2): boolean {
+  const text = amountSearchText(amountFils, exponent);
+  if (!numeric.includes('.')) return text.split('.')[0] === numeric.replace(/^0+(?=\d)/, '');
+  const [whole, fraction = ''] = numeric.split('.');
+  const [amountWhole, amountFraction = ''] = text.split('.');
+  return amountWhole === whole.replace(/^0+(?=\d)/, '') && amountFraction.startsWith(fraction);
+}
+
+/** The amount as typed digits at the ledger exponent: 4562 → "45.62". */
+export function amountSearchText(amountFils: number, exponent = 2): string {
+  const scale = 10 ** exponent;
+  const whole = Math.trunc(amountFils / scale);
+  const fraction = exponent > 0 ? String(Math.abs(amountFils) % scale).padStart(exponent, '0') : '';
+  return fraction ? `${whole}.${fraction}` : String(whole);
+}
 type TransactionFilterProjection = {
   filtered: Transaction[];
   totalShown: number;
   excluded: { transfers: number; movements: number; hidden: number };
+  separatedTransfers: { count: number; reviewCount: number; incomeFils: number; expenseFils: number };
   days: { date: string; totalFils: number; data: Transaction[] }[];
 };
 
 /** Owned by one mounted screen. Rebuild when ledger, language or salary day
  * changes; never cache personal strings globally or modify the source rows. */
-export function createTransactionFilterIndex(rows: readonly Transaction[], language: string) {
+export function createTransactionFilterIndex(rows: readonly Transaction[], language: string,
+  /** Account id → searchable name (name, bank, last four). Optional. */
+  accountNames?: ReadonlyMap<string, string>,
+  customCategories: readonly CustomCategory[] = []) {
   const labels = new Map<CategoryId, string>();
-  const entries: IndexedTransaction[] = rows.map(row => {
-    let category = labels.get(row.category);
-    if (category === undefined) {
-      category = getCategory(row.category).label.toLowerCase() + '\u0000' +
-        categoryLabel(row.category, language === 'ar' ? 'ar' : 'en').toLowerCase();
-      labels.set(row.category, category);
-    }
+  // Only this mounted index owns these strings. Browsing does not need search
+  // labels, and a date/account filter should not format years of excluded rows.
+  // Build search text on first use, then reuse it across keystrokes.
+  const displays = new Map<string, Map<string, string>>();
+  const searchText = (row: Transaction): string => {
+    const category = [...new Set([row.category, ...(row.splits ?? []).map(part => part.category)])].map(id => {
+      let label = labels.get(id);
+      if (label === undefined) {
+        label = getCategory(id, customCategories).label.toLowerCase() + '\u0000' +
+          categoryLabel(id, language === 'ar' ? 'ar' : 'en', customCategories).toLowerCase();
+        labels.set(id, label);
+      }
+      return label;
+    }).join('\u0000');
     const title = row.title.toLowerCase();
-    return { row, merchantKey: title.trim(), search: title + '\u0000' + category, month: monthKey(row.date) };
-  });
+    const cacheable = row.transferEvidence === undefined && row.transferDecision === undefined;
+    // Display meaning distinguishes salary/business and unclassified income;
+    // ordinary spending categories only affect the separately indexed label.
+    const displayCategory = row.category === 'salary' || row.category === 'business'
+      ? row.category : row.type === 'income' && row.category === 'other' ? 'other' : '';
+    const key = cacheable ? [row.type, displayCategory, row.source, !!row.smsKey,
+      row.captureSource, row.isTransfer === true, row.cardPaymentSide, row.paymentFlowSide,
+      row.userEdited === true, row.titleEdited === true].join('|') : '';
+    const variants = cacheable ? displays.get(row.title) : undefined;
+    let display = variants?.get(key);
+    if (display === undefined) {
+      const presentation = transactionPresentation(row, language);
+      display = [presentation.title, presentation.tag].filter(Boolean).join(' ').toLowerCase();
+      if (cacheable) {
+        if (variants) variants.set(key, display);
+        else displays.set(row.title, new Map([[key, display]]));
+      }
+    }
+    const account = accountNames?.get(row.accountId);
+    return title + '\u0000' + display + '\u0000' + category + (account ? '\u0000' + account.toLowerCase() : '');
+  };
+  const entries: IndexedTransaction[] = rows.map(row => ({
+    row, merchantKey: row.title.toLowerCase().trim(), search: undefined, month: monthKey(row.date),
+  }));
   // Sorting changes no filter result and is needed at most once per ledger.
   // The expensive Date parse is computed once per row, not per comparison.
   const ordered = new Map<SortMode, IndexedTransaction[]>([['newest', entries]]);
@@ -62,6 +151,9 @@ export function createTransactionFilterIndex(rows: readonly Transaction[], langu
   return {
     size: rows.length,
     newestDateOrdered,
+    search(item: IndexedTransaction): string {
+      return item.search ??= searchText(item.row);
+    },
     ordered(sort: SortMode) {
       const prior = ordered.get(sort);
       if (prior) return prior;
@@ -92,6 +184,10 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
   const cached = index.cached(filters, options);
   if (cached) return cached;
   const query = options.query.trim().toLowerCase(); const merchant = options.merchant?.trim().toLowerCase();
+  const numeric = numericAmountQuery(query);
+  const sources = filters.sources && filters.sources.size > 0 ? filters.sources : null;
+  const maxFils = filters.maxFils ?? null;
+  const kind = filters.kind ?? null;
   const last = shiftMonthKey(options.currentKey, -1); const three = shiftMonthKey(options.currentKey, -2);
   let dateFrom: string | null = null; let dateTo: string | null = null;
   let monthFrom: string | null = null; let monthTo: string | null = null;
@@ -108,10 +204,12 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
   else if (filters.datePreset === 'custom') { dateFrom = filters.dateFrom; dateTo = filters.dateTo; }
   const filtered: Transaction[] = []; const byDay = new Map<string, { date: string; totalFils: number; data: Transaction[] }>();
   let totalShown = 0; let transfers = 0; let movements = 0; let hidden = 0;
+  const separatedTransfers = { count: 0, reviewCount: 0, incomeFils: 0, expenseFils: 0 };
   const ordered = index.ordered(filters.sort);
   const ascending = filters.sort === 'oldest';
   const canStopAtDateBoundary = ascending || (filters.sort === 'newest' && index.newestDateOrdered);
-  for (const { row, merchantKey, search, month } of ordered) {
+  for (const item of ordered) {
+    const { row, month } = item;
     // Date filtering is normally the narrowest filter on a large ledger. The
     // source ledger is newest-first and the cached oldest view is explicitly
     // sorted, so once we cross the requested boundary there is no reason to
@@ -130,30 +228,46 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
       continue;
     }
     if (options.smsOnly && row.source !== 'sms') continue;
-    if (merchant && merchant !== merchantKey) continue;
+    if (options.bestEffortOnly && !row.bestEffort) continue;
+    if (merchant && merchant !== item.merchantKey) continue;
     if (filters.type && row.type !== filters.type) continue;
     if (filters.accountId && row.accountId !== filters.accountId) continue;
     if (filters.categories.size > 0 && !touchesCategories(row, filters.categories)) continue;
     if (filters.minFils && row.amountFils < filters.minFils) continue;
-    if (query && !search.includes(query)) continue;
+    if (maxFils !== null && row.amountFils > maxFils) continue;
+    if (kind === 'transfers' && !options.transferIds?.has(row.id)) continue;
+    if (kind === 'review' && !options.reviewIds?.has(row.id)) continue;
+    if (sources && !sources.has(transactionSource(row))) continue;
+    if (query && !index.search(item).includes(query) && !(numeric !== null && amountMatches(row.amountFils, numeric, options.amountExponent))) continue;
     if (options.corroborating.has(row.id)) continue;
-    filtered.push(row);
     const counts = countsInTotals(row, options.live, options.internal);
+    const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
+    const contribution = row.type === 'expense' ? -part : part;
+    totalShown += contribution;
+    // The Transfers chip is the one place confirmed transfers are listed here.
+    // A row on a hidden (archived) account stays in this list and in the
+    // hidden count below, as it does everywhere else; only rows that belong to
+    // a live account or already count in totals move to Transfers.
+    if (kind !== 'transfers' && options.separateTransferIds?.has(row.id) && (counts || options.live.has(row.accountId))) {
+      separatedTransfers.count++;
+      if (options.reviewTransferIds?.has(row.id)) separatedTransfers.reviewCount++;
+      if (row.type === 'income') separatedTransfers.incomeFils += part;
+      else separatedTransfers.expenseFils += part;
+      continue;
+    }
+    filtered.push(row);
     if (!counts) {
       if (!options.live.has(row.accountId)) hidden++;
       else if (isMoneyMovementOnly(row)) movements++;
       else transfers++;
     }
-    const part = !counts ? 0 : filters.categories.size > 0 ? amountInCategories(row, filters.categories) : row.amountFils;
-    const contribution = row.type === 'expense' ? -part : part;
-    totalShown += contribution;
     if (filters.sort !== 'largest') {
       let day = byDay.get(row.date);
       if (!day) { day = { date: row.date, totalFils: 0, data: [] }; byDay.set(row.date, day); }
       day.data.push(row); day.totalFils += contribution;
     }
   }
-  const result = { filtered, totalShown, excluded: { transfers, movements, hidden }, days: [...byDay.values()] };
+  const result = { filtered, totalShown, excluded: { transfers, movements, hidden }, separatedTransfers, days: [...byDay.values()] };
   index.remember(filters, options, result);
   return result;
 }

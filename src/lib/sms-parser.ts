@@ -7,8 +7,12 @@ import {
   keywordsForMarket,
   MARKETS,
 } from '@/lib/markets';
-import type { CategoryId, TransactionType } from '@/lib/types';
+import type { BestEffortMarker, CategoryId, TransactionType } from '@/lib/types';
 import { localMoneyPrefixPattern, malformedLocalMoneyTokens } from '@/lib/bank-amount-tokens';
+import { convertMinorUnits, currencyExponent, originalMoneyFields, type MinorExponent } from '@/lib/fx';
+import { CURRENCY_MINOR_UNITS } from '@/lib/currency-metadata';
+import { cachedReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
+import { isBnplProviderSource } from '@/lib/bnpl-providers';
 
 /* ────────────────────────── Arabic normalisation ──────────────────────────
  *
@@ -384,8 +388,52 @@ export interface ParsedCard {
  * that date. Expose the previous interpretation for exact-source repair during
  * re-import; retain generic DD/MM and all obligation deadlines. No automatic
  * Android history reread is requested; PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 52: any payment whose payee is a BNPL provider (Tabby, Tamara, Postpay,
+ * Cashew, incl. legal entity and domain descriptors) — card charge, direct
+ * debit or bank transfer — is Shopping, and a BNPL name elsewhere in the body
+ * (a BNPL provider's own card footer) no longer files the named merchant as
+ * Loan. Bank loans and finance houses keep Loan.
+ * Statement announcements without a deadline, Arabic pending purchases,
+ * alerts stating two separate movements and alerts offering two candidate
+ * amounts no longer post. Future captures only; heal.ts never re-files a
+ * non-Other category, so PARSER_BACKFILL_VERSION remains 49.
+ * 53: a message whose sender is a BNPL provider (Tabby, Tamara, Postpay,
+ * Cashew — isBnplProviderSource) never parses: the bank's card charge to the
+ * provider is the one real transaction, and the provider's restatement under
+ * the shop's name double-counted it. Future captures only; rows an older
+ * version already posted from a provider source are not deleted by a reread,
+ * so PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 54: salary credits post as Salary income. FAB's field-list credit with a
+ * salary header ("Salary Credit / Account XXXX0002 / AED … / DD/MM/YYYY /
+ * Balance …") is Salary instead of an uncategorised "Account credit" parked
+ * in Review, and the unlabelled date field after the amount is its posting
+ * date. "Payroll credit: AED …" and "A credit transaction of AED …" are
+ * income, not dropped or booked as expenses. A date directly after the amount
+ * no longer makes a flattened field list's amount token look malformed.
+ * Future captures only; PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 55: Emirates NBD's card due reminder ("Total Amt - AED …; Min Amt - AED …")
+ * is a card statement due with its total, minimum and deadline. The dash
+ * label matched neither figure, so the reminder was refused and the due never
+ * reached Bills. A field list's posting-date field may state a two-digit
+ * year (FAB sends "26/09/26" as often as "26/09/2026"); it was left undated
+ * and filed on the day it was read. Future captures plus the bounded recent re-read;
+ * PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 56: bank-channel words such as Personal Internet Banking no longer classify
+ * account debits as Telecom. Explicit completed transfers through that channel
+ * retain transfer semantics without inventing own-account ownership. Future
+ * captures and source-backed rereads only; missing notification text is never
+ * reconstructed from amounts. PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 57: ADCB's "Total due to avoid fin. charges" is a statement total;
+ * "Pay min. AED..." supplies its minimum. Neither the minimum nor the late
+ * fee can replace an unreadable total. Future captures plus the bounded recent reread;
+ * PARSER_BACKFILL_VERSION remains 49.
  */
-export const PARSER_VERSION = 51;
+export const PARSER_VERSION = 57;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -410,14 +458,28 @@ export interface ParsedSms {
   amountFils: number;
   /** ISO 4217 currency of `amountFils` (the active market's ledger currency). */
   currency: string;
-  /** Original foreign amount, when the alert names one (two-decimal minor units). */
+  /** Set only by the unproven-format policy (best-effort-autopost.ts). */
+  bestEffort?: BestEffortMarker;
+  /**
+   * Original foreign amount as legacy two-decimal minor units (major × 100),
+   * present only when that representation is exact. See fx.ts originalMoneyOf.
+   */
   originalAmountMinor?: number;
-  /** ISO 4217 currency code for `originalAmountMinor`. */
+  /** ISO 4217 currency code of the original amount. */
   originalCurrency?: string;
+  /** Exact original amount in the original currency's own ISO exponent. */
+  originalMinorUnits?: number;
+  /** ISO exponent of `originalMinorUnits` (JPY 0, USD 2, KWD 3). */
+  originalExponent?: 0 | 2 | 3;
   /** Local-currency units per one original-currency unit. */
   fxRate?: number;
-  /** Whether the local value came from the bank or the offline parser table. */
-  fxSource?: 'bank' | 'fallback';
+  /** Effective date of a dated reference rate (`fxSource: 'reference'`). */
+  fxRateDate?: string;
+  /**
+   * `bank`: the alert stated the charged local amount; `fallback`: the offline
+   * parser table; `reference`: a dated provider rate applied after parsing.
+   */
+  fxSource?: 'bank' | 'fallback' | 'reference';
   merchant: string;
   /** ISO date if the message contained one, otherwise null (caller defaults to today). */
   date: string | null;
@@ -576,16 +638,26 @@ export function bankProfileForSender(sender?: string): BankProfile | null {
   return { name: bank.name, ...(BANK_PROFILES[bank.name] ?? { brand: /x^/ }) };
 }
 
+// BNPL provider identity lives in its own pure registry; re-exported so the
+// parser's callers and tests reach it from here too.
+export { isBnplProviderSource };
+
 /** Optional, per-call context. Everything here is additive: omit it and nothing changes. */
 export interface ParseOptions {
   /**
    * SMS sender ID ("ADIB", "RAKBANK", "Mashreq") or the notification package
-   * name a bank app posted under ("ae.wio.personal"). Used only to
-   * disambiguate — never to decide that a message is or is not a transaction.
+   * name a bank app posted under ("ae.wio.personal"). Used to disambiguate,
+   * with ONE exception that decides: a BNPL provider source
+   * (`isBnplProviderSource`) is never a transaction — its bank's card alert is.
    */
   sender?: string;
   /** Original source received timestamp in milliseconds, never the import time. */
   observedAt?: number;
+  /**
+   * Network-free dated rate lookup for a currency outside the offline table.
+   * Defaults to rates already known on this device (fx-rates memory cache).
+   */
+  fxLookup?: (base: string, quote: string, date: string) => import('@/lib/fx').FxQuote | null;
 }
 
 /**
@@ -619,11 +691,28 @@ const AR_CREDIT_WORDS =
 // So a bare "credit" now has to be doing a MONEY job: credit OF, credit TO,
 // credit advice, credit AED. The verb "credited" is unchanged and still counts
 // on its own, which is how every real credit alert in this corpus states it.
+//
+// "Payroll credit" is the same money job as "salary" (already listed): with
+// only the lookahead form, "Payroll credit: AED 6,250.00 to account 1234"
+// named no direction at all and was dropped, or — with a balance quoted —
+// booked as an EXPENSE. Anchored to the noun pair, never bare "payroll", and
+// never before a product noun: a "Payroll (Credit) Card" purchase must stay
+// spending.
 const CREDIT_WORDS = new RegExp(
   `credited|\\bcredit(?=\\s+(?:of|to|for|amount|advice|note|entry|txn|transaction|aed|dhs|sar)\\b)` +
+    `|\\bpayroll\\s+credit(?:ed)?\\b(?!\\s+(?:card|limit|line|facility))` +
     `|received|salary|refund(?:ed)?|deposit(?:ed)?|transferred to your|${AR_CREDIT_WORDS}`,
   'i',
 );
+/**
+ * "credit transaction of/amount" — see creditTransactionOnly in parseSmsInner.
+ * The /g copy exists only for blank(); .test() uses the non-global one.
+ * The purchase-evidence list is what keeps a CARD's "Credit transaction of
+ * AED 350.00 at NOON.COM on card …" a purchase.
+ */
+const CREDIT_TRANSACTION_RE = /\bcredit\s{1,3}transaction\s+(?:of|amount)\b/i;
+const CREDIT_TRANSACTION_ALL_RE = /\bcredit\s{1,3}transaction\s+(?:of|amount)\b/gi;
+const CREDIT_TRANSACTION_PURCHASE_RE = /\b(?:card|visa|mastercard|merchant|pos)\b|\bat\s+[^\d\s]/i;
 /**
  * Direction settled by the CLAUSE that says WHERE the money went. These beat
  * the word lists outright: "Your salary of AED 10,000 has been paid into your
@@ -776,6 +865,9 @@ const STATEMENT_RE =
   // ends "Pls refer stmt for exact amt", and a bare stem there would turn
   // every one of those purchases into a statement.
   /statement|\blast\s+stmt\b|\bstmt\s+(?:date|bal(?:ance)?)\b|total\s+(?:amount\s+)?due|total\s+billed\s+am(?:oun)?t|min(?:imum)?\s+(?:payment|amount\s+due|due)\b|\bmin\s+amt\b|outstanding\s+(?:amount|balance)\s+of|كشف الحساب|كشف حساب|اجمالي المبلغ المستحق|المبلغ الاجمالي المستحق/i;
+/** "Your statement is ready / has been generated" — the announcement itself. */
+const STATEMENT_ANNOUNCEMENT_RE =
+  /\bstatement\b(?:[^.\n]|\.\d){0,60}?\b(?:is\s+(?:now\s+)?(?:ready|available)|has\s+been\s+(?:generated|issued|prepared|sent|emailed|dispatched))\b/i;
 /** Purchase-style verbs that disqualify the statement branch (NOT "paid"). */
 const STATEMENT_TXN_BLOCK_RE = /purchase|was used|charged|withdraw|debited|spent/i;
 
@@ -1544,6 +1636,47 @@ const SETTLED_TENSE_RE =
  */
 const SETTLED_MOVEMENT_RE =
   /\b(?:has|have|had)\s+been\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|made|used|reversed|refunded|received|withdrawn|transferred|spent|blocked)\b|\bwas\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|spent|used|made|posted|processed|withdrawn|transferred|reversed|refunded)\b|\bwere\s+(?:debited|credited|charged|deducted)\b|\b(?:spent|debited|deducted|withdrawn|charged|purchased)\s+(?:at|from|on|via|using|with)\b|\b(?:refunded|reversed|credited|transferred|remitted|deposited)\s+(?:back\s+)?(?:to|from|into)\b|\b(?:transaction|payment|transfer|purchase|withdrawal)\b[^.\n]{0,80}\b(?:completed|successful|succeeded|posted|processed)\b|تم خصم|تم الخصم|تم شراء|تم سحب|تم دفع|تم الدفع|تم استرداد/i;
+/**
+ * ONE ALERT, TWO MOVEMENTS. "Purchase posted: AED 40 at X. A separate refund
+ * of AED 15 from Y was also credited" is two ledger entries; a row can hold
+ * one, and posting the first silently drops the second. Only an explicit
+ * "separate <movement>" stated as ALREADY DONE counts: two figures alone are
+ * the ordinary amount-plus-balance alert, and "the fee will be charged as a
+ * separate transaction" is a footer about the future, not a second movement.
+ * The SEPARATE clause must state its own figure, and another figure must
+ * remain outside it: "a separate transfer was made earlier today" beside an
+ * available balance is a note about an earlier alert, not a second movement.
+ */
+const SEPARATE_MOVEMENT_RE = new RegExp(
+  String.raw`\bseparate\s+(?:outgoing\s+|incoming\s+)?(?:refund|purchase|payment|transfer|debit|credit|transaction|withdrawal|charge|deposit|remittance)\b(?:[^.\n]|\.\d){0,80}?\b(?:was|were|has\s+been|have\s+been)\s+(?:also\s+)?(?:credited|debited|posted|charged|refunded|made|processed|completed|executed|transferred)\b` +
+    // "وتم تنفيذ تحويل صادر منفصل بمبلغ AED 250" — (و)تم (done), never
+    // سيتم (will be). The trailing بمبلغ figure belongs to the clause.
+    `|(?<![${AR_LETTER}])و?تم\\s+(?:[${AR_LETTER}]+\\s+){0,2}(?:تحويل|حواله|عمليه|شراء|سحب|دفعه|خصم|ايداع)(?:\\s+[${AR_LETTER}]+){0,2}\\s+منفصله?(?![${AR_LETTER}])` +
+    `(?:\\s+(?:بمبلغ|بقيمه)\\s+(?:[A-Z]{3}\\s*)?\\d[\\d,]*(?:\\.\\d+)?(?:\\s*(?:[A-Z]{3}|درهم|ريال))?)?`,
+  'i',
+);
+/**
+ * An alert whose AMOUNT field offers two candidates in the SAME currency for
+ * one movement, or which says its corrected/revised amount is unconfirmed or
+ * pending, does not establish what was charged. "USD 27.23 or AED 100.00" is
+ * one charge in two currencies; a prize "AED X or AED Y" has no amount label.
+ */
+const AMBIGUOUS_AMOUNT_RE =
+  /\bamount\s*:?\s*(AED|SAR|USD|EUR|GBP|QAR|KWD|BHD|OMR|Dhs?)\s*\d[\d,]*(?:\.\d+)?\s+or\s+\1\s*\d|\b(?:corrected|amended|revised)\s+(?:transaction\s+)?amount\b(?:[^.\n]|\.\d){0,40}?\b(?:not\s+(?:yet\s+)?(?:been\s+)?confirmed|unconfirmed|to\s+be\s+confirmed|pending|awaiting)\b/i;
+/** A money figure. Non-global on purpose: it is only ever `.test()`ed. */
+const MONEY_FIGURE_RE = /\b(?:[A-Z]{3}|Dhs?)\s*\d|\d(?:[\d,]*\.?\d*)\s*(?:[A-Z]{3}\b|Dhs?\b|درهم|ريال)/;
+/** One movement stated as done in Arabic — a posted clause, not a notice. */
+const AR_SETTLED_VERB_RE = new RegExp(
+  // Definite forms too: تم الشراء / تم السحب / تم التحويل / تم السداد. And a
+  // body that OPENS with the debit noun and its figure ("الخصم 100.00 درهم")
+  // is the bank stating the debit, not a status.
+  `(?<![${AR_LETTER}])و?تم\\s+(?:ال)?(?:خصم|شراء|سحب|دفع|تحويل|سداد)|^\\s*(?:ال)?خصم\\s+(?:مبلغ\\s+)?(?:[A-Z]{3}\\s*)?\\d`,
+);
+/**
+ * "تمت" (it was completed). Vetoes only the قيد/معلقة idioms: an explicit
+ * "لم يتم الخصم بعد" after it still says the debit has not happened.
+ */
+const AR_COMPLETED_RE = new RegExp(`(?<![${AR_LETTER}])و?تمت(?![${AR_LETTER}])`);
 const STRONG_SENDERLESS_POSTING_RE =
   /\b(?:transaction|txn|payment|purchase|withdrawal|transfer|debit|credit)\b(?:[^.\n]|\.\d){0,120}?\b(?:amount\s+(?:of|is)|for|of)?\s*(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,120}?\b(?:has\s+been|was|is)\s+(?:successfully\s+)?(?:paid|completed|processed|posted|debited|credited|charged|refunded|reversed|successful|succeeded)\b|\b(?:[A-Z]{3}|Dhs?)\s*[\d,]+(?:\.\d{1,3})?(?:[^.\n]|\.\d){0,96}?\b(?:has\s+been|was)\s+(?:successfully\s+)?(?:debited|deducted|credited|charged|paid|posted|processed|refunded|reversed|received|withdrawn|transferred)\b/i;
 /**
@@ -1561,6 +1694,41 @@ const RETURNED_UNPAID_RE =
  */
 const PENDING_PROCESSING_RE =
   /\bquick\s+cash\b(?:[^.\n]|\.\d){0,160}?\bwill\s+be\s+processed\s+within\s+\d{1,3}\s+working\s+days?\b|\bhas\s+been\s+deposited\b(?:[^.\n]|\.\d){0,100}?\bsubject\s+to\s+(?:being\s+)?clear(?:ed|ance)\b|\b(?:cheque|check|chq)\b[^\n]{0,180}?\bsent\s+for\s+clearing\b|\b(?:cheque|check|chq)\b[\s\S]{0,220}?\bdeposit\s+will\s+be\s+confirmed\s+after\s+(?:successful\s+)?(?:cheque\s+)?clearing\b|\b(?:transaction|payment|transfer|purchase|withdrawal|fee|charge|debit|credit)\b(?:[^.\n]|\.\d){0,60}?\b(?:is|remains?)\s+(?:still\s+)?pending(?:\s+(?:processing|clearance|completion|debit|credit))?\b|\bpending\s+(?:debit|credit|posting|processing|clearance|completion)\b/i;
+/**
+ * The Arabic "still pending" statements, post-fold. قيد alone is a POSTING
+ * verb ("تم قيد مبلغ" — an amount was entered), so it only counts in the fixed
+ * idioms قيد الانتظار / قيد المعالجة / قيد التنفيذ (awaiting, being processed,
+ * being executed). "لم يتم ... بعد" is "has not yet been" debited/paid, and
+ * معلقة only when it qualifies the transaction noun itself.
+ *
+ * Every alternative must QUALIFY THE MOVEMENT inside one clause: the idiom is
+ * also how a refund request, a transfer's onward status, or an app footer
+ * ("الطلبات قيد التنفيذ") is described beside a debit that did happen. And the
+ * caller skips it outright when a settled Arabic verb (AR_SETTLED_VERB_RE) is
+ * present, because this is shared evidence that can delete a stored row.
+ * The clause class admits "180.00" / "1,000" so a figure does not end it.
+ */
+// One clause AFTER the transaction noun. It ends at punctuation (a figure's
+// "." or "," does not count), at a "و" opening a new clause, and at any other
+// noun the idiom could be describing instead: a request, an order, a
+// shipment/delivery, a refund, a deposit, a bill payment, the biller or bank.
+const AR_OTHER_SUBJECT = `(?:ال)?(?:طلب|طلبات|شحن|شحنه|توصيل|استرداد|ايداع|سداد|مفوتر|بنك)`;
+const AR_CLAUSE =
+  `(?:(?!\\sو[${AR_LETTER}])(?!(?<![${AR_LETTER}])${AR_OTHER_SUBJECT})(?:[^.\\n,;]|[.,]\\d))`;
+const AR_TXN_NOUN = `(?<![${AR_LETTER}])(?:ال)?(?:عمليه|معامله|حركه|شراء|خصم)(?![${AR_LETTER}])`;
+/** The قيد/معلقة idioms, qualifying the transaction noun itself. */
+const AR_PENDING_IDIOM_RE = new RegExp(
+  `${AR_TXN_NOUN}${AR_CLAUSE}{0,60}?\\s*(?<![${AR_LETTER}])قيد\\s+(?:الانتظار|المعالجه|التنفيذ)(?![${AR_LETTER}])` +
+    `|(?<![${AR_LETTER}])(?:عمليه|معامله|حركه)(?:\\s+[${AR_LETTER}]+){0,2}\\s+معلقه(?![${AR_LETTER}])`,
+);
+/** "(و)لم يتم (قيد) الخصم ... بعد" — not yet debited — after the transaction noun. */
+const AR_NOT_YET_RE = new RegExp(
+  `${AR_TXN_NOUN}${AR_CLAUSE}{0,80}?\\s(?:و)?لم\\s+يتم\\s+(?:قيد\\s+)?(?:الخصم|خصم[${AR_LETTER}]*|الدفع|دفع[${AR_LETTER}]*|القيد)\\s+بعد(?![${AR_LETTER}])`,
+);
+function arabicPendingPosting(body: string): boolean {
+  if (AR_SETTLED_VERB_RE.test(body)) return false;
+  return (AR_PENDING_IDIOM_RE.test(body) && !AR_COMPLETED_RE.test(body)) || AR_NOT_YET_RE.test(body);
+}
 const EXPECTED_FUTURE_MOVEMENT_RE =
   /\b(?:expected|anticipated)\b(?:[^.]|\.\d){0,80}\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b|\b(?:salary|payroll|wages|wps|payment|transfer|credit|deposit|refund|reversal|fee|charge|payout|settlement)\b(?:[^.]|\.\d){0,80}\b(?:expected|anticipated)\b|(?:راتب|مرتب|دفع|تحويل|ايداع)[\s\S]{0,80}متوقع|سيصل[\s\S]{0,80}(?:راتب|مرتب|دفع|تحويل|ايداع)/iu;
 const REQUEST_RECEIVED_RE =
@@ -1593,11 +1761,44 @@ let SNAPSHOT_RE = /x^/;
 let PLAIN_BALANCE_RE = /x^/;
 let CARD_PAYMENT_RE = /x^/;
 let CARD_RECEIPT_DATE_RE = /x^/;
+let FIELD_LIST_DATE_RE = /x^/;
+let FIRST_LOCAL_AMOUNT_RE = /x^/;
 let DEBIT_WORDS = /x^/;
 let PAYMENT_FOR_RE = /x^/;
 let FX_PREFIX_RE = /x^/;
 let FX_SUFFIX_RE = /x^/;
+/** ISO codes outside the offline table; matched only during a rate pass. */
+let EXT_FX_PREFIX_RE = /x^/;
+let EXT_FX_SUFFIX_RE = /x^/;
 let compiledForMarket = '';
+
+/**
+ * CURRENCIES OUTSIDE THE OFFLINE TABLE ARE NEVER SILENTLY DROPPED.
+ *
+ * The table above is an approximation for ~40 travel corridors. A purchase
+ * in any other ISO currency (NGN, ISK, UZS ...) used to make the whole alert
+ * unparseable. Such a figure is now read in a second, explicit pass with a
+ * rate supplied by the caller:
+ *
+ *   - 'reference': a dated provider quote already known on the device. The
+ *     row posts converted, labelled `fxSource: 'reference'` with its date.
+ *   - 'probe': rate 1, used only to recover the parsed facts (merchant, card,
+ *     date, amount) so the purchase can wait in Review in its own currency
+ *     until a rate exists. A probe row is NEVER returned as a posting.
+ *
+ * Outside those passes the extended codes are not matched at all, so every
+ * alert the parser already handled parses exactly as before.
+ */
+type ExtendedRate = { rate: number; source: 'reference' | 'probe'; date?: string };
+let extendedRates: ((code: string) => ExtendedRate | null) | null = null;
+/**
+ * Extended codes that are also everyday uppercase words or brands ("ALL 3
+ * ITEMS", "TOP UP 50", "PEN 2"). Reading them as money is worse than asking.
+ */
+const EXTENDED_CODE_DENYLIST = new Set(['ALL', 'TOP', 'CUP', 'PEN', 'MOP', 'SOS', 'BOB', 'BAM', 'AMD']);
+const extendedCurrencyCodes = (local: string): string[] => Object.keys(CURRENCY_MINOR_UNITS).filter((code) =>
+  !(code in UNITS_PER_USD) && code !== local && !EXTENDED_CODE_DENYLIST.has(code) &&
+  currencyExponent(code) !== null && !['BOV', 'CHE', 'CHW', 'COU', 'MXV', 'USN', 'UYI', 'XAD', 'XCG'].includes(code));
 
 /**
  * The words that may sit between "your" and "card" in a card-settlement
@@ -1707,15 +1908,31 @@ function ensureCurrencyPatterns(): void {
   // not as part of the amount. Require whitespace after label punctuation:
   // without it, "AED.99" loses its decimal and inflates 99 fils to AED 99.
   AED_AMOUNT_RE = new RegExp(`${PREFIX}\\s*(${FIGURE})`, 'gi');
+  // See fieldListPostingDate: the date field directly after the MOVEMENT
+  // amount field. FIRST_LOCAL_AMOUNT_RE finds that field (a field list states
+  // the movement before the balance); FIELD_LIST_DATE_RE is anchored to it and
+  // requires the date to END its field — line end, end of text, or the
+  // balance field of a list flattened onto one line — so a date that runs on
+  // into prose ("AED 250.00 01/12/2028 at …") is not a field.
+  FIRST_LOCAL_AMOUNT_RE = new RegExp(`(?<![A-Za-z])(?:${PREFIX})\\s*${FIGURE}`, 'i');
+  FIELD_LIST_DATE_RE = new RegExp(
+    `^(?:${PREFIX})\\s*${FIGURE}(?:[^\\S\\n]*\\n[^\\S\\n]*|[^\\S\\n]+)` +
+      // FAB states the same field with a two-digit year as often as four.
+      `(\\d{1,2})[/.-](\\d{1,2})[/.-](\\d{4}|\\d{2})(?!\\d)(?![/.-]\\d)` +
+      `(?=[^\\S\\n]*(?:\\n|$)|[^\\S\\n]+(?:bal(?:ance)?|avl|avail(?:able)?)\\b)`,
+    'i');
   // The trailing guard covers Arabic too: without it "50 دار" would read its
   // first two letters as the currency symbol and invent an amount.
   AED_SUFFIX_RE = new RegExp(
     `(${FIGURE})\\s*(?:${CUR})(?![A-Za-z${AR_LETTER}])`, 'gi');
   // "Min Amt AED 154.32" is the abbreviated card-summary spelling of the same
-  // figure. Without it that block had no minimum, and a statement with no
-  // minimum raises no reminder for the payment the user actually has to make.
+  // figure. Missing it loses the bank-stated minimum even when the statement
+  // total and deadline remain readable.
+  // The observed "Pay min. AED462.48 ... AED241.50 late fees" footer labels
+  // only the minimum. Keep the pay verb and dot so neither bare "min" nor
+  // the later late-fee amount can supply it; the total remains independent.
   MIN_DUE_RE = new RegExp(
-    `min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)\\s*(?:of|:|is)?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    `(?:min(?:imum)?\\s+(?:(?:amount\\s+)?due(?:\\s+amount)?|payment(?:\\s+(?:of|due))?|amt(?:\\s+due)?)|\\bpay\\s+min\\.)\\s*(?:of|:|is|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   // "Closing balance" and "statement balance" are what a statement calls its
   // total. Without them the branch fell through to first-amount extraction and
   // recorded the MINIMUM as the statement total — AED 425 owed on a AED 8,500
@@ -1734,14 +1951,20 @@ function ensureCurrencyPatterns(): void {
   // malformed balance sanitization must distinguish an obligation total from
   // an optional account snapshot. See sanitizeLocalMoney.
   const TOTAL_DUE_LABEL =
-    `(?:total\\s+(?:(?:amount|amt)\\s+due|due|billed\\s+am(?:oun)?t|outstanding(?:\\s+(?:amount|balance))?)` +
+    // ADCB inserts this exact qualifier between the total label and amount.
+    // Keep it literal: arbitrary text here could capture a minimum or late fee.
+    `(?:total\\s+(?:(?:amount|amt)\\s+due|due(?:\\s+to\\s+avoid\\s+fin\\.\\s+charges)?|billed\\s+am(?:oun)?t|outstanding(?:\\s+(?:amount|balance))?)` +
     // A bill heading states its amount directly. Anchor the clause so
     // "minimum payment for credit card bill" cannot masquerade as a total.
     `|(?:^|[.!?;\\n]\\s*)(?:your\\s+)?(?:credit|covered)\\s+card\\s+bill` +
     `|closing\\s+balance|statement\\s+balance|new\\s+balance|statement\\s+amount` +
+    // Emirates NBD's due reminder writes "Total Amt - AED 2,345.67; Min Amt -
+    // AED 117.28". The bare abbreviation is a total only with that dash
+    // label, so a purchase that merely mentions a "total amt" is untouched.
+    `|total\\s+amt(?=\\s*[-\u2013]\\s)` +
     `|(?<!\\bmin\\s)(?<!\\bmin\\.\\s)(?<!\\bminimum\\s)amount\\s+due)`;
   TOTAL_DUE_RE = new RegExp(
-    `${TOTAL_DUE_LABEL}\\s*(?:is|:)?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
+    `${TOTAL_DUE_LABEL}\\s*(?:is|:|[-\u2013](?=\\s))?\\s*(?:${PREFIX})\\s*(${FIGURE})`, 'i');
   CARD_PAYMENT_DUE_TOTAL_RE = new RegExp(
     `\\bcard\\b[^.\\n]{0,96}?\\bpayment\\s+is\\s+due\\s+on\\s+` +
     `\\d{1,2}[-\\s]+[A-Za-z]{3,9}(?:[-\\s]+\\d{2,4})?\\s+is\\s+` +
@@ -1896,6 +2119,10 @@ function ensureCurrencyPatterns(): void {
   // isBillDue requires !hasDebit — so the reminder became a posted expense for
   // money the user had not yet sent. Same failure the `payment(?!\s+due)`
   // guard beside it exists to prevent, one word later.
+  // "transaction of" stays a debit word even after "credit": "Visa Credit
+  // transaction of AED 350.00 at NOON.COM on card …" is a CARD purchase. The
+  // account-side "A credit transaction of … Description: SALARY" is handled at
+  // the call site (see creditTransactionOnly), not by weakening this list.
   DEBIT_WORDS = new RegExp(
     `purchase|debit(?:ed)?|deducted|spent|\\bpaid\\b|payment(?!\\s+(?:due|of\\s+(?:${CUR})[\\d,. ]+(?:is\\s+)?received))|withdraw(?:n|al)?|\\bused\\b|utilis(?:e|ed)|utiliz(?:e|ed)|swiped|tapped|transacted|transaction\\s+(?:of|amount)|cash\\s+advance|charged|(?:via|using|through)\\s+(?:your\\s+)?(?:credit|debit|covered|charge|prepaid)\\s+card` +
       // "AED 500 has been TRANSFERRED from your account to MOHAMMED ALI" named
@@ -1908,11 +2135,21 @@ function ensureCurrencyPatterns(): void {
       `|transferr(?:ed|ing)` +
       `|${AR_DEBIT_WORDS}`, 'i');
   const codes = Object.keys(UNITS_PER_USD).filter((c) => c !== m.currency.code).join('|');
-  FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*(${FIGURE})`, 'i');
+  // A foreign figure may carry its own currency's third decimal (KWD 12.345,
+  // BHD, OMR, JOD). Reading only two decimals silently dropped it. Whether
+  // the digits fit the currency's ISO exponent is decided per candidate in
+  // extractForeignAmount, never by this pattern.
+  const FX_FIGURE = String.raw`(?:[\d,]+(?:\.\d{1,3})?|\.\d{1,3})`;
+  FX_PREFIX_RE = new RegExp(`\\b(${codes})[^\\S\\r\\n]*(${FX_FIGURE})`, 'i');
   // Same line only. "Card No XXXX4777 \n USD .00" used to read the card's last
   // four digits as USD 8,722 and file a 32,031.55 purchase for a message whose
   // amount was masked out entirely.
-  FX_SUFFIX_RE = new RegExp(`(${FIGURE})[^\\S\\r\\n]*(${codes})\\b`, 'i');
+  FX_SUFFIX_RE = new RegExp(`(${FX_FIGURE})[^\\S\\r\\n]*(${codes})\\b`, 'i');
+  // Uppercase only: an ISO code in a bank alert is written in capitals, and a
+  // lowercase "all 50" or "top 10" is prose.
+  const extended = extendedCurrencyCodes(m.currency.code).join('|');
+  EXT_FX_PREFIX_RE = new RegExp(`\\b(${extended})[^\\S\\r\\n]*(${FX_FIGURE})`);
+  EXT_FX_SUFFIX_RE = new RegExp(`(${FX_FIGURE})[^\\S\\r\\n]*(${extended})\\b`);
 }
 
 /**
@@ -1949,10 +2186,41 @@ function fxMinorPerUnit(code: string): number {
  * actually charged or leaves every estimate uncorrected forever.
  */
 interface ForeignAmount {
+  /** Where the rate came from: the offline table, a provider quote, or a probe. */
+  source: 'table' | 'reference' | 'probe';
+  rateDate?: string;
   currency: string;
+  /** Exact amount in the currency's OWN ISO exponent (JPY 1500, KWD 12345). */
   amountMinor: number;
+  exponent: MinorExponent;
   localFils: number;
   rate: number;
+}
+
+/**
+ * The foreign figure in two-decimal units (major × 100), possibly fractional
+ * for a three-decimal amount. Local fils are two-decimal on the AED/SAR ledgers
+ * this parser serves, so `local fils / this` is the local-per-foreign rate.
+ */
+function foreignHundredths(amount: Pick<ForeignAmount, 'amountMinor' | 'exponent'>): number {
+  return amount.exponent === 3 ? amount.amountMinor / 10 : amount.amountMinor * 10 ** (2 - amount.exponent);
+}
+
+/**
+ * "12.345" -> 12345 at exponent 3, "1,500" -> 1500 at exponent 0, without a
+ * binary multiply. More fraction digits than the currency has are accepted
+ * only when they are zeros ("JPY 1,500.00"); anything else is not an amount
+ * in that currency and returns null.
+ */
+function foreignFigureToMinor(figure: string, exponent: MinorExponent): number | null {
+  const value = figure.replace(/,/g, '');
+  const match = /^(\d*)(?:\.(\d+))?$/.exec(value);
+  if (!match || (!match[1] && !match[2])) return null;
+  const fraction = match[2] ?? '';
+  if (fraction.length > exponent && /[1-9]/.test(fraction.slice(exponent))) return null;
+  const digits = `${match[1] || '0'}${fraction.slice(0, exponent).padEnd(exponent, '0')}`;
+  const minor = Number(digits);
+  return Number.isSafeInteger(minor) && minor > 0 ? minor : null;
 }
 
 /**
@@ -1976,8 +2244,8 @@ interface ForeignAmount {
 function extractForeignAmount(raw: string): ForeignAmount | null {
   /** Where the CODE starts (the balance window ends there) and where the digits do. */
   const candidates: { at: number; digitsAt: number; code: string; num: string }[] = [];
-  const collect = (re: RegExp, codeGroup: 1 | 2) => {
-    const scan = new RegExp(re.source, 'gi');
+  const collect = (re: RegExp, codeGroup: 1 | 2, flags = 'gi') => {
+    const scan = new RegExp(re.source, flags);
     let m: RegExpExecArray | null;
     while ((m = scan.exec(raw))) {
       const num = codeGroup === 1 ? m[2] : m[1];
@@ -1989,29 +2257,63 @@ function extractForeignAmount(raw: string): ForeignAmount | null {
   };
   collect(FX_PREFIX_RE, 1);
   if (!candidates.length) collect(FX_SUFFIX_RE, 2);
+  if (!candidates.length && extendedRates) {
+    collect(EXT_FX_PREFIX_RE, 1, 'g');
+    if (!candidates.length) collect(EXT_FX_SUFFIX_RE, 2, 'g');
+  }
 
   for (const c of candidates) {
-    if (!(c.code in UNITS_PER_USD)) continue;
+    const extended = !(c.code in UNITS_PER_USD) ? extendedRates?.(c.code) ?? null : null;
+    if (!(c.code in UNITS_PER_USD) && !extended) continue;
     if (isMaskedFigure(raw, c.digitsAt)) continue;
     // 56, exactly as extractAmountFils: the window has to hold a balance noun
     // plus the card reference that can sit between it and the figure.
     if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, c.at - 56), c.at))) continue;
-    const original = Number(c.num.replace(/,/g, ''));
-    const amountMinor = Math.round(original * 100);
+    // Each currency keeps its OWN exponent: KWD 12.345 is 12345 thousandths,
+    // JPY 1,500 is 1500 yen. Storing everything as major × 100 lost the
+    // third decimal of every dinar charge.
+    const exponent = currencyExponent(c.code);
+    if (exponent === null) continue;
+    const amountMinor = foreignFigureToMinor(c.num, exponent);
+    if (amountMinor === null) continue;
+    if (extended) {
+      // A provider quote converts with exact integer arithmetic; a probe
+      // keeps the foreign minor units only to describe the purchase.
+      let fils: number;
+      try {
+        fils = extended.source === 'probe'
+          ? Math.max(1, Math.round(foreignHundredths({ amountMinor, exponent })))
+          : convertMinorUnits(amountMinor, exponent, extended.rate, 2);
+      } catch {
+        return null;
+      }
+      if (extended.source === 'reference' && fils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
+      return {
+        source: extended.source,
+        ...(extended.date ? { rateDate: extended.date } : {}),
+        currency: c.code,
+        amountMinor,
+        exponent,
+        localFils: fils,
+        rate: extended.rate,
+      };
+    }
     const rate = fxMinorPerUnit(c.code) / 100;
     // Convert the integer foreign minor units directly. Multiplying the major
     // value by a repeating cross-rate first made exact half-fils values land a
     // binary hair below .5 (17 AZN became 3672.499999...), rounding one fils
     // down. The tiny relative tolerance restores positive decimal half-up
     // rounding without moving values that are not at a floating-point tie.
-    const unroundedFils = amountMinor * rate;
+    const unroundedFils = foreignHundredths({ amountMinor, exponent }) * rate;
     const fils = Math.floor(
       unroundedFils + 0.5 + Number.EPSILON * Math.max(1, unroundedFils) * 4,
     );
     if (!Number.isFinite(fils) || fils <= 0 || fils > MAX_PLAUSIBLE_AMOUNT_FILS) return null;
     return {
+      source: 'table',
       currency: c.code,
       amountMinor,
+      exponent,
       localFils: fils,
       rate,
     };
@@ -2273,7 +2575,8 @@ const MERCHANT_RE = new RegExp(
     NAME_INITIALS +
     String.raw`[A-Za-z0-9%][A-Za-z0-9%·• &'\-*/()+_]{1,40}?(?:` +
     HOST_LABELS +
-    String.raw`\.(?:com|ae|net|org|io|co)\b)?)` +
+    // ".ai" for the BNPL host "WWW.TABBY.AI", which otherwise lost its name.
+    String.raw`\.(?:com|ae|net|org|io|co|ai)\b)?)` +
     MERCHANT_STOP,
   'gi',
 );
@@ -2610,7 +2913,7 @@ function cleanDescriptor(name: string): string {
   // The TLD list is the same one MERCHANT_RE will accept, so this can only
   // ever strip a suffix the merchant grammar itself put there.
   out = out.replace(/^www\./i, '').trim();
-  return out.replace(/(?:\s+COM|\.(?:com|ae|net|org|io|co))$/i, '').trim();
+  return out.replace(/(?:\s+COM|\.(?:com|ae|net|org|io|co|ai))$/i, '').trim();
 }
 
 function merchantFromLines(raw: string): string {
@@ -2693,6 +2996,20 @@ const OUTGOING_MOVE_RE =
 const TRANSFER_HINT_RE =
   /(?:towards?|for)\s+(?:payment\s+of\s+)?(?:your\s+(?:(?:credit|covered|charge|prepaid)\s+)?card|(?:credit|covered|charge|prepaid)\s+card|cr\.?\s*card|card\s+(?:no\.?\s*)?[\dXx*•])|(?:credit|covered|charge)\s+card\s+(?:bill\s+)?payment|c\/?c\s+payment|cc\s*pymt|crd\s*pmt|card\s*e-?pay|card\s+settlement|own\s+account\s+transfer|transfer\s+to\s+(?:your\s+)?own\s+account|self\s+transfer|سداد بطاق|سداد البطاق|تسديد بطاق|دفعه لبطاق|تحويل بين حساباتك|تحويل الي حسابك|حواله داخليه/i;
 
+/**
+ * A payee that is a BNPL provider and nothing else: the brand, its domain
+ * descriptor (WWW.TABBY.AI), its legal entity (TAMARA FINANCE COMPANY, TABBY
+ * FZ LLC) and an acquirer's trailing city/country. Any other word — "Tamara
+ * Restaurant", "Cashew Cafe" — makes it a different business.
+ */
+const BNPL_PAYEE_RE =
+  /^(?:www\.)?(?:tabby|tamara|postpay|cashew)(?:\.(?:ai|com|co|ae|sa))?(?:[\s,]+(?:fz[\s-]*llc|fzco|fze|llc|l\.l\.c\.?|finance|financing|company|co\.?|technologies|payments?|uae|ae|are|ksa|sa|sau|dubai|abu\s+dhabi|sharjah|riyadh|jeddah))*$/i;
+
+/** Is this payee name a BNPL provider and nothing else? (Stored-row repair.) */
+export function isBnplPayee(name: string): boolean {
+  return BNPL_PAYEE_RE.test(name.trim());
+}
+
 const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // Exchange houses move money; they do not sell anything. There is no
   // remittance category to file them under, so they resolve to `other` —
@@ -2711,7 +3028,11 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // Other — hiding the user's largest recurring outflow from the debt view.
   // Takaful is Islamic insurance, which the parser files under health.
   [/\bmurabaha?\b|\bijarah?\b|\bmusharaka?h?\b|\btawarruq\b|\bdiminishing\s+musharaka/i, 'loan'],
-  [/\b(?:tabby|tamara|postpay|cashew)\b/i, 'loan'],
+  // No BNPL provider names here. This list reads the WHOLE body, and a BNPL
+  // name in a body is not a loan: a card charge to TABBY is the instalment of
+  // a purchase (see BNPL_PAYEE_RE in categoryOf), and "Your Tabby Card limit
+  // is now ..." is the footer of a purchase at a named merchant. As a body
+  // keyword it filed both as Loan, and Loan unlocks the relaxed bill path.
   [/\btakaful\b/i, 'health'],
   // UAE merchants read off a real 300-message accuracy report. Acquirers
   // truncate the descriptor to 20-22 characters, so several of these
@@ -3217,6 +3538,9 @@ function categoryOf(
   // Card-brand and processor labels do not describe the payee's business.
   // Keep the source descriptor otherwise: existing acquirers truncate names
   // before a meaningful suffix, and direct-debit/rent clauses carry event facts.
+  // The bank's delivery/channel vocabulary is not the merchant's business.
+  // In particular Internet Banking must never turn an account debit into Telecom.
+  text = text.replace(/\b(?:(?:personal|business|corporate)\s+)?(?:internet|online|mobile|digital|telephone)\s+banking\b/gi, ' ');
   text = text.replace(/\betisalat(?=\s+(?:(?:credit|debit|covered)\s+)?card\s+(?:ending\b|no\.?\b|number\b|[Xx*\d]))/gi, ' ')
     .replace(/\bpaypal\s*\*\s*/gi, ' ');
   const merchantText = normalizeArabic(merchant ?? text);
@@ -3245,6 +3569,17 @@ function categoryOf(
   // (for example "2C2P BOLT") still reaches the payee's category normally.
   if (merchant && /^(?:2c2p)$/i.test(merchant.trim())) {
     return { id: 'other', deliberate: true };
+  }
+  // ANY payment whose PAYEE is a BNPL provider — card charge, direct debit or
+  // bank transfer — is an instalment of a purchase. The bank sent no alert for
+  // the purchase itself, so this row is the only ledger record of that
+  // spending: Shopping, as it was until a body-wide BNPL keyword briefly filed
+  // it as Loan. It runs before the DD/loan-instalment keywords on purpose.
+  // Read against the payee name only, and only when the name is the provider
+  // and nothing else — "Tamara Restaurant" is a restaurant. Bank loans and
+  // finance houses are not BNPL providers and keep Loan.
+  if (merchant && BNPL_PAYEE_RE.test(merchant.trim())) {
+    return { id: 'shopping', deliberate: true };
   }
   // Market-local vocabulary wins over the global baseline.
   const marketKeywords = marketId === null ? globalCategoryKeywords() :
@@ -3730,7 +4065,7 @@ function transactionMoney(raw: string) {
     !!foreignCandidate &&
     bankLocalFils !== null &&
     (() => {
-      const implied = bankLocalFils / foreignCandidate.amountMinor;
+      const implied = bankLocalFils / foreignHundredths(foreignCandidate);
       const table = foreignCandidate.rate;
       if (!(implied > 0) || !(table > 0)) return true;
       const ratio = implied / table;
@@ -3743,13 +4078,19 @@ function transactionMoney(raw: string) {
     amountFils,
     ...(foreignAmount
       ? {
-          originalAmountMinor: foreignAmount.amountMinor,
-          originalCurrency: foreignAmount.currency,
+          ...originalMoneyFields({
+            currency: foreignAmount.currency,
+            minorUnits: foreignAmount.amountMinor,
+            exponent: foreignAmount.exponent,
+          }),
           fxRate:
             bankLocalFils !== null
-              ? amountFils / foreignAmount.amountMinor
+              ? amountFils / foreignHundredths(foreignAmount)
               : foreignAmount.rate,
-          fxSource: bankLocalFils !== null ? ('bank' as const) : ('fallback' as const),
+          fxSource: bankLocalFils !== null ? ('bank' as const)
+            : foreignAmount.source === 'reference' ? ('reference' as const) : ('fallback' as const),
+          ...(bankLocalFils === null && foreignAmount.source === 'reference' && foreignAmount.rateDate
+            ? { fxRateDate: foreignAmount.rateDate } : {}),
         }
       : {}),
   };
@@ -3764,6 +4105,8 @@ interface TtPaymentAmount {
   type: 'income' | 'expense';
   originalAmountMinor?: number;
   originalCurrency?: string;
+  originalMinorUnits?: number;
+  originalExponent?: 2;
   fxRate?: number;
   fxSource?: 'fallback';
 }
@@ -3805,6 +4148,9 @@ const extractTtPaymentAmount = (raw: string): TtPaymentAmount | null => {
       type: match[3] === '+' ? 'income' : 'expense',
       originalAmountMinor,
       originalCurrency: code,
+      // USD/EUR/GBP only: all two-decimal, so both spellings are the same figure.
+      originalMinorUnits: originalAmountMinor,
+      originalExponent: 2,
       fxRate: rate,
       fxSource: 'fallback',
     };
@@ -4009,7 +4355,9 @@ function nonPostingReasonInBody(
     return 'preauthorisation';
   }
   if (RETURNED_UNPAID_RE.test(body)) return 'returned-unpaid';
-  if (!settledRefund && (PENDING_PROCESSING_RE.test(body) || EXPECTED_FUTURE_MOVEMENT_RE.test(body) ||
+  if (!settledRefund && (PENDING_PROCESSING_RE.test(body) ||
+    arabicPendingPosting(body) ||
+    EXPECTED_FUTURE_MOVEMENT_RE.test(body) ||
     REQUEST_RECEIVED_RE.test(body) || MANDATE_LIFECYCLE_RE.test(body) ||
     CONDITIONAL_PAYOUT_RE.test(body) || CONDITIONAL_MOVEMENT_RE.test(body))) {
     return 'pending-processing';
@@ -4648,6 +4996,41 @@ function sourceBackedReceiptDate(
   return { date, dateRepairFrom: previous };
 }
 
+/**
+ * The posting date of a FIELD-LIST alert, which labels nothing:
+ *
+ *   Salary Credit / Account XXXX0002 / AED 28500.00 / 26/09/2026 / Balance …
+ *
+ * DATE_RE needs a lead-in word ("on", "value date"), so this family arrived
+ * with date null and was filed on the day it happened to be imported — a
+ * history import put every month's salary on one day. Only the field that
+ * DIRECTLY follows the MOVEMENT amount field — the first local figure, and
+ * not one labelled as a balance — counts: next line, or next token when the
+ * list is flattened onto one line, with a four-digit year, ending its field.
+ * A date after an instalment, a balance or any later figure is not read by
+ * this rule, nor is one later than the day the alert arrived. Posting date
+ * only: the reminder/statement branches never consult it.
+ */
+function fieldListPostingDate(raw: string, options?: ParseOptions): string | null {
+  ensureCurrencyPatterns();
+  const first = raw.match(FIRST_LOCAL_AMOUNT_RE);
+  if (!first || first.index === undefined) return null;
+  // The first figure is the movement only when it is not itself the balance.
+  if (BALANCE_PREFIX_RE.test(raw.slice(Math.max(0, first.index - 56), first.index))) return null;
+  const m = raw.slice(first.index).match(FIELD_LIST_DATE_RE);
+  const date = m ? numericDate(m[1], m[2], m[3]) : null;
+  if (!date) return null;
+  // A posting date cannot be later than the day the alert arrived. Same clock
+  // rule as sourceBackedReceiptDate: the source's received time at the fixed
+  // Gulf offset (UTC+4, the later of the launch markets), never Date.now().
+  const observedAt = options?.observedAt;
+  if (typeof observedAt === 'number' && Number.isFinite(observedAt)) {
+    const received = new Date(observedAt + 4 * 60 * 60 * 1000);
+    if (Number.isFinite(received.getTime()) && date > received.toISOString().slice(0, 10)) return null;
+  }
+  return date;
+}
+
 function extractDate(raw: string): string | null {
   // Each format falls through to the next: a numeric date that matched but
   // could not be resolved must not stop the named-month form from being read.
@@ -4740,6 +5123,21 @@ function parseSmsInner(
   // disagree about the same message.
   const suppressible = blank(maskMerchantNames(raw), FRAUD_FOOTER_RE);
   if (nonPostingReasonInBody(raw, suppressible)) return null;
+  // Two movements in one alert, or one movement with two candidate amounts,
+  // cannot become one row without dropping or guessing money. Refused here so
+  // the alert stays for review; deliberately NOT in nonPostingReason, which is
+  // evidence for deleting stored rows and these messages did move money.
+  const separate = SEPARATE_MOVEMENT_RE.exec(suppressible);
+  if (
+    (separate &&
+      MONEY_FIGURE_RE.test(separate[0]) &&
+      MONEY_FIGURE_RE.test(
+        suppressible.slice(0, separate.index) + ' ' + suppressible.slice(separate.index + separate[0].length),
+      )) ||
+    AMBIGUOUS_AMOUNT_RE.test(suppressible)
+  ) {
+    return null;
+  }
   // Read once: this is what every boilerplate-shaped suppression rule below
   // has to beat before it may delete a message.
   const posted = hasPostedEvidence(raw, card);
@@ -4943,7 +5341,8 @@ function parseSmsInner(
   // reason there are two variables: on the billDue and cardStatement paths
   // that clause is the answer, and those branches read `statedDate`.
   const statedDate = extractDate(raw);
-  const date = extractDate(blank(raw, DUE_DATE_FOOTER_RE));
+  const postingText = blank(raw, DUE_DATE_FOOTER_RE);
+  const date = extractDate(postingText) ?? fieldListPostingDate(postingText, options);
   const snapshot = extractSnapshot(raw);
   const snapshotFils = snapshot?.fils ?? null;
   let snapshotKind = snapshot?.kind ?? null;
@@ -5029,6 +5428,17 @@ function parseSmsInner(
    * Keep this sender-gated and shape-gated. The first AED figure after the
    * masked account is the movement; extractSnapshot independently reads the
    * later Balance figure. No FAB sender => no special interpretation.
+   *
+   * The same field list arrives with a SALARY header instead of "Account
+   * activity" (the owner's own alert, account masked by them):
+   *
+   *   Salary Credit / Account XXXX0002 / AED 28500.00 / 26/09/2026 / Balance …
+   *
+   * Titled "Account credit" and left in `other`, that row is exactly what
+   * shouldReviewParsedIncome parks in Review, so a salary never reached the
+   * ledger. Only the HEADER before "Credit Account" can name it — a salary
+   * word anywhere else in the body proves nothing about this movement — and a
+   * salary ADVANCE or loan header is financing, not pay.
    */
   const fabAccountCredit = bank?.name === 'FAB'
     ? raw.match(
@@ -5041,12 +5451,15 @@ function parseSmsInner(
     const fabBalanceFils = fabBalance
       ? Math.round(Number(fabBalance[1].replace(/,/g, '')) * 100)
       : null;
+    const fabHeader = raw.slice(0, fabAccountCredit.index ?? 0);
+    const fabSalary = SALARY_RE.test(fabHeader) && !/\b(?:advance|loan|financ\w*)\b/i.test(fabHeader);
+    const fabCategory = fabSalary ? categoryOf('Salary', 'income', overrides, 'Salary') : null;
     if (Number.isFinite(amountFils) && amountFils > 0) {
       return {
         kind: 'transaction',
         type: 'income',
         amountFils,
-        merchant: 'Account credit',
+        merchant: fabSalary ? 'Salary' : 'Account credit',
         date,
         dueDay: null,
         minDueFils: null,
@@ -5054,8 +5467,9 @@ function parseSmsInner(
         transferHint: false,
         snapshotFils: Number.isFinite(fabBalanceFils) ? fabBalanceFils : snapshotFils,
         snapshotKind: Number.isFinite(fabBalanceFils) ? 'balance' : snapshotKind,
-        categoryGuess: 'other',
-        categoryDeliberate: false,
+        categoryGuess: fabCategory?.id ?? 'other',
+        categoryDeliberate: fabCategory?.deliberate ?? false,
+        ...(fabCategory?.pinned ? { categoryPinned: true as const } : {}),
         currency,
         reference,
         raw: source,
@@ -5901,6 +6315,20 @@ function parseSmsInner(
     };
   }
 
+  // A statement ANNOUNCEMENT that reached here is informational. The two
+  // statement branches above need a deadline or a readable minimum-due label;
+  // "Your credit-card statement is ready. Total amount due AED 1,800.00;
+  // minimum payment AED 90.00" has neither, and fell through to the generic
+  // path as a AED 1,800 purchase. The total is a debt, not a movement.
+  if (
+    STATEMENT_ANNOUNCEMENT_RE.test(raw) &&
+    statementTotalFils(raw) !== null &&
+    !STATEMENT_TXN_BLOCK_RE.test(raw) &&
+    !SETTLED_MOVEMENT_RE.test(raw)
+  ) {
+    return null;
+  }
+
   // URLs carry misleading words ("sewapayment.tiny.us" is not a payment).
   const prose = raw.replace(/https?:\/\/\S+/gi, ' ');
   // ...and so do the two clauses a reminder signs off with. See
@@ -5925,7 +6353,18 @@ function parseSmsInner(
     blank(maskMerchantNames(prose), HYPOTHETICAL_PAYMENT_RE),
     PAYMENT_INSTRUCTION_RE,
   );
-  const hasDebit = DEBIT_WORDS.test(stated);
+  // "A CREDIT transaction of AED 18,000.00 has been processed on your account
+  // … Description: SALARY" is money arriving, yet DEBIT_WORDS' bare
+  // "transaction of" booked it as an AED 18,000 expense titled "Account
+  // debit". The phrase is exempted only when NOTHING else in the body is
+  // purchase evidence — no card, merchant, POS or "at <payee>" — so "Visa
+  // Credit transaction of AED 350.00 at NOON.COM on card …" and "Credit
+  // Transaction Amount … Merchant … Card …" stay the card purchases they are.
+  // Any other debit word still counts.
+  const creditTransactionOnly =
+    CREDIT_TRANSACTION_RE.test(stated) && !CREDIT_TRANSACTION_PURCHASE_RE.test(prose) &&
+    !DEBIT_WORDS.test(blank(stated, CREDIT_TRANSACTION_ALL_RE));
+  const hasDebit = !creditTransactionOnly && DEBIT_WORDS.test(stated);
   const hasCredit = CREDIT_WORDS.test(stated);
   // Carrier-billed store purchases ("App Store & Google Play bill") are
   // receipts, never utility bills — treating them as dues produced garbage
@@ -6090,6 +6529,15 @@ function parseSmsInner(
   // but calling them "Card purchase" was wrong twice over, and a row that
   // reads "Transfer to Khalid Rashid" needs no category at all.
   let structuralMerchant = false;
+  const channelTransfer = !isBillDue && type === 'expense' &&
+    /\b(?:debited|deducted)\b/i.test(prose) &&
+    /\b(?:for|towards)\s+(?:an?\s+)?(?:funds?\s+)?transfer\s+(?:through|via|using)\s+(?:(?:personal|business|corporate)\s+)?(?:internet|online|mobile|digital)\s+banking\b/i.test(prose) &&
+    !FEE_RE.test(prose);
+  if (channelTransfer) {
+    merchant = 'Outgoing transfer';
+    structuralMerchant = true;
+    transferHint = true;
+  }
   if (isIncomingCreditReversal) {
     merchant = 'Credit reversal';
     structuralMerchant = true;
@@ -6498,12 +6946,105 @@ function merchantsAgree(a: ParsedSms, b: ParsedSms): boolean {
  * that spells out "Emirates NBD Credit Card" is stating its issuer, while a
  * sender ID only suggests one.
  */
+/** Run one parse with extended (non-table) currency codes enabled. */
+function withExtendedRates<T>(rates: (code: string) => ExtendedRate | null, run: () => T): T {
+  const previous = extendedRates;
+  extendedRates = rates;
+  try {
+    return run();
+  } finally {
+    extendedRates = previous;
+  }
+}
+
+const localIsoDay = (epochMs: number | undefined): string | null => {
+  if (epochMs === undefined || !Number.isFinite(epochMs)) return null;
+  const day = new Date(epochMs);
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+};
+
+/**
+ * The purchase the offline table could not price, parsed with a probe rate
+ * so its facts are known. Only an ordinary transaction whose money came from
+ * an extended-code figure qualifies; anything else returns null.
+ */
+function probeExtendedForeign(
+  message: string,
+  overrides: Record<string, CategoryId> | undefined,
+  options: ParseOptions | undefined,
+): ParsedSms | null {
+  // Cheap prefilter: nearly every refused message names no extended code,
+  // and must not pay for a second full parse.
+  ensureCurrencyPatterns();
+  if (!EXT_FX_PREFIX_RE.test(message) && !EXT_FX_SUFFIX_RE.test(message)) return null;
+  const probe = withExtendedRates(() => ({ rate: 1, source: 'probe' }), () =>
+    parseSmsInner(message, overrides, options));
+  if (!probe || probe.kind !== 'transaction' || probe.fxSource === 'bank' ||
+    typeof probe.originalCurrency !== 'string' || probe.originalCurrency in UNITS_PER_USD ||
+    probe.originalMinorUnits === undefined || probe.originalExponent === undefined) return null;
+  return probe;
+}
+
+/**
+ * A foreign purchase this parser read but cannot price yet, restated in its
+ * OWN currency (amount in that currency's minor units, no conversion fields)
+ * for a Review item that waits for a rate. Null when the message is not such
+ * a purchase or when parseSms can already post it.
+ */
+export function parseForeignAwaitingRate(
+  message: string,
+  overrides?: Record<string, CategoryId>,
+  options?: ParseOptions,
+): ParsedSms | null {
+  ensureCurrencyPatterns();
+  // Prefilter before any full parse: refused alerts almost never name one.
+  if (!EXT_FX_PREFIX_RE.test(message) && !EXT_FX_SUFFIX_RE.test(message)) return null;
+  if (parseSms(message, overrides, options)) return null;
+  const probe = probeExtendedForeign(message, overrides, options);
+  if (!probe) return null;
+  const {
+    originalAmountMinor: _legacy, originalCurrency, originalMinorUnits, originalExponent: _exponent,
+    fxRate: _rate, fxRateDate: _rateDate, fxSource: _source, ...rest
+  } = probe;
+  return {
+    ...rest,
+    currency: originalCurrency!,
+    amountFils: originalMinorUnits!,
+    snapshotFils: null,
+    snapshotKind: null,
+  };
+}
+
 export function parseSms(
   message: string,
   overrides?: Record<string, CategoryId>,
   options?: ParseOptions,
 ): ParsedSms | null {
-  const parsed = parseSmsInner(message, overrides, options);
+  // A BNPL provider restating an instalment its bank already alerted on; see
+  // bnpl-providers.ts. Every kind, both directions: the provider's refund
+  // notice duplicates the bank's refund credit exactly as its charge does.
+  if (isBnplProviderSource(options?.sender)) return null;
+  let parsed = parseSmsInner(message, overrides, options);
+  if (!parsed) {
+    // A currency outside the offline table: convert only with a dated rate
+    // already known on this device. Otherwise the alert is refused here and
+    // parseForeignAwaitingRate hands it to Review; it is never dropped.
+    ensureCurrencyPatterns();
+    const probe = probeExtendedForeign(message, overrides, options);
+    const day = probe ? probe.date ?? localIsoDay(options?.observedAt) : null;
+    if (probe && day) {
+      const local = getActiveMarket().currency.code;
+      const lookup = options?.fxLookup ?? ((base: string, quote: string, date: string) =>
+        cachedReferenceQuote(base, quote, date));
+      const quote = lookup(probe.originalCurrency!, local, day);
+      if (quoteFitsDay(quote, day) && quote.base === probe.originalCurrency && quote.quote === local) {
+        const priced = withExtendedRates((code) => code === quote.base
+          ? { rate: quote.rate, source: 'reference', date: quote.date } : null,
+        () => parseSmsInner(message, overrides, options));
+        if (priced && priced.fxSource === 'reference' && priced.originalCurrency === quote.base) parsed = priced;
+      }
+    }
+  }
   if (!parsed) return null;
   // The same obligation is named on both sides of its lifecycle: a provider
   // reminder calls it an account/party ID, while a bank bill-pay receipt often

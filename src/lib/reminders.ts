@@ -23,10 +23,10 @@
  */
 import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
-import { formatAED, shiftISO } from '@/lib/format';
+import { formatAED, monthKey, monthStartISO, shiftISO, shiftMonthKey, toISODate } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
-import { daysUntilNext, detectSubscriptions, type Subscription } from '@/lib/subscriptions';
+import { daysUntilNext, detectSubscriptions, isCancelledByUser, isSubscriptionDismissed, subscriptionKey, subscriptionLabel, subscriptionMatchesBill, type Subscription } from '@/lib/subscriptions';
 import type { AppState } from '@/lib/types';
 
 export type ReminderKind = 'bill' | 'card' | 'subscription';
@@ -46,6 +46,9 @@ export interface PaymentReminder {
 /** iOS caps pending local notifications at 64; this stays well inside it. */
 export const MAX_REMINDERS = 24;
 
+/** How far ahead a bill reminder is planned. */
+export const BILL_REMINDER_WINDOW_DAYS = 30;
+
 /**
  * Whether rebuilding the native reminder schedule can produce a different
  * result. Keep this source-free and reference-based so an empty capture refresh
@@ -59,6 +62,7 @@ export function reminderScheduleInputsChanged(before: AppState, after: AppState)
     before.cardDues !== after.cardDues ||
     before.budgets !== after.budgets ||
     before.notSubscriptions !== after.notSubscriptions ||
+    before.cancelledSubscriptions !== after.cancelledSubscriptions ||
     before.dailySummary !== after.dailySummary ||
     before.monthStartDay !== after.monthStartDay ||
     before.language !== after.language ||
@@ -106,25 +110,35 @@ export function buildPaymentReminders(
   const liveAccounts = liveAccountIds(state.accounts);
   const internal = internalTransferIdsForState(state);
 
-  // Bills: the day before, and the day itself.
-  const billTitles = new Set(state.bills.map((b) => b.title.toLowerCase()));
-  for (const { bill, status, dueISO } of billsForMonth(
-    state.bills,
-    state.transactions,
-    now,
-    liveAccounts,
-    internal,
-  )) {
+  // Bills: project every money month whose due dates can produce a reminder
+  // within 30 days. A short February can make this span three money months.
+  // Include one extra due-date day: a bill just beyond the window still has
+  // its day-before reminder inside it.
+  const lastBillReminderISO = shiftISO(toISODate(now), BILL_REMINDER_WINDOW_DAYS);
+  const firstMonth = monthKey(now);
+  const lastMonth = monthKey(shiftISO(lastBillReminderISO, 1));
+  const projectedBills: ReturnType<typeof billsForMonth> = [];
+  for (let key = firstMonth; key <= lastMonth; key = shiftMonthKey(key, 1)) {
+    const at = key === firstMonth ? now : new Date(`${monthStartISO(key)}T12:00:00`);
+    projectedBills.push(...billsForMonth(state.bills, state.transactions, at, liveAccounts, internal));
+  }
+  for (const { bill, status, dueISO } of projectedBills) {
     // Paid covers both marked-paid and auto-reconciled-from-the-debit, so
     // this is the only check needed — the old second `paidMonths` guard below
-    // the loop body was unreachable.
+    // the loop body was unreachable. It is per money month, so paying this
+    // month's bill never silences next month's.
     if (status === 'paid') continue;
     for (const [offset, label] of [[-1, t('tomorrow')], [0, todayWord]] as const) {
+      const dateISO = shiftISO(dueISO, offset);
+      if (dateISO > lastBillReminderISO) continue;
       add(
-        `bill-${bill.id}-${offset}`,
+        // The due date is part of the id: two projected months carry the same
+        // bill, and the id becomes the OS notification identifier, where a
+        // collision would silently replace one month's reminder with the other.
+        `bill-${bill.id}-${dueISO}-${offset}`,
         'bill',
-        shiftISO(dueISO, offset),
-        tf('notificationBillDue', { name: bill.title, when: label }),
+        dateISO,
+        tf('notificationBillDue', { name: subscriptionLabel({ title: bill.title, billIdentity: bill.importIdentity }), when: label }),
         tf('notificationBillBody', {
           amount: formatAED(bill.amountFils, { decimals: false }),
         }),
@@ -175,21 +189,24 @@ export function buildPaymentReminders(
         internal,
       );
   for (const sub of subscriptions) {
+    if (isSubscriptionDismissed(sub, state.notSubscriptions ?? [])) continue;
     if (sub.status === 'stopped') continue; // cancelled services need no renewal reminders
+    // Nor do ones the user told us they cancelled — until a later charge says otherwise.
+    if (isCancelledByUser(sub, state.cancelledSubscriptions)) continue;
     // An on-demand top-up has no due date. It belongs in Fixed so the user can
     // see the recurring cash requirement, but predicting a day would create a
     // false reminder.
     if (sub.cadence === 'as-needed') continue;
-    if (billTitles.has(sub.title.toLowerCase())) continue;
+    if (state.bills.some(bill => subscriptionMatchesBill(sub, bill))) continue;
     const days = daysUntilNext(sub, now);
     if (days < 1 || days > 30) continue;
     add(
-      `sub-${sub.title.trim().toLowerCase()}`,
+      `sub-${subscriptionKey(sub)}`,
       'subscription',
       shiftISO(sub.nextExpectedISO, -1),
-      tf('notificationRenewsTomorrow', { name: sub.title }),
+      tf('notificationRenewsTomorrow', { name: subscriptionLabel(sub) }),
       tf('notificationRenewalBody', {
-        amount: formatAED(sub.avgAmountFils, { decimals: false }),
+        amount: formatAED(sub.lastAmountFils, { decimals: false }),
       }),
     );
   }
