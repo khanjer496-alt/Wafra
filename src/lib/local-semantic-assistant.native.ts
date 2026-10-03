@@ -1,5 +1,6 @@
 import { LOCAL_ASSISTANT_PROTOTYPE_INDEX } from '@/lib/local-semantic-bundle';
 import { chooseLocalSemanticAssistantPlan, createLocalSemanticRetriever } from '@/lib/local-semantic-model';
+import { LOCAL_SEMANTIC_E5_ENABLED } from '@/lib/local-semantic-flags';
 import { getLocalSemanticEncoder, localSemanticRuntimeStatus } from '@/lib/local-semantic-runtime';
 import type { Period } from '@/lib/period';
 import type { AssistantToolRequest } from '@/lib/wafra-assistant';
@@ -19,7 +20,8 @@ export async function improveAssistantRequestLocally(input: {
   cancelled?: () => boolean;
   groundRequest?: (candidate: AssistantToolRequest) => AssistantToolRequest;
 }): Promise<AssistantToolRequest> {
-  if (input.deterministicRequest.tool !== 'help' || input.previousRequest || input.cancelled?.()) {
+  // Disabled builds must never start the E5 download from a question.
+  if (!LOCAL_SEMANTIC_E5_ENABLED || input.deterministicRequest.tool !== 'help' || input.previousRequest || input.cancelled?.()) {
     return input.deterministicRequest;
   }
   if (localSemanticRuntimeStatus().state !== 'ready') {

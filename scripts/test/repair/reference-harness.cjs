@@ -31,7 +31,13 @@ function createHarness(options = {}) {
     return Number.isSafeInteger(parsed)&&parsed>0?parsed:null;
   };
   const format={ formatAED, formatAmount:amount, formatCompactAED:f=>amount(f,{decimals:false}),
+    // AED-ledger forms of the currency-aware helpers: 100 fils per dirham.
+    formatAmountForInput:(fils,opts={})=>(fils/100).toFixed(opts.decimals||fils%100?2:0),
+    ledgerTypicalMinor:major=>major*100, ledgerWholeMajor:fils=>Math.round(fils/100),
+    ledgerNiceMinor:fils=>Math.max(10_000,Math.round(fils/10_000)*10_000),
+    ledgerCurrencyLabel:()=>lang==='ar'?'د.إ':'AED',
     getMonthStartDay:()=>1,
+    monthStartISO: (key) => `${key}-01`, monthEndISO:key=>{const [y,m]=key.split('-').map(Number);return `${key}-${String(new Date(Date.UTC(y,m,0)).getUTCDate()).padStart(2,'0')}`;},
     monthKey:d=>String(d instanceof Date?d.toISOString():d).slice(0,7),
     monthLabel:(k,short=false)=>new Date(k+'-01T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:short?'short':'long',year:'numeric'}),
     shiftMonthKey:(k,n)=>{const d=new Date(k+'-01T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+n);return d.toISOString().slice(0,7)},
@@ -39,14 +45,17 @@ function createHarness(options = {}) {
     weekdayShort:d=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d], weekdayName:d=>['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d],
     toISODate:d=>d.toISOString().slice(0,10),clockTime:()=>'',parseAmountToFils:s=>isFinite(Number(s))?Math.round(Number(s)*100):null,parseAmountWithMoneySpec,
     totalAsShown:a=>a.reduce((s,v)=>s+v,0),fullDateTime:tx=>tx.date,friendlyDate:d=>format.shortDate(d),
+    daysBetweenISO:(a,b)=>Math.round((Date.parse(b+'T12:00:00Z')-Date.parse(a+'T12:00:00Z'))/86400000),
+    shiftISO:(iso,days)=>new Date(Date.parse(iso+'T12:00:00Z')+days*86400000).toISOString().slice(0,10),
   };
   const platform=options.platform??'android';
   const native={View:'View',ActivityIndicator:'ActivityIndicator',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',ScrollView:p=>jsx('ScrollView',p),RefreshControl:'RefreshControl',StyleSheet:nativeStyles,
     Platform:{OS:platform,select:x=>x[platform]??x.default},AppState:{addEventListener:()=>({remove(){}})},InteractionManager:{runAfterInteractions:task=>{task();return{cancel(){}};}},Alert:{alert:m=>events.push(['alert',m])},useWindowDimensions:()=>({width:options.width??390,fontScale:options.largeText?1.3:1})};
   const period=options.period??{mode:'month',key:'2026-09'};
   const periodModule={inPeriod:(date,p)=>typeof p==='string'?date.slice(0,7)===p:p.mode==='month'?date.slice(0,7)===p.key:true,
-    periodLabel:p=>p.mode==='month'?format.monthLabel(p.key,true):'This year',toPeriod:p=>typeof p==='string'?{mode:'month',key:p}:p,
-    comparablePreviousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null};
+    periodRange:()=>'',periodLabel:p=>p.mode==='month'?format.monthLabel(p.key,true):p.mode==='year'?String(p.year):p.mode==='range'?`${format.shortDate(p.from)} – ${format.shortDate(p.to)}`:'All time',toPeriod:p=>typeof p==='string'?{mode:'month',key:p}:p,
+    comparablePreviousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null,
+    previousPeriod:p=>p.mode==='month'?{mode:'month',key:format.shiftMonthKey(p.key,-1)}:null,isCurrentMonth:p=>typeof p==='object'&&p.mode==='month'&&p.key==='2026-09'};
   const accounts=[
     {id:'enbd',name:'Emirates NBD',kind:'bank',bankName:'Emirates NBD',last4:'4821',openingFils:0,snapshotKind:'balance',snapshotFils:2500000,snapshotTs:1788681600000,color:'#166CA2'},
     {id:'adcb',name:'ADCB',kind:'bank',bankName:'ADCB',last4:'8310',openingFils:0,snapshotKind:'balance',snapshotFils:1700000,snapshotTs:1788681600000,color:'#BD364C'},
@@ -69,7 +78,7 @@ function createHarness(options = {}) {
     privateMode:true,notSubscriptions:[],merchantOverrides:{},billAliases:{},marketId:'AE',ledgerMoney:{currency:'AED',exponent:2},reviewTray:{pending:[]},...options.state};
   if(options.empty){state.transactions=[];state.accounts=[];state.budgets=[];state.bills=[];state.cardDues=[];}
   const store={state,getStateSnapshot:()=>state,getStateGeneration:()=>0};
-  for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','deleteBill','markBillPaid','setNotSubscription','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport','setLedgerMoney'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
+  for(const name of ['editTransaction','deleteTransaction','setMerchantOverride','setBillAlias','addAccount','editAccount','deleteAccount','addGoal','editGoal','deleteGoal','mergeRenewedCard','markCardsDistinct','addBill','editBill','deleteBill','markBillPaid','setNotSubscription','setSubscriptionCancelled','setAccountBalance','payCardDue','upsertBudget','deleteBudget','applyFxUpdates','setCaptureOptOut','beginHistoryImport','setLedgerMoney'])store[name]=(...args)=>{events.push([name,...args]);return Promise.resolve()};
   const harnessToday=options.now??new Date('2026-09-15T09:00:00Z');
   const deps={react,'react/jsx-runtime':runtime,'@/lib/assistant-copy':assistantCopy,'react-native':native,'@/constants/theme':themes,'@/global.css':{},
     'expo-router':{useRouter:()=>({push:p=>events.push(['route',p]),back:()=>events.push(['back'])}),useLocalSearchParams:()=>options.params??{},Redirect:p=>jsx('Redirect',p)},
@@ -82,9 +91,9 @@ function createHarness(options = {}) {
     // only replaces it when the app is foregrounded. Handing back a fresh
     // Date per call would invalidate every memo keyed on `now` on every
     // render — which is what the render-cost tests exist to catch.
-    '@/hooks/use-today':{useToday:()=>harnessToday},
+    '@/hooks/use-today':{useToday:()=>harnessToday,useResumeClock:()=>harnessToday},
     '@/hooks/use-screen-entering':{useScreenEntering:()=>()=>undefined},'@/hooks/use-color-scheme':{useColorScheme:()=>options.theme??'light'},
-    '@/hooks/use-reduced-motion':{useReducedMotion:()=>true},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true},
+    '@/hooks/use-reduced-motion':{useReducedMotion:()=>true},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true,useFocusEffect:()=>{}},
     '@/lib/foreground-history-priority':{prioritizeForegroundNavigation(){}},
     '@/lib/i18n':i18n,
     '@/lib/format':format,'@/lib/markets':{ledgerCurrencyCode:()=> 'AED',ledgerCurrencyDisplay:()=>lang==='ar'?'د.إ':'AED'},
@@ -106,14 +115,46 @@ function createHarness(options = {}) {
     '@/components/ui/states':{EmptyMonth:p=>jsx('EmptyMonth',p),SkeletonRows:p=>jsx('SkeletonRows',p)},
     '@/components/recap/recap-logo-trigger':{RecapLogoTrigger:p=>jsx('RecapLogoTrigger',p)},
   };
-  const animated={View:'View'};const fade={delay(){return this},duration(){return this}};
-  deps['react-native-reanimated']={__esModule:true,default:animated,FadeInDown:fade,ReduceMotion:{System:'system'},
-    useAnimatedStyle:f=>f(),useSharedValue:v=>({value:v}),withSpring:v=>v,withTiming:v=>v,Easing:{bezier:()=>null},interpolate:(v,a,b)=>b[0]+(v-a[0])/(a[1]-a[0])*(b[1]-b[0])};
+  const animated={View:'View'};const fade={delay(){return this},duration(){return this},springify(){return this},damping(){return this},stiffness(){return this}};
+  deps['react-native-reanimated']={__esModule:true,default:animated,FadeInDown:fade,FadeInUp:fade,ReduceMotion:{System:'system'},
+    useAnimatedStyle:f=>f(),useSharedValue:v=>({value:v}),withSpring:v=>v,withTiming:v=>v,withDelay:(_d,v)=>v,Easing:{bezier:()=>null},interpolate:(v,a,b)=>b[0]+(v-a[0])/(a[1]-a[0])*(b[1]-b[0])};
   deps['react-native-svg']={__esModule:true,default:'svg',Circle:'circle',Line:'line',Path:'path',Rect:'rect',Defs:'defs',LinearGradient:'linearGradient',Stop:'stop'};
   const local=(name,filename)=>deps[name]=load(path.join(root,filename??name.replace('@/', 'src/')+'.tsx'),deps,{Date:Clock});
+  // Ask Wafra redesign: its copy runs from source; the answer extras are a
+  // presentational boundary with their own tests.
+  deps['@/lib/biometric-kind']=load(path.join(root,'src/lib/biometric-kind.ts'));
+  deps['@/lib/settings-copy']=load(path.join(root,'src/lib/settings-copy.ts'),deps);
+  deps['@/lib/assistant-screen-copy']=load(path.join(root,'src/lib/assistant-screen-copy.ts'),deps);
+  deps['@/components/assistant-answer-extras']={AssistantPaymentRows:p=>jsx('PaymentRows',p),AssistantMonthChart:p=>jsx('MonthChart',p)};
   deps['@react-native-async-storage/async-storage']={getItem:async()=>null,setItem:async()=>{}};
   local('@/lib/home-widget-preferences','src/lib/home-widget-preferences.ts');
+  local('@/lib/home-today','src/lib/home-today.ts');
+  local('@/lib/period-pace','src/lib/period-pace.ts');
+  local('@/lib/transaction-source','src/lib/transaction-source.ts');
+  local('@/lib/transactions-copy','src/lib/transactions-copy.ts');
+  // Swipe gestures are native; the row inside is the real component.
+  deps['react-native-gesture-handler']={GestureHandlerRootView:p=>jsx('View',p)};
+  deps['@/components/swipe-row']={SwipeRow:p=>jsx('SwipeRow',{...p,children:p.children})};
+  local('@/lib/capture-pause','src/lib/capture-pause.ts');
+  deps['@/components/home-add-button']={HomeAddButton:p=>jsx('HomeAddButton',p)};
+  deps['@/lib/capture-pause-state']={loadCapturePauseSnooze:async()=>options.snoozedAtMs??null,saveCapturePauseSnooze:async at=>{events.push(['snooze',at]);}};
+  local('@/lib/widget-snapshot','src/lib/widget-snapshot.ts');
+  deps['@/lib/widget-sync']={requestWidgetSnapshotSync:()=>({cancel(){},done:Promise.resolve('written')}),invalidateWidgetSnapshotSync:async()=> 'cleared'};
+  deps['../../modules/wafra-widgets']={setWidgetSnapshot(){},clearWidgetSnapshot(){}};
+  // Widget inputs Home shares with the Widgets screen run from source over
+  // this harness's ledger (loaded on first use); the hint is a boundary.
+  Object.defineProperty(deps,'@/lib/widget-ledger',{enumerable:true,configurable:true,get(){
+    const real=load(path.join(root,'src/lib/widget-ledger.ts'),deps);
+    Object.defineProperty(deps,'@/lib/widget-ledger',{value:real,enumerable:true,configurable:true,writable:true});
+    return real;
+  }});
+  deps['@/components/widgets/widgets-hint']={WidgetsHint:p=>jsx('WidgetsHint',p)};
+  // The final size, as Reduce Motion shows it.
+  deps['@/components/ui/grow-bar']={GrowBar:p=>jsx('View',{style:[p.style,p.axis==='width'?{width:`${p.size}%`}:{height:p.size}]})};
+  local('@/lib/account-freshness','src/lib/account-freshness.ts');
   local('@/lib/home-widgets','src/lib/home-widgets.ts');
+  // Covered by home-goal-order-repair.test.cjs; Home's own tests need no storage repair.
+  deps['@/lib/home-goal-order-repair']={repairGoalOrderedHomeOnce:async()=>{}};
   local('@/lib/reference-copy','src/lib/reference-copy.ts');
   local('@/lib/currency-metadata','src/lib/currency-metadata.ts');
   local('@/lib/ledger-money','src/lib/ledger-money.ts');
@@ -126,24 +167,35 @@ function createHarness(options = {}) {
   local('@/lib/transfer-activity-copy','src/lib/transfer-activity-copy.ts');
   local('@/lib/transfer-review-copy','src/lib/transfer-review-copy.ts');
   local('@/lib/ledger','src/lib/ledger.ts');local('@/lib/splits','src/lib/splits.ts');local('@/lib/balances','src/lib/balances.ts');local('@/lib/categories','src/lib/categories.ts');
+  // Accounts/Bills redesign: pure figures and their copy, real source.
+  local('@/lib/money-places-copy','src/lib/money-places-copy.ts');local('@/lib/money-places','src/lib/money-places.ts');
   local('@/lib/bill-alias','src/lib/bill-alias.ts');
   local('@/lib/merchant-spending','src/lib/merchant-spending.ts');
   local('@/lib/merchant-spending-copy','src/lib/merchant-spending-copy.ts');
-  deps['@/lib/subscriptions']={detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
+  local('@/lib/details-copy','src/lib/details-copy.ts');
+  deps['@/components/merchant-month-bars']={MerchantMonthBars:p=>jsx('MerchantMonthBars',p)};
+  deps['@/components/merchant-category-rule']={MerchantCategoryRule:p=>jsx('MerchantCategoryRule',p)};
+  const recurringSource = load(path.join(root, 'src/lib/subscriptions.ts'), deps);
+  deps['@/lib/subscriptions']={...recurringSource, detectSubscriptions:()=>options.empty?[]:subs,activeSubscriptions:s=>s,stoppedSubscriptions:()=>[],trueSubscriptions:s=>s,
     fixedCommitments:()=>[],billCommitments:()=>[],otherCommitments:()=>[],daysUntilNext:s=>Math.round((Date.parse(s.nextExpectedISO)-Date.parse('2026-09-06'))/86400000),
-    recurringPaymentAccount:(tx,accounts)=>accounts.find(a=>a.id===tx.accountId)};
+    peekSubscriptionDetection:()=>null,subscriptionDetectionRunning:()=>false};
   local('@/lib/transaction-filter','src/lib/transaction-filter.ts');
-  local('@/lib/insights','src/lib/insights.ts');local('@/lib/analytics','src/lib/analytics.ts');local('@/lib/reference-presentation','src/lib/reference-presentation.ts');
+  local('@/lib/spending-daily','src/lib/spending-daily.ts');
+  local('@/lib/insights','src/lib/insights.ts');local('@/lib/analytics','src/lib/analytics.ts');local('@/lib/reference-presentation','src/lib/reference-presentation.ts');local('@/lib/upcoming-window','src/lib/upcoming-window.ts');
   const summary=deps['@/lib/insights'].summarizeMonth(state.transactions,period,new Set(state.accounts.map(a=>a.id)),new Set());
   deps['@/lib/cards']={openDues:()=>state.cardDues.map(due=>({due,daysLeft:4,remainingFils:due.totalDueFils,status:'upcoming',minimumKnown:true})),recentlySettledDues:()=>[],
     reissueSuggestions:()=>[],isInactiveAccount:(_s,a)=>!!a.archived,cardFigure:(_s,a)=>({kind:a.cardType==='credit'?'owed':a.snapshotFils===undefined&&a.kind!=='cash'?'unknown':'balance',fils:a.snapshotFils??(a.kind==='cash'?a.openingFils:null)})};
   deps['@/lib/bills']={billsForMonth:()=>state.bills.map(bill=>({bill,status:'upcoming',daysLeft:bill.dueDay-6,dueISO:`2026-09-${String(bill.dueDay).padStart(2,'0')}`}))};
+  local('@/lib/upcoming-bills','src/lib/upcoming-bills.ts');
   deps['@/lib/leaving-soon']={daysPhrase:n=>lang==='ar'?`خلال ${n} أيام`:`In ${n} days`};
   deps['@/lib/dashboard-projection']={projectDashboard:()=>({hero:{...summary,netFils:summary.incomeFils-summary.expenseFils},live:true,
     activityRows:state.transactions.filter(tx=>tx.date.slice(0,7)==='2026-09').slice(0,4),accountById:new Map(state.accounts.map(a=>[a.id,a])),internalTransactionIds:new Set(),
+    activityDayTotals:state.transactions.filter(tx=>tx.date.slice(0,7)==='2026-09').reduce((m,tx)=>m.set(tx.date,(m.get(tx.date)??0)+(tx.type==='income'?tx.amountFils:-tx.amountFils)),new Map()),
     unreadFormats:{count:0,shouldPrompt:false},uncategorised:{shouldPrompt:false,summary:{merchants:[],paymentPurposes:[],rowCount:0,totalFils:0}},
     upcoming:{items:state.bills.map(b=>({id:b.id,title:b.title,kind:'bill',amountFils:b.amountFils,daysLeft:b.dueDay-6,dateISO:`2026-09-0${b.dueDay}`,billId:b.id}))}})};
   local('@/components/themed-text');local('@/components/ui/icon');local('@/components/ui/money');local('@/components/ui/category-avatar');
+  // Home's Today figure rolls its digits (rolling-money.test.cjs); here it renders as the Money it formats like.
+  deps['@/components/ui/rolling-money']={RollingMoney:p=>deps['@/components/ui/money'].Money(p)};
   local('@/components/merchant-spending-link');
   deps['@/components/ui/bank-avatar']={BankAvatar:p=>jsx('BankAvatar',p)};
   deps['@/components/ui/merchant-avatar']={MerchantAvatar:p=>deps['@/components/ui/category-avatar'].CategoryAvatar(p)};
@@ -156,21 +208,58 @@ function createHarness(options = {}) {
     ['card-detail-sheet','CardDetailSheet'],['transaction-filter-sheet','TransactionFilterSheet'],['ui/amount-sheet','AmountSheet'],['ui/choice-sheet','ChoiceSheet'],['ui/confirm-sheet','ConfirmSheet'],['ui/category-chips','CategoryChips'],['limit-sheet','LimitSheet']]) {
     deps['@/components/'+module]={[name]:p=>jsx('Boundary',{...p,name})};
   }
-  local('@/components/ui/category-chips');
+  // Manual Add: the keypad text model and its copy are pure and run for real;
+  // the keypad itself is a boundary, and the category advisor (rules, then an
+  // optional on-device model) answers "no suggestion" as it does off-device.
+  local('@/lib/amount-keypad','src/lib/amount-keypad.ts');
+  local('@/lib/motion-android-copy','src/lib/motion-android-copy.ts');
+  deps['@/components/ui/amount-keypad']={AmountKeypad:p=>jsx('AmountKeypad',p),KeypadAmountDisplay:p=>jsx('KeypadAmountDisplay',p)};
+  deps['@/lib/on-device-category']={categoryAdvisor:{suggest:async()=>({kind:'none',reason:'harness'}),clear(){}}};
   local('@/components/wafra-logo');
   local('@/lib/ledger-light-copy','src/lib/ledger-light-copy.ts');
   local('@/components/history-reading-status');
   local('@/lib/money-picture-progress','src/lib/money-picture-progress.ts');
   local('@/components/money-picture-progress');
   local('@/components/transfer-review-notice');
+  // Design language E: the band palette resolves from the real theme; the
+  // scaffold renders its band content and sheet as children so tests reach
+  // both; the pattern is its own subscribed component (pattern.test.cjs).
+  deps['@/hooks/use-band']={useBand:(id)=>themes.BandPalettes[options.theme??'light'][id],useBandScheme:()=>options.theme??'light'};
+  deps['@/hooks/use-theme'].ThemeScope={Provider:'ThemeScope'};
+  deps['@/components/ui/band-scaffold']={BandScaffold:p=>jsx('BandScaffold',{...p,children:[p.bandContent,p.children]}),useBandBottomInset:()=>10,BAND_GUTTER:20};
+  deps['@/components/ui/your-pattern']={YourPattern:p=>jsx('YourPattern',p)};
+  local('@/components/ui/band/band-figure');local('@/components/ui/band/stat-tile');local('@/components/ui/band/week-tiles');
+  // The everyday screens in language E (Spending, Transactions, Add, the
+  // entry, filter and limit sheets): their band pieces and pure helpers run
+  // from source.
+  local('@/lib/band-copy','src/lib/band-copy.ts');local('@/lib/limit-status','src/lib/limit-status.ts');
+  local('@/lib/everyday-band-copy','src/lib/everyday-band-copy.ts');
+  local('@/lib/spending-compare','src/lib/spending-compare.ts');local('@/lib/spending-calendar-tiles','src/lib/spending-calendar-tiles.ts');
+  local('@/components/ui/band/band-segmented');local('@/components/ui/band/band-chip');local('@/components/ui/band/share-bar');
+  local('@/components/ui/band/glyph-tile');local('@/components/ui/band/status-bar');local('@/components/ui/band/e-button');
+  // The category creation form uses the real field/button and band palette;
+  // load it only after those existing UI boundaries are ready.
+  local('@/components/ui/category-chips');
+  local('@/components/spending/spending-band');
+  // The limit dial's drag is native; its steppers and adjustable actions run.
+  native.PanResponder={create:()=>({panHandlers:{}})};
+  local('@/components/ui/band/dial-limit');
+  local('@/components/add-band-field');
+  // Bills and Accounts in language E: the band pieces they use, their pure
+  // layout figures and the band's own copy run from source.
+  local('@/lib/money-places-band','src/lib/money-places-band.ts');
+  for(const name of ['pin-timeline'])local(`@/components/ui/band/${name}`);
+  local('@/components/money-places/key-value-rows');local('@/components/bills/bill-history-tiles');
   local('@/components/transaction-row');local('@/components/reference-home-summary');
-  local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');
-  local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');
+  local('@/components/spending/spending-overview');local('@/components/spending/spending-trends');local('@/components/spending/spending-calendar');
+  local('@/components/bills/bills-segment-control');local('@/components/bills/payment-agenda');local('@/components/bills/bills-timeline');local('@/components/wallet/balance-overview');local('@/components/wallet/account-groups');
   deps['react-native-safe-area-context']={useSafeAreaInsets:()=>({top:0,bottom:10,left:0,right:0})};
   deps['@/components/ui/tab-bar-metrics']={useTabBarMetrics:()=>({measuredHeight:78,setMeasuredHeight(){}})};
   local('@/components/tab-bar');
   function loadDetail() {
     deps['@/lib/fx'].formatOriginalCurrency=(f,c)=>c+' '+amount(f);
+    // Reading a stored original is pure; use the shipping reader.
+    deps['@/lib/fx'].originalMoneyOf=require('../build/fx.js').originalMoneyOf;
     deps['@/lib/sms-parser']={overrideFitsDirection:()=>false};
     deps['@/lib/uncategorised']={overrideAppliesTo:()=>false};
     deps['@/components/ui/section-header']={SectionHeader:p=>jsx('SectionHeader',p)};

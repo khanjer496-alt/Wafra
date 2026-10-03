@@ -18,10 +18,10 @@ const ok = (name, cond) => {
 
 // The router keeps hidden screens mounted, so hit-test: only return an element
 // that is actually on top at its own centre point.
-async function visibleText(page, text, timeout = 8000) {
+async function visibleText(page, text, timeout = 8000, scope = page) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    const els = await page.getByText(text).all();
+    const els = await scope.getByText(text).all();
     for (const el of els) {
       // Bring it on screen first. This helper used to test only what already
       // happened to be in the viewport, so any section that moved below the
@@ -125,34 +125,6 @@ const tapTab = async (page, label) => {
  * assertions further down do sums on what they find.
  */
 
-/** Every leaf text run that is actually painted, with its box and colour. */
-const paintedText = (page) => page.evaluate(() => {
-  const out = [];
-  const seen = new Set();
-  for (const el of document.querySelectorAll('div,span,h1,h2,h3,h4,h5,h6')) {
-    if (el.children.length) continue;
-    const s = (el.textContent || '').trim();
-    if (!s) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width < 2 || r.height < 2) continue;
-    if (r.bottom < 0 || r.top > window.innerHeight) continue;
-    const cx = Math.min(Math.max(r.x + r.width / 2, 0), window.innerWidth - 1);
-    const cy = Math.min(Math.max(r.y + r.height / 2, 0), window.innerHeight - 1);
-    const top = document.elementFromPoint(cx, cy);
-    if (!(top && (el.contains(top) || top.contains(el)))) continue;
-    const key = `${Math.round(r.y)}|${Math.round(r.x)}|${s}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({
-      t: s,
-      x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
-      // numberOfLines truncation shows as an ellipsis; overflow shows as a
-      // scrollWidth wider than the box. Both mean a figure the user cannot read.
-      clipped: el.scrollWidth > el.clientWidth + 1 || /…/.test(s),
-    });
-  }
-  return out;
-});
 
 /**
  * Text drawn on top of other text, within one screen.
@@ -196,16 +168,27 @@ const money = (s) => {
 };
 
 /** The scheme the app is actually painting in, read off the page fill. */
-const paintedScheme = (page) => page.evaluate(() => {
-  let n = document.elementFromPoint(6, 300), bg = '';
-  while (n) {
-    const c = getComputedStyle(n).backgroundColor;
-    if (c && c !== 'rgba(0, 0, 0, 0)') { bg = c; break; }
-    n = n.parentElement;
+const paintedScheme = async (page) => {
+  // Home's configurable overview can place the theme-bearing sheet below the
+  // first viewport. Expose that real surface before measuring its paint.
+  if (new URL(page.url()).pathname === '/') await page.getByTestId('home-screen-sheet').scrollIntoViewIfNeeded();
+  return page.evaluate(() => {
+  // E bands intentionally stay dark or coloured in light mode. Read the
+  // current cream/dark detail sheet, not an arbitrary point on the band.
+  for (const sheet of [...document.querySelectorAll('[data-testid$="-sheet"]')].reverse()) {
+    const r = sheet.getBoundingClientRect();
+    const topEdge = Math.max(0, r.top), bottomEdge = Math.min(innerHeight, r.bottom);
+    if (r.width < 20 || bottomEdge - topEdge < 20) continue;
+    const top = document.elementFromPoint(Math.min(innerWidth - 2, r.x + r.width / 2), (topEdge + bottomEdge) / 2);
+    if (!top || !(sheet.contains(top) || top === sheet)) continue;
+    const bg = getComputedStyle(sheet).backgroundColor;
+    if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') continue;
+    const [red, green, blue] = bg.match(/\d+/g).map(Number);
+    return (red + green + blue) / 3 > 128 ? 'light' : 'dark';
   }
-  const [r, g, b] = (bg.match(/\d+/g) || [0, 0, 0]).map(Number);
-  return (r + g + b) / 3 > 128 ? 'light' : 'dark';
-});
+  throw new Error('No exposed band sheet to verify the painted theme');
+  });
+};
 
 // The dev container ships Chromium at a fixed path; a CI runner installs it
 // where Playwright expects. Use the pinned path only when it is really there,
@@ -215,6 +198,10 @@ const browser = await chromium.launch(
   existsSync(CHROMIUM) ? { executablePath: CHROMIUM } : {},
 );
 const page = await browser.newPage({ viewport: { width: 412, height: 915 }, colorScheme: 'dark' });
+// Keep the seeded merchant/category coverage stable at the start of a real month.
+// Let Date.now advance too: React Native sheet animations depend on elapsed time.
+await page.clock.install({ time: new Date('2026-09-27T08:00:00Z') });
+await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 let aborted = null;
@@ -239,10 +226,14 @@ const homePayments = await page.evaluate(() => {
   const now = new Date();
   return [...document.querySelectorAll('[data-testid="home-widget-due"], [data-testid="home-widget-upcoming"]')]
     .flatMap(section => [...section.querySelectorAll('[role="button"]')])
-    .filter(node => (node.textContent || '').trim()) // exclude empty section chevrons
+    // Exclude the heading's count-and-total action; it is checked below.
+    .filter(node => (node.textContent || '').trim() && !(node.getAttribute('data-testid') || '').endsWith('-total'))
     .map(node => {
       const leaves = [...node.querySelectorAll('div,span')].filter(n => !n.children.length && n.textContent.trim());
-      return { fields: leaves.map(n => n.textContent.trim()),
+      const text = leaves.map(n => n.textContent.trim());
+      // Money now paints its currency and exact digits separately; keep
+      // that complete visible amount together, including an estimate mark.
+      return { fields: [text[0], text[1], text.slice(2).join(' ')],
         clipped: leaves.some(n => n.scrollWidth > n.clientWidth + 1 || /…/.test(n.textContent)),
         today: [now.getFullYear(), now.getMonth(), now.getDate()] };
     });
@@ -258,7 +249,21 @@ const paymentDayOffset = (phrase) => {
 ok(`home: every payment exposes a readable date and exact amount (${homePayments.length} rows)`,
   homePayments.length > 0 && homePayments.every(({ fields, clipped }) =>
     fields.length === 3 && fields[0] && Number.isFinite(paymentDayOffset(fields[1])) &&
-    /^[\d,]+(?:\.\d{1,2})?$/.test(fields[2]) && !clipped));
+    /^(?:≈\s*)?AED\s*[\d,]+(?:\.\d{1,2})?$/.test(fields[2].replace(/[\u200e\u200f]/g, '')) && !clipped));
+
+// Each payments heading totals its group; with every row shown, the rows add up to it.
+const paymentHeadings = await page.evaluate(() => [...document.querySelectorAll('[data-testid="home-widget-due"], [data-testid="home-widget-upcoming"]')]
+  .map(section => {
+    const minor = text => Math.round(Number((text.replace(/[\u200e\u200f]/g, '').match(/[\d,]+(?:\.\d{1,2})?/) || ['NaN'])[0].replace(/,/g, '')) * 100);
+    const heading = section.querySelector('[data-testid$="-total"]');
+    const rows = [...section.querySelectorAll('[role="button"]')].filter(node => node !== heading && (node.textContent || '').trim());
+    const count = Number((heading?.getAttribute('aria-label') || '').match(/(\d+) payments?/)?.[1]);
+    return { total: heading ? minor(heading.textContent) : NaN, count,
+      rows: rows.map(node => minor((node.getAttribute('aria-label') || '').split('. ').pop())) };
+  }));
+ok(`home: payment headings total their groups (${paymentHeadings.length} groups)`,
+  paymentHeadings.length > 0 && paymentHeadings.every(({ total, count, rows }) => Number.isFinite(total) &&
+    rows.length === Math.min(count, 3) && (count > 3 || rows.reduce((sum, value) => sum + value, 0) === total)));
 
 // Entry detail sheet.
 //
@@ -325,7 +330,7 @@ ok('spending titles the screen', !!(await visibleText(page, /^Spending$/)));
 // The amount itself is an accessible Money group rather than one leaf text
 // node, so resolve it inside the same summary cell as the label instead of
 // depending on how React Native Web happens to split currency and digits.
-const flowTotalHeading = (await page.getByTestId('spending-categories').innerText())
+const flowTotalHeading = (await page.getByTestId('spending-total').innerText())
   .match(/\bAED\s*[\d,]+(?:\.\d+)?/)?.[0] ?? '';
 ok('Spending presents a readable total before category rows', Number.isFinite(money(flowTotalHeading)));
 // Categories own budgets now. Keep exact money and drill-down checks.
@@ -368,28 +373,32 @@ ok('Spending shows category limits with their spending', !!(await visibleText(pa
     await tapLabel(page,'Back',1200);await tapTab(page,'Spending');
   }
 }
-await tapText(page,'Trends',800);
-ok('Trends owns six-month cashflow',!!(await visibleText(page,/Income & spending/i)));
-const months=await page.locator('[data-testid="spending-trends"] [role="button"][aria-label]').evaluateAll(nodes=>nodes
+await tapText(page,'Compare',800);
+ok('Compare keeps the six-month cashflow',!!(await visibleText(page,/Income & spending/i)));
+const months=await page.locator('[data-testid="spending-trends"] [data-testid^="cashflow-month-"][role="button"][aria-label]').evaluateAll(nodes=>nodes
   .map(n=>({label:n.getAttribute('aria-label'),selected:n.getAttribute('aria-selected'),text:n.textContent}))
   .filter(n=>/Income:.*Spending:|No recorded activity/.test(n.label)));
 ok('All six months expose readable cashflow or no-data',months.length===6);
 ok('Exactly one month is selected',months.filter(m=>m.selected==='true').length===1);
-ok('Trends includes merchant and change analysis',!!(await visibleText(page,'Top merchants'))&&!!(await visibleText(page,'What changed')));
+ok('Compare includes merchant and change analysis', !!(await visibleText(page, 'Top merchants')) &&
+  await page.getByTestId('spending-compare').locator('[data-testid^="spending-mover-"]').count() > 0);
+const monthDetails = await page.getByTestId('cashflow-month-details').getByRole('button').all();
+ok('All six months also show their exact values as readable rows', monthDetails.length === 6 &&
+  (await Promise.all(monthDetails.map(row => row.getAttribute('aria-label')))).every(label => months.some(month => month.label === label)));
 await tapText(page,'Categories',700);
 await tapLabel(page,/^Transport\. AED /,800);
 await tapText(page,'Edit monthly limit',800);
 ok('Category limit editor remains reachable',!!(await visibleText(page,/MONTHLY LIMIT/i)));
-ok('Limit editor preserves its merchant detail',!!(await visibleText(page,/WHERE IT WENT/i)));
+ok('Limit editor preserves its merchant detail',!!(await visibleText(page,/WHERE IT WENT/i,8000,page.getByTestId('limit-sheet'))));
 // Opening the limit editor already closes the category detail sheet.
 await tapLabel(page,'Close',500);
 
 // ── Bills ─────────────────────────────────────────────────────────────
 await tapTab(page, 'Bills');
-ok('Bills has Upcoming and All views',!!(await visibleText(page,'Upcoming'))&&!!(await visibleText(page,'All')));
+ok('Bills has Next 30 days and All views',!!(await visibleText(page,'Next 30 days'))&&!!(await visibleText(page,'All')));
 const agenda=page.locator('[data-testid="payment-agenda"]');
-await agenda.waitFor({state:'visible'});
-ok('Agenda states that marking paid only updates Wafra and sends no payment',/Marking something paid only updates Wafra\. No payment is sent\./.test(await agenda.innerText()));
+await agenda.first().waitFor({state:'visible'});
+ok('Agenda states that marking paid only updates Wafra and sends no payment',/Marking something paid only updates Wafra\. No payment is sent\./.test((await agenda.allTextContents()).join(' ')));
 await tapText(page,'All',600);
 const rows=await agenda.locator('[role="button"][aria-label]').evaluateAll(nodes=>nodes.map(n=>({label:n.getAttribute('aria-label'),text:n.textContent})));
 ok('Chronological agenda contains named obligations',rows.length>0 && rows.every(n=>/AED [\d,]+/.test(n.label)));
@@ -421,9 +430,9 @@ ok('Predicted recurring charges remain identified as estimates',rows.some(n=>/Es
 // a correct lifetime total must include the rows the user can reach by scrolling.
 await tapText(page, /^Netflix$/, 1400);
 {
-  const t = await paintedText(page);
-  const label = t.find((x) => /^total paid$/i.test(x.t));
-  const total = label && t.find((x) => x.y > label.y && x.y < label.y + 40 && /^AED/.test(x.t));
+  const totalRow = page.getByTestId('bill-detail-facts').getByLabel(/^Total paid, /);
+  await totalRow.scrollIntoViewIfNeeded();
+  const total = { t: (await totalRow.innerText()).match(/AED\s+[\d,]+(?:\.\d+)?/)?.[0] };
   const chargeTexts = await page.evaluate(() => {
     const scroller = document.querySelector('[data-testid="subscription-history-scroll"]');
     if (!scroller) return [];
@@ -464,13 +473,13 @@ await tapLabel(page, 'Settings', 1400);
  // Settings now presents task sections in one scrollable screen. Read each
  // actual heading sequentially: parallel scroll attempts race one another.
  const sections=[];
- for (const title of ['Imports','Notifications','Preferences','Privacy','Data','Support & feedback']) {
+ for (const title of ['Capture','Notifications','Appearance','Country and currency','Privacy and security']) {
    sections.push(!!(await visibleText(page,new RegExp(`^${title}$`,'i'))));
  }
- ok('Settings exposes its import, preferences, privacy, data and support sections',sections.every(Boolean));
+ ok('Settings exposes its capture, notification, appearance, region and privacy sections',sections.every(Boolean));
 }
-ok('Settings keeps Pro and trial status reachable',!!(await visibleText(page,'Wafra Pro'))&&!!(await visibleText(page,/Free trial · \d day/)));
-ok('Support keeps feedback reachable',!!(await visibleText(page,'Send feedback')));
+ok('Settings keeps Pro and trial status reachable',!!(await visibleText(page,'Wafra Pro'))&&!!(await visibleText(page,/Automatic capture is included for \d+ more day|Trial ended/)));
+ok('Settings reaches Data and help',!!(await visibleText(page,'Data and help')));
 ok('Privacy retains app lock',!!(await visibleText(page,'App lock')));
 
 /**
@@ -481,7 +490,7 @@ ok('Privacy retains app lock',!!(await visibleText(page,'App lock')));
  */
 {
   ok('settings offers a compact Appearance preference', !!(await visibleText(page, /^Appearance$/i)));
-  await tapText(page, /^Appearance$/i, 1200);
+  await tapText(page, /^Theme$/i, 1200);
   for (const opt of ['System', 'Light', 'Dark']) {
     ok(`appearance offers ${opt}`, !!(await visibleText(page, opt)));
   }
@@ -502,19 +511,22 @@ ok('Privacy retains app lock',!!(await visibleText(page,'App lock')));
   };
   await tapText(page, 'Light', 1200);
   ok('appearance: Light turns the whole app over while the OS is dark', await acrossTheApp('light'));
-  await tapText(page, /^Appearance$/i, 1200);
+  await tapText(page, /^Theme$/i, 1200);
   await tapText(page, 'Dark', 1200);
   ok('appearance: Dark pins it back', await acrossTheApp('dark'));
-  await tapText(page, /^Appearance$/i, 1200);
+  await tapText(page, /^Theme$/i, 1200);
   await tapText(page, 'System', 1200);
   ok('appearance: System follows the OS again', await acrossTheApp('dark'));
-  ok('appearance: System says it is following the phone',
-    !!(await visibleText(page, /System · follows phone/)));
+  ok('appearance: the Theme row says System again',
+    !!(await visibleText(page, /^System$/)));
 }
 
 // ── Import ────────────────────────────────────────────────────────────
-await tapText(page, 'Improve accuracy', 1200);
+await tapText(page, 'Data and help', 1200);
+await tapText(page, 'Unread alerts', 1200);
 ok('accuracy screen opens', !!(await visibleText(page, /reads clean|could not be fully read/)));
+await tapLabel(page, 'Back', 1200);
+// Data and help sits one level under Settings.
 await tapLabel(page, 'Back', 1200);
 
 // Reached in-app from Wallet: a cold load of an exported route hits the
@@ -549,7 +561,7 @@ await tapText(page, 'Wafra Pro', 1400);
   if (hits.length) console.log(hits.slice(0, 4));
 }
 ok('paywall renders plans', !!(await visibleText(page, /GET WAFRA PRO/i)));
-ok('paywall shows the remaining trial', !!(await visibleText(page, /Free trial · \d day/)));
+ok('paywall shows the remaining trial', !!(await visibleText(page, /Automatic capture is included for \d+ more days?\./)));
 
 // ── Hidden-unlock defense: repeated VERSION taps must not grant Pro ──
 //
@@ -558,11 +570,11 @@ ok('paywall shows the remaining trial', !!(await visibleText(page, /Free trial �
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(2000);
 await tapLabel(page, 'Settings', 1400);
-const about = await visibleText(page, 'Know where it goes');
-if (about) await about.scrollIntoViewIfNeeded();
+await tapText(page, 'Data and help', 1200);
+const mark = page.getByTestId('settings-version-footer');
+await mark.scrollIntoViewIfNeeded();
 await page.waitForTimeout(400);
-const mark = await visibleText(page, /^Wafra\s+\d/);
-ok('the version label is exposed for the old seven-tap trigger', !!mark);
+ok('the version label is exposed for the old seven-tap trigger', await mark.isVisible() && /^Wafra\s+\d/.test(await mark.innerText()));
 if (!mark) throw new Error('No exposed Wafra version label for hidden-unlock regression');
 for (let i = 0; i < 7; i++) {
   await mark.click({ timeout: 4000 });

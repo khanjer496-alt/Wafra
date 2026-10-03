@@ -62,6 +62,20 @@ const { inspectGenericBankEventForReview } = require('./build/launch-alert-parse
 const secure = require('./build/stub-secure-store');
 const rn = require('./build/stub-react-native');
 const worker = require('./build/worker').default;
+const reviewTrayApi = require('./build/alert-review-tray.js');
+const reviewFixtureTime = Date.now();
+function reviewFixture(label) {
+  return reviewTrayApi.prepareUniversalReviewAlert({
+    id: `fixture_review_id_${label}`, sourceKey: `fixture_review_source_${label}`,
+    observedAt: reviewFixtureTime, channel: 'shortcut',
+    event: inspectGenericBankEventForReview('Purchase of AED 50.00 at CARREFOUR with Debit Card ending 1234'),
+  });
+}
+function persistFixtureReviews(state, items) {
+  const batch = reviewTrayApi.admitPreparedReviewAlerts(state.reviewTray ?? reviewTrayApi.emptyAlertReviewTray(), items, Date.now());
+  state.reviewTray = batch.state;
+  return batch.outcomes.filter(value => value === 'admitted').length;
+}
 
 let pass = 0, fail = 0;
 function ok(name, cond, detail = '') {
@@ -785,6 +799,8 @@ async function queueItem(id, row, publicKey) {
         !JSON.stringify(result.reviewCandidates).includes('FAB payroll'));
     eq('review row: its queue id stays distinguishable until tray persistence',
       result.reviewIds, ['56565656-5656-4656-8656-565656565656']);
+    eq('review row: sealed queue identity maps to its sanitized source',
+      result.reviewSourceKeysById?.get('56565656-5656-4656-8656-565656565656'), result.reviewCandidates[0].sourceKey);
   }
 
   {
@@ -811,6 +827,21 @@ async function queueItem(id, row, publicKey) {
         !JSON.stringify(globalReview).includes('Chase Alert'));
     eq('global review row: queue identity stays reserved until tray durability',
       result.reviewIds, ['57575757-5757-4757-8757-575757575757']);
+  }
+
+  {
+    const { net, cfg } = await paired();
+    const older = reviewRowFor(FALLBACK_SALARY);
+    const newer = universalReviewRowFor('Chase Alert: Your card ending 1234 was charged USD 20.00 at TARGET.');
+    const newerId = '58585858-5858-4858-8858-585858585858';
+    const olderId = '59595959-5959-4959-8959-595959595959';
+    const items = [await queueItem(newerId, newer), await queueItem(olderId, older)];
+    net.on('GET /v1/sync', () => json(200, { items }));
+    const result = await relay.syncRelay(cfg);
+    eq('review mapping: chronological sorting never changes sealed queue ownership',
+      [result.reviewCandidates.map(item => item.sourceKey),
+        result.reviewSourceKeysById?.get(newerId), result.reviewSourceKeysById?.get(olderId)],
+      [[older.sourceKey, newer.sourceKey], newer.sourceKey, older.sourceKey]);
   }
 
   /* ═════════════════ Revoked from another device ═════════════════
@@ -1255,6 +1286,13 @@ async function queueItem(id, row, publicKey) {
     !relay.isParsedRelayRow({ ...row, sender: 'ENBD\nforged' }));
   ok('row: a legitimate rawless structured row is accepted',
     !('raw' in row) && relay.isParsedRelayRow(row));
+  const indexedStatement = { ...row, captureSource: 'pdf', statementImportId: 'a'.repeat(32), statementRowIndex: 0 };
+  ok('row: statement file ordinal survives validated relay conversion',
+    relay.isParsedRelayRow(indexedStatement) && relay.relayRowToScannedSms(indexedStatement).statementRowIndex === 0);
+  for (const changed of [
+    { statementRowIndex: -1 }, { statementRowIndex: 200 }, { statementRowIndex: 0.5 },
+    { statementImportId: undefined }, { statementImportId: 'invalid' }, { captureSource: 'shortcut' },
+  ]) ok('row: malformed statement ordinal or provenance is rejected', !relay.isParsedRelayRow({ ...indexedStatement, ...changed }));
   ok('row: only the exact Messages-automation marker can prove setup',
     relay.isParsedRelayRow({
       ...row,
@@ -1790,6 +1828,8 @@ async function queueItem(id, row, publicKey) {
     let synced = { parsed: [], ids: [], unreadable: 0, testReceived: 0, testIds: [] };
     let acked = [];
     const captureDep = (id) => {
+      if (id === '@/lib/capture-source-identity') return require('./build/capture-source-identity.js');
+      if (id === '@/lib/runtime-performance') return require('./build/runtime-performance');
       if (id === '@/lib/review-source-bindings') return require('./build/review-source-bindings');
       if (id === '@/lib/background-relay-storage') return { backgroundRelayStorage: storage };
       if (id === '@/lib/background-relay') {
@@ -1831,6 +1871,8 @@ async function queueItem(id, row, publicKey) {
     {
       let requestedSince = null;
       const historyCapture = execute('src/lib/capture.ts', (id) => {
+        if (id === '@/lib/capture-source-identity') return require('./build/capture-source-identity.js');
+        if (id === '@/lib/runtime-performance') return require('./build/runtime-performance');
         if (id === '@/lib/review-source-bindings') return require('./build/review-source-bindings');
         if (id === '@/lib/background-relay-storage') return { backgroundRelayStorage: storage };
         if (id === '@/lib/background-relay') {
@@ -2112,6 +2154,9 @@ async function queueItem(id, row, publicKey) {
         batch: { lastScanTs: 900 },
       };
       const executorModule = execute('src/lib/capture-executor.ts', (id) => {
+        if (id === '@/lib/statement-import-flow') return require('./build/statement-import-flow.js');
+        if (id === '@/lib/alert-review-tray') return require('./build/alert-review-tray.js');
+        if (id === '@/lib/capture-source-identity') return require('./build/capture-source-identity.js');
         if (id === '@/lib/capture-trace') return require('./build/capture-trace.js');
         if (id === '@/lib/runtime-performance') return { recordRuntimeOperation: () => {} };
         if (id === '@/lib/wallet-near-match') return require('./build/wallet-near-match.js');
@@ -2140,15 +2185,17 @@ async function queueItem(id, row, publicKey) {
         throw new Error(`unexpected capture executor dependency ${id}`);
       });
       const hydrated = { hydrated: true, lastScanTs: 0 };
-      const ledger = (durable, events) => ({
-        getState: () => hydrated,
+      const ledger = (durable, events) => {
+        const fixtureState = { ...hydrated, reviewTray: reviewTrayApi.emptyAlertReviewTray() };
+        return {
+        getState: () => fixtureState,
         importBatch: () => {
           events.push('persist');
           return { ids: ['tx_1'], durable: typeof durable === 'function' ? durable() : durable };
         },
         ensureDurable: async () => void events.push('flush'),
         markParserVersion: () => void events.push('parser'),
-      });
+      }; };
 
       // Exercise the real planner at the executor boundary: a refused batch
       // must never be acknowledged as an empty/duplicate relay result.
@@ -2339,7 +2386,8 @@ async function queueItem(id, row, publicKey) {
               events.push(`flush:${current.ledgerId}`);
               await ledgerDurable;
             },
-            stageReviewAlerts: () => {
+            stageReviewAlerts(items) {
+              persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
               return { admitted: 1, durable: reviewDurable };
             },
@@ -2352,7 +2400,7 @@ async function queueItem(id, row, publicKey) {
                 captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
               }],
               declined: [], newestTs: 1,
-              reviewCandidates: [{ id: 'structured-review' }],
+              reviewCandidates: [reviewFixture('structured-review')],
               source: 'relay', needsSetup: false,
               commit: async () => void events.push('ack'),
             }),
@@ -2481,15 +2529,15 @@ async function queueItem(id, row, publicKey) {
             getState: () => current,
             importBatch: () => ({ ids: [], durable: Promise.resolve() }),
             ensureDurable: async () => {},
-            stageReviewAlerts: () => ({
-              admitted: 1,
+            stageReviewAlerts: (items) => ({
+              admitted: persistFixtureReviews(current, items),
               durable: new Promise((resolve) => { releaseReview = resolve; }),
             }),
           },
           dependencies: {
             collectRoutine: async () => ({
               parsed: [row(1, 'SHOP')], declined: [], newestTs: 2,
-              reviewCandidates: [{ id: 'structured-review' }],
+              reviewCandidates: [reviewFixture('structured-review')],
               historicalReread: true,
               source: 'sms', needsSetup: false, commit: async () => {},
             }),
@@ -2518,7 +2566,8 @@ async function queueItem(id, row, publicKey) {
               events.push('persist');
               return { ids: [], durable: Promise.resolve() };
             },
-            stageReviewAlerts: () => {
+            stageReviewAlerts(items) {
+              persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
               return { admitted: 1, durable: Promise.resolve() };
             },
@@ -2534,7 +2583,7 @@ async function queueItem(id, row, publicKey) {
               current = { hydrated: true, lastScanTs: 1, captureOptOut: true };
               return {
                 parsed: [row(1, 'SHOP')], declined: [], newestTs: 2,
-                reviewCandidates: [{ id: 'must-not-stage' }],
+                reviewCandidates: [reviewFixture('must-not-stage')],
                 detectedLaunchMarket: 'SA', source: 'relay', needsSetup: false,
                 commit: async () => void events.push('ack'),
               };
@@ -2559,7 +2608,8 @@ async function queueItem(id, row, publicKey) {
         const executor = executorModule.createCaptureExecutor({
           ledger: {
             ...ledger(Promise.resolve(), events),
-            stageReviewAlerts: () => {
+            stageReviewAlerts(items) {
+              persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
               return { admitted: 1, durable: reviewDurable };
             },
@@ -2567,7 +2617,7 @@ async function queueItem(id, row, publicKey) {
           dependencies: {
             collectRoutine: async () => ({
               parsed: [], declined: [], newestTs: 1,
-              reviewCandidates: [{ id: 'structured-review' }],
+              reviewCandidates: [reviewFixture('structured-review')],
               source: 'sms', needsSetup: false,
               commit: async () => void events.push('commit'),
             }),
@@ -2599,7 +2649,8 @@ async function queueItem(id, row, publicKey) {
               events.push('persist');
               return { ids: [], durable: Promise.resolve() };
             },
-            stageReviewAlerts: () => {
+            stageReviewAlerts(items) {
+              persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
               return { admitted: 1, durable: reviewDurable };
             },
@@ -2609,7 +2660,7 @@ async function queueItem(id, row, publicKey) {
           dependencies: {
             collectRoutine: async () => ({
               parsed: [], declined: [], newestTs: 1,
-              reviewCandidates: [{ id: 'already-being-encrypted' }],
+              reviewCandidates: [reviewFixture('already-being-encrypted')],
               source: 'relay', needsSetup: false,
               commit: async () => void events.push('ack'),
             }),
@@ -2632,7 +2683,8 @@ async function queueItem(id, row, publicKey) {
         const executor = executorModule.createCaptureExecutor({
           ledger: {
             ...ledger(Promise.resolve(), events),
-            stageReviewAlerts: () => {
+            stageReviewAlerts(items) {
+              persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
               return { admitted: 1, durable: Promise.resolve() };
             },
@@ -2640,7 +2692,7 @@ async function queueItem(id, row, publicKey) {
           dependencies: {
             collectRoutine: async () => ({
               parsed: [], declined: [], newestTs: 900,
-              reviewCandidates: [{ id: 'structured-review' }],
+              reviewCandidates: [reviewFixture('structured-review')],
               source: 'sms', needsSetup: false,
               commit: async () => void events.push('commit'),
             }),
@@ -2657,7 +2709,8 @@ async function queueItem(id, row, publicKey) {
         const executor = executorModule.createCaptureExecutor({
           ledger: {
             ...ledger(Promise.resolve(), events),
-            stageReviewAlerts: () => {
+            stageReviewAlerts(items) {
+              persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
               return {
                 admitted: 1,
@@ -2668,7 +2721,7 @@ async function queueItem(id, row, publicKey) {
           dependencies: {
             collectRoutine: async () => ({
               parsed: [row(1, 'SHOP')], declined: [], newestTs: 1,
-              reviewCandidates: [{ id: 'structured-review' }],
+              reviewCandidates: [reviewFixture('structured-review')],
               source: 'sms', needsSetup: false,
               commit: async () => void events.push('commit'),
             }),
@@ -2751,7 +2804,8 @@ async function queueItem(id, row, publicKey) {
           ledger: {
             getState: () => current,
             setMarket: (market) => { events.push(`market:${market}`); return true; },
-            stageReviewAlerts: () => {
+            stageReviewAlerts(items) {
+              persistFixtureReviews(this.getState(), items);
               events.push('stage-review');
               return { admitted: 1, durable: Promise.resolve() };
             },
@@ -2780,7 +2834,7 @@ async function queueItem(id, row, publicKey) {
             ...row(20, 'PANDA'), market: 'SA', captureSource: 'shortcut',
             captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
           }],
-          reviewCandidates: [{ id: 'review' }],
+          reviewCandidates: [reviewFixture('review')],
           ids: ['bank-row'], testIds: [], unreadable: 0, testReceived: 0,
           shortcutRows: 1, shortcutRowsWithBank: 1,
         });
@@ -2803,7 +2857,8 @@ async function queueItem(id, row, publicKey) {
         const executor = executorModule.createCaptureExecutor({
           ledger: {
             getState: () => current,
-            stageReviewAlerts: () => {
+            stageReviewAlerts(items) {
+              persistFixtureReviews(this.getState(), items);
               events.push('stage-review');
               return {
                 admitted: 1,
@@ -2825,7 +2880,7 @@ async function queueItem(id, row, publicKey) {
                   ...row(21, 'LULU'), captureSource: 'shortcut',
                   captureAutomation: automationMarker('device', AUTOMATION_GENERATION_A),
                 }],
-                reviewCandidates: [{ id: 'review' }],
+                reviewCandidates: [reviewFixture('review')],
                 ids: ['bank-row'], testIds: [], unreadable: 0, testReceived: 0,
                 shortcutRows: 1, shortcutRowsWithBank: 1,
               };
@@ -2906,7 +2961,8 @@ async function queueItem(id, row, publicKey) {
         const executor = executorModule.createCaptureExecutor({
           ledger: {
             ...ledger(Promise.resolve(), events),
-            stageReviewAlerts: () => {
+            stageReviewAlerts(items) {
+              persistFixtureReviews(this.getState(), items);
               events.push('review-stage');
               return { admitted: 1, durable: Promise.resolve().then(() => events.push('review-durable')) };
             },
@@ -2914,7 +2970,7 @@ async function queueItem(id, row, publicKey) {
           dependencies: {
             getRelay: async () => cfg,
             sync: async () => ({
-              parsed: [], reviewCandidates: [{ id: 'structured-review' }],
+              parsed: [], reviewCandidates: [reviewFixture('structured-review')],
               ids: ['review-row', 'setup-probe'], reviewIds: ['review-row'],
               testIds: ['setup-probe'], unreadable: 0, testReceived: 1,
               shortcutRows: 1, shortcutRowsWithBank: 1,
@@ -3374,7 +3430,7 @@ async function queueItem(id, row, publicKey) {
               baseUrl: 'https://relay.test', syncToken: 's', privateKey: 'k', setupState: 'verified',
             }),
             sync: async () => ({
-              parsed: [], reviewCandidates: [{ id: 'structured-review' }],
+              parsed: [], reviewCandidates: [reviewFixture('structured-review')],
               ids: ['review-row'], reviewIds: ['review-row'], testIds: [],
               unreadable: 0, testReceived: 0, shortcutRows: 1, shortcutRowsWithBank: 1,
             }),

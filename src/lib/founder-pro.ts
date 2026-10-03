@@ -3,6 +3,8 @@ export const FOUNDER_TAP_WINDOW_MS = 4_000;
 
 const FOUNDER_UNLOCK_ENABLED =
   process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
+const AUTOMATIC_FOUNDER_PRO_ENABLED =
+  process.env.EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO === '1';
 
 export interface FounderTapSequence {
   count: number;
@@ -21,6 +23,14 @@ export const EMPTY_FOUNDER_TAP_SEQUENCE: FounderTapSequence = {
 
 /** Build-time gate. Production profiles compile the founder gesture closed. */
 export const isFounderUnlockBuild = (): boolean => FOUNDER_UNLOCK_ENABLED;
+
+/**
+ * Explicit tester-artifact grant, separate from a verified store purchase.
+ * Native hydration persists the existing local founder entitlement. Once
+ * granted, it survives ledger erase and later builds on that installation.
+ */
+export const isAutomaticFounderProBuild = (): boolean =>
+  FOUNDER_UNLOCK_ENABLED && AUTOMATIC_FOUNDER_PRO_ENABLED;
 
 /** Count one bounded burst of taps without retaining timers or user data. */
 export const recordFounderTap = (

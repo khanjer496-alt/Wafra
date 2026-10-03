@@ -1,7 +1,7 @@
 import { daysBetweenISO, shiftISO, toISODate } from '@/lib/format';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { isSpending } from '@/lib/ledger';
-import type { Account, CategoryId, Transaction } from '@/lib/types';
+import type { Account, Bill, CategoryId, Transaction } from '@/lib/types';
 
 export type Cadence = 'weekly' | 'monthly' | 'yearly' | 'as-needed';
 
@@ -15,6 +15,8 @@ export type RecurringGroup = 'subscription' | 'utility' | 'housing' | 'commitmen
 
 export interface Subscription {
   title: string;
+  /** Provider service identity, retaining only a closed kind and masked tail. */
+  billIdentity?: string;
   category: CategoryId;
   group: RecurringGroup;
   /** stopped = silent for well past its cadence (likely cancelled). */
@@ -236,7 +238,7 @@ function previousPriceRun(amounts: number[]): number[] {
  * parser-assigned utility/telecom rows; an arbitrary shop containing "internet"
  * must never become a household bill.
  */
-function recurringProviderTitle(transaction: Transaction): string {
+export function recurringProviderTitle(transaction: Pick<Transaction, 'title' | 'category' | 'userEdited'>): string {
   if (transaction.userEdited ||
     (transaction.category !== 'utilities' && transaction.category !== 'telecom')) {
     return transaction.title.trim();
@@ -250,6 +252,76 @@ function recurringProviderTitle(transaction: Transaction): string {
   return title;
 }
 
+type RecurringIdentity = Pick<Subscription, 'title' | 'billIdentity'>;
+
+/** Keep kinds distinct: a matching last four alone does not prove one service. */
+function normalizedBillIdentity(identity: string | undefined): string | undefined {
+  return typeof identity === 'string' && /^(?:account|consumer|party|customer|contract|service):[a-z0-9]{4}$/i.test(identity)
+    ? identity.toLowerCase()
+    : undefined;
+}
+
+/** Stable persistence/navigation key; legacy unidentified providers keep their old key. */
+export function subscriptionKey(sub: RecurringIdentity): string {
+  const provider = sub.title.trim().toLowerCase();
+  const identity = normalizedBillIdentity(sub.billIdentity);
+  if (identity) return `service:${JSON.stringify([provider, identity])}`;
+  // Raw merchant names are user-editable. Keep their namespace separate from
+  // encoded service keys, including names resembling another escaped name.
+  return /^(?:service|provider):/.test(provider) ? `provider:${JSON.stringify(provider)}` : provider;
+}
+
+/** Only canonical service keys may persist scoped undo markers. */
+export function isScopedSubscriptionKey(key: string): boolean {
+  if (!key.startsWith('service:')) return false;
+  try {
+    const value: unknown = JSON.parse(key.slice('service:'.length));
+    return Array.isArray(value) && value.length === 2 &&
+      typeof value[0] === 'string' && value[0].trim().length > 0 && typeof value[1] === 'string' &&
+      normalizedBillIdentity(value[1]) !== undefined &&
+      subscriptionKey({ title: value[0], billIdentity: value[1] }) === key;
+  } catch {
+    return false;
+  }
+}
+
+/** Human-facing discriminator without changing the provider used by merchant logos. */
+export function subscriptionLabel(sub: RecurringIdentity): string {
+  const identity = normalizedBillIdentity(sub.billIdentity);
+  return identity ? `${sub.title} · •••• ${identity.slice(-4).toUpperCase()}` : sub.title;
+}
+
+/** The detail history uses exactly the same provider/service boundary as detection. */
+export function matchesRecurringTransaction(sub: RecurringIdentity, transaction: Transaction): boolean {
+  return subscriptionKey(sub) === subscriptionKey({
+    title: recurringProviderTitle(transaction),
+    billIdentity: transaction.billIdentity,
+  });
+}
+
+/** An identified bill replaces only its own service; old manual reminders cover the provider. */
+export function subscriptionMatchesBill(
+  sub: RecurringIdentity,
+  bill: Pick<Bill, 'title' | 'category' | 'importIdentity'>,
+): boolean {
+  const provider = recurringProviderTitle(bill).trim().toLowerCase();
+  if (sub.title.trim().toLowerCase() !== provider) return false;
+  if (!bill.importIdentity) return true;
+  const identity = normalizedBillIdentity(bill.importIdentity);
+  return identity !== undefined && identity === normalizedBillIdentity(sub.billIdentity);
+}
+
+/** Scoped choices coexist with provider-wide choices saved by earlier versions. */
+export function isSubscriptionDismissed(
+  sub: RecurringIdentity,
+  dismissed: readonly string[] | ReadonlySet<string>,
+): boolean {
+  const keys: ReadonlySet<string> = Array.isArray(dismissed)
+    ? new Set(dismissed.map((key) => key.trim().toLowerCase()))
+    : dismissed as ReadonlySet<string>;
+  return keys.has(subscriptionKey(sub)) || keys.has(subscriptionKey({ title: sub.title }));
+}
+
 type SubscriptionDetectionKey = {
   transactions: Transaction[];
   notSubscriptions: string[];
@@ -259,15 +331,37 @@ type SubscriptionDetectionKey = {
 };
 
 type SubscriptionDetectionCacheEntry = SubscriptionDetectionKey & { value: Subscription[] };
-type SubscriptionDetectionInFlight = SubscriptionDetectionKey & { promise: Promise<Subscription[]> };
+type SubscriptionDetectionInFlight = SubscriptionDetectionKey & {
+  promise: Promise<Subscription[] | null>;
+  /** Every caller's cancellation probe; the default one never cancels. */
+  waiters: (() => boolean)[];
+  /** A newer ledger snapshot has started its own projection since. */
+  superseded: boolean;
+};
 
 // A single-entry cache let an unrelated caller evict Bills' projection, so
 // switching tabs could restart a 15k-row scan even though the ledger had not
-// changed. Keep a tiny identity-keyed LRU instead. Store snapshots are immutable,
-// so these references are an exact semantic key and need no O(n) fingerprint.
+// changed. Keep a tiny LRU instead. Store snapshots are immutable, so the
+// transaction/dismissal array references are an exact semantic key and need no
+// O(n) fingerprint.
 const SUBSCRIPTION_CACHE_MAX = 4;
 let subscriptionDetectionCache: SubscriptionDetectionCacheEntry[] = [];
 let subscriptionDetectionInFlight: SubscriptionDetectionInFlight[] = [];
+
+/**
+ * The detector reads the live/internal sets only through membership, so two
+ * sets with the same members give the same answer. Comparing members (after
+ * the free identity check) is what lets Bills, reminders and Ask share one job:
+ * each builds its own Set for the same ledger, and a capture that re-stamps an
+ * identical transfer receipt mints a new one. An identity-only key made every
+ * such caller start its own full-ledger scan beside the others.
+ */
+function sameMembers(a?: Set<string>, b?: Set<string>): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
+}
 
 function sameDetectionKey(
   entry: SubscriptionDetectionKey,
@@ -280,8 +374,8 @@ function sameDetectionKey(
   return entry.transactions === transactions &&
     entry.notSubscriptions === notSubscriptions &&
     entry.todayKey === todayKey &&
-    entry.liveAccounts === liveAccounts &&
-    entry.internalTransfers === internalTransfers;
+    sameMembers(entry.liveAccounts, liveAccounts) &&
+    sameMembers(entry.internalTransfers, internalTransfers);
 }
 
 function cachedSubscriptionDetection(
@@ -322,6 +416,40 @@ function cacheSubscriptionDetection(
 }
 
 /**
+ * The finished projection for exactly this input, if one is cached; never
+ * starts work. Lets a screen that mounts after another caller (reminders, a
+ * previous visit) finished the scan paint that answer on its first frame.
+ */
+export function peekSubscriptionDetection(
+  transactions: Transaction[],
+  notSubscriptions: string[] = [],
+  today: Date = new Date(),
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+): Subscription[] | null {
+  return cachedSubscriptionDetection(
+    transactions,
+    notSubscriptions,
+    toISODate(today),
+    liveAccounts,
+    internalTransfers,
+  );
+}
+
+/** Whether a cooperative projection for exactly this input is already running. */
+export function subscriptionDetectionRunning(
+  transactions: Transaction[],
+  notSubscriptions: string[] = [],
+  today: Date = new Date(),
+  liveAccounts?: Set<string>,
+  internalTransfers?: Set<string>,
+): boolean {
+  const todayKey = toISODate(today);
+  return subscriptionDetectionInFlight.some((entry) =>
+    sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
+}
+
+/**
  * The recurrence projection is deliberately expressed as a cooperative worker.
  * A 15k-row imported ledger is normal on Android, and running the complete scan
  * in one React render can hold the JS thread long enough for the first Bills tap
@@ -355,13 +483,17 @@ function* subscriptionDetectionWorker(
     const t = transactions[index];
     if (!isSpending(t, liveAccounts, internalTransfers)) continue;
     const providerTitle = recurringProviderTitle(t);
-    const k = providerTitle.toLowerCase();
-    if (!k || dismissed.has(k)) continue;
+    const providerKey = providerTitle.toLowerCase();
+    const service = { title: providerTitle, billIdentity: normalizedBillIdentity(t.billIdentity) };
+    // A raw merchant title can resemble a public service key. Keep the internal
+    // partition structurally distinct so such a title cannot merge ledger rows.
+    const k = JSON.stringify([providerKey, service.billIdentity ?? null]);
+    if (!providerKey || isSubscriptionDismissed(service, dismissed)) continue;
     // A fee alert proves a posted fee, not a future commitment. Even an annual
     // fee needs stable card/account identity carried through the Subscription
     // model before it can safely become a recurring bill. Until then every
     // parser-minted fee stays out of automatic recurrence detection.
-    if (/fee$/.test(k) || k === 'service charge') continue;
+    if (/fee$/.test(providerKey) || providerKey === 'service charge') continue;
     const list = groups.get(k) ?? [];
     list.push(providerTitle === t.title ? t : { ...t, title: providerTitle });
     groups.set(k, list);
@@ -563,6 +695,7 @@ function* subscriptionDetectionWorker(
 
     subs.push({
       title,
+      ...(normalizedBillIdentity(last.billIdentity) ? { billIdentity: normalizedBillIdentity(last.billIdentity) } : {}),
       category: last.category,
       group,
       status,
@@ -622,11 +755,15 @@ export function detectSubscriptions(
   );
 }
 
-// 120 Hz leaves ~8.3 ms for the entire frame. Keep recurrence maintenance to
-// roughly a quarter of that budget so rendering/input still have headroom on
-// large ledgers while the cooperative worker is active.
-const SUBSCRIPTION_DETECTION_SLICE_MS = 2;
-const SUBSCRIPTION_DETECTION_YIELD_MS = 16;
+// A slice is measured on the device's own clock, so these are phone
+// milliseconds. The previous 2 ms slice + 16 ms timer spent ~90% of the job's
+// wall time asleep: a 15k-row ledger needs ~110 ms of Hermes CPU, which became
+// ~55 slices and 1-7 s of wall time on a busy phone, long enough for the next
+// capture to replace the ledger before Bills ever received an answer. Six
+// milliseconds still leaves most of a 120 Hz frame to input and rendering, and
+// the short yield returns the thread to them on every slice.
+const SUBSCRIPTION_DETECTION_SLICE_MS = 6;
+const SUBSCRIPTION_DETECTION_YIELD_MS = 8;
 
 /**
  * Same answer as detectSubscriptions(), but never intentionally monopolises a
@@ -653,7 +790,19 @@ export function detectSubscriptionsCooperatively(
 
   const existing = subscriptionDetectionInFlight.find((entry) =>
     sameDetectionKey(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers));
-  if (existing) return existing.promise.then((value) => cancelled() ? null : value);
+  if (existing) {
+    existing.waiters.push(cancelled);
+    return existing.promise.then((value) => value === null || cancelled() ? null : value);
+  }
+
+  // A projection for an older snapshot that nobody is waiting for any more is
+  // pure waste: every capture used to leave one running beside the new one, so
+  // Bills and reminders ended up time-slicing several full-ledger scans of
+  // ledgers that no longer existed. A job keeps running while ANY caller still
+  // wants it (a tab merely losing focus on an unchanged ledger still joins it
+  // on return); it stops only once a newer snapshot exists and every one of
+  // its callers has cancelled.
+  for (const entry of subscriptionDetectionInFlight) entry.superseded = true;
 
   const worker = subscriptionDetectionWorker(
     transactions,
@@ -662,12 +811,28 @@ export function detectSubscriptionsCooperatively(
     liveAccounts,
     internalTransfers,
   );
+  const waiters: (() => boolean)[] = [cancelled];
+  const flight: SubscriptionDetectionInFlight = {
+    transactions,
+    notSubscriptions,
+    todayKey,
+    liveAccounts,
+    internalTransfers,
+    // Assigned below, before any caller can observe the entry.
+    promise: null as unknown as Promise<Subscription[] | null>,
+    waiters,
+    superseded: false,
+  };
 
   // One shared projection per immutable ledger snapshot. A tab losing focus no
   // longer aborts the underlying worker and makes the next visit start from row
   // zero; callers simply ignore the eventual value when their own view is gone.
-  const promise = new Promise<Subscription[]>((resolve) => {
+  const promise = new Promise<Subscription[] | null>((resolve) => {
     const runSlice = () => {
+      if (flight.superseded && waiters.every((waiter) => waiter())) {
+        resolve(null);
+        return;
+      }
       const startedAt = Date.now();
       let step = worker.next();
       while (!step.done && Date.now() - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS) {
@@ -690,16 +855,10 @@ export function detectSubscriptionsCooperatively(
   }).finally(() => {
     subscriptionDetectionInFlight = subscriptionDetectionInFlight.filter((entry) => entry.promise !== promise);
   });
+  flight.promise = promise;
 
-  subscriptionDetectionInFlight.push({
-    transactions,
-    notSubscriptions,
-    todayKey,
-    liveAccounts,
-    internalTransfers,
-    promise,
-  });
-  return promise.then((value) => cancelled() ? null : value);
+  subscriptionDetectionInFlight.push(flight);
+  return promise.then((value) => value === null || cancelled() ? null : value);
 }
 
 /** Monthly-equivalent total of what is still charging (stopped ones cost nothing). */
@@ -754,4 +913,64 @@ export function otherCommitments(subs: Subscription[]): Subscription[] {
 /** Days until the next expected charge; negative if the date passed. */
 export function daysUntilNext(sub: Subscription, today: Date): number {
   return daysBetween(toISODate(today), sub.nextExpectedISO);
+}
+
+/**
+ * Whether the user has said this subscription is cancelled, and no charge
+ * since has contradicted them.
+ *
+ * `cancelled` maps a service key (or legacy provider key) to the date the user said so. A
+ * charge dated AFTER that day is the bank saying it is still being paid, so
+ * the subscription counts again rather than hiding money that is still going
+ * out. A charge on the same day is the one the user just cancelled after.
+ */
+export function isCancelledByUser(
+  sub: Pick<Subscription, 'title' | 'billIdentity' | 'lastChargedISO'>,
+  cancelled: Readonly<Record<string, string | null>> | undefined,
+): boolean {
+  const on = subscriptionCancellationDate(sub, cancelled);
+  return on !== null && sub.lastChargedISO <= on;
+}
+
+/** An explicit scoped undo (null) takes precedence over an older provider cancellation. */
+export function subscriptionCancellationDate(
+  sub: RecurringIdentity,
+  cancelled: Readonly<Record<string, string | null>> | undefined,
+): string | null {
+  if (!cancelled) return null;
+  const key = subscriptionKey(sub);
+  const provider = subscriptionKey({ title: sub.title });
+  const on = Object.prototype.hasOwnProperty.call(cancelled, key)
+    ? cancelled[key]
+    : Object.prototype.hasOwnProperty.call(cancelled, provider) ? cancelled[provider] : null;
+  return typeof on === 'string' ? on : null;
+}
+
+/** Subscriptions still in play: the user has not marked them cancelled. */
+export function withoutCancelled<T extends Pick<Subscription, 'title' | 'billIdentity' | 'lastChargedISO'>>(
+  subs: T[],
+  cancelled: Readonly<Record<string, string | null>> | undefined,
+): T[] {
+  if (!cancelled || Object.keys(cancelled).length === 0) return subs;
+  return subs.filter((sub) => !isCancelledByUser(sub, cancelled));
+}
+
+/** The ones the user marked cancelled, for the reversible "Cancelled by you" list. */
+export function cancelledByUser<T extends Pick<Subscription, 'title' | 'billIdentity' | 'lastChargedISO'>>(
+  subs: T[],
+  cancelled: Readonly<Record<string, string | null>> | undefined,
+): T[] {
+  if (!cancelled || Object.keys(cancelled).length === 0) return [];
+  return subs.filter((sub) => isCancelledByUser(sub, cancelled));
+}
+
+/**
+ * Monthly-equivalent total of the true subscriptions still charging: active,
+ * not marked cancelled. The figure behind "Subscriptions · X / month".
+ */
+export function subscriptionsMonthlyEquivalent(
+  subs: Subscription[],
+  cancelled?: Readonly<Record<string, string | null>>,
+): number {
+  return subscriptionsMonthlyTotal(withoutCancelled(activeSubscriptions(trueSubscriptions(subs)), cancelled));
 }

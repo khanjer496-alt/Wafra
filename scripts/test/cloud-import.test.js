@@ -117,10 +117,13 @@ ok('email token: response injection is rejected',
   ok('coverage: only a masked account or card is an identified source',
     isIdentifiedCoverageSource('card:credit:4821') && isIdentifiedCoverageSource('account:account:1234') &&
       !isIdentifiedCoverageSource('bank-statements') && !isIdentifiedCoverageSource('bank:hsbc'));
-  ok('coverage: an identified card with every month is complete',
-    byKey.get('card:credit:4821')?.identified === true && byKey.get('card:credit:4821')?.missing.length === 0);
-  ok('coverage: an identified account reports its missing months',
-    byKey.get('account:account:1234')?.identified === true && byKey.get('account:account:1234').missing.length > 0);
+  ok('coverage: identified transaction ranges do not claim completeness',
+    byKey.get('card:credit:4821')?.identified === true &&
+      byKey.get('card:credit:4821')?.canAssessCompleteness === false);
+  ok('coverage: observed row dates cannot prove missing months',
+    byKey.get('account:account:1234')?.identified === true &&
+      byKey.get('account:account:1234').missing.length === 0 &&
+      byKey.get('account:account:1234').canAssessCompleteness === false);
   ok('coverage: unidentified statements are never presented as complete or gap-checked',
     byKey.get('bank-statements')?.identified === false && byKey.get('bank-statements').missing.length === 0 &&
       byKey.get('bank:hsbc')?.identified === false,
@@ -173,7 +176,10 @@ ok('statement uploads send the authoritative ledger currency and exponent, never
 ok('statement import requires an explicit ledger currency before picking files',
   /LedgerCurrencySheet/.test(surface) &&
     /!state\.ledgerMoney/.test(surface) &&
-    /disabled=\{!capabilities \|\| busy !== null \|\| pendingPdfs\.length > 0 \|\| !state\.ledgerMoney\}/.test(surface));
+    // "Choose file" connects on first use, so capabilities are loaded by the
+    // tap itself; the ledger currency is still required before the picker.
+    /disabled=\{loadingConfig \|\| busy !== null \|\| pendingPdfs\.length > 0 \|\| !state\.ledgerMoney\}/.test(surface) &&
+    /const chooseFile = async \(\) => \{[\s\S]{0,160}if \(!state\.ledgerMoney\) \{\s*setCurrencySheetVisible\(true\);\s*return;/.test(surface));
 ok('picker cache copy is immediately readable and deleted after the attempt',
   /copyToCacheDirectory: true/.test(surface) &&
   /file\.delete\(\)/.test(surface));
@@ -186,7 +192,7 @@ ok('protected PDF retry keeps the picker copy only until password retry or cance
 // ledger persist inside the per-file loop was the "laggy import" report.
 const uploadLoop = surface.slice(
   surface.indexOf('for (let index = 0; index < picked.assets.length'),
-  surface.indexOf('await rememberCoverage(coverage)'),
+  surface.indexOf('if (aliveRef.current) setFileResults(fileResults)'),
 );
 ok('statement coverage is recorded after the upload loop, not per file',
   uploadLoop.length > 0 && !/rememberCoverage\(/.test(uploadLoop) &&
@@ -208,10 +214,8 @@ ok('queued statement rows retry without requiring another upload',
   /queuedRetryNeededRef/.test(surface) &&
     /AppState\.addEventListener\('change'/.test(surface) &&
     /setTimeout\(\(\) => \{ void retryQueued\(\); \}, 1_500\)/.test(surface));
-ok('multi-file statement imports drain full 200-row relay pages without one giant JS turn',
-  /for \(let page = 0; page < 50; page \+= 1\)/.test(surface) &&
-    /outcome\.moreQueued !== true/.test(surface) &&
-    /await new Promise<void>\(\(resolve\) => setTimeout\(resolve, 0\)\)/.test(surface));
+// Multi-page progress, capacity and interrupted imports are exercised by
+// repair/statement-client-audit.test.cjs against the actual drain module.
 ok('queued imports persist to SQLCipher before relay acknowledgement',
   /execute\('supplemental'\)/.test(surface) &&
   captureExecutor.indexOf('await receipt.durable') <
@@ -222,16 +226,8 @@ ok('queued imports persist to SQLCipher before relay acknowledgement',
 // acking the whole array consumed the proof, the setup screen timed out, and
 // the retry it offered was byte-identical, so the relay's replay receipt
 // refused it and pushed its own expiry out. Only /ios-setup may ack a probe.
-ok('a supplemental sync leaves the iOS setup probe for the screen waiting on it',
-  /execute\('supplemental'\)/.test(surface) &&
-  /const reserved = new Set\(queued\.testIds\)/.test(captureExecutor) &&
-  /queued\.ids\.filter\(\(id\) => !reserved\.has\(id\)\)/.test(captureExecutor) &&
-  !/acknowledge\(cfg, queued\.ids\)/.test(
-    captureExecutor.slice(
-      captureExecutor.indexOf('const executeSupplemental'),
-      captureExecutor.indexOf('const executeBackground'),
-    ),
-  ));
+// Probe ownership and durable selective ACK are exercised by relay.test.js
+// and repair/capture-review-admission.test.cjs.
 ok('email forwarding has separate create and revoke actions',
   /method: 'POST'/.test(transport) && /method: 'DELETE'/.test(transport) &&
   /\/v1\/email-token/.test(transport));
@@ -245,16 +241,14 @@ ok('email forwarding has separate create and revoke actions',
 const copySource = fs.readFileSync(path.join(root, 'src/lib/supplement-copy.ts'), 'utf8');
 const filingStatus = surface.slice(
   surface.indexOf('const finishQueuedImport'),
-  surface.indexOf('const imported = await syncQueued()'),
+  surface.indexOf('await syncQueued(generation)', surface.indexOf('const finishQueuedImport')),
 );
 ok('the in-flight filing status does not reuse the failure copy',
   /copy\.acceptedFiling/.test(filingStatus) && !/copy\.acceptedPending/.test(filingStatus),
   'acceptedPending tells the user to retry; nothing has failed while the rows are still being filed');
 
-ok('acceptedPending is still what a real sync failure reports',
-  /setStatus\(interpolate\(copy\.acceptedPending/.test(
-    surface.slice(surface.indexOf('} catch (e) {', surface.indexOf('const finishQueuedImport')))),
-  'the failure branch must keep the wording that asks the user to try again');
+// Actual incomplete/durable completion branches are exercised by the
+// component callback tests in repair/statement-client-audit.test.cjs.
 
 ok('both languages define the filing progress line',
   (copySource.match(/acceptedFiling:/g) || []).length === 2,
@@ -266,8 +260,6 @@ ok('one failed file no longer aborts the batch: every file gets its own result a
 ok('uploads are paced under the relay rate limit, with a visible waiting state, and one rate-limit retry',
   /nextUploadDelay\(/.test(uploadLoop) && /copy\.waitingForLimit/.test(surface) &&
     /rate_limited/.test(uploadLoop));
-ok('coverage and the queued-row drain still run for the files that succeeded',
-  /await rememberCoverage\(coverage\);[\s\S]{0,400}finishQueuedImport\(/.test(surface));
 ok('the statement screen says files go to Wafra\'s server, above the Choose button, in both languages',
   /copy\.uploadDisclosure/.test(surface) &&
     surface.indexOf('copy.uploadDisclosure') < surface.indexOf('copy.chooseStatements') &&

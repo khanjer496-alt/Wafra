@@ -7,6 +7,7 @@
     "base": {
       "node": "22.22.3",
       "env": {
+        "EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO": "0",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
         "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
@@ -30,16 +31,6 @@
       "env": {
         "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "1",
-        "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
-        "WAFRA_SMS_CORPUS_EXPORT": "0"
-      }
-    },
-    "screenmap-simulator": {
-      "extends": "development-simulator",
-      "env": {
-        "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
-        "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
-        "EXPO_PUBLIC_WAFRA_SCREENMAP_DEMO": "1",
         "EXPO_PUBLIC_WAFRA_SMS_CORPUS_EXPORT": "0",
         "WAFRA_SMS_CORPUS_EXPORT": "0"
       }
@@ -113,6 +104,7 @@
       "environment": "preview",
       "autoIncrement": true,
       "env": {
+        "EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO": "1",
         "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "1",
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",
@@ -148,6 +140,7 @@
       "environment": "production",
       "autoIncrement": true,
       "env": {
+        "EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO": "0",
         "EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK": "0",
         "EXPO_PUBLIC_WAFRA_RELAY_URL": "https://wafra-relay.khanjer496.workers.dev",
         "EXPO_PUBLIC_WAFRA_PARSER_RESEARCH": "0",

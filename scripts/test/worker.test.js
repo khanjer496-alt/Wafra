@@ -118,11 +118,11 @@ function makeDb(transformSchema = (sql) => sql, applyMigrations = true) {
   const db = new DatabaseSync(':memory:');
   db.exec(transformSchema(fs.readFileSync(path.join(repoRoot, 'server', 'schema.sql'), 'utf8')));
   if (applyMigrations) {
-    db.exec(fs.readFileSync(
-      path.join(repoRoot, 'server', 'migrations',
-        '2026-08-25-shortcut-ingest-retirement.sql'),
-      'utf8',
-    ));
+    // Every tracked migration, in the order Wrangler applies them.
+    const migrations = path.join(repoRoot, 'server', 'migrations');
+    for (const name of fs.readdirSync(migrations).filter((file) => file.endsWith('.sql')).sort()) {
+      db.exec(fs.readFileSync(path.join(migrations, name), 'utf8'));
+    }
   }
   // Test-only interleaving seam. A race test can stop after a real SQLite
   // SELECT has authenticated a request or selected a queue target, mutate the
@@ -167,7 +167,7 @@ function makeDb(transformSchema = (sql) => sql, applyMigrations = true) {
 
 const ALL_TABLES = [
   'vaults', 'devices', 'automation_generations', 'device_invites', 'queue',
-  'push_registrations', 'ingest_receipts', 'ingest_limits', 'pair_limits',
+  'push_registrations', 'ingest_receipts', 'statement_import_bindings', 'ingest_limits', 'pair_limits',
   'cost_limits', 'admin_deletion_receipts', 'feedback', 'feedback_limits',
 ];
 
@@ -2024,6 +2024,98 @@ const CARD_PAYMENT_DEBIT =
       saPdf.status === 202 && saPdfRows.length === 1 && saPdfRows[0].currency === 'SAR');
   }
 
+  {
+    const { parseStatementLines } = require('./build/imports');
+    const text = 'HSBC Credit Card Statement\nCredit Card Number 4111 1111 1111 1111\n' +
+      'Transaction Date Description Amount\n04-Feb-26 TO 4111 1111 1111 1111 123.45 CR';
+    for (const kind of ['credit', 'unknown', 'debit', 'account']) {
+      const parsed = parseStatementLines(text, 'AED', { card: { kind, last4: '1111' }, bankHint: 'HSBC' });
+      ok(`HSBC header proof: ${kind} source keeps the appropriate settlement boundary`,
+        (parsed.rows[0]?.kind === 'cardPayment') === (kind === 'credit' || kind === 'unknown'));
+    }
+  }
+
+  // An old delivery receipt proves delivery, not the original interpretation.
+  // A parser revision cannot bypass it while its facts are unverified. Once
+  // those receipts expire, a fresh bound reading retains the stable file ID.
+  for (const format of ['pdf', 'csv']) {
+    const env = { DB: makeDb() };
+    const me = await pairDevice(env);
+    const unrelated = await pairDevice(env);
+    const statement = format === 'pdf' ? tinyPdf([
+      'HSBC Credit Card Statement', 'Credit Card Number 4111 1111 1111 1111',
+      '04-Feb-26 TO 4111 1111 1111 1111 123.45 CR', '05-Feb-26 LOCAL SHOP 67.89 DR',
+    ]) : 'Date,Description,Debit,Credit,Credit Card Number\n' +
+      '2026-02-04,PAYMENT RECEIVED - THANK YOU,,123.45,1111\n' +
+      '2026-02-05,LOCAL SHOP,67.89,,1111';
+    const bytes = typeof statement === 'string' ? enc.encode(statement) : statement;
+    const digest = b64encode(await webcrypto.subtle.digest('SHA-256', bytes));
+    const baseKey = await keyedFingerprint(me.adminToken, `${format}:${digest}`);
+    for (let i = 0; i < 2; i++) env.DB.handle.prepare(
+      'INSERT INTO ingest_receipts (device_id, replay_key, created_at, expires_at) VALUES (?, ?, unixepoch(), unixepoch() + 259200)',
+    ).run(me.deviceId, `${baseKey}:${i}:${me.deviceId}`);
+    const send = () => call(env, 'POST', `/v1/import/${format}`, {
+      token: me.adminToken, headers: { 'content-type': format === 'pdf' ? 'application/pdf' : 'text/csv' }, body: statement,
+    });
+    const refused = await send(); const refusal = await refused.json();
+    ok(`${format} upgrade: unbound older delivery revisions require an explicit refusal`,
+      refused.status === 409 && refusal.error === 'statement_options_conflict');
+    ok(`${format} upgrade: refusal queues no guessed correction or newly inferred range`,
+      (await drainOpened(env, me)).length === 0 && refusal.coverage === undefined &&
+      env.DB.handle.prepare('SELECT COUNT(*) AS n FROM statement_import_bindings WHERE device_id = ?').get(me.deviceId).n === 0);
+    const stillRefused = await send();
+    ok(`${format} upgrade: retry cannot bypass the live legacy receipt`,
+      stillRefused.status === 409 && (await drainOpened(env, me)).length === 0);
+    env.DB.handle.prepare('UPDATE ingest_receipts SET expires_at = unixepoch() - 1 WHERE device_id = ?').run(me.deviceId);
+    const response = await send(); const outcome = await response.json();
+    const rows = await drainOpened(env, me);
+    ok(`${format} upgrade: receipt expiry allows a fresh bound reading`,
+      response.status === 202 && outcome.alreadyProcessed === false && rows.length === 2);
+    const idBytes = new Uint8Array(await webcrypto.subtle.digest('SHA-256', enc.encode(`statement-file:${baseKey}`)));
+    const stableId = [...idBytes.slice(0, 16)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+    ok(`${format} upgrade: stable file identity does not change with delivery revision`,
+      rows.length === 2 && rows.every(row => row.statementImportId === stableId));
+    ok(`${format} upgrade: exact repayment is a settlement receipt, not income`,
+      rows.some(row => row.amountFils === 12345 && row.kind === 'cardPayment' && row.cardPaymentSide === 'receipt' && row.transferHint), JSON.stringify(rows.map(row => ({kind:row.kind,type:row.type,card:row.card,amountFils:row.amountFils,merchant:row.merchant}))));
+    ok(`${format} upgrade: unrelated devices never receive this statement`, (await drainOpened(env, unrelated)).length === 0);
+    if (rows.length === 2) {
+      const { materializeImportBatch, applyMaterializedImportBatch } = require('./build/ledger-import');
+      const { isIncome, isSpending } = require('./build/ledger');
+      const fresh = { ...LEDGER, privateMode: true, marketId: 'AE', ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 } };
+      let sequence = 0;
+      const save = (plan, state) => applyMaterializedImportBatch(state,
+        materializeImportBatch(plan.batch, state, prefix => `${format}-${prefix}-${++sequence}`));
+      const original = save(importOnPhone(rows, fresh), fresh);
+      // That older parser did not persist ordinal identity. Keeping the new
+      // ordinal while changing money semantics would correctly be a conflict,
+      // not evidence for an automatic legacy repair.
+      const old = { ...original, transactions: original.transactions.map(({ statementRowIndex: _position, ...row }) => row.amountFils === 12345
+        ? { ...row, title: 'TO 4111 1111 1111 1111', isTransfer: false, cardPaymentSide: undefined } : row) };
+      const repair = importOnPhone(rows, old); const repaired = save(repair, old);
+      const payment = repaired.transactions.find(row => row.amountFils === 12345);
+      ok(`${format} upgrade: saved receipt is repaired without adding duplicate money`,
+        repair.txCount === 0 && repaired.transactions.length === 2 && payment?.cardPaymentSide === 'receipt' && !isIncome(payment) && !isSpending(payment));
+      ok(`${format} upgrade: transaction IDs and source keys remain stable`,
+        repaired.transactions.every(row => original.transactions.some(prior => prior.id === row.id && prior.smsKey === row.smsKey)));
+      const protectedState = { ...old, transactions: old.transactions.map(row => ({ ...row, userEdited: true })) };
+      const protectedPlan = importOnPhone(rows, protectedState);
+      const afterProtected = save(protectedPlan, protectedState);
+      const financialFields = ['id', 'smsKey', 'type', 'amountFils', 'date', 'title', 'category', 'accountId',
+        'isTransfer', 'cardPaymentSide', 'note', 'splits', 'originalCurrency', 'originalMinorUnits', 'fxRate'];
+      ok(`${format} upgrade: manual corrections remain protected while provenance may be enriched`,
+        protectedPlan.txCount === 0 && afterProtected.transactions.length === protectedState.transactions.length &&
+        afterProtected.transactions.every(row => {
+          const prior = protectedState.transactions.find(item => item.id === row.id);
+          return prior && row.userEdited === true && financialFields.every(field => JSON.stringify(row[field]) === JSON.stringify(prior[field]));
+        }));
+    }
+    const repeat = await send();
+    ok(`${format} upgrade: the corrected revision is still idempotent`,
+      repeat.status === 202 && (await repeat.json()).alreadyProcessed === true && (await drainOpened(env, me)).length === 0);
+    ok(`${format} upgrade: no source text or full card digits are persisted`,
+      !dumpDb(env.DB).includes('4111 1111 1111 1111') && rows.every(row => row.raw === undefined));
+  }
+
   /* ══════ A multi-row statement must arrive as many rows, not as one ══════
    *
    * THE DEFECT THIS SECTION EXISTS FOR. Every multi-row import path computed
@@ -2243,6 +2335,93 @@ const CARD_PAYMENT_DEBIT =
       JSON.stringify(mailed.map((row) => row.receivedAt)));
     ok('statement: and the phone keeps both of those too',
       importOnPhone(mailed).batch.transactions.length === 2);
+
+    // ── A forwarded statement is read in the user's ledger currency ──
+    // The phone records the ledger currency and its country's date order when
+    // it mints the address; the relay used to read every forwarded statement
+    // as AED or SAR from the market pack.
+    const euroDevice = await pairDevice(env);
+    const euroMint = await call(env, 'POST', '/v1/email-token', {
+      token: euroDevice.adminToken,
+      body: { ledgerCurrency: 'EUR', ledgerExponent: 2, dateOrder: 'day-first' },
+    });
+    const euroEmail = await euroMint.json();
+    ok('email locale: a current build records the ledger currency with the address', euroMint.status === 201);
+    const euroForward = await call(env, 'POST', '/v1/email/ingest', {
+      token: euroEmail.emailToken,
+      body: { text: '01/07/2026 BOULANGERIE PAUL 12,50 DR\n02/07/2026 LOYER JUILLET 1.234,56 DR' },
+    });
+    // Rows share one ingest; their delivery order is not a contract.
+    const euroRows = (await drainOpened(env, euroDevice)).sort((a, b) => a.date.localeCompare(b.date));
+    ok('email locale: a EUR ledger reads a forwarded decimal-comma statement exactly, day-first',
+      euroForward.status === 202 && euroRows.length === 2 &&
+        euroRows.every((row) => row.currency === 'EUR') &&
+        euroRows[0].amountFils === 1250 && euroRows[1].amountFils === 123456 &&
+        euroRows[0].date === '2026-07-01',
+      JSON.stringify(euroRows.map((row) => [row.currency, row.amountFils, row.date])));
+    const usDevice = await pairDevice(env);
+    const usEmail = await (await call(env, 'POST', '/v1/email-token', {
+      token: usDevice.adminToken,
+      body: { ledgerCurrency: 'USD', ledgerExponent: 2, dateOrder: 'month-first' },
+    })).json();
+    await call(env, 'POST', '/v1/email/ingest', {
+      token: usEmail.emailToken, body: { text: '01/07/2026 TARGET 24.90 DR' },
+    });
+    const usRows = await drainOpened(env, usDevice);
+    ok('email locale: a month-first country reads an ambiguous forwarded date month-first, in USD',
+      usRows.length === 1 && usRows[0].currency === 'USD' && usRows[0].date === '2026-01-07',
+      JSON.stringify(usRows.map((row) => [row.currency, row.date])));
+    const legacyDevice = await pairDevice(env);
+    const legacyEmail = await (await call(env, 'POST', '/v1/email-token', { token: legacyDevice.adminToken })).json();
+    await call(env, 'POST', '/v1/email/ingest', {
+      token: legacyEmail.emailToken, body: { text: '01/07/2026 CARREFOUR 24.90 DR' },
+    });
+    const legacyRows = await drainOpened(env, legacyDevice);
+    ok('email locale: an address minted without a locale keeps the launch AED day-first reading',
+      legacyRows.length === 1 && legacyRows[0].currency === 'AED' && legacyRows[0].date === '2026-07-01',
+      JSON.stringify(legacyRows.map((row) => [row.currency, row.date])));
+    for (const badLocale of [
+      { ledgerCurrency: 'EUR', ledgerExponent: 3, dateOrder: 'day-first' },
+      { ledgerCurrency: 'XXX', ledgerExponent: 2, dateOrder: 'day-first' },
+      { ledgerCurrency: 'EUR', ledgerExponent: 2, dateOrder: 'sideways' },
+    ]) {
+      ok(`email locale: a malformed locale is refused (${JSON.stringify(badLocale)})`,
+        (await call(env, 'POST', '/v1/email-token', { token: legacyDevice.adminToken, body: badLocale })).status === 400);
+    }
+
+    // The app's own uploads carry the country's date order as a header.
+    const usCsvDevice = await pairDevice(env);
+    const usCsv = await call(env, 'POST', '/v1/import/csv', {
+      token: usCsvDevice.adminToken,
+      headers: {
+        'content-type': 'text/csv', 'x-wafra-ledger-currency': 'USD', 'x-wafra-ledger-exponent': '2',
+        'x-wafra-date-order': 'month-first',
+      },
+      body: 'Date,Description,Debit,Credit\n01/07/2026,TARGET,24.90,\n02/07/2026,COSTCO,10.00,\n',
+    });
+    const usCsvRows = await drainOpened(env, usCsvDevice);
+    ok('statement locale: a month-first header reads an ambiguous USD CSV month-first',
+      usCsv.status === 202 && usCsvRows.length === 2 && usCsvRows.some((row) => row.date === '2026-01-07'),
+      JSON.stringify(usCsvRows.map((row) => row.date)));
+    const unknownCsv = await call(env, 'POST', '/v1/import/csv', {
+      token: usCsvDevice.adminToken,
+      headers: {
+        'content-type': 'text/csv', 'x-wafra-ledger-currency': 'USD', 'x-wafra-ledger-exponent': '2',
+        'x-wafra-date-order': 'unknown',
+      },
+      body: 'Date,Description,Debit,Credit\n03/08/2026,TARGET,24.90,\n',
+    });
+    ok('statement locale: an unknown country still refuses an ambiguous date by name',
+      unknownCsv.status === 422 && (await unknownCsv.json()).error === 'ambiguous_dates');
+    ok('statement locale: a malformed date-order header is refused',
+      (await call(env, 'POST', '/v1/import/csv', {
+        token: usCsvDevice.adminToken,
+        headers: {
+          'content-type': 'text/csv', 'x-wafra-ledger-currency': 'USD', 'x-wafra-ledger-exponent': '2',
+          'x-wafra-date-order': 'DMY',
+        },
+        body: 'Date,Description,Debit,Credit\n03/08/2026,TARGET,24.90,\n',
+      })).status === 400);
 
     // A forwarded bank ALERT parses as ONE row, and must keep the receipt clock
     // rather than the transaction's date — including when it quotes one, which
@@ -2511,6 +2690,19 @@ const CARD_PAYMENT_DEBIT =
           item.platform === 'ios' && item.locale === 'en-AE', JSON.stringify(item));
       ok('feedback read: the no-AI decision is explicit for every downstream reader',
         item.aiReviewConsent === false);
+      ok('feedback read: an untyped report carries a null type',
+        item.diagnostic.topic === null);
+      const typedWake = collector();
+      const typed = await call(env, 'POST', '/v1/feedback', {
+        body: { ...REPORT, diagnostic: { ...REPORT.diagnostic, topic: 'category' } }, ctx: typedWake.ctx,
+      });
+      const typedBody = await typed.json();
+      await typedWake.settled();
+      ok('feedback: a report typed on the screen is accepted', typed.status === 202, String(typed.status));
+      const typedItem = await (await call(env, 'GET', `/v1/feedback/${typedBody.id}`, {
+        token: 'read-token-abcdefghijklmnop',
+      })).json();
+      ok('feedback read: the chosen type reaches the maintainer', typedItem.diagnostic.topic === 'category');
       ok('feedback read: the diagnostic comes back as JSON, not as a string',
         item.diagnostic.reportSchema === 2 && item.diagnostic.delivery.thirdPartyAi === false &&
           item.diagnostic.detail === 'figures' && item.diagnostic.counts.transactions === 1 &&
@@ -2841,6 +3033,10 @@ const CARD_PAYMENT_DEBIT =
         (await bad({ ...REPORT, diagnostic: [1, 2] })).error === 'bad_diagnostic');
       ok('feedback: a diagnostic that is a string is refused, not wrapped',
         (await bad({ ...REPORT, diagnostic: 'everything is broken' })).error === 'bad_diagnostic');
+      ok('feedback: a report type outside the three the app offers is refused',
+        (await bad({ ...REPORT, diagnostic: { ...REPORT.diagnostic, topic: 'please call me' } })).error === 'bad_topic');
+      ok('feedback: a non-string report type is refused',
+        (await bad({ ...REPORT, diagnostic: { ...REPORT.diagnostic, topic: 3 } })).error === 'bad_topic');
       ok('feedback: nothing malformed reached the database', count(env.DB, 'feedback') === 0);
 
       // An error that quotes what it refused is a way to read data back out of

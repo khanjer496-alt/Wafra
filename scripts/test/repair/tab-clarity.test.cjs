@@ -7,6 +7,16 @@ const { createHarness, walk, text } = require('./reference-harness.cjs');
 const projection = load(path.resolve(__dirname, '../../../src/lib/reference-presentation.ts'));
 const nodeById = (tree, id) => walk(tree).find(n => n.props?.testID === id);
 
+// Completed recurrence is a fixture for presentation checks. Native scheduling
+// and pending/cancelled states run separately in screen-background-work.test.cjs.
+function billsHarness(options = {}) {
+  const h = createHarness({ platform: 'ios', ...options });
+  const subscriptions = h.deps['@/lib/subscriptions'];
+  const completed = subscriptions.detectSubscriptions();
+  subscriptions.peekSubscriptionDetection = () => completed;
+  return h;
+}
+
 test('category share uses period spending, independently of its budget', () => {
   assert.equal(projection.spendingShare(25000, 100000), .25);
   assert.equal(projection.spendingShareLabel(.25, 'en'), '25%');
@@ -27,7 +37,7 @@ test('every visible category has an explicit spending share, including categorie
   const tree = createHarness().render('flow');
   assert.match(text(nodeById(tree, 'spending-share-dining')), /11.6%\s+of spending/);
   assert.match(text(nodeById(tree, 'spending-share-other')), /27.8%\s+of spending/);
-  assert.match(text(nodeById(tree, 'spending-category-dining')), /41\s*%\s+of limit used/);
+  assert.match(text(nodeById(tree, 'spending-limit-dining')), /41%\s+of AED 1,500\.00 limit/);
 });
 test('filtering budgets does not relabel the remaining category as 100% of spending', () => {
   const tree = createHarness({ states: { 1: 'unlimited' } }).render('flow');
@@ -41,13 +51,24 @@ test('zero-spend budget categories render 0% rather than NaN or an invented expe
   assert.doesNotMatch(text(tree), /NaN|Infinity/);
 });
 test('Home keeps accounts out of its hero and exposes one Add and one Settings action', () => {
-  const h = createHarness(); const tree = h.render('home');
-  assert.ok(nodeById(tree, 'home-spending-total'));
-  assert.ok(nodeById(tree, 'home-income-summary'));
-  assert.equal(nodeById(tree, 'reference-quick-actions'), undefined);
-  assert.doesNotMatch(text(tree), /Recorded balances|Net after spending/);
-  for (const label of ['Add', 'Settings']) {
-    assert.equal(walk(tree).filter(n => n.props?.accessibilityLabel === label && n.props.onPress).length, 1);
+  for (const platform of ['ios', 'android']) {
+    const h = createHarness({ platform }); const tree = h.render('home');
+    assert.ok(nodeById(tree, 'home-spending-total'));
+    assert.ok(nodeById(tree, 'home-income-summary'));
+    assert.equal(nodeById(tree, 'reference-quick-actions'), undefined);
+    assert.doesNotMatch(text(tree), /Recorded balances|Net after spending/);
+    assert.equal(walk(tree).filter(n => n.props?.accessibilityLabel === 'Settings' && n.props.onPress).length, 1);
+    const headerAdd = walk(tree).filter(n => n.props?.accessibilityLabel === 'Add' && n.props.onPress);
+    const fab = walk(tree).filter(n => n.type === 'HomeAddButton');
+    // iPhone keeps its header "+"; Android moves Add to one floating button.
+    assert.equal(headerAdd.length + fab.length, 1, platform);
+    assert.equal(fab.length, platform === 'android' ? 1 : 0, platform);
+    const ask = nodeById(tree, 'home-widget-assistant');
+    assert.ok(ask, `${platform}: Ask is one configurable content section`);
+    assert.equal(nodeById(tree, 'home-ask-chip'), undefined, 'no unhideable duplicate Ask chip');
+    if (ask) { ask.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/assistant']); }
+    (headerAdd[0] ?? fab[0]).props.onPress();
+    assert.deepEqual(h.events.at(-1), ['route', '/add-transaction']);
   }
 });
 test('Home renders at most five recent transactions without losing the full activity route', () => {
@@ -64,11 +85,8 @@ test('Home renders at most five recent transactions without losing the full acti
   const all = walk(activity).find(n => n.props?.onPress && text(n).includes(h.deps['@/lib/i18n'].t('allActivity')));
   assert.ok(all); all.props.onPress(); assert.deepEqual(h.events.at(-1), ['route', '/transactions']);
 });
-test('Bills keeps every obligation in one due-date timeline instead of type silos', () => {
-  // iOS keeps the synchronous recurrence projection used by this presentation
-  // contract. Android deliberately defers that historical scan until after the
-  // first Bills frame; its behavior is covered by the performance suites.
-  const tree = createHarness({ platform: 'ios' }).render('bills');
+test('Bills All keeps every obligation in one due-date timeline instead of type silos', () => {
+  const tree = billsHarness({ states: { 0: 'all' } }).render('bills');
   const agenda = text(nodeById(tree, 'payment-agenda'));
   for (const label of ['Netflix', 'Spotify', 'DEWA', 'Etisalat', 'NBD credit card']) {
     assert.match(agenda, new RegExp(label));
@@ -78,14 +96,30 @@ test('Bills keeps every obligation in one due-date timeline instead of type silo
   assert.equal(nodeById(tree, 'bills-cards'), undefined);
   assert.ok(agenda.indexOf('Next 7 days') < agenda.indexOf('Later'));
 });
+test('Bills Next 30 days groups subscriptions under their monthly total, then bills and cards', () => {
+  const tree = billsHarness().render('bills');
+  const subscriptions = text(nodeById(tree, 'bills-subscriptions'));
+  assert.match(subscriptions, /Subscriptions[\s\S]*AED 62.00 \/ month/);
+  assert.match(subscriptions, /Netflix/);
+  assert.match(subscriptions, /Spotify/);
+  const rest = text(nodeById(tree, 'bills-and-cards'));
+  for (const label of ['DEWA', 'Etisalat', 'NBD credit card']) assert.match(rest, new RegExp(label));
+  assert.doesNotMatch(rest, /Netflix/);
+  assert.ok(nodeById(tree, 'bills-timeline'));
+});
 test('a manually tracked detected subscription is shown once in the due timeline', () => {
-  const h = createHarness({ platform: 'ios' });
+  const h = billsHarness();
   h.state.bills.push({ id: 'netflix', title: 'Netflix', category: 'entertainment', amountFils: 4900, dueDay: 9, paidMonths: [] });
   const tree = h.render('bills');
   const rows = walk(nodeById(tree, 'payment-agenda')).filter(n => n.props?.accessibilityLabel?.startsWith('Netflix.') && n.props.onPress);
-  assert.equal(rows.length, 1);
-  assert.match(rows[0].props.accessibilityLabel, /49.00/);
-  assert.doesNotMatch(rows[0].props.accessibilityLabel, /Estimated/);
+  // Next 30 days lists each time the tracked bill falls due (the unpaid 9 Sept
+  // and the 9 Oct inside the window). What must never appear is the detected
+  // subscription as a second, estimated Netflix beside the bill.
+  assert.deepEqual(rows.map(r => r.props.accessibilityLabel.split('. ')[1]), ['9 Sept', '9 Oct']);
+  for (const row of rows) {
+    assert.match(row.props.accessibilityLabel, /49.00/);
+    assert.doesNotMatch(row.props.accessibilityLabel, /Estimated/);
+  }
 });
 test('entertainment/software expenses are not automatically presented as subscriptions', () => {
   for (const category of ['entertainment', 'software', 'rent']) {
@@ -105,7 +139,7 @@ test('estimated, confirmed overdue and paid semantics survive payment-type group
   assert.equal(JSON.stringify(items), before);
 });
 test('empty Bills shows one truthful empty timeline without inventing type sections', () => {
-  const tree = createHarness({ empty: true, platform: 'ios' }).render('bills');
+  const tree = billsHarness({ empty: true }).render('bills');
   assert.match(text(nodeById(tree, 'payment-agenda')), /Nothing coming up/);
   assert.equal(nodeById(tree, 'bills-subscriptions'), undefined);
   assert.equal(nodeById(tree, 'bills-utilities'), undefined);

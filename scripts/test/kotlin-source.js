@@ -35,6 +35,10 @@ const FILES = {
     MODULES,
     'notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationCaptureStore.kt',
   ),
+  NotificationRepostIdentity: path.join(
+    MODULES,
+    'notification-reader/android/src/main/java/expo/modules/notificationreader/NotificationRepostIdentity.kt',
+  ),
 };
 
 function read(file) {

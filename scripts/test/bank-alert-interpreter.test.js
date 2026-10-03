@@ -30,8 +30,24 @@ for (const row of [...uaeCorpus, ...saudiCorpus]) {
     JSON.stringify({ legacy, result }));
 }
 
-const payroll = interpretBankAlert({
+// "Payroll credit:" used to be this legacy debit-direction mistake. Since
+// PARSER_VERSION 54 the legacy parser reads it as salary income itself, so the
+// same answer now arrives with origin 'legacy'; the semantic correction is
+// still exercised by a payroll alert the legacy parser still misreads.
+const payrollCredit = interpretBankAlert({
   source: 'Payroll credit: AED 7,500.00 was posted to your account 1234.',
+  sender: 'FAB',
+  market: 'AE',
+});
+ok('explicit "Payroll credit:" is salary income from the legacy parser',
+  payrollCredit.outcome === 'parsed' && payrollCredit.origin === 'legacy' &&
+    payrollCredit.meaning === 'salary-income' && payrollCredit.parsed.type === 'income' &&
+    payrollCredit.parsed.amountFils === 750000 && payrollCredit.parsed.merchant === 'Salary' &&
+    payrollCredit.parsed.categoryGuess === 'salary' && payrollCredit.parsed.transferHint === false,
+  JSON.stringify(payrollCredit));
+
+const payroll = interpretBankAlert({
+  source: 'Payroll: AED 7,500.00 was posted to your account 1234.',
   sender: 'FAB',
   market: 'AE',
 });

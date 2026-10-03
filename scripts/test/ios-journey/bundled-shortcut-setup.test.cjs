@@ -33,7 +33,8 @@ test('a modern binary installs its bundled SMS graph without a public URL and ru
   await h.controller.send({ type: 'check-shortcut' });
   const url = new URL(h.opened[0]);
   assert.equal(url.searchParams.get('name'), 'Wafra Capture v3');
-  assert.equal(url.searchParams.get('text'), 'WAFRA_SETUP_CHECK_V1');
+  assert.equal(url.searchParams.has('input'), false);
+  assert.equal(url.searchParams.has('text'), false);
   assert.equal(h.controller.getModel().readiness, 'not-added');
   h.controller.dispose();
 });
@@ -57,4 +58,41 @@ test('bundled capture requires its own v3 proof even when an old installation re
   assert.equal(api.resolveIosSetupReadiness({ enabled: true, setupProofVersion: 3, firstCapturedAt: null }, 3), 'shortcut-proven');
   assert.equal(api.resolveIosSetupReadiness({ enabled: false, setupProofVersion: 3, firstCapturedAt: null }, 3), 'not-added');
   assert.equal(api.resolveIosSetupReadiness({ enabled: true, setupProofVersion: 1, firstCapturedAt: null }), 'shortcut-proven');
+});
+
+
+test('bundled v3 setup uses only its no-input proof lane and preserves every return callback', () => {
+  const configured = load(path.join(root, 'src/lib/ios-local-capture-protocol.ts'), {}, { process: { env: {
+    EXPO_PUBLIC_WAFRA_SHORTCUT_URL: 'https://www.icloud.com/shortcuts/0123456789abcdef0123456789abcdef',
+    EXPO_PUBLIC_WAFRA_SHORTCUT_SETUP_CHECK_VERSION: '1',
+  } } });
+  for (const api of [protocol, configured]) for (const onboarding of [false, true]) {
+    const url = new URL(api.iosLocalCaptureTestUrl(onboarding, true));
+    assert.equal(url.protocol, 'shortcuts:'); assert.equal(url.hostname, 'x-callback-url');
+    assert.equal(url.pathname, '/run-shortcut'); assert.equal(url.searchParams.get('name'), 'Wafra Capture v3');
+    assert.equal(url.searchParams.has('input'), false); assert.equal(url.searchParams.has('text'), false);
+    for (const result of ['success', 'cancel', 'error']) {
+      const callback = new URL(url.searchParams.get(`x-${result}`));
+      assert.equal(callback.protocol, 'wafra:'); assert.equal(callback.hostname, 'ios-setup');
+      assert.equal(callback.searchParams.get('shortcutResult'), result);
+      assert.equal(callback.searchParams.get('fromOnboarding'), onboarding ? '1' : null);
+    }
+  }
+});
+
+test('legacy shares retain their existing marker policy and installed shortcut names', () => {
+  for (const [share, version, name, marker] of [
+    ['0123456789abcdef0123456789abcdef', '1', 'Wafra Capture v2', true],
+    ['0123456789abcdef0123456789abcdef', undefined, 'Wafra Capture v2', false],
+    ['9a85d5f8b44d416181a76e68fcdf569d', '1', 'WafraLocalCapture', false],
+  ]) {
+    const api = load(path.join(root, 'src/lib/ios-local-capture-protocol.ts'), {}, { process: { env: {
+      EXPO_PUBLIC_WAFRA_SHORTCUT_URL: `https://www.icloud.com/shortcuts/${share}`,
+      EXPO_PUBLIC_WAFRA_SHORTCUT_SETUP_CHECK_VERSION: version,
+    } } });
+    const url = new URL(api.iosLocalCaptureTestUrl(false, false));
+    assert.equal(url.searchParams.get('name'), name);
+    assert.equal(url.searchParams.get('input'), marker ? 'text' : null);
+    assert.equal(url.searchParams.get('text'), marker ? 'WAFRA_SETUP_CHECK_V1' : null);
+  }
 });

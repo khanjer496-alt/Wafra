@@ -148,13 +148,25 @@ test('an accidental whole notification cannot decide a merchant category', () =>
   assert.equal(result.category, 'other');
   assert.equal(result.needsReview, true);
 });
-for (const merchant of ['FIVERR', 'PAYPAL *FIVERR', 'FIVERR.COM', 'PAYPAL *FIVERR.COM', 'KLARNA', 'TABBY', 'TABBY.AI', 'TAMARA', 'TAMARA.COM']) {
+for (const merchant of ['FIVERR', 'PAYPAL *FIVERR', 'FIVERR.COM', 'PAYPAL *FIVERR.COM', 'KLARNA']) {
   test('opaque service/payment platform does not prove the purchased category: ' + merchant, () => {
     const result = expense(merchant);
     assert.equal(result.category, 'other');
     assert.equal(result.needsReview, true);
   });
 }
+// A payment whose payee IS the BNPL provider is the instalment of a purchase:
+// Shopping, in agreement with the SMS parser, not an unresolved platform.
+for (const merchant of ['TABBY', 'TABBY.AI', 'WWW.TABBY.AI', 'TABBY FZ LLC', 'TAMARA', 'TAMARA.COM', 'TAMARA FINANCE COMPANY', 'POSTPAY', 'CASHEW']) {
+  test('an exact BNPL provider payee is shopping: ' + merchant, () => {
+    const result = expense(merchant);
+    assert.equal(result.category, 'shopping');
+    assert.equal(result.needsReview, false);
+  });
+}
+test('a business that merely shares a BNPL brand word keeps its own activity', () => {
+  assert.equal(expense('TAMARA RESTAURANT').category, 'dining');
+});
 test('a user can deliberately classify their own Fiverr activity', () => {
   const result = expense('FIVERR', { overrides: { 'expense:fiverr': 'software' } });
   assert.equal(result.category, 'software');

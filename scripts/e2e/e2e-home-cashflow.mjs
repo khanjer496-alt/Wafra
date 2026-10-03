@@ -57,7 +57,19 @@ try {
             }
             return null;
           });
-          assert.equal(background, mode === 'dark' ? 'rgb(20, 18, 15)' : 'rgb(244, 241, 234)');
+          // Home v2: the selected total is the month line on the ink band,
+          // under the Today tiles and above the week.
+          assert.equal(background, mode === 'dark' ? 'rgb(11, 10, 8)' : 'rgb(22, 19, 15)');
+          const weekBox = await page.getByTestId('home-week').boundingBox();
+          const totalBox = await outgoing.boundingBox();
+          assert.ok(totalBox.y < weekBox.y, 'the month line sits above the week on the band');
+          const days = page.locator('[data-testid^="week-value-"]');
+          assert.equal(await days.count(), 7, 'the entire week is present');
+          for (const day of await days.all()) {
+            const box = await day.boundingBox();
+            assert.ok(box && box.x >= weekBox.x - 1 && box.x + box.width <= weekBox.x + weekBox.width + 1,
+              'every day, including the weekend, fits inside the chart');
+          }
           for (const row of [incoming, outgoing, net]) {
             await row.scrollIntoViewIfNeeded();
             const clipped = await row.evaluate(node => [...node.querySelectorAll('*')]
@@ -76,6 +88,14 @@ try {
           await outgoing.waitFor({ state: 'visible' });
           await outgoing.click();
           await page.waitForURL(/\/flow/);
+          await page.goto(base + '/', { waitUntil: 'networkidle' });
+          const budgets = page.getByTestId('home-left-to-spend');
+          assert.equal(await budgets.getAttribute('role'), 'button', 'Left in budgets is actionable');
+          await budgets.click();
+          await page.waitForURL(/flow\?view=categories&filter=limited/);
+          const limited = page.getByRole('button', { name: language === 'ar' ? 'بحد إنفاق' : 'With limits', exact: true });
+          assert.equal(await limited.getAttribute('aria-pressed'), 'true', 'budgeted categories are selected');
+          assert.equal(await page.getByTestId('spending-category-other').count(), 0, 'unbudgeted rows are excluded');
           results.push({ name, passed: true });
           console.log('PASS ' + name);
         } catch (error) {

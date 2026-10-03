@@ -1,5 +1,6 @@
 import { evaluateLocalReviewWindow } from '@/lib/local-semantic-review-runtime';
 import { onLocalSemanticBackgroundCancelled } from '@/lib/local-semantic-background-policy';
+import { LOCAL_SEMANTIC_E5_ENABLED } from '@/lib/local-semantic-flags';
 import type { ReviewEntry, UniversalReviewAlert } from '@/lib/alert-review-tray';
 import type { UniversalBankEvent } from '@/lib/universal-types';
 import type { LocalParserFamilyAdvisoryResult } from '@/lib/local-semantic-model';
@@ -22,7 +23,7 @@ const keyFor = (item: ReviewEntry): string => JSON.stringify([
 
 type Evaluate = (event: UniversalBankEvent, window: string, cancelled: () => boolean) => Promise<LocalParserFamilyAdvisoryResult>;
 /** Session-only bounded cache. No source, spans, or AI-generated finance facts persist. */
-export function createLocalReviewAdvisor(evaluate: Evaluate) {
+export function createLocalReviewAdvisor(evaluate: Evaluate, enabled: () => boolean = () => true) {
   const cache = new Map<string, LocalReviewSuggestion>();
   const listeners = new Set<() => void>();
   let generation = 0;
@@ -39,7 +40,8 @@ export function createLocalReviewAdvisor(evaluate: Evaluate) {
     },
     clear(): void { generation++; cache.clear(); emit(); },
     enqueue(item: UniversalReviewAlert, inspected: UniversalBankEvent, window: string): Promise<void> {
-      if (item.expiresAt <= Date.now() || !eligibleLocalReviewEvent(inspected) ||
+      // A disabled model must not put a "checking"/"no suggestion" badge on Review.
+      if (!enabled() || item.expiresAt <= Date.now() || !eligibleLocalReviewEvent(inspected) ||
           !eligibleLocalReviewEvent(item.event) || !window || window.length > 320) return Promise.resolve();
       const key = keyFor(item);
       if (cache.has(key) || queued >= 50) return Promise.resolve();
@@ -69,6 +71,6 @@ export function createLocalReviewAdvisor(evaluate: Evaluate) {
   };
 }
 
-export const localReviewAdvisor = createLocalReviewAdvisor(evaluateLocalReviewWindow);
+export const localReviewAdvisor = createLocalReviewAdvisor(evaluateLocalReviewWindow, () => LOCAL_SEMANTIC_E5_ENABLED);
 export const clearLocalReviewSuggestions = (): void => localReviewAdvisor.clear();
 onLocalSemanticBackgroundCancelled(clearLocalReviewSuggestions);

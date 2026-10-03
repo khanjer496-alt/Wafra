@@ -16,9 +16,9 @@ const results = [];
 const minor = value => {
   const normalized = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
     .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/٬/g, ',').replace(/٫/g, '.');
-  const number = normalized.match(/\d[\d,]*(?:\.\d+)?/);
+  const number = normalized.match(/(?:\bAED\s*|^\s*)(\d[\d,]*(?:\.\d+)?)/);
   assert.ok(number, `Missing displayed amount: ${normalized}`);
-  return Math.round(Number(number[0].replaceAll(',', '')) * 100);
+  return Math.round(Number(number[1].replaceAll(',', '')) * 100);
 };
 // Native-stack screens stay mounted. Scroll clear of the floating tab bar,
 // then hit-test so a matching income row behind the current screen cannot win.
@@ -128,7 +128,8 @@ try {
 
       // Changing the existing global period updates counts and totals, not just
       // a heading. The following Activity handoff must retain that same scope.
-      await tapOnTop(active(page, 'merchant-period').getByRole('button'));
+      await tapOnTop(active(page, 'merchant-period'));
+
       const dialog = page.locator('[role="dialog"]:visible').last();
       await dialog.getByRole('button', { name: language === 'ar' ? 'كل الفترات' : 'All time', exact: true }).click();
       await dialog.waitFor({ state: 'hidden' });

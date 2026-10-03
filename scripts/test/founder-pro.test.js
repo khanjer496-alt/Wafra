@@ -39,7 +39,8 @@ ok('a clock moving backwards restarts the sequence',
 const root = path.join(__dirname, '../..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 const eas = JSON.parse(read('eas.json'));
-const settings = read('src/app/settings.tsx');
+// The brand mark (and its founder gesture) moved to Data and help → About.
+const settings = read('src/app/settings-data.tsx');
 const store = read('src/lib/store.tsx');
 const purchases = read('src/lib/purchases.ts');
 
@@ -52,7 +53,7 @@ ok('only the Wafra logo in an enabled native test build advances the gesture',
     /<Pressable[\s\S]{0,260}onFounderLogoTap\(\)[\s\S]{0,180}<WafraMark/.test(settings));
 ok('founder unlock stays on the Support brand mark and never becomes a setting row',
   (settings.match(/onPress=\{\(\) => void onFounderLogoTap\(\)\}/g) ?? []).length === 1 &&
-    /supportHeader[\s\S]*<Pressable[\s\S]{0,260}onFounderLogoTap\(\)[\s\S]{0,180}<WafraMark/.test(settings) &&
+    /testID="settings-data-about"[\s\S]*<Pressable[\s\S]{0,260}onFounderLogoTap\(\)[\s\S]{0,180}<WafraMark/.test(settings) &&
     !/linkRow\([\s\S]{0,180}onFounderLogoTap|<Row[^>]*onPress=\{[^}]*onFounderLogoTap/.test(settings));
 ok('Settings grants the dedicated founder entitlement instead of forging store Pro',
   /await unlockFounderPro\(\)/.test(settings) && !/setPro\(/.test(settings));

@@ -5,8 +5,10 @@ import { summarizeCashOutflow } from '@/lib/cash-flow';
 import { summarizeForeignActivity, type ForeignActivitySummary } from '@/lib/fx-summary';
 import { buildInsights, summarizeMonth, type Insight } from '@/lib/insights';
 import { leavingSoon, type Outgoing } from '@/lib/leaving-soon';
-import { countsInCashflowTotals, internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
+import { countsInCashflowTotals, internalTransferIdsForState, isIncome, isSpending, liveAccountIds } from '@/lib/ledger';
 import { inPeriod, isCurrentMonth, type Period } from '@/lib/period';
+import { duplicateTransactionIds, isListedExternalTransfer } from '@/lib/transfer-activity';
+import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 import { uncategorisedMerchants, worthPrompting, type UncategorisedSummary } from '@/lib/uncategorised';
 import type { Account, AppState, Transaction } from '@/lib/types';
 
@@ -44,11 +46,31 @@ export interface DashboardProjection {
 export interface HomeDashboardProjection extends Pick<DashboardProjection,
   'upcoming' | 'activityRows' | 'accountById' | 'internalTransactionIds' | 'uncategorised'> {
   hero: Pick<DashboardProjection['hero'], 'incomeFils' | 'expenseFils' | 'netFils'>;
+  /** The period has transfer records on live accounts; Home links to Transfers. */
+  hasPeriodTransfers: boolean;
+  /**
+   * The period has any record on a live account. Recent activity lists only
+   * cash-flow rows, so a month holding only card-payment settlements, internal
+   * movements or transfers is still not an "empty month".
+   */
+  hasPeriodRecords: boolean;
   /** Null when a higher-priority prompt hides this calculation. */
   unreadFormats: DashboardProjection['unreadFormats'] | null;
+  /** Each recent-activity day's whole total on the month line's terms (income +, spending −); absent when unfinished. */
+  activityDayTotals: ReadonlyMap<string, number>;
 }
 
 const UPCOMING_WITHIN_DAYS = 9;
+/** Rows Home may read past its sixth to finish the last listed day's total. */
+const DAY_TOTAL_LOOKAHEAD = 50;
+
+/** Date-only probe; a sorted prefix is not enough to stop a day's scan early. */
+function datesAreNewestFirst(transactions: readonly Transaction[]): boolean {
+  for (let index = 1; index < transactions.length; index += 1) {
+    if (transactions[index - 1]!.date < transactions[index]!.date) return false;
+  }
+  return true;
+}
 
 /**
  * The Home insight widget needs one ranked observation, not the entire dashboard
@@ -72,7 +94,7 @@ export function projectDashboardInsight(
     state.notSubscriptions,
     liveAccounts,
     internal,
-    { includeRecurringAnalysis: false },
+    { includeRecurringAnalysis: false, cancelledSubscriptions: state.cancelledSubscriptions, customCategories: state.customCategories },
   ).find((item) => item.id !== dismissedInsightId) ?? null;
 }
 
@@ -110,11 +132,38 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
 
   // The store already provides display order. Stop at the six visible rows
   // rather than allocating a filtered copy of the entire transaction history.
+  // Home leaves out transfers that the Transfers screen is guaranteed to list.
+  // It must not rebuild the transfer graph here, so the test is row-local:
+  // unconfirmed transfers (whose listing depends on the whole ledger, e.g. a
+  // likely card repayment) stay in recent activity rather than disappear.
   const activityRows: Transaction[] = [];
+  // Home only: each listed day's total on the month line's own terms
+  // (isIncome +, isSpending −), so the days reconcile with Spent · In · Net;
+  // transfers, withdrawals and other movements stay listed but add nothing.
+  // The whole day counts, not just the rows shown: after the sixth row the
+  // scan goes on to finish that row's day, for at most DAY_TOTAL_LOOKAHEAD
+  // more rows. A day it cannot finish gets no total rather than a partial
+  // one, and an out-of-order ledger gets none at all.
+  const activityDayTotals = new Map<string, number>();
+  const dayTotals = homeOnly && datesAreNewestFirst(state.transactions);
+  const addToDay = (transaction: Transaction) => {
+    const signed = isIncome(transaction, liveAccounts, internal) ? transaction.amountFils
+      : isSpending(transaction, liveAccounts, internal) ? -transaction.amountFils : 0;
+    activityDayTotals.set(transaction.date, (activityDayTotals.get(transaction.date) ?? 0) + signed);
+  };
+  let lookahead = 0;
+  let duplicates: ReadonlySet<string> | undefined;
   for (const transaction of state.transactions) {
+    const full = activityRows.length === 6;
+    if (full && (!dayTotals || transaction.date < activityRows[5]!.date)) break;
+    if (full && ++lookahead > DAY_TOTAL_LOOKAHEAD) { activityDayTotals.delete(activityRows[5]!.date); break; }
     if (countsInCashflowTotals(transaction, liveAccounts, internal) && inPeriod(transaction.date, period)) {
-      activityRows.push(transaction);
-      if (activityRows.length === 6) break;
+      if (homeOnly && isTransferCandidate(transaction)) {
+        if (!duplicates) duplicates = duplicateTransactionIds(state.transactions);
+        if (isListedExternalTransfer(transaction, duplicates)) continue;
+      }
+      if (!full) activityRows.push(transaction);
+      if (dayTotals && (!full || activityDayTotals.has(transaction.date))) addToDay(transaction);
     }
   }
 
@@ -129,7 +178,11 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
       // deposits, investments and unresolved transfers remain visible as
       // account activity, but do not distort Income / Spending / Net.
       hero: { incomeFils, expenseFils, netFils: incomeFils - expenseFils },
-      upcoming, activityRows, accountById, internalTransactionIds: internal,
+      hasPeriodTransfers: state.transactions.some(transaction => liveAccounts.has(transaction.accountId) &&
+        inPeriod(transaction.date, period) && isTransferCandidate(transaction)),
+      hasPeriodRecords: activityRows.length > 0 || state.transactions.some(transaction =>
+        liveAccounts.has(transaction.accountId) && inPeriod(transaction.date, period)),
+      upcoming, activityRows, activityDayTotals, accountById, internalTransactionIds: internal,
       unreadFormats, uncategorised,
     };
   }
@@ -139,6 +192,7 @@ export function projectDashboard(request: DashboardProjectionRequest): Dashboard
   const cashOut = summarizeCashOutflow(state, period, { live: liveAccounts, internal });
   const insight = includeInsights ? buildInsights(
     state.transactions, state.budgets, period, now, state.notSubscriptions, liveAccounts, internal,
+    { cancelledSubscriptions: state.cancelledSubscriptions, customCategories: state.customCategories },
   ).find((item) => item.id !== dismissedInsightId) ?? null : null;
 
   return {

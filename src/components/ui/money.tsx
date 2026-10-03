@@ -1,12 +1,15 @@
-import { StyleSheet, TextInput, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { ThemedText, type TextType } from '@/components/themed-text';
 import { Fonts, Spacing } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
-import { useLedgerMoney } from '@/hooks/use-ledger-money';
+import { useLedgerMoney, useMoneyLocaleKey } from '@/hooks/use-ledger-money';
+import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
 import { formatAmount } from '@/lib/format';
+import { figureFontMultiplier } from '@/lib/large-text-figure';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
-import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
+import { currencyDisplayLabel, currencyPlacement, formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 
 type Sign = 'none' | 'auto' | 'minus' | 'plus';
 
@@ -22,6 +25,11 @@ interface MoneyProps {
   /** The demoted currency prefix. On by default. */
   prefix?: boolean;
   style?: StyleProp<ViewStyle>;
+  /**
+   * Horizontal padding and borders around a hero figure beyond the screen's
+   * own gutters (a card's inset), so Larger Text fits it to the real width.
+   */
+  fitInset?: number;
 }
 
 function signGlyph(fils: number, sign: Sign): string {
@@ -37,13 +45,65 @@ function signGlyph(fils: number, sign: Sign): string {
   }
 }
 
+/*
+ * The device number conventions are module state that React cannot see, and
+ * React Compiler memoizes each call below on its arguments. The locale key is
+ * an argument only so a device settings change invalidates those memos; the
+ * formatting itself reads the conventions ledger-money.ts has applied.
+ */
+function figureText(
+  fils: number,
+  denomination: LedgerMoneySpec | null,
+  decimals: boolean | undefined,
+  _localeKey: string,
+): string {
+  return denomination
+    ? formatMinorUnits(Math.round(Math.abs(fils)), denomination, decimals === true ? { decimals: true } : undefined)
+    : formatAmount(Math.abs(fils), { decimals });
+}
+const placementFor = (currency: string, _localeKey: string) => currencyPlacement(currency);
+const labelFor = (code: string, _localeKey: string) => currencyDisplayLabel(code);
+
+/**
+ * The visual currency label: an unambiguous symbol in the device locale
+ * ("€", "₹", "CA$"), else the ISO code. AED and SAR always show their code.
+ * Screen readers hear the ISO code, never a bare symbol.
+ */
 function CurrencyPrefix({ label }: { label?: string }) {
   const ledgerMoney = useLedgerMoney();
+  const localeKey = useMoneyLocaleKey();
+  const code = label ?? ledgerMoney?.currency ?? ledgerCurrencyDisplay();
   return (
-    <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}>
-      {label ?? ledgerMoney?.currency ?? ledgerCurrencyDisplay()}
+    <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}
+      accessibilityLabel={code}>
+      {labelFor(code, localeKey)}
     </ThemedText>
   );
+}
+
+/** Base size and ramp cap of the hero figure types (see ThemedText RAMP_CAP). */
+const HERO_FIGURE: Partial<Record<TextType, { size: number; cap: number }>> = {
+  display: { size: 36, cap: 1.75 },
+  sheetAmount: { size: 34, cap: 1.75 },
+  amount: { size: 32, cap: 1.8 },
+};
+/** figureFontMultiplier for the hero figure types (see src/lib/large-text-figure.ts). */
+export function heroFigureMultiplier(
+  chars: number,
+  type: TextType,
+  availableWidth: number,
+  fontScale: number,
+): number | undefined {
+  const hero = HERO_FIGURE[type];
+  if (!hero) return undefined;
+  return figureFontMultiplier(chars, hero.size, hero.cap, availableWidth, fontScale);
+}
+
+/** heroFigureMultiplier for a figure laid across the screen's content width. */
+export function useHeroFigureMultiplier(text: string, type: TextType, inset = 0): number | undefined {
+  const { width, fontScale } = useWindowDimensions();
+  // Screen gutters (2 × 18) plus a little slack, plus any card inset.
+  return heroFigureMultiplier(text.length, type, width - 48 - inset, fontScale);
 }
 
 /**
@@ -59,23 +119,37 @@ export function Money({
   decimals,
   prefix = true,
   style,
+  fitInset,
 }: MoneyProps) {
   const contextMoney = useLedgerMoney();
+  const localeKey = useMoneyLocaleKey();
   const denomination = moneySpec ?? contextMoney;
   const currency = denomination?.currency ?? ledgerCurrencyDisplay();
-  const value = denomination
-    ? formatMinorUnits(Math.round(Math.abs(fils)), denomination, decimals === true ? { decimals: true } : undefined)
-    : formatAmount(Math.abs(fils), { decimals });
+  const value = figureText(fils, denomination, decimals, localeKey);
   const amount = `${signGlyph(fils, sign)}${value}`;
   const label = `${prefix ? `${currency} ` : ''}${amount}`;
+  // The locale's own pattern: "1.234,56 €" in de-DE, "$1,234.56" in en-US;
+  // AED/SAR and any code-labelled currency stay "AED 1,234.56". The screen
+  // reader label above always speaks the ISO code first.
+  const placement = placementFor(currency, localeKey);
+  const currencyNode = prefix ? <CurrencyPrefix label={currency} /> : null;
+  const fitMultiplier = useHeroFigureMultiplier(amount, type, fitInset);
+  // A figure has no good place to break. At the accessibility sizes it keeps
+  // its full width and the row around it wraps it onto its own line, instead
+  // of being squeezed until the digits break (or spill past the screen edge).
+  const large = useLargeTextLayout();
+  const figure = (
+    <ThemedText type={type} tabular maxFontSizeMultiplier={fitMultiplier}
+      style={[styles.value, large && styles.valueWhole, color ? { color } : undefined]}>
+      {amount}
+    </ThemedText>
+  );
+  const [first, second] = placement.position === 'after' ? [figure, currencyNode] : [currencyNode, figure];
   return (
-    <View accessible accessibilityRole="text" accessibilityLabel={label} style={[styles.inline, style]}>
-      {prefix && (
-        <CurrencyPrefix label={currency} />
-      )}
-      <ThemedText type={type} tabular style={[styles.value, color ? { color } : undefined]}>
-        {amount}
-      </ThemedText>
+    <View accessible accessibilityRole="text" accessibilityLabel={label}
+      style={[styles.inline, !placement.spaced && styles.tight, style]}>
+      {first}
+      {second}
     </View>
   );
 }
@@ -120,7 +194,10 @@ export function AmountField({
           placeholderTextColor={theme.textTertiary}
           selectionColor={theme.primary}
           cursorColor={theme.primary}
-          style={[
+          // The entry figure follows the hero ramp (ThemedText RAMP_CAP):
+          // 38pt × 3.1 would leave room for four digits on a phone.
+          maxFontSizeMultiplier={AMOUNT_INPUT_CAP}
+          style={scaleTextStyleForE2E([
             styles.input,
             {
               color: theme.text,
@@ -128,7 +205,7 @@ export function AmountField({
               lineHeight: fontSize * 1.1,
               letterSpacing: fontSize * -0.02,
             },
-          ]}
+          ], undefined, AMOUNT_INPUT_CAP)}
         />
       </View>
       {helper && (
@@ -139,6 +216,8 @@ export function AmountField({
     </View>
   );
 }
+
+const AMOUNT_INPUT_CAP = 1.75;
 
 const styles = StyleSheet.create({
   // The demoted currency: 15px mono in textSecondary, on the amount's baseline.
@@ -153,7 +232,9 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     gap: Spacing.two - 2,
   },
+  tight: { gap: 1 },
   value: { flexShrink: 1, minWidth: 0 },
+  valueWhole: { flexShrink: 0, maxWidth: '100%' },
   field: {
     gap: Spacing.two,
   },

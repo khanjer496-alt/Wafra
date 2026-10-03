@@ -79,5 +79,49 @@ ok('budget and goal money pin the schema before a bank transaction exists',
 ok('migration is idempotent for a valid v2 spec',
   migrateLegacyLedgerMoney({ ledgerMoney: AED, transactions: [{ amountFils: 500 }] }) === AED);
 
+{
+  // "Try a sample" follows the ledger currency; the AED sample is unchanged.
+  const { AED_PASTE_SAMPLE, pasteSampleForLedger } = require('./build/paste-sample.js');
+  const { parsePastedBankAlerts } = require('./build/launch-alert-parser.js');
+  const { inspectUniversalBankEvent } = require('./build/universal-parser.js');
+  const markets = require('./build/markets.js');
+  ok('the AED and unpinned paste samples are the launch-tested text',
+    pasteSampleForLedger(AED) === AED_PASTE_SAMPLE && pasteSampleForLedger(null) === AED_PASTE_SAMPLE &&
+      AED_PASTE_SAMPLE.startsWith('Purchase of AED 187.50 with Debit Card ending 1234 at CARREFOUR'));
+  ok('JPY and KWD samples are sized to the currency in canonical bank form',
+    pasteSampleForLedger(JPY).startsWith('Purchase of JPY 18,750 with') &&
+      pasteSampleForLedger(KWD).includes('KWD 5.500 was debited') &&
+      pasteSampleForLedger(ledgerMoneySpec('INR')).includes('INR 185,000.00 has been credited'));
+  const outcomes = {};
+  try {
+    for (const code of ['AED', 'SAR', 'USD', 'JPY', 'KWD']) {
+      const spec = ledgerMoneySpec(code);
+      markets.setLedgerCurrency(code, spec.exponent);
+      const refused = [];
+      const parsed = parsePastedBankAlerts(pasteSampleForLedger(spec), {}, (block) => refused.push(block));
+      outcomes[code] = {
+        posted: parsed.map((row) => row.parsed?.amountFils ?? row.amountFils),
+        review: refused.map((block) => {
+          const event = inspectUniversalBankEvent(block);
+          if (event.decision !== 'review') return event.decision;
+          // Three-decimal "18.750" is honestly ambiguous with a grouped
+          // 18,750; review then offers both readings, the exact one included.
+          const value = event.amount?.value ?? event.amount?.alternatives?.[0];
+          return `${value?.currency} ${value?.minorUnits}`;
+        }),
+      };
+    }
+  } finally {
+    markets.setLedgerCurrency(null);
+  }
+  ok('AED and SAR samples still post their three launch rows',
+    JSON.stringify(outcomes.AED.posted) === '[18750,5500,1850000]' &&
+      JSON.stringify(outcomes.SAR.posted) === '[18750,5500,1850000]', outcomes);
+  ok('other ledgers get a reviewable sample in their own currency, never a mismatch',
+    JSON.stringify(outcomes.USD.review) === '["USD 18750","USD 5500","USD 1850000"]' &&
+      JSON.stringify(outcomes.JPY.review) === '["JPY 18750","JPY 5500","JPY 1850000"]' &&
+      JSON.stringify(outcomes.KWD.review) === '["KWD 18750","KWD 5500","KWD 1850000"]', outcomes);
+}
+
 console.log(`\nledger-money: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

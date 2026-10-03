@@ -16,19 +16,27 @@ for (const platform of ['ios', 'android']) for (const language of ['en', 'ar']) 
   test(`${platform}/${language}: capture recovery has an actual scroll target`, () => {
     const h = createWorkflowHarness({ platform, language, params: { section: 'imports' } });
     const tree = h.renderScreen('settings');
-    const scaffold = walk(tree).find(node => node.type === 'Scaffold');
+    // Design language E: the Capture group sits inside the sheet, under the
+    // band, so the target is the band's measured end plus the group's offset.
+    const scaffold = walk(tree).find(node => node.type === 'BandScaffold');
+    const band = walk(tree).find(node => node.props?.testID === 'settings-band-body');
     const target = walk(tree).find(node => node.props?.testID === 'settings-imports');
     assert.ok(scaffold.props.scrollRef, 'the source screen can scroll its real scaffold');
+    assert.equal(typeof band?.props?.onLayout, 'function');
     assert.equal(typeof target?.props?.onLayout, 'function');
     assert.equal(typeof scaffold.props.scrollProps.onContentSizeChange, 'function');
     assert.deepEqual(h.events, [], 'opening recovery must not change capture');
     const offsets = [];
     scaffold.props.scrollRef.current = { scrollTo: value => offsets.push(value) };
-    target.props.onLayout({ nativeEvent: { layout: { y: 420 } } });
+    target.props.onLayout({ nativeEvent: { layout: { y: 16 } } });
+    assert.equal(offsets.length, 0, 'wait until the band has been measured');
+    band.props.onLayout({ nativeEvent: { layout: { y: 60, height: 200 } } });
     assert.equal(offsets.length, 0, 'wait until content is large enough to reach the target');
     scaffold.props.scrollProps.onContentSizeChange(390, 1800);
     assert.equal(offsets.length, 1);
-    assert.ok(offsets[0].y > 0 && offsets[0].y < 420);
+    const expected = h.deps['@/lib/settings-layout'].settingsSectionScrollY(260, 16);
+    assert.equal(offsets[0].y, expected);
+    assert.ok(offsets[0].y > 260, 'lands below the band, at the sheet');
     scaffold.props.scrollProps.onContentSizeChange(390, 1850);
     assert.equal(offsets.length, 1, 'later layout changes must not pull users back');
   });

@@ -10,6 +10,17 @@ const results = [];
 const browser = await chromium.launch();
 async function exposed(locator, page) {
   assert.equal(await locator.count(), 1, 'Expected exactly one action');
+  // Modal content is attached before its opening transform reaches the viewport.
+  // Wait without scrolling it: an off-screen or covered footer must still fail.
+  const element = await locator.elementHandle();
+  try {
+    await page.waitForFunction(node => {
+      const r = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return r.width > 0 && r.height > 0 && r.top >= -1 && r.bottom <= innerHeight + 1 &&
+        !!hit && (node === hit || node.contains(hit));
+    }, element, { timeout: 10000 });
+  } finally { await element.dispose(); }
   const geometry = await locator.evaluate(node => {
     const r = node.getBoundingClientRect(), p = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
     return { x:r.x, y:r.y, right:r.right, bottom:r.bottom, width:r.width, height:r.height, hit:!!p && (p === node || node.contains(p)) };
@@ -22,13 +33,17 @@ try {
   for (const [width,height,theme] of [[360,780,'dark'],[390,844,'light'],[320,568,'dark'],[390,420,'dark']]) {
     const name = `${width}x${height}-${theme}`;
     const page = await browser.newPage({ viewport:{width,height}, colorScheme:theme, reducedMotion:'reduce' });
+    // The demo omits future charges; its single Apple Store fixture needs a completed day 23.
+    // Let Date.now advance too: React Native sheet animations depend on elapsed time.
+    await page.clock.install({ time: new Date('2026-09-27T08:00:00Z') });
+    await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
     const errors = [];page.on('pageerror', error => errors.push(String(error)));
     try {
       await page.goto(`${BASE}/transactions`, { waitUntil:'networkidle' });
       const summary = page.getByTestId('transactions-summary');
       await summary.waitFor({state:'visible', timeout:30000});
       const search = page.getByPlaceholder('Merchant or category', {exact:true});
-      assert.equal(await page.getByText('Search transactions', {exact:true}).count(),1);
+      assert.ok(await search.isVisible() && await search.isEditable(), 'Search field is visibly editable');
       assert.equal(await search.count(),1);
       assert.equal(await search.getAttribute('aria-label'),'Search merchants or categories');
       const inputFits = await search.evaluate(node => {

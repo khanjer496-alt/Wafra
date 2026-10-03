@@ -427,26 +427,37 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     useCallback: (fn) => fn,
     useContext: () => null,
     useEffect: () => {},
+    useLayoutEffect: () => {},
     useMemo: (fn) => fn(),
+    useSyncExternalStore: (_subscribe, snapshot) => snapshot(),
     useRef: (value) => ({ current: value }),
     useState: (value) => [value, () => {}],
   };
   const identityState = (state) => state;
   const modules = {
+    'expo-crypto': { randomUUID: () => require('node:crypto').randomUUID() },
+    '@/lib/founder-pro': require('./build/founder-pro'),
+    '@/lib/custom-categories': require('./build/custom-categories'),
     'react/jsx-runtime': {
-      // StoreProvider now wraps StoreContext.Provider in PrivateModeContext.Provider,
-      // whose value is the private-mode boolean; the store value is the inner
-      // element, already captured as this element's child.
+      // StoreContext.Provider is the innermost element; the wrappers around it
+      // (money locale, private mode, the selector handle) pass through the
+      // store value already captured as their child. The harness renders the
+      // provider without children, so the innermost element yields its value.
       jsx: (_type, props) => captureProvider
-        ? (typeof props.value === 'object' && props.value !== null ? props.value : props.children)
+        ? (typeof props.children === 'object' && props.children !== null ? props.children : props.value)
         : {},
       jsxs: (_type, props) => captureProvider
-        ? (typeof props.value === 'object' && props.value !== null ? props.value : props.children)
+        ? (typeof props.children === 'object' && props.children !== null ? props.children : props.value)
         : {},
       Fragment: Symbol('Fragment'),
     },
     react,
-    'expo-localization': { useLocales: () => [{ languageCode: 'en' }] },
+    // A UAE phone: these fixtures are launch-market ledgers, and the country
+    // migration reads the device Region when a ledger predates `country`.
+    'expo-localization': {
+      useLocales: () => [{ languageCode: 'en' }],
+      getLocales: () => [{ languageCode: 'en', regionCode: 'AE' }],
+    },
     'react-native': {
       AppState: { addEventListener: () => ({ remove() {} }) },
       I18nManager: { isRTL: false, allowRTL() {}, forceRTL() {} },
@@ -491,6 +502,10 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/local-semantic-review': require('./build/local-semantic-review'),
     '@/lib/local-semantic-background-policy': require('./build/local-semantic-background-policy'),
     '@/lib/cards': { mergeImportedCardDues: (_existing, incoming) => incoming },
+    // "Set today's balance" on a hand-kept account reads the real running figure.
+    '@/lib/balances': require('./build/balances'),
+    // Pure helpers for the Accounts/Bills redesign (applyBillEdit), real source.
+    '@/lib/money-places': execute('src/lib/money-places.ts', (id) => require(id.replace('@/lib/', './build/'))),
     '@/lib/bills': require('./build/bills'),
     '@/lib/bill-alias': require('./build/bill-alias'),
     '@/lib/dedupe': dedupe,
@@ -511,6 +526,9 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     '@/lib/alert-review-tray': require('./build/alert-review-tray'),
     '@/lib/types': require('./build/types'),
     '@/lib/review-promotion': require('./build/review-promotion'),
+    // Real quote cache; the store only reaches its network loader when a
+    // foreign review is promoted, which this harness does not do.
+    '@/lib/fx-rates': require('./build/fx-rates'),
     '@/lib/state-storage': { migrateLegacyState: async () => null, stateStorage: {} },
     '@/lib/storage-diagnostics': { recordStorageFailure: () => ({ category: 'unknown' }) },
     '@/lib/android-live-background': { waitForAndroidBackgroundCaptureIdle: async () => {} },
@@ -528,6 +546,20 @@ function loadHydrationExports(realModules = {}, captureProvider = false) {
     // let hydration drift from what the app does, which is the one thing this
     // harness exists to pin.
     '@/lib/known-banks': require('./build/known-banks'),
+    // The real country model: migration and the parser-pack choice are pure.
+    '@/lib/country': require('./build/country'),
+    // The real unproven-format policy: the store mirrors its setting and
+    // writes its undo tombstones on hydrate/undo/delete.
+    '@/lib/best-effort-autopost': require('./build/best-effort-autopost'),
+    // Provider plumbing only: the locale key for memoised money text.
+    '@/hooks/use-ledger-money': { MoneyLocaleProvider: ({ children }) => children },
+    // Native widget bridge: clearAll only asks it to drop the widget summary.
+    '../../modules/wafra-widgets': { clearWidgetSnapshot: () => {}, setWidgetSnapshot: () => {} },
+    // The real selector helpers (dependency-free).
+    '@/lib/store-selection': execute('src/lib/store-selection.ts', () => { throw new Error('store-selection has no imports'); }),
+    // The real one-time BNPL category repair (it reads the real parser).
+    '@/lib/bnpl-category-repair': require('./build/bnpl-category-repair'),
+    '@/lib/subscriptions': require('./build/subscriptions'),
     './balances': {},
     ...realModules,
   };
@@ -702,7 +734,7 @@ ok('hydration clears the latch only AFTER a successful read',
 
 ok('an empty database counts as a successful read',
   !!hydrateBody &&
-    /loaded = await persistence\.load\(\)[\s\S]*?let next: [^=]*= SYNTHETIC_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
+    /loaded = await persistence\.load\(\)[\s\S]*?let next: [^=]*= E2E_DEMO_LEDGER\s*\? demoState\(\)\s*:\s*\{ onboarded: false \}/.test(hydrateBody) &&
     /loaded = await persistence\.load\(\)[\s\S]*?if \(loaded\)[\s\S]*?setHydrationFailed\(false\)[\s\S]*?dispatch\(\{ type: 'hydrate', state: next \}\)/.test(hydrateBody),
   'a legitimately empty ledger and an unreadable one must not share a code path, but they ' +
     'must share the SUCCESS path — one `storageBlocked = false` reached by both, not a ' +
@@ -3019,6 +3051,20 @@ asyncSuites.push((async () => {
 // work queued before React can rerender the Review screen.
 asyncSuites.push((async () => {
   const { localReviewAdvisor } = require('./build/local-semantic-review');
+  // E5 is off by default: the shipped advisor queues nothing and shows no badge.
+  const flags = require('./build/local-semantic-flags');
+  ok('E5 review advice is off by default', flags.LOCAL_SEMANTIC_E5_ENABLED === false);
+  {
+    const offEvent = { decision: 'review', family: 'unknown', status: 'posted', issues: [],
+      amount: { evidence: 'explicit', value: { currency: 'AED', minorUnits: '4500', exponent: 2 }, alternatives: [] } };
+    const offItem = { kind: 'universal', id: 'synthetic-ai-review-off', sourceKey: 'synthetic-ai-source-off',
+      observedAt: Date.now(), expiresAt: Date.now() + 60000, event: offEvent };
+    await localReviewAdvisor.enqueue(offItem, offEvent, 'movement <money>');
+    ok('default-off review advisor leaves no pending or unavailable badge', localReviewAdvisor.get(offItem) === null);
+  }
+  // The reset guarantees below still hold for research builds that opt in
+  // (EXPO_PUBLIC_WAFRA_LOCAL_E5=1); simulate that build for this block.
+  flags.LOCAL_SEMANTIC_E5_ENABLED = true;
   const runtime = loadHydrationExports({}, true);
   const ledger = runtime.StoreProvider({ children: null });
   const event = { decision: 'review', family: 'unknown', status: 'posted', issues: [],
@@ -3046,6 +3092,7 @@ asyncSuites.push((async () => {
   ok('capture opt-out cancels queued AI before persistence finishes', captureCancelled());
   await captureSaved;
   background.setLocalSemanticAppActive(false);
+  flags.LOCAL_SEMANTIC_E5_ENABLED = false;
 })().catch(error => ok('AI review generation reset integration completes', false, String(error))));
 
 // Transfer decisions use the authoritative reducer snapshot and explicit
@@ -3228,6 +3275,100 @@ asyncSuites.push((async () => {
     transactions: [tx('android-backup-repair', { raw: 'retained source in restored backup' })],
   });
   ok('backup-style migration still repairs retained SMS immediately on Android', calls === 2);
+}
+
+// ---------------------------------------------------------------------------
+// One-time BNPL category repair. A body-wide BNPL keyword stored every payment
+// to Tabby/Tamara/Postpay/Cashew, and every purchase on a BNPL card at a named
+// merchant, as Loan; heal only re-files Other, so hydration repairs them once.
+// ---------------------------------------------------------------------------
+{
+  const real = loadHydrationExports({
+    '@/lib/sms-parser': require('./build/sms-parser'),
+    '@/lib/heal': require('./build/heal'),
+    '@/lib/ledger': require('./build/ledger'),
+    '@/lib/markets': { ...require('./build/markets'), detectMarketId: () => 'AE' },
+  });
+  const BNPL_CARD_SMS =
+    'You spent AED 96.50 at SAMPLE PIZZA RESTAURANT. Your Tabby Card limit is now AED 1,846.50.';
+  const rows = [
+    tx('bnpl-payee', { title: 'Tabby', category: 'loan', amountFils: 21450 }),
+    tx('bnpl-entity', { title: 'Tamara Finance Company', category: 'loan', amountFils: 35000 }),
+    tx('bnpl-card', { title: 'Sample Pizza Restaurant', category: 'loan', amountFils: 9650, raw: BNPL_CARD_SMS }),
+    tx('bnpl-card-no-raw', { title: 'Sample Pizza Restaurant', category: 'loan', amountFils: 9650 }),
+    tx('bnpl-edited', { title: 'Tabby', category: 'loan', userEdited: true }),
+    tx('bnpl-ruled', { title: 'Postpay', category: 'loan' }),
+    tx('bnpl-transfer', { title: 'Tabby', category: 'loan', isTransfer: true }),
+    tx('bnpl-manual', { title: 'Tabby', category: 'loan', source: 'manual' }),
+    tx('bank-loan', { title: 'Sample Islamic Finance', category: 'loan', amountFils: 334600 }),
+    tx('bank-dd', { title: 'Sample Bank', category: 'loan', amountFils: 247000 }),
+    tx('brand-word-business', { title: 'Tamara Restaurant', category: 'loan' }),
+  ];
+  const before = new Map(rows.map((row) => [row.id, JSON.stringify(row)]));
+  const migrated = real.migratePersistedState({
+    marketId: 'AE',
+    transactions: rows.map((row) => ({ ...row })),
+    merchantOverrides: { 'expense:postpay': 'loan' },
+  });
+  const byId = new Map(migrated.transactions.map((row) => [row.id, row]));
+  ok('BNPL repair: a stored payment to a BNPL provider moves from Loan to Shopping',
+    byId.get('bnpl-payee')?.category === 'shopping' && byId.get('bnpl-entity')?.category === 'shopping');
+  ok("BNPL repair: a stored BNPL-card purchase gets the merchant's category from its retained SMS",
+    byId.get('bnpl-card')?.category === 'dining', byId.get('bnpl-card'));
+  ok('BNPL repair: without a retained SMS a BNPL-card purchase is left alone',
+    byId.get('bnpl-card-no-raw')?.category === 'loan');
+  ok('BNPL repair: only the category changes on a repaired row',
+    JSON.stringify({ ...byId.get('bnpl-payee'), category: 'loan' }) === before.get('bnpl-payee'));
+  ok('BNPL repair: user-edited, user-ruled, transfer and manual rows are untouched byte-for-byte',
+    ['bnpl-edited', 'bnpl-ruled', 'bnpl-transfer', 'bnpl-manual']
+      .every((id) => JSON.stringify(byId.get(id)) === before.get(id)));
+  ok('BNPL repair: genuine bank loans, finance houses and brand-word businesses keep Loan',
+    ['bank-loan', 'bank-dd', 'brand-word-business'].every((id) => byId.get(id)?.category === 'loan'));
+  ok('BNPL repair: the receipt is stamped', migrated.bnplCategoryRepairVersion === 1);
+
+  const again = real.migratePersistedState({ ...migrated, transactions: migrated.transactions.map((row) => ({ ...row })) });
+  ok('BNPL repair: running it again changes nothing (idempotent)',
+    JSON.stringify(again.transactions) === JSON.stringify(migrated.transactions));
+
+  // Launch trusts its own receipt; without one it repairs once.
+  const reparseKey = JSON.stringify([2, 999, 'AE']);
+  const launchState = (extra) => ({
+    onboarded: true, marketId: 'AE', parserVersion: 999, hydrationReparseKey: reparseKey,
+    transactions: [tx('launch-bnpl', { title: 'Tabby', category: 'loan' })], ...extra,
+  });
+  const trusted = hydration.migratePersistedState(launchState({ bnplCategoryRepairVersion: 1 }),
+    { reuseCompletedReparse: true });
+  ok('BNPL repair: a launch with a current receipt does not walk the ledger again',
+    trusted.transactions[0].category === 'loan');
+  const first = hydration.migratePersistedState(launchState({}), { reuseCompletedReparse: true });
+  ok('BNPL repair: a launch without the receipt repairs once and stamps it',
+    first.transactions[0].category === 'shopping' && first.bnplCategoryRepairVersion === 1);
+
+  // A retained SMS is re-read under the LEDGER's pack even on the launch path,
+  // where the raw reparse is skipped and whatever pack was live stays live.
+  {
+    const realMarkets = require('./build/markets');
+    realMarkets.setActiveMarket('AE');
+    const saudi = real.migratePersistedState({
+      onboarded: true, marketId: 'SA', parserVersion: 999,
+      hydrationReparseKey: JSON.stringify([2, require('./build/sms-parser').PARSER_BACKFILL_VERSION, 'SA']),
+      transactions: [tx('saudi-bnpl-card', {
+        title: 'Sample Pizza Restaurant', category: 'loan', amountFils: 30000,
+        raw: 'You spent SAR 300.00 at SAMPLE PIZZA RESTAURANT. Your Tabby Card limit is now SAR 1,846.50.',
+      })],
+    }, { reuseCompletedReparse: true });
+    ok('BNPL repair: a Saudi BNPL-card purchase is re-read under the Saudi pack and repaired',
+      saudi.transactions[0].category === 'dining', saudi.transactions[0]);
+    realMarkets.setActiveMarket('AE');
+  }
+
+  // A backup is normalised by the receiving build, whatever receipt it carries.
+  const restored = hydration.parseBackupForRestore(JSON.stringify({
+    app: 'wafra', version: 1,
+    data: { bnplCategoryRepairVersion: 1, transactions: [tx('restored-bnpl', { title: 'Tabby', category: 'loan' })] },
+  }));
+  ok('BNPL repair: a restored backup is repaired even if it carries a receipt',
+    restored?.transactions?.[0]?.category === 'shopping' && restored?.bnplCategoryRepairVersion === 1);
 }
 
 // The erase-race contract in 2c is behavioural, so it settles after this file

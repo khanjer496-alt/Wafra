@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -7,8 +8,13 @@ import { Radius, Spacing } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { tapped } from '@/lib/haptics';
-import { categoryLabel, type CategoryMeta } from '@/lib/categories';
-import type { CategoryId } from '@/lib/types';
+import { type CategoryMeta } from '@/lib/categories';
+import { TextField } from '@/components/ui/text-field';
+import { EButton } from '@/components/ui/band/e-button';
+import { useBand } from '@/hooks/use-band';
+import { useStoreActions } from '@/lib/store';
+import { customCategoryCopy } from '@/lib/custom-category-copy';
+import type { CategoryId, TransactionType } from '@/lib/types';
 
 interface CategoryChipsProps {
   categories: CategoryMeta[];
@@ -17,6 +23,8 @@ interface CategoryChipsProps {
   onToggle: (id: CategoryId) => void;
   /** `scroll` for one horizontal line, `wrap` when the full set should be visible. */
   layout?: 'scroll' | 'wrap';
+  /** Editing pickers may create a category; filters only select existing ones. */
+  createType?: TransactionType;
 }
 
 /**
@@ -32,9 +40,28 @@ export function CategoryChips({
   selected,
   onToggle,
   layout = 'scroll',
+  createType,
 }: CategoryChipsProps) {
+  const { categoryLabel } = useCategoryCatalog();
   const theme = useTheme();
   const language = useLanguage();
+  const band = useBand('spending');
+  const { createCustomCategory } = useStoreActions();
+  const copy = customCategoryCopy[language];
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [error, setError] = useState<string>();
+  const saving = useRef(false);
+  const create = () => {
+    if (!createType || saving.current) return;
+    saving.current = true;
+    try {
+      const result = createCustomCategory(name, createType);
+      if (!result.ok) { setError(copy.errors[result.reason]); return; }
+      setCreating(false); setName(''); setError(undefined);
+      onToggle(result.id);
+    } finally { saving.current = false; }
+  };
   const isOn = (id: CategoryId) =>
     selected instanceof Set ? selected.has(id) : selected === id;
 
@@ -79,6 +106,7 @@ export function CategoryChips({
         accessibilityRole="button"
         accessibilityLabel={label}
         accessibilityState={{ selected: on }}
+        aria-pressed={on}
         style={[
           styles.chip,
           {
@@ -94,18 +122,30 @@ export function CategoryChips({
     );
   });
 
-  if (layout === 'wrap') return <View style={styles.wrap}>{chips}</View>;
+  const add = createType ? <Pressable key="create" accessibilityRole="button"
+    accessibilityLabel={copy.newCategory} testID="category-create-open"
+    onPress={() => { setCreating(true); setError(undefined); }}
+    style={[styles.chip, { borderColor: theme.controlBorder }]}>
+    <Icon name="plus" size={13} color={theme.textSecondary} />
+    <ThemedText type="meta">{copy.newCategory}</ThemedText>
+  </Pressable> : null;
 
-  return (
-    <ScrollView
-      ref={scroller}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-      contentContainerStyle={styles.row}>
-      {chips}
-    </ScrollView>
-  );
+  return <View style={{ gap: Spacing.three }}>
+    {layout === 'wrap' ? <View style={styles.wrap}>{chips}{add}</View> : (
+      <ScrollView ref={scroller} horizontal showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled" contentContainerStyle={styles.row}>
+        {chips}{add}
+      </ScrollView>
+    )}
+    {creating && createType ? <View style={{ gap: Spacing.three }} testID="category-create-form">
+      <TextField label={copy.name} value={name} onChangeText={(value) => { setName(value); setError(undefined); }}
+        autoFocus maxLength={80} helperText={copy.hint} errorText={error}
+        testID="category-create-name" returnKeyType="done" onSubmitEditing={create} />
+      <EButton palette={band} label={copy.create} onPress={create} disabled={!name.trim()} testID="category-create-save" />
+      <EButton palette={band} variant="quiet" label={copy.cancel}
+        onPress={() => { setCreating(false); setName(''); setError(undefined); }} />
+    </View> : null}
+  </View>;
 }
 
 const styles = StyleSheet.create({

@@ -1,3 +1,4 @@
+import type { CustomCategory } from '@/lib/types';
 /**
  * The per-charge banner for iOS, with no notification API in sight.
  *
@@ -184,10 +185,11 @@ export function buildChargeAlert(
   rows: readonly ScannedSms[],
   nowMs: number,
   lang: Lang,
+  customCategories?: readonly CustomCategory[],
 ): ChargeAlert | null {
   const charges = announceableCharges(rows, nowMs);
   if (charges.length === 0) return null;
-  if (charges.length === 1) return single(charges[0], lang);
+  if (charges.length === 1) return single(charges[0], lang, customCategories);
 
   const out = charges.filter((row) => row.type === 'expense');
   const received = charges.filter((row) => row.type !== 'expense');
@@ -218,7 +220,7 @@ export function buildChargeAlert(
   );
 
   const named = charges.slice(0, ALERT_ROWS);
-  const lines = named.map((row) => line(row, lang));
+  const lines = named.map((row) => line(row, lang, customCategories));
   const rest = charges.length - named.length;
   if (rest > 0) {
     lines.push(tf('dailySummaryMore', { count: rest, s: rest === 1 ? '' : 's' }, lang));
@@ -228,7 +230,7 @@ export function buildChargeAlert(
 }
 
 /** The one-charge banner: what Android posts, with the parser's certainty. */
-function single(row: ScannedSms, lang: Lang): ChargeAlert {
+function single(row: ScannedSms, lang: Lang, customCategories?: readonly CustomCategory[]): ChargeAlert {
   const amount = money(row);
   const credit = row.type !== 'expense';
   const merchant = namedMerchant(row);
@@ -252,7 +254,7 @@ function single(row: ScannedSms, lang: Lang): ChargeAlert {
   // dress a shrug up as a finding.
   const parts: string[] = [];
   if (row.card) parts.push(cardAccountName(row.card.last4, row.card.kind, lang));
-  if (row.categoryDeliberate) parts.push(categoryLabel(row.categoryGuess, lang));
+  if (row.categoryDeliberate) parts.push(categoryLabel(row.categoryGuess, lang, customCategories));
 
   return { title, body: parts.join(' · '), count: 1 };
 }
@@ -273,11 +275,11 @@ function namedMerchant(row: ScannedSms): string | null {
  * printed as the amount alone, which is what the Kotlin does with the same
  * problem and is still useful.
  */
-function line(row: ScannedSms, lang: Lang): string {
+function line(row: ScannedSms, lang: Lang, customCategories?: readonly CustomCategory[]): string {
   const amount = money(row);
   const credit = row.type !== 'expense';
   const merchant = namedMerchant(row) ?? (row.categoryDeliberate
-    ? categoryLabel(row.categoryGuess, lang)
+    ? categoryLabel(row.categoryGuess, lang, customCategories)
     : null);
   if (merchant) {
     return tf(credit ? 'chargeAlertLineCredit' : 'dailySummaryLine', { amount, merchant }, lang);

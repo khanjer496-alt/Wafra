@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tile glyph for a bill whose title has no letter (a masked card). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+  android:width="16dp"
+  android:height="16dp"
+  android:viewportWidth="24"
+  android:viewportHeight="24">
+  <path
+    android:fillColor="@color/wafra_widget_upcoming_text"
+    android:pathData="M7,2h2v2h6V2h2v2h2c1.1,0 2,0.9 2,2v13c0,1.1 -0.9,2 -2,2H5c-1.1,0 -2,-0.9 -2,-2V6c0,-1.1 0.9,-2 2,-2h2V2zM5,9v10h14V9H5z" />
+</vector>

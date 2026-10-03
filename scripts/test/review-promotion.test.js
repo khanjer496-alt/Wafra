@@ -71,8 +71,26 @@ for (const [currency, exponent, minorUnits] of [
   const result = planReviewPromotion(
     state(item, { ledgerMoney: ledgerMoneySpec('AED') }), command(item), 'tx-mismatch', NOW + 1,
   );
+  // Foreign review money is converted with a dated rate, never relabelled.
+  // With no rate available nothing posts and the review stays pending.
   ok('review money can never be relabelled into a different ledger currency',
-    result.outcome === 'refused' && result.reason === 'currency-mismatch', JSON.stringify(result));
+    result.outcome === 'refused' && result.reason === 'fx-rate-unavailable', JSON.stringify(result));
+  const converted = planReviewPromotion(
+    state(item, { ledgerMoney: ledgerMoneySpec('AED') }), command(item), 'tx-converted', NOW + 1,
+    { base: 'INR', quote: 'AED', rate: 0.04409, date: '2026-08-11' },
+  );
+  ok('a registered foreign review converts with the dated reference rate it records',
+    converted.outcome === 'added' && converted.transaction.amountFils === 5513 &&
+      converted.transaction.originalCurrency === 'INR' && converted.transaction.originalMinorUnits === 125050 &&
+      converted.transaction.originalExponent === 2 && converted.transaction.originalAmountMinor === 125050 &&
+      converted.transaction.fxRate === 0.04409 && converted.transaction.fxRateDate === '2026-08-11' &&
+      converted.transaction.fxSource === 'reference' && converted.ledgerMoney.currency === 'AED',
+    JSON.stringify(converted));
+  ok('a quote for another pair or a later day is not this purchase\'s rate',
+    planReviewPromotion(state(item, { ledgerMoney: ledgerMoneySpec('AED') }), command(item), 'tx-x', NOW + 1,
+      { base: 'USD', quote: 'AED', rate: 3.6725, date: '2026-08-11' }).reason === 'fx-rate-unavailable' &&
+    planReviewPromotion(state(item, { ledgerMoney: ledgerMoneySpec('AED') }), command(item), 'tx-y', NOW + 1,
+      { base: 'INR', quote: 'AED', rate: 0.04409, date: '2026-08-12' }).reason === 'fx-rate-unavailable');
 }
 
 {
@@ -345,7 +363,7 @@ for (const [alias, canonical] of [
   ok('resolved generic evidence cannot promote again from stale state',
     run({}, { reviewTray: emptyAlertReviewTray() }).reason === 'not-found');
   ok('a changed ledger currency is rechecked at confirmation time',
-    run({}, { ledgerMoney: ledgerMoneySpec('AED') }).reason === 'currency-mismatch');
+    run({}, { ledgerMoney: ledgerMoneySpec('AED') }).reason === 'fx-rate-unavailable');
   ok('an unhydrated ledger cannot receive a confirmed generic posting',
     run({}, { hydrated: false }).reason === 'not-hydrated');
   ok('ungrounded user-entered money cannot become a generic transaction',

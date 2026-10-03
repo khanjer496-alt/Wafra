@@ -1,5 +1,5 @@
 import { isFixedCommitment } from '@/lib/categories';
-import { monthKey, shiftMonthKey } from '@/lib/format';
+import { ledgerTypicalMinor, monthEndISO, monthKey, monthStartISO, shiftMonthKey } from '@/lib/format';
 import { countsInTotals, internalTransferIdsForState, isSpending } from '@/lib/ledger';
 import {
   comparablePreviousPeriod,
@@ -79,15 +79,102 @@ export function categoryMovers(
   }
   const cats = new Set<CategoryId>([...cur.keys(), ...prev.keys()]);
   const movers: CategoryMover[] = [];
+  // Ignore moves under about AED 50 in the ledger's currency (5,000 fils,
+  // ¥5,000, KWD 5.000): noise, not a finding.
+  const noiseFloor = ledgerTypicalMinor(50);
   for (const category of cats) {
     const currentFils = cur.get(category) ?? 0;
     const previousFils = prev.get(category) ?? 0;
     const deltaFils = currentFils - previousFils;
-    if (Math.abs(deltaFils) < 5000) continue; // ignore < AED 50 noise
+    if (Math.abs(deltaFils) < noiseFloor) continue;
     movers.push({ category, currentFils, previousFils, deltaFils });
   }
   movers.sort((a, b) => Math.abs(b.deltaFils) - Math.abs(a.deltaFils));
   return movers.slice(0, limit);
+}
+
+/**
+ * Everyday spending in this period against the same elapsed stretch of the
+ * previous one: the headline for the Compare view. Uses the same comparable
+ * window as `categoryMovers`. Fixed commitments (rent, business) are left out,
+ * as `dayOfWeekSpend` and the insights already do: a rent payment is the same
+ * every month, and a month when it lands a day later would otherwise read as
+ * a large swing in habit. Null when the period has nothing to compare against.
+ */
+export interface ComparableSpend {
+  currentFils: number;
+  previousFils: number;
+  deltaFils: number;
+}
+
+export function comparableSpend(
+  transactions: Transaction[],
+  periodLike: PeriodLike,
+  live?: Set<string>,
+  internal?: Set<string>,
+  today: Date = new Date(),
+): ComparableSpend | null {
+  const period = toPeriod(periodLike);
+  const prevPeriod = comparablePreviousPeriod(period, today, transactions);
+  if (!prevPeriod) return null;
+  let currentFils = 0;
+  let previousFils = 0;
+  for (const t of transactions) {
+    if (!isSpending(t, live, internal)) continue;
+    const current = inPeriod(t.date, period);
+    if (!current && !inPeriod(t.date, prevPeriod)) continue;
+    let everyday = 0;
+    for (const a of allocationsOf(t)) if (!isFixedCommitment(a.category)) everyday += a.amountFils;
+    if (current) currentFils += everyday; else previousFils += everyday;
+  }
+  return { currentFils, previousFils, deltaFils: currentFils - previousFils };
+}
+
+/**
+ * One money month, day by day, for the Spending calendar. Every date of the
+ * month is present (zero included) so the grid never skips a day. Like the
+ * weekday chart, fixed commitments are left out: a rent payment on the 1st is
+ * a calendar fact, not a habit, and would otherwise flatten every other day.
+ */
+export interface DailySpend {
+  dateISO: string;
+  /** Everyday spending, fixed commitments left out. Drives the shading. */
+  fils: number;
+  /** Rent and other fixed commitments that day, so a rent-only day is not "nothing spent". */
+  fixedFils: number;
+}
+
+export function dailySpendForMonth(
+  transactions: Transaction[],
+  key: string,
+  live?: Set<string>,
+  internal?: Set<string>,
+  /** The same row filter the activity list below the calendar applies. */
+  include: (transaction: Transaction) => boolean = () => true,
+): DailySpend[] {
+  const startISO = monthStartISO(key);
+  const endISO = monthEndISO(key);
+  const days: DailySpend[] = [];
+  const index = new Map<string, number>();
+  const [sy, sm, sd] = startISO.split('-').map(Number);
+  for (let offset = 0; offset < 32; offset += 1) {
+    const day = new Date(Date.UTC(sy!, sm! - 1, sd! + offset));
+    const iso = day.toISOString().slice(0, 10);
+    if (iso > endISO) break;
+    index.set(iso, days.length);
+    days.push({ dateISO: iso, fils: 0, fixedFils: 0 });
+  }
+  for (const t of transactions) {
+    if (t.date < startISO || t.date > endISO) continue;
+    if (!isSpending(t, live, internal) || !include(t)) continue;
+    const at = index.get(t.date);
+    if (at === undefined) continue;
+    for (const a of allocationsOf(t)) {
+      if (isFixedCommitment(a.category)) days[at]!.fixedFils += a.amountFils;
+      else days[at]!.fils += a.amountFils;
+    }
+  }
+  return days;
 }
 
 /**
@@ -261,9 +348,10 @@ export function trendShape(points: { fils: number }[]): TrendShape {
   const maxFils = Math.max(...values);
   const latestFils = values[values.length - 1];
   const averageFils = Math.round(values.reduce((s, v) => s + v, 0) / values.length);
-  // Flat within a dirham, or within 1% of the biggest month — a standing order
-  // that drifts by a few fils has still not moved.
-  const flat = maxFils - minFils <= Math.max(100, maxFils * 0.01);
+  // Flat within about a dirham in the ledger currency, or within 1% of the
+  // biggest month — a standing order that drifts by a few fils has still not
+  // moved.
+  const flat = maxFils - minFils <= Math.max(ledgerTypicalMinor(1), maxFils * 0.01);
   return {
     averageFils,
     latestFils,

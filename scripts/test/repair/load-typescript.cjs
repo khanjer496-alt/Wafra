@@ -28,7 +28,83 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
   vm.runInNewContext(result.outputText, {
     exports, module,
     require: (name) => {
+      // Screens subscribe through narrow selectors now. A harness store stub
+      // that models only `useStore()` still drives them: each selector reads
+      // the same (possibly per-render replaced) store the stub returns.
+      if (name === '@/lib/store' && Object.hasOwn(dependencies, name) &&
+          typeof dependencies[name].useStore === 'function' &&
+          typeof dependencies[name].useStoreSelector !== 'function') {
+        const stub = dependencies[name];
+        return {
+          ...stub,
+          useStoreSelector: (selector) => selector(stub.useStore()),
+          useStoreActions: () => stub.useStore(),
+        };
+      }
+      // Money reads the device-locale key beside the ledger denomination.
+      // Stubs of that hook module predate it; outside a provider it is ''.
+      if (name === '@/hooks/use-ledger-money' && Object.hasOwn(dependencies, name) &&
+          typeof dependencies[name].useMoneyLocaleKey !== 'function') {
+        return { ...dependencies[name], useMoneyLocaleKey: () => '' };
+      }
       if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      // Route-level tests keep their existing navigation boundary. The real app
+      // router and SDK stack identity policy have their own behavioral suite.
+      if (name === '@/hooks/use-app-router' && dependencies['expo-router']?.useRouter) {
+        return { useRouter: dependencies['expo-router'].useRouter };
+      }
+      // Catalog labels are ledger-local. Run the shipping hook against this
+      // harness's React and store so rerenders observe edits/restores, rather
+      // than returning a fixed empty catalog or duplicating its lookup rules.
+      if (name === '@/hooks/use-category-catalog') {
+        const categories = loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/categories.ts'), {
+          '@/lib/i18n': dependencies['@/lib/i18n'] ?? require('../build/i18n.js'),
+        });
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/hooks/use-category-catalog.ts'), {
+          react: dependencies.react,
+          '@/lib/store': dependencies['@/lib/store'],
+          '@/lib/categories': categories,
+        }, globals);
+      }
+      if (name === '@/lib/categories' || name === '@/lib/custom-categories' || name === '@/lib/custom-category-copy') {
+        return loadTypescript(require('node:path').resolve(__dirname, `../../../src/lib/${name.slice(6)}.ts`), {
+          '@/lib/i18n': dependencies['@/lib/i18n'] ?? require('../build/i18n.js'),
+        }, globals);
+      }
+      if (name === './ios-setup-availability' || name === '@/lib/ios-setup-availability') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/ios-setup-availability.ts'));
+      }
+      // Pure production policies used by capture and backup validation.
+      if (name === '@/lib/alert-review-tray') return require('../build/alert-review-tray.js');
+      if (name === '@/lib/capture-source-identity') return require('../build/capture-source-identity.js');
+      if (name === '@/lib/statement-import-flow') return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/statement-import-flow.ts'));
+      if (name === '@/lib/subscriptions') return require('../build/subscriptions.js');
+      // Setup videos are an opaque presentation child in route harnesses;
+      // their optional native player/lifecycle has its own behavioral suite.
+      if (name === '@/components/ios-setup-video-card') {
+        return { IosSetupVideoCard: () => null };
+      }
+      // Display labels execute from current source; accounting predicates stay real.
+      if (name === '@/lib/transaction-presentation') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/transaction-presentation.ts'), {
+          '@/lib/ledger': require('../build/ledger.js'),
+          '@/lib/transfer-reconciliation': require('../build/transfer-reconciliation.js'),
+        });
+      }
+      // Widget snapshots resolve only bundled, allowlisted logo ids. Execute
+      // the pure resolver for screen harnesses that load the real snapshot.
+      if (name === '@/lib/widget-logo') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/widget-logo.ts'));
+      }
+      // Pure selection helpers used by screens; always the real source.
+      if (name === '@/lib/store-selection') {
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/store-selection.ts'));
+      }
+      // The pull-to-refresh scan control is an opaque child boundary for
+      // screen harnesses, like the other capture surfaces.
+      if (name === '@/components/capture-refresh-control') {
+        return { CaptureRefreshControl: (props) => ({ type: 'RefreshControl', props, key: undefined }) };
+      }
       // UI/parser repair harnesses isolate their own subject and intentionally
       // do not execute foreground scheduling. The scheduling suite supplies an
       // explicit counted stub; unrelated harnesses get an inert boundary so a
@@ -84,6 +160,25 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/known-banks') {
         return require('../build/known-banks.js');
       }
+      // The country model (ISO list, date order, parser-pack choice) is pure
+      // data and functions, imported by markets.ts itself, so every harness
+      // gets the real compiled module.
+      // The real unproven-format policy (pure; the setting mirror defaults on).
+      if (name === '@/lib/best-effort-autopost') {
+        return require('../build/best-effort-autopost.js');
+      }
+      if (name === '@/lib/country') {
+        return require('../build/country.js');
+      }
+      if (name === '@/lib/country-names') {
+        return require('../build/country-names.js');
+      }
+      // BNPL provider identity is a pure sender/package registry consulted by
+      // the parser, the launch session and the capture scanner. Harnesses that
+      // stub the parser still get the real registry, never a drifting copy.
+      if (name === '@/lib/bnpl-providers') {
+        return require('../build/bnpl-providers.js');
+      }
       // The on-device semantic model is native-only and advisory. Screen and
       // journey harnesses get the same fail-closed behaviour the web build has:
       // the deterministic plan is returned unchanged and the runtime is never
@@ -92,6 +187,15 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       // the capture path get the real compiled module, never a stub that could
       // drift from what ships. Shadow evaluation is observational only and
       // native-only, so it is inert here unless a harness supplies its own.
+      // Reference-rate conversion is pure money arithmetic plus an in-memory
+      // quote cache; its network loader only runs when a caller invokes it.
+      // Harnesses get the real compiled modules so conversion cannot drift.
+      if (name === '@/lib/fx') {
+        return require('../build/fx.js');
+      }
+      if (name === '@/lib/fx-rates') {
+        return require('../build/fx-rates.js');
+      }
       if (name === '@/lib/universal-parser') {
         return require('../build/universal-parser.js');
       }
@@ -140,6 +244,41 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           localSemanticInboxShadowStatus: () => ({ state: 'idle', checked: 0, eligible: 0, queued: 0, startedAt: null, finishedAt: null }),
         };
       }
+      // E5 is default-off in shipping builds; harnesses see the same flag.
+      if (name === '@/lib/local-semantic-flags') {
+        return { LOCAL_SEMANTIC_E5_ENABLED: false };
+      }
+      // Platform on-device model: absent in Node, exactly as on an older OS.
+      // Suites that exercise the provider load src/lib/on-device-ai.ts itself.
+      if (name === '@/lib/on-device-ai') {
+        const availability = { status: 'unsupported-os', provider: null, languages: null, canPrepare: false };
+        return {
+          onDeviceAI: {
+            peekAvailability: () => null,
+            getAvailability: async () => availability,
+            prepare: async () => availability,
+            respond: async () => ({ kind: 'unavailable' }),
+          },
+          textLanguage: (text, fallback) => (/[\u0600-\u06FF]/u.test(text) ? 'ar' : /[A-Za-z]/u.test(text) ? 'en' : fallback),
+          supportsOnDeviceLanguage: () => false,
+        };
+      }
+      if (name === '@/lib/on-device-assistant') {
+        return { improveAssistantRequestOnDevice: async ({ deterministicRequest }) =>
+          ({ source: 'deterministic', request: deterministicRequest, reason: 'unavailable' }) };
+      }
+      if (name === '@/lib/large-text-figure') {
+        // Pure fitting rule for money at large text sizes: the real module.
+        return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/large-text-figure.ts'), {});
+      }
+      if (name === '@/lib/e2e-font-scale') {
+        // E2E-only web font-scale emulation: inert in native and test builds.
+        return { E2E_FONT_SCALE: null, scaleTextStyleForE2E: style => style };
+      }
+      if (name === '@/components/category-suggestion') {
+        // No suggestion has arrived yet: the row still offers the full picker.
+        return { useCategorySuggestions: () => new Map() };
+      }
       if (name === '@/lib/local-semantic-assistant') {
         return { improveAssistantRequestLocally: async ({ deterministicRequest }) => deterministicRequest };
       }
@@ -148,6 +287,10 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           '@/lib/wafra-assistant': require('../build/wafra-assistant.js'),
         });
       }
+      if (name === '@/lib/ai-alert-reader') {
+        // Default install: no downloaded alert model, so the AI reader is inert.
+        return { aiReviewEventForRefusedAlert: async () => null };
+      }
       if (name === '@/lib/local-semantic-runtime') {
         return {
           localSemanticRuntimeStatus: () => ({ state: 'not-downloaded', modelVersion: 'test', error: null, retryAfter: null,
@@ -155,6 +298,7 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           getLocalSemanticEncoder: async () => { throw new Error('local-semantic-runtime:native-only'); },
           createDownloadedSemanticRetriever: async () => { throw new Error('local-semantic-runtime:native-only'); },
           clearLocalSemanticArtifacts() {},
+          purgeLocalSemanticArtifacts() {},
         };
       }
       throw new Error(`Unstubbed runtime dependency ${name} in ${file}`);

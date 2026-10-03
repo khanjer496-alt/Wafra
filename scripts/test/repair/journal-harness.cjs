@@ -1,4 +1,7 @@
 'use strict';
+/** Each listed day's cash-flow total, income + and spending − (dashboard-projection activityDayTotals). */
+const dayTotals = (rows) => rows.reduce((map, row) => map.set(row.date, (map.get(row.date) ?? 0)
+  + (row.type === 'income' ? row.amountFils : -row.amountFils)), new Map());
 // Source-component contract harness, NOT React Native or a device renderer.
 // It deliberately substitutes the OS, store and primitives. Real source owns
 // composition and handlers; fixtures contain no personal data.
@@ -44,11 +47,13 @@ function harness(options = {}) {
   const dashboard = {
     hero: { netFils: 941300, incomeFils: 1450000, expenseFils: 508700 }, live: true,
     activityRows: state.transactions, accountById: new Map([['bank', account]]), internalTransactionIds: new Set(),
+    activityDayTotals: options.dayTotals ?? dayTotals(state.transactions),
     unreadFormats: { count: 0, shouldPrompt: false }, uncategorised: { shouldPrompt: false, summary: { merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 } },
     upcoming: { items: options.empty ? [] : [{ id: 'utility', title: 'Electricity', kind: 'bill',
       dateISO: '2026-09-09', daysLeft: 3, amountFils: 38000, overdue: false, urgent: false }] },
   };
   const native = { View: 'View', ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable', RefreshControl: 'RefreshControl',
+    useWindowDimensions: () => ({ width: options.width ?? 390, fontScale: options.largeText ? 1.3 : 1 }),
     Platform: { OS: options.platform ?? 'android' }, StyleSheet: { create: (style) => style, flatten: (style) => Object.assign({}, ...(Array.isArray(style) ? style.flat(Infinity).filter(Boolean) : [style])), hairlineWidth: 1 },
     Alert: { alert: (message) => events.push(['alert', message]) }, AppState: { addEventListener: () => ({ remove() {} }) },
     // Home defers its insight projection until interactions settle. Run it
@@ -64,11 +69,13 @@ function harness(options = {}) {
     }),
     '@/constants/theme': themeModule,
     'expo-router': { useRouter: () => ({ push: (route) => events.push(['route', route]) }) },
-    '@react-navigation/native': { useIsFocused: () => true },
+    '@react-navigation/native': { useIsFocused: () => true, useFocusEffect: () => {} },
     '@/components/themed-text': { ThemedText: (props) => jsx('Text', props) },
     '@/components/ui/merchant-avatar': { MerchantAvatar: (props) => jsx('Avatar', props) },
     '@/components/ui/icon': { Icon: (props) => { if (!icons.has(props.name)) throw new Error(`Unknown icon ${props.name}`); return jsx('Icon', props); } },
     '@/components/ui/money': { Money: (props) => jsx('Money', props) },
+    // Home's Today figure rolls its digits; rolling-money.test.cjs covers the roll, so here it renders as the Money it formats like.
+    '@/components/ui/rolling-money': { RollingMoney: (props) => jsx('Money', props) },
     '@/components/recap/recap-logo-trigger': { RecapLogoTrigger: (props) => jsx('RecapLogoTrigger', props) },
     '@/components/ui/screen-scaffold': { ScreenScaffold: (props) => jsx('Scaffold', props) },
     '@/components/ui/states': { EmptyMonth: (props) => jsx('EmptyMonth', props), SkeletonRows: (props) => jsx('SkeletonRows', props) },
@@ -80,8 +87,11 @@ function harness(options = {}) {
     '@/hooks/use-theme': { useTheme: () => theme },
     '@/hooks/use-auto-import': { useAutoImport: () => ({ captureState: options.captureState ?? 'waiting-for-alert',
       needsPermission: options.needsPermission ?? false, runAutoImport: async () => { events.push(['scan']); } }) },
-    '@/lib/categories': { getCategory: (category) => category, categoryLabel: (category) => category },
-    '@/lib/format': { formatAmount: amount, clockTime: () => '', shortDate: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short' }) },
+    '@/lib/categories': { getCategory: (category) => category, categoryLabel: (category) => category, isFixedCommitment: (category) => category === 'rent' || category === 'business' },
+    '@/lib/format': { formatAmount: amount, clockTime: () => '', monthKey: (d) => String(d instanceof Date ? d.toISOString() : d).slice(0, 7),
+      monthStartISO: (key) => `${key}-01`, monthEndISO: (key) => { const [y, m] = key.split('-').map(Number); return `${key}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`; },
+      shortDate: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { day: 'numeric', month: 'short' }),
+      friendlyDate: (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString(language === 'ar' ? 'ar-AE' : 'en-GB', { weekday: 'long', day: 'numeric', month: 'short' }) },
     '@/lib/markets': { ledgerCurrencyCode: () => 'AED', ledgerCurrencyDisplay: () => 'AED' },
     '@/lib/i18n': { t, hasArabicScript: (s) => /[\u0600-\u06ff]/.test(s), tf: (key, values) => key === 'balanceCoverage' ? `${values.known} of ${values.total} account balances recorded` : key === 'historyImportLiveProgress' ? `${values.scanned} read · ${values.found} found` : `${key} ${values.count ?? ''}` },
     '@/lib/dashboard-projection': { projectDashboard: (request) => {
@@ -111,16 +121,46 @@ function harness(options = {}) {
   dependencies['@react-native-async-storage/async-storage'] = { getItem: async () => null, setItem: async () => {} };
   dependencies['@/lib/home-widget-preferences'] = load(path.join(root, 'src/lib/home-widget-preferences.ts'));
   dependencies['@/lib/home-widgets'] = load(path.join(root, 'src/lib/home-widgets.ts'), dependencies);
+  // Covered by home-goal-order-repair.test.cjs; Home's own tests need no storage repair.
+  dependencies['@/lib/home-goal-order-repair'] = { repairGoalOrderedHomeOnce: async () => {} };
+  dependencies['@/lib/home-today'] = load(path.join(root, 'src/lib/home-today.ts'), dependencies);
+  dependencies['@/lib/transaction-source'] = load(path.join(root, 'src/lib/transaction-source.ts'), dependencies);
+  dependencies['@/lib/transactions-copy'] = load(path.join(root, 'src/lib/transactions-copy.ts'), dependencies);
+  dependencies['@/lib/capture-pause'] = load(path.join(root, 'src/lib/capture-pause.ts'), dependencies);
+  dependencies['@/lib/capture-pause-state'] = { loadCapturePauseSnooze: async () => null, saveCapturePauseSnooze: async (at) => { events.push(['snooze', at]); } };
+  // The real clearance constant, with the button itself left as a marker.
+  const { HOME_ADD_BUTTON_CLEARANCE } = load(path.join(root, 'src/components/home-add-button.tsx'), {
+    ...dependencies, '@/hooks/use-tab-bar-clearance': { useTabBarClearance: () => 0 },
+  });
+  dependencies['@/components/home-add-button'] = { HOME_ADD_BUTTON_CLEARANCE, HomeAddButton: (props) => jsx('HomeAddButton', props) };
+  dependencies['@/components/limit-sheet'] = { LimitSheet: (props) => jsx('Sheet', { ...props, name: 'LimitSheet' }) };
+  dependencies['@/lib/widget-snapshot'] = load(path.join(root, 'src/lib/widget-snapshot.ts'), dependencies);
+  dependencies['@/lib/widget-sync'] = { requestWidgetSnapshotSync: () => ({cancel() {}, done: Promise.resolve('written')}), invalidateWidgetSnapshotSync: async () => 'cleared' };
+  dependencies['../../modules/wafra-widgets'] = { setWidgetSnapshot() {}, clearWidgetSnapshot() {} };
+  // Widget inputs Home shares with the Widgets screen run from source, over
+  // this harness's own ledger stubs (loaded on first use, once they exist).
+  // The widgets hint is a boundary; widgets-screen.test.cjs renders it.
+  Object.defineProperty(dependencies, '@/lib/widget-ledger', { enumerable: true, configurable: true, get() {
+    const real = load(path.join(root, 'src/lib/widget-ledger.ts'), dependencies);
+    Object.defineProperty(dependencies, '@/lib/widget-ledger', { value: real, enumerable: true, configurable: true, writable: true });
+    return real;
+  } });
+  dependencies['@/components/widgets/widgets-hint'] = { WidgetsHint: (props) => jsx('WidgetsHint', props) };
+  dependencies['@/components/ui/grow-bar'] = { GrowBar: (p) => ({ type: 'View', props: { style: [p.style, p.axis === 'width' ? { width: `${p.size}%` } : { height: p.size }] } }) };
+  dependencies['@/lib/account-freshness'] = load(path.join(root, 'src/lib/account-freshness.ts'), dependencies);
+  dependencies['@/lib/splits'] = dependencies['@/lib/splits'] ?? load(path.join(root, 'src/lib/splits.ts'), dependencies);
   if (options.render) {
     const svg = { __esModule: true, default: 'svg', Circle: 'circle', Line: 'line', Path: 'path', Rect: 'rect' };
     dependencies['react-native-svg'] = svg;
     dependencies['@/components/ui/platform-symbol'] = { PlatformSymbol: (props) => props.fallback };
     dependencies['@/components/themed-text'] = load(path.join(root, 'src/components/themed-text.tsx'), dependencies);
     dependencies['@/components/ui/money'] = load(path.join(root, 'src/components/ui/money.tsx'), dependencies);
+    dependencies['@/components/ui/rolling-money'] = { RollingMoney: (props) => dependencies['@/components/ui/money'].Money(props) };
     dependencies['@/components/ui/icon'] = load(path.join(root, 'src/components/ui/icon.tsx'), dependencies);
     dependencies['@/lib/categories'] = {
       getCategory: (id) => ({ id, type: 'expense', icon: ({dining:'dining', shopping:'bag', entertainment:'play', transport:'car'})[id] ?? 'receipt' }),
       categoryLabel: (meta) => typeof meta === 'string' ? meta : ({dining:'Dining',shopping:'Shopping',entertainment:'Entertainment',transport:'Transport'})[meta.id] ?? meta.id,
+      isFixedCommitment: (category) => category === 'rent' || category === 'business',
     };
     const { CategoryAvatar } = load(path.join(root, 'src/components/ui/category-avatar.tsx'), dependencies);
     dependencies['@/components/ui/merchant-avatar'] = { MerchantAvatar: (props) => CategoryAvatar(props) };
@@ -131,6 +171,15 @@ function harness(options = {}) {
   dependencies['@/components/history-reading-status'] = load(path.join(root, 'src/components/history-reading-status.tsx'), dependencies);
   dependencies['@/lib/money-picture-progress'] = load(path.join(root, 'src/lib/money-picture-progress.ts'), dependencies);
   dependencies['@/components/money-picture-progress'] = load(path.join(root, 'src/components/money-picture-progress.tsx'), dependencies);
+  // Design language E: real band palettes; the scaffold renders its band and
+  // sheet as children; the pattern is a separately subscribed component.
+  dependencies['@/hooks/use-band'] = { useBand: (id) => themeModule.BandPalettes[options.theme ?? 'light'][id], useBandScheme: () => options.theme ?? 'light' };
+  dependencies['@/hooks/use-theme'].ThemeScope = { Provider: 'ThemeScope' };
+  dependencies['@/components/ui/band-scaffold'] = { BandScaffold: (props) => jsx('BandScaffold', { ...props, children: [props.bandContent, props.children] }) };
+  dependencies['@/components/ui/your-pattern'] = { YourPattern: (props) => jsx('YourPattern', props) };
+  for (const name of ['band-figure', 'stat-tile', 'week-tiles']) {
+    dependencies[`@/components/ui/band/${name}`] = load(path.join(root, `src/components/ui/band/${name}.tsx`), dependencies);
+  }
   dependencies['@/components/reference-home-summary'] = load(path.join(root, 'src/components/reference-home-summary.tsx'), dependencies);
   dependencies['@/lib/merchant-spending-copy'] = load(path.join(root, 'src/lib/merchant-spending-copy.ts'));
   const bankIdentity = load(path.join(root, 'src/lib/markets.ts'));

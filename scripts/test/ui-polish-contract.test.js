@@ -27,7 +27,9 @@ assert.match(add, /addTransaction/);
 const bills = code(read('src/app/(tabs)/bills.tsx'));
 const billsFilter = code(read('src/components/bills/bills-segment-control.tsx'));
 assert.match(bills, /useState<BillsSegment>\('upcoming'\)/);
-assert.match(billsFilter, /'upcoming' \| 'subscriptions' \| 'utilities' \| 'cards' \| 'all'/);
+// Two views; the payment types that were tabs are filters inside All.
+assert.match(billsFilter, /export type BillsSegment = 'upcoming' \| 'all'/);
+assert.match(billsFilter, /export type BillsGroupFilterValue = 'everything' \| 'subscriptions' \| 'utilities' \| 'cards'/);
 for (const seam of ['openDues(', 'recentlySettledDues(', 'billsForMonth(', 'billFromSubscription(']) {
   assert.ok(bills.includes(seam), `Bills lost ${seam}`);
 }
@@ -39,14 +41,21 @@ const flow = read('src/app/(tabs)/flow.tsx');
 assert.match(flow, /summarizeMonth\(/);
 assert.match(flow, /spendingCategoryRows\(/);
 
-const pro = read('src/app/pro.tsx');
+// Design language E: the checkout moved verbatim into useProCheckout, shared
+// by the Pro screen and the in-context Pro sheet; the plan radios are one
+// shared component. The Pro surface is the three read together.
+const proCheckoutSurface = () => [
+  'src/app/pro.tsx', 'src/hooks/use-pro-checkout.ts', 'src/components/pro/pro-plan-options.tsx',
+].map(read).join('\n');
+const pro = proCheckoutSurface();
 for (const seam of ['useWafraBilling(', 'purchasePro(', 'fetchProOffers(', 'restorePro(', 'subscriptionManagementUrl(']) {
   assert.ok(pro.includes(seam), `Pro lost ${seam}`);
 }
 
 const interactionBills = code(read('src/app/(tabs)/bills.tsx'));
+// The recurring row is its own memoised component (RecurringRow).
 const recurringRow = interactionBills.match(
-  /const renderRecurringRow[\s\S]*?\n  \};\n\n  return \(/,
+  /const RecurringRow = React\.memo[\s\S]*?\n\}\);\n/,
 )?.[0] ?? '';
 assert.ok(recurringRow.length > 0, 'recurring row block was not found');
 assert.doesNotMatch(recurringRow, /remindAboutA11y/);
@@ -70,38 +79,40 @@ assert.match(agenda,/section\.items\.map/);
 assert.match(agenda,/accessibilityRole="button"[\s\S]*?accessibilityLabel=/);
 assert.match(agenda,/onPress=\{\(\) => onOpen\(item\)\}/);
 assert.doesNotMatch(agenda,/<Button|onPayDue|payCardDue|onLongPress/);
-assert.match(interactionBills,/<PaymentAgenda[\s\S]*?onOpen=\{\(item\) =>/);
-assert.match(interactionBills,/openCardDetail\(state\.accounts\.find[\s\S]*?item\.paid \? undefined : id\)/);
-assert.match(interactionBills,/const onPayDue[\s\S]*?setConfirmation\(\{[\s\S]*?onConfirm:[\s\S]*?payCardDue\(/);
-assert.match(interactionBills, /const \[selectedDueId, setSelectedDueId\] = useState<string \| null>\(null\)/);
-assert.match(interactionBills, /const selectedDue = useMemo\([\s\S]*?dues\.find\([\s\S]*?due\.id === selectedDueId/);
-assert.match(interactionBills, /setSelectedDueId\(account \? dueId \?\? null : null\)/);
-assert.match(interactionBills, /const closeCardDetail[\s\S]*?setCardDetail\(null\)[\s\S]*?setSelectedDueId\(null\)/);
-assert.match(interactionBills, /<CardDetailSheet[\s\S]{0,900}footer=\{selectedDue \?/);
-assert.match(interactionBills, /const due = selectedDue;[\s\S]*?closeCardDetail\(\);[\s\S]*?onPayDue\(/);
+// A stable handler (the agenda is memoised) that still opens the tapped item.
+assert.match(interactionBills,/<PaymentAgenda[\s\S]*?onOpen=\{onOpenAgendaItem\}/);
+assert.match(interactionBills,/agendaOpenRef\.current = \(item\) =>/);
+// A due opens its card's sheet; recording a payment happens there (Record a
+// payment -> the card payment sheet and its own confirmation), never from Bills.
+assert.match(interactionBills,/openCardDetail\(state\.accounts\.find\(\(a\) => a\.id === due\.accountId\) \?\? null\)/);
+assert.match(interactionBills, /<CardDetailSheet[\s\S]{0,200}account=\{cardDetail\}/);
+assert.doesNotMatch(interactionBills, /payCardDue\(/);
+const cardSheetForBills = code(read('src/components/card-detail-sheet.tsx'));
+assert.match(cardSheetForBills, /w\.recordPayment[\s\S]*?setPaying\(statement\)/);
+assert.match(cardSheetForBills, /<CardPaymentSheet due=\{paying\}/);
 
 const subscriptionDetail = interactionBills.match(
   /\{detail && \([\s\S]*?(?=\n\s*\{selectedReminder && \()/,
 )?.[0] ?? '';
 assert.ok(subscriptionDetail.length > 0, 'subscription detail was not found');
-assert.match(subscriptionDetail, /<BottomSheet[\s\S]*?footer=/);
+assert.match(subscriptionDetail, /<BillDetailSheet[\s\S]*?footer=/);
 assert.match(subscriptionDetail, /remindable\(detail\)[\s\S]*?addBill\(billFromSubscription\(detail\)\)/);
 assert.match(subscriptionDetail, /const sub = detail;[\s\S]*?setDetail\(null\);[\s\S]*?onDismissSub\(sub\)/);
 
 const manualRows=agenda;
-assert.match(interactionBills,/setSelectedReminderId\(item\.id\.slice\(5\)\)/);
+assert.match(interactionBills,/setSelectedBill\(\{ id: \(item\.repeatOf \?\? item\.id\)\.slice\(5\), dueISO: item\.dateISO \}\)/);
 assert.match(manualRows,/accessibilityRole="button"/);
 assert.match(manualRows,/accessibilityLabel=/);
 assert.doesNotMatch(manualRows,/onLongPress|t\('markPaid'\)/);
-assert.match(interactionBills, /const \[selectedReminderId, setSelectedReminderId\] = useState<string \| null>\(null\)/);
-assert.match(interactionBills, /const selectedReminder = useMemo\([\s\S]*?rows\.find\([\s\S]*?bill\.id === selectedReminderId/);
+assert.match(interactionBills, /const \[selectedBill, setSelectedBill\] = useState<\{ id: string; dueISO: string \} \| null>\(null\)/);
+assert.match(interactionBills, /const selectedReminder = useMemo\([\s\S]*?billForAgendaOccurrence\(state\.bills, state\.transactions, selectedBill, now, liveAccounts, internal\)/);
 const manualDetail = interactionBills.match(
   /\{selectedReminder && \([\s\S]*?(?=\n\s*<BottomSheet[\s\n]*visible=\{adderVisible\})/,
 )?.[0] ?? '';
 assert.ok(manualDetail.length > 0, 'manual reminder detail was not found');
-assert.match(manualDetail, /<BottomSheet[\s\S]*?footer=\{\([\s\S]*?t\('markPaid'\)[\s\S]*?t\('delete'\)/);
-assert.match(manualDetail, /const reminder = selectedReminder;[\s\S]*?setSelectedReminderId\(null\);[\s\S]*?onPay\(reminder\.bill\.id\)/);
-assert.match(manualDetail, /const reminder = selectedReminder;[\s\S]*?setSelectedReminderId\(null\);[\s\S]*?onLongPressBill\(reminder\.bill\.id/);
+assert.match(manualDetail, /<BillDetailSheet[\s\S]*?footer=\{\([\s\S]*?t\('markPaid'\)[\s\S]*?t\('delete'\)/);
+assert.match(manualDetail, /const reminder = selectedReminder;[\s\S]*?setSelectedBill\(null\);[\s\S]*?onPay\(reminder\.bill\.id, reminder\.dueISO\)/);
+assert.match(manualDetail, /const reminder = selectedReminder;[\s\S]*?setSelectedBill\(null\);[\s\S]*?onLongPressBill\(reminder\.bill\.id/);
 
 const cardDetailSheet = code(read('src/components/card-detail-sheet.tsx'));
 assert.match(cardDetailSheet, /footer\?: React\.ReactNode/);
@@ -129,7 +140,7 @@ assert.match(activeAccountRows,/onPress=\{\(\) => onOpen\(row\.account\)\}/);
 assert.match(activeAccountRows,/onPress=\{\(\) => onManage\(row\.account\)\}/);
 assert.match(activeAccountRows,/accessibilityLabel=\{`\$\{row\.account\.name\}[\s\S]*?row\.figureFils/);
 const inactiveAccountRows = interactionWallet.match(
-  /inactiveAccounts\.map\([\s\S]*?(?=\n\s*<SectionHeader[\s\S]{0,80}goalsHeader)/,
+  /inactiveAccounts\.map\([\s\S]*?(?=testID="wallet-goals")/,
 )?.[0] ?? '';
 assert.ok(inactiveAccountRows.length > 0, 'inactive Wallet source rows were not found');
 assert.match(inactiveAccountRows, /accessibilityRole="button"/);
@@ -147,27 +158,30 @@ assert.match(task3Home, /function Hero[\s\S]*?<PeriodPill onPress=\{onChangePeri
 assert.match(task3Home, /<Hero[\s\S]*?onChangePeriod=\{\(\) => setPeriodSheetOpen\(true\)\}/);
 
 const task3Transactions = read('src/app/transactions.tsx');
-assert.match(task3Transactions, /useScreenContentInsets\(\{ hasFooter: false \}\)/);
-assert.match(task3Transactions, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/);
-assert.match(task3Transactions, /header=\{\{[\s\S]*?back:[\s\S]*?actions:/);
+// Design language E: an ink band (nav, search, type chips) over a sheet that
+// holds the virtualized list; the sheet clears the home indicator itself.
+assert.match(task3Transactions, /const listBottom = useBandBottomInset\(\)/);
+assert.match(task3Transactions, /<BandScaffold[\s\S]*?band="home"[\s\S]*?scroll=\{false\}/);
+assert.match(task3Transactions, /nav=\{\{[\s\S]*?back: true[\s\S]*?actions:/);
 assert.match(task3Transactions, /<SectionList[\s\S]*?ListHeaderComponent=/);
-assert.match(task3Transactions, /contentContainerStyle=\{\[listInsets\.contentContainerStyle, styles\.listContent\]\}/);
+assert.match(task3Transactions, /contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}\]\}/);
 assert.match(task3Transactions, /listContent: \{ gap: 0 \}/);
-assert.match(task3Transactions, /contentInset=\{listInsets\.contentInset\}/);
-assert.match(task3Transactions, /scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}/);
-assert.match(task3Transactions, /contentInsetAdjustmentBehavior="automatic"/);
+assert.match(task3Transactions, /scrollIndicatorInsets=\{\{ top: 0, bottom: listBottom \}\}/);
+assert.match(task3Transactions, /<BandSearchField[\s\S]*?label=\{tr\('searchMerchants'\)\}[\s\S]*?clearLabel=\{tr\('clearSearch'\)\}/);
 assert.match(task3Transactions, /<TextField[\s\S]*?label=\{tr\('transactionSearchLabel'\)\}[\s\S]*?accessibilityLabel=\{tr\('searchMerchants'\)\}/);
 assert.match(task3Transactions, /<ActionIconButton[\s\S]*?label=\{tr\('clearSearch'\)\}[\s\S]*?variant="plain"/);
 assert.match(task3Transactions, /const clearFilters[\s\S]*?setSmsOnly\(false\)/);
 
 const task3Add = read('src/app/add-transaction.tsx');
-assert.match(task3Add, /<ScreenScaffold[\s\S]*?keyboardAware[\s\S]*?headerMode="inline"/);
+// Design language E: Add is a green band (type, amount, merchant, suggested
+// categories) over a sheet holding the detail chips and keypad.
+assert.match(task3Add, /<BandScaffold[\s\S]*?band="flow"[\s\S]*?keyboardAware[\s\S]*?bandContent=\{manualBand\}/);
 assert.match(task3Add, /scrollProps=\{\{ keyboardShouldPersistTaps: 'handled' \}\}/);
 assert.match(task3Add, /footer=\{/);
-assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 2,
-  'Manual Add keeps labelled amount/title fields while alert review avoids redundant editable fields');
-assert.match(task3Add, /!reviewItem \? <TextField[\s\S]*?descriptionOptional/,
-  'captured-alert review does not ask the user to rewrite a title Wafra already has');
+assert.ok((task3Add.match(/<TextField/g) ?? []).length >= 1,
+  'Manual Add keeps a labelled typed-amount field');
+assert.match(task3Add, /const manualBand = reviewItem \? undefined[\s\S]*?<BandTextField[\s\S]*?label=\{tUi\('descriptionOptional'\)\}/,
+  'captured-alert review does not ask the user to rewrite a title Wafra already has; a manual entry labels its merchant field');
 assert.match(task3Add, /const focusFirstInvalid = \(\) => \{/);
 assert.match(task3Add, /const onSavePress = \(\) => \{[\s\S]*?setShowValidation\(true\)[\s\S]*?focusFirstInvalid\(\)/);
 assert.match(task3Add, /disabled=\{saving \|\| reviewRouteInvalid\}/);
@@ -183,8 +197,9 @@ assert.match(task3Scaffold, /keyboardAware && Platform\.OS !== 'ios'[\s\S]*?keyb
 assert.match(task3Scaffold, /scrollIndicatorInsets:[\s\S]*?bottom:[\s\S]*?keyboardHeight/);
 
 const task4Flow = read('src/app/(tabs)/flow.tsx');
-assert.match(task4Flow, /const flowHeader: ScreenHeaderProps = \{/);
-assert.match(task4Flow, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{flowHeader\}/);
+// Design language E: Spending is a clay band (the one figure) over a sheet.
+assert.match(task4Flow, /<BandScaffold band="spending" tabbed[\s\S]*?nav=\{\{ title: t\('tabFlow'\)/);
+assert.match(task4Flow, /bandContent=\{bandContent\}/);
 assert.match(task4Flow, /summarizeMonth\(/);
 assert.match(task4Flow, /spendingCategoryRows\(/);
 assert.match(task4Flow, /router\.push\(`\/transactions\?type=expense&category=\$\{id\}`\)/);
@@ -206,59 +221,69 @@ assert.doesNotMatch(read('src/lib/categories.ts'), /CATEGORY_RAMP|rampColor|onRa
 const overview=read('src/components/spending/spending-overview.tsx');
 const trends=read('src/components/spending/spending-trends.tsx');
 assert.match(overview,/accessibilityLabel=\{`\$\{categoryLabel[\s\S]*?row\.spentFils[\s\S]*?row\.limitFils/);
-assert.match(overview,/function categoryPaletteIndex\(/,
-  'Spending list gives tail categories a stable visible accent instead of the donut neutral');
-assert.match(overview,/donutColors\.get\(row\.category\) \?\?[\s\S]*?palette\[categoryPaletteIndex\(row\.category, palette\.length\)\]/,
-  'categories collapsed into the donut Other wedge still use readable categorical ink in the list');
-assert.doesNotMatch(overview,/const sliceColor = donutColors\.get\(row\.category\) \?\? neutral/,
-  'dark-mode tail rows must never reuse the near-background donut neutral');
-assert.match(overview,/trackColor=\{scheme === 'dark' \? theme\.cardBorderStrong : theme\.track\}/,
-  'thin category progress tracks keep enough dark-mode contrast');
+// Design language E: colour in the list means limit status only. Every
+// category glyph sits on the one glyph ground in the text colour, and the
+// only bar on a row is its limit bar.
+assert.match(overview,/<GlyphTile category=\{row\.category\} palette=\{band\}/,
+  'category rows use the one-tone glyph tile, never a category hue');
+assert.doesNotMatch(overview,/useCategoricalPalette|categoryPaletteIndex|sliceColor/,
+  'no categorical palette on Spending rows');
+assert.match(overview,/<LimitStatusBar spentMinor=\{row\.spentFils\} limitMinor=\{row\.limitFils\}/,
+  'a row with a limit carries the status-coloured limit bar');
 assert.match(trends,/accessibilityLabel=\{monthDescription\(month\)\}/);
 assert.match(trends,/accessibilityState=\{\{ selected: month\.key === p\.selectedKey \}\}/);
 assert.match(trends,/accessibilityLiveRegion="polite"[\s\S]*?monthLabel\(selected\.key\)/);
-assert.match(trends,/!showAllTrendLabels &&[\s\S]*?p\.months\.map/);
+assert.match(trends,/testID="cashflow-month-details"[\s\S]*?p\.months\.map/);
 assert.match(trends,/backgroundColor: theme\.primary/);
 assert.match(trends,/backgroundColor: theme\.expenseGraphic/);
 
 const task5Bills = read('src/app/(tabs)/bills.tsx');
 const task5Segments = read('src/components/bills/bills-segment-control.tsx');
-assert.match(task5Bills, /const billsHeader: ScreenHeaderProps = \{/);
+// Design language E: the ochre band's nav row replaces the inline header.
+assert.match(task5Bills, /const billsNav: BandNav = \{/);
 assert.match(task5Bills, /title: t\('billsTitle'\)[\s\S]*?label: t\('newReminder'\)[\s\S]*?icon: 'plus'/);
-assert.match(task5Bills, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{billsHeader\}/);
+assert.match(task5Bills, /<BandScaffold[\s\S]*?band="bills"[\s\S]*?tabbed[\s\S]*?nav=\{billsNav\}/);
 assert.equal((task5Bills.match(/<ScrollView/g) ?? []).length, 0, 'Bills history shares the BottomSheet scroller');
-assert.match(task5Bills, /detailData\.txs\.slice\(0, 36\)/);
-assert.match(task5Bills, /<MerchantSpendingLink merchant=\{detail\.title\}/);
-assert.match(task5Bills, /testID="subscription-history-scroll"/);
+// Charge history lives in the one shared bill detail sheet now.
+const task5BillSheet = read('src/components/bill-detail-sheet.tsx');
+assert.equal((task5BillSheet.match(/<ScrollView/g) ?? []).length, 0, 'bill history shares the BottomSheet scroller');
+assert.match(task5BillSheet, /data\.txs\.slice\(0, 36\)/);
+assert.match(task5BillSheet, /<MerchantSpendingLink merchant=\{subscription\.title\}/);
+assert.match(task5BillSheet, /testID="subscription-history-scroll"/);
 assert.match(task5Bills,/<BillsSegmentControl[\s\S]*?segment=\{agendaView\}[\s\S]*?onChange=\{setAgendaView\}/);
-assert.match(task5Segments,/role="tablist"/);
+// The views are the band's tablist; the filter chips keep a 44pt hit area.
+const task5BandSegmented = read('src/components/ui/band/band-segmented.tsx');
+assert.match(task5Segments,/<BandSegmented/);
+assert.match(task5BandSegmented,/role="tablist"/);
 assert.match(task5Segments,/accessibilityState=\{\{ selected:/);
-assert.ok(Number(task5Segments.match(/segmentItem:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=48);
+assert.ok(Number(task5BandSegmented.match(/segment:\s*\{[\s\S]*?minHeight:\s*(\d+)/)?.[1])>=44);
+assert.match(task5Segments,/hitSlop=\{3\}/);
 assert.doesNotMatch(task5Segments,/numberOfLines/);
-for (const label of ['refUpcoming','subscriptionsSeg','utilitiesSeg','cardsSeg','refAll']) assert.ok(task5Segments.includes(`t('${label}')`));
+// Next 30 days / All, and the payment types as filters inside All.
+for (const label of ['w.next30Days', 'w.allBills', 'w.everything', 'agenda.subscriptions', 'agenda.utilities', 'agenda.cards']) assert.ok(task5Segments.includes(label), label);
 assert.equal((task5Bills.match(/<TextField/g) ?? []).length, 3, 'Bills reminder adder has exactly three shared fields');
 assert.doesNotMatch(task5Bills, /<TextInput/);
 assert.match(task5Bills, /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?footer=\{\([\s\S]*?<Button[\s\S]*?label=\{t\('saveReminder'\)\}[\s\S]*?disabled=\{!draftValid\}/);
 
 const task6Wallet = read('src/app/(tabs)/wallet.tsx');
-assert.match(task6Wallet, /const walletHeader: ScreenHeaderProps = \{/);
+assert.match(task6Wallet, /const walletNav: BandNav = \{/);
 assert.match(task6Wallet, /title: t\('walletTitle'\)[\s\S]*?label: t\('settingsTitle'\)[\s\S]*?icon: 'sliders'[\s\S]*?label: t\('newAccount'\)[\s\S]*?icon: 'plus'/);
-assert.match(task6Wallet, /<ScreenScaffold[\s\S]*?tabbed[\s\S]*?headerMode="inline"[\s\S]*?header=\{walletHeader\}/);
-assert.match(task6Wallet, /const openAccount = \(account: Account\)[\s\S]*?router\.push\(`\/cards\?card=\$\{account\.id\}`\)[\s\S]*?setOptionsFor\(account\)/);
+assert.match(task6Wallet, /<BandScaffold[\s\S]*?band="accounts"[\s\S]*?tabbed[\s\S]*?nav=\{walletNav\}/);
+assert.match(task6Wallet, /const openAccount = \(account: Account\)[\s\S]*?router\.push\(`\/card\?id=\$\{encodeURIComponent\(account\.id\)\}`\)[\s\S]*?router\.push\(`\/account\?id=\$\{encodeURIComponent\(account\.id\)\}`\)[\s\S]*?setOptionsFor\(account\)/);
 assert.match(task6Wallet, /<AccountGroups[\s\S]*?onManage=\{setOptionsFor\}/);
 assert.match(task6Wallet, /accessibilityLabel=\{inactiveDisclosureLabel\}[\s\S]{0,180}accessibilityState=\{\{ expanded: showInactive \}\}/);
 
 const task6Balance = read('src/components/wallet/balance-overview.tsx');
 const headlineAmount = task6Balance.match(
-  /<View style=\{\[styles\.money[\s\S]*?(?=\n\s*\{p\.activeSourceCount === 0)/,
+  /\{p\.knownBalanceCount > 0[\s\S]*?(?=\n\s*\{p\.activeSourceCount === 0)/,
 )?.[0] ?? '';
 assert.ok(headlineAmount.length > 0, 'Wallet headline amount block was not found');
 assert.doesNotMatch(headlineAmount, /numberOfLines=\{1\}|adjustsFontSizeToFit|minimumFontScale/);
 
 const task6Cards = read('src/app/cards.tsx');
-assert.match(task6Cards, /const cardsHeader: ScreenHeaderProps = \{/);
-assert.match(task6Cards, /title: t\('cardsTitle'\)[\s\S]*?back: \{ label: t\('back'\), onPress: \(\) => router\.back\(\) \}/);
-assert.match(task6Cards, /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?header=\{cardsHeader\}/);
+assert.match(task6Cards, /const cardsNav: BandNav = \{/);
+assert.match(task6Cards, /title: t\('cardsTitle'\)[\s\S]*?back: \(\) => router\.back\(\)/);
+assert.match(task6Cards, /<BandScaffold[\s\S]*?band="accounts"[\s\S]*?nav=\{cardsNav\}/);
 assert.match(task6Cards, /useLocalSearchParams<\{ card\?: string \}>/);
 assert.match(task6Cards, /useLargeTextLayout\(\)/);
 assert.match(task6Cards, /numberOfLines=\{largeText \? undefined : 1\}/);
@@ -279,46 +304,50 @@ const billableDetail = billableDetailStart >= 0 && billableDetailEnd > billableD
   ? task6CardDetail.slice(billableDetailStart, billableDetailEnd)
   : '';
 assert.ok(billableDetail.length > 0, 'billable CardDetail presentation block was not found');
+// Design language E: the card (identity + statement balance) first, then the
+// due line and Record a payment, then statements, then payments made.
 for (const [before, after] of [
-  ['styles.summary', "title={t('statements')}"],
-  ["title={t('statements')}", 'styles.head'],
-  ['styles.head', "title={t('paymentsMade')}"],
+  ['styles.inkCard', 'styles.summary'],
+  ['styles.summary', "{t('statements')}"],
+  ["{t('statements')}", "{t('paymentsMade')}"],
 ]) {
   assert.ok(
     billableDetail.indexOf(before) >= 0 && billableDetail.indexOf(before) < billableDetail.indexOf(after),
     `CardDetail order keeps ${before} before ${after}`,
   );
 }
-assert.match(task6CardDetail, /!data\.billable && \([\s\S]*?styles\.head[\s\S]*?debitHasNoStatement/);
+assert.match(task6CardDetail, /!data\.billable && \([\s\S]*?\{identity\}[\s\S]*?debitHasNoStatement/);
 assert.doesNotMatch(task6CardDetail, /type="subtitle" numberOfLines=\{1\}/);
 assert.match(task6CardDetail, /<BottomSheet[^>]*footer=\{footer\}/);
 
 const task7Settings = code(read('src/app/settings.tsx'));
-const task7Pro = code(read('src/app/pro.tsx'));
+// Data and help: exports, backup, the clean-ups, public links and Erase.
+const task7SettingsData = code(read('src/app/settings-data.tsx'));
+const task7Pro = code(proCheckoutSurface());
 const task7I18n = read('src/lib/i18n.ts');
 const task7PublicLinksPath = path.join(ROOT, 'src/lib/public-links.ts');
 
-assert.match(task7Settings, /const settingsHeader: ScreenHeaderProps = \{[\s\S]*?title: t\('settingsTitle'\)[\s\S]*?back: \{ label: t\('back'\), onPress: \(\) => router\.back\(\) \}/);
-assert.match(task7Settings, /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?header=\{settingsHeader\}/);
-assert.match(task7Pro, /const proHeader: ScreenHeaderProps = \{[\s\S]*?title: t\('wafraPro'\)[\s\S]*?back: \{ label: t\('back'\), onPress: \(\) => router\.back\(\) \}/);
-assert.match(task7Pro, /<ScreenScaffold[\s\S]*?headerMode="native"[\s\S]*?header=\{proHeader\}/);
+// Design language E: Settings and Pro are band screens. The band's nav row
+// holds Back; the plain title is set large on the band.
+assert.match(task7Settings, /const settingsNav: BandNav = \{ back: true \}/);
+assert.match(task7Settings, /<BandScaffold[\s\S]*?band="settings"[\s\S]*?nav=\{settingsNav\}[\s\S]*?<BandTitle title=\{t\('settingsTitle'\)\}/);
+assert.match(task7Pro, /const proNav: BandNav = \{ back: true \}/);
+assert.match(task7Pro, /<BandScaffold[\s\S]*?nav=\{proNav\}[\s\S]*?<BandTitle title=\{t\('wafraPro'\)\}/);
 assert.doesNotMatch(task7Pro, /footer=\{purchaseFooter\}/);
 assert.match(task7Pro, /<View style=\{styles\.actions\}>[\s\S]*?<View style=\{\[styles\.legalLinks/);
 
 const settingsRenderStart = task7Settings.indexOf('<React.Fragment>');
 assert.ok(settingsRenderStart >= 0, 'Settings route-owned Fragment was not found');
 const settingsRender = task7Settings.slice(settingsRenderStart);
-assert.equal((settingsRender.match(/<Section index=\{/g) ?? []).length, 8, 'Settings renders exactly eight compact groups');
+assert.equal((settingsRender.match(/<SettingsGroupTitle title=\{/g) ?? []).length, 5, 'Settings renders exactly five titled groups under the Pro card');
 const settingsGroupMarkers = [
-  '<Block onPress={() => router.push(\'/pro\')}>',
-  "<SectionHeader title={t('settingsImportsHeader')} />",
-  "<SectionHeader title={t('settingsNotificationsHeader')} />",
-  "<SectionHeader title={t('settingsPreferencesHeader')} />",
-  "<SectionHeader title={t('privacyHeader')} />",
-  '<SectionHeader title={words.needsReview} />',
-  "<SectionHeader title={t('dataHeader')} />",
-  "<SectionHeader title={t('supportHeader')} />",
-  "<SectionHeader title={t('settingsDangerHeader')} />",
+  'testID="settings-pro-card"',
+  "<SettingsGroupTitle title={t('settingsImportsHeader')} palette={band} />",
+  "<SettingsGroupTitle title={t('settingsNotificationsHeader')} palette={band} />",
+  "<SettingsGroupTitle title={t('settingsPreferencesHeader')} palette={band} />",
+  '<SettingsGroupTitle title={copy.countryAndCurrency} palette={band} />',
+  '<SettingsGroupTitle title={copy.privacyAndSecurity} palette={band} />',
+  "router.push('/settings-data')",
 ];
 let previousSettingsGroup = -1;
 for (const marker of settingsGroupMarkers) {
@@ -326,16 +355,33 @@ for (const marker of settingsGroupMarkers) {
   assert.ok(next > previousSettingsGroup, `Settings group order lost ${marker}`);
   previousSettingsGroup = next;
 }
+const settingsDataRender = task7SettingsData.slice(task7SettingsData.indexOf('<React.Fragment>'));
+assert.equal((settingsDataRender.match(/<SettingsGroupTitle title=\{/g) ?? []).length, 5, 'Data and help renders five titled groups');
+let previousDataGroup = -1;
+for (const marker of [
+  '<SettingsGroupTitle title={copy.yourData} palette={band} />',
+  '<SettingsGroupTitle title={copy.helpImprove} palette={band} />',
+  '<SettingsGroupTitle title={copy.advanced} palette={band} />',
+  '<SettingsGroupTitle title={copy.about} palette={band} />',
+  // Erase stands alone at the bottom, with distance above it, under its own
+  // heading so a screen reader announces the danger before the button.
+  'testID="settings-data-erase"',
+  "<SettingsGroupTitle title={t('settingsDangerHeader')} palette={band} />",
+]) {
+  const next = settingsDataRender.indexOf(marker);
+  assert.ok(next > previousDataGroup, `Data and help group order lost ${marker}`);
+  previousDataGroup = next;
+}
 assert.doesNotMatch(task7Settings, /StatusFacts|settingsStatusHeader/);
-assert.match(task7Settings, /from '@\/components\/ui\/section-header'/);
+assert.match(task7Settings, /SettingsGroupTitle,[\s\S]*?from '@\/components\/settings-rows'/);
 assert.doesNotMatch(task7Settings, /from '@\/components\/ui\/segmented-control'/);
 assert.match(task7Settings, /visible=\{preferenceSheet === 'appearance'\}[\s\S]*?onSelect=\{setThemePreference\}/);
 assert.doesNotMatch(task7Settings, /<Segmented\b|SectionHeader.*from '@\/components\/ui\/layout'/);
 
 for (const [key, en, ar] of [
-  ['settingsImportsHeader', 'Imports', 'الاستيراد'],
+  ['settingsImportsHeader', 'Capture', 'الالتقاط'],
   ['settingsNotificationsHeader', 'Notifications', 'الإشعارات'],
-  ['settingsPreferencesHeader', 'Preferences', 'التفضيلات'],
+  ['settingsPreferencesHeader', 'Appearance', 'المظهر'],
   ['settingsDangerHeader', 'Danger zone', 'منطقة الخطر'],
   ['supportWebsite', 'Support', 'الدعم'],
   ['publicLinkUnavailable', 'Unavailable in this build', 'غير متاح في هذا الإصدار'],
@@ -355,19 +401,19 @@ assert.match(task7PublicLinks, /const value = extra\?\.\[key\]/);
 assert.match(task7PublicLinks, /const url = new URL\(value\)/);
 assert.match(task7PublicLinks, /return url\.protocol === 'https:' \? url\.toString\(\) : null/);
 
-for (const screen of [task7Settings, task7Pro]) {
+for (const screen of [task7SettingsData, task7Pro]) {
   assert.match(screen, /import \{ configuredPublicUrl \} from '@\/lib\/public-links'/);
   assert.match(screen, /configuredPublicUrl\('privacyPolicyUrl'\)/);
   assert.match(screen, /configuredPublicUrl\('termsOfUseUrl'\)/);
 }
-assert.match(task7Settings, /configuredPublicUrl\('supportUrl'\)/);
-const settingsPublicRows = task7Settings.match(
-  /const publicLinkRow[\s\S]*?(?=\n  const trial)/,
+assert.match(task7SettingsData, /configuredPublicUrl\('supportUrl'\)/);
+const settingsPublicRows = task7SettingsData.match(
+  /const publicLinkRow[\s\S]*?(?=\n  return \()/,
 )?.[0] ?? '';
 assert.ok(settingsPublicRows.length > 0, 'Settings public-link row helper was not found');
 assert.match(settingsPublicRows, /if \(url\) return linkRow\(title, null, \(\) => void openPublicLink\(url\)/);
 const unavailableSettingsPublicRow = settingsPublicRows.match(
-  /return \(\s*(<Row last=\{last\}>[\s\S]*?<\/Row>)\s*\);/,
+  /return \(\s*(<Row last=\{last\}[^>]*>[\s\S]*?<\/Row>)\s*\);/,
 )?.[1] ?? '';
 assert.match(unavailableSettingsPublicRow, /<Icon name="alert"/);
 assert.match(unavailableSettingsPublicRow, /t\('publicLinkUnavailable'\)/);
@@ -376,8 +422,8 @@ for (const row of [
   "publicLinkRow(t('privacyPolicy'), privacyPolicyUrl)",
   "publicLinkRow(t('termsOfUse'), termsOfUseUrl)",
   "publicLinkRow(t('supportWebsite'), supportUrl, true)",
-]) assert.ok(settingsRender.includes(row), `Settings does not always render ${row}`);
-assert.match(task7Settings, /publicLinkNotice && \([\s\S]*?accessibilityRole="alert"[\s\S]*?accessibilityLiveRegion="polite"[\s\S]*?legalLinkFailed[\s\S]*?legalLinkFailedBody/);
+]) assert.ok(settingsDataRender.includes(row), `Data and help does not always render ${row}`);
+assert.match(task7SettingsData, /publicLinkNotice && \([\s\S]*?accessibilityRole="alert"[\s\S]*?accessibilityLiveRegion="polite"[\s\S]*?legalLinkFailed[\s\S]*?legalLinkFailedBody/);
 
 const proPublicRows = task7Pro.match(
   /const publicLinkRow[\s\S]*?\n  \};/,
@@ -385,7 +431,7 @@ const proPublicRows = task7Pro.match(
 assert.ok(proPublicRows.length > 0, 'Pro public-link row helper was not found');
 assert.match(proPublicRows, /if \(url\) return \([\s\S]*?<Pressable[\s\S]*?accessibilityRole="link"[\s\S]*?openLegal\(url\)/);
 const unavailableProPublicRow = proPublicRows.match(
-  /return \(\s*(<Row last=\{last\}>[\s\S]*?<\/Row>)\s*\);/,
+  /return \(\s*(<Row last=\{last\}[^>]*>[\s\S]*?<\/Row>)\s*\);/,
 )?.[1] ?? '';
 assert.match(unavailableProPublicRow, /<Icon name="alert"/);
 assert.match(unavailableProPublicRow, /t\('publicLinkUnavailable'\)/);
@@ -401,13 +447,19 @@ assert.match(task7Pro, /if \(!legalReady\)[\s\S]*?purchaseLegalMissingBody/);
 assert.match(task7Pro, /entitled \? \([\s\S]*?manageSubscription[\s\S]*?proContinue[\s\S]*?: \([\s\S]*?buySelectedPlan\(\)[\s\S]*?restorePurchase/);
 
 const task8Routes = [
-  ['accuracy', 'accuracyHeader'],
-  ['categorise', 'categoriseHeader'],
-  ['currency', 'currencyHeader'],
-  ['feedback', 'feedbackHeader'],
-  ['review-alerts', 'reviewAlertsHeader'],
-  ['trusted-devices', 'trustedDevicesHeader'],
+  // Accuracy, Categorise, Currency, Review, Feedback and Trusted devices moved
+  // onto their bands (design language E); each band screen is asserted where
+  // it is restyled.
 ];
+// Design language E: Feedback (green), Trusted devices (slate) and Improve
+// accuracy (sand) are band screens; the band's nav row holds Back and the
+// plain title sits on the band.
+for (const [route, band, nav] of [['feedback', 'flow', 'feedbackNav'], ['trusted-devices', 'accounts', 'trustedNav'],
+  ['accuracy', 'settings', 'accuracyNav']]) {
+  const source = read(`src/app/${route}.tsx`);
+  assert.match(source, new RegExp(`const ${nav}: BandNav = \\{ back: true`), `${route} lacks its band back control`);
+  assert.match(source, new RegExp(`<BandScaffold[\\s\\S]*?band="${band}"[\\s\\S]*?nav=\\{${nav}\\}`), `${route} is not on its band`);
+}
 for (const [route, header] of task8Routes) {
   const source = read(`src/app/${route}.tsx`);
   assert.match(source, new RegExp(`const ${header}: ScreenHeaderProps = \\{[\\s\\S]*?back: \\{ label: [\\s\\S]*?onPress: \\(\\) => router\\.back\\(\\) \\}`));
@@ -423,9 +475,13 @@ for (const seam of [
 assert.doesNotMatch(task8Accuracy, /accuracyShareUncategorized/);
 
 const task8Categorise = read('src/app/categorise.tsx');
-assert.match(task8Categorise, /const \[openKey, setOpenKey\] = useState<string \| null>\(null\)/);
+// Every row is open with one suggestion; answers are staged and written
+// together by "Save N answers" (redesign), never on the first tap.
+assert.match(task8Categorise, /const \[answers, setAnswers\] = useState<Record<string, CategoryId>>\(\{\}\)/);
+assert.match(task8Categorise, /const \[pickerId, setPickerId\] = useState<string \| null>\(null\)/);
 assert.match(task8Categorise, /const \[sortedRows, setSortedRows\] = useState\(0\)/);
-assert.match(task8Categorise, /const at = items\.findIndex\([\s\S]*?const next = at >= 0 \? items\[at \+ 1\] : undefined/);
+assert.match(task8Categorise, /const save = \(\) => \{[\s\S]*?for \(const item of staged\)[\s\S]*?moved \+= item\.count/);
+assert.match(task8Categorise, /useCategorySuggestions\(\{/);
 assert.match(task8Categorise, /setMerchantOverride\(item\.merchant, category, true\)/);
 assert.match(task8Categorise, /setBillAlias\(item\.sourceTitle, item\.billIdentity, item\.sourceTitle, category, true\)/);
 assert.match(task8Categorise, /INITIAL_VISIBLE_ITEMS = 12/);
@@ -433,36 +489,42 @@ assert.match(task8Categorise, /summary\.paymentPurposes[\s\S]*?kind: 'payment-pu
 for (const count of ['summary.rowCount', 'item.count', 'sortedRows']) {
   assert.ok(task8Categorise.includes(count), `Categorise lost ${count}`);
 }
+// Sand band: the count and one line on the band, Save pinned as the footer.
+assert.match(task8Categorise, /const band = useBand\('settings'\)/);
+assert.match(task8Categorise, /<BandScaffold[\s\S]*?band="settings"[\s\S]*?nav=\{\{ back: true, title: t\('categoriseMerchants'\) \}\}[\s\S]*?footer=\{staged\.length > 0/);
+assert.match(task8Categorise, /bandWords\.entriesMoved\(d\.entries\(item\.count\)\)/, 'each staged answer says how many entries it moves');
 
 const task8Currency = read('src/app/currency.tsx');
 for (const seam of [
   'summarizeForeignActivity(', 'inPeriod(transaction.date, period)', 'ledgerCurrency,',
   'visibleGroups', 'visibleTransactions', 'normalizedQuery', 'liveAccountIds(', 'internalTransferIdsForState(',
-  '<PeriodSheet', '<EntryDetailSheet', '<MerchantAvatar', '<Money',
+  '<PeriodSheet', '<EntryDetailSheet', '<MerchantAvatar', '<BandFigure', 'fxRowSource(item)',
 ]) assert.ok(task8Currency.includes(seam), `Currency lost ${seam}`);
-assert.match(task8Currency, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"/,
+// Design language E: a Spending detail on the clay band, the sheet owning the virtualized list.
+assert.match(task8Currency, /<BandScaffold[\s\S]*?band="spending"[\s\S]*?scroll=\{false\}/,
   'Foreign spending virtualizes its transaction history instead of mounting the whole ledger in a ScrollView');
 assert.match(task8Currency, /<FlatList[\s\S]*?ListHeaderComponent=\{listHeader\}/);
-assert.match(task8Currency, /contentContainerStyle=\{\[listInsets\.contentContainerStyle, styles\.listContent\]\}/);
+assert.match(task8Currency, /contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}\]\}/);
 assert.match(task8Currency, /removeClippedSubviews=\{Platform\.OS === 'android'\}/);
 assert.doesNotMatch(task8Currency, /visibleTransactions\.map|summary\.transactions\.map/,
   'hundreds of foreign charges must not be mounted eagerly');
 assert.match(task8Currency, /const INITIAL_CURRENCY_ROWS = 5/);
 assert.match(task8Currency, /summary\.groups\.slice\(0, INITIAL_CURRENCY_ROWS\)/);
-assert.match(task8Currency, /const percent = summary\.totalLocalFils > 0[\s\S]*?group\.localFils \/ summary\.totalLocalFils/);
+assert.match(task8Currency, /const shareOf = [\s\S]*?totalLocalFils > 0[\s\S]*?group\.localFils \/ totalLocalFils/);
 assert.match(task8Currency, /styles\.currencyTrack[\s\S]*?styles\.currencyFill/,
   'currency impact stays a restrained Ledger & Light progress treatment rather than decorative cards');
 assert.match(task8Currency, /setSelectedCurrency\(\(current\) => current === currency \? null : currency\)/);
 assert.match(task8Currency, /transaction\.originalCurrency\?\.toUpperCase\(\) !== selectedCurrency/);
 const currencyHierarchy = task8Currency.match(
-  /<Money[\s\S]*?<SectionHeader title=\{t\('currencyBreakdown'[\s\S]*?<SectionHeader title=\{t\('foreignRecent'[\s\S]*?<TextField/,
+  /<BandFigure[\s\S]*?<SectionHeader title=\{t\('currencyBreakdown'[\s\S]*?<SectionHeader title=\{t\('foreignRecent'[\s\S]*?<TextField/,
+
 )?.[0] ?? '';
 assert.ok(currencyHierarchy.length > 0,
   'Currency hierarchy remains total → currencies → transactions/search');
 assert.match(task8Currency, /const showSearch = chargeCount >= 12/);
 assert.match(task8Currency, /<TextField[\s\S]*?label=\{t\('searchForeignSpending', language\)\}[\s\S]*?value=\{query\}[\s\S]*?onChangeText=\{setQuery\}/);
 assert.match(task8Currency, /leading=\{<Icon name="search"/);
-assert.match(task8Currency, /formatOriginalCurrency\([\s\S]*?item\.originalAmountMinor![\s\S]*?formatAED\(item\.amountFils/,
+assert.match(task8Currency, /originalMoneyOf\(item\)[\s\S]*?formatOriginalCurrency\(originalMoney\.minorUnits[\s\S]*?formatAED\(item\.amountFils/,
   'Foreign rows keep original and ledger amounts together');
 assert.doesNotMatch(task8Currency, /FadeInDown|Animated\.View/,
   'data-heavy foreign spending should not delay Android readability with entrance animation');
@@ -470,7 +532,7 @@ assert.doesNotMatch(task8Currency, /conversionQuality|bankQuoted|referenceRate|o
   'Foreign spending should not expose FX diagnostics as a primary page section');
 
 const task8Feedback = read('src/app/feedback.tsx');
-assert.match(task8Feedback, /<ScreenScaffold[\s\S]*?keyboardAware[\s\S]*?headerMode="native"[\s\S]*?header=\{feedbackHeader\}/);
+assert.match(task8Feedback, /<BandScaffold[\s\S]*?keyboardAware[\s\S]*?nav=\{feedbackNav\}/);
 assert.match(task8Feedback, /scrollProps=\{\{ keyboardShouldPersistTaps: 'handled'/);
 assert.match(task8Feedback, /<TextField[\s\S]*?label=\{t\('feedbackInputA11y'\)\}[\s\S]*?value=\{message\}[\s\S]*?multiline[\s\S]*?maxLength=\{FEEDBACK_MESSAGE_MAX\}/);
 for (const seam of [
@@ -481,9 +543,12 @@ assert.match(task8Feedback, /isParserResearchBuild\(\)[\s\S]{0,500}router\.push\
 assert.match(task8Feedback, /fontFamily: Fonts\.mono[\s\S]*?textAlign: 'left'[\s\S]*?writingDirection: 'ltr'/);
 
 const task8Review = read('src/app/review-alerts.tsx');
-assert.match(task8Review, /useScreenContentInsets\(\{ hasFooter: false \}\)/);
-assert.match(task8Review, /<ScreenScaffold[\s\S]*?scroll=\{false\}[\s\S]*?virtualized[\s\S]*?headerMode="native"[\s\S]*?header=\{reviewAlertsHeader\}/);
-assert.match(task8Review, /<FlatList[\s\S]*?contentContainerStyle=\{\[listInsets\.contentContainerStyle,[\s\S]*?contentInset=\{listInsets\.contentInset\}[\s\S]*?scrollIndicatorInsets=\{listInsets\.scrollIndicatorInsets\}[\s\S]*?contentInsetAdjustmentBehavior="automatic"/);
+// Green band: one card at a time scrolls with its band; the full list keeps
+// its own virtualized scroll on the sheet and clears the home indicator.
+assert.match(task8Review, /const band = useBand\('flow'\)/);
+assert.match(task8Review, /const listBottom = useBandBottomInset\(\)/);
+assert.match(task8Review, /<BandScaffold[\s\S]*?band="flow"[\s\S]*?scroll=\{stepMode\}[\s\S]*?nav=\{\{ back: true,/);
+assert.match(task8Review, /<FlatList[\s\S]*?contentContainerStyle=\{\[styles\.listContent, \{ paddingBottom: listBottom \}[\s\S]*?scrollIndicatorInsets=\{\{ top: 0, bottom: listBottom \}\}/);
 assert.match(task8Review, /item\.expiresAt > now/);
 assert.match(task8Review, /minorUnits\.padStart\(exponent \+ 1, '0'\)/);
 assert.match(task8Review, /pathname: '\/add-transaction', params: \{ reviewId: item\.id \}/);

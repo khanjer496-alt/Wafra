@@ -1,15 +1,37 @@
+import { originalMoneyOf, type MinorExponent } from '@/lib/fx';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import type { Transaction } from '@/lib/types';
 
 export interface CurrencyActivity {
   currency: string;
+  /** Sum of the group's originals in `originalExponent` minor units. */
   originalMinor: number;
+  /**
+   * The finest exponent among the group's rows: legacy rows are two-decimal,
+   * new rows use the currency's own ISO exponent (KWD 3, JPY 0).
+   */
+  originalExponent: MinorExponent;
   localFils: number;
   count: number;
   bankQuotedCount: number;
   referenceCount: number;
   estimatedCount: number;
   latestDate: string;
+}
+
+/** How one converted row got its ledger amount. */
+export type FxRowSource = 'bank' | 'reference' | 'estimated';
+
+/**
+ * The rate source of one foreign row, by the same rule the summary counts
+ * with: the bank's own converted figure, a dated reference rate, or anything
+ * else (a fallback, or a row from before the source was recorded), which is
+ * an approximation until a reference rate replaces it.
+ */
+export function fxRowSource(tx: Pick<Transaction, 'fxSource'>): FxRowSource {
+  if (tx.fxSource === 'bank') return 'bank';
+  if (tx.fxSource === 'reference') return 'reference';
+  return 'estimated';
 }
 
 export interface ForeignActivitySummary {
@@ -54,19 +76,20 @@ export function summarizeForeignActivity(
       tx.type === 'expense' &&
       !tx.isTransfer &&
       include(tx) &&
-      typeof tx.originalCurrency === 'string' &&
-      /^[A-Za-z]{3}$/.test(tx.originalCurrency) &&
-      tx.originalCurrency.toUpperCase() !== local &&
-      Number.isSafeInteger(tx.originalAmountMinor) &&
-      (tx.originalAmountMinor ?? 0) > 0,
+      (() => {
+        const original = originalMoneyOf(tx);
+        return original !== null && original.currency !== local;
+      })(),
   );
 
   const grouped = new Map<string, CurrencyActivity>();
   for (const tx of foreign) {
-    const currency = tx.originalCurrency!.toUpperCase();
+    const original = originalMoneyOf(tx)!;
+    const currency = original.currency;
     const row = grouped.get(currency) ?? {
       currency,
       originalMinor: 0,
+      originalExponent: original.exponent,
       localFils: 0,
       count: 0,
       bankQuotedCount: 0,
@@ -74,12 +97,19 @@ export function summarizeForeignActivity(
       estimatedCount: 0,
       latestDate: tx.date,
     };
-    row.originalMinor += tx.originalAmountMinor!;
+    // Originals of one currency are only ever added at one exponent. A row
+    // finer than the running total rescales the total (exact: × 10 or × 100).
+    if (original.exponent > row.originalExponent) {
+      row.originalMinor *= 10 ** (original.exponent - row.originalExponent);
+      row.originalExponent = original.exponent;
+    }
+    row.originalMinor += original.minorUnits * 10 ** (row.originalExponent - original.exponent);
     row.localFils += tx.amountFils;
     row.count += 1;
     row.latestDate = row.latestDate > tx.date ? row.latestDate : tx.date;
-    if (tx.fxSource === 'bank') row.bankQuotedCount += 1;
-    else if (tx.fxSource === 'reference') row.referenceCount += 1;
+    const source = fxRowSource(tx);
+    if (source === 'bank') row.bankQuotedCount += 1;
+    else if (source === 'reference') row.referenceCount += 1;
     else row.estimatedCount += 1;
     grouped.set(currency, row);
   }

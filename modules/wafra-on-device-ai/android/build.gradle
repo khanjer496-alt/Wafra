@@ -1,0 +1,28 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.wafraondeviceai'
+version = '0.1.0'
+
+android {
+  namespace "expo.modules.wafraondeviceai"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+}
+
+dependencies {
+  // ML Kit GenAI Prompt API (Gemini Nano through Android AICore, on device).
+  //
+  // Pinned to beta2 on purpose: beta3/beta4 are compiled with Kotlin 2.3
+  // metadata and pull kotlin-stdlib 2.3.x, which the Kotlin 2.1.20 compiler
+  // used by React Native 0.83 / Expo SDK 55 cannot read. beta2 carries
+  // Kotlin 2.2 metadata (readable one minor ahead) and kotlin-stdlib 1.8.
+  // The library's minSdk is 26; the app keeps minSdk 24 through
+  // tools:overrideLibrary in this module's manifest and never touches an
+  // ML Kit class below API 26 (see WafraOnDeviceAIModule.kt).
+  implementation 'com.google.mlkit:genai-prompt:1.0.0-beta2'
+}

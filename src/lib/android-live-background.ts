@@ -35,7 +35,11 @@ import {
   setActiveMarket,
   setLedgerCurrency as setGlobalLedgerCurrency,
 } from '@/lib/markets';
+import { setActiveCountry } from '@/lib/country';
+import { setBestEffortAutoPostEnabled } from '@/lib/best-effort-autopost';
 import { isProActive } from '@/lib/purchases';
+import { syncDailySummary, syncPaymentReminders } from '@/lib/notifications';
+import { reminderScheduleInputsChanged } from '@/lib/reminders';
 import { migrateLegacyState, stateStorage } from '@/lib/state-storage';
 import type { AppState, ImportBatchInput, Transaction } from '@/lib/types';
 
@@ -124,6 +128,11 @@ function applyLedgerContext(state: AppState): boolean {
     // Rebuild it from the encrypted ledger rather than trusting process history.
     setGlobalLedgerCurrency(null);
     setActiveMarket(state.marketId);
+    // Country conventions (numeric date order) for the universal parser.
+    setActiveCountry(state.country ?? null);
+    // "Auto-add alerts from unverified bank formats": a killed-process wake
+    // must honour OFF exactly as the foreground does, never the module default.
+    setBestEffortAutoPostEnabled(state.bestEffortAutoPost);
     setGlobalLedgerCurrency(state.ledgerMoney!.currency, state.ledgerMoney!.exponent);
     setLanguage(state.language === 'ar' ? 'ar' : 'en');
     return true;
@@ -197,9 +206,6 @@ async function boundedCollector(
     },
   );
 
-  const noObservedSms = source === 'sms' && result.inboxScannedCount === 0 &&
-    result.parsed.length === 0 && result.declined.length === 0 &&
-    result.reviewCandidates.length === 0;
   const holdPushAcknowledgement = result.reviewCandidates.length > 0;
 
   return {
@@ -213,8 +219,14 @@ async function boundedCollector(
     // A killed-process task does not persist Review rows. Keep the SMS cursor
     // where it was so the next normal foreground scan can still stage any
     // ambiguous alert from this tiny window. Already-imported rows dedupe.
-    newestTs: source === 'sms' ? state.lastScanTs :
-      (noObservedSms ? state.lastScanTs : result.newestTs),
+    //
+    // A push wake never moves it either. lastScanTs is the SMS watermark, and
+    // this wake read no SMS: stamping the notification's post time on it made
+    // the next foreground scan start after that moment and skip every SMS the
+    // 2-minute event wake had not imported (an owner's card purchase received
+    // at 22:43 was never read after a push import at 02:45). The foreground
+    // notification-only drain already keeps lastScanTs for the same reason.
+    newestTs: state.lastScanTs,
     scannedCount: result.scannedCount,
     inboxScannedCount: result.inboxScannedCount,
     historicalReread: false,
@@ -287,7 +299,28 @@ async function processBackgroundCapture(source: BackgroundSource, observedAt: nu
       collectRoutine: (state) => boundedCollector(state, source, observedAt),
     },
   });
+  const before = adapter.getState();
   const outcome = await executor.execute(source === 'push' ? 'notification-only' : 'routine');
+  // execute resolves only after the ledger is durable. A closed-app statement
+  // must earn a due reminder now, and a receipt must cancel one now. Keep this
+  // wake bounded: recurrence discovery belongs to foreground maintenance.
+  // Refresh the dated summary too: otherwise a closed-app spending day has no
+  // 9 pm notification, or still reports the snapshot from the last app open.
+  const after = adapter.getState();
+  if (reminderScheduleInputsChanged(before, after)) {
+    try {
+      await syncPaymentReminders(after, new Date(), { obligationsOnly: true });
+    } catch {
+      // Notification delivery cannot roll back or fail a durable bank capture.
+    }
+  }
+  if (after.dailySummary && before.transactions !== after.transactions) {
+    try {
+      await syncDailySummary(after);
+    } catch {
+      // Independent of payment scheduling: either notification can fail alone.
+    }
+  }
   if (source === 'push' && outcome.kind === 'imported') {
     postImportedPushNotice(adapter, outcome.transactionIds);
   }

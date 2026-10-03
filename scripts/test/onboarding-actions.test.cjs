@@ -17,6 +17,8 @@ const actionNames = ['startScan', 'connectAndroidNotifications', 'finishAndroidC
 const declarations = new Map();
 let overlayExpression;
 let backDisabledExpression;
+// Design language E: the completion screen is the `completeStep` element,
+// titled by `completeTitle`/`completeBody`; Back is disabled by `backDisabled`.
 const completionFragments = new Map();
 function collect(node) {
   if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && actionNames.includes(node.name.text)) {
@@ -27,16 +29,13 @@ function collect(node) {
     assert.equal(overlayExpression, undefined, 'One actual render condition owns the overlay');
     overlayExpression = node.initializer.getText(ast);
   }
-  if (ts.isJsxElement(node)) {
-    const attributes = node.openingElement.attributes.getText(ast);
-    const content = node.getText(ast);
-    if (attributes.includes('styles.captureActions') && content.includes('openWafra')) completionFragments.set('actions', content);
-    if (attributes.includes('styles.questionTitle') && content.includes('automaticCompletion')) completionFragments.set('title', content);
-    if (attributes.includes('styles.questionBodyCopy') && content.includes('automaticCompletion')) completionFragments.set('body', content);
+  if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) &&
+      ['completeTitle', 'completeBody', 'completeStep'].includes(node.name.text)) {
+    assert.ok(!completionFragments.has(node.name.text), `One shipping ${node.name.text}`);
+    completionFragments.set(node.name.text, node.initializer.getText(ast));
   }
-  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === 'BackHeader') {
-    const disabled = node.attributes.properties.find(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText(ast) === 'disabled');
-    if (disabled?.initializer && ts.isJsxExpression(disabled.initializer)) backDisabledExpression = disabled.initializer.expression.getText(ast);
+  if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'backDisabled') {
+    backDisabledExpression = node.initializer.getText(ast);
   }
   ts.forEachChild(node, collect);
 }
@@ -44,7 +43,7 @@ collect(ast);
 for (const name of actionNames) assert.ok(declarations.has(name), `Shipping action exists: ${name}`);
 assert.ok(overlayExpression, 'Actual onboarding visibility expression exists');
 assert.ok(backDisabledExpression, 'Actual back navigation has a disabled condition');
-assert.equal(completionFragments.size, 3, 'Actual completion title, body and actions are rendered');
+assert.equal(completionFragments.size, 3, 'Actual completion title, body and screen are rendered');
 const program = ts.transpileModule(
   `${[...declarations.values()].join('\n')}\n({ ${actionNames.join(', ')} });`,
   { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } },
@@ -75,6 +74,12 @@ function actions(options = {}) {
     GROWTH_PLACEMENTS: { onboarding: 'onboarding_main', postImportPro: 'post_import_pro' },
     trackGrowthEvent() {},
     saveJourney(stage) { record('journey', stage); },
+    // Design language E: each capture choice records the alert answer it implies.
+    recordCaptureChoice(choice) { ui.alerts = choice; record('capture-choice', choice); },
+    iosSetupLaunched: { current: false },
+    resumeAtResult: { current: false },
+    setHandoff(value) { record('handoff', value); },
+    patternInputFromState: () => ({}),
     beginStepTransition() { record('transition'); return options.transitionAllowed ?? true; },
     onboardingLandingPath: focus => focus === 'spending' ? '/flow' : focus === 'bills' ? '/bills' : '/',
     setupBusyRef: { current: false },
@@ -101,6 +106,7 @@ function actions(options = {}) {
     setResult(value) { ui.result = clone(value); record('result', value); },
     setCompletionOutcome(value) { ui.outcome = value; record('outcome', value); },
     setStep(value) { ui.step = value; record('step', value); },
+    get activeStep() { return ui.step; },
     setShortcutCleanup(value) { ui.cleanup = value; record('cleanup', value); },
     async setCaptureOptOut(value) {
       record('capture-write-start', value);
@@ -121,6 +127,10 @@ function actions(options = {}) {
     ensureDurable: service('ensureDurable'),
     getRelayConfigStrict: service('getRelayConfigStrict', options.relay ?? null),
     unpairDevice: service('unpairDevice'),
+    // Real predicate: only a relay provisioned for a Shortcut carries an
+    // automation generation and can forward alerts on its own.
+    isLegacyShortcutCaptureActive: config => config != null && config.shortcutCaptureRetiredAt === undefined &&
+      typeof config.automationGeneration === 'string' && /^[A-Za-z0-9_-]{40,128}$/.test(config.automationGeneration),
     disableRelayBackgroundSync: service('disableRelayBackgroundSync'),
     dispatchIosMessageSetup: service('dispatchIosMessageSetup'),
     isSmsScanningAvailable: () => options.scanAvailable ?? true,
@@ -140,7 +150,15 @@ function actions(options = {}) {
   const handlers = vm.runInNewContext(program, context, { filename: sourcePath });
   Object.assign(context, handlers, {
     exports: {},
-    View: 'View', Button: 'Button', ThemedText: 'Text',
+    View: 'View', ThemedText: 'Text', EStepFrame: 'EStepFrame', EHeadline: 'EHeadline', EBody: 'EBody',
+    EButton: 'EButton', ETextAction: 'ETextAction', ArrivedCard: 'ArrivedCard', ResultStrip: 'ResultStrip',
+    ReadySummary: 'ReadySummary', Linking: { openSettings: async () => {} },
+    stepBand: {}, bandButtonColor: () => ({}), onClose: undefined, revealAfterSetup: false,
+    words: { continue: 'continue', addByHand: 'addByHand', manualTitle: 'manualTitle', waitingTitle: 'waitingTitle',
+      waitingBody: 'waitingBody', workingTitle: () => 'workingTitle' },
+    preferredName: null, firstPayment: null, discoveredResult: null, readySummary: null, lang: 'en',
+    importsStillReading: false, showHistoryGapOffer: false, selectedAlerts: null, legacyFocus: null, legacyTracking: null,
+    onboardingNoAutomaticCapture: () => false, showPattern() { record('showPattern'); }, openStatementImport() {},
     styles: new Proxy({}, { get: () => ({}) }), night: new Proxy({}, { get: () => 'color' }),
     t: key => key,
     goBack() { record('goBack'); },
@@ -161,9 +179,12 @@ function actions(options = {}) {
     androidNotificationReady: { get: () => ui.androidNotificationReady },
     awaitingNotificationAccess: { get: () => ui.awaitingNotificationAccess },
     failedCompletion: { get: () => ui.step === 'complete' && ui.outcome === 'failed' },
+    backDisabled: { get: () => ui.busy || ui.finishing || false },
   });
   const isOverlayVisible = () => vm.runInNewContext(overlayExpression, context, { filename: sourcePath });
-  const renderProgram = ts.transpileModule(`() => [${[...completionFragments.values()].join(',\n')}];`, {
+  const renderProgram = ts.transpileModule(`() => { const completeTitle = ${completionFragments.get('completeTitle')};
+    const completeBody = ${completionFragments.get('completeBody')};
+    return ${completionFragments.get('completeStep')}; };`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
     fileName: 'actual-completion-fragments.tsx',
   }).outputText;
@@ -212,8 +233,10 @@ test('manual choice reports a failed opt-out write without claiming setup succes
   remainsEmpty(h);
 });
 
+const SHORTCUT_GENERATION = 'g'.repeat(43);
+
 test('iOS manual fallback revokes a previously paired relay before clearing setup return', async () => {
-  const relay = { id: 'synthetic-relay', ingestToken: 'synthetic-token' };
+  const relay = { id: 'synthetic-relay', ingestToken: 'synthetic-token', automationGeneration: SHORTCUT_GENERATION };
   const h = actions({ platform: 'ios', relay });
   await h.continueManually();
   assert.equal(h.ui.outcome, 'manual');
@@ -228,7 +251,7 @@ test('iOS manual fallback revokes a previously paired relay before clearing setu
 
 for (const service of ['getRelayConfigStrict', 'unpairDevice']) {
   test(`iOS manual fallback keeps failure visible when ${service} fails`, async () => {
-    const h = actions({ platform: 'ios', relay: { id: 'synthetic-relay' }, [service]: fails });
+    const h = actions({ platform: 'ios', relay: { id: 'synthetic-relay', automationGeneration: SHORTCUT_GENERATION }, [service]: fails });
     await h.continueManually();
     assert.equal(h.ledger.captureOptOut, true, 'The immediate local stop remains active');
     assert.equal(h.ui.outcome, 'failed');
@@ -250,8 +273,24 @@ test('iOS manual fallback with no relay does not pretend it revoked one', async 
   assert.equal(calls(h, 'dispatchIosMessageSetup').length, 1);
 });
 
+// 2026-09-25: iPhone setup offers statements before live capture. A relay
+// paired only to upload a statement carries no Shortcut; "Not now" must not
+// revoke it (queued statement rows would be stranded) or claim a Shortcut.
+test('iOS manual fallback keeps a statement-only relay and claims no Shortcut cleanup', async () => {
+  const relay = { id: 'synthetic-statement-relay', ingestToken: 'synthetic-token' };
+  const h = actions({ platform: 'ios', relay });
+  await h.continueManually();
+  assert.equal(h.ui.outcome, 'manual');
+  assert.equal(h.ui.cleanup, null);
+  assert.equal(calls(h, 'unpairDevice').length, 0);
+  assert.equal(calls(h, 'dispatchIosMessageSetup').length, 1);
+  const retired = actions({ platform: 'ios', relay: { ...relay, automationGeneration: SHORTCUT_GENERATION, shortcutCaptureRetiredAt: 1 } });
+  await retired.continueManually();
+  assert.equal(calls(retired, 'unpairDevice').length, 0, 'a retired Shortcut identity needs no revocation');
+});
+
 test('best-effort background unregister failure does not undo successful iOS relay revocation', async () => {
-  const h = actions({ platform: 'ios', relay: { id: 'synthetic-relay' }, disableRelayBackgroundSync: fails });
+  const h = actions({ platform: 'ios', relay: { id: 'synthetic-relay', automationGeneration: SHORTCUT_GENERATION }, disableRelayBackgroundSync: fails });
   await h.continueManually();
   assert.equal(h.ui.outcome, 'manual');
   assert.equal(h.ui.cleanup, 'revoked');
@@ -352,10 +391,10 @@ test('unavailable Android SMS bridge reports setup failure until the user explic
   assert.equal(calls(h, 'committed').length, 0);
   assert.equal(calls(h, 'route').length, 0);
   remainsEmpty(h);
-  const buttons = walk(h.renderCompletion()).filter(node => node.type === 'Button');
-  assert.deepEqual(buttons.map(node => node.props.label), ['onboardRetrySetup', 'onboardManualChoice'],
+  const buttons = actionsOf(h.renderCompletion());
+  assert.deepEqual(buttons.map(node => node.props.label), ['onboardRetrySetup', 'addByHand'],
     'Failure offers setup retry and explicit manual consent, without completion or entry promotion');
-  buttons.find(node => node.props.label === 'onboardManualChoice').props.onPress();
+  buttons.find(node => node.props.label === 'addByHand').props.onPress();
   await flush();
   assert.equal(h.ui.outcome, 'manual');
   assert.equal(h.ledger.captureOptOut, true, 'The rendered manual action persists the explicit choice');
@@ -387,6 +426,8 @@ for (const platform of ['ios', 'android']) {
       '/statement-import?fromOnboarding=1&statementSession=test-statement-session',
     ]]);
     assert.deepEqual(calls(h, 'journey'), [['journey', 'capture']]);
+    // Choosing statements answers the alert question as "not sure" (a gap to fill).
+    assert.deepEqual(calls(h, 'capture-choice'), [['capture-choice', 'statements']]);
     assert.equal(h.ledger.captureOptOut, true);
     assert.equal(calls(h, 'capture-write-start').length, 0);
     assert.equal(calls(h, 'requestSmsPermission').length, 0);
@@ -505,7 +546,7 @@ test('the real overlay stays visible through a failed completion save and its re
   assert.ok(failed, 'The real render condition admits the failure surface');
   assert.match(text(failed), /onboardFinishSaveFailedTitle/);
   assert.match(text(failed), /onboardFinishSaveFailedBody/);
-  const buttons = walk(failed).filter(node => node.type === 'Button');
+  const buttons = actionsOf(failed);
   assert.equal(buttons.length, 1, 'Failure exposes one save retry rather than restarting capture');
   assert.equal(buttons[0].props.label, 'storageRecoveryRetry');
   assert.equal(buttons[0].props.disabled, false);
@@ -563,7 +604,7 @@ test('automatic capture final-save failure retains the overlay and rendered Retr
   const failure = h.renderCompletion();
   assert.match(text(failure), /onboardFinishSaveFailedTitle/);
   assert.match(text(failure), /onboardFinishSaveFailedBody/);
-  const buttons = walk(failure).filter(node => node.type === 'Button');
+  const buttons = actionsOf(failure);
   assert.equal(buttons.length, 1);
   assert.equal(buttons[0].props.label, 'storageRecoveryRetry');
   assert.equal(buttons[0].props.disabled, false);
@@ -610,19 +651,26 @@ function preview(language) {
     '@/hooks/use-language': { useLanguage: () => language },
     '@/lib/i18n': i18n,
     '@/lib/haptics': { tapped() {} },
+    '@/lib/ledger-money': load(path.join(root, 'src/lib/ledger-money.ts'), {
+      '@/lib/currency-metadata': load(path.join(root, 'src/lib/currency-metadata.ts')),
+    }),
   };
-  const component = load(process.env.WAFRA_ONBOARDING_PREVIEW || path.join(root, 'src/components/onboarding/money-preview.tsx'), deps).MoneyPreview;
-  return { render() { index = 0; return component({ reducedMotion: true }); }, i18n };
+  const module = load(process.env.WAFRA_ONBOARDING_PREVIEW || path.join(root, 'src/components/onboarding/money-preview.tsx'), deps);
+  const component = module.MoneyPreview;
+  return { render(props = {}) { index = 0; return component({ reducedMotion: true, ...props }); }, i18n, sampleAmount: module.sampleAmount };
 }
 function walk(node, out = []) {
   if (Array.isArray(node)) node.forEach(child => walk(child, out));
-  else if (node && typeof node === 'object') { out.push(node); walk(node.props?.children, out); }
+  else if (node && typeof node === 'object') { out.push(node); walk(node.props?.children, out); walk(node.props?.footer, out); }
   return out;
 }
 function text(node) {
   if (Array.isArray(node)) return node.map(text).join(' ');
-  return node && typeof node === 'object' ? text(node.props?.children) : typeof node === 'string' ? node : '';
+  return node && typeof node === 'object' ? [text(node.props?.children), text(node.props?.footer)].join(' ')
+    : typeof node === 'string' ? node : '';
 }
+/** The rendered actions: the E buttons and the quiet text actions. */
+const actionsOf = tree => walk(tree).filter(node => node.type === 'EButton' || node.type === 'ETextAction');
 for (const language of ['en', 'ar']) {
   test(`sample interaction remains local and labeled before and after reveal/reset: ${language}`, () => {
     const h = preview(language);
@@ -640,3 +688,17 @@ for (const language of ['en', 'ar']) {
     }
   });
 }
+
+test('the sample amount follows the chosen ledger currency and never defaults to AED', () => {
+  const h = preview('en');
+  const sample = h.sampleAmount;
+  assert.deepEqual({ ...sample(null) }, { text: '24.50', spoken: '24.50' });
+  assert.equal(sample('AED').text, 'AED 24.50', 'the UAE sample is unchanged');
+  assert.equal(sample('SAR').text, 'SAR 24.50');
+  assert.equal(sample('JPY').text, 'JPY 2,450');
+  assert.equal(sample('KWD').text, 'KWD 2.450');
+  assert.equal(sample('INR').text, 'INR 245');
+  assert.equal(sample('ZZZ').text, '24.50', 'an unknown code is not printed as money');
+  assert.ok(text(h.render({ currency: 'EUR' })).includes('EUR 24.50'));
+  assert.ok(!text(h.render()).includes('AED'));
+});

@@ -107,10 +107,13 @@ test('Wallet does not compute the removed cash-outflow summary', () => {
 
 test('Wallet uses fresh balances after an account snapshot changes', () => {
   const p = screenProbe('wallet');
-  const before = walk(p.render()).find(node => node.props?.balanceCoverageText !== undefined).props.balanceFils;
+  // The balance is the slate band's figure (design language E): look in the
+  // band content as well as the sheet.
+  const withBand = (tree) => walk(tree).flatMap((node) => [node, ...(node.props?.bandContent ? walk(node.props.bandContent) : [])]);
+  const before = withBand(p.render()).find(node => node.props?.balanceCoverageText !== undefined).props.balanceFils;
   p.state = { ...p.state, accounts: p.state.accounts.map((account, i) => i === 0
     ? { ...account, snapshotFils: account.snapshotFils + 12345 } : account) };
-  const after = walk(p.render()).find(node => node.props?.balanceCoverageText !== undefined).props.balanceFils;
+  const after = withBand(p.render()).find(node => node.props?.balanceCoverageText !== undefined).props.balanceFils;
   assert.equal(after - before, 12345, 'performance caching must not freeze actual money updates');
 });
 

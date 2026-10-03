@@ -33,7 +33,11 @@ export interface UniversalParseContext {
   /** An existing language/market pack assists interpretation; it is not required. */
   market?: UniversalMarket;
   sender?: string;
-  /** Supply only a documented source convention or an explicit user choice. */
+  /**
+   * Supply only a documented source convention (a routed institution's own
+   * country) or the user's country setting (country.ts). Omitted when the
+   * country is unknown, so an ambiguous numeric date stays unresolved.
+   */
   dateOrder?: 'DMY' | 'MDY' | 'YMD';
   /** Documented source aliases, never aliases guessed from the ledger currency. */
   currencyAliases?: CurrencyAliasMap;

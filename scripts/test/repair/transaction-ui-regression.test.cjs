@@ -30,7 +30,9 @@ for (const language of ['en', 'ar']) {
       assert.equal(input.props.accessibilityLabel, t('searchMerchants'));
       assert.equal(input.props.placeholder, t('transactionSearchPlaceholder'));
       assert.notEqual(input.props.placeholder, t('searchMerchants'));
-      assert.ok(text(h.tree).includes(t('transactionSearchLabel')));
+      // On the band the pill's placeholder names what it matches and the label
+      // is spoken; on the sheet (large text) the field keeps its visible label.
+      if (largeText) assert.ok(text(h.tree).includes(t('transactionSearchLabel')));
       input.props.onChangeText('Noon');
       assert.ok(h.events.some(e => e[0] === 'state' && e[2] === 'Noon'));
       input.props.onSubmitEditing();
@@ -55,7 +57,11 @@ for (const language of ['en', 'ar']) {
       const t = h.deps['@/lib/i18n'].t;
       assert.equal(tree.props.testID, 'entry-detail-sheet');
       assert.ok(tree.props.footer);
-      assert.equal(style(tree.props.footer).flexDirection, largeText ? 'column' : 'row');
+      // Design language E: Done closes a read; Edit and Delete sit beside each
+      // other under it (stacked at the accessibility sizes).
+      assert.ok(labelled(tree.props.footer, h.deps['@/lib/reference-copy'].entryDetailCopy[language].done));
+      const actions = walk(tree.props.footer).find(n => n.props?.testID === 'entry-detail-actions');
+      assert.equal(style(actions).flexDirection, largeText ? 'column' : 'row');
       assert.ok(labelled(tree.props.footer, t('editEntry')));
       assert.ok(labelled(tree.props.footer, t('delete')));
       assert.equal(labelled(tree.props.children, t('delete')), undefined);
@@ -175,8 +181,10 @@ test('entry edit does not rescan merchant history for every typed character', ()
     'editable title/category must not drive a full-ledger merchant scan');
   assert.match(source, /countMerchantMatches\(merchant, category\)/,
     'the current edited merchant is counted once when Save actually needs the rule prompt');
-  assert.equal((source.match(/horizontal nestedScrollEnabled/g) || []).length, 1,
-    'the category rail must cooperate with the vertical sheet scroll; the account rail is now a picker bottom sheet, not an inline horizontal ScrollView');
+  assert.equal((source.match(/horizontal nestedScrollEnabled/g) || []).length, 0,
+    'categories are a wrapping grid, so no horizontal rail competes with the vertical sheet scroll; the account rail is a picker bottom sheet');
+  assert.equal((source.match(/<CategoryChips\b(?=[^>]*categories=\{categories\})(?=[^>]*createType=\{income \? 'income' : 'expense'\})[^>]*layout="wrap"\s*\/>/g) || []).length, 2,
+    'both the edit form and the category sheet state use the wrapping category grid');
 });
 
 test('narrow screens give search full width without reducing the font size', () => {
@@ -203,12 +211,42 @@ test('an unresolved transfer moves to its own view without contributing to regul
   const notice = walk(h.tree).find(n => n.props?.testID === 'transactions-separated-transfers');
   assert.ok(notice);
   assert.match(text(notice), /1 transfer record/);
-  assert.match(text(notice), /Needs review/);
+  assert.doesNotMatch(text(notice), /ownership review|Needs review/,
+    'a generic unknown transfer is not announced as a review chore');
   const link = walk(h.tree).find(n => n.props?.testID === 'transactions-transfers-link');
   assert.ok(link); link.props.onPress();
   assert.ok(h.events.some(event => event[0] === 'route' && event[1] === '/transfers'));
   assert.equal(walk(h.tree).find(n => n.props?.testID === 'transactions-unresolved-transfers'), undefined,
     'transfer review belongs under Accounts rather than the transaction summary');
+});
+
+for (const language of ['en', 'ar']) test(`${language}: the review note appears when a separated transfer is in the reconciler's review queue`, () => {
+  const rows = [
+    fixtureRow('purchase', { amountFils: 12500 }),
+    fixtureRow('generic', { title: 'Incoming transfer', type: 'income', category: 'other', amountFils: 25000 }),
+    fixtureRow('queued', { title: 'Outgoing transfer', category: 'other', amountFils: 40000 }),
+  ];
+  const h = createHarness({ language, state: { transactions: rows }, period: { mode: 'all' } });
+  h.deps['react-native'].Keyboard = { dismiss() {} };
+  h.deps['react-native'].SectionList = p => h.jsx('SectionList', { ...p, children: p.ListHeaderComponent });
+  h.deps['@react-native-community/datetimepicker'] = { __esModule: true, default: 'DateTimePicker' };
+  h.deps['@/lib/period'].periodRange = () => '';
+  // The reconciler queues only a credible own-account match. Mark one row as
+  // such a suggestion; the generic unknown stays out of the queue.
+  const ledger = h.deps['@/lib/ledger'];
+  const real = ledger.transferReconciliationForState;
+  ledger.transferReconciliationForState = state => {
+    const result = real(state);
+    result.byId.set('queued', { id: 'queued', status: 'likely-own', reason: 'amount-time', candidateIds: ['elsewhere'] });
+    result.pendingIds.add('queued');
+    return result;
+  };
+  const tree = h.local('@/app/transactions').default();
+  const notice = walk(tree).find(n => n.props?.testID === 'transactions-separated-transfers');
+  assert.ok(notice);
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(language);
+  assert.ok(text(notice).includes(words.separated(2)));
+  assert.ok(text(notice).includes(words.reviewNote), 'one queued record in view shows the review note');
 });
 
 const fixtureRow = (id, overrides = {}) => ({

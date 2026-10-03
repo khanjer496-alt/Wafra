@@ -95,8 +95,33 @@ const CERTIFIED_RULES: readonly CertificationRule[] = [
   { id: 'in-hdfc-card-purchase-v1', market: 'IN', institution: 'hdfc-bank', family: 'purchase', direction: 'debit',
     source: /(?:\b(?:card\s+purchase|purchase)\b[\s\S]{0,140}\b(?:debited|charged)\b|\b(?:debited|charged)\b[\s\S]{0,140}\bpurchase\b)/iu },
 
-  // Second-wave markets (CA/AU/BR/MX/SG) are not in the shipped UniversalMarket
-  // union yet; their certified grammars land together with their market packs.
+  // Second-wave markets. Each rule mirrors one issuer-documented alert family
+  // reconstructed in scripts/test/fixtures/public-alert-evidence.js
+  // (standard-derived, fictional values; not consented real alerts). Canada has
+  // no certified rule: its only documented family is Interac Request Money,
+  // which is lifecycle evidence and never posts.
+  //
+  // These documented templates are headings ("compra", "cargo recurrente",
+  // "PayNow outgoing") rather than completion statements, and the same
+  // headings open holds, requests, reversals, fraud questions, promotions and
+  // limit changes. Each rule is therefore anchored to the WHOLE documented
+  // template (case-sensitive upper-case counterparty, nothing after it), and it
+  // still applies only to an event the semantic layer independently proved
+  // posted. Today only the ANZ Osko credit carries its own completion verb;
+  // the Itaú, Banorte and DBS headings are not posted evidence, so their rules
+  // stay inert (Review) until a template-specific posting adapter exists.
+  { id: 'au-anz-osko-credit-v1', market: 'AU', institution: 'anz-australia', family: 'transfer', direction: 'credit',
+    source: /^ANZ: AUD \d{1,3}(?:,\d{3})*\.\d{2} received via Osko into your account\.?$/u },
+  { id: 'br-itau-card-purchase-v1', market: 'BR', institution: 'itau-brasil', family: 'purchase', direction: 'debit',
+    source: /^Ita[uú]: compra com cart[aã]o (?:BRL|R\$) ?\d{1,3}(?:\.\d{3})*,\d{2} em [A-Z0-9][A-Z0-9 &'.*/-]{0,60}[A-Z0-9]\.?$/u },
+  { id: 'mx-banorte-purchase-v1', market: 'MX', institution: 'banorte-mexico', family: 'purchase', direction: 'debit',
+    source: /^Banorte: \d{2}\/\d{2} compra (?:MXN|\$) ?\d{1,3}(?:,\d{3})*\.\d{2} [A-Z0-9][A-Z0-9 &'.*/-]{0,60}\. Tarjeta terminaci[oó]n \d{4}\.?$/u },
+  { id: 'mx-banorte-recurring-v1', market: 'MX', institution: 'banorte-mexico', family: 'recurring-payment', direction: 'debit',
+    source: /^Banorte: \d{2}\/\d{2} cargo recurrente (?:MXN|\$) ?\d{1,3}(?:,\d{3})*\.\d{2} [A-Z0-9][A-Z0-9 &'.*/-]{0,60}\. Tarjeta terminaci[oó]n \d{4}\.?$/u },
+  { id: 'mx-banorte-refund-v1', market: 'MX', institution: 'banorte-mexico', family: 'refund', direction: 'credit',
+    source: /^Banorte: \d{2}\/\d{2} devoluci[oó]n (?:MXN|\$) ?\d{1,3}(?:,\d{3})*\.\d{2} [A-Z0-9][A-Z0-9 &'.*/-]{0,60}\. Tarjeta terminaci[oó]n \d{4}\.?$/u },
+  { id: 'sg-dbs-paynow-outgoing-v1', market: 'SG', institution: 'dbs-singapore', family: 'transfer', direction: 'debit',
+    source: /^DBS(?: Bank)?: PayNow outgoing SGD \d{1,3}(?:,\d{3})*\.\d{2} to [A-Z0-9][A-Z0-9 &'.*/-]{0,60}[A-Z0-9]\.?$/u },
 ] as const;
 
 const NON_TRANSACTION_FAMILIES = new Set<UniversalBankEvent['family']>([

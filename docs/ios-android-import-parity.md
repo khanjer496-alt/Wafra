@@ -27,6 +27,11 @@ the shared import planner and ledger reducer, alongside Android `scanInbox`.
   inbox capture, including when they quote AED. A currency token is not evidence
   that a foreign issuer is a supported regional bank. Unsupported automatic
   postings remain available through the existing source-free Review flow.
+  Since the best-effort policy (`src/lib/best-effort-autopost.ts`), History
+  import and Android inbox/notification capture may add such an alert when
+  the policy proves a completed movement in the pinned ledger currency; the row
+  is marked "Auto-added — check". iOS live capture deliberately stays
+  review-only for unverified formats.
 - Live declines preserve valid Apple message identities, so an unrelated posting
   sharing the same received second cannot be removed by timestamp matching.
 - An admitted date-only repair runs before account discovery and snapshots. It

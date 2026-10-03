@@ -37,6 +37,8 @@ export type ScreenScaffoldProps = {
   keyboardAware?: boolean;
   keyboardVerticalOffset?: number;
   tabbed?: boolean;
+  /** Extra bottom space for a control that floats over the content (Android's Home Add). */
+  floatingClearance?: number;
   contentStyle?: StyleProp<ViewStyle>;
   testID?: string;
 };
@@ -50,16 +52,18 @@ export type ScreenContentInsets = {
 export function useScreenContentInsets({
   tabbed = false,
   hasFooter = false,
+  floatingClearance = 0,
 }: {
   tabbed?: boolean;
   hasFooter?: boolean;
+  floatingClearance?: number;
 }): ScreenContentInsets {
   const insets = useSafeAreaInsets();
   const tabBarClearance = useTabBarClearance();
   const footerClearance = hasFooter ? 48 + Spacing.four : 0;
-  const bottom = tabbed
+  const bottom = (tabbed
     ? tabBarClearance + footerClearance
-    : (Platform.OS === 'android' ? 0 : insets.bottom) + footerClearance + Spacing.four;
+    : (Platform.OS === 'android' ? 0 : insets.bottom) + footerClearance + Spacing.four) + floatingClearance;
   const top = tabbed && Platform.OS !== 'android' ? insets.top + Spacing.three : Spacing.three;
 
   // Stable inset objects let memoized lists skip unrelated search/menu renders.
@@ -86,11 +90,12 @@ export function ScreenScaffold({
   keyboardAware = false,
   keyboardVerticalOffset = 0,
   tabbed = false,
+  floatingClearance = 0,
   contentStyle,
   testID,
 }: ScreenScaffoldProps) {
   const safeAreaInsets = useSafeAreaInsets();
-  const contentInsets = useScreenContentInsets({ tabbed, hasFooter: footer !== undefined });
+  const contentInsets = useScreenContentInsets({ tabbed, hasFooter: footer !== undefined, floatingClearance });
   const keyboardHeight = useKeyboardHeight(keyboardAware && Platform.OS !== 'ios');
   const resolvedHeaderMode = headerMode === 'auto'
     ? (tabbed ? 'inline' : 'native')
@@ -123,7 +128,7 @@ export function ScreenScaffold({
     [effectiveInsets.contentInset.top, usesNativeHeader],
   );
   const footerClearance = footer !== undefined ? 48 + Spacing.four : 0;
-  const footerBottom = contentInsets.contentInset.bottom - footerClearance;
+  const footerBottom = contentInsets.contentInset.bottom - footerClearance - floatingClearance;
   const inlineHeader = header && !usesNativeHeader
     ? <ScreenHeader {...header} mode="inline" />
     : null;

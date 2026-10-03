@@ -19,10 +19,12 @@
  *  - `sessionSetupRan` — entitlement refresh and reminder sync happen once per
  *    launch, not once per screen that mounts.
  */
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState as RNAppState, Platform } from 'react-native';
 
+import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { useToast } from '@/components/ui/toast';
 import {
   hasBankNotificationAccess,
@@ -50,7 +52,8 @@ import {
   androidNotificationCaptureEnabled,
   androidSmsCaptureEnabled,
 } from '@/lib/android-capture-sources';
-import { committed } from '@/lib/haptics';
+import { captured, committed } from '@/lib/haptics';
+import { liveCaptureToastContent } from '@/lib/capture-toast';
 import { t, tf } from '@/lib/i18n';
 import {
   notificationDeliveryAllowed,
@@ -69,7 +72,9 @@ import {
 import {
   getSharedIosLocalCaptureCoordinator,
 } from '@/lib/ios-local-capture';
-import { useStore } from '@/lib/store';
+import { cachedReferenceQuote, loadReferenceQuote } from '@/lib/fx-rates';
+import { useStoreActions, useStoreSelector } from '@/lib/store';
+import { historyStatusOnly } from '@/lib/store-selection';
 import { isCaptureTimestamp } from '@/lib/ios-capture-health';
 import { loadIosMessageSetupProgress } from '@/lib/ios-message-onboarding';
 import { createInboxRefreshScheduler } from '@/lib/inbox-refresh-scheduler';
@@ -564,12 +569,36 @@ export type AutoImport = {
  * visits deliberately does not need to, because the throttle and the in-flight
  * join make a second watcher redundant rather than harmful.
  */
+const NOT_WATCHED_TRANSACTIONS: AppState['transactions'] = [];
+
 export function useAutoImport(
   watchForeground = false,
   watchStatus = watchForeground,
 ): AutoImport {
+  // Only the fields this hook reads. Everything else, import progress
+  // included, is read through getStateSnapshot(), so callers (Home, the
+  // pull-to-refresh control) no longer re-render on every store change.
+  const state = useStoreSelector(({ state: s }) => ({
+    hydrated: s.hydrated, onboarded: s.onboarded, captureOptOut: s.captureOptOut,
+    androidCaptureSources: s.androidCaptureSources, historyImport: historyStatusOnly(s.historyImport),
+    pro: s.pro, founderPro: s.founderPro, trialStartTs: s.trialStartTs,
+    // Read only by the effects that return early unless watchForeground (a
+    // constant per caller), so other callers do not follow every import page.
+    lastScanTs: watchForeground ? s.lastScanTs : 0,
+    dailySummary: watchForeground ? s.dailySummary : false,
+    transactions: watchForeground ? s.transactions : NOT_WATCHED_TRANSACTIONS,
+    accounts: watchForeground ? s.accounts : undefined,
+    cardDues: watchForeground ? s.cardDues : undefined,
+    bills: watchForeground ? s.bills : undefined,
+    budgets: watchForeground ? s.budgets : undefined,
+    notSubscriptions: watchForeground ? s.notSubscriptions : undefined,
+    cancelledSubscriptions: watchForeground ? s.cancelledSubscriptions : undefined,
+    monthStartDay: watchForeground ? s.monthStartDay : undefined,
+    language: watchForeground ? s.language : undefined,
+    marketId: watchForeground ? s.marketId : undefined,
+    ledgerMoney: watchForeground ? s.ledgerMoney : undefined,
+  }));
   const {
-    state,
     getStateSnapshot,
     getStateGeneration,
     importBatch,
@@ -579,8 +608,8 @@ export function useAutoImport(
     setMarket,
     recordIosCaptureWarning,
     clearIosCaptureWarning,
-  } = useStore();
-  const previousHistoryIncomplete = useRef(historyImportIncomplete(state.historyImport));
+  } = useStoreActions();
+  const reminderInputsObserved = useRef(false);
   const captureLedger = useMemo<CaptureLedgerAdapter>(() => ({
     getState: getStateSnapshot,
     getStateGeneration,
@@ -618,8 +647,15 @@ export function useAutoImport(
       native: iosNative,
       ledger: captureLedger,
       retireShortcutCapture: retireLegacyShortcutCapture,
+      // Private Mode makes no request: only a rate already known converts.
+      fxQuote: (base, quote, date) => {
+        const current = getStateSnapshot();
+        return current.privateMode
+          ? Promise.resolve(cachedReferenceQuote(base, quote, date, current.transactions))
+          : loadReferenceQuote(base, quote, date, { transactions: current.transactions });
+      },
     });
-  }, [captureLedger, iosNative]);
+  }, [captureLedger, getStateSnapshot, iosNative]);
   const iosCycleDependencies = useMemo<IosLocalCaptureCycleDependencies | null>(() => {
     if (!iosNative || !iosCoordinator) return null;
     return {
@@ -640,6 +676,9 @@ export function useAutoImport(
     };
   }, [getStateSnapshot, iosCoordinator, iosNative, recordIosCaptureWarning]);
   const toast = useToast();
+  // Read when a capture lands, which can be long after this render.
+  const privacyGateCleared = useRef(true);
+  privacyGateCleared.current = usePrivacyGateCleared();
   const router = useRouter();
   const [needsPermission, setNeedsPermission] = useState(false);
   const [captureState, setCaptureState] = useState<CaptureSurfaceState>('checking');
@@ -951,14 +990,33 @@ export function useAutoImport(
     }
   }, [getStateSnapshot]);
 
-  const showLiveCaptureFeedback = useCallback((count: number): void => {
+  const showLiveCaptureFeedback = useCallback((
+    count: number,
+    transactionIds: readonly string[] = [],
+  ): void => {
     if (count <= 0) return;
-    committed();
+    // A light tick, not the firmer "you committed something" tap: the user
+    // did nothing, a transaction simply arrived.
+    captured();
+    // Name the row only when exactly one is known by id; otherwise (a burst,
+    // or a caller that could only count) keep the generic line. Behind App
+    // Lock nothing is named: the announcement is spoken even while hidden.
+    let content: ReturnType<typeof liveCaptureToastContent> = null;
+    if (count === 1 && transactionIds.length === 1) {
+      const current = getStateSnapshot();
+      const row = current.transactions.find((transaction) => transaction.id === transactionIds[0]);
+      content = liveCaptureToastContent(row, current.ledgerMoney ?? null, current.language, privacyGateCleared.current, current.customCategories);
+    }
     toast.show(
-      count === 1 ? t('liveTransactionAdded') : tf('liveTransactionsAdded', { count }),
-      { tone: 'success', durationMs: 3200 },
+      content?.message ?? (count === 1 ? t('liveTransactionAdded') : tf('liveTransactionsAdded', { count })),
+      {
+        tone: 'success',
+        durationMs: 3200,
+        placement: 'top',
+        ...(content ? { trailing: content.amount, announcement: content.spoken } : {}),
+      },
     );
-  }, [toast]);
+  }, [getStateSnapshot, toast]);
 
   const performAutoImport = useCallback(
     async (interactive: boolean, liveEvent = false): Promise<AutoImportOutcome> => {
@@ -1131,7 +1189,7 @@ export function useAutoImport(
       // Source-free launch/resume maintenance stays quiet, but an actual live
       // Android provider edge should feel immediate once the durable row lands.
       if (liveEvent && !interactive) {
-        showLiveCaptureFeedback(outcome.transactions);
+        showLiveCaptureFeedback(outcome.transactions, outcome.transactionIds);
       } else if (interactive) {
         committed();
         toast.show(
@@ -1273,7 +1331,7 @@ export function useAutoImport(
         androidNotificationLastCheckedAt = Date.now();
         if (outcome.kind === 'imported') {
           postAndroidImportNotice(outcome.transactionIds);
-          if (liveEvent) showLiveCaptureFeedback(outcome.transactions);
+          if (liveEvent) showLiveCaptureFeedback(outcome.transactions, outcome.transactionIds);
           return 'imported';
         }
         if (liveEvent && pushRowsImportedByExisting > 0) {
@@ -1631,35 +1689,92 @@ export function useAutoImport(
     watchForeground,
   ]);
 
-  // The first session reminder sync may run while Android is still rebuilding
-  // retained SMS history. In that state syncPaymentReminders deliberately skips
-  // the full subscription recurrence projection. Rebuild once, after the final
-  // history page is durable, so reminders become complete without competing
-  // with parser/history work on every intermediate page.
+  // Session setup cannot cover a statement or repayment arriving later. The
+  // foreground owner follows only reminder inputs, coalesces changing snapshots,
+  // and waits for encrypted durability before updating the OS. History pages
+  // stay deferred until completion, including when setup ran during that job.
   useEffect(() => {
-    if (!watchForeground || Platform.OS !== 'android') return;
-    const incomplete = historyImportIncomplete(state.historyImport);
-    const wasIncomplete = previousHistoryIncomplete.current;
-    previousHistoryIncomplete.current = incomplete;
-    if (!wasIncomplete || incomplete || !state.hydrated || !state.onboarded) return;
+    if (!watchForeground || Platform.OS === 'web' || !state.hydrated || !state.onboarded) return;
+    const initialSchedule = !reminderInputsObserved.current;
+    reminderInputsObserved.current = true;
     let cancelled = false;
-    void (async () => {
-      await waitForForegroundHistoryIdle(SESSION_REMINDER_SYNC_GRACE_MS);
-      if (cancelled || RNAppState.currentState !== 'active') return;
-      const current = getStateSnapshot();
-      if (!current.hydrated || !current.onboarded || historyImportIncomplete(current.historyImport)) return;
+    let running = false;
+    // Session setup owns the initial plan, but this listener must still exist
+    // when a permission grant or a new calendar day changes it on resume.
+    let completed = initialSchedule;
+    let obligationsRunning = false;
+    let obligationsCompleted = initialSchedule;
+    const refresh = async () => {
+      if (cancelled || running || completed || RNAppState.currentState !== 'active' ||
+          getStateSnapshot().historyImport?.status === 'running') return;
+      running = true;
       try {
-        await syncPaymentReminders(current);
+        await waitForForegroundHistoryIdle(SESSION_REMINDER_SYNC_GRACE_MS);
+        if (cancelled || RNAppState.currentState !== 'active') return;
+        await ensureDurable();
+        if (cancelled || RNAppState.currentState !== 'active') return;
+        const current = getStateSnapshot();
+        if (!current.hydrated || !current.onboarded || current.historyImport?.status === 'running') return;
+        // A paused/failed history job may stay that way while independent bank
+        // pushes arrive. Their authoritative dues still deserve reminders;
+        // recurrence discovery waits until the retained history is complete.
+        await syncPaymentReminders(current, new Date(),
+          historyImportIncomplete(current.historyImport) ? { obligationsOnly: true } : undefined);
+        completed = true;
       } catch {
-        // Best-effort maintenance; completed history never depends on reminders.
+        // Reminders are best-effort; a later resume can retry this snapshot.
+      } finally {
+        running = false;
       }
-    })();
-    return () => { cancelled = true; };
+    };
+    // A live alert can arrive just before the user leaves. Native headless
+    // capture already deferred that event to us while the Activity was active;
+    // waiting for another app open would lose its reminder through the due day.
+    // Flush only bank-stated obligations on departure, without recurrence work.
+    const flushObligations = async () => {
+      if (cancelled || completed || obligationsRunning || obligationsCompleted) return;
+      obligationsRunning = true;
+      try {
+        await ensureDurable();
+        if (cancelled) return;
+        const current = getStateSnapshot();
+        if (!current.hydrated || !current.onboarded) return;
+        await syncPaymentReminders(current, new Date(), { obligationsOnly: true });
+        obligationsCompleted = true;
+      } catch {
+        // Best-effort delivery; the normal foreground refresh remains pending.
+      } finally {
+        obligationsRunning = false;
+      }
+    };
+    if (RNAppState.currentState === 'active') void refresh();
+    else if (state.historyImport?.status !== 'running') void flushObligations();
+    const sub = RNAppState.addEventListener('change', next => {
+      if (next === 'active') {
+        completed = false;
+        obligationsCompleted = false;
+        void refresh();
+      } else void flushObligations();
+    });
+    return () => { cancelled = true; sub.remove(); };
   }, [
+    ensureDurable,
     getStateSnapshot,
     state.historyImport?.status,
     state.hydrated,
     state.onboarded,
+    state.accounts,
+    state.cardDues,
+    state.transactions,
+    state.bills,
+    state.budgets,
+    state.notSubscriptions,
+    state.cancelledSubscriptions,
+    state.dailySummary,
+    state.monthStartDay,
+    state.language,
+    state.marketId,
+    state.ledgerMoney,
     watchForeground,
   ]);
 
@@ -1687,26 +1802,38 @@ export function useAutoImport(
   // ledger.
   const historyImportRunning = state.historyImport?.status === 'running';
   useEffect(() => {
-    if (!watchForeground || !state.hydrated || !state.onboarded || !state.dailySummary) return;
+    // Web has no local notifications (syncDailySummary is a no-op there), so
+    // it must not flush the ledger on every visibility change for nothing.
+    if (!watchForeground || Platform.OS === 'web' || !state.hydrated || !state.onboarded || !state.dailySummary) return;
     if (historyImportRunning) return;
     let cancelled = false;
-    void (async () => {
-      await waitForForegroundHistoryIdle(DAILY_SUMMARY_MAINTENANCE_GRACE_MS);
-      if (cancelled || RNAppState.currentState !== 'active') return;
-      const current = getStateSnapshot();
-      if (!current.hydrated || !current.onboarded || !current.dailySummary ||
-          current.historyImport?.status === 'running') return;
-      const startedAt = Date.now();
+    const refreshSummary = async (departing = false) => {
       try {
-        await syncDailySummary(current);
+        if (!departing) await waitForForegroundHistoryIdle(DAILY_SUMMARY_MAINTENANCE_GRACE_MS);
+        if (cancelled || (!departing && RNAppState.currentState !== 'active')) return;
+        await ensureDurable();
+        if (cancelled || (!departing && RNAppState.currentState !== 'active')) return;
+        const current = getStateSnapshot();
+        if (!current.hydrated || !current.onboarded || !current.dailySummary ||
+            current.historyImport?.status === 'running') return;
+        const startedAt = Date.now();
+        try {
+          await syncDailySummary(current);
+        } finally {
+          recordRuntimeOperation('daily-summary', Date.now() - startedAt);
+        }
       } catch {
-        // A digest is never worth surfacing an error over.
-      } finally {
-        recordRuntimeOperation('daily-summary', Date.now() - startedAt);
+        // Delivery may fail independently of the durable ledger; resume retries.
       }
-    })();
-    return () => { cancelled = true; };
-  }, [getStateSnapshot, historyImportRunning, state.dailySummary, state.hydrated, state.onboarded,
+    };
+    void refreshSummary(RNAppState.currentState !== 'active');
+    const sub = RNAppState.addEventListener('change', next => {
+      // Leaving before the maintenance grace expires must not lose tonight's
+      // only dated summary. Never quote an uncommitted ledger snapshot.
+      void refreshSummary(next !== 'active');
+    });
+    return () => { cancelled = true; sub.remove(); };
+  }, [ensureDurable, getStateSnapshot, historyImportRunning, state.dailySummary, state.hydrated, state.onboarded,
     state.transactions, watchForeground]);
 
   return {

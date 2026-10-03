@@ -1,3 +1,4 @@
+import { NEUTRAL_MARKET_ID } from '@/lib/country';
 import type { CategoryId } from '@/lib/types';
 
 /**
@@ -259,6 +260,34 @@ const SA: MarketPack = {
 
 export const MARKETS: MarketPack[] = [AE, SA];
 
+/**
+ * The parser pack for every country without a launch-tested one.
+ *
+ * It carries no bank registry and no country overlay: a user in Germany or
+ * the US must never have a sender attributed to a UAE bank, or see UAE banks
+ * offered as theirs. Its category vocabulary is the shared language and
+ * cross-border list (globalCategoryKeywords), which is exactly what the AE
+ * pack uses too, so categorisation is unchanged.
+ *
+ * The currency lexicon is the UAE one on purpose. It is NOT the user's
+ * currency — that is the pinned ledger currency, chosen explicitly before any
+ * money is recorded — it is only what the legacy Gulf grammar recognises as
+ * "local" when some older code path re-reads a stored message under the
+ * active pack. Keeping it identical to what these users ran under before
+ * (every non-Gulf user was silently on AE) means no stored row can re-parse
+ * differently, while an AED/SAR amount still meets the ledger's currency
+ * refusal exactly as before. It is deliberately absent from MARKETS: the
+ * relay, the Worker and every "known markets" lookup see only AE and SA.
+ */
+const NEUTRAL: MarketPack = {
+  id: NEUTRAL_MARKET_ID,
+  name: 'Worldwide',
+  flag: '\u{1F30D}',
+  currency: AE.currency,
+  banks: [],
+  keywords: [...ARABIC_KEYWORDS, ...CROSS_BORDER_KEYWORDS],
+};
+
 /** Shared language and cross-border vocabulary without any country overlay. */
 export function globalCategoryKeywords(): MarketPack['keywords'] {
   return [...ARABIC_KEYWORDS, ...CROSS_BORDER_KEYWORDS];
@@ -343,9 +372,13 @@ export function ledgerCurrencyDisplay(): string {
   );
 }
 
-/** Parser-market selection is independent from the ledger accounting currency. */
+/**
+ * Parser-market selection is independent from the ledger accounting currency.
+ * The neutral pack is selectable (a country without a launch pack), but it is
+ * not a member of MARKETS.
+ */
 export function canSelectMarket(id: string): boolean {
-  return MARKETS.some((market) => market.id === id);
+  return id === NEUTRAL_MARKET_ID || MARKETS.some((market) => market.id === id);
 }
 
 /**
@@ -355,7 +388,7 @@ export function canSelectMarket(id: string): boolean {
  */
 export function setActiveMarket(id: string): boolean {
   if (!canSelectMarket(id)) return false;
-  active = MARKETS.find((m) => m.id === id)!;
+  active = id === NEUTRAL_MARKET_ID ? NEUTRAL : MARKETS.find((m) => m.id === id)!;
   return true;
 }
 
@@ -422,7 +455,12 @@ export function withMarketPackForParsing<T>(
   }
 }
 
-/** Best-effort country from the device locale ("en-SA" → SA). */
+/**
+ * Parser pack from the device locale ("en-SA" → SA). Any locale outside the
+ * two launch markets — or none at all — selects the neutral pack. This used
+ * to fall back to AE, which silently gave every user in the world the UAE
+ * bank registry.
+ */
 export function detectMarketId(): string {
   try {
     const locale = Intl.DateTimeFormat().resolvedOptions().locale ?? '';
@@ -431,7 +469,7 @@ export function detectMarketId(): string {
   } catch {
     // Intl not available — fall through.
   }
-  return 'AE';
+  return NEUTRAL_MARKET_ID;
 }
 
 /** Bank identity from an SMS sender ID / app package name, per the active market. */

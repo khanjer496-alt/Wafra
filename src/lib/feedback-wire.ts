@@ -4,6 +4,19 @@ export const FEEDBACK_RETENTION_DAYS = 14;
 export const FEEDBACK_DIAGNOSTIC_MAX_BYTES = 16 * 1024;
 export const PARSER_RESEARCH_FEEDBACK_TEXT = 'Sanitized parser research report.';
 
+/**
+ * What an ordinary report is about, chosen by the user on the feedback screen.
+ * Optional: `null` means no type was chosen. Carried inside the diagnostic so
+ * a relay that predates it still accepts the report (unknown diagnostic keys
+ * are stored as sent) and a current relay validates it against this list.
+ */
+export const FEEDBACK_TOPICS = ['idea', 'broken', 'category'] as const;
+export type FeedbackTopic = (typeof FEEDBACK_TOPICS)[number];
+
+export function isFeedbackTopic(value: unknown): value is FeedbackTopic {
+  return typeof value === 'string' && (FEEDBACK_TOPICS as readonly string[]).includes(value);
+}
+
 export interface FeedbackDeliveryDisclosure {
   retentionDays: 14;
   reviewedBy: 'wafra-maintainers';
@@ -52,6 +65,8 @@ export interface ParserResearchWirePayload {
 
 interface FeedbackWireSource {
   schema: number;
+  /** Absent on payloads built before topics existed; sent as null. */
+  topic?: FeedbackTopic | null;
   message: string;
   detailRequested: string;
   detail: string;
@@ -80,6 +95,7 @@ export interface FeedbackWirePayload {
   aiReviewConsent: false;
   diagnostic: {
     reportSchema: number;
+    topic: FeedbackTopic | null;
     detailRequested: string;
     detail: string;
     withheld: string | null;
@@ -102,6 +118,7 @@ export function toFeedbackWirePayload(payload: FeedbackWireSource): FeedbackWire
     aiReviewConsent: false,
     diagnostic: {
       reportSchema: payload.schema,
+      topic: isFeedbackTopic(payload.topic) ? payload.topic : null,
       detailRequested: payload.detailRequested,
       detail: payload.detail,
       withheld: payload.withheld,

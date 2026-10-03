@@ -34,14 +34,19 @@ function importExitProgram(fixtureNames) {
     if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations)
       for (const name of bindings(declaration.name)) declarations.set(name, declaration);
   }
+  // The band's nav row is the screen's only header (design language E): its
+  // back control is `importNav.back`, used in first run and afterwards alike.
   function scan(node) {
-    if (ts.isConditionalExpression(node) && node.condition.getText(ast) === 'onboardingPresentation' && ts.isJsxSelfClosingElement(node.whenTrue)) { fragments.push(node); return; }
+    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === 'importNav' && node.initializer &&
+      ts.isObjectLiteralExpression(node.initializer)) { fragments.push(node.initializer); return; }
     if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === 'ConfirmSheet') fragments.push(node);
     ts.forEachChild(node, scan);
   }
   scan(component.body);
-  assert.equal(fragments.filter(node => ts.isConditionalExpression(node)).length, 1,
+  assert.equal(fragments.filter(node => ts.isObjectLiteralExpression(node)).length, 1,
     'Exactly one real import header is tested');
+  const navUse = source.match(/<BandScaffold[\s\S]*?nav=\{importNav\}/);
+  assert.ok(navUse, 'The band scaffold uses that nav row');
   function collect(node) {
     if (ts.isIdentifier(node) && !fixtureNames.has(node.text)) {
       const declaration = declarations.get(node.text);
@@ -130,7 +135,7 @@ function screen(options = {}) {
     dispatchIosMessageSetup: async event => { changes.push(event); events.push('mark-history'); return { returnToOnboarding: true }; },
     setHistoryCommitState: value => { input.historyCommitState = value; }, setNotice: value => notices.push(value),
     router: { replace: route => routes.push(['replace', route]), back: () => routes.push(['back']) },
-    onboardingPresentation: options.onboarding === true, t: key => key, SetupHeader: 'SetupHeader', ScreenHeader: 'ScreenHeader', ConfirmSheet: confirm,
+    t: key => key, ConfirmSheet: confirm,
     require: name => { assert.equal(name, 'react/jsx-runtime'); return { jsx, jsxs: jsx, Fragment: 'Fragment' }; },
   };
   const renderActual = vm.runInNewContext(importExitProgram(new Set(Object.keys(fixtures))), fixtures, { filename: sourceFile });
@@ -144,8 +149,8 @@ function screen(options = {}) {
     assert.equal(buttons.length, 2, 'Real ConfirmSheet exposes cancel and confirm'); return buttons[1].props;
   };
   return { input, services, nativeCalls, changes, routes, notices, events, controller, lock, flush, render, dialog, confirmButton,
-    header: () => walk(tree).find(node => ['SetupHeader', 'ScreenHeader'].includes(node.type)).props,
-    async back() { const header = this.header(); (header.back?.onPress ?? header.onBack)(); await flush(); },
+    header: () => tree.find(node => node && typeof node.back === 'function'),
+    async back() { this.header().back(); await flush(); },
     async cancel() { const sheet = dialog(); assert.ok(sheet); sheet.props.onClose(); await flush(); },
     async confirm() { confirmButton().onPress(); await flush(); },
     async replaceSession(id) { input.history = id; input.historyResult = { sessionId: id }; render(); await flush(); },
@@ -167,7 +172,7 @@ test('dismissing import Back confirmation keeps the session and review open', as
 });
 
 test('twenty rapid Back taps open one choice and never discard without consent', async () => {
-  const h = screen(); const back = (h.header().back?.onPress ?? h.header().onBack);
+  const h = screen(); const back = h.header().back;
   await Promise.all(Array.from({ length: 20 }, () => back())); await h.flush();
   assert.deepEqual(h.nativeCalls, []); assert.deepEqual(h.routes, []); assert.ok(h.dialog());
 });
@@ -246,9 +251,10 @@ test('ordinary paste Back keeps its existing navigation and respects the write l
   }
 });
 
-test('first-run styled header retains the same protected Back confirmation', async () => {
+test('the band nav row is the one header, first run or not, with the same protected Back confirmation', async () => {
   const h = screen({ onboarding: true });
-  assert.equal(typeof h.header().back.onPress, 'function');
+  assert.equal(typeof h.header().back, 'function');
+  assert.equal(h.header().title, 'importBankActivity');
   await h.back();
   assert.deepEqual(h.nativeCalls, []); assert.deepEqual(h.routes, []);
   assert.ok(h.dialog());

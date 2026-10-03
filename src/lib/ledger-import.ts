@@ -24,7 +24,7 @@ import {
 } from '@/lib/ledger-money';
 import { reconcilePaymentFlows } from '@/lib/payment-flow';
 import {
-  isTransferCandidate,
+  isTransferInertTransaction,
   normalizeTransferLinks,
   reconcileTransfers,
   reconciliationInternalIds,
@@ -53,10 +53,21 @@ export interface MaterializedImportBatch {
   cardTypes: NonNullable<ImportBatchInput['cardTypes']>;
   confirmedLedgerCurrency?: string;
   parserRereadComplete: boolean;
+  recentRereadParserVersion?: number;
   historyImport: ImportBatchInput['historyImport'];
   lastScanTs: number;
   updates: TxHealUpdate[];
 }
+
+const recentReread = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+
+/** The recent re-read receipt only moves forward, and only with proof. */
+const nextRecentReread = (state: AppState, batch: MaterializedImportBatch): number | undefined =>
+  recentReread(batch.recentRereadParserVersion) &&
+    batch.recentRereadParserVersion > (state.recentRereadParserVersion ?? 0)
+    ? batch.recentRereadParserVersion
+    : state.recentRereadParserVersion;
 
 const resolveAccountRef = (ref: string, accounts: Account[]): string =>
   /^\d+$/.test(ref) && Number(ref) < accounts.length ? accounts[Number(ref)].id : ref;
@@ -101,6 +112,8 @@ export const materializeImportBatch = (
     cardTypes: mapRefs(input.cardTypes),
     confirmedLedgerCurrency: input.confirmedLedgerCurrency,
     parserRereadComplete: input.parserRereadComplete === true,
+    ...(recentReread(input.recentRereadParserVersion)
+      ? { recentRereadParserVersion: input.recentRereadParserVersion } : {}),
     historyImport: input.historyImport,
     lastScanTs: input.lastScanTs,
     updates: (input.updates ?? []).map((update) => ({
@@ -172,15 +185,10 @@ const canUseIncrementalCaptureFastPath = (
   batch.newAccounts.length === 0 &&
   Object.keys(batch.bankNames).length === 0 &&
   Object.keys(batch.cardTypes).length === 0 &&
-  batch.transactions.every((transaction) =>
-    !isTransferCandidate(transaction) &&
-    transaction.isTransfer !== true &&
-    transaction.transferMatch === undefined &&
-    transaction.transferDecision === undefined &&
-    transaction.transferEvidence === undefined &&
-    transaction.paymentFlowSide === undefined &&
-    transaction.cardPaymentSide === undefined
-  );
+  // A captured instrument is an ownership observation (a card purchase can
+  // prove the endpoint of an existing transfer), so such rows take the
+  // canonical path; see isTransferInertTransaction.
+  batch.transactions.every(isTransferInertTransaction);
 
 type MoneyBearingImport = Pick<ImportBatchInput,
   'importMoney' | 'transactions' | 'newAccounts' | 'newDues' | 'newBills' | 'snapshots' | 'updates'>;
@@ -242,6 +250,7 @@ export const applyMaterializedImportBatch = (
       lastScanTs: Math.max(state.lastScanTs, batch.lastScanTs),
       historyImport: batch.historyImport ?? state.historyImport,
       parserVersion: batch.parserRereadComplete ? PARSER_BACKFILL_VERSION : state.parserVersion,
+      recentRereadParserVersion: nextRecentReread(state, batch),
     };
   }
   const accounts = reuseUnchangedRows(state.accounts, [...state.accounts, ...batch.newAccounts].map((account) => {
@@ -301,6 +310,7 @@ export const applyMaterializedImportBatch = (
     // proof that one new alert was imported. This distinction matters when a
     // backup is restored while an incremental capture is already in flight.
     parserVersion: batch.parserRereadComplete ? PARSER_BACKFILL_VERSION : state.parserVersion,
+    recentRereadParserVersion: nextRecentReread(state, batch),
   };
 
   // First-history import can contain tens of thousands of messages. Running

@@ -1,4 +1,4 @@
-import { canonicalCaptureSourceKey, isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
+import { alertTextClock, canonicalCaptureSourceKey, isUnboundAndroidSourceKey, isUsableCaptureSourceIdentity } from '@/lib/capture-source-identity';
 import { cardAccountName, colorForHint, estimatedMinimumFils } from '@/lib/cards';
 import {
   bankBrandForName,
@@ -11,13 +11,18 @@ import {
 import { singleKnownBank } from '@/lib/known-banks';
 import {
   bodyPrint,
+  captureEventIdentity,
   compatibleCaptureInstrument,
   duplicateGuard,
   fromDifferentStatementUploads,
   isApplePayWalletRow,
   isStatementCaptureSource,
   mergeCaptureInstrument,
+  sameMerchantCapture,
   statementUploadOf,
+  statementRowKey,
+  statementDescriptorsAgree,
+  type CaptureChannel,
   type DuplicateCandidate,
 } from '@/lib/dedupe';
 import { readBillAlias } from '@/lib/bill-alias';
@@ -47,7 +52,7 @@ import {
   type NonPostingReason,
   type ParsedSms,
 } from '@/lib/sms-parser';
-import type { CaptureChannel } from '@/lib/dedupe';
+import { bestEffortObservationKey } from '@/lib/best-effort-autopost';
 import type { Account, AppState, Bill, CaptureInstrument, CaptureSource, CardDue, ImportBatchInput, Transaction, TxHealUpdate } from '@/lib/types';
 
 
@@ -79,6 +84,7 @@ export type ScannedSms = Omit<ParsedSms, 'raw'> & {
   captureSource?: CaptureSource;
   /** Relay-assigned opaque id of the statement upload a PDF/CSV row came from. */
   statementImportId?: string;
+  statementRowIndex?: number;
   /**
    * Server-bound proof of the exact Shortcut branch and setup generation.
    * Only a marker for this receiving device's current generation may prove
@@ -459,24 +465,34 @@ function buildImportPlanInMarket(
   const guard = (): ReturnType<typeof duplicateGuard> => {
     if (!guardCache) {
       guardCache = duplicateGuard(matchableTransactions(), true, {
-        // Statement overlap may cross accounts only when the statement side
-        // names none, and never across two banks either side does name.
+        // Cross-file statement overlap needs a resolved source account; a
+        // bank name or an unassigned holding cannot establish ownership.
         accountBankIdentity: (accountId) => {
           const bankName = state.accounts.find((account) => account.id === accountId)?.bankName ??
             bankNames[accountId];
           return bankName ? bankIdentityForName(bankName) : undefined;
         },
         unresolvedAccount: (accountId) =>
-          accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID || isUnassignedTransferAccount(accountId),
+          accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID || accountId === UNASSIGNED_INCOME_ACCOUNT_ID ||
+          isUnassignedTransferAccount(accountId),
       });
       for (const id of protectedEditedPushConsumed) guardCache.consume(id);
       for (const candidate of protectedReplacementCandidates) guardCache.add(candidate);
     }
     return guardCache;
   };
+  // A source-stated bank name is independent of the ledger currency/market.
+  // The old active-pack lookup discarded HSBC in SAR ledgers and every named
+  // bank outside the launch packs, so the same receipt could not heal/reconcile.
+  // This is explicit structured evidence only; an unknown sender is not a bank.
+  const bankFromHint = (p: ScannedSms): ReturnType<typeof bankFromName> => {
+    const name = p.bankHint?.trim();
+    if (!name || name.length > 120 || /[\u0000-\u001f\u007f]/.test(name)) return null;
+    return bankBrandForName(name) ?? { name, color: colorForHint(p.card?.last4 ?? '0000') };
+  };
   const captureInstrumentOf = (p: ScannedSms): CaptureInstrument | undefined => {
     if (!p.card) return undefined;
-    const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
+    const bank = bankFromHint(p) ?? bankFromSender(p.sender);
     return {
       last4: p.card.last4,
       kind: p.card.kind,
@@ -487,11 +503,13 @@ function buildImportPlanInMarket(
    * Statement-upload provenance for dedupe: the relay's upload id (validated)
    * and the bank the statement itself named. Empty for every other capture.
    */
-  const statementFactsOf = (p: ScannedSms): Pick<DuplicateCandidate, 'statementImportId' | 'statementBank'> => {
+  const statementFactsOf = (p: ScannedSms): Pick<DuplicateCandidate, 'statementImportId' | 'statementRowIndex' | 'statementBank'> => {
     const statementImportId = statementUploadOf(p);
     if (!statementImportId) return {};
-    const bank = p.bankHint ? bankFromName(p.bankHint) : null;
-    return { statementImportId, ...(bank ? { statementBank: bankIdentityForName(bank.name) } : {}) };
+    const bank = bankFromHint(p);
+    return { statementImportId,
+      ...(statementRowKey(p) ? { statementRowIndex: p.statementRowIndex } : {}),
+      ...(bank ? { statementBank: bankIdentityForName(bank.name) } : {}) };
   };
   /**
    * A statement row may take an existing row's identity only when that row is
@@ -499,17 +517,37 @@ function buildImportPlanInMarket(
    * clock at midday, so a shared `s{ts}-{amount}` there is a collision between
    * different rows, not a re-read of one. The duplicate guard pairs those.
    */
-  const sameStatementUploadOrNone = (prior: Transaction | undefined, p: ScannedSms): Transaction | undefined =>
-    prior && fromDifferentStatementUploads(prior, p) ? undefined : prior;
+  const sameStatementUploadOrNone = (prior: Transaction | undefined, p: ScannedSms): Transaction | undefined => {
+    if (!prior) return undefined;
+    const incomingRow = statementRowKey(p);
+    const priorRow = statementRowKey(prior);
+    if (incomingRow && priorRow) {
+      if (incomingRow !== priorRow) return undefined;
+      const incomingType = p.kind === 'cardPayment' ? 'income' : p.type;
+      if ((!prior.userEdited && (prior.date !== p.date || prior.amountFils !== p.amountFils || prior.type !== incomingType ||
+          !compatibleCaptureInstrument(prior.captureInstrument, captureInstrumentOf(p)))) ||
+          (!prior.userEdited && !prior.titleEdited && !statementDescriptorsAgree(prior.title, p.merchant))) {
+        throw new Error('Statement row identity conflicts with stored financial facts');
+      }
+    }
+    // A file's synthetic midday clock cannot identify a live message. A
+    // retained provider identity may legitimately have been bound to a file
+    // row by the one-to-one statement matcher on an earlier import.
+    if (p.sourceEventId && prior.smsKey === canonicalCaptureSourceKey(`h${p.sourceEventId}`, p.smsTs)) return prior;
+    return fromDifferentStatementUploads(prior, p) ||
+      isStatementCaptureSource(prior.captureSource) !== isStatementCaptureSource(p.captureSource)
+      ? undefined : prior;
+  };
   let protectedEditedPushIndex: Map<string, Transaction[]> | null = null;
   const editedPushKey = (date: string, amountFils: number, type: Transaction['type']) =>
     `${date}|${amountFils}|${type}`;
   const protectedEditedPushFor = (p: ScannedSms, date: string): Transaction | undefined => {
-    if (p.channel === 'push' || !Number.isFinite(p.smsTs)) return undefined;
+    if (p.channel === 'push' || isStatementCaptureSource(p.captureSource) || !Number.isFinite(p.smsTs)) return undefined;
     if (!protectedEditedPushIndex) {
       const index = new Map<string, Transaction[]>();
       for (const row of state.transactions) {
-        if (row.source !== 'sms' || row.viaPush !== true || row.userEdited !== true || !Number.isFinite(row.ts)) continue;
+        if (row.source !== 'sms' || row.viaPush !== true || row.userEdited !== true ||
+          isStatementCaptureSource(row.captureSource) || !Number.isFinite(row.ts)) continue;
         // Wallet rows bind only through applePayWalletPriorFor's strict rule.
         if (isApplePayWalletRow(row)) continue;
         const key = editedPushKey(row.date, row.amountFils, row.type);
@@ -520,11 +558,18 @@ function buildImportPlanInMarket(
       protectedEditedPushIndex = index;
     }
     const incomingInstrument = captureInstrumentOf(p);
+    const incomingClock = textClockOf(p);
     let best: Transaction | undefined;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const row of protectedEditedPushIndex.get(editedPushKey(date, p.amountFils, p.type)) ?? []) {
       if (protectedEditedPushConsumed.has(row.id)) continue;
       if (!compatibleCaptureInstrument(row.captureInstrument, incomingInstrument)) continue;
+      // A user's category/account edit does not erase the alert's evidence.
+      // Different stated instants are different purchases, even when their
+      // notifications and SMS arrive inside the same two-minute window.
+      if (Number.isSafeInteger(row.textClock) && incomingClock !== undefined &&
+        row.textClock !== incomingClock) continue;
+      if (row.titleEdited !== true && !sameMerchantCapture(row.title, p.merchant)) continue;
       const distance = Math.abs(row.ts! - p.smsTs!);
       if (distance > 120_000 || distance >= bestDistance) continue;
       best = row;
@@ -769,7 +814,65 @@ function buildImportPlanInMarket(
     });
     return candidates.length === 1 ? candidates[0] : undefined;
   };
+  const consumedLegacyStatementPayments = new Set<string>();
+  /** A statement receipt can correct one old, explicitly named card payment.
+   * Never use this exception for an ordinary expense, an ownership decision,
+   * another date/amount/card, or ambiguous equal payments. Keep the live id.
+   */
+  const legacyStatementPaymentPrior = (p: ScannedSms, accountId: string): Transaction | undefined => {
+    const instrument = captureInstrumentOf(p);
+    if (!isStatementCaptureSource(p.captureSource) || p.kind !== 'cardPayment' ||
+        p.cardPaymentSide !== 'receipt' || !p.transferHint || !p.date ||
+        instrument?.kind !== 'credit' || !instrument.bankIdentity) return undefined;
+    const candidates = (transferRepairCandidates().get(
+      transferRepairKey(accountId, 'expense', p.amountFils, p.date),
+    ) ?? []).filter((row) => !consumedLegacyStatementPayments.has(row.id) &&
+      row.isTransfer === true && row.category === 'other' &&
+      row.cardPaymentSide === undefined && row.paymentFlowSide === undefined &&
+      row.originalCurrency === undefined && row.fxSource === undefined &&
+      row.captureInstrument?.kind === 'credit' &&
+      row.captureInstrument.bankIdentity === instrument.bankIdentity &&
+      row.captureInstrument.last4 === instrument.last4 &&
+      /^card(?:\s*•\s*\d{4})?\s+payment$/i.test(row.title.trim()));
+    return candidates.length === 1 ? candidates[0] : undefined;
+  };
+  /** Reverse arrival: a later legacy alert must not undo a statement receipt. */
+  const statementPaymentReceiptPrior = (p: ScannedSms, accountId: string): Transaction | undefined => {
+    const instrument = captureInstrumentOf(p);
+    if (isStatementCaptureSource(p.captureSource) || p.kind !== 'transaction' ||
+        p.type !== 'expense' || !p.transferHint || !p.date || p.paymentFlowSide ||
+        instrument?.kind !== 'credit' || !instrument.bankIdentity ||
+        !/^card(?:\s*•\s*\d{4})?\s+payment$/i.test(p.merchant.trim())) return undefined;
+    const candidates = (transferRepairCandidates().get(
+      transferRepairKey(accountId, 'income', p.amountFils, p.date),
+    ) ?? []).filter((row) => !consumedLegacyStatementPayments.has(row.id) &&
+      isStatementCaptureSource(row.captureSource) && row.isTransfer === true &&
+      row.cardPaymentSide === 'receipt' && row.category === 'other' &&
+      row.originalCurrency === undefined && row.fxSource === undefined &&
+      row.captureInstrument?.kind === 'credit' &&
+      row.captureInstrument.bankIdentity === instrument.bankIdentity &&
+      row.captureInstrument.last4 === instrument.last4);
+    return candidates.length === 1 ? candidates[0] : undefined;
+  };
   const updates: TxHealUpdate[] = [];
+  const claimStatementOccurrence = (prior: Transaction, p: ScannedSms): void => {
+    const key = statementRowKey(p);
+    if (!key || statementRowKey(prior) === key) return;
+    let previousPatch: TxHealUpdate | undefined;
+    for (let index = updates.length - 1; index >= 0; index -= 1) {
+      const patch = updates[index];
+      if (patch.id === prior.id && patch.statementOccurrences !== undefined) { previousPatch = patch; break; }
+    }
+    const claims = previousPatch?.statementOccurrences ?? prior.statementOccurrences ?? [];
+    if (claims.some((claim) => `${claim.importId}:${claim.rowIndex}` === key)) return;
+    if (claims.length >= 64) throw new Error('Statement occurrence claim capacity exceeded');
+    if (!p.date) throw new Error('Statement occurrence requires an explicit source date');
+    const next = [...claims, { importId: p.statementImportId!, rowIndex: p.statementRowIndex!,
+      date: p.date, amountFils: p.amountFils, type: p.kind === 'cardPayment' ? 'income' as const : p.type,
+      title: p.merchant.normalize('NFKC').trim().replace(/\s+/g, ' ') }];
+    if (previousPatch) previousPatch.statementOccurrences = next;
+    else updates.push({ id: prior.id, statementOccurrences: next });
+  };
   const healFromReparse = (
     smsKey: string | undefined,
     p: ScannedSms,
@@ -777,7 +880,7 @@ function buildImportPlanInMarket(
     cardPaymentSide?: 'debit' | 'receipt',
     stablePrior?: Transaction,
   ) => {
-    const prior = stablePrior ?? (smsKey ? compatiblePrior(smsKey, p) : undefined);
+    const prior = stablePrior ?? (smsKey ? sameStatementUploadOrNone(compatiblePrior(smsKey, p), p) : undefined);
     // A hand-entered row may explain one bank alert for duplicate prevention,
     // but it is never parser-owned. Do not attach parser roles or move it to a
     // guessed account during a later inbox re-read.
@@ -803,9 +906,14 @@ function buildImportPlanInMarket(
     const transferChanged = transferEvidence !== undefined &&
       JSON.stringify(transferEvidence) !== JSON.stringify(prior.transferEvidence);
     const clearTransferEvidence = prior.transferEvidence !== undefined && transferEvidence === undefined;
-    if (patch || accountChanged || instrumentProven || captureChanged || transferChanged || clearTransferEvidence) {
+    // A proven reading of the alert behind an "Auto-added — check" row
+    // settles it: the marker goes, the row stays.
+    const clearBestEffort = !!prior.bestEffort && !p.bestEffort;
+    if (patch || accountChanged || instrumentProven || captureChanged || transferChanged || clearTransferEvidence ||
+      clearBestEffort) {
       updates.push({
         ...(patch ?? { id: prior.id }),
+        ...(clearBestEffort ? { clearBestEffort: true as const } : {}),
         ...(accountChanged ? { accountId: resolvedAccountId } : {}),
         ...(instrumentProven ? { paymentInstrumentSource: 'alert' as const } : {}),
         ...(captureChanged ? { captureInstrument } : {}),
@@ -850,19 +958,30 @@ function buildImportPlanInMarket(
     const transferChanged = transferEvidence !== undefined &&
       JSON.stringify(transferEvidence) !== JSON.stringify(prior.transferEvidence);
     const clearTransferEvidence = !prior.userEdited && prior.transferEvidence !== undefined && transferEvidence === undefined;
-    if (!patch && !accountChanged && !identityChanged && !instrumentProven && !transferChanged && !clearTransferEvidence) return;
+    const clearBestEffort = !!prior.bestEffort && !p.bestEffort;
+    if (!patch && !accountChanged && !identityChanged && !instrumentProven && !transferChanged && !clearTransferEvidence &&
+      !clearBestEffort) return;
     updates.push({
       ...(patch ?? { id: matchedId }),
+      ...(clearBestEffort ? { clearBestEffort: true as const } : {}),
       ...(accountChanged ? { accountId: resolvedAccountId } : {}),
       ...(instrumentProven ? { paymentInstrumentSource: 'alert' as const } : {}),
       ...(transferChanged ? { transferEvidence } : {}),
       ...(clearTransferEvidence ? { clearTransferEvidence: true as const } : {}),
       smsKey,
       ts: p.smsTs,
+      ...(textClockOf(p) !== undefined ? { textClock: textClockOf(p) } : {}),
       viaPush: false,
       ...(p.card ? { captureInstrument: mergeCaptureInstrument(
             captureInstrumentOf(p), prior.captureInstrument) } : {}),
     });
+  };
+  // Text time is evidence/display only; delivery ts and source keys stay intact.
+  const textClocks = new Map<ScannedSms, number | null>();
+  const textClockOf = (p: ScannedSms): number | undefined => {
+    if (p.kind !== 'transaction' || isStatementCaptureSource(p.captureSource)) return undefined;
+    if (!textClocks.has(p)) textClocks.set(p, alertTextClock(p.raw, p.date));
+    return textClocks.get(p) ?? undefined;
   };
   const smsKeyOf = (p: ScannedSms): string | undefined =>
     p.sourceEventId
@@ -1015,7 +1134,7 @@ function buildImportPlanInMarket(
           return { accountId: hinted, confident: true };
         }
         if (createMissing) {
-          const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ??
+          const bank = bankFromHint(p) ??
             bankFromName(evidence.sourceBank) ?? bankFromSender(p.sender);
           const bankName = bank?.name ?? evidence.sourceBank;
           const idx = newAccounts.length;
@@ -1055,7 +1174,7 @@ function buildImportPlanInMarket(
       // parsed fees, receipts and salaries. Keep a stable unresolved reference
       // until real source evidence or the user identifies an account.
       const priorAccount = ambiguousFallbackAccountId ? accountAtRef(ambiguousFallbackAccountId) : undefined;
-      const issuer = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
+      const issuer = bankFromHint(p) ?? bankFromSender(p.sender);
       // A sender identifies an issuer, not one of the user's cards. Preserve
       // user choices and compatible old assignments; repair only a provable
       // cross-bank fallback. New unidentified events get no invented account.
@@ -1079,7 +1198,7 @@ function buildImportPlanInMarket(
     // real cards sharing their last four digits at different banks — one user
     // holds a Liv card and an ENBD card both ending 8575, and payments were
     // settling against the wrong one.
-    const bank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
+    const bank = bankFromHint(p) ?? bankFromSender(p.sender);
     const scoped = hintKey(bank?.name, last4, kind);
     const noteType = (ref: string) => {
       if (kind === 'account' || kind === 'unknown') return;
@@ -1359,7 +1478,18 @@ function buildImportPlanInMarket(
   // as the caller's own object so its queue record can be identified.
   const scannedRowOf = new Map(ordered.map((row, index) => [row, scanOrder[index]] as const));
 
+  // An auto-added row the person undid leaves a durable tombstone. A rescan,
+  // parser re-read or history import of the same alert must not re-add it:
+  // exact source identity always matches; the observation clock matches only
+  // another best-effort reading of the same time, currency and amount.
+  const undoneBestEffort = new Set(state.bestEffortUndone ?? []);
+
   for (const p of ordered) {
+    if (undoneBestEffort.size > 0 && p.kind === 'transaction') {
+      const undoKey = smsKeyOf(p);
+      if ((undoKey && undoneBestEffort.has(undoKey)) ||
+        (p.bestEffort && undoneBestEffort.has(bestEffortObservationKey(p.smsTs, p.currency, p.amountFils) ?? ''))) continue;
+    }
     const date = p.date ?? toISODate(new Date());
     if (p.kind === 'billDue') {
       // Same stale-misread sweep the cardStatement branch does below, and it
@@ -1397,7 +1527,7 @@ function buildImportPlanInMarket(
       }
       if (!p.date) continue;
       if (p.date < staleDueCutoff) continue;
-      const statementBank = (p.bankHint ? bankFromName(p.bankHint) : null) ?? bankFromSender(p.sender);
+      const statementBank = bankFromHint(p) ?? bankFromSender(p.sender);
       const bankOnlyCandidates = !p.card && statementBank
         ? accountCandidates.filter(
             ({ ref, account }) =>
@@ -1509,6 +1639,10 @@ function buildImportPlanInMarket(
       if (resolution.confident) noteSnapshot(accountId, p);
       const cardPaymentSide = cardPaymentSideOf(p);
       if (exactPrior) {
+        if (isStatementCaptureSource(p.captureSource)) {
+          claimStatementOccurrence(exactPrior, p);
+          guard().consume(exactPrior.id);
+        }
         // Exact retained-message identity is already one-to-one. Do not build
         // the generalized duplicate/cross-channel indexes just to rediscover
         // the same row during a parser backfill.
@@ -1531,6 +1665,14 @@ function buildImportPlanInMarket(
         );
         continue;
       }
+      const legacyStatementPayment = resolution.confident
+        ? legacyStatementPaymentPrior(p, accountId) : undefined;
+      if (legacyStatementPayment) {
+        consumedLegacyStatementPayments.add(legacyStatementPayment.id);
+        healFromReparse(undefined, p, accountId, cardPaymentSide, legacyStatementPayment);
+        guard().consume(legacyStatementPayment.id);
+        continue;
+      }
       // A card payment lands as income into the card account.
       const candidate = {
         date, amountFils: p.amountFils, title: p.merchant,
@@ -1544,6 +1686,10 @@ function buildImportPlanInMarket(
       if (duplicate.has(candidate)) {
         const matchedId = duplicate.takeMatchedId();
         const matchedPrior = matchedId ? priorById().get(matchedId) : undefined;
+        if (statementRowKey(p) && matchedPrior) {
+          claimStatementOccurrence(matchedPrior, p);
+          continue;
+        }
         const matchedOppositeSettlementSide =
           matchedPrior?.cardPaymentSide !== undefined &&
           cardPaymentSide !== undefined &&
@@ -1583,7 +1729,7 @@ function buildImportPlanInMarket(
         source: 'sms',
         smsKey,
         captureSource: p.captureSource,
-        ...(statementUploadOf(p) ? { statementImportId: statementUploadOf(p) } : {}),
+        ...statementFactsOf(p),
         cardPaymentSide,
         isTransfer: true,
         captureInstrument: captureInstrumentOf(p),
@@ -1597,14 +1743,25 @@ function buildImportPlanInMarket(
     const sourceCorrectionPrior = exactPrior ? undefined : legacyTransferSourcePrior(p);
     const stablePrior = exactPrior ?? sameStatementUploadOrNone(stableLocalPrior(p), p) ?? sourceCorrectionPrior;
     const prior = stablePrior;
+    // The event the alert text itself stated (clock to the second, money,
+    // card): lets a re-posted bank-app notification, or the SMS about it, be
+    // matched however long after the first copy it was delivered. Statement
+    // rows carry no source text and keep their own one-to-one matcher.
+    const textClock = textClockOf(p);
+    const eventIdentity = isStatementCaptureSource(p.captureSource) ? undefined : captureEventIdentity({
+      raw: p.raw, amountFils: p.amountFils, type: p.type, currency: p.currency,
+      captureInstrument: captureInstrumentOf(p),
+    });
     const captureCandidate = {
       date, amountFils: p.amountFils, title: p.merchant,
       type: p.type, smsKey, ts: p.smsTs, channel: p.channel, raw: p.raw,
+      ...(textClock !== undefined ? { textClock } : {}),
       captureSource: p.captureSource,
       ...statementFactsOf(p),
       ...(liveMessageObservation(p) ? { liveObservation: true } : {}),
       eventKind: 'transaction' as const,
       captureInstrument: captureInstrumentOf(p),
+      ...(eventIdentity ? { eventIdentity } : {}),
     };
     const protectedEditedPush = exactPrior ? undefined : protectedEditedPushFor(p, date);
     if (protectedEditedPush && smsKey) {
@@ -1671,10 +1828,20 @@ function buildImportPlanInMarket(
       (!prior?.userEdited && !prior?.captureInstrument && accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) ||
       (!prior?.userEdited && isUnassignedTransferAccount(accountId)) ? accountId : undefined;
     if (exactPrior) {
+      if (isStatementCaptureSource(p.captureSource)) {
+        claimStatementOccurrence(exactPrior, p);
+        guard().consume(exactPrior.id);
+      }
       healFromReparse(smsKey, p, healedAccountId, undefined, exactPrior);
       continue;
     }
     const duplicate = guard();
+    const statementReceipt = resolution.confident ? statementPaymentReceiptPrior(p, accountId) : undefined;
+    if (statementReceipt) {
+      consumedLegacyStatementPayments.add(statementReceipt.id);
+      duplicate.consume(statementReceipt.id);
+      continue;
+    }
     const statementPrior = !exactPrior && !stablePrior && resolution.confident
       ? statementTransferPrior(p, accountId)
       : undefined;
@@ -1708,6 +1875,10 @@ function buildImportPlanInMarket(
     if (duplicate.has(candidate)) {
       const matchedId = duplicate.takeMatchedId();
       const matchedPrior = matchedId ? priorById().get(matchedId) : undefined;
+      if (statementRowKey(p) && matchedPrior) {
+        claimStatementOccurrence(matchedPrior, p);
+        continue;
+      }
       if (p.sourceEventId && matchedId) {
         // Promote the matched live capture to the exact retained-Message key.
         // The next distinct history GUID can then survive reducer hydration.
@@ -1750,6 +1921,7 @@ function buildImportPlanInMarket(
           type: p.type,
           ...(accountForMatchedPrior(priorById().get(supersededId)) ? { accountId } : {}),
           ts: p.smsTs,
+          ...(textClock !== undefined ? { textClock } : {}),
           smsKey,
           viaPush: false,
           ...(p.card ? { captureInstrument: mergeCaptureInstrument(
@@ -1809,6 +1981,7 @@ function buildImportPlanInMarket(
       !p.transferHint &&
       p.type === 'expense' &&
       (p.merchant === 'Card purchase' ||
+        (p.merchant === 'Account debit' && p.categoryGuess === 'other') ||
         (p.categoryGuess === 'other' &&
           !p.categoryDeliberate &&
           !STRUCTURAL_TITLES.has(p.merchant)));
@@ -1817,24 +1990,30 @@ function buildImportPlanInMarket(
       amountFils: p.amountFils,
       originalAmountMinor: p.originalAmountMinor,
       originalCurrency: p.originalCurrency,
+      ...(p.originalMinorUnits !== undefined && p.originalExponent !== undefined
+        ? { originalMinorUnits: p.originalMinorUnits, originalExponent: p.originalExponent } : {}),
       fxRate: p.fxRate,
+      ...(p.fxRateDate !== undefined ? { fxRateDate: p.fxRateDate } : {}),
       fxSource: p.fxSource,
       category: p.categoryGuess,
       accountId,
       title: p.merchant,
       date,
       ts: p.smsTs,
+      ...(textClock !== undefined ? { textClock } : {}),
       source: 'sms',
       captureInstrument: captureInstrumentOf(p),
+      ...(p.bestEffort ? { bestEffort: p.bestEffort } : {}),
       smsKey,
       viaPush: p.channel === 'push' || undefined,
+      ...(eventIdentity ? { captureEventIdentity: eventIdentity } : {}),
       ...(p.channel === 'push' && p.captureSource === undefined && p.sourceEventId === undefined &&
         typeof p.notificationObservationId === 'string' &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p.notificationObservationId)
         ? { notificationObservationId: p.notificationObservationId } : {}),
       ...(liveMessageObservation(p) ? { messageObservationId: p.messageObservationId } : {}),
       captureSource: p.captureSource,
-      ...(statementUploadOf(p) ? { statementImportId: statementUploadOf(p) } : {}),
+      ...statementFactsOf(p),
       isTransfer: p.transferHint || undefined,
       transferEvidence: buildTransferEvidence(p, resolution.confident),
       paymentFlowSide: p.paymentFlowSide,
@@ -1846,7 +2025,9 @@ function buildImportPlanInMarket(
       // Relay/email/PDF ingestion deliberately discards the source body
       // before this device sees the structured row. Keep a diagnostic excerpt
       // only on Android's local parser path, where one actually exists.
-      raw: lowConfidence ? p.raw?.slice(0, 300) : undefined,
+      // A best-effort row never keeps message text: its marker and the
+      // structured fields are all the person needs to check it.
+      raw: lowConfidence && !p.bestEffort ? p.raw?.slice(0, 300) : undefined,
     };
     // Never post a possible second copy of a Wallet purchase silently. The
     // candidate stays in the duplicate guard above, so a same-scan push copy
@@ -1932,8 +2113,10 @@ function buildImportPlanInMarket(
         const row = priorBySmsKey.get(canonicalCaptureSourceKey(`h${d.sourceEventId}`, d.smsTs));
         if (!row || swept.has(row.id)) continue;
         // The scanner already proved byte-identical body, sender, adjacent
-        // provider ids and sub-second delivery. Preserve anything user-owned.
-        if (row.source !== 'sms' || row.userEdited || row.transferDecision || row.splits) continue;
+        // provider ids and sub-second delivery. Preserve anything user-owned,
+        // and anything a transfer pairing depends on.
+        if (row.source !== 'sms' || row.userEdited || row.transferDecision || row.splits ||
+            row.transferMatch || row.isTransfer) continue;
         swept.add(row.id);
         updates.push({ id: row.id, remove: true });
         declineReconciledCount += 1;
@@ -2006,14 +2189,23 @@ function buildImportPlanInMarket(
     // treating it as such creates a second monthly reminder every month.
     return due.billIdentity ?? null;
   };
+  const statedBillDate = (due: ScannedSms): string | undefined =>
+    due.date && Number.isInteger(due.dueDay) && Number(due.date.slice(8)) === due.dueDay
+      ? due.date : undefined;
+  const billObservationTime = (due: ScannedSms): number | undefined =>
+    Number.isSafeInteger(due.smsTs) && due.smsTs! > 0 ? due.smsTs : undefined;
+  const datedUnidentifiedProviders = new Set(billDues
+    .filter((due) => !billImportIdentity(due) && statedBillDate(due))
+    .map((due) => due.merchant.trim().toLowerCase()));
   const latestUnidentifiedCycle = billDues.reduce((latest, due) => {
     if (billImportIdentity(due)) return latest;
     const merchant = due.merchant.trim().toLowerCase();
+    if (datedUnidentifiedProviders.has(merchant) && !statedBillDate(due)) return latest;
     const cycle = due.date?.slice(0, 7) ?? '';
     if (cycle > (latest.get(merchant) ?? '')) latest.set(merchant, cycle);
     return latest;
   }, new Map<string, string>());
-  const latestBillDues = [...billDues.reduce((latest, due) => {
+  const groupedBillDues = billDues.reduce((groups, due) => {
     // Keep separately referenced accounts distinct when the bank supplies an
     // account/reference identity, while still collapsing monthly repeats.
     const merchant = due.merchant.trim().toLowerCase();
@@ -2022,16 +2214,36 @@ function buildImportPlanInMarket(
     // With no account identity, retain distinct obligations from the newest
     // provider cycle (amount/day are the only structured facts available),
     // but never resurrect the same provider's previous month beside it.
-    if (!identity && cycle !== latestUnidentifiedCycle.get(merchant)) return latest;
+    if (!identity && (cycle !== latestUnidentifiedCycle.get(merchant) ||
+        (datedUnidentifiedProviders.has(merchant) && !statedBillDate(due)))) return groups;
     const key = identity
       ? `${merchant}|${identity}`
       : `${merchant}|unidentified|${due.amountFils}|${due.dueDay ?? due.date?.slice(8) ?? ''}`;
-    const prior = latest.get(key);
-    const dueTime = due.smsTs ?? Date.parse(`${due.date ?? '1970-01-01'}T00:00:00Z`);
-    const priorTime = prior?.smsTs ?? Date.parse(`${prior?.date ?? '1970-01-01'}T00:00:00Z`);
-    if (!prior || dueTime >= priorTime) latest.set(key, due);
-    return latest;
-  }, new Map<string, ScannedSms>()).values()];
+    const group = groups.get(key) ?? [];
+    group.push(due);
+    groups.set(key, group);
+    return groups;
+  }, new Map<string, ScannedSms[]>());
+  const latestBillDues = [...groupedBillDues.values()].map((group) => {
+    // A recent reminder for an older bill is still the older cycle. Align
+    // batch selection with mergeImportedBills before considering source time.
+    const latestDate = group.reduce((latest, due) => {
+      const date = statedBillDate(due) ?? '';
+      return date > latest ? date : latest;
+    }, '');
+    const cycle = latestDate ? group.filter((due) => statedBillDate(due) === latestDate) : group;
+    const unknownClock = cycle.some((due) => billObservationTime(due) === undefined);
+    const latestTime = cycle.reduce((latest, due) => Math.max(latest, billObservationTime(due) ?? 0), 0);
+    const newest = cycle.filter((due) => (billObservationTime(due) ?? 0) === latestTime);
+    const unresolved = unknownClock ? cycle : newest;
+    if (new Set(unresolved.map((due) => due.amountFils)).size > 1) {
+      // No batch or new cursor is returned, so capture cannot acknowledge an
+      // obligation that was silently omitted. A generic Review lane is not
+      // yet part of the planner contract; retain the source for recovery.
+      throw new Error('Conflicting bill notices require distinct source timestamps');
+    }
+    return newest[0];
+  });
 
   for (const due of latestBillDues) {
     const dueDay = due.dueDay ?? (due.date ? Number(due.date.slice(8)) : 0);
@@ -2043,6 +2255,8 @@ function buildImportPlanInMarket(
       amountFils: due.amountFils,
       dueDay,
       autoDetected: true,
+      ...(statedBillDate(due) ? { statedDueDate: statedBillDate(due) } : {}),
+      ...(billObservationTime(due) !== undefined ? { noticeObservedAt: billObservationTime(due) } : {}),
       ...(importIdentity ? { importIdentity } : {}),
     });
   }

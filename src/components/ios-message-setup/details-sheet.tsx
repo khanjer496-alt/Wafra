@@ -23,9 +23,10 @@ export const DetailsSheet = ({
   visible, onClose, section, source = 'message', language = 'en', fromOnboarding, actions = [], privacyExpanded, onTogglePrivacy,
 }: DetailsSheetProps) => {
   const walletHelp = t('iosApplePayWalletHelp', language === 'ar' ? 'ar' : 'en');
+  const canReinstall = actions.some(action => action.label === t('iosMessageAddAgain'));
   const lines: StringKey[] = section === 'future'
     ? source === 'apple-pay' ? [] : source === 'notification' ? ['iosNotificationSetupSummary', 'iosNotificationHelpInput', 'iosNotificationHelpStatus']
-    : ['iosMessageHelpLocal', 'iosMessageGuideSender', 'iosMessageGuideNoFilter',
+    : ['iosMessageHelpLocal', ...(canReinstall ? ['iosMessageHelpReinstall' as const] : []), 'iosMessageGuideSender', 'iosMessageGuideNoFilter',
       'iosMessagePermissionBody', 'iosMessagePermissionLocked',
       'iosMessageHelpProof', 'iosMessageSenderUnavailable']
     : ['iosMessageHelpReadable', 'iosMessageHelpCoverage', 'historyReadyCompact',

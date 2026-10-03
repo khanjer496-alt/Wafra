@@ -46,7 +46,17 @@ export async function copyTextToClipboard(text: string): Promise<void> {
 /** The picker may return a copied cache file or an external URI. Only the
  * former belongs to Wafra; consume it before showing the restore confirmation.
  */
-export async function readBackupPickerCopy(uri: string): Promise<string> {
+export async function readBackupPickerCopy(uri: string, pickedFile?: { text(): Promise<string> }): Promise<string> {
+  // Expo DocumentPicker provides a local File on web; native FileSystem is
+  // unavailable there. Reading that File never fetches or uploads a URL.
+  if (Platform.OS === 'web') {
+    try {
+      if (!pickedFile) throw new Error('The selected backup file is unavailable.');
+      return await pickedFile.text();
+    } finally {
+      if (uri.startsWith('blob:')) URL.revokeObjectURL(uri);
+    }
+  }
   let ownedCopy = false;
   try {
     const cache = FileSystem.cacheDirectory ? new URL(FileSystem.cacheDirectory) : null;

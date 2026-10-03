@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A due pill on the ochre band: the band's tile tone, fully rounded. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+  <corners android:radius="999dp" />
+  <solid android:color="@color/wafra_widget_upcoming_tile" />
+</shape>

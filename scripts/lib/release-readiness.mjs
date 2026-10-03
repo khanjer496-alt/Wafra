@@ -201,6 +201,34 @@ const checkBuildProfile = (eas, profile, submit, findings) => {
   }
 };
 
+const resolvedBuildProfile = (eas, name, seen = new Set()) => {
+  if (seen.has(name) || !eas?.build?.[name]) return null;
+  seen.add(name);
+  const profile = eas.build[name];
+  const parent = profile.extends ? resolvedBuildProfile(eas, profile.extends, seen) : {};
+  return parent ? { ...parent, ...profile, env: { ...parent.env, ...profile.env } } : null;
+};
+
+const checkTesterProBuild = (eas, profile, platform, publicEnv, findings) => {
+  const resolved = resolvedBuildProfile(eas, profile);
+  if (!resolved) return;
+  const env = { ...resolved.env, ...publicEnv };
+  const automatic = env.EXPO_PUBLIC_WAFRA_AUTO_FOUNDER_PRO;
+  const eligible = env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
+  const publicProfile = profile === 'production' || profile === 'production-candidate';
+  const invalid = automatic !== undefined && automatic !== '0' && automatic !== '1';
+  const allowedBeta = profile === 'history-beta' && platform === 'ios' && eligible &&
+    resolved.distribution === 'store' && resolved.environment === 'preview' && resolved.channel === 'history-beta';
+  if (invalid || (automatic === '1' && !allowedBeta) || (publicProfile && eligible)) {
+    findings.push(finding(
+      'tester-pro-build',
+      'Tester Pro cannot enter this release configuration',
+      'Automatic local grants are restricted to the isolated history-beta iOS profile. Public production and candidate profiles cannot enable founder access.',
+      'Disable both founder flags for public builds; use history-beta with its preview environment and beta channel for automatic tester Pro.',
+    ));
+  }
+};
+
 const checkProductionRuntime = (expo, eas, platform, publicEnv, findings) => {
   const extra = expo?.extra ?? {};
   const env = eas?.build?.production?.env ?? {};
@@ -350,6 +378,7 @@ export const assessReleaseReadiness = async ({ root, intent, publicEnv = {} }) =
     checkProject(expo, findings);
     checkPlatformIdentity(expo, platform, findings);
     checkBuildProfile(eas, profile, submit, findings);
+    checkTesterProBuild(eas, profile, platform, publicEnv, findings);
     if (intent.kind === 'store-release' && eas?.build?.development?.developmentClient !== true) {
       findings.push(finding('development-client', 'The development profile is not a development client', 'Device debugging would no longer use the expected client profile.', 'Set eas.json build.development.developmentClient to true.'));
     }

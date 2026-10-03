@@ -1,32 +1,50 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
+import { useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   findNodeHandle,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   TextInput,
   View,
 } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { BandTextField } from '@/components/add-band-field';
+import { BandScaffold } from '@/components/ui/band-scaffold';
+import { BandChip } from '@/components/ui/band/band-chip';
+import { BandSegmented } from '@/components/ui/band/band-segmented';
+import { EButton } from '@/components/ui/band/e-button';
 import { Icon } from '@/components/ui/icon';
+import { AmountKeypad, KeypadAmountDisplay } from '@/components/ui/amount-keypad';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { CategoryChips } from '@/components/ui/category-chips';
+import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { LedgerCurrencySheet, suggestedLedgerCurrency } from '@/components/ledger-currency-sheet';
 import { ScreenScaffold } from '@/components/ui/screen-scaffold';
 import { TextField } from '@/components/ui/text-field';
 import { useToast } from '@/components/ui/toast';
 import { Fonts, Radius, Spacing } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
-import { categorySupportsType, categoryLabel, EXPENSE_CATEGORIES, getCategory, INCOME_CATEGORIES } from '@/lib/categories';
+import { applyKeypadKey, keypadDisplay, keypadMinorUnits, keypadTextFromMinor, type KeypadKey } from '@/lib/amount-keypad';
+import { categorySupportsType } from '@/lib/categories';
 import { parseAmountToFils, parseAmountWithMoneySpec, shortDate, toISODate } from '@/lib/format';
-import { committed } from '@/lib/haptics';
+import { committed, tapped } from '@/lib/haptics';
 import { t as tUi, tf as tfUi } from '@/lib/i18n';
 import { accountDisplayName } from '@/lib/ledger';
 import { useStore } from '@/lib/store';
+import { cachedReferenceQuote, convertWithReferenceQuote, loadReferenceQuote, quoteFitsDay } from '@/lib/fx-rates';
+import { displayNumberConventions, formatMinorUnits, formatMinorUnitsForInput, ledgerMoneySpec } from '@/lib/ledger-money';
+import { motionAndroidCopy } from '@/lib/motion-android-copy';
+import { categoryAdvisor } from '@/lib/on-device-category';
+import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { reviewTemplateRuleFor, type PromoteReviewAlertInput } from '@/lib/review-promotion';
 import { isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
@@ -41,6 +59,23 @@ type WebGroupAriaProps = {
   'aria-invalid': boolean;
 };
 
+
+/**
+ * How long typing must pause before the category advisor is asked about the
+ * merchant. The advisor answers from rules first and only then may consult
+ * the on-device model; either way it runs once per pause, never per key.
+ */
+const SUGGESTION_DEBOUNCE_MS = 600;
+
+/** A single scrolling chip row that never steals a tap from an open keyboard. */
+const CHIP_SCROLL = {
+  horizontal: true,
+  showsHorizontalScrollIndicator: false,
+  keyboardShouldPersistTaps: 'handled',
+} as const;
+
+/** Quick dates offered on a manual entry, in days before today. */
+const DATE_OFFSETS = ['0', '1', '2', '3'] as const;
 
 const isApplePaySource = (item: ReviewEntry): boolean =>
   item.channel === 'push' && /^apple_pay_review_source_[a-f0-9]{32}$/.test(item.sourceKey);
@@ -72,7 +107,10 @@ function defaultReviewTitle(item: ReviewAlert): string {
 }
 
 export default function AddTransactionScreen() {
+  const { categoryLabel, getCategory, expenseCategories, incomeCategories } = useCategoryCatalog();
   const theme = useTheme();
+  // Design language E: adding is a capture flow and wears the green band.
+  const band = useBand('flow');
   const router = useRouter();
   const toast = useToast();
   const params = useLocalSearchParams<{ reviewId?: string | string[] }>();
@@ -133,6 +171,9 @@ export default function AddTransactionScreen() {
   });
   const [selectedInstrument, setSelectedInstrument] = useState<UniversalInstrument | null>(reviewInstrument ?? null);
   const [amountText, setAmountText] = useState('');
+  /** Currency on the receipt for a manual entry; null = the ledger's own. */
+  const [spendCurrency, setSpendCurrency] = useState<string | null>(null);
+  const [spendSheetVisible, setSpendSheetVisible] = useState(false);
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
   const suggestedCurrency = useMemo(suggestedLedgerCurrency, []);
   const [category, setCategory] = useState<CategoryId | null>(
@@ -182,22 +223,57 @@ export default function AddTransactionScreen() {
   const informationGeneration = useRef(getStateGeneration());
   const informationRouteId = useRef(reviewId);
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  // Manual entries type their amount on an in-app keypad. The system keyboard
+  // stays one tap away ("Type the amount") and is where a screen reader user
+  // starts, because TalkBack and VoiceOver already drive it well.
+  const [typingAmount, setTypingAmount] = useState(false);
+  const [keypadText, setKeypadText] = useState('');
+  const [keyFade, setKeyFade] = useState(0);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [advisedCategory, setAdvisedCategory] = useState<CategoryId | null>(null);
+  const reducedMotion = useReducedMotion();
+  const manualEntry = !reviewItem;
   informationRouteId.current = reviewId;
   useEffect(() => {
     informationDismissActive.current = true;
     return () => { informationDismissActive.current = false; };
   }, []);
+  useEffect(() => {
+    // Decided once, when the form opens; after that the mode is the user's.
+    if (!manualEntry || typeof AccessibilityInfo.isScreenReaderEnabled !== 'function') return;
+    let current = true;
+    AccessibilityInfo.isScreenReaderEnabled()
+      .then((on) => { if (current && on) setTypingAmount(true); })
+      .catch(() => {});
+    return () => { current = false; };
+  }, [manualEntry]);
 
-  const categories = type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
+  const categories = type === 'expense' ? expenseCategories : incomeCategories;
   const manualMoneySpec = state.ledgerMoney;
+  // Foreign spending is entered in the receipt's currency and converted on
+  // save with a dated reference rate; the original stays on the row.
+  const foreignSpec = !reviewItem && manualMoneySpec && spendCurrency &&
+    spendCurrency !== manualMoneySpec.currency ? ledgerMoneySpec(spendCurrency) : null;
+  const entrySpec = foreignSpec ?? manualMoneySpec ?? null;
+  // The keypad's canonical string converts through its own exact helper; only
+  // text typed on the system keyboard goes through the locale-aware parser.
   const amountFils = reviewItem
     ? parseAmountToFils(amountText)
-    : manualMoneySpec ? parseAmountWithMoneySpec(amountText, manualMoneySpec) : null;
+    : !typingAmount ? (entrySpec ? keypadMinorUnits(keypadText, entrySpec.exponent) : null)
+      : foreignSpec ? parseAmountWithMoneySpec(amountText, foreignSpec)
+        : manualMoneySpec ? parseAmountWithMoneySpec(amountText, manualMoneySpec) : null;
   const reviewRouteInvalid = !!reviewId && (!reviewItem || reviewItem.expiresAt <= Date.now());
   const sourceChanged = !!genericItem && (reviewBinding.current?.sourceKey !== genericItem.sourceKey ||
     reviewBinding.current?.observedAt !== genericItem.observedAt);
+  // A foreign amount is converted at promotion; only the same currency at a
+  // different exponent (unrepresentable) is still a mismatch.
   const moneyMatchesLedger = !selectedMoney || !state.ledgerMoney ||
-    (state.ledgerMoney.currency === selectedMoney.currency && state.ledgerMoney.exponent === selectedMoney.exponent);
+    state.ledgerMoney.currency !== selectedMoney.currency ||
+    state.ledgerMoney.exponent === selectedMoney.exponent;
+  const selectedMoneyForeign = !!selectedMoney && !!state.ledgerMoney &&
+    state.ledgerMoney.currency !== selectedMoney.currency;
+  const registeredMoneyForeign = !!registeredItem && !!state.ledgerMoney &&
+    state.ledgerMoney.currency !== registeredItem.amount.currency;
   const genericReady = !event || (ordinaryPosting && !sourceChanged && !!selectedMoney &&
     /^[1-9]\d*$/.test(selectedMoney.minorUnits) && moneyMatchesLedger && directionConfirmed &&
     title.trim().length > 0 && title.trim().length <= 80 &&
@@ -229,6 +305,159 @@ export default function AddTransactionScreen() {
     d.setDate(d.getDate() - dayOffset);
     return toISODate(d);
   }, [dayOffset, reviewDate, reviewItem]);
+
+  const copy = motionAndroidCopy(state.language);
+  const titleForAdvice = title.trim();
+  const merchantOverrides = state.merchantOverrides;
+  const adviceLanguage = state.language === 'ar' ? 'ar' : 'en';
+  useEffect(() => {
+    if (!manualEntry || type !== 'expense' || titleForAdvice.length < 2) {
+      setAdvisedCategory(null);
+      return;
+    }
+    let current = true;
+    const timer = setTimeout(() => {
+      categoryAdvisor.suggest({
+        merchant: titleForAdvice, appLanguage: adviceLanguage, overrides: merchantOverrides,
+        cancelled: () => !current,
+      }).then((advice) => {
+        if (current) setAdvisedCategory(advice.kind === 'none' ? null : advice.category);
+      }).catch(() => { if (current) setAdvisedCategory(null); });
+    }, SUGGESTION_DEBOUNCE_MS);
+    return () => { current = false; clearTimeout(timer); };
+  }, [adviceLanguage, manualEntry, merchantOverrides, titleForAdvice, type]);
+  // Rank the last 90 days from this entry's opening ledger. Saving changes
+  // frequency ranks while router.back() removes this screen; reordering the
+  // same native ScrollView children in that batch can tear down Android Fabric.
+  // A new entry gets the latest ledger; direction changes still rerank here.
+  const suggestionHistory = useRef<typeof state.transactions | null>(null);
+  if (suggestionHistory.current === null && state.hydrated) {
+    suggestionHistory.current = state.transactions;
+  }
+  const transactions = suggestionHistory.current ?? state.transactions;
+  const usualCategories = useMemo(() => {
+    if (!manualEntry) return [] as CategoryId[];
+    const since = new Date();
+    since.setDate(since.getDate() - 90);
+    const floor = toISODate(since);
+    const counts = new Map<CategoryId, number>();
+    for (const row of transactions) {
+      if (row.type !== type || row.date < floor || row.category === 'other') continue;
+      counts.set(row.category, (counts.get(row.category) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .filter(([id]) => categorySupportsType(id, type))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([id]) => id);
+  }, [manualEntry, transactions, type]);
+  const suggestedCategories = [...new Set([
+    ...(advisedCategory && categorySupportsType(advisedCategory, type) ? [advisedCategory] : []),
+    ...usualCategories,
+  ])].slice(0, 3);
+
+  const pressKey = (key: KeypadKey) => {
+    if (!entrySpec) return;
+    const next = applyKeypadKey(keypadText, key, entrySpec.exponent);
+    if (next === keypadText) return;
+    setKeypadText(next);
+    // Only an added character fades in; deleting one simply removes it.
+    if (key !== 'backspace') setKeyFade((value) => value + 1);
+  };
+  const switchAmountMode = () => {
+    tapped();
+    if (typingAmount) {
+      setKeypadText(entrySpec ? keypadTextFromMinor(amountFils, entrySpec.exponent) : '');
+      setKeyFade(0);
+      setTypingAmount(false);
+      return;
+    }
+    setAmountText(entrySpec && amountFils ? formatMinorUnitsForInput(amountFils, entrySpec) : '');
+    setTypingAmount(true);
+  };
+  const conventions = displayNumberConventions();
+  const amountShown = entrySpec
+    ? keypadDisplay(keypadText, (whole) => formatMinorUnits(Number(whole), { ...entrySpec, exponent: 0 }),
+      conventions.decimal)
+    : '0';
+  const dateLabels = [tUi('today'), tUi('yesterday'), tUi('twoDaysAgo'), tUi('threeDaysAgo')];
+  // Hidden for a review whose alert already matched exactly one account with
+  // an unambiguous instrument: that would only re-confirm what is known.
+  const showAccountGroup = !reviewItem || !matchedAccount || event?.instrument.evidence === 'ambiguous';
+  /**
+   * The account picker trigger: a chip in a manual entry's detail row, a full
+   * labelled field in a review. Either opens the same searchable sheet; the
+   * old inline list rendered every account as a 52pt row and ate the page
+   * for people with 30-40 saved cards.
+   */
+  const accountGroup = (variant: 'chip' | 'field') => {
+    const selected = state.accounts.find((a) => a.id === accountId) ?? null;
+    const borderColor = accountInvalid ? theme.expense : selected ? selected.color : theme.controlBorder;
+    const chip = variant === 'chip';
+    return (
+      <View
+        ref={accountRef}
+        collapsable={false}
+        accessibilityLabel={tUi('account')}
+        accessibilityLabelledBy={accountLabelId}
+        accessibilityHint={tUi('reviewAlertChooseAccount')}
+        {...(Platform.OS === 'web' ? accountWebAriaProps : {})}
+        style={chip ? styles.chipGroup : styles.fieldBlock}>
+        <ThemedText type={chip ? 'meta' : 'small'} themeColor="textSecondary" nativeID={accountLabelId}>
+          {tUi('account')}
+        </ThemedText>
+        {state.accounts.length > 0 ? (
+          <Pressable
+            testID="account-picker-trigger"
+            accessibilityRole="button"
+            accessibilityLabel={selected
+              ? chip ? copy.accountChipSpoken(accountDisplayName(selected)) : `${tUi('account')}: ${accountDisplayName(selected)}`
+              : tUi('reviewAlertChooseAccount')}
+            accessibilityHint={tUi('reviewAlertChooseAccount')}
+            onPress={() => setAccountPickerOpen(true)}
+            style={({ pressed }) => [
+              chip ? styles.chip : styles.accountTrigger,
+              {
+                borderColor,
+                backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
+              },
+            ]}>
+            {selected ? <>
+              <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
+              {/* Never cut short: the chip row wraps, so a long account
+                  name takes its own line (and wraps under Larger Text). */}
+              <ThemedText type="small" style={chip ? styles.chipText : styles.accountTriggerName}>
+                {accountDisplayName(selected)}
+              </ThemedText>
+            </> : <ThemedText type="small" themeColor="textSecondary" style={chip ? styles.chipText : styles.accountTriggerName}>
+              {chip ? copy.accountChoose : tUi('reviewAlertChooseAccount')}
+            </ThemedText>}
+            <Icon name="chevron-down" size={16} color={theme.textSecondary} />
+          </Pressable>
+        ) : null}
+        {!chip && accountInvalid && (
+          <ThemedText
+            type="meta"
+            themeColor="expense"
+            nativeID={accountErrorId}
+            accessibilityLiveRegion="polite"
+            selectable>
+            {tUi('reviewAlertChooseAccount')}
+          </ThemedText>
+        )}
+        {!chip && state.accounts.length === 0 && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push('/wallet', { preserveTabHistory: true })}
+            style={styles.emptyAccountAction}>
+            <ThemedText type="small" style={{ color: theme.primary }}>
+              {tUi('reviewAlertCreateAccount')}
+            </ThemedText>
+          </Pressable>
+        )}
+      </View>
+    );
+  };
 
   const switchType = (t: TransactionType) => {
     setType(t);
@@ -278,7 +507,9 @@ export default function AddTransactionScreen() {
           setConfirmingSeparate(false);
           setDuplicateReview({ item: reviewItem, generation: saveGeneration, input });
         } else {
-          toast.show(tUi('reviewAlertAddFailed'), { tone: 'error' });
+          const rateMissing = typeof error === 'object' && error !== null && 'reason' in error &&
+            error.reason === 'fx-rate-unavailable';
+          toast.show(tUi(rateMissing ? 'fxRateUnavailable' : 'reviewAlertAddFailed'), { tone: 'error' });
         }
       } finally {
         setSaving(false);
@@ -286,6 +517,40 @@ export default function AddTransactionScreen() {
       return;
     }
     if (!amountFils) return;
+    if (foreignSpec && manualMoneySpec) {
+      // Only two currency codes and the day are requested; Private Mode
+      // uses a rate already known on this device or none at all.
+      setSaving(true);
+      try {
+        const current = getStateSnapshot();
+        const quote = current.privateMode
+          ? cachedReferenceQuote(foreignSpec.currency, manualMoneySpec.currency, date, current.transactions)
+          : await loadReferenceQuote(foreignSpec.currency, manualMoneySpec.currency, date,
+            { transactions: current.transactions });
+        const conversion = quoteFitsDay(quote, date) ? convertWithReferenceQuote(
+          { currency: foreignSpec.currency, minorUnits: amountFils, exponent: foreignSpec.exponent },
+          manualMoneySpec.currency, manualMoneySpec.exponent, quote,
+        ) : null;
+        if (!conversion) {
+          toast.show(tUi('fxRateUnavailable'), { tone: 'error' });
+          return;
+        }
+        addTransaction({
+          type,
+          amountFils: conversion.amountFils,
+          ...conversion.fields,
+          category,
+          accountId,
+          title: title.trim() || categoryLabel(getCategory(category)),
+          date,
+          source: 'manual',
+        });
+        router.back();
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     addTransaction({
       type,
       amountFils,
@@ -539,47 +804,123 @@ export default function AddTransactionScreen() {
     );
   }
 
+  // Manual entry in design language E: the green band holds what is being
+  // written (Expense / Income, the amount as it is keyed, the merchant and
+  // the suggested categories); the sheet holds the detail chips and keypad.
+  // A captured alert keeps its review on the sheet.
+  const bandWords = everydayBandCopy(state.language);
+  const arabic = state.language === 'ar';
+  const entryCurrency = foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '—';
+  const manualBand = reviewItem ? undefined : <View style={styles.band}>
+    <BandSegmented palette={band} label={bandWords.entryType} value={type} onChange={switchType} testID="add-type"
+      segments={[{ value: 'expense', label: tUi('expenseLabel'), testID: 'add-type-expense' },
+        { value: 'income', label: tUi('incomeLabel'), testID: 'add-type-income' }]} />
+    {typingAmount ? null : <View style={styles.bandAmount}>
+      <ThemedText type="small" style={{ color: band.onBandSecondary }}>{bandWords.amountLabel}</ThemedText>
+      <KeypadAmountDisplay
+        // The same ref the typed field uses, so the protected
+        // focusFirstInvalid() reaches the amount in either mode.
+        ref={amountRef}
+        testID="amount-display"
+        palette={band}
+        currency={entryCurrency}
+        text={amountShown}
+        empty={keypadText === ''}
+        fadeKey={keyFade}
+        animate={!reducedMotion}
+        invalid={amountInvalid}
+        spokenLabel={keypadText === '' ? copy.amountEmptySpoken
+          : copy.amountSpoken(foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '', amountShown)}
+        errorText={amountInvalid ? (foreignSpec
+          ? tfUi('amountInCurrency', { currency: foreignSpec.currency }) : tUi('amountInLedgerCurrency')) : undefined}
+      />
+    </View>}
+    <View style={styles.amountTools}>
+      {state.ledgerMoney ? (
+        <Pressable
+          testID="spend-currency-trigger"
+          accessibilityRole="button"
+          accessibilityLabel={`${tUi('spendCurrencyTitle')}: ${foreignSpec?.currency ?? state.ledgerMoney.currency}`}
+          accessibilityHint={tUi('spendCurrencyHint')}
+          onPress={() => setSpendSheetVisible(true)}
+          style={({ pressed }) => [styles.bandPill, {
+            backgroundColor: foreignSpec ? band.selected : band.tile, opacity: pressed ? 0.75 : 1,
+          }]}>
+          <ThemedText type="smallBold" style={{ color: foreignSpec ? band.onSelected : band.onBand }}>
+            {foreignSpec?.currency ?? state.ledgerMoney.currency}</ThemedText>
+          <Icon name="chevron-down" size={16} color={foreignSpec ? band.onSelected : band.onBand} />
+        </Pressable>
+      ) : <View />}
+      <Pressable
+        testID="amount-mode-toggle"
+        accessibilityRole="button"
+        accessibilityLabel={typingAmount ? copy.keypadUseKeypad : copy.keypadTypeInstead}
+        onPress={switchAmountMode}
+        style={styles.modeToggle}>
+        <ThemedText type="small" style={[styles.underline, { color: band.onBand }]}>
+          {typingAmount ? copy.keypadUseKeypad : copy.keypadTypeInstead}
+        </ThemedText>
+      </Pressable>
+    </View>
+    {state.ledgerMoney && foreignSpec ? (
+      <ThemedText testID="foreign-manual-note" type="meta" style={{ color: band.onBandSecondary }}>
+        {tfUi('foreignManualNote', { ledger: state.ledgerMoney.currency, currency: foreignSpec.currency })}
+      </ThemedText>
+    ) : null}
+    <BandTextField
+      palette={band}
+      testID="add-merchant-field"
+      label={tUi('descriptionOptional')}
+      accessibilityLabel={tUi('descriptionOptionalA11y')}
+      value={title}
+      onChangeText={setTitle}
+      placeholder={type === 'expense' ? tUi('expenseExample') : tUi('incomeExample')}
+      arabic={arabic}
+    />
+    {suggestedCategories.length > 0 ? <View style={styles.suggestRow}>
+      <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{bandWords.suggested}</ThemedText>
+      <ScrollView {...CHIP_SCROLL} testID="suggested-categories"
+        accessibilityLabel={copy.suggestedCategories} contentContainerStyle={styles.chipScroll}>
+        {suggestedCategories.map((id) => {
+          const meta = getCategory(id);
+          return <BandChip key={id} testID={`suggested-category-${id}`} palette={band} icon={meta.icon}
+            label={categoryLabel(meta)} selected={category === id}
+            accessibilityHint={copy.suggestedCategorySpoken(categoryLabel(meta))}
+            onPress={() => { tapped(); setCategory(id); }} />;
+        })}
+      </ScrollView>
+    </View> : null}
+  </View>;
+
   return (
     <>
-    <ScreenScaffold
+    <BandScaffold
+      band="flow"
       keyboardAware
-      headerMode="inline"
-      header={{
+      presentedAsModal
+      testID="add-transaction-screen"
+      nav={{
+        close: () => router.back(),
         title: tUi(reviewItem ? 'genericReviewTitle' : 'newTransaction'),
-        back: { label: tUi('close'), icon: 'close', onPress: () => router.back() },
       }}
       scrollProps={{ keyboardShouldPersistTaps: 'handled' }}
       contentStyle={styles.content}
+      bandContent={manualBand}
       footer={(
-        <View
-          style={[
-            styles.footer,
-            { borderTopColor: theme.cardBorder, backgroundColor: theme.background },
-          ]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : 'saveTransaction')}
-            accessibilityState={{ disabled: saving || reviewRouteInvalid, busy: saving }}
-            onPress={onSavePress}
-            disabled={saving || reviewRouteInvalid}
-            style={[
-              styles.saveBtn,
-              {
-                backgroundColor: theme.primary,
-                opacity: saving || reviewRouteInvalid ? 0.4 : 1,
-              },
-            ]}>
-            <Icon name="check" size={20} color={theme.onPrimary} strokeWidth={2.6} />
-            <ThemedText type="smallBold" style={{ color: theme.onPrimary, fontSize: 16 }}>
-              {tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
-            </ThemedText>
-          </Pressable>
-        </View>
+        <EButton
+          palette={band}
+          label={tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
+          onPress={onSavePress}
+          // save() gives the commit haptic itself.
+          haptic="none"
+          disabled={saving || reviewRouteInvalid}
+          testID="add-save"
+        />
       )}>
       {/* A captured alert asks only what Wafra genuinely does not know. If the
           bank already supplied debit/credit direction, do not make the person
-          reconfirm it. Manual entries still need the normal type switch. */}
-      {(!reviewItem || !reviewDirectionKnown) ? <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
+          reconfirm it. A manual entry chooses its type on the band. */}
+      {(reviewItem && !reviewDirectionKnown) ? <View style={[styles.segment, { backgroundColor: theme.backgroundSelected }]}>
               {(['expense', 'income'] as TransactionType[]).map((t) => {
                 const active = type === t && directionConfirmed;
                 const color = t === 'expense' ? theme.expense : theme.income;
@@ -607,6 +948,11 @@ export default function AddTransactionScreen() {
       {event && !directionConfirmed ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericChooseDirection')}</ThemedText> : null}
       {sourceChanged ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericSourceChanged')}</ThemedText> : null}
       {!moneyMatchesLedger ? <ThemedText type="small" themeColor="textSecondary">{tUi('genericCurrencyMismatch')}</ThemedText> : null}
+      {(selectedMoneyForeign || registeredMoneyForeign) && state.ledgerMoney ? (
+        <ThemedText testID="review-foreign-conversion" type="small" themeColor="textSecondary">
+          {tfUi('foreignReviewConversionNote', { ledger: state.ledgerMoney.currency })}
+        </ThemedText>
+      ) : null}
       {/* A manual-only first run has no bank alert to establish accounting
           currency. Require one explicit choice instead of inheriting the
           parser pack's fallback currency. The phone region is only a hint. */}
@@ -705,38 +1051,26 @@ export default function AddTransactionScreen() {
             </View>
           </View>
         </View>
-      ) : (
+      ) : typingAmount ? (
         <TextField
           ref={amountRef}
-          label={tUi('amountInLedgerCurrency')}
+          label={foreignSpec ? tfUi('amountInCurrency', { currency: foreignSpec.currency }) : tUi('amountInLedgerCurrency')}
           value={amountText}
           onChangeText={setAmountText}
           numeric
           placeholder="0"
           autoFocus
           invalid={amountInvalid}
-          errorText={amountInvalid ? tUi('amountInLedgerCurrency') : undefined}
+          errorText={amountInvalid ? (foreignSpec
+            ? tfUi('amountInCurrency', { currency: foreignSpec.currency }) : tUi('amountInLedgerCurrency')) : undefined}
           leading={(
             <ThemedText type="smallBold" themeColor="textSecondary" style={styles.currency}>
-              {state.ledgerMoney?.currency ?? '—'}
+              {foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '—'}
             </ThemedText>
           )}
           style={[styles.amountInput, { color: theme.text, fontFamily: state.language === 'ar' ? Fonts.arabicBold : Fonts.sansSemi }]}
         />
-      )}
-
-      {/* Title */}
-      {!reviewItem ? <TextField
-        label={tUi(genericItem ? 'genericMerchantTitle' : 'descriptionOptional')}
-                value={title}
-                onChangeText={setTitle}
-                accessibilityLabel={tUi(genericItem ? 'genericMerchantTitle' : 'descriptionOptionalA11y')}
-                maxLength={genericItem ? 80 : undefined}
-                invalid={!!genericItem && (title.length > 80 || (showValidation && !title.trim()))}
-                errorText={genericItem && title.length > 80 ? tUi('genericShortenTitle') : undefined}
-                placeholder={type === 'expense' ? tUi('expenseExample') : tUi('incomeExample')}
-              /> : null}
-
+      ) : null}
       {/* Category grid */}
       {reviewFamily === 'transfer' && (
               <Pressable
@@ -754,36 +1088,59 @@ export default function AddTransactionScreen() {
               </Pressable>
       )}
 
-      {!reviewItem ? <View
-        ref={categoryRef}
-        collapsable={false}
-        accessibilityLabel={tUi('category')}
-        accessibilityLabelledBy={categoryLabelId}
-        accessibilityHint={tUi('reviewAlertChooseCategory')}
-        {...(Platform.OS === 'web' ? categoryWebAriaProps : {})}
-        style={styles.fieldBlock}>
-              <ThemedText
-          type="small"
-          themeColor="textSecondary"
-          nativeID={categoryLabelId}>
-          {tUi('category')}
-        </ThemedText>
-        <Pressable
-          testID="category-picker-trigger"
-          accessibilityRole="button"
-          accessibilityLabel={category ? `${tUi('category')}: ${categoryLabel(getCategory(category))}` : tUi('category')}
-          accessibilityState={{ expanded: categoryPickerOpen }}
-          onPress={() => setCategoryPickerOpen(true)}
-          style={({ pressed }) => [styles.accountTrigger, {
-            borderColor: categoryInvalid ? theme.expense : theme.controlBorder,
-            backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
-          }]}>
-          {category && <Icon name={getCategory(category).icon} size={18} color={theme.textSecondary} />}
-          <ThemedText type="small" style={styles.accountTriggerName}>
-            {category ? categoryLabel(getCategory(category)) : tUi('category')}
+      {/* One row for the three things a manual entry still needs: what it
+          was, when, and which account. Each chip opens its own picker. The
+          row wraps rather than scrolls: a sideways row hid the account chip
+          past the screen edge ("Emirat…"). */}
+      {!reviewItem ? <View testID="add-detail-chips" style={styles.chipRowWrap}>
+        <View style={styles.chipRow}>
+        <View
+          ref={categoryRef}
+          collapsable={false}
+          accessibilityLabel={tUi('category')}
+          accessibilityLabelledBy={categoryLabelId}
+          accessibilityHint={tUi('reviewAlertChooseCategory')}
+          {...(Platform.OS === 'web' ? categoryWebAriaProps : {})}
+          style={styles.chipGroup}>
+          <ThemedText type="meta" themeColor="textSecondary" nativeID={categoryLabelId}>
+            {tUi('category')}
           </ThemedText>
-          <Icon name="chevron-down" size={16} color={theme.textSecondary} />
-        </Pressable>
+          <Pressable
+            testID="category-picker-trigger"
+            accessibilityRole="button"
+            accessibilityLabel={category ? copy.categoryChipSpoken(categoryLabel(getCategory(category))) : tUi('category')}
+            accessibilityState={{ expanded: categoryPickerOpen }}
+            onPress={() => setCategoryPickerOpen(true)}
+            style={({ pressed }) => [styles.chip, {
+              borderColor: categoryInvalid ? theme.expense : band.rule,
+              backgroundColor: pressed ? band.rule : band.card,
+            }]}>
+            {category && <Icon name={getCategory(category).icon} size={16} color={theme.textSecondary} />}
+            <ThemedText type="small" style={styles.chipText}>
+              {category ? categoryLabel(getCategory(category)) : tUi('category')}
+            </ThemedText>
+            <Icon name="chevron-down" size={16} color={theme.textSecondary} />
+          </Pressable>
+        </View>
+        <View style={styles.chipGroup}>
+          <ThemedText type="meta" themeColor="textSecondary">{tUi('when')}</ThemedText>
+          <Pressable
+            testID="date-picker-trigger"
+            accessibilityRole="button"
+            accessibilityLabel={copy.dateChipSpoken(dateLabels[dayOffset] ?? dateLabels[0])}
+            accessibilityState={{ expanded: datePickerOpen }}
+            onPress={() => setDatePickerOpen(true)}
+            style={({ pressed }) => [styles.chip, {
+              borderColor: band.rule,
+              backgroundColor: pressed ? band.rule : band.card,
+            }]}>
+            <Icon name="calendar" size={16} color={theme.textSecondary} />
+            <ThemedText type="small" numberOfLines={1}>{dateLabels[dayOffset] ?? dateLabels[0]}</ThemedText>
+            <Icon name="chevron-down" size={16} color={theme.textSecondary} />
+          </Pressable>
+        </View>
+        {accountGroup('chip')}
+        </View>
         {categoryInvalid && (
           <ThemedText
             type="meta"
@@ -791,57 +1148,9 @@ export default function AddTransactionScreen() {
             nativeID={categoryErrorId}
             accessibilityLiveRegion="polite"
             selectable>
-                  {tUi('reviewAlertChooseCategory')}
-                </ThemedText>
-              )}
-      </View> : null}
-
-      {/* Account picker: a compact selected-pill trigger that opens a sheet.
-          The old inline chip list rendered every account as its own 52-tall
-          row; users with 30-40 saved cards saw the field eat the whole page.
-          Hidden entirely when a review already matched a single account and
-          the parsed instrument is unambiguous — that's just a re-confirmation. */}
-      {(!reviewItem || !matchedAccount || event?.instrument.evidence === 'ambiguous') ? <View
-        ref={accountRef}
-        collapsable={false}
-        accessibilityLabel={tUi('account')}
-        accessibilityLabelledBy={accountLabelId}
-        accessibilityHint={tUi('reviewAlertChooseAccount')}
-        {...(Platform.OS === 'web' ? accountWebAriaProps : {})}
-        style={styles.fieldBlock}>
-        <ThemedText
-          type="small"
-          themeColor="textSecondary"
-          nativeID={accountLabelId}>
-          {tUi('account')}
-        </ThemedText>
-        {state.accounts.length > 0 ? (() => {
-          const selected = state.accounts.find((a) => a.id === accountId) ?? null;
-          const borderColor = accountInvalid ? theme.expense : selected ? selected.color : theme.controlBorder;
-          return (
-            <Pressable
-              testID="account-picker-trigger"
-              accessibilityRole="button"
-              accessibilityLabel={selected ? `${tUi('account')}: ${accountDisplayName(selected)}` : tUi('reviewAlertChooseAccount')}
-              accessibilityHint={tUi('reviewAlertChooseAccount')}
-              onPress={() => setAccountPickerOpen(true)}
-              style={({ pressed }) => [
-                styles.accountTrigger,
-                {
-                  borderColor,
-                  backgroundColor: pressed ? theme.backgroundSelected : theme.backgroundElement,
-                },
-              ]}>
-              {selected ? <>
-                <View style={[styles.accountDot, { backgroundColor: selected.color }]} />
-                <ThemedText type="small" style={styles.accountTriggerName} numberOfLines={1}>{accountDisplayName(selected)}</ThemedText>
-              </> : <ThemedText type="small" themeColor="textSecondary" style={styles.accountTriggerName}>
-                {tUi('reviewAlertChooseAccount')}
-              </ThemedText>}
-              <Icon name="chevron-down" size={16} color={theme.textSecondary} />
-            </Pressable>
-          );
-        })() : null}
+            {tUi('reviewAlertChooseCategory')}
+          </ThemedText>
+        )}
         {accountInvalid && (
           <ThemedText
             type="meta"
@@ -855,7 +1164,7 @@ export default function AddTransactionScreen() {
         {state.accounts.length === 0 && (
           <Pressable
             accessibilityRole="button"
-            onPress={() => router.push('/wallet')}
+            onPress={() => router.push('/wallet', { preserveTabHistory: true })}
             style={styles.emptyAccountAction}>
             <ThemedText type="small" style={{ color: theme.primary }}>
               {tUi('reviewAlertCreateAccount')}
@@ -864,47 +1173,50 @@ export default function AddTransactionScreen() {
         )}
       </View> : null}
 
-      {/* Date quick-pick */}
-      {!reviewItem ? <View style={styles.fieldBlock}>
-          <>
-            <ThemedText type="small" themeColor="textSecondary">{tUi('when')}</ThemedText>
-              <View style={styles.dateRow}>
-                {[
-                  { label: tUi('today'), offset: 0 },
-                  { label: tUi('yesterday'), offset: 1 },
-                  { label: tUi('twoDaysAgo'), offset: 2 },
-                  { label: tUi('threeDaysAgo'), offset: 3 },
-                ].map((d) => {
-                  const active = dayOffset === d.offset;
-                  return (
-                    <Pressable
-                      key={d.offset}
-                      accessibilityRole="button"
-                      accessibilityLabel={d.label}
-                      accessibilityState={{ selected: active }}
-                      onPress={() => setDayOffset(d.offset)}
-                      style={[
-                        styles.dateChip,
-                        {
-                          backgroundColor: active ? `${theme.primary}22` : theme.backgroundElement,
-                          borderColor: active ? theme.primary : theme.cardBorder,
-                        },
-                      ]}>
-                      <ThemedText type="small">{d.label}</ThemedText>
-                    </Pressable>
-                  );
-                })}
-            </View>
-          </>
-      </View> : null}
+      {/* A review asks for an account only when the alert did not already
+          settle it: kept as its own labelled field, as before. */}
+      {reviewItem && showAccountGroup ? accountGroup('field') : null}
+
+      {!reviewItem && !typingAmount ? (
+        <AmountKeypad
+          palette={band}
+          exponent={entrySpec?.exponent ?? 2}
+          decimalMark={conventions.decimal}
+          disabled={!entrySpec}
+          onKey={pressKey}
+          labels={{ keypad: copy.keypadLabel, decimal: copy.keypadDecimal, backspace: copy.keypadDelete }}
+        />
+      ) : null}
 
 
-    </ScreenScaffold>
+    </BandScaffold>
     <LedgerCurrencySheet
       visible={currencySheetVisible}
       value={state.ledgerMoney?.currency ?? null}
       onClose={() => setCurrencySheetVisible(false)}
       onSelect={setLedgerMoney}
+    />
+    <LedgerCurrencySheet
+      visible={spendSheetVisible}
+      value={foreignSpec?.currency ?? state.ledgerMoney?.currency ?? null}
+      onClose={() => setSpendSheetVisible(false)}
+      onSelect={(code) => {
+        setSpendCurrency(code === state.ledgerMoney?.currency ? null : code);
+        setAmountText('');
+        // A different currency can have a different exponent (JPY 0, KWD 3):
+        // start the keypad afresh rather than reinterpret the old digits.
+        setKeypadText('');
+      }}
+      title={tUi('spendCurrencyTitle')}
+      body={tfUi('spendCurrencyBody', { ledger: state.ledgerMoney?.currency ?? '' })}
+    />
+    <ChoiceSheet
+      visible={datePickerOpen}
+      onClose={() => setDatePickerOpen(false)}
+      title={tUi('when')}
+      options={DATE_OFFSETS.map((offset, index) => ({ value: offset, label: dateLabels[index] }))}
+      value={String(dayOffset) as (typeof DATE_OFFSETS)[number]}
+      onSelect={(value) => setDayOffset(Number(value))}
     />
     <BottomSheet
       visible={categoryPickerOpen}
@@ -912,7 +1224,7 @@ export default function AddTransactionScreen() {
       title={tUi('category')}
       testID="category-picker-sheet">
       <View accessibilityRole="radiogroup" accessibilityLabel={tUi('category')}>
-        <CategoryChips
+        <CategoryChips createType={type}
           categories={categories}
           selected={category}
           onToggle={(value) => { setCategory(value); setCategoryPickerOpen(false); }}
@@ -972,6 +1284,11 @@ const styles = StyleSheet.create({
   content: {
     gap: Spacing.three + 4,
   },
+  band: { gap: 16 },
+  bandAmount: { gap: 2 },
+  bandPill: { minHeight: 44, borderRadius: 22, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  underline: { textDecorationLine: 'underline' },
+  suggestRow: { gap: 8 },
   segment: {
     flexDirection: 'row',
     borderRadius: 26,
@@ -1065,17 +1382,32 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     justifyContent: 'center',
   },
-  dateRow: {
+  amountTools: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: Spacing.two,
   },
-  dateChip: {
-    paddingHorizontal: Spacing.two + 4,
-    paddingVertical: Spacing.two,
-    borderRadius: Radius.full,
+  modeToggle: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.one,
+  },
+  chipRowWrap: { gap: Spacing.two },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.two, rowGap: Spacing.two + 2 },
+  chipScroll: { gap: Spacing.two, paddingEnd: Spacing.two },
+  chipGroup: { gap: Spacing.one, maxWidth: '100%', flexShrink: 1 },
+  chip: {
+    minHeight: 44,
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one + 2,
+    paddingHorizontal: Spacing.three - 2,
+    borderRadius: 22,
     borderWidth: 1.5,
   },
+  chipText: { flexShrink: 1 },
   footer: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: Spacing.two,

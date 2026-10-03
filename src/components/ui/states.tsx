@@ -58,14 +58,14 @@ function SkeletonRow({
       shimmer.value = 0.72;
       return;
     }
-    // 150ms down the list, so the sweep reads as one motion rather than a
-    // row of independently blinking bars.
+    // A 50ms step down the list (the bars' stagger), so the sweep reads as
+    // one motion; each half of the loop stays inside the 500ms ceiling.
     shimmer.value = withDelay(
-      index * 150,
+      index * 50,
       withRepeat(
         withSequence(
-          withTiming(1, { duration: 700, easing: EASING }),
-          withTiming(0.55, { duration: 700, easing: EASING }),
+          withTiming(1, { duration: Motion.pulse / 2, easing: EASING }),
+          withTiming(0.55, { duration: Motion.pulse / 2, easing: EASING }),
         ),
         -1,
         false,

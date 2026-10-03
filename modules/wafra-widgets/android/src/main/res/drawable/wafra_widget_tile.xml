@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A bill's merchant tile: the band's own tone, 8dp corners. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+  <corners android:radius="8dp" />
+  <solid android:color="@color/wafra_widget_upcoming_tile" />
+</shape>

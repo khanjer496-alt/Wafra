@@ -22,6 +22,19 @@ function harness(flag, platform = 'android', sinkThrows = false) {
 }
 const plain = value => JSON.parse(JSON.stringify(value));
 
+test('capture and summary CPU phases keep only bounded source-free timing aggregates', () => {
+  const h = harness(undefined);
+  for (const tag of ['capture-source-keys', 'capture-parse', 'capture-inspect', 'daily-summary-project']) {
+    h.recordRuntimeOperation(tag, 17);
+    assert.ok(h.getRuntimePerformanceSnapshot().operations[tag], `${tag} must be recorded separately from native waits`);
+    assert.deepEqual(plain(h.getRuntimePerformanceSnapshot().operations[tag]),
+      { count: 1, maxMs: 17, totalMs: 17, recentMs: [17] });
+  }
+  h.recordRuntimeOperation('a source message must not become a tag', 20);
+  assert.equal(Object.keys(h.getRuntimePerformanceSnapshot().operations).length, 4);
+  assert.equal(h.logs.length, 0);
+});
+
 test('runtime trace defaults off and preserves valid aggregate timing', () => {
   for (const flag of [undefined, '0', 'true']) {
     const h = harness(flag);

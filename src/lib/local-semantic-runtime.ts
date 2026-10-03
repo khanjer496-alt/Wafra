@@ -54,3 +54,5 @@ export async function createDownloadedSemanticRetriever(
 }
 
 export function clearLocalSemanticArtifacts(): void { /* native-only */ }
+
+export function purgeLocalSemanticArtifacts(): void { /* native-only */ }

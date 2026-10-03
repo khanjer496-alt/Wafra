@@ -126,8 +126,21 @@ function sessionHarness(options = {}) {
   };
   h.deps['@/lib/local-assistant-grounding'] = load(path.join(root, 'src/lib/local-assistant-grounding.ts'), { '@/lib/wafra-assistant': engine });
   if (options.improve) {
-    h.deps['@/lib/local-semantic-assistant'] = { improveAssistantRequestLocally: options.improve };
-    h.deps['@/lib/local-semantic-runtime'] = { localSemanticRuntimeStatus: () => ({ state: options.modelState ?? 'ready' }) };
+    // The platform-model boundary: the stub returns a request, and the outcome
+    // is on-device only when it differs from the deterministic plan.
+    h.deps['@/lib/on-device-assistant'] = { improveAssistantRequestOnDevice: async input => {
+      const request = await options.improve(input);
+      return request === input.deterministicRequest
+        ? { source: 'deterministic', request, reason: 'stub' } : { source: 'on-device-ai', request };
+    } };
+  }
+  if (options.availability) {
+    const availability = { languages: null, canPrepare: false, ...options.availability };
+    h.deps['@/lib/on-device-ai'] = { onDeviceAI: {
+      peekAvailability: () => null,
+      getAvailability: async () => availability,
+      prepare: async () => { options.prepared?.(); return availability; },
+    } };
   }
   const globals = {
     Date: Clock,
@@ -164,10 +177,14 @@ function sessionHarness(options = {}) {
     return render();
   }
   const find = predicate => walk(tree).find(predicate);
-  const button = label => find(node => node.type === 'Button' && node.props.label === label);
+  // Answer actions are the screen's own pills: real buttons named by their label.
+  const button = label => find(node => node.props?.accessibilityRole === 'button' && node.props.accessibilityLabel === label);
+  // The evidence action carries its transaction count ("See 3 transactions").
+  const evidenceButton = () => find(node => node.props?.accessibilityRole === 'button' &&
+    /^See \d+ transactions?$/.test(node.props.accessibilityLabel ?? ''));
   const turns = () => walk(tree).filter(node => node.props?.testID === 'assistant-turn');
   return {
-    render, flushFrames, calls, haptics, turns, find, button,
+    render, flushFrames, calls, haptics, turns, find, button, evidenceButton,
     get tree() { return tree; }, get state() { return state; }, get frameCount() { return frames.size; },
     patchState: patch => { state = { ...state, ...patch }; },
     setGeneration: value => { generation = value; },
@@ -278,7 +295,7 @@ test('Private Mode keeps unknown Ask Wafra language fully local', async () => us
   h.render();
   await h.submitAsync('gimme the money burn rn');
   assert.deepEqual(h.calls.map(call => call.kind), ['ask']);
-  const scaffold = h.find(node => node.type === 'Scaffold');
+  const scaffold = h.find(node => node.type === 'BandScaffold');
   assert.match(text(scaffold.props.footer), /On-device/);
 }));
 
@@ -367,7 +384,7 @@ test('cold route waits for hydration and the salary-day reporting period, then a
 test('equal-value period objects retain the conversation and its open evidence', () => using({ state: fixture }, h => {
   h.render();
   h.submit('How much did I spend?');
-  h.button('View transactions').props.onPress();
+  h.evidenceButton().props.onPress();
   h.render();
   assert.ok(h.find(node => node.type === 'EvidenceSheet'));
   h.setPeriod({ mode: 'month', key: '2026-09' });
@@ -379,7 +396,7 @@ test('equal-value period objects retain the conversation and its open evidence',
 
 test('replacement of a loaded ledger clears turns and evidence without replaying the route question', () => using({ state: fixture, question: 'How much did I spend?' }, h => {
   h.render(); h.flushFrames();
-  h.button('View transactions').props.onPress(); h.render();
+  h.evidenceButton().props.onPress(); h.render();
   assert.ok(h.find(node => node.type === 'EvidenceSheet'));
   h.patchState({ transactions: [] }); h.setGeneration(2); h.render(); h.flushFrames();
   assert.equal(h.turns().length, 0);
@@ -411,7 +428,7 @@ function refreshDateScenario(sourceTransform) {
     assert.equal(h.calls[0].now.toISOString(), '2026-09-20T12:00:00.000Z');
     h.setFocused(false); h.setNow('2026-09-21T12:00:00Z'); h.setFocused(true);
     assert.ok(h.button('Refresh answer'), 'returning after midnight marks an answer stale');
-    assert.equal(h.button('View transactions'), undefined, 'a stale answer cannot expose an apparently current ledger proof');
+    assert.equal(h.evidenceButton(), undefined, 'a stale answer cannot expose an apparently current ledger proof');
     h.button('Refresh answer').props.onPress(); h.render();
     assert.equal(h.calls[1].kind, 'refresh');
     assert.equal(h.calls[1].now.toISOString(), '2026-09-21T12:00:00.000Z', 'refresh must use the current date rather than answeredAt');
@@ -425,7 +442,7 @@ test('focus/date rollover marks old answers stale and refresh uses the current d
 
 test('native app activation catches midnight and ledger edits invalidate open evidence until refreshed', () => using({ state: fixture }, h => {
   h.render(); h.submit('How much did I spend?');
-  h.button('View transactions').props.onPress(); h.render();
+  h.evidenceButton().props.onPress(); h.render();
   assert.equal(h.find(node => node.type === 'EvidenceSheet').props.stale, false);
   h.patchState({ transactions: [transaction(9_000)] }); h.render();
   const staleSheet = h.find(node => node.type === 'EvidenceSheet');
@@ -436,7 +453,7 @@ test('native app activation catches midnight and ledger edits invalidate open ev
   assert.equal(h.calls.at(-1).state, h.state);
   assert.equal(h.find(node => node.type === 'EvidenceSheet'), undefined);
   assert.equal(h.button('Refresh answer'), undefined, 'refresh saves the new ledger input references');
-  h.button('View transactions').props.onPress(); h.render();
+  h.evidenceButton().props.onPress(); h.render();
   assert.equal(h.find(node => node.type === 'EvidenceSheet').props.evidence[0].totalFils, 9_000);
   h.setNow('2026-09-21T01:00:00Z'); h.appActive();
   assert.equal(h.find(node => node.type === 'EvidenceSheet').props.stale, true);
@@ -487,22 +504,65 @@ test('period picker cancel preserves context; explicit current-month apply reset
   h.submit('How much did I spend?');
   assert.equal(h.calls.at(-1).period.key, '2026-09');
   assert.ok(h.calls.at(-1).previous == null, 'the discarded August request must not override the selection');
-  h.button('View transactions').props.onPress(); h.render();
+  h.evidenceButton().props.onPress(); h.render();
   assert.equal(h.find(node => node.type === 'EvidenceSheet').props.evidence[0].totalFils, 6_000);
 }));
 
 
-test('an unavailable encoder can warm or retry when a new question needs interpretation', async () => {
+test('an unavailable on-device model keeps the deterministic answer', async () => {
   const requests = [];
-  await usingAsync({ state: fixture, modelState: 'failed', improve: async input => {
+  await usingAsync({ state: fixture, improve: async input => {
     requests.push(input); return input.deterministicRequest;
   } }, async h => {
     h.render();
     await h.submitAsync('Give me a fiscal digest');
-    assert.equal(requests.length, 1, 'the native wrapper owns non-blocking warmup and retry backoff');
-    assert.equal(h.turns().length, 1, 'the deterministic answer remains available during warmup');
+    assert.equal(requests.length, 1, 'an unrecognised fresh question is offered to the platform model once');
+    assert.equal(h.turns().length, 1, 'the deterministic answer remains available');
+    assert.equal(h.find(node => node.props?.testID === 'assistant-interpreted-on-device'), undefined);
   });
 });
+
+test('a validated on-device plan is executed by the ledger engine and labelled honestly', async () => {
+  await usingAsync({ state: fixture, improve: async input => ({ tool: 'spending-total', period: input.defaultPeriod }) }, async h => {
+    h.render();
+    await h.submitAsync('Give me a fiscal digest');
+    await new Promise(resolve => setImmediate(resolve));
+    h.render();
+    assert.equal(h.turns().length, 1);
+    const executed = h.calls.filter(call => call.kind === 'refresh').at(-1);
+    assert.equal(executed.request.tool, 'spending-total', 'the executor, not the model, produced the answer');
+    assert.match(text(h.find(node => node.props?.testID === 'assistant-interpreted-on-device')),
+      /interpreted by on-device AI/);
+  });
+});
+
+for (const [availability, pattern] of [
+  [{ status: 'available', provider: 'apple-foundation-models' }, /Apple Intelligence can help interpret/],
+  [{ status: 'available', provider: 'gemini-nano' }, /Gemini Nano can help interpret/],
+  [{ status: 'not-enabled', provider: 'apple-foundation-models' }, /Turn on Apple Intelligence/],
+  [{ status: 'model-not-ready', provider: 'gemini-nano', canPrepare: true }, /not ready yet/],
+  [{ status: 'device-not-eligible', provider: null }, /not available on this device/],
+  [{ status: 'unsupported-os', provider: null }, /not available on this device/],
+]) {
+  test(`Ask shows an honest on-device status for ${availability.status}/${availability.provider}`, async () => {
+    let prepared = 0;
+    await usingAsync({ state: fixture, availability, prepared: () => { prepared++; } }, async h => {
+      h.render();
+      await new Promise(resolve => setImmediate(resolve));
+      h.render();
+      assert.match(text(h.find(node => node.props?.testID === 'assistant-model-status')), pattern);
+      const prepare = h.find(node => node.props?.testID === 'assistant-model-prepare');
+      assert.equal(Boolean(prepare), availability.canPrepare === true,
+        'the model download is offered only when the platform says it can be prepared');
+      assert.equal(prepared, 0, 'nothing downloads without the explicit tap');
+      if (prepare) {
+        prepare.props.onPress();
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(prepared, 1);
+      }
+    });
+  });
+}
 
 test('new independent question reaches local AI after an earlier answer', async () => {
   const requests = [];
@@ -514,7 +574,8 @@ test('new independent question reaches local AI after an earlier answer', async 
     h.render();
     assert.equal(requests.length, 1);
     assert.equal(requests[0].previousRequest, null);
-    assert.equal(typeof requests[0].groundRequest, 'function');
+    assert.equal(requests[0].appLanguage, 'en');
+    assert.equal(requests[0].question, 'Give me a fiscal digest');
   });
 });
 
@@ -562,4 +623,39 @@ test('card obligation payment and remaining follow-ups retain the selected card'
     assert.equal(result.tool, 'obligation-status', question);
     assert.equal(result.accountId, 'card-a', question);
   }
+}));
+
+test('Ask Wafra wears the ink band: the question on the band, the answer and its actions on the sheet', async () => usingAsync({ state: fixture }, async h => {
+  const themes = load(path.join(root, 'src/constants/theme.ts'), { '@/global.css': {}, 'react-native': { Platform: { select: x => x.android } } });
+  const ink = themes.BandPalettes.light.home;
+  const flat = style => Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
+  h.render();
+  let scaffold = h.find(node => node.type === 'BandScaffold');
+  assert.equal(scaffold.props.band, 'home');
+  assert.equal(scaffold.props.nav.title, 'Ask Wafra');
+  assert.equal(typeof scaffold.props.nav.close, 'function');
+  assert.equal(scaffold.props.nav.actions.length, 0, 'New chat appears only once there is a conversation');
+  // Before a question the band names what the screen is for; the on-phone
+  // badge keeps its exact spoken claim.
+  const badge = walk(scaffold.props.bandContent).find(node => node.props?.testID === 'assistant-local-badge');
+  assert.equal(badge.props.accessibilityLabel, 'Answers are calculated on this phone from your recorded transactions.');
+  assert.match(text(scaffold.props.bandContent), /Understand your transactions/);
+
+  await h.submitAsync('How much did I spend?');
+  scaffold = h.find(node => node.type === 'BandScaffold');
+  assert.deepEqual([...scaffold.props.nav.actions].map(action => action.label), ['New chat']);
+  const bubble = walk(scaffold.props.bandContent).find(node => node.props?.testID === 'assistant-band-question');
+  assert.equal(flat(bubble.props.style).backgroundColor, ink.tile, 'the question sits in the band tone');
+  assert.match(text(bubble), /How much did I spend\?/);
+  assert.doesNotMatch(text(h.turns()[0]), /How much did I spend\?/, 'the latest question is not repeated on the sheet');
+  const evidence = h.evidenceButton();
+  assert.equal(flat(evidence.props.style({ pressed: false })).backgroundColor, ink.fill, 'the first action is the filled pill');
+
+  await h.submitAsync('How much did I spend at Store?');
+  const [first, second] = h.turns();
+  // Once the band can scroll away behind earlier answers, each question keeps
+  // its bubble beside its answer (also for screen readers).
+  assert.match(text(first), /How much did I spend\?/, 'an earlier question keeps its bubble beside its answer');
+  assert.match(text(second), /How much did I spend at Store\?/);
+  assert.match(text(h.find(node => node.props?.testID === 'assistant-band-question')), /How much did I spend at Store\?/);
 }));

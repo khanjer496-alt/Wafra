@@ -7,6 +7,7 @@ const path = require('node:path');
 const root = process.env.WAFRA_TEST_ROOT ?? path.resolve(__dirname, '../../..');
 const load = require(path.join(root, 'scripts/test/repair/load-typescript.cjs'));
 const { createHarness, walk, text } = require(path.join(root, 'scripts/test/repair/reference-harness.cjs'));
+const { hasKnownCustomCategoryMention } = require(path.join(root, 'scripts/test/build/wafra-assistant.js'));
 
 function scaffoldHarness(language, platform) {
   const h = createHarness({ language });
@@ -17,6 +18,12 @@ function scaffoldHarness(language, platform) {
   h.deps['@/hooks/use-keyboard-height'] = { useKeyboardHeight: () => 300 };
   h.deps['@/hooks/use-tab-bar-clearance'] = { useTabBarClearance: () => 78 };
   h.local('@/components/ui/screen-scaffold');
+  // Ask Wafra sits on the band scaffold: its real ScrollView carries the
+  // screen's scroll props.
+  h.deps['expo-status-bar'] = { StatusBar: props => h.jsx('StatusBar', props) };
+  h.deps['@/hooks/use-reduced-motion'] = { useReducedMotion: () => true, useMotionPreference: () => ({ ready: true, reducedMotion: true }) };
+  h.local('@/lib/band-copy', 'src/lib/band-copy.ts');
+  h.local('@/components/ui/band-scaffold');
   return h;
 }
 
@@ -43,6 +50,8 @@ for (const platform of ['ios', 'android']) {
       };
       const calls = [];
       h.deps['@/lib/wafra-assistant'] = {
+        // Scope/privacy detection remains the real policy while answer work is isolated.
+        hasKnownCustomCategoryMention,
         suggestedAssistantQuestions: () => [], assistantFollowUpQuestions: () => [],
         latestAssistantContext: requests => requests.at(-1) ?? null, planAssistantCorrection: () => undefined,
         executeAssistantTool: () => ({ tool: 'spending-total', title: 'Answer', body: 'A local answer' }),
@@ -85,7 +94,8 @@ for (const platform of ['ios', 'android']) {
         const widget = walk(tree).find(node => node.props?.testID === `home-widget-${id}`);
         assert.ok(widget, `the ${id} widget is visible`);
         const action = walk(widget).find(node => node.props?.accessibilityRole === 'button');
-        assert.equal(action.props.accessibilityLabel, language === 'ar' ? 'عرض كل الدفعات' : 'View all payments');
+        // The named action, then the count and total the heading shows.
+        assert.ok(action.props.accessibilityLabel.startsWith(language === 'ar' ? 'عرض كل الدفعات. ' : 'View all payments. '), action.props.accessibilityLabel);
         action.props.onPress();
       }
       assert.deepEqual(h.events, [['route', '/bills'], ['route', '/bills']]);
@@ -109,8 +119,16 @@ for (const language of ['en', 'ar']) {
     };
     h.deps['@/lib/feedback-transport'] = { FeedbackSendError: class extends Error {} };
     h.deps['@/lib/parser-research-source'] = { isParserResearchBuild: () => true };
+    // The type chips' list and copy run from source.
+    h.deps['@/lib/feedback-wire'] = load(path.join(root, 'src/lib/feedback-wire.ts'), {}, { TextEncoder });
+    h.deps['@/lib/feedback-copy'] = load(path.join(root, 'src/lib/feedback-copy.ts'));
+    // Design language E: the band title and settings-style rows run from source.
+    h.deps['@/lib/settings-e-copy'] = load(path.join(root, 'src/lib/settings-e-copy.ts'));
+    h.deps['@/components/settings-band/band-title'] = load(path.join(root, 'src/components/settings-band/band-title.tsx'), h.deps);
+    h.deps['@/components/settings-rows'] = load(path.join(root, 'src/components/settings-rows.tsx'), h.deps);
     const tree = load(path.join(root, 'src/app/feedback.tsx'), h.deps).default();
-    const row = walk(tree).find(node => node.props?.accessibilityLabel === h.deps['@/lib/i18n'].t('feedbackParserTitle'));
+    // The row speaks its title first, then its detail (SettingsLinkRow).
+    const row = walk(tree).find(node => node.props?.onPress && node.props.accessibilityLabel?.startsWith(h.deps['@/lib/i18n'].t('feedbackParserTitle')));
     assert.ok(row);
     row.props.onPress();
     assert.deepEqual(h.events, [['route', '/parser-research']]);

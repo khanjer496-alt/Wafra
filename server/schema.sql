@@ -119,6 +119,19 @@ CREATE TABLE IF NOT EXISTS ingest_receipts (
   PRIMARY KEY (device_id, replay_key)
 );
 
+-- Opaque per-device file/row-interpretation binding. Neither digest is an
+-- unkeyed statement hash; no amounts, dates, names or source text are stored.
+CREATE TABLE IF NOT EXISTS statement_import_bindings (
+  device_id TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  interpretation_digest TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  PRIMARY KEY (device_id, source_key),
+  FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS statement_bindings_by_expiry ON statement_import_bindings (expires_at);
+
 -- A fixed-window counter limits authenticated Shortcut traffic without storing
 -- IP addresses, message hashes, sender IDs or any other user-derived value.
 CREATE TABLE IF NOT EXISTS ingest_limits (
@@ -210,6 +223,9 @@ CREATE TABLE IF NOT EXISTS feedback_limits (
 -- the older market/push columns remain documented manual upgrades for legacy
 -- databases that predate the migration ledger.
 -- ALTER TABLE devices ADD COLUMN market TEXT NOT NULL DEFAULT 'AE';
+-- The forwarded-statement currency and date order (email_statement_currency,
+-- email_statement_date_order) are owned by the tracked migration
+-- migrations/2026-09-24-email-statement-locale.sql.
 -- ALTER TABLE push_registrations ADD COLUMN push_sent_at INTEGER NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS queue_by_device ON queue (device_id, created_at);

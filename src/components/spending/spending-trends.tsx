@@ -1,28 +1,42 @@
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { spendingTrendsCopy as copy } from '@/lib/reference-copy';
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
-import { CategoryAvatar } from '@/components/ui/category-avatar';
+import { GlyphTile } from '@/components/ui/band/glyph-tile';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Money } from '@/components/ui/money';
+import { GrowBar } from '@/components/ui/grow-bar';
 import { Icon } from '@/components/ui/icon';
 import { useTheme } from '@/hooks/use-theme';
+import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { categoryLabel } from '@/lib/categories';
-import { formatAED, monthLabel, weekdayShort } from '@/lib/format';
+
+import { formatAED, ledgerWholeMajor, monthLabel, weekdayShort } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
-import { formatMinorUnits } from '@/lib/ledger-money';
+import {
+  displayNumberConventions,
+  formatMinorUnits,
+  type LedgerMoneySpec,
+  wholeMajorUnits,
+} from '@/lib/ledger-money';
 import type { CategoryMover, MerchantStat } from '@/lib/analytics';
 import type { CategoryId } from '@/lib/types';
 
-/** Compact axis label — 12.4k, 1.2M — for the peak reference on the trends chart. */
-function shortAmount(fils: number): string {
-  const value = Math.round(fils / 100); // fils → currency units
+/**
+ * Compact axis label — 12.4k, 1.2M — for the peak reference on the trends
+ * chart. Whole major units at the ledger's own exponent (AED /100, JPY /1,
+ * KWD /1000), with the device's decimal mark ("1,2k" on a German phone).
+ */
+function shortAmount(fils: number, spec: LedgerMoneySpec | null): string {
+  const value = spec ? wholeMajorUnits(fils, spec) : ledgerWholeMajor(fils);
   const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(abs >= 10_000_000 ? 0 : 1)}M`;
-  if (abs >= 1_000) return `${(value / 1_000).toFixed(abs >= 10_000 ? 0 : 1)}k`;
+  const decimal = displayNumberConventions().decimal;
+  const fixed = (n: number, digits: number) => n.toFixed(digits).replace('.', decimal);
+  if (abs >= 1_000_000) return `${fixed(value / 1_000_000, abs >= 10_000_000 ? 0 : 1)}M`;
+  if (abs >= 1_000) return `${fixed(value / 1_000, abs >= 10_000 ? 0 : 1)}k`;
   return `${value}`;
 }
 
@@ -35,21 +49,30 @@ type Props = {
   weekdays: readonly number[];
   periodLabel: string;
   comparisonLabel: string | null;
+  /** Short names for the two sides, e.g. "Sep 2026" and "Aug 2026". */
+  currentName?: string;
+  previousName?: string | null;
   onMonth: (key: string) => void;
   onMerchant: (name: string) => void;
   onCategory: (id: CategoryId) => void;
 };
 
 
-/** The useful Stats content now belongs inside Spending, not another destination. */
+/**
+ * Spending → Compare, on the sheet. The band above states the comparison in
+ * one sentence; here the categories that moved it lead as paired bars, then
+ * the six-month income/spending history, top merchants and weekday pattern
+ * (the former Trends and Stats content) stay reachable below them.
+ */
 export function SpendingTrends(p: Props) {
-  const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
+  const { categoryLabel } = useCategoryCatalog();
+  const theme = useTheme(); const band = useBand('spending'); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const { width, fontScale } = useWindowDimensions();
-  // Six labels must fit at the actual width and text size. When they cannot,
-  // every month remains available in a wrapping detail list, not hidden.
+  // Keep compact chart labels only when they fit. The visible detail list
+  // below always names every month and both exact amounts.
   const showAllTrendLabels = !large && (Math.min(width, 800) - 146) / 6 >= (lang === 'ar' ? 58 : 32) * fontScale;
   const w = copy[lang === 'ar' ? 'ar' : 'en']; const [patterns, setPatterns] = useState(false);
   const max = Math.max(1, ...p.months.flatMap((m) => [m.incomeFils, m.expenseFils]));
@@ -61,9 +84,9 @@ export function SpendingTrends(p: Props) {
     ? `${monthLabel(month.key)}. ${w.income}: ${moneyLabel(month.incomeFils)}. ${w.spending}: ${moneyLabel(month.expenseFils)}`
     : `${monthLabel(month.key)}. ${w.noData}`;
   const monthFigures = (month: MonthFlow) => hasActivity(month) ? (
-    <View style={styles.monthFigures}>
-      <View style={styles.monthFigure}><ThemedText type="meta">{w.income}</ThemedText><Money fils={month.incomeFils} type="meta" /></View>
-      <View style={styles.monthFigure}><ThemedText type="meta">{w.spending}</ThemedText><Money fils={month.expenseFils} type="meta" /></View>
+    <View style={[styles.monthFigures, large && styles.stackColumn]}>
+      <View style={[styles.monthFigure, large && styles.stackColumn]}><ThemedText type="meta">{w.income}</ThemedText><Money fils={month.incomeFils} type="meta" /></View>
+      <View style={[styles.monthFigure, large && styles.stackColumn]}><ThemedText type="meta">{w.spending}</ThemedText><Money fils={month.expenseFils} type="meta" /></View>
     </View>
   ) : <ThemedText type="meta" themeColor="textSecondary">— {w.noData}</ThemedText>;
   const weekdayMax = Math.max(1, ...p.weekdays);
@@ -79,15 +102,57 @@ export function SpendingTrends(p: Props) {
   const deltaPct = selected && previous && previousExpense > 0
     ? Math.round((deltaFils / previousExpense) * 100) : null;
   return <View style={styles.root} testID="spending-trends">
+    <View style={styles.section} testID="spending-compare">
+      {/* The sentence that answers "more or less than last time" sits on the
+          band above; the categories that moved it are listed here, each with
+          this period's bar in the band tint over the earlier one in the
+          secondary text tone, both on the rule-tone track. Colour carries "now" and "then", never a category. */}
+      {([['more', p.movers.filter((m) => m.deltaFils > 0)], ['less', p.movers.filter((m) => m.deltaFils < 0)]] as const).map(([kind, list]) =>
+        list.length === 0 ? null : <View key={kind} style={styles.compareGroup}>
+          <ThemedText type="smallBold" accessibilityRole="header" style={styles.sectionTitle}>{kind === 'more' ? w.spendingMore : w.spendingLess}</ThemedText>
+          {list.map((m) => {
+            const scale = Math.max(1, m.currentFils, m.previousFils);
+            return <Pressable key={m.category} accessibilityRole="button" onPress={() => p.onCategory(m.category)}
+              testID={`spending-mover-${m.category}`}
+              accessibilityLabel={`${categoryLabel(m.category, lang)}. ${p.periodLabel} ${moneyLabel(m.currentFils)}. ${p.comparisonLabel ?? ''} ${moneyLabel(m.previousFils)}. ${m.deltaFils > 0 ? w.more : w.fewer} ${moneyLabel(Math.abs(m.deltaFils))}`}
+              style={({ pressed }) => [styles.compareRow, styles.rule, { borderColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
+              <View style={[styles.compareTop, large && styles.compareTopLarge]}>
+                <GlyphTile category={m.category} palette={band} size={34} />
+                <ThemedText type="smallBold" style={[styles.grow, large && styles.compareNameLarge]}>{categoryLabel(m.category, lang)}</ThemedText>
+                <ThemedText type="smallBold" tabular>
+                  {m.deltaFils > 0 ? '+' : '−'}{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
+              </View>
+              {([[p.currentName ?? p.periodLabel, m.currentFils, band.tint], [p.previousName ?? p.comparisonLabel ?? '', m.previousFils, band.textSecondary]] as const).map(([label, fils, color], index) =>
+                <View key={index} style={styles.compareBarStack}>
+                  <View style={[styles.compareBarHead, large && styles.stackColumn]}>
+                    <ThemedText type="meta" style={{ color: band.textSecondary }}>{label}</ThemedText>
+                    <Money fils={fils} type="meta" />
+                  </View>
+                  {/* Both bars sit on the rule-tone track, so a period at zero
+                      still reads as an empty bar rather than a missing one. */}
+                  <View style={[styles.compareTrack, { backgroundColor: band.rule }]}>
+                    <GrowBar axis="width" delay={index * 50} size={fils / scale * 100}
+                      style={{ height: 10, borderRadius: 5, backgroundColor: color }} />
+                  </View>
+                </View>)}
+            </Pressable>;
+          })}
+        </View>)}
+      {p.movers.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noChange}</ThemedText>}
+    </View>
+
     <View style={[styles.panel, { backgroundColor: 'transparent', borderColor: theme.cardBorder }]}>
       <ThemedText type="heading">{w.cashflow}</ThemedText>
       <ThemedText type="meta" themeColor="textSecondary">{w.sixMonths} · {p.months[0] ? monthLabel(p.months[0].key, true) : ''} — {p.months.at(-1) ? monthLabel(p.months.at(-1)!.key, true) : ''}</ThemedText>
       <View style={styles.chartWrap}>
-        <View style={styles.axis} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>{shortAmount(max)}</ThemedText>
-          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>{shortAmount(max / 2)}</ThemedText>
+        {/* The axis is scale decoration (every month's exact figures are in
+            the list below the chart); at the accessibility sizes its labels
+            cannot fit a 34pt gutter, so the bars take the full width instead. */}
+        {!large && <View style={styles.axis} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>{shortAmount(max, moneySpec)}</ThemedText>
+          <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>{shortAmount(max / 2, moneySpec)}</ThemedText>
           <ThemedText type="nano" themeColor="textTertiary" style={styles.axisLabel}>0</ThemedText>
-        </View>
+        </View>}
         <View style={styles.chartBody}>
           <View style={styles.grid} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" pointerEvents="none">
             <View style={[styles.gridline, { backgroundColor: theme.cardBorder }]} />
@@ -97,8 +162,8 @@ export function SpendingTrends(p: Props) {
           <View style={styles.chart}>
             {p.months.map((month) => {
               const isSelected = month.key === p.selectedKey;
-              const inH = Math.max(month.incomeFils > 0 ? 3 : 0, month.incomeFils / max * 100);
-              const outH = Math.max(month.expenseFils > 0 ? 3 : 0, month.expenseFils / max * 100);
+              const inH = Math.max(0, month.incomeFils / max * 100);
+              const outH = Math.max(0, month.expenseFils / max * 100);
               return <Pressable key={month.key} accessibilityRole="button"
                 testID={`cashflow-month-${month.key}`}
                 aria-selected={isSelected}
@@ -156,13 +221,14 @@ export function SpendingTrends(p: Props) {
           </View>
         </View>
         {monthFigures(selected)}
-        <View style={styles.selectedNetRow}>
+        <View style={[styles.selectedNetRow, large && styles.stackColumn]}>
           <ThemedText type="nano" themeColor="textTertiary">{w.net}</ThemedText>
           <Money fils={selected.incomeFils - selected.expenseFils} type="smallBold" sign="auto"
             color={selected.incomeFils - selected.expenseFils < 0 ? theme.expense : theme.income} />
         </View>
       </View>}
-      {!showAllTrendLabels && <View style={styles.monthDetails} testID="cashflow-month-details">
+      {/* Exact values stay visible for every month, including wide layouts. */}
+      <View style={styles.monthDetails} testID="cashflow-month-details">
         {p.months.map((month) => <Pressable key={month.key} testID={`cashflow-detail-${month.key}`}
           accessibilityRole="button" accessibilityLabel={monthDescription(month)}
           aria-selected={month.key === p.selectedKey}
@@ -173,7 +239,7 @@ export function SpendingTrends(p: Props) {
           <ThemedText type="smallBold">{monthLabel(month.key)}</ThemedText>
           {monthFigures(month)}
         </Pressable>)}
-      </View>}
+      </View>
       <ThemedText type="meta" themeColor="textTertiary">{w.partial}</ThemedText>
     </View>
 
@@ -183,10 +249,10 @@ export function SpendingTrends(p: Props) {
       <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
         {p.merchants.map((m) => <Pressable key={m.title} accessibilityRole="button"
           accessibilityLabel={`${m.title}, ${moneyLabel(m.totalFils)}, ${m.count} ${w.records}`}
-          onPress={() => p.onMerchant(m.title)} style={({ pressed }) => [styles.row, styles.rule,
+          onPress={() => p.onMerchant(m.title)} style={({ pressed }) => [styles.row, large && styles.rowStacked, styles.rule,
             { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
           <MerchantAvatar title={m.title} category={m.category} size={36} />
-          <View style={styles.grow}><ThemedText type="smallBold">{m.title}</ThemedText>
+          <View style={[styles.grow, large && styles.growStacked]}><ThemedText type="smallBold">{m.title}</ThemedText>
             <ThemedText type="meta" themeColor="textSecondary">{m.count} {w.records}</ThemedText></View>
           <Money fils={m.totalFils} type="smallBold" />
         </Pressable>)}
@@ -194,31 +260,17 @@ export function SpendingTrends(p: Props) {
       </View>
     </View>
 
-    <View style={styles.section}>
-      <ThemedText type="heading">{w.change}</ThemedText>
-      <ThemedText type="meta" themeColor="textSecondary">{p.comparisonLabel ? `${w.vs} ${p.comparisonLabel}` : w.missingComparison}</ThemedText>
-      <View style={[styles.group, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
-        {p.movers.map((m) => <Pressable key={m.category} accessibilityRole="button" onPress={() => p.onCategory(m.category)}
-          accessibilityLabel={`${categoryLabel(m.category, lang)}. ${moneyLabel(m.previousFils)}. ${moneyLabel(m.currentFils)}`}
-          style={[styles.row, styles.rule, { borderColor: theme.cardBorder }]}>
-          <CategoryAvatar category={m.category} size={36} />
-          <View style={styles.grow}><ThemedText type="smallBold">{categoryLabel(m.category, lang)}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary" tabular>{moneyLabel(m.previousFils)} → {moneyLabel(m.currentFils)}</ThemedText></View>
-          <View style={styles.change}><ThemedText type="smallBold" tabular themeColor={m.deltaFils > 0 ? 'expense' : 'income'}>{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">{m.deltaFils > 0 ? w.more : w.fewer}</ThemedText></View>
-        </Pressable>)}
-        {p.movers.length === 0 && <ThemedText type="meta" themeColor="textSecondary" style={styles.empty}>{w.noChange}</ThemedText>}
-      </View>
-    </View>
-
     <Pressable accessibilityRole="button" accessibilityState={{ expanded: patterns }} onPress={() => setPatterns(!patterns)} style={styles.disclosure}>
       <ThemedText type="smallBold">{w.patterns}</ThemedText><Icon name={patterns ? 'chevron-down' : 'chevron-right'} size={18} color={theme.textSecondary} />
     </Pressable>
     {patterns && <View style={[styles.panel, { borderColor: theme.cardBorder, backgroundColor: 'transparent' }]}>
+      <ThemedText type="meta" themeColor="textSecondary">{p.periodLabel}</ThemedText>
       {p.weekdays.map((fils, day) => <View key={day} style={styles.weekday} accessible accessibilityLabel={`${weekdayShort(day)}, ${moneyLabel(fils)}`}>
-        <ThemedText type="meta" style={styles.weekdayName}>{weekdayShort(day)}</ThemedText>
+        <View style={[styles.compareBarHead, large && styles.stackColumn]}>
+          <ThemedText type="meta">{weekdayShort(day)}</ThemedText>
+          <Money fils={fils} type="meta" />
+        </View>
         <View style={[styles.weekdayTrack, { backgroundColor: theme.track }]}><View style={{ height: 6, borderRadius: 3, width: `${fils / weekdayMax * 100}%`, backgroundColor: theme.primary }} /></View>
-        <Money fils={fils} type="meta" />
       </View>)}
       <ThemedText type="meta" themeColor="textSecondary">{w.patternsNote}</ThemedText>
     </View>}
@@ -226,7 +278,10 @@ export function SpendingTrends(p: Props) {
 }
 const styles = StyleSheet.create({
   monthFigures: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  monthFigure: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  monthFigure: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, flexShrink: 1, maxWidth: '100%' },
+  // Label over figure at the accessibility sizes: a row-wrapping pair is sized
+  // to its widest content and would push the figure past the screen edge.
+  stackColumn: { flexDirection: 'column', alignItems: 'flex-start', gap: 2 },
   monthDetails: { gap: 12 }, monthDetail: { minHeight: 48, gap: 6, borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12 },
   root: { gap: 18 }, panel: { paddingVertical: 8, gap: 10 },
   chartWrap: { flexDirection: 'row', gap: 8, marginTop: 4, alignItems: 'flex-start' },
@@ -250,11 +305,27 @@ const styles = StyleSheet.create({
   selectedHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 },
   selectedHeadActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 6 },
   latestButton: { minHeight: 30, minWidth: 54, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
-  selectedNetRow: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
+  selectedNetRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: 6 },
   deltaChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, borderWidth: 1 },
   section: { gap: 8 }, group: { overflow: 'hidden', },
   row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, paddingVertical: 13 }, rule: { borderTopWidth: StyleSheet.hairlineWidth },
-  grow: { flex: 1, minWidth: 100, gap: 4 }, change: { alignItems: 'flex-end', gap: 4 },
+  grow: { flex: 1, minWidth: 100, gap: 4 },
+  // At the accessibility sizes the avatar sits above the name and the figure
+  // below it, so a long merchant name gets the row's full width.
+  rowStacked: { flexDirection: 'column', flexWrap: 'nowrap', alignItems: 'flex-start' },
+  growStacked: { flex: 0, flexBasis: 'auto', alignSelf: 'stretch' }, change: { alignItems: 'flex-end', gap: 4 },
+  changeStacked: { alignItems: 'flex-start' },
+  sectionTitle: { fontSize: 17, lineHeight: 24 },
+  compareGroup: { gap: 2, paddingTop: 10 },
+  compareRow: { paddingVertical: 12, gap: 6 },
+  compareTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  // Both periods share the full track width. Labels wrap above the bars,
+  // so an unusually large amount never changes their relative scale.
+  compareTopLarge: { flexWrap: 'wrap' },
+  compareNameLarge: { flexBasis: '100%' },
+  compareBarStack: { gap: 4 },
+  compareTrack: { height: 10, borderRadius: 5, overflow: 'hidden' },
+  compareBarHead: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 },
   empty: { paddingVertical: 20 }, disclosure: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 48 },
-  weekday: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }, weekdayName: { width: 42 }, weekdayTrack: { flex: 1, minWidth: 40, height: 6, borderRadius: 3 },
+  weekday: { gap: 6 }, weekdayTrack: { width: '100%', height: 6, borderRadius: 3 },
 });

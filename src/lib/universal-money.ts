@@ -1,4 +1,5 @@
 import { inspectAlertDraft, type AlertDraft, type MoneyCandidate, type SourceSpan } from '@/lib/alert-draft';
+import { alertMarketPack } from '@/lib/alert-market-packs';
 import { CURRENCY_SYMBOL_CANDIDATES } from '@/lib/currency-metadata';
 import {
   missingUniversalField,
@@ -25,8 +26,8 @@ export interface UniversalMoneyExtraction {
 // Long labels consume their component words: "minimum payment due" must not
 // leave a second, stronger-looking "payment" or "amount due" match behind.
 const LABEL = new RegExp([
-  String.raw`(?<minimum>\bmin(?:imum)?\.?\s+(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
-  String.raw`(?<total>\b(?:statement\s+(?:total|balance|amount)|closing\s+balance|total\s+(?:(?:amount|amt)\s+)?due|total\s+outstanding(?:\s+balance)?|new\s+balance|saldo\s+total\s+del\s+estado)\b|(?<![\p{L}\p{M}\p{N}_])(?:total\s+à\s+payer|कुल\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|(?:اجمالي|إجمالي)\s+(?:المبلغ\s+المستحق|مبلغ\s+الكشف))`,
+  String.raw`(?<minimum>\bpay\s+min\.|\bmin(?:imum)?\.?\s+(?:(?:amount|amt|payment)\s+)?due\b|\bminimum\s+payment\b|\bpago\s+mínimo\b|(?<![\p{L}\p{M}\p{N}_])(?:paiement\s+minimum|न्यूनतम\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|الحد\s+(?:الادنى|الأدنى)\s+(?:المستحق|للدفع|للسداد))`,
+  String.raw`(?<total>\b(?:statement\s+(?:total|balance|amount)|closing\s+balance|total\s+(?:(?:amount|amt)\s+)?due(?:\s+to\s+avoid\s+fin\.\s+charges)?|total\s+outstanding(?:\s+balance)?|new\s+balance|saldo\s+total\s+del\s+estado)\b|(?<![\p{L}\p{M}\p{N}_])(?:total\s+à\s+payer|कुल\s+देय\s+राशि)(?![\p{L}\p{M}\p{N}_])|(?:اجمالي|إجمالي)\s+(?:المبلغ\s+المستحق|مبلغ\s+الكشف))`,
   String.raw`(?<limit>\b(?:(?:available|avl|avail)\.?\s+(?:credit|cr\.?)\s+limit|(?:available|credit|avl|avail)\.?\s+limit)\b|الحد\s+(?:المتاح|الائتماني))`,
   String.raw`(?<balance>\b(?:(?:available|current|avl|avail)\.?\s+)?bal(?:ance)?\b|\b(?:solde(?:\s+disponible)?|kontostand|saldo|(?:kullanılabilir\s+)?bakiye)\b|الرصيد(?:\s+(?:الحالي|المتاح))?|(?<![\p{L}\p{M}\p{N}_])رصيد\s+حسابك(?:\s+(?:الحالي|المتاح))?(?![\p{L}\p{M}\p{N}_])|(?:उपलब्ध\s+)?शेष\s+राशि|(?:利用可能)?残高|(?:可用)?余额)`,
   String.raw`(?<bill>\b(?:bill(?:\s+amount)?\s+(?:due|of)|amount\s+due|payment\s+due|bill\s+amount|bill\s+for|montant\s+à\s+payer|importo\s+da\s+pagare)\b|مبلغ\s+الفاتورة|المبلغ\s+المستحق|देय\s+राशि)`,
@@ -63,21 +64,51 @@ const LABEL_ROLES: Record<string, UniversalMoneyRole> = {
   balance: 'balance', bill: 'bill-due', fee: 'fee', transaction: 'transaction',
 };
 
-function labels(text: string): { role: UniversalMoneyRole; start: number; text: string }[] {
-  return [...text.matchAll(LABEL)].map((match) => ({
+function labels(text: string, marketLabels: RegExp | null = null): { role: UniversalMoneyRole; start: number; text: string }[] {
+  const found = [...text.matchAll(LABEL)].map((match) => ({
     role: LABEL_ROLES[Object.keys(match.groups ?? {}).find((key) => match.groups?.[key] !== undefined)!],
     start: match.index!, text: match[0],
   }));
+  if (!marketLabels) return found;
+  for (const match of text.matchAll(marketLabels)) {
+    found.push({ role: 'transaction', start: match.index! + match[1].length, text: match[2] });
+  }
+  return found.sort((a, b) => a.start - b.start);
+}
+
+// Market-scoped transaction labels (second-wave packs only). Built from fixed
+// pack vocabulary, never from alert text; at most one pattern per market.
+const marketLabelPatterns = new Map<string, RegExp | null>();
+function marketLabelPattern(market: UniversalParseContext['market']): RegExp | null {
+  if (!market) return null;
+  if (marketLabelPatterns.has(market)) return marketLabelPatterns.get(market)!;
+  const terms = alertMarketPack(market).moneyLabels ?? [];
+  const pattern = terms.length
+    ? new RegExp(String.raw`(^|[^\p{L}\p{N}])(${terms
+      .map((term) => term.trim().split(/\s+/u).map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(String.raw`\s+`))
+      .join('|')})(?=$|[^\p{L}\p{N}])`, 'giu')
+    : null;
+  marketLabelPatterns.set(market, pattern);
+  return pattern;
 }
 
 /** Separators between monetary fields; decimal and domain punctuation is excluded. */
 function separators(text: string): number[] {
   return [...text.matchAll(/[;\n!?。।]|[.,](?=\s|$)/g)]
     .filter((match) => match[0] !== '.' || !/\b(?:min|avl|avail|cr|dr|amt|bal)$/i.test(text.slice(0, match.index)))
+    // The observed ADCB total label includes an abbreviation, not a clause
+    // boundary. Its qualifier must stay attached to its own total only.
+    .filter((match) => match[0] !== '.' ||
+      !(/\btotal\s+due\s+to\s+avoid\s+fin$/i.test(text.slice(0, match.index)) &&
+        /^\.\s+charges\b/i.test(text.slice(match.index))))
     .map((match) => match.index!);
 }
 
-function ownCandidates(draft: AlertDraft, excludedRoleSpans: readonly SourceSpan[]): OwnedCandidate[] {
+function ownCandidates(
+  draft: AlertDraft,
+  excludedRoleSpans: readonly SourceSpan[],
+  marketLabels: RegExp | null = null,
+): OwnedCandidate[] {
   const text = draft.normalizedText;
   let roleText = text;
   for (const span of excludedRoleSpans) {
@@ -91,9 +122,9 @@ function ownCandidates(draft: AlertDraft, excludedRoleSpans: readonly SourceSpan
     const nextStart = draft.candidates[index + 1]?.span.start ?? text.length;
     const before = text.slice(previousEnd, candidate.span.start);
     let prefixStart = previousEnd + ((separators(before).at(-1) ?? -1) + 1);
-    let preceding = labels(roleText.slice(prefixStart, candidate.span.start)).at(-1);
+    let preceding = labels(roleText.slice(prefixStart, candidate.span.start), marketLabels).at(-1);
     if (!preceding) {
-      const prior = labels(roleText.slice(previousEnd, candidate.span.start)).at(-1);
+      const prior = labels(roleText.slice(previousEnd, candidate.span.start), marketLabels).at(-1);
       if (prior) {
         const start = previousEnd + prior.start;
         const tail = roleText.slice(start + prior.text.length, candidate.span.start);
@@ -109,7 +140,7 @@ function ownCandidates(draft: AlertDraft, excludedRoleSpans: readonly SourceSpan
     }
     const after = text.slice(candidate.span.end, nextStart);
     const suffixEnd = candidate.span.end + (separators(after)[0] ?? after.length);
-    const following = labels(roleText.slice(candidate.span.end, suffixEnd))[0];
+    const following = labels(roleText.slice(candidate.span.end, suffixEnd), marketLabels)[0];
     const label = preceding ?? following;
     let role = label?.role ?? 'unknown';
     // In a statement, an explicitly labelled "amount due" is the total;
@@ -255,7 +286,7 @@ export function extractUniversalMoney(
     Number.isInteger(span.start) && Number.isInteger(span.end) &&
     span.start >= 0 && span.end > span.start && span.end <= draft.normalizedText.length &&
     candidate.span.start < span.end && candidate.span.end > span.start));
-  const owned = ownCandidates({ ...draft, candidates }, excludedRoleSpans);
+  const owned = ownCandidates({ ...draft, candidates }, excludedRoleSpans, marketLabelPattern(context.market));
   const observations = owned.map(({ candidate, role, aggregate }) => {
     const field = candidateField(candidate, draft.normalizedText);
     if (aggregate) field.issues = [...field.issues, 'aggregate-money-field'];

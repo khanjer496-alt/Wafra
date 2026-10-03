@@ -1,7 +1,10 @@
 package expo.modules.notificationreader
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Telephony
 
 /**
  * Exact package identities from current official bank listings plus
@@ -23,6 +26,8 @@ object TrustedBankNotificationPackages {
 
   const val SOURCE_TRUSTED_BANK = "trusted-bank"
   const val SOURCE_FINANCIAL_CANDIDATE = "financial-candidate"
+  /** An SMS app's notification while Wafra cannot read SMS itself: Review only. */
+  const val SOURCE_MESSAGING_REVIEW = "messaging-review"
 
   private val FINANCIAL_CONTEXT_RE = Regex(
     "\\b(?:debit(?:ed)?|credit(?:ed)?|purchase|payment|transaction|transfer|spent|withdraw(?:al|n)?|refund|card|account|balance|statement|merchant|pos|atm|iban|swift)\\b" +
@@ -48,6 +53,72 @@ object TrustedBankNotificationPackages {
     "com.barclays.android.barclaysmobilebanking" to "GB",
     "com.hdfcbank.android.now" to "IN",
   )
+
+  /**
+   * Messaging apps are never a bank's own notification channel, whatever
+   * their text says, and never a financial candidate.
+   *
+   * The default SMS app re-announces every bank SMS the SMS path already
+   * captures, so while Wafra can read SMS a Messages notification is only a
+   * second copy — and approving it in Review taught Wafra to trust the
+   * Messages app itself, and with it anyone who can text the user. When the
+   * user has NOT granted READ_SMS, though, that notification is their only
+   * route to their bank's SMS. Then, and only for SMS apps, it is admitted as
+   * SOURCE_MESSAGING_REVIEW: JS sends it to Review only and attaches no
+   * package identity Review could learn. Chat apps carry money-looking text
+   * from anyone and are never admitted.
+   *
+   * Keep both lists aligned with SMS_APP_PACKAGES and CHAT_APP_PACKAGES in
+   * src/lib/auto-import.ts, which applies the same rule to queued rows;
+   * android-review-capture.test.js compares them.
+   */
+  val smsAppPackages: Set<String> = setOf(
+    "com.google.android.apps.messaging",
+    "com.samsung.android.messaging",
+    "com.android.mms",
+    "com.android.messaging",
+    "com.oneplus.mms",
+    "com.microsoft.android.smsorganizer",
+    "com.truecaller",
+  )
+
+  val chatAppPackages: Set<String> = setOf(
+    "com.whatsapp",
+    "com.whatsapp.w4b",
+    "org.telegram.messenger",
+    "org.thoughtcrime.securesms",
+    "com.facebook.orca",
+    "com.viber.voip",
+    "jp.naver.line.android",
+    "com.tencent.mm",
+    "com.imo.android.imoim",
+    "com.botim.im",
+  )
+
+  private fun defaultSmsPackage(context: Context): String? = try {
+    Telephony.Sms.getDefaultSmsPackage(context)
+  } catch (_: Exception) {
+    null
+  }
+
+  /** The default SMS app or a known SMS app. */
+  private fun isSmsApp(context: Context, packageName: String): Boolean =
+    smsAppPackages.contains(packageName) || defaultSmsPackage(context) == packageName
+
+  /** The default SMS app, a known SMS app or a known chat app. */
+  fun isMessagingApp(context: Context, packageName: String): Boolean =
+    chatAppPackages.contains(packageName) || isSmsApp(context, packageName)
+
+  /**
+   * Whether Wafra can read the SMS inbox itself. A failed check counts as
+   * readable: the cost is a missed Review card for one notification, never a
+   * duplicate of an SMS the inbox path already captures.
+   */
+  private fun smsReadable(context: Context): Boolean = try {
+    context.checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
+  } catch (_: Exception) {
+    true
+  }
 
   private fun installer(context: Context, packageName: String): String? = try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -96,8 +167,26 @@ object TrustedBankNotificationPackages {
     // otherwise healthy phones. Unknown packages still require Play provenance;
     // this native classification alone never authorizes a ledger import.
     if (isTrusted(context, packageName)) return SOURCE_TRUSTED_BANK
+    // Messaging apps before the Play gate: a preinstalled Messages app has no
+    // Play installer, and the default-SMS role is itself the identity check.
+    if (isMessagingApp(context, packageName)) {
+      return if (isSmsApp(context, packageName) && !smsReadable(context) &&
+          FINANCIAL_CONTEXT_RE.containsMatchIn(body)) SOURCE_MESSAGING_REVIEW else null
+    }
     if (!playInstalled(context, packageName)) return null
     return if (FINANCIAL_CONTEXT_RE.containsMatchIn(body)) SOURCE_FINANCIAL_CANDIDATE else null
+  }
+
+  /**
+   * Classification of a row already in the encrypted queue. A messaging-app
+   * row always reaches JS as SOURCE_MESSAGING_REVIEW so JS can acknowledge
+   * it (SMS readable, or a chat app) or send it to Review; returning null
+   * would strand it in the queue until retention expires.
+   */
+  fun queuedSourceClass(context: Context, packageName: String, body: String): String? {
+    if (isTrusted(context, packageName)) return SOURCE_TRUSTED_BANK
+    if (isMessagingApp(context, packageName)) return SOURCE_MESSAGING_REVIEW
+    return sourceClass(context, packageName, body)
   }
 
   private const val MAX_APPLICATION_LABEL_CHARS = 120

@@ -12,6 +12,7 @@ const BASE = process.env.BASE ?? 'http://localhost:8126';
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
 const page = await ctx.newPage();
+await page.context().route('**/*', route => route.request().url().startsWith(BASE + '/') ? route.continue() : route.abort());
 
 let pass = 0;
 let fail = 0;

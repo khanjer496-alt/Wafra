@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
@@ -10,13 +10,13 @@ import { merchantSpendingHref } from '@/lib/merchant-spending';
 import type { Transaction } from '@/lib/types';
 
 /** One labelled target, never a nested pressable inside a transaction row. */
-export function MerchantSpendingLink({ merchant, type = 'expense', onClose }: {
-  merchant?: string; type?: Transaction['type']; onClose?: () => void;
+export function MerchantSpendingLink({ merchant, displayName, type = 'expense', onClose }: {
+  merchant?: string; displayName?: string; type?: Transaction['type']; onClose?: () => void;
 }) {
   const router = useRouter(); const theme = useTheme(); const language = useLanguage();
   const w = merchantSpendingCopy[language === 'ar' ? 'ar' : 'en'];
   const label = merchant ? (type === 'income' ? w.viewIncome : w.view) : w.browse;
-  return <Pressable accessibilityRole="button" accessibilityLabel={merchant ? `${label}: ${merchant}` : label}
+  return <Pressable accessibilityRole="button" accessibilityLabel={merchant ? `${label}: ${displayName ?? merchant}` : label}
     testID={merchant ? 'view-merchant-spending' : 'browse-merchant-spending'}
     onPress={() => { onClose?.(); router.push(merchant ? merchantSpendingHref(merchant, type) : '/merchants'); }}
     style={({ pressed }) => [styles.row, { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>

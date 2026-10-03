@@ -96,3 +96,10 @@ export interface TransferDecisionRequest {
   expectedFingerprints: Record<string, string>;
   now: number;
 }
+
+/** Explicitly selected decisions share one validation, ledger update and write. */
+export interface TransferDecisionBatchRequest {
+  decisions: Pick<TransferDecisionRequest, 'ids' | 'ownership' | 'counterpartId'>[];
+  expectedFingerprints: Record<string, string>;
+  now: number;
+}

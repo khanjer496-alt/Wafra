@@ -4,13 +4,22 @@ const { test } = require('node:test');
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
 
+const counts = (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id);
 function harness(rows = [], options = {}) {
   let insightCalls = 0;
   let periodChecks = 0;
   const calls = { unread: 0, cashOut: 0, comparison: 0, foreign: 0, upcomingKinds: [] };
   const state = { transactions: rows, accounts: [{ id: 'bank' }], budgets: [], notSubscriptions: [],
     reviewTray: { pending: options.pending ?? [] } };
+  // Row-local transfer facts are fixture fields; the projection must never
+  // rebuild the transfer graph, so reconciliation itself throws.
+  const reconciliation = { isTransferCandidate: row => row.ownership !== undefined,
+    transferOwnership: row => row.ownership ?? null,
+    reconcileTransfers: () => { throw new Error('dashboard projection rebuilt the transfer graph'); } };
+  const transferActivity = load(path.resolve(__dirname, '../../../src/lib/transfer-activity.ts'), {
+    '@/lib/transfer-reconciliation': reconciliation });
   const { projectDashboard } = load(path.resolve(__dirname, '../../../src/lib/dashboard-projection.ts'), {
+    '@/lib/transfer-reconciliation': reconciliation, '@/lib/transfer-activity': transferActivity,
     '@/lib/accuracy': { unreadFormatCount: () => { calls.unread++; return options.unread ?? 0; }, REPORT_PROMPT_THRESHOLD: 5 },
     '@/lib/analytics': { periodComparison: () => { calls.comparison++; return null; } },
     '@/lib/cash-flow': { summarizeCashOutflow: () => { calls.cashOut++; return { totalFils: 120, cardPaymentsFils: 20, accountOutflowFils: 100 }; } },
@@ -19,7 +28,7 @@ function harness(rows = [], options = {}) {
       buildInsights: () => { insightCalls += 1; return [{ id: 'one' }, { id: 'two' }]; } },
     '@/lib/leaving-soon': { leavingSoon: (_state, _now, opts) => { calls.upcomingKinds.push(opts.kinds);
       return ['card', 'bill', 'subscription'].filter(kind => !opts.kinds || opts.kinds.includes(kind)).map(kind => ({ kind })); } },
-    '@/lib/ledger': { countsInTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), countsInCashflowTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), liveAccountIds: () => new Set(['bank']), internalTransferIds: () => new Set(['internal']), internalTransferIdsForState: () => new Set(['internal']) },
+    '@/lib/ledger': { countsInTotals: counts, isIncome: (row, live, internal) => row.type === 'income' && counts(row, live, internal), isSpending: (row, live, internal) => row.type !== 'income' && counts(row, live, internal), countsInCashflowTotals: (row, live, internal) => !row.isTransfer && live.has(row.accountId) && !internal.has(row.id), liveAccountIds: () => new Set(['bank']), internalTransferIds: () => new Set(['internal']), internalTransferIdsForState: () => new Set(['internal']) },
     '@/lib/period': { inPeriod: (date) => { periodChecks += 1; return date === '2026-09-06'; }, isCurrentMonth: () => true },
     '@/lib/uncategorised': { uncategorisedMerchants: () => ({ merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 }), worthPrompting: () => !!options.needsCategory },
   });
@@ -45,8 +54,23 @@ test('Home can skip invisible insights without changing the monetary projection'
 test('activity selection stops at six visible rows and preserves display order', () => {
   const rows = Array.from({ length: 10000 }, (_, i) => ({ id: `${i}`, date: '2026-09-06', accountId: 'bank' }));
   const h = harness(rows);
-  assert.deepEqual(Array.from(h.project().activityRows, (r) => r.id), ['0', '1', '2', '3', '4', '5']);
-  assert.equal(h.counts().periodChecks, 6);
+  const projected = h.project();
+  assert.deepEqual(Array.from(projected.activityRows, (r) => r.id), ['0', '1', '2', '3', '4', '5']);
+  // Six rows, then at most 50 more to finish the last day's total: bounded,
+  // never the whole ledger. A day it cannot finish carries no total.
+  assert.ok(h.counts().periodChecks <= 56, `${h.counts().periodChecks} period checks`);
+  assert.equal(harness(rows).project({ surface: 'home' }).activityDayTotals.has('2026-09-06'), false,
+    'an unfinished day has no partial total');
+});
+test('activity day totals cover the whole listed day, not only the rows shown', () => {
+  const rows = [
+    ...Array.from({ length: 8 }, (_, i) => ({ id: `t${i}`, date: '2026-09-06', accountId: 'bank', type: 'expense', amountFils: 100 })),
+    { id: 'y', date: '2026-09-05', accountId: 'bank', type: 'income', amountFils: 5000 },
+  ];
+  const projected = harness(rows).project({ surface: 'home' });
+  assert.equal(projected.activityRows.length, 6);
+  assert.equal(projected.activityDayTotals.get('2026-09-06'), -800, 'all eight rows of the day, though six are listed');
+  assert.equal(projected.activityDayTotals.has('2026-09-05'), false, 'a day not listed carries no total');
 });
 test('transfer, archived, internal and other-period rows cannot displace visible activity', () => {
   const rows = [
@@ -85,4 +109,26 @@ test('parser review state no longer hides Home unread-format work', () => {
   assert.equal(projected.unreadFormats.count, 8);
   assert.equal(projected.unreadFormats.shouldPrompt, true);
   assert.equal(h.counts().unread, 1);
+});
+
+test('Home leaves only row-locally settled external transfers to the Transfers screen', () => {
+  const rows = [
+    { id: 'sent', date: '2026-09-06', accountId: 'bank', ownership: 'external' },
+    { id: 'unknown', date: '2026-09-06', accountId: 'bank', ownership: 'unknown' },
+    { id: 'dup', date: '2026-09-06', accountId: 'bank', ownership: 'external' },
+    { id: 'dup', date: '2026-09-06', accountId: 'bank', ownership: 'external' },
+    { id: 'coffee', date: '2026-09-06', accountId: 'bank' },
+  ];
+  const home = harness(rows).project({ surface: 'home' });
+  // Unknown ownership may be a likely card repayment that Transfers does not
+  // list; duplicate ids are left to review. Both stay visible here.
+  assert.deepEqual(Array.from(home.activityRows, r => r.id), ['unknown', 'dup', 'dup', 'coffee']);
+  assert.equal(home.hasPeriodTransfers, true);
+  assert.equal(home.hasPeriodRecords, true);
+  assert.deepEqual(Array.from(harness(rows).project().activityRows, r => r.id), ['sent', 'unknown', 'dup', 'dup', 'coffee'],
+    'the full dashboard surface keeps its existing activity rows');
+  assert.equal(harness([{ id: 'coffee', date: '2026-09-06', accountId: 'bank' },
+    { id: 'old-sent', date: '2026-08-06', accountId: 'bank', ownership: 'external' },
+    { id: 'hidden-sent', date: '2026-09-06', accountId: 'hidden', ownership: 'external' }])
+    .project({ surface: 'home' }).hasPeriodTransfers, false, 'other periods and hidden accounts do not count');
 });

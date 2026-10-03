@@ -10,7 +10,7 @@ import { Spacing } from '@/constants/theme';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 import { monthKey, monthLabel, shiftMonthKey, toISODate } from '@/lib/format';
-import { t } from '@/lib/i18n';
+import { t, tf } from '@/lib/i18n';
 import { usePeriod } from '@/lib/period-context';
 import type { Period } from '@/lib/period';
 
@@ -76,7 +76,7 @@ export function PeriodSheet({ visible, onClose, selectedPeriod, onApply }: Perio
       <View style={styles.gridHeader}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${gridYear - 1}`}
+          accessibilityLabel={tf('periodPreviousYear', { year: gridYear - 1 })}
           onPress={() => setGridYear(gridYear - 1)}
           style={({ pressed }) => [styles.yearButton, pressed && { backgroundColor: theme.backgroundSelected }]}>
           <Icon name="chevron-left" size={18} color={theme.textSecondary} />
@@ -85,7 +85,7 @@ export function PeriodSheet({ visible, onClose, selectedPeriod, onApply }: Perio
         <ThemedText type="smallBold" accessibilityRole="header">{gridYear}</ThemedText>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${gridYear + 1}`}
+          accessibilityLabel={tf('periodNextYear', { year: gridYear + 1 })}
           accessibilityState={{ disabled: gridYear >= thisYear }}
           disabled={gridYear >= thisYear}
           onPress={() => gridYear < thisYear && setGridYear(gridYear + 1)}

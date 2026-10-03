@@ -25,22 +25,41 @@ import type { Account } from '@/lib/types';
 // every MerchantAvatar/row into one ScrollView on the first Bills mount blocks
 // the JS/UI hand-off even when the underlying analysis is already cached.
 const PAYMENT_AGENDA_PAGE_SIZE = 24;
+const EMPTY_ACCOUNTS: readonly Account[] = [];
+
+const TIMING_SECTIONS = new Set<string>(['soon', 'later']);
 
 const groupIcons: Record<PaymentGroup, IconName> = {
   subscriptions: 'repeat', utilities: 'bolt', cards: 'wallet', loans: 'bank', other: 'receipt',
 };
 
 /** Bills filters choose the payment family; due timing remains the visual hierarchy inside the list. */
-export function PaymentAgenda({ items, accounts = [], includePaid, group: selectedGroup, onOpen }: {
+// Memoised: Bills re-renders for sheets, forms and segment taps; the agenda
+// only needs to when its own inputs change (so onOpen and renderMeta must be
+// stable).
+export const PaymentAgenda = React.memo(function PaymentAgenda({ items, accounts = EMPTY_ACCOUNTS, includePaid, group: selectedGroup, onOpen, renderMeta, showNote = true, timingHeadings = true }: {
   items: readonly PaymentAgendaItem[];
   accounts?: readonly Account[];
   includePaid: boolean;
   group?: PaymentGroup;
   onOpen: (item: PaymentAgendaItem) => void;
+  /** An extra line under a row, e.g. "was AED 10.99 · Price went up". */
+  renderMeta?: (item: PaymentAgendaItem) => React.ReactNode;
+  /** The "only updates Wafra" footnote; one per screen is enough. */
+  showNote?: boolean;
+  /**
+   * "Next 7 days" / "Later" headings. Next 30 days leaves them out: the band's
+   * dated strip and each row's date already say when, and the list reads as
+   * one run. Past due, Expected earlier and Recently paid always keep theirs.
+   */
+  timingHeadings?: boolean;
 }) {
   const theme = useTheme(); const lang = useLanguage(); const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
-  const accountById = new Map(accounts.map((account) => [account.id, account] as const));
+  const accountById = useMemo(
+    () => new Map(accounts.map((account) => [account.id, account] as const)),
+    [accounts],
+  );
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
   const w = copy[lang === 'ar' ? 'ar' : 'en'];
@@ -105,12 +124,12 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
       </ThemedText>}
     </View>}
     {limitedSections.map((section) => <View key={section.key} style={styles.section} testID={`bills-${section.key}`}>
-      <View style={styles.sectionHeading}>
+      {(timingHeadings || !TIMING_SECTIONS.has(section.key)) && <View style={styles.sectionHeading}>
         <ThemedText type="smallBold" themeColor={section.key === 'overdue' ? 'expense' : 'textSecondary'}>
           {w[section.key]}
         </ThemedText>
         <ThemedText type="micro" tabular themeColor="textTertiary">{section.items.length}</ThemedText>
-      </View>
+      </View>}
       {section.items.map((item) => {
         const date = item.paid ? `${item.kind === 'card' ? w.paidStatement : w.recorded} ${shortDate(item.dateISO)}`
           : item.daysLeft === 0 ? w.today : item.daysLeft === 1 ? w.tomorrow : shortDate(item.dateISO);
@@ -121,29 +140,31 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
         const dateChipColor = isOverdue ? theme.expense : isToday ? theme.warning : theme.textSecondary;
         const cardAccount = item.kind === 'card' && item.accountId ? accountById.get(item.accountId) : undefined;
         return <Pressable key={item.id} accessibilityRole="button"
-          accessibilityLabel={`${item.title}. ${date}. ${w[section.key]}. ${item.estimated ? w.estimate : ''} ${moneyLabel(item.amountFils)}`}
+          accessibilityLabel={`${item.displayLabel ?? item.title}. ${date}. ${w[section.key]}. ${item.estimated ? w.estimate : ''} ${moneyLabel(item.amountFils)}`}
           onPress={() => onOpen(item)} style={({ pressed }) => [styles.row,
             { borderColor: theme.cardBorder, backgroundColor: pressed ? theme.backgroundSelected : 'transparent' }]}>
           {cardAccount
-            ? <BankAvatar account={cardAccount} size={36} />
-            : <MerchantAvatar title={item.title} category={item.category} size={36} />}
+            ? <BankAvatar account={cardAccount} size={40} />
+            : <MerchantAvatar title={item.title} category={item.category} size={40} />}
           <View style={styles.content}>
             <View style={[styles.top, large && styles.stack]}>
-              <ThemedText type="smallBold" style={styles.grow}>{item.title}</ThemedText>
+              <ThemedText type="smallBold" style={styles.grow}>{item.displayLabel ?? item.title}</ThemedText>
               <Money fils={item.amountFils} type="smallBold" color={isOverdue ? theme.expense : theme.text} />
             </View>
+            {/* One meta line: date, estimate, account, then any note. */}
             <View style={styles.metaRow}>
               <View style={[styles.dateChip, {
                 backgroundColor: dateChipBg, borderColor: dateChipBorder,
                 paddingHorizontal: isOverdue || isToday ? 8 : 0,
                 paddingVertical: isOverdue || isToday ? 2 : 0,
               }]}>
-                <ThemedText type="meta" style={{ color: dateChipColor }} tabular>{date}</ThemedText>
+                <ThemedText type="meta" style={{ color: dateChipColor }}>{date}</ThemedText>
               </View>
-              {item.estimated && <ThemedText type="meta" style={{ color: theme.gold }}>{w.estimate}</ThemedText>}
+              {item.estimated && <ThemedText type="meta" style={{ color: theme.gold }}>{`· ${w.estimate}`}</ThemedText>}
+              {item.accountName && <ThemedText type="meta" themeColor="textTertiary">{`· ${item.accountName}`}</ThemedText>}
               {item.paid && <Icon name="check" size={15} color={theme.income} />}
+              {renderMeta?.(item)}
             </View>
-            {item.accountName && <ThemedText type="meta" themeColor="textTertiary">{item.accountName}</ThemedText>}
           </View>
         </Pressable>;
       })}
@@ -159,15 +180,15 @@ export function PaymentAgenda({ items, accounts = [], includePaid, group: select
       <ThemedText type="smallBold">{w.showMore(hiddenCount)}</ThemedText>
       <Icon name="chevron-down" size={16} color={theme.textSecondary} />
     </Pressable>}
-    {visibleCount > 0 && <ThemedText type="meta" themeColor="textTertiary" style={styles.notice}>{w.noteBody}</ThemedText>}
+    {showNote && visibleCount > 0 && <ThemedText type="meta" themeColor="textTertiary" style={styles.notice}>{w.noteBody}</ThemedText>}
   </View>;
-}
+});
 const styles = StyleSheet.create({
-  root: { gap: 18 }, section: { gap: 4 },
-  sectionHeading: { minHeight: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
-  content: { flex: 1, minWidth: 0, gap: 4 }, top: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  grow: { flex: 1, minWidth: 0, gap: 3 }, metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  root: { gap: 12 }, section: { gap: 0 },
+  sectionHeading: { minHeight: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 60, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  content: { flex: 1, minWidth: 0, gap: 2 }, top: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  grow: { flex: 1, minWidth: 0, gap: 3 }, metaRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 4, rowGap: 2 },
   dateChip: { borderRadius: 999, borderWidth: 1 },
   stack: { flexDirection: 'column', alignItems: 'flex-start' },
   emptyState: { minHeight: 112, alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },

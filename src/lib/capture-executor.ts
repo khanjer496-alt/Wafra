@@ -6,7 +6,8 @@
  * barriers, and acknowledgement ordering never cross this interface.
  */
 import { buildImportPlan, type ImportPlan, type ScannedSms } from '@/lib/auto-import';
-import { collectNewMessages, type CaptureResult, type CaptureSource } from '@/lib/capture';
+import { StatementFilingError } from '@/lib/statement-import-flow';
+import { collectNewMessages, type CaptureSource } from '@/lib/capture';
 import {
   ackRelay,
   getBackgroundRelayConfig,
@@ -24,17 +25,22 @@ import type {
   LocalCaptureDeclineQualificationMapping,
   LocalCaptureReviewQualificationCandidate,
 } from '@/lib/types';
-import type { ReviewEntry } from '@/lib/alert-review-tray';
+import { emptyAlertReviewTray, partitionReviewsByCapacity, type ReviewEntry } from '@/lib/alert-review-tray';
 import { stageWalletNearMatches } from '@/lib/wallet-near-match';
 import type { ReviewSourceBinding } from '@/lib/review-source-bindings';
 import { captureTrace, captureTraceEnabled } from '@/lib/capture-trace';
 import { recordRuntimeOperation } from '@/lib/runtime-performance';
+import { canonicalCaptureSourceKey } from '@/lib/capture-source-identity';
 
 export type CaptureIntent = 'routine' | 'notification-only' | 'supplemental' | 'setup-verification' | 'background';
 
 export interface CaptureImportSummary {
   /** Relay returned a full page; supplemental callers should drain another page after yielding. */
   moreQueued?: boolean;
+  /** Review rows retained on the relay, so filing is not complete. */
+  deferredReviews?: number;
+  /** A full page is retained but cannot progress until another flow resolves it. */
+  queueBlocked?: boolean;
   transactions: number;
   dues: number;
   bills: number;
@@ -92,7 +98,7 @@ export interface BackgroundCaptureAdapter {
 }
 
 interface CaptureExecutorDependencies {
-  collectRoutine: (state: AppState, options?: { notificationOnly?: boolean }) => Promise<CaptureResult>;
+  collectRoutine: typeof collectNewMessages;
   planRows: typeof buildImportPlan;
   getRelay: () => Promise<RelayConfig | null>;
   getBackgroundRelay: () => Promise<BackgroundRelayConfig | null>;
@@ -162,12 +168,31 @@ const summary = (
 const acknowledgementsFor = (
   queued: RelaySyncResult,
   includeReviews = false,
+  deferredReviewSourceKeys: readonly string[] = [],
+  includeTests = false,
 ): string[] => {
-  const reserved = new Set(queued.testIds);
+  const reserved = new Set(includeTests ? [] : queued.testIds);
   if (!includeReviews) {
     for (const id of queued.reviewIds ?? []) reserved.add(id);
+  } else if (deferredReviewSourceKeys.length > 0) {
+    const deferred = new Set(deferredReviewSourceKeys.map(key => canonicalCaptureSourceKey(key)));
+    const reviewsBySource = new Map((queued.reviewCandidates ?? []).map(item => [item.sourceKey, item]));
+    for (const id of queued.reviewIds ?? []) {
+      const sourceKey = queued.reviewSourceKeysById?.get(id);
+      const review = sourceKey ? reviewsBySource.get(sourceKey) : undefined;
+      if (!sourceKey || !review || deferred.has(canonicalCaptureSourceKey(sourceKey, review.observedAt))) reserved.add(id);
+    }
   }
   return queued.ids.filter((id) => !reserved.has(id));
+};
+
+const reviewSourceClaims = (state: AppState): Set<string> => {
+  const now = Date.now();
+  return new Set([
+    ...(state.reviewTray?.pending ?? []).filter(item => item.expiresAt > now),
+    ...(state.reviewTray?.tombstones ?? []).filter(item => item.expiresAt > now &&
+      (item.outcome === 'added' || item.outcome === 'dismissed' || item.outcome === 'duplicate')),
+  ].map(item => canonicalCaptureSourceKey(item.sourceKey, 'observedAt' in item ? item.observedAt : undefined)));
 };
 
 const launchMarketForRows = (
@@ -246,12 +271,22 @@ export const createCaptureExecutor = ({
     const activeLedger = requireLedger();
     const state = activeLedger.getState();
     if (!state.hydrated) return { kind: 'not-hydrated' };
+    const generation = activeLedger.getStateGeneration?.();
+    const routineStopped = (source: CaptureSource) => captureStopped(activeLedger, source) ||
+      (generation !== undefined && activeLedger.getStateGeneration?.() !== generation);
+    // A current in-memory claim can avoid crowding out older inbox reviews,
+    // but is not an ACK receipt until ensureDurable succeeds. Do not use this
+    // optimization on adapters without a replacement-generation guard.
+    const currentReviewClaims = () => reviewSourceClaims(activeLedger.getState());
+    const knownReviewSourceKeys = generation === undefined ? [] : [...currentReviewClaims()];
+    const knownPendingReviewSources = new Set((state.reviewTray?.pending ?? [])
+      .map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)));
 
     const tracing = captureTraceEnabled();
     const traceStarted = tracing ? Date.now() : 0;
     captureTrace('routine:start');
     const collectStarted = Date.now();
-    const collected = await dependencies.collectRoutine(state, { notificationOnly });
+    const collected = await dependencies.collectRoutine(state, { notificationOnly, knownReviewSourceKeys });
     recordRuntimeOperation('capture-collect', Date.now() - collectStarted);
     captureTrace('collect:done', collected.parsed.length, tracing ? Date.now() - traceStarted : 0);
     if (collected.needsSetup) return { kind: 'needs-setup' };
@@ -264,10 +299,36 @@ export const createCaptureExecutor = ({
     // a cursor, changing the ledger market, or acknowledging remote rows.
     // Leaving the relay copy unacknowledged is intentional: it can be retried
     // only after the user explicitly enables capture again.
-    if (captureStopped(activeLedger, collected.source)) {
+    if (routineStopped(collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
     }
-    const reviewCandidates = collected.reviewCandidates ?? [];
+    // Native and relay collectors can retain observations in encrypted queues.
+    // Never evict existing money evidence merely to make room for this page.
+    const candidates = collected.reviewCandidates ?? [];
+    const capacity = collected.source === 'sms' || collected.source === 'push' || collected.source === 'relay'
+      ? partitionReviewsByCapacity(activeLedger.getState().reviewTray ?? emptyAlertReviewTray(), candidates, Date.now())
+      : { admit: candidates, deferred: [] };
+    const reviewCandidates = capacity.admit;
+    const deferredReviewSourceKeys = capacity.deferred.map(item => item.sourceKey);
+    const finalDeferredReviewSources = () => {
+      const currentClaims = currentReviewClaims();
+      return [...deferredReviewSourceKeys,
+        ...[...knownReviewSourceKeys, ...reviewCandidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt))]
+          .filter(key => !currentClaims.has(canonicalCaptureSourceKey(key)))];
+    };
+    const skippedInboxSources = collected.skippedKnownInboxReviewSourceKeys ?? [];
+    const skippedInboxNeedsRetry = () => {
+      const claims = currentReviewClaims();
+      return skippedInboxSources.some(key => knownPendingReviewSources.has(canonicalCaptureSourceKey(key)) ||
+        !claims.has(canonicalCaptureSourceKey(key)));
+    };
+    // Pending claims can disappear during any later persistence await without
+    // a ledger replacement. Keep the monotonic cursor and parser receipts
+    // unchanged for this scan rather than advancing and trying to rewind.
+    // Known-source filtering still exposes older cropped rows; completion
+    // resumes once the overlapping pending reviews have final decisions.
+    let deferInbox = collected.deferredInboxReviews || capacity.deferred.some(item => item.channel !== 'push') ||
+      skippedInboxNeedsRetry();
     let reviewAlerts = 0;
     if (reviewCandidates.length > 0 || (collected.reviewSourceBindings?.length ?? 0) > 0) {
       if (!activeLedger.stageReviewAlerts) {
@@ -282,7 +343,7 @@ export const createCaptureExecutor = ({
       reviewAlerts = reviewReceipt.admitted;
       await reviewReceipt.durable;
       captureTrace('reviews:done', reviewAlerts, tracing ? Date.now() - reviewStarted : 0);
-      if (captureStopped(activeLedger, collected.source)) {
+      if (routineStopped(collected.source)) {
         return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
       }
     }
@@ -295,35 +356,60 @@ export const createCaptureExecutor = ({
     if (collected.parsed.length > 0 || collected.declined.length > 0) {
       await yieldForegroundTurn();
     }
-    if (captureStopped(activeLedger, collected.source)) {
+    if (routineStopped(collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
     }
-    // This is deliberately after the final pre-import await. importBatch
-    // dispatches synchronously below, so a stale plan can never stamp a
-    // restored ledger as having completed a historical parser migration.
-    const stateAtPlan = activeLedger.getState();
+    let stateAtPlan = activeLedger.getState();
     if (!stateAtPlan.hydrated) return { kind: 'not-hydrated' };
     // Runtime diagnostics are always on for Android tester builds, independently
     // of the verbose capture trace flag. Starting this clock at zero when trace
     // was disabled produced epoch-sized "capture-plan" durations and hid the
     // real operation that could be blocking the JS thread.
-    const planStarted = Date.now();
-    captureTrace('plan:start', collected.parsed.length);
-    const planned = dependencies.planRows(
-      collected.parsed,
-      stateAtPlan,
-      collected.newestTs,
-      new Date(),
-      collected.declined,
-    );
-    recordRuntimeOperation('capture-plan', Date.now() - planStarted);
+    let planMs = 0;
+    const planAgainst = (ledgerState: AppState): ImportPlan => {
+      deferInbox ||= skippedInboxNeedsRetry();
+      const planStarted = Date.now();
+      captureTrace('plan:start', collected.parsed.length);
+      const result = dependencies.planRows(
+        collected.parsed,
+        ledgerState,
+        deferInbox ? ledgerState.lastScanTs : collected.newestTs,
+        new Date(),
+        collected.declined,
+      );
+      planMs = Date.now() - planStarted;
+      recordRuntimeOperation('capture-plan', planMs);
+      return result;
+    };
+    let planned = planAgainst(stateAtPlan);
+    // Planning and applying a batch each walk the whole ledger. Run in one JS
+    // turn they were the longest freeze of a capture on a 15k-row phone, so
+    // input and rendering get a turn between them. The plan that is applied is
+    // still exactly the plan for the ledger it is applied to: importBatch
+    // dispatches synchronously below, and if anything replaced the ledger
+    // during this yield (an edit, another import, a restore) the batch is
+    // re-planned against the new snapshot in that same final turn. A stale plan
+    // therefore still cannot stamp a restored ledger as having completed a
+    // historical parser migration.
+    if (hasChanges(planned) || (planned.walletNearMatches?.length ?? 0) > 0) {
+      await yieldForegroundTurn();
+      if (routineStopped(collected.source)) {
+        return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
+      }
+      const current = activeLedger.getState();
+      if (!current.hydrated) return { kind: 'not-hydrated' };
+      if (current !== stateAtPlan) {
+        stateAtPlan = current;
+        planned = planAgainst(current);
+      }
+    }
     // Possible Apple Pay duplicates were withheld from the batch. Stage them in
     // this same turn so the importBatch below (and its cursor) persist with
     // them, and settle before any commit/ACK below.
     const nearMatches = stageNearMatches(activeLedger, planned);
     const plan = nearMatches.plan;
     reviewAlerts += nearMatches.admitted;
-    captureTrace('plan:done', plan.txCount + plan.healedCount, tracing ? Date.now() - planStarted : 0);
+    captureTrace('plan:done', plan.txCount + plan.healedCount, tracing ? planMs : 0);
     // The parser version is a durable migration receipt. Only the collection
     // that actually started at the beginning of the Android inbox may carry
     // it into the atomic ledger write. A routine scan can finish after an old
@@ -331,18 +417,21 @@ export const createCaptureExecutor = ({
     // launch from repairing the restored history.
     const importBatch: ImportBatchInput = {
       ...plan.batch,
-      ...(collected.historicalReread ? { parserRereadComplete: true } : {}),
-      ...(collected.historyImport ? { historyImport: collected.historyImport } : {}),
+      ...(collected.historicalReread && !deferInbox ? { parserRereadComplete: true } : {}),
+      ...(collected.historyImport && !deferInbox ? { historyImport: collected.historyImport } : {}),
+      ...(collected.recentRereadParserVersion !== undefined && !deferInbox
+        ? { recentRereadParserVersion: collected.recentRereadParserVersion } : {}),
     };
 
     if (!hasChanges(plan)) {
       // A review-only Android scan still consumed the inbox up to newestTs.
       // Persist that cursor after the sanitized tray is durable; otherwise it
-      // rereads the same bounded review window forever. Alerts older than the
-      // privacy cap are intentionally not retained. Relay rows use ACKs.
+      // rereads an already handled review window forever. Cropped/deferred
+      // inbox evidence keeps the existing watermark above. Relay rows use ACKs.
       if (collected.source === 'sms' &&
         (importBatch.lastScanTs > stateAtPlan.lastScanTs ||
-          importBatch.parserRereadComplete === true || importBatch.historyImport !== undefined)) {
+          importBatch.parserRereadComplete === true || importBatch.historyImport !== undefined ||
+          (importBatch.recentRereadParserVersion ?? 0) > (stateAtPlan.recentRereadParserVersion ?? 0))) {
         // Runtime diagnostics are always active in tester builds. Do not zero
         // this clock when verbose capture tracing is off; that records an
         // epoch-sized fake duration and hides the real save cost.
@@ -352,7 +441,7 @@ export const createCaptureExecutor = ({
         await cursorReceipt.durable;
         recordRuntimeOperation('capture-save', Date.now() - saveStarted);
         captureTrace('save:done', cursorReceipt.ids.length, tracing ? Date.now() - saveStarted : 0);
-        if (captureStopped(activeLedger, collected.source)) {
+        if (routineStopped(collected.source)) {
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
         }
       }
@@ -363,7 +452,7 @@ export const createCaptureExecutor = ({
         (reviewCandidates.length === 0 || collected.parsed.length > 0)
       ) {
         await activeLedger.ensureDurable();
-        if (captureStopped(activeLedger, collected.source)) {
+        if (routineStopped(collected.source)) {
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
         }
       }
@@ -372,24 +461,24 @@ export const createCaptureExecutor = ({
       // deleting its sole encrypted native copy, even in a mixed SMS scan.
       if (collected.requiresDurableCommit) {
         await activeLedger.ensureDurable();
-        if (captureStopped(activeLedger, collected.source)) {
+        if (routineStopped(collected.source)) {
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
         }
       }
-      if (captureStopped(activeLedger, collected.source)) {
+      if (routineStopped(collected.source)) {
         return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
       }
       if (collected.source === 'relay') {
         await recordForegroundAutomationProof(collected.parsed);
-        if (captureStopped(activeLedger, collected.source)) {
+        if (routineStopped(collected.source)) {
           return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
         }
       }
       await nearMatches.settle();
-      if (captureStopped(activeLedger, collected.source)) {
+      if (routineStopped(collected.source)) {
         return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
       }
-      await collected.commit();
+      await collected.commit(finalDeferredReviewSources());
       captureTrace('routine:done', 0, tracing ? Date.now() - traceStarted : 0);
       return {
         kind: 'up-to-date',
@@ -405,20 +494,20 @@ export const createCaptureExecutor = ({
     await receipt.durable;
     recordRuntimeOperation('capture-save', Date.now() - saveStarted);
     captureTrace('save:done', receipt.ids.length, tracing ? Date.now() - saveStarted : 0);
-    if (captureStopped(activeLedger, collected.source)) {
+    if (routineStopped(collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
     }
     if (collected.source === 'relay') {
       await recordForegroundAutomationProof(collected.parsed);
-      if (captureStopped(activeLedger, collected.source)) {
+      if (routineStopped(collected.source)) {
         return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
       }
     }
     await nearMatches.settle();
-    if (captureStopped(activeLedger, collected.source)) {
+    if (routineStopped(collected.source)) {
       return { kind: 'up-to-date', source: 'none', ...EMPTY_SUMMARY };
     }
-    await collected.commit();
+    await collected.commit(finalDeferredReviewSources());
     captureTrace('routine:done', receipt.ids.length, tracing ? Date.now() - traceStarted : 0);
     return {
       kind: 'imported',
@@ -431,6 +520,7 @@ export const createCaptureExecutor = ({
     const activeLedger = requireLedger();
     const startingState = activeLedger.getState();
     if (!startingState.hydrated) return { kind: 'not-hydrated' };
+    const generation = activeLedger.getStateGeneration?.();
     // Supplemental statement import is an explicit foreground action. A user
     // who disabled automatic capture can still choose a statement file. If
     // they opt out during an import that started enabled, honor that new choice
@@ -439,6 +529,7 @@ export const createCaptureExecutor = ({
     const supplementalStopped = (): boolean => {
       const current = activeLedger.getState();
       return !current.hydrated || current.privateMode ||
+        (generation !== undefined && activeLedger.getStateGeneration?.() !== generation) ||
         (!startedOptedOut && current.captureOptOut === true);
     };
     const stopped = (): CaptureExecutionOutcome => ({
@@ -460,7 +551,9 @@ export const createCaptureExecutor = ({
     let state = activeLedger.getState();
     if (!state.hydrated) return { kind: 'not-hydrated' };
     let reviewAlerts = 0;
-    const reviewCandidates = queued.reviewCandidates ?? [];
+    const candidates = queued.reviewCandidates ?? [];
+    const capacity = partitionReviewsByCapacity(state.reviewTray ?? emptyAlertReviewTray(), candidates, Date.now());
+    const reviewCandidates = capacity.admit;
     if (reviewCandidates.length > 0) {
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
@@ -472,24 +565,31 @@ export const createCaptureExecutor = ({
       if (supplementalStopped()) return stopped();
       state = activeLedger.getState();
     }
-    const newestTs = queued.parsed.reduce(
-      (max, row) => Math.max(max, row.smsTs ?? 0),
-      state.lastScanTs,
-    );
     if (queued.parsed.length > 0) await yieldForegroundTurn();
     if (supplementalStopped()) return stopped();
+    state = activeLedger.getState();
+    const planAgainst = (snapshot: AppState) => dependencies.planRows(queued.parsed, snapshot,
+      queued.parsed.reduce((max, row) => Math.max(max, row.smsTs ?? 0), snapshot.lastScanTs));
     const supplementalTracing = captureTraceEnabled();
     const planStarted = supplementalTracing ? Date.now() : 0;
     captureTrace('plan:start', queued.parsed.length);
-    let plan = dependencies.planRows(queued.parsed, state, newestTs);
+    let plan = planAgainst(state);
     captureTrace('plan:done', plan.txCount + plan.healedCount,
       supplementalTracing ? Date.now() - planStarted : 0);
     let transactionIds: string[] = [];
     let nearMatchSettle: () => Promise<void> = async () => {};
-    if (queued.parsed.length > 0 && hasChanges(plan)) {
-      if (supplementalStopped()) return stopped();
+    if (queued.parsed.length > 0 && (hasChanges(plan) || (plan.walletNearMatches?.length ?? 0) > 0)) {
       await yieldForegroundTurn();
       if (supplementalStopped()) return stopped();
+      const current = activeLedger.getState();
+      if (current !== state) {
+        state = current;
+        plan = planAgainst(current);
+      }
+    }
+    // No await separates the authoritative replan from staging/application.
+    // Normal account edits and competing imports do not change generation.
+    if (queued.parsed.length > 0 && hasChanges(plan)) {
       // Same synchronous turn as the importBatch below.
       const nearMatches = stageNearMatches(activeLedger, plan);
       plan = nearMatches.plan;
@@ -517,7 +617,7 @@ export const createCaptureExecutor = ({
         await receipt.durable;
       }
       if (supplementalStopped()) return stopped();
-    } else if (reviewCandidates.length === 0) {
+    } else if (reviewCandidates.length === 0 || queued.parsed.length > 0) {
       if (supplementalStopped()) return stopped();
       const saveStarted = supplementalTracing ? Date.now() : 0;
       captureTrace('save:start');
@@ -526,18 +626,32 @@ export const createCaptureExecutor = ({
       if (supplementalStopped()) return stopped();
     }
 
-    await nearMatchSettle();
-    if (supplementalStopped()) return stopped();
-    await recordForegroundAutomationProof(queued.parsed, cfg);
-    if (supplementalStopped()) return stopped();
-    const acknowledge = acknowledgementsFor(queued, true);
-    if (acknowledge.length > 0) {
+    let acknowledge: string[] = [];
+    try {
+      await nearMatchSettle();
       if (supplementalStopped()) return stopped();
-      await dependencies.acknowledge(cfg, acknowledge);
+      await recordForegroundAutomationProof(queued.parsed, cfg);
+      if (supplementalStopped()) return stopped();
+      const finalClaims = reviewSourceClaims(activeLedger.getState());
+      const deferredReviewSources = [
+        ...capacity.deferred.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)),
+        ...candidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !finalClaims.has(key)),
+      ];
+      acknowledge = acknowledgementsFor(queued, true, deferredReviewSources);
+      if (acknowledge.length > 0) {
+        if (supplementalStopped()) return stopped();
+        await dependencies.acknowledge(cfg, acknowledge);
+      }
+    } catch (error) {
+      throw new StatementFilingError(error, plan.txCount, reviewAlerts);
     }
     const pageSummary = {
       ...summary(plan, transactionIds, reviewAlerts),
-      moreQueued: queued.pageFull === true,
+      // A full page held entirely for Review capacity cannot make progress
+      // until a decision frees space; do not spin a caller's page-drain loop.
+      moreQueued: queued.pageFull === true && acknowledge.length > 0,
+      queueBlocked: queued.pageFull === true && acknowledge.length === 0,
+      deferredReviews: (queued.reviewIds ?? []).filter(id => !acknowledge.includes(id)).length,
     };
     return hasChanges(plan)
       ? { kind: 'imported', source: 'relay', ...pageSummary }
@@ -573,11 +687,21 @@ export const createCaptureExecutor = ({
 
   const executeSetupVerification = async (): Promise<CaptureExecutionOutcome> => {
     const activeLedger = requireLedger();
-    if (!activeLedger.getState().hydrated) return { kind: 'not-hydrated' };
+    const startingState = activeLedger.getState();
+    if (!startingState.hydrated) return { kind: 'not-hydrated' };
+    const generation = activeLedger.getStateGeneration?.();
+    const setupStopped = () => {
+      const current = activeLedger.getState();
+      return !current.hydrated || current.privateMode ||
+        (generation !== undefined && activeLedger.getStateGeneration?.() !== generation) ||
+        (!startingState.captureOptOut && current.captureOptOut === true);
+    };
 
     const cfg = await dependencies.getRelay();
+    if (setupStopped()) return { kind: 'setup-waiting' };
     if (!cfg) return { kind: 'needs-setup' };
     const queued = await dependencies.sync(cfg);
+    if (setupStopped()) return { kind: 'setup-waiting' };
     alignLedgerMarket(activeLedger, launchMarketForRows(queued.parsed, cfg.market));
     const shortcutRow = queued.parsed.find((row) =>
       row.captureSource === 'shortcut' &&
@@ -587,12 +711,25 @@ export const createCaptureExecutor = ({
     );
     const proofObserved = queued.testReceived > 0 || shortcutRow !== undefined;
 
-    const reviewCandidates = queued.reviewCandidates ?? [];
+    const candidates = queued.reviewCandidates ?? [];
+    const capacity = partitionReviewsByCapacity(activeLedger.getState().reviewTray ?? emptyAlertReviewTray(), candidates, Date.now());
+    const reviewCandidates = capacity.admit;
+    const acknowledgeSetup = async () => {
+      if (setupStopped()) return;
+      const claims = reviewSourceClaims(activeLedger.getState());
+      const deferred = [
+        ...capacity.deferred.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)),
+        ...candidates.map(item => canonicalCaptureSourceKey(item.sourceKey, item.observedAt)).filter(key => !claims.has(key)),
+      ];
+      const ids = acknowledgementsFor(queued, true, deferred, true);
+      if (ids.length > 0) await dependencies.acknowledge(cfg, ids);
+    };
     if (reviewCandidates.length > 0) {
       if (!activeLedger.stageReviewAlerts) {
         throw new Error('Capture executor requires review staging for review candidates');
       }
       await activeLedger.stageReviewAlerts(reviewCandidates).durable;
+      if (setupStopped()) return { kind: 'setup-waiting' };
     }
 
     if (queued.parsed.length > 0) {
@@ -614,13 +751,15 @@ export const createCaptureExecutor = ({
         // failed. The relay copy remains the recovery source until this flush.
         await activeLedger.ensureDurable();
       }
+      if (setupStopped()) return { kind: 'setup-waiting' };
       await nearMatches.settle();
+      if (setupStopped()) return { kind: 'setup-waiting' };
     }
 
     if (!proofObserved) {
       // Setup owns probe ids. Unreadable rows are unrecoverable and are also
       // retired here so they cannot block the next valid test for 30 days.
-      if (queued.ids.length > 0) await dependencies.acknowledge(cfg, queued.ids);
+      await acknowledgeSetup();
       return { kind: 'setup-waiting' };
     }
 
@@ -628,8 +767,10 @@ export const createCaptureExecutor = ({
     // failure then leaves the relay row available for a retry instead of
     // forcing the user to run the Shortcut again.
     const verified = await dependencies.markVerified(cfg);
+    if (setupStopped()) return { kind: 'setup-waiting' };
     await recordForegroundAutomationProof(queued.parsed, verified);
-    if (queued.ids.length > 0) await dependencies.acknowledge(cfg, queued.ids);
+    if (setupStopped()) return { kind: 'setup-waiting' };
+    await acknowledgeSetup();
     return {
       kind: 'setup-observed',
       merchant: queued.testReceived > 0 ? 'Wafra Capture' : shortcutRow!.merchant,

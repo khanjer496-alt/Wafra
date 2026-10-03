@@ -78,7 +78,7 @@ try {
     await page.screenshot({ path: path.join(out, `home-${mode}.png`) });
 
     await page.getByRole('tab', { name: 'Spending', exact: true }).click();
-    await page.getByRole('tab', { name: 'Activity', exact: true }).click();
+    await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
     const activity = page.getByTestId('spending-activity');
     await activity.waitFor({ state: 'visible' });
     await check(`Activity ${mode}: real logos replace category icons`, () => decoded(activity));
@@ -97,14 +97,14 @@ try {
       await dialog.getByTestId(identity).waitFor({ state: 'visible' });
       await decoded(dialog);
       const size = await dialog.getByTestId(identity).boundingBox();
-      assert.equal(size.width, 52); assert.equal(size.height, 52);
+      assert.equal(size.width, 64); assert.equal(size.height, 64);
     });
     await page.screenshot({ path: path.join(out, `detail-${mode}.png`) });
     await page.keyboard.press('Escape');
     await dialog.waitFor({ state: 'hidden' });
     await search.fill('');
 
-    await page.getByRole('tab', { name: 'Trends', exact: true }).click();
+    await page.getByRole('tab', { name: 'Compare', exact: true }).click();
     const trends = page.getByTestId('spending-trends');
     await trends.waitFor({ state: 'visible' });
     await check(`Trends ${mode}: top merchants have logos`, () => decoded(trends));
@@ -113,7 +113,7 @@ try {
 
     await page.getByRole('tab', { name: 'Bills', exact: true }).click();
     const agenda = page.getByTestId('payment-agenda');
-    await agenda.waitFor({ state: 'visible' });
+    await agenda.first().waitFor({ state: 'visible' });
     await check(`Bills ${mode}: payment agenda has logos`, () => decoded(agenda));
     await page.getByRole('tab', { name: 'All', exact: true }).click();
     await check(`Bills ${mode}: newly added subscription logo decodes`, async () => {
@@ -127,7 +127,7 @@ try {
     await page.screenshot({ path: path.join(out, `bills-${mode}.png`) });
     await context.setOffline(true);
     await page.getByRole('tab', { name: 'Spending', exact: true }).click();
-    await page.getByRole('tab', { name: 'Activity', exact: true }).click();
+    await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
     await check(`Offline ${mode}: previously displayed logos remain available`, () => decoded(activity));
     await context.close();
   }

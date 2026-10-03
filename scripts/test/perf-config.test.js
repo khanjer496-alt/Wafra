@@ -296,7 +296,7 @@ const tabBar = stripComments(read('src/components/tab-bar.tsx'));
 
 {
   ok('src/components/tab-bar.tsx: selection is immediate without shared-value motion',
-    !/useSharedValue|withSpring|withTiming/.test(tabBar) && /focused \? theme\.primary/.test(tabBar),
+    !/useSharedValue|withSpring|withTiming/.test(tabBar) && /focused \? tone\.text/.test(tabBar),
     'selection uses the keyed tab state directly, without a new animation');
 
   /**
@@ -909,14 +909,14 @@ function bodyOf(source, header) {
   const autoImport = stripComments(read('src/hooks/use-auto-import.ts'));
   ok('real Android arrival edges acknowledge a durable import while source-free maintenance stays quiet',
     /liveEvent && !interactive/.test(autoImport) &&
-      /showLiveCaptureFeedback\(outcome\.transactions\)/.test(autoImport) &&
+      /showLiveCaptureFeedback\(outcome\.transactions, outcome\.transactionIds\)/.test(autoImport) &&
       /latestScan\.current\(false, true\)/.test(autoImport) &&
       /runAndroidNotificationDrain\(true\)/.test(autoImport) &&
       /latestScan\.current\(false\)/.test(autoImport),
     'only a source-backed SMS/notification edge should get the short live success feedback; launch/resume safety scans remain silent');
 
   ok('daily summary work is keyed to ledger changes, not every store mutation',
-    /\[getStateSnapshot, historyImportRunning, state\.dailySummary, state\.hydrated, state\.onboarded,[\s\S]*?state\.transactions, watchForeground\]/.test(autoImport) &&
+    /\[ensureDurable, getStateSnapshot, historyImportRunning, state\.dailySummary, state\.hydrated, state\.onboarded,[\s\S]*?state\.transactions, watchForeground\]/.test(autoImport) &&
       !/\}, \[state, watchForeground\]\);/.test(autoImport),
     'history pages, settings changes, and other unrelated reducer updates must not reschedule the daily summary; completion may schedule once');
 
@@ -1066,16 +1066,39 @@ function bodyOf(source, header) {
       !/homeCleanupReady|setHomeCleanupReady/.test(home),
     'uncategorisedMerchants and unreadFormatCount are full-history maintenance; dedicated screens own them, not Home');
 
-  ok('Settings renders cleanup routes without scanning the full ledger for badge counts',
-    !/uncategorisedMerchants|unreadFormatCount|noFormatsReason/.test(settings) &&
-      /sortShopsSettingsDetail/.test(settings) &&
-      /improveAccuracySettingsDetail/.test(settings),
-    'opening Settings to change a toggle or send diagnostics must stay independent of transaction count');
+  ok('Settings renders without scanning the full ledger for badge counts',
+    !/uncategorisedMerchants|unreadFormatCount|noFormatsReason/.test(settings),
+    'opening Settings to change a toggle must stay independent of transaction count');
 
+  // The clean-up rows (and their counts) moved to Data and help. The counts
+  // are full-history scans, so they run only after the screen's interactions
+  // settle, with the static descriptions shown until then.
+  const settingsData = stripComments(read('src/app/settings-data.tsx'));
+  const deferred = settingsData.match(/InteractionManager\.runAfterInteractions\(\(\) => \{[\s\S]*?\n\s*\}\);/)?.[0] ?? '';
+  ok('Data and help defers its clean-up counts until after first paint',
+    /uncategorisedMerchants\(/.test(deferred) && /unreadFormatCount\(/.test(deferred) &&
+      (settingsData.match(/uncategorisedMerchants\(|unreadFormatCount\(/g) ?? []).length === 2 &&
+      /cleanupCounts \? copy\.merchantsToPlace\(cleanupCounts\.place\) : t\('sortShopsSettingsDetail'\)/.test(settingsData) &&
+      /cleanupCounts && formatsCountable \? copy\.unreadFormats\(cleanupCounts\.unread\) : t\('improveAccuracySettingsDetail'\)/.test(settingsData),
+    'the two ledger scans may never run in the render path');
+
+  // Inspect the actual projection hooks, independent of extra ledger fields or
+  // dependency order. Catalog invalidation must not weaken the clock guard.
+  const ts = require('typescript');
+  const homeAst = ts.createSourceFile('home.tsx', read('src/screens/journal-home-screen.tsx'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const projectionDependencies = [];
+  const visitHome = (node) => {
+    if (ts.isCallExpression(node) && ['useMemo', 'useEffect'].includes(node.expression.getText(homeAst)) &&
+        /projectDashboard(?:Insight)?\(/.test(node.arguments[0]?.getText(homeAst) ?? '')) {
+      const deps = node.arguments[1];
+      projectionDependencies.push(deps && ts.isArrayLiteralExpression(deps) ? deps.elements.map(item => item.getText(homeAst)) : []);
+    }
+    ts.forEachChild(node, visitHome);
+  };
+  visitHome(homeAst);
   ok('Home resume clock does not invalidate full-ledger projections within the same day',
-    /const projectionDay\s*=/.test(home) &&
-      (home.match(/state\.marketId, period, projectionDay/g) ?? []).length >= 2 &&
-      !/state\.marketId, period, now\]/.test(home),
+    /const projectionDay\s*=/.test(home) && projectionDependencies.length === 2 &&
+      projectionDependencies.every(deps => deps.includes('projectionDay') && deps.includes('period') && !deps.includes('now')),
     'setNow(new Date()) runs on every foreground resume; the Date object must not make Home scan the whole ledger twice when only the clock changed');
 
   ok('Home defers optional historical insight work until after the first usable frame',
@@ -1140,17 +1163,14 @@ function bodyOf(source, header) {
   const cards = stripComments(read('src/lib/cards.ts'));
   const assistant = stripComments(read('src/lib/wafra-assistant.ts'));
   const assistantScreen = stripComments(read('src/app/assistant.tsx'));
-  ok('the first Android Bills frame does not synchronously run recurring detection',
-    /androidRecurring/.test(bills) &&
-      /InteractionManager\.runAfterInteractions/.test(bills) &&
-      (bills.match(/requestAnimationFrame/g) ?? []).length >= 2 &&
-      /detectSubscriptionsCooperatively\(/.test(bills) &&
-      /Platform\.OS === 'android'[\s\S]*?androidRecurring \?\? \[\]/.test(bills),
-    'Bills is lazy-mounted on the navigation tap; full-ledger recurrence work must start only after the tab has painted');
+  // First-paint deferral and Android's navigation grace execute against the
+  // actual screen in repair/screen-background-work.test.cjs. Source-name
+  // checks here rejected the same behavior when the worker expanded to iOS.
 
   ok('Android recurring detection yields the full-ledger scan instead of merely delaying one blocking turn',
     /function\* subscriptionDetectionWorker/.test(subscriptions) &&
-      /SUBSCRIPTION_DETECTION_SLICE_MS\s*=\s*2/.test(subscriptions) &&
+      Number(/SUBSCRIPTION_DETECTION_SLICE_MS\s*=\s*(\d+)/.exec(subscriptions)?.[1] ?? Infinity) <= 8 &&
+      Number(/SUBSCRIPTION_DETECTION_YIELD_MS\s*=\s*(\d+)/.exec(subscriptions)?.[1] ?? 0) >= 4 &&
       /Date\.now\(\) - startedAt < SUBSCRIPTION_DETECTION_SLICE_MS/.test(subscriptions) &&
       /waitForForegroundHistoryIdle\(SUBSCRIPTION_DETECTION_YIELD_MS\)/.test(subscriptions),
     'a delayed synchronous detectSubscriptions call still freezes JS after the tab paints; the scan itself must be cooperative');
@@ -1165,19 +1185,24 @@ function bodyOf(source, header) {
   ok('Bills never restarts recurrence from row zero on tab churn',
     /UPCOMING_RECURRENCE_IDLE_MS\s*=\s*4_000/.test(bills) &&
       /needsRecurrenceNow/.test(bills) &&
-      /agendaView === 'cards'/.test(bills) &&
+      // All with only the cards filter never needs recurrence.
+      /groupFilter === 'cards'/.test(bills) &&
       /subscriptionDetectionInFlight/.test(subscriptions) &&
-      /if \(existing\) return existing\.promise/.test(subscriptions) &&
+      /if \(existing\) \{[\s\S]*?return existing\.promise/.test(subscriptions) &&
       /callers simply ignore the eventual value/.test(read('src/lib/subscriptions.ts')),
     'one immutable ledger snapshot must own one cooperative recurrence job; focus changes may ignore the result but must not cancel/restart the underlying scan');
 
-  ok('default Upcoming does not start recurrence in the navigation-critical window',
-    /else delay = setTimeout\(startProjection, UPCOMING_RECURRENCE_IDLE_MS\)/.test(bills) &&
-      /agendaView === 'subscriptions' \|\| agendaView === 'utilities' \|\| agendaView === 'all'/.test(bills),
-    'cards/manual bills must paint immediately; only an explicit recurrence view may bypass the idle grace');
+  ok('Bills, reminders and Ask share one recurrence job and Bills paints a finished one at once',
+    /function sameMembers\(/.test(subscriptions) &&
+      /sameMembers\(entry\.liveAccounts, liveAccounts\)/.test(subscriptions) &&
+      /sameMembers\(entry\.internalTransfers, internalTransfers\)/.test(subscriptions) &&
+      /flight\.superseded && waiters\.every\(\(waiter\) => waiter\(\)\)/.test(subscriptions) &&
+      /peekSubscriptionDetection\(state\.transactions/.test(bills) &&
+      /subscriptionDetectionRunning\(transactions/.test(bills),
+    'identity-only keys let every caller start its own 15k-row scan, and orphaned scans of replaced ledgers kept running; Subscriptions stayed empty on the phone');
 
   ok('Bills does not compute recently-paid card history for the default Upcoming view',
-    /const needsPaidCards = agendaView === 'cards' \|\| agendaView === 'all'/.test(bills) &&
+    /const needsPaidCards = agendaView === 'all' && \(groupFilter === 'everything' \|\| groupFilter === 'cards'\)/.test(bills) &&
       /needsPaidCards[\s\S]*?bills-paid-cards[\s\S]*?recentlySettledDues\(state, now\)[\s\S]*?: \[\]/.test(bills),
     'recent settled statements are invisible on Upcoming and must not block the first Bills tap');
 

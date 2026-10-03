@@ -1,5 +1,6 @@
 import type { LedgerMoneySpec } from '@/lib/ledger-money';
-import type { Account, Transaction } from '@/lib/types';
+import { categoryLabel, isCustomCategoryId } from '@/lib/categories';
+import type { Account, CustomCategory, Transaction } from '@/lib/types';
 
 /** CSV quoting preserves cells; a leading apostrophe keeps risky text literal. */
 function csvTextField(value: string): string {
@@ -27,6 +28,7 @@ export function buildLedgerCsv(
   transactions: readonly Transaction[],
   accounts: readonly Account[],
   money: LedgerMoneySpec | null,
+  customCategories?: readonly CustomCategory[],
 ): string {
   const header = 'date,type,amount,currency,category,title,account,transfer';
   if (!transactions.length) return header;
@@ -35,7 +37,7 @@ export function buildLedgerCsv(
   return [header, ...transactions.map((tx) => [
     csvTextField(tx.date), csvTextField(tx.type),
     exactMajorUnits(tx.amountFils, money.exponent), csvTextField(money.currency),
-    csvTextField(tx.category), csvTextField(tx.title),
+    csvTextField(isCustomCategoryId(tx.category) ? categoryLabel(tx.category, 'en', customCategories) : tx.category), csvTextField(tx.title),
     csvTextField(names.get(tx.accountId) ?? ''), tx.isTransfer ? '1' : '0',
   ].join(','))].join('\n');
 }

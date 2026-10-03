@@ -163,7 +163,9 @@ const executeFile = (filename, requireModule) => {
   const loaded = { exports: {} };
   Function('require', 'module', 'exports', '__filename', '__dirname', output)(
     (id) => id === './ios-capture-health' || id === '@/lib/ios-capture-health'
-      ? execute('src/lib/ios-capture-health.ts', requireModule) : requireModule(id),
+      ? execute('src/lib/ios-capture-health.ts', requireModule)
+      : id === './ios-setup-availability' || id === '@/lib/ios-setup-availability'
+        ? execute('src/lib/ios-setup-availability.ts', requireModule) : requireModule(id),
     loaded, loaded.exports, filename, path.dirname(filename),
   );
   return loaded.exports;
@@ -2037,13 +2039,55 @@ struct WafraBankSenderRegistryTests {
           expectedSourceKey: sampleReview.sourceKey, expectedObservedAt: sampleReview.observedAt,
         },
       }, 'tx-promoted', Date.now());
-      ok('an SAR Review item cannot be posted into the AED ledger',
-        plan.outcome === 'refused' && plan.reason === 'currency-mismatch',
+      // Without a dated SAR→AED rate nothing is posted or relabelled; the
+      // item stays in Review until the host obtains one.
+      ok('an SAR Review item cannot be posted into the AED ledger without a rate',
+        plan.outcome === 'refused' && plan.reason === 'fx-rate-unavailable',
         JSON.stringify(plan));
       const drainAgain = await coordinator(native, ledger).drain();
       ok('a second drain finds nothing waiting behind foreign-currency reviews',
         native.pending().length === 0 && drainAgain.imported === 0 && drainAgain.scanned === 0,
         JSON.stringify({ drainAgain, pending: native.pending().length }));
+      trayModule.reviewCaptureBacklog.reset();
+    }
+
+    {
+      // Convert instead of review: with a dated SAR→AED reference rate the
+      // same Saudi purchase is imported into the AED ledger, keeping SAR
+      // 125.50 as its original with the rate, its date and its source. Its
+      // SAR balance is not relabelled as an AED balance.
+      trayModule.reviewCaptureBacklog.reset();
+      const saId = nextId();
+      const native = nativeQueue([envelope({ id: saId, sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(60_000) })]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...BASE_STATE, ledgerMoney: AED_MONEY });
+      const asked = [];
+      const outcome = await localCapture.createIosLocalCaptureCoordinator({
+        native, ledger, retireShortcutCapture: async () => 'not-needed',
+        fxQuote: async (base, quote, date) => {
+          asked.push(`${base}|${quote}|${date}`);
+          return { base, quote, rate: 0.9793, date };
+        },
+      }).drain();
+      const row = ledger.getState().transactions[0];
+      ok('a Saudi purchase on an AED ledger converts with the dated rate instead of waiting in Review',
+        outcome.imported === 1 && outcome.reviews === 0 && native.acknowledged.includes(saId) &&
+          row?.amountFils === 12290 && row.originalCurrency === 'SAR' && row.originalMinorUnits === 12550 &&
+          row.fxSource === 'reference' && row.fxRate === 0.9793 && typeof row.fxRateDate === 'string' &&
+          ledger.getState().ledgerMoney === AED_MONEY && asked.length === 1 && /^SAR\|AED\|\d{4}-\d{2}-\d{2}$/.test(asked[0]),
+        JSON.stringify({ outcome, row, asked, calls: ledger.calls }));
+      const offlineNative = nativeQueue([envelope({ id: nextId(), sender: 'ALRAJHI', text: SA_BODY, observedAt: recentIso(30_000) })]);
+      const offlineLedger = ledgerAdapter();
+      offlineLedger.setState({ ...BASE_STATE, ledgerMoney: AED_MONEY });
+      const offlineOutcome = await localCapture.createIosLocalCaptureCoordinator({
+        native: offlineNative, ledger: offlineLedger, retireShortcutCapture: async () => 'not-needed',
+        fxQuote: async () => null,
+      }).drain();
+      ok('offline, the same purchase keeps its original in Review and posts nothing',
+        offlineOutcome.imported === 0 && offlineOutcome.reviews === 1 &&
+          offlineLedger.getState().transactions.length === 0 &&
+          offlineLedger.getState().reviewTray.pending[0]?.currencyConflict === true,
+        JSON.stringify(offlineOutcome));
       trayModule.reviewCaptureBacklog.reset();
     }
 
@@ -2997,6 +3041,82 @@ struct WafraBankSenderRegistryTests {
         JSON.stringify({ milestones: native.milestones, acknowledged: native.acknowledged }));
     }
 
+    // First capture is evidence of recognized bank information, not evidence
+    // that a new expense was added. Use the production sender registry,
+    // parser, planner and qualification policy; only storage durability waits.
+    for (const fixture of [
+      {
+        name: 'ADCB credit-card statement', kind: 'cardStatement',
+        text: 'Cr.Card XXX9426 Billing alert: Total due to avoid fin. charges: AED9249.64. Due date Sep 30 2026; Pay min. AED462.48 by due date to avoid AED241.50 late fees.',
+        observedAt: '2026-09-29T08:00:00.000Z',
+      },
+      {
+        name: 'ADCB credit-card payment receipt', kind: 'cardPayment',
+        text: 'Your payment of AED 9251 against Credit Card no. XXX9426 was received at 12:10 PM on 30/09/2026. Thank you.',
+        observedAt: '2026-09-30T08:10:00.000Z',
+      },
+    ]) {
+      const id = nextId();
+      const now = Date.parse('2026-09-30T08:30:00.000Z');
+      const serialized = envelope({ id, sender: 'ADCB', text: fixture.text, observedAt: fixture.observedAt });
+      const parsed = productionLocalMessage.parseLocalMessageRecord(serialized, new Date(now), 'AE', session('AE'));
+      ok(`${fixture.name} is recognized by the production parser as its own financial kind`,
+        parsed.kind === 'parsed' && parsed.row.kind === fixture.kind &&
+          parsed.row.card?.last4 === '9426', JSON.stringify(parsed));
+      if (parsed.kind !== 'parsed' || parsed.row.kind !== fixture.kind) {
+        throw new Error(`${fixture.name} did not reach the financial parser path`);
+      }
+      const native = nativeQueue([serialized]);
+      const ledger = ledgerAdapter();
+      ledger.setState({ ...ledger.getState(), ledgerMoney: AED_MONEY,
+        accounts: [{ id: 'adcb-9426', name: 'ADCB Credit Card', kind: 'card', cardType: 'credit',
+          bankName: 'ADCB', last4: '9426', openingFils: 0, color: '#000000' }],
+      });
+      const staged = deferred();
+      const durable = deferred();
+      const importBatch = ledger.importBatch.bind(ledger);
+      ledger.importBatch = (batch, mappings) => {
+        const receipt = importBatch(batch, mappings);
+        staged.resolve();
+        return { ...receipt, durable: durable.promise };
+      };
+      const pending = productionLocalCapture.createIosLocalCaptureCoordinator({
+        native, ledger, now: () => now, retireShortcutCapture: async () => 'not-needed',
+      }).drain();
+      await Promise.race([staged.promise, pending.then(() => {
+        throw new Error(`${fixture.name} finished without a financial import`);
+      })]);
+      ok(`${fixture.name} cannot qualify or acknowledge before its financial write is durable`,
+        native.milestones.length === 0 && native.acknowledged.length === 0 && native.pending().length === 1,
+        JSON.stringify({ milestones: native.milestones, acknowledged: native.acknowledged }));
+      durable.resolve();
+      const outcome = await pending;
+      const stored = ledger.getState();
+      ok(`${fixture.name} qualifies the first bank capture after durable processing`,
+        outcome.firstCapturedAt === Date.parse(fixture.observedAt) && outcome.reviews === 0 &&
+          native.milestones.length === 1 && native.milestones[0] === Date.parse(fixture.observedAt) &&
+          native.acknowledged.length === 1 && native.acknowledged[0] === id && native.pending().length === 0,
+        JSON.stringify({ outcome, milestones: native.milestones, acknowledged: native.acknowledged }));
+      if (fixture.kind === 'cardStatement') {
+        const due = stored.cardDues[0];
+        ok('statement-only first capture records the stated due and minimum without inventing a transaction',
+          outcome.imported === 0 && stored.transactions.length === 0 && stored.cardDues.length === 1 &&
+            due.accountId === 'adcb-9426' && due.totalDueFils === 924964 && due.minDueFils === 46248 &&
+            due.minDueEstimated !== true && due.dueDate === '2026-09-30' &&
+            ledger.calls.indexOf('ensure') > ledger.calls.indexOf('import'),
+          JSON.stringify({ outcome, dues: stored.cardDues, calls: ledger.calls }));
+      } else {
+        const payment = stored.transactions[0];
+        const { isIncome, isSpending } = requireBuild('@/lib/ledger');
+        ok('payment-receipt first capture records a settlement rather than spending or earned income',
+          outcome.imported === 1 && stored.transactions.length === 1 && stored.cardDues.length === 0 &&
+            payment.accountId === 'adcb-9426' && payment.amountFils === 925100 && payment.type === 'income' &&
+            payment.isTransfer === true && payment.cardPaymentSide === 'receipt' &&
+            !isSpending(payment) && !isIncome(payment),
+          JSON.stringify({ outcome, payment }));
+      }
+    }
+
     {
       const native = nativeQueue([envelope({ text: 'Your available balance is AED 5,000.00.' })]);
       const ledger = ledgerAdapter();
@@ -3314,7 +3434,7 @@ struct WafraBankSenderRegistryTests {
   {
     const hookModule = execute('src/hooks/use-auto-import.ts', (id) => {
       if (id === 'react') return require('react');
-      if (id === 'expo-router') {
+      if (id === 'expo-router' || id === '@/hooks/use-app-router') {
         return {
           useFocusEffect: () => {},
           useRouter: () => ({ push: () => {} }),
@@ -3981,7 +4101,7 @@ struct WafraBankSenderRegistryTests {
       };
       const mountedHookModule = execute('src/hooks/use-auto-import.ts', (id) => {
         if (id === 'react') return runtime.react;
-        if (id === 'expo-router') {
+        if (id === 'expo-router' || id === '@/hooks/use-app-router') {
           return {
             useFocusEffect: (effect) => {
               focusEnter = effect;
@@ -4000,6 +4120,7 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/components/ui/toast') return { useToast: () => ({ show: () => {} }) };
+        if (id === '@/components/lock-gate') return { usePrivacyGateCleared: () => true };
         if (id === '@/lib/auto-import') {
           return {
             hasBankNotificationAccess: () => false,
@@ -4076,8 +4197,10 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/lib/store') {
-          return { useStore: () => ({ state: storeState, ...storeMethods }) };
+          const store = () => ({ state: storeState, ...storeMethods });
+          return { useStore: store, useStoreSelector: (select) => select(store()), useStoreActions: store };
         }
+        if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => ({}));
         return {};
       });
       const render = () => runtime.render(() => mountedHookModule.useAutoImport(false, true));
@@ -4215,7 +4338,7 @@ struct WafraBankSenderRegistryTests {
       };
       const mountedAndroidHook = execute('src/hooks/use-auto-import.ts', (id) => {
         if (id === 'react') return runtime.react;
-        if (id === 'expo-router') {
+        if (id === 'expo-router' || id === '@/hooks/use-app-router') {
           return {
             useFocusEffect: (effect) => runtime.react.useEffect(effect, [effect]),
             useRouter: () => ({ push: () => {} }),
@@ -4233,6 +4356,7 @@ struct WafraBankSenderRegistryTests {
           };
         }
         if (id === '@/components/ui/toast') return { useToast: () => ({ show: () => {} }) };
+        if (id === '@/components/lock-gate') return { usePrivacyGateCleared: () => true };
         if (id === '@/lib/auto-import') {
           return {
             hasBankNotificationAccess: () => false,
@@ -4298,8 +4422,10 @@ struct WafraBankSenderRegistryTests {
           return { getSharedIosLocalCaptureCoordinator: () => null };
         }
         if (id === '@/lib/store') {
-          return { useStore: () => ({ state: storeState, ...storeMethods }) };
+          const store = () => ({ state: storeState, ...storeMethods });
+          return { useStore: store, useStoreSelector: (select) => select(store()), useStoreActions: store };
         }
+        if (id === '@/lib/store-selection') return execute('src/lib/store-selection.ts', () => ({}));
         return {};
       });
       const render = () => runtime.render(() => ({
@@ -4608,6 +4734,24 @@ struct WafraBankSenderRegistryTests {
       futureAutomationConfirmed: true,
       futureStatus: 'in-progress',
     }, 'shortcut-proven'), 'ready');
+
+  // 2026-09-25 guided setup: numbered steps are presentation over the same
+  // step resolution; the local test still comes before the automation.
+  eq('guided setup: each resolved step maps to Add → Test → Automate → done',
+    ['add-shortcut', 'confirm-shortcut', 'prove-shortcut', 'create-automation', 'ready']
+      .map((step) => setupModule.iosCaptureGuideStage(step)),
+    [1, 1, 2, 3, 'done']);
+  eq('guided setup: the automation walkthrough is one Apple screen per step',
+    setupModule.IOS_AUTOMATION_GUIDE_SCREENS, 5);
+  eq('iOS 27 one-toggle hook: off in this build on every iOS version (no bundled Shortcut yet)',
+    ['26.4', '27', '27.1', 28].map((version) => setupModule.iosOneToggleCaptureAvailable(version)),
+    [false, false, false, false]);
+  eq('iOS 27 one-toggle hook: once the Shortcut ships, only iOS 27 or later qualifies',
+    ['16.7', '26.9', '27', '27.0.1', 28, 'x', ''].map((version) =>
+      setupModule.iosOneToggleCaptureAvailable(version, true)),
+    [false, false, true, true, true, false, false]);
+  eq('iOS 27 one-toggle hook: the shipping flag stays off until the Shortcut file exists',
+    setupModule.IOS_ONE_TOGGLE_CAPTURE_SHORTCUT_BUNDLED, false);
 
   eq('setup trigger guard: the guided empty-Sender trigger is supported (bank SMS IDs are not Contacts)',
     setupModule.isSupportedIosMessageAutomationTrigger({

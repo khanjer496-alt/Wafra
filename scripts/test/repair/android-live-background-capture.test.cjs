@@ -54,6 +54,9 @@ test('headless JS processes only a tiny event window and uses the normal durable
   assert.match(background, /applyMaterializedImportBatch\(base, materialized\)/);
   assert.match(background, /diskPersistence\.save\(next\)/);
   assert.match(background, /createCaptureExecutor/);
+  assert.match(background,
+    /function applyLedgerContext[\s\S]*?setBestEffortAutoPostEnabled\(state\.bestEffortAutoPost\)[\s\S]*?return true;/,
+    'a killed-process wake must honour "Auto-add alerts from unverified bank formats" OFF');
   assert.doesNotMatch(stripComments(background), /sweepVisible|sweepActiveNotifications|setInterval|WorkManager|PeriodicWorkRequest/);
 
   assert.match(autoImport, /maxNotificationRows\?: number/);
@@ -66,11 +69,8 @@ test('headless JS processes only a tiny event window and uses the normal durable
 test('background capture and foreground StoreProvider never become competing ledger owners', () => {
   const hook = read('src/hooks/use-auto-import.ts');
   const store = read('src/lib/store.tsx');
-  const rootLayout = read('src/components/app-root-layout.tsx');
   const background = read('src/lib/android-live-background.ts');
 
-  assert.match(rootLayout, /import '@\/lib\/android-live-background';/,
-    'headless registration must happen at JS bundle module scope');
   assert.match(hook, /installAndroidLiveCaptureLedger\(captureLedger\)/);
   assert.match(hook, /Platform\.OS !== 'android' \|\| !watchForeground/);
   assert.match(store, /await waitForAndroidBackgroundCaptureIdle\(\)/);
@@ -81,8 +81,10 @@ test('background capture and foreground StoreProvider never become competing led
 test('headless SMS leaves the normal cursor review-safe and push review rows remain recoverable', () => {
   const background = read('src/lib/android-live-background.ts');
 
-  assert.match(background, /newestTs: source === 'sms' \? state\.lastScanTs/,
+  assert.match(background, /newestTs: state\.lastScanTs,/,
     'a background SMS pass must not hide a review-only row behind a new cursor');
+  assert.doesNotMatch(background, /newestTs:[^\n]*result\.newestTs/,
+    'a background push wake read no SMS and must never advance the SMS watermark');
   assert.match(background, /const holdPushAcknowledgement = result\.reviewCandidates\.length > 0/);
   assert.match(background, /commit: holdPushAcknowledgement \? async \(\) => \{\} : result\.commit/);
 });
@@ -97,4 +99,54 @@ test('headless disk persistence stays byte-compatible with StoreProvider chunkin
   assert.match(store, /TX_CHUNK_SIZE = 400/);
   assert.match(background, /TX_CHUNK_ORDER = 'oldest-first'/);
   assert.match(store, /TX_CHUNK_ORDER = 'oldest-first'/);
+});
+
+test('cold bundle entry registers live capture before Router without rendering a screen', () => {
+  const load = require('./load-typescript.cjs');
+  const tasks = new Map();
+  const events = [];
+  const registerRouter = () => { events.push('router'); return {}; };
+  const registerLiveCapture = () => {
+    events.push('live');
+    return load(path.join(root, 'src/lib/android-live-background.ts'), {
+      'react-native': {
+        Platform: { OS: 'android' },
+        AppState: { currentState: 'background' },
+        AppRegistry: { registerHeadlessTask: (name, provider) => tasks.set(name, provider) },
+      },
+      '../../modules/notification-reader': {}, '../../modules/sms-reader': {},
+      '@/lib/android-capture-sources': {}, '@/lib/auto-import': {},
+      '@/lib/capture-executor': {}, '@/lib/capture': {}, '@/lib/i18n': {},
+      '@/lib/ledger-import': {}, '@/lib/ledger-money': {}, '@/lib/markets': {},
+      '@/lib/ledger-persistence': { createLedgerPersistence: () => ({}) },
+      '@/lib/country': {}, '@/lib/best-effort-autopost': {}, '@/lib/purchases': {},
+      '@/lib/notifications': {}, '@/lib/reminders': {}, '@/lib/state-storage': {},
+    });
+  };
+  const nativeTasks = {};
+  Object.defineProperties(nativeTasks, {
+    '@/lib/android-live-background': { get: registerLiveCapture },
+    '@/lib/background-relay': { get: () => ({}) },
+  });
+  const dependencies = { '@expo/metro-runtime': {} };
+  Object.defineProperties(dependencies, {
+    './src/lib/native-background-tasks': { get: () => load(path.join(root, 'src/lib/native-background-tasks.ts'), nativeTasks) },
+    'expo-router/entry': { get: registerRouter },
+  });
+  const main = JSON.parse(read('package.json')).main;
+  // Model native Router registration only: no App render, no route discovery,
+  // no layout imports. This is the launch mode used by HeadlessJsTaskService.
+  if (main === 'expo-router/entry') registerRouter();
+  else load(path.resolve(root, main), dependencies);
+  assert.equal(typeof tasks.get('WafraLiveCapture'), 'function',
+    'cold headless launch must register the real task without opening a route');
+  assert.deepEqual(events, ['live', 'router'], 'background registration precedes Router');
+});
+
+test('the web entry registers no background tasks, so the public site stays light', () => {
+  const web = read('src/lib/native-background-tasks.web.ts');
+  assert.doesNotMatch(web, /^\s*import /m, 'web has no background tasks to register');
+  assert.match(read('index.js'), /import '\.\/src\/lib\/native-background-tasks';/);
+  assert.doesNotMatch(read('index.js'), /android-live-background|background-relay/,
+    'native task modules are reached only through the platform-resolved file');
 });

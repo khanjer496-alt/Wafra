@@ -18,7 +18,8 @@ test('tab projections reuse immutable ledger work instead of rescanning on every
   assert.match(subscriptions, /subscriptionDetectionCache\.findIndex\(\(entry\) =>/);
   assert.match(subscriptions, /sameDetectionKey\(entry, transactions, notSubscriptions, todayKey, liveAccounts, internalTransfers\)/);
   assert.match(subscriptions, /entry\.transactions === transactions/);
-  assert.match(subscriptions, /entry\.liveAccounts === liveAccounts/);
+  // Equal live/internal membership is the same question, whichever Set built it.
+  assert.match(subscriptions, /sameMembers\(entry\.liveAccounts, liveAccounts\)/);
   assert.match(balances, /netWorthBreakdownCache\?\.accounts === state\.accounts/);
   assert.match(balances, /netWorthBreakdownCache\.transactions === state\.transactions/);
   const cards = read('src/lib/cards.ts');
@@ -31,7 +32,8 @@ test('Wallet balance projection does not reconcile the full transfer graph on fi
   const breakdown = balances.match(/export function netWorthBreakdown[\s\S]*?\n\}/)?.[0] ?? '';
   assert.doesNotMatch(breakdown, /=\s*reconcileTransfers\s*\(/,
     'recorded-balance projection must not synchronously rebuild the transfer graph');
-  assert.match(breakdown, /transaction\.source === 'sms'/,
+  // The captured-row rule lives in one predicate (isCapturedRow) shared with Set balance.
+  assert.match(breakdown, /transaction\.source === 'sms'|isCapturedRow\(transaction\)/,
     'SMS-fed accounts must still remain excluded from derived running balances');
 });
 
@@ -39,7 +41,8 @@ test('manual account balance skips transfer reconciliation when bank-capture evi
   const balances = read('src/lib/balances.ts');
   const account = balances.match(/export function accountBalanceFils[\s\S]*?\n\}/)?.[0] ?? '';
   assert.match(account, /hasCapturedRows/);
-  assert.match(account, /t\.source === 'sms' \|\| Boolean\(t\.smsKey\)/);
+  assert.match(account, /t\.source === 'sms' \|\| Boolean\(t\.smsKey\)|isCapturedRow\(t\)/);
+  assert.match(balances, /export function isCapturedRow[\s\S]*?source === 'sms' \|\| Boolean\(t\.smsKey\)/);
   assert.match(account, /hasCapturedRows\s*\?\s*reconcileTransfers/);
 });
 

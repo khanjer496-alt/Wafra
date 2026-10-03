@@ -1,27 +1,34 @@
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, AppState as NativeAppState, Keyboard, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AssistantMonthChart, AssistantPaymentRows } from '@/components/assistant-answer-extras';
 import { AssistantEvidenceSheet } from '@/components/assistant-evidence-sheet';
 import { AssistantCoverage, AssistantFindings } from '@/components/assistant-findings';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
-import { Button } from '@/components/ui/controls';
-import { Icon } from '@/components/ui/icon';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import { Fonts, Radius } from '@/constants/theme';
+import { BandScaffold } from '@/components/ui/band-scaffold';
+import { EButton } from '@/components/ui/band/e-button';
+import { Icon, type IconName } from '@/components/ui/icon';
+import { Fonts, Radius, type BandPalette } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { useTheme } from '@/hooks/use-theme';
+import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
 import { assistantCopy as copy } from '@/lib/assistant-copy';
-import { categoryLabel } from '@/lib/categories';
+import { assistantScreenCopy, evidenceTransactionCount } from '@/lib/assistant-screen-copy';
+
 import { toISODate } from '@/lib/format';
 import { tapped } from '@/lib/haptics';
 import { t, tf } from '@/lib/i18n';
 import { groundLocalAssistantRequest, isIndependentAssistantQuestion, localAssistantPreviousRequest, normalizeLocalAssistantQuestion } from '@/lib/local-assistant-grounding';
 import { improveAssistantRequestLocally } from '@/lib/local-semantic-assistant';
-import { localSemanticRuntimeStatus } from '@/lib/local-semantic-runtime';
+import { LOCAL_SEMANTIC_E5_ENABLED } from '@/lib/local-semantic-flags';
+import { onDeviceAI, type OnDeviceAIAvailability } from '@/lib/on-device-ai';
+import { improveAssistantRequestOnDevice } from '@/lib/on-device-assistant';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { currentMonthPeriod, periodLabel, periodRange } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
@@ -32,6 +39,7 @@ import {
   assistantFollowUpQuestions, executeAssistantTool, latestAssistantContext, planAssistantCorrection, runWafraAssistant,
   runWafraAssistantCooperatively, suggestedAssistantQuestions,
   type AssistantAnswer, type AssistantCorrectionPlan, type AssistantFinding, type AssistantToolRequest,
+  hasKnownCustomCategoryMention,
 } from '@/lib/wafra-assistant';
 
 const MAX_TURNS = 12;
@@ -39,7 +47,7 @@ const MAX_TURNS = 12;
 // No ledger rows or raw messages are copied into persistent chat storage.
 const ledgerInputs = (state: AppState): unknown[] => [state.transactions, state.accounts,
   state.bills, state.cardDues, state.notSubscriptions, state.monthStartDay,
-  state.ledgerMoney, state.historyImport];
+  state.ledgerMoney, state.historyImport, state.customCategories];
 
 interface AssistantTurn {
   id: number;
@@ -49,12 +57,51 @@ interface AssistantTurn {
   request: AssistantToolRequest;
   answeredAt: Date;
   inputs: unknown[];
+  /** The platform model chose the tool; Wafra still computed every figure. */
+  interpretedOnDevice?: boolean;
+}
+
+/** Honest, state-specific status for the platform model. Null hides the line. */
+function onDeviceStatusCopy(availability: OnDeviceAIAvailability | null): string | null {
+  if (!availability) return null;
+  switch (availability.status) {
+    case 'available':
+      return availability.provider === 'gemini-nano' ? copy.onDeviceAiReadyGemini : copy.onDeviceAiReadyApple;
+    case 'not-enabled': return copy.onDeviceAiNotEnabled;
+    case 'model-not-ready': return copy.onDeviceAiPreparing;
+    default: return copy.onDeviceAiUnavailable;
+  }
+}
+
+/**
+ * An answer's action as a pill on the sheet: the first (primary) one is
+ * filled with the band colour, the rest are cards with a rule. 48pt tall, so
+ * each is a full touch target; the label wraps rather than being cut.
+ */
+function AskPill({ label, onPress, palette, primary = false, icon, testID }: {
+  label: string;
+  onPress: () => void;
+  palette: BandPalette;
+  primary?: boolean;
+  icon?: IconName;
+  testID?: string;
+}) {
+  const fg = primary ? palette.onFill : palette.text;
+  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} onPress={() => { tapped(); onPress(); }}
+    style={({ pressed }) => [styles.pill, primary
+      ? { backgroundColor: palette.fill, borderColor: palette.fill }
+      : { backgroundColor: palette.card, borderColor: palette.rule }, { opacity: pressed ? 0.8 : 1 }]}>
+    {icon ? <Icon name={icon} size={16} color={fg} strokeWidth={2} /> : null}
+    <ThemedText type="smallBold" style={[styles.pillText, { color: fg }]}>{label}</ThemedText>
+  </Pressable>;
 }
 
 export default function AssistantScreen() {
+  const { categoryLabel } = useCategoryCatalog();
   const router = useRouter();
   const params = useLocalSearchParams<{ question?: string }>();
-  const theme = useTheme();
+  // Ask is a Home detail: it wears Home's ink band.
+  const band = useBand('home');
   const largeText = useLargeTextLayout();
   const insets = useSafeAreaInsets();
   const keyboardHeight = useKeyboardHeight();
@@ -62,6 +109,10 @@ export default function AssistantScreen() {
   const { state, getStateSnapshot, getStateGeneration, editTransaction, resolveTransfers,
     setMerchantOverride, setNotSubscription } = useStore();
   const { period } = usePeriod();
+  // Redesign additions read plain state: no new hooks, so hook order is unchanged.
+  const screenLanguage: 'en' | 'ar' = state.language === 'ar' ? 'ar' : 'en';
+  const screenCopy = assistantScreenCopy(screenLanguage);
+  const ledgerMoney = state.ledgerMoney ?? null;
   const periodKey = JSON.stringify(period);
   const generation = getStateGeneration();
   const scrollRef = useRef<ScrollView>(null);
@@ -75,13 +126,25 @@ export default function AssistantScreen() {
   const previousPeriod = useRef(periodKey);
   const [question, setQuestion] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [modelState, setModelState] = useState(() => localSemanticRuntimeStatus().state);
+  const [aiAvailability, setAiAvailability] = useState<OnDeviceAIAvailability | null>(() => onDeviceAI.peekAvailability());
+  const [preparingModel, setPreparingModel] = useState(false);
   useFocusEffect(useCallback(() => {
-    const update = () => setModelState(localSemanticRuntimeStatus().state);
+    let active = true;
+    // Availability changes in Settings (Apple Intelligence on/off, model
+    // downloaded) while Wafra is in the background: re-check on focus/return.
+    const update = () => {
+      void onDeviceAI.getAvailability({ refresh: true }).then((value) => { if (active) setAiAvailability(value); });
+    };
     update();
-    const timer = setInterval(update, 2000);
-    return () => clearInterval(timer);
+    const subscription = NativeAppState.addEventListener('change', (status) => { if (status === 'active') update(); });
+    return () => { active = false; subscription.remove(); };
   }, []));
+  const aiStatus = onDeviceStatusCopy(aiAvailability);
+  const prepareModel = () => {
+    if (preparingModel) return;
+    setPreparingModel(true);
+    void onDeviceAI.prepare().then(setAiAvailability).finally(() => setPreparingModel(false));
+  };
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
   const [droppedTurns, setDroppedTurns] = useState(false);
@@ -89,7 +152,6 @@ export default function AssistantScreen() {
   const [evidenceSelection, setEvidenceSelection] = useState<{ turnId: number; findingId?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [today, setToday] = useState(() => toISODate(new Date()));
-  const [composerHeight, setComposerHeight] = useState(0);
   const minInputHeight = Math.max(48, Math.ceil(22 * fontScale) + 24);
   const maxInputHeight = Math.max(minInputHeight, Math.min(160, height * 0.25));
   const [inputHeight, setInputHeight] = useState(minInputHeight);
@@ -133,7 +195,8 @@ export default function AssistantScreen() {
     if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
   }, []);
 
-  const appendAnswer = (clean: string, result: { request: AssistantToolRequest; answer: AssistantAnswer }, snapshot: AppState, answeredAt: Date) => {
+  const appendAnswer = (clean: string, result: { request: AssistantToolRequest; answer: AssistantAnswer; interpretedOnDevice?: boolean },
+    snapshot: AppState, answeredAt: Date) => {
     const id = ++nextId.current;
     const currentGeneration = getStateGeneration();
     needsScroll.current = true;
@@ -284,10 +347,32 @@ export default function AssistantScreen() {
           )
         : runWafraAssistant(snapshot, interpretedQuestion, now, previous, period);
       if (result === null) return;
-      // The native wrapper returns this answer immediately while an unavailable
-      // model warms/retries under its backoff. A failed startup download must
-      // not strand Ask in deterministic-only mode until the next app restart.
-      if (result.request.tool === 'help' && (!previous || isIndependentAssistantQuestion(clean))) {
+      let interpretedOnDevice = false;
+      const localCustomScope = hasKnownCustomCategoryMention(clean, snapshot.customCategories);
+      // Unrecognised fresh question: the platform model may pick ONE closed
+      // tool. Wafra validates it and the ledger executor computes the answer.
+      if (!localCustomScope && result.request.tool === 'help' && (!previous || isIndependentAssistantQuestion(clean))) {
+        const outcome = await improveAssistantRequestOnDevice({
+          question: clean,
+          deterministicRequest: result.request,
+          previousRequest: null,
+          defaultPeriod: period,
+          now,
+          appLanguage: snapshot.language === 'ar' ? 'ar' : 'en',
+          // Local names only, used to refuse plans that would drop or invent scope.
+          knownMerchants: [...new Set(snapshot.transactions.map((row) => row.title).filter(Boolean))],
+          knownAccountNames: [...new Set(snapshot.accounts.flatMap((row) => [row.name, row.bankName ?? '']).filter(Boolean))],
+          cancelled: () => startGeneration !== getStateGeneration(),
+        });
+        if (startGeneration !== getStateGeneration()) throw new Error(copy.stale);
+        if (outcome.source === 'on-device-ai') {
+          result = { request: outcome.request, answer: executeAssistantTool(snapshot, outcome.request, now) };
+          interpretedOnDevice = true;
+        }
+      }
+      // Research builds only (EXPO_PUBLIC_WAFRA_LOCAL_E5=1): the old E5 path.
+      if (!localCustomScope && LOCAL_SEMANTIC_E5_ENABLED && !interpretedOnDevice && result.request.tool === 'help' &&
+        (!previous || isIndependentAssistantQuestion(clean))) {
         const improved = await improveAssistantRequestLocally({
           question: clean,
           deterministicRequest: result.request,
@@ -303,7 +388,7 @@ export default function AssistantScreen() {
         }
       }
       if (startGeneration !== getStateGeneration()) throw new Error(copy.stale);
-      appendAnswer(clean, result, snapshot, now);
+      appendAnswer(clean, { ...result, interpretedOnDevice }, snapshot, now);
     } catch {
       // Restore the draft when submission fails; financial records never enter logs.
       setQuestion((current) => current || clean);
@@ -420,28 +505,69 @@ export default function AssistantScreen() {
     return () => cancelAnimationFrame(frame);
   }, [keyboardHeight, latest, scrollToLatest]);
 
+
+  // The period, currency and on-device status sit in the pinned composer. At
+  // the accessibility text sizes that composer would fill half the screen, so
+  // there they scroll at the top of the sheet and only the question field and
+  // Send stay pinned.
+  const contextControls = <>
+    <View style={styles.context}>
+      <Pressable accessibilityRole="button" accessibilityLabel={copy.period + ': ' + periodLabel(contextPeriod)}
+        onPress={() => { tapped(); Keyboard.dismiss(); setPeriodOpen(true); }} style={styles.period}>
+        <Icon name="calendar" size={15} color={band.textSecondary} />
+        <ThemedText type="meta" style={{ color: band.textSecondary }}>{periodLabel(contextPeriod)}</ThemedText>
+        <Icon name="chevron-down" size={12} color={band.textSecondary} />
+      </Pressable>
+      <ThemedText type="meta" style={{ color: band.textSecondary }}>
+        {`${ledgerCurrencyCode()} · ${copy.localShort}`}
+      </ThemedText>
+    </View>
+    {Platform.OS !== 'web' && aiStatus ? <View style={styles.aiStatus}>
+      <ThemedText testID="assistant-model-status" type="meta" style={[styles.aiStatusText, { color: band.textSecondary }]}>
+        {aiStatus}
+      </ThemedText>
+      {aiAvailability?.canPrepare ? <Pressable testID="assistant-model-prepare" accessibilityRole="button"
+        accessibilityLabel={copy.onDeviceAiPrepare} accessibilityState={{ disabled: preparingModel, busy: preparingModel }}
+        disabled={preparingModel} onPress={() => { tapped(); prepareModel(); }} style={styles.aiPrepare}>
+        <ThemedText type="meta" style={{ color: band.tint }}>{preparingModel ? copy.onDeviceAiDownloading : copy.onDeviceAiPrepare}</ThemedText>
+      </Pressable> : null}
+    </View> : null}
+  </>;
+
+  // The band holds the question being answered: the one in flight, else the
+  // latest. Before the first question it names what the screen is for.
+  const bandQuestion = pendingQuestion ?? latest?.question ?? null;
+  const bandContent = <View style={styles.bandStack}>
+    <View testID="assistant-local-badge" accessible accessibilityLabel={screenCopy.onThisPhoneA11y}
+      style={[styles.localBadge, { backgroundColor: band.tile }]}>
+      <Icon name="lock" size={12} color={band.accent} />
+      <ThemedText type="meta" style={[styles.localBadgeText, { color: band.accent }]}>{screenCopy.onThisPhone}</ThemedText>
+    </View>
+    {bandQuestion !== null ? <View testID="assistant-band-question"
+      style={[styles.bandBubble, !largeText && styles.bandBubbleInset, { backgroundColor: band.tile }]}>
+      <ThemedText selectable style={[styles.bandBubbleText, { color: band.onBand }]}>{bandQuestion}</ThemedText>
+    </View> : <ThemedText type="title" style={{ color: band.onBand }}>{copy.heading}</ThemedText>}
+  </View>;
+
   return <>
-    <ScreenScaffold testID="assistant-screen"
+    <BandScaffold testID="assistant-screen" band="home"
+      // iOS avoids the keyboard with the scaffold's KeyboardAvoidingView.
+      // Android keeps the composer's own measured lift below, which also
+      // ignores a stale height when an OEM misses keyboardDidHide.
       keyboardAware={Platform.OS === 'ios'}
-      // ScreenScaffold owns this screen's header. `useHeaderHeight()` cannot be
-      // used here because the root stack starts with `headerShown: false`; on
-      // Android it throws before the first frame, leaving only the window
-      // background visible. The keyboard-avoiding view already lives below the
-      // native header on iOS, so no navigator-header offset is required.
+      // The root stack starts with `headerShown: false`, so no navigator
+      // header sits above the keyboard-avoiding view.
       keyboardVerticalOffset={0}
       scrollRef={scrollRef}
-      contentStyle={composerHeight > 0 ? { paddingBottom: composerHeight + 12 } : undefined}
       scrollProps={{ keyboardShouldPersistTaps: 'handled', keyboardDismissMode: 'on-drag',
         onContentSizeChange: scrollToLatest, onLayout: scrollToLatest }}
-      header={{ title: copy.title,
-        back: { label: copy.back, onPress: () => router.canGoBack() ? router.back() : router.replace('/') },
-        actions: currentTurns.length > 0 ? [{ label: copy.newChat, onPress: resetConversation }] : [],
+      nav={{ title: copy.title,
+        close: () => router.canGoBack() ? router.back() : router.replace('/'),
+        actions: currentTurns.length > 0 ? [{ icon: 'plus', label: copy.newChat, onPress: resetConversation, testID: 'assistant-new-chat' }] : [],
       }}
-      footer={<View testID="assistant-composer" onLayout={(event) => {
-        const next = Math.ceil(event.nativeEvent.layout.height);
-        if (next !== composerHeight) setComposerHeight(next);
-      }} style={[styles.composer, {
-        borderColor: theme.cardBorder,
+      bandContent={bandContent}
+      contentStyle={styles.sheet}
+      footer={<View testID="assistant-composer" style={[styles.composer, {
         // keyboardDidHide can occasionally be missed on some Android OEMs.
         // Never keep a stale keyboard height lifting the composer after the OS
         // itself says the keyboard is gone.
@@ -449,102 +575,106 @@ export default function AssistantScreen() {
           ? Math.max(0, keyboardHeight - insets.bottom)
           : 0,
       }]}>
-        <View style={styles.context}>
-          <Pressable accessibilityRole="button" accessibilityLabel={copy.period + ': ' + periodLabel(contextPeriod)}
-            onPress={() => { tapped(); Keyboard.dismiss(); setPeriodOpen(true); }} style={styles.period}>
-            <Icon name="calendar" size={15} color={theme.textSecondary} />
-            <ThemedText type="meta" themeColor="textSecondary">{periodLabel(contextPeriod)}</ThemedText>
-            <Icon name="chevron-down" size={12} color={theme.textSecondary} />
-          </Pressable>
-          <ThemedText type="meta" themeColor="textSecondary">
-            {`${ledgerCurrencyCode()} · ${copy.localShort}`}
-          </ThemedText>
-        </View>
-        {Platform.OS !== 'web' ? <ThemedText testID="assistant-model-status" type="meta" themeColor="textSecondary">
-          {modelState === 'ready' ? copy.localAiReady : modelState === 'downloading' ? copy.localAiPreparing : copy.localAiUnavailable}
-        </ThemedText> : null}
-        {error ? <ThemedText type="meta" accessibilityRole="alert" themeColor="expense">{error}</ThemedText> : null}
-        <View style={styles.inputRow}>
+        {largeText ? null : contextControls}
+        {error ? <ThemedText type="meta" accessibilityRole="alert" style={{ color: band.statusOver }}>{error}</ThemedText> : null}
+        <View style={[styles.inputRow, { borderColor: band.rule, backgroundColor: band.card }]}>
           <TextInput testID="assistant-input" value={question} onChangeText={(value) => { setQuestion(value); setError(null); }}
             onSubmitEditing={() => ask()} returnKeyType="send" submitBehavior="submit" multiline
             accessibilityLabel={copy.placeholder} maxLength={1000} editable={state.hydrated && !isSending}
-            placeholder={copy.placeholder} placeholderTextColor={theme.textTertiary}
-            selectionColor={theme.primary} autoComplete="off" textAlignVertical="top"
+            placeholder={copy.placeholder} placeholderTextColor={band.textSecondary}
+            selectionColor={band.tint} autoComplete="off" textAlignVertical="top"
             onContentSizeChange={(event) => setInputHeight(event.nativeEvent.contentSize.height)}
-            style={[styles.input, { height: Math.max(minInputHeight, Math.min(maxInputHeight, inputHeight)),
-              color: theme.text, borderColor: theme.controlBorder, backgroundColor: theme.backgroundElement }]} />
+            style={scaleTextStyleForE2E([styles.input, { height: Math.max(minInputHeight, Math.min(maxInputHeight, inputHeight)),
+              color: band.text }], undefined, undefined)} />
           <Pressable testID="assistant-send" accessibilityRole="button" accessibilityLabel={copy.send}
             accessibilityState={{ disabled: !question.trim() || !state.hydrated || isSending, busy: isSending }}
             disabled={!question.trim() || !state.hydrated || isSending} onPress={() => { tapped(); void ask(); }}
-            style={[styles.send, { backgroundColor: theme.primary, opacity: question.trim() && state.hydrated && !isSending ? 1 : 0.4 }]}>
-            <Icon name="arrow-up" size={20} color={theme.onPrimary} />
+            style={[styles.send, { backgroundColor: band.fill, opacity: question.trim() && state.hydrated && !isSending ? 1 : 0.4 }]}>
+            <Icon name="arrow-up" size={20} color={band.onFill} />
           </Pressable>
         </View>
       </View>}>
+      {largeText ? <View style={styles.contextInline}>{contextControls}</View> : null}
       {currentTurns.length === 0 ? <View style={styles.hero}>
-        <ThemedText type="heading">{copy.heading}</ThemedText>
-        <ThemedText themeColor="textSecondary">{copy.privacy}</ThemedText>
-        {periodRange(period) ? <ThemedText type="meta" themeColor="textSecondary">{periodRange(period)}</ThemedText> : null}
+        <ThemedText style={{ color: band.textSecondary }}>{copy.privacy}</ThemedText>
+        {periodRange(period) ? <ThemedText type="meta" style={{ color: band.textSecondary }}>{periodRange(period)}</ThemedText> : null}
       </View> : null}
-      {!state.hydrated ? <ThemedText accessibilityRole="progressbar">{copy.loading}</ThemedText>
+      {!state.hydrated ? <ThemedText accessibilityRole="progressbar" style={{ color: band.text }}>{copy.loading}</ThemedText>
         : !hasRecords && currentTurns.length === 0 ? <View style={styles.hero}>
-          <ThemedText type="smallBold">{copy.emptyTitle}</ThemedText>
-          <ThemedText themeColor="textSecondary">{copy.emptyBody}</ThemedText>
-          <Button label={copy.import} onPress={() => router.push('/import-sms')} />
-          <Button label={copy.add} variant="outline" onPress={() => router.push('/add-transaction')} />
+          <ThemedText type="smallBold" style={{ color: band.text }}>{copy.emptyTitle}</ThemedText>
+          <ThemedText style={{ color: band.textSecondary }}>{copy.emptyBody}</ThemedText>
+          <EButton palette={band} label={copy.import} onPress={() => router.push('/import-sms')} />
+          <EButton palette={band} variant="secondary" label={copy.add} onPress={() => router.push('/add-transaction')} />
         </View> : currentTurns.length === 0 ? <View style={styles.suggestions}>
           {suggestions.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => { tapped(); void ask(item); }}
-            style={[styles.suggestion, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
-            <ThemedText type="small" style={styles.suggestionText}>{item}</ThemedText>
-            <Icon name="chevron-right" size={16} color={theme.textTertiary} />
+            style={({ pressed }) => [styles.suggestion, { borderColor: band.rule, backgroundColor: band.card, opacity: pressed ? 0.8 : 1 }]}>
+            <ThemedText type="small" style={[styles.suggestionText, { color: band.text }]}>{item}</ThemedText>
+            <Icon name="chevron-right" size={16} color={band.textSecondary} />
           </Pressable>)}
         </View> : null}
-      {droppedTurns ? <ThemedText type="meta" themeColor="textTertiary">{copy.recentQuestions(MAX_TURNS)}</ThemedText> : null}
-      {pendingQuestion ? <View style={styles.turn} testID="assistant-pending-turn">
-        <View style={[styles.questionBubble, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
-          <ThemedText type="smallBold" selectable>{pendingQuestion}</ThemedText>
-        </View>
-        <ThemedText type="meta" themeColor="textTertiary" accessibilityRole="progressbar">{copy.understanding}</ThemedText>
+      {droppedTurns ? <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.recentQuestions(MAX_TURNS)}</ThemedText> : null}
+      {currentTurns.map((turn, index) => {
+        // A lone question is on the band, right above its answer. Once the
+        // band can scroll out of view behind earlier answers, every question
+        // keeps its bubble beside its answer (the band still shows the latest).
+        const questionInBand = currentTurns.length === 1 && !pendingQuestion;
+        const stale = isStale(turn);
+        const evidenceCount = evidenceTransactionCount(turn.answer.evidence);
+        const hasEvidence = !!turn.answer.evidence?.length;
+        return <View key={turn.id} testID="assistant-turn"
+          style={[styles.turn, index > 0 && [styles.turnDivided, { borderTopColor: band.rule }]]}>
+          {questionInBand ? null : <View style={[styles.questionBubble, { backgroundColor: band.card, borderColor: band.rule }]}>
+            <ThemedText type="smallBold" selectable style={{ color: band.text }}>{turn.question}</ThemedText>
+          </View>}
+          <View accessibilityLiveRegion={index === currentTurns.length - 1 ? 'polite' : 'none'} style={styles.answer}>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{turn.answer.title}</ThemedText>
+            {turn.interpretedOnDevice ? <ThemedText testID="assistant-interpreted-on-device" type="meta" style={{ color: band.textSecondary }}>
+              {copy.onDeviceAiInterpreted}
+            </ThemedText> : null}
+            {turn.answer.headline ? <>
+              <ThemedText type="title" selectable style={[styles.answerFigure, { color: band.text }]}>{turn.answer.headline}</ThemedText>
+              {turn.answer.meta ? <ThemedText type="meta" selectable style={{ color: band.textSecondary }}>{turn.answer.meta}</ThemedText> : null}
+            </> : <ThemedText type="heading" selectable style={[styles.answerSentence, { color: band.text }]}>{turn.answer.body}</ThemedText>}
+            {turn.answer.monthlySeries?.length && ledgerMoney ? <AssistantMonthChart series={turn.answer.monthlySeries}
+              highlight={turn.answer.monthlySeriesHighlight} money={ledgerMoney} language={screenLanguage} palette={band} largeText={largeText} /> : null}
+            {turn.answer.payments?.length && ledgerMoney ? <AssistantPaymentRows payments={turn.answer.payments}
+              money={ledgerMoney} language={screenLanguage} palette={band} />
+            : turn.answer.facts?.length ? <View style={styles.facts}>
+              {turn.answer.facts.map((fact, factIndex) => <View key={fact.label + '-' + factIndex} style={[styles.factRow, largeText && styles.factRowLarge]}>
+                <ThemedText type="meta" style={[styles.factLabel, { color: band.textSecondary }]}>{fact.label}</ThemedText>
+                <ThemedText type="smallBold" tabular selectable style={[styles.factValue, { color: band.text }]}>{fact.value}</ThemedText>
+              </View>)}
+            </View> : null}
+            {turn.answer.findings?.length ? <AssistantFindings findings={turn.answer.findings}
+              stale={stale} onReview={(findingId) => { Keyboard.dismiss(); setEvidenceSelection({ turnId: turn.id, findingId }); }}
+              onAsk={(finding) => exploreFinding(turn, finding)} /> : null}
+            {turn.answer.coverage ? <AssistantCoverage coverage={turn.answer.coverage} /> : null}
+            {stale ? <View style={styles.hero}>
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.stale}</ThemedText>
+              <View style={styles.pills}>
+                <AskPill palette={band} primary label={copy.refresh} onPress={() => refreshAnswer(turn)} />
+              </View>
+            </View> : hasEvidence || turn.answer.destination ? <View style={styles.pills}>
+              {hasEvidence ? <AskPill palette={band} primary icon="receipt"
+                label={evidenceCount > 0 ? screenCopy.seeTransactions(evidenceCount) : copy.viewTransactions}
+                onPress={() => { Keyboard.dismiss(); setEvidenceSelection({ turnId: turn.id }); }} /> : null}
+              {turn.answer.destination ? <AskPill palette={band} primary={!hasEvidence} label={copy.viewPayments}
+                onPress={() => router.push(turn.answer.destination!)} /> : null}
+            </View> : null}
+          </View>
+        </View>;
+      })}
+      {pendingQuestion ? <View style={[styles.turn, currentTurns.length > 0 && [styles.turnDivided, { borderTopColor: band.rule }]]}
+        testID="assistant-pending-turn">
+        {currentTurns.length > 0 ? <View style={[styles.questionBubble, { backgroundColor: band.card, borderColor: band.rule }]}>
+          <ThemedText type="smallBold" selectable style={{ color: band.text }}>{pendingQuestion}</ThemedText>
+        </View> : null}
+        <ThemedText type="meta" style={{ color: band.textSecondary }} accessibilityRole="progressbar">{copy.understanding}</ThemedText>
       </View> : null}
-      {currentTurns.map((turn, index) => <View key={turn.id} style={styles.turn} testID="assistant-turn">
-        <View style={[styles.questionBubble, { backgroundColor: theme.backgroundElement, borderColor: theme.cardBorder }]}>
-          <ThemedText type="smallBold" selectable>{turn.question}</ThemedText>
-        </View>
-        <View accessibilityLiveRegion={index === currentTurns.length - 1 ? 'polite' : 'none'}
-          style={[styles.answer, { borderColor: theme.primaryBorder, backgroundColor: theme.primarySoft }]}>
-          <ThemedText type="micro" themeColor="primary">{turn.answer.title}</ThemedText>
-          {turn.answer.headline ? <>
-            <ThemedText type="heading" tabular selectable>{turn.answer.headline}</ThemedText>
-            {turn.answer.meta ? <ThemedText type="meta" themeColor="textSecondary" selectable>{turn.answer.meta}</ThemedText> : null}
-          </> : <ThemedText selectable>{turn.answer.body}</ThemedText>}
-          {turn.answer.facts?.length ? <View style={styles.facts}>
-            {turn.answer.facts.map((fact, factIndex) => <View key={fact.label + '-' + factIndex} style={[styles.factRow, largeText && styles.factRowLarge]}>
-              <ThemedText type="meta" themeColor="textSecondary" style={styles.factLabel}>{fact.label}</ThemedText>
-              <ThemedText type="smallBold" tabular selectable style={styles.factValue}>{fact.value}</ThemedText>
-            </View>)}
-          </View> : null}
-          {turn.answer.findings?.length ? <AssistantFindings findings={turn.answer.findings}
-            stale={isStale(turn)} onReview={(findingId) => { Keyboard.dismiss(); setEvidenceSelection({ turnId: turn.id, findingId }); }}
-            onAsk={(finding) => exploreFinding(turn, finding)} /> : null}
-          {turn.answer.coverage ? <AssistantCoverage coverage={turn.answer.coverage} /> : null}
-          {isStale(turn) ? <View style={styles.hero}>
-            <ThemedText type="meta" themeColor="textSecondary">{copy.stale}</ThemedText>
-            <Button label={copy.refresh} variant="outline" onPress={() => refreshAnswer(turn)} />
-          </View> : <>
-            {turn.answer.evidence?.length ? <Button label={copy.viewTransactions} icon="receipt" variant="outline"
-              onPress={() => { Keyboard.dismiss(); setEvidenceSelection({ turnId: turn.id }); }} /> : null}
-            {turn.answer.destination ? <Button label={copy.viewPayments} variant="outline"
-              onPress={() => router.push(turn.answer.destination!)} /> : null}
-          </>}
-        </View>
-      </View>)}
-      {currentTurns.length > 0 && followUps.length > 0 ? <View testID="assistant-followups" style={styles.quickFollowUps}>
-        {followUps.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => { tapped(); void ask(item); }}
-          style={[styles.followUpChip, { borderColor: theme.cardBorder, backgroundColor: theme.backgroundElement }]}>
-          <ThemedText type="meta" style={styles.followUpText}>{item}</ThemedText>
-        </Pressable>)}
+      {currentTurns.length > 0 && followUps.length > 0 ? <View testID="assistant-followups" style={styles.pills}>
+        {followUps.map((item) => <AskPill key={item} palette={band} label={item} onPress={() => { void ask(item); }} />)}
       </View> : null}
-    </ScreenScaffold>
+    </BandScaffold>
     <PeriodSheet visible={periodOpen} selectedPeriod={contextPeriod} onApply={resetConversation} onClose={() => setPeriodOpen(false)} />
     {evidenceTurn && selectedEvidence?.length ? <AssistantEvidenceSheet key={evidenceTurn.id + ':' + (evidenceSelection?.findingId ?? 'all')}
       evidence={selectedEvidence} state={state} stale={isStale(evidenceTurn)}
@@ -553,29 +683,51 @@ export default function AssistantScreen() {
 }
 
 const styles = StyleSheet.create({
+  bandStack: { gap: 16 },
+  localBadge: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderRadius: Radius.full, paddingHorizontal: 10, paddingVertical: 4 },
+  localBadgeText: { fontFamily: Fonts.sansSemi },
+  // The question as a chat bubble on the band: end-aligned, its tail corner at
+  // the logical bottom end so it mirrors under RTL.
+  bandBubble: { alignSelf: 'flex-end', maxWidth: '100%', borderRadius: 22, borderBottomEndRadius: 6,
+    paddingHorizontal: 16, paddingVertical: 14 },
+  bandBubbleInset: { marginStart: 48 },
+  bandBubbleText: { fontSize: 17, lineHeight: 24 },
+  sheet: { gap: 16 },
   hero: { gap: 8 },
   suggestions: { gap: 8 },
-  suggestion: { minHeight: 48, borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.control,
-    paddingHorizontal: 14, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  suggestion: { minHeight: 52, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16,
+    paddingHorizontal: 16, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
   suggestionText: { flex: 1, minWidth: 0 },
-  answer: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet, padding: 12, gap: 8 },
-  turn: { gap: 6, paddingTop: 2 },
+  answer: { gap: 10 },
+  // The answer's figure and sentence: Geist SemiBold with tabular digits
+  // (never Geist Mono at this size, whose comma spaces out a figure).
+  answerFigure: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], letterSpacing: -0.6 },
+  answerSentence: { fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], fontSize: 22, lineHeight: 29, letterSpacing: -0.4 },
+  turn: { gap: 10 },
+  turnDivided: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 16 },
   questionBubble: { alignSelf: 'flex-end', maxWidth: '90%', borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.control, paddingHorizontal: 12, paddingVertical: 10 },
+    borderRadius: 18, borderBottomEndRadius: 6, paddingHorizontal: 14, paddingVertical: 10 },
   facts: { gap: 6 },
   factRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 },
   factRowLarge: { flexDirection: 'column', alignItems: 'stretch', gap: 2 },
   factLabel: { flex: 1, minWidth: 0 },
   factValue: { flexShrink: 1 },
-  quickFollowUps: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  followUpChip: { minHeight: 40, maxWidth: '100%', flexShrink: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: 16,
-    paddingHorizontal: 12, paddingVertical: 8, justifyContent: 'center' },
-  followUpText: { flexShrink: 1, minWidth: 0 },
-  composer: { gap: 6, paddingTop: 6, borderTopWidth: StyleSheet.hairlineWidth },
+  pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  pill: { minHeight: 48, maxWidth: '100%', flexShrink: 1, borderWidth: 1.5, borderRadius: 24,
+    paddingHorizontal: 18, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  pillText: { flexShrink: 1, minWidth: 0 },
+  composer: { gap: 6, paddingTop: 8 },
   context: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   period: { minHeight: 44, flexShrink: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' },
-  inputRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end' },
-  input: { flex: 1, minWidth: 0, borderWidth: 1, borderRadius: Radius.control,
+  // The composer is one pill: the field, then Send inside its end.
+  inputRow: { flexDirection: 'row', gap: 8, alignItems: 'flex-end', borderWidth: 1.5, borderRadius: 28,
+    paddingStart: 6, paddingEnd: 3, paddingVertical: 3 },
+  input: { flex: 1, minWidth: 0, borderRadius: Radius.control,
     paddingHorizontal: 12, paddingVertical: 12, fontSize: 15, lineHeight: 22, fontFamily: Fonts.sans },
   send: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
+  contextInline: { gap: 6 },
+  aiStatus: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  aiStatusText: { flexShrink: 1, minWidth: 0 },
+  aiPrepare: { minHeight: 44, justifyContent: 'center' },
 });

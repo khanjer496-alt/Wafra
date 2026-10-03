@@ -49,6 +49,15 @@ and optional network features in the submitted AAB.
   to Wafra's relay as described in the Privacy Policy; raw statement/email data
   is processed transiently and structured results are device-sealed.
 - Wafra has no ads or third-party analytics in the current repository.
+- ML Kit GenAI Prompt API (`com.google.mlkit:genai-prompt`, Gemini Nano via
+  AICore) runs inference on the device; Wafra sends it only an Ask question or
+  an unclassified merchant name and makes no network request of its own for
+  it. Google's ML Kit Android data disclosure
+  (https://developers.google.com/ml-kit/android-data-disclosure) states that ML
+  Kit SDKs collect device information, app information and performance/usage
+  metrics for diagnostics and analytics. Declare that SDK collection in the
+  Data Safety form after checking the disclosure for the exact shipped
+  version.
 
 ## Remaining Play Console blockers
 

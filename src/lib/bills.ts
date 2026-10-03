@@ -1,4 +1,4 @@
-import { monthEndISO, monthKey, monthStartISO, toISODate } from '@/lib/format';
+import { daysBetweenISO, getMonthStartDay, monthEndISO, monthKey, monthStartISO, toISODate } from '@/lib/format';
 import { isSpending } from '@/lib/ledger';
 import type { Bill, Transaction } from '@/lib/types';
 
@@ -89,6 +89,7 @@ let billsForMonthCache: {
   bills: Bill[];
   transactions: Transaction[];
   key: string;
+  monthStartDay: number;
   day: string;
   live?: Set<string>;
   internal?: Set<string>;
@@ -104,13 +105,37 @@ function billIdentity(s: string): string {
   return s.normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 }
 
+function noticeObservedAt(bill: Bill): number | undefined {
+  return Number.isSafeInteger(bill.noticeObservedAt) && bill.noticeObservedAt! > 0
+    ? bill.noticeObservedAt : undefined;
+}
+
+/** Import order is not source chronology: history pages can arrive backwards. */
+function canRefreshNotice(prior: Bill, incoming: Bill): boolean {
+  if (!prior.statedDueDate) return true;
+  // An undated estimate cannot erase a bank-stated obligation. Its existing
+  // amount remains an estimate automatically outside the recorded cycle.
+  if (!incoming.statedDueDate) return false;
+  if (incoming.statedDueDate !== prior.statedDueDate) {
+    return incoming.statedDueDate > prior.statedDueDate;
+  }
+  const before = noticeObservedAt(prior);
+  const after = noticeObservedAt(incoming);
+  if (before !== undefined && after !== undefined && after < before) return false;
+  // Matching facts can acquire missing source metadata on a reread. A changed
+  // total needs positive chronology, including for downward bank corrections;
+  // a legacy notice with no clock cannot establish which version came first.
+  return incoming.amountFils === prior.amountFils ||
+    (before !== undefined && after !== undefined && after > before);
+}
+
 /**
  * Merge bill reminders learned during an encrypted capture.
  *
  * A manual reminder is the user's decision and is never rewritten. An
  * automatically detected reminder is refreshed by the newest bank notice so
- * its amount and due day do not stay frozen at last month's values. Paid
- * months and an explicitly chosen account survive that refresh.
+ * its amount and due day do not stay frozen at last month's values. An
+ * explicitly chosen account and unrelated paid months survive that refresh.
  */
 export function mergeImportedBills(existing: Bill[], incoming: Bill[]): Bill[] {
   const merged = existing.slice();
@@ -146,13 +171,26 @@ export function mergeImportedBills(existing: Bill[], incoming: Bill[]): Bill[] {
     }
     claimed.add(index);
     const prior = merged[index];
+    if (!canRefreshNotice(prior, bill)) continue;
+    const { statedDueDate: _priorDeadline, noticeObservedAt: _priorObservedAt, ...priorFields } = prior;
+    const observedAt = noticeObservedAt(bill) ??
+      (bill.statedDueDate === prior.statedDueDate ? noticeObservedAt(prior) : undefined);
+    // A manual claim covered the prior expected total. When an accepted bank
+    // notice raises that total, its money month needs payment evidence again.
+    // Keep the actual expense; receipt reconciliation can still cover the new
+    // figure. The import/store boundary detaches any revoked payment link.
+    const reopenedMonth = bill.statedDueDate && bill.amountFils > prior.amountFils
+      ? monthKey(bill.statedDueDate) : undefined;
     merged[index] = {
-      ...prior,
+      ...priorFields,
       title: bill.title,
       category: bill.category,
       amountFils: bill.amountFils,
       dueDay: bill.dueDay,
       autoDetected: true,
+      paidMonths: reopenedMonth ? prior.paidMonths.filter((month) => month !== reopenedMonth) : prior.paidMonths,
+      ...(bill.statedDueDate ? { statedDueDate: bill.statedDueDate } : {}),
+      ...(observedAt !== undefined ? { noticeObservedAt: observedAt } : {}),
       ...(bill.importIdentity ? { importIdentity: bill.importIdentity } : {}),
     };
   }
@@ -198,9 +236,148 @@ function exactBillAccount(bill: Bill, transaction: Transaction): boolean {
   return tail !== null && tail === billIdentityTail(transaction.billIdentity);
 }
 
+/** Provider spellings already emitted by bank alerts, including Arabic SEWA. */
+function providerTitle(title: string): string {
+  const key = normalize(title.replace(/&/g, ' and '));
+  if (/^(?:e and(?: uae)?|etisalat|e digital app)$/.test(key)) return 'etisalat';
+  if (key === 'كهرباء الشارقة') return 'sewa';
+  return key;
+}
+
+function sameBillProvider(billTitle: string, transactionTitle: string): boolean {
+  const b = providerTitle(billTitle);
+  const x = providerTitle(transactionTitle);
+  if (!b || !x) return false;
+  if (b === x) return true;
+  // Short provider names need equality: E& must never match every title with e.
+  if (b.length >= 4 && x.length >= 4 && (x.includes(b) || b.includes(x))) return true;
+  const tokens = payeeTokens(b);
+  return [...payeeTokens(x)].some((token) => tokens.has(token));
+}
+
+/** Single-service descriptors, not marketplaces such as Apple or Amazon. */
+const DIRECT_SUBSCRIPTIONS = new Set([
+  'chatgpt', 'claude', 'google one', 'netflix', 'spotify', 'alldebrid', 'real debrid',
+  'disney', 'disney plus', 'youtube premium', 'anghami', 'shahid', 'osn', 'starzplay',
+  'deezer', 'audible', 'dropbox', 'canva', 'microsoft 365', 'office 365',
+]);
+
+type RenewalCycle = { dueISO: string; ordinal: number; rows: Transaction[]; confirmed: boolean };
+type RenewalHistory = Map<number, RenewalCycle>;
+let renewalHistoryCache: {
+  bills: Bill[]; transactions: Transaction[]; live?: Set<string>; internal?: Set<string>;
+  value: Map<Bill, RenewalHistory>; monthStartDay: number;
+} | undefined;
+
+function renewalOrdinal(bill: Bill, date: string): number {
+  const year = Number(date.slice(0, 4));
+  return bill.yearlyOnISO ? year : year * 12 + Number(date.slice(5, 7)) - 1;
+}
+
+function renewalAnchor(bill: Bill, ordinal: number): string {
+  const year = bill.yearlyOnISO ? ordinal : Math.floor(ordinal / 12);
+  const month = bill.yearlyOnISO ? Number(bill.yearlyOnISO.slice(5, 7)) - 1 : ordinal % 12;
+  const day = Math.min(bill.dueDay, new Date(Date.UTC(year, month + 1, 0)).getUTCDate());
+  return new Date(Date.UTC(year, month, day)).toISOString().slice(0, 10);
+}
+
+const serviceIdentity = (identity?: string): string | undefined | null => identity === undefined
+  ? undefined : /^(?:account|consumer|party|customer|contract|service):[a-z0-9]{4}$/i.test(identity)
+    ? identity.toLowerCase() : null;
+const timelyRenewal = (bill: Bill, row: Transaction, dueISO: string): boolean =>
+  (row.source === 'manual' && row.billPayment?.billId === bill.id &&
+    row.billPayment.month === monthKey(dueISO) && bill.paidMonths.includes(row.billPayment.month)) ||
+  Math.abs(daysBetweenISO(row.date, dueISO)) <= 5;
+
+/**
+ * A single-service subscription (ChatGPT, Netflix…) is settled by the one
+ * charge from that exact service within five days of its calendar anchor, at
+ * whatever price was charged: plans change price and providers bill a few days
+ * early. That holds for a saved estimate and for a bill the person added. Two
+ * charges in one cycle, a competing bill for the same service, or a
+ * bank-stated exact total keep the cycle on the stricter rules.
+ *
+ * Each raw charge belongs to ONE nearest calendar anchor, even when it posts
+ * across a reporting-month boundary. Do not also offer it to the legacy
+ * same-month matcher: September 30 must not settle both September and October.
+ * Scan targeted histories once per immutable ledger snapshot, not once per
+ * forecast month or once per bill on a large imported ledger.
+ */
+function renewalHistories(
+  bills: Bill[], transactions: Transaction[], live?: Set<string>, internal?: Set<string>,
+): Map<Bill, RenewalHistory> {
+  if (renewalHistoryCache?.bills === bills && renewalHistoryCache.transactions === transactions &&
+      renewalHistoryCache.live === live && renewalHistoryCache.internal === internal &&
+      renewalHistoryCache.monthStartDay === getMonthStartDay()) {
+    return renewalHistoryCache.value;
+  }
+  const value = new Map<Bill, RenewalHistory>();
+  const byTitle = new Map<string, Bill[]>();
+  for (const bill of bills) {
+    if (bill.statedDueDate || serviceIdentity(bill.importIdentity) === null ||
+        !DIRECT_SUBSCRIPTIONS.has(normalize(bill.title))) continue;
+    // Legacy matching compares masked tails, even across identity kinds.
+    // Unknown/malformed identities or equal tails therefore remain competing
+    // claims; only distinct valid tails are disjoint from that matcher.
+    if (bills.some(other => other !== bill && sameBillProvider(other.title, bill.title) &&
+        (!billIdentityTail(other.importIdentity) || !billIdentityTail(bill.importIdentity) ||
+          billIdentityTail(other.importIdentity) === billIdentityTail(bill.importIdentity)))) continue;
+    value.set(bill, new Map());
+    const title = normalize(bill.title);
+    byTitle.set(title, [...(byTitle.get(title) ?? []), bill]);
+  }
+  if (value.size) for (const transaction of transactions) {
+    const targets = byTitle.get(normalize(transaction.title));
+    if (!targets || !isSpending(transaction, live, internal) || transaction.amountFils <= 0) continue;
+    for (const bill of targets) {
+      // Unknown identity cannot stand in for an explicitly identified service.
+      if (serviceIdentity(transaction.billIdentity) === null ||
+          serviceIdentity(bill.importIdentity) !== serviceIdentity(transaction.billIdentity)) continue;
+      if (transaction.billPayment) {
+        const claim = transaction.billPayment;
+        if (transaction.source !== 'manual' || claim.billId !== bill.id || !bill.paidMonths.includes(claim.month)) continue;
+        const dueISO = bill.yearlyOnISO ? yearlyDueInMonth(claim.month, bill.yearlyOnISO)
+          : dueDateInMonth(claim.month, bill.dueDay);
+        if (!dueISO) continue;
+        const ordinal = renewalOrdinal(bill, dueISO);
+        const history = value.get(bill)!;
+        const cycle = history.get(ordinal) ?? { dueISO, ordinal, rows: [], confirmed: false };
+        cycle.rows.push(transaction);
+        history.set(ordinal, cycle);
+        continue;
+      }
+      const ordinal = renewalOrdinal(bill, transaction.date);
+      const anchors = [ordinal - 1, ordinal, ordinal + 1].map(index => ({
+        ordinal: index, dueISO: renewalAnchor(bill, index),
+      }));
+      const distance = (anchor: { dueISO: string }) => Math.abs(daysBetweenISO(transaction.date, anchor.dueISO));
+      const minimum = Math.min(...anchors.map(distance));
+      // A midpoint is ambiguous evidence for both adjacent cycles.
+      for (const anchor of anchors.filter(candidate => distance(candidate) === minimum)) {
+        const history = value.get(bill)!;
+        const cycle = history.get(anchor.ordinal) ?? { ...anchor, rows: [], confirmed: false };
+        cycle.rows.push(transaction);
+        history.set(anchor.ordinal, cycle);
+      }
+    }
+  }
+  for (const [bill, history] of value) {
+    for (const cycle of [...history.values()].sort((a, b) => a.ordinal - b.ordinal)) {
+      const row = cycle.rows.length === 1 ? cycle.rows[0] : undefined;
+      // A rise is a new plan price; a fall below half the saved price could
+      // be an add-on, a top-up or a card check, so it counts only once the
+      // previous cycle already renewed through this service.
+      cycle.confirmed = Boolean(row && timelyRenewal(bill, row, cycle.dueISO) &&
+        (row.amountFils * 2 >= bill.amountFils || history.get(cycle.ordinal - 1)?.confirmed));
+    }
+  }
+  renewalHistoryCache = { bills, transactions, live, internal, value, monthStartDay: getMonthStartDay() };
+  return value;
+}
+
 /**
  * Transactions that could be this bill's payment: same month, amount within
- * ±15%, and a title that either CONTAINS the bill's (or is contained by it) or
+ * ±15% for manual estimates, and a title that either CONTAINS the bill's (or is contained by it) or
  * shares a token that names the payee.
  *
  * Containment alone was the whole rule, and it is exact where it applies —
@@ -223,8 +400,12 @@ function candidatePayments(
 ): Transaction[] {
   const billTitle = normalize(bill.title);
   if (!billTitle) return [];
-  const billTokens = payeeTokens(bill.title);
   const billTail = billIdentityTail(bill.importIdentity);
+  // A notice is exact only for its stated cycle. Recurring averages and later
+  // cycles keep estimate tolerance; a partial payment cannot settle this one.
+  const hasStatedTotal = bill.autoDetected && bill.statedDueDate !== undefined &&
+    bill.statedDueDate === dueDateInMonth(key, bill.dueDay);
+  const minimumPayment = hasStatedTotal ? bill.amountFils : bill.amountFils * 0.85;
   const out: Transaction[] = [];
   for (const t of transactions) {
     // `live`/`internal` are what stop a bill settling against money the rest
@@ -234,48 +415,18 @@ function candidatePayments(
     // of this error. Optional, so a caller with no accounts to hand (tests,
     // the importer) still gets the transfer rule; see ledger.ts.
     if (!isSpending(t, live, internal) || monthKey(t.date) !== key) continue;
-    if (t.amountFils < bill.amountFils * 0.85 || t.amountFils > bill.amountFils * 1.15) continue;
-    // A provider may call this "account 1849" while the bank's registered
-    // payee receipt calls it "consumer number 1849". The tail is accepted
-    // only alongside same-month spending and the amount band above. The
-    // claims pass below then refuses it if two obligations want the same row.
+    if (t.amountFils < minimumPayment || t.amountFils > bill.amountFils * 1.15) continue;
+    // "Account 1849" and "consumer number 1849" can describe one provider's
+    // customer, but the same four digits can occur at another provider. Amount
+    // and month cannot establish who was paid. Require provider evidence even
+    // for matching tails; a user-confirmed bill alias supplies it for a bank
+    // nickname that otherwise tells us nothing about the provider.
     const paymentTail = billIdentityTail(t.billIdentity);
     // Matching provider names cannot override an explicitly different account.
     if (billTail && paymentTail && billTail !== paymentTail) continue;
-    if (billTail && paymentTail === billTail) {
-      out.push(t);
-      continue;
-    }
-    const txTitle = normalize(t.title);
-    // Every string contains "", so a title that normalizes to nothing (a row
-    // titled "—" or "***") would otherwise mark any similar-sized bill paid.
-    if (!txTitle) continue;
-    if (nests(bill, t)) {
-      out.push(t);
-      continue;
-    }
-    for (const token of payeeTokens(t.title)) {
-      if (billTokens.has(token)) {
-        out.push(t);
-        break;
-      }
-    }
+    if (sameBillProvider(bill.title, t.title)) out.push(t);
   }
   return out;
-}
-
-/** True when the two titles nest, which needs no corroboration. */
-function nests(bill: Bill, t: Transaction): boolean {
-  const b = normalize(bill.title);
-  const x = normalize(t.title);
-  if (!b || !x) return false;
-  if (b === x) return true;
-  // A short provider title such as "E&" normalizes to "e". Treating one
-  // character as containment made any similarly priced merchant containing
-  // that letter look like proof the telecom bill was paid. Short names need
-  // exact title equality or the structured identity path above.
-  if (b.length < 4 || x.length < 4) return false;
-  return x.includes(b) || b.includes(x);
 }
 
 /**
@@ -327,6 +478,7 @@ export function billsForMonth(
       billsForMonthCache.bills === bills &&
       billsForMonthCache.transactions === transactions &&
       billsForMonthCache.key === key &&
+      billsForMonthCache.monthStartDay === getMonthStartDay() &&
       billsForMonthCache.day === todayISO &&
       billsForMonthCache.live === live &&
       billsForMonthCache.internal === internal) {
@@ -366,7 +518,21 @@ export function billsForMonth(
    * bill that says paid while the money is still owed.
    */
   const monthRows = spendingInMonth(transactions, key, live, internal);
-  const candidates = scheduled.map(({ bill }) => candidatePayments(bill, monthRows, key, live, internal));
+  const histories = renewalHistories(bills, transactions, live, internal);
+  const candidates = scheduled.map(({ bill, dueISO }) => {
+    const history = histories.get(bill);
+    if (!history) return candidatePayments(bill, monthRows, key, live, internal);
+    const ordinal = renewalOrdinal(bill, dueISO);
+    const cycle = history.get(ordinal);
+    if (cycle?.confirmed) return cycle.rows;
+    if (bill.autoDetected) return [];
+    // A bill the person added keeps its same-month match for a charge off
+    // the anchor, but never one that settled a neighbouring cycle: a
+    // September 27 renewal for October must not also settle September.
+    const elsewhere = new Set<string>();
+    for (const [other, { rows, confirmed }] of history) if (other !== ordinal && confirmed) for (const row of rows) elsewhere.add(row.id);
+    return candidatePayments(bill, monthRows, key, live, internal).filter(row => !elsewhere.has(row.id));
+  });
   const explicitlyClaimed = new Set<string>();
   candidates.forEach((rows, index) => {
     for (const transaction of rows) {
@@ -405,11 +571,18 @@ export function billsForMonth(
     else if (daysLeft < 0) status = 'overdue';
     else if (daysLeft <= 5) status = 'due-soon';
     else status = 'upcoming';
-    return { bill, status, daysLeft, dueISO, autoReconciled };
+    const history = histories.get(bill);
+    const ordinal = renewalOrdinal(bill, dueISO);
+    const current = history?.get(ordinal);
+    const prior = history?.get(ordinal - 1);
+    const evidence = current?.confirmed ? current : !current && prior?.confirmed ? prior : undefined;
+    const projectedBill = evidence ? { ...bill, amountFils: evidence.rows[0].amountFils } : bill;
+    return { bill: projectedBill, status, daysLeft, dueISO, autoReconciled };
   });
 
   const rank: Record<BillStatus, number> = { overdue: 0, 'due-soon': 1, upcoming: 2, paid: 3 };
   rows.sort((a, b) => rank[a.status] - rank[b.status] || a.daysLeft - b.daysLeft);
-  billsForMonthCache = { bills, transactions, key, day: todayISO, live, internal, value: rows };
+  billsForMonthCache = { bills, transactions, key, day: todayISO, live, internal, value: rows,
+    monthStartDay: getMonthStartDay() };
   return rows.slice();
 }

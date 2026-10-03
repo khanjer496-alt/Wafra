@@ -1,23 +1,31 @@
-import { useRouter } from 'expo-router';
-import React, { useMemo } from 'react';
+import { useCategoryCatalog } from '@/hooks/use-category-catalog';
+import { useRouter } from '@/hooks/use-app-router';
+import React, { useMemo, useState } from 'react';
 import { Share, StyleSheet, View } from 'react-native';
 
+import { BandCount } from '@/components/capture/band-count';
+import { SheetSectionTitle } from '@/components/capture/sheet-link-row';
+import { EntryDetailSheet } from '@/components/entry-detail-sheet';
+import { BandTitle } from '@/components/settings-band/band-title';
 import { ThemedText } from '@/components/themed-text';
-import { Button } from '@/components/ui/controls';
+import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
+import { EButton } from '@/components/ui/band/e-button';
+import { StatTile, statTileColors } from '@/components/ui/band/stat-tile';
 import { Icon } from '@/components/ui/icon';
-import { Row, Section } from '@/components/ui/layout';
 import { Money } from '@/components/ui/money';
-import { ScreenScaffold } from '@/components/ui/screen-scaffold';
-import type { ScreenHeaderProps } from '@/components/ui/screen-header';
 import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
-import { cardDiagnostics, noFormatsReason, parserCoverage, unreadFormats } from '@/lib/accuracy';
+import { useBand } from '@/hooks/use-band';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { cardDiagnostics, formatKey, newestRowOfFormat, noFormatsReason, parserCoverage, unreadFormats } from '@/lib/accuracy';
+import { accuracyBandCopy } from '@/lib/accuracy-band-copy';
 import { isCaptureAvailable } from '@/lib/capture';
 import { shareText } from '@/lib/share-text';
-import { categoryLabel } from '@/lib/categories';
+
+import { detailsWords } from '@/lib/details-copy';
 import { isRelayPlatform } from '@/lib/relay';
 import { useStore } from '@/lib/store';
 import { t, tf } from '@/lib/i18n';
+import type { Transaction } from '@/lib/types';
 
 /** Long digit runs could be account numbers — keep only the last 4. */
 function maskDigits(s: string): string {
@@ -29,15 +37,31 @@ function maskDigits(s: string): string {
  * the list is how new bank formats get fixed: every message here is one the
  * grammar couldn't fully read.
  */
+/**
+ * Rows mounted per group before "Show more". Each row carries the masked raw
+ * message, so a new market's first import (hundreds of unread formats) would
+ * otherwise lay out every one of them inside the scroll view at once.
+ */
+const FORMAT_PAGE = 30;
+
 export default function AccuracyScreen() {
-  const theme = useTheme();
+  const { categoryLabel } = useCategoryCatalog();
+  const band = useBand('settings');
   const router = useRouter();
   const { state } = useStore();
+  const [groupLimits, setGroupLimits] = useState<Record<string, number>>({});
+  const [entry, setEntry] = useState<Transaction | null>(null);
+  const d = detailsWords(state.language);
 
   const rows = useMemo(
     () => unreadFormats(state.transactions, (id) => categoryLabel(id, state.language === 'ar' ? 'ar' : 'en')),
-    [state.transactions, state.language],
+    [state.transactions, state.language, categoryLabel],
   );
+
+  // The newest recorded row of each listed format. These rows are already in
+  // the ledger, so the fix is to open that entry — never to add it again.
+  // Same rows and format key as unreadFormats().
+  const newestOfFormat = useMemo(() => newestRowOfFormat(state.transactions), [state.transactions]);
 
   const unread = useMemo(() => rows.filter((r) => r.reason === 'unread'), [rows]);
   const uncategorized = useMemo(() => rows.filter((r) => r.reason === 'uncategorized'), [rows]);
@@ -99,34 +123,58 @@ export default function AccuracyScreen() {
     shareText('wafra-card-diagnostic.txt', cardDiagnostics(state)).catch(() => {});
   };
 
-  const accuracyHeader: ScreenHeaderProps = {
-    title: t('improveAccuracy'),
-    back: { label: t('back'), onPress: () => router.back() },
-  };
+  const accuracyNav: BandNav = { back: true };
+  const words = accuracyBandCopy(state.language);
+  const largeText = useLargeTextLayout();
+  const tile = statTileColors(band, 'band');
+  // The title's count is the list below; where the text was never kept there
+  // is no list, and a zero would read as "nothing to check".
+  const countLine = noFormats === 'none-found' || rows.length > 0 ? words.toCheck(rows.length) : null;
+  // Counts, never a percentage: each tile names its own denominator.
+  const tiles = coverage.imported === 0 ? [] : [
+    { id: 'read', label: words.messagesRead, count: coverage.imported, total: null },
+    ...(coverage.measured > 0 ? [{ id: 'named', label: words.shopsNamed, count: coverage.named, total: coverage.measured }] : []),
+    ...(coverage.categoryMeasured > 0
+      ? [{ id: 'categorised', label: words.categorised, count: coverage.categorised, total: coverage.categoryMeasured }] : []),
+  ];
+  const muted = { color: band.textSecondary };
 
   return (
     <>
-      <ScreenScaffold
-        headerMode="native"
-        header={accuracyHeader}
-        scrollProps={{ showsVerticalScrollIndicator: false }}>
+      <BandScaffold
+        band="settings"
+        testID="accuracy-screen"
+        nav={accuracyNav}
+        scrollProps={{ showsVerticalScrollIndicator: false }}
+        bandContent={<View style={styles.bandBlock}>
+          <BandTitle testID="accuracy-title" title={t('improveAccuracy')} body={countLine} palette={band} />
+          {tiles.length > 0 ? (
+            <View testID="accuracy-coverage-tiles" style={[styles.tiles, largeText && styles.tilesStacked]}>
+              {tiles.map((item) => (
+                <StatTile key={item.id} testID={`accuracy-tile-${item.id}`} palette={band} label={item.label}
+                  meta={item.total === null ? undefined : words.of(item.total)} style={styles.tile}
+                  accessibilityLabel={words.tileSpoken(item.label, item.count, item.total)}>
+                  <BandCount value={item.count.toLocaleString('en-US')} color={tile.fg} />
+                </StatTile>
+              ))}
+            </View>
+          ) : null}
+        </View>}>
           {/* Counts, never a percentage. "492 of 505" is something a person can
               check and act on; "97% accurate" is a claim they can only take or
               leave. Every figure names its own denominator, and the last line
               says out loud what was left out of it — a metric that reads
               correct behaviour as failure gets dismissed once and then never
               read again. */}
-          <Section index={0} style={styles.coverage}>
-            <ThemedText type="meta" themeColor="textTertiary" style={styles.coverageHeading}>
-              {t('coverageHeading')}
-            </ThemedText>
+          <View testID="accuracy-coverage" style={styles.section}>
+            <SheetSectionTitle title={t('coverageHeading')} palette={band} />
             {coverage.imported === 0 ? (
-              <ThemedText type="default" themeColor="textSecondary">
+              <ThemedText type="default" style={muted}>
                 {t('coverageNothingYet')}
               </ThemedText>
             ) : (
               <>
-                <ThemedText type="default">
+                <ThemedText type="default" style={{ color: band.text }}>
                   {coverage.measured === 0
                     ? tf('coverageNoShops', {
                         imported: coverage.imported,
@@ -140,7 +188,7 @@ export default function AccuracyScreen() {
                       })}
                 </ThemedText>
                 {coverage.categoryMeasured > 0 && (
-                  <ThemedText type="default">
+                  <ThemedText type="default" style={{ color: band.text }}>
                     {tf('coverageCategories', {
                       categorised: coverage.categorised,
                       categoryMeasured: coverage.categoryMeasured,
@@ -151,7 +199,7 @@ export default function AccuracyScreen() {
                     two sentences above show 100 purchases and then 60, with
                     nothing on screen saying where the other 40 went. */}
                 {coverage.decided > 0 && (
-                  <ThemedText type="meta" themeColor="textTertiary">
+                  <ThemedText type="meta" style={muted}>
                     {tf('coverageDecided', { decided: coverage.decided })}
                   </ThemedText>
                 )}
@@ -159,7 +207,7 @@ export default function AccuracyScreen() {
                     A ledger with no purchases in it has already been told, in
                     the line above, that all of it is transfers. */}
                 {coverage.skipped > 0 && coverage.measured > 0 && (
-                  <ThemedText type="meta" themeColor="textTertiary">
+                  <ThemedText type="meta" style={muted}>
                     {tf('coverageSkipped', { skipped: coverage.skipped })}
                   </ThemedText>
                 )}
@@ -168,16 +216,16 @@ export default function AccuracyScreen() {
                     to list below and nothing to share. Saying so here stops the
                     figure from reading as a complete answer. */}
                 {misses > 0 && noFormats !== 'none-found' && (
-                  <ThemedText type="meta" themeColor="textTertiary">
+                  <ThemedText type="meta" style={muted}>
                     {t('coverageNoText')}
                   </ThemedText>
                 )}
               </>
             )}
-          </Section>
+          </View>
 
-          <Section index={1} style={styles.intro}>
-            <ThemedText type="default" themeColor="textSecondary">
+          <View testID="accuracy-actions" style={styles.section}>
+            <ThemedText type="default" style={muted}>
               {t(
                 noFormats === 'relay'
                   ? 'formatsNotKeptRelay'
@@ -189,17 +237,21 @@ export default function AccuracyScreen() {
               )}
             </ThemedText>
             {uncategorized.length > 0 && (
-              <Button
+              <EButton
+                testID="accuracy-sort-shops"
+                palette={band}
                 label={t('sortShops')}
                 icon="filter"
                 onPress={() => router.push('/categorise')}
               />
             )}
             {unread.length > 0 && (
-              <Button
+              <EButton
+                testID="accuracy-share-unread"
+                palette={band}
+                variant="secondary"
                 label={`${t('shareUnrecognized')} · ${unread.length}`}
                 icon="upload"
-                variant="outline"
                 onPress={shareUnread}
               />
             )}
@@ -207,46 +259,65 @@ export default function AccuracyScreen() {
                 answers — a payment counted twice, a statement filed against the
                 wrong account — happen to messages the parser read CONFIDENTLY,
                 so they never appear in the list above. */}
-            <Button
+            <EButton
+              testID="accuracy-share-cards"
+              palette={band}
+              variant="secondary"
               label={t('shareCardDiagnostic')}
               icon="upload"
-              variant="outline"
               onPress={shareCards}
             />
-            <ThemedText type="meta" themeColor="textTertiary">
+            <ThemedText type="meta" style={muted}>
               {t('shareCardDiagnosticHint')}
             </ThemedText>
-          </Section>
+          </View>
 
           {([
             [t('couldNotRead'), unread] as const,
             [t('noCategoryYet'), uncategorized] as const,
           ]).map(([heading, list]) =>
-            list.length === 0 ? null : (
-              <View key={heading}>
-                <ThemedText type="meta" themeColor="textTertiary" style={styles.groupHeading}>
-                  {heading} · {list.length}
-                </ThemedText>
-                {list.map((r, i) => (
-                  <Row key={`${heading}-${i}`} last={i === list.length - 1} style={styles.formatRow}>
-                    <View style={styles.formatInner}>
-                      <View style={styles.formatTop}>
-                        <ThemedText type="small" numberOfLines={1} style={styles.formatTitle}>
-                          {r.title}
-                        </ThemedText>
-                        <Money fils={r.amountFils} prefix={false} />
-                      </View>
-                      <ThemedText type="meta" themeColor="textTertiary">
-                        {t('readAs')} {r.category} · {tf('seenCount', { count: r.count })}
+            list.length === 0 ? null : (() => {
+              const limit = groupLimits[heading] ?? FORMAT_PAGE;
+              const shown = list.slice(0, limit);
+              const hidden = list.length - shown.length;
+              return (
+              <View key={heading} style={styles.section}>
+                <SheetSectionTitle title={`${heading} · ${list.length}`} palette={band} />
+                {shown.map((r, i) => (
+                  <View key={`${heading}-${i}`} style={[styles.formatRow,
+                    i < shown.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: band.rule }]}>
+                    <View style={styles.formatTop}>
+                      <ThemedText type="smallBold" numberOfLines={1} style={[styles.formatTitle, { color: band.text }]}>
+                        {r.title}
                       </ThemedText>
-                      <ThemedText type="meta" themeColor="textSecondary" style={styles.raw}>
-                        {maskDigits(r.raw)}
-                      </ThemedText>
+                      <Money fils={r.amountFils} prefix={false} color={band.text} />
                     </View>
-                  </Row>
+                    <ThemedText type="meta" style={muted}>
+                      {t('readAs')} {r.category} · {tf('seenCount', { count: r.count })}
+                    </ThemedText>
+                    <ThemedText type="meta" style={[styles.raw, muted]}>
+                      {maskDigits(r.raw)}
+                    </ThemedText>
+                    {newestOfFormat.has(formatKey(r.raw)) ? (
+                      <View testID="accuracy-open-entry" style={styles.openEntry}>
+                        <EButton palette={band} variant="secondary" label={d.accuracy.openEntry} icon="arrow-up-right"
+                          onPress={() => setEntry(newestOfFormat.get(formatKey(r.raw)) ?? null)} />
+                        <ThemedText type="meta" style={muted}>{d.accuracy.openEntryHint}</ThemedText>
+                      </View>
+                    ) : null}
+                  </View>
                 ))}
+                {hidden > 0 && (
+                  <EButton
+                    palette={band}
+                    variant="quiet"
+                    label={tf('showMoreRows', { count: Math.min(FORMAT_PAGE, hidden) })}
+                    onPress={() => setGroupLimits((current) => ({ ...current, [heading]: limit + FORMAT_PAGE }))}
+                  />
+                )}
               </View>
-            ),
+              );
+            })(),
           )}
 
           {/* The green tick is a VERDICT — "the parser read everything you
@@ -254,46 +325,27 @@ export default function AccuracyScreen() {
               to check against. Where it was not, the explanation above is the
               whole answer and this block would only contradict it. */}
           {rows.length === 0 && noFormats === 'none-found' && (
-            <Section index={2} style={styles.empty}>
-              <Icon name="check" size={26} color={theme.income} strokeWidth={2.1} />
-              <ThemedText type="small">{t('noUnrecognized')}</ThemedText>
-              <ThemedText type="default" themeColor="textSecondary">
+            <View testID="accuracy-clean" style={styles.empty}>
+              <Icon name="check" size={26} color={band.statusOk} strokeWidth={2.1} />
+              <ThemedText type="smallBold" style={{ color: band.text }}>{t('noUnrecognized')}</ThemedText>
+              <ThemedText type="default" style={muted}>
                 {t('noUnrecognizedText')}
               </ThemedText>
-            </Section>
+            </View>
           )}
-      </ScreenScaffold>
+      </BandScaffold>
+      <EntryDetailSheet transaction={entry} onClose={() => setEntry(null)} />
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  coverage: {
-    gap: Spacing.two,
-    paddingBottom: Spacing.four,
-  },
-  coverageHeading: {
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    paddingBottom: Spacing.two - 4,
-  },
-  intro: {
-    gap: Spacing.three - 2,
-    paddingBottom: Spacing.four,
-  },
-  groupHeading: {
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    paddingTop: Spacing.four,
-    paddingBottom: Spacing.two - 2,
-  },
-  formatRow: {
-    paddingVertical: Spacing.three - 2,
-  },
-  formatInner: {
-    flex: 1,
-    gap: Spacing.two - 2,
-  },
+  bandBlock: { gap: 16, paddingTop: 4, paddingBottom: 8 },
+  tiles: { flexDirection: 'row', gap: 8 },
+  tilesStacked: { flexDirection: 'column' },
+  tile: { minHeight: 96 },
+  section: { gap: 10, paddingBottom: 22 },
+  formatRow: { gap: Spacing.two - 2, paddingVertical: Spacing.three - 2 },
   formatTop: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -303,6 +355,7 @@ const styles = StyleSheet.create({
   formatTitle: {
     flexShrink: 1,
   },
+  openEntry: { gap: Spacing.one, paddingTop: Spacing.one },
   raw: {
     fontSize: 12.5,
     lineHeight: 18,

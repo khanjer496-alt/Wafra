@@ -50,7 +50,8 @@ function captureProbe(page) {
     '@/lib/background-relay-storage': {},
     '@/lib/relay': { isRelayPlatform: () => false },
     '@/lib/sms-parser': { PARSER_VERSION: 40, PARSER_BACKFILL_VERSION: 40 },
-    '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [] },
+    '@/lib/review-source-bindings': { collectLegacyReviewSourceKeys: () => [],
+      withoutRecordedReviews: require('../build/review-source-bindings.js').withoutRecordedReviews },
   });
   return { collect: module.collectNewMessages, args: () => args };
 }
@@ -72,8 +73,9 @@ test('a parser upgrade processes one newest page, then hands off a durable resum
 
 test('ordinary incremental capture reads only the next watermark and does not create history work', async () => {
   const p = captureProbe({ ...page, inboxHistoryComplete: true, nextCursor: null });
-  const result = await p.collect({ ...state, parserVersion: 40 });
+  const result = await p.collect({ ...state, parserVersion: 40, recentRereadParserVersion: 40 });
   assert.equal(p.args()[0], 101); assert.equal(result.historyImport, undefined);
+  assert.equal(result.recentRereadParserVersion, undefined, 'a current receipt is never re-stamped');
   assert.equal(result.historicalReread, false);
 });
 
@@ -107,6 +109,88 @@ test('the history handoff shares the same durable ledger write even when no mone
   events.length = 0;
   await assert.rejects(() => run(Promise.reject(Error('storage fixture'))).execute('routine'));
   assert.deepEqual(events, [], 'failed durability never acknowledges a page');
+});
+
+const DAY = 24 * 60 * 60 * 1000;
+const recentState = () => ({ ...state, parserVersion: 40, recentRereadParserVersion: 39,
+  lastScanTs: Date.now() - 60 * 60 * 1000 });
+
+test('a parser release re-reads the recent two weeks once, then returns to the watermark', async () => {
+  const done = { ...page, inboxHistoryComplete: true, nextCursor: null };
+  const p = captureProbe(done);
+  const before = Date.now();
+  const result = await p.collect(recentState());
+  const sinceMs = p.args()[0];
+  assert.ok(sinceMs >= before - 14 * DAY - 1000 && sinceMs <= Date.now() - 14 * DAY,
+    'the first scan under a new parser reaches back over the recovery window, not to lastScanTs');
+  assert.equal(p.args()[4].maxInboxPages, undefined, 'the window is read completely, not one page');
+  assert.equal(result.recentRereadParserVersion, 40, 'a completed window read carries the receipt');
+  assert.equal(result.historicalReread, false, 'a recent re-read is never a full-history migration');
+  assert.equal(result.newestTs, done.newestTs);
+
+  const afterReceipt = captureProbe(done);
+  const steady = { ...recentState(), recentRereadParserVersion: 40 };
+  const next = await afterReceipt.collect(steady);
+  assert.equal(afterReceipt.args()[0], steady.lastScanTs + 1, 'the receipt restores the incremental watermark');
+  assert.equal(next.recentRereadParserVersion, undefined);
+});
+
+test('an unfinished recent re-read, a push-only drain or an older watermark never fakes the receipt', async () => {
+  const partial = captureProbe({ ...page, inboxHistoryComplete: false, nextCursor: null });
+  assert.equal((await partial.collect(recentState())).recentRereadParserVersion, undefined);
+
+  const pushOnly = captureProbe({ ...page, inboxHistoryComplete: true, nextCursor: null });
+  const drained = await pushOnly.collect(recentState(), { notificationOnly: true });
+  assert.equal(pushOnly.args()[0], 0);
+  assert.equal(drained.recentRereadParserVersion, undefined, 'the notification queue proves nothing about SMS');
+
+  // A watermark already older than the window keeps it: the read starts there.
+  const old = { ...recentState(), lastScanTs: Date.now() - 30 * DAY };
+  const stale = captureProbe({ ...page, inboxHistoryComplete: true, nextCursor: null });
+  assert.equal((await stale.collect(old)).recentRereadParserVersion, 40);
+  assert.equal(stale.args()[0], old.lastScanTs + 1);
+});
+
+test('a re-read never re-offers in Review a Message the ledger already booked', async () => {
+  const at = Date.now() - 3 * DAY;
+  const review = (id, observedAt) => ({ kind: 'universal', id: `ari1_${id}`,
+    sourceKey: `android_message_review_source_a${id}`, observedAt, expiresAt: observedAt + 30 * DAY,
+    channel: 'inbox', parserVersion: 1, event: {} });
+  const candidates = [review(501, at), review(502, at + 1000), review(503, at + 2000)];
+  const booked = { ...recentState(), transactions: [
+    { source: 'sms', smsKey: `ha501t${at}`, ts: at },
+    { source: 'sms', smsKey: `s${at + 2000}-2500`, ts: at + 2000 },
+  ] };
+  const p = captureProbe({ ...page, inboxHistoryComplete: true, nextCursor: null, reviewCandidates: candidates });
+  const result = await p.collect(booked);
+  assert.deepEqual(result.reviewCandidates.map((item) => item.id), ['ari1_502'],
+    'only the Message with no ledger outcome reaches Review');
+  const routine = captureProbe({ ...page, inboxHistoryComplete: true, nextCursor: null, reviewCandidates: candidates });
+  const steady = await routine.collect({ ...booked, recentRereadParserVersion: 40 });
+  assert.equal(steady.reviewCandidates.length, 3, 'the routine scan is unchanged');
+});
+
+test('the recent re-read receipt is written even when the re-read changes no money', async () => {
+  const collected = await captureProbe({ ...page, inboxHistoryComplete: true, nextCursor: null })
+    .collect(recentState());
+  const current = recentState();
+  const writes = [];
+  const batch = { transactions: [], newAccounts: [], newHints: {}, newDues: [], newBills: [], snapshots: {},
+    bankNames: {}, cardTypes: {}, lastScanTs: current.lastScanTs, updates: [] };
+  const { createCaptureExecutor } = load(path.join(root, 'src/lib/capture-executor.ts'), {
+    '@/lib/auto-import': {}, '@/lib/capture': {}, '@/lib/relay': {},
+    '@/lib/capture-trace': { captureTrace: () => {}, captureTraceEnabled: () => false },
+  });
+  await createCaptureExecutor({ ledger: {
+    getState: () => current, ensureDurable: async () => {},
+    importBatch: input => { writes.push(input); return { ids: [], durable: Promise.resolve() }; },
+  }, dependencies: {
+    collectRoutine: async () => collected,
+    planRows: () => ({ batch, txCount: 0, healedCount: 0, dueCount: 0, newAccountCount: 0 }),
+  } }).execute('routine');
+  assert.equal(writes.length, 1, 'a no-change re-read still persists its receipt');
+  assert.equal(writes[0].recentRereadParserVersion, 40);
+  assert.equal(writes[0].parserRereadComplete, undefined);
 });
 
 test('native change events carry no bank data and release their observer on shutdown', () => {

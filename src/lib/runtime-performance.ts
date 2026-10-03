@@ -64,10 +64,14 @@ export type RuntimeOperationTag =
   | 'bills-agenda-window'
   | 'notification-drain'
   | 'capture-collect'
+  | 'capture-source-keys'
+  | 'capture-parse'
+  | 'capture-inspect'
   | 'capture-plan'
   | 'capture-save'
   | 'auto-import'
   | 'daily-summary'
+  | 'daily-summary-project'
   | 'reminder-projection'
   | 'history-scan-page'
   | 'history-plan-page'
@@ -97,10 +101,14 @@ const OPERATION_TAGS: Record<RuntimeOperationTag, true> = {
   'bills-agenda-window': true,
   'notification-drain': true,
   'capture-collect': true,
+  'capture-source-keys': true,
+  'capture-parse': true,
+  'capture-inspect': true,
   'capture-plan': true,
   'capture-save': true,
   'auto-import': true,
   'daily-summary': true,
+  'daily-summary-project': true,
   'reminder-projection': true,
   'history-scan-page': true,
   'history-plan-page': true,
@@ -346,10 +354,22 @@ export function startRuntimePerformanceMonitor(): () => void {
     void initializeBreadcrumbPersistence();
     active = AppState.currentState === 'active';
     resetExpectedAt();
-    timer = setInterval(sample, SAMPLE_INTERVAL_MS);
+    // Sample only while foregrounded. A background tick did nothing but reset
+    // `expectedAt`, which the lifecycle handler below already does, yet it
+    // still woke the JS thread every second for as long as a headless capture
+    // or history job kept the process alive.
+    const syncSampler = () => {
+      if (active && !timer) timer = setInterval(sample, SAMPLE_INTERVAL_MS);
+      else if (!active && timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    syncSampler();
     subscription = AppState.addEventListener('change', (next) => {
       active = next === 'active';
       resetExpectedAt();
+      syncSampler();
       if (next !== 'active') persistBreadcrumbSoon(true);
     });
   }

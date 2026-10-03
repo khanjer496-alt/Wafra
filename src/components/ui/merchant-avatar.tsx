@@ -5,6 +5,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { CategoryAvatar } from '@/components/ui/category-avatar';
 import { merchantLogoFor } from '@/components/ui/merchant-logo-assets';
 import { Radius } from '@/constants/theme';
+import { useBand } from '@/hooks/use-band';
 import { useTheme } from '@/hooks/use-theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { resolveRemoteMerchantLogo, type RemoteMerchantLogo } from '@/lib/merchant-logo-resolver';
@@ -20,6 +21,7 @@ interface MerchantAvatarProps {
 /** Bundled artwork first; only locally verified identities may use CDN artwork. */
 function MerchantAvatarInner({ title, category, size = 34 }: MerchantAvatarProps) {
   const privateMode = usePrivateMode();
+  const ground = useBand('home').glyphGround;
   const allowRemote = !privateMode; // Narrow context: unrelated ledger changes do not rerender every visible row.
   const bundled = merchantLogoFor(title);
   const [remote, setRemote] = useState<RemoteMerchantLogo | null>(null);
@@ -48,7 +50,9 @@ function MerchantAvatarInner({ title, category, size = 34 }: MerchantAvatarProps
   if (allowRemote && remote) {
     return <LogoTile key={remote.id} id={remote.id} source={{ uri: remote.logoUrl }} category={category} size={size} />;
   }
-  return <CategoryAvatar category={category} size={size} />;
+  // No artwork: the category glyph on the shared glyph ground, so the row
+  // keeps a tile like its neighbours with logos.
+  return <CategoryAvatar category={category} size={size} ground={ground} />;
 }
 
 export const MerchantAvatar = React.memo(MerchantAvatarInner);
@@ -62,8 +66,9 @@ function LogoTile({ id, source, tint, category, size }: {
 }) {
   const theme = useTheme();
   const dark = useColorScheme() === 'dark';
+  const ground = useBand('home').glyphGround;
   const [failed, setFailed] = useState(false);
-  if (failed) return <CategoryAvatar category={category} size={size} />;
+  if (failed) return <CategoryAvatar category={category} size={size} ground={ground} />;
 
   return (
     <View

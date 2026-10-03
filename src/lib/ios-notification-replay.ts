@@ -71,7 +71,10 @@ export function createIosNotificationReplayGuard(
       id: `local_review_id_${opaque}`,
       sourceKey: `local_review_source_${opaque}`,
     }) : null;
-    if (!item) throw new Error('Notification replay review unavailable');
+    // A match that cannot be described for Review must neither post nor be
+    // dropped. Hold it in the native queue (never acknowledged) so the drain
+    // pages past it; throwing here wedged every later drain on this record.
+    if (!item) return { kind: 'held', market: null, milestone: 'none' };
     return {
       kind: 'review',
       market: outcome.market,

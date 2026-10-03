@@ -89,6 +89,7 @@ export function ConfirmSheet({
             inline
             variant={destructive ? 'danger' : 'filled'}
             label={confirmLabel}
+            haptic="commit"
             onPress={commit}
           />
         </View>

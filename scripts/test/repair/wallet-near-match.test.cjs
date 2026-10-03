@@ -404,9 +404,13 @@ test('a statement row for a bound Wallet purchase is not added a second time', (
     captureSource: 'pdf', smsTs: Date.parse(`${date}T12:00:00Z`) + 3 * MIN, statementImportId: 'f'.repeat(32), ...extra });
   const bound = wallet({ smsKey: 'h' + 'a'.repeat(64), viaPush: false, walletBound: true,
     captureInstrument: { last4: '4417', kind: 'credit' } });
-  for (const [label, row] of [['names the card', stmt()], ['names no account', stmt({ card: null })]]) {
+  for (const [label, row, expected] of [['names the card', stmt(), 0], ['names no account', stmt({ card: null }), 1]]) {
     const result = buildImportPlan([row], state([bound]), 0, new Date(at + 86_400_000));
-    assert.equal(result.txCount, 0, `statement that ${label}`);
+    assert.equal(result.txCount, expected, `statement that ${label}`);
+    if (row.card === null) {
+      assert.equal(result.batch.updates.some(update => update.remove || update.id === bound.id), false,
+        'an unidentified account cannot consume or rewrite the bound Wallet purchase');
+    }
   }
   // One-to-one: a second genuine statement purchase of the same amount still imports.
   const two = buildImportPlan([stmt(), stmt({ merchant: 'CARREFOUR MOE DXB 2' })], state([bound]), 0, new Date(at + 86_400_000));

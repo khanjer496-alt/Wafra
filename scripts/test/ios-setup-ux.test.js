@@ -53,7 +53,9 @@ const execute = (relative, dependencies = {}) => {
     output,
   )(
     (request) => dependencies[request] ??
-      (request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') : {}),
+      (request === './ios-capture-health' ? execute('src/lib/ios-capture-health.ts') :
+        request === './ios-setup-availability' || request === '@/lib/ios-setup-availability'
+          ? execute('src/lib/ios-setup-availability.ts') : {}),
     loaded,
     loaded.exports,
     filename,
@@ -63,11 +65,11 @@ const execute = (relative, dependencies = {}) => {
 };
 
 const screen = read('src/app/ios-setup.tsx');
-const settingsScreen = read('src/app/settings.tsx');
+// Settings is two screens since the redesign: the main list and Data and help.
+const settingsScreen = read('src/app/settings.tsx') + read('src/app/settings-data.tsx');
 const storageRecovery = read('src/components/storage-recovery.tsx');
 const controller = read('src/lib/ios-capture-setup.ts');
 const protocol = read('src/lib/ios-local-capture-protocol.ts');
-const controls = read('src/components/ui/controls.tsx');
 const checklistRowPath = path.join(
   ROOT,
   'src/components/ios-message-setup/checklist-row.tsx',
@@ -93,19 +95,23 @@ const translated = (key, lang) => {
 
 ok('iOS message setup: checklist row and details sheet are separate components',
   checklistRow.length > 0 && detailsSheet.length > 0);
-eq('iOS message setup: one checklist contains exactly the Future and Past rows',
+// 2026-09-25: iPhone setup is a guided Messages flow (Add → Test → Automate).
+// Past SMS import left setup: it renders only for Settings → Advanced's
+// `section=history` link, or to finish a handoff that is already running.
+eq('iOS message setup: one guide, and past SMS only as its own explicit section',
   [
+    (screen.match(/testID="ios-message-setup-guide"/g) || []).length,
     (screen.match(/testID="ios-message-setup-checklist"/g) || []).length,
     (screen.match(/<ChecklistRow/g) || []).length,
-  ], [1, 2]);
-ok('iOS message setup: Future is first, History is optional, and only the selected row expands',
-  screen.indexOf("title={t('iosMessageFutureTitle')}") >= 0 &&
-    screen.indexOf("title={t('iosMessageFutureTitle')}") <
-      screen.indexOf("title={t('iosMessagePastTitle')}") &&
-    /expanded=\{activeSection === 'future'\}/.test(screen) &&
-    /expanded=\{activeSection === 'history'\}/.test(screen) &&
-    translated('iosMessageFutureTitle', 'en') === 'Automatic bank alerts' &&
-    translated('iosMessagePastTitle', 'en') === 'Past messages · Optional');
+  ], [1, 1, 1]);
+ok('iOS message setup: the guide is numbered Add → Test → Automate and History needs an explicit request',
+  /const stepLabels = \[shortcutCopy\.stepAdd, shortcutCopy\.stepTest, shortcutCopy\.stepAutomate\]/.test(screen) &&
+    /<StepProgress current=/.test(screen) &&
+    /const historyVisible = historySupported &&\s*\(requestedSection === 'history' \|\| historySetup\.handoffStartedAt !== null\)/.test(screen) &&
+    screen.indexOf('historyMode ? (') < screen.indexOf('testID="ios-message-setup-guide"') &&
+    /section: 'history'/.test(settingsScreen) && /iosPastSmsTitle/.test(settingsScreen) &&
+    translated('iosMessagePastTitle', 'en') === 'Past messages · Optional' &&
+    translated('iosPastSmsTitle', 'en') === 'Import past SMS (experimental)');
 ok('iOS history explains Shortcut extraction before app review and keeps the phone-open instruction',
   /Shortcuts.*messages.*Wafra.*batches/.test(translated('iosMessageHistoryStartHelp', 'en')) &&
     /unlocked.*stops.*again.*progress/.test(translated('iosMessageHistoryRunningHelp', 'en')) &&
@@ -125,10 +131,10 @@ eq('iOS message setup: every checklist status has localized VoiceOver copy', [
   translated('iosMessageStatusComplete', 'en'),
   translated('iosMessageStatusSkipped', 'en'),
 ], ['Not started', 'In progress', 'Complete', 'Not finished']);
-eq('iOS message setup: compact navigation title and page heading stay distinct', [
+eq('iOS message setup: Settings row and page heading stay distinct', [
   translated('iosSetupTitle', 'en'),
-  translated('iosMessageSetupHeading', 'en'),
-], ['Bank alerts', 'Bank messages']);
+  execute('src/lib/ios-shortcut-setup-copy.ts').iosShortcutSetupCopy('en').liveTitle,
+], ['Capture sources', 'Catch new transactions']);
 
 const futureGuideKeys = [
   'iosMessageGuideMessage',
@@ -141,13 +147,13 @@ eq('iOS message setup: Future guide tells the user to leave Sender empty because
     'Message',
     'Sender: leave empty · Message Contains: one space',
     'Choose Run Immediately, turn off Notify When Run if shown, then Next',
-    'Pick {shortcut} from the list (not New Blank Automation), then Done',
+    'Pick {shortcut} from the list (not New Blank Automation). Tap Done if it appears.',
   ]);
 ok('iOS message setup: the unfiltered trigger is explained as on-device filtering, never a fake contact or a skip',
   translated('iosMessageGuideNoFilter', 'en').includes('Message Contains') &&
     translated('iosMessageGuideNoFilter', 'en').includes('single space') &&
     translated('iosMessageGuideNoFilter', 'en').includes('discards other messages on this iPhone') &&
-    translated('iosMessageContinueManual', 'en').includes('without automatic capture') &&
+    translated('iosMessageContinueManual', 'en') === 'Skip for now' &&
     !/skip this setup|fake contact|add .* to Contacts/i.test(translated('iosMessageGuideNoFilter', 'en')));
 ok('iOS message setup: obsolete universal-trigger instructions are absent',
   !/Any Sender|iosLocalChoiceAnySender|iosLocalChoiceContainsEmpty/.test(
@@ -163,7 +169,7 @@ eq('iOS message setup: Future actions use the exact staged labels', [
   'Add Shortcut',
   'I added it',
   'Open Shortcuts',
-  'I set it up',
+  'I turned it on',
 ]);
 eq('iOS message setup: harmless proof remains honest about the real trigger',
   translated('iosLocalWaitingTitle', 'en'),
@@ -288,14 +294,16 @@ ok('iOS local setup: controller has only local native, Linking and fixed-file sh
     /getCaptureStatus/.test(controller) &&
     /setCaptureEnabled/.test(controller));
 
-ok('iOS message setup: sentence-length actions wrap',
-  (screen.match(/<Button\b[\s\S]*?\/>/g) || []).every((button) => /wrapLabel/.test(button)) &&
-    /wrapLabel = true[\s\S]{0,1600}numberOfLines=\{wrapLabel \? undefined : 1\}/.test(controls));
-ok('iOS local setup: shared actions retain the 48pt minimum target',
-  /minHeight:\s*48/.test(controls));
-ok('iOS local setup: the whole screen scrolls and respects both safe edges',
-  /<SafeAreaView[\s\S]{0,120}edges=\{\['top', 'bottom'\]\}/.test(screen) &&
-    /<ScrollView[\s\S]{0,180}contentInsetAdjustmentBehavior="automatic"/.test(screen));
+const bandButton = read('src/components/ui/band/e-button.tsx');
+const bandScaffold = read('src/components/ui/band-scaffold.tsx');
+ok('iOS message setup: sentence-length E actions wrap',
+  /<EButton\b/.test(screen) && !/numberOfLines/.test(bandButton) && /flexShrink:\s*1/.test(bandButton));
+ok('iOS local setup: shared E actions retain their minimum target',
+  /minHeight:\s*BandLayout.buttonHeight/.test(bandButton) && /buttonHeight:\s*56/.test(read('src/constants/theme.ts')));
+ok('iOS local setup: the shared band scaffold owns scrolling and safe edges',
+  /<BandScaffold\b/.test(screen) && !/scroll=\{false\}/.test(screen) &&
+  /scroll = true/.test(bandScaffold) && /useSafeAreaInsets/.test(bandScaffold) &&
+  /insets\.top/.test(bandScaffold) && /insets\.bottom/.test(bandScaffold));
 ok('iOS local setup: large Dynamic Type changes layout instead of clipping',
   /useLargeTextLayout/.test(screen) &&
     /const largeText = useLargeTextLayout\(\)/.test(screen) &&

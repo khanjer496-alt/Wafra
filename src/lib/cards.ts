@@ -2,6 +2,7 @@ import { reliableBalanceFils } from '@/lib/balances';
 import { toISODate } from '@/lib/format';
 import { tf, type Lang } from '@/lib/i18n';
 import { isSpending } from '@/lib/ledger';
+import { bankIdentityForName } from '@/lib/markets';
 import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { Account, AppState, CardDue, Transaction } from '@/lib/types';
 
@@ -84,6 +85,13 @@ interface CardInputs {
   cardDues: CardDue[];
 }
 
+/**
+ * Everything card math reads. Screens can pass a narrow store selection
+ * instead of the whole AppState, so progress and settings updates do not
+ * re-render them.
+ */
+export type CardState = Pick<AppState, 'accounts' | 'transactions' | 'cardDues'>;
+
 function sameInputs(a: CardInputs, b: CardInputs): boolean {
   return (
     a.accounts === b.accounts &&
@@ -104,6 +112,7 @@ let paymentsCache: {
   byKey: Map<string, Transaction[]>;
   /** Rows that could be a card payment for SOME card; see cardPaymentsOf. */
   candidates: Transaction[];
+  byId: Map<string, Transaction>;
 } | null = null;
 let allocationCache: (CardInputs & { byAccount: Map<string, Map<string, Allocation>> }) | null = null;
 let activityCache: { transactions: Transaction[]; byAccount: Map<string, string> } | null = null;
@@ -179,10 +188,8 @@ export function mergeImportedCardDues(
             : due.minDueFils === 0
               ? 0
               : Math.max(prior.minDueFils, due.minDueFils);
-    const settledAt = [prior.settledAt, due.settledAt]
-      .filter((value): value is string => Boolean(value))
-      .sort()
-      .at(-1);
+    const settlement = due.settledAt && (!prior.settledAt || due.settledAt > prior.settledAt)
+      ? due : prior;
 
     merged[at] = {
       ...prior,
@@ -192,7 +199,8 @@ export function mergeImportedCardDues(
         ? due.minDueEstimated
         : priorKnown || nextKnown ? undefined : true,
       paidFils: Math.max(prior.paidFils, due.paidFils),
-      settledAt,
+      settledAt: settlement.settledAt,
+      settledByTransactionId: settlement.settledByTransactionId,
     };
   }
 
@@ -205,7 +213,7 @@ export function mergeImportedCardDues(
  * Confirmed links are remapped before accounting runs, so a surviving account
  * id is the only safe member. Similar bank metadata is never proof of identity.
  */
-function cardAccountIds(state: AppState, accountId: string): Set<string> {
+function cardAccountIds(state: CardState, accountId: string): Set<string> {
   const keyOf = cardIdentity(state.accounts);
   const key = keyOf(accountId);
   const ids = new Set<string>([accountId]);
@@ -276,7 +284,7 @@ function isCardPayment(t: Transaction, ids: Set<string>, creditIds: Set<string>)
   );
 }
 
-function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
+function cardPaymentsOf(state: CardState, ids: Set<string>): Transaction[] {
   // The full-ledger filter + sort, memoised per card. `allocatePayments` runs
   // once per statement and `openDues` runs it for all of them, so on a ledger
   // with several statements per card this is the same walk repeated. The key
@@ -291,6 +299,7 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
       transactions: state.transactions,
       accounts: state.accounts,
       byKey: new Map(),
+      byId: new Map(),
       // Narrow the ledger ONCE per ledger, not once per card. Both conditions
       // below are `isCardPayment`'s own, and neither reads the id set, so a row
       // failing them cannot be a payment toward any card — which makes this a
@@ -304,6 +313,7 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
         !((t.source === 'sms' || t.smsKey || t.transferEvidence || t.transferDecision) &&
           isTransferCandidate(t))),
     };
+    for (const row of paymentsCache.candidates) paymentsCache.byId.set(row.id, row);
   }
   const hit = paymentsCache.byKey.get(key);
   if (hit) return hit;
@@ -349,6 +359,45 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
 }
 
 /**
+ * Recorded activity on exactly one card, with the same payment confirmations
+ * collapsed as Statements. This is a display projection only: it neither
+ * allocates payments nor changes persisted evidence. Non-payment transfers
+ * and movements remain browsable.
+ */
+export function cardActivityRows(state: CardState, accountId: string): Transaction[] {
+  const ids = new Set([accountId]);
+  const creditIds = new Set(state.accounts.filter(a => a.id === accountId && a.cardType === 'credit').map(a => a.id));
+  const canonicalIds = new Set(cardPaymentsOf(state, ids).map(row => row.id));
+  return state.transactions.filter(row => row.accountId === accountId &&
+    (!isCardPayment(row, ids, creditIds) || canonicalIds.has(row.id)));
+}
+
+/** Only destination-card evidence may identify a legacy funding-bank debit. */
+function compatibleExternalCardPayment(
+  debit: Transaction,
+  receipt: Transaction,
+  account: Account | undefined,
+): boolean {
+  type Hint = { last4?: string; kind?: string; bankIdentity?: string };
+  const compatible = (a: Hint, b: Hint): boolean =>
+    (!a.last4 || !b.last4 || a.last4 === b.last4) &&
+    (!a.kind || !b.kind || a.kind === 'unknown' || b.kind === 'unknown' || a.kind === b.kind) &&
+    (!a.bankIdentity || !b.bankIdentity || bankIdentityForName(a.bankIdentity) === bankIdentityForName(b.bankIdentity));
+  const card: Hint = { last4: account?.last4, kind: 'credit', bankIdentity: account?.bankName };
+  const received = receipt.captureInstrument;
+  if (received && !compatible(received, card)) return false;
+  const destination = debit.transferEvidence?.counterparty;
+  // A capture instrument explicitly naming an account/debit card identifies
+  // the funding side. Older card-payment parses instead captured the credit
+  // card being paid, even when they routed the row to the funding account.
+  const captured = debit.captureInstrument;
+  const capturedCard = captured?.kind === 'credit' || captured?.kind === 'unknown' ? captured : undefined;
+  const hints = [destination, capturedCard].filter((hint): hint is NonNullable<typeof hint> => hint !== undefined);
+  return hints.every((hint) => compatible(hint, card) && (!received || compatible(hint, received))) &&
+    (hints.length < 2 || compatible(hints[0], hints[1]));
+}
+
+/**
  * Every distinct payment toward a credit card.
  *
  * A card settlement can be observed twice: once when money leaves the bank
@@ -357,7 +406,7 @@ function cardPaymentsOf(state: AppState, ids: Set<string>): Transaction[] {
  * statements, so cash-flow reporting consumes that same answer rather than
  * inventing a second dedupe policy.
  */
-export function cardPaymentRows(state: AppState): Transaction[] {
+export function cardPaymentRows(state: CardState): Transaction[] {
   const creditIds = new Set(
     state.accounts.filter((account) => account.cardType === 'credit').map((account) => account.id),
   );
@@ -388,8 +437,9 @@ export function cardPaymentRows(state: AppState): Transaction[] {
    * Older builds filed the debit observation on the funding bank account and
    * the receipt observation on the card. Card allocation cannot safely attach
    * that bank row to a statement, but whole-ledger Cash out can still prove
-   * that explicit opposite sides are one movement: exact amount, ±1 day, one
-   * debit consumed by one receipt. Unmatched debit observations remain real
+   * that compatible opposite sides are one movement: exact amount, ±1 day,
+   * no contradictory card identity, and unambiguous funding/receiving accounts.
+   * One debit is consumed by one receipt. Unmatched observations remain real
    * cash movements and are returned as their own canonical rows.
    */
   const receiptSlots = canonicalEntries
@@ -425,6 +475,7 @@ export function cardPaymentRows(state: AppState): Transaction[] {
     externalDebitsByAmount.set(debit.amountFils, bucket);
   }
   const matchedExternalDebitIds = new Set<string>();
+  const accountsById = new Map(state.accounts.map((account) => [account.id, account]));
   for (const [amountFils, debits] of externalDebitsByAmount) {
     const slots = (receiptSlotsByAmount.get(amountFils) ?? []).slice().sort(
       (a, b) =>
@@ -432,18 +483,66 @@ export function cardPaymentRows(state: AppState): Transaction[] {
         (a.receipt.ts ?? 0) - (b.receipt.ts ?? 0) ||
         a.receipt.id.localeCompare(b.receipt.id),
     );
-    for (const [debitIndex, receiptIndex] of preferredObservedPairs(
-      debits,
-      slots.map((slot) => slot.receipt),
-    )) {
-      const debit = debits[debitIndex];
-      const slot = slots[receiptIndex];
-      matchedExternalDebitIds.add(debit.id);
-      canonical[slot.index] = {
-        ...slot.row,
-        cashOutDate: debit.cashOutDate ?? debit.date,
-        cashOutAccountId: debit.accountId,
-      };
+    const receipts = slots.map((slot) => slot.receipt);
+    const receivingAccounts = new Map<string, Set<string>>();
+    const fundingAccounts = new Map<string, Set<string>>();
+    const candidates = new Map<string, Set<string>>();
+    const receiptsByDay = new Map<number, Transaction[]>();
+    for (const receipt of receipts) {
+      const day = isoDay(receipt.date);
+      if (!Number.isFinite(day)) continue;
+      const bucket = receiptsByDay.get(day) ?? [];
+      bucket.push(receipt);
+      receiptsByDay.set(day, bucket);
+    }
+    for (const debit of debits) {
+      const day = isoDay(debit.date);
+      for (let offset = -OBSERVED_COLLAPSE_DAYS; offset <= OBSERVED_COLLAPSE_DAYS; offset++) {
+        for (const receipt of receiptsByDay.get(day + offset) ?? []) {
+          if (!compatibleExternalCardPayment(debit, receipt, accountsById.get(receipt.accountId))) continue;
+          const eligible = candidates.get(debit.id) ?? new Set<string>();
+          eligible.add(receipt.id);
+          candidates.set(debit.id, eligible);
+          const receiving = receivingAccounts.get(debit.id) ?? new Set<string>();
+          receiving.add(receipt.accountId);
+          receivingAccounts.set(debit.id, receiving);
+          const funding = fundingAccounts.get(receipt.id) ?? new Set<string>();
+          funding.add(debit.accountId);
+          fundingAccounts.set(receipt.id, funding);
+        }
+      }
+    }
+    // Repeated equal payments on one card still use the existing one-to-one
+    // chronological matcher. Ambiguity across real accounts is never resolved
+    // merely by whichever row happens to be first in that matcher. Independent
+    // account pairs must have independent timelines: equal-date A/B payments
+    // can be observed as B/A receipts without preventing both proven matches.
+    const pairs = new Map<string, { debits: Transaction[]; slots: typeof slots }>();
+    for (const debit of debits) {
+      const receiving = receivingAccounts.get(debit.id);
+      if (receiving?.size !== 1) continue;
+      const key = JSON.stringify([debit.accountId, [...receiving][0]]);
+      const pair = pairs.get(key) ?? { debits: [], slots: [] };
+      pair.debits.push(debit);
+      pairs.set(key, pair);
+    }
+    for (const slot of slots) {
+      const funding = fundingAccounts.get(slot.receipt.id);
+      if (funding?.size !== 1) continue;
+      pairs.get(JSON.stringify([[...funding][0], slot.receipt.accountId]))?.slots.push(slot);
+    }
+    for (const pair of pairs.values()) {
+      for (const [debitIndex, receiptIndex] of preferredObservedPairs(pair.debits, pair.slots.map((slot) => slot.receipt),
+        (debit, receipt) => candidates.get(debit.id)?.has(receipt.id) === true)) {
+        const debit = pair.debits[debitIndex];
+        const slot = pair.slots[receiptIndex];
+        matchedExternalDebitIds.add(debit.id);
+        canonical[slot.index] = {
+          ...slot.row,
+          cashOutDate: debit.cashOutDate ?? debit.date,
+          cashOutAccountId: debit.accountId,
+        };
+      }
     }
   }
   for (const debit of externalDebits) {
@@ -632,6 +731,7 @@ function preferredDatedPairs(
   left: number[][],
   right: number[][],
   windowDays: number,
+  compatible?: (leftIndex: number, rightIndex: number) => boolean,
 ): [number, number][] {
   if (!left.length || !right.length) return [];
   // The index covers the inclusive +/-day window. Invalid dates retain their
@@ -678,7 +778,7 @@ function preferredDatedPairs(
             for (const b of right[j]) distance = Math.min(distance, Math.abs(a - b));
           }
         }
-        const canMatch = distance <= windowDays;
+        const canMatch = distance <= windowDays && (!compatible || compatible(i, j));
         let count = canMatch ? next.counts[j + 1] + 1 : -1;
         let skew = canMatch ? next.distances[j + 1] + distance : Infinity;
         let decision = 1;
@@ -732,11 +832,13 @@ function preferredDatedPairs(
 function preferredObservedPairs(
   debits: Transaction[],
   receipts: Transaction[],
+  compatible?: (debit: Transaction, receipt: Transaction) => boolean,
 ): [number, number][] {
   return preferredDatedPairs(
     debits.map((row) => [isoDay(row.date)]),
     receipts.map((row) => [isoDay(row.date)]),
     OBSERVED_COLLAPSE_DAYS,
+    compatible ? (left, right) => compatible(debits[left], receipts[right]) : undefined,
   );
 }
 
@@ -1020,7 +1122,7 @@ interface Allocation {
  *    marked it.
  */
 function computePaymentAllocations(
-  state: AppState,
+  state: CardState,
   accountId: string,
   /** Included even when absent from state — callers may hold a due directly. */
   target?: CardDue,
@@ -1028,11 +1130,18 @@ function computePaymentAllocations(
   const ids = cardAccountIds(state, accountId);
   const known = state.cardDues.filter((d) => ids.has(d.accountId));
   const dues = target && !known.some((d) => d.id === target.id) ? [...known, target] : known;
+  const payments = cardPaymentsOf(state, ids);
 
   const byDate = new Map<string, Statement>();
   for (const d of dues) {
     const s = byDate.get(d.dueDate);
-    const settledOn = d.settledAt ? d.settledAt.slice(0, 10) : null;
+    const owner = d.settledByTransactionId ? paymentsCache?.byId.get(d.settledByTransactionId) : undefined;
+    // An ISO timestamp is UTC; the ledger payment day is the bank/user's local
+    // calendar day. Use the linked receipt so a just-after-midnight payment
+    // cannot be allocated to the next statement instead of the chosen one.
+    const settledOn = !d.settledAt ? null : d.settledByTransactionId
+      ? owner?.source === 'manual' && owner.type === 'income' && ids.has(owner.accountId) ? owner.date : null
+      : d.settledAt.slice(0, 10);
     if (!s) {
       byDate.set(d.dueDate, {
         dueDate: d.dueDate,
@@ -1052,7 +1161,7 @@ function computePaymentAllocations(
   }
   const statements = [...byDate.values()].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
-  for (const payment of cardPaymentsOf(state, ids)) {
+  for (const payment of payments) {
     let left = payment.amountFils;
     for (let i = 0; i < statements.length && left > 0; i++) {
       const s = statements[i];
@@ -1082,7 +1191,7 @@ function computePaymentAllocations(
 }
 
 function allocatePayments(
-  state: AppState,
+  state: CardState,
   accountId: string,
   /** Included even when absent from state — callers may hold a due directly. */
   target?: CardDue,
@@ -1122,7 +1231,7 @@ function allocatePayments(
  * plus payments made to its resolved card account. Confirmed links have
  * already remapped every ledger reference onto that one account id.
  */
-export function duePaidFils(state: AppState, due: CardDue): number {
+export function duePaidFils(state: CardState, due: CardDue): number {
   return allocatePayments(state, due.accountId, due).get(due.id)?.paidFils ?? due.paidFils;
 }
 
@@ -1143,7 +1252,7 @@ export function duePaidFils(state: AppState, due: CardDue): number {
  * this statement. A payment that spilled across two statements appears against
  * both, because it really did pay into both.
  */
-export function duePayments(state: AppState, due: CardDue): Transaction[] {
+export function duePayments(state: CardState, due: CardDue): Transaction[] {
   const rows = allocatePayments(state, due.accountId, due).get(due.id)?.payments ?? [];
   return rows.slice().sort((a, b) => b.date.localeCompare(a.date));
 }
@@ -1155,7 +1264,7 @@ function shiftISO(iso: string, days: number): string {
 }
 
 export function dueWithStatus(
-  state: AppState,
+  state: CardState,
   due: CardDue,
   today: Date,
   /** Set by openDues, which knows how long this has been the current one. */
@@ -1219,7 +1328,7 @@ const STALE_OVERDUE_DAYS = 30;
  * whatever went unpaid before it. Two open statements on one card was the app
  * charging the user twice for the same money.
  */
-export function openDues(state: AppState, today: Date): DueWithStatus[] {
+export function openDues(state: CardState, today: Date): DueWithStatus[] {
   const day = toISODate(today);
   if (openDuesCache && openDuesCache.day === day && sameInputs(openDuesCache, state)) {
     // A copy, not the cached array. Callers sort and splice their own lists,
@@ -1241,7 +1350,7 @@ export function openDues(state: AppState, today: Date): DueWithStatus[] {
 
 /** Most recent settled statement per live credit card, for Bills history. */
 export function recentlySettledDues(
-  state: AppState,
+  state: CardState,
   today: Date,
   withinDays = 75,
 ): DueWithStatus[] {
@@ -1276,7 +1385,7 @@ export function recentlySettledDues(
   return value.slice();
 }
 
-function computeOpenDues(state: AppState, today: Date): DueWithStatus[] {
+function computeOpenDues(state: CardState, today: Date): DueWithStatus[] {
   const creditIds = new Set(
     state.accounts.filter((a) => a.cardType === 'credit' && !a.archived).map((a) => a.id),
   );
@@ -1385,7 +1494,7 @@ export interface CardStatementView {
   billable: boolean;
 }
 
-export function cardStatementView(state: AppState, accountId: string): CardStatementView {
+export function cardStatementView(state: CardState, accountId: string): CardStatementView {
   const keyOf = cardIdentity(state.accounts);
   const cardKey = keyOf(accountId);
 
@@ -1447,7 +1556,7 @@ export function cardStatementView(state: AppState, accountId: string): CardState
  * ISO date of the last known activity on an account: newest transaction or
  * the bank's latest snapshot SMS, whichever is later. Null = no history.
  */
-export function accountLastActivityISO(state: AppState, accountId: string): string | null {
+export function accountLastActivityISO(state: CardState, accountId: string): string | null {
   // One pass over the ledger builds the answer for EVERY account, because the
   // caller that matters asks for all of them: Wallet filters its card list
   // through `isInactiveAccount`, which lands here once per card. Per-account
@@ -1479,7 +1588,7 @@ export const DORMANT_AFTER_DAYS = 90;
  * identify themselves by never texting again. Accounts with no history at all
  * (freshly added by hand) are left alone.
  */
-export function isInactiveAccount(state: AppState, account: Account, today: Date): boolean {
+export function isInactiveAccount(state: CardState, account: Account, today: Date): boolean {
   if (account.archived) return true;
   const last = accountLastActivityISO(state, account.id);
   if (!last) return false;
@@ -1543,7 +1652,7 @@ export interface ReissueSuggestion {
   candidateIds: string[];
 }
 
-export function reissueSuggestions(state: AppState, today: Date): ReissueSuggestion[] {
+export function reissueSuggestions(state: CardState, today: Date): ReissueSuggestion[] {
   const todayISO = toISODate(today);
   if (
     reissueCache?.transactions === state.transactions &&
@@ -1633,7 +1742,7 @@ export interface CardFigure {
   fils: number | null;
 }
 
-export function cardFigure(state: AppState, account: Account, today: Date): CardFigure {
+export function cardFigure(state: CardState, account: Account, today: Date): CardFigure {
   if (account.cardType === 'credit') {
     // An open statement is the most useful answer: it is what the bank will
     // take, on a date, and the app knows how much of it is already paid.
