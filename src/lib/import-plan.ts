@@ -2250,9 +2250,11 @@ function buildImportPlanInMarket(
         if (!row || swept.has(row.id)) continue;
         // The scanner already proved byte-identical body, sender, adjacent
         // provider ids and sub-second delivery. Preserve anything user-owned,
-        // and anything a transfer pairing depends on.
+        // and any row another leg's transfer pairing points at. The parser's
+        // own transfer hint (isTransfer) is neither, so a second copy of a
+        // parser-flagged transfer is retired like any other.
         if (row.source !== 'sms' || row.userEdited || row.transferDecision || row.splits ||
-            row.transferMatch || row.isTransfer) continue;
+            row.transferMatch) continue;
         swept.add(row.id);
         updates.push({ id: row.id, remove: true });
         declineReconciledCount += 1;
