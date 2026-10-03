@@ -70,13 +70,18 @@ export function BillsTimeline({ items, todayISO, palette }: {
             {group.payments.map(pin => <View key={pin.key} testID={`bills-timeline-payment-${pin.key}`}
               accessible accessibilityRole="text" accessibilityLabel={`${pin.displayLabel ?? pin.title}. ${date}. ${pin.spokenAmount}`}
               style={[styles.payment, { width: cardWidth, backgroundColor: palette.tile }]}>
-              <ThemedText type="meta" testID={`bills-payment-due-${pin.key}`} style={{ color: palette.onBandSecondary }}>
-                {date} · {due}
-              </ThemedText>
-              <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-                <MerchantAvatar title={pin.title} category={pin.category} size={32} />
+              {/* One compact cell: logo beside the payee and its date, then the amount. */}
+              <View style={styles.head}>
+                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                  <MerchantAvatar title={pin.title} category={pin.category} size={28} />
+                </View>
+                <View style={styles.name}>
+                  <ThemedText type="smallBold" style={{ color: palette.onBand }}>{pin.displayLabel ?? pin.title}</ThemedText>
+                  <ThemedText type="meta" testID={`bills-payment-due-${pin.key}`} style={{ color: palette.onBandSecondary }}>
+                    {date} · {due}
+                  </ThemedText>
+                </View>
               </View>
-              <ThemedText type="smallBold" style={{ color: palette.onBand }}>{pin.displayLabel ?? pin.title}</ThemedText>
               <View style={styles.figure}>
                 {pin.estimated ? <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{w.about}</ThemedText> : null}
                 <BandFigure fils={pin.amountFils} moneySpec={moneySpec ?? undefined} palette={palette} size="medium"
@@ -98,6 +103,8 @@ const styles = StyleSheet.create({
   groups: { flexDirection: 'row', gap: 12, paddingBottom: 8 },
   group: { gap: 8 },
   payments: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
-  payment: { borderRadius: 16, padding: 12, gap: 8, flexShrink: 0 },
-  figure: { marginTop: 'auto', paddingTop: 4 },
+  payment: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, gap: 6, flexShrink: 0 },
+  head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  name: { flexShrink: 1, minWidth: 0 },
+  figure: { marginTop: 'auto', flexDirection: 'row', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' },
 });

@@ -37,9 +37,9 @@ export function BandSegmented<T extends string>({ segments, value, onChange, lab
       const active = segment.value === value;
       return <Pressable key={segment.value} testID={segment.testID} accessibilityRole="tab" accessibilityLabel={segment.label}
         accessibilityHint={segment.accessibilityHint} accessibilityState={{ selected: active }} aria-selected={active}
-        onPress={() => { if (!active) tapped(); onChange(segment.value); }}
-        style={[styles.segment, { backgroundColor: active ? palette.selected : 'transparent' }]}>
-        <ThemedText type="smallBold" style={[styles.label, { color: active ? palette.onSelected : palette.onBand }]}>
+        onPress={() => { if (!active) tapped(); onChange(segment.value); }} hitSlop={large ? undefined : { top: 4, bottom: 4 }}
+        style={[styles.segment, large && styles.segmentLarge, { backgroundColor: active ? palette.selected : 'transparent' }]}>
+        <ThemedText type="smallBold" style={[styles.label, !large && styles.labelCompact, { color: active ? palette.onSelected : palette.onBand }]}>
           {segment.label}
         </ThemedText>
       </Pressable>;
@@ -48,8 +48,12 @@ export function BandSegmented<T extends string>({ segments, value, onChange, lab
 }
 
 const styles = StyleSheet.create({
-  track: { flexDirection: 'row', padding: 4, borderRadius: 26, gap: 4 },
+  // Design language E: a 42pt track whose 36pt segments keep a 44pt target
+  // through their hit slop; Larger Text restores full-height segments.
+  track: { flexDirection: 'row', padding: 3, borderRadius: 22, gap: 3 },
   stack: { flexDirection: 'column', borderRadius: 20 },
-  segment: { flex: 1, minHeight: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 8 },
+  segment: { flex: 1, minHeight: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10, paddingVertical: 6 },
+  segmentLarge: { minHeight: 44, borderRadius: 22, paddingVertical: 8 },
   label: { textAlign: 'center', flexShrink: 1 },
+  labelCompact: { fontSize: 14, lineHeight: 20 },
 });

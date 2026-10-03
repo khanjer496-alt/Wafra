@@ -280,13 +280,15 @@ export default function FlowScreen() {
     : dailyView?.paged ? `${words.calendarRecent} · ${monthLabel(dailyView.monthKey, true)}` : words.calendarRecent;
   const trendsWords = spendingTrendsCopy[language === 'ar' ? 'ar' : 'en'];
 
+  // The period sits in the nav row beside search, as the design draws it,
+  // rather than taking a row of its own above the figure.
+  const periodPill = <Pressable testID="spending-period" accessibilityRole="button" accessibilityLabel={words.choosePeriod(currentPeriodName)}
+    onPress={() => setPeriodOpen(true)} style={[styles.periodChip, { backgroundColor: band.tile }]}>
+    <ThemedText type="smallBold" style={{ color: band.onBand }}>{currentPeriodName}</ThemedText>
+    <Icon name="chevron-down" size={16} color={band.onBand} />
+  </Pressable>;
   const bandContent = <View style={styles.band}>
     <View style={styles.periodSummary} testID="spending-period-summary">
-      <Pressable testID="spending-period" accessibilityRole="button" accessibilityLabel={words.choosePeriod(currentPeriodName)}
-        onPress={() => setPeriodOpen(true)} style={[styles.periodChip, { backgroundColor: band.tile }]}>
-        <ThemedText type="smallBold" style={{ color: band.onBand }}>{currentPeriodName}</ThemedText>
-        <Icon name="chevron-down" size={16} color={band.onBand} />
-      </Pressable>
       {periodRange(period) ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{periodRange(period)}</ThemedText> : null}
       <BandFigure testID="spending-total" palette={band} label={words.totalSpent} fils={summary.expenseFils} />
     </View>
@@ -324,7 +326,7 @@ export default function FlowScreen() {
 
   return <>
     <BandScaffold band="spending" tabbed testID="reference-spending-screen" contentStyle={styles.sheet}
-      nav={{ title: t('tabFlow'), actions: [
+      nav={{ title: t('tabFlow'), trailing: periodPill, actions: [
         { icon: 'search', label: w.search, onPress: () => setViewMode('calendar'), testID: 'spending-search' },
       ] }}
       refreshControl={<CaptureRefreshControl />}

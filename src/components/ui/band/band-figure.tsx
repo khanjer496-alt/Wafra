@@ -14,7 +14,7 @@ export type BandFigureSize = 'hero' | 'large' | 'medium';
 
 /** Band figures: Geist SemiBold with tabular digits, never Geist Mono (its comma spaces out "5 , 480"). */
 const SIZES: Record<BandFigureSize, { fontSize: number; lineHeight: number; letterSpacing: number; cap: number; prefix: number }> = {
-  hero: { fontSize: 56, lineHeight: 62, letterSpacing: -2.2, cap: 1.5, prefix: 22 },
+  hero: { fontSize: 48, lineHeight: 54, letterSpacing: -1.8, cap: 1.5, prefix: 22 },
   large: { fontSize: 32, lineHeight: 38, letterSpacing: -1, cap: 1.75, prefix: 17 },
   medium: { fontSize: 22, lineHeight: 28, letterSpacing: -0.5, cap: 2, prefix: 14 },
 };
