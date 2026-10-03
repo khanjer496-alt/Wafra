@@ -754,6 +754,8 @@ test('a working v2 setup is shown as one upgrade card, not a broken setup, until
 test('replacing v2 requires v3 installation, a fresh v3 check and re-pointing the existing automation', async t => {
   const s = await screen(t, { bundled: true, progress: ready,
     nativeStatus: { ...proven, setupProofAt: Date.now() - 60_000, firstCapturedAt: Date.now() - 60_000 } });
+  const videos = () => s.all().filter(node => node.type === 'VideoGuide').map(node => node.props.kind);
+  assert.deepEqual(videos(), [], 'the upgrade card adds the shortcut before any automation video');
   labelled(s, iosEn.upgradeAction).onPress(); await s.flush();
   assert.equal(s.urls[0], 'file:///app/Wafra%20Capture%20v3.shortcut');
   assert.equal(s.saved().futureAutomationConfirmed, true, 'starting the update never flips Home');
@@ -767,6 +769,7 @@ test('replacing v2 requires v3 installation, a fresh v3 check and re-pointing th
   s.nativeStatus.setupProofVersion = 3; s.nativeStatus.setupProofAt = Date.now() + 1; await s.callback('success');
   // Proven, but the old automation still runs the old Shortcut: point it at v3.
   assert.ok(labelled(s, iosEn.editExisting));
+  assert.deepEqual(videos(), ['capture'], 're-pointing the automation keeps its video');
   assert.equal(s.button('iosMessageContinue'), undefined);
   labelled(s, 'I updated the automation').onPress(); await s.flush();
   assert.equal(s.saved().futureAutomationRelink, undefined);
@@ -842,6 +845,24 @@ test('automation guide is one Apple screen per step, leads with Open Shortcuts, 
   // An Apple Pay receipt on the shared queue clock is not Message evidence.
   s.nativeStatus.lastApplePayReceivedAt = s.nativeStatus.lastReceivedAt; await s.foreground();
   assert.deepEqual([done().result.title, done().result.body], [iosEn.testPassed, iosEn.waitingAutomation]);
+});
+
+test('the automation video waits for step 3, after the shortcut is added and tested', async t => {
+  const videos = s => s.all().filter(node => node.type === 'VideoGuide').map(node => node.props.kind);
+  const s = await screen(t, { bundled: true, params: { fromOnboarding: '1' }, progress: { futureStatus: 'in-progress' } });
+  assert.ok(s.button('iosLocalInstallShortcut'), 'step 1 adds the shortcut');
+  assert.deepEqual(videos(s), [], 'no automation video before the shortcut exists');
+  await s.press('iosLocalInstallShortcut');
+  await s.leaveAndReturn();
+  assert.equal(step(s, 'ios-automation-guide-step'), undefined, 'the test runs before the automation guide');
+  assert.deepEqual(videos(s), []);
+  s.nativeStatus.enabled = true; s.nativeStatus.setupProofVersion = 3; s.nativeStatus.setupProofAt = Date.now();
+  await s.foreground();
+  assert.ok(step(s, 'ios-automation-guide-step'), 'a passed test opens step 3');
+  assert.deepEqual(videos(s), ['capture'], 'the recording sits with the step it shows');
+  await s.automate();
+  assert.ok(step(s, 'ios-capture-ready'));
+  assert.deepEqual(videos(s), [], 'the finished setup drops the guide video');
 });
 
 test('a failed check overrides an already-open automation review guide', async t => {

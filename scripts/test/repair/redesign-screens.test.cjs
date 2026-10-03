@@ -170,6 +170,44 @@ test('iPhone checklist marks a step done only from recorded evidence', () => {
   assert.deepEqual(done({ ...base, readiness: 'first-alert-captured' }), [true, true, true, true]);
 });
 
+test('iPhone checklist offers Open Shortcuts only after the shortcut is added and tested', () => {
+  const { iosCaptureChecklist } = load(path.join(root, 'src/lib/ios-capture-checklist.ts'));
+  const jsx = (type, props) => ({ type, props: props ?? {} });
+  const { CaptureChecklist } = load(path.join(root, 'src/components/onboarding/capture-checklist.tsx'), {
+    'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
+    react: {},
+    'react-native': { Pressable: 'Pressable', View: 'View', StyleSheet: { create: (styles) => styles, hairlineWidth: 1 } },
+    '@/components/themed-text': { ThemedText: 'Text' },
+    '@/components/ui/icon': { Icon: 'Icon' },
+    '@/constants/theme': { Fonts: {}, Radius: {}, Spacing: {} },
+    '@/lib/haptics': { tapped() {} },
+  });
+  const openButtons = (evidence) => {
+    const tree = CaptureChecklist({ rows: iosCaptureChecklist(evidence), titles: {}, details: {}, doneLabel: 'Done',
+      toDoLabel: 'To do', openShortcutsLabel: 'Open Shortcuts', onOpenShortcuts() {}, palette: {} });
+    const found = [];
+    const walk = (node) => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (!node || typeof node !== 'object') return;
+      if (node.type === 'Pressable') found.push(node.props.accessibilityLabel);
+      walk(node.props.children);
+    };
+    walk(tree);
+    return found;
+  };
+  const base = { shortcutConfirmed: false, automationConfirmed: false, readiness: 'not-added' };
+  assert.deepEqual(openButtons(null), [], 'nothing is added yet, so the automation is not offered first');
+  assert.deepEqual(openButtons({ ...base, shortcutConfirmed: true }), [], 'added but not tested');
+  assert.deepEqual(openButtons({ ...base, readiness: 'shortcut-proven' }), ['Open Shortcuts']);
+  assert.deepEqual(openButtons({ ...base, readiness: 'shortcut-proven', automationConfirmed: true }), []);
+});
+
+test('first-run capture screen leads with the setup steps, not setup videos', () => {
+  // Each recording sits on the guided step it shows (ios-setup.tsx), so the
+  // first screen never opens on the automation before the shortcut exists.
+  assert.doesNotMatch(read('src/components/onboarding-gate.tsx'), /IosSetupVideoCard/);
+});
+
 test('Ask Wafra copy is paired; the evidence count counts distinct transactions', () => {
   const kind = load(path.join(root, 'src/lib/biometric-kind.ts'));
   const settings = load(path.join(root, 'src/lib/settings-copy.ts'), { '@/lib/biometric-kind': kind });
