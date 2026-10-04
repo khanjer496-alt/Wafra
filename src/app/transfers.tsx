@@ -52,6 +52,8 @@ export default function TransfersScreen() {
   const search = useDeferredValue(query.trim().toLocaleLowerCase());
   const [periodOpen, setPeriodOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Set with selectedId when the sheet opens for the several-accounts question: it starts on the picker.
+  const [pickFor, setPickFor] = useState<string | null>(null);
   // Reuse the reconciliation keyed on the stored transfer receipt. Only while a
   // history import holds a provisional receipt does this dedicated screen
   // build the graph itself (array-identity memoized in the reconciler).
@@ -118,7 +120,7 @@ export default function TransfersScreen() {
     if (!current) return;
     const candidates = ownCandidates(current.transaction, current.assessment, rowsById);
     // Several accounts could be the other side: the detail sheet asks which.
-    if (choice === 'own' && candidates.length > 1) { setSelectedId(current.transaction.id); return; }
+    if (choice === 'own' && candidates.length > 1) { setSelectedId(current.transaction.id); setPickFor(current.transaction.id); return; }
     const labels = current.transaction.type === 'income' ? words.answers.in : words.answers.out;
     await answer({ transaction: current.transaction, answer: choice, counterpart: candidates[0], label: labels[choice] });
   };
@@ -207,7 +209,8 @@ export default function TransfersScreen() {
     </BandScaffold>
     <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
     <EntryDetailSheet transaction={selected?.transaction ?? null} transferAssessment={selected?.assessment}
-      showMerchantLink={false} onClose={() => setSelectedId(null)} />
+      showMerchantLink={false} startWithAccountPicker={!!selectedId && pickFor === selectedId}
+      onClose={() => { setSelectedId(null); setPickFor(null); }} />
   </>;
 }
 

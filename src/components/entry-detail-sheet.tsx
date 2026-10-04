@@ -57,6 +57,11 @@ interface EntryDetailSheetProps {
   transferAssessment?: TransferAssessment;
   initialMode?: EntryDetailMode;
   /**
+   * Open on the "which account?" picker when several accounts could be the
+   * other side (Transfers sets it after the person chose "own" on its card).
+   */
+  startWithAccountPicker?: boolean;
+  /**
    * The band of the screen it opens over (design language E): the sheet is
    * that screen's sheet, lifted, and its Done button takes the band colour.
    * Transactions and Home are ink.
@@ -71,7 +76,7 @@ interface EntryDetailSheetProps {
  * row — "what actually was this?" — was answered by six input boxes. Reading
  * comes first now; editing is one tap away.
  */
-export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment, initialMode = 'read', band: bandId = 'home' }: EntryDetailSheetProps) {
+export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment, initialMode = 'read', startWithAccountPicker = false, band: bandId = 'home' }: EntryDetailSheetProps) {
   const { getCategory, categoryLabel, expenseCategories, incomeCategories } = useCategoryCatalog();
   const theme = useTheme();
   const band = useBand(bandId);
@@ -117,10 +122,12 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const [pickedCategory, setPickedCategory] = useState<CategoryId>('other');
   // The "What is this?" answer. Like every hook here it runs before the early return below.
   const { answer, busy } = useTransferAnswer();
-  const [picking, setPicking] = useState(false);
   const activityWords = transferActivityCopy(language);
   const answerWords = activityWords.answers;
   const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
+  const opensOnPicker = () => startWithAccountPicker && !!transaction &&
+    ownCandidates(transaction, transferAssessment, rowsById).length > 1;
+  const [picking, setPicking] = useState(opensOnPicker);
 
   useEffect(() => {
     if (!transaction) return;
@@ -130,7 +137,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     setBillRuleAsk(null);
     setPickedCategory(transaction.category);
     setCategoryPicking(initialMode === 'category');
-    setPicking(false);
+    setPicking(opensOnPicker());
     setTitle(transaction.title);
     // The FULL amount, fils included. Seeding the field from the display
     // string — which hides the fils — meant opening an entry and saving any
@@ -321,6 +328,15 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     });
     onClose();
   };
+  // The way back for a captured row marked above: it is not a candidate (only
+  // manual rows count the flag), so it has no question to change the answer.
+  const unmarkTransfer = () => {
+    editTransaction(transaction.id, {
+      isTransfer: undefined,
+      ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
+    });
+    onClose();
+  };
 
   // Close the sheet and reset the picker only when the answer is applied
   // ('saved', or 'unsaved' = applied in memory with the write still pending).
@@ -347,6 +363,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   // The own-account action is for ordinary rows only: a transfer candidate
   // answers through the question below, and a transfer is already one.
   const canMarkTransfer = !transferReview && !confirmedTransfer && !pendingTransfer;
+  const canUnmarkTransfer = !transferCandidate && transaction.isTransfer === true;
   const originalMoney = originalMoneyOf(transaction);
   const fxSourceLabel =
     transaction.fxSource === 'bank'
@@ -442,6 +459,13 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           <Icon name="repeat" size={16} color={band.text} />
           <ThemedText type="small" style={{ color: band.text }}>{answerLabels.own}</ThemedText>
         </Pressable> : null}
+        {canUnmarkTransfer ? <Pressable accessibilityRole="button" testID="entry-unmark-transfer"
+          accessibilityLabel={answerLabels.none}
+          onPress={unmarkTransfer}
+          style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
+          <Icon name="repeat" size={16} color={band.text} />
+          <ThemedText type="small" style={{ color: band.text }}>{answerLabels.none}</ThemedText>
+        </Pressable> : null}
       </View> : null}
 
       {categoryPicking ? (
@@ -503,6 +527,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             onPress={() => void choose('own')}
             style={[styles.pickRow, { borderColor: band.rule, backgroundColor: band.card, opacity: busy ? 0.6 : 1 }]}>
             <ThemedText type="small">{answerWords.noLink}</ThemedText>
+          </Pressable>
+          <Pressable testID="entry-transfer-picker-back" accessibilityRole="button" disabled={busy}
+            accessibilityLabel={t('back')} onPress={() => setPicking(false)}
+            style={[styles.pickRow, { borderColor: band.rule, opacity: busy ? 0.6 : 1 }]}>
+            <ThemedText type="small" themeColor="textSecondary">{t('back')}</ThemedText>
           </Pressable>
         </View> : <TransferAnswerChoices incoming={income} value={answered} layout="radios" palette={band} disabled={busy}
           linkedLabel={linkedTo ? activityWords.route.linked(accountLabelFor(linkedTo.accountId)) : undefined}

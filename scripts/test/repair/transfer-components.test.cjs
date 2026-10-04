@@ -267,3 +267,52 @@ test('detail sheet: the picker and answers stack at large text', () => {
   assert.notEqual(rows.flexDirection, 'row', 'account above date, never side by side');
   assert.ok(rows.minHeight >= 48);
 });
+
+test('detail sheet: a sheet opened for the several-candidates case starts on the picker, and Back returns to the answers', () => {
+  const { h, words, subject, assessment } = detail();
+  const tree = h.renderDetail(subject, { transferAssessment: assessment, startWithAccountPicker: true });
+  assert.ok(byId(tree, 'entry-transfer-candidate-left') && byId(tree, 'entry-transfer-candidate-right'));
+  assert.equal(byId(tree, 'transfer-answer-own'), undefined);
+  const withOne = detail();
+  const single = withOne.h.renderDetail(withOne.subject, { transferAssessment: { status: 'likely-own', counterpartId: 'left' }, startWithAccountPicker: true });
+  assert.ok(byId(single, 'transfer-answer-own'), 'one candidate never needs the picker');
+  const plain = detail();
+  assert.ok(byId(plain.h.renderDetail(plain.subject, { transferAssessment: plain.assessment }), 'transfer-answer-own'), 'the prop is opt-in');
+  const back = byId(tree, 'entry-transfer-picker-back');
+  assert.equal(back.props.accessibilityRole, 'button');
+  assert.equal(back.props.accessibilityLabel, h.deps['@/lib/i18n'].t('back'));
+  assert.ok(flat(back.props.style).minHeight >= 48);
+  back.props.onPress();
+  assert.ok(h.events.some(e => e[0] === 'state' && e[1] === PICKER && e[2] === false), 'Back shows the three answers again');
+  assert.ok(words.answers.whichAccount);
+});
+
+test('detail sheet: a captured row marked as a transfer offers one action to undo it, and the mark action is hidden', () => {
+  const { h, words } = detail({ answerResult: 'saved' });
+  const marked = { ...h.state.transactions[1], id: 'carrefour', title: 'Carrefour', source: 'sms', isTransfer: true };
+  const tree = h.renderDetail(marked);
+  const unmark = byId(tree, 'entry-unmark-transfer');
+  assert.ok(unmark, 'a non-candidate with the transfer flag can be unmarked');
+  assert.equal(unmark.props.accessibilityRole, 'button');
+  assert.equal(unmark.props.accessibilityLabel, words.answers.out.none);
+  assert.equal(byId(tree, 'entry-mark-transfer'), undefined);
+  assert.equal(byId(tree, 'entry-transfer-question'), undefined);
+  unmark.props.onPress();
+  const edit = h.events.find(e => e[0] === 'editTransaction');
+  assert.equal(edit[1], 'carrefour');
+  assert.ok('isTransfer' in edit[2] && edit[2].isTransfer === undefined);
+  assert.equal('bestEffort' in edit[2], false);
+  assert.ok(h.events.some(e => e[0] === 'close'));
+  const best = detail();
+  byId(best.h.renderDetail({ ...best.h.state.transactions[1], id: 'be', isTransfer: true, bestEffort: true }), 'entry-unmark-transfer').props.onPress();
+  const bestEdit = best.h.events.find(e => e[0] === 'editTransaction');
+  assert.ok('bestEffort' in bestEdit[2] && bestEdit[2].bestEffort === undefined, 'saving the correction clears the best-effort flag like the mark does');
+  const income = detail();
+  const incomeTree = income.h.renderDetail({ ...income.h.state.transactions[7], id: 'in-flag', isTransfer: true });
+  assert.equal(byId(incomeTree, 'entry-unmark-transfer').props.accessibilityLabel, income.words.answers.in.none);
+  const ordinary = detail();
+  assert.equal(byId(ordinary.h.renderDetail(ordinary.h.state.transactions[1]), 'entry-unmark-transfer'), undefined);
+  const manual = detail();
+  assert.equal(byId(manual.h.renderDetail({ ...manual.h.state.transactions[1], id: 'm', source: 'manual', isTransfer: true }), 'entry-unmark-transfer'), undefined,
+    'a manual flagged row is a candidate and answers through the question');
+});

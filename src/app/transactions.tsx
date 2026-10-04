@@ -818,6 +818,11 @@ export default function TransactionsScreen() {
     filters.datePreset, filters.accountId, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
     separatedTransfers, stripDetail, transferWords, scrollingSearchControls, words, accountLabelFor]);
 
+  // The open entry's transfer assessment, from the reconciliation the screen
+  // already shares (cached per stored receipt; null while a history import
+  // holds a provisional one). Only looked up while the sheet is open.
+  const sheetAssessment = editing ? transferReconciliationForState(state)?.byId.get(editing.id) : undefined;
+
   return (
     <>
       <BandScaffold
@@ -844,7 +849,8 @@ export default function TransactionsScreen() {
         sourceKinds={sourceKinds}
         onClose={() => setSheetVisible(false)} onApply={applyFilters} />}
 
-      <EntryDetailSheet transaction={editing} initialMode={entryMode} onClose={() => { setEditing(null); setEntryMode('read'); }} />
+      <EntryDetailSheet transaction={editing} initialMode={entryMode} transferAssessment={sheetAssessment}
+        onClose={() => { setEditing(null); setEntryMode('read'); }} />
       {deleting ? <ConfirmSheet
         visible
         onClose={() => setDeleting(null)}

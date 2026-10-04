@@ -122,6 +122,37 @@ test('answering own with several candidate accounts opens the entry instead of g
   assert.ok(h.events.some(event => event[0] === 'state' && event[2] === 'q1'), 'the entry detail sheet opens for that transfer');
 });
 
+test('the several-candidates case opens the sheet straight onto the account picker, a row tap does not', async () => {
+  const rows = [leg('q1', 'expense', 'current'), leg('c1', 'income', 'savings'), leg('c2', 'income', 'savings', { amountFils: 50100 })];
+  const entries = [
+    ['q1', { id: 'q1', status: 'likely-own', reason: 'amount-time', candidateIds: ['c1', 'c2'] }],
+    ['c1', { id: 'c1', status: 'ownership-unknown', reason: 'missing-evidence', candidateIds: [] }],
+    ['c2', { id: 'c2', status: 'ownership-unknown', reason: 'missing-evidence', candidateIds: [] }],
+  ];
+  const make = states => {
+    const h = harness({ language: 'en', states, state: { transactions: rows, accounts: accountsFixture } });
+    withReconciliation(h, entries, ['q1']);
+    return h;
+  };
+  const first = make();
+  await byId(byId(first.renderScreen('transfers'), 'transfer-question-card'), 'transfer-answer-own').props.onPress();
+  const opened = first.events.filter(event => event[0] === 'state' && event[2] === 'q1').map(event => event[1]);
+  assert.equal(opened.length, 2, 'the open row and the "start on the picker" marker are both set');
+  const sheetOf = h => walk(h.renderScreen('transfers')).find(node => node.props?.name === 'EntryDetailSheet');
+  const picker = sheetOf(make({ [opened[0]]: 'q1', [opened[1]]: 'q1' }));
+  assert.equal(picker.props.transaction.id, 'q1');
+  assert.equal(picker.props.startWithAccountPicker, true);
+  const tapped = sheetOf(make({ [opened[0]]: 'q1' }));
+  assert.equal(tapped.props.transaction.id, 'q1');
+  assert.ok(!tapped.props.startWithAccountPicker, 'a row tap opens the three answers');
+  const closed = sheetOf(make());
+  assert.equal(closed.props.transaction, null);
+  const closing = make({ [opened[0]]: 'q1', [opened[1]]: 'q1' });
+  sheetOf(closing).props.onClose();
+  const cleared = closing.events.filter(event => event[0] === 'state' && opened.includes(event[1]) && event[2] === null).map(event => event[1]);
+  assert.deepEqual(cleared.sort(), [...opened].sort(), 'closing clears both');
+});
+
 test('no queued transfers means no question card', () => {
   const h = harness({ language: 'en', state: { transactions: mixedRows(), accounts: accountsFixture } });
   withReconciliation(h, mixedEntries());

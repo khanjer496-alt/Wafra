@@ -183,6 +183,33 @@ test('Transfer swipes open the entry sheet to read it; only a declined candidate
   assert.deepEqual(plain(h.events.filter((e) => e[0] === 'state' && e[1] === MODE).at(-1)), ['state', MODE, 'category']);
 });
 
+test('Transactions hands the sheet the reconciliation it already holds, so own links from here', async () => {
+  const bank = ['1111', '2222'].map((last4, i) => ({ id: `bank-${i}`, name: `Bank ${i}`, kind: 'bank', bankName: 'ADCB', last4, openingFils: 0, color: '#111111' }));
+  const leg = (id, extra) => ({ id, type: 'expense', amountFils: 10000, category: 'other', accountId: 'bank-0', title: 'Outgoing transfer',
+    date: '2026-09-08', ts: 1788861600000, source: 'sms', captureInstrument: { last4: '1111', kind: 'account', bankIdentity: 'adcb' },
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', reference: 'TRANSFER-123456' }, ...extra });
+  const out = leg('out');
+  const incoming = leg('in', { type: 'income', accountId: 'bank-1', title: 'Incoming transfer',
+    captureInstrument: { last4: '2222', kind: 'account', bankIdentity: 'adcb' } });
+  const options = { state: { accounts: bank, transactions: [out, incoming, { ...createHarness().state.transactions[1], id: 'shop', accountId: 'bank-0' }] } };
+  const sheetOf = (editing) => walk(screen({ ...options, states: { [EDITING]: editing } }).tree).find((n) => n.props?.name === 'EntryDetailSheet');
+  const expected = createHarness(options).deps['@/lib/ledger'].transferReconciliationForState(createHarness(options).state).byId.get('out');
+  assert.equal(expected.counterpartId, 'in');
+  const sheet = sheetOf(out);
+  assert.deepEqual(plain(sheet.props.transferAssessment), plain(expected));
+  assert.equal(sheetOf(options.state.transactions[2]).props.transferAssessment, undefined, 'an ordinary row has none');
+  assert.equal(sheetOf(null).props.transferAssessment, undefined, 'nothing is looked up while the sheet is closed');
+  // The sheet, given what Transactions passes, shows the link and saves own with that counterpart.
+  const detail = createHarness(options);
+  const tree = detail.renderDetail(out, { transferAssessment: sheet.props.transferAssessment });
+  assert.match(text(tree), /Linked to/);
+  byId(tree, 'transfer-answer-own').props.onPress();
+  await new Promise((resolve) => setImmediate(resolve));
+  const saved = detail.events.find((e) => e[0] === 'answer')[1];
+  assert.equal(saved.answer, 'own');
+  assert.equal(saved.counterpart.id, 'in');
+});
+
 test('the Transfers chip lists transfers and candidates, never a row answered "not a transfer"', () => {
   const base = createHarness().state.transactions;
   const candidate = { ...base[1], id: 'candidate', title: 'Bank transfer', transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback' } };
