@@ -39,6 +39,30 @@ const en = {
   tags: { own: 'Your accounts', external: 'Someone else · counted', needsAnswer: 'Needs an answer', unconfirmed: 'Not answered yet' },
   route: { unknown: 'Unknown', linked: (account: string) => `Linked to ${account}`, to: 'to' },
   listTitle: 'This month',
+  answers: {
+    question: 'What is this?',
+    out: { own: 'Moved to my own account', external: 'Paid someone else', none: 'Not a transfer' },
+    in: { own: 'Came from my own account', external: 'Received from someone', none: 'Not a transfer' },
+    effect: { own: (incoming: boolean) => `Not counted as ${incoming ? 'income' : 'spending'}`,
+      external: (incoming: boolean) => `Counted as ${incoming ? 'income' : 'spending'}`,
+      none: 'A normal purchase, bill or income' },
+    whichAccount: 'Which account?',
+    noLink: 'None of these',
+    saved: 'Saved',
+    undo: 'Undo',
+    undone: 'Answer removed',
+    changed: 'This transfer changed. Open it again.',
+    failed: 'Couldn’t save. Try again.',
+    done: 'Done',
+  },
+  card: {
+    title: (n: number) => `${n} transfer${n === 1 ? ' needs' : 's need'} an answer`,
+    step: (i: number, n: number) => `${i} of ${n}`,
+    whereOut: 'Where did this go?',
+    whereIn: 'Where did this come from?',
+    looksLike: (account: string) => `looks like your ${account}`,
+    seeAll: (n: number) => `See all ${n}`,
+  },
 };
 
 const ar: typeof en = {
@@ -80,6 +104,30 @@ const ar: typeof en = {
   tags: { own: 'حساباتك', external: 'شخص آخر · محتسبة', needsAnswer: 'بانتظار إجابتك', unconfirmed: 'لم تتم الإجابة بعد' },
   route: { unknown: 'غير معروف', linked: (account) => `مرتبط بـ ${account}`, to: 'إلى' },
   listTitle: 'هذا الشهر',
+  answers: {
+    question: 'ما هذه المعاملة؟',
+    out: { own: 'نُقلت إلى حسابي', external: 'دفعت لشخص آخر', none: 'ليست تحويلاً' },
+    in: { own: 'جاءت من حسابي', external: 'استلمتها من شخص', none: 'ليست تحويلاً' },
+    effect: { own: (incoming) => `لا تُحتسب ضمن ${incoming ? 'الدخل' : 'المصروفات'}`,
+      external: (incoming) => `تُحتسب ضمن ${incoming ? 'الدخل' : 'المصروفات'}`,
+      none: 'شراء أو فاتورة أو دخل عادي' },
+    whichAccount: 'أي حساب؟',
+    noLink: 'لا شيء مما سبق',
+    saved: 'تم الحفظ',
+    undo: 'تراجع',
+    undone: 'تمت إزالة الإجابة',
+    changed: 'تغيّر هذا التحويل. افتحه مرة أخرى.',
+    failed: 'تعذّر الحفظ. حاول مرة أخرى.',
+    done: 'تم',
+  },
+  card: {
+    title: (n) => `${n} من التحويلات بانتظار إجابتك`,
+    step: (i, n) => `${i} من ${n}`,
+    whereOut: 'إلى أين ذهبت؟',
+    whereIn: 'من أين جاءت؟',
+    looksLike: (account) => `يبدو أنها حسابك ${account}`,
+    seeAll: (n) => `عرض الكل (${n})`,
+  },
 };
 
 export function transferActivityCopy(language = getLanguage()) {
