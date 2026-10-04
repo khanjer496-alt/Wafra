@@ -10,6 +10,7 @@ import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 const ORDER: TransferAnswer[] = ['own', 'external', 'none'];
 
 /** The one transfer question. Buttons on the question card, radio rows in the detail sheet. */
+/* Gold (`statusNear`) marks the selected radio row; it is the same gold on every band. */
 export function TransferAnswerChoices({ incoming, value, onChange, palette, layout, linkedLabel, disabled }: {
   incoming: boolean; value: TransferAnswer | null; onChange: (answer: TransferAnswer) => void;
   palette: BandPalette; layout: 'buttons' | 'radios'; linkedLabel?: string; disabled?: boolean;
@@ -25,7 +26,9 @@ export function TransferAnswerChoices({ incoming, value, onChange, palette, layo
         accessibilityLabel={`${labels[answer]}. ${effect(answer)}`}
         onPress={() => onChange(answer)}
         style={({ pressed }) => [styles.button, large && styles.buttonLarge,
-          { backgroundColor: i === 0 ? palette.fill : palette.card, opacity: pressed || disabled ? 0.7 : 1 }]}>
+          i === 0 ? { backgroundColor: palette.fill }
+            : { backgroundColor: palette.sheet, borderWidth: 1, borderColor: palette.textSecondary },
+          { opacity: pressed || disabled ? 0.7 : 1 }]}>
         <ThemedText type="smallBold" style={{ color: i === 0 ? palette.onFill : palette.text, textAlign: 'center' }}>{labels[answer]}</ThemedText>
       </Pressable>)}
     </View>;
@@ -39,9 +42,9 @@ export function TransferAnswerChoices({ incoming, value, onChange, palette, layo
           accessibilityLabel={`${labels[answer]}. ${effect(answer)}`}
           onPress={() => onChange(answer)}
           style={({ pressed }) => [styles.radioRow, { backgroundColor: palette.card,
-            borderColor: on ? palette.tint : palette.rule, opacity: pressed || disabled ? 0.75 : 1 }]}>
-          <View style={[styles.radio, { borderColor: on ? palette.tint : palette.textSecondary }]}>
-            {on ? <View style={[styles.radioDot, { backgroundColor: palette.tint }]} /> : null}
+            borderColor: on ? palette.statusNear : palette.rule, opacity: pressed || disabled ? 0.75 : 1 }]}>
+          <View style={[styles.radio, { borderColor: on ? palette.statusNear : palette.textSecondary }]}>
+            {on ? <View style={[styles.radioDot, { backgroundColor: palette.statusNear }]} /> : null}
           </View>
           <View style={styles.radioText}>
             <ThemedText type="smallBold">{labels[answer]}</ThemedText>
