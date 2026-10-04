@@ -165,7 +165,7 @@
       [
         "expo-notifications",
         {
-          "color": "#57B894",
+          "color": "#1F6B52",
           "defaultChannel": "payment-reminders",
           "enableBackgroundRemoteNotifications": true
         }
