@@ -1041,7 +1041,7 @@ function bodyOf(source, header) {
 
   const store = stripComments(read('src/lib/store.tsx'));
   ok('completed hydration maintenance is receipt-gated instead of walking the ledger every launch',
-    /HYDRATION_FINALIZE_VERSION\s*=\s*1/.test(store) &&
+    /HYDRATION_FINALIZE_VERSION\s*=\s*2/.test(store) &&
       /finalizationReceiptCurrent/.test(store) &&
       /finalizationReceiptCurrent\s*\?\s*paymentsRepaired\s*:\s*removeDeclinedTransactions/.test(store) &&
       /finalizationReceiptCurrent[\s\S]*?\?\s*declinesRemoved\.transactions[\s\S]*?:\s*finalizeHydrationTransactions/.test(store),

@@ -237,7 +237,9 @@ const STORAGE_KEY = 'wafra/state/v1';
  * Bump when removeDeclinedTransactions, capture dedupe, or payment-flow
  * reconciliation changes in a way that needs one full existing-ledger pass.
  */
-export const HYDRATION_FINALIZE_VERSION = 1;
+// 2: payment-flow folds a biller's own receipt into the bank's row for the
+// same payment, so stored e&-style duplicates fold once at launch.
+export const HYDRATION_FINALIZE_VERSION = 2;
 
 const EMPTY_STATE: AppState = {
   customCategories: [],

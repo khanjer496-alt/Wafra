@@ -220,6 +220,16 @@ export class ImportMoneyError extends Error {
 const OBSERVATION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** A GUID-less iOS live Message: one delivered Message without history identity. */
+/**
+ * The settlement's biller-account tail (Transaction.billerAccountTail), kept
+ * only in its parser shape: four digits. A relay row is not trusted to have
+ * produced it, so anything else is dropped rather than stored.
+ */
+function billerAccountTailOf(p: ScannedSms): string | undefined {
+  return typeof p.billerAccountTail === 'string' && /^\d{4}$/.test(p.billerAccountTail)
+    ? p.billerAccountTail : undefined;
+}
+
 function liveMessageObservation(p: ScannedSms): boolean {
   return p.channel !== 'push' && p.sourceEventId === undefined && p.captureSource === undefined &&
     typeof p.messageObservationId === 'string' && OBSERVATION_UUID_RE.test(p.messageObservationId);
@@ -2076,6 +2086,7 @@ function buildImportPlanInMarket(
             ? { clearTransferEvidence: true as const } : {}),
           paymentFlowSide: p.paymentFlowSide,
           billIdentity: p.billIdentity,
+          billerAccountTail: billerAccountTailOf(p),
           paymentInstrumentSource:
             resolution.confident && p.paymentFlowSide === 'receipt' && p.card
               ? 'alert'
@@ -2162,6 +2173,7 @@ function buildImportPlanInMarket(
       transferEvidence: buildTransferEvidence(p, resolution.confident),
       paymentFlowSide: p.paymentFlowSide,
       billIdentity: p.billIdentity,
+      billerAccountTail: billerAccountTailOf(p),
       paymentInstrumentSource:
         resolution.confident && p.paymentFlowSide === 'receipt' && p.card
           ? 'alert'

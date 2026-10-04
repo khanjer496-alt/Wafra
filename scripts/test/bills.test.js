@@ -389,6 +389,16 @@ eq(
     paidIds(bills.billsForMonth([pair[0], reminder('duplicate', '7118')], [receipt], today)), []);
   eq('a refund alone never proves a utility obligation paid',
     paidIds(bills.billsForMonth(pair, [{ ...receipt, type: 'income' }], today)), []);
+  // e&'s due notice is keyed on its Party-ID, its receipt on the account
+  // number; a folded card row carries the receipt's account identity.
+  const partyNotice = { ...reminder('eand', '4835', 'Etisalat'), importIdentity: 'party:4835', category: 'telecom' };
+  const foldedCardRow = { ...receipt, id: 'eand-card', title: 'Etisalat', category: 'telecom', billIdentity: 'account:2543' };
+  eq('a Party-ID notice is settled by a payment that quotes the account number',
+    paidIds(bills.billsForMonth([partyNotice], [foldedCardRow], today)), ['eand']);
+  eq('a different Party-ID still refuses the payment',
+    paidIds(bills.billsForMonth([partyNotice], [{ ...foldedCardRow, billIdentity: 'party:9999' }], today)), []);
+  eq('account and consumer numbers stay one numbering for conflicts',
+    paidIds(bills.billsForMonth([reminder('home', '7118')], [{ ...receipt, billIdentity: 'consumer:2442' }], today)), []);
 }
 
 console.log(`\nbills.test.js: ${pass} passed, ${fail} failed`);

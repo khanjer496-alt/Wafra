@@ -231,6 +231,29 @@ function billIdentityTail(identity: string | undefined): string | null {
   return match?.[1].toUpperCase() ?? null;
 }
 
+/**
+ * Which numbering an identity belongs to. A provider's account and consumer
+ * numbers name the same customer; its Party-ID, contract or service numbers
+ * are separate series. e&'s due notice is keyed on the Party-ID while its
+ * payment receipt quotes the account number, so their tails never agree.
+ */
+function billIdentityKind(identity: string | undefined): string | null {
+  const kind = identity?.match(/^(account|consumer|party|customer|contract|service):[A-Z0-9]{4}$/i)?.[1].toLowerCase();
+  return kind === undefined ? null : kind === 'consumer' ? 'account' : kind;
+}
+
+/**
+ * Two identities contradict only within one numbering. Different series
+ * cannot be compared, so the payment falls back to provider evidence — what
+ * paid the bill before a receipt's account number was carried onto it.
+ */
+function contradictingBillIdentity(bill: string | undefined, payment: string | undefined): boolean {
+  const billTail = billIdentityTail(bill);
+  const paymentTail = billIdentityTail(payment);
+  return billTail !== null && paymentTail !== null && billTail !== paymentTail &&
+    billIdentityKind(bill) === billIdentityKind(payment);
+}
+
 function exactBillAccount(bill: Bill, transaction: Transaction): boolean {
   const tail = billIdentityTail(bill.importIdentity);
   return tail !== null && tail === billIdentityTail(transaction.billIdentity);
@@ -400,7 +423,6 @@ function candidatePayments(
 ): Transaction[] {
   const billTitle = normalize(bill.title);
   if (!billTitle) return [];
-  const billTail = billIdentityTail(bill.importIdentity);
   // A notice is exact only for its stated cycle. Recurring averages and later
   // cycles keep estimate tolerance; a partial payment cannot settle this one.
   const hasStatedTotal = bill.autoDetected && bill.statedDueDate !== undefined &&
@@ -421,9 +443,8 @@ function candidatePayments(
     // and month cannot establish who was paid. Require provider evidence even
     // for matching tails; a user-confirmed bill alias supplies it for a bank
     // nickname that otherwise tells us nothing about the provider.
-    const paymentTail = billIdentityTail(t.billIdentity);
     // Matching provider names cannot override an explicitly different account.
-    if (billTail && paymentTail && billTail !== paymentTail) continue;
+    if (contradictingBillIdentity(bill.importIdentity, t.billIdentity)) continue;
     if (sameBillProvider(bill.title, t.title)) out.push(t);
   }
   return out;
