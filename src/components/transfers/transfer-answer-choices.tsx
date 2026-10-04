@@ -9,7 +9,11 @@ import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 
 const ORDER: TransferAnswer[] = ['own', 'external', 'none'];
 
-/** The one transfer question. Buttons on the question card, radio rows in the detail sheet. */
+/**
+ * The one transfer question. Buttons on the question card, radio rows in the detail sheet.
+ * Tapping the answer that is already selected does nothing: re-saving it would write a
+ * decision the row did not have, which is not a no-op for every row (card payments).
+ */
 /* Gold (`statusNear`) marks the selected radio row; it is the same gold on every band. */
 export function TransferAnswerChoices({ incoming, value, onChange, palette, layout, linkedLabel, disabled }: {
   incoming: boolean; value: TransferAnswer | null; onChange: (answer: TransferAnswer) => void;
@@ -24,7 +28,7 @@ export function TransferAnswerChoices({ incoming, value, onChange, palette, layo
       {ORDER.map((answer, i) => <Pressable key={answer} testID={`transfer-answer-${answer}`} disabled={disabled}
         accessibilityRole="radio" accessibilityState={{ checked: value === answer, disabled: !!disabled }}
         accessibilityLabel={`${labels[answer]}. ${effect(answer)}`}
-        onPress={() => onChange(answer)}
+        onPress={() => { if (answer !== value) onChange(answer); }}
         style={({ pressed }) => [styles.button, large && styles.buttonLarge,
           i === 0 ? { backgroundColor: palette.fill }
             : { backgroundColor: palette.sheet, borderWidth: 1, borderColor: palette.textSecondary },
@@ -40,7 +44,7 @@ export function TransferAnswerChoices({ incoming, value, onChange, palette, layo
         <Pressable testID={`transfer-answer-${answer}`} disabled={disabled}
           accessibilityRole="radio" accessibilityState={{ checked: on, disabled: !!disabled }}
           accessibilityLabel={`${labels[answer]}. ${effect(answer)}`}
-          onPress={() => onChange(answer)}
+          onPress={() => { if (!on) onChange(answer); }}
           style={({ pressed }) => [styles.radioRow, { backgroundColor: palette.card,
             borderColor: on ? palette.statusNear : palette.rule, opacity: pressed || disabled ? 0.75 : 1 }]}>
           <View style={[styles.radio, { borderColor: on ? palette.statusNear : palette.textSecondary }]}>

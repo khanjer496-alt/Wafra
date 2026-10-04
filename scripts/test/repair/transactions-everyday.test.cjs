@@ -199,13 +199,20 @@ test('Transactions hands the sheet the reconciliation it already holds, so own l
   assert.deepEqual(plain(sheet.props.transferAssessment), plain(expected));
   assert.equal(sheetOf(options.state.transactions[2]).props.transferAssessment, undefined, 'an ordinary row has none');
   assert.equal(sheetOf(null).props.transferAssessment, undefined, 'nothing is looked up while the sheet is closed');
-  // The sheet, given what Transactions passes, shows the link and saves own with that counterpart.
+  // The sheet, given what Transactions passes, shows the link. Own is already the answer, so
+  // tapping it again saves nothing (re-saving could unpay a card statement).
   const detail = createHarness(options);
   const tree = detail.renderDetail(out, { transferAssessment: sheet.props.transferAssessment });
   assert.match(text(tree), /Linked to/);
   byId(tree, 'transfer-answer-own').props.onPress();
   await new Promise((resolve) => setImmediate(resolve));
-  const saved = detail.events.find((e) => e[0] === 'answer')[1];
+  assert.equal(detail.events.some((e) => e[0] === 'answer'), false);
+  // With the same counterpart only suggested, own saves with that counterpart.
+  const likely = createHarness(options);
+  const suggested = { ...sheet.props.transferAssessment, status: 'likely-own' };
+  byId(likely.renderDetail(out, { transferAssessment: suggested }), 'transfer-answer-own').props.onPress();
+  await new Promise((resolve) => setImmediate(resolve));
+  const saved = likely.events.find((e) => e[0] === 'answer')[1];
   assert.equal(saved.answer, 'own');
   assert.equal(saved.counterpart.id, 'in');
 });

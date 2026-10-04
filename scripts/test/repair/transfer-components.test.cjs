@@ -333,3 +333,64 @@ test('detail sheet: a card payment or other system-flagged row never offers the 
   }
   assert.equal(h.events.some(e => e[0] === 'editTransaction'), false);
 });
+
+// ---- Final review fixes ----
+test('answer choices: tapping the answer that is already selected reports nothing', () => {
+  const h = harness('en');
+  const { TransferAnswerChoices } = h.deps['@/components/transfers/transfer-answer-choices'];
+  for (const layout of ['buttons', 'radios']) for (const value of ['own', 'external', 'none']) {
+    const picked = [];
+    const tree = TransferAnswerChoices({ incoming: true, value, layout, onChange: v => picked.push(v), palette: palette(h) });
+    byId(tree, `transfer-answer-${value}`).props.onPress();
+    assert.deepEqual(picked, [], `${layout} ${value}: the selected answer is a no-op`);
+    const other = value === 'own' ? 'external' : 'own';
+    byId(tree, `transfer-answer-${other}`).props.onPress();
+    assert.deepEqual(picked, [other], `${layout}: a different answer is still reported`);
+  }
+});
+
+test('detail sheet: tapping the selected answer saves nothing, shows no toast and stays open', async () => {
+  const { h, subject } = detail();
+  // A manual credit on a card flagged by hand reads "own" from the row itself, with no decision saved.
+  const manual = { ...subject, id: 'manual-card', type: 'income', source: 'manual', smsKey: undefined,
+    transferEvidence: undefined, accountId: 'credit', isTransfer: true };
+  h.state.transactions.push(manual);
+  const tree = h.renderDetail(manual);
+  assert.equal(byId(tree, 'transfer-answer-own').props.accessibilityState.checked, true);
+  byId(tree, 'transfer-answer-own').props.onPress(); await settle();
+  assert.deepEqual(answers(h), [], 'no save');
+  assert.equal(closes(h), 0, 'the sheet stays open');
+  assert.equal(h.events.some(e => e[0] === 'state' && e[1] === PICKER), false, 'no picker');
+  const declined = detail();
+  const row = { ...declined.subject, transferDecision: { version: 1, ownership: 'none', decidedAt: 1 } };
+  byId(declined.h.renderDetail(row), 'transfer-answer-none').props.onPress(); await settle();
+  assert.deepEqual(answers(declined.h), []);
+  byId(declined.h.renderDetail(row), 'transfer-answer-external').props.onPress(); await settle();
+  assert.equal(answers(declined.h)[0].answer, 'external', 'a different answer still saves');
+});
+
+test('detail sheet: the picker is a no-op only for the link already saved', async () => {
+  const words = h => h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
+  const manualOwn = s => ({ ...s, id: 'manual-own', source: 'manual', smsKey: undefined, transferEvidence: undefined, isTransfer: true });
+  // A likely-own partner is a suggestion: picking it links, and the sheet does not claim a link before that.
+  const likely = detail({ states: { [PICKER]: true } });
+  const suggested = { status: 'likely-own', counterpartId: 'left', candidateIds: ['left'] };
+  const answersTree = likely.h.renderDetail(manualOwn(likely.subject), { transferAssessment: suggested });
+  byId(answersTree, 'entry-transfer-candidate-left').props.onPress(); await settle();
+  assert.equal(answers(likely.h)[0].counterpart.id, 'left');
+  const shown = detail();
+  assert.ok(!text(shown.h.renderDetail(manualOwn(shown.subject), { transferAssessment: suggested })).includes(words(shown.h).route.linked('ADCB')));
+  // A confirmed link re-picked, or "no link" on an unlinked own answer, saves nothing.
+  const linked = detail({ states: { [PICKER]: true } });
+  const confirmed = { status: 'confirmed-own', counterpartId: 'left', candidateIds: [] };
+  byId(linked.h.renderDetail(linked.subject, { transferAssessment: confirmed }), 'entry-transfer-candidate-left').props.onPress(); await settle();
+  assert.deepEqual(answers(linked.h), []);
+  const unlinked = detail({ states: { [PICKER]: true } });
+  byId(unlinked.h.renderDetail(manualOwn(unlinked.subject), { transferAssessment: unlinked.assessment }), 'entry-transfer-candidate-none').props.onPress(); await settle();
+  assert.deepEqual(answers(unlinked.h), []);
+  // Unlinking a confirmed pair is a change and still saves.
+  const unlink = detail({ states: { [PICKER]: true } });
+  byId(unlink.h.renderDetail(unlink.subject, { transferAssessment: confirmed }), 'entry-transfer-candidate-none').props.onPress(); await settle();
+  assert.equal(answers(unlink.h)[0].answer, 'own');
+  assert.equal(answers(unlink.h)[0].counterpart, undefined);
+});

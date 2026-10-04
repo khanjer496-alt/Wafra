@@ -205,7 +205,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const transferCandidate = isTransferCandidate(transaction);
   const answered = currentAnswer(transaction, transferAssessment);
   const candidates = ownCandidates(transaction, transferAssessment, rowsById);
-  const linkedTo = transferAssessment?.counterpartId ? rowsById.get(transferAssessment.counterpartId) : undefined;
+  // Only a confirmed pair is linked; a likely-own counterpart is a suggestion, not a link.
+  const linkedTo = transferAssessment?.status === 'confirmed-own' && transferAssessment.counterpartId
+    ? rowsById.get(transferAssessment.counterpartId) : undefined;
   const answerLabels = transaction.type === 'income' ? answerWords.in : answerWords.out;
   const accountLabelFor = (id: string) => {
     const found = state.accounts.find((a) => a.id === id);
@@ -342,6 +344,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   // ('saved', or 'unsaved' = applied in memory with the write still pending).
   // The hook has already told the person about every other outcome.
   const choose = async (next: TransferAnswer, counterpart?: Transaction) => {
+    // The answer already shown, with the same link (or none), changes nothing: save nothing.
+    if (next === answered && (next !== 'own' || counterpart?.id === linkedTo?.id)) {
+      setPicking(false);
+      return;
+    }
     const outcome = await answer({ transaction, answer: next, counterpart, label: answerLabels[next] });
     if (outcome === 'saved' || outcome === 'unsaved') {
       setPicking(false);
