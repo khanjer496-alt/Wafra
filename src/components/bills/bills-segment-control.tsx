@@ -4,7 +4,6 @@ import { ThemedText } from '@/components/themed-text';
 import { BandSegmented } from '@/components/ui/band/band-segmented';
 import { BandLayout, Spacing, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
-import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { tapped } from '@/lib/haptics';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { paymentAgendaCopy } from '@/lib/reference-copy';
