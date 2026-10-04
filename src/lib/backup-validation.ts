@@ -104,6 +104,7 @@ const transaction: Check = (value) => {
     bestEffort: bestEffortMarker,
     transferEvidence: isTransferEvidence, transferDecision: isTransferDecision, transferMatch: isTransferMatch,
     paymentFlowSide: oneOf('funding', 'receipt'), billIdentity: text, billPayment,
+    billerAccountTail: (v) => typeof v === 'string' && /^\d{4}$/.test(v),
     paymentInstrumentSource: oneOf('alert', 'user'), cashOutDate: isoDate,
     cashOutAccountId: id, isTransfer: boolean, userEdited: boolean, titleEdited: boolean, raw: text,
   })) return false;

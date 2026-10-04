@@ -2037,6 +2037,75 @@ t('an AutoPay "has been received and posted to your account no" echo stays skipp
   'Dear Valued Customer, Payment of AED 351.35 on 15/04/2019 has been received and posted to your account no 5552906 Thank you for using AutoPay service.',
   null);
 
+// ══ THE AMOUNT-FIRST HEAD NEEDS THE BILLER TO SAY WHO IT IS ══
+//
+// The sentence shape alone is not biller evidence. A bank telling the user
+// "your payment of AED 2,500.00 for account XXXX4321 has been received" with an
+// Amount Paid line is just as readable as a statement about the user's OWN
+// account, and the head filed it as a confident telecom "Payment to •4321"
+// receipt. This message is a review probe, not a captured SMS: it pins the
+// gate, not a format. Without an Etisalat channel line or an e& sender it must
+// read exactly as it did before the head existed (origin/main: "Account
+// debit", other, the account it names, no receipt side).
+{
+  const BANKISH = 'your payment of AED 2,500.00 for account XXXX4321 has been received.\nAmount Paid: AED 2,500.00';
+  for (const [label, options] of [['no sender', undefined], ['a bank sender', { sender: 'ADCBAlert' }]]) {
+    t(`the amount-first shape with no biller evidence falls through (${label})`, BANKISH,
+      { kind: 'transaction', type: 'expense', amountFils: 250000, merchant: 'Account debit', category: 'other',
+        card: { last4: '4321', kind: 'account' }, transfer: false }, options);
+    const r = parseSms(BANKISH, undefined, options);
+    ok(`...and is not a biller receipt (${label})`,
+      r && r.paymentFlowSide === undefined && r.billIdentity === undefined && r.categoryGuess !== 'telecom',
+      JSON.stringify(r && { s: r.paymentFlowSide, b: r.billIdentity, c: r.categoryGuess }));
+  }
+  // The real e& receipt with its channel line anonymised keeps the head ONLY
+  // when the sender is e& itself.
+  const ANON = 'Hello, your payment of AED 313.95 for account 065000000 has been received.\n' +
+    'Amount Due: AED 313.95\nAmount Paid: AED 313.95\nPayment Channel: Bank Website\nCard Number: NA';
+  t('an anonymous channel from the e& sender is still the receipt family', ANON,
+    { merchant: 'Payment to •0000', category: 'telecom', paymentFlowSide: 'receipt',
+      billIdentity: 'account:0000', card: null }, { sender: 'eandINF' });
+  {
+    const r = parseSms(ANON);
+    ok('...but with no sender and an anonymous channel the head is not taken',
+      r && r.paymentFlowSide === undefined && r.merchant !== 'Payment to •0000',
+      JSON.stringify(r && { m: r.merchant, s: r.paymentFlowSide, c: r.categoryGuess }));
+  }
+}
+
+// ══ A BILLER'S ACCOUNT NUMBER IS NEVER THE ROW'S ACCOUNT, IN EITHER HEAD ══
+//
+// extractCard reads "for account XXXXX4567" and "payment to the account number
+// ····2543" as an account the user owns. The receipt row carried it as
+// card {last4, account}, and buildImportPlan minted "Account •4567" /
+// "Account •2543" — a phantom bank account named after a phone line — and
+// stamped the row's instrument as alert-sourced. The ····2543 receipt is the
+// real one pinned above; the XXXXX4567 one is the real e& capture with its
+// account digits masked the way a bank export would mask them.
+{
+  const { buildImportPlan } = require('./build/import-plan');
+  const empty = { hydrated: true, accounts: [], transactions: [], budgets: [], bills: [], goals: [],
+    cardDues: [], accountHints: {}, merchantOverrides: {}, billAliases: {}, lastScanTs: 0, parserVersion: 0 };
+  const ts = Date.parse('2026-10-03T11:31:16Z');
+  for (const [label, body, sender, tail] of [
+    ['masked amount-first e&', 'Hello, your payment of AED 313.95 for account XXXXX4567 has been received.\nAmount Due: AED 313.95\nAmount Paid: AED 313.95\nPayment Channel: Etisalat Mobile App\nCard Number: NA', 'eandINF', '4567'],
+    ['processed-voice ····2543', 'Dear Customer, Your payment to the account number ····2543 has been processed.\nAmount Due: AED 450.45 \nAmount Paid: AED 450.45 \nPayment Channel: Etisalat Mobile App', 'Etisalat', '2543'],
+    ['processed-voice ····2543, anonymous channel', 'Dear Customer, Your payment to the account number ····2543 has been processed.\nAmount Due: AED 408.45\nAmount Paid: AED 408.45\nPayment Channel: Bank Website\nCard Number: NA', undefined, '2543'],
+  ]) {
+    const row = parseSms(body, undefined, sender ? { sender } : undefined);
+    ok(`the biller's account number is the bill identity only (${label})`,
+      row && row.card === null && row.billIdentity === `account:${tail}` && row.paymentFlowSide === 'receipt',
+      JSON.stringify(row && { card: row.card, b: row.billIdentity, s: row.paymentFlowSide }));
+    const plan = buildImportPlan([{ ...row, date: '2026-10-03', smsTs: ts, sender, channel: 'inbox' }], empty, ts);
+    const b = plan.batch;
+    ok(`importing it mints no "Account •${tail}" and no alert-sourced instrument (${label})`,
+      plan.txCount === 1 && b.newAccounts.length === 0 && Object.keys(b.newHints).length === 0 &&
+        b.transactions[0].paymentInstrumentSource !== 'alert' && b.transactions[0].billIdentity === `account:${tail}`,
+      JSON.stringify({ na: b.newAccounts.map((a) => a.name), nh: b.newHints,
+        tx: b.transactions.map((x) => [x.accountId, x.paymentInstrumentSource, x.billIdentity]) }));
+  }
+}
+
 // Third corpus, from the shipped build.
 t('Trip.com is travel, dot and all',
   'Purchase of GBP 37.6 with Debit Card ending 4733 at TRIP.COM, LONDON. Avl Balance is AED 43,415.07.',
@@ -2879,13 +2948,34 @@ t('..."we have received X towards your <biller> account"',
 // ...AND 9876 IS ETISALAT'S NUMBER FOR THE USER, NOT THE USER'S BANK ACCOUNT.
 // extractCard read "account 9876" as an account the user owns, so this row
 // carried card {9876, account} and the import planner minted a phantom bank
-// account "Account •9876" out of a phone-bill reference. The digits survive
-// only as the bill identity, which is how the portal-receipt family keeps its
-// own biller account number.
-t('a biller\'s account number in a settlement is the bill identity, never the user\'s account',
+// account "Account •9876" out of a phone-bill reference.
+//
+// An earlier revision of this rule also emitted the digits as billIdentity
+// "account:9876". That is withdrawn: bills.ts refuses a payment whose identity
+// tail differs from the reminder's, and the reminder need not be keyed on the
+// same number — see the Party-ID control below.
+t('a biller\'s account number in a settlement is never the user\'s account',
   'We have received AED 350.00 towards your Etisalat account 9876.',
   { type: 'expense', amountFils: 35000, merchant: 'Etisalat', category: 'telecom',
-    card: null, billIdentity: 'account:9876', transfer: false });
+    card: null, transfer: false });
+{
+  const r = parseSms('We have received AED 350.00 towards your Etisalat account 9876.');
+  ok('...and carries no bill identity of its own', r && r.billIdentity === undefined,
+    JSON.stringify(r && r.billIdentity));
+  // The digits still travel as the fold-only guard billerAccountTail, which
+  // bills.ts never reads (payment-flow uses it to refuse folding a receipt
+  // for ANOTHER e& account into this settlement).
+  ok('...but keeps the biller account tail as a fold guard', r && r.billerAccountTail === '9876',
+    JSON.stringify(r && r.billerAccountTail));
+  const withCard = parseSms('Your payment of AED 350.00 from your Credit Card ending 2518 has been received towards your Etisalat account 9876.');
+  ok('a card-paid settlement keeps its card, no bill identity, and the biller tail as a guard',
+    withCard && withCard.card && withCard.card.last4 === '2518' && withCard.billIdentity === undefined &&
+      withCard.billerAccountTail === '9876',
+    JSON.stringify(withCard && { card: withCard.card, b: withCard.billIdentity, g: withCard.billerAccountTail }));
+  const own = parseSms('Your salary payment of AED 12,000.00 has been credited to your RAKBANK account 1234.');
+  ok("the user's own bank account is never a biller tail", own && own.billerAccountTail === undefined,
+    JSON.stringify(own && own.billerAccountTail));
+}
 {
   const { buildImportPlan } = require('./build/import-plan');
   const empty = { hydrated: true, accounts: [], transactions: [], budgets: [], bills: [], goals: [],
@@ -2896,12 +2986,47 @@ t('a biller\'s account number in a settlement is the bill identity, never the us
   ok('importing a biller settlement mints no "Account •9876"',
     plan.txCount === 1 && plan.batch.newAccounts.length === 0 && Object.keys(plan.batch.newHints).length === 0,
     JSON.stringify({ na: plan.batch.newAccounts, nh: plan.batch.newHints }));
+  const stored = plan.batch.transactions[0];
+  ok('the imported settlement stores the biller tail as a guard, not as a bill identity',
+    stored && stored.billerAccountTail === '9876' && stored.billIdentity === undefined,
+    JSON.stringify(stored && { g: stored.billerAccountTail, b: stored.billIdentity }));
+  const forged = buildImportPlan([{ ...row, billerAccountTail: 'account:9876<script>', date: '2026-10-03', smsTs: ts + 1,
+    sender: 'ETISALAT', channel: 'inbox' }], empty, ts);
+  const forgedRow = forged.batch.transactions[0];
+  ok('a biller tail not in its four-digit parser shape is dropped at import',
+    forgedRow && forgedRow.billerAccountTail === undefined, JSON.stringify(forgedRow && forgedRow.billerAccountTail));
 }
-// The other biller-account settlements already had no card; they gain the
-// identity and nothing else.
-t('"credited to your du account 1234567" keeps the du number as bill identity',
-  'AED 200.00 has been credited to your du account 1234567.',
-  { type: 'expense', merchant: 'Du', category: 'telecom', card: null, billIdentity: 'account:4567' });
+// The other biller-account settlements already had no card and stay as they
+// were on origin/main: no card, no identity.
+{
+  const r = parseSms('AED 200.00 has been credited to your du account 1234567.');
+  ok('"credited to your du account 1234567" mints neither a card nor a bill identity',
+    r && r.type === 'expense' && r.merchant === 'Du' && r.categoryGuess === 'telecom' &&
+      r.card === null && r.billIdentity === undefined,
+    JSON.stringify(r && { t: r.type, m: r.merchant, c: r.categoryGuess, card: r.card, b: r.billIdentity }));
+}
+// A SETTLEMENT MUST STILL SETTLE THE REMINDER IT PAID. The e& due notice is
+// real (pinned earlier in this file) and keys on its Party-ID, "party:4835".
+// With the settlement carrying "account:9876", bills.ts saw two different
+// tails and refused the match: the AED 775.81 bill stayed "due" after it was
+// paid. origin/main marked it paid on provider + amount + month.
+{
+  const bills = require('./build/bills');
+  const fmt = require('./build/format');
+  fmt.setMonthStartDay(1);
+  const due = parseSms('Dear Customer, The due date for your e& bill is nearing. A total amount of AED 775.81 including VAT is due for FISH BASKET REST. with the Party-ID 3014835 on 15-08-2026 . To pay your bill, please visit businessonline.etisalat.ae/quickpay. Kindly disregard this message if you have already paid. Thank you.');
+  const paid = parseSms('We have received AED 775.81 towards your Etisalat account 9876.');
+  const bill = { id: 'eand', title: due.merchant, category: 'telecom', amountFils: due.amountFils, dueDay: due.dueDay,
+    autoDetected: true, importIdentity: due.billIdentity, paidMonths: [] };
+  const tx = { id: 'settle', type: 'expense', amountFils: paid.amountFils, category: paid.categoryGuess, accountId: 'a',
+    title: paid.merchant, date: '2026-08-10', source: 'sms', ...(paid.billIdentity ? { billIdentity: paid.billIdentity } : {}),
+    // The fold guard rides along exactly as import stores it; bills.ts must ignore it.
+    ...(paid.billerAccountTail ? { billerAccountTail: paid.billerAccountTail } : {}) };
+  const rows = bills.billsForMonth([bill], [tx], new Date(2026, 7, 12));
+  ok('a biller settlement still settles a Party-ID-keyed reminder for the same provider',
+    due.billIdentity === 'party:4835' && paid.billerAccountTail === '9876' && rows.length === 1 && rows[0].status === 'paid',
+    JSON.stringify({ due: due.billIdentity, paid: paid.billIdentity, rows: rows.map((r) => [r.bill.id, r.status]) }));
+}
 // CONTROLS: the user's OWN bank account in the same verb-first shape keeps its
 // account. A bank and an account type are never a biller.
 t('a salary credited to the user\'s RAKBANK account keeps that account',
@@ -6428,6 +6553,26 @@ for (const [desc, merchant, category] of [
 
 {
   const stmt = parseSms('Mini Stmt for Card ending 8575: Statement date 20/10/26. Total Amt Due AED 3,000.00, Due Date 14/11/26. Min Amt Due AED 150.00');
+  // More issue-date wordings (from #82), and a range is a period, not a day.
+  for (const [label, body, want] of [
+    ['an ISO statement date is not read day-first', 'Credit Card ending 8575 statement date 2026-08-28. Total Amt Due AED 2469.92, Due Date 22/09/26.', '2026-08-28'],
+    ['a named-month statement date is read', 'Credit Card ending 8575. Stmt date 28Aug26. Total Amt Due AED 2469.92, Due Date 22/09/26.', '2026-08-28'],
+    ['a statement dated in words is read', 'Your Credit Card ending 3749 statement dated 01 Aug 2026. Total amount due AED 5,645.07. Due date is 26Aug26', '2026-08-01'],
+    ['a FAB statement names its date through the card it belongs to', 'Your statement of the card ending with 3749 dated 01Aug26 has been sent to you and can also be viewed in the new FAB mobile banking app, download it from the App Store goo.gl/FB7qEZ. The total amount due is AED 5,645.07. Minimum due is AED 282.25. Due date is 26Aug26', '2026-08-01'],
+    ['a generated-on date is the statement date', 'Your Credit Card ending 4821 statement is generated on 20/12/2026. Total due AED 3,240.00, minimum due AED 162.00. Payment due on 05/01/2027.', '2026-12-20'],
+    ['the ENBD mini statement keeps its statement date', 'Emirates NBD Credit Card Mini Stmt for Card ending 8575: Statement date 28/08/26. Total Amt Due AED 2469.92, Due Date 22/09/26. Min Amt Due AED 513.62', '2026-08-28'],
+    ['a due date is never read as the statement date', 'Credit Card ending 8575: Due Date 22/09/26. Total Amt Due AED 2469.92. Min Amt Due AED 513.62', undefined],
+    ['a statement date range states a period, not a closing day', 'Credit Card ending 8575. Statement Date: 01/08/26 - 31/08/26. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
+    ['a countdown after the statement date is not a range', 'Credit Card ending 8575. Statement Date: 01/08/26 - 21 days to pay. Total Amt Due AED 100.00, Due Date 22/08/26', '2026-08-01'],
+    ['...and the same range in words', 'Credit Card ending 8575. Statement dated 01 Aug 2026 to 31 Aug 2026. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
+    ['a clock after a year-less month is not a year', 'Credit Card ending 8575. Statement date 28 Aug 15:30. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
+    ['a count after a year-less month is not a year', 'Credit Card ending 8575. Statement date 28 Aug, 21 days to pay. Total Amt Due AED 100.00, Due Date 22/09/26', undefined],
+    ['a statement announcing only its deadline states no statement date', 'Your Credit Card statement for card ending 1234 is ready. Total amount due AED 714.74, minimum due AED 100.00. Due date 15/10/2026.', undefined],
+  ]) {
+    const r = parseSms(body);
+    if (r && r.kind === 'cardStatement' && r.statementDate === want) { pass++; console.log(`✓ ${label}`); }
+    else { fail++; console.log(`✗ ${label}`, JSON.stringify(r && { k: r.kind, s: r.statementDate, d: r.date })); }
+  }
   if (stmt && stmt.kind === 'cardStatement' && stmt.statementDate === '2026-10-20' && stmt.date === '2026-11-14') { pass++; console.log('✓ a statement carries its stated issue date apart from its due date'); }
   else { fail++; console.log('✗ a statement carries its stated issue date apart from its due date', JSON.stringify(stmt && { k: stmt.kind, s: stmt.statementDate, d: stmt.date })); }
   const noIssue = parseSms('Your Credit Card ending 4844 statement has been generated. Total Amount Due AED 5,234.10. Minimum Amount Due AED 261.70. Payment Due Date 25/10/2026.');

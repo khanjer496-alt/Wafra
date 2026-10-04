@@ -285,6 +285,18 @@ export interface Transaction {
    */
   billIdentity?: string;
   /**
+   * Last four of the BILLER's customer number named by a settlement ("We have
+   * received AED 350.00 towards your Etisalat account 9876" → "9876").
+   *
+   * Deliberately NOT a bill identity. A reminder may key the same obligation
+   * on another number (e&'s Party-ID), and bills.ts refuses a payment whose
+   * identity tail differs from the reminder's, so this must never be read by
+   * bill, subscription or alias matching. Its only reader is payment-flow's
+   * biller-receipt fold, where a different stated account proves a different
+   * bill and stops a receipt for another account being folded away.
+   */
+  billerAccountTail?: string;
+  /**
    * Why the account shown for a named biller receipt is trustworthy.
    *
    * Receipt alerts that omit a card still need a ledger account, so import
@@ -1008,6 +1020,8 @@ export interface TxHealUpdate {
   cardPaymentSide?: 'debit' | 'receipt';
   paymentFlowSide?: 'funding' | 'receipt';
   billIdentity?: string;
+  /** Fold guard only; see Transaction.billerAccountTail. */
+  billerAccountTail?: string;
   paymentInstrumentSource?: 'alert' | 'user';
   /** A source-proven ordinary credit was previously misclassified as a card payment. */
   clearCardPaymentRole?: true;

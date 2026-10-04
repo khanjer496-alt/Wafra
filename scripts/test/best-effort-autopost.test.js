@@ -470,6 +470,22 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     ['BDT', 'BD', 'bKash', 'You have received Tk 1,000.00 from 01712345678. Fee Tk 0.00. Balance Tk 2,500.00. TrxID ABC123 at 02/10/2026 10:15', 100000, 'income', 'other'],
     ['ZAR', 'ZA', 'FNB', 'FNB: R450.00 paid from Cheq a/c..1234 @ CHECKERS SANDTON. Avail R5,200.00. 02Oct 10:15', 45000, 'expense', 'groceries'],
     ['INR', 'IN', 'AD-SBIINB', 'Dear UPI user A/C X1234 debited by 450.0 on date 02Oct26 trf to ZOMATO Refno 627512345678. If not u? call 1800111109 -SBI', 45000, 'expense', 'dining'],
+    // Ordinary words that contain a short symbol ("users", "Sharma") must not
+    // switch off the currency-less UPI reading.
+    ['INR', 'IN', 'AD-SBIINB', 'Dear UPI user A/C X1234 debited by 450.0 on date 02Oct26 trf to Rahul Sharma Refno 412345678901. If not u? call 1800111109. -SBI', 45000, 'expense', undefined],
+    ['EUR', 'ES', 'CaixaBank', 'CaixaBank: Has recibido un Bizum de 25,00 EUR de LAURA GARCIA.', 2500, 'income', 'other'],
+    ['EUR', 'ES', 'Santander', 'Santander: Se ha realizado un cargo de 64,30 EUR con su tarjeta ****1234 en EL CORTE INGLES.', 6430, 'expense', 'shopping'],
+    ['EUR', 'PT', 'CGD', 'CGD: Compra de 18,90 EUR efetuada no PINGO DOCE com o cartao terminado em 1234.', 1890, 'expense', 'groceries'],
+    ['PLN', 'PL', 'PKO BP', 'PKO BP: Transakcja karta 1234 na kwote 54,99 PLN w BIEDRONKA zostala zrealizowana.', 5499, 'expense', 'groceries'],
+    ['PEN', 'PE', 'BCP', 'BCP: Realizaste un consumo de S/ 45.50 en PLAZA VEA con tu tarjeta ****1234.', 4550, 'expense', 'groceries'],
+    ['KRW', 'KR', 'Shinhan', '[신한카드] 승인 12,000원 GS25 강남점 10/02 14:30', 12000, 'expense', undefined, 0],
+    ['CNY', 'CN', 'ICBC', '您尾号1234的卡于10月02日在美团消费成功,金额58.00元。', 5800, 'expense', undefined],
+    ['GHS', 'GH', 'MobileMoney', 'Payment made for GHS 45.00 to SHOPRITE ACCRA. Current Balance: GHS 320.00. Transaction Id: 12345678.', 4500, 'expense', 'groceries'],
+    ['MAD', 'MA', 'AttijariWafa', 'Attijariwafa bank: Paiement par carte effectué : 320,00 MAD chez MARJANE le 02/10/2026.', 32000, 'expense', 'groceries'],
+    ['PKR', 'PK', 'JazzCash', 'You have successfully sent Rs. 1,500 to ALI KHAN (0300XXXX123) via JazzCash. TID: 1234567890.', 150000, 'expense', 'other'],
+    ['INR', 'IN', 'VM-SBIINB', 'आपके खाते XX1234 से रु 750.00 डेबिट किए गए हैं, BIGBASKET को भुगतान सफल हुआ।', 75000, 'expense', 'groceries'],
+    ['EUR', 'DE', 'Sparkasse', 'Sparkasse: Lastschrift über 49,99 EUR von TELEKOM DEUTSCHLAND wurde Ihrem Konto belastet.', 4999, 'expense', 'telecom'],
+    ['KES', 'KE', 'MPESA', 'QJK1ABC124 Confirmed. You have received Ksh2,000.00 from JOHN KAMAU 0712345678 on 2/10/26 at 11:00 AM. New M-PESA balance is Ksh7,300.00.', 200000, 'income', 'other'],
     ['NGN', 'NG', 'GTBank', 'Acct: ****1234 Amt: NGN5,000.00 DR Desc: POS PURCHASE SHOPRITE LEKKI Avail Bal: NGN45,000.00 Date: 02-Oct-2026', 500000, 'expense', 'groceries'],
   ]) {
     const row = worldwide(currency, cc, sender, body, exponent);
@@ -482,10 +498,37 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     ok('a worldwide salary is income, never a transfer kept out of Income',
       salary?.type === 'income' && salary.categoryGuess === 'salary' && salary.transferHint === false, salary);
   }
+  // Worldwide card statements become the card's bill; card payments settle it.
+  {
+    // A statement naming no card number is still a card statement; the import
+    // planner attaches it only to the one eligible card (as on the Gulf path).
+    const cardless = worldwide('USD', 'US', '24273', 'Chase: Your credit card statement is ready. Statement balance $1,234.56, minimum payment $35.00 due 10/25/2026.');
+    ok('a cardless credit-card statement is a statement, never spending',
+      cardless?.kind === 'cardStatement' && cardless.card === null && cardless.amountFils === 123456 && cardless.type === 'expense', cardless);
+  }
+  for (const [currency, cc, sender, body, expect] of [
+    ['USD', 'US', 'Chase', 'Chase: Your credit card ending 1005 statement is ready. Statement balance $1,234.56, minimum payment $35.00 due 10/25/2026.',
+      { kind: 'cardStatement', amountFils: 123456, minDueFils: 3500, date: '2026-10-25', last4: '1005' }],
+    ['INR', 'IN', 'AX-AXISBK', 'Axis Bank Credit Card XX5678 statement: Total Amount Due INR 23,456.00, Minimum Amount Due INR 1,173.00, Payment Due Date 20-10-2026.',
+      { kind: 'cardStatement', amountFils: 2345600, minDueFils: 117300, date: '2026-10-20', last4: '5678' }],
+    ['GBP', 'GB', 'Barclaycard', 'Barclaycard: Your statement is ready. Balance £845.20, minimum payment £25.00 due by 18/10/2026 on card ending 4321.',
+      { kind: 'cardStatement', amountFils: 84520, minDueFils: 2500, date: '2026-10-18', last4: '4321' }],
+    ['USD', 'US', 'Chase', 'Chase: We received your payment of $1,234.56 to your credit card ending 1005 on 10/02/2026. Thank you.',
+      { kind: 'cardPayment', amountFils: 123456, side: 'receipt', last4: '1005' }],
+    ['INR', 'IN', 'VM-HDFCBK', 'Payment of Rs.23,456.00 has been received towards your HDFC Bank Credit Card ending 5678 on 02-10-2026. Thank you.',
+      { kind: 'cardPayment', amountFils: 2345600, side: 'receipt', last4: '5678' }],
+  ]) {
+    const row = worldwide(currency, cc, sender, body);
+    ok(`${cc}: ${expect.kind} — ${body.slice(0, 52)}…`,
+      row?.kind === expect.kind && row.amountFils === expect.amountFils && row.currency === currency &&
+        row.card?.last4 === expect.last4 && row.card?.kind === 'credit' &&
+        (expect.minDueFils === undefined || row.minDueFils === expect.minDueFils) &&
+        (expect.date === undefined || row.date === expect.date) &&
+        (expect.side === undefined || (row.cardPaymentSide === expect.side && row.transferHint === true)), row);
+  }
   for (const [currency, cc, sender, body] of [
     ['USD', 'US', '24273', 'Chase: A $500.00 transaction at BEST BUY was declined on your card ending 1005.'],
     ['USD', 'US', '24273', "Chase: Your one-time code is 482913. Don't share it. We'll never call to ask for it."],
-    ['USD', 'US', '24273', 'Chase: Your credit card statement is ready. Statement balance $1,234.56, minimum payment $35.00 due 10/25/2026.'],
     // A comma-written three-decimal figure stays ambiguous even in Kuwait.
     ['KWD', 'KW', 'NBK', 'NBK: Purchase of KWD 12,500 with card ending 1234 at TALABAT KUWAIT on 02/10/2026.'],
     // A dot-written KWD figure resolves only with dot-decimal locale evidence:
@@ -495,6 +538,37 @@ for (const key of ['autoAddedCheck', 'autoAddedExplain', 'autoAddedLooksRight', 
     ['EGP', 'EG', 'CIB', 'تم خصم 100.00 جنيه استرليني من بطاقتك رقم 1234 لدى AMAZON UK'],
     // A "compra aprobada" heading also opens holds and fraud questions; it stays in Review.
     ['MXN', 'MX', 'BBVA', 'BBVA: Compra aprobada por $350.00 MXN en OXXO con tu tarjeta terminación 1234.'],
+    // A statement in another currency than the ledger is never a due.
+    ['EUR', 'DE', 'Chase', 'Chase: Your credit card ending 1005 statement is ready. Statement balance USD 1,234.56, minimum payment USD 35.00 due 10/25/2026.'],
+    // A card payment that names no card cannot settle one.
+    ['USD', 'US', 'Chase', 'Chase: We received your payment of $1,234.56 to your credit card. Thank you.'],
+    // A plain "balance" outside a statement announcement is not an amount owed.
+    ['GBP', 'GB', 'Barclaycard', 'Barclaycard: Balance £845.20 on card ending 4321. Minimum payment £25.00 due by 18/10/2026.'],
+    ['EUR', 'ES', 'BBVA', 'BBVA: Tienes una compra pendiente de 120,00 EUR en ZARA.'],
+    ['KRW', 'KR', 'Shinhan', '[신한카드] 승인취소 12,000원 GS25 강남점 10/02 14:35'],
+    ['USD', 'US', 'Chase', 'Chase: Your credit limit has been increased to $8,000.00 on card ending 1005.'],
+    // Independent-review regressions: none of these may post.
+    ['KRW', 'KR', 'Shinhan', '[신한카드] 승인거절 12,000원 GS25 강남점 10/02 14:30 잔액부족'],
+    ['KRW', 'KR', 'Shinhan', '[신한카드] 승인 한도 안내: 잔여한도 1,500,000원'],
+    ['KRW', 'KR', 'Shinhan', '[신한카드] 승인 즉시 10,000원 캐시백! 이벤트 응모하세요 10/31 까지'],
+    ['USD', 'US', 'Chase', 'Chase: Your payment of $1,234.56 received to your credit card ending 1005 has been reversed.'],
+    ['INR', 'IN', 'VM-HDFCBK', 'Payment of Rs.23,456.00 towards your HDFC Bank Credit Card ending 5678 will be auto debited on 15-10-2026.'],
+    ['USD', 'US', 'Chase', 'Chase: We received your payment of $1,234.56 to your credit card ending 1005. It is processing and may take 2 days to post.'],
+    ['USD', 'US', 'Chase', 'Chase: We received your payment of $1,234.56 to your credit card ending 1005 on 10/20/2026. Thank you.'],
+    ['GBP', 'GB', 'Barclaycard', 'Barclaycard: Your statement is ready. Available balance £2,845.20, minimum payment £25.00 due by 18/10/2026 on card ending 4321.'],
+    ['GBP', 'GB', 'Barclaycard', 'Barclaycard: Your statement is ready. Balance £45.20 CR, no payment due. Minimum payment £0.00 due by 18/10/2026 on card ending 4321.'],
+    ['INR', 'IN', 'AX-AXISBK', 'Axis Bank Credit Card XX5678 statement: Total Amount Due INR 2,345.00 Cr, Minimum Amount Due INR 0.00, Payment Due Date 20-10-2026.'],
+    ['INR', 'IN', 'AX-AXISBK', 'Thank you! Total Amount Due INR 23,456.00 on your Axis Bank Credit Card XX5678 statement has been paid in full. Payment Due Date 20-10-2026.'],
+    ['INR', 'IN', 'AX-AXISBK', 'Your Axis Bank Credit Card XX5678 statement will be generated on 15-10-2026. Total Amount Due INR 12,345.00 so far. Payment Due Date 05-11-2026.'],
+    ['INR', 'IN', 'AX-AXISBK', 'Your Axis Bank Personal Loan XX5678 EMI statement: Total Amount Due INR 23,456.00, Payment Due Date 20-10-2026. Pay via credit card.'],
+    ['USD', 'US', 'Chase', 'Chase: Reminder: your credit card ending 1005 statement balance of $1,234.56 was due 09/25/2026. Minimum payment $35.00.'],
+    ['CAD', 'CA', 'Chase', 'Chase: We received your payment of $1,234.56 to your credit card ending 1005 on 10/02/2026.'],
+    ['INR', 'IN', 'VM-ICICIB', 'Payment of Rs.500.00 received towards your ICICI FASTag card XX1234 on 02-10-2026. Thank you.'],
+    ['PLN', 'PL', 'PKO BP', 'PKO BP: Transakcja karta 1234 na kwote 54,99 PLN w BIEDRONKA nie zostala zrealizowana.'],
+    ['PLN', 'PL', 'PKO BP', 'PKO BP: Blokada srodkow: transakcja karta 1234 na kwote 54,99 PLN w BIEDRONKA zostala zrealizowana i oczekuje na rozliczenie.'],
+    ['INR', 'IN', 'VM-SBIINB', 'रु 750.00 जो पहले डेबिट किए गए थे, आपके खाते XX1234 में वापस क्रेडिट कर दिए गए हैं।'],
+    ['INR', 'IN', 'VM-SBIINB', 'आपके खाते XX1234 से रु 750.00 डेबिट किए गए थे, लेनदेन रिवर्स किया गया।'],
+    ['CNY', 'CN', 'ICBC', '您尾号1234的卡于10月02日在如家酒店消费成功(预授权),金额580.00元。'],
     // A bare "R" is the rand only for a person in South Africa.
     ['USD', 'US', 'FNB', 'FNB: R450.00 paid from Cheq a/c..1234 @ CHECKERS SANDTON. Avail R5,200.00. 02Oct 10:15'],
     // A currency-less figure is rupees only in India, and only on a UPI/IMPS/NEFT account alert.

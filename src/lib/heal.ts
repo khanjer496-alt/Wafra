@@ -169,6 +169,12 @@ export function healPatch(
   if (p.billIdentity && prior.billIdentity !== p.billIdentity) {
     patch.billIdentity = p.billIdentity;
   }
+  // The biller's customer-number tail a settlement states: a payment-flow
+  // fold guard only (Transaction.billerAccountTail), set, never cleared.
+  if (p.billerAccountTail && /^\d{4}$/.test(p.billerAccountTail) &&
+    prior.billerAccountTail !== p.billerAccountTail) {
+    patch.billerAccountTail = p.billerAccountTail;
+  }
   // Instrument provenance is deliberately NOT inferred here. `healPatch`
   // understands parser fields but not whether account resolution was unique;
   // import-plan adds the marker only after it has proved one account.
@@ -330,6 +336,7 @@ export function applyHealPatch(tx: Transaction, patch: TxHealUpdate): Transactio
   if (patch.cardPaymentSide !== undefined) next.cardPaymentSide = patch.cardPaymentSide;
   if (patch.paymentFlowSide !== undefined) next.paymentFlowSide = patch.paymentFlowSide;
   if (patch.billIdentity !== undefined) next.billIdentity = patch.billIdentity;
+  if (patch.billerAccountTail !== undefined) next.billerAccountTail = patch.billerAccountTail;
   if (patch.paymentInstrumentSource !== undefined) {
     next.paymentInstrumentSource = patch.paymentInstrumentSource;
   }

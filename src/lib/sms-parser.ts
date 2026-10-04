@@ -453,8 +453,33 @@ export interface ParsedCard {
  * minted a phantom "Account •9876" — and is kept as the bill identity instead.
  * Future captures plus the bounded recent reread; PARSER_BACKFILL_VERSION
  * remains 49.
+ *
+ * 60: worldwide pass. Worldwide card statements and card payments post as
+ * statements and settlements; Korean, Chinese, Hindi, Spanish, Portuguese,
+ * Polish, Peruvian, Ghanaian and German completed wordings; South African
+ * rand and Indian currency-less UPI alerts; accented French alerts no longer
+ * dropped before parsing. Future captures plus the bounded recent reread;
+ * PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 61: a card statement's issue date is read in more wordings (ISO, 28Aug26,
+ * "01 Aug 2026", "generated on", FAB's "statement of the card ending with 3749
+ * dated 01Aug26"), and a statement-date RANGE is read as no date. A
+ * fraud-verification question ("Did you attempt …? Reply YES or NO") is never
+ * a posted transaction. Future captures plus the bounded recent reread;
+ * PARSER_BACKFILL_VERSION remains 49.
+ *
+ * 62: on top of 59. The amount-first e& receipt also accepts an e& sender ID
+ * ("eandINF", "Etisalat") as biller evidence, so a receipt paid through
+ * "Bank Website" is read; 59's card/minimum-due/outstanding/loan refusal still
+ * runs first. A settlement's biller customer number ("towards your Etisalat
+ * account 9876") is no longer emitted as `billIdentity` — it made bills.ts
+ * refuse a settlement against a reminder keyed on e&'s Party-ID — and the row
+ * matches on provider as before 59. The tail travels instead as
+ * `billerAccountTail`, a fold guard bills.ts never reads, so a settlement for
+ * one e& account cannot absorb a same-amount receipt for another. Future
+ * captures plus the bounded recent reread; PARSER_BACKFILL_VERSION remains 49.
  */
-export const PARSER_VERSION = 59;
+export const PARSER_VERSION = 62;
 /**
  * Historical-repair contract for already-saved data.
  *
@@ -540,6 +565,12 @@ export interface ParsedSms {
   reference: string | null;
   /** Privacy-safe provider/account tail for a bill reminder, when stated. */
   billIdentity?: string;
+  /**
+   * Last four of the biller's own customer number a settlement names. A
+   * payment-flow fold guard only, never a bill identity; see
+   * Transaction.billerAccountTail.
+   */
+  billerAccountTail?: string;
   /** Bank-side leg of a card payment / own-account transfer: money moved, not spent. */
   transferHint: boolean;
   /**
@@ -834,8 +865,10 @@ function billerSettlement(prose: string): string | null {
  * the customer's number AT ETISALAT. extractCard reads any "account NNNN" as
  * the user's own bank account, so the row carried card {9876, account} and the
  * import planner minted a phantom "Account •9876" from it. The digits belong to
- * the biller and are kept only as the privacy-safe bill identity, exactly as
- * the portal-receipt family does with its "account number ····2543".
+ * the biller, so the card they produced is dropped. They are not re-emitted as
+ * a bill identity either: see the settlement return site for why that broke
+ * reminder matching. They survive only as `billerAccountTail`, the
+ * payment-flow fold guard.
  *
  * Narrow on purpose: only the verb-first settlement order, only digits that sit
  * directly after "<biller> account", and only a payee the category vocabulary
@@ -971,6 +1004,19 @@ const PORTAL_RECEIPT_RE =
  * original family. "Payment of AED 351.35 ... has been received and posted to
  * your account no 5552906" (an AutoPay echo) and "Your payment of AED 9251
  * against Credit Card no. XXX9426 was received" both fail it.
+ *
+ * AND THE SHAPE ALONE IS NOT ENOUGH. "your payment of AED 2,500.00 for account
+ * XXXX4321 has been received. Amount Paid: AED 2,500.00" is just as plausible
+ * from a bank about the user's own account, and this branch would have filed
+ * it as a telecom receipt. So the head is only taken with positive biller
+ * evidence — the Payment Channel line naming a RECEIPT_BILLERS biller, or a
+ * RECEIPT_BILLER_SENDER_RE sender — and the receipt block must not mention
+ * a credit card, a minimum due, a non-zero outstanding balance or a loan
+ * (PORTAL_RECEIVED_REFUSE_RE, checked before the evidence, so a biller sender
+ * never overrides it). Otherwise the message falls through to the generic
+ * reader exactly as it did before this head existed. The
+ * older PORTAL_RECEIPT_RE head is not gated: its whole corpus arrived without
+ * sender IDs, half of it through anonymous channels.
  */
 const PORTAL_RECEIVED_RE =
   /\bpayment\s+of\s+(?:[A-Z]{3}|Dhs?)\.?\s*[\d,]+(?:\.\d{1,2})?\s+for\s+account\s+(?:(?:number|no\.?)\s*:?\s*)?[·•X*]*(\d{4,})\s+has\s+been\s+received\b[\s\S]*?\bamount\s+paid\s*:?\s*(?:[A-Z]{3}|Dhs?)?\s*([\d,]+(?:\.\d{1,2})?)/i;
@@ -1006,6 +1052,16 @@ const RECEIPT_BILLERS: [RegExp, string][] = [
   // stable across old Etisalat receipts and newer "e& UAE" app receipts.
   [/(?:etisalat|اتصالات|(?:^|\s)e\s*(?:&|and)\s*(?:uae)?(?:\s|$))/i, 'Etisalat'],
 ];
+/**
+ * Sender IDs that ARE a biller, for the amount-first receipt head only.
+ *
+ * "eandINF" is the sender of the real iPhone capture that head was written
+ * from; "Etisalat" is the biller's own name as a sender ID, not a bank's.
+ * Nothing else is listed — no du, DEWA or SEWA receipt in this template has
+ * been seen, and the branch defaults a silent category to telecom, so adding
+ * a utility sender here would file its receipts as phone bills.
+ */
+const RECEIPT_BILLER_SENDER_RE = /^(?:eandinf|etisalat)$/i;
 /** Payment INTO a card: settles dues rather than spending. */
 // CARD_PAYMENT_RE is market-compiled below.
 
@@ -3260,7 +3316,7 @@ const CATEGORY_KEYWORDS: [RegExp, CategoryId][] = [
   // remittance house, not the hypermarket — a money transfer was being
   // filed as a grocery shop, which overstates consumption for exactly the
   // users who send money home every month.
-  [/carrefour|\blulu\b(?!\s*(?:exchange|money|intl|international))|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|kibsons|barakat|el\s?grocer|freshtohome|fresh\s+to\s+home|family\s*mart|lawson|\b7-?11\b|\b7[ -]?eleven\b|mini ?mart\b|shams al buhaira super|hypermarket|superm\w*|grocer|fresh market|baqala/i, 'groceries'],
+  [/carrefour|\blulu\b(?!\s*(?:exchange|money|intl|international))|spinneys|union coop|choithram|grandiose|waitrose|nesto|al maya|west zone|viva supermarket|\bcoop\b|noon minutes|instashop|careem quik|talabat mart|kibsons|park\s*n\s*shop|wellcome\s+supermarket|plaza\s+vea|tottus|biedronka|[zż]abka|kaufland|barakat|el\s?grocer|freshtohome|fresh\s+to\s+home|family\s*mart|lawson|\b7-?11\b|\b7[ -]?eleven\b|mini ?mart\b|shams al buhaira super|hypermarket|superm\w*|grocer|fresh market|baqala/i, 'groceries'],
   [/karam al sham gents/i, 'personal-care'],
   [/uber\s*eats|talabat|deliveroo|zomato|noon food|careem food|eateasy|\bwolt\b|mamaesh|al deek al soori|restaurant|restoran|cafe|coffee|starbucks|costa|tim hortons|mc\s*donald|kfc|hardee|subway|shawarma|shaurma|cafeteria|dining|bakery|baklava|\bpide\b|pizza|burger|grill|chicken|broast|dunkin|krispy|baskin|papa john|pizza hut|domino|wingstop|five guys|shake shack|raising cane|jollibee|al ?baik|karak|chai|juice|catering|kitchen|bistro|donut|gelato|ice ?cream|sweets|pastr|foodcourt|food court|snack|falafel|biryani|mandi|machboos|kabab|kebab|hommus|manakish|allo beirut|wagamama|nando|chili|applebee|cheesecake|paul\b|shakespeare|arabian tea|barista|caribou|filli|karam|zaatar|maraheb|al safadi|automatic\b|\bkeeta\b|americana|kuwait food|restaur|\bsweets?\b|\bbake\b|bakeir|shawerm|noodle|sushi|ramen|bento|taco\b|wings\b|cookies|crumble|pinkberry|kcal\b|tortilla|arabica|hummus|galitos|\bfoods?\b|beverages/i, 'dining'],
   // `toll` carries a NEGATIVE LOOKAHEAD and it is not decoration: "call our
@@ -5183,17 +5239,54 @@ function numericDate(d: string, m: string, yRaw: string): string | null {
 /**
  * The ISSUE date a card statement states, read only off an explicit
  * statement-date label. Never the due date and never a generic "on <date>".
+ *
+ * The label may reach across the card it belongs to — FAB writes "Your
+ * statement of the card ending with 3749 dated 01Aug26" — but never across a
+ * "due". The date may be numeric (28/08/26), ISO (2026-08-28) or carry a month
+ * name with or without spaces (28Aug26, 01 Aug 2026). A label followed by a
+ * RANGE ("01/08/26 - 31/08/26", "01 Aug 2026 to 31 Aug 2026") states a period,
+ * not a closing day, and is read as no date at all: its start would open the
+ * payment window a full cycle early. A two-digit year after a space must not
+ * be a clock or a count ("28 Aug 15:30", "28 Aug, 21 days").
  */
-const STATEMENT_ISSUE_DATE_RE =
-  /\b(?:statement|stmt)\s*(?:date|dt\.?|dated|generated\s+on|issued\s+on|prepared\s+on)\s*(?:is|:|-|on)?\s*(\d{1,2})[/.-](\d{1,2}|[A-Za-z]{3,9})[/.-](\d{2,4})(?!\d)|تاريخ\s+(?:ال)?كشف\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/i;
-function extractStatementIssueDate(raw: string, dueDate: string | null): string | null {
-  const m = raw.match(STATEMENT_ISSUE_DATE_RE);
-  if (!m) return null;
-  const [d, mo, y] = m[1] !== undefined ? [m[1], m[2], m[3]] : [m[4], m[5], m[6]];
+const STATEMENT_ISSUE_LABEL_RE =
+  /\b(?:statement|stmt)(?:\s+of\s+(?:the\s+|your\s+)?(?:credit\s+)?card\s+(?:no\.?\s+|number\s+)?(?:ending\s+(?:with|in)\s+)?[X*•·\d]{4,})?\s*(?:is\s+)?(?:dated|date|dt\.?|generated\s+on|issued\s+on|prepared\s+on)\s*(?:is|:|-|on)?\s*/gi;
+const STATEMENT_DATE_TOKEN_RE =
+  /^(?:(\d{4})-(\d{2})-(\d{2})(?!\d)|(\d{1,2})[/.-](\d{1,2}|[A-Za-z]{3,9})[/.-](\d{2,4})(?!\d)|(\d{1,2})\s*([A-Za-z]{3,9})(?:\s*,?\s*(\d{4})(?![\d:])|(\d{2})(?![\d:])|\s*,?\s+(\d{2})(?![\d:])(?!\s*[A-Za-z])))/;
+// A range needs a full second DATE after the separator: "01/08/26 - 21 days
+// to pay" is a countdown, and treating it as a range lost the issue date.
+const STATEMENT_DATE_RANGE_SEPARATOR_RE = /^\s*(?:-|–|—|to|till|until)\s*/i;
+const isStatementDateRange = (after: string): boolean => {
+  const separator = after.match(STATEMENT_DATE_RANGE_SEPARATOR_RE);
+  if (!separator) return false;
+  const second = after.slice(separator[0].length).match(STATEMENT_DATE_TOKEN_RE);
+  return !!second && statementTokenDate(second) !== null;
+};
+const STATEMENT_ISSUE_DATE_AR_RE = /تاريخ\s+(?:ال)?كشف\s*:?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})(?!\d)/;
+function statementTokenDate(m: RegExpMatchArray): string | null {
+  if (m[1] !== undefined) return isoDate(Number(m[1]), Number(m[2]), Number(m[3]));
+  const [d, mo, y] = m[4] !== undefined ? [m[4], m[5], m[6]] : [m[7], m[8], m[9] ?? m[10] ?? m[11]];
+  const year = y.length === 2 ? 2000 + Number(y) : Number(y);
+  if (/^\d+$/.test(mo)) return numericDate(d, mo, y);
   const named = MONTH_NAMES[mo.slice(0, 3).toLowerCase()];
-  const date = /^\d+$/.test(mo)
-    ? numericDate(d, mo, y)
-    : named ? isoDate(y.length === 2 ? 2000 + Number(y) : Number(y), named, Number(d)) : null;
+  return named ? isoDate(year, named, Number(d)) : null;
+}
+function extractStatementIssueDate(raw: string, dueDate: string | null): string | null {
+  let date: string | null = null;
+  STATEMENT_ISSUE_LABEL_RE.lastIndex = 0;
+  for (let label = STATEMENT_ISSUE_LABEL_RE.exec(raw); label; label = STATEMENT_ISSUE_LABEL_RE.exec(raw)) {
+    const rest = raw.slice(label.index + label[0].length);
+    const token = rest.match(STATEMENT_DATE_TOKEN_RE);
+    if (!token) continue;
+    if (isStatementDateRange(rest.slice(token[0].length))) return null;
+    date = statementTokenDate(token);
+    break;
+  }
+  STATEMENT_ISSUE_LABEL_RE.lastIndex = 0;
+  if (!date) {
+    const ar = raw.match(STATEMENT_ISSUE_DATE_AR_RE);
+    if (ar) date = numericDate(ar[1], ar[2], ar[3]);
+  }
   // An issue date on or after the deadline is not an issue date.
   if (!date || (dueDate && date >= dueDate)) return null;
   return date;
@@ -6133,9 +6226,12 @@ function parseSmsInner(
   // needs a real sample first.
   // The amount-first opening is ordinary bank wording on its own ("your
   // payment of AED 3,000.00 for account 4711 has been received" is also how a
-  // card repayment can read), so it joins the family only when the channel
-  // line names a known biller and the body says nothing about a card, a
-  // minimum due, an outstanding balance or a loan.
+  // card repayment can read), so it joins the family only when the body says
+  // nothing about a card, a minimum due, an outstanding balance or a loan,
+  // AND there is positive biller evidence: the channel line names a known
+  // biller, or the sender ID is the biller's own (see PORTAL_RECEIVED_RE).
+  // The refusal is checked first, so an e& sender never rescues a body that
+  // reads like a card or loan repayment.
   const portalPay = raw.match(PORTAL_RECEIPT_RE) ?? (() => {
     const received = raw.match(PORTAL_RECEIVED_RE);
     if (!received) return null;
@@ -6147,8 +6243,12 @@ function parseSmsInner(
     const block = (tail < 0 ? raw : raw.slice(0, blockEnd + tail))
       .split('\n').filter((line) => !/^\s*(?:mode\s+of\s+payment|card\s+(?:no\.?|number))\b/i.test(line)).join('\n');
     if (PORTAL_RECEIVED_REFUSE_RE.test(block)) return null;
+    // "Bank Website" names nobody; the sender may still be the biller.
     const channel = raw.match(PORTAL_CHANNEL_RE)?.[1] ?? '';
-    return RECEIPT_BILLERS.some(([re]) => re.test(channel)) ? received : null;
+    const senderId = (options?.sender ?? '').replace(/[\s._-]/g, '');
+    const billerNamed = (channel !== '' && RECEIPT_BILLERS.some(([re]) => re.test(channel))) ||
+      RECEIPT_BILLER_SENDER_RE.test(senderId);
+    return billerNamed ? received : null;
   })();
   if (portalPay) {
     // Last four, not first four: an unmasked account number would otherwise
@@ -6229,8 +6329,22 @@ function parseSmsInner(
         date,
         dueDay: null,
         minDueFils: null,
-        // The account number in this template is the BILLER's ("for account
-        // XXXXX2543"), so a card read from those same digits is not the user's.
+        /**
+         * THE ACCOUNT NUMBER IN THE HEAD IS THE BILLER'S, NOT THE USER'S.
+         *
+         * extractCard reads "account number ····2543" / "for account
+         * XXXXX4567" as an account the user owns, and import-plan then minted
+         * a phantom "Account •2543" from it and stamped the row's instrument
+         * as alert-sourced. The digits belong to Etisalat; they survive only
+         * as the bill identity parseSms derives from the body.
+         *
+         * ANY instrument carrying those last four is dropped, not only an
+         * `account`: biller fragments collide with real card fragments (the
+         * corpus has a 4822 biller account for a user whose Liv debit card
+         * ends 4822), and crediting the payment to the wrong card is worse
+         * than crediting it to none. A different instrument named elsewhere
+         * (different digits) is kept.
+         */
         card: card && card.last4 === last4 ? null : card,
         transferHint: false,
         // This is biller-side evidence for a payment. It remains useful when
@@ -7059,8 +7173,19 @@ function parseSmsInner(
   // A biller's customer number is not the user's account; see
   // billerOwnAccountTail. Only the instrument extractCard took FROM that
   // number is dropped — a real card or account named elsewhere in the body
-  // (different digits) is kept. The number itself survives as the bill
-  // identity whether or not extractCard had picked it up.
+  // (different digits) is kept.
+  //
+  // The number is deliberately NOT emitted as `billIdentity`. bills.ts
+  // compares identity tails across kinds and refuses a payment whose tail
+  // differs from the reminder's, and a settlement's "account 9876" need not be
+  // the number the reminder was keyed on: e&'s real due notice keys on the
+  // Party-ID ("party:4835"). With the identity attached, an AED 775.81
+  // settlement stopped settling that AED 775.81 reminder, which origin/main
+  // marked paid. Without it the row matches on provider, exactly as before.
+  //
+  // It IS kept as `billerAccountTail`, which only payment-flow's biller-receipt
+  // fold reads: without it, an e& receipt for account 2543 of the same amount
+  // could be folded into this settlement for account 9876 and deleted.
   const billerAccount = billerPaid && !isBillDue ? billerOwnAccountTail(raw, billerPaid) : null;
   const billerOwnsCard = billerAccount !== null && card?.kind === 'account' && card.last4 === billerAccount;
 
@@ -7075,7 +7200,7 @@ function parseSmsInner(
     dueDay: billDueDate ? Number(billDueDate.slice(8)) : null,
     minDueFils: null,
     card: billerOwnsCard ? null : card,
-    ...(billerAccount ? { billIdentity: `account:${billerAccount}` } : {}),
+    ...(billerAccount ? { billerAccountTail: billerAccount } : {}),
     transferHint,
     snapshotFils: fundingBalance ? null : snapshotFils,
     snapshotKind: fundingBalance ? null : snapshotKind,
