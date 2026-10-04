@@ -4,7 +4,7 @@ import React, { startTransition, useCallback, useEffect, useMemo, useRef, useSta
 import { Alert, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from '@/hooks/use-app-router';
 import { Fonts } from '@/constants/theme';
-import { useIsFocused } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { ThemedText } from '@/components/themed-text';
 import { TransactionRow } from '@/components/transaction-row';
@@ -129,6 +129,13 @@ export const HOME_STATE_FIELDS = [
 ] as const satisfies readonly (keyof LedgerState)[];
 const homeStateEqual = fieldsEqual<LedgerState>(HOME_STATE_FIELDS);
 
+/** The same recap entry again keeps its object, so returning Home does not re-render it. */
+function keepRecapEntry<T extends { descriptor: RecapDescriptor; unread: boolean }>(
+  current: T | null, descriptor: RecapDescriptor, unread: boolean,
+): T | { descriptor: RecapDescriptor; unread: boolean } {
+  return current?.descriptor.id === descriptor.id && current.unread === unread ? current : { descriptor, unread };
+}
+
 export default function JournalHomeScreen() {
   const theme = useTheme();
   // Design language E: Home wears the ink band in both schemes.
@@ -137,7 +144,6 @@ export default function JournalHomeScreen() {
   const words = copy[language === 'ar' ? 'ar' : 'en'];
   const transferWords = transferActivityCopy(language);
   const largeText = useLargeTextLayout();
-  const focused = useIsFocused();
   const privacyGateCleared = usePrivacyGateCleared();
   const router = useRouter();
   const toast = useToast();
@@ -208,8 +214,11 @@ export default function JournalHomeScreen() {
       refreshInFlight.current = null;
     };
   }, []);
-  useEffect(() => {
-    if (!focused) return;
+  // Focus-driven work uses useFocusEffect, not useIsFocused: subscribing to
+  // focus re-rendered all of Home on every switch to it (and away from it)
+  // only to start or cancel the jobs below. Each focus effect runs on focus,
+  // again when its inputs change while focused, and cleans up on blur.
+  useFocusEffect(useCallback(() => {
     let alive = true;
     // Every return to this tab reloads the preference. Only publish a new
     // object when something actually changed, so the tab switch itself does
@@ -220,25 +229,24 @@ export default function JournalHomeScreen() {
     const unsubscribe = subscribeHomeWidgetPreferences(apply);
     void loadHomeWidgetPreferences().then(apply);
     return () => { alive = false; unsubscribe(); };
-  }, [focused]);
+  }, []));
 
-  useEffect(() => {
-    if (!focused) return;
+  useFocusEffect(useCallback(() => {
     let alive = true;
     void loadCapturePauseSnooze().then((snoozedAt) => {
       if (alive) setCaptureSnoozedAt((current) => current === snoozedAt ? current : snoozedAt);
     });
     return () => { alive = false; };
-  }, [focused]);
+  }, []));
 
-  useEffect(() => {
-    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
+  useFocusEffect(useCallback(() => {
+    if (!privacyGateCleared || !state.hydrated || !state.onboarded) return;
     // Mark Home usable from the first committed ledger frame. Category/parser
     // cleanup is intentionally NOT scheduled from Home: both dedicated tools
     // remain available in Settings, and a large ledger must not pay multiple
     // full-history scans a moment after the first frame just to render a prompt.
     markLaunchPhase('first-usable-home');
-  }, [focused, privacyGateCleared, state.hydrated, state.onboarded]);
+  }, [privacyGateCleared, state.hydrated, state.onboarded]));
   // Homes saved by the earlier Goals step opened with the goal sections and
   // lost their band; put the band back once (home-goal-order-repair.ts). A
   // repaired layout reaches this screen through the preference subscription.
@@ -247,8 +255,8 @@ export default function JournalHomeScreen() {
     if (!state.hydrated || !state.onboarded || !choseGoals) return;
     void repairGoalOrderedHomeOnce();
   }, [state.hydrated, state.onboarded, choseGoals]);
-  useEffect(() => {
-    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded || homeAnalysisReady) return;
+  useFocusEffect(useCallback(() => {
+    if (!privacyGateCleared || !state.hydrated || !state.onboarded || homeAnalysisReady) return;
     // The insight is lower priority again. Its Home variant deliberately skips
     // subscription detection; Bills owns that full historical analysis.
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -259,9 +267,9 @@ export default function JournalHomeScreen() {
       task.cancel();
       if (timer !== null) clearTimeout(timer);
     };
-  }, [focused, homeAnalysisReady, privacyGateCleared, state.hydrated, state.onboarded]);
-  useEffect(() => {
-    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
+  }, [homeAnalysisReady, privacyGateCleared, state.hydrated, state.onboarded]));
+  useFocusEffect(useCallback(() => {
+    if (!privacyGateCleared || !state.hydrated || !state.onboarded) return;
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     // Recap is celebratory, never launch-critical. Wait until Home and its
@@ -277,7 +285,7 @@ export default function JournalHomeScreen() {
         }
         void loadViewedRecaps().then((viewed) => {
           const descriptor = candidates.find((candidate) => !viewed.has(candidate.id)) ?? candidates[0]!;
-          if (alive) setRecapEntry({ descriptor, unread: !viewed.has(descriptor.id) });
+          if (alive) setRecapEntry((current) => keepRecapEntry(current, descriptor, !viewed.has(descriptor.id)));
         });
       }, 2_600);
     });
@@ -288,7 +296,7 @@ export default function JournalHomeScreen() {
     };
     // A new day can cross a salary-month boundary and produce a new recap.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focused, privacyGateCleared, state.hydrated, state.onboarded, state.transactions, projectionDay]);
+  }, [privacyGateCleared, state.hydrated, state.onboarded, state.transactions, projectionDay]));
   useEffect(() => {
     const listener = AppState.addEventListener('change', (next) => {
       if (next === 'active') setNow(new Date());
@@ -341,7 +349,9 @@ export default function JournalHomeScreen() {
     // A stale answer is dropped at once: it must not hold an old ledger while
     // Home is hidden, nor show another scope's renewals.
     if (homeRecurring !== null && !recurringCurrent) setHomeRecurring(null);
-    if (!focused || !state.hydrated || !state.onboarded || state.privateMode || recurringCurrent) return;
+  }, [homeRecurring, recurringCurrent]);
+  useFocusEffect(useCallback(() => {
+    if (!state.hydrated || !state.onboarded || state.privateMode || recurringCurrent) return;
     const { transactions, notSubscriptions } = state;
     let cancelled = false;
     const today = new Date(`${projectionDay}T12:00:00`);
@@ -367,8 +377,8 @@ export default function JournalHomeScreen() {
     });
     return () => { cancelled = true; task.cancel(); timers.forEach(clearTimeout); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focused, state.hydrated, state.onboarded, state.privateMode, recurringCurrent, state.transactions,
-    state.notSubscriptions, liveAccounts, homeInternal, projectionDay]);
+  }, [state.hydrated, state.onboarded, state.privateMode, recurringCurrent, state.transactions,
+    state.notSubscriptions, liveAccounts, homeInternal, projectionDay]));
   const payments = useMemo(() => {
     if (!homeRecurring || !recurringCurrent) return dashboard.upcoming.items;
     // A renewal that has not shown up yet is an estimate running late, not a
@@ -445,22 +455,31 @@ export default function JournalHomeScreen() {
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
   const historyAnalysisBlocked = state.historyImport !== null && state.historyImport.status !== 'complete';
   const completedInsightInputs = useRef<readonly unknown[] | null>(null);
+  // Focus resumes unfinished work, but a simple tab round trip must not
+  // repeat a completed full-history projection for identical inputs.
+  const insightInputs = [state.transactions, state.accounts, state.budgets, state.notSubscriptions,
+    state.transferInternalIds, state.transferNormalizationVersion, state.historyImport?.status,
+    state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay];
+  const insightInputsCompleted = () =>
+    completedInsightInputs.current?.every((value, index) => Object.is(value, insightInputs[index])) === true;
+  const insightDisabled = !homeAnalysisReady || !insightWidgetVisible || historyAnalysisBlocked;
+  // Runs whether or not Home is focused: a disabled insight clears at once,
+  // and obsolete ledger references are released even while this tab is hidden.
   useEffect(() => {
-    if (!homeAnalysisReady || !insightWidgetVisible || historyAnalysisBlocked) {
+    if (insightDisabled) {
       completedInsightInputs.current = null;
       setHomeInsight(null);
       return;
     }
-    // Focus resumes unfinished work, but a simple tab round trip must not
-    // repeat a completed full-history projection for identical inputs.
-    const inputs = [state.transactions, state.accounts, state.budgets, state.notSubscriptions,
-      state.transferInternalIds, state.transferNormalizationVersion, state.historyImport?.status,
-      state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay];
-    if (completedInsightInputs.current?.every((value, index) => Object.is(value, inputs[index]))) return;
-    // Release obsolete ledger references even while this visited tab is hidden.
-    // Cancel queued work on blur and analyse new inputs only on returning Home.
-    completedInsightInputs.current = null;
-    if (!focused) return;
+    if (!insightInputsCompleted()) completedInsightInputs.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [insightDisabled, state.transactions, state.accounts, state.budgets, state.notSubscriptions,
+    state.transferInternalIds, state.transferNormalizationVersion, state.historyImport?.status,
+    state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay]);
+  // Queued work is cancelled on blur; new inputs are analysed only on Home.
+  useFocusEffect(useCallback(() => {
+    if (insightDisabled || insightInputsCompleted()) return;
+    const inputs = insightInputs;
     let cancelled = false;
     // Keep the previous card only inside its original period/language while
     // recomputing. Analysis must not hitch the turn that just painted an SMS.
@@ -481,16 +500,18 @@ export default function JournalHomeScreen() {
     // insight is computed only after Home is already interactive and only while
     // the user has that widget enabled.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focused, homeAnalysisReady, insightWidgetVisible, historyAnalysisBlocked, state.transactions, state.accounts, state.budgets,
-    state.notSubscriptions, state.transferInternalIds, state.transferNormalizationVersion,
-    state.historyImport?.status, state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay]);
+  }, [insightDisabled, state.transactions, state.accounts, state.budgets, state.notSubscriptions,
+    state.transferInternalIds, state.transferNormalizationVersion, state.historyImport?.status,
+    state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay]));
   // Home names the transfer review queue only once it is known: the same
   // pendingIds the review screen lists, so the count and the list agree. The
   // graph is built after interactions, never during hydration or a running
   // history import, and not at all when no row could be a transfer.
   useEffect(() => {
-    if (historyAnalysisBlocked) { setPendingTransfers(null); return; }
-    if (!focused || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
+    if (historyAnalysisBlocked) setPendingTransfers(null);
+  }, [historyAnalysisBlocked]);
+  useFocusEffect(useCallback(() => {
+    if (historyAnalysisBlocked || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
     let cancelled = false;
     const task = InteractionManager.runAfterInteractions(() => {
       if (cancelled) return;
@@ -500,7 +521,10 @@ export default function JournalHomeScreen() {
       const next = reconciliation
         ? pendingTransferSummary(state.transactions, reconciliation.pendingIds)
         : { count: 0, incomingFils: 0, outgoingFils: 0 };
-      if (!cancelled) setPendingTransfers(next);
+      // An unchanged queue keeps its object, so returning Home does not
+      // re-render it once the graph is rebuilt.
+      if (!cancelled) setPendingTransfers((current) => current !== null && current.count === next.count
+        && current.incomingFils === next.incomingFils && current.outgoingFils === next.outgoingFils ? current : next);
     });
     return () => {
       cancelled = true;
@@ -508,8 +532,8 @@ export default function JournalHomeScreen() {
     };
     // Transfer receipts change the reconciliation even when the arrays do not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focused, privacyGateCleared, state.hydrated, state.onboarded, historyAnalysisBlocked, state.transactions, state.accounts,
-    state.transferInternalIds, state.transferNormalizationVersion]);
+  }, [privacyGateCleared, state.hydrated, state.onboarded, historyAnalysisBlocked, state.transactions, state.accounts,
+    state.transferInternalIds, state.transferNormalizationVersion]));
   const history = state.historyImport?.status !== 'complete' ? state.historyImport : null;
   const status: CaptureSurfaceState = state.captureOptOut || needsPermission ? 'off'
     : Platform.OS === 'android' && !isProActive(state) ? 'paused' : captureState;
