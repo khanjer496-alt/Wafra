@@ -479,8 +479,8 @@ export default function TransactionsScreen() {
   const { filtered, totalShown, excluded, separatedTransfers } = projection;
   const transferContributes = separatedTransfers.incomeFils > 0 || separatedTransfers.expenseFils > 0;
   const stripDetail = [
-    separatedTransfers.expenseFils > 0 ? transferWords.strip.sentInNet(formatAED(separatedTransfers.expenseFils, { decimals: true })) : null,
-    separatedTransfers.incomeFils > 0 ? transferWords.strip.receivedInNet(formatAED(separatedTransfers.incomeFils, { decimals: true })) : null,
+    separatedTransfers.expenseFils > 0 ? transferWords.strip.sentInNet(formatAED(separatedTransfers.expenseFils, { decimals: false })) : null,
+    separatedTransfers.incomeFils > 0 ? transferWords.strip.receivedInNet(formatAED(separatedTransfers.incomeFils, { decimals: false })) : null,
     separatedTransfers.reviewCount > 0 ? transferWords.strip.needsAnswer(separatedTransfers.reviewCount) : null,
   ].filter(Boolean).join(' · ');
   // A single ordinary row already displays its amount. Keep a separate total

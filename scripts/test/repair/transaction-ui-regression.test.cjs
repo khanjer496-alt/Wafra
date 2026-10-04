@@ -349,6 +349,7 @@ for (const language of ['en', 'ar']) test(`${language}: the transfer strip says 
   assert.ok(strip);
   assert.ok(text(strip).includes(words.strip.kept(1)));
   assert.match(text(strip), language === 'en' ? /sent to others is in the net/ : /أُرسلت لآخرين ضمن الصافي/);
+  assert.ok(/400/.test(text(strip)) && !/400\.00/.test(text(strip)), 'a whole amount shows no decimals');
   assert.ok(strip.props.accessibilityLabel.includes(words.viewAll));
 });
 

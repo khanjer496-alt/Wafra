@@ -20,6 +20,21 @@ test('a linked pair is one row reading from → to, counted once', () => {
   assert.equal(transferTotals(items).ownFils, 700000);
 });
 
+test('two unlinked own legs of one transfer count the amount once', () => {
+  const out = tx('o', 'expense', 'fab', 250000); const inn = tx('i', 'income', 'enbd', 250000);
+  const items = transferListItems([rec(out, 'own'), rec(inn, 'own')], []);
+  assert.equal(items.length, 2);
+  assert.equal(transferTotals(items).ownFils, 250000);
+});
+
+test('an own transfer captured only from its incoming side adds nothing to the tile', () => {
+  const inn = tx('i', 'income', 'enbd', 250000);
+  const items = transferListItems([rec(inn, 'own')], []);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].direction, 'in');
+  assert.equal(transferTotals(items).ownFils, 0);
+});
+
 test('single rows: names the person, else a dashed unknown; tags follow the answer', () => {
   const paid = tx('p', 'expense', 'adcb', 85000, { transferEvidence: { counterpartyName: 'Ahmed K.' } });
   const got = tx('r', 'income', 'adcb', 12000);

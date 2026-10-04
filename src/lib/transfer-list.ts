@@ -49,8 +49,8 @@ export function transferListItems(
 export function transferTotals(items: readonly TransferListItem[]) {
   let ownFils = 0; let sentFils = 0; let receivedFils = 0;
   for (const item of items) {
-    // An own transfer seen only from its incoming side still moved that money once.
-    if (item.tag === 'own') ownFils += item.amountFils;
+    // Own money counts via 'out'/'between' items so unlinked legs never double; an in-only capture is left out.
+    if (item.tag === 'own') { if (item.direction !== 'in') ownFils += item.amountFils; }
     else if (item.tag === 'external' && item.direction === 'out') sentFils += item.amountFils;
     else if (item.tag === 'external' && item.direction === 'in') receivedFils += item.amountFils;
   }
