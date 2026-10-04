@@ -408,6 +408,20 @@ test('detail sheet: without a passed assessment it reads the cached reconciliati
     transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'ADCB' } };
   const { h, words } = detail();
   h.state.transactions.push(out, inn);
+  // A final stored receipt, as the store keeps one.
+  const version = h.deps['@/lib/transfer-reconciliation'].TRANSFER_NORMALIZATION_VERSION;
+  Object.assign(h.state, { transferInternalIds: [], transferNormalizationVersion: version, historyImport: null });
+  const ledger = h.deps['@/lib/ledger'];
+  // Before Home, Transactions or Transfers has built the graph for this receipt, the sheet does not build it.
+  const reconcile = h.deps['@/lib/transfer-reconciliation'].reconcileTransfers;
+  let builds = 0;
+  h.deps['@/lib/transfer-reconciliation'].reconcileTransfers = (...args) => { builds++; return reconcile(...args); };
+  const cold = h.renderDetail(inn);
+  assert.equal(builds, 0, 'opening an entry never walks the transfer graph');
+  assert.ok(!text(cold).includes(words.route.linked('Emirates NBD')), 'no cached graph: the row answers for itself');
+  h.deps['@/lib/transfer-reconciliation'].reconcileTransfers = reconcile;
+  // Home builds it after interactions (journal-home-screen); the same cache serves every sheet.
+  assert.equal(ledger.transferReconciliationForState(h.state).byId.get('pair-in').status, 'confirmed-own');
   // Account, Flow, Home, card, merchant and the other sheets pass no assessment.
   const plain = h.renderDetail(inn);
   assert.equal(byId(plain, 'transfer-answer-own').props.accessibilityState.checked, true, 'the confirmed pair reads as own');

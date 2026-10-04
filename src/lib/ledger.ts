@@ -320,6 +320,23 @@ export function transferReconciliationForState(
 }
 
 /**
+ * The reconciliation `transferReconciliationForState` already cached for this
+ * exact final receipt, or null. It never builds one, so a surface that opens
+ * on a tap (the entry detail sheet) can use the graph without walking the
+ * ledger: Home builds it after interactions, and Transactions and Transfers
+ * build it for their own lists. Null for a provisional or missing receipt, or
+ * before any of those has run since the receipt last changed.
+ */
+export function cachedTransferReconciliationForState(
+  state: Pick<AppState, 'accounts' | 'transferInternalIds' | 'transferNormalizationVersion'>,
+): TransferReconciliationResult | null {
+  const receipt = state.transferInternalIds;
+  if (!Array.isArray(receipt) || state.transferNormalizationVersion !== TRANSFER_NORMALIZATION_VERSION) return null;
+  return receiptReconciliationCache?.receipt === receipt && receiptReconciliationCache.accounts === state.accounts
+    ? receiptReconciliationCache.result : null;
+}
+
+/**
  * Secondary bank alerts that corroborate an already-recorded transfer.
  *
  * FAB can emit both a transfer-detail alert and an outward-remittance debit for

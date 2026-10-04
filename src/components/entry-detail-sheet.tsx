@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
-import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, transferReconciliationForState } from '@/lib/ledger';
+import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, cachedTransferReconciliationForState } from '@/lib/ledger';
 import { canMarkOwnTransfer, isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
 import { currentAnswer, ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
@@ -86,11 +86,13 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const { state, editTransaction, deleteTransaction, resolveBestEffort, setMerchantOverride, setBillAlias } = useStore();
   // Transactions and Transfers pass the assessment from the reconciliation they
   // already hold. Every other sheet (account, Flow, Home, card, merchant, ...)
-  // reads the one cached per stored transfer receipt, so a confirmed pair shows
-  // its answer and link and "own" can link the other side. Only while an entry
-  // is shown; null during a history import's provisional receipt, which is safe.
+  // reads the one already cached for the stored transfer receipt, so a confirmed
+  // pair shows its answer and link and "own" can link the other side. Only a
+  // cache read, and only while an entry is shown: opening an entry must never
+  // walk the ledger's transfer graph. Without a cached result (a provisional
+  // import receipt, a restored ledger with none) the row answers for itself.
   const transferAssessment = passedAssessment ?? (transaction
-    ? transferReconciliationForState(state)?.byId.get(transaction.id) : undefined);
+    ? cachedTransferReconciliationForState(state)?.byId.get(transaction.id) : undefined);
   const [editing, setEditing] = useState(false);
 
   const [title, setTitle] = useState('');
