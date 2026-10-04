@@ -1201,15 +1201,16 @@ const styles = StyleSheet.create({
   headerLarge: { alignItems: 'stretch' },
   block: { gap: Spacing.one },
   blockHeader: {
-    minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between',
-    gap: Spacing.two, paddingTop: Spacing.two,
+    minHeight: 44, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between',
+    gap: Spacing.one, paddingTop: Spacing.one, paddingBottom: Spacing.one,
   },
   blockTitle: { flexShrink: 1 },
   notice: {
-    flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingStart: Spacing.three,
-    borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.three,
+    paddingHorizontal: Spacing.three, paddingVertical: Spacing.two,
+    borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet, marginBottom: Spacing.two,
   },
-  noticeAction: { minHeight: 44, minWidth: 64, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.two },
+  noticeAction: { minHeight: 44, minWidth: 80, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.two, flexShrink: 0 },
   // 36pt plus the 4pt hit slop each side keeps the 44pt target.
   pill: {
     minHeight: 36, justifyContent: 'center', paddingHorizontal: 14,
