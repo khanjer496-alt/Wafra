@@ -56,6 +56,7 @@ export type RuntimeOperationTag =
   | 'ask-execute'
   | 'ask-evidence'
   | 'bills-projection'
+  | 'bills-projection-prewarm'
   | 'bills-open-dues'
   | 'bills-paid-cards'
   | 'bills-transfer-scope'
@@ -93,6 +94,7 @@ const OPERATION_TAGS: Record<RuntimeOperationTag, true> = {
   'ask-execute': true,
   'ask-evidence': true,
   'bills-projection': true,
+  'bills-projection-prewarm': true,
   'bills-open-dues': true,
   'bills-paid-cards': true,
   'bills-transfer-scope': true,

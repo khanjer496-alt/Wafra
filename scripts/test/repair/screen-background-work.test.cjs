@@ -244,3 +244,96 @@ test('Home recomputes completed insights when the custom category catalog change
   assert.equal(analysed.length, 2, 'unchanged catalog still reuses completed work');
   p.dispose();
 });
+
+// iOS native tabs mount all four tabs at launch. A hidden Bills prepares its
+// recurring answer, so the first switch shows the agenda instead of the
+// pending line and then a second, different screen a moment later.
+test('iOS hidden Bills prewarms recurrence after an idle delay so a switch never shows pending', async () => {
+  const p = screenProbe('src/app/(tabs)/bills.tsx', 'ios');
+  const subscriptions = p.deps['@/lib/subscriptions'];
+  const expected = subscriptions.detectSubscriptions();
+  const jobs = [];
+  subscriptions.detectSubscriptionsCooperatively = (...args) => new Promise(resolve => jobs.push({ resolve, cancelled: args[5] }));
+  const nodes = tree => walk(tree).flatMap(node => [node, ...(node.props?.bandContent ? walk(node.props.bandContent) : [])]);
+  p.focused = false;
+  p.render(); p.interactions(); p.frames();
+  assert.equal(jobs.length, 0, 'launch keeps the JS thread: nothing starts before the prewarm delay');
+  p.timers(1_500);
+  assert.equal(jobs.length, 0, 'prewarm still waits for running interactions');
+  p.interactions();
+  assert.equal(jobs.length, 1, 'hidden iOS Bills starts the cooperative detector');
+  jobs[0].resolve(expected); await Promise.resolve();
+  p.focused = true;
+  const shown = nodes(p.render());
+  p.interactions(); p.frames();
+  assert.equal(shown.some(node => node.props?.testID === 'bills-summary-pending'), false, 'switching to Bills shows the prepared answer');
+  assert.ok(shown.some(node => node.props?.testID === 'bills-summary'));
+  assert.equal(jobs.length, 1, 'a prepared answer is not analysed again on focus');
+  p.dispose();
+});
+
+// Tabs mount under onboarding: an answer from the empty ledger would stand as
+// the first result and a later first visit would show totals without renewals.
+test('iOS hidden Bills never prewarms an empty ledger', async () => {
+  const p = screenProbe('src/app/(tabs)/bills.tsx', 'ios');
+  const subscriptions = p.deps['@/lib/subscriptions'];
+  const jobs = [];
+  subscriptions.detectSubscriptionsCooperatively = (...args) => new Promise(resolve => jobs.push({ resolve, cancelled: args[5] }));
+  p.state = { ...p.state, transactions: [] };
+  p.focused = false;
+  p.render(); p.interactions(); p.frames(); p.timers(1_500); p.interactions();
+  assert.equal(jobs.length, 0, 'no hidden prewarm before the first transaction');
+  p.dispose();
+});
+
+test('iOS Bills prewarm defers to the focused job and Android never prewarms', async () => {
+  const ios = screenProbe('src/app/(tabs)/bills.tsx', 'ios');
+  let iosJobs = 0;
+  ios.deps['@/lib/subscriptions'].detectSubscriptionsCooperatively = () => { iosJobs += 1; return new Promise(() => {}); };
+  ios.render(); ios.timers(1_500); ios.interactions(); ios.frames();
+  assert.equal(iosJobs, 1, 'a focused tab runs one job, not focus plus prewarm');
+  ios.dispose();
+
+  const android = screenProbe('src/app/(tabs)/bills.tsx', 'android');
+  let androidJobs = 0;
+  android.deps['@/lib/subscriptions'].detectSubscriptionsCooperatively = () => { androidJobs += 1; return new Promise(() => {}); };
+  android.focused = false;
+  android.render(); android.timers(1_500); android.timers(4_000); android.interactions(); android.frames();
+  assert.equal(androidJobs, 0, 'Android hidden tabs are frozen and keep the focused path');
+  android.dispose();
+});
+
+test('Home and Bills do not subscribe to focus just to start or cancel work', () => {
+  const fs = require('node:fs');
+  for (const file of ['src/screens/journal-home-screen.tsx', 'src/app/(tabs)/bills.tsx']) {
+    const source = fs.readFileSync(path.join(root, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    // useIsFocused re-renders the whole screen on every switch to and from it.
+    assert.doesNotMatch(source, /useIsFocused/, `${file} must use useFocusEffect for focus-driven work`);
+  }
+});
+
+test('iOS hidden Bills prewarms only the first answer and never during a history import', async () => {
+  const p = screenProbe('src/app/(tabs)/bills.tsx', 'ios');
+  const subscriptions = p.deps['@/lib/subscriptions'];
+  const expected = subscriptions.detectSubscriptions();
+  const jobs = [];
+  subscriptions.detectSubscriptionsCooperatively = (...args) => new Promise(resolve => jobs.push({ resolve, cancelled: args[5] }));
+  p.focused = false;
+  p.render(); p.timers(1_500); p.interactions();
+  assert.equal(jobs.length, 1);
+  jobs[0].resolve(expected); await Promise.resolve(); p.render();
+  // A capture changes the ledger while Bills stays hidden.
+  p.state = { ...p.state, transactions: [...p.state.transactions] };
+  p.render(); p.timers(1_500); p.interactions(); p.frames();
+  assert.equal(jobs.length, 1, 'a hidden tab with an answer does not re-scan after each capture');
+  p.dispose();
+
+  const importing = screenProbe('src/app/(tabs)/bills.tsx', 'ios');
+  let started = 0;
+  importing.deps['@/lib/subscriptions'].detectSubscriptionsCooperatively = () => { started += 1; return new Promise(() => {}); };
+  importing.state = { ...importing.state, historyImport: { status: 'running' } };
+  importing.focused = false;
+  importing.render(); importing.timers(1_500); importing.interactions(); importing.frames();
+  assert.equal(started, 0, 'an unfinished history import keeps the JS thread');
+  importing.dispose();
+});

@@ -1,4 +1,4 @@
-import React, { startTransition, useCallback, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   ActivityIndicator,
@@ -51,6 +51,7 @@ import {
   shortDate,
   toISODate,
 } from '@/lib/format';
+import { historyImportIncomplete } from '@/lib/history-import';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { openAgendaSummary } from '@/lib/money-places-band';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
@@ -114,6 +115,13 @@ export function recurringChargePresentation(sub: Subscription): { amountFils: nu
 }
 
 const UPCOMING_RECURRENCE_IDLE_MS = 4_000;
+/**
+ * iOS native tabs mount every tab at launch, so a hidden Bills can have its
+ * recurring answer ready before the first tap. It waits this long after the
+ * ledger last changed (an import's pages keep resetting it), then for running
+ * interactions, so launch and capture keep the JS thread first.
+ */
+export const IOS_HIDDEN_RECURRENCE_PREWARM_MS = 1_500;
 /** "Next 30 days" is a window, and its label is a promise about it. */
 const UPCOMING_WINDOW_DAYS = 30;
 
@@ -396,6 +404,56 @@ export default function BillsScreen() {
     const dismissed = new Set(state.notSubscriptions.map((title) => title.trim().toLowerCase()));
     return nativeRecurringResult.value.filter((sub) => !isSubscriptionDismissed(sub, dismissed));
   }, [cachedRecurring, nativeRecurringResult, state.notSubscriptions]);
+
+  // Whether the focused job below owns the analysis. A ref, not useIsFocused,
+  // so focus changes do not re-render the screen.
+  const focusedRef = useRef(false);
+  useFocusEffect(useCallback(() => {
+    focusedRef.current = true;
+    return () => { focusedRef.current = false; };
+  }, []));
+
+  // iOS: prepare the FIRST answer while the tab is hidden, so the first switch
+  // to Bills shows the finished agenda instead of "Checking recurring
+  // payments…" and then replacing it a moment later. Once any answer exists
+  // it stays visible while a changed ledger is refreshed on focus, so a hidden
+  // tab never re-scans the whole ledger after each capture. Not during an
+  // unfinished history import either: its pages keep changing the ledger, and
+  // the import owns the JS thread. Android mounts tabs on first visit and
+  // freezes hidden ones, so it keeps the focused path.
+  const historyRunning = historyImportIncomplete(state.historyImport);
+  // Nor on an empty ledger: the tabs mount under onboarding, and an answer
+  // computed before the first import would stand as the first result, so a
+  // later first visit would show final-looking totals without renewals.
+  const ledgerEmpty = state.transactions.length === 0;
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || ledgerEmpty || hasRecurringResult || historyRunning) return;
+    let cancelled = false;
+    let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+    const transactions = state.transactions;
+    const notSubscriptions = state.notSubscriptions;
+    const delay = setTimeout(() => {
+      task = InteractionManager.runAfterInteractions(() => {
+        // The focused job is already running (or will join this one).
+        if (cancelled || focusedRef.current) return;
+        const projectionStartedAt = Date.now();
+        void detectSubscriptionsCooperatively(
+          transactions, notSubscriptions, recurrenceToday, liveAccounts, internal, () => cancelled,
+        ).then((value) => {
+          recordRuntimeOperation('bills-projection-prewarm', Date.now() - projectionStartedAt);
+          if (cancelled || value === null) return;
+          startTransition(() => setNativeRecurringResult({
+            value, transactions, notSubscriptions, today: recurrenceToday, liveAccounts, internal,
+          }));
+        });
+      });
+    }, IOS_HIDDEN_RECURRENCE_PREWARM_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(delay);
+      task?.cancel();
+    };
+  }, [ledgerEmpty, hasRecurringResult, historyRunning, state.transactions, state.notSubscriptions, recurrenceToday, liveAccounts, internal]);
 
   // useFocusEffect rather than useIsFocused: focus changes no longer re-render
   // the whole screen just to start or cancel this job.

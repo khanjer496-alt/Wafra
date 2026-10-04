@@ -1088,7 +1088,9 @@ function bodyOf(source, header) {
   const homeAst = ts.createSourceFile('home.tsx', read('src/screens/journal-home-screen.tsx'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const projectionDependencies = [];
   const visitHome = (node) => {
-    if (ts.isCallExpression(node) && ['useMemo', 'useEffect'].includes(node.expression.getText(homeAst)) &&
+    // useCallback is the callback a focus effect runs; its array is that
+    // effect's dependency list.
+    if (ts.isCallExpression(node) && ['useMemo', 'useEffect', 'useCallback'].includes(node.expression.getText(homeAst)) &&
         /projectDashboard(?:Insight)?\(/.test(node.arguments[0]?.getText(homeAst) ?? '')) {
       const deps = node.arguments[1];
       projectionDependencies.push(deps && ts.isArrayLiteralExpression(deps) ? deps.elements.map(item => item.getText(homeAst)) : []);

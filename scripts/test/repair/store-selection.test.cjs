@@ -174,6 +174,14 @@ function homeProjectionDependencies(state, period) {
     try { return factory(); } finally { activeMemo = prior; }
   };
   h.deps.react.useEffect = (effect, deps) => effects.push({ effect, deps });
+  // Focus-driven work is a useFocusEffect(useCallback(work, deps)): observe it
+  // with the callback's dependency array, like a plain effect.
+  const callbackDeps = new WeakMap();
+  h.deps.react.useCallback = (fn, deps) => { callbackDeps.set(fn, deps); return fn; };
+  h.deps['@react-navigation/native'] = {
+    ...h.deps['@react-navigation/native'],
+    useFocusEffect: (effect) => effects.push({ effect, deps: callbackDeps.get(effect), focus: true }),
+  };
   const projection = h.deps['@/lib/dashboard-projection'];
   h.deps['@/lib/dashboard-projection'] = {
     ...projection,
@@ -192,7 +200,9 @@ function homeProjectionDependencies(state, period) {
   // The historical insight reads budgets/subscriptions but not the bill list;
   // the independent widget-sync effect also reads bills. Select independently
   // of customCategories so a missing catalog dependency cannot hide the bug.
-  const candidates = effects.filter(({ deps }) => deps?.includes(state.budgets) &&
+  // A plain effect with the same inputs only clears a disabled or obsolete
+  // insight even while Home is hidden; the projection itself runs on focus.
+  const candidates = effects.filter(({ deps, focus }) => focus && deps?.includes(state.budgets) &&
     deps.includes(state.notSubscriptions) && !deps.includes(state.bills));
   assert.equal(candidates.length, 1, 'one historical insight effect is observed');
   const cleanup = candidates[0].effect();
