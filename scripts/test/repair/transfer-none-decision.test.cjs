@@ -46,7 +46,13 @@ test('legacy isTransfer does not keep a declined manual row out of totals', () =
   assert.equal(ledger.isTransfer(manual), true);
   const [declined] = decide([manual], ['m1'], 'none');
   assert.equal(ledger.isTransfer(declined), false);
-  assert.equal(ledger.countsInTotals(declined, new Set([accounts[0].id]), new Set()), true);
+  const live = new Set([accounts[0].id]);
+  assert.equal(ledger.countsInTotals(declined, live, new Set()), true);
+  assert.equal(ledger.countsInCashflowTotals(declined, live, new Set()), true,
+    'Home activity and day totals must include it, matching the month total');
+  assert.equal(ledger.isSpending(declined, live, new Set()), true);
+  assert.equal(ledger.isUnresolvedTransferMovement(declined, live, new Set()), false);
+  assert.equal(ledger.isInboundTransfer(declined), false);
 });
 
 test('a declined row is never proposed as the other side of someone else\'s transfer', () => {

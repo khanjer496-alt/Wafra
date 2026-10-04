@@ -99,7 +99,8 @@ export function countsInCashflowTotals(
   if (ownership === 'own') return false;
   // Settlement/funding rows are deliberately not transfer candidates. Preserve
   // their existing exclusion instead of re-labelling card payments as income.
-  if (ownership === null && transaction.isTransfer === true) return false;
+  // A row the person declined ("not a transfer") keeps its legacy flag but counts as ordinary.
+  if (ownership === null && transaction.isTransfer === true && !transferDeclined(transaction)) return false;
   // A holding transfer source is not a user's known account, so it cannot yet
   // establish cash flow for the ledger. Ordinary unassigned parsed activity is
   // still governed by the live-account set below.
