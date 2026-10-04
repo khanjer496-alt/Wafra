@@ -57,8 +57,8 @@ function seed(language, mode) {
   };
 }
 const labels = {
-  en: { transferEntry: 'Check a transfer', save: 'Save classification', undo: 'Undo decision', group: 'Classify these 2 transfers', backup: 'Back up to a file', leave: 'Leave as recorded' },
-  ar: { transferEntry: 'مراجعة تحويل', save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'تصنيف هذه التحويلات وعددها 2', backup: 'نسخ احتياطي إلى ملف', leave: 'تركه كما هو مسجل' },
+  en: { save: 'Save classification', undo: 'Undo decision', group: 'Classify these 2 transfers', backup: 'Back up to a file', leave: 'Leave as recorded' },
+  ar: { save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'تصنيف هذه التحويلات وعددها 2', backup: 'نسخ احتياطي إلى ملف', leave: 'تركه كما هو مسجل' },
 };
 function minor(value) {
   const normalized = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
@@ -190,10 +190,21 @@ try {
       assert.equal(await page.getByRole('button', { name: /^Outgoing transfer,/ }).count(), 0,
         'transfer records are not regular transaction rows');
       await page.goto(`${BASE}/transfers`, { waitUntil: 'networkidle' });
-      await click(page.getByTestId('transfer-record-unknown-out').getByRole('button').first());
-      await fits(page.getByTestId('entry-transfer-review'));
-      await click(page.getByRole('button', { name: words.transferEntry, exact: true }));
+      await click(page.getByTestId('transfer-row-unknown-out'));
+      // The detail sheet asks the one question; its three answers are always offered.
+      await fits(page.getByTestId('entry-transfer-question'));
+      for (const answer of ['own', 'external', 'none']) {
+        assert.equal(await page.getByTestId('entry-transfer-question').getByTestId(`transfer-answer-${answer}`).count(), 1, `detail sheet offers ${answer}`);
+      }
+      await click(page.getByTestId('entry-detail-done'));
+      await page.getByTestId('entry-detail-sheet').waitFor({ state: 'hidden' });
+      // "See all" on the question card is the way into the batch review screen.
+      await click(page.getByTestId('transfer-question-see-all'));
       await page.waitForURL(/review-transfers/);
+      // The batch screen opened from "See all" is the collapsed history; one entry opens by id.
+      await page.getByTestId('review-transfers-screen').waitFor({ state: 'visible' });
+      assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'See all opens the collapsed history');
+      await page.goto(`${BASE}/review-transfers?transactionId=unknown-out`, { waitUntil: 'networkidle' });
       await click(page.getByTestId('transfer-review-entry'));
       await page.getByTestId('transfer-review-confirmation').waitFor({ state: 'visible' });
       await page.goto(`${BASE}/review-transfers`, { waitUntil: 'networkidle' });
