@@ -26,61 +26,64 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
   const boundary = name => props => ({ type: name, props });
   // Design language E: the screen sits on the slate band and colours status
   // from the band palette rather than theme names.
-  const band = { onBand: 'ink', onBandSecondary: 'ink2', textSecondary: 'band-secondary', statusNear: 'band-near',
-    tint: 'band-tint', rule: 'band-rule' };
+  const band = { band: 'band', onBand: 'ink', onBandSecondary: 'ink2', tile: 'tile', textSecondary: 'band-secondary', statusNear: 'band-near',
+    statusNearSoft: 'band-near-soft', tint: 'band-tint', rule: 'band-rule', card: 'card', sheet: 'sheet', glyphGround: 'glyph',
+    fill: 'fill', onFill: 'on-fill', text: 'text' };
   const state = { language, transactions, accounts };
+  const answers = [];
   const deps = {
     react: { useDeferredValue: v => v, useMemo: f => f(), useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}] },
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { Keyboard: { dismiss() {} }, Platform: { OS: 'ios' }, Pressable: 'Pressable', View: 'View',
-      SectionList: props => ({ type: 'SectionList', props }), StyleSheet: { create: s => s, hairlineWidth: 1 } },
+      FlatList: props => ({ type: 'FlatList', props }), StyleSheet: { create: s => s, hairlineWidth: 1 } },
     'expo-router': { useRouter: () => ({ push: route => events.push(['route', route]), back() {}, canGoBack: () => true, replace() {} }) },
     '@/components/entry-detail-sheet': { EntryDetailSheet: boundary('EntryDetailSheet') },
     '@/components/period-sheet': { PeriodSheet: boundary('PeriodSheet') },
     '@/components/themed-text': { ThemedText: boundary('Text') },
-    '@/components/transfer-pair-accounts': { TransferPairAccounts: boundary('TransferPairAccounts') },
     '@/components/ui/band-scaffold': { BandScaffold: props => ({ type: 'BandScaffold', props }), useBandBottomInset: () => 0 },
+    '@/components/ui/band/band-figure': { BandFigure: boundary('BandFigure') },
     '@/components/ui/action-icon-button': { ActionIconButton: boundary('ActionIconButton') },
     '@/components/ui/icon': { Icon: boundary('Icon') },
     '@/components/ui/money': { Money: boundary('Money') },
     '@/components/ui/period-pill': { PeriodPill: boundary('PeriodPill') },
-    '@/components/ui/screen-scaffold': { ScreenScaffold: props => ({ type: 'Scaffold', props }),
-      useScreenContentInsets: () => ({ contentContainerStyle: {}, contentInset: {}, scrollIndicatorInsets: {} }) },
-    '@/components/ui/segmented-control': { SegmentedControl: boundary('SegmentedControl') },
     '@/components/ui/text-field': { TextField: boundary('TextField') },
-    '@/constants/theme': { Fonts: { sansSemi: 'sans-semi' }, Spacing: { one: 4, two: 8, three: 12, four: 16, five: 24 } },
+    '@/constants/theme': { Spacing: { one: 4, two: 8, three: 12, four: 16, five: 24 } },
     '@/hooks/use-band': { useBand: () => band },
     '@/hooks/use-language': { useLanguage: () => language },
     '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
     '@/hooks/use-ledger-money': { useLedgerMoney: () => null },
-    '@/hooks/use-theme': { useTheme: () => ({ primary: 'green', textSecondary: 'gray', textTertiary: 'gray', cardBorder: 'line' }) },
-    '@/lib/details-copy': { detailsWords: () => ({ transfers: { pairsLink: n => `${n} pairs`, matchedTitle: 'Matched',
-      pairA11y: () => 'pair', showFewer: 'Fewer', showAll: n => `All ${n}` } }) },
-    '@/lib/format': { formatAED: fils => `AED ${(fils / 100).toFixed(2)}`, friendlyDate: date => date,
-      shortDate: date => date, toISODate: () => '2026-09-15' },
+    '@/hooks/use-transfer-answer': { useTransferAnswer: () => ({ busy: false, answer: async input => { answers.push(input); return 'saved'; } }) },
+    '@/lib/format': { formatAED: fils => `AED ${(fils / 100).toFixed(2)}`, formatAmount: fils => (fils / 100).toFixed(2), shortDate: date => date },
     '@/lib/i18n': { t: key => key },
     '@/lib/ledger': { accountDisplayName: ledger.accountDisplayName, transferReconciliationForState: current => {
       const result = core.reconcileTransfers(current.transactions, current.accounts);
       adjust(result); return result;
     } },
     '@/lib/ledger-money': { formatMinorUnits: fils => String(fils) },
-    '@/lib/period': { inPeriod: () => true },
+    '@/lib/markets': { ledgerCurrencyDisplay: () => 'AED' },
+    '@/lib/period': { inPeriod: () => true, isCurrentMonth: () => true, periodLabel: () => 'Sep 2026' },
     '@/lib/period-context': { usePeriod: () => ({ period: { mode: 'all' } }) },
     '@/lib/store': { useStore: () => ({ state }) },
     '@/lib/transfer-reconciliation': core,
   };
-  deps['@/lib/transfer-pairs'] = load(path.join(root, 'src/lib/transfer-pairs.ts'), deps);
-  deps['@/lib/transfer-activity'] = load(path.join(root, 'src/lib/transfer-activity.ts'), deps);
+  const src = file => load(path.join(root, file), deps);
+  deps['@/lib/transfer-pairs'] = src('src/lib/transfer-pairs.ts');
+  deps['@/lib/transfer-activity'] = src('src/lib/transfer-activity.ts');
   deps['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'),
     { '@/lib/i18n': { getLanguage: () => language } });
+  deps['@/lib/transfer-answer'] = src('src/lib/transfer-answer.ts');
+  deps['@/lib/transfer-list'] = src('src/lib/transfer-list.ts');
+  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-question-card']) {
+    deps[`@/components/transfers/${name}`] = src(`src/components/transfers/${name}.tsx`);
+  }
   const screen = load(path.join(root, 'src/app/transfers.tsx'), deps).default();
-  const list = walk(screen).find(node => node.type === 'SectionList');
-  const records = list.props.sections.flatMap(section => section.data);
-  const items = records.map(item => ({ item, tree: list.props.renderItem({ item }) }));
-  return { events, list, records, items, band, words: deps['@/lib/transfer-activity-copy'].transferActivityCopy(language) };
+  const list = walk(screen).find(node => node.type === 'FlatList');
+  const records = list.props.data;
+  const items = records.map((item, index) => ({ item, tree: list.props.renderItem({ item, index }) }));
+  return { events, answers, screen, list, records, items, band, words: deps['@/lib/transfer-activity-copy'].transferActivityCopy(language) };
 }
 
-for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neutral; only reconciler review items offer a review action`, () => {
+for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neutral; only reconciler review items are queued as questions`, () => {
   const accounts = [{ id: 'bank', name: 'Bank', kind: 'bank', openingFils: 0 },
     { id: 'old', name: 'Old', kind: 'bank', openingFils: 0, archived: true }];
   const transactions = [
@@ -93,21 +96,27 @@ for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neu
     result.byId.set('queued', { id: 'queued', status: 'likely-own', reason: 'amount-time', candidateIds: ['x'] });
     result.pendingIds.add('queued');
   } });
-  const ids = Array.from(h.records, item => item.transaction.id);
+  const ids = Array.from(h.records, item => item.transactionId);
   assert.deepEqual(ids.slice().sort(), ['generic', 'queued', 'sent'], 'archived and duplicate-id rows are not listed');
   const keys = h.records.map(item => h.list.props.keyExtractor(item));
   assert.equal(new Set(keys).size, keys.length, 'every rendered record has a unique key');
-  const by = id => h.items.find(entry => entry.item.transaction.id === id).tree;
-  const reviewButton = tree => walk(tree).find(node => node.props?.accessibilityLabel?.startsWith(`${h.words.review}:`));
-  const statusNode = tree => walk(tree).find(node => node.type === 'Text' && [h.words.unconfirmed, h.words.needsReview,
-    h.words.own, h.words.external].includes(node.props.children));
-  assert.equal(statusNode(by('generic')).props.children, h.words.unconfirmed);
-  assert.equal(statusNode(by('generic')).props.style.color, h.band.textSecondary);
-  assert.equal(reviewButton(by('generic')), undefined, 'a generic unknown is not a review chore');
-  assert.equal(statusNode(by('queued')).props.children, h.words.needsReview);
-  assert.equal(statusNode(by('queued')).props.style.color, h.band.statusNear);
-  assert.ok(reviewButton(by('queued')));
-  assert.equal(statusNode(by('sent')).props.children, h.words.external);
-  assert.equal(reviewButton(by('sent')), undefined);
-  assert.doesNotMatch(text(by('generic')), new RegExp(h.words.needsReview));
+  const by = id => h.items.find(entry => entry.item.transactionId === id).tree;
+  // The tag pill is the View whose only child is its label.
+  const tagBox = (tree, label) => walk(tree).find(node => node.type === 'View'
+    && node.props.children?.type === 'Text' && node.props.children.props.children === label);
+  const tagLabels = [h.words.tags.unconfirmed, h.words.tags.needsAnswer, h.words.tags.external, h.words.tags.own];
+  const tagOf = tree => tagLabels.find(label => tagBox(tree, label)?.props.style);
+  assert.equal(tagOf(by('generic')), h.words.tags.unconfirmed);
+  const generic = walk(by('generic')).find(node => node.type === 'Text' && node.props.children === h.words.tags.unconfirmed);
+  assert.equal(generic.props.style.color, h.band.textSecondary);
+  assert.equal(tagOf(by('queued')), h.words.tags.needsAnswer);
+  assert.equal(tagBox(by('queued'), h.words.tags.needsAnswer).props.style[1].backgroundColor, h.band.statusNear);
+  assert.equal(tagOf(by('sent')), h.words.tags.external);
+  assert.doesNotMatch(text(by('generic')), new RegExp(h.words.tags.needsAnswer));
+  assert.equal(walk(by('generic')).filter(node => node.type === 'Pressable').length, 1, 'a row carries no second per-row Review button');
+  // The question card lists exactly the queued rows, not the generic unknown.
+  const card = walk(h.list.props.ListHeaderComponent).find(node => node.props?.testID === 'transfer-question-card');
+  assert.ok(card, 'a queued transfer shows the question card');
+  assert.ok(text(card).includes(h.words.card.title(1)), 'one queued row, one question');
+  assert.ok(text(card).includes(h.words.card.step(1, 1)));
 });
