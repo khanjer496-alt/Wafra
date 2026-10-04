@@ -65,3 +65,6 @@ server/.test-build/
 # arrives as branches, never as files here.
 .claude/worktrees/
 .variate/
+
+# Brainstorming mockups
+.superpowers/
