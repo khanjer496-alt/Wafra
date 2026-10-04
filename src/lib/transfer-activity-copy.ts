@@ -32,6 +32,13 @@ const en = {
     needsAnswer: (count: number) => `${count} need${count === 1 ? 's' : ''} an answer`,
     open: 'Open',
   },
+  headline: (period: string) => `${period} · moved between your accounts`,
+  notCounted: 'Not counted as spending or income',
+  tiles: { own: 'Your accounts', sent: 'Sent to others', received: 'Received', counted: 'counted',
+    count: (n: number) => `${n} transfer${n === 1 ? '' : 's'}` },
+  tags: { own: 'Your accounts', external: 'Someone else · counted', needsAnswer: 'Needs an answer', unconfirmed: 'Not answered yet' },
+  route: { unknown: 'Unknown', linked: (account: string) => `Linked to ${account}`, to: 'to' },
+  listTitle: 'This month',
 };
 
 const ar: typeof en = {
@@ -66,6 +73,13 @@ const ar: typeof en = {
     needsAnswer: (count) => `${count} بانتظار إجابتك`,
     open: 'فتح',
   },
+  headline: (period) => `${period} · نُقلت بين حساباتك`,
+  notCounted: 'لا تُحتسب ضمن المصروفات أو الدخل',
+  tiles: { own: 'حساباتك', sent: 'أُرسلت لآخرين', received: 'مستلمة', counted: 'محتسبة',
+    count: (n) => `${n} من التحويلات` },
+  tags: { own: 'حساباتك', external: 'شخص آخر · محتسبة', needsAnswer: 'بانتظار إجابتك', unconfirmed: 'لم تتم الإجابة بعد' },
+  route: { unknown: 'غير معروف', linked: (account) => `مرتبط بـ ${account}`, to: 'إلى' },
+  listTitle: 'هذا الشهر',
 };
 
 export function transferActivityCopy(language = getLanguage()) {
