@@ -42,3 +42,42 @@ test('current answer and own candidates', () => {
   assert.deepEqual([...answer.ownCandidates(row('a'), { id: 'a', status: 'ambiguous', reason: 'multiple-candidates', candidateIds: ['b', 'c'] }, rowsById).map(r => r.id)], ['b', 'c']);
   assert.deepEqual([...answer.ownCandidates(row('a'), { id: 'a', status: 'likely-own', reason: 'reference', counterpartId: 'b', candidateIds: [] }, rowsById).map(r => r.id)], ['b']);
 });
+
+test('undoing a linked own answer clears both sides through the resolver', () => {
+  const out = row('o'); const inn = row('i', { type: 'income', accountId: accounts[1].id, title: 'Incoming transfer' });
+  const answered = core.applyTransferDecision([out, inn], accounts, {
+    ...answer.buildTransferAnswer({ transaction: out, answer: 'own', counterpart: inn, generation: 3 }), now: NOW + 1,
+  });
+  const [a, b] = answered;
+  assert.equal(a.transferDecision.ownership, 'own');
+  assert.equal(b.transferDecision.ownership, 'own', 'the other side carries its own decision after a linked answer');
+  assert.equal(a.transferMatch.counterpartId, 'i');
+
+  const undo = answer.buildTransferUndo({ transaction: a, counterpart: b, generation: 3 });
+  assert.equal(undo.decisions.length, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(undo.decisions)), [{ ids: ['o'], ownership: null }, { ids: ['i'], ownership: null }]);
+  assert.deepEqual(Object.keys(undo.expectedFingerprints).sort(), ['i', 'o']);
+  assert.equal(undo.expectedGeneration, 3);
+
+  const cleared = core.applyTransferDecisionBatch(answered, accounts, { ...undo, now: NOW + 2 });
+  for (const tx of cleared) {
+    assert.equal(tx.transferDecision, undefined, `${tx.id} keeps no decision`);
+    assert.equal(tx.transferMatch, undefined, `${tx.id} keeps no link`);
+  }
+});
+
+test('the one-sided undo the brief first described leaves the counterpart decided', () => {
+  const out = row('o'); const inn = row('i', { type: 'income', accountId: accounts[1].id, title: 'Incoming transfer' });
+  const answered = core.applyTransferDecision([out, inn], accounts, {
+    ...answer.buildTransferAnswer({ transaction: out, answer: 'own', counterpart: inn, generation: 3 }), now: NOW + 1,
+  });
+  const half = core.applyTransferDecision(answered, accounts, { ids: ['o'], ownership: null, now: NOW + 2,
+    expectedFingerprints: { o: core.transferFingerprint(answered[0]) } });
+  assert.equal(half[1].transferDecision.ownership, 'own');
+});
+
+test('an undo without a counterpart is a single-row decision', () => {
+  const undo = answer.buildTransferUndo({ transaction: row('o'), generation: 2 });
+  assert.equal(undo.decisions.length, 1);
+  assert.deepEqual(Object.keys(undo.expectedFingerprints), ['o']);
+});

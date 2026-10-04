@@ -53,6 +53,7 @@ const en = {
     undone: 'Answer removed',
     changed: 'This transfer changed. Open it again.',
     failed: 'Couldn’t save. Try again.',
+    unsaved: 'Answer kept on this device but not saved yet. Wafra will retry.',
     done: 'Done',
   },
   card: {
@@ -118,6 +119,7 @@ const ar: typeof en = {
     undone: 'تمت إزالة الإجابة',
     changed: 'تغيّر هذا التحويل. افتحه مرة أخرى.',
     failed: 'تعذّر الحفظ. حاول مرة أخرى.',
+    unsaved: 'تم الاحتفاظ بالإجابة على هذا الجهاز ولم تُحفظ بعد. سيعيد وفرة المحاولة.',
     done: 'تم',
   },
   card: {

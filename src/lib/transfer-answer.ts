@@ -36,3 +36,21 @@ export function buildTransferAnswer({ transaction, answer, counterpart, generati
     expectedGeneration: generation,
   };
 }
+
+/**
+ * Remove an answer. A linked own answer leaves a decision on each side, and the
+ * resolver keeps the other side's decision when one row is cleared, so both rows
+ * are cleared together as two single-row decisions (a multi-id decision would
+ * trigger the legacy group rule). Pass the rows as they are now, not as shown
+ * when the answer was given: saving the answer changed their fingerprints.
+ */
+export function buildTransferUndo({ transaction, counterpart, generation }: {
+  transaction: Transaction; counterpart?: Transaction; generation: number;
+}) {
+  const rows = counterpart && counterpart.id !== transaction.id ? [transaction, counterpart] : [transaction];
+  return {
+    decisions: rows.map(row => ({ ids: [row.id], ownership: null })),
+    expectedFingerprints: Object.fromEntries(rows.map(row => [row.id, transferFingerprint(row)])),
+    expectedGeneration: generation,
+  };
+}
