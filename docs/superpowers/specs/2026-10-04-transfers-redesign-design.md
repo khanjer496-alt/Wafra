@@ -23,7 +23,7 @@ Date: 2026-10-04. Status: approved in brainstorming (Mix 2), awaiting spec revie
 
 - **Band:** period pill and search in the nav row. Headline: "October · moved between your accounts", amount, "Not counted as spending or income". Three tiles: **Your accounts** (total, not counted), **Sent to others** (counted), **Received** (counted). Tapping a tile filters the list; tapping it again clears the filter. Tiles stack under `useLargeTextLayout`.
 - **Question card** (only when the reconciler queue has items): "N transfers need an answer · 1 of N", the row as a route (`FAB ••4410 → ?`) with amount and a hint line when there is a likely counterpart ("looks like your ENBD account"), then three 44pt+ buttons. Answering saves immediately, shows a toast with **Undo**, and advances to the next item. "See all N" opens the existing review screen for selecting several at once.
-- **List:** one card, rows grouped by month header with "All ▾" scope (All / Your accounts / Others / Needs an answer). Each row: route chips `From → To` (account chips use merchant/bank logo or initials; a person or unknown side uses initials or a dashed "?"), signed amount, date, and one tag: **Your accounts** (slate) or **Someone else · counted** (gold) or **Needs an answer** (warning). Tapping a row opens the entry detail sheet.
+- **List:** one card under a "This month" header; the band tiles are its filter (no separate scope menu), and unanswered transfers are reached through the question card. Each row: route chips `From → To` (account chips use merchant/bank logo or initials; a person or unknown side uses initials or a dashed "?"), signed amount, date, and one tag: **Your accounts** (slate) or **Someone else · counted** (gold) or **Needs an answer** (warning). Tapping a row opens the entry detail sheet.
 - Copy retires: "transfer records", "Ownership not confirmed/needs review", "Review ownership", "Matched pairs", "Confirmed / Not confirmed". Counts say "transfers".
 
 ### Transactions screen (`src/app/transactions.tsx`)
@@ -34,13 +34,17 @@ Date: 2026-10-04. Status: approved in brainstorming (Mix 2), awaiting spec revie
 
 ### Entry detail sheet (`src/components/entry-detail-sheet.tsx`)
 
-- For any transfer candidate, and on request for any row ("Is this a transfer?" link), the sheet shows **What is this?** with the three answers as radio rows (selected row gold-outlined), "Linked to …" under the own-account answer when a counterpart exists, and **Done**.
+- For any transfer candidate the sheet shows **What is this?** with the three answers as radio rows (selected row gold-outlined), "Linked to …" under the own-account answer when a counterpart exists, and **Done**.
 - Removes the "Mark as transfer" chip + its confirm sheet, the edit-mode "Transfer between my accounts" toggle, and the "Check a transfer" button.
 - If several own accounts could be the other side, choosing "my own account" reveals a short account picker; with none, the decision saves without a link.
 
 ### Alert review (`src/app/add-transaction.tsx`)
 
-The "This moved money between my own accounts" checkbox becomes the same three answers (default unselected = Not a transfer, current behaviour).
+Kept as a checkbox this round, relabelled **Moved to my own account** to match. Correction found while planning: today an unticked transfer-family alert is saved as an `'external'` decision (not "not a transfer"), and `betweenOwnAccounts` is part of remembered review rules (`review-promotion.ts:181`), so a three-way control would change persisted rules. Its answer can be changed afterwards from the detail sheet.
+
+### Rows that are not transfer candidates
+
+`resolveTransfers` accepts transfer candidates only. A row that is not a candidate (an ordinary purchase, a manual entry) keeps one action in its detail sheet, **Moved to my own account**, which writes `isTransfer: true` exactly as today's chip does. That makes a manual row a candidate, so from then on it shows the three answers.
 
 ## Data
 
@@ -48,7 +52,7 @@ The "This moved money between my own accounts" checkbox becomes the same three a
 - Reconciler: a `'none'` decision keeps the row a candidate (so Undo stays reachable, as today), never links it, excludes it from Transfers and from the review queue, and lets it count in spending/income exactly like an ordinary row with its category. Money effect equals `'external'`; only membership and labelling differ.
 - Persisted decisions are additive; existing `'own' | 'external'` rows are unchanged. Restore/import validation (`isTransferDecision`) accepts `'none'`.
 - Answers go through the existing `resolveTransfers` / `resolveTransferBatch` paths with their fingerprint, generation, durability and Undo guarantees. No new store action.
-- The legacy `isTransfer` toggle is no longer written by the UI; existing values keep their current meaning.
+- The edit-mode `isTransfer` toggle is removed; the renamed action above is the only UI writer. `ledger.isTransfer` must return false for a row whose decision is `'none'`, even when legacy `isTransfer` is true, otherwise "Not a transfer" would still be left out of totals.
 
 ## Copy and design
 
