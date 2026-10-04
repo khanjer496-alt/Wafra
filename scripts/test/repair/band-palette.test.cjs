@@ -67,7 +67,7 @@ for (const scheme of ['light', 'dark']) {
         ['onAccent/accent', p.onAccent, p.accent], ['onAccentSecondary/accent', p.onAccentSecondary, p.accent],
         ['accentOnBand/home band', p.accentOnBand, BandPalettes[scheme].home.band], ['accentOnBand/home tile', p.accentOnBand, BandPalettes[scheme].home.tile],
         ['statusOk/sheet', p.statusOk, p.sheet], ['statusNear/sheet', p.statusNear, p.sheet], ['statusOver/sheet', p.statusOver, p.sheet],
-        ['limitOk/sheet', p.limitOk, p.sheet],
+        ['limitOk/sheet', p.limitOk, p.sheet], ['onDanger/danger', p.onDanger, p.danger],
         ['text/glyphGround', p.text, p.glyphGround],
       ];
       for (const [name, fg, bg] of pairs) assert.ok(contrast(fg, bg) >= 4.5, `${scheme} ${id} ${name}: ${contrast(fg, bg).toFixed(2)}`);

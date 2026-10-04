@@ -274,6 +274,9 @@ export interface BandPalette {
   statusOkSoft: string;
   /** Within a limit: blue, calm and apart from amber and red for every eye (`limitStatusColor`). */
   limitOk: string;
+  /** A destructive action's fill (a row's Delete) and its label: clay, whatever the band. */
+  danger: string;
+  onDanger: string;
   statusNearSoft: string;
   statusOverSoft: string;
   /** expo-status-bar style: light content on dark bands. */
@@ -306,7 +309,7 @@ const SHEET_LIGHT = {
   accent: LOGO_GREEN, onAccent: CREAM, onAccentSecondary: '#D6E6DD', accentOnBand: LOGO_GREEN_LIGHT,
   statusOk: LOGO_GREEN, statusNear: '#7E5F14', statusOver: '#A3402D',
   statusOkSoft: '#E4EDE8', statusNearSoft: '#F1E9D8', statusOverSoft: '#FBF3F0',
-  limitOk: '#2B5FA6',
+  limitOk: '#2B5FA6', danger: '#A4432F', onDanger: CREAM,
 } as const;
 
 // dark.py: sheets #1C1A16, cards #24211C, rules #3B362E, text #F2EFE8,
@@ -316,7 +319,7 @@ const SHEET_DARK = {
   accent: LOGO_GREEN, onAccent: CREAM, onAccentSecondary: '#D6E6DD', accentOnBand: LOGO_GREEN_LIGHT,
   statusOk: LOGO_GREEN_LIGHT, statusNear: '#D9AE62', statusOver: '#E08A70',
   statusOkSoft: '#1E3A31', statusNearSoft: '#3A3020', statusOverSoft: '#2A1D18',
-  limitOk: '#8AB2EE',
+  limitOk: '#8AB2EE', danger: '#6E2B1E', onDanger: DARK_TEXT,
 } as const;
 
 const BAND_CORE: Record<'light' | 'dark', Record<BandId, BandCore>> = {
