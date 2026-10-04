@@ -131,9 +131,83 @@ test('no queued transfers means no question card', () => {
 test('large text stacks the tiles instead of squeezing three across', () => {
   const rowOf = largeText => {
     const tree = harness({ language: 'en', largeText }).renderScreen('transfers');
-    return walk(byId(tree, 'transfers-band')).find(node => node.props?.children?.[0]?.props?.testID === 'transfers-tile-own');
+    return byId(tree, 'transfers-tiles');
   };
   const direction = row => [row.props.style].flat(Infinity).filter(Boolean).map(style => style.flexDirection).filter(Boolean).pop();
   assert.equal(direction(rowOf(false)), 'row');
   assert.equal(direction(rowOf(true)), 'column');
+});
+
+// ---- fix round 1 ----
+const stateOf = (h, value) => h.events.find(event => event[0] === 'state' && event[2] === value);
+
+test('searching for the incoming account keeps a linked pair as one route row', () => {
+  const rows = [leg('out', 'expense', 'current'), leg('in', 'income', 'savings')];
+  // Hook order: tile is state 0 and the search query is state 1.
+  const h = harness({ language: 'en', states: { 1: 'savings' }, state: { transactions: rows, accounts: accountsFixture } });
+  withReconciliation(h, pairEntries);
+  const tree = h.renderScreen('transfers');
+  assert.deepEqual(rowIds(tree), ['transfer-row-out|in'], 'one pair row, not a one-sided leg');
+  assert.match(byId(tree, 'transfer-row-out|in').props.accessibilityLabel, /Current account.*Savings/);
+  const none = harness({ language: 'en', states: { 1: 'nomatch' }, state: { transactions: rows, accounts: accountsFixture } });
+  withReconciliation(none, pairEntries);
+  assert.deepEqual(rowIds(none.renderScreen('transfers')), []);
+});
+
+test('a pair is placed by its outgoing leg: it never splits on the period boundary', () => {
+  const straddle = [leg('out', 'expense', 'current', { date: '2026-09-30' }), leg('in', 'income', 'savings', { date: '2026-10-01' })];
+  const h = harness({ language: 'en', state: { transactions: straddle, accounts: accountsFixture } });
+  withReconciliation(h, pairEntries);
+  assert.deepEqual(rowIds(h.renderScreen('transfers')), ['transfer-row-out|in'], 'out leg in September: the pair is listed whole');
+  const early = [leg('out', 'expense', 'current', { date: '2026-08-31' }), leg('in', 'income', 'savings', { date: '2026-09-01' })];
+  const later = harness({ language: 'en', state: { transactions: early, accounts: accountsFixture } });
+  withReconciliation(later, pairEntries);
+  assert.deepEqual(rowIds(later.renderScreen('transfers')), [], 'out leg in August: not a lone September receipt');
+});
+
+test('the period chip sits in the band nav row and opens the period sheet', () => {
+  const h = harness({ language: 'en' });
+  const tree = h.renderScreen('transfers');
+  const scaffold = walk(tree).find(node => node.type === 'BandScaffold');
+  const chip = walk(scaffold.props.nav.trailing).find(node => node.props?.testID === 'transfers-period');
+  assert.ok(chip, 'the nav row carries the period chip');
+  chip.props.onPress();
+  assert.ok(stateOf(h, true), 'pressing it opens the period sheet');
+});
+
+test('large text moves the tiles from the band into the list header', () => {
+  const inBand = tree => !!byId(byId(tree, 'transfers-band'), 'transfers-tile-own');
+  const inHeader = tree => !!byId(byId(tree, 'transfer-history').props.ListHeaderComponent, 'transfers-tile-own');
+  const normal = harness({ language: 'en' }).renderScreen('transfers');
+  assert.ok(inBand(normal) && !byId(byId(normal, 'transfer-history').props.ListHeaderComponent, 'transfers-tile-own'));
+  const large = harness({ language: 'en', largeText: true }).renderScreen('transfers');
+  assert.ok(!inBand(large), 'the fixed band no longer holds the tiles');
+  assert.ok(inHeader(large), 'the tiles scroll with the list');
+  assert.ok(byId(byId(large, 'transfers-band'), 'transfers-band') || text(byId(large, 'transfers-band')).includes('AED'), 'the figure stays in the band');
+});
+
+test('sent and received tiles say counted; your accounts does not', () => {
+  const h = harness({ language: 'en', state: { transactions: mixedRows(), accounts: accountsFixture } });
+  withReconciliation(h, mixedEntries());
+  const tree = h.renderScreen('transfers');
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
+  for (const key of ['sent', 'received']) {
+    const tile = byId(tree, `transfers-tile-${key}`);
+    assert.ok(text(tile).includes(words.tiles.counted), key);
+    assert.ok(tile.props.accessibilityLabel.includes(words.tiles.counted), `${key} label`);
+  }
+  assert.ok(!text(byId(tree, 'transfers-tile-own')).includes(words.tiles.counted));
+  assert.ok(!byId(tree, 'transfers-tile-own').props.accessibilityLabel.includes(words.tiles.counted));
+});
+
+test('a tile that empties the list says so and offers to clear it', () => {
+  const rows = [leg('out', 'expense', 'current'), leg('in', 'income', 'savings')];
+  const h = harness({ language: 'en', states: { 0: 'sent' }, state: { transactions: rows, accounts: accountsFixture } });
+  withReconciliation(h, pairEntries);
+  const tree = h.renderScreen('transfers');
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
+  assert.ok(text(tree).includes(words.emptyTile));
+  assert.ok(!text(tree).includes(words.emptyBody));
+  byId(tree, 'transfers-clear-tile').props.onPress();
+  assert.ok(stateOf(h, null), 'clearing sets the tile back to none');
 });

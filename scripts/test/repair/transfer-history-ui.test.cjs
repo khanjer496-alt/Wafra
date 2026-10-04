@@ -54,7 +54,7 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
     '@/hooks/use-ledger-money': { useLedgerMoney: () => null },
     '@/hooks/use-transfer-answer': { useTransferAnswer: () => ({ busy: false, answer: async input => { answers.push(input); return 'saved'; } }) },
     '@/lib/format': { formatAED: fils => `AED ${(fils / 100).toFixed(2)}`, formatAmount: fils => (fils / 100).toFixed(2), shortDate: date => date },
-    '@/lib/i18n': { t: key => key },
+    '@/lib/i18n': { t: key => key, tf: key => key },
     '@/lib/ledger': { accountDisplayName: ledger.accountDisplayName, transferReconciliationForState: current => {
       const result = core.reconcileTransfers(current.transactions, current.accounts);
       adjust(result); return result;

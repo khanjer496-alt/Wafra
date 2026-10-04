@@ -147,7 +147,6 @@ const en = {
     notPair: 'Not a pair',
     matched: 'Transfer matched',
     notPairDone: 'Kept separate. Each entry stays in the list below.',
-    matchedEmpty: 'No matched pairs in this period',
     pairA11y: (out: string, inAccount: string, amount: string) => `${out} to ${inAccount}, ${amount}`,
   },
 
@@ -297,7 +296,6 @@ const ar: DetailsCopy = {
     notPair: 'ليسا زوجاً',
     matched: 'تمت مطابقة التحويل',
     notPairDone: 'بقيا منفصلين. تبقى كل عملية في القائمة أدناه.',
-    matchedEmpty: 'لا توجد أزواج مطابقة في هذه الفترة',
     pairA11y: (out, inAccount, amount) => `${out} إلى ${inAccount}، ${amount}`,
   },
 

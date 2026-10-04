@@ -12,7 +12,6 @@ import { BandFigure } from '@/components/ui/band/band-figure';
 import { BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
-import { PeriodPill } from '@/components/ui/period-pill';
 import { TextField } from '@/components/ui/text-field';
 import { Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
@@ -21,7 +20,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useTransferAnswer } from '@/hooks/use-transfer-answer';
 import { formatAED } from '@/lib/format';
-import { t } from '@/lib/i18n';
+import { t, tf } from '@/lib/i18n';
 import { accountDisplayName, transferReconciliationForState } from '@/lib/ledger';
 import { formatMinorUnits } from '@/lib/ledger-money';
 import { inPeriod, isCurrentMonth, periodLabel } from '@/lib/period';
@@ -33,8 +32,8 @@ import { ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
 import { filterTransferItems, transferListItems, transferTotals, type TransferTile } from '@/lib/transfer-list';
 import { matchedTransferPairs } from '@/lib/transfer-pairs';
 import { reconcileTransfers } from '@/lib/transfer-reconciliation';
+import type { Transaction } from '@/lib/types';
 
-type Activity = ReturnType<typeof getTransferActivity>[number];
 const TILES = [['own', 'repeat'], ['sent', 'arrow-up-right'], ['received', 'arrow-down-right']] as const;
 
 export default function TransfersScreen() {
@@ -64,11 +63,13 @@ export default function TransfersScreen() {
   const accounts = useMemo(() => new Map(state.accounts.map(account => [account.id, account])), [state.accounts]);
   const selected = selectedId ? activity.find(item => item.transaction.id === selectedId) : undefined;
   const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
-  // Pairs the reconciler has confirmed, both legs naming each other, in the selected period.
-  const pairs = useMemo(() => matchedTransferPairs(reconciliation, rowsById, pair => inPeriod(pair.out.date, period)),
+  // A confirmed pair belongs to the period of its outgoing leg and is always listed whole:
+  // both legs come in with it, and the incoming leg of a pair that left in another period stays out.
+  const allPairs = useMemo(() => matchedTransferPairs(reconciliation, rowsById), [reconciliation, rowsById]);
+  const pairs = useMemo(() => allPairs.filter(pair => inPeriod(pair.out.date, period)),
     // monthKey reads the StoreProvider's active salary-day setting.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [reconciliation, rowsById, period, state.monthStartDay]);
+    [allPairs, period, state.monthStartDay]);
   const accountName = (id: string) => {
     const account = accounts.get(id);
     return account ? accountDisplayName(account) : words.accountUnknown;
@@ -76,18 +77,29 @@ export default function TransfersScreen() {
   const moneyLabel = (fils: number) => moneySpec
     ? `${moneySpec.currency} ${formatMinorUnits(fils, moneySpec, { decimals: true })}`
     : formatAED(fils, { decimals: true });
-  const matchesSearch = (item: Activity) => {
-    if (!search) return true;
-    const account = accounts.get(item.transaction.accountId);
-    return [item.transaction.title, account?.name, account?.bankName, account?.last4,
-      item.transaction.transferEvidence?.counterpartyName,
-      item.transaction.transferEvidence?.counterparty?.last4].filter(Boolean).join(' ').toLocaleLowerCase().includes(search);
+  const matchesSearch = (tx: Transaction) => {
+    const account = accounts.get(tx.accountId);
+    return [tx.title, account?.name, account?.bankName, account?.last4,
+      tx.transferEvidence?.counterpartyName,
+      tx.transferEvidence?.counterparty?.last4].filter(Boolean).join(' ').toLocaleLowerCase().includes(search);
   };
-  const inView = useMemo(() => activity.filter(item => inPeriod(item.transaction.date, period) && matchesSearch(item)),
-    // monthKey reads the StoreProvider's active salary-day setting; matchesSearch closes over search and accounts.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activity, period, search, accounts, state.monthStartDay]);
-  const items = useMemo(() => transferListItems(inView, pairs), [inView, pairs]);
+  const periodItems = useMemo(() => {
+    const inPair = new Set(pairs.flatMap(pair => [pair.out.id, pair.in.id]));
+    const outOfPeriod = new Set(allPairs.flatMap(pair => inPair.has(pair.out.id) ? [] : [pair.out.id, pair.in.id]));
+    return transferListItems(activity.filter(item => !outOfPeriod.has(item.transaction.id)
+      && (inPair.has(item.transaction.id) || inPeriod(item.transaction.date, period))), pairs);
+  // monthKey reads the StoreProvider's active salary-day setting.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity, allPairs, pairs, period, state.monthStartDay]);
+  const pairsByKey = useMemo(() => new Map(pairs.map(pair => [pair.key, pair])), [pairs]);
+  // Search is applied to whole routes: a pair matches when either leg does.
+  const items = useMemo(() => !search ? periodItems : periodItems.filter(item => {
+    const pair = pairsByKey.get(item.key);
+    const legs = pair ? [pair.out, pair.in] : [rowsById.get(item.transactionId)];
+    return legs.some(tx => !!tx && matchesSearch(tx));
+  // matchesSearch closes over search and accounts.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [periodItems, pairsByKey, rowsById, search, accounts]);
   const totals = useMemo(() => transferTotals(items), [items]);
   const shown = useMemo(() => filterTransferItems(items, tile), [items, tile]);
   // The questions are the reconciler's queue, newest first, whatever the period or search.
@@ -95,10 +107,13 @@ export default function TransfersScreen() {
   const queue = useMemo(() => activity.filter(item => item.needsReview)
     .sort((a, b) => b.transaction.date.localeCompare(a.transaction.date) || (b.transaction.ts ?? 0) - (a.transaction.ts ?? 0)), [activity]);
   const current = queue[0];
-  const hint = current ? (() => {
+  const hint = useMemo(() => {
+    if (!current) return undefined;
     const [candidate] = ownCandidates(current.transaction, current.assessment, rowsById);
     return candidate ? words.card.looksLike(accountName(candidate.accountId)) : undefined;
-  })() : undefined;
+  // accountName reads accounts and the language's copy.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current, rowsById, accounts, words]);
   const answerCurrent = async (choice: TransferAnswer) => {
     if (!current) return;
     const candidates = ownCandidates(current.transaction, current.assessment, rowsById);
@@ -108,26 +123,44 @@ export default function TransfersScreen() {
     await answer({ transaction: current.transaction, answer: choice, counterpart: candidates[0], label: labels[choice] });
   };
 
+  // At the default sizes the tiles sit on the band; at accessibility text sizes they would crowd the
+  // list out of the screen, so they move onto the sheet and scroll away with it.
+  const tilesOnBand = !large;
+  const tiles = <View testID="transfers-tiles" style={[styles.tiles, large && styles.tilesStack]}>
+    {TILES.map(([key, icon]) => {
+      const on = tile === key;
+      const fils = key === 'own' ? totals.ownFils : key === 'sent' ? totals.sentFils : totals.receivedFils;
+      const counted = key !== 'own';
+      const ground = tilesOnBand ? (on ? band.onBand : band.tile) : (on ? band.fill : band.card);
+      const ink = tilesOnBand ? (on ? band.band : band.onBand) : (on ? band.onFill : band.text);
+      const quiet = tilesOnBand ? (on ? band.band : band.onBandSecondary) : (on ? band.onFill : band.textSecondary);
+      return <Pressable key={key} testID={`transfers-tile-${key}`} accessibilityRole="button"
+        accessibilityState={{ selected: on }}
+        accessibilityLabel={`${words.tiles[key]}. ${moneyLabel(fils)}${counted ? `. ${words.tiles.counted}` : ''}`}
+        onPress={() => setTile(on ? null : key)}
+        style={[styles.tile, { backgroundColor: ground }, !tilesOnBand && { borderWidth: 1, borderColor: on ? band.fill : band.rule }]}>
+        <Icon name={icon} size={15} color={ink} />
+        <ThemedText type="meta" style={{ color: quiet }}>{words.tiles[key]}</ThemedText>
+        <Money fils={fils} type="smallBold" decimals color={ink} />
+        {counted ? <ThemedText type="micro" style={{ color: quiet }}>{words.tiles.counted}</ThemedText> : null}
+      </Pressable>;
+    })}
+  </View>;
+  // The period sits in the nav row (the Spending pattern); the picker sheet is unchanged.
+  const periodChip = <Pressable testID="transfers-period" accessibilityRole="button"
+    accessibilityLabel={tf('reportingPeriod', { period: periodLabel(period) }, language)}
+    onPress={() => setPeriodOpen(true)} style={[styles.periodChip, { backgroundColor: band.tile }]}>
+    <ThemedText type="smallBold" style={{ color: band.onBand }}>{periodLabel(period)}</ThemedText>
+    <Icon name="chevron-down" size={16} color={band.onBand} />
+  </Pressable>;
+
   return <>
     <BandScaffold band="accounts" scroll={false} testID="transfers-screen" contentStyle={styles.sheet}
-      nav={{ back: () => { if (router.canGoBack()) router.back(); else router.replace('/wallet'); }, title: words.title }}
+      nav={{ back: () => { if (router.canGoBack()) router.back(); else router.replace('/wallet'); }, title: words.title, trailing: periodChip }}
       bandContent={<View testID="transfers-band" style={styles.bandIntro}>
         <BandFigure label={words.headline(periodLabel(period))} fils={totals.ownFils} decimals palette={band}
           qualifier={words.notCounted} />
-        <View style={[styles.tiles, large && styles.tilesStack]}>
-          {TILES.map(([key, icon]) => {
-            const on = tile === key;
-            const fils = key === 'own' ? totals.ownFils : key === 'sent' ? totals.sentFils : totals.receivedFils;
-            return <Pressable key={key} testID={`transfers-tile-${key}`} accessibilityRole="button"
-              accessibilityState={{ selected: on }} accessibilityLabel={`${words.tiles[key]}. ${moneyLabel(fils)}`}
-              onPress={() => setTile(on ? null : key)}
-              style={[styles.tile, { backgroundColor: on ? band.onBand : band.tile }]}>
-              <Icon name={icon} size={15} color={on ? band.band : band.onBand} />
-              <ThemedText type="meta" style={{ color: on ? band.band : band.onBandSecondary }}>{words.tiles[key]}</ThemedText>
-              <Money fils={fils} type="smallBold" decimals color={on ? band.band : band.onBand} />
-            </Pressable>;
-          })}
-        </View>
+        {tilesOnBand ? tiles : null}
       </View>}>
       <FlatList
         testID="transfer-history"
@@ -140,7 +173,7 @@ export default function TransfersScreen() {
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         initialNumToRender={14} maxToRenderPerBatch={10} windowSize={9}
         ListHeaderComponent={<View style={styles.controls}>
-          <View style={styles.context}><PeriodPill onPress={() => setPeriodOpen(true)} /></View>
+          {tilesOnBand ? null : tiles}
           <TextField label={words.search} value={query} onChangeText={setQuery}
             inputMode="search" returnKeyType="search" placeholder={words.searchPlaceholder}
             onSubmitEditing={() => Keyboard.dismiss()}
@@ -160,7 +193,16 @@ export default function TransfersScreen() {
             onPress={() => { Keyboard.dismiss(); setSelectedId(item.transactionId); }} />
         </View>}
         ListEmptyComponent={<View style={styles.empty}><Icon name="repeat" size={30} color={band.textSecondary} />
-          <ThemedText type="heading">{words.empty}</ThemedText><ThemedText type="small" themeColor="textSecondary" style={styles.emptyCopy}>{words.emptyBody}</ThemedText></View>}
+          {tile && items.length > 0 ? <>
+            <ThemedText type="heading" style={styles.emptyCopy}>{words.emptyTile}</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.emptyCopy}>{words.emptyTileBody}</ThemedText>
+            <Pressable testID="transfers-clear-tile" accessibilityRole="button" onPress={() => setTile(null)} style={styles.clearTile}>
+              <ThemedText type="linkPrimary" style={{ color: band.tint }}>{words.clearTile}</ThemedText>
+            </Pressable>
+          </> : <>
+            <ThemedText type="heading" style={styles.emptyCopy}>{words.empty}</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.emptyCopy}>{words.emptyBody}</ThemedText>
+          </>}</View>}
       />
     </BandScaffold>
     <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
@@ -176,7 +218,8 @@ const styles = StyleSheet.create({
   tile: { flex: 1, minHeight: 72, borderRadius: 14, padding: Spacing.two, gap: 2 },
   sheet: { paddingTop: Spacing.two },
   content: { gap: 0 }, controls: { gap: Spacing.three, paddingBottom: Spacing.two },
-  context: { flexDirection: 'row', alignItems: 'center' },
+  periodChip: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 22, flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%', flexWrap: 'wrap' },
+  clearTile: { minHeight: 44, justifyContent: 'center' },
   rowCard: { paddingHorizontal: Spacing.three },
   rowCardFirst: { borderTopStartRadius: 18, borderTopEndRadius: 18 },
   rowCardLast: { borderBottomStartRadius: 18, borderBottomEndRadius: 18 },
