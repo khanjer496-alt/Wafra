@@ -394,3 +394,29 @@ test('detail sheet: the picker is a no-op only for the link already saved', asyn
   assert.equal(answers(unlink.h)[0].answer, 'own');
   assert.equal(answers(unlink.h)[0].counterpart, undefined);
 });
+
+test('detail sheet: without a passed assessment it reads the cached reconciliation, and a passed one wins', () => {
+  const ts = Date.UTC(2026, 8, 5, 10);
+  const out = { id: 'pair-out', type: 'expense', amountFils: 150000, accountId: 'enbd', category: 'other',
+    title: 'Outgoing transfer', date: '2026-09-05', ts, source: 'sms', smsKey: 'pair-1', isTransfer: true,
+    captureInstrument: { last4: '4821', kind: 'account', bankIdentity: 'emirates nbd' },
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'Emirates NBD', explicitOwn: true,
+      counterparty: { last4: '8310', kind: 'account', bankIdentity: 'adcb' } } };
+  const inn = { id: 'pair-in', type: 'income', amountFils: 150000, accountId: 'adcb', category: 'other',
+    title: 'Incoming transfer', date: '2026-09-05', ts: ts + 60000, source: 'sms', smsKey: 'pair-2',
+    captureInstrument: { last4: '8310', kind: 'account', bankIdentity: 'adcb' },
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'ADCB' } };
+  const { h, words } = detail();
+  h.state.transactions.push(out, inn);
+  // Account, Flow, Home, card, merchant and the other sheets pass no assessment.
+  const plain = h.renderDetail(inn);
+  assert.equal(byId(plain, 'transfer-answer-own').props.accessibilityState.checked, true, 'the confirmed pair reads as own');
+  assert.ok(text(plain).includes(words.route.linked('Emirates NBD')), 'and names the other side');
+  const explicit = h.renderDetail(inn, { transferAssessment: { status: 'ownership-unknown', candidateIds: [] } });
+  assert.ok(!text(explicit).includes(words.route.linked('Emirates NBD')), 'the explicit prop takes precedence');
+  // While a history import holds a provisional receipt there is no reconciliation: nothing is claimed, nothing breaks.
+  Object.assign(h.state, { transferInternalIds: [], transferNormalizationVersion: -1, historyImport: { status: 'running' } });
+  const importing = h.renderDetail(inn);
+  assert.ok(byId(importing, 'entry-transfer-question'));
+  assert.ok(!text(importing).includes(words.route.linked('Emirates NBD')));
+});

@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
-import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
+import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, transferReconciliationForState } from '@/lib/ledger';
 import { canMarkOwnTransfer, isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
 import { currentAnswer, ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
@@ -76,7 +76,7 @@ interface EntryDetailSheetProps {
  * row — "what actually was this?" — was answered by six input boxes. Reading
  * comes first now; editing is one tap away.
  */
-export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment, initialMode = 'read', startWithAccountPicker = false, band: bandId = 'home' }: EntryDetailSheetProps) {
+export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment: passedAssessment, initialMode = 'read', startWithAccountPicker = false, band: bandId = 'home' }: EntryDetailSheetProps) {
   const { getCategory, categoryLabel, expenseCategories, incomeCategories } = useCategoryCatalog();
   const theme = useTheme();
   const band = useBand(bandId);
@@ -84,6 +84,13 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const extra = entryDetailCopy[language === 'ar' ? 'ar' : 'en'];
   const largeText = useLargeTextLayout();
   const { state, editTransaction, deleteTransaction, resolveBestEffort, setMerchantOverride, setBillAlias } = useStore();
+  // Transactions and Transfers pass the assessment from the reconciliation they
+  // already hold. Every other sheet (account, Flow, Home, card, merchant, ...)
+  // reads the one cached per stored transfer receipt, so a confirmed pair shows
+  // its answer and link and "own" can link the other side. Only while an entry
+  // is shown; null during a history import's provisional receipt, which is safe.
+  const transferAssessment = passedAssessment ?? (transaction
+    ? transferReconciliationForState(state)?.byId.get(transaction.id) : undefined);
   const [editing, setEditing] = useState(false);
 
   const [title, setTitle] = useState('');
