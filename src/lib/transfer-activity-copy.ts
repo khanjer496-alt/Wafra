@@ -21,15 +21,17 @@ const en = {
   accountUnknown: 'Account not identified',
   viewAll: 'View all transfers',
   viewDetails: 'View transfer details',
-  netIncluding: 'Net including transfers',
-  transferIncome: 'Transfer income',
-  transferSpending: 'Transfer spending',
   records: (count: number) => `${count} transfer record${count === 1 ? '' : 's'}`,
-  separated: (count: number) => `${count} transfer record${count === 1 ? ' is' : 's are'} shown separately.`,
-  reviewNote: 'Some of these transfers need an ownership review in Transfers.',
-  countsNote: 'Transfers with other people still count toward income or spending. The net above includes them.',
   activityCountsNote: 'Transfers with other people still count toward spending totals.',
   walletDetail: 'Browse transfers and check ownership',
+  net: 'Net',
+  strip: {
+    kept: (count: number) => `${count} transfer${count === 1 ? '' : 's'} kept apart`,
+    sentInNet: (amount: string) => `${amount} sent to others is in the net`,
+    receivedInNet: (amount: string) => `${amount} received from others is in the net`,
+    needsAnswer: (count: number) => `${count} need${count === 1 ? 's' : ''} an answer`,
+    open: 'Open',
+  },
 };
 
 const ar: typeof en = {
@@ -53,15 +55,17 @@ const ar: typeof en = {
   accountUnknown: 'الحساب غير محدد',
   viewAll: 'عرض كل التحويلات',
   viewDetails: 'عرض تفاصيل التحويل',
-  netIncluding: 'الصافي شاملاً التحويلات',
-  transferIncome: 'دخل التحويلات',
-  transferSpending: 'مصروفات التحويلات',
   records: (count) => `${count} من سجلات التحويل`,
-  separated: (count) => `تُعرض ${count} من سجلات التحويل بشكل منفصل.`,
-  reviewNote: 'بعض هذه التحويلات تحتاج إلى مراجعة الملكية في التحويلات.',
-  countsNote: 'تبقى التحويلات مع الآخرين ضمن الدخل أو المصروفات. ويشملها الصافي أعلاه.',
   activityCountsNote: 'تبقى التحويلات مع الآخرين ضمن إجمالي المصروفات.',
   walletDetail: 'تصفح التحويلات وراجع الملكية',
+  net: 'الصافي',
+  strip: {
+    kept: (count) => `${count} من التحويلات معروضة على حدة`,
+    sentInNet: (amount) => `${amount} أُرسلت لآخرين ضمن الصافي`,
+    receivedInNet: (amount) => `${amount} استُلمت من آخرين ضمن الصافي`,
+    needsAnswer: (count) => `${count} بانتظار إجابتك`,
+    open: 'فتح',
+  },
 };
 
 export function transferActivityCopy(language = getLanguage()) {

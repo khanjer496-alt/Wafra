@@ -14,7 +14,6 @@ const S = {
   // Transaction list and details: concise visible labels, complete semantics.
   transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
   transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
-  transactionNetTotal: { en: 'Net', ar: 'الصافي' },
   transactionNetPending: { en: 'Net', ar: 'الصافي' },
   transactionConfirmedSubtotal: {
     en: 'Confirmed entries: {amount}',
@@ -2647,6 +2646,9 @@ const S = {
     en: '{count} money movement{s} not counted',
     ar: '{count} حركة أموال مستبعدة من الإجمالي',
   },
+  cashWithdrawalsExcluded: { en: '{count} cash withdrawal{s} not counted', ar: '{count} سحب نقدي مستبعد من الإجمالي' },
+  investingExcluded: { en: '{count} investment{s} not counted', ar: '{count} استثمار مستبعد من الإجمالي' },
+  cashDepositsExcluded: { en: '{count} cash deposit{s} not counted', ar: '{count} إيداع نقدي مستبعد من الإجمالي' },
   // Rows on a hidden account. They are still listed — they are real records
   // and searching for one should find it — but every other total in the app
   // leaves them out, so this one must too, and must say so.

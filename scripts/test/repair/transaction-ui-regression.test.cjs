@@ -45,8 +45,20 @@ for (const language of ['en', 'ar']) {
       assert.ok(summary && net);
       assert.equal(style(summary).flexDirection, 'column');
       assert.equal(style(summary).alignItems, 'stretch');
-      assert.ok(text(net).includes(h.deps['@/lib/i18n'].t('transactionNetTotal')));
-      assert.equal(style(net).flexDirection, largeText ? 'column' : 'row');
+      const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(language);
+      assert.ok(text(net).includes(words.net));
+      // The label and amount may wrap at large text; they never sit squeezed beside the count line.
+      assert.equal(style(net).flexWrap, 'wrap');
+      // The count line and the net are stacked children of the summary, never siblings in one row.
+      const line = walk(summary).find(n => n.props?.testID === 'transactions-summary-line');
+      assert.ok(line, 'the count line has its own element');
+      const rowParent = walk(summary).find(n => style(n).flexDirection === 'row' &&
+        [].concat(n.props.children).flat(Infinity).includes(line));
+      assert.equal(rowParent, undefined, 'the count line is not a child of a row container');
+      const lineParent = walk(summary).find(n => [].concat(n.props?.children).flat(Infinity).includes(line));
+      assert.equal([].concat(lineParent.props.children).flat(Infinity).includes(net), false);
+      assert.ok(walk(lineParent).includes(net), 'both stack inside the same column container');
+      assert.notEqual(style(lineParent).flexDirection, 'row');
       assert.equal(walk(net).some(n => n.props?.numberOfLines), false);
       const header = h.list.props.renderSectionHeader({ section: h.list.props.sections[0] });
       assert.equal(style(header).flexDirection, largeText ? 'column' : 'row');
@@ -208,13 +220,18 @@ test('an unresolved transfer moves to its own view without contributing to regul
   assert.equal(netSummary(h), undefined, 'one remaining ordinary result does not need a duplicate total');
   assert.deepEqual(Array.from(h.list.props.sections[0].data, row => row.id), ['purchase']);
   assert.equal(h.list.props.sections[0].totalFils, -12500, 'unknown ownership must not add income');
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
   const notice = walk(h.tree).find(n => n.props?.testID === 'transactions-separated-transfers');
   assert.ok(notice);
-  assert.match(text(notice), /1 transfer record/);
-  assert.doesNotMatch(text(notice), /ownership review|Needs review/,
+  assert.ok(text(notice).includes(words.strip.kept(1)));
+  assert.doesNotMatch(text(notice), /in the net/, 'an unknown-ownership transfer adds nothing to the net, so the strip does not claim it does');
+  assert.doesNotMatch(text(notice), /need an answer|needs an answer/,
     'a generic unknown transfer is not announced as a review chore');
-  const link = walk(h.tree).find(n => n.props?.testID === 'transactions-transfers-link');
-  assert.ok(link); link.props.onPress();
+  assert.equal(notice.props.accessibilityRole, 'button');
+  assert.ok(notice.props.accessibilityLabel.includes(words.strip.kept(1)));
+  assert.ok(style(notice).minHeight >= 44);
+  const link = notice;
+  link.props.onPress();
   assert.ok(h.events.some(event => event[0] === 'route' && event[1] === '/transfers'));
   assert.equal(walk(h.tree).find(n => n.props?.testID === 'transactions-unresolved-transfers'), undefined,
     'transfer review belongs under Accounts rather than the transaction summary');
@@ -245,8 +262,8 @@ for (const language of ['en', 'ar']) test(`${language}: the review note appears 
   const notice = walk(tree).find(n => n.props?.testID === 'transactions-separated-transfers');
   assert.ok(notice);
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(language);
-  assert.ok(text(notice).includes(words.separated(2)));
-  assert.ok(text(notice).includes(words.reviewNote), 'one queued record in view shows the review note');
+  assert.ok(text(notice).includes(words.strip.kept(2)));
+  assert.ok(text(notice).includes(words.strip.needsAnswer(1)), 'one queued record in view says it needs an answer');
 });
 
 const fixtureRow = (id, overrides = {}) => ({
@@ -322,3 +339,18 @@ for (const language of ['en', 'ar']) {
     assert.ok(text(h.list.props.ListEmptyComponent).includes(h.deps['@/lib/i18n'].t('nothingMatches')));
   });
 }
+
+for (const language of ['en', 'ar']) test(`${language}: the transfer strip says what a transfer with someone else adds to the net`, () => {
+  const rows = [
+    fixtureRow('purchase', { amountFils: 12500 }),
+    fixtureRow('sent', { title: 'Outgoing transfer', category: 'other', amountFils: 40000,
+      transferDecision: { version: 1, ownership: 'external', decidedAt: 1 } }),
+  ];
+  const h = transactions({ language, state: { transactions: rows }, period: { mode: 'all' } });
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(language);
+  const strip = walk(h.tree).find(n => n.props?.testID === 'transactions-separated-transfers');
+  assert.ok(strip);
+  assert.ok(text(strip).includes(words.strip.kept(1)));
+  assert.match(text(strip), language === 'en' ? /sent to others is in the net/ : /أُرسلت لآخرين ضمن الصافي/);
+  assert.ok(strip.props.accessibilityLabel.includes(words.viewAll));
+});

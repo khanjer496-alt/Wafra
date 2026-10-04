@@ -79,10 +79,14 @@ export function amountSearchText(amountFils: number, exponent = 2): string {
   const fraction = exponent > 0 ? String(Math.abs(amountFils) % scale).padStart(exponent, '0') : '';
   return fraction ? `${whole}.${fraction}` : String(whole);
 }
+type MovementKind = 'cash-withdrawal' | 'investing' | 'cash-deposit';
+const movementKindOf = (row: Transaction): MovementKind =>
+  row.category === 'cash-withdrawal' ? 'cash-withdrawal' : row.category === 'investing' ? 'investing' : 'cash-deposit';
+
 type TransactionFilterProjection = {
   filtered: Transaction[];
   totalShown: number;
-  excluded: { transfers: number; movements: number; hidden: number };
+  excluded: { transfers: number; movements: number; hidden: number; movementKind?: MovementKind };
   separatedTransfers: { count: number; reviewCount: number; incomeFils: number; expenseFils: number };
   days: { date: string; totalFils: number; data: Transaction[] }[];
 };
@@ -204,6 +208,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
   else if (filters.datePreset === 'custom') { dateFrom = filters.dateFrom; dateTo = filters.dateTo; }
   const filtered: Transaction[] = []; const byDay = new Map<string, { date: string; totalFils: number; data: Transaction[] }>();
   let totalShown = 0; let transfers = 0; let movements = 0; let hidden = 0;
+  let movementKind: MovementKind | 'mixed' | undefined;
   const separatedTransfers = { count: 0, reviewCount: 0, incomeFils: 0, expenseFils: 0 };
   const ordered = index.ordered(filters.sort);
   const ascending = filters.sort === 'oldest';
@@ -258,7 +263,11 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
     filtered.push(row);
     if (!counts) {
       if (!options.live.has(row.accountId)) hidden++;
-      else if (isMoneyMovementOnly(row)) movements++;
+      else if (isMoneyMovementOnly(row)) {
+        movements++;
+        const kind = movementKindOf(row);
+        movementKind = movementKind === undefined || movementKind === kind ? kind : 'mixed';
+      }
       else transfers++;
     }
     if (filters.sort !== 'largest') {
@@ -267,7 +276,7 @@ export function projectTransactionFilter(index: ReturnType<typeof createTransact
       day.data.push(row); day.totalFils += contribution;
     }
   }
-  const result = { filtered, totalShown, excluded: { transfers, movements, hidden }, separatedTransfers, days: [...byDay.values()] };
+  const result = { filtered, totalShown, excluded: { transfers, movements, hidden, ...(movementKind && movementKind !== 'mixed' ? { movementKind } : {}) }, separatedTransfers, days: [...byDay.values()] };
   index.remember(filters, options, result);
   return result;
 }

@@ -180,3 +180,17 @@ test('Transactions separation reconciles once per stored receipt and never again
   assert.equal(transferReconciliationForState(legacy), core.reconcileTransfers(rows, accounts),
     'without a receipt it shares the reconciler memo used by the internal-id fallback');
 });
+
+test('a single kind of excluded money movement is named', () => {
+  const rows = [
+    row('w1', { category: 'cash-withdrawal', title: 'ATM', transferDecision: undefined, date: '2026-09-02', amountFils: 50000 }),
+    row('w2', { category: 'cash-withdrawal', title: 'ATM', transferDecision: undefined, date: '2026-09-03', amountFils: 20000 }),
+  ];
+  const first = project(rows);
+  assert.equal(first.excluded.movements, 2);
+  assert.equal(first.excluded.movementKind, 'cash-withdrawal');
+  rows.push(row('i1', { category: 'investing', title: 'Broker', transferDecision: undefined, amountFils: 10000 }));
+  const mixed = project(rows);
+  assert.equal(mixed.excluded.movements, 3);
+  assert.equal(mixed.excluded.movementKind, undefined);
+});
