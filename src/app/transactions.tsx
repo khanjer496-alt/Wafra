@@ -421,7 +421,7 @@ export default function TransactionsScreen() {
           else { setEntryMode('transfer'); setEditing(tx); }
         } });
     }
-    actions.push({ name: 'delete', label: words.delete, icon: 'trash', destructive: true, band: 'spending',
+    actions.push({ name: 'delete', label: words.delete, icon: 'trash', destructive: true,
       onPress: () => { Keyboard.dismiss(); setDeleting(tx); } });
     return actions;
   }, [internal, words]);

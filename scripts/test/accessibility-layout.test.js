@@ -69,7 +69,7 @@ for (const [name, code] of Object.entries({ Home: home, Flow: spendingOverview, 
 ok('Home stacks its hero breakdown for large text', /largeText && styles\.splitLarge/.test(home));
 ok('Flow stacks summary and category rows for large text', /large && styles\.stack/.test(spendingOverview) && /<SpendingOverview/.test(flow));
 ok('Bills reflows its header and segments for large text',
-  /<BillsSegmentControl/.test(bills) && /<ScrollView[\s\S]*?horizontal/.test(billsSegments) && !/numberOfLines/.test(billsSegments));
+  /<BillsSegmentControl/.test(bills) && /flexWrap: 'wrap'/.test(billsSegments) && !/numberOfLines/.test(billsSegments));
 // Design language E: the headline is the slate band's BandFigure (which puts
 // the currency on its own line at large text) and its chips stack.
 ok('Wallet stacks its recorded-balance headline at accessibility text sizes',

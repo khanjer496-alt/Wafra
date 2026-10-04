@@ -218,7 +218,7 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
         accessibilityLabel={`${words.trialTimelineLabel}. ${words.trialToday}: ${captureOn ? words.trialTodayBody : words.trialTodayBodyOff} ${words.trialEnd(timeline[1]!.day)}: ${words.trialEndBody}`}
         testID="onboarding-trial-timeline">
         <View style={[styles.stage, { backgroundColor: band.tile }]}>
-          <ThemedText type="smallBold" style={{ color: band.accent }}>{words.trialToday}</ThemedText>
+          <ThemedText type="smallBold" style={{ color: band.accentOnBand }}>{words.trialToday}</ThemedText>
           <ThemedText type="meta" style={{ color: band.onBand }}>{captureOn ? words.trialTodayBody : words.trialTodayBodyOff}</ThemedText>
         </View>
         <View style={[styles.stage, { backgroundColor: band.tile }]}>

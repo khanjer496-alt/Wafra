@@ -46,9 +46,11 @@ test('Transactions: swipe actions wear Category ochre, Transfer slate and Delete
   const list = walk(h.tree).find((node) => node.type === 'SectionList');
   const swipe = walk(list.props.renderItem({ item: h.state.transactions[1], index: 0 })).find((node) => node.type === 'SwipeRow');
   assert.deepEqual([...swipe.props.actions.map((action) => `${action.name}:${action.band}`)],
-    ['category:bills', 'transfer:accounts', 'delete:spending']);
+    ['category:bills', 'transfer:accounts', 'delete:undefined']);
+  assert.equal(swipe.props.actions.find((action) => action.name === 'delete').destructive, true, 'Delete is clay via the danger token');
   const source = fs.readFileSync(path.join(root, 'src/components/swipe-row.tsx'), 'utf8');
   assert.match(source, /BandPalettes\[scheme\]\[tone\]/, 'the colour comes from the band palette for the current scheme');
+  assert.match(source, /danger\.danger/, 'a destructive action takes the danger token, not a band');
   assert.doesNotMatch(source, /#[0-9A-Fa-f]{6}/, 'no hard-coded colours');
 });
 

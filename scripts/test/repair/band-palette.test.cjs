@@ -17,8 +17,9 @@ const luminance = (value) => { const [r, g, b] = hex(value); return 0.2126 * lin
 const contrast = (a, b) => { const x = luminance(a); const y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
 
 test('the six bands carry the approved light and dark colours', () => {
-  const light = { home: '#16130F', spending: '#A4432F', bills: '#E2B45A', accounts: '#2F6577', flow: '#1F6B52', settings: '#EDE3CF' };
-  const dark = { home: '#0B0A08', spending: '#6E2B1E', bills: '#5E4719', accounts: '#1B3F4A', flow: '#14473A', settings: '#26221C' };
+  // Spending went near-black for its coloured category coins; flow moved from green to indigo.
+  const light = { home: '#16130F', spending: '#141414', bills: '#E2B45A', accounts: '#2F6577', flow: '#2E3470', settings: '#EDE3CF' };
+  const dark = { home: '#0B0A08', spending: '#0C0C0C', bills: '#5E4719', accounts: '#1B3F4A', flow: '#1D2148', settings: '#26221C' };
   assert.deepEqual([...BAND_IDS], ['home', 'spending', 'bills', 'accounts', 'flow', 'settings']);
   for (const id of BAND_IDS) {
     assert.equal(BandPalettes.light[id].band, light[id], `light ${id}`);
@@ -30,16 +31,20 @@ test('the six bands carry the approved light and dark colours', () => {
     assert.equal(BandPalettes.dark[id].rule, '#3B362E');
     assert.equal(BandPalettes.dark[id].text, '#F2EFE8');
     assert.equal(BandPalettes.dark[id].textSecondary, '#A9A29A');
-    assert.equal(BandPalettes.light[id].accent, '#57B894', 'mint is the one accent');
+    assert.equal(BandPalettes.light[id].accent, '#1F6B52', 'the Wafra logo green is the one accent');
     assert.equal(BandPalettes.dark[id].onBand, '#F2EFE8', 'every dark band takes light text');
   }
   // Light text on dark bands, ink on the light ochre and sand bands.
   assert.equal(BandPalettes.light.bills.onBand, '#16130F');
   assert.equal(BandPalettes.light.settings.onBand, '#16130F');
   assert.equal(BandPalettes.light.spending.onBand, '#F4F1EA');
-  // dark.py's tints for glyphs, links and status on dark surfaces.
-  assert.deepEqual(['spending', 'accounts', 'flow', 'bills'].map((id) => BandPalettes.dark[id].tint), ['#E08A70', '#7FB4C4', '#57B894', '#D9AE62']);
-  assert.deepEqual([BandPalettes.dark.home.statusOk, BandPalettes.dark.home.statusNear, BandPalettes.dark.home.statusOver], ['#57B894', '#D9AE62', '#E08A70']);
+  // Lighter tints for glyphs, links and status on dark surfaces.
+  assert.deepEqual(['spending', 'accounts', 'flow', 'bills'].map((id) => BandPalettes.dark[id].tint), ['#F2EFE8', '#7FB4C4', '#A8B1F0', '#D9AE62']);
+  // Success is the logo green's family; near and over keep amber and red.
+  assert.deepEqual([BandPalettes.dark.home.statusOk, BandPalettes.dark.home.statusNear, BandPalettes.dark.home.statusOver], ['#6BC79E', '#D9AE62', '#E08A70']);
+  assert.equal(BandPalettes.light.home.statusOk, '#1F6B52');
+  // Within a limit is blue, apart from amber and red for every eye.
+  assert.deepEqual([BandPalettes.light.home.limitOk, BandPalettes.dark.home.limitOk], ['#2B5FA6', '#8AB2EE']);
   assert.deepEqual([BandLayout.sheetRadius, BandLayout.sheetOverlap, BandLayout.sheetRise, BandLayout.buttonHeight, BandLayout.buttonRadius, BandLayout.chipHeight],
     [28, 28, 40, 56, 16, 38]);
 });
@@ -60,13 +65,16 @@ for (const scheme of ['light', 'dark']) {
         ['tint/sheet', p.tint, p.sheet], ['onFill/fill', p.onFill, p.fill],
         ['text/sheet', p.text, p.sheet], ['textSecondary/sheet', p.textSecondary, p.sheet], ['text/card', p.text, p.card],
         ['onAccent/accent', p.onAccent, p.accent], ['onAccentSecondary/accent', p.onAccentSecondary, p.accent],
+        ['accentOnBand/home band', p.accentOnBand, BandPalettes[scheme].home.band], ['accentOnBand/home tile', p.accentOnBand, BandPalettes[scheme].home.tile],
         ['statusOk/sheet', p.statusOk, p.sheet], ['statusNear/sheet', p.statusNear, p.sheet], ['statusOver/sheet', p.statusOver, p.sheet],
+        ['limitOk/sheet', p.limitOk, p.sheet], ['onDanger/danger', p.onDanger, p.danger],
         ['text/glyphGround', p.text, p.glyphGround],
       ];
       for (const [name, fg, bg] of pairs) assert.ok(contrast(fg, bg) >= 4.5, `${scheme} ${id} ${name}: ${contrast(fg, bg).toFixed(2)}`);
       // Week bars that are not today read as data: 3:1 against the band.
       assert.ok(contrast(p.bandMark, p.band) >= 3, `${scheme} ${id} bandMark ${contrast(p.bandMark, p.band).toFixed(2)}`);
-      assert.ok(contrast(p.accent, p.band) >= 1.2, 'today\'s mint bar stands apart from the band');
+      // The logo green is not drawn on Accounts' slate band (its button takes the cream pill instead).
+      if (id !== 'accounts') assert.ok(contrast(p.accent, p.band) >= 1.2, `${scheme} ${id}: today's bar stands apart from the band`);
     }
   });
 

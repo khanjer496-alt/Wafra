@@ -3,7 +3,8 @@
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
 const root = path.resolve(__dirname, '../../..');
-const nativeStyles = { create: s => s, hairlineWidth: 1, flatten: s => Object.assign({}, ...(Array.isArray(s) ? s.flat(Infinity).filter(Boolean) : [s])) };
+const fill = { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 };
+const nativeStyles = { create: s => s, hairlineWidth: 1, absoluteFill: fill, absoluteFillObject: fill, flatten: s => Object.assign({}, ...(Array.isArray(s) ? s.flat(Infinity).filter(Boolean) : [s])) };
 const themes = load(path.join(root, 'src/constants/theme.ts'), { '@/global.css': {}, 'react-native': { Platform: { select: x => x.android } } });
 function createHarness(options = {}) {
   class Clock extends Date { constructor(...args){ super(...(args.length?args:['2026-09-06T12:00:00Z'])); } static now(){return Date.parse('2026-09-06T12:00:00Z');} }
@@ -50,7 +51,11 @@ function createHarness(options = {}) {
   };
   const platform=options.platform??'android';
   const native={View:'View',ActivityIndicator:'ActivityIndicator',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',ScrollView:p=>jsx('ScrollView',p),RefreshControl:'RefreshControl',StyleSheet:nativeStyles,
-    Platform:{OS:platform,select:x=>x[platform]??x.default},AppState:{addEventListener:()=>({remove(){}})},InteractionManager:{runAfterInteractions:task=>{task();return{cancel(){}};}},Alert:{alert:m=>events.push(['alert',m])},useWindowDimensions:()=>({width:options.width??390,fontScale:options.largeText?1.3:1})};
+    Platform:{OS:platform,select:x=>x[platform]??x.default},AppState:{addEventListener:()=>({remove(){}})},InteractionManager:{runAfterInteractions:task=>{task();return{cancel(){}};}},Alert:{alert:m=>events.push(['alert',m])},useWindowDimensions:()=>({width:options.width??390,fontScale:options.largeText?1.3:1}),
+    // Core Animated as the final frame: values hold what they are given, and runs never start.
+    Animated:(()=>{const run={start(){},stop(){}};class Value{constructor(v){this.value=v;}setValue(v){this.value=v;}interpolate(){return this;}}
+      return {View:'View',Value,add:(a)=>a,multiply:(a)=>a,timing:()=>run,spring:()=>run,delay:()=>run,sequence:()=>run,parallel:()=>run};})(),
+    Easing:{bezier:()=>null}};
   const period=options.period??{mode:'month',key:'2026-09'};
   const periodModule={inPeriod:(date,p)=>typeof p==='string'?date.slice(0,7)===p:p.mode==='month'?date.slice(0,7)===p.key:true,
     periodRange:()=>'',periodLabel:p=>p.mode==='month'?format.monthLabel(p.key,true):p.mode==='year'?String(p.year):p.mode==='range'?`${format.shortDate(p.from)} – ${format.shortDate(p.to)}`:'All time',toPeriod:p=>typeof p==='string'?{mode:'month',key:p}:p,
@@ -93,7 +98,7 @@ function createHarness(options = {}) {
     // render — which is what the render-cost tests exist to catch.
     '@/hooks/use-today':{useToday:()=>harnessToday,useResumeClock:()=>harnessToday},
     '@/hooks/use-screen-entering':{useScreenEntering:()=>()=>undefined},'@/hooks/use-color-scheme':{useColorScheme:()=>options.theme??'light'},
-    '@/hooks/use-reduced-motion':{useReducedMotion:()=>true},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true,useFocusEffect:()=>{}},
+    '@/hooks/use-reduced-motion':{useReducedMotion:()=>true,useMotionPreference:()=>({ready:true,reducedMotion:true})},'@/lib/haptics':{tapped(){}},'@react-navigation/native':{useIsFocused:()=>true,useFocusEffect:()=>{}},
     '@/lib/foreground-history-priority':{prioritizeForegroundNavigation(){}},
     '@/lib/i18n':i18n,
     '@/lib/format':format,'@/lib/markets':{ledgerCurrencyCode:()=> 'AED',ledgerCurrencyDisplay:()=>lang==='ar'?'د.إ':'AED'},
@@ -234,7 +239,7 @@ function createHarness(options = {}) {
   // from source.
   local('@/lib/band-copy','src/lib/band-copy.ts');local('@/lib/limit-status','src/lib/limit-status.ts');
   local('@/lib/everyday-band-copy','src/lib/everyday-band-copy.ts');
-  local('@/lib/spending-compare','src/lib/spending-compare.ts');local('@/lib/spending-calendar-tiles','src/lib/spending-calendar-tiles.ts');
+  local('@/lib/spending-compare','src/lib/spending-compare.ts');local('@/lib/category-colors','src/lib/category-colors.ts');local('@/lib/spending-calendar-tiles','src/lib/spending-calendar-tiles.ts');
   local('@/components/ui/band/band-segmented');local('@/components/ui/band/band-chip');local('@/components/ui/band/share-bar');
   local('@/components/ui/band/glyph-tile');local('@/components/ui/band/status-bar');local('@/components/ui/band/e-button');
   // The category creation form uses the real field/button and band palette;

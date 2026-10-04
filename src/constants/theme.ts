@@ -258,15 +258,25 @@ export interface BandPalette {
   /** The segmented control's selected pill on the band, and its label. */
   selected: string;
   onSelected: string;
-  /** Mint: the one accent (today's bar, the Left-in-budgets tile, Add). */
+  /** The Wafra logo green: the one accent fill (today's bar, the Left-in-budgets tile, Add). */
   accent: string;
   onAccent: string;
   onAccentSecondary: string;
-  /** Limit status: within, near (≥85%), over. Text-grade on the sheet. */
+  /** The accent as text or a stroke on a dark band (a good-news figure), where the logo green is too deep to read. */
+  accentOnBand: string;
+  /**
+   * Success (done, paid, confirmed) and the limit statuses near (≥85%) and
+   * over. Text-grade on the sheet. Success is the logo green's family.
+   */
   statusOk: string;
   statusNear: string;
   statusOver: string;
   statusOkSoft: string;
+  /** Within a limit: blue, calm and apart from amber and red for every eye (`limitStatusColor`). */
+  limitOk: string;
+  /** A destructive action's fill (a row's Delete) and its label: clay, whatever the band. */
+  danger: string;
+  onDanger: string;
   statusNearSoft: string;
   statusOverSoft: string;
   /** expo-status-bar style: light content on dark bands. */
@@ -280,7 +290,14 @@ type BandCore = Pick<BandPalette, 'band' | 'onBand' | 'onBandSecondary' | 'tile'
 
 const CREAM = '#F4F1EA';
 const INK = '#16130F';
+// The pattern keeps its original mint; the interface accent is the logo's green.
 const MINT = '#57B894';
+/** The Wafra logo's green (assets/images/wafra-mark.svg, the app icon). */
+const LOGO_GREEN = '#1F6B52';
+/** The logo green lifted to read as text on dark bands and the dark sheet. */
+const LOGO_GREEN_LIGHT = '#6BC79E';
+/** The Spending band's selected pill: cream with logo-green text, clear on the near-black band. */
+const SPENDING_SELECTED = { selected: CREAM, onSelected: LOGO_GREEN } as const;
 // Named, not inlined: the accessibility suite reads `text:`/`textSecondary:`
 // hex literals in this file as the two page palettes above.
 const LIGHT_SECONDARY = '#57524A';
@@ -289,33 +306,37 @@ const DARK_SECONDARY = '#A9A29A';
 
 const SHEET_LIGHT = {
   sheet: '#F4F1EA', card: '#FBF9F4', rule: '#E3DED2', glyphGround: '#EDE3CF', text: INK, textSecondary: LIGHT_SECONDARY,
-  accent: MINT, onAccent: INK, onAccentSecondary: '#23342A',
-  statusOk: '#1F6B52', statusNear: '#7E5F14', statusOver: '#A3402D',
+  accent: LOGO_GREEN, onAccent: CREAM, onAccentSecondary: '#D6E6DD', accentOnBand: LOGO_GREEN_LIGHT,
+  statusOk: LOGO_GREEN, statusNear: '#7E5F14', statusOver: '#A3402D',
   statusOkSoft: '#E4EDE8', statusNearSoft: '#F1E9D8', statusOverSoft: '#FBF3F0',
+  limitOk: '#2B5FA6', danger: '#A4432F', onDanger: CREAM,
 } as const;
 
 // dark.py: sheets #1C1A16, cards #24211C, rules #3B362E, text #F2EFE8,
 // secondary #A9A29A; glyph/link/status tints move lighter.
 const SHEET_DARK = {
   sheet: '#1C1A16', card: '#24211C', rule: '#3B362E', glyphGround: '#2E2A23', text: DARK_TEXT, textSecondary: DARK_SECONDARY,
-  accent: MINT, onAccent: INK, onAccentSecondary: '#23342A',
-  statusOk: '#57B894', statusNear: '#D9AE62', statusOver: '#E08A70',
+  accent: LOGO_GREEN, onAccent: CREAM, onAccentSecondary: '#D6E6DD', accentOnBand: LOGO_GREEN_LIGHT,
+  statusOk: LOGO_GREEN_LIGHT, statusNear: '#D9AE62', statusOver: '#E08A70',
   statusOkSoft: '#1E3A31', statusNearSoft: '#3A3020', statusOverSoft: '#2A1D18',
+  limitOk: '#8AB2EE', danger: '#6E2B1E', onDanger: DARK_TEXT,
 } as const;
 
 const BAND_CORE: Record<'light' | 'dark', Record<BandId, BandCore>> = {
   light: {
     home: { band: INK, onBand: CREAM, onBandSecondary: '#A09D96', tile: '#282521', bandRule: '#3E3B36', bandMark: '#64615C',
       tint: INK, fill: INK, onFill: CREAM, selected: CREAM, onSelected: INK, statusBar: 'light', tabTint: INK },
-    spending: { band: '#A4432F', onBand: CREAM, onBandSecondary: '#EBDED5', tile: '#8D3B2A', bandRule: '#B26251', bandMark: '#D5ADA1',
-      tint: '#A4432F', fill: '#A4432F', onFill: CREAM, selected: CREAM, onSelected: '#A4432F', statusBar: 'light', tabTint: '#A4432F' },
+    // Spending is near-black in both schemes, so its coloured category coins carry the screen.
+    spending: { band: '#141414', onBand: CREAM, onBandSecondary: '#A6A39C', tile: '#252523', bandRule: '#3A3A37', bandMark: '#6E6C67',
+      // Ink on the sheet, as Home: a green tint would read as success on every bar.
+      tint: INK, fill: INK, onFill: CREAM, ...SPENDING_SELECTED, statusBar: 'light', tabTint: LOGO_GREEN },
     // Ochre is light: ink text on it, and its sheet tint is the text-grade ochre.
     bills: { band: '#E2B45A', onBand: INK, onBandSecondary: '#574727', tile: '#E9CC94', bandRule: '#BD974D', bandMark: '#7A6234',
       tint: '#7E5F14', fill: INK, onFill: CREAM, selected: INK, onSelected: CREAM, statusBar: 'dark', tabTint: '#7E5F14' },
     accounts: { band: '#2F6577', onBand: CREAM, onBandSecondary: '#D6DCD9', tile: '#2B5866', bandRule: '#527E8C', bandMark: '#9FB5B9',
       tint: '#2F6577', fill: '#2F6577', onFill: CREAM, selected: CREAM, onSelected: '#2F6577', statusBar: 'light', tabTint: '#2F6577' },
-    flow: { band: '#1F6B52', onBand: CREAM, onBandSecondary: '#D6DED5', tile: '#1E5D47', bandRule: '#45836D', bandMark: '#9BB9AA',
-      tint: '#1F6B52', fill: '#1F6B52', onFill: CREAM, selected: CREAM, onSelected: '#1F6B52', statusBar: 'light', tabTint: '#1F6B52' },
+    flow: { band: '#2E3470', onBand: CREAM, onBandSecondary: '#D3D6EA', tile: '#262B60', bandRule: '#4A5088', bandMark: '#9DA3CF',
+      tint: '#2E3470', fill: '#2E3470', onFill: CREAM, selected: CREAM, onSelected: '#2E3470', statusBar: 'light', tabTint: '#2E3470' },
     settings: { band: '#EDE3CF', onBand: INK, onBandSecondary: '#6A645A', tile: '#F1EBDF', bandRule: '#C6BEAC', bandMark: '#888175',
       tint: INK, fill: INK, onFill: CREAM, selected: INK, onSelected: CREAM, statusBar: 'dark', tabTint: INK },
   },
@@ -323,14 +344,14 @@ const BAND_CORE: Record<'light' | 'dark', Record<BandId, BandCore>> = {
   dark: {
     home: { band: '#0B0A08', onBand: '#F2EFE8', onBandSecondary: '#96938E', tile: '#1D1C1A', bandRule: '#353330', bandMark: '#605F5B',
       tint: '#F2EFE8', fill: '#F2EFE8', onFill: INK, selected: '#1C1A16', onSelected: '#F2EFE8', statusBar: 'light', tabTint: '#F2EFE8' },
-    spending: { band: '#6E2B1E', onBand: '#F2EFE8', onBandSecondary: '#D0BCB3', tile: '#793B2E', bandRule: '#864E42', bandMark: '#A98379',
-      tint: '#E08A70', fill: '#E08A70', onFill: INK, selected: '#1C1A16', onSelected: '#E08A70', statusBar: 'light', tabTint: '#E08A70' },
+    spending: { band: '#0C0C0C', onBand: '#F2EFE8', onBandSecondary: '#A6A39C', tile: '#1F1F1D', bandRule: '#333331', bandMark: '#666460',
+      tint: '#F2EFE8', fill: '#F2EFE8', onFill: INK, ...SPENDING_SELECTED, statusBar: 'light', tabTint: LOGO_GREEN_LIGHT },
     bills: { band: '#5E4719', onBand: '#F2EFE8', onBandSecondary: '#D6CFC1', tile: '#6A542A', bandRule: '#79653E', bandMark: '#A4967A',
       tint: '#D9AE62', fill: '#D9AE62', onFill: INK, selected: '#1C1A16', onSelected: '#D9AE62', statusBar: 'light', tabTint: '#D9AE62' },
     accounts: { band: '#1B3F4A', onBand: '#F2EFE8', onBandSecondary: '#B2BAB9', tile: '#2C4D57', bandRule: '#425F66', bandMark: '#75898C',
       tint: '#7FB4C4', fill: '#7FB4C4', onFill: INK, selected: '#1C1A16', onSelected: '#7FB4C4', statusBar: 'light', tabTint: '#7FB4C4' },
-    flow: { band: '#14473A', onBand: '#F2EFE8', onBandSecondary: '#B6C2B9', tile: '#265448', bandRule: '#3C6559', bandMark: '#738F85',
-      tint: '#57B894', fill: '#57B894', onFill: INK, selected: '#1C1A16', onSelected: '#57B894', statusBar: 'light', tabTint: '#57B894' },
+    flow: { band: '#1D2148', onBand: '#F2EFE8', onBandSecondary: '#B5B9D6', tile: '#2B3060', bandRule: '#3F4475', bandMark: '#7A80AE',
+      tint: '#A8B1F0', fill: '#A8B1F0', onFill: INK, selected: '#1C1A16', onSelected: '#A8B1F0', statusBar: 'light', tabTint: '#A8B1F0' },
     settings: { band: '#26221C', onBand: '#F2EFE8', onBandSecondary: '#A09D96', tile: '#36322C', bandRule: '#4B4741', bandMark: '#6F6C65',
       tint: '#F2EFE8', fill: '#F2EFE8', onFill: INK, selected: '#1C1A16', onSelected: '#F2EFE8', statusBar: 'light', tabTint: '#F2EFE8' },
   },
@@ -386,12 +407,12 @@ export interface TabPillColors {
 export const TabPill: Record<'light' | 'dark', TabPillColors> = {
   light: {
     bar: INK, border: INK, inactive: '#BDBAB3', ripple: 'rgba(244, 241, 234, 0.16)',
-    home: { fill: CREAM, text: INK }, spending: { fill: '#A4432F', text: CREAM },
+    home: { fill: CREAM, text: INK }, spending: { fill: LOGO_GREEN, text: CREAM },
     bills: { fill: '#E2B45A', text: INK }, accounts: { fill: '#2F6577', text: CREAM },
   },
   dark: {
     bar: '#0B0A08', border: '#3B362E', inactive: '#B8B6B0', ripple: 'rgba(242, 239, 232, 0.14)',
-    home: { fill: DARK_TEXT, text: INK }, spending: { fill: '#A4432F', text: DARK_TEXT },
+    home: { fill: DARK_TEXT, text: INK }, spending: { fill: LOGO_GREEN, text: DARK_TEXT },
     bills: { fill: '#E2B45A', text: INK }, accounts: { fill: '#2F6577', text: DARK_TEXT },
   },
 };

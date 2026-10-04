@@ -6,14 +6,14 @@
   <color name="wafra_widget_today_text">#F2EFE8</color>
   <color name="wafra_widget_today_secondary">#96938E</color>
   <color name="wafra_widget_today_mark">#605F5B</color>
-  <color name="wafra_widget_today_accent">#57B894</color>
+  <color name="wafra_widget_today_accent">#1F6B52</color>
   <color name="wafra_widget_upcoming_band">#5E4719</color>
   <color name="wafra_widget_upcoming_text">#F2EFE8</color>
   <color name="wafra_widget_upcoming_secondary">#D6CFC1</color>
   <color name="wafra_widget_upcoming_tile">#6A542A</color>
   <color name="wafra_widget_today_tile">#1D1C1A</color>
   <color name="wafra_widget_today_over">#E08A70</color>
-  <color name="wafra_widget_spending_band">#6E2B1E</color>
+  <color name="wafra_widget_spending_band">#0C0C0C</color>
   <color name="wafra_widget_spending_text">#F2EFE8</color>
-  <color name="wafra_widget_spending_secondary">#D0BCB3</color>
+  <color name="wafra_widget_spending_secondary">#A6A39C</color>
 </resources>

@@ -17,7 +17,8 @@ export interface BandSegment<T extends string> {
  * Segmented control set on a band (Spending's Categories · Compare ·
  * Calendar, Bills' Next 30 days · All). The track is the band's own tone;
  * the selected pill is the sheet surface with band-colour text (on the light
- * ochre and sand bands, an ink pill with cream text). Selection is immediate.
+ * ochre and sand bands, an ink pill with cream text; on Spending's
+ * near-black band, a cream pill with logo-green text). Selection is immediate.
  * A tablist for assistive tech; at the accessibility text sizes the segments
  * stack instead of truncating.
  */

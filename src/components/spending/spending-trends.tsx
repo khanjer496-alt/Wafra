@@ -117,7 +117,7 @@ export function SpendingTrends(p: Props) {
               accessibilityLabel={`${categoryLabel(m.category, lang)}. ${p.periodLabel} ${moneyLabel(m.currentFils)}. ${p.comparisonLabel ?? ''} ${moneyLabel(m.previousFils)}. ${m.deltaFils > 0 ? w.more : w.fewer} ${moneyLabel(Math.abs(m.deltaFils))}`}
               style={({ pressed }) => [styles.compareRow, styles.rule, { borderColor: band.rule, opacity: pressed ? 0.7 : 1 }]}>
               <View style={[styles.compareTop, large && styles.compareTopLarge]}>
-                <GlyphTile category={m.category} palette={band} size={34} />
+                <GlyphTile category={m.category} palette={band} size={34} tone="category" />
                 <ThemedText type="smallBold" style={[styles.grow, large && styles.compareNameLarge]}>{categoryLabel(m.category, lang)}</ThemedText>
                 <ThemedText type="smallBold" tabular>
                   {m.deltaFils > 0 ? '+' : '−'}{moneyLabel(Math.abs(m.deltaFils))}</ThemedText>
@@ -131,8 +131,9 @@ export function SpendingTrends(p: Props) {
                   {/* Both bars sit on the rule-tone track, so a period at zero
                       still reads as an empty bar rather than a missing one. */}
                   <View style={[styles.compareTrack, { backgroundColor: band.rule }]}>
+                    {/* The earlier period recedes, so the two bars differ by more than shade. */}
                     <GrowBar axis="width" delay={index * 50} size={fils / scale * 100}
-                      style={{ height: 10, borderRadius: 5, backgroundColor: color }} />
+                      style={{ height: 10, borderRadius: 5, backgroundColor: color, opacity: index === 0 ? 1 : 0.45 }} />
                   </View>
                 </View>)}
             </Pressable>;

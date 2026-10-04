@@ -29,8 +29,8 @@ const TRAY_COLUMNS = 3;
 
 /**
  * The pattern's tiles in its reading order (row, then column, as Home packs
- * them). The band here is the pattern's own green, so a green shape takes
- * the board's on-band tones instead: mint for a solid, cream for a ring.
+ * them). A green shape takes the board's on-band tones instead (mint for a
+ * solid, cream for a ring), so it reads as a mark on the flow band.
  */
 export function trayTiles(tiles: readonly PatternTile[]): PatternTile[] {
   return [...tiles].sort((a, b) => a.row - b.row || a.col - b.col)

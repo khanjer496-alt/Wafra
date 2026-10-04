@@ -49,7 +49,7 @@ export default function GoalRoute() {
 
 function GoalScreen({ goalId }: { goalId: string }) {
   const router = useRouter();
-  // Goals are money set aside by hand: the green flow band, the ring in mint.
+  // Goals are money set aside by hand: the indigo flow band, the ring in the logo-green accent.
   const band = useBand('flow');
   const language = useLanguage();
   const w = moneyPlacesWords(language);

@@ -55,7 +55,7 @@ type SceneKey = 'cover' | 'where' | 'category' | 'account' | 'rhythm' | 'highlig
 /**
  * The band each card wears. The cover is the ink of Home (where the recap
  * opens from, and the only other place the personal pattern is drawn); "where
- * and when" is Spending's clay; the rest take the tab their subject lives in.
+ * and when" is Spending's band; the rest take the tab their subject lives in.
  */
 export const RECAP_SCENE_BANDS: Record<SceneKey, BandId> = {
   cover: 'home',

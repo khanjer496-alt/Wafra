@@ -24,12 +24,12 @@ struct WafraBand {
     if scheme == .dark {
       return WafraBand(
         band: Color(hex: 0x0B0A08), onBand: Color(hex: 0xF2EFE8), onBandSecondary: Color(hex: 0x96938E),
-        tile: Color(hex: 0x1D1C1A), mark: Color(hex: 0x605F5B), accent: Color(hex: 0x57B894)
+        tile: Color(hex: 0x1D1C1A), mark: Color(hex: 0x605F5B), accent: Color(hex: 0x1F6B52)
       )
     }
     return WafraBand(
       band: Color(hex: 0x16130F), onBand: Color(hex: 0xF4F1EA), onBandSecondary: Color(hex: 0xA09D96),
-      tile: Color(hex: 0x282521), mark: Color(hex: 0x64615C), accent: Color(hex: 0x57B894)
+      tile: Color(hex: 0x282521), mark: Color(hex: 0x64615C), accent: Color(hex: 0x1F6B52)
     )
   }
 
@@ -47,17 +47,17 @@ struct WafraBand {
     )
   }
 
-  /// Spending's clay band, light text in both schemes.
+  /// Spending's near-black band, light text in both schemes.
   static func spending(_ scheme: ColorScheme) -> WafraBand {
     if scheme == .dark {
       return WafraBand(
-        band: Color(hex: 0x6E2B1E), onBand: Color(hex: 0xF2EFE8), onBandSecondary: Color(hex: 0xD0BCB3),
-        tile: Color(hex: 0x793B2E), mark: Color(hex: 0xA98379), accent: Color(hex: 0xF2EFE8)
+        band: Color(hex: 0x0C0C0C), onBand: Color(hex: 0xF2EFE8), onBandSecondary: Color(hex: 0xA6A39C),
+        tile: Color(hex: 0x1F1F1D), mark: Color(hex: 0x666460), accent: Color(hex: 0xF2EFE8)
       )
     }
     return WafraBand(
-      band: Color(hex: 0xA4432F), onBand: Color(hex: 0xF4F1EA), onBandSecondary: Color(hex: 0xEBDED5),
-      tile: Color(hex: 0x8D3B2A), mark: Color(hex: 0xD5ADA1), accent: Color(hex: 0xF4F1EA)
+      band: Color(hex: 0x141414), onBand: Color(hex: 0xF4F1EA), onBandSecondary: Color(hex: 0xA6A39C),
+      tile: Color(hex: 0x252523), mark: Color(hex: 0x6E6C67), accent: Color(hex: 0xF4F1EA)
     )
   }
 
@@ -833,7 +833,7 @@ struct WafraLockScreenView: View {
   }
 }
 
-// MARK: - Spending this month (systemMedium, clay band)
+// MARK: - Spending this month (systemMedium, near-black band)
 
 /// This month as the Spending tab shows it: the month and its total, a share
 /// bar of the categories (three named in falling strength, the rest quiet)

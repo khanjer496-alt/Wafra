@@ -61,7 +61,7 @@ export interface BandFigureProps {
   qualifier?: string;
   palette: BandPalette;
   size?: BandFigureSize;
-  /** Text colours; defaults to the band's own. A mint tile passes onAccent. */
+  /** Text colours; defaults to the band's own. A logo-green tile passes onAccent. */
   color?: string;
   secondaryColor?: string;
   /**

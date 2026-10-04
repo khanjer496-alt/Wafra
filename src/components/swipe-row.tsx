@@ -24,8 +24,8 @@ export interface SwipeAction {
   destructive?: boolean;
   /**
    * Design language E: the action wears a band's colour (Category ochre,
-   * Transfer slate, Delete clay on Transactions). Without one, the plain
-   * surface, or clay for a destructive action.
+   * Transfer slate on Transactions). Without one, the plain surface; a
+   * destructive action is always clay.
    */
   band?: BandId;
   onPress: () => void;
@@ -48,10 +48,12 @@ export function SwipeRow({ actions, children, testID }: { actions: readonly Swip
   if (actions.length === 0) return <>{children}</>;
   const renderActions = () => <View style={styles.actions}>
     {actions.map((action) => {
-      const tone = action.band ?? (action.destructive ? 'spending' : null);
+      // A destructive action is clay (`danger`) whatever band the screen wears.
+      const tone = action.destructive ? null : action.band ?? null;
       const palette = tone ? BandPalettes[scheme][tone] : null;
-      const fill = palette ? palette.band : theme.backgroundElement;
-      const ink = palette ? palette.onBand : theme.text;
+      const danger = action.destructive ? BandPalettes[scheme].home : null;
+      const fill = danger ? danger.danger : palette ? palette.band : theme.backgroundElement;
+      const ink = danger ? danger.onDanger : palette ? palette.onBand : theme.text;
       return <Pressable key={action.name} testID={`swipe-action-${action.name}`}
         accessibilityRole="button" accessibilityLabel={action.label}
         onPress={() => { tapped(); methods.current?.close(); action.onPress(); }}
