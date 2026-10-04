@@ -170,15 +170,11 @@ export const homeSummaryCopy = {
     transfersNotCounted: 'لا تُحتسب في الإنفاق أو الدخل حتى تؤكدها.' },
 };
 
-/** Entry detail additions: statement kind, direct transfer marking and the category sheet state. */
+/** Entry detail additions: statement kind and the category sheet state. */
 export const entryDetailCopy = {
   en: { statementPdf: 'Bank statement (PDF)', statementCsv: 'Bank statement (CSV)', applePay: 'Apple Pay (Wallet)', bankEmail: 'Bank email',
-    markTransfer: 'Mark as transfer', markTransferQuestion: 'Mark as a transfer between your accounts?',
-    markTransferBody: 'It stays in account balances but no longer counts as spending or income. You can change this later from the transaction.',
     chooseCategory: 'Choose a category', done: 'Done' },
   ar: { statementPdf: 'كشف حساب بنكي (PDF)', statementCsv: 'كشف حساب بنكي (CSV)', applePay: 'Apple Pay (المحفظة)', bankEmail: 'بريد البنك',
-    markTransfer: 'تحديد كتحويل', markTransferQuestion: 'هل هذا تحويل بين حساباتك؟',
-    markTransferBody: 'يبقى في أرصدة الحسابات لكنه لا يُحتسب إنفاقاً أو دخلاً. يمكنك تغيير ذلك لاحقاً من المعاملة نفسها.',
     chooseCategory: 'اختر فئة', done: 'تم' },
 };
 

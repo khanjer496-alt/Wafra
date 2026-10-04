@@ -66,7 +66,8 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
     '@/lib/format': { formatAED: amount => `AED ${(amount / 100).toFixed(2)}`, fullDateTime: tx => `${tx.date} ${tx.ts}`,
       shortDate: date => date, toISODate: () => '2026-09-09' },
     '@/lib/transfer-reconciliation': { reconcileTransfers: reconcile, transferFingerprint: fingerprint,
-      isTransferCandidate: require('../build/transfer-reconciliation.js').isTransferCandidate },
+      isTransferCandidate: require('../build/transfer-reconciliation.js').isTransferCandidate,
+      transferDeclined: require('../build/transfer-reconciliation.js').transferDeclined },
     '@/hooks/use-language': { useLanguage: () => language },
     '@/hooks/use-theme': { useTheme: () => ({ cardBorder: '#ccc', primary: '#147', textSecondary: '#555' }) },
     '@/constants/theme': { Fonts: { sansSemi: 'Geist-SemiBold' }, Spacing: { one: 4, two: 8, three: 12, four: 16, six: 24 } },
@@ -297,6 +298,24 @@ test('reviewed decisions undo individually with the current decision fingerprint
   assert.deepEqual(h.events[0], ['resolve', { ids: ['reviewed'], ownership: null,
     expectedFingerprints: { reviewed: fingerprint(tx) }, expectedGeneration: 1 }]);
   assert.deepEqual(h.events.at(-1), ['toast', h.words.undone]);
+});
+
+test('a row answered "not a transfer" is never listed here as "with someone else"', () => {
+  const external = row('external', { transferDecision: { version: 1, ownership: 'external', decidedAt: 2 } });
+  const declined = row('declined', { transferDecision: { version: 1, ownership: 'none', decidedAt: 3 } });
+  const h = createUI({ transactions: [external, declined], params: { transactionId: 'external' } });
+  byLabel(h.render(), h.words.showAll).props.onPress();
+  expandGroups(h);
+  const tree = h.render();
+  const entries = walk(tree).filter(node => node.props?.testID === 'transfer-review-entry');
+  assert.equal(entries.length, 1, 'the declined row has no place on the transfer review screen');
+  assert.ok(entries[0].props.accessibilityLabel.includes(external.title));
+  assert.equal(text(tree).includes(h.words.confirmedExternal), true, 'the real external answer still reads as one');
+  const alone = createUI({ transactions: [declined], params: { transactionId: 'declined' } });
+  byLabel(alone.render(), alone.words.showAll)?.props.onPress();
+  expandGroups(alone);
+  assert.equal(walk(alone.render()).filter(node => node.props?.testID === 'transfer-review-entry').length, 0);
+  assert.equal(text(alone.render()).includes(alone.words.confirmedExternal), false);
 });
 
 test('deep links derive their current group and can show the complete review list', () => {

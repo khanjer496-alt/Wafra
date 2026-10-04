@@ -63,8 +63,8 @@ test('Entry detail: centred logo and figure, category and transfer chips, Done',
   const category = byId(chips, 'entry-category-chip');
   assert.equal(category.props.accessibilityLabel, 'Category: Dining');
   category.props.onPress();
-  assert.ok(h.events.some((event) => event[0] === 'state' && event[1] === 13 && event[2] === true), 'opens the category picker');
-  assert.ok(byId(chips, 'entry-mark-transfer'));
+  assert.ok(h.events.some((event) => event[0] === 'state' && event[1] === 12 && event[2] === true), 'opens the category picker');
+  assert.equal(text(byId(chips, 'entry-mark-transfer')).trim(), h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en').answers.out.own);
   const done = byId(tree.props.footer, 'entry-detail-done');
   done.props.onPress();
   assert.ok(h.events.some((event) => event[0] === 'close'));
@@ -72,6 +72,28 @@ test('Entry detail: centred logo and figure, category and transfer chips, Done',
   // From Spending, the sheet is clay.
   const clay = h.deps['@/components/entry-detail-sheet'].EntryDetailSheet({ transaction: h.state.transactions[1], band: 'spending', onClose() {} });
   assert.equal(clay.props.palette, h.deps['@/hooks/use-band'].useBand('spending'));
+});
+
+test('Entry detail: a transfer candidate shows the three answers, an ordinary row one own-account action', () => {
+  const h = createHarness();
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
+  const candidate = { ...h.state.transactions[1], id: 'candidate', title: 'Outgoing transfer',
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback' } };
+  const ordinary = { ...h.state.transactions[1], id: 'carrefour', title: 'Carrefour', source: 'manual' };
+  const candidateTree = h.renderDetail(candidate);
+  const ordinaryTree = h.renderDetail(ordinary);
+  assert.ok(byId(candidateTree, 'transfer-answer-own') && byId(candidateTree, 'transfer-answer-none'));
+  assert.ok(byId(candidateTree, 'transfer-answer-external'));
+  assert.ok(text(byId(candidateTree, 'entry-transfer-question')).includes(words.answers.question));
+  assert.equal(byId(candidateTree, 'entry-mark-transfer'), undefined);
+  assert.equal(byId(candidateTree, 'entry-transfer-review'), undefined, 'no second route into the old review screen');
+  assert.equal(byId(ordinaryTree, 'transfer-answer-own'), undefined);
+  assert.equal(byId(ordinaryTree, 'entry-transfer-question'), undefined);
+  assert.ok(byId(ordinaryTree, 'entry-mark-transfer'));
+  assert.equal(text(byId(ordinaryTree, 'entry-mark-transfer')).trim(), words.answers.out.own);
+  const income = createHarness();
+  assert.equal(text(byId(income.renderDetail({ ...income.state.transactions[7], id: 'inc', title: 'Cash deposit', source: 'manual' }), 'entry-mark-transfer')).trim(),
+    words.answers.in.own, 'an incoming row words the same action by direction');
 });
 
 function add(options = {}) {

@@ -151,3 +151,119 @@ test('question card stacks its question and amount at large text', () => {
     { transaction, index: 0, total: 1, accountLabel: 'FAB', palette: palette(h), busy: false, onAnswer() {}, onSeeAll() {} });
   assert.equal(flat(byId(tree, 'transfer-question-what').props.style).flexDirection, 'column');
 });
+
+// Entry detail sheet: "What is this?" for a transfer candidate.
+// entry-detail-sheet.tsx useState order: 10 ruleAsk, 12 categoryPicking, 14 picking (the account picker).
+const PICKER = 14;
+function detail(options = {}) {
+  const h = createWorkflowHarness({ language: options.language ?? 'en', largeText: options.largeText,
+    states: options.states, answerResult: options.answerResult, answerBusy: options.answerBusy });
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(options.language ?? 'en');
+  const candidate = (id, accountId, date) => ({ id, title: 'Outgoing transfer', type: 'expense', category: 'other', accountId,
+    amountFils: 85000, date, source: 'sms', transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback' } });
+  const subject = candidate('subject', 'enbd', '2026-09-05');
+  const left = { ...candidate('left', 'adcb', '2026-09-05'), type: 'income' };
+  const right = { ...candidate('right', 'credit', '2026-09-06'), type: 'income' };
+  h.state.transactions.push(subject, left, right);
+  const assessment = { status: 'ownership-unknown', candidateIds: ['left', 'right'] };
+  return { h, words, subject, left, right, assessment };
+}
+const answers = h => h.events.filter(e => e[0] === 'answer').map(e => e[1]);
+const settle = () => new Promise(resolve => setImmediate(resolve));
+const closes = h => h.events.filter(e => e[0] === 'close').length;
+
+test('detail sheet: choosing own with several candidates opens the account picker, not a save', () => {
+  const { h, subject, assessment } = detail();
+  const tree = h.renderDetail(subject, { transferAssessment: assessment });
+  byId(tree, 'transfer-answer-own').props.onPress();
+  assert.deepEqual(h.events.filter(e => e[0] === 'state'), [['state', PICKER, true]]);
+  assert.deepEqual(answers(h), []);
+});
+
+test('detail sheet: the account picker lists each candidate with account and date, and a way to skip', async () => {
+  const { h, words, subject, left, assessment } = detail({ states: { [PICKER]: true } });
+  const tree = h.renderDetail(subject, { transferAssessment: assessment });
+  assert.ok(text(tree).includes(words.answers.whichAccount));
+  assert.equal(byId(tree, 'transfer-answer-own'), undefined, 'the three answers give way to the picker');
+  const pick = byId(tree, 'entry-transfer-candidate-left');
+  assert.equal(pick.props.accessibilityRole, 'button');
+  assert.match(pick.props.accessibilityLabel, /ADCB/);
+  assert.match(pick.props.accessibilityLabel, /Sep/);
+  assert.ok(flat(pick.props.style).minHeight >= 48);
+  const none = byId(tree, 'entry-transfer-candidate-none');
+  assert.equal(none.props.accessibilityRole, 'button');
+  assert.ok(flat(none.props.style).minHeight >= 48);
+  assert.ok(text(none).includes(words.answers.noLink));
+  pick.props.onPress(); await settle();
+  assert.equal(answers(h).length, 1);
+  assert.equal(answers(h)[0].answer, 'own');
+  assert.equal(answers(h)[0].counterpart.id, left.id);
+  assert.equal(answers(h)[0].label, words.answers.out.own);
+  const skipped = detail({ states: { [PICKER]: true } });
+  byId(skipped.h.renderDetail(skipped.subject, { transferAssessment: skipped.assessment }), 'entry-transfer-candidate-none').props.onPress(); await settle();
+  assert.equal(answers(skipped.h)[0].answer, 'own');
+  assert.equal(answers(skipped.h)[0].counterpart, undefined);
+});
+
+test('detail sheet: closes and resets the picker only when the answer was saved or kept', async () => {
+  for (const [result, closed] of [['saved', true], ['unsaved', true], ['changed', false], ['failed', false], ['busy', false]]) {
+    const { h, subject, assessment } = detail({ states: { [PICKER]: true }, answerResult: result });
+    byId(h.renderDetail(subject, { transferAssessment: assessment }), 'entry-transfer-candidate-left').props.onPress(); await settle();
+    assert.equal(closes(h), closed ? 1 : 0, `${result} ${closed ? 'closes' : 'leaves the sheet open'}`);
+    assert.equal(h.events.some(e => e[0] === 'state' && e[1] === PICKER && e[2] === false), closed, `${result} picker reset`);
+  }
+});
+
+test('detail sheet: one candidate links without asking; none saves an unlinked own answer; the others save directly', async () => {
+  const one = detail();
+  byId(one.h.renderDetail(one.subject, { transferAssessment: { status: 'likely-own', counterpartId: 'left' } }), 'transfer-answer-own').props.onPress(); await settle();
+  assert.equal(answers(one.h)[0].counterpart.id, 'left');
+  assert.equal(one.h.events.some(e => e[0] === 'state' && e[2] === true), false, 'never opens the picker for a single candidate');
+  const bare = detail();
+  byId(bare.h.renderDetail(bare.subject), 'transfer-answer-own').props.onPress(); await settle();
+  assert.equal(answers(bare.h)[0].answer, 'own');
+  assert.equal(answers(bare.h)[0].counterpart, undefined, 'without an assessment there is nothing to link');
+  for (const choice of ['external', 'none']) {
+    const direct = detail();
+    byId(direct.h.renderDetail(direct.subject, { transferAssessment: direct.assessment }), `transfer-answer-${choice}`).props.onPress(); await settle();
+    assert.equal(answers(direct.h)[0].answer, choice);
+    assert.equal(answers(direct.h)[0].counterpart, undefined);
+    assert.equal(answers(direct.h)[0].label, direct.words.answers.out[choice]);
+  }
+  const incoming = detail();
+  byId(incoming.h.renderDetail(incoming.left), 'transfer-answer-none').props.onPress(); await settle();
+  assert.equal(answers(incoming.h)[0].label, incoming.words.answers.in.none, 'an incoming row words its answers by direction');
+});
+
+test('detail sheet: shows the saved answer, a linked account and the declined state', () => {
+  const { h, words, subject, assessment } = detail();
+  const own = h.renderDetail(subject, { transferAssessment: { status: 'confirmed-own', counterpartId: 'left', candidateIds: [] } });
+  assert.equal(byId(own, 'transfer-answer-own').props.accessibilityState.checked, true);
+  assert.ok(text(own).includes(words.route.linked('ADCB')));
+  const declined = h.renderDetail({ ...subject, transferDecision: { version: 1, ownership: 'none', decidedAt: 1 } }, { transferAssessment: assessment });
+  assert.equal(byId(declined, 'transfer-answer-none').props.accessibilityState.checked, true);
+  assert.equal(byId(declined, 'transfer-answer-own').props.accessibilityState.checked, false);
+});
+
+test('detail sheet: answers are disabled while one is saving, and word the question in Arabic', () => {
+  const busy = detail({ answerBusy: true });
+  for (const choice of ['own', 'external', 'none']) {
+    assert.equal(byId(busy.h.renderDetail(busy.subject), `transfer-answer-${choice}`).props.disabled, true);
+  }
+  const ar = detail({ language: 'ar' });
+  const tree = ar.h.renderDetail(ar.subject, { transferAssessment: ar.assessment });
+  assert.ok(text(byId(tree, 'entry-transfer-question')).includes(ar.words.answers.question));
+  assert.ok(text(tree).includes(ar.words.answers.out.own));
+  const picking = detail({ language: 'ar', states: { [PICKER]: true } });
+  const picker = picking.h.renderDetail(picking.subject, { transferAssessment: picking.assessment });
+  assert.ok(text(picker).includes(picking.words.answers.whichAccount));
+  assert.ok(text(picker).includes(picking.words.answers.noLink));
+});
+
+test('detail sheet: the picker and answers stack at large text', () => {
+  const { h, subject, assessment } = detail({ largeText: true, states: { [PICKER]: true } });
+  const picker = byId(h.renderDetail(subject, { transferAssessment: assessment }), 'entry-transfer-candidate-left');
+  const rows = flat(picker.props.style);
+  assert.notEqual(rows.flexDirection, 'row', 'account above date, never side by side');
+  assert.ok(rows.minHeight >= 48);
+});

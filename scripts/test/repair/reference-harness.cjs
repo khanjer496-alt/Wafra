@@ -264,9 +264,14 @@ function createHarness(options = {}) {
     deps['@/lib/uncategorised']={overrideAppliesTo:()=>false};
     deps['@/components/ui/section-header']={SectionHeader:p=>jsx('SectionHeader',p)};
     local('@/components/ui/layout');
+    // The save path is the hook's own suite; here it records the answer and returns the configured outcome.
+    deps['@/hooks/use-transfer-answer']={useTransferAnswer:()=>({busy:!!options.answerBusy,
+      answer:async args=>{events.push(['answer',args]);return options.answerResult??'saved';}})};
+    local('@/lib/transfer-answer','src/lib/transfer-answer.ts');
+    local('@/components/transfers/transfer-answer-choices');
     local('@/components/entry-detail-sheet');
   }
-  const renderDetail=(transaction=state.transactions[1])=>{hookIndex=0;loadDetail();return deps['@/components/entry-detail-sheet'].EntryDetailSheet({transaction,onClose:()=>events.push(['close'])});};
+  const renderDetail=(transaction=state.transactions[1],props={})=>{hookIndex=0;loadDetail();return deps['@/components/entry-detail-sheet'].EntryDetailSheet({transaction,onClose:()=>events.push(['close']),...props});};
   const render=screen=>{hookIndex=0;const file=screen==='home'?'src/screens/journal-home-screen.tsx':screen==='stats'?'src/app/stats.tsx':`src/app/(tabs)/${screen}.tsx`;
     return load(path.join(root,file),deps,{Date:Clock}).default();};
   const tabTree=screen=>deps['@/components/tab-bar'].WafraTabBar({state:{index:['home','flow','bills','wallet'].indexOf(screen),routes:['index','flow','bills','wallet'].map(name=>({key:name,name}))},navigation:{emit:()=>({defaultPrevented:false}),navigate:name=>events.push(['route',name])}});

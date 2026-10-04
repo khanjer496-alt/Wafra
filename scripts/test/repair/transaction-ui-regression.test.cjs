@@ -79,7 +79,7 @@ for (const language of ['en', 'ar']) {
         assert.equal(walk(button).some(n => n.props?.numberOfLines === 1), false);
       }
       labelled(tree.props.footer, t('delete')).props.onPress();
-      assert.ok(h.events.some(e => e[0] === 'state' && e[1] === 7 && e[2] === true));
+      assert.ok(h.events.some(e => e[0] === 'state' && e[1] === 6 && e[2] === true));
       assert.equal(h.events.some(e => e[0] === 'deleteTransaction'), false);
     });
     test(`${language}/${largeText}: details name the capture channel a row actually came from`, () => {
@@ -133,7 +133,7 @@ test('opening a row or filters dismisses the search keyboard before presenting a
   assert.ok(h.events.some(e => e[0] === 'state' && e[2]?.id === h.state.transactions[0].id));
 });
 test('delete confirmation remains a separate, destructive second action', () => {
-  const h = createHarness({ states: { 7: true } });
+  const h = createHarness({ states: { 6: true } }); // entry-detail-sheet.tsx useState 6: confirmingDelete
   const tree = h.renderDetail();
   const confirm = walk(tree).find(n => n.props?.name === 'ConfirmSheet');
   assert.ok(confirm);assert.equal(confirm.props.destructive, true);

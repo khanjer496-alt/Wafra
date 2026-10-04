@@ -52,7 +52,7 @@ import { TRANSACTION_SOURCE_KINDS, transactionSource, type TransactionSourceKind
 import { transactionsWords } from '@/lib/transactions-copy';
 import { getTransferActivity } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate, transferDeclined, transferOwnership } from '@/lib/transfer-reconciliation';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, CategoryId, Transaction } from '@/lib/types';
@@ -373,7 +373,9 @@ export default function TransactionsScreen() {
     const transfers = new Set<string>();
     const review = new Set<string>();
     for (const row of state.transactions) {
-      if (isLedgerTransfer(row) || internal.has(row.id) || separateTransferIds.has(row.id) || isTransferCandidate(row)) transfers.add(row.id);
+      // A row answered "not a transfer" stays a candidate only so Undo is reachable; it is not one.
+      if (isLedgerTransfer(row) || internal.has(row.id) || separateTransferIds.has(row.id) ||
+        (isTransferCandidate(row) && !transferDeclined(row))) transfers.add(row.id);
       if (row.bestEffort || pendingTransferIds.has(row.id) ||
         isUnassignedIncome(row) || row.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) review.add(row.id);
     }
@@ -402,12 +404,14 @@ export default function TransactionsScreen() {
   }, []);
   /**
    * Row actions, by swipe or by the screen reader's actions menu. None acts
-   * silently: Category and Transfer open the entry sheet in that state (a
-   * transfer still unresolved opens its review), Delete asks first.
+   * silently: Category opens the entry sheet on its category picker, Transfer
+   * opens it to read ("What is this?" for a candidate, one own-account action
+   * otherwise), Delete asks first.
    */
   const rowActions = useCallback((tx: Transaction) => {
     const confirmedTransfer = isLedgerTransfer(tx) || internal.has(tx.id) || transferOwnership(tx) === 'own';
-    const candidate = isTransferCandidate(tx);
+    // A declined candidate ("not a transfer") swipes like an ordinary row.
+    const candidate = isTransferCandidate(tx) && !transferDeclined(tx);
     const actions: SwipeAction[] = [];
     if (!confirmedTransfer && !candidate) {
       actions.push({ name: 'category', label: words.category, icon: 'receipt', band: 'bills',
@@ -415,11 +419,7 @@ export default function TransactionsScreen() {
     }
     if (!confirmedTransfer) {
       actions.push({ name: 'transfer', label: words.transfer, icon: 'repeat', band: 'accounts',
-        onPress: () => {
-          Keyboard.dismiss();
-          if (candidate) routerRef.current.push({ pathname: '/review-transfers', params: { transactionId: tx.id } });
-          else { setEntryMode('transfer'); setEditing(tx); }
-        } });
+        onPress: () => { Keyboard.dismiss(); setEntryMode('read'); setEditing(tx); } });
     }
     actions.push({ name: 'delete', label: words.delete, icon: 'trash', destructive: true, band: 'spending',
       onPress: () => { Keyboard.dismiss(); setDeleting(tx); } });

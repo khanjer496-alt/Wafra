@@ -13,8 +13,8 @@ const plain = (value) => JSON.parse(JSON.stringify(value));
 const byId = (tree, id) => walk(tree).find((node) => node.props?.testID === id);
 // transactions.tsx useState order: 3 filters, 7 editing, 8 entryMode, 9 deleting.
 const FILTERS = 3; const EDITING = 7; const MODE = 8; const DELETING = 9;
-// entry-detail-sheet.tsx: 11 ruleAsk, 13 categoryPicking, 14 pickedCategory, 15 confirmingTransfer.
-const RULE = 11; const PICKING = 13; const PICKED = 14; const CONFIRM_TRANSFER = 15;
+// entry-detail-sheet.tsx: 10 ruleAsk, 12 categoryPicking, 13 pickedCategory.
+const RULE = 10; const PICKING = 12; const PICKED = 13;
 
 function screen(options = {}) {
   const h = createHarness(options);
@@ -127,7 +127,7 @@ test('rows read "time · source" beside the logo tile and put the category under
   assert.match(details.props.accessibilityLabel, /app alert/);
 });
 
-test('swipe actions: Category and Transfer open the sheet in that state; Delete asks first', () => {
+test('swipe actions: Category opens the picker, Transfer opens the sheet to read; Delete asks first', () => {
   const h = screen();
   const item = h.state.transactions[1];
   const rendered = h.list.props.renderItem({ item, index: 0 });
@@ -143,7 +143,9 @@ test('swipe actions: Category and Transfer open the sheet in that state; Delete 
   assert.ok(h.events.some((e) => e[0] === 'state' && e[1] === EDITING && e[2]?.id === item.id));
   h.events.length = 0;
   details.props.onAccessibilityAction({ nativeEvent: { actionName: 'transfer' } });
-  assert.ok(h.events.some((e) => e[0] === 'state' && e[1] === MODE && e[2] === 'transfer'));
+  assert.ok(h.events.some((e) => e[0] === 'state' && e[1] === MODE && e[2] === 'read'), 'Transfer opens the sheet to read it');
+  assert.ok(h.events.some((e) => e[0] === 'state' && e[1] === EDITING && e[2]?.id === item.id));
+  assert.equal(h.events.some((e) => e[0] === 'route'), false);
   h.events.length = 0;
   swipe.props.actions[2].onPress();
   assert.ok(h.events.some((e) => e[0] === 'state' && e[1] === DELETING && e[2]?.id === item.id));
@@ -156,20 +158,42 @@ test('swipe actions: Category and Transfer open the sheet in that state; Delete 
   assert.deepEqual(plain(confirming.events.filter((e) => e[0] === 'deleteTransaction')), [['deleteTransaction', item.id]]);
 });
 
-test('an unresolved transfer swipes into its review, and transfers offer no category action', () => {
+test('Transfer swipes open the entry sheet to read it; only a declined candidate keeps Category', () => {
   const h = screen();
   const pending = { ...h.state.transactions[1], id: 'pending', title: 'Bank transfer',
     transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback' } };
   const swipe = walk(h.list.props.renderItem({ item: pending, index: 0 })).find((n) => n.type === 'SwipeRow');
   assert.deepEqual(plain(swipe.props.actions.map((a) => a.name)), ['transfer', 'delete']);
   swipe.props.actions[0].onPress();
-  assert.deepEqual(plain(h.events.at(-1)), ['route', { pathname: '/review-transfers', params: { transactionId: 'pending' } }]);
+  assert.equal(h.events.some((e) => e[0] === 'route'), false, 'never the old review screen');
+  assert.deepEqual(plain(h.events.filter((e) => e[0] === 'state' && e[1] === MODE)), [['state', MODE, 'read']]);
+  assert.deepEqual(plain(h.events.filter((e) => e[0] === 'state' && e[1] === EDITING).map((e) => e[2].id)), ['pending']);
+  const ordinary = walk(h.list.props.renderItem({ item: h.state.transactions[1], index: 0 })).find((n) => n.type === 'SwipeRow');
+  ordinary.props.actions.find((a) => a.name === 'transfer').onPress();
+  assert.deepEqual(plain(h.events.filter((e) => e[0] === 'state' && e[1] === MODE).at(-1)), ['state', MODE, 'read']);
+  assert.equal(h.events.some((e) => e[0] === 'route'), false);
   const own = { ...h.state.transactions[1], id: 'own', isTransfer: true };
   const ownSwipe = walk(h.list.props.renderItem({ item: own, index: 0 })).find((n) => n.type === 'SwipeRow');
   assert.deepEqual(plain(ownSwipe.props.actions.map((a) => a.name)), ['delete']);
+  // "Not a transfer" keeps the row a candidate only so Undo is reachable; it swipes like an ordinary row.
+  const declined = { ...pending, id: 'declined', transferDecision: { version: 1, ownership: 'none', decidedAt: 1 } };
+  const declinedSwipe = walk(h.list.props.renderItem({ item: declined, index: 0 })).find((n) => n.type === 'SwipeRow');
+  assert.deepEqual(plain(declinedSwipe.props.actions.map((a) => a.name)), ['category', 'transfer', 'delete']);
+  declinedSwipe.props.actions[0].onPress();
+  assert.deepEqual(plain(h.events.filter((e) => e[0] === 'state' && e[1] === MODE).at(-1)), ['state', MODE, 'category']);
 });
 
-test('entry detail: FX line labelled by its rate source, and a confirmed Mark as transfer', () => {
+test('the Transfers chip lists transfers and candidates, never a row answered "not a transfer"', () => {
+  const base = createHarness().state.transactions;
+  const candidate = { ...base[1], id: 'candidate', title: 'Bank transfer', transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback' } };
+  const declined = { ...candidate, id: 'declined', transferDecision: { version: 1, ownership: 'none', decidedAt: 1 } };
+  const filters = { type: null, accountId: null, categories: new Set(), datePreset: 'all', dateFrom: null, dateTo: null, minFils: null,
+    sort: 'newest', maxFils: null, sources: new Set(), kind: 'transfers' };
+  const h = screen({ states: { [FILTERS]: filters }, state: { transactions: [candidate, declined] } });
+  assert.deepEqual(plain(h.rows.map((r) => r.id)), ['candidate']);
+});
+
+test('entry detail: FX line labelled by its rate source, and a one-tap own-account action', () => {
   const h = createHarness();
   const fx = { ...h.state.transactions[1], originalCurrency: 'EUR', originalMinorUnits: 4200, originalExponent: 2,
     fxRate: 1.0862, fxSource: 'reference', fxRateDate: '2026-09-05' };
@@ -182,18 +206,28 @@ test('entry detail: FX line labelled by its rate source, and a confirmed Mark as
   assert.match(bank, /Bank-quoted/);
   assert.equal(byId(h.renderDetail(h.state.transactions[1]), 'entry-fx-line'), undefined);
 
-  const mark = walk(h.renderDetail()).find((n) => n.props?.accessibilityLabel === 'Mark as transfer' && n.props.onPress);
-  mark.props.onPress();
-  assert.ok(h.events.some((e) => e[0] === 'state' && e[1] === CONFIRM_TRANSFER && e[2] === true));
-  assert.equal(h.events.some((e) => e[0] === 'editTransaction'), false, 'never silently');
-  const confirming = createHarness({ states: { [CONFIRM_TRANSFER]: true } });
-  const sheet = walk(confirming.renderDetail()).find((n) => n.props?.name === 'ConfirmSheet');
-  sheet.props.onConfirm();
-  const edit = confirming.events.find((e) => e[0] === 'editTransaction');
+  // The same flag the old toggle wrote, in one tap and with no confirm sheet.
+  const chip = byId(h.renderDetail(), 'entry-mark-transfer');
+  assert.equal(chip.props.accessibilityLabel, 'Moved to my own account');
+  chip.props.onPress();
+  const edit = h.events.find((e) => e[0] === 'editTransaction');
   assert.deepEqual(plain(edit[2]), { isTransfer: true });
-  // Rows the transfer review owns keep that route instead.
+  assert.ok(h.events.some((e) => e[0] === 'close'));
+  assert.equal(walk(h.renderDetail()).some((n) => n.props?.name === 'ConfirmSheet' && n.props.question?.includes('transfer')), false);
+  // Rows that are already transfer candidates answer through the question instead.
   const pending = { ...h.state.transactions[1], transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback' } };
-  assert.equal(walk(h.renderDetail(pending)).some((n) => n.props?.accessibilityLabel === 'Mark as transfer'), false);
+  assert.equal(byId(h.renderDetail(pending), 'entry-mark-transfer'), undefined);
+});
+
+test('entry detail edit form: no transfer toggle and no transfer flag written by Save', () => {
+  const h = createHarness({ states: { 0: true, 1: 'Talabat', 2: '620', 3: 'dining', 4: 'enbd', 5: '2026-09-03' } });
+  const tree = h.renderDetail();
+  assert.equal(walk(tree).some((n) => n.props?.label === 'Transfer between my accounts'), false);
+  assert.equal(walk(tree).some((n) => text(n) === 'Transfer between my accounts'), false);
+  walk(tree.props.footer).find((n) => n.props?.accessibilityLabel === 'Save changes' || n.props?.label === 'Save changes').props.onPress();
+  const edit = h.events.find((e) => e[0] === 'editTransaction');
+  assert.ok(edit);
+  assert.equal('isTransfer' in edit[2], false);
 });
 
 test('entry detail: finer source labels for statement, Apple Pay and email rows', () => {

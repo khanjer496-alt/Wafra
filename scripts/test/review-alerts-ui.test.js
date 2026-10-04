@@ -37,7 +37,7 @@ ok('review route never reads or renders source-message fields',
   !/\.raw\b|\.sourceKey\b|\.sender\b|\.reasons\b/.test(route));
 ok('review route asks only for unresolved facts before promotion, never silent import',
   /pathname:\s*['"]\/add-transaction['"][\s\S]*reviewId/.test(route) &&
-    /promoteReviewAlert/.test(add) && /reviewAlertOwnAccounts/.test(add) &&
+    /promoteReviewAlert/.test(add) && /[aA]nswers\.in\.own/.test(add) && /[aA]nswers\.out\.own/.test(add) && !/reviewAlertOwnAccounts/.test(add) &&
     /reviewMoneyChoices/.test(add) && /observedReviewDate/.test(add) &&
     !/postedConfirmed/.test(add) && !/genericConfirmPosted/.test(reviewFields) &&
     /type:\s*['"]promoteReviewAlert['"]/.test(store) &&
