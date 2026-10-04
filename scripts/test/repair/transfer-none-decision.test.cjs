@@ -76,3 +76,23 @@ test('Undo (null) removes a none decision and the batch path accepts none', () =
   });
   assert.deepEqual(batch.map(r => r.transferDecision.ownership), ['none', 'external']);
 });
+
+test('canMarkOwnTransfer offers the one-tap mark only on ordinary rows the system has not claimed', () => {
+  const shop = { id: 'shop', type: 'expense', amountFils: 4500, category: 'groceries', accountId: accounts[0].id, title: 'Carrefour',
+    date: '2026-10-02', ts: NOW, source: 'sms', smsKey: 's-shop' };
+  assert.equal(typeof core.canMarkOwnTransfer, 'function');
+  assert.equal(core.canMarkOwnTransfer(shop), true, 'an ordinary captured purchase');
+  assert.equal(core.canMarkOwnTransfer({ ...shop, isTransfer: true }), true, 'and the same row once chip-marked, so it can be unmarked');
+  assert.equal(core.canMarkOwnTransfer({ ...shop, type: 'income' }), true);
+  assert.equal(core.canMarkOwnTransfer({ ...shop, isTransfer: true, cardPaymentSide: 'payer' }), false, 'a card payment with cardPaymentSide');
+  assert.equal(core.canMarkOwnTransfer({ ...shop, isTransfer: true, paymentFlowSide: 'receipt' }), false, 'a payment flow');
+  assert.equal(core.canMarkOwnTransfer({ ...shop, isTransfer: true, title: 'Card payment' }), false, 'a "Card payment" SMS title');
+  assert.equal(core.canMarkOwnTransfer({ ...shop, title: 'Credit card payment received' }), false, 'a settlement title');
+  assert.equal(core.canMarkOwnTransfer({ ...shop, category: 'salary', type: 'income', title: 'Salary' }), false, 'salary');
+  assert.equal(core.canMarkOwnTransfer({ ...shop, category: 'business', title: 'Acme Trading' }), false, 'business spending');
+  assert.equal(core.canMarkOwnTransfer(row('candidate')), false, 'a candidate answers through the question instead');
+  assert.equal(core.canMarkOwnTransfer(row('declined', { transferDecision: { version: 1, ownership: 'none', decidedAt: NOW } })), false);
+  assert.equal(core.canMarkOwnTransfer({ ...shop, source: 'manual', smsKey: undefined, isTransfer: true }), false, 'a manual flagged row is a candidate');
+  assert.equal(core.canMarkOwnTransfer({ ...shop, type: 'transfer' }), false, 'only income and expense rows');
+  assert.equal(core.isTransferCandidate(row('candidate')), true, 'the shared exclusions did not change candidates');
+});

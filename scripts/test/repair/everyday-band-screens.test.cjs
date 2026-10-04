@@ -92,7 +92,7 @@ test('Entry detail: a transfer candidate shows the three answers, an ordinary ro
   assert.ok(byId(ordinaryTree, 'entry-mark-transfer'));
   assert.equal(text(byId(ordinaryTree, 'entry-mark-transfer')).trim(), words.answers.out.own);
   const income = createHarness();
-  assert.equal(text(byId(income.renderDetail({ ...income.state.transactions[7], id: 'inc', title: 'Cash deposit', source: 'manual' }), 'entry-mark-transfer')).trim(),
+  assert.equal(text(byId(income.renderDetail({ ...income.state.transactions[7], id: 'inc', title: 'Cash deposit', category: 'other', source: 'manual' }), 'entry-mark-transfer')).trim(),
     words.answers.in.own, 'an incoming row words the same action by direction');
 });
 

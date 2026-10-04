@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
 import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
-import { isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
+import { canMarkOwnTransfer, isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
 import { currentAnswer, ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { useTransferAnswer } from '@/hooks/use-transfer-answer';
@@ -362,8 +362,10 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             : t('addedByHand');
   // The own-account action is for ordinary rows only: a transfer candidate
   // answers through the question below, and a transfer is already one.
-  const canMarkTransfer = !transferReview && !confirmedTransfer && !pendingTransfer;
-  const canUnmarkTransfer = !transferCandidate && transaction.isTransfer === true;
+  // Rows the system flags itself (card payments, payment flows, salary, settlement titles) get neither.
+  const canMarkTransfer = !transferReview && !confirmedTransfer && !pendingTransfer &&
+    canMarkOwnTransfer(transaction) && !transaction.isTransfer;
+  const canUnmarkTransfer = canMarkOwnTransfer(transaction) && transaction.isTransfer === true;
   const originalMoney = originalMoneyOf(transaction);
   const fxSourceLabel =
     transaction.fxSource === 'bank'

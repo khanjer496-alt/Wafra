@@ -100,18 +100,35 @@ export const isUnassignedTransferAccount = (accountId: string): boolean =>
 export const isObservedUnassignedTransferAccount = (accountId: string): boolean =>
   /^__unassigned-transfer__:[a-z0-9-]{1,80}:[a-f0-9]{64}$/.test(accountId);
 
+/** Rows that are never an own-account transfer: card settlements and payment flows, salary, business and utility-style titles. */
+const excludedFromTransfers = (tx: Transaction): boolean =>
+  tx.cardPaymentSide !== undefined || tx.paymentFlowSide !== undefined ||
+  tx.category === 'salary' || (tx.category === 'business' && !STRUCTURAL.test(tx.title.trim())) ||
+  NON_TRANSFER_TITLE.test(tx.title) ||
+  CARD_SETTLEMENT_TITLE.test(tx.title);
+
 export function isTransferCandidate(tx: Transaction): boolean {
   const row = tx as TransferRow;
   if ((tx.type !== 'income' && tx.type !== 'expense') || typeof tx.title !== 'string') return false;
   // The person's choice remains authoritative after a parser/category edit,
   // and must stay reachable so they can undo it from the same review surface.
   if (decisionOf(row)) return true;
-  if (tx.cardPaymentSide !== undefined || tx.paymentFlowSide !== undefined ||
-    tx.category === 'salary' || (tx.category === 'business' && !STRUCTURAL.test(tx.title.trim())) ||
-    NON_TRANSFER_TITLE.test(tx.title) ||
-    CARD_SETTLEMENT_TITLE.test(tx.title)) return false;
+  if (excludedFromTransfers(tx)) return false;
   if (manual(tx)) return tx.isTransfer === true || decisionOf(row) !== undefined;
   return evidenceOf(row) !== undefined || decisionOf(row) !== undefined || STRUCTURAL.test(tx.title.trim());
+}
+
+/**
+ * Whether the entry sheet may offer the one-tap "Moved to my own account" (or
+ * its reverse) on a row. Only an ordinary income or expense row that is not
+ * already a candidate and that none of the system rules exclude: a card
+ * payment, a payment flow, salary or a settlement title carries `isTransfer`
+ * for the ledger's own reasons, and clearing it would count the money as
+ * spending or income and break card allocation.
+ */
+export function canMarkOwnTransfer(tx: Transaction): boolean {
+  if ((tx.type !== 'income' && tx.type !== 'expense') || typeof tx.title !== 'string') return false;
+  return !isTransferCandidate(tx) && !excludedFromTransfers(tx);
 }
 
 /**

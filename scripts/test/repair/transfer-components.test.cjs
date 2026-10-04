@@ -308,11 +308,28 @@ test('detail sheet: a captured row marked as a transfer offers one action to und
   const bestEdit = best.h.events.find(e => e[0] === 'editTransaction');
   assert.ok('bestEffort' in bestEdit[2] && bestEdit[2].bestEffort === undefined, 'saving the correction clears the best-effort flag like the mark does');
   const income = detail();
-  const incomeTree = income.h.renderDetail({ ...income.h.state.transactions[7], id: 'in-flag', isTransfer: true });
+  const incomeTree = income.h.renderDetail({ ...income.h.state.transactions[7], id: 'in-flag', category: 'other', title: 'Cash deposit', isTransfer: true });
   assert.equal(byId(incomeTree, 'entry-unmark-transfer').props.accessibilityLabel, income.words.answers.in.none);
   const ordinary = detail();
   assert.equal(byId(ordinary.h.renderDetail(ordinary.h.state.transactions[1]), 'entry-unmark-transfer'), undefined);
   const manual = detail();
   assert.equal(byId(manual.h.renderDetail({ ...manual.h.state.transactions[1], id: 'm', source: 'manual', isTransfer: true }), 'entry-unmark-transfer'), undefined,
     'a manual flagged row is a candidate and answers through the question');
+});
+
+test('detail sheet: a card payment or other system-flagged row never offers the mark or the unmark', () => {
+  const { h } = detail();
+  const base = h.state.transactions[1];
+  for (const extra of [
+    { cardPaymentSide: 'payer', isTransfer: true },
+    { cardPaymentSide: 'payer' },
+    { paymentFlowSide: 'receipt', isTransfer: true },
+    { title: 'Card payment', isTransfer: true },
+    { category: 'salary', type: 'income', title: 'Salary', isTransfer: true },
+  ]) {
+    const tree = h.renderDetail({ ...base, id: 'system', source: 'sms', ...extra });
+    assert.equal(byId(tree, 'entry-mark-transfer'), undefined, JSON.stringify(extra));
+    assert.equal(byId(tree, 'entry-unmark-transfer'), undefined, JSON.stringify(extra));
+  }
+  assert.equal(h.events.some(e => e[0] === 'editTransaction'), false);
 });
