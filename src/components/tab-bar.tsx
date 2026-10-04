@@ -30,7 +30,7 @@ const TAB_LABELS: Record<string, StringKey> = {
   wallet: 'tabWallet',
 };
 
-/** Each tab's own colour (design language E): Home ink, Spending clay, Bills ochre, Accounts slate. */
+/** Each tab's own colour (design language E): Home ink, Spending near-black, Bills ochre, Accounts slate. */
 export const TAB_BANDS = {
   index: 'home',
   flow: 'spending',

@@ -120,6 +120,8 @@ function harness() {
     withDelay: (_delay, value) => value, withTiming: (value) => value };
   deps['@/hooks/use-reduced-motion'] = { useReducedMotion: () => true };
   deps['@/lib/rolling-digits'] = local('rolling-digits');
+  // Spending's per-category colours (pure): the coins and the row tiles share them.
+  deps['@/lib/category-colors'] = local('category-colors');
   deps['@/components/ui/rolling-money'] = compile('src/components/ui/rolling-money.tsx', false);
   const { ReferenceHomeSummary } = compile('src/components/reference-home-summary.tsx');
   const renderNode = (node, position) => {

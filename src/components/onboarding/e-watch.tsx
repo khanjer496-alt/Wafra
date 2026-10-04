@@ -172,7 +172,7 @@ export function WatchStep({ draft, open, onOpen, onLimit, moneySpec, currency, o
   const lang = language === 'ar' ? 'ar' : 'en';
   const words = onboardingECopy(language);
   const band = useBand('settings');
-  // A row with a limit wears Spending's clay on its icon, as picked tiles do on the board.
+  // A row with a limit wears Spending's colours on its icon, as picked tiles do on the board.
   const clay = useBand('spending');
   const largeText = useLargeTextLayout();
   const [currencyOpen, setCurrencyOpen] = useState(false);

@@ -219,7 +219,7 @@ function MonthLine(p: Props & { band: BandPalette }) {
     { id: 'home-income-summary', label: w.lineIn, value: exact(p.incomeFils), color: band.onBand, onPress: p.onIncome,
       spoken: `${w.moneyIn}, ${currency} ${formatMinorUnits(Math.round(p.incomeFils), p.moneySpec)}` },
     { id: 'home-net-summary', label: w.lineNet, value: `${netSign}${exact(p.netFils)}`,
-      color: p.netFils > 0 ? band.accent : band.onBand, onPress: undefined,
+      color: p.netFils > 0 ? band.accentOnBand : band.onBand, onPress: undefined,
       spoken: `${w.netLabel}, ${currency} ${netSign}${exact(p.netFils)}` },
   ];
   // The period heads the strip; each figure takes a third of the row under
@@ -278,7 +278,7 @@ function SummaryCard(p: Props) {
   const stackMetrics = p.largeText || width - 40 - (p.figureInset ?? 0) < 256;
   const fg = p.onBand && p.band ? p.band.onBand : p.theme.text;
   const secondary = p.onBand && p.band ? p.band.onBandSecondary : p.theme.textSecondary;
-  const positive = p.onBand && p.band ? p.band.accent : p.theme.income;
+  const positive = p.onBand && p.band ? p.band.accentOnBand : p.theme.income;
   const rule = p.onBand && p.band ? p.band.bandMark : p.theme.cardBorder;
   const netSign = p.netFils < 0 ? '−' : p.netFils > 0 ? '+' : '';
   const netColor = p.netFils < 0 ? (p.onBand ? fg : p.theme.expense) : p.netFils > 0 ? positive : fg;

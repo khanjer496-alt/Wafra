@@ -7,12 +7,12 @@ import { limitFillPercent, limitStatus, type LimitStatus } from '@/lib/limit-sta
 
 /** The status colour for a limit on the sheet. */
 export function limitStatusColor(palette: BandPalette, status: LimitStatus): string {
-  return status === 'over' ? palette.statusOver : status === 'near' ? palette.statusNear : palette.statusOk;
+  return status === 'over' ? palette.statusOver : status === 'near' ? palette.statusNear : palette.limitOk;
 }
 
 /**
  * A limit bar on the sheet: the share of the limit used, coloured by status
- * only — green within the limit, amber from 85%, red over it. Not the system
+ * only — blue within the limit, amber from 85%, red over it. Not the system
  * status bar (that is expo-status-bar's, driven by BandScaffold). Decorative
  * for assistive tech: the row it sits in speaks the figures and the status.
  */

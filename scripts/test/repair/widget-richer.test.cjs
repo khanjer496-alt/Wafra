@@ -157,7 +157,7 @@ test('Android draws the shapes as tinted masks so night mode recolours them, and
   assert.match(read('modules/wafra-widgets/index.ts'), /export type PinnableWidget = 'today' \| 'upcoming' \| 'spending';/);
 });
 
-test('the Spending widget wears Spending’s clay band on both platforms, light and dark', () => {
+test('the Spending widget wears Spending’s near-black band on both platforms, light and dark', () => {
   const colors = (dir) => Object.fromEntries([...read(`${res}/${dir}/colors.xml`).matchAll(/<color name="(\w+)">(#[0-9A-F]{6})<\/color>/g)].map((m) => [m[1], m[2]]));
   const swift = read('targets/widget/WafraWidgetViews.swift');
   const body = swift.slice(swift.indexOf('static func spending(_ scheme: ColorScheme) -> WafraBand'));

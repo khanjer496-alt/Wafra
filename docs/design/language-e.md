@@ -12,8 +12,9 @@ example of everything below.
 
 ## The rules
 
-- **Every tab owns a colour.** Home ink, Spending clay, Bills ochre, Accounts
-  slate. Flows (capture, review, add) are green; settings and data are sand.
+- **Every tab owns a colour.** Home ink, Spending near-black (its category
+  coins carry the colour), Bills ochre, Accounts slate. Flows (capture, review,
+  add) are indigo; settings and data are sand.
   Detail screens take their parent's colour.
 - **A screen is a band and a sheet.** The band holds the one figure that
   matters; the cream sheet (28pt top radius, overlapping the band by 28pt)
@@ -22,11 +23,16 @@ example of everything below.
   tabular digits (`BandFigure`) — never Geist Mono, whose comma spaces out
   "5 , 480". Row amounts keep Geist Mono (`Money`, `TransactionRow`).
   Headlines say what the screen is or shows; no slogans.
-- **One accent per screen** (its tab colour) plus mint for the one figure that
-  is good news. Stat tiles use the band's own tone.
-- **Colour in lists means status only**: green within a limit, amber from 85%,
-  red over it (`StatusBar`, `limitStatus`). Never a category's identity —
-  category glyph tiles are one tone (`GlyphTile`).
+- **One accent per screen** (its tab colour) plus the Wafra logo green
+  `#1F6B52` for the one figure that is good news, with cream on it. As text on
+  a dark band it lifts to `#6BC79E` (`accentOnBand`). Stat tiles use the band's
+  own tone.
+- **Colour means status, or a category on Spending.** Limits: blue within
+  (`limitOk`), amber from 85%, red over (`StatusBar`, `limitStatus`). Success
+  (done, paid, confirmed) is the logo green (`statusOk`). Spending gives each
+  category its own colour (`categoryColor`, `src/lib/category-colors.ts`): its
+  coin on the band and its glyph tile on the sheet match. Glyph tiles
+  elsewhere stay one tone (`GlyphTile`).
 - **Everything drawn is a tile from real figures**: merchant logo tiles (kept
   on every merchant row; the category glyph is only the fallback), glyph
   tiles, week bars, calendar cells, the share bar, timeline pins. No
@@ -55,31 +61,34 @@ example of everything below.
 | Band id | Colour (light / dark) | Screens |
 |---|---|---|
 | `home` | ink `#16130F` / `#0B0A08` | Home, Transactions, TxDetail, Filter, Ask, ApplePay, CustomizeHome, Lock, Widgets |
-| `spending` | clay `#A4432F` / `#6E2B1E` | Spending (the `flow` tab), Merchant, Merchants, Currencies, Limit |
+| `spending` | near-black `#141414` / `#0C0C0C` | Spending (the `flow` tab), Merchant, Merchants, Currencies, Limit |
 | `bills` | ochre `#E2B45A` / `#5E4719` | Bills, BillDetail |
 | `accounts` | slate `#2F6577` / `#1B3F4A` | Accounts (the `wallet` tab), AccountDetail, Card, CardPayment, Transfers, Trusted |
-| `flow` | green `#1F6B52` / `#14473A` | Add, Review, CaptureStatus, Goal, Feedback, AndroidSms |
+| `flow` | indigo `#2E3470` / `#1D2148` | Add, Review, CaptureStatus, Goal, Feedback, AndroidSms |
 | `settings` | sand `#EDE3CF` / `#26221C` | Settings, DataHelp, ImproveCategories, Statements, NotFound |
 
 Note the naming trap: the **`flow` tab route** is Spending and wears the
-`spending` band; the **`flow` band id** is the green capture/review colour.
+`spending` band; the **`flow` band id** is the indigo capture/review colour.
 `TAB_BANDS` in `src/components/tab-bar.tsx` maps tab routes to band ids.
 
 ## Dark mode mapping (dark.py)
 
-- Bands deepen so they never glare: ink `#0B0A08`, clay `#6E2B1E`, ochre
-  `#5E4719` (light text on it), slate `#1B3F4A`, green `#14473A`, sand `#26221C`.
+- Bands deepen so they never glare: ink `#0B0A08`, Spending `#0C0C0C`, ochre
+  `#5E4719` (light text on it), slate `#1B3F4A`, indigo `#1D2148`, sand `#26221C`.
   Text on every dark band is `#F2EFE8`.
 - Sheets `#1C1A16`, cards `#24211C`, rules `#3B362E`, text `#F2EFE8`,
   secondary `#A9A29A`, glyph ground `#2E2A23`.
-- Glyphs, links and status move to lighter tints on dark surfaces: clay
-  `#E08A70`, slate `#7FB4C4`, green `#57B894`, amber `#D9AE62` (`tint`,
-  `statusOk/Near/Over`).
+- Glyphs, links and status move to lighter tints on dark surfaces: cream
+  `#F2EFE8` (Spending, as Home), slate `#7FB4C4`, indigo `#A8B1F0`, green `#6BC79E`
+  (success), blue `#8AB2EE` (within a limit), amber `#D9AE62`, red `#E08A70`
+  (`tint`, `statusOk/Near/Over`, `limitOk`).
 - Controls keep their accent fill; text set on an accent keeps its colour.
 - The pattern keeps its fills on the ink band; sand grounds become `#2E2A23`
   and glyph strokes take the lighter tints (`PatternPalette.dark`).
 - The segmented control's selected pill becomes the dark sheet with the band
-  tint as its text.
+  tint as its text. Spending's pill is cream with logo-green text in both
+  schemes, as its band is near-black. Its sheet tint is ink (cream in dark),
+  as Home's: a green tint would read as success on every bar.
 
 ## Tokens — `src/constants/theme.ts`
 
@@ -92,8 +101,10 @@ are unchanged (`node scripts/check-design-baseline.mjs`).
   actions), `bandRule`, `bandMark` (non-today bars), `sheet`, `card`, `rule`,
   `glyphGround`, `text`, `textSecondary`, `tint` (the band colour as it reads
   on the sheet), `fill`/`onFill` (primary button), `selected`/`onSelected`
-  (segmented pill), `accent`/`onAccent`/`onAccentSecondary` (mint),
-  `statusOk`/`statusNear`/`statusOver` and their `…Soft` tints, `statusBar`
+  (segmented pill), `accent`/`onAccent`/`onAccentSecondary` (logo green
+  `#1F6B52`, cream on it), `accentOnBand` (the accent as text on a dark band),
+  `statusOk`/`statusNear`/`statusOver` and their `…Soft` tints, `limitOk`
+  (within a limit), `statusBar`
   (`'light' | 'dark'`), `tabTint` (iOS selected tab).
   Every text token is solid and tested at 4.5:1 where it is drawn
   (`scripts/test/repair/band-palette.test.cjs`).
@@ -105,7 +116,7 @@ are unchanged (`node scripts/check-design-baseline.mjs`).
 
 ```ts
 import { bandPalette } from '@/constants/theme';
-const clay = bandPalette('spending', 'light'); // clay.band === '#A4432F'
+const spending = bandPalette('spending', 'light'); // spending.band === '#141414'
 ```
 
 ## Hooks
@@ -202,7 +213,7 @@ band-colour text (ink pill + cream text on ochre and sand). Stacks at large text
 
 ### `StatTile` — `stat-tile.tsx`
 
-A figure tile in the band's own tone (`tone="band"`) or mint (`tone="accent"`).
+A figure tile in the band's own tone (`tone="band"`) or the logo green (`tone="accent"`).
 `statTileColors(palette, tone)` gives the colours for a figure inside it.
 
 ```tsx
@@ -213,18 +224,33 @@ A figure tile in the band's own tone (`tone="band"`) or mint (`tone="accent"`).
 
 ### `ShareBar` — `share-bar.tsx`
 
-One tone split by share (rank-based strength of `onBand`), the top three named
-with whole-number shares that add to 100 (`sharePercents`), "+N more" for the
-rest; spoken as one image. Shares only, never amounts.
+A row of coins lying on their side (face toward the start edge, so it mirrors
+under RTL), one per segment, sized by its exact value. Each coin is its
+segment's own `color` (Spending passes `categoryColor`); a segment without one
+falls back to the band's text colour at a rank-based strength (`coinFill`).
+There are at most seven coins: past that, the smallest categories share one
+"N other categories" coin in `restColor`, so the row never runs off a narrow
+band. Under the coins, a two-column legend (one column at large text sizes)
+names every coin with its amount (`formatValue`) and share. The bar is spoken
+as one image: the top three named with their shares, the rest as one figure.
+
+Motion: coins rise into place 45ms apart with one small bounce, each with a
+faint glow of its colour on the band. Tapping a coin or its legend line pops
+the coin up 10pt over a brighter glow and dims the other coins and lines; tap
+it again to clear. The selection is visual only, and the spoken summary does
+not change. All of this is paint only (opacity and transform on the native
+driver), so Android animates it too. Reduce Motion, or a running screen
+reader, shows everything in place.
 
 ```tsx
-<ShareBar palette={band} label={words.spending}
-  segments={rows.map((row) => ({ key: row.category, label: categoryLabel(row.category), value: row.spentFils }))} />
+<ShareBar palette={band} label={words.spending} formatValue={moneyLabel} restColor={CATEGORY_REST}
+  segments={rows.map((row) => ({ key: row.category, label: categoryLabel(row.category), value: row.spentFils,
+    color: categoryColor(row.category) }))} />
 ```
 
 ### `WeekTiles` — `week-tiles.tsx`
 
-Day bars from real values: today in mint, others in `bandMark`, exact currency
+Day bars from real values: today in the logo green, others in `bandMark`, exact currency
 amounts above each bar. Long values and large text switch to labelled horizontal
 rows; zeros and fractional units stay visible. Bars grow 50ms apart.
 
@@ -258,11 +284,13 @@ for a dial set on a band (onboarding), default on the sheet.
 
 ### `GlyphTile` — `band/glyph-tile.tsx`
 
-A category glyph on the sheet's one glyph ground in the text colour — one tone
-for every category.
+A category glyph on the sheet's one glyph ground in the text colour, one tone
+for every category. Spending's category list uses `tone="category"`: the
+category's own colour with dark ink, matching its coin on the band.
 
 ```tsx
 <GlyphTile category="groceries" palette={band} size={40} />
+<GlyphTile category="groceries" palette={band} size={40} tone="category" />
 ```
 
 ### `StatusBar` (limit bar) — `band/status-bar.tsx`

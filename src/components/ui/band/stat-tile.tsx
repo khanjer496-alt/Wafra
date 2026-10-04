@@ -14,7 +14,7 @@ export function statTileColors(palette: BandPalette, tone: StatTileTone): { bg: 
 }
 
 /**
- * A figure tile on a band: the band's own tone (or the mint accent for the
+ * A figure tile on a band: the band's own tone (or the logo-green accent for the
  * one figure that is good news, like Left in budgets). The value comes first
  * (a `BandFigure size="medium"` or `BandCount` in `statTileColors(...).fg`),
  * so values in a row of tiles share one top line however their labels wrap;

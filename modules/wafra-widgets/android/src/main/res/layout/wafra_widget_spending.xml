@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Live "Spending this month" widget on Spending's clay band: the month and
+<!-- Live "Spending this month" widget on Spending's near-black band: the month and
      its total, a share bar of the categories (three named in falling
      strength, the rest quiet) and the three largest with whole-unit amounts.
      The share bar is a white mask drawn in code (WidgetGraphics.shareBar) and

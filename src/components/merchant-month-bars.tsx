@@ -28,7 +28,7 @@ function columnMonth(key: string): string {
 }
 
 /**
- * Whole-month bars for one merchant, set on the merchant page's clay band. A
+ * Whole-month bars for one merchant, set on the merchant page's Spending band. A
  * month with no activity is drawn as an empty baseline rather than left out,
  * and months before the ledger's first entry are never in the series
  * (merchantMonthlySeries), so an empty bar always means a real zero. The

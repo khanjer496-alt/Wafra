@@ -26,7 +26,7 @@ import type { Account } from '@/lib/types';
 type Load = { state: 'loading' } | { state: 'ready'; health: IosCaptureHealth | null };
 
 /**
- * Automatic capture, on the green band: whether the queue is being
+ * Automatic capture, on the indigo flow band: whether the queue is being
  * processed and when it last was (the band's figure), what is waiting and
  * what was added (stat tiles), then on the sheet the banks already read and
  * where to go when something is missing. Every figure comes from the native
@@ -97,8 +97,8 @@ export default function CaptureHealthScreen() {
   const handledAt = status.kind === 'working' || status.kind === 'quiet' ? status.lastHandledAt : null;
   const handled = handledTimeParts(handledAt, now, language, words);
   const detail = status.kind === 'never' ? d.capture.neverBody : null;
-  // Mint only for the good news; full-strength cream when something needs a
-  // look (amber would not show on the green band); muted otherwise. The
+  // The accent only for the good news; full-strength cream when something
+  // needs a look (one signal, whatever the band); muted otherwise. The
   // headline always says which, so the dot is never the only signal.
   const dot = status.kind === 'working' ? band.accent
     : status.kind === 'attention' || status.kind === 'paused' ? band.onBand

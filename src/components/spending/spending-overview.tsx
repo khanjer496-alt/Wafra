@@ -15,6 +15,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
+import { categoryColors } from '@/lib/category-colors';
 import { formatAED } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
 import { limitStatus } from '@/lib/limit-status';
@@ -44,9 +45,9 @@ type Props = {
 
 /**
  * Spending · Categories on the sheet: every category behind the band's figure,
- * each a glyph tile in one tone with its amount and share. A row with a limit
- * carries the limit bar, coloured by status only (green within, amber from
- * 85%, red over); a row without one says so. Categories and their limits are
+ * each a glyph tile in its own colour (matching its coin) with its amount and
+ * share. A row with a limit carries the limit bar, coloured by status only
+ * (blue within, amber from 85%, red over); a row without one says so. Categories and their limits are
  * one list.
  */
 export function SpendingOverview(p: Props) {
@@ -59,6 +60,8 @@ export function SpendingOverview(p: Props) {
   const w = spendingCopy[language === 'ar' ? 'ar' : 'en'];
   const words = everydayBandCopy(language);
   const limited = limitedCategorySummary(p.rows);
+  // The same assignment the band's coins use, so a row's tile matches its coin.
+  const colors = categoryColors(p.rows.map((row) => row.category));
   const rows = p.rows.filter((row) => p.filter === 'all' ||
     (p.filter === 'limited' ? row.limitFils !== null : row.limitFils === null));
   return <View style={styles.root} testID="spending-categories">
@@ -99,7 +102,7 @@ export function SpendingOverview(p: Props) {
           onPress={() => p.onCategory(row.category)}
           style={({ pressed }) => [styles.category, large && styles.categoryStacked,
             { borderTopColor: band.rule, borderTopWidth: index === 0 ? 0 : StyleSheet.hairlineWidth, opacity: pressed ? 0.7 : 1 }]}>
-          <GlyphTile category={row.category} palette={band} size={40} />
+          <GlyphTile category={row.category} palette={band} size={40} tone="category" color={colors.get(row.category)} />
           <View style={[styles.categoryContent, large && styles.categoryContentStacked]}>
             <View style={[styles.categoryTop, large && styles.stack]}>
               <ThemedText type="smallBold" style={[styles.grow, styles.name]}>{categoryLabel(row.category, language)}</ThemedText>
