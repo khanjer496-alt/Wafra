@@ -177,7 +177,29 @@ const scrollTo = (page, y) => page.evaluate((v) => {
 }, y);
 
 /** Every pressable on a screen, including the ones below the fold. */
+/**
+ * Wait until the screen's scroller stops growing. A long list mounts its rows
+ * over several frames, and a swipe row's hidden actions can be hit-testable for
+ * a frame while it lays out; collecting then records controls that are gone a
+ * moment later (Transactions' Category and Delete, intermittently).
+ */
+async function waitForSettledScroller(page) {
+  let previous = -1, steady = 0;
+  for (let i = 0; i < 40 && steady < 3; i++) {
+    const height = await page.evaluate(() => {
+      const scr = [...document.querySelectorAll('div')].filter(
+        (d) => d.scrollHeight > d.clientHeight + 20 && d.clientHeight > 250 && d.getBoundingClientRect().width > 200,
+      );
+      return scr.length ? scr[scr.length - 1].scrollHeight : 0;
+    });
+    steady = height === previous ? steady + 1 : 0;
+    previous = height;
+    await page.waitForTimeout(150);
+  }
+}
+
 async function everyControl(page, { fullScroll = false } = {}) {
+  await waitForSettledScroller(page);
   const seen = new Set();
   for (let y = 0; fullScroll || y <= 2400; y += 500) {
     const position = await scrollTo(page, y);
