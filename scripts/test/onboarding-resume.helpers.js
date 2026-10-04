@@ -41,7 +41,7 @@ class EffectHarness {
       userName: 'there', budgets: [], wafraGoals: undefined }, pathname: '/',
       params: {}, hydrationFailed: false, resumeAttempt: 0 };
     this.ui = { ready: false, failed: false, step: 'welcome', alerts: null, country: null,
-      nameDraft: '', nameSaving: false, nameSaveFailed: false, goals: [], watch: [], watchActive: null,
+      nameDraft: '', nameSaving: false, nameSaveFailed: false, goals: [], watch: [], watchOpen: null,
       smsReady: false, notificationReady: false, awaitingNotification: false, reveal: false };
     this.resumeHandled = { current: false }; this.previouslyOnboarded = { current: false };
     this.alertsRef = { current: null }; this.iosSetupLaunched = { current: false }; this.resumeAtResult = { current: false };
@@ -65,7 +65,7 @@ class EffectHarness {
       setNameSaveFailed: value => { ui.nameSaveFailed = value; },
       setGoalsDraft: value => { ui.goals = value; },
       setWatchDraft: value => { ui.watch = value; },
-      setWatchActive: value => { ui.watchActive = value; },
+      setWatchOpen: value => { ui.watchOpen = value; },
       setDailySummaryDraft: () => {}, setNotificationsAllowed: () => {}, setCurrencyDraft: () => {},
       setResult: () => {}, setSmsDenied: () => {}, setCompletionOutcome: value => { ui.outcome = value; },
       setAndroidSmsReady: value => { ui.smsReady = value; },
@@ -130,7 +130,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(staged.ui.nameDraft, 'Sara');
   assert.deepEqual([...staged.ui.goals], ['salary', 'bills']);
   assert.deepEqual(JSON.parse(JSON.stringify(staged.ui.watch)), [{ category: 'dining', limitMinor: 60000 }]);
-  assert.equal(staged.ui.watchActive, 'dining');
+  assert.equal(staged.ui.watchOpen, null, 'resumed rows show their amounts closed');
   assert.equal(staged.ui.alerts, 'notifications'); assert.equal(staged.ui.country, 'AE');
   assert.equal(staged.alertsRef.current, 'notifications');
   ok('a saved stage resumes on its step with the durable name, goals and limits');

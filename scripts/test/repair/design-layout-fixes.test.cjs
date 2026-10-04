@@ -36,25 +36,21 @@ test('recap cards sit directly under their headline; the account shows its last 
   assert.match(story, /finalAction: \{ marginTop: 'auto' \}/);
 });
 
-test('Watch: three across when every row fits its longest words, else two, else one', () => {
-  const { watchColumns } = pure('src/components/onboarding/e-watch.tsx');
-  // Unmeasured: the board's own count (two at Larger Text).
-  assert.equal(watchColumns(0, null, 3), 3);
-  assert.equal(watchColumns(342, null, 2), 2);
-  // 390pt phone, Geist 15: "Entertainment" needs ~125pt with padding; its row still fits.
-  const mins = [68, 91, 91, 90, 125, 69];
-  assert.equal(watchColumns(342, mins, 3), 3);
-  assert.equal(watchColumns(312, mins, 3), 3);
-  // At a larger text size the long row no longer fits three across.
-  const big = mins.map((m) => Math.round(m * 1.35));
-  assert.equal(watchColumns(342, big, 3), 2);
-  // Larger Text never goes past two; one when even two cannot hold a word.
-  assert.equal(watchColumns(342, mins, 2), 2);
-  assert.equal(watchColumns(200, [150, 150, 60, 60, 60, 60], 2), 1);
+test('Watch: one row per category; the name keeps a readable line and the clay marks a set limit', () => {
+  // 2026-10-03 onboarding polish: the tile grid became expandable rows (one
+  // open at a time, quick amounts, typed figure). A row is full width, so the
+  // name never competes with two neighbours for its longest word.
   const watch = read('src/components/onboarding/e-watch.tsx');
-  assert.match(watch, /picked \? clay\.fill/, 'the picked tile wears the board\'s clay');
+  assert.match(watch, /amount \? clay\.fill/, 'a row with a limit wears the board\'s clay on its icon');
   assert.match(watch, /const clay = useBand\('spending'\)/);
-  assert.doesNotMatch(watch, /numberOfLines|adjustsFontSizeToFit/);
+  assert.doesNotMatch(watch, /numberOfLines|adjustsFontSizeToFit|maxFontSizeMultiplier/);
+  // At the accessibility sizes the amount wraps under the name, never the chevron alone,
+  // and the name keeps a readable width instead of a sliver.
+  assert.match(watch, /largeText && styles\.headWrap/);
+  assert.match(watch, /headWrap: \{ flexWrap: 'wrap' \}/);
+  assert.match(watch, /largeText && styles\.nameWide/);
+  assert.match(watch, /nameWide: \{ minWidth: 140 \}/);
+  assert.match(watch, /useCategoryCatalog\(\)/, 'custom category names and icons, as everywhere else');
 });
 
 test('Goals: loose on-band tray, no card, green shapes take on-band tones', () => {

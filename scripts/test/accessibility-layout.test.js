@@ -136,7 +136,11 @@ ok('onboarding action targets retain native accessibility size floors',
     declaredStyleValue(onboardingFrame, 'iconButton', 'height') >= 44 &&
     declaredStyleValue(source('src/components/onboarding/e-name.tsx'), 'input', 'minHeight') >= 48 &&
     declaredStyleValue(source('src/components/onboarding/e-name.tsx'), 'row', 'minHeight') >= 44 &&
-    declaredStyleValue(source('src/components/onboarding/e-goals.tsx'), 'pill', 'minHeight') >= 48 &&
+    declaredStyleValue(source('src/components/onboarding/e-choice-row.tsx'), 'row', 'minHeight') >= 48 &&
+    declaredStyleValue(source('src/components/onboarding/e-watch.tsx'), 'headPress', 'minHeight') >= 48 &&
+    declaredStyleValue(source('src/components/onboarding/e-watch.tsx'), 'quick', 'minHeight') >= 44 &&
+    declaredStyleValue(source('src/components/onboarding/e-watch.tsx'), 'stepper', 'height') >= 44 &&
+    declaredStyleValue(source('src/components/onboarding/e-watch.tsx'), 'remove', 'height') >= 44 &&
     declaredStyleValue(source('src/components/onboarding/e-first-payment.tsx'), 'source', 'minHeight') >= 48 &&
     declaredStyleValue(onboardingExample, 'action', 'minHeight') >= 48 &&
     declaredStyleValue(controls, 'button', 'minHeight') >= 48);

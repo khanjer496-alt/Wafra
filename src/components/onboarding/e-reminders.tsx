@@ -7,8 +7,10 @@
  *   before), and card statements (three days before and on the day) are the
  *   payment reminders. They have no separate setting in the app — they are
  *   scheduled whenever notifications are allowed — so they are shown as what
- *   notifications turn on, never as a toggle that does nothing;
- * - the daily summary is the app's real switch (`dailySummary`, Settings).
+ *   notifications turn on — a plain checked list with no card or control
+ *   look — never as a toggle that does nothing;
+ * - the daily summary is the app's real switch (`dailySummary`, Settings),
+ *   the only filled card, marked optional.
  *
  * There is no monthly recap notification, so none is offered. "Allow
  * notifications" is the explicit tap that may show the system prompt.
@@ -26,23 +28,21 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
 
-function ReminderCard({ title, when, note, palette, trailing, testID }: {
+/** One reminder notifications turn on: a check, what it is, when it comes. Not a control. */
+function IncludedItem({ title, when, palette, testID }: {
   title: string;
   when: string;
-  /** A short line under the timing, e.g. "With notifications on". */
-  note?: React.ReactNode;
   palette: BandPalette;
-  trailing?: React.ReactNode;
   testID: string;
 }) {
-  const largeText = useLargeTextLayout();
-  return <View testID={testID} style={[styles.card, largeText && styles.cardStacked, { backgroundColor: palette.fill }]}>
-    <View style={styles.cardCopy}>
-      <ThemedText type="smallBold" style={[styles.cardTitle, { color: palette.onFill }]}>{title}</ThemedText>
-      <ThemedText type="meta" style={{ color: palette.onFill, opacity: 0.85 }}>{when}</ThemedText>
-      {note}
+  return <View testID={testID} style={styles.item} accessible accessibilityLabel={`${title}. ${when}`}>
+    <View style={[styles.itemCheck, { backgroundColor: palette.tile }]}>
+      <Icon name="check" size={14} color={palette.onBand} strokeWidth={2.4} />
     </View>
-    {trailing ?? null}
+    <View style={styles.cardCopy}>
+      <ThemedText type="smallBold" style={[styles.cardTitle, { color: palette.onBand }]}>{title}</ThemedText>
+      <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{when}</ThemedText>
+    </View>
   </View>;
 }
 
@@ -57,10 +57,7 @@ export function RemindersStep({ dailySummary, onDailySummary, onAllow, onNotNow,
 }) {
   const words = onboardingECopy(useLanguage());
   const band = useBand('bills');
-  const included = <View style={styles.included} accessible accessibilityLabel={words.remindIncluded}>
-    <Icon name="check" size={14} color={band.onFill} strokeWidth={2.2} />
-    <ThemedText type="meta" style={{ color: band.onFill }}>{words.remindIncluded}</ThemedText>
-  </View>;
+  const largeText = useLargeTextLayout();
   return <EStepFrame palette={band} step={4} onBack={onBack} onClose={onClose} backDisabled={busy} testID="onboarding-reminders"
     footer={<>
       <EButton palette={band} color={bandButtonColor(band)} label={words.allowNotifications} onPress={onAllow}
@@ -69,24 +66,36 @@ export function RemindersStep({ dailySummary, onDailySummary, onAllow, onNotNow,
     </>}>
     <EHeadline palette={band} size={44}>{words.remindersTitle}</EHeadline>
     <EBody palette={band}>{words.remindersBody}</EBody>
-    <View style={styles.cards}>
-      <ReminderCard palette={band} title={words.remindBillsTitle} when={words.remindBillsWhen} note={included}
-        testID="onboarding-remind-bills" />
-      <ReminderCard palette={band} title={words.remindCardsTitle} when={words.remindCardsWhen} note={included}
-        testID="onboarding-remind-cards" />
-      <ReminderCard palette={band} title={words.remindDailyTitle} when={words.remindDailyWhen} testID="onboarding-remind-daily"
-        trailing={<View style={styles.switchBox}>
-          <Switch value={dailySummary} onValueChange={onDailySummary} disabled={busy}
-            accessibilityLabel={`${words.remindDailyTitle}. ${words.remindDailyWhen}`}
-            trackColor={{ true: band.accent, false: band.bandMark }} thumbColor={band.onFill}
-            ios_backgroundColor={band.bandMark} testID="onboarding-remind-daily-switch" />
-        </View>} />
+    <View style={[styles.group, { borderColor: band.bandRule }]}>
+      <ThemedText type="meta" accessibilityRole="header" style={[styles.groupTitle, { color: band.onBandSecondary }]}>
+        {words.remindIncludedTitle}
+      </ThemedText>
+      <IncludedItem palette={band} title={words.remindBillsTitle} when={words.remindBillsWhen} testID="onboarding-remind-bills" />
+      <View style={[styles.rule, { backgroundColor: band.bandRule }]} />
+      <IncludedItem palette={band} title={words.remindCardsTitle} when={words.remindCardsWhen} testID="onboarding-remind-cards" />
+    </View>
+    <View testID="onboarding-remind-daily" style={[styles.card, largeText && styles.cardStacked, { backgroundColor: band.fill }]}>
+      <View style={styles.cardCopy}>
+        <ThemedText type="micro" style={{ color: band.onFill, opacity: 0.85 }}>{words.remindOptional}</ThemedText>
+        <ThemedText type="smallBold" style={[styles.cardTitle, { color: band.onFill }]}>{words.remindDailyTitle}</ThemedText>
+        <ThemedText type="meta" style={{ color: band.onFill, opacity: 0.85 }}>{words.remindDailyWhen}</ThemedText>
+      </View>
+      <View style={styles.switchBox}>
+        <Switch value={dailySummary} onValueChange={onDailySummary} disabled={busy}
+          accessibilityLabel={`${words.remindDailyTitle}. ${words.remindDailyWhen}`}
+          trackColor={{ true: band.accent, false: band.bandMark }} thumbColor={band.onFill}
+          ios_backgroundColor={band.bandMark} testID="onboarding-remind-daily-switch" />
+      </View>
     </View>
   </EStepFrame>;
 }
 
 const styles = StyleSheet.create({
-  cards: { gap: 8 },
+  group: { borderWidth: 1.5, borderRadius: 22, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 6 },
+  groupTitle: { paddingBottom: 6 },
+  item: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 10 },
+  itemCheck: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  rule: { height: StyleSheet.hairlineWidth, marginStart: 36 },
   card: {
     minHeight: 72, borderRadius: 22, paddingHorizontal: 18, paddingVertical: 14,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12,
@@ -94,7 +103,6 @@ const styles = StyleSheet.create({
   cardStacked: { flexDirection: 'column', alignItems: 'flex-start' },
   cardCopy: { flex: 1, minWidth: 0, gap: 2 },
   cardTitle: { fontSize: 16, lineHeight: 22 },
-  included: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   // react-native-web draws a Switch's thumb outside its track under RTL; the
   // control itself has no reading direction, so it stays left-to-right there.
   switchBox: Platform.OS === 'web' ? { direction: 'ltr' } : {},

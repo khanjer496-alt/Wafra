@@ -16,21 +16,21 @@ const open = async (t, options) => {
 };
 
 for (const reducedMotion of [false, true]) {
-  test(`goals Continue double tap 30ms apart stays on Watch: reducedMotion=${reducedMotion}`, async t => {
+  test(`goals Skip double tap 30ms apart stays on Watch: reducedMotion=${reducedMotion}`, async t => {
     const h = await open(t, { profile: profile('focus'), reducedMotion });
-    await h.press('continue'); stage(h, 'tracking');
+    await h.press('skipForNow'); stage(h, 'tracking');
     await h.advance(30);
     // Read the newly rendered same-position button, not the old callback.
     // Calling it also protects against a queued native press after disabling.
-    h.control('continue').onPress(); await h.flush();
+    h.control('skipForNow').onPress(); await h.flush();
     stage(h, 'tracking');
-    assert.equal(h.control('continue').disabled, true);
+    assert.equal(h.control('skipForNow').disabled, true);
     assert.equal(h.control('back').disabled, true);
     await h.advance(319);
-    assert.equal(h.control('continue').disabled, true);
+    assert.equal(h.control('skipForNow').disabled, true);
     await h.advance(1);
-    assert.equal(h.control('continue').disabled, false);
-    await h.press('continue'); stage(h, 'alerts');
+    assert.equal(h.control('skipForNow').disabled, false);
+    await h.press('skipForNow'); stage(h, 'alerts');
     assert.deepEqual(writes(h), []);
   });
 }
@@ -48,19 +48,19 @@ test('rapid Back taps use one transition and deliberate Back remains available a
 
 test('rapid alternating Next and Back cannot undo a transition before its screen settles', async t => {
   const h = await open(t, { profile: profile('focus') });
-  await h.press('continue'); stage(h, 'tracking');
+  await h.press('skipForNow'); stage(h, 'tracking');
   await h.advance(30);
   h.control('back').onPress(); await h.flush(); stage(h, 'tracking');
   await h.advance(320);
   await h.press('back'); stage(h, 'focus');
-  h.control('continue').onPress(); await h.flush(); stage(h, 'focus');
+  h.control('skipForNow').onPress(); await h.flush(); stage(h, 'focus');
   await h.advance(350);
-  await h.press('continue'); stage(h, 'tracking');
+  await h.press('skipForNow'); stage(h, 'tracking');
 });
 
-test('Watch Continue cannot also allow notifications on the newly rendered Reminders', async t => {
+test('Watch Skip cannot also allow notifications on the newly rendered Reminders', async t => {
   const h = await open(t, { profile: profile('tracking') });
-  await h.press('continue'); stage(h, 'alerts');
+  await h.press('skipForNow'); stage(h, 'alerts');
   await h.advance(30);
   assert.equal(h.control('allowNotifications').disabled, true);
   h.control('allowNotifications').onPress(); await h.flush();
@@ -90,14 +90,14 @@ test('the Reminders second tap cannot open statements, start capture or choose b
 
 test('transition timer is cleared on unmount and is not inherited by a fresh gate', async t => {
   const h = await open(t, { profile: profile('focus') });
-  await h.press('continue'); stage(h, 'tracking');
+  await h.press('skipForNow'); stage(h, 'tracking');
   assert.equal(h.clock.pending, 1);
   const saved = JSON.parse(JSON.stringify(h.state));
   h.unmount(); assert.equal(h.clock.pending, 0);
   const restored = await open(t, { ledger: saved });
-  assert.equal(restored.control('continue').disabled, false);
+  assert.equal(restored.control('skipForNow').disabled, false);
   assert.equal(restored.clock.pending, 0);
-  await restored.press('continue'); stage(restored, 'alerts');
+  await restored.press('skipForNow'); stage(restored, 'alerts');
 });
 
 test('an empty name cannot Continue, start a transition or bypass the step', async t => {

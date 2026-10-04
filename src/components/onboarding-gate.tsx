@@ -74,13 +74,13 @@ import {
   homeOrderForGoals,
   ONBOARDING_E_BANDS,
   onboardingEResumeStep,
-  setWatchLimit,
   toggleGoal,
-  toggleWatch,
   WATCH_CATEGORIES,
   watchBudgetChanges,
   watchDraftFromBudgets,
   watchedProgress,
+  watchFooterAction,
+  withWatchLimit,
   type OnboardingCaptureChoice,
   type OnboardingEStep,
   type WatchDraft,
@@ -218,7 +218,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [goalsDraft, setGoalsDraft] = useState<GoalId[]>([]);
   /** Categories picked on step 3 and their limits, saved as budgets on Continue. */
   const [watchDraft, setWatchDraft] = useState<WatchDraft[]>([]);
-  const [watchActive, setWatchActive] = useState<CategoryId | null>(null);
+  const [watchOpen, setWatchOpen] = useState<CategoryId | null>(null);
   /** The Reminders step's daily-summary switch; applied only with notifications allowed. */
   const [dailySummaryDraft, setDailySummaryDraft] = useState(true);
   /** Whether the Reminders step ended with notifications allowed; null when not decided this session. */
@@ -269,7 +269,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setCountry(null);
     setGoalsDraft([]);
     setWatchDraft([]);
-    setWatchActive(null);
+    setWatchOpen(null);
     setDailySummaryDraft(true);
     setNotificationsAllowed(null);
     setCurrencyDraft(null);
@@ -416,7 +416,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     setGoalsDraft(sanitizeGoalIds(state.wafraGoals) ?? []);
     const watched = watchDraftFromBudgets(state.budgets);
     setWatchDraft(watched);
-    setWatchActive(watched[0]?.category ?? null);
+    setWatchOpen(null);
     setResumeReady(false);
     let cancelled = false;
     const restore = async () => {
@@ -745,26 +745,20 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       placement: GROWTH_PLACEMENTS.onboarding,
     });
     saveJourney('tracking');
+    // Every row starts closed, showing its amount; none is left open from a visit before.
+    setWatchOpen(null);
     setStep('watch');
   };
 
-  const toggleWatchCategory = (category: CategoryId) => {
-    const next = toggleWatch(watchDraft, category);
-    setWatchDraft(next);
-    const picked = next.some((item) => item.category === category);
-    if (picked) setWatchActive(category);
-    else if (watchActive === category) setWatchActive(next[next.length - 1]?.category ?? null);
-  };
-
   /**
-   * Watch: every picked category with a limit becomes a monthly budget, and a
-   * limit unpicked on a second pass is removed. A budget needs the ledger's
-   * currency, so the currency shown on the Name step is pinned first when the
-   * ledger has none yet.
+   * Watch: every row with a limit becomes a monthly budget, and a limit
+   * removed on a second pass is deleted. An empty step writes nothing. A
+   * budget needs the ledger's currency, so the currency shown on the Name
+   * step is pinned first when the ledger has none yet.
    */
-  const saveWatch = (save: boolean) => {
+  const saveWatch = () => {
     if (!beginStepTransition()) return;
-    if (save && !previewMode) {
+    if (!previewMode) {
       const { upsert, remove } = watchBudgetChanges(watchDraft, state.budgets);
       try {
         if (upsert.length > 0 && !state.ledgerMoney && shownCurrency) setLedgerMoney(shownCurrency);
@@ -774,6 +768,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         // A refused budget leaves the ledger as it was; the Limit sheet can set it later.
       }
     }
+    // Back from Reminders finds every row closed, showing its amount.
+    setWatchOpen(null);
     saveJourney('alerts');
     setStep('reminders');
   };
@@ -1527,14 +1523,14 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           currency={shownCurrency} onCurrency={chooseCurrency} />;
       case 'goals':
         return <GoalsStep goals={goalsDraft} onToggle={(goal) => setGoalsDraft(toggleGoal(goalsDraft, goal))}
-          onContinue={saveGoals} onBack={goBack} onClose={onClose} tiles={patternTiles} disabled={transitioning} />;
+          onContinue={saveGoals} onBack={goBack} onClose={onClose} tiles={patternTiles} disabled={transitioning}
+          saved={!previewMode && (sanitizeGoalIds(state.wafraGoals)?.length ?? 0) > 0} />;
       case 'watch':
-        return <WatchStep draft={watchDraft} active={watchActive} onToggle={toggleWatchCategory}
-          onActivate={setWatchActive}
-          onLimit={(category, limit) => setWatchDraft(setWatchLimit(watchDraft, category, limit))}
+        return <WatchStep draft={watchDraft} open={watchOpen} onOpen={setWatchOpen}
+          onLimit={(category, limit) => setWatchDraft(withWatchLimit(watchDraft, category, limit))}
           moneySpec={watchMoney} currency={shownCurrency} onCurrency={chooseCurrency}
-          onContinue={() => saveWatch(true)} onSkip={() => saveWatch(false)}
-          onBack={goBack} onClose={onClose} disabled={transitioning} />;
+          action={watchFooterAction(watchDraft, previewMode ? [] : state.budgets)}
+          onContinue={saveWatch} onBack={goBack} onClose={onClose} disabled={transitioning} />;
       case 'reminders':
         return <RemindersStep dailySummary={dailySummaryDraft} onDailySummary={setDailySummaryDraft}
           onAllow={() => void runSetupAction(() => finishNotificationChoice(true))}

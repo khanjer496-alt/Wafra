@@ -241,6 +241,8 @@ async function gate(options = {}) {
   dependencies['@/lib/onboarding-e'] = lib('onboarding-e', dependencies);
   dependencies['@/lib/onboarding-e-copy'] = lib('onboarding-e-copy', dependencies);
   dependencies['@/lib/band-copy'] = lib('band-copy');
+  dependencies['@/lib/arabic-sms'] = { normalizeArabicNumerals: text => text.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))) };
+  dependencies['@/lib/format'] = { parseAmountWithMoneySpec: text => /^\d+(\.\d{1,2})?$/.test(text) ? Math.round(Number(text) * 100) : null };
   dependencies['@/lib/pattern'] = lib('pattern');
   dependencies['@/lib/period'] = { currentMonthPeriod: () => ({ mode: 'month', key: '2026-09' }), inPeriod: () => true };
   dependencies['@/lib/purchases'] = { trialDaysLeft: () => options.trialDays ?? 3, billingStore: () => 'appStore' };
@@ -251,7 +253,10 @@ async function gate(options = {}) {
   };
   dependencies['@/lib/categories'] = { categoryLabel: category => category, getCategory: () => ({ icon: 'receipt' }) };
   dependencies['@/lib/ledger-money'] = { formatMoneyText: minor => String(minor),
-    ledgerMoneySpec: currency => ({ schemaVersion: 2, currency, exponent: 2 }), typicalMinorAmount: (_spec, major) => major * 100 };
+    ledgerMoneySpec: currency => ({ schemaVersion: 2, currency, exponent: 2 }), typicalMinorAmount: (_spec, major) => major * 100,
+    currencyDisplayLabel: currency => currency, formatMinorUnits: minor => String(minor / 100),
+    formatMinorUnitsForInput: minor => String(minor / 100),
+    parseLocalizedMajorToMinor: text => /^\d+(\.\d{1,2})?$/.test(text) ? Math.round(Number(text) * 100) : null };
   dependencies['@/hooks/use-band'] = { useBand: id => theme.bandPalette(id, options.scheme ?? 'light'), useBandScheme: () => options.scheme ?? 'light' };
   dependencies['@/components/ui/pattern-mosaic'] = { PatternMosaic: 'PatternMosaic' };
   dependencies['@/components/ui/band/dial-limit'] = { DialLimit: 'DialLimit' };
@@ -263,7 +268,7 @@ async function gate(options = {}) {
   dependencies['@/components/ui/band/e-button'] = load(path.join(root, 'src/components/ui/band/e-button.tsx'), dependencies);
   dependencies['@/components/onboarding/e-motion'] = load(path.join(root, 'src/components/onboarding/e-motion.tsx'), dependencies,
     { setTimeout: setTimer, clearTimeout: clearTimer, setInterval: () => 0, clearInterval() {} });
-  for (const name of ['e-frame', 'e-welcome', 'e-name', 'e-goals', 'e-watch', 'e-reminders', 'e-first-payment',
+  for (const name of ['e-frame', 'e-choice-row', 'e-welcome', 'e-name', 'e-goals', 'e-watch', 'e-reminders', 'e-first-payment',
     'e-pattern', 'e-paywall', 'e-handoff', 'capture-checklist', 'ready-summary', 'sms-explainer']) {
     dependencies[`@/components/onboarding/${name}`] = load(path.join(root, `src/components/onboarding/${name}.tsx`), dependencies);
   }
@@ -346,8 +351,8 @@ const calls = (h, name) => h.events.filter(event => event[0] === name);
 const toLive = async h => {
   await h.press('getStarted'); at(h, 'name');
   await h.press('onboardNameSkip'); at(h, 'goals');
-  await h.press('continue'); at(h, 'watch');
-  await h.press('notNow'); at(h, 'reminders');
+  await h.press('skipForNow'); at(h, 'watch');
+  await h.press('skipForNow'); at(h, 'reminders');
   await h.press('notNow'); at(h, 'live');
 };
 
@@ -365,8 +370,21 @@ for (const language of ['en', 'ar']) {
     // The bills goal leads the sheet; the band's greeting, totals and week stay first.
     assert.deepEqual(calls(h, 'saveHomeWidgets').at(-1)[1].order.slice(0, 6), ['greeting', 'overview', 'today', 'week', 'due', 'upcoming']);
     await h.tap('onboarding-watch-dining');
-    h.byTestID('onboarding-watch-limit').props.onChange(60000); await h.flush();
-    await h.press('continue'); at(h, 'reminders');
+    assert.equal(h.byTestID('onboarding-watch-continue').props.accessibilityLabel, h.eWords.skipForNow, 'an open row alone saves nothing');
+    await h.tap('onboarding-watch-limit-quick-1'); // 500, in the currency's scale
+    assert.equal(h.byTestID('onboarding-watch-limit-quick-1').props.accessibilityState.selected, true);
+    await h.tap('onboarding-watch-limit-raise'); // + 50
+    assert.equal(h.byTestID('onboarding-watch-limit-input').props.value, '550');
+    await h.changeText('onboarding-watch-limit-input', '0');
+    assert.equal(h.byTestID('onboarding-watch-continue').props.accessibilityLabel, h.eWords.skipForNow, 'zero is no limit');
+    await h.changeText('onboarding-watch-limit-input', '600');
+    assert.equal(h.byTestID('onboarding-watch-continue').props.accessibilityLabel, h.eWords.watchSave(1));
+    await h.changeText('onboarding-watch-limit-input', '6x');
+    h.byTestID('onboarding-watch-limit-input').props.onBlur(); await h.flush();
+    assert.equal(h.byTestID('onboarding-watch-limit-input').props.value, '600', 'leaving the field shows the limit that will be saved');
+    await h.tap('onboarding-watch-dining'); assert.equal(h.byTestID('onboarding-watch-limit'), undefined, 'tapping closes, never removes');
+    assert.ok(h.byTestID('onboarding-watch-dining').props.accessibilityLabel.endsWith(', AED 600'), 'the row speaks its exact limit');
+    await h.tap('onboarding-watch-continue'); at(h, 'reminders');
     assert.deepEqual(h.state.budgets, [{ category: 'dining', limitFils: 60000 }]);
     assert.equal(h.state.ledgerMoney.currency, 'AED', 'the confirmed currency is pinned before the first limit');
     await h.press('notNow'); at(h, 'live');
@@ -375,8 +393,9 @@ for (const language of ['en', 'ar']) {
     await h.press('continue'); at(h, 'goals');
     assert.equal(h.byTestID('onboarding-goal-bills').props.accessibilityState.checked, true);
     await h.press('continue'); at(h, 'watch');
-    assert.equal(h.byTestID('onboarding-watch-dining').props.accessibilityState.checked, true);
-    await h.press('continue'); await h.press('notNow'); at(h, 'live');
+    assert.ok(h.byTestID('onboarding-watch-dining').props.accessibilityLabel.endsWith(', AED 600'), 'the row speaks its exact limit');
+    assert.equal(h.byTestID('onboarding-watch-limit'), undefined, 'a resumed row shows its amount closed');
+    await h.tap('onboarding-watch-continue'); await h.press('notNow'); at(h, 'live');
     assert.deepEqual(h.state.budgets, [{ category: 'dining', limitFils: 60000 }], 'a second pass writes the same limit once');
     assert.equal(h.state.onboardingProfile.stage, 'capture');
     assert.equal(h.state.onboarded, false); assert.deepEqual(h.routes, []);
@@ -626,7 +645,7 @@ test('repeated taps on synchronous Next controls cannot skip a step', async () =
   await h.flush(); at(h, 'name');
   assert.equal(h.control('continue').disabled, true);
   await h.press('onboardNameSkip'); at(h, 'goals');
-  const next = h.control('continue');
+  const next = h.control('skipForNow');
   for (let n = 0; n < 20; n++) next.onPress();
   await h.flush(); at(h, 'watch');
   assert.deepEqual(h.routes, []); assert.equal(calls(h, 'setCaptureOptOut').length, 0);
@@ -642,11 +661,12 @@ test('six full Back/Next cycles keep the latest answers and save each stage with
     const goal = ids[cycle % ids.length];
     await h.tap(`onboarding-goal-${goal}`);
     if (picked.has(goal)) picked.delete(goal); else picked.add(goal);
-    await h.press('continue'); at(h, 'watch');
+    await h.tap('onboarding-goals-continue'); at(h, 'watch');
     assert.deepEqual(h.state.wafraGoals, ids.filter(id => picked.has(id)));
-    await h.tap('onboarding-watch-transport'); await h.press('continue');
+    await h.tap('onboarding-watch-transport'); assert.ok(h.byTestID('onboarding-watch-limit'), 'the row opens');
+    await h.press('skipForNow');
     await h.press('notNow'); at(h, 'live');
-    assert.deepEqual(h.state.budgets, [], 'a picked category with no limit is not a budget');
+    assert.deepEqual(h.state.budgets, [], 'an opened row with no limit is not a budget');
     for (const [screen, stage] of [['reminders', 'alerts'], ['watch', 'tracking'], ['goals', 'focus'], ['name', 'welcome']]) {
       await h.press('back'); at(h, screen);
       assert.equal(h.state.onboardingProfile.stage, stage);
@@ -709,9 +729,9 @@ test('ordinary profile save failure cannot be turned into a successful final com
   const h = await gate({ profile: profile('focus'), services: {
     setCaptureOptOut: async () => { throw new Error('synthetic encrypted persistence failure'); },
   } });
-  at(h, 'goals'); await h.press('continue');
+  at(h, 'goals'); await h.press('skipForNow');
   await h.setFailure({ operation: 'write', message: 'synthetic profile persistence failure' });
-  await h.press('notNow'); await h.press('notNow'); at(h, 'live');
+  await h.press('skipForNow'); await h.press('notNow'); at(h, 'live');
   await h.press('addByHand');
   assert.equal(h.state.onboarded, false); assert.deepEqual(h.routes, []);
   assert.equal(calls(h, 'committed').length, 0);
