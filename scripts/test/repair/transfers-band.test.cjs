@@ -242,3 +242,21 @@ test('a tile that empties the list says so and offers to clear it', () => {
   byId(tree, 'transfers-clear-tile').props.onPress();
   assert.ok(stateOf(h, null), 'clearing sets the tile back to none');
 });
+
+test('a likely pair with both legs queued is one question, asked about the outgoing leg', async () => {
+  const rows = [leg('p-in', 'income', 'savings', { date: '2026-09-12' }), leg('p-out', 'expense', 'current', { date: '2026-09-12' }),
+    leg('q1', 'expense', 'current', { date: '2026-09-11', amountFils: 8500 })];
+  const h = harness({ language: 'en', state: { transactions: rows, accounts: accountsFixture } });
+  withReconciliation(h, [
+    ['p-in', { id: 'p-in', status: 'likely-own', reason: 'amount-time', counterpartId: 'p-out', candidateIds: [] }],
+    ['p-out', { id: 'p-out', status: 'likely-own', reason: 'amount-time', counterpartId: 'p-in', candidateIds: [] }],
+    ['q1', { id: 'q1', status: 'ownership-unknown', reason: 'missing-evidence', candidateIds: [] }],
+  ], ['p-in', 'p-out', 'q1']);
+  const card = byId(h.renderScreen('transfers'), 'transfer-question-card');
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
+  assert.ok(text(card).includes(words.card.title(2)), 'two movements need an answer, not three entries');
+  assert.ok(text(card).includes(words.card.step(1, 2)));
+  await byId(card, 'transfer-answer-own').props.onPress();
+  assert.equal(h.answers[0].transaction.id, 'p-out');
+  assert.equal(h.answers[0].counterpart.id, 'p-in', 'answering own links the other leg');
+});

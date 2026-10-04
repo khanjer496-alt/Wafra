@@ -111,3 +111,41 @@ export function getTransferActivity(
 export function isListedExternalTransfer(transaction: Transaction, duplicates: ReadonlySet<string>): boolean {
   return transferOwnership(transaction) === 'external' && !duplicates.has(transaction.id);
 }
+
+const PAIRED_STATUSES: ReadonlySet<TransferAssessment['status']> = new Set(['confirmed-own', 'likely-own']);
+
+/**
+ * The other leg of each linked (`confirmed-own`) or likely own-account pair
+ * among `records`, recorded both ways, so a count can name one movement once.
+ * A pair needs one outgoing and one incoming leg on different accounts, both
+ * present in `records`; it is enough for one leg to name the other. A leg
+ * belongs to at most one pair (the first that names it, in record order).
+ * Counting only: no amount is read or changed.
+ */
+export function transferPartnerIds(
+  records: readonly Pick<TransferActivityRecord, 'transaction' | 'assessment'>[],
+): Map<string, string> {
+  const byId = new Map(records.map(record => [record.transaction.id, record.transaction] as const));
+  const partners = new Map<string, string>();
+  for (const { transaction, assessment } of records) {
+    if (!PAIRED_STATUSES.has(assessment.status) || !assessment.counterpartId) continue;
+    const other = byId.get(assessment.counterpartId);
+    if (!other || other.id === transaction.id || partners.has(transaction.id) || partners.has(other.id)) continue;
+    if (other.type === transaction.type || other.accountId === transaction.accountId) continue;
+    if ((transaction.type !== 'expense' && transaction.type !== 'income') ||
+      (other.type !== 'expense' && other.type !== 'income')) continue;
+    partners.set(transaction.id, other.id);
+    partners.set(other.id, transaction.id);
+  }
+  return partners;
+}
+
+/**
+ * One question per movement. When both legs of a pair are queued, keep the
+ * outgoing leg and drop the incoming one; answering it settles the pair. Order
+ * is kept. A leg whose partner is not queued is asked about on its own.
+ */
+export function onePerPair<T extends Pick<TransferActivityRecord, 'transaction' | 'assessment'>>(queue: readonly T[]): T[] {
+  const partners = transferPartnerIds(queue);
+  return queue.filter(item => item.transaction.type !== 'income' || !partners.has(item.transaction.id));
+}

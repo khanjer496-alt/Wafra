@@ -50,7 +50,7 @@ import {
 import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
 import { TRANSACTION_SOURCE_KINDS, transactionSource, type TransactionSourceKind } from '@/lib/transaction-source';
 import { transactionsWords } from '@/lib/transactions-copy';
-import { getTransferActivity } from '@/lib/transfer-activity';
+import { getTransferActivity, transferPartnerIds } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { isTransferCandidate, transferDeclined, transferOwnership } from '@/lib/transfer-reconciliation';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
@@ -138,9 +138,13 @@ interface TransferSeparation {
   reviewTransferIds: ReadonlySet<string>;
   /** Transfer legs still waiting for their other side (the Needs review chip). */
   pendingTransferIds: ReadonlySet<string>;
+  /** The other leg of each linked or likely own pair among the separated rows, so the strip counts a pair once. */
+  separatedPartnerIds: ReadonlyMap<string, string>;
 }
 
-const NO_SEPARATION: TransferSeparation = { separateTransferIds: NO_IDS, reviewTransferIds: NO_IDS, pendingTransferIds: NO_IDS };
+const NO_PARTNERS: ReadonlyMap<string, string> = new Map();
+const NO_SEPARATION: TransferSeparation = { separateTransferIds: NO_IDS, reviewTransferIds: NO_IDS, pendingTransferIds: NO_IDS,
+  separatedPartnerIds: NO_PARTNERS };
 
 /**
  * Rows the Transfers screen owns, which of those the reconciler queued for
@@ -168,6 +172,9 @@ function computeSeparateTransferIds(state: TransferSeparationState): TransferSep
     separateTransferIds: new Set(records.map(item => item.transaction.id)),
     reviewTransferIds: new Set(records.filter(item => item.needsReview).map(item => item.transaction.id)),
     pendingTransferIds: reconciliation.pendingIds,
+    // Built here, from the same records and reconciliation as the separation set, so the
+    // pairs can only name rows that are separated; remembered with it per ledger.
+    separatedPartnerIds: transferPartnerIds(records),
   };
   separateTransferCache = { transactions, accounts, reconciliation, value };
   return value;
@@ -366,7 +373,7 @@ export default function TransactionsScreen() {
   // and stays empty while a history import only has a provisional receipt.
   // Unlike `internal` it may lag one ledger change behind: it recomputes after
   // interactions settle and holds its last answer during a running import.
-  const { separateTransferIds, reviewTransferIds, pendingTransferIds } = useSeparateTransferIds(state);
+  const { separateTransferIds, reviewTransferIds, pendingTransferIds, separatedPartnerIds } = useSeparateTransferIds(state);
   // The Transfers and Needs review chips, from the predicates the rows and
   // the review screens already use: one pass over the ledger.
   const { transferIds, reviewIds } = useMemo(() => {
@@ -470,10 +477,10 @@ export default function TransactionsScreen() {
 
   const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly,
     bestEffortOnly: autoAddedActive, currentKey, period,
-    live: liveAccounts, internal, corroborating, separateTransferIds, reviewTransferIds, transferIds, reviewIds,
+    live: liveAccounts, internal, corroborating, separateTransferIds, reviewTransferIds, separatedPartnerIds, transferIds, reviewIds,
     amountExponent: state.ledgerMoney?.exponent ?? 2 }),
   [appliedQuery, merchantFilter, smsOnly, autoAddedActive, currentKey, period, liveAccounts, internal, corroborating,
-    separateTransferIds, reviewTransferIds, transferIds, reviewIds, state.ledgerMoney?.exponent]);
+    separateTransferIds, reviewTransferIds, separatedPartnerIds, transferIds, reviewIds, state.ledgerMoney?.exponent]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded, separatedTransfers } = projection;

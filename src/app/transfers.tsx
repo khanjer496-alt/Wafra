@@ -26,7 +26,7 @@ import { formatMinorUnits } from '@/lib/ledger-money';
 import { inPeriod, isCurrentMonth, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
-import { getTransferActivity } from '@/lib/transfer-activity';
+import { getTransferActivity, onePerPair } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
 import { filterTransferItems, transferListItems, transferTotals, type TransferTile } from '@/lib/transfer-list';
@@ -106,8 +106,9 @@ export default function TransfersScreen() {
   const shown = useMemo(() => filterTransferItems(items, tile), [items, tile]);
   // The questions are the reconciler's queue, newest first, whatever the period or search.
   // Saving an answer takes the row out of the queue, so the card always shows the first one.
-  const queue = useMemo(() => activity.filter(item => item.needsReview)
-    .sort((a, b) => b.transaction.date.localeCompare(a.transaction.date) || (b.transaction.ts ?? 0) - (a.transaction.ts ?? 0)), [activity]);
+  // A pair with both legs queued is one movement: one question, asked about its outgoing leg.
+  const queue = useMemo(() => onePerPair(activity.filter(item => item.needsReview)
+    .sort((a, b) => b.transaction.date.localeCompare(a.transaction.date) || (b.transaction.ts ?? 0) - (a.transaction.ts ?? 0))), [activity]);
   const current = queue[0];
   const hint = useMemo(() => {
     if (!current) return undefined;

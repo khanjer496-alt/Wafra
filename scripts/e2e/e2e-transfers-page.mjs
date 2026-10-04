@@ -47,8 +47,9 @@ const transactions = [
     transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'ADCB', explicitExternal: true, counterpartyName: 'Ahmed K.' } }),
   tx('ext-in', 'income', RECEIVED_FILS, 300, { transferEvidence: { version: 1, currency: 'AED', attribution: 'source',
     sourceBank: 'HSBC', explicitExternal: true, counterpartyName: 'Sara M.' } }),
-  // Two unconfirmed movements, each with both legs queued, so the card opens at "1 of 4". Answering one
-  // leg settles its partner too ("1 of 2"); the newest leg (q-in) is the one the card asks about first.
+  // Two unconfirmed movements, each with both legs queued. A pair is one question, asked about its
+  // outgoing leg, so the card opens at "1 of 2" on q-out (the newer movement). Answering it settles
+  // q-in too ("1 of 1"); Undo brings back "1 of 2".
   tx('p-out', 'expense', 5600, 250),
   tx('p-in', 'income', 5600, 240),
   tx('q-out', 'expense', 12300, 200),
@@ -57,7 +58,7 @@ const transactions = [
   tx('unk-out', 'expense', NONE_FILS, 100, { isTransfer: true, transferEvidence: undefined }),
 ];
 const OPEN_ROWS = 8; // own pair (one row), ext-out, ext-in, p-out, p-in, q-out, q-in, unk-out
-const QUEUED = 4;
+const QUEUED = 2; // movements needing an answer: one question per pair
 const seed = (language, theme) => ({
   ledgerMoney: { schemaVersion: 2, currency: 'AED', exponent: 2 }, accounts, transactions,
   budgets: [], bills: [], cardDues: [], goals: [], merchantOverrides: {}, accountHints: {}, notSubscriptions: [],

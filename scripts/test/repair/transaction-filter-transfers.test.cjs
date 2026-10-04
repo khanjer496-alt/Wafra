@@ -194,3 +194,28 @@ test('a single kind of excluded money movement is named', () => {
   assert.equal(mixed.excluded.movements, 3);
   assert.equal(mixed.excluded.movementKind, undefined);
 });
+
+test('the strip counts a linked or likely pair once when both legs are separated and in view; money is unchanged', () => {
+  const rows = [row('p-out'), row('p-in', { type: 'income', accountId: 'savings' }), row('solo', { amountFils: 2500 })];
+  const live = new Set(['bank', 'savings']);
+  const separateTransferIds = new Set(['p-out', 'p-in', 'solo']);
+  const reviewTransferIds = new Set(['p-out', 'p-in']);
+  const base = { live, separateTransferIds, reviewTransferIds };
+  const partners = new Map([['p-out', 'p-in'], ['p-in', 'p-out']]);
+  const legs = project(rows, defaults, base).separatedTransfers;
+  assert.equal(legs.count, 3, 'without pair data each leg is one');
+  const paired = project(rows, defaults, { ...base, separatedPartnerIds: partners }).separatedTransfers;
+  assert.equal(paired.count, 2, 'the pair is one transfer, plus the single row');
+  assert.equal(paired.reviewCount, 1, 'and one answer settles it');
+  assert.equal(paired.incomeFils, legs.incomeFils);
+  assert.equal(paired.expenseFils, legs.expenseFils);
+  for (const sort of ['newest', 'oldest', 'largest']) {
+    assert.equal(project(rows, { ...defaults, sort }, { ...base, separatedPartnerIds: partners }).separatedTransfers.count, 2, sort);
+  }
+  // Only one leg in view: it still counts as one.
+  const outOnly = project(rows, { ...defaults, type: 'expense' }, { ...base, separatedPartnerIds: partners }).separatedTransfers;
+  assert.equal(outOnly.count, 2);
+  assert.equal(outOnly.reviewCount, 1);
+  const inOnly = project(rows, { ...defaults, type: 'income' }, { ...base, separatedPartnerIds: partners }).separatedTransfers;
+  assert.equal(inOnly.count, 1);
+});

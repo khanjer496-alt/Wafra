@@ -12,7 +12,7 @@ const core = load(path.join(root, 'src/lib/transfer-reconciliation.ts'), {
   '@noble/hashes/sha2.js': require('@noble/hashes/sha2.js'),
   '@noble/hashes/utils.js': require('@noble/hashes/utils.js'),
 });
-const { confirmedTransferIds, duplicateTransactionIds, getTransferActivity, isListedExternalTransfer } = load(path.join(root, 'src/lib/transfer-activity.ts'), {
+const { confirmedTransferIds, duplicateTransactionIds, getTransferActivity, isListedExternalTransfer, onePerPair, transferPartnerIds } = load(path.join(root, 'src/lib/transfer-activity.ts'), {
   '@/lib/transfer-reconciliation': core,
 });
 const NOW = Date.parse('2026-09-08T10:00:00Z');
@@ -181,4 +181,42 @@ test('the row-local activity test never hides a row that the Transfers screen do
   const skipped = rows.filter(tx => isListedExternalTransfer(tx, duplicates)).map(tx => tx.id);
   assert.deepEqual(skipped.join(), 'sent');
   for (const id of skipped) assert.ok(listed.has(id), `${id} is listed on Transfers`);
+});
+
+// ---- Final review: a pair is one transfer ----
+const record = (id, type, status, counterpartId, accountId = accounts[0].id) => ({
+  transaction: row(id, { type, accountId }), needsReview: true,
+  assessment: { id, status, reason: 'amount-time', candidateIds: [], ...(counterpartId ? { counterpartId } : {}) },
+});
+
+test('a linked or likely own pair names its other leg both ways; anything else has no partner', () => {
+  const records = [
+    record('a-in', 'income', 'likely-own', 'a-out', accounts[1].id), record('a-out', 'expense', 'likely-own', 'a-in'),
+    record('b-out', 'expense', 'confirmed-own', 'b-in'), record('b-in', 'income', 'confirmed-own', 'b-out', accounts[1].id),
+    // Named by one side only (the reconciler may name a partner one way).
+    record('c-out', 'expense', 'likely-own', 'c-in'), record('c-in', 'income', 'ownership-unknown', undefined, accounts[1].id),
+    // Partner not among the records, same direction, same account, or a non-own status: no pair.
+    record('lone', 'expense', 'likely-own', 'gone'),
+    record('d-1', 'expense', 'likely-own', 'd-2'), record('d-2', 'expense', 'likely-own', 'd-1', accounts[1].id),
+    record('e-out', 'expense', 'likely-own', 'e-in'), record('e-in', 'income', 'likely-own', 'e-out'),
+    record('f-out', 'expense', 'ambiguous', 'f-in'), record('f-in', 'income', 'ambiguous', undefined, accounts[1].id),
+    // One leg belongs to at most one pair.
+    record('g-out1', 'expense', 'likely-own', 'g-in'), record('g-out2', 'expense', 'likely-own', 'g-in'),
+    record('g-in', 'income', 'likely-own', 'g-out1', accounts[1].id),
+  ];
+  const partners = transferPartnerIds(records);
+  assert.deepEqual(Object.fromEntries([...partners].sort()), {
+    'a-in': 'a-out', 'a-out': 'a-in', 'b-in': 'b-out', 'b-out': 'b-in', 'c-in': 'c-out', 'c-out': 'c-in',
+    'g-in': 'g-out1', 'g-out1': 'g-in',
+  });
+});
+
+test('one question per movement: the outgoing leg stands for a pair whose legs are both queued', () => {
+  const queue = [record('q-in', 'income', 'likely-own', 'q-out', accounts[1].id), record('q-out', 'expense', 'likely-own', 'q-in'),
+    record('p-in', 'income', 'likely-own', 'p-out', accounts[1].id), record('p-out', 'expense', 'likely-own', 'p-in'),
+    record('solo', 'expense', 'ownership-unknown')];
+  assert.deepEqual(onePerPair(queue).map(item => item.transaction.id), ['q-out', 'p-out', 'solo'], 'order kept, income legs dropped');
+  // A queued leg whose partner is no longer queued is asked about on its own.
+  assert.deepEqual(onePerPair([queue[0], queue[4]]).map(item => item.transaction.id), ['q-in', 'solo']);
+  assert.deepEqual(onePerPair([]), []);
 });
