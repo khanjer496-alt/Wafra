@@ -757,11 +757,11 @@ export default function TransactionsScreen() {
                 accessibilityRole="button"
                 accessibilityLabel={[transferWords.strip.kept(separatedTransfers.count), stripDetail, transferWords.viewAll].filter(Boolean).join('. ')}
                 onPress={() => routerRef.current.push('/transfers')}
-                style={({ pressed }) => [styles.strip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
+                style={({ pressed }) => [styles.strip, largeText && styles.stripLarge, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
                 <View style={[styles.stripIcon, { backgroundColor: band.glyphGround }]}>
                   <Icon name="repeat" size={16} color={band.text} />
                 </View>
-                <View style={styles.stripText}>
+                <View style={[styles.stripText, largeText && styles.stripTextLarge]}>
                   <View style={styles.stripTitle}>
                     <ThemedText type="smallBold">{transferWords.strip.kept(separatedTransfers.count)}</ThemedText>
                     {separatedTransfers.reviewCount > 0 && <View style={[styles.stripDot, { backgroundColor: band.statusNear }]} />}
@@ -899,6 +899,9 @@ const styles = StyleSheet.create({
   netValue: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: Spacing.two },
   strip: { marginTop: Spacing.two, minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: Spacing.two,
     padding: Spacing.two, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth },
+  // Accessibility text sizes: icon, text and "Open" stack, so the text keeps the full width.
+  stripLarge: { flexDirection: 'column', alignItems: 'stretch' },
+  stripTextLarge: { flexGrow: 0, flexBasis: 'auto' },
   stripIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   stripText: { flex: 1, minWidth: 0, gap: 2 },
   stripTitle: { flexDirection: 'row', alignItems: 'center', gap: 6 },

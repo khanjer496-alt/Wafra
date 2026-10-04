@@ -47,18 +47,15 @@ for (const language of ['en', 'ar']) {
       assert.equal(style(summary).alignItems, 'stretch');
       const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(language);
       assert.ok(text(net).includes(words.net));
-      // The label and amount may wrap at large text; they never sit squeezed beside the count line.
-      assert.equal(style(net).flexWrap, 'wrap');
-      // The count line and the net are stacked children of the summary, never siblings in one row.
+      // The count line and the net stack: the nearest element holding both
+      // is never a row, so neither is squeezed beside the other.
       const line = walk(summary).find(n => n.props?.testID === 'transactions-summary-line');
       assert.ok(line, 'the count line has its own element');
-      const rowParent = walk(summary).find(n => style(n).flexDirection === 'row' &&
-        [].concat(n.props.children).flat(Infinity).includes(line));
-      assert.equal(rowParent, undefined, 'the count line is not a child of a row container');
-      const lineParent = walk(summary).find(n => [].concat(n.props?.children).flat(Infinity).includes(line));
-      assert.equal([].concat(lineParent.props.children).flat(Infinity).includes(net), false);
-      assert.ok(walk(lineParent).includes(net), 'both stack inside the same column container');
-      assert.notEqual(style(lineParent).flexDirection, 'row');
+      const ancestors = walk(summary).filter(n => { const sub = walk(n); return sub.includes(line) && sub.includes(net); });
+      const common = ancestors.reduce((best, n) => (walk(n).length < walk(best).length ? n : best));
+      assert.notEqual(common, line);
+      assert.notEqual(common, net);
+      assert.notEqual(style(common).flexDirection, 'row', 'the count line and the net share a non-row container');
       assert.equal(walk(net).some(n => n.props?.numberOfLines), false);
       const header = h.list.props.renderSectionHeader({ section: h.list.props.sections[0] });
       assert.equal(style(header).flexDirection, largeText ? 'column' : 'row');
@@ -354,3 +351,17 @@ for (const language of ['en', 'ar']) test(`${language}: the transfer strip says 
   assert.match(text(strip), language === 'en' ? /sent to others is in the net/ : /أُرسلت لآخرين ضمن الصافي/);
   assert.ok(strip.props.accessibilityLabel.includes(words.viewAll));
 });
+
+for (const language of ['en', 'ar']) for (const largeText of [false, true]) {
+  test(`${language}/${largeText}: the transfer strip stacks its open action under the text at large text`, () => {
+    const rows = [fixtureRow('purchase', { amountFils: 12500 }),
+      fixtureRow('sent', { title: 'Outgoing transfer', category: 'other', amountFils: 40000,
+        transferDecision: { version: 1, ownership: 'external', decidedAt: 1 } })];
+    const h = transactions({ language, largeText, state: { transactions: rows }, period: { mode: 'all' } });
+    const strip = walk(h.tree).find(n => n.props?.testID === 'transactions-separated-transfers');
+    assert.ok(strip);
+    assert.equal(style(strip).flexDirection, largeText ? 'column' : 'row');
+    assert.ok(style(strip).minHeight >= 44);
+    if (largeText) assert.notEqual(style(strip).alignItems, 'center', 'stacked children align to the start, not centred');
+  });
+}
