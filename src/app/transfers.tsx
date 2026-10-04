@@ -144,7 +144,7 @@ export default function TransfersScreen() {
         style={[styles.tile, { backgroundColor: ground }, !tilesOnBand && { borderWidth: 1, borderColor: on ? band.fill : band.rule }]}>
         <Icon name={icon} size={15} color={ink} />
         <ThemedText type="meta" style={{ color: quiet }}>{words.tiles[key]}</ThemedText>
-        <Money fils={fils} type="smallBold" decimals color={ink} />
+        <Money fils={fils} type="smallBold" decimals color={ink} currencyColor={quiet} />
         {counted ? <ThemedText type="micro" style={{ color: quiet }}>{words.tiles.counted}</ThemedText> : null}
       </Pressable>;
     })}
@@ -153,7 +153,7 @@ export default function TransfersScreen() {
   const periodChip = <Pressable testID="transfers-period" accessibilityRole="button"
     accessibilityLabel={tf('reportingPeriod', { period: periodLabel(period) }, language)}
     onPress={() => setPeriodOpen(true)} style={[styles.periodChip, { backgroundColor: band.tile }]}>
-    <ThemedText type="smallBold" style={{ color: band.onBand }}>{periodLabel(period)}</ThemedText>
+    <ThemedText type="smallBold" style={[styles.periodLabel, { color: band.onBand }]}>{periodLabel(period)}</ThemedText>
     <Icon name="chevron-down" size={16} color={band.onBand} />
   </Pressable>;
 
@@ -222,7 +222,8 @@ const styles = StyleSheet.create({
   tile: { flex: 1, minHeight: 72, borderRadius: 14, padding: Spacing.two, gap: 2 },
   sheet: { paddingTop: Spacing.two },
   content: { gap: 0 }, controls: { gap: Spacing.three, paddingBottom: Spacing.two },
-  periodChip: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 22, flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%', flexWrap: 'wrap' },
+  periodChip: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 22, flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%', flexShrink: 1 },
+  periodLabel: { flexShrink: 1 },
   clearTile: { minHeight: 44, justifyContent: 'center' },
   rowCard: { paddingHorizontal: Spacing.three },
   rowCardFirst: { borderTopStartRadius: 18, borderTopEndRadius: 18 },

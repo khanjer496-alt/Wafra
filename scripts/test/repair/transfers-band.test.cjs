@@ -217,6 +217,38 @@ test('large text moves the tiles from the band into the list header', () => {
   assert.ok(byId(byId(large, 'transfers-band'), 'transfers-band') || text(byId(large, 'transfers-band')).includes('AED'), 'the figure stays in the band');
 });
 
+const flat = style => Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
+const textNodes = node => walk(node).filter(n => n.type === 'Text');
+
+test('every tile figure draws its currency label in the tile\'s own secondary colour, on the band and on the sheet', () => {
+  const words = harness({ language: 'en' }).deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
+  for (const [label, options, states] of [['band', { language: 'en' }, undefined], ['selected on band', { language: 'en' }, { 0: 'sent' }],
+    ['sheet at large text', { language: 'en', largeText: true }, undefined]]) {
+    const h = harness({ ...options, states });
+    const tree = h.renderScreen('transfers');
+    for (const key of ['own', 'sent', 'received']) {
+      const tile = byId(tree, `transfers-tile-${key}`) ?? byId(byId(tree, 'transfer-history').props.ListHeaderComponent, `transfers-tile-${key}`);
+      const caption = textNodes(tile).find(node => node.props.children === words.tiles[key]);
+      const currency = textNodes(tile).find(node => node.props.children === 'AED');
+      assert.ok(caption && currency, `${label} ${key}: tile has caption and currency`);
+      assert.equal(flat(currency.props.style).color, flat(caption.props.style).color,
+        `${label} ${key}: the currency label takes the tile's quiet colour, not the sheet's textSecondary`);
+    }
+  }
+});
+
+test('the period chip is one row: label shrinks, chevron stays beside it, 44pt pill', () => {
+  const tree = harness({ language: 'en' }).renderScreen('transfers');
+  const chip = walk(walk(tree).find(node => node.type === 'BandScaffold').props.nav.trailing).find(node => node.props?.testID === 'transfers-period');
+  const style = flat(chip.props.style);
+  assert.equal(style.flexDirection, 'row');
+  assert.notEqual(style.flexWrap, 'wrap', 'the chevron must never drop onto a second line');
+  assert.ok(style.minHeight >= 44);
+  assert.ok(style.borderRadius >= 22, 'pill radius');
+  const label = textNodes(chip)[0];
+  assert.equal(flat(label.props.style).flexShrink, 1, 'the label shrinks, the chevron does not');
+});
+
 test('sent and received tiles say counted; your accounts does not', () => {
   const h = harness({ language: 'en', state: { transactions: mixedRows(), accounts: accountsFixture } });
   withReconciliation(h, mixedEntries());
