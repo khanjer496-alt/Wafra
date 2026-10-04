@@ -8,6 +8,7 @@ import {
   isUnassignedTransferAccount,
   reconcileTransfers,
   reconciliationInternalIds,
+  transferDeclined,
   transferOwnership,
   TRANSFER_NORMALIZATION_VERSION,
 } from '@/lib/transfer-reconciliation';
@@ -48,6 +49,7 @@ export function liveAccountIds(accounts: Account[]): Set<string> {
 }
 
 export function isTransfer(transaction: Transaction): boolean {
+  if (transferDeclined(transaction)) return false;
   const ownership = transferOwnership(transaction);
   return ownership === 'own' || (ownership === null && transaction.isTransfer === true);
 }

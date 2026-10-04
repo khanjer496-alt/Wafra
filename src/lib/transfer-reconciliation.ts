@@ -66,9 +66,10 @@ export function isTransferEvidence(value: unknown): value is TransferEvidence {
 }
 
 export function isTransferDecision(value: unknown): value is TransferDecision {
-  return record(value) && value.version === 1 && (value.ownership === 'own' || value.ownership === 'external') &&
+  return record(value) && value.version === 1 &&
+    (value.ownership === 'own' || value.ownership === 'external' || value.ownership === 'none') &&
     clock(value.decidedAt) && optional(value, 'counterpartId', id) &&
-    (value.ownership !== 'external' || value.counterpartId === undefined);
+    (value.ownership === 'own' || value.counterpartId === undefined);
 }
 
 export function isTransferMatch(value: unknown): value is TransferMatch {
@@ -135,11 +136,16 @@ export function isTransferInertTransaction(tx: Transaction): boolean {
     tx.cardPaymentSide === undefined;
 }
 
+/** The person said this row is not a transfer. It stays a candidate only so Undo is reachable. */
+export function transferDeclined(tx: Transaction): boolean {
+  return decisionOf(tx as TransferRow)?.ownership === 'none';
+}
+
 /** Row-local ownership only. Persisted links require the ledger-aware reconciler. */
 export function transferOwnership(tx: Transaction): Ownership {
   if (!isTransferCandidate(tx)) return null;
   const decision = decisionOf(tx);
-  if (decision) return decision.ownership;
+  if (decision) return decision.ownership === 'none' ? null : decision.ownership;
   if (evidenceOf(tx)?.explicitExternal === true) return 'external';
   if ((manual(tx) && tx.isTransfer === true) || evidenceOf(tx)?.explicitOwn === true ||
     (tx.isTransfer === true && OWN_TITLE.test(tx.title.trim()))) return 'own';
@@ -479,7 +485,9 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
   const corroboratingOf = complementaryPostingPairs(entries);
   // External user choices may still have a companion bank confirmation, but
   // must never participate in automatic own-account matching.
-  for (const [id, entry] of entries) if (transferOwnership(entry.tx) === 'external') entries.delete(id);
+  for (const [id, entry] of entries) {
+    if (transferOwnership(entry.tx) === 'external' || transferDeclined(entry.tx)) entries.delete(id);
+  }
   const knownCounterparties = knownTransferCounterparties(rows, duplicateIds, accounts, entries);
   return { rows, duplicateIds, accounts: accountById, entries, fingerprints, instrumentKey, corroboratingOf, knownCounterparties };
 }
@@ -835,12 +843,15 @@ function reconcile(ctx: Context): TransferReconciliationResult {
   const knownCardRepayments = new Map<string, string>();
   for (const tx of ctx.rows.values()) {
     const ownership = transferOwnership(tx);
-    if (ownership === null || !id(tx.id)) continue;
+    const declined = transferDeclined(tx);
+    if ((ownership === null && !declined) || !id(tx.id)) continue;
     if (corroboratingIds.has(tx.id)) {
       byId.set(tx.id, { id: tx.id, status: 'corroborating-alert', reason: 'bank-confirmation',
         counterpartId: corroboratingOf.get(tx.id), candidateIds: [] });
       continue;
     }
+    // "Not a transfer": no assessment, no queue, no link; it counts like any row.
+    if (declined) continue;
     if (ctx.duplicateIds.has(tx.id)) {
       byId.set(tx.id, { id: tx.id, status: 'ambiguous', reason: 'multiple-candidates', candidateIds: [] });
       pendingIds.add(tx.id);
@@ -1274,7 +1285,7 @@ export function applyTransferDecisionBatch(
   for (const decision of request.decisions) {
     if (!record(decision) || !Array.isArray(decision.ids) || decision.ids.length === 0 ||
       decision.ids.some(value => !id(value)) || new Set(decision.ids).size !== decision.ids.length ||
-      !['own', 'external', null].includes(decision.ownership) ||
+      !['own', 'external', 'none', null].includes(decision.ownership) ||
       (decision.counterpartId !== undefined && (!id(decision.counterpartId) || decision.ownership !== 'own' || decision.ids.length !== 1))) {
       throw new Error('Invalid transfer decision');
     }
