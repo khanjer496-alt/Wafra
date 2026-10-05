@@ -174,9 +174,9 @@ export const homeSummaryCopy = {
 /** Entry detail additions: statement kind and the category sheet state. */
 export const entryDetailCopy = {
   en: { statementPdf: 'Bank statement (PDF)', statementCsv: 'Bank statement (CSV)', applePay: 'Apple Pay (Wallet)', bankEmail: 'Bank email',
-    chooseCategory: 'Choose a category', done: 'Done' },
+    chooseCategory: 'Choose a category', done: 'Done', edit: 'Edit' },
   ar: { statementPdf: 'كشف حساب بنكي (PDF)', statementCsv: 'كشف حساب بنكي (CSV)', applePay: 'Apple Pay (المحفظة)', bankEmail: 'بريد البنك',
-    chooseCategory: 'اختر فئة', done: 'تم' },
+    chooseCategory: 'اختر فئة', done: 'تم', edit: 'تعديل' },
 };
 
 /** Category limit sheet: steppers and the three-month picture. */

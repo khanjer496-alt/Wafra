@@ -288,7 +288,8 @@ await tapLabel(page, firstEntry.label, 1200);
 ok('entry sheet opens on a row', !!(await visibleText(page, /TRANSACTION DETAILS/i)));
 ok(`entry sheet names the account (${firstEntry.account})`,
   !!(await visibleText(page, firstEntry.account)));
-await tapText(page, 'Edit transaction', 1000);
+// The button reads "Edit" in the sheet's one-row footer; its spoken name is the full one.
+await tapLabel(page, 'Edit transaction', 1000);
 ok('entry sheet switches to editing', !!(await visibleText(page, /DESCRIPTION/i)));
 
 /**
@@ -317,7 +318,7 @@ ok('entry sheet switches to editing', !!(await visibleText(page, /DESCRIPTION/i)
     !!freshLabel && freshLabel.includes(`, ${chosenCategory},`) && freshLabel.includes(`, ${firstEntry.account},`));
   if (!freshLabel) throw new Error('Edited transaction lost its Home Details control');
   await tapLabel(page, freshLabel, 500);
-  await tapText(page, 'Edit transaction', 500);
+  await tapLabel(page, 'Edit transaction', 500);
   const after = await amountValue();
   ok(`editing only the category leaves the amount alone (${before} → ${after})`, !!before && before === after);
 }

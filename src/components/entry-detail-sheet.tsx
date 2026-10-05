@@ -400,6 +400,14 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     })}`
     : null;
 
+  // The read footer's three actions; the order is the layout's (see footer).
+  const readDelete = <EButton key="delete" palette={{ ...band, tint: band.statusOver }} size="compact" variant="quiet"
+    label={t('delete')} onPress={() => setConfirmingDelete(true)} style={styles.quietAction} />;
+  const readEdit = <EButton key="edit" palette={band} size="compact" variant="secondary" label={extra.edit}
+    accessibilityLabel={t('editEntry')} onPress={() => setEditing(true)} style={styles.rowAction} />;
+  const readDone = <EButton key="done" palette={band} size="compact" label={extra.done} onPress={onClose}
+    testID="entry-detail-done" style={styles.rowAction} />;
+
   return (
     <BottomSheet
       visible
@@ -409,23 +417,20 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       palette={band}
       footer={categoryPicking ? (
           <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-            <EButton palette={band} variant="secondary" label={t('cancel')} onPress={cancelCategory} style={styles.action} />
-            <EButton palette={band} label={extra.done} onPress={commitCategory} style={styles.action} />
+            <EButton palette={band} size="compact" variant="secondary" label={t('cancel')} onPress={cancelCategory} style={styles.action} />
+            <EButton palette={band} size="compact" label={extra.done} onPress={commitCategory} style={styles.action} />
           </View>
       ) : editing ? (
           <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-            <EButton palette={band} label={t('saveChanges')} onPress={save} disabled={!canSave} style={styles.action} />
-            <EButton palette={band} variant="secondary" label={t('cancel')} onPress={() => setEditing(false)} style={styles.action} />
+            <EButton palette={band} size="compact" label={t('saveChanges')} onPress={save} disabled={!canSave} style={styles.action} />
+            <EButton palette={band} size="compact" variant="secondary" label={t('cancel')} onPress={() => setEditing(false)} style={styles.action} />
           </View>
       ) : (
-          <View style={styles.footerStack}>
-            {/* Reading an entry ends with Done; changing it is one step aside. */}
-            <EButton palette={band} label={extra.done} onPress={onClose} testID="entry-detail-done" />
-            <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-              <EButton palette={band} variant="secondary" label={t('editEntry')} onPress={() => setEditing(true)} style={styles.action} />
-              <EButton palette={{ ...band, tint: band.statusOver }} variant="quiet" label={t('delete')}
-                onPress={() => setConfirmingDelete(true)} style={styles.action} />
-            </View>
+          // Reading an entry ends with Done; changing it is one step aside, in
+          // the same short row (Delete at the start, Done at the end). Stacked
+          // at the accessibility sizes, Done leads.
+          <View testID="entry-detail-actions" style={[styles.actions, largeText ? styles.actionsLarge : styles.readActions]}>
+            {largeText ? [readDone, readEdit, readDelete] : [readDelete, readEdit, readDone]}
           </View>
       )}>
       {editing ? <View style={[styles.head, styles.editHead, { borderColor: band.rule }]}>
@@ -440,19 +445,25 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           style={styles.editHeadAmount}
         />
       </View> : <View style={styles.head} testID="entry-detail-head">
-        <MerchantAvatar title={transaction.title} category={transaction.category} size={64} />
-        <ThemedText type="heading" style={styles.headTitle}>{presentation.title}</ThemedText>
+        {/* Who and when beside a 44pt logo, then the figure: the sheet's
+            answer stays in view with its question and actions below it. */}
+        <View style={styles.headRow}>
+          <MerchantAvatar title={transaction.title} category={transaction.category} size={44} />
+          <View style={styles.headText}>
+            <ThemedText type="heading" style={styles.headTitle}>{presentation.title}</ThemedText>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>
+              {friendlyDate(transaction.date, toISODate(new Date()))}
+            </ThemedText>
+          </View>
+        </View>
         {/* Decimals on. This sheet exists to answer "what exactly was this",
             and it sat above an edit field showing 72.73 while itself reading
             −73. Both the list and details now retain the exact minor units. */}
         <BandFigure testID="entry-detail-amount" fils={transaction.amountFils} sign={presentation.sign} decimals
-          palette={band} size="hero" fitInset={8}
+          palette={band} size="large" fitInset={8}
           color={income && !pendingTransfer && !confirmedTransfer ? theme.income : band.text}
-          secondaryColor={band.textSecondary} style={styles.headAmount} />
-        <ThemedText type="meta" style={[styles.headDate, { color: band.textSecondary }]}>
-          {friendlyDate(transaction.date, toISODate(new Date()))}
-        </ThemedText>
-        {fxLine ? <ThemedText type="meta" tabular testID="entry-fx-line" style={[styles.fxLine, { color: band.textSecondary }]}>
+          secondaryColor={band.textSecondary} />
+        {fxLine ? <ThemedText type="meta" tabular testID="entry-fx-line" style={{ color: band.textSecondary }}>
           {fxLine}</ThemedText> : null}
       </View>}
 
@@ -461,28 +472,28 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       {!editing && !categoryPicking ? <View style={styles.chips} testID="entry-detail-chips">
         {confirmedTransfer || pendingTransfer ? <View accessible accessibilityRole="text" style={[styles.chip, { backgroundColor: band.card, borderColor: band.rule }]}>
           <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={{ color: band.text }}>{presentation.repayment ? presentation.tag : pendingTransfer ? transferWords.ownershipUnknown
+          <ThemedText type="small" style={[styles.chipText, { color: band.text }]}>{presentation.repayment ? presentation.tag : pendingTransfer ? transferWords.ownershipUnknown
             : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel')}</ThemedText>
         </View> : <Pressable accessibilityRole="button" testID="entry-category-chip"
           accessibilityLabel={`${t('category')}: ${categoryLabel(meta)}`}
           onPress={() => { setPickedCategory(transaction.category); setCategoryPicking(true); }}
           style={({ pressed }) => [styles.chip, { backgroundColor: band.fill, borderColor: band.fill, opacity: pressed ? 0.8 : 1 }]}>
           <Icon name={meta.icon} size={16} color={band.onFill} />
-          <ThemedText type="smallBold" style={{ color: band.onFill }}>{categoryLabel(meta)}</ThemedText>
+          <ThemedText type="smallBold" style={[styles.chipText, { color: band.onFill }]}>{categoryLabel(meta)}</ThemedText>
         </Pressable>}
         {canMarkTransfer ? <Pressable accessibilityRole="button" testID="entry-mark-transfer"
           accessibilityLabel={answerLabels.own}
           onPress={markAsTransfer}
           style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
           <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={{ color: band.text }}>{answerLabels.own}</ThemedText>
+          <ThemedText type="small" style={[styles.chipText, { color: band.text }]}>{answerLabels.own}</ThemedText>
         </Pressable> : null}
         {canUnmarkTransfer ? <Pressable accessibilityRole="button" testID="entry-unmark-transfer"
           accessibilityLabel={answerLabels.none}
           onPress={unmarkTransfer}
           style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
           <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={{ color: band.text }}>{answerLabels.none}</ThemedText>
+          <ThemedText type="small" style={[styles.chipText, { color: band.text }]}>{answerLabels.none}</ThemedText>
         </Pressable> : null}
       </View> : null}
 
@@ -520,9 +531,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           <ThemedText type="smallBold">{t('autoAddedCheck')}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">{t('autoAddedExplain')}</ThemedText>
           <View style={[styles.actions, largeText && styles.actionsLarge]}>
-            <EButton palette={band} label={t('autoAddedLooksRight')} style={styles.action}
+            <EButton palette={band} size="compact" label={t('autoAddedLooksRight')} style={styles.action}
               onPress={() => resolveBestEffort(transaction.id, 'confirm')} />
-            <EButton palette={band} variant="secondary" label={t('autoAddedUndo')} style={styles.action}
+            <EButton palette={band} size="compact" variant="secondary" label={t('autoAddedUndo')} style={styles.action}
               onPress={() => setConfirmingUndo(true)} />
           </View>
           <ThemedText type="meta" themeColor="textTertiary">{t('autoAddedUndoHint')}</ThemedText>
@@ -870,36 +881,22 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
 }
 
 const styles = StyleSheet.create({
-  head: {
-    flexDirection: 'column',
-    paddingTop: 4,
-    paddingBottom: 4,
-    alignItems: 'center',
-    gap: 4,
-  },
+  head: { gap: Spacing.two },
+  headRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three - 4 },
+  headText: { flex: 1, minWidth: 0, gap: 2 },
   editHead: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.two, paddingHorizontal: 0,
     paddingVertical: Spacing.two, alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   editHeadTitle: { flexShrink: 1 },
   editHeadAmount: { alignSelf: 'center' },
-  headTitle: {
-    textAlign: 'center',
-    marginTop: 8,
-    maxWidth: '90%',
-  },
-  headDate: {
-    textAlign: 'center',
-  },
-  headAmount: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    marginTop: 2,
-  },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: Spacing.two },
+  headTitle: { flexShrink: 1 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  // A long chip ("Between your accounts · not spending" at a larger text
+  // size) wraps inside the sheet instead of running off both edges.
   chip: {
     minHeight: BandLayout.chipHeight, borderRadius: BandLayout.chipHeight / 2, paddingHorizontal: 14,
-    flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1,
+    flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, maxWidth: '100%',
   },
-  fxLine: { textAlign: 'center' },
+  chipText: { flexShrink: 1 },
   field: {
     gap: Spacing.two,
   },
@@ -928,12 +925,13 @@ const styles = StyleSheet.create({
   },
   transferQuestion: { gap: Spacing.two },
   picker: { gap: Spacing.two },
-  pickRow: { minHeight: 48, borderWidth: 1, borderRadius: Radius.control, padding: Spacing.three, gap: 2, justifyContent: 'center' },
+  pickRow: { minHeight: 48, borderWidth: 1, borderRadius: Radius.control, paddingHorizontal: Spacing.three - 2,
+    paddingVertical: Spacing.two + 2, gap: 2, justifyContent: 'center' },
   transferMeaning: {
-    gap: Spacing.one,
+    gap: 2,
     borderWidth: 1,
     borderRadius: Radius.control,
-    paddingHorizontal: Spacing.three,
+    paddingHorizontal: Spacing.three - 2,
     paddingVertical: Spacing.two + 2,
   },
   actionsLarge: { flexDirection: 'column' },
@@ -944,7 +942,12 @@ const styles = StyleSheet.create({
   },
   // Side by side the two buttons share the row; stacked they take its width.
   action: { flexGrow: 1, flexBasis: 0, alignSelf: 'auto' },
-  footerStack: { gap: Spacing.two },
+  // The read row: Edit and Done share what Delete (sized to its word) leaves.
+  // On a very narrow screen a whole button moves to a second line rather
+  // than any label breaking inside one.
+  readActions: { flexWrap: 'wrap' },
+  rowAction: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%' },
+  quietAction: { flexGrow: 0, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%' },
   raw: {
     fontSize: 12.5,
     lineHeight: 18,

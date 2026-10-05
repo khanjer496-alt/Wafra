@@ -68,9 +68,10 @@ const styles = StyleSheet.create({
   button: { flex: 1, minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.two, paddingVertical: Spacing.two },
   buttonLarge: { flex: 0, alignSelf: 'stretch' },
   radios: { gap: Spacing.two },
-  radioRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: Spacing.three, padding: Spacing.three, borderRadius: 14, borderWidth: 1.5 },
+  radioRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: Spacing.three - 4, paddingHorizontal: Spacing.three - 2,
+    paddingVertical: Spacing.two + 2, borderRadius: 14, borderWidth: 1.5 },
   radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
   radioDot: { width: 10, height: 10, borderRadius: 5 },
-  radioText: { flex: 1, minWidth: 0, gap: 2 },
+  radioText: { flex: 1, minWidth: 0, gap: 0 },
   linked: { paddingStart: Spacing.three, paddingTop: Spacing.one },
 });
