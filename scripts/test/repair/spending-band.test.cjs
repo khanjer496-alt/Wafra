@@ -69,19 +69,21 @@ test('Categories: the band holds the selected period, total and one-tone share b
   assert.equal(byId(past, 'spending-pace'), undefined);
 });
 
-test('Categories rows: glyph tiles in one tone; limit bars only on rows with a limit; rows without one say so', () => {
+test('Categories rows: glyph tiles in each category\'s colour; limit bars only on rows with a limit; rows without one say so', () => {
   const h = createHarness();
   const tree = h.render('flow');
-  const clay = h.deps['@/hooks/use-band'].useBand('spending');
   const dining = byId(tree, 'spending-category-dining');
   const other = byId(tree, 'spending-category-other');
   assert.ok(byId(dining, 'spending-limit-bar-dining'), 'dining has a limit and its bar');
   assert.equal(byId(other, 'spending-limit-bar-other'), undefined);
   assert.match(text(byId(other, 'spending-share-other')), /% of spending · no limit$/);
-  // Every glyph tile on the sheet shares one ground and one ink.
-  const grounds = new Set(walk(tree).filter((node) => node.props?.importantForAccessibility === 'no' && node.props?.style?.[1]?.backgroundColor)
-    .map((node) => node.props.style[1].backgroundColor));
-  assert.deepEqual([...grounds], [clay.glyphGround]);
+  // Each row's glyph tile is its category's own colour, the same one its coin has on the band.
+  const { categoryColor } = h.deps['@/lib/category-colors'];
+  for (const category of ['dining', 'other']) {
+    const tile = walk(byId(tree, `spending-category-${category}`)).find((node) => node.props?.importantForAccessibility === 'no' && node.props?.style?.[1]?.backgroundColor);
+    assert.equal(tile.props.style[1].backgroundColor, categoryColor(category));
+  }
+  assert.notEqual(categoryColor('dining'), categoryColor('other'));
 });
 
 test('Compare: the plain sentence on the band from the existing comparison, bars on the sheet', () => {

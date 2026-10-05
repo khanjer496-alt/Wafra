@@ -49,7 +49,7 @@ export function BalanceOverview(p: BalanceOverviewProps) {
     </View>
     {p.activeSourceCount === 0
       ? <EButton palette={band} label={t('newAccount')} icon="plus" onPress={p.onAddAccount} testID="wallet-add-first-account"
-          color={{ fill: band.accent, text: band.onAccent }} />
+          color={{ fill: band.selected, text: band.onSelected }} />
       : null}
   </View>;
 }

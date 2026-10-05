@@ -428,7 +428,7 @@ export default function TransactionsScreen() {
       actions.push({ name: 'transfer', label: words.transfer, icon: 'repeat', band: 'accounts',
         onPress: () => { Keyboard.dismiss(); setEntryMode('read'); setEditing(tx); } });
     }
-    actions.push({ name: 'delete', label: words.delete, icon: 'trash', destructive: true, band: 'spending',
+    actions.push({ name: 'delete', label: words.delete, icon: 'trash', destructive: true,
       onPress: () => { Keyboard.dismiss(); setDeleting(tx); } });
     return actions;
   }, [internal, words]);

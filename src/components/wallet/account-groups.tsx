@@ -58,7 +58,7 @@ const CARD_CHROME = 32 + 46;
  */
 function usageColor(status: LimitStatus): string {
   const onInk = BandPalettes.dark.home;
-  return status === 'over' ? onInk.statusOver : status === 'near' ? onInk.statusNear : onInk.statusOk;
+  return status === 'over' ? onInk.statusOver : status === 'near' ? onInk.statusNear : onInk.limitOk;
 }
 
 /**

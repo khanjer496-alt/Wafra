@@ -51,7 +51,7 @@ interface LimitSheetProps {
 export function LimitSheet({ category, open, monthKey: key, onClose }: LimitSheetProps) {
   const { categoryLabel, getCategory, expenseCategories } = useCategoryCatalog();
   const theme = useTheme();
-  // Limits belong to Spending: the clay band's sheet, lifted.
+  // Limits belong to Spending: the Spending band's sheet, lifted.
   const band = useBand('spending');
   const language = useLanguage();
   const words = limitSheetCopy[language === 'ar' ? 'ar' : 'en'];

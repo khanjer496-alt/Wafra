@@ -142,7 +142,7 @@ test('BandSegmented: a tablist of tabs, the selected one on the sheet surface', 
   assert.deepEqual(changed, ['calendar']);
 });
 
-test('ShareBar: one tone, top three named with shares that add to 100, the rest counted', () => {
+test('ShareBar: segments without a colour of their own fall back to one tone; shares add to 100; the rest pooled when spoken', () => {
   const s = setup();
   const { ShareBar, sharePercents } = s.ui('@/components/ui/band/share-bar');
   assert.deepEqual([...sharePercents([1836, 1004, 880, 562, 438, 214, 180, 366])].reduce((a, b) => a + b, 0), 100);
@@ -157,11 +157,20 @@ test('ShareBar: one tone, top three named with shares that add to 100, the rest 
   assert.equal(image.props.accessibilityLabel, 'Share of spending: Groceries 34%, Dining 18%, Shopping 16%, 3 other categories 32%');
   const segments = walk(image).filter((node) => flat(node.props?.style).flexGrow !== undefined);
   assert.equal(segments.length, 6);
-  assert.ok(segments.every((node) => flat(node.props.style).backgroundColor === palette.onBand), 'no hue stands for a category');
-  assert.match(text(tree), /\+3 more/);
+  // Without their own colour, coins are the band's text colour laid over the band, brightest first.
+  const { blendHex } = s.ui('@/lib/spending-calendar-tiles');
+  const strengths = [0.92, 0.7, 0.5, 0.24, 0.24, 0.24];
+  segments.forEach((coin, index) => {
+    const fills = new Set(walk(coin).map((node) => flat(node.props?.style).backgroundColor).filter(Boolean));
+    fills.delete(palette.band); // the rim and the face's shade
+    fills.delete('#FFFFFF'); // the sheen
+    assert.deepEqual([...fills], [blendHex(palette.onBand, palette.band, strengths[index])], `coin ${index}`);
+  });
+  // Every coin has a legend line; with no amount formatter, its share alone.
+  assert.match(text(tree), /Other\s*14%/);
 });
 
-test('StatusBar (limit): green within, amber from 85%, red over', () => {
+test('StatusBar (limit): blue within, amber from 85%, red over', () => {
   const s = setup();
   const { limitStatus, limitFillPercent } = s.ui('@/lib/limit-status');
   assert.deepEqual([84, 85, 100, 101].map((spent) => limitStatus(spent, 100)), ['ok', 'near', 'near', 'over']);
@@ -173,7 +182,7 @@ test('StatusBar (limit): green within, amber from 85%, red over', () => {
     assert.equal(flat(bar.props.style).backgroundColor, palette.rule, 'the track is the sheet rule');
     return flat(walk(bar.props.children).find((node) => node.type === 'View').props.style).backgroundColor;
   };
-  assert.deepEqual([50, 92, 120].map(colour), [palette.statusOk, palette.statusNear, palette.statusOver]);
+  assert.deepEqual([50, 92, 120].map(colour), [palette.limitOk, palette.statusNear, palette.statusOver]);
 });
 
 test('DialLimit: adjustable, currency-scaled steps, snapped, announced with its currency', () => {

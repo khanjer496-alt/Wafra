@@ -305,16 +305,16 @@ export default function MarketingHome() {
           </div>
           <div className={styles.screenGrid}>
             <figure className={styles.screenPreview}>
-              <figcaption><h3>Home</h3><p>Your spending first. Income, the next payments and recent activity, without a wall of cards.</p></figcaption>
-              <img src="/wafra-app-home.png" alt="Wafra Home: one spending summary, a smaller income row and upcoming payments; sample data" width={390} height={844} loading="lazy" decoding="async" />
+              <figcaption><h3>Home</h3><p>Today’s spending and what’s left in your budgets first. Then the month’s in and out, the last seven days and the next payments.</p></figcaption>
+              <img src="/wafra-app-home.png" alt="Wafra Home: today's spending, what is left in budgets, the month's spent, in and net, the last seven days and the next payment; sample data" width={390} height={844} loading="lazy" decoding="async" />
             </figure>
             <figure className={styles.screenPreview}>
-              <figcaption><h3>Spending</h3><p>See each category’s share of total spending. Budget usage is labelled separately.</p></figcaption>
-              <img src="/wafra-app-spending.png" alt="Wafra Spending: amounts, category percentages and proportional bars, with separate budget usage; sample data" width={390} height={844} loading="lazy" decoding="async" />
+              <figcaption><h3>Spending</h3><p>Every category as its own coloured coin, sized by the category’s share of total spending. Budget usage is labelled separately.</p></figcaption>
+              <img src="/wafra-app-spending.png" alt="Wafra Spending: the month's total, a row of coloured category coins sized by share, each category's amount and share, then the category rows; sample data" width={390} height={844} loading="lazy" decoding="async" />
             </figure>
             <figure className={styles.screenPreview}>
               <figcaption><h3>Bills</h3><p>Subscriptions and utilities in separate sections. Dates and estimated charges stay visible.</p></figcaption>
-              <img src="/wafra-app-bills-light.png" alt="Wafra Bills: separate Subscriptions and Utilities and telecom sections with renewal dates; sample data" width={390} height={844} loading="lazy" decoding="async" />
+              <img src="/wafra-app-bills-light.png" alt="Wafra Bills: the total due in the next 30 days, a dated row of payment logos, then subscriptions with renewal dates and estimates; sample data" width={390} height={844} loading="lazy" decoding="async" />
             </figure>
           </div>
         </section>

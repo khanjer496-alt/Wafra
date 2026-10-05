@@ -540,8 +540,8 @@ export default function AssistantScreen() {
   const bandContent = <View style={styles.bandStack}>
     <View testID="assistant-local-badge" accessible accessibilityLabel={screenCopy.onThisPhoneA11y}
       style={[styles.localBadge, { backgroundColor: band.tile }]}>
-      <Icon name="lock" size={12} color={band.accent} />
-      <ThemedText type="meta" style={[styles.localBadgeText, { color: band.accent }]}>{screenCopy.onThisPhone}</ThemedText>
+      <Icon name="lock" size={12} color={band.accentOnBand} />
+      <ThemedText type="meta" style={[styles.localBadgeText, { color: band.accentOnBand }]}>{screenCopy.onThisPhone}</ThemedText>
     </View>
     {bandQuestion !== null ? <View testID="assistant-band-question"
       style={[styles.bandBubble, !largeText && styles.bandBubbleInset, { backgroundColor: band.tile }]}>

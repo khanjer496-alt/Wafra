@@ -10,6 +10,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import type { ComparableSpend } from '@/lib/analytics';
 
+import { CATEGORY_REST, categoryColors } from '@/lib/category-colors';
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { formatAED } from '@/lib/format';
 import { formatMinorUnits } from '@/lib/ledger-money';
@@ -17,11 +18,18 @@ import { spendingTrendsCopy } from '@/lib/reference-copy';
 import { spendingShare, spendingShareLabel, type SpendingCategoryRow } from '@/lib/reference-presentation';
 import { compareDirection } from '@/lib/spending-compare';
 
+/** The ledger's own currency and minor units, as the sheet's rows write it. */
+function useMoneyLabel(): (fils: number) => string {
+  const moneySpec = useLedgerMoney();
+  return (fils) => moneySpec
+    ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
+}
+
 /**
- * Spending · Categories on the clay band: the period's total as the band's one
- * figure, the running month's "Day X of Y", then the share bar (one cream tone,
- * the three biggest named, "+N more"). The rows that add up to the figure are
- * on the sheet below.
+ * Spending · Categories on the near-black band: the period's total as the band's one
+ * figure, the running month's "Day X of Y", then the share coins, each in its
+ * category's colour, with a legend of every coin's amount and share. The rows
+ * that add up to the figure are on the sheet below.
  */
 export function SpendingCategoriesBand({ palette, label, totalFils, paceLabel, rows, showFigure = true }: {
   palette: BandPalette;
@@ -37,14 +45,18 @@ export function SpendingCategoriesBand({ palette, label, totalFils, paceLabel, r
   const { categoryLabel } = useCategoryCatalog();
   const language = useLanguage();
   const w = spendingTrendsCopy[language === 'ar' ? 'ar' : 'en'];
+  const moneyLabel = useMoneyLabel();
+  const colors = categoryColors(rows.map((row) => row.category));
   return <View style={styles.block} testID="spending-hero">
     {showFigure ? <View style={styles.figure}>
       <BandFigure testID="spending-total" label={label} fils={totalFils} palette={palette} />
       {paceLabel ? <ThemedText type="meta" testID="spending-pace" style={{ color: palette.onBandSecondary }}>{paceLabel}</ThemedText> : null}
     </View> : null}
     <ShareBar testID="spending-share-bar" palette={palette} label={w.spending}
-      formatShare={(value) => spendingShareLabel(spendingShare(value, totalFils), language)}
-      segments={rows.map((row) => ({ key: row.category, label: categoryLabel(row.category, language), value: row.spentFils }))} />
+      formatShare={(value) => spendingShareLabel(spendingShare(value, totalFils), language)} formatValue={moneyLabel}
+      restColor={CATEGORY_REST} segments={rows.map((row) => ({
+        key: row.category, label: categoryLabel(row.category, language), value: row.spentFils, color: colors.get(row.category),
+      }))} />
   </View>;
 }
 
@@ -68,9 +80,7 @@ export function SpendingCompareBand({ palette, comparison, otherName, partial, p
   const language = useLanguage();
   const words = everydayBandCopy(language);
   const w = spendingTrendsCopy[language === 'ar' ? 'ar' : 'en'];
-  const moneySpec = useLedgerMoney();
-  const moneyLabel = (fils: number) => moneySpec
-    ? `${moneySpec.currency} ${formatMinorUnits(Math.round(fils), moneySpec)}` : formatAED(fils);
+  const moneyLabel = useMoneyLabel();
   if (!comparison || !otherName) {
     return <View style={styles.block} testID="spending-compare-band">
       <ThemedText type="small" style={{ color: palette.onBand }}>{w.missingComparison}</ThemedText>

@@ -4,7 +4,7 @@
  * A day's tile is the band's own text colour laid over the band at a
  * strength that grows with the day's everyday spending — one tone, never a
  * hue per category. The day number on a filled tile is set in the dark ink
- * the palette uses on light fills (`onAccent`), and the weakest fill is chosen
+ * used on light fills (`TILE_INK`), and the weakest fill is chosen
  * per palette so that ink always reads at 4.5:1; an empty day keeps the band
  * behind it and the band's own text colour. Pure, so the contrast rule is
  * tested for every band and scheme.
@@ -12,6 +12,9 @@
 import type { BandPalette } from '@/constants/theme';
 
 type Rgb = readonly [number, number, number];
+
+/** The dark ink set on a light fill, in both schemes (the light palette's text colour). */
+const TILE_INK = '#16130F';
 
 function parseHex(hex: string): Rgb {
   const value = hex.replace('#', '');
@@ -57,7 +60,7 @@ export const MAX_TILE_ALPHA = 0.92;
 export function minTileAlpha(palette: BandPalette): number {
   for (let step = 20; step <= MAX_TILE_ALPHA * 100; step += 1) {
     const alpha = step / 100;
-    if (contrastRatio(palette.onAccent, blendHex(palette.onBand, palette.band, alpha)) >= 4.5) return alpha;
+    if (contrastRatio(TILE_INK, blendHex(palette.onBand, palette.band, alpha)) >= 4.5) return alpha;
   }
   return MAX_TILE_ALPHA;
 }
@@ -80,7 +83,7 @@ export function calendarTileColors(palette: BandPalette, share: number, minAlpha
   // Dark ink on the light fills of a dark band (Spending's clay); a band
   // whose own text is dark fills toward that dark, so its tiles take the band
   // colour for their numbers instead. The better of the two, always.
-  const text = contrastRatio(palette.onAccent, background) >= contrastRatio(palette.band, background)
-    ? palette.onAccent : palette.band;
+  const text = contrastRatio(TILE_INK, background) >= contrastRatio(palette.band, background)
+    ? TILE_INK : palette.band;
   return { background, text };
 }
