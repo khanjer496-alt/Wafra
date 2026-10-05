@@ -161,7 +161,7 @@ function CoverCoins({ spendFils, incomeFils, palette, width }: {
     style={styles.coverCoins}>
     {Array.from({ length: COVER_COINS }, (_, index) => index < spent
       ? <CoverCoin key={index} index={index} width={width} ready={motion.ready} reducedMotion={motion.reducedMotion} />
-      : <CoinDisc key={index} testID={`recap-cover-ghost-${index}`} width={width} tone={ghost} shine={false} />)}
+      : <CoinDisc key={index} testID={`recap-cover-ghost-${index}`} width={width} tone={ghost} shine={false} shadow />)}
   </View>;
 }
 
@@ -198,7 +198,7 @@ function CoverCoin({ index, width, ready, reducedMotion }: { index: number; widt
     ],
   }), [rise]);
   return <CoreAnimated.View testID={`recap-cover-coin-${index}`} style={paint}>
-    <CoinDisc width={width} />
+    <CoinDisc width={width} shadow />
   </CoreAnimated.View>;
 }
 

@@ -39,7 +39,8 @@ export function cardFaceColors(color: string | undefined, scheme: 'light' | 'dar
   for (let step = 1; contrastRatio(text, face) < FACE_TEXT_CONTRAST && step <= 20; step++) {
     face = blendHex(away, base, step * 0.05);
   }
-  return { face, text, edge: blendHex(text, face, 0.18) };
+  // Strong enough that a card's edge still reads where it peeks out of a stack on a dark sheet.
+  return { face, text, edge: blendHex(text, face, 0.32) };
 }
 
 /** Card geometry, in points. */
@@ -49,10 +50,11 @@ export const FAN_GAP = 10;
 export const STACK_PEEK = 14;
 /** Cards deeper than this sit exactly behind the deepest visible one. */
 export const STACK_MAX_DEPTH = 3;
-/** Each card further back is drawn this much smaller. */
-export const DEPTH_SCALE = 0.05;
-/** Tilt of the stacked cards, as if lying on a table seen from just above. */
-export const STACK_TILT_DEG = 8;
+/** Each card further back is drawn this much smaller, so depth reads from size, not only tilt. */
+export const DEPTH_SCALE = 0.07;
+/** Tilt of the stacked cards, as if lying on a table seen from just above; slight, so the
+ * front card's near edge does not visibly splay wider than its far edge. */
+export const STACK_TILT_DEG = 4;
 /** A card further back is shaded this much more (fraction of the ink overlay). */
 export const DEPTH_SHADE = 0.12;
 /** Perspective distance for the tilt. */

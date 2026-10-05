@@ -22,7 +22,7 @@ const LOGO = 32;
 const DROP = 14;
 const LIFT = 6;
 /** The other logos while one is lifted; their dates stay at full strength. */
-const DIMMED = 0.45;
+const DIMMED = 0.38;
 /** The first-paint stagger stops growing here, so a long month still lands quickly. */
 const MAX_STAGGERED = 12;
 
@@ -94,7 +94,9 @@ export function BillsTimeline({ items, todayISO, palette }: {
         </ThemedText>
       </View>;
     })}
-    {/* Visual only: the lifted logo's amount and date, which its spoken label already says. */}
+    {/* Visual only: the lifted logo's amount and date, which its spoken label already says.
+        With nothing lifted the same line names the next payment, quietly, so the
+        line is always there and a tap swaps its words rather than moving the agenda. */}
     {lifted ? <View key={lifted.key} testID="bills-timeline-lifted" style={styles.liftedLine}
       importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
       <LiftedLabel ready={motion.ready} reducedMotion={motion.reducedMotion}>
@@ -104,7 +106,14 @@ export function BillsTimeline({ items, todayISO, palette }: {
           </ThemedText>
         </View>
       </LiftedLabel>
-    </View> : null}
+    </View> : <View testID="bills-timeline-next" style={styles.liftedLine}
+      importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+      <View style={[styles.liftedChip, styles.nextChip, { borderColor: palette.bandRule }]}>
+        <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>
+          {[pins[0]!.displayLabel ?? pins[0]!.title, words.dueIn(pins[0]!.dayOffset), pins[0]!.spokenAmount].join(' · ')}
+        </ThemedText>
+      </View>
+    </View>}
   </View>;
 }
 
@@ -190,8 +199,13 @@ function TimelineLogo({ pinKey, title, category, index, selected, dimmed, appear
       },
       {
         scale: Animated.add(
-          enter.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }),
-          lift.interpolate({ inputRange: [0, 1], outputRange: [0, 0.08] }),
+          Animated.add(
+            enter.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }),
+            lift.interpolate({ inputRange: [0, 1], outputRange: [0, 0.08] }),
+          ),
+          // A dimmed logo also steps back a little, so the lifted one reads as in front
+          // rather than the rest just turning muddy on a dark band.
+          fade.interpolate({ inputRange: [DIMMED, 1], outputRange: [-0.08, 0], extrapolate: 'clamp' }),
         ),
       },
     ],
@@ -250,4 +264,6 @@ const styles = StyleSheet.create({
   // Its own line under the strip, whatever the text size; wraps rather than truncating.
   liftedLine: { width: '100%', alignItems: 'flex-start' },
   liftedChip: { borderRadius: Radius.full, paddingHorizontal: 10, paddingVertical: 3, maxWidth: '100%' },
+  // Same size as the lifted chip (its border replaces the fill), so swapping them never moves the line.
+  nextChip: { borderWidth: 1, paddingHorizontal: 9, paddingVertical: 2 },
 });

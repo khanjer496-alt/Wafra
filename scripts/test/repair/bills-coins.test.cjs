@@ -74,6 +74,15 @@ test('tapping a logo toggles it; the lifted one shows its date and amount (visua
   assert.equal(tree.props.accessibilityLabel, first.tree.props.accessibilityLabel);
 });
 
+test('with nothing lifted, the same line quietly names the next payment, so a tap never moves the agenda', () => {
+  const { tree } = timeline();
+  assert.equal(byId(tree, 'bills-timeline-lifted'), undefined);
+  const next = byId(tree, 'bills-timeline-next');
+  assert.ok(next && hidden(next), 'visual only: every pin already speaks its payment');
+  // Spotify (today, estimated) is the soonest unpaid payment in the window.
+  assert.match(text(next), /^Spotify · .+ · About AED 12\.34$/);
+});
+
 test('Arabic keeps the same drawing and spoken order', () => {
   const { tree } = timeline({ language: 'ar', largeText: true });
   const logos = walk(tree).filter((node) => String(node.props?.testID ?? '').startsWith('bills-timeline-logo-'));

@@ -35,20 +35,25 @@ export function discGeometry(width: number) {
  * no SVG and paints the same on iOS, Android and the web. Decorative: the
  * caller writes the amount it stands for.
  */
-export function CoinDisc({ width, tone = GOLD, shine = true, style, testID }: {
+export function CoinDisc({ width, tone = GOLD, shine = true, shadow = false, style, testID }: {
   width: number;
   tone?: CoinTone;
   /** A soft highlight on the face; off for a ghost (spent) coin. */
   shine?: boolean;
+  /** A soft contact shadow under a coin standing on its own (a stack draws one for all its coins). */
+  shadow?: boolean;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }) {
   const { face, edge, height } = discGeometry(width);
+  const drop = shadow ? Math.max(2, Math.round(face * 0.22)) : 0;
   const ellipse = (top: number) => ({
     position: 'absolute' as const, start: 0, top: top + face / 2 - width / 2, width, height: width,
     borderRadius: width / 2, transform: [{ scaleY: face / width }],
   });
-  return <View testID={testID} style={[{ width, height, pointerEvents: 'none' }, style]}>
+  return <View testID={testID} style={[{ width, height: height + drop, pointerEvents: 'none' }, style]}>
+    {shadow ? <View style={[ellipse(edge + drop), { backgroundColor: CoinColors.shadow, opacity: 0.2,
+      transform: [{ scaleY: (face / width) * 0.7 }, { scaleX: 0.94 }] }]} /> : null}
     {/* The edge: the lower ellipse and the band joining it to the face. */}
     <View style={[ellipse(edge), { backgroundColor: tone.side, borderWidth: 1, borderColor: tone.rim }]} />
     <View style={[styles.edge, { top: face / 2, height: edge, backgroundColor: tone.side, borderColor: tone.rim }]} />

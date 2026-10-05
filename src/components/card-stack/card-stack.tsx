@@ -82,11 +82,12 @@ export function CardStack({ cards, palette, labelFor, onOpen }: {
     translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [place.stackedOffset, 0] }),
     scale: progress.interpolate({ inputRange: [0, 1], outputRange: [place.stackedScale, 1] }),
     rotateX: progress.interpolate({ inputRange: [0, 1], outputRange: [`${STACK_TILT_DEG}deg`, '0deg'] }),
-    shade: progress.interpolate({ inputRange: [0, 1], outputRange: [place.stackedShade, 0] }),
+    // On a dark sheet a darkened back card disappears; it is shaded half as much there.
+    shade: progress.interpolate({ inputRange: [0, 1], outputRange: [place.stackedShade * (palette.scheme === 'dark' ? 0.5 : 1), 0] }),
     // A card behind the front one shows only its coloured edge stacked;
     // its words appear as it fans out.
     words: place.depth === 0 ? 1 : progress.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, 1] }),
-  })), [layout, progress]);
+  })), [layout, palette.scheme, progress]);
 
   if (cards.length === 0 || large) return null;
 
@@ -191,7 +192,7 @@ const styles = StyleSheet.create({
   placed: { position: 'absolute', start: 0, end: 0 },
   face: {
     borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     paddingHorizontal: 16,
     paddingTop: 14,
     paddingBottom: 12,

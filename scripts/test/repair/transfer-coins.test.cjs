@@ -66,6 +66,7 @@ for (const language of ['en', 'ar']) {
   test(`${language}: the route line carries a gold coin hidden from assistive tech, and the row says the same`, () => {
     const h = transfersHarness({ language });
     h.deps['react-native'].Animated.multiply = (progress, distance) => ({ progress, distance });
+    h.deps['react-native'].Animated.add = (origin, run) => ({ origin, ...run });
     const still = routeRow(h);
     const moving = routeRow(h, { coin: { at: Date.now(), delay: 0 } });
     const lane = byId(moving, 'transfer-lane-out|in');
@@ -77,8 +78,11 @@ for (const language of ['en', 'ar']) {
     assert.ok(walk(coin).some(node => node.props?.style && flat(node.props.style).borderRadius === 6), 'a 12pt face-on coin');
     const along = flat(coin.props.style).transform.find(step => 'translateX' in step).translateX;
     lane.props.onLayout({ nativeEvent: { layout: { width: 36, height: 20 } } });
-    // The measured line less the coin, towards the destination: right in English, left in mirrored Arabic.
-    assert.equal(along.distance.value, language === 'ar' ? -24 : 24);
+    // The coin sets off over the source chip, 20pt before the line, and crosses the measured
+    // line less the coin and on into the destination: right in English, left in mirrored Arabic.
+    const dir = language === 'ar' ? -1 : 1;
+    assert.equal(along.origin.value, -20 * dir);
+    assert.equal(along.distance.value, (24 + 32) * dir);
     assert.equal(byId(moving, 'transfer-row-out|in').props.accessibilityLabel, byId(still, 'transfer-row-out|in').props.accessibilityLabel,
       'the spoken route, amount and tag do not change');
     assert.match(byId(moving, 'transfer-row-out|in').props.accessibilityLabel, /Current.*Savings/);

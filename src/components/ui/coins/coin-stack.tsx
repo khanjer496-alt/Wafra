@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { CoinDisc, GOLD, discGeometry, type CoinTone } from '@/components/ui/coins/coin-disc';
+import { CoinColors } from '@/constants/theme';
 import { COIN_MOVE, COIN_RISE, COIN_STAGGER, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 
@@ -26,7 +27,10 @@ export function CoinStack({ total, filled, width, tone = GOLD, ghost, style, tes
   const motion = useMotionPreference();
   const count = Math.max(1, Math.floor(total));
   const level = Math.max(0, Math.min(count, Math.round(filled)));
-  const { edge, height } = discGeometry(width);
+  const { face, edge, height } = discGeometry(width);
+  // The soft shadow the stack casts where it stands, so it sits on the
+  // surface rather than floating over it; it reaches a little past the coin.
+  const shadow = Math.max(2, Math.round(face * 0.22));
   // The level the coins last settled at, so a change knows which end moved.
   // Recorded only once motion can start, so a stack drawn before the
   // screen-reader answer arrives still drops in one coin after another.
@@ -34,7 +38,10 @@ export function CoinStack({ total, filled, width, tone = GOLD, ghost, style, tes
   const from = previous.current;
   useEffect(() => { if (motion.ready) previous.current = level; });
   return <View testID={testID} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
-    style={[{ width, height: height + (count - 1) * edge, pointerEvents: 'none' }, style]}>
+    style={[{ width, height: height + (count - 1) * edge + shadow, pointerEvents: 'none' }, style]}>
+    <View style={{ position: 'absolute', start: width * 0.04, width: width * 0.92, top: (count - 1) * edge + edge + shadow,
+      height: face, borderRadius: width / 2, backgroundColor: CoinColors.shadow, opacity: 0.18,
+      transform: [{ scaleY: 0.7 }] }} />
     {Array.from({ length: count }, (_, index) => {
       const top = (count - 1 - index) * edge;
       // First paint: bottom up. A drain: from the old top down. A refill: from the old top up.
@@ -86,7 +93,13 @@ function Slot({ on, delay, width, tone, ready, reducedMotion, testID }: {
   }, [on, ready, reducedMotion, shown]);
   const paint = useMemo(() => ({
     opacity: shown.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 1, 1], extrapolate: 'clamp' }),
-    transform: [{ translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [-14, 0] }) }],
+    transform: [
+      { translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [-14, 0] }) },
+      // The spring overshoots its landing a little; the coin squashes there,
+      // wider and flatter for a beat, then settles round.
+      { scaleX: shown.interpolate({ inputRange: [0, 1, 1.12], outputRange: [1, 1, 1.12], extrapolate: 'clamp' }) },
+      { scaleY: shown.interpolate({ inputRange: [0, 1, 1.12], outputRange: [1, 1, 0.72], extrapolate: 'clamp' }) },
+    ],
   }), [shown]);
   return <Animated.View testID={testID} style={[{ position: 'absolute', start: 0, top: 0 }, paint]}>
     <CoinDisc width={width} tone={tone} />

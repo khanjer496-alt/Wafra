@@ -199,14 +199,16 @@ export const MotionSpring = { stiffness: 260, damping: 24, mass: 1 } as const;
 /**
  * Wafra's coin: warm gold, drawn where money is shown as coins (Home's budget
  * stack, a goal's jar, a transfer's route). `face` is the top, `side` its
- * edge, `rim` the outline, `shine` the highlight. Coins are decoration beside
- * a written figure, never the figure itself.
+ * edge, `rim` the outline, `shine` the highlight, `shadow` the soft contact
+ * shadow a stack casts on its surface (drawn at low opacity). Coins are
+ * decoration beside a written figure, never the figure itself.
  */
 export const CoinColors = {
   face: '#EDC85E',
   side: '#B98F2E',
   rim: '#5E4610',
   shine: '#FFF4CF',
+  shadow: '#000000',
 } as const;
 
 /**

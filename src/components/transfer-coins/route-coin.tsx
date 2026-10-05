@@ -10,6 +10,9 @@ import { cueIsFresh, type CoinCue } from '@/components/transfer-coins/coin-cues'
 
 /** The travelling coin's diameter. */
 export const ROUTE_COIN = 12;
+/** How far past the lane's start the coin's journey begins, over the source chip. */
+const REACH = 20;
+const REACH_STACKED = 6;
 /** How long the coin takes to cross from the source to the destination. */
 const ROUTE_TRAVEL_MS = 650;
 
@@ -34,13 +37,22 @@ export function RouteCoinLane({ cue, stacked, rtl, palette, testID }: {
   // 1 is "arrived": the coin rests, faded out, at the destination end.
   const progress = useAnimatedNumber(1);
   const distance = useAnimatedNumber(0);
+  const origin = useAnimatedNumber(0);
   const span = useRef(0);
   // Read when the coin sets off, not a dependency: a re-render that only
   // restaggers must not restart a coin already travelling.
   const delay = useRef(cue?.delay ?? 0);
   delay.current = cue?.delay ?? 0;
   const at = cue?.at;
-  const place = () => distance.setValue(stacked || !rtl ? span.current : -span.current);
+  // The lane itself stays as narrow as the old chevron so the row never wraps
+  // sooner; the coin's journey reaches past both its ends, starting over the
+  // source chip and fading into the destination, drawn over the chips.
+  const place = () => {
+    const reach = stacked ? REACH_STACKED : REACH;
+    const dir = stacked || !rtl ? 1 : -1;
+    origin.setValue(-reach * dir);
+    distance.setValue((span.current + reach * 1.6) * dir);
+  };
   const measure = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
     span.current = Math.max(0, (stacked ? height : width) - ROUTE_COIN);
@@ -66,12 +78,12 @@ export function RouteCoinLane({ cue, stacked, rtl, palette, testID }: {
     };
   }, [at, motion.ready, motion.reducedMotion, progress]);
   const paint = useMemo(() => {
-    const along = Animated.multiply(progress, distance);
+    const along = Animated.add(origin, Animated.multiply(progress, distance));
     return {
       opacity: progress.interpolate({ inputRange: [0, 0.12, 0.8, 1], outputRange: [0, 1, 1, 0], extrapolate: 'clamp' }),
       transform: [stacked ? { translateY: along } : { translateX: along }],
     };
-  }, [distance, progress, stacked]);
+  }, [distance, origin, progress, stacked]);
   return <View testID={testID} onLayout={measure} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
     style={stacked ? styles.laneStacked : styles.lane}>
     <View style={[stacked ? styles.lineStacked : styles.line, { backgroundColor: palette.rule }]} />
@@ -85,7 +97,7 @@ export function RouteCoinLane({ cue, stacked, rtl, palette, testID }: {
 }
 
 const styles = StyleSheet.create({
-  lane: { width: 26, flexShrink: 1, minWidth: 18, height: 20, flexDirection: 'row', alignItems: 'center', pointerEvents: 'none' },
+  lane: { width: 22, height: 20, flexDirection: 'row', alignItems: 'center', pointerEvents: 'none' },
   laneStacked: { width: 16, height: 30, alignItems: 'center', pointerEvents: 'none' },
   line: { flex: 1, height: 1.5, borderRadius: 1, marginEnd: -6 },
   lineStacked: { flex: 1, width: 1.5, borderRadius: 1, marginBottom: -6 },
