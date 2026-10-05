@@ -48,8 +48,9 @@ test('Watch: one row per category; the name keeps a readable line and the clay m
   // and the name keeps a readable width instead of a sliver.
   assert.match(watch, /largeText && styles\.headWrap/);
   assert.match(watch, /headWrap: \{ flexWrap: 'wrap' \}/);
-  assert.match(watch, /largeText && styles\.nameWide/);
-  assert.match(watch, /nameWide: \{ minWidth: 140 \}/);
+  // 2026-10-05: at large text the name goes first on a line of its own, so it wraps between words.
+  assert.match(watch, /largeText \? <ThemedText type="smallBold" style=\{\[styles\.name, styles\.nameWide/);
+  assert.match(watch, /nameWide: \{ flex: 0, flexBasis: '100%' \}/);
   assert.match(watch, /useCategoryCatalog\(\)/, 'custom category names and icons, as everywhere else');
 });
 
