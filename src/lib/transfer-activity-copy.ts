@@ -48,6 +48,49 @@ const en = {
     failed: 'Couldn’t save. Try again.',
     unsaved: 'Answer kept on this device but not saved yet. Wafra will retry.',
     done: 'Done',
+    /** Several transfers in and out at once: the answer named for both directions. */
+    mixed: { own: 'Between my own accounts', external: 'With someone else', none: 'Not transfers' },
+    mixedEffect: { own: 'Not counted as spending or income', external: 'Counted as spending or income' },
+    /** Takes an answer back off one entry, as the toast's Undo does. */
+    clear: 'Clear my answer',
+    /** Under a likely other side ("Linked to …"): Wafra matched it; the person has not confirmed it. */
+    suggestedOnly: 'Same amount, close in time: a suggestion, not confirmed until you answer.',
+  },
+  /** Several entries with the same account and other side, answered together. */
+  group: {
+    entries: (n: number) => `${n} entr${n === 1 ? 'y' : 'ies'}`,
+    section: 'Waiting for your answer',
+    entriesTitle: 'Entries',
+    openEntry: 'Open this entry on its own',
+    more: (shown: number, total: number) => `Show more · ${shown} of ${total}`,
+  },
+  select: {
+    action: 'Select',
+    actionHint: 'Answer several transfers at once',
+    hint: 'Tick transfers, then pick one answer for all of them.',
+    all: (n: number) => `Select all (${n})`,
+    clear: 'Clear',
+    cancel: 'Cancel',
+    selected: (n: number) => `${n} selected`,
+    none: 'Nothing selected yet',
+    item: 'Select',
+  },
+  batch: {
+    selected: (n: number) => `${n} selected`,
+    save: (n: number) => n === 1 ? 'Save answer' : `Save answer for ${n} entries`,
+    saving: 'Saving…',
+    retry: 'Retry saving',
+    cancel: 'Cancel',
+    saved: (n: number) => `Saved for ${n} entr${n === 1 ? 'y' : 'ies'}`,
+    choose: 'Pick the answer for all of these',
+    changed: 'These transfers changed while this was open. Close it and pick them again.',
+    failed: 'Couldn’t save. Close this and try again.',
+    durability: 'Your answer is applied here but not safely saved yet. Retry saving before you leave.',
+  },
+  /** A link to one entry (an old Review transfers link, a notification). */
+  link: {
+    missing: 'This transfer is no longer available.',
+    notTransfer: 'This entry is not a transfer.',
   },
   card: {
     title: (n: number) => `${n} transfer${n === 1 ? ' needs' : 's need'} an answer`,
@@ -60,6 +103,9 @@ const en = {
     seeAllPlain: 'See all',
   },
 };
+
+/** Arabic counted noun: one, two, 3–10, 11 and up. */
+const arEntries = (n: number) => n === 1 ? 'قيد واحد' : n === 2 ? 'قيدان' : n <= 10 ? `${n} قيود` : `${n} قيداً`;
 
 const ar: typeof en = {
   title: 'التحويلات',
@@ -108,6 +154,44 @@ const ar: typeof en = {
     failed: 'تعذّر الحفظ. حاول مرة أخرى.',
     unsaved: 'تم الاحتفاظ بالإجابة على هذا الجهاز ولم تُحفظ بعد. سيعيد وفرة المحاولة.',
     done: 'تم',
+    mixed: { own: 'بين حساباتي', external: 'مع شخص آخر', none: 'ليست تحويلات' },
+    mixedEffect: { own: 'لا تُحتسب ضمن المصروفات أو الدخل', external: 'تُحتسب ضمن المصروفات أو الدخل' },
+    clear: 'إلغاء إجابتي',
+    suggestedOnly: 'المبلغ نفسه وفي وقت متقارب: اقتراح غير مؤكد حتى تجيب.',
+  },
+  group: {
+    entries: arEntries,
+    section: 'بانتظار إجابتك',
+    entriesTitle: 'القيود',
+    openEntry: 'افتح هذا القيد وحده',
+    more: (shown, total) => `عرض المزيد · ${shown} من ${total}`,
+  },
+  select: {
+    action: 'تحديد',
+    actionHint: 'أجب عن عدة تحويلات معاً',
+    hint: 'حدّد التحويلات، ثم اختر إجابة واحدة لها كلها.',
+    all: (n) => `تحديد الكل (${n})`,
+    clear: 'مسح',
+    cancel: 'إلغاء',
+    selected: (n) => `${n} محدد`,
+    none: 'لم يُحدَّد شيء بعد',
+    item: 'تحديد',
+  },
+  batch: {
+    selected: (n) => `${n} محدد`,
+    save: (n) => n === 1 ? 'حفظ الإجابة' : `حفظ الإجابة لـ ${arEntries(n)}`,
+    saving: 'جارٍ الحفظ…',
+    retry: 'أعد محاولة الحفظ',
+    cancel: 'إلغاء',
+    saved: (n) => `تم الحفظ لـ ${arEntries(n)}`,
+    choose: 'اختر الإجابة لها كلها',
+    changed: 'تغيّرت هذه التحويلات أثناء فتح هذه النافذة. أغلقها وحدّدها مرة أخرى.',
+    failed: 'تعذّر الحفظ. أغلق هذه النافذة وحاول مرة أخرى.',
+    durability: 'طُبّقت إجابتك هنا لكنها لم تُحفظ بأمان بعد. أعد محاولة الحفظ قبل المغادرة.',
+  },
+  link: {
+    missing: 'لم يعد هذا التحويل متاحاً.',
+    notTransfer: 'هذا القيد ليس تحويلاً.',
   },
   card: {
     title: (n) => `${n} من التحويلات بانتظار إجابتك`,

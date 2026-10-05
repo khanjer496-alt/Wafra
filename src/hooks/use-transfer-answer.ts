@@ -3,7 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useToast } from '@/components/ui/toast';
 import { useLanguage } from '@/hooks/use-language';
 import { useStoreActions } from '@/lib/store';
-import { buildTransferAnswer, buildTransferUndo, type TransferAnswer } from '@/lib/transfer-answer';
+import { buildTransferAnswer, buildTransferUndo, buildTransferUndoMany, type TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { transferFingerprint } from '@/lib/transfer-reconciliation';
 import type { Transaction } from '@/lib/types';
@@ -103,6 +103,35 @@ export function useTransferAnswer() {
     }
   }, [commit, getStateGeneration, getStateSnapshot, resolveTransferBatch, resolveTransfers, toast, words]);
 
+  /**
+   * Undo for an answer saved to several rows at once (a group or a selection
+   * on the Transfers page). Each row is cleared on its own, from the rows as
+   * they are now; a row that has gone since means the ledger changed.
+   */
+  const undoMany = useCallback(async (ids: readonly string[]) => {
+    if (saving.current) {
+      toast.show(words.failed, { tone: 'error' });
+      return;
+    }
+    const rows = new Map(getStateSnapshot().transactions.map(entry => [entry.id, entry]));
+    const current = ids.map(id => rows.get(id));
+    if (!current.length || current.some(row => !row)) {
+      toast.show(words.changed, { tone: 'error' });
+      return;
+    }
+    const request = buildTransferUndoMany({ rows: current as Transaction[], generation: getStateGeneration() });
+    saving.current = true; setBusy(true);
+    try {
+      const outcome = await commit(() => resolveTransferBatch(request), request.expectedGeneration,
+        request.decisions.map(decision => decision.ids[0]));
+      toast.show(outcome === 'saved' ? words.undone : outcome === 'unsaved' ? words.unsaved
+        : outcome === 'changed' ? words.changed : words.failed,
+      { tone: outcome === 'saved' ? 'success' : outcome === 'unsaved' ? 'warning' : 'error' });
+    } finally {
+      saving.current = false; setBusy(false);
+    }
+  }, [commit, getStateGeneration, getStateSnapshot, resolveTransferBatch, toast, words]);
+
   const answer = useCallback(async ({ transaction, answer: choice, counterpart, label }: {
     transaction: Transaction; answer: TransferAnswer; counterpart?: Transaction; label: string;
   }): Promise<TransferAnswerResult> => {
@@ -134,5 +163,5 @@ export function useTransferAnswer() {
     }
   }, [commit, getStateGeneration, getStateSnapshot, resolveTransfers, toast, undo, words]);
 
-  return { answer, busy };
+  return { answer, undo, undoMany, busy };
 }

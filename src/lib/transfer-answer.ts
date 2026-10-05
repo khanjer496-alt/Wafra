@@ -54,3 +54,17 @@ export function buildTransferUndo({ transaction, counterpart, generation }: {
     expectedGeneration: generation,
   };
 }
+
+/**
+ * Remove the answers one save gave to several rows (a group or a selection),
+ * each row cleared as its own single-row decision, as above. Every row named
+ * must still exist; pass them as they are now.
+ */
+export function buildTransferUndoMany({ rows, generation }: { rows: readonly Transaction[]; generation: number }) {
+  const unique = [...new Map(rows.map(row => [row.id, row] as const)).values()];
+  return {
+    decisions: unique.map(row => ({ ids: [row.id], ownership: null })),
+    expectedFingerprints: Object.fromEntries(unique.map(row => [row.id, transferFingerprint(row)])),
+    expectedGeneration: generation,
+  };
+}
