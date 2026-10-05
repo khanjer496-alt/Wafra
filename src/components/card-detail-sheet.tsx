@@ -211,11 +211,11 @@ export function CardDetailSheet({ account, onClose, footer }: CardDetailSheetPro
 const styles = StyleSheet.create({
   identity: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   identityText: { flex: 1, minWidth: 0, gap: Spacing.half },
-  inkCard: { borderRadius: 22, padding: 16, gap: 18, borderWidth: StyleSheet.hairlineWidth },
+  inkCard: { borderRadius: 22, padding: 16, gap: 12, borderWidth: StyleSheet.hairlineWidth },
   summary: { gap: Spacing.two + 2 },
   usage: { gap: Spacing.one },
   section: { gap: 2, paddingTop: Spacing.two },
   sectionHead: { flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: Spacing.two },
-  listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingVertical: 10 },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48, paddingVertical: 8 },
   rowText: { flex: 1, minWidth: 0, gap: Spacing.half },
 });

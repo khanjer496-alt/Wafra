@@ -1153,6 +1153,7 @@ export default function BillsScreen() {
                     palette={band}
                     testID="bill-detail-remind"
                     label={t('remindMe')}
+                    style={styles.detailPrimary}
                     onPress={() => {
                       addBill(billFromSubscription(detail));
                       setDetail(null);
@@ -1163,6 +1164,7 @@ export default function BillsScreen() {
                 variant="ghost"
                 labelColor={theme.expense}
                 label={t('notASubscription')}
+                style={styles.detailQuiet}
                 onPress={() => {
                   const sub = detail;
                   setDetail(null);
@@ -1186,6 +1188,7 @@ export default function BillsScreen() {
                   palette={band}
                   testID="bill-detail-mark-paid"
                   label={t('markPaid')}
+                  style={styles.detailPrimary}
                   onPress={() => {
                     const reminder = selectedReminder;
                     setSelectedBill(null);
@@ -1197,6 +1200,7 @@ export default function BillsScreen() {
                 variant="ghost"
                 labelColor={theme.expense}
                 label={t('delete')}
+                style={styles.detailQuiet}
                 onPress={() => {
                   const reminder = selectedReminder;
                   setSelectedBill(null);
@@ -1398,5 +1402,9 @@ const styles = StyleSheet.create({
   fieldColumn: { flex: 1 },
   dayField: { flex: 0.6 },
   // One primary E button, then the quiet destructive choice under it.
-  detailActions: { flexDirection: 'column', alignItems: 'stretch', gap: Spacing.one },
+  // One row: the primary at the end, the way out at the start. When they
+  // cannot share a line the primary's line comes first, each label whole.
+  detailActions: { flexDirection: 'row-reverse', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
+  detailQuiet: { flexGrow: 1, flexShrink: 1, maxWidth: '100%', paddingHorizontal: Spacing.three },
+  detailPrimary: { flexGrow: 2, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%' },
 });

@@ -341,6 +341,8 @@ export default function CardsScreen() {
         account={detail}
         onClose={() => setDetail(null)}
         footer={detail ? (
+          // One row (row-reverse: Manage at the start). When the pair cannot
+          // fit, Set credit limit's line comes first, each label whole.
           <View style={styles.detailActions}>
             {detail.cardType === 'credit' && (
               <EButton
@@ -348,6 +350,7 @@ export default function CardsScreen() {
                 variant="secondary"
                 testID="card-set-limit"
                 label={t('setCreditLimit')}
+                style={styles.detailMain}
                 onPress={() => {
                   setDetail(null);
                   askCreditLimit(detail);
@@ -359,6 +362,7 @@ export default function CardsScreen() {
               variant="quiet"
               testID="card-manage"
               label={t('manage')}
+              style={styles.detailQuiet}
               onPress={() => {
                 setDetail(null);
                 setOptionsFor(detail);
@@ -465,6 +469,11 @@ const styles = StyleSheet.create({
   },
   androidDisclosureAction: { minWidth: 48, minHeight: 48 },
   detailActions: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: Spacing.two,
   },
+  detailQuiet: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%' },
+  detailMain: { flexGrow: 2, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%' },
 });

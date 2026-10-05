@@ -252,12 +252,16 @@ export function BillDetailSheet({ subscription = null, bill = null, onClose, foo
           s: data?.chargedMonths === 1 ? '' : 's',
         });
 
+    // One row: the primary at the end, the way out at the start (row-reverse);
+    // when they cannot share a line the primary's line comes first.
     const defaultFooter = (
       <View style={styles.actions}>
         {!stopped && subscription.cadence !== 'as-needed' && (
-          <EButton palette={band} label={t('remindDayBefore')} onPress={remindMe} testID="bill-detail-remind-day-before" />
+          <EButton palette={band} label={t('remindDayBefore')} onPress={remindMe} testID="bill-detail-remind-day-before"
+            style={styles.primaryAction} />
         )}
-        <Button variant="ghost" labelColor={theme.expense} label={t('notRecurring')} onPress={() => setConfirming('not-recurring')} />
+        <Button variant="ghost" labelColor={theme.expense} label={t('notRecurring')} style={styles.quietAction}
+          onPress={() => setConfirming('not-recurring')} />
       </View>
     );
 
@@ -531,7 +535,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two,
     paddingVertical: Spacing.two, borderTopWidth: StyleSheet.hairlineWidth,
   },
-  actions: { gap: Spacing.one },
+  actions: { flexDirection: 'row-reverse', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
+  quietAction: { flexGrow: 1, flexShrink: 1, maxWidth: '100%', paddingHorizontal: Spacing.three },
+  primaryAction: { flexGrow: 2, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%' },
   actionsRow: { flexDirection: 'row', gap: Spacing.two },
   edit: { gap: Spacing.two },
   notice: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.sheet, padding: Spacing.three, gap: Spacing.half },
