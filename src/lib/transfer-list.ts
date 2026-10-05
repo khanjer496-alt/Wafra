@@ -46,11 +46,26 @@ export function transferListItems(
   return items.sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts);
 }
 
+/** How far apart (in days) two unlinked legs of one own transfer can be dated. */
+const OWN_LEG_DAYS = 3;
+const dayGap = (a: string, b: string) => Math.abs(Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000;
+
 export function transferTotals(items: readonly TransferListItem[]) {
   let ownFils = 0; let sentFils = 0; let receivedFils = 0;
+  // An own transfer seen from both sides but not linked shows as an 'out' row
+  // and an 'in' row; it moved the money once. An own 'in' row with no such
+  // outgoing partner (the debit was never captured, e.g. cash logged by hand
+  // after an ATM withdrawal) still moved that money, so it counts.
+  const unpairedOut = items.filter(item => item.tag === 'own' && item.direction === 'out');
   for (const item of items) {
-    // Own money counts via 'out'/'between' items so unlinked legs never double; an in-only capture is left out.
-    if (item.tag === 'own') { if (item.direction !== 'in') ownFils += item.amountFils; }
+    if (item.tag === 'own') {
+      if (item.direction !== 'in') { ownFils += item.amountFils; continue; }
+      const toAccount = item.to.kind === 'account' ? item.to.accountId : null;
+      const partner = unpairedOut.findIndex(out => out.amountFils === item.amountFils &&
+        !(out.from.kind === 'account' && out.from.accountId === toAccount) && dayGap(out.date, item.date) <= OWN_LEG_DAYS);
+      if (partner >= 0) unpairedOut.splice(partner, 1);
+      else ownFils += item.amountFils;
+    }
     else if (item.tag === 'external' && item.direction === 'out') sentFils += item.amountFils;
     else if (item.tag === 'external' && item.direction === 'in') receivedFils += item.amountFils;
   }

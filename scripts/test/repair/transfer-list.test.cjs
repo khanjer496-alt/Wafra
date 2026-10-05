@@ -27,12 +27,35 @@ test('two unlinked own legs of one transfer count the amount once', () => {
   assert.equal(transferTotals(items).ownFils, 250000);
 });
 
-test('an own transfer captured only from its incoming side adds nothing to the tile', () => {
-  const inn = tx('i', 'income', 'enbd', 250000);
+test('an own transfer captured only from its incoming side still moved that money', () => {
+  // e.g. cash logged by hand after an ATM withdrawal whose bank debit was never captured.
+  const inn = tx('i', 'income', 'cash', 50000);
   const items = transferListItems([rec(inn, 'own')], []);
   assert.equal(items.length, 1);
   assert.equal(items[0].direction, 'in');
-  assert.equal(transferTotals(items).ownFils, 0);
+  assert.equal(transferTotals(items).ownFils, 50000);
+  assert.equal(filterTransferItems(items, 'own').length, 1, 'the tile lists exactly what it counts');
+});
+
+test('unlinked own legs pair only on the same amount, a different account and nearby dates', () => {
+  const out = tx('o', 'expense', 'fab', 250000);
+  const otherAmount = tx('i', 'income', 'enbd', 90000);
+  assert.equal(transferTotals(transferListItems([rec(out, 'own'), rec(otherAmount, 'own')], [])).ownFils, 340000,
+    'different amounts are two movements');
+  const later = tx('l', 'income', 'enbd', 250000, { date: '2026-10-20' });
+  assert.equal(transferTotals(transferListItems([rec(out, 'own'), rec(later, 'own')], [])).ownFils, 500000,
+    'weeks apart, the same amount is two movements');
+  const sameAccount = tx('s', 'income', 'fab', 250000);
+  assert.equal(transferTotals(transferListItems([rec(out, 'own'), rec(sameAccount, 'own')], [])).ownFils, 500000,
+    'money back into the account it left is not the other side of that transfer');
+});
+
+test('one outgoing leg absorbs only one incoming leg of the same amount', () => {
+  const out = tx('o', 'expense', 'fab', 250000);
+  const in1 = tx('i1', 'income', 'enbd', 250000);
+  const in2 = tx('i2', 'income', 'cash', 250000);
+  const items = transferListItems([rec(out, 'own'), rec(in1, 'own'), rec(in2, 'own')], []);
+  assert.equal(transferTotals(items).ownFils, 500000);
 });
 
 test('single rows: names the person, else a dashed unknown; tags follow the answer', () => {
