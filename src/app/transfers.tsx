@@ -33,10 +33,12 @@ import { bankBrandForName } from '@/lib/markets';
 import { inPeriod, isCurrentMonth, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
-import { getTransferActivity, transferQuestionQueue, unaskedPendingIds } from '@/lib/transfer-activity';
+import { duplicateTransactionIds, getTransferActivity, transferQuestionQueue, unaskedPendingIds,
+  type TransferActivityRecord } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
-import { freezeTransferRows, transferAnswerGroups, transferBatchChangedIds, type TransferBatchItem } from '@/lib/transfer-batch';
+import { freezeTransferRows, transferAnswerGroups, transferBatchChangedIds, transferBatchIncoming,
+  type TransferBatchItem } from '@/lib/transfer-batch';
 import { absorbedOwnIncoming, filterTransferItems, transferListItems, transferTotals,
   type RouteEnd, type TransferListItem, type TransferTag, type TransferTile } from '@/lib/transfer-list';
 import { matchedTransferPairs, suggestedTransferPairs } from '@/lib/transfer-pairs';
@@ -88,7 +90,10 @@ export default function TransfersScreen() {
   const { state, getStateGeneration } = useStore();
   const { period } = usePeriod();
   const listBottom = useBandBottomInset();
-  const { answer, busy: answering } = useTransferAnswer();
+  // One answer hook for the page, its group and selection saves' Undo and the entry sheet: while any of
+  // them writes, every control here waits.
+  const answers = useTransferAnswer();
+  const { answer, busy: answering } = answers;
   const [tile, setTile] = useState<TransferTile | null>(null);
   const [query, setQuery] = useState('');
   const search = useDeferredValue(query.trim().toLocaleLowerCase());
@@ -165,8 +170,10 @@ export default function TransfersScreen() {
     .filter(pair => listedIds.has(pair.out.id) && listedIds.has(pair.in.id)), [reconciliation, rowsById, listedIds]);
   const suggestedByKey = useMemo(() => new Map(suggested.map(pair => [pair.key, pair])), [suggested]);
   const answerGroups = useMemo(() => transferAnswerGroups({ groups: reconciliation.groups, pendingIds: reconciliation.pendingIds,
-    rowsById, excludeIds: new Set(suggested.flatMap(pair => [pair.out.id, pair.in.id])), listedIds }),
-  [reconciliation, rowsById, suggested, listedIds]);
+    rowsById, excludeIds: new Set(suggested.flatMap(pair => [pair.out.id, pair.in.id])), listedIds,
+    assessments: reconciliation.byId, duplicateIds: duplicateTransactionIds(state.transactions) }),
+  [reconciliation, rowsById, suggested, listedIds, state.transactions]);
+  const answerGroupById = useMemo(() => new Map(answerGroups.map(group => [group.id, group])), [answerGroups]);
   const groupedIds = useMemo(() => new Set(answerGroups.flatMap(group => group.transactionIds)), [answerGroups]);
   // Groups are not a period's history but a to-do: every date, bounded (collapsed) however many
   // entries they hold. Search narrows each group to its matching entries, as the bulk review did.
@@ -197,21 +204,25 @@ export default function TransfersScreen() {
     const incoming = group.direction === 'income';
     const otherLabel = otherName ?? '?', otherSpoken = otherName ?? words.route.unknown;
     const likely = suggestedAccounts(group.transactionIds);
+    const source = answerGroupById.get(group.id);
     return { key: group.id, ids: group.transactionIds, direction: group.direction,
+      whole: !!source?.whole && !source.duplicate, ...(source?.duplicate ? { blocked: words.group.duplicate } : {}),
       from: incoming ? other : mine, to: incoming ? mine : other,
       fromLabel: incoming ? otherLabel : account, toLabel: incoming ? account : otherLabel,
       fromSpoken: incoming ? otherSpoken : account, toSpoken: incoming ? account : otherSpoken,
       totalFils: group.rows.reduce((sum, row) => sum + row.amountFils, 0), count: group.rows.length,
       newest: group.rows[0].date, oldest: group.rows[group.rows.length - 1].date,
-      ...(likely.length === 1 ? { hint: words.card.looksLike(likely[0]) } : {}) };
+      ...(likely.length === 1 ? { hint: words.answers.looksLike(likely[0]) } : {}) };
   // accountName and suggestedAccounts read accounts, reconciliation and the language's copy.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [projected, accounts, reconciliation, rowsById, words]);
+  }), [projected, answerGroupById, accounts, reconciliation, rowsById, words]);
 
   // ---- Select several ----
   const [coins, setCoins] = useState<ReadonlyMap<string, CoinCue>>(() => new Map());
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<ReadonlyMap<string, TransferBatchItem>>(() => new Map());
+  // Select mode: the catch-all groups opened to show their entries, each ticked on its own.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [linkNotice, setLinkNotice] = useState<string | null>(() => {
     if (!linkedId) return null;
     const row = state.transactions.find(entry => entry.id === linkedId);
@@ -219,9 +230,10 @@ export default function TransfersScreen() {
   });
   // Rows a group or selection answer just changed: their coins travel when they reach the list.
   const justAnswered = useRef<ReadonlySet<string>>(new Set());
-  const batch = useTransferBatch({ rowsById, onSaved: changedIds => {
+  const batch = useTransferBatch({ rowsById, answers, onSaved: changedIds => {
     justAnswered.current = new Set(changedIds);
     setPicked(new Map());
+    setExpanded(new Set());
     setSelecting(false);
   } });
   const busy = answering || batch.busy;
@@ -243,24 +255,62 @@ export default function TransfersScreen() {
   // A grouped entry is answered with its group, so it is not listed a second time on its own.
   const periodRows = useMemo(() => filterTransferItems(items, tile).filter(item => !routeLegIds(item).some(id => groupedIds.has(id))),
     [items, tile, groupedIds]);
-  const data = useMemo<ListRow[]>(() => selecting ? [...groupRows, ...selectRows]
+  const activityById = useMemo(() => new Map(activity.map(record => [record.transaction.id, record] as const)), [activity]);
+  /** A catch-all group's entries as their own rows (select mode, opened): each is ticked on its own. */
+  const groupEntryRows = (view: TransferGroupView): TransferListItem[] => transferListItems(view.ids.flatMap(id => {
+    const listed = activityById.get(id);
+    if (listed) return [listed];
+    // An entry listed nowhere else on the page (an archived account) is drawn from the ledger row as it waits.
+    const transaction = rowsById.get(id), assessment = reconciliation.byId.get(id);
+    return transaction && assessment ? [{ transaction, assessment, ownership: 'unknown', confirmed: false, needsReview: true } satisfies TransferActivityRecord] : [];
+  }), []);
+  const selectGroupRows = useMemo<ListRow[]>(() => groupRows.flatMap(row => row.group.whole || row.group.blocked || !expanded.has(row.key)
+    ? [row] : [row, ...groupEntryRows(row.group)]),
+  // groupEntryRows reads activity, the ledger rows and the reconciliation.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [groupRows, expanded, activityById, rowsById, reconciliation]);
+  const data = useMemo<ListRow[]>(() => selecting ? [...selectGroupRows, ...selectRows]
     : groupRows.length ? [...groupRows, ...(periodRows.length ? [{ kind: 'header' as const, key: 'header:period', title: periodTitle }] : []), ...periodRows]
-      : periodRows, [selecting, groupRows, selectRows, periodRows, periodTitle]);
-  const selectable = useMemo(() => data.filter((row): row is GroupRow | TransferListItem => !('kind' in row) || row.kind === 'group'), [data]);
+      : periodRows, [selecting, selectGroupRows, groupRows, selectRows, periodRows, periodTitle]);
+  // What can be ticked: a whole group (one answer for all its entries) or one route. A catch-all group
+  // is never ticked whole, not even by Select all, and a blocked one never at all.
+  const selectable = useMemo(() => data.filter((row): row is GroupRow | TransferListItem => !('kind' in row)
+    || (row.kind === 'group' && row.group.whole && !row.group.blocked)), [data]);
+  // A ticked group answers the entries its row showed when it was ticked. If search (or the ledger) now
+  // shows it with other entries, it is unticked rather than saved for entries the row no longer shows.
+  useEffect(() => {
+    const views = new Map(groupViews.map(view => [`group:${view.key}`, view]));
+    setPicked(current => {
+      let next: Map<string, TransferBatchItem> | null = null;
+      for (const [key, item] of current) {
+        const view = item.kind === 'group' ? views.get(key) : undefined;
+        if (!view) continue;
+        const frozen = new Set(item.ids);
+        if (!view.whole || view.blocked || view.ids.length !== frozen.size || view.ids.some(id => !frozen.has(id))) {
+          (next ??= new Map(current)).delete(key);
+        }
+      }
+      return next ?? current;
+    });
+  }, [groupViews]);
 
   /** Freeze one list row as the person sees it now: its rows' fingerprints, the generation, the route. */
   const batchItem = (row: GroupRow | TransferListItem): TransferBatchItem | null => {
     const generation = getStateGeneration();
     if ('kind' in row) {
       const view = row.group;
+      // Entries stored twice under one id are never answered.
+      if (view.blocked) return null;
       const rows = view.ids.map(id => rowsById.get(id)).filter((entry): entry is Transaction => !!entry);
       if (rows.length !== view.ids.length) return null;
       return { key: row.key, kind: 'group', ids: view.ids, direction: view.direction,
         expectedFingerprints: freezeTransferRows(rows), expectedGeneration: generation,
+        // A catch-all group's sheet only lists its entries; each is answered on its own.
+        ...(view.whole ? {} : { listOnly: true as const }),
         preview: { from: view.from, to: view.to, fromLabel: view.fromLabel, toLabel: view.toLabel, amountFils: view.totalFils,
           sign: view.direction === 'income' ? 'plus' : 'minus', count: view.count,
           dates: view.oldest !== view.newest ? `${shortDateWithYear(view.oldest)} – ${shortDateWithYear(view.newest)}` : shortDateWithYear(view.newest),
-          spoken: `${view.fromSpoken} ${words.route.to} ${view.toSpoken}` } };
+          spoken: `${view.fromSpoken} ${words.route.to} ${view.toSpoken}`, ...(view.hint ? { hint: view.hint } : {}) } };
     }
     const pair = suggestedByKey.get(row.key);
     const named = (end: RouteEnd) => end.kind === 'account' ? accountName(end.accountId) : end.kind === 'party' ? end.name : words.route.unknown;
@@ -277,12 +327,34 @@ export default function TransfersScreen() {
     }
     const entry = rowsById.get(row.transactionId);
     if (!entry || entry.transferDecision) return null;
+    const other = matchedEntry(entry.id);
     return { key: row.key, kind: 'entry', ids: [entry.id], direction: entry.type === 'income' ? 'income' : 'expense',
       expectedFingerprints: freezeTransferRows([entry]), expectedGeneration: generation,
-      preview: { ...preview, sign: entry.type === 'income' ? 'plus' : 'minus', count: 1 } };
+      preview: { ...preview, sign: entry.type === 'income' ? 'plus' : 'minus', count: 1,
+        ...(other && other.accountId !== entry.accountId ? { hint: words.answers.looksLike(accountName(other.accountId)) } : {}) } };
+  };
+  /** Select mode, a catch-all group: show or hide its entries. Hiding unticks them, so nothing hidden is saved. */
+  const toggleExpanded = (row: GroupRow) => {
+    if (busy) return;
+    Keyboard.dismiss();
+    const open = expanded.has(row.key);
+    setExpanded(current => {
+      const next = new Set(current);
+      if (open) next.delete(row.key); else next.add(row.key);
+      return next;
+    });
+    if (open) {
+      const keys = new Set(groupEntryRows(row.group).map(item => item.key));
+      setPicked(current => [...current.keys()].some(key => keys.has(key))
+        ? new Map([...current].filter(([key]) => !keys.has(key))) : current);
+    }
   };
   const togglePicked = (row: GroupRow | TransferListItem) => {
     if (busy) return;
+    if ('kind' in row && (row.group.blocked || !row.group.whole)) {
+      if (!row.group.blocked) toggleExpanded(row);
+      return;
+    }
     Keyboard.dismiss();
     const item = picked.has(row.key) ? null : batchItem(row);
     setPicked(current => {
@@ -308,30 +380,31 @@ export default function TransfersScreen() {
     if (busy || batch.needsDurability) return;
     setSelecting(false);
     setPicked(new Map());
+    setExpanded(new Set());
   };
   const openGroup = (row: GroupRow) => {
-    if (busy) return;
+    if (busy || row.group.blocked) return;
     Keyboard.dismiss();
     const item = batchItem(row);
     if (item) batch.open([item], null);
   };
   const pickedItems = [...picked.values()];
-  const pickedIncoming = pickedItems.every(item => item.direction === 'income') ? true
-    : pickedItems.some(item => item.direction === 'income') ? 'mixed' as const : false;
+  const pickedIncoming = transferBatchIncoming(pickedItems);
   const sheetEntries = batch.batch?.items.length === 1 && batch.batch.items[0].kind === 'group'
     ? batch.batch.items[0].ids.map(id => rowsById.get(id)).filter((row): row is Transaction => !!row) : undefined;
   // Each listed entry names its own likely other side; one entry's sheet names it under the own answer.
   const entryMatch = (id: string) => {
     const other = matchedEntry(id);
-    return other ? `${words.route.linked(accountName(other.accountId))} · ${matchDetail(other)}` : undefined;
+    return other ? `${words.answers.looksLike(accountName(other.accountId))} · ${matchDetail(other)}` : undefined;
   };
   const sheetIds = batch.batch?.items.flatMap(item => [...item.ids, ...(item.counterpartId ? [item.counterpartId] : [])]) ?? [];
   const sheetMatch = batch.batch && transferBatchChangedIds(batch.batch.items).length === 1 ? matchedEntry(sheetIds[0]) : undefined;
+  // Under the own answer: the one account these look like, or (when they look like different
+  // accounts) a line pointing at each entry's own hint. A suggestion is never "Linked to".
   const sheetSuggestion = useMemo(() => {
-    if (!batch.batch) return undefined;
+    if (!batch.batch || batch.batch.items.some(item => item.listOnly)) return undefined;
     const names = suggestedAccounts(batch.batch.items.flatMap(item => item.ids));
-    return names.length ? words.route.linked(names.length > 2 ? `${names.slice(0, 2).join(' · ')} +${names.length - 2}` : names.join(' · '))
-      : undefined;
+    return names.length === 1 ? words.answers.looksLike(names[0]) : names.length > 1 ? words.answers.looksLikeEach : undefined;
   // suggestedAccounts reads accounts and reconciliation.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batch.batch, accounts, reconciliation, rowsById, words]);
@@ -416,9 +489,10 @@ export default function TransfersScreen() {
     <ThemedText type="smallBold" style={[styles.periodLabel, { color: band.onBand }]}>{periodLabel(period)}</ThemedText>
     <Icon name="chevron-down" size={16} color={band.onBand} />
   </Pressable>;
-  const waiting = groupRows.length + selectRows.length;
+  // Something Select can act on: a group that is not blocked, or a waiting route.
+  const waiting = groupRows.filter(row => !row.group.blocked).length + selectRows.length;
   // What a row draws besides its data: its travelling coin, its tick and whether it can be pressed.
-  const listState = useMemo(() => ({ coins, picked, selecting, busy }), [coins, picked, selecting, busy]);
+  const listState = useMemo(() => ({ coins, picked, selecting, busy, expanded }), [coins, picked, selecting, busy, expanded]);
   // The list's first heading, with Select at its end: the waiting groups' section when there are
   // any (the period's heading then sits in the list above its rows), else the period.
   const listHead = <View testID="transfers-list-head" style={styles.listHead}>
@@ -508,8 +582,11 @@ export default function TransfersScreen() {
           const card = [styles.rowCard, { backgroundColor: band.card }, first && styles.rowCardFirst, last && styles.rowCardLast];
           const select = selecting ? { checked: picked.has(item.key), disabled: busy } : undefined;
           if ('kind' in item) {
+            // In select mode a whole group is one tick; a catch-all group opens to show its entries; a blocked one is read-only.
+            const tickable = item.group.whole && !item.group.blocked;
             return <View style={card}>
-              <TransferGroupRow group={item.group} palette={band} first={first} select={select}
+              <TransferGroupRow group={item.group} palette={band} first={first} select={tickable ? select : undefined}
+                expand={selecting && !tickable && !item.group.blocked ? { expanded: expanded.has(item.key), disabled: busy } : undefined}
                 onPress={() => selecting ? togglePicked(item) : openGroup(item)} />
             </View>;
           }
@@ -535,14 +612,14 @@ export default function TransfersScreen() {
       />
     </BandScaffold>
     <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
-    <EntryDetailSheet transaction={selectedTransaction ?? null} transferAssessment={selectedAssessment}
+    <EntryDetailSheet transaction={selectedTransaction ?? null} transferAssessment={selectedAssessment} transferAnswers={answers}
       showMerchantLink={false} startWithAccountPicker={!!selectedId && pickFor === selectedId}
       onClose={() => { setSelectedId(null); setPickFor(null); }} />
     {batch.batch ? <TransferAnswerSheet batch={batch.batch} palette={band} busy={batch.busy} stale={batch.stale} error={batch.error}
       needsDurability={batch.needsDurability} suggestion={sheetSuggestion} entries={sheetEntries}
       suggestionDetail={sheetMatch ? matchDetail(sheetMatch) : undefined} entryMatch={entryMatch}
       onChoose={batch.choose} onSave={() => void batch.save(batch.batch)} onClose={batch.close}
-      onOpenEntry={id => { batch.close(); setSelectedId(id); }} /> : null}
+      onOpenEntry={id => { if (batch.close()) setSelectedId(id); }} /> : null}
   </>;
 }
 

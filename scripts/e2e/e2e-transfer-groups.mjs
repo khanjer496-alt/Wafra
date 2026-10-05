@@ -1,5 +1,5 @@
 // One Transfers page: a group of likely card repayments, its "What is this?" sheet with
-// the "Linked to …" card, select mode and the batch preview, driven through the real
+// the "Looks like your …" card, select mode and the batch preview, driven through the real
 // web UI with a durable ledger. Synthetic bank records in isolated contexts.
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -97,13 +97,15 @@ try {
       await fits(page, screen, `${name} page`);
       await page.screenshot({ path: path.join(OUT, `${name}-1-page-with-group.png`) });
 
-      // Its sheet is the same "What is this?" with the three answers; the card is "Linked to …" under own.
+      // Its sheet is the same "What is this?" with the three answers: every entry matches the same card, so they
+      // are answered whole, and the card is "Looks like your …" under own (a suggestion, never "Linked to").
       await row.click();
       const sheet = page.getByTestId('transfer-answer-sheet');
       await expect(sheet).toBeVisible();
       await expect(sheet).toContainText(words.answers.question);
       for (const answer of ['own', 'external', 'none']) await expect(sheet.getByTestId(`transfer-answer-${answer}`)).toHaveCount(1);
       await expect(sheet.getByTestId('transfer-answer-own-suggestion')).toContainText('ADCB Credit Card');
+      await expect(sheet.getByTestId('transfer-answer-own-suggestion')).not.toContainText(words.route.linked('ADCB'));
       await expect(sheet.getByTestId('transfer-answer-own-suggestion')).toContainText(words.answers.suggestedOnly);
       // Each entry names its matching card payment: the card, what it was, when and how much.
       await expect(sheet.getByTestId('transfer-group-entry-match')).toHaveCount(6);

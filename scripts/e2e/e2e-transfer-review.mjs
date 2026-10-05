@@ -160,6 +160,15 @@ async function choose(page, id, ownership) {
   await page.getByTestId('entry-detail-sheet').waitFor({ state: 'hidden' });
   assert.equal(await decisionOf(page, id, ownership), ownership);
 }
+/** Answer the open entry sheet "my own account"; when several accounts could be the other side, link none. */
+async function answerOwnInSheet(page) {
+  const detail = page.getByTestId('entry-detail-sheet');
+  await click(page.getByTestId('entry-transfer-question').getByTestId('transfer-answer-own'));
+  const none = page.getByTestId('entry-transfer-candidate-none');
+  await Promise.race([none.waitFor({ state: 'visible' }), detail.waitFor({ state: 'hidden' })]);
+  if (await none.isVisible()) await click(none);
+  await detail.waitFor({ state: 'hidden' });
+}
 
 await mkdir(OUT, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
@@ -230,20 +239,35 @@ try {
       await page.getByTestId('transfers-screen').waitFor({ state: 'visible' });
       assert.equal(await page.getByTestId('transfer-group-entry').count(), 0, 'groups are collapsed rows, not a task list');
       await page.screenshot({ path: path.join(OUT, `${name}-recent-groups.png`) });
-      // Two transfers to the same masked account (4999): one route row with its count. Its sheet asks the
-      // one question; nothing is saved until an answer is picked and Save is pressed.
+      // Two transfers to the same masked account (4999) whose reference collides, so the reconciler cannot
+      // tell them apart (ambiguous): one route row with its count. It is not answered as a whole: its sheet
+      // lists both entries, and each opens its own "What is this?".
       const shared = page.locator('[data-testid^="transfer-group-transfer-group"]').filter({ hasText: '4999' });
       await click(shared);
       const sheet = page.getByTestId('transfer-answer-sheet');
       await sheet.waitFor({ state: 'visible' });
       await fits(sheet);
-      assert.equal(await sheet.getByTestId('transfer-group-entry').count(), 2, 'the sheet lists both entries it will answer');
-      assert.equal(await sheet.getByTestId('transfer-answer-sheet-save').isDisabled(), true, 'no answer is assumed');
+      assert.equal(await sheet.getByTestId('transfer-group-entry').count(), 2, 'the sheet lists both entries');
+      assert.equal(await sheet.getByTestId('transfer-answer-sheet-save').count(), 0, 'no answer for all of them');
+      assert.equal(await sheet.getByTestId('transfer-answer-own').count(), 0);
+      await sheet.getByTestId('transfer-answer-sheet-one-by-one').waitFor({ state: 'visible' });
       await page.screenshot({ path: path.join(OUT, `${name}-group-sheet.png`) });
-      await click(sheet.getByTestId('transfer-answer-own'));
-      await page.screenshot({ path: path.join(OUT, `${name}-choices.png`) });
-      await click(sheet.getByTestId('transfer-answer-sheet-save'));
+      await click(sheet.getByTestId('transfer-group-entry').first());
       await sheet.waitFor({ state: 'hidden' });
+      await page.getByTestId('entry-transfer-question').waitFor({ state: 'visible' });
+      await page.screenshot({ path: path.join(OUT, `${name}-choices.png`) });
+      await answerOwnInSheet(page);
+      let first;
+      for (const deadline = Date.now() + 8000; !first && Date.now() < deadline;) {
+        first = (await stored(page)).transactions.find(row => ['group-a', 'group-b'].includes(row.id) && row.transferDecision);
+        if (!first) await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      assert.ok(first, 'the opened entry is answered on its own');
+      const other = first.id === 'group-a' ? 'group-b' : 'group-a';
+      assert.equal(await decisionOf(page, other, undefined), undefined, 'the other entry is not answered with it');
+      await page.goto(`${BASE}/review-transfers?transactionId=${other}`, { waitUntil: 'networkidle' });
+      await page.waitForURL(/\/transfers\?transactionId=/);
+      await answerOwnInSheet(page);
       for (const id of ['group-a', 'group-b']) assert.equal(await decisionOf(page, id, 'own'), 'own');
       let saved = await stored(page);
       await home(page, [200000, 10000, 190000], 2);

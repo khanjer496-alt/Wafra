@@ -53,7 +53,14 @@ const en = {
     mixedEffect: { own: 'Not counted as spending or income', external: 'Counted as spending or income' },
     /** Takes an answer back off one entry, as the toast's Undo does. */
     clear: 'Clear my answer',
-    /** Under a likely other side ("Linked to …"): Wafra matched it; the person has not confirmed it. */
+    /**
+     * A likely other side Wafra matched (same amount, close in time) and the person has not confirmed.
+     * "Linked to …" (route.linked) is only ever said of a confirmed link.
+     */
+    looksLike: (account: string) => `Looks like your ${account}`,
+    /** Under the own answer when the entries answered together look like different accounts. */
+    looksLikeEach: 'Each entry below shows the account it looks like.',
+    /** Under a likely other side ("Looks like your …"): Wafra matched it; the person has not confirmed it. */
     suggestedOnly: 'Same amount, close in time: a suggestion, not confirmed until you answer.',
   },
   /** Several entries with the same account and other side, answered together. */
@@ -63,6 +70,13 @@ const en = {
     entriesTitle: 'Entries',
     openEntry: 'Open this entry on its own',
     more: (shown: number, total: number) => `Show more · ${shown} of ${total}`,
+    /** A catch-all group ("Account → ?"): not one answer for all of them. */
+    oneByOne: 'These are not all the same, so each needs its own answer. Open an entry below to answer it.',
+    /** Select mode: a catch-all group opens to show its entries, each ticked on its own. */
+    showEntries: 'Show entries to tick one by one',
+    hideEntries: 'Hide entries',
+    /** Entries whose id is stored twice: shown, never answered here. */
+    duplicate: 'Stored twice under one ID, so it can’t be answered here.',
   },
   select: {
     action: 'Select',
@@ -156,6 +170,8 @@ const ar: typeof en = {
     mixed: { own: 'بين حساباتي', external: 'مع شخص آخر', none: 'ليست تحويلات' },
     mixedEffect: { own: 'لا تُحتسب ضمن المصروفات أو الدخل', external: 'تُحتسب ضمن المصروفات أو الدخل' },
     clear: 'إلغاء إجابتي',
+    looksLike: (account) => `يبدو أنها حسابك ${account}`,
+    looksLikeEach: 'يظهر تحت كل قيد أدناه الحساب الذي يبدو أنه له.',
     suggestedOnly: 'المبلغ نفسه وفي وقت متقارب: اقتراح غير مؤكد حتى تجيب.',
   },
   group: {
@@ -164,6 +180,10 @@ const ar: typeof en = {
     entriesTitle: 'القيود',
     openEntry: 'افتح هذا القيد وحده',
     more: (shown, total) => `عرض المزيد · ${shown} من ${total}`,
+    oneByOne: 'هذه القيود ليست متشابهة كلها، لذا يحتاج كل منها إلى إجابته. افتح قيداً أدناه للإجابة عنه.',
+    showEntries: 'اعرض القيود لتحديدها واحداً تلو الآخر',
+    hideEntries: 'إخفاء القيود',
+    duplicate: 'محفوظ مرتين بالمعرّف نفسه، لذا لا يمكن الإجابة عنه هنا.',
   },
   select: {
     action: 'تحديد',

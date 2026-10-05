@@ -226,7 +226,7 @@ test('a group\'s sheet is "What is this?" with the three answers; nothing is sav
 for (const language of ['en', 'ar']) {
   test(`${language}: the answers word money in and money out, each with its effect`, () => {
     for (const type of ['income', 'expense']) {
-      const h = createPage({ language, transactions: [row(`${type}-1`, { type }), row(`${type}-2`, { type })] });
+      const h = createPage({ language, bulk: true, transactions: [row(`${type}-1`, { type }), row(`${type}-2`, { type })] });
       const choice = byId(openGroup(h), 'transfer-answer-external');
       const words = h.words.answers;
       assert.ok(choice.props.accessibilityLabel.includes(type === 'income' ? words.in.external : words.out.external));
@@ -242,7 +242,7 @@ test('save submits the latest answer explicitly, including a changed answer, thr
   const hook = fs.readFileSync(path.join(root, 'src/hooks/use-transfer-batch.ts'), 'utf8');
   assert.match(hook, /const save = async \(target: TransferBatch \| null\) => \{\n    const selection = target;/);
   assert.match(fs.readFileSync(path.join(root, 'src/app/transfers.tsx'), 'utf8'), /onSave=\{\(\) => void batch\.save\(batch\.batch\)\}/);
-  const h = createPage();
+  const h = createPage({ bulk: true });
   answerIn(openGroup(h), 'own');
   answerIn(sheetOf(h), 'external');
   save(h); await flush();
@@ -253,7 +253,7 @@ test('save submits the latest answer explicitly, including a changed answer, thr
 });
 
 test('"Not a transfer" for a group is saved for each entry, and is never "someone else"', async () => {
-  const h = createPage();
+  const h = createPage({ bulk: true });
   answerIn(openGroup(h), 'none');
   save(h); await flush();
   const request = h.events.find(event => event[0] === 'batch')[1];
@@ -261,7 +261,7 @@ test('"Not a transfer" for a group is saved for each entry, and is never "someon
 });
 
 test('changed ledger fingerprints block saving and keep the original preview', () => {
-  const h = createPage();
+  const h = createPage({ bulk: true });
   answerIn(openGroup(h), 'external');
   h.state.transactions = h.state.transactions.map(tx => tx.id === 'one' ? { ...tx, amountFils: 55500 } : tx);
   const sheet = sheetOf(h);
@@ -273,7 +273,7 @@ test('changed ledger fingerprints block saving and keep the original preview', (
 });
 
 test('a rejected save keeps a visible error and never announces success', async () => {
-  const h = createPage({ resolveTransferBatch: async () => { throw new Error('stale'); } });
+  const h = createPage({ bulk: true, resolveTransferBatch: async () => { throw new Error('stale'); } });
   answerIn(openGroup(h), 'own');
   save(h); await flush();
   const sheet = sheetOf(h);
@@ -282,9 +282,21 @@ test('a rejected save keeps a visible error and never announces success', async 
   assert.equal(h.events.some(event => event[0] === 'toast'), false);
 });
 
+for (const message of ['Transfer review is out of date', 'Transfer review changed; open it again']) {
+  test(`the store refusing a moved ledger ("${message}") says the transfers changed, not "couldn't save"`, async () => {
+    const h = createPage({ bulk: true, resolveTransferBatch: async () => { throw new Error(message); } });
+    answerIn(openGroup(h), 'own');
+    save(h); await flush();
+    const error = text(byId(sheetOf(h), 'transfer-answer-sheet-error'));
+    assert.ok(error.includes(h.words.batch.changed));
+    assert.ok(!error.includes(h.words.batch.failed));
+    assert.equal(h.events.some(event => event[0] === 'toast'), false);
+  });
+}
+
 test('a failed durable write keeps the sheet and retries persistence without applying the answer twice', async () => {
   const retry = deferred();
-  const h = createPage({ resolveTransferBatch: async (_request, state) => {
+  const h = createPage({ bulk: true, resolveTransferBatch: async (_request, state) => {
     state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 1 } }));
     throw Object.assign(new Error('write failed'), { code: 'transfer-durability',
       expectedFingerprints: Object.fromEntries(state.transactions.map(tx => [tx.id, fingerprint(tx)])) });
@@ -300,6 +312,12 @@ test('a failed durable write keeps the sheet and retries persistence without app
   sheet.props.onClose(); assert.ok(sheetOf(h), 'it cannot be dismissed');
   assert.equal(byId(sheet, 'transfer-answer-sheet-save').props.accessibilityLabel, h.words.batch.retry);
   assert.equal(byId(sheet, 'transfer-answer-own').props.accessibilityState.disabled, true, 'the applied answer cannot be changed');
+  // Opening one entry on its own would close the sheet mid-retry: it waits until the answer is saved.
+  const entry = allById(sheet, 'transfer-group-entry')[0];
+  assert.equal(entry.props.disabled, true, 'Open this entry on its own waits for the retry');
+  entry.props.onPress();
+  assert.ok(sheetOf(h), 'the sheet stays');
+  assert.equal(detailSheet(h.render()).props.transaction, null, 'no entry opened over a pending retry');
   byId(sheet, 'transfer-answer-sheet-save').props.onPress();
   assert.equal(h.events.filter(event => event[0] === 'batch').length, 1);
   assert.equal(h.events.filter(event => event[0] === 'durable').length, 1);
@@ -310,7 +328,7 @@ test('a failed durable write keeps the sheet and retries persistence without app
 });
 
 test('a restored ledger invalidates even a pending durability retry', async () => {
-  const h = createPage({ resolveTransferBatch: async (_request, state) => { throw Object.assign(new Error('write'), { code: 'transfer-durability',
+  const h = createPage({ bulk: true, resolveTransferBatch: async (_request, state) => { throw Object.assign(new Error('write'), { code: 'transfer-durability',
     expectedFingerprints: Object.fromEntries(state.transactions.map(tx => [tx.id, fingerprint(tx)])) }); } });
   answerIn(openGroup(h), 'own');
   save(h); await flush();
@@ -324,7 +342,7 @@ test('a restored ledger invalidates even a pending durability retry', async () =
 
 for (const change of ['edit', 'delete']) {
   test(`${change} during failed storage invalidates retry against fresh state before rendering`, async () => {
-    const h = createPage({ resolveTransferBatch: async (_request, state) => {
+    const h = createPage({ bulk: true, resolveTransferBatch: async (_request, state) => {
       state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 3 } }));
       throw Object.assign(new Error('write'), { code: 'transfer-durability',
         expectedFingerprints: Object.fromEntries(state.transactions.map(tx => [tx.id, fingerprint(tx)])) });
@@ -351,7 +369,7 @@ test('Cancel leaves the entries unanswered: no write, no announcement', () => {
 });
 
 test('a saved group answer offers Undo, which clears each entry from its current state', async () => {
-  const h = createPage({ resolveTransferBatch: async (request, state) => {
+  const h = createPage({ bulk: true, resolveTransferBatch: async (request, state) => {
     if (request.decisions[0].ownership === null) return;
     state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 5 } }));
   } });
@@ -369,6 +387,46 @@ test('a saved group answer offers Undo, which clears each entry from its current
   assert.deepEqual(h.events.at(-1), ['toast', h.words.answers.undone]);
 });
 
+test('Undo never clears an answer given since the save: it says the transfers changed', async () => {
+  const h = createPage({ bulk: true, resolveTransferBatch: async (request, state) => {
+    if (request.decisions[0].ownership === null) return;
+    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 5 } }));
+  } });
+  answerIn(openGroup(h), 'own');
+  save(h); await flush();
+  const undo = h.toasts.at(-1)[1].actions.find(action => action.label === h.words.answers.undo);
+  // A newer answer to one entry (its own sheet, another device's restore) lands before Undo is pressed.
+  h.state.transactions = h.state.transactions.map(tx => tx.id === 'two'
+    ? { ...tx, transferDecision: { version: 1, ownership: 'external', decidedAt: 9 } } : tx);
+  const batches = h.events.filter(event => event[0] === 'batch').length;
+  undo.onPress(); await flush(); await flush();
+  assert.equal(h.events.filter(event => event[0] === 'batch').length, batches, 'nothing is cleared');
+  assert.deepEqual(h.events.at(-1), ['toast', h.words.answers.changed]);
+  assert.equal(h.state.transactions.find(tx => tx.id === 'two').transferDecision.ownership, 'external', 'the newer answer stays');
+});
+
+test('while Undo runs the page knows: its controls wait until it is done', async () => {
+  const undoing = deferred();
+  const h = createPage({ bulk: true, transactions: [row('one'), row('two'), row('three', { accountId: 'other' })],
+    groupDefinitions: [{ id: 'group', transactionIds: ['one', 'two'], bulkEligible: true }, { id: 'solo', transactionIds: ['three'], bulkEligible: false }],
+    resolveTransferBatch: async (request, state) => {
+      if (request.decisions[0].ownership === null) return undoing.promise;
+      state.transactions = state.transactions.map(tx => tx.id === 'three' ? tx
+        : { ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 5 } });
+    } });
+  // The page's real answer hook keeps its busy flag in state; this harness re-renders from its slots.
+  answerIn(openGroup(h), 'own');
+  save(h); await flush();
+  const undo = h.toasts.at(-1)[1].actions.find(action => action.label === h.words.answers.undo);
+  undo.onPress(); await flush();
+  const tree = h.render();
+  assert.equal(byId(tree, 'transfers-select').props.disabled, true, 'Select waits');
+  assert.equal(walk(tree).find(n => n.type === 'Scaffold').props.nav.backDisabled, true, 'leaving waits');
+  assert.equal(byId(byId(tree, 'transfer-question-card'), 'transfer-answer-own').props.disabled, true, 'the question card waits');
+  undoing.resolve(); await flush(); await flush();
+  assert.equal(byId(h.render(), 'transfers-select').props.disabled, false, 'and comes back once Undo is done');
+});
+
 test('3,106 waiting entries stay one bounded group row; its entries page 20 at a time', () => {
   const h = createPage({ transactions: Array.from({ length: 3106 }, (_, i) => row(`old-${i}`, { date: '2022-11-05' })) });
   let tree = h.render();
@@ -382,7 +440,9 @@ test('3,106 waiting entries stay one bounded group row; its entries page 20 at a
   walk(sheet).find(node => node.props?.accessibilityLabel === h.words.group.more(20, 3106)).props.onPress();
   sheet = sheetOf(h);
   assert.equal(allById(sheet, 'transfer-group-entry').length, 40);
-  assert.equal(byId(sheet, 'transfer-answer-sheet-save').props.disabled, true);
+  // A catch-all group ("Account → ?") is never answered whole: its sheet lists the entries only.
+  assert.equal(byId(sheet, 'transfer-answer-sheet-save'), undefined);
+  assert.equal(byId(sheet, 'transfer-answer-own'), undefined);
   byId(sheet, 'transfer-answer-sheet-cancel').props.onPress();
   walk(h.render()).find(node => node.type === 'TextInput').props.onChangeText('Synthetic');
   tree = h.render();
@@ -408,7 +468,7 @@ test('one entry of a group can still be answered on its own', () => {
 // ---- The card-repayment suggestion: "Linked to …" under the own answer ----
 
 for (const language of ['en', 'ar']) {
-  test(`${language}: a likely card repayment shows its matching card as "Linked to …" under the own answer`, () => {
+  test(`${language}: a likely card repayment shows its matching card as "Looks like your …" under the own answer, never "Linked to"`, () => {
     const card = { id: 'card', name: 'ADCB Credit Card', last4: '7720' };
     const transactions = [row('r1', { date: '2026-09-02' }), row('r2', { date: '2026-09-05' }),
       row('c1', { type: 'income', accountId: 'card', title: 'Payment received' }), row('c2', { type: 'income', accountId: 'card', title: 'Payment received' })];
@@ -420,17 +480,19 @@ for (const language of ['en', 'ar']) {
     const tree = h.render();
     const group = byId(tree, 'transfer-group-liv');
     const label = ledger.accountDisplayName(card);
-    assert.ok(text(group).includes(h.words.card.looksLike(label)), 'the row says which card it looks like');
+    assert.ok(text(group).includes(h.words.answers.looksLike(label)), 'the row says which card it looks like');
     const sheet = openGroup(h, 'liv');
     const suggestion = byId(sheet, 'transfer-answer-own-suggestion');
-    assert.ok(text(suggestion).includes(h.words.route.linked(label)));
+    assert.ok(text(suggestion).includes(h.words.answers.looksLike(label)));
     assert.ok(text(suggestion).includes(h.words.answers.suggestedOnly), 'a suggestion, said to be one');
-    assert.ok(byId(sheet, 'transfer-answer-own').props.accessibilityLabel.includes(h.words.route.linked(label)));
+    assert.ok(byId(sheet, 'transfer-answer-own').props.accessibilityLabel.includes(h.words.answers.looksLike(label)));
+    // Answered "own", it is saved without a pair link, so it is never said to be linked.
+    assert.ok(!text(sheet).includes(h.words.route.linked(label)), 'a suggestion is never "Linked to"');
     // Each entry names its matching card payment: account, what, when and how much (the old "matching bank entry").
     const matches = allById(sheet, 'transfer-group-entry-match').map(node => text(node));
     assert.equal(matches.length, 2);
     for (const match of matches) {
-      assert.ok(match.includes(h.words.route.linked(label)) && match.includes('Payment received') && match.includes('AED 123.45'), match);
+      assert.ok(match.includes(h.words.answers.looksLike(label)) && match.includes('Payment received') && match.includes('AED 123.45'), match);
       assert.match(match, /2026-09-0\d \d+/, 'its date and time');
     }
     // Not the old verbose block or the retired sheet's words, which are gone from the copy too.
@@ -557,7 +619,15 @@ test('a suggested pair answered "someone else" answers both legs, each alone and
   const h = createPage(manyPairs(1));
   startSelecting(h);
   pairChecks(h)[0].props.onPress();
+  // A pair moves money out of one account and into another: its answers are worded for both directions.
+  const bar = byId(footer(h), 'transfer-answer-external');
+  assert.ok(bar.props.accessibilityLabel.includes(h.words.answers.mixed.external));
+  assert.ok(!bar.props.accessibilityLabel.includes(h.words.answers.out.external), 'not the outgoing-only wording');
   answerIn(footer(h), 'external');
+  const choice = byId(sheetOf(h), 'transfer-answer-external');
+  assert.ok(choice.props.accessibilityLabel.includes(h.words.answers.mixed.external));
+  assert.ok(choice.props.accessibilityLabel.includes(h.words.answers.mixedEffect.external));
+  assert.ok(!choice.props.accessibilityLabel.includes(h.words.answers.out.external));
   save(h); await flush();
   const request = h.events.find(e => e[0] === 'batch')[1];
   assert.deepEqual(request.decisions, [{ ids: ['out-0'], ownership: 'external' }, { ids: ['in-0'], ownership: 'external' }]);
@@ -565,7 +635,7 @@ test('a suggested pair answered "someone else" answers both legs, each alone and
 
 test('ticked groups and entries enter as single-entry decisions, never a catchall group decision', async () => {
   const h = createPage({ transactions: [row('a'), row('b', { accountId: 'other' }), row('untouched', { date: '2026-09-07' })],
-    groupDefinitions: [{ id: 'a', transactionIds: ['a', 'untouched'], bulkEligible: false },
+    groupDefinitions: [{ id: 'a', transactionIds: ['a', 'untouched'], bulkEligible: true },
       { id: 'b', transactionIds: ['b'], bulkEligible: false }] });
   startSelecting(h);
   byId(h.render(), 'transfer-group-a').props.onPress();
@@ -693,7 +763,7 @@ test('large text stacks the routes, the controls and the answer buttons', () => 
 
 test('select mode: a group is one tick; no checkbox outside select mode; Select all counts what has one', async () => {
   const h = createPage({ transactions: [row('a'), row('b', { accountId: 'other' }), row('c')],
-    groupDefinitions: [{ id: 'one', transactionIds: ['b'], bulkEligible: false }, { id: 'two', transactionIds: ['a', 'c'], bulkEligible: false }] });
+    groupDefinitions: [{ id: 'one', transactionIds: ['b'], bulkEligible: false }, { id: 'two', transactionIds: ['a', 'c'], bulkEligible: true }] });
   let tree = h.render();
   assert.equal(byId(tree, 'transfer-group-two').props.accessibilityRole, 'button', 'no checkbox outside select mode');
   assert.ok(byId(byId(tree, 'transfer-group-two'), 'transfer-group-count'), 'several entries keep their count');
@@ -709,6 +779,107 @@ test('select mode: a group is one tick; no checkbox outside select mode; Select 
   save(h); await flush();
   const request = h.events.find(event => event[0] === 'batch')[1];
   assert.deepEqual(request.decisions, [{ ids: ['a'], ownership: 'none' }, { ids: ['c'], ownership: 'none' }]);
+});
+
+// ---- A catch-all group ("Account → ?"): every entry needs its own answer ----
+
+const catchAll = (extra = {}) => createPage({ transactions: [row('a', { title: 'First' }), row('c', { title: 'Second' }),
+  row('b', { accountId: 'other' })], groupDefinitions: [{ id: 'two', transactionIds: ['a', 'c'], bulkEligible: false },
+  { id: 'one', transactionIds: ['b'], bulkEligible: false }], ...extra });
+
+test('a catch-all group\'s sheet lists its entries, each opened on its own; there is no answer for all of them', () => {
+  const h = catchAll();
+  const sheet = openGroup(h, 'two');
+  assert.equal(sheet.props.title, h.words.answers.question);
+  for (const answer of ['own', 'external', 'none']) assert.equal(byId(sheet, `transfer-answer-${answer}`), undefined, answer);
+  assert.equal(byId(sheet, 'transfer-answer-sheet-save'), undefined, 'nothing to save for all of them');
+  assert.ok(text(byId(sheet, 'transfer-answer-sheet-one-by-one')).includes(h.words.group.oneByOne));
+  assert.equal(text(byId(sheet, 'transfer-answer-sheet-cancel')), h.words.answers.done);
+  const entries = allById(sheet, 'transfer-group-entry');
+  assert.equal(entries.length, 2);
+  entries.find(node => node.props.accessibilityLabel.includes('Second')).props.onPress();
+  const tree = h.render();
+  assert.equal(byId(tree, 'transfer-answer-sheet'), undefined);
+  assert.equal(detailSheet(tree).props.transaction.id, 'c', 'its own "What is this?"');
+  assert.deepEqual(h.events, []);
+});
+
+test('select mode never ticks a catch-all group whole, not even Select all; it opens to tick its entries one by one', async () => {
+  const h = catchAll();
+  startSelecting(h);
+  let tree = h.render();
+  const group = byId(tree, 'transfer-group-two');
+  assert.equal(group.props.accessibilityRole, 'button', 'a disclosure, not a checkbox');
+  assert.equal(group.props.accessibilityState.expanded, false);
+  assert.ok(text(group).includes(h.words.group.showEntries));
+  assert.equal(byId(tree, 'transfer-select-shown').props.accessibilityLabel, h.words.select.all(1), 'only the lone entry has a tick');
+  byId(tree, 'transfer-select-shown').props.onPress();
+  assert.ok(text(footer(h)).includes(h.words.select.selected(1)), 'Select all ticked the lone entry only');
+  byId(h.render(), 'transfer-clear-selection').props.onPress();
+  // Opened, its entries are rows of their own, each with its own tick.
+  byId(h.render(), 'transfer-group-two').props.onPress();
+  tree = h.render();
+  assert.equal(byId(tree, 'transfer-group-two').props.accessibilityState.expanded, true);
+  assert.ok(byId(tree, 'transfer-row-a') && byId(tree, 'transfer-row-c'));
+  assert.equal(byId(tree, 'transfer-row-a').props.accessibilityRole, 'checkbox');
+  byId(tree, 'transfer-row-c').props.onPress();
+  assert.ok(text(footer(h)).includes(h.words.select.selected(1)));
+  // Closing it again unticks what it hid, so nothing hidden is saved.
+  byId(h.render(), 'transfer-group-two').props.onPress();
+  assert.ok(text(footer(h)).includes(h.words.select.none));
+  byId(h.render(), 'transfer-group-two').props.onPress();
+  byId(h.render(), 'transfer-row-c').props.onPress();
+  answerIn(footer(h), 'own');
+  save(h); await flush();
+  const request = h.events.find(event => event[0] === 'batch')[1];
+  assert.deepEqual(request.decisions, [{ ids: ['c'], ownership: 'own' }], 'only the entry ticked on its own');
+});
+
+test('a group with one shared suggestion is still answered whole; a catch-all never enters a batch', () => {
+  const batch = load(path.join(root, 'src/lib/transfer-batch.ts'), { '@/lib/transfer-reconciliation': core });
+  assert.throws(() => batch.transferBatchDecisions([{ kind: 'group', ids: ['a', 'b'], listOnly: true }], 'own'));
+  assert.deepEqual(plain(batch.transferBatchDecisions([{ kind: 'group', ids: ['a', 'b'] }], 'own')),
+    [{ ids: ['a'], ownership: 'own' }, { ids: ['b'], ownership: 'own' }]);
+});
+
+test('a ticked group whose row search changes is unticked, so its save never covers entries the row no longer shows', () => {
+  const h = createPage({ bulk: true, transactions: [row('one', { title: 'Rent' }), row('two', { title: 'Gym' }), row('three', { title: 'Rent too' })],
+    groupDefinitions: [{ id: 'group', transactionIds: ['one', 'two', 'three'], bulkEligible: true }] });
+  // The real effect runs after render here.
+  const effects = [];
+  h.deps.react.useEffect = fn => { effects.push(fn); };
+  const render = () => { effects.length = 0; const tree = h.render(); effects.forEach(fn => fn()); return tree; };
+  startSelecting(h); render();
+  byId(render(), 'transfer-group-group').props.onPress(); render();
+  assert.equal(byId(render(), 'transfer-group-group').props.accessibilityState.checked, true);
+  assert.ok(text(footer(h)).includes(h.words.select.selected(1)));
+  walk(render()).find(node => node.type === 'TextInput').props.onChangeText('Rent');
+  render(); const tree = render();
+  assert.ok(text(byId(tree, 'transfer-group-group')).includes(h.words.group.entries(2)), 'the row now shows two entries');
+  assert.equal(byId(tree, 'transfer-group-group').props.accessibilityState.checked, false, 'and is no longer ticked');
+  assert.ok(text(footer(h)).includes(h.words.select.none));
+  byId(render(), 'transfer-group-group').props.onPress(); render();
+  answerIn(footer(h), 'own');
+  assert.equal(byId(sheetOf(h), 'transfer-answer-sheet-save').props.accessibilityLabel, h.words.batch.save(2), 'ticked again: the two it shows');
+});
+
+test('an id stored twice is shown read-only with its reason, never ticked or saved', () => {
+  const h = createPage({ transactions: [row('dup'), row('dup', { amountFils: 500 }), row('solo', { accountId: 'other' })],
+    groupDefinitions: [{ id: 'g', transactionIds: ['dup'], bulkEligible: true }, { id: 's', transactionIds: ['solo'], bulkEligible: false }] });
+  let tree = h.render();
+  const blocked = byId(tree, 'transfer-group-g:duplicate');
+  assert.ok(blocked, 'still shown, so nothing waiting is hidden');
+  assert.equal(blocked.type, 'View', 'not a button');
+  assert.ok(text(blocked).includes(h.words.group.duplicate));
+  assert.ok(blocked.props.accessibilityLabel.includes(h.words.group.duplicate));
+  startSelecting(h); tree = h.render();
+  const shown = byId(tree, 'transfer-group-g:duplicate');
+  assert.equal(shown.type, 'View');
+  assert.equal(shown.props.accessibilityState, undefined, 'no tick');
+  assert.equal(byId(tree, 'transfer-select-shown').props.accessibilityLabel, h.words.select.all(1));
+  byId(tree, 'transfer-select-shown').props.onPress();
+  answerIn(footer(h), 'own');
+  assert.equal(byId(sheetOf(h), 'transfer-answer-sheet-save').props.accessibilityLabel, h.words.batch.save(1), 'only the other entry');
 });
 
 test('disabled select controls stay legible: no faded fill', () => {
@@ -844,6 +1015,39 @@ test('a decided entry is cleared on its own with its current decision fingerprin
   assert.deepEqual(h.events.at(-1), ['toast', h.words.answers.undone]);
 });
 
+test('an answer\'s Undo clears exactly that answer: refused once the entry is answered again', async () => {
+  const shown = row('mine');
+  const h = answerHook({ transactions: [shown], resolveTransfers: async (request, state) => {
+    state.transactions = state.transactions.map(tx => tx.id === 'mine' ? { ...tx, transferDecision: request.ownership === null ? undefined
+      : { version: 1, ownership: request.ownership, decidedAt: 4 } } : tx);
+  } });
+  assert.equal(await h.hook.answer({ transaction: shown, answer: 'external', label: 'x' }), 'saved');
+  const undo = h.toasts.at(-1)[1].actions.find(action => action.label === h.words.answers.undo);
+  // Answered again (its own sheet) before Undo is pressed.
+  h.state.transactions = h.state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'none', decidedAt: 6 } }));
+  const writes = h.events.filter(event => event[0] === 'resolve').length;
+  undo.onPress(); await flush();
+  assert.equal(h.events.filter(event => event[0] === 'resolve').length, writes, 'the newer answer is not cleared');
+  assert.deepEqual(h.events.at(-1), ['toast', h.words.answers.changed]);
+  // Unchanged since the save, Undo clears it.
+  const again = answerHook({ transactions: [shown], resolveTransfers: async (request, state) => {
+    state.transactions = state.transactions.map(tx => tx.id === 'mine' ? { ...tx, transferDecision: request.ownership === null ? undefined
+      : { version: 1, ownership: request.ownership, decidedAt: 4 } } : tx);
+  } });
+  await again.hook.answer({ transaction: shown, answer: 'external', label: 'x' });
+  again.toasts.at(-1)[1].actions[0].onPress(); await flush();
+  assert.deepEqual(again.events.at(-1), ['toast', again.words.answers.undone]);
+  assert.equal(again.state.transactions[0].transferDecision, undefined);
+});
+
+test('Clear refuses when the entry changed since it was shown', async () => {
+  const tx = row('reviewed', { transferDecision: { version: 1, ownership: 'external', decidedAt: 2 } });
+  const h = answerHook({ transactions: [{ ...tx, transferDecision: { version: 1, ownership: 'none', decidedAt: 3 } }] });
+  await h.hook.undo('reviewed', undefined, { reviewed: fingerprint(tx) });
+  assert.equal(h.events.some(event => event[0] === 'resolve' || event[0] === 'batch'), false);
+  assert.deepEqual(h.events.at(-1), ['toast', h.words.answers.changed]);
+});
+
 test('an entry that changed since it was shown is refused, not overwritten', async () => {
   const shown = row('low-signal');
   const h = answerHook({ transactions: [{ ...shown, amountFils: 55500 }] });
@@ -900,13 +1104,15 @@ test('the detail sheet offers "Clear my answer" for a saved answer, clearing bot
   const clear = byId(tree, 'entry-transfer-clear');
   assert.equal(clear.props.accessibilityLabel, copyFor('en').answers.clear);
   clear.props.onPress();
-  assert.deepEqual(cleared, [['mine', 'theirs']]);
+  // Clear takes back exactly the answer shown: the rows' fingerprints as shown go with it.
+  const fingerprintOf = h.deps['@/lib/transfer-reconciliation'].transferFingerprint;
+  assert.deepEqual(plain(cleared), [['mine', 'theirs', { mine: fingerprintOf(h.state.transactions[0]) }]]);
   const fresh = createHarness({ language: 'en', state: { transactions: [row('open', { transferEvidence: { version: 1, currency: 'AED', attribution: 'source' } })] } });
   assert.equal(byId(fresh.renderDetail(fresh.state.transactions[0]), 'entry-transfer-clear'), undefined, 'nothing to clear before an answer');
 });
 
 for (const language of ['en', 'ar']) {
-  test(`${language}: one entry's sheet names its matching card payment as the likely other side, as a suggestion`, () => {
+  test(`${language}: one entry's sheet names its matching card payment as the likely other side, as a suggestion`, async () => {
     const card = { id: 'card', name: 'ADCB Credit Card', last4: '7720', kind: 'card' };
     const debit = row('debit', { transferEvidence: { version: 1, currency: 'AED', attribution: 'source', sourceBank: 'Liv' } });
     const receipt = row('receipt', { type: 'income', accountId: 'card', title: 'Payment received', amountFils: 12345, ts: 1788898200000 });
@@ -918,12 +1124,19 @@ for (const language of ['en', 'ar']) {
     const suggestion = byId(byId(tree, 'entry-transfer-question'), 'transfer-answer-own-suggestion');
     assert.ok(suggestion, 'the likely other side is under "my own account"');
     const said = text(suggestion);
-    assert.ok(said.includes(words.route.linked(ledger.accountDisplayName(card))));
+    assert.ok(said.includes(words.answers.looksLike(ledger.accountDisplayName(card))));
+    assert.ok(!text(tree).includes(words.route.linked(ledger.accountDisplayName(card))), 'a suggestion is never "Linked to"');
     assert.ok(said.includes('Payment received'), 'what the matching entry was');
     assert.ok(said.includes('123.45'), 'its amount');
     assert.ok(said.includes(words.answers.suggestedOnly), 'not confirmed until answered');
     for (const old of ['Check a transfer', 'Save classification', 'Leave as recorded', 'What was this transfer?']) {
       assert.ok(!text(tree).includes(old), old);
     }
+    // Answered "own", a likely card repayment is saved as own without a pair link, as the group and selection saves do.
+    byId(byId(tree, 'entry-transfer-question'), 'transfer-answer-own').props.onPress(); await flush();
+    const answered = h.events.find(event => event[0] === 'answer');
+    assert.equal(answered[1].answer, 'own');
+    assert.equal(answered[1].counterpart, undefined, 'no link to the card receipt');
+    assert.equal(h.events.some(event => event[0] === 'state' && event[1] === 'picking'), false);
   });
 }

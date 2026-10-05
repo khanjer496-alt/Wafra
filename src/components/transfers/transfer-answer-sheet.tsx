@@ -13,21 +13,15 @@ import type { TransferBatch } from '@/hooks/use-transfer-batch';
 import { shortDateWithYear } from '@/lib/format';
 import type { TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { transferBatchChangedIds, type TransferBatchItem } from '@/lib/transfer-batch';
+import { transferBatchChangedIds, transferBatchIncoming, type TransferBatchItem } from '@/lib/transfer-batch';
 import { TRANSFER_HISTORY_PAGE_SIZE } from '@/lib/transfer-review-presentation';
 import type { Transaction } from '@/lib/types';
-
-/** Money in only, money out only (pairs move out of one account), or both. */
-function directionOf(items: readonly TransferBatchItem[]): boolean | 'mixed' {
-  const incoming = items.map(item => item.direction === 'income');
-  return incoming.every(Boolean) ? true : incoming.some(Boolean) ? 'mixed' : false;
-}
 
 function PreviewRoute({ item, palette, testID }: { item: TransferBatchItem; palette: BandPalette; testID: string }) {
   const words = transferActivityCopy(useLanguage());
   const { preview } = item;
   return <View testID={testID} accessible accessibilityRole="text"
-    accessibilityLabel={[preview.spoken, preview.count > 1 ? words.group.entries(preview.count) : null, preview.dates, preview.note]
+    accessibilityLabel={[preview.spoken, preview.count > 1 ? words.group.entries(preview.count) : null, preview.dates, preview.note, preview.hint]
       .filter(Boolean).join('. ')}
     style={styles.preview}>
     <TransferRoute from={preview.from} to={preview.to} fromLabel={preview.fromLabel} toLabel={preview.toLabel}
@@ -39,6 +33,7 @@ function PreviewRoute({ item, palette, testID }: { item: TransferBatchItem; pale
       <ThemedText type="meta" style={{ color: palette.textSecondary }}>{preview.dates}</ThemedText>
     </View>
     {preview.note ? <ThemedText type="meta" style={{ color: palette.textSecondary }}>{preview.note}</ThemedText> : null}
+    {preview.hint ? <ThemedText testID="transfer-batch-preview-hint" type="meta" style={{ color: palette.tint }}>{preview.hint}</ThemedText> : null}
   </View>;
 }
 
@@ -46,7 +41,9 @@ function PreviewRoute({ item, palette, testID }: { item: TransferBatchItem; pale
  * "What is this?" for a group of entries or for the transfers ticked in
  * select mode: the same question and the same three answers as one entry's
  * detail sheet, with the likely other side under the own answer. Nothing is
- * written until Save; the save itself is `useTransferBatch`'s.
+ * written until Save; the save itself is `useTransferBatch`'s. A group whose
+ * entries cannot be answered as a whole (ambiguous, "Account → ?") only lists
+ * them: each opens its own "What is this?".
  */
 export function TransferAnswerSheet({ batch, palette, busy, stale, error, needsDurability, suggestion, suggestionDetail, entries,
   entryMatch, onChoose, onSave, onClose, onOpenEntry }: {
@@ -54,7 +51,7 @@ export function TransferAnswerSheet({ batch, palette, busy, stale, error, needsD
   needsDurability: boolean; suggestion?: string;
   /** One entry's matching entry on the other side (what, when, how much). */
   suggestionDetail?: string;
-  /** A listed entry's own likely other side ("Linked to … · what · when · how much"). */
+  /** A listed entry's own likely other side ("Looks like your … · what · when · how much"). */
   entryMatch?: (id: string) => string | undefined;
   /** A single group's entries, newest first, each of which can be opened on its own. */
   entries?: readonly Transaction[];
@@ -66,30 +63,33 @@ export function TransferAnswerSheet({ batch, palette, busy, stale, error, needsD
   const { items } = batch;
   const changed = transferBatchChangedIds(items).length;
   const single = items.length === 1 ? items[0] : undefined;
+  // While a save or its retry is pending, nothing else on the sheet can be pressed.
   const locked = busy || (needsDurability && !stale);
+  const listOnly = !!single?.listOnly;
   const list = single ? entries ?? [] : items;
   return <BottomSheet visible palette={palette} title={words.answers.question} testID="transfer-answer-sheet"
     onClose={onClose} dismissible={!locked}
     footer={<View style={styles.actions}>
-      <EButton testID="transfer-answer-sheet-save" palette={palette}
+      {listOnly ? null : <EButton testID="transfer-answer-sheet-save" palette={palette}
         label={busy ? words.batch.saving : needsDurability ? words.batch.retry : words.batch.save(changed)}
-        disabled={busy || stale || batch.answer === null} onPress={onSave} />
-      <EButton testID="transfer-answer-sheet-cancel" palette={palette} variant="quiet" label={words.batch.cancel}
+        disabled={busy || stale || batch.answer === null} onPress={onSave} />}
+      <EButton testID="transfer-answer-sheet-cancel" palette={palette} variant="quiet" label={listOnly ? words.answers.done : words.batch.cancel}
         disabled={locked} onPress={onClose} />
     </View>}>
     <View style={styles.body}>
       {single ? <PreviewRoute item={single} palette={palette} testID="transfer-answer-sheet-route" />
         : <ThemedText type="subtitle" accessibilityRole="header">{words.batch.selected(items.length)}</ThemedText>}
-      {items.length > 1 || batch.answer === null
-        ? <ThemedText type="small" themeColor="textSecondary">{words.batch.choose}</ThemedText> : null}
-      <TransferAnswerChoices incoming={directionOf(items)} value={batch.answer} onChange={onChoose} palette={palette}
-        layout="radios" suggestion={suggestion} suggestionDetail={suggestionDetail} disabled={busy || needsDurability} />
+      {listOnly ? <ThemedText testID="transfer-answer-sheet-one-by-one" type="small" themeColor="textSecondary">{words.group.oneByOne}</ThemedText>
+        : items.length > 1 || batch.answer === null
+          ? <ThemedText type="small" themeColor="textSecondary">{words.batch.choose}</ThemedText> : null}
+      {listOnly ? null : <TransferAnswerChoices incoming={transferBatchIncoming(items)} value={batch.answer} onChange={onChoose} palette={palette}
+        layout="radios" suggestion={suggestion} suggestionDetail={suggestionDetail} disabled={busy || needsDurability} />}
       {list.length > 0 ? <View testID="transfer-batch-preview" style={styles.list}>
         {single ? <ThemedText type="smallBold" accessibilityRole="header">{words.group.entriesTitle}</ThemedText> : null}
         {single ? (entries ?? []).slice(0, limit).map(entry => <Pressable key={entry.id} testID="transfer-group-entry"
-          accessibilityRole="button" disabled={busy || !onOpenEntry}
+          accessibilityRole="button" disabled={locked || !onOpenEntry}
           accessibilityLabel={[words.group.openEntry, entry.title, shortDateWithYear(entry.date), entryMatch?.(entry.id)].filter(Boolean).join('. ')}
-          onPress={() => onOpenEntry?.(entry.id)}
+          onPress={() => { if (!locked) onOpenEntry?.(entry.id); }}
           style={({ pressed }) => [styles.entry, { borderColor: palette.rule, backgroundColor: palette.card, opacity: pressed ? 0.7 : 1 }]}>
           <View style={styles.entryText}>
             <ThemedText type="small">{entry.title}</ThemedText>

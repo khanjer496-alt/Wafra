@@ -1,7 +1,7 @@
 import type { TransferAnswer } from '@/lib/transfer-answer';
 import type { RouteEnd } from '@/lib/transfer-list';
 import { transferFingerprint } from '@/lib/transfer-reconciliation';
-import type { TransferDecisionBatchRequest, TransferReviewGroup } from '@/lib/transfer-reconciliation-types';
+import type { TransferAssessment, TransferDecisionBatchRequest, TransferReviewGroup } from '@/lib/transfer-reconciliation-types';
 import type { Transaction } from '@/lib/types';
 
 /**
@@ -26,6 +26,11 @@ export interface TransferBatchItem {
   expectedGeneration: number;
   /** What the person saw when they picked it; never refreshed from a newer ledger. */
   preview: TransferBatchPreview;
+  /**
+   * A group that cannot be answered as a whole (its entries are ambiguous):
+   * its sheet only lists the entries, each answered on its own. Never saved.
+   */
+  listOnly?: true;
 }
 
 /** One picked item drawn as its Transfers route. */
@@ -41,6 +46,18 @@ export interface TransferBatchPreview {
   spoken: string;
   /** A pair whose legs differ in amount names the other leg's amount; the two are never merged. */
   note?: string;
+  /** Its own likely other side ("Looks like your …"), shown with it rather than merged into one line. */
+  hint?: string;
+}
+
+/**
+ * Which words the answers use for these items: money in only (true), money
+ * out only (false), or both ('mixed'). A suggested pair moves money out of one
+ * account and into another, so it is both.
+ */
+export function transferBatchIncoming(items: readonly Pick<TransferBatchItem, 'direction'>[]): boolean | 'mixed' {
+  if (items.length > 0 && items.every(item => item.direction === 'income')) return true;
+  return items.some(item => item.direction === 'income' || item.direction === 'between') ? 'mixed' : false;
 }
 
 /** The rows an answer to these items changes: every id, and a pair's other leg. */
@@ -54,10 +71,12 @@ export function transferBatchChangedIds(items: readonly Pick<TransferBatchItem, 
  * known-counterparty group); a suggested pair answered "own" is one linked
  * decision, exactly as the per-pair Match made it; a pair answered otherwise is
  * answered leg by leg. The person's answer applies to every row they saw.
+ * A list-only group (entries answered one by one) is never answered whole.
  */
 export function transferBatchDecisions(
-  items: readonly Pick<TransferBatchItem, 'ids' | 'counterpartId' | 'kind'>[], answer: TransferAnswer,
+  items: readonly Pick<TransferBatchItem, 'ids' | 'counterpartId' | 'kind' | 'listOnly'>[], answer: TransferAnswer,
 ): TransferDecisionBatchRequest['decisions'] {
+  if (items.some(item => item.listOnly)) throw new Error('These entries are answered one at a time');
   return items.flatMap(item => {
     if (item.kind === 'pair' && item.counterpartId) {
       return answer === 'own'
@@ -83,27 +102,75 @@ export function transferRowsChanged(
   });
 }
 
+/** Assessments that name one specific other side worth suggesting. */
+const SUGGESTED_STATUSES: ReadonlySet<TransferAssessment['status']> = new Set(['likely-own', 'likely-card-repayment']);
+
+/** A pending group as the Transfers page offers it. */
+export type TransferAnswerGroup = TransferReviewGroup & {
+  /**
+   * One answer may be given to every entry at once: the reconciler marked the
+   * group bulk-eligible (one known other side), or every entry is a suggestion
+   * whose matching entry sits on the same one other account. A catch-all group
+   * (ambiguous, ownership unknown, "Account → ?") is answered entry by entry.
+   */
+  whole: boolean;
+  /**
+   * Entries whose id is carried by more than one stored row. Nothing can tell
+   * those observations apart, so the store refuses any answer to them: they
+   * are shown, read-only, and never ticked or saved.
+   */
+  duplicate?: true;
+};
+
+/** True when every entry's suggested other side exists and is on the same one account. */
+function sharesOneSuggestion(ids: readonly string[], assessments: ReadonlyMap<string, TransferAssessment>,
+  rowsById: ReadonlyMap<string, Transaction>): boolean {
+  const accounts = new Set<string>();
+  for (const id of ids) {
+    const assessment = assessments.get(id);
+    const other = assessment?.counterpartId && SUGGESTED_STATUSES.has(assessment.status)
+      ? rowsById.get(assessment.counterpartId) : undefined;
+    if (!other || other.id === id) return false;
+    accounts.add(other.accountId);
+  }
+  return accounts.size === 1;
+}
+
 /**
  * The groups the Transfers list shows as one route with an "N entries" count:
  * the reconciler's pending groups, keeping only rows still waiting for an
  * answer (pending, no decision, not a leg of a suggested pair, which is asked
  * about as its own route). A group stays when it still holds several entries,
  * or when one of its entries is not listed anywhere else on the page (a likely
- * card repayment, an archived account, a duplicate observation), so every
- * queued entry can be reached from the page.
+ * card repayment, an archived account), so every queued entry can be reached
+ * from the page. Duplicate-id observations are split off into their own
+ * read-only group.
  */
-export function transferAnswerGroups({ groups, pendingIds, rowsById, excludeIds, listedIds }: {
+export function transferAnswerGroups({ groups, pendingIds, rowsById, excludeIds, listedIds,
+  assessments = new Map(), duplicateIds = new Set() }: {
   groups: readonly TransferReviewGroup[];
   pendingIds: ReadonlySet<string>;
   rowsById: ReadonlyMap<string, Transaction>;
   excludeIds: ReadonlySet<string>;
   listedIds: ReadonlySet<string>;
-}): TransferReviewGroup[] {
-  const result: TransferReviewGroup[] = [];
+  /** The reconciler's assessments, to tell a group with one shared suggestion from a catch-all. */
+  assessments?: ReadonlyMap<string, TransferAssessment>;
+  /** Ids carried by more than one stored row (duplicateTransactionIds). */
+  duplicateIds?: ReadonlySet<string>;
+}): TransferAnswerGroup[] {
+  const result: TransferAnswerGroup[] = [];
   for (const group of groups) {
-    const transactionIds = group.transactionIds.filter(id => pendingIds.has(id) && !excludeIds.has(id) &&
+    const waiting = group.transactionIds.filter(id => pendingIds.has(id) && !excludeIds.has(id) &&
       !!rowsById.get(id) && !rowsById.get(id)!.transferDecision);
-    if (transactionIds.length > 1 || transactionIds.some(id => !listedIds.has(id))) result.push({ ...group, transactionIds });
+    const transactionIds = waiting.filter(id => !duplicateIds.has(id));
+    const duplicates = waiting.filter(id => duplicateIds.has(id));
+    if (transactionIds.length > 1 || transactionIds.some(id => !listedIds.has(id))) {
+      result.push({ ...group, transactionIds,
+        whole: group.bulkEligible || (SUGGESTED_STATUSES.has(group.status) && sharesOneSuggestion(transactionIds, assessments, rowsById)) });
+    }
+    if (duplicates.length) {
+      result.push({ ...group, id: `${group.id}:duplicate`, transactionIds: duplicates, bulkEligible: false, whole: false, duplicate: true });
+    }
   }
   return result;
 }

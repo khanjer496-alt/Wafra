@@ -6,7 +6,7 @@ import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
 import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, cachedTransferReconciliationForState } from '@/lib/ledger';
 import { canMarkOwnTransfer, isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
-import { currentAnswer, ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
+import { currentAnswer, ownCandidates, transferFingerprintsOf, type TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { useTransferAnswer } from '@/hooks/use-transfer-answer';
 import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
@@ -67,6 +67,12 @@ interface EntryDetailSheetProps {
    * Transactions and Home are ink.
    */
   band?: BandId;
+  /**
+   * The screen's own transfer answer hook (Transfers passes its one), so the
+   * screen knows while this sheet saves or clears an answer and holds its
+   * controls. Without it the sheet uses its own.
+   */
+  transferAnswers?: Pick<ReturnType<typeof useTransferAnswer>, 'answer' | 'undo' | 'busy'>;
 }
 
 /**
@@ -76,7 +82,7 @@ interface EntryDetailSheetProps {
  * row — "what actually was this?" — was answered by six input boxes. Reading
  * comes first now; editing is one tap away.
  */
-export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment: passedAssessment, initialMode = 'read', startWithAccountPicker = false, band: bandId = 'home' }: EntryDetailSheetProps) {
+export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment: passedAssessment, initialMode = 'read', startWithAccountPicker = false, band: bandId = 'home', transferAnswers }: EntryDetailSheetProps) {
   const { getCategory, categoryLabel, expenseCategories, incomeCategories } = useCategoryCatalog();
   const theme = useTheme();
   const band = useBand(bandId);
@@ -130,7 +136,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const [categoryPicking, setCategoryPicking] = useState(false);
   const [pickedCategory, setPickedCategory] = useState<CategoryId>('other');
   // The "What is this?" answer. Like every hook here it runs before the early return below.
-  const { answer, undo, busy } = useTransferAnswer();
+  const ownAnswers = useTransferAnswer();
+  const { answer, undo, busy } = transferAnswers ?? ownAnswers;
   const activityWords = transferActivityCopy(language);
   const answerWords = activityWords.answers;
   const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
@@ -218,7 +225,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const linkedTo = transferAssessment?.status === 'confirmed-own' && transferAssessment.counterpartId
     ? rowsById.get(transferAssessment.counterpartId) : undefined;
   // The likely other side while it is still a suggestion: a matching entry on another of the person's
-  // accounts or cards (same amount, close in time), shown under "my own account" as where it would link.
+  // accounts or cards (same amount, close in time), shown under "my own account" as "Looks like your …".
+  // Only a likely own-account pair is linked when answered; a likely card repayment is saved as own
+  // without a link (ownCandidates offers nothing for it), so neither is ever called "Linked to".
   const suggestedOther = !answered && transferAssessment?.counterpartId &&
     (transferAssessment.status === 'likely-own' || transferAssessment.status === 'likely-card-repayment')
     ? rowsById.get(transferAssessment.counterpartId) : undefined;
@@ -576,7 +585,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         </View> : <TransferAnswerChoices incoming={income} value={answered} layout="radios" palette={band} disabled={busy}
           linkedLabel={linkedTo ? activityWords.route.linked(accountLabelFor(linkedTo.accountId)) : undefined}
           suggestion={suggestedOther && suggestedOther.accountId !== transaction.accountId
-            ? activityWords.route.linked(accountLabelFor(suggestedOther.accountId)) : undefined}
+            ? answerWords.looksLike(accountLabelFor(suggestedOther.accountId)) : undefined}
           suggestionDetail={suggestedOther ? [suggestedOther.title, fullDateTime(suggestedOther),
             `${ledgerCurrencyCode()} ${formatAmount(suggestedOther.amountFils, { decimals: true })}`].join(' · ') : undefined}
           onChange={(next) => {
@@ -587,7 +596,13 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             returns to waiting for an answer (both sides of a link are cleared). */}
         {!picking && transaction.transferDecision ? <Pressable testID="entry-transfer-clear" accessibilityRole="button"
           accessibilityLabel={answerWords.clear} disabled={busy}
-          onPress={() => { void undo(transaction.id, transaction.transferDecision?.counterpartId).then(onClose); }}
+          onPress={() => {
+            // Clear exactly the answer shown here: if either row has changed since, nothing is cleared.
+            const counterpartId = transaction.transferDecision?.counterpartId;
+            const shown = new Map([[transaction.id, transaction], ...(counterpartId && rowsById.get(counterpartId)
+              ? [[counterpartId, rowsById.get(counterpartId)!] as const] : [])]);
+            void undo(transaction.id, counterpartId, transferFingerprintsOf([...shown.keys()], shown)).then(onClose);
+          }}
           style={({ pressed }) => [styles.clearAnswer, { opacity: busy ? 0.6 : pressed ? 0.7 : 1 }]}>
           <ThemedText type="small" style={{ color: band.tint }}>{answerWords.clear}</ThemedText>
         </Pressable> : null}

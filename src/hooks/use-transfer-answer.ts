@@ -3,7 +3,8 @@ import { useCallback, useRef, useState } from 'react';
 import { useToast } from '@/components/ui/toast';
 import { useLanguage } from '@/hooks/use-language';
 import { useStoreActions } from '@/lib/store';
-import { buildTransferAnswer, buildTransferUndo, buildTransferUndoMany, type TransferAnswer } from '@/lib/transfer-answer';
+import { buildTransferAnswer, buildTransferUndo, buildTransferUndoMany, isStaleTransferRejection, transferAnswerMoved,
+  transferFingerprintsOf, type TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { transferFingerprint } from '@/lib/transfer-reconciliation';
 import type { Transaction } from '@/lib/types';
@@ -16,10 +17,7 @@ export type TransferAnswerResult = 'saved' | 'unsaved' | 'changed' | 'failed' | 
 
 type Outcome = Exclude<TransferAnswerResult, 'busy'>;
 
-/** The store refuses a stale answer with these messages; the person sees "changed", not "failed". */
-const STALE_MESSAGES = ['Transfer review is out of date', 'Transfer review changed; open it again'];
-
-function failureDetails(failure: unknown): { code?: unknown; message?: unknown; expectedFingerprints?: unknown } {
+function failureDetails(failure: unknown): { code?: unknown; expectedFingerprints?: unknown } {
   return typeof failure === 'object' && failure !== null ? failure : {};
 }
 
@@ -51,10 +49,9 @@ export function useTransferAnswer() {
       await save();
       return 'saved';
     } catch (failure) {
-      const { code, message, expectedFingerprints } = failureDetails(failure);
-      if (code !== 'transfer-durability') {
-        return typeof message === 'string' && STALE_MESSAGES.includes(message) ? 'changed' : 'failed';
-      }
+      const { code, expectedFingerprints } = failureDetails(failure);
+      // The store refuses a stale answer; the person sees "changed", not "failed".
+      if (code !== 'transfer-durability') return isStaleTransferRejection(failure) ? 'changed' : 'failed';
       const reported = postDecisionFingerprints(expectedFingerprints, changedIds);
       // Without verifiable fingerprints the write cannot be retried safely; the answer stays in memory.
       if (!reported) return 'unsaved';
@@ -72,7 +69,20 @@ export function useTransferAnswer() {
     }
   }, [ensureDurable, getStateGeneration, getStateSnapshot]);
 
-  const undo = useCallback(async (id: string, counterpartId?: string) => {
+  const report = useCallback((outcome: Outcome) => {
+    toast.show(outcome === 'saved' ? words.undone : outcome === 'unsaved' ? words.unsaved
+      : outcome === 'changed' ? words.changed : words.failed,
+    { tone: outcome === 'saved' ? 'success' : outcome === 'unsaved' ? 'warning' : 'error' });
+  }, [toast, words]);
+
+  /**
+   * Take one answer back (the toast's Undo, or Clear my answer). `expected` is
+   * what the rows looked like when the answer was saved or shown: if the entry
+   * has changed since (a newer answer, an edit), nothing is cleared and the
+   * person is told it changed. The other side of a link is cleared only while
+   * its decision still names this entry.
+   */
+  const undo = useCallback(async (id: string, counterpartId?: string, expected?: Readonly<Record<string, string>>) => {
     if (saving.current) {
       toast.show(words.failed, { tone: 'error' });
       return;
@@ -81,7 +91,8 @@ export function useTransferAnswer() {
     // counterpart that no longer exists has nothing left to clear.
     const rows = new Map(getStateSnapshot().transactions.map(entry => [entry.id, entry]));
     const row = rows.get(id);
-    if (!row) {
+    const checked = expected ? Object.fromEntries(Object.entries(expected).filter(([key]) => key === id || rows.has(key))) : {};
+    if (!row || transferAnswerMoved(checked, rows)) {
       toast.show(words.changed, { tone: 'error' });
       return;
     }
@@ -90,47 +101,43 @@ export function useTransferAnswer() {
     const changedIds = request.decisions.map(decision => decision.ids[0]);
     saving.current = true; setBusy(true);
     try {
-      const outcome = await commit(() => counterpart
+      report(await commit(() => changedIds.length > 1
         ? resolveTransferBatch(request)
         : resolveTransfers({ ids: [id], ownership: null, expectedFingerprints: request.expectedFingerprints,
           expectedGeneration: request.expectedGeneration }),
-      request.expectedGeneration, changedIds);
-      toast.show(outcome === 'saved' ? words.undone : outcome === 'unsaved' ? words.unsaved
-        : outcome === 'changed' ? words.changed : words.failed,
-      { tone: outcome === 'saved' ? 'success' : outcome === 'unsaved' ? 'warning' : 'error' });
+      request.expectedGeneration, changedIds));
     } finally {
       saving.current = false; setBusy(false);
     }
-  }, [commit, getStateGeneration, getStateSnapshot, resolveTransferBatch, resolveTransfers, toast, words]);
+  }, [commit, getStateGeneration, getStateSnapshot, report, resolveTransferBatch, resolveTransfers, toast, words]);
 
   /**
    * Undo for an answer saved to several rows at once (a group or a selection
    * on the Transfers page). Each row is cleared on its own, from the rows as
-   * they are now; a row that has gone since means the ledger changed.
+   * they are now; a row that has gone since, or (with `expected`, the rows as
+   * the save left them) one answered or edited since, means the ledger changed
+   * and nothing is cleared.
    */
-  const undoMany = useCallback(async (ids: readonly string[]) => {
+  const undoMany = useCallback(async (ids: readonly string[], expected?: Readonly<Record<string, string>>) => {
     if (saving.current) {
       toast.show(words.failed, { tone: 'error' });
       return;
     }
     const rows = new Map(getStateSnapshot().transactions.map(entry => [entry.id, entry]));
     const current = ids.map(id => rows.get(id));
-    if (!current.length || current.some(row => !row)) {
+    if (!current.length || current.some(row => !row) || (expected && transferAnswerMoved(expected, rows))) {
       toast.show(words.changed, { tone: 'error' });
       return;
     }
     const request = buildTransferUndoMany({ rows: current as Transaction[], generation: getStateGeneration() });
     saving.current = true; setBusy(true);
     try {
-      const outcome = await commit(() => resolveTransferBatch(request), request.expectedGeneration,
-        request.decisions.map(decision => decision.ids[0]));
-      toast.show(outcome === 'saved' ? words.undone : outcome === 'unsaved' ? words.unsaved
-        : outcome === 'changed' ? words.changed : words.failed,
-      { tone: outcome === 'saved' ? 'success' : outcome === 'unsaved' ? 'warning' : 'error' });
+      report(await commit(() => resolveTransferBatch(request), request.expectedGeneration,
+        request.decisions.map(decision => decision.ids[0])));
     } finally {
       saving.current = false; setBusy(false);
     }
-  }, [commit, getStateGeneration, getStateSnapshot, resolveTransferBatch, toast, words]);
+  }, [commit, getStateGeneration, getStateSnapshot, report, resolveTransferBatch, toast, words]);
 
   const answer = useCallback(async ({ transaction, answer: choice, counterpart, label }: {
     transaction: Transaction; answer: TransferAnswer; counterpart?: Transaction; label: string;
@@ -148,10 +155,12 @@ export function useTransferAnswer() {
     }
     saving.current = true; setBusy(true);
     try {
-      const outcome = await commit(() => resolveTransfers(request), request.expectedGeneration,
-        [transaction.id, ...(request.counterpartId ? [request.counterpartId] : [])]);
+      const changedIds = [transaction.id, ...(request.counterpartId ? [request.counterpartId] : [])];
+      const outcome = await commit(() => resolveTransfers(request), request.expectedGeneration, changedIds);
       if (outcome === 'saved' || outcome === 'unsaved') {
-        const undoAction = { label: words.undo, onPress: () => { void undo(transaction.id, request.counterpartId); } };
+        // The rows as this answer left them: Undo clears exactly this answer, never a newer one.
+        const after = transferFingerprintsOf(changedIds, new Map(getStateSnapshot().transactions.map(row => [row.id, row])));
+        const undoAction = { label: words.undo, onPress: () => { void undo(transaction.id, request.counterpartId, after); } };
         toast.show(outcome === 'saved' ? `${words.saved} · ${label}` : words.unsaved,
           { tone: outcome === 'saved' ? 'success' : 'warning', actions: [undoAction] });
       } else {
@@ -163,5 +172,8 @@ export function useTransferAnswer() {
     }
   }, [commit, getStateGeneration, getStateSnapshot, resolveTransfers, toast, undo, words]);
 
-  return { answer, undo, undoMany, busy };
+  /** True while this hook is writing (an answer, an Undo or a Clear), before React re-renders. */
+  const pending = useCallback(() => saving.current, []);
+
+  return { answer, undo, undoMany, busy, pending };
 }

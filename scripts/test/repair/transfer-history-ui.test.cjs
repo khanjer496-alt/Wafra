@@ -115,6 +115,14 @@ for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neu
   // The queued duplicate observation is still reachable: it waits as a group row the card cannot ask about.
   const groups = h.records.filter(item => item.kind === 'group');
   assert.deepEqual(Array.from(groups, item => Array.from(item.group.ids)), [['twice']]);
+  // An id stored twice cannot be answered (the store refuses it): the row says why and is never pressed or ticked.
+  assert.equal(groups[0].group.blocked, h.words.group.duplicate);
+  assert.equal(groups[0].group.whole, false);
+  const blocked = h.items.find(entry => entry.item.kind === 'group').tree;
+  const blockedRow = walk(blocked).find(node => node.props?.testID === `transfer-group-${groups[0].group.key}`);
+  assert.equal(blockedRow.type, 'View', 'read-only, not a button');
+  assert.ok(text(blocked).includes(h.words.group.duplicate));
+  assert.ok(blockedRow.props.accessibilityLabel.includes(h.words.group.duplicate));
   assert.equal(h.records[0].kind, 'group', 'what waits for an answer comes first');
   assert.deepEqual(Array.from(h.records.filter(item => item.kind === 'header'), item => item.title), [h.words.listTitle],
     'the period heading sits above the period\'s transfers');
@@ -137,6 +145,7 @@ for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neu
   // The question card lists exactly the queued rows, not the generic unknown.
   const card = walk(h.list.props.ListHeaderComponent).find(node => node.props?.testID === 'transfer-question-card');
   assert.ok(card, 'a queued transfer shows the question card');
-  assert.ok(text(card).includes(h.words.card.title(1)), 'one queued row, one question');
-  assert.ok(text(card).includes(h.words.card.step(1, 1)));
+  // The title counts everything waiting: the one question and the duplicate observation it cannot ask.
+  assert.ok(text(card).includes(h.words.card.title(2)), 'one queued row plus one it cannot ask');
+  assert.ok(!text(card).includes(h.words.card.step(1, 1)), 'no step while the card cannot walk them all');
 });
