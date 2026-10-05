@@ -88,13 +88,3 @@ export function accountsBandCounts(accounts: readonly Pick<Account, 'archived' |
 export function cardUsageStatus(usage: Pick<CardUsage, 'usedFils' | 'limitFils'>): LimitStatus {
   return limitStatus(usage.usedFils, usage.limitFils);
 }
-
-/** Ring geometry for a goal: the arc never runs past a full turn and never goes negative. */
-export function goalRingGeometry(size: number, stroke: number, ratio: number): {
-  radius: number; circumference: number; dashOffset: number; drawn: boolean;
-} {
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const clamped = Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : 0;
-  return { radius, circumference, dashOffset: circumference * (1 - clamped), drawn: clamped > 0 };
-}

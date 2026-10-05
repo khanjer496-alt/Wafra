@@ -4,6 +4,7 @@ import { useRouter } from '@/hooks/use-app-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
+  Animated,
   findNodeHandle,
   Platform,
   Pressable,
@@ -23,6 +24,8 @@ import { Icon } from '@/components/ui/icon';
 import { AmountKeypad, KeypadAmountDisplay } from '@/components/ui/amount-keypad';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { CategoryChips } from '@/components/ui/category-chips';
+import { CoinToken } from '@/components/ui/coins/coin-token';
+import { nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { LedgerCurrencySheet, suggestedLedgerCurrency } from '@/components/ledger-currency-sheet';
@@ -77,6 +80,9 @@ const CHIP_SCROLL = {
 
 /** Quick dates offered on a manual entry, in days before today. */
 const DATE_OFFSETS = ['0', '1', '2', '3'] as const;
+/** The saved-expense coin: its size and how long it takes to fall into Save and fade. */
+const SAVE_COIN = 16;
+const SAVE_COIN_MS = 360;
 
 const isApplePaySource = (item: ReviewEntry): boolean =>
   item.channel === 'push' && /^apple_pay_review_source_[a-f0-9]{32}$/.test(item.sourceKey);
@@ -233,6 +239,11 @@ export default function AddTransactionScreen() {
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [advisedCategory, setAdvisedCategory] = useState<CategoryId | null>(null);
   const reducedMotion = useReducedMotion();
+  // A saved expense drops a coin into the Save button as the sheet closes (SaveCoin).
+  // 1 is "landed": the coin is hidden until a save succeeds.
+  const coinDrop = useAnimatedNumber(1);
+  const coinRun = useRef<Animated.CompositeAnimation | null>(null);
+  useEffect(() => () => coinRun.current?.stop(), []);
   const manualEntry = !reviewItem;
   informationRouteId.current = reviewId;
   useEffect(() => {
@@ -468,6 +479,20 @@ export default function AddTransactionScreen() {
       : t === 'expense' ? 'groceries' : 'salary');
   };
 
+  /**
+   * Called only after the ledger accepted the expense, just before the sheet
+   * closes; it never waits or holds navigation. The drop runs on the native
+   * driver while the sheet slides away. Nothing under Reduce Motion or a
+   * screen reader, nothing for income.
+   */
+  const dropCoin = () => {
+    if (type !== 'expense' || reducedMotion) return;
+    coinRun.current?.stop();
+    coinDrop.setValue(0);
+    coinRun.current = Animated.timing(coinDrop, { toValue: 1, duration: SAVE_COIN_MS, useNativeDriver: nativeDriver });
+    coinRun.current.start();
+  };
+
   const save = async () => {
     if (!canSave || !accountId || !category) return;
     committed();
@@ -491,6 +516,7 @@ export default function AddTransactionScreen() {
       };
       try {
         await promoteReviewAlert(input);
+        dropCoin();
         toast.show(tUi('reviewAlertAdded'), { tone: 'success' });
         router.back();
       } catch (error) {
@@ -546,6 +572,7 @@ export default function AddTransactionScreen() {
           date,
           source: 'manual',
         });
+        dropCoin();
         router.back();
       } finally {
         setSaving(false);
@@ -561,6 +588,7 @@ export default function AddTransactionScreen() {
       date,
       source: 'manual',
     }, state.ledgerMoney ? undefined : manualMoneySpec ?? undefined);
+    dropCoin();
     router.back();
   };
 
@@ -911,15 +939,18 @@ export default function AddTransactionScreen() {
       contentStyle={styles.content}
       bandContent={manualBand}
       footer={(
-        <EButton
-          palette={band}
-          label={tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
-          onPress={onSavePress}
-          // save() gives the commit haptic itself.
-          haptic="none"
-          disabled={saving || reviewRouteInvalid}
-          testID="add-save"
-        />
+        <View>
+          <EButton
+            palette={band}
+            label={tUi(saving ? 'savingSecurely' : genericItem ? 'genericConfirmAdd' : reviewItem ? 'reviewAlertAdd' : 'saveTransaction')}
+            onPress={onSavePress}
+            // save() gives the commit haptic itself.
+            haptic="none"
+            disabled={saving || reviewRouteInvalid}
+            testID="add-save"
+          />
+          <SaveCoin progress={coinDrop} />
+        </View>
       )}>
       {/* A captured alert asks only what Wafra genuinely does not know. If the
           bank already supplied debit/credit direction, do not make the person
@@ -1284,7 +1315,30 @@ export default function AddTransactionScreen() {
   );
 }
 
+/**
+ * The coin a saved expense drops into the Save button: it falls from above the
+ * button onto its top edge, sinks in and fades. The sheet is already closing,
+ * so it is drawn where it can still be seen (the Save button the person just
+ * pressed) rather than over a category field that may be scrolled away.
+ * Decorative and hidden from assistive tech; the toast and the new row say
+ * what was saved.
+ */
+function SaveCoin({ progress }: { progress: Animated.Value }) {
+  const paint = useMemo(() => ({
+    opacity: progress.interpolate({ inputRange: [0, 0.1, 0.7, 1], outputRange: [0, 1, 1, 0], extrapolate: 'clamp' }),
+    transform: [
+      { translateY: progress.interpolate({ inputRange: [0, 0.7, 1], outputRange: [-34, 0, 6], extrapolate: 'clamp' }) },
+      { scale: progress.interpolate({ inputRange: [0, 0.7, 1], outputRange: [1, 1, 0.55], extrapolate: 'clamp' }) },
+    ],
+  }), [progress]);
+  return <Animated.View testID="add-save-coin" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
+    style={[styles.saveCoin, paint]}>
+    <CoinToken size={SAVE_COIN} />
+  </Animated.View>;
+}
+
 const styles = StyleSheet.create({
+  saveCoin: { position: 'absolute', top: 0, start: 0, end: 0, alignItems: 'center', pointerEvents: 'none' },
   content: {
     gap: Spacing.three + 4,
   },

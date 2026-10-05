@@ -180,6 +180,11 @@ function harness(options = {}) {
   for (const name of ['band-figure', 'stat-tile', 'week-tiles']) {
     dependencies[`@/components/ui/band/${name}`] = load(path.join(root, `src/components/ui/band/${name}.tsx`), dependencies);
   }
+  // Left in budgets' coin stack is decoration hidden from assistive tech; the
+  // count it draws is the real coin arithmetic.
+  dependencies['@/lib/coin-math'] = load(path.join(root, 'src/lib/coin-math.ts'));
+  dependencies['@/components/ui/coins/coin-stack'] = { CoinStack: (props) => ({ type: 'CoinStack', props }) };
+  dependencies['@/components/ui/coins/coin-disc'] = { ghostTone: () => ({}) };
   dependencies['@/components/reference-home-summary'] = load(path.join(root, 'src/components/reference-home-summary.tsx'), dependencies);
   dependencies['@/lib/merchant-spending-copy'] = load(path.join(root, 'src/lib/merchant-spending-copy.ts'));
   const bankIdentity = load(path.join(root, 'src/lib/markets.ts'));

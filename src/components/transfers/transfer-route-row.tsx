@@ -1,7 +1,8 @@
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Icon } from '@/components/ui/icon';
+import type { CoinCue } from '@/components/transfer-coins/coin-cues';
+import { RouteCoinLane } from '@/components/transfer-coins/route-coin';
 import { Money } from '@/components/ui/money';
 import { Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
@@ -48,10 +49,13 @@ function Tag({ tag, label, palette, slate }: { tag: TransferListItem['tag']; lab
 
 const stripDot = (name: string) => name.replace(/\.+$/, '');
 
-export function TransferRouteRow({ item, accountLabel, palette, onPress, first }: {
+export function TransferRouteRow({ item, accountLabel, palette, onPress, first, coin }: {
   item: TransferListItem; accountLabel: (id: string) => string; palette: BandPalette; onPress: () => void; first: boolean;
+  /** When given and fresh, a coin travels this route once (see transfer-coins/coin-cues). */
+  coin?: CoinCue;
 }) {
-  const words = transferActivityCopy(useLanguage());
+  const language = useLanguage();
+  const words = transferActivityCopy(language);
   const large = useLargeTextLayout();
   const slate = useBand('accounts').tint;
   const ledgerMoney = useLedgerMoney();
@@ -73,8 +77,8 @@ export function TransferRouteRow({ item, accountLabel, palette, onPress, first }
       { opacity: pressed ? 0.7 : 1 }]}>
     <View testID={`transfer-route-${item.key}`} style={large ? styles.routeLarge : styles.route}>
       <Chip end={item.from} label={shown(item.from)} palette={palette} large={large} />
-      {/* Icon mirrors the chevron in Arabic itself; stacked, the route reads downward. */}
-      <Icon name={large ? 'arrow-down' : 'chevron-right'} size={14} color={palette.textSecondary} />
+      {/* The line from one end to the other, where a coin travels; stacked, the route reads downward. */}
+      <RouteCoinLane cue={coin} stacked={large} rtl={language === 'ar'} palette={palette} testID={`transfer-lane-${item.key}`} />
       <Chip end={item.to} label={shown(item.to)} palette={palette} large={large} />
       <View style={large ? undefined : styles.amount}>
         <Money fils={item.amountFils} sign={sign} type="smallBold" decimals />

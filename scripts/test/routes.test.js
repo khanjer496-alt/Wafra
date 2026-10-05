@@ -480,7 +480,8 @@ function sources(dir = SRC) {
     // Each commit hangs off a confirmation the screen draws itself, and the
     // one sheet that renders them is handed that same callback.
     const wired = [
-      /onConfirm: \(\) =>\s*markBillPaid\(/,
+      // The paid stamp follows the booking inside the same callback, never before it.
+      /onConfirm: \(\) =>\s*\{?\s*markBillPaid\(/,
       /onConfirm: \(\) =>\s*deleteBill\(/,
       /onConfirm: \(\) =>\s*setNotSubscription\(/,
       /onConfirm: \(\) => \{\s*setSubscriptionCancelled\(/,

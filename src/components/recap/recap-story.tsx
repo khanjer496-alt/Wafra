@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated as CoreAnimated, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -20,6 +20,8 @@ import { EButton } from '@/components/ui/band/e-button';
 import { StatTile } from '@/components/ui/band/stat-tile';
 import { BAND_GUTTER, BandIconButton } from '@/components/ui/band-scaffold';
 import { BankAvatar } from '@/components/ui/bank-avatar';
+import { CoinDisc, ghostTone } from '@/components/ui/coins/coin-disc';
+import { COIN_RISE, COIN_STAGGER, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
 import { GrowBar } from '@/components/ui/grow-bar';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { YourPattern } from '@/components/ui/your-pattern';
@@ -27,8 +29,9 @@ import { EASE, Fonts, Motion, bandPalette, type BandId, type BandPalette } from 
 import { useBandScheme } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { useMotionPreference, useReducedMotion } from '@/hooks/use-reduced-motion';
 import { monthLabel, shiftMonthKey, shortDate, weekdayName } from '@/lib/format';
+import { filledCoins, shareOf } from '@/lib/coin-math';
 import { formatMinorUnits, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { tapped } from '@/lib/haptics';
 import { alignEnd, isRTL, t } from '@/lib/i18n';
@@ -49,6 +52,10 @@ const STORY_NUMERAL_MAX = 1.5;
 /** Strength of the band's text colour per category rank on the share bar. */
 const RANK_OPACITY = [0.92, 0.7, 0.5, 0.36, 0.28] as const;
 const REST_OPACITY = 0.16;
+
+/** The cover's row of coins, and when the first one rises: as the total arrives. */
+const COVER_COINS = 5;
+const COVER_COIN_DELAY = 140;
 
 type SceneKey = 'cover' | 'where' | 'category' | 'account' | 'rhythm' | 'highlight' | 'final';
 
@@ -131,6 +138,70 @@ function TileRow({ children, stacked, testID }: { children: React.ReactNode; sta
   return <View testID={testID} style={[styles.tileRow, stacked && styles.tileRowStacked]}>{children}</View>;
 }
 
+/**
+ * The period's money in as a short row of coins, with the share that went out
+ * drawn in gold and rising in one after another under the cover's title as
+ * the total arrives below it; the rest stay as empty places. No money in, or
+ * nothing spent, and there is no row: the coins only ever stand for a real
+ * share. Decorative: the figures are written and spoken beside it, so the row
+ * is hidden from assistive tech, and Reduce Motion (or a running screen
+ * reader) shows it in place.
+ */
+function CoverCoins({ spendFils, incomeFils, palette, width }: {
+  spendFils: number;
+  incomeFils: number;
+  palette: BandPalette;
+  width: number;
+}) {
+  const motion = useMotionPreference();
+  if (!(incomeFils > 0) || !(spendFils > 0)) return null;
+  const spent = filledCoins(shareOf(spendFils, incomeFils), COVER_COINS);
+  const ghost = ghostTone(palette.band, palette.onBand);
+  return <View testID="recap-cover-coins" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
+    style={styles.coverCoins}>
+    {Array.from({ length: COVER_COINS }, (_, index) => index < spent
+      ? <CoverCoin key={index} index={index} width={width} ready={motion.ready} reducedMotion={motion.reducedMotion} />
+      : <CoinDisc key={index} testID={`recap-cover-ghost-${index}`} width={width} tone={ghost} shine={false} />)}
+  </View>;
+}
+
+function CoverCoin({ index, width, ready, reducedMotion }: { index: number; width: number; ready: boolean; reducedMotion: boolean }) {
+  const rise = useAnimatedNumber(reducedMotion ? 1 : 0);
+  const risen = useRef(false);
+  // Read when the rise starts, not a dependency: the stagger never restarts a coin.
+  const wait = useRef(COVER_COIN_DELAY + index * COIN_STAGGER);
+  useEffect(() => {
+    if (reducedMotion) {
+      risen.current = true;
+      rise.setValue(1);
+      return;
+    }
+    // Hold still until the screen-reader state is known (see use-reduced-motion).
+    if (!ready || risen.current) return;
+    risen.current = true;
+    const move = CoreAnimated.sequence([
+      CoreAnimated.delay(wait.current),
+      CoreAnimated.spring(rise, { toValue: 1, ...COIN_RISE, useNativeDriver: nativeDriver }),
+    ]);
+    move.start();
+    // Interrupted, a coin lands in its place rather than hanging half-risen.
+    return () => {
+      move.stop();
+      rise.setValue(1);
+    };
+  }, [ready, reducedMotion, rise]);
+  const paint = useMemo(() => ({
+    opacity: rise.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, 1, 1], extrapolate: 'clamp' }),
+    transform: [
+      { translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) },
+      { scale: rise.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) },
+    ],
+  }), [rise]);
+  return <CoreAnimated.View testID={`recap-cover-coin-${index}`} style={paint}>
+    <CoinDisc width={width} />
+  </CoreAnimated.View>;
+}
+
 function CoverScene({ snapshot, moneySpec, palette, w, compact, name }: SceneProps & { name: string | null }) {
   const enter = useRecapEntering();
   const large = useLargeTextLayout();
@@ -150,6 +221,8 @@ function CoverScene({ snapshot, moneySpec, palette, w, compact, name }: ScenePro
       <ThemedText accessibilityRole="header" maxFontSizeMultiplier={STORY_TITLE_SMALL_MAX}
         style={[styles.coverTitle, { color: palette.onBand }]}>{w.coverTitle(name, descriptor.label)}</ThemedText>
       <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{shortDate(snapshot.from)} — {shortDate(snapshot.to)}</ThemedText>
+      <CoverCoins spendFils={snapshot.totalSpendFils} incomeFils={snapshot.totalIncomeFils} palette={palette}
+        width={compact || large ? 26 : 32} />
     </View>
     <Animated.View entering={enter(FadeInUp.delay(100).duration(420))} style={styles.coverFigure}>
       <BandFigure testID="recap-spend-total" fils={snapshot.totalSpendFils} moneySpec={moneySpec} palette={palette} size="hero" />
@@ -537,6 +610,7 @@ const styles = StyleSheet.create({
   coverTitle: { fontFamily: Fonts.sansSemi, fontSize: 22, lineHeight: 28, letterSpacing: -0.4 },
   coverTitleLarge: { fontFamily: Fonts.sansSemi, fontSize: 40, lineHeight: 46, letterSpacing: -1.2 },
   coverFigure: { gap: 6 },
+  coverCoins: { flexDirection: 'row', alignItems: 'flex-end', gap: 6, paddingTop: 6 },
   coverLine: { fontFamily: Fonts.sansSemi, fontSize: 26, lineHeight: 31, letterSpacing: -0.6 },
   coverLineCompact: { fontSize: 22, lineHeight: 27 },
   cardTitle: { fontFamily: Fonts.sansSemi, fontSize: 30, lineHeight: 36, letterSpacing: -0.8 },

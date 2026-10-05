@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { CardDetailSheet } from '@/components/card-detail-sheet';
+import { CardStack } from '@/components/card-stack/card-stack';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
@@ -203,6 +204,11 @@ export default function CardsScreen() {
       });
   };
 
+  // The bank a card's row names, and its face in the stack above the rows.
+  const cardLabel = (card: Account) =>
+    card.bankName ?? (card.name.replace(/\s*(?:credit|debit)?\s*card.*$/i, '').trim() || t('card'));
+  const activeCreditCards = useMemo(() => activeCards.filter((c) => c.cardType === 'credit'), [activeCards]);
+
   const cardsNav: BandNav = {
     title: t('cardsTitle'),
     back: () => router.back(),
@@ -237,8 +243,7 @@ export default function CardsScreen() {
         <AccountTile account={card} />
         <View style={styles.rowText}>
           <ThemedText type="small" numberOfLines={largeText ? undefined : 1}>
-            {card.bankName ??
-              (card.name.replace(/\s*(?:credit|debit)?\s*card.*$/i, '').trim() || t('card'))}
+            {cardLabel(card)}
           </ThemedText>
           <ThemedText type="meta" themeColor="textTertiary">
             {isCredit ? t('credit') : t('debit')} ·· {card.last4 ?? '????'}
@@ -299,6 +304,9 @@ export default function CardsScreen() {
           </View>
         )}>
           <Section index={0}>
+            {/* Decorative: which card is which and how much of each limit is
+                used, beside the rows that say it (hidden from assistive tech). */}
+            <CardStack cards={activeCreditCards} palette={band} labelFor={cardLabel} onOpen={setDetail} />
             {activeCards.map((c, i) => renderCard(c, i, activeCards, false))}
             {activeCards.length === 0 && (
               <ThemedText type="default" themeColor="textSecondary">

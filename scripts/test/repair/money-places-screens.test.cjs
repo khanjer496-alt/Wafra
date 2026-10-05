@@ -184,6 +184,7 @@ test('a goal row on Accounts opens the goal screen', () => {
 test('the goal screen shows saved against target, says no money moves, and invents no pace', () => {
   const h = createHarness({ state: { goals } });
   h.deps['expo-router'].useLocalSearchParams = () => ({ id: 'umrah' });
+  h.local('@/components/goals/goal-jar');
   const tree = load(path.join(root, 'src/app/goal.tsx'), h.deps).default();
   const hero = text(byId(tree, 'goal-progress'));
   assert.match(hero, /64%/);

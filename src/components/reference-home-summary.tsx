@@ -5,9 +5,12 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { BandFigure, figureEms } from '@/components/ui/band/band-figure';
+import { ghostTone } from '@/components/ui/coins/coin-disc';
+import { CoinStack } from '@/components/ui/coins/coin-stack';
 import { StatTile, statTileColors } from '@/components/ui/band/stat-tile';
 import { WeekTiles } from '@/components/ui/band/week-tiles';
 import { Fonts, type BandPalette, type Colors } from '@/constants/theme';
+import { filledCoins, shareOf } from '@/lib/coin-math';
 import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
 import type { HomeToday } from '@/lib/home-today';
 
@@ -66,6 +69,11 @@ type BandProps = Props & {
   sections?: React.ReactNode;
 };
 
+/** Coins in Left in budgets' stack, their width, and the gap before the figure. */
+const LEFT_COINS = 8;
+const LEFT_COIN_WIDTH = 22;
+const LEFT_COIN_GAP = 8;
+
 /** Today | Left in budgets as band tiles, then the last seven days as bars. Amounts are the shared ledger figures. */
 function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToday; part?: 'today' | 'week' | 'both' }) {
   const w = copy[p.language === 'ar' ? 'ar' : 'en'];
@@ -92,6 +100,13 @@ function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToda
   const rightWarning = budget !== null && budget.overCount > 0;
   const caveat = budget !== null && p.captureStopped === true;
   const accent = statTileColors(p.band, 'accent');
+  // The budget as a stack of coins beside its figure: gold for the share of
+  // the total still left, the spent places as empty slots in the tile's own
+  // tone. Only a real budget has a stack; Larger Text leaves the figure the
+  // whole tile instead.
+  const coins = budget !== null && budget.limitFils > 0 && !p.largeText
+    ? filledCoins(shareOf(budget.leftFils, budget.limitFils), LEFT_COINS) : null;
+  const coinRoom = coins === null ? 0 : LEFT_COIN_WIDTH + LEFT_COIN_GAP;
   // Full Arabic weekday names only where seven really fit: a column is about
   // 44pt on a 390pt phone, narrower than الخميس in Noto Kufi. Otherwise the
   // initials, with full names always spoken.
@@ -121,8 +136,12 @@ function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToda
         meta={rightMeta} metaTone={rightWarning ? 'strong' : 'normal'}
         accessibilityLabel={[`${rightLabel}, ${money(rightFils)}. ${rightMeta}`, caveat ? w.mayBeHigh : null].filter(Boolean).join('. ')}
         style={p.largeText && styles.tileStacked}>
-        <BandFigure fils={rightFils} moneySpec={p.moneySpec} palette={p.band} size="medium" color={accent.fg}
-          secondaryColor={accent.fgSecondary} fitInset={(p.largeText ? 28 : 200) + (p.figureInset ?? 0)} />
+        <View style={{ paddingEnd: coinRoom }}>
+          <BandFigure fils={rightFils} moneySpec={p.moneySpec} palette={p.band} size="medium" color={accent.fg}
+            secondaryColor={accent.fgSecondary} fitInset={(p.largeText ? 28 : 200) + coinRoom + (p.figureInset ?? 0)} />
+          {coins === null ? null : <CoinStack testID="home-left-coins" total={LEFT_COINS} filled={coins} width={LEFT_COIN_WIDTH}
+            ghost={ghostTone(accent.bg, accent.fg)} style={styles.coinStack} />}
+        </View>
         {caveat ? <ThemedText type="smallBold" style={{ color: accent.fg }} testID="home-left-caveat">{w.mayBeHigh}</ThemedText> : null}
       </StatTile> : null}
     </View> : null}
@@ -336,6 +355,9 @@ const styles = StyleSheet.create({
   tiles: { flexDirection: 'row', gap: 10 },
   tileStacked: { flexBasis: 'auto', flexGrow: 0, alignSelf: 'stretch' },
   offer: { gap: 4 },
+  // The stack sits at the tile's end on the figure's line, rising into the
+  // tile's top padding rather than pushing its label below the Today tile's.
+  coinStack: { position: 'absolute', end: 0, bottom: 2 },
   inlineAction: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   underline: { textDecorationLine: 'underline' },
   weekHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 },

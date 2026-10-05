@@ -31,7 +31,7 @@ test('mark-paid confirmation and expense use the selected occurrence projection'
   const saved = { id: 'plan', title: 'ChatGPT', category: 'software', amountFils: 39900 };
   const state = { bills: [saved], transactions: [], accounts: [{ id: 'bank' }] };
   const now = new Date(2026, 10, 1), liveAccounts = new Set(['bank']), internal = new Set();
-  let confirmation, marked, selected;
+  let confirmation, marked, selected, stamped;
   const onPay = action('onPay', {
     state, now, liveAccounts, internal, todayISO: '2026-11-01',
     billForAgendaOccurrence: (bills, transactions, selection, at, live, transfers) => {
@@ -44,6 +44,8 @@ test('mark-paid confirmation and expense use the selected occurrence projection'
     tf: (key, values) => ({ key, ...values }), t: key => key,
     formatAED: amount => amount, monthKey: date => date.slice(0, 7),
     markBillPaid: (...args) => { marked = args; },
+    // The paid stamp follows the booking; it never stands in for it.
+    setStampAsked: value => { assert.ok(marked, 'booked before the stamp'); stamped = value; },
   });
   onPay('plan', '2026-11-01');
   assert.deepEqual(selected, { id: 'plan', dueISO: '2026-11-01' });
@@ -51,6 +53,8 @@ test('mark-paid confirmation and expense use the selected occurrence projection'
   confirmation.onConfirm();
   assert.equal(marked[1], '2026-11');
   assert.equal(marked[2].amountFils, 8900);
+  assert.equal(stamped.title, 'ChatGPT');
+  assert.equal(stamped.month, '2026-11');
   assert.equal(saved.amountFils, 39900);
 });
 
