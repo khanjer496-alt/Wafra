@@ -6,7 +6,6 @@ import {
   // Core Animated for the paid stamp (paint only, native
   // driver); Reanimated stays the rows' entering animation.
   Animated as CoreAnimated,
-  InteractionManager,
   Platform,
   Pressable,
   StyleSheet,
@@ -57,6 +56,7 @@ import {
   shortDate,
   toISODate,
 } from '@/lib/format';
+import { runAfterFirstFrames, type DeferredWork } from '@/lib/after-first-frames';
 import { historyImportIncomplete } from '@/lib/history-import';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
 import { openAgendaSummary } from '@/lib/money-places-band';
@@ -532,11 +532,11 @@ export default function BillsScreen() {
   useEffect(() => {
     if (Platform.OS !== 'ios' || ledgerEmpty || hasRecurringResult || historyRunning) return;
     let cancelled = false;
-    let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+    let task: DeferredWork | null = null;
     const transactions = state.transactions;
     const notSubscriptions = state.notSubscriptions;
     const delay = setTimeout(() => {
-      task = InteractionManager.runAfterInteractions(() => {
+      task = runAfterFirstFrames(() => {
         // The focused job is already running (or will join this one).
         if (cancelled || focusedRef.current) return;
         const projectionStartedAt = Date.now();
@@ -565,35 +565,31 @@ export default function BillsScreen() {
       (agendaView === 'all' && groupFilter === 'cards')) return;
     let cancelled = false;
     let delay: ReturnType<typeof setTimeout> | null = null;
-    let firstFrame: number | null = null;
-    let secondFrame: number | null = null;
-    let task: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+    let task: DeferredWork | null = null;
     const transactions = state.transactions;
     const notSubscriptions = state.notSubscriptions;
 
     const startProjection = () => {
       if (cancelled) return;
-      task = InteractionManager.runAfterInteractions(() => {
-        firstFrame = requestAnimationFrame(() => {
-          secondFrame = requestAnimationFrame(() => {
-            const projectionStartedAt = Date.now();
-            void detectSubscriptionsCooperatively(
-              transactions,
-              notSubscriptions,
-              recurrenceToday,
-              liveAccounts,
-              internal,
-              () => cancelled,
-            ).then((value) => {
-              recordRuntimeOperation('bills-projection', Date.now() - projectionStartedAt);
-              if (cancelled || value === null) return;
-              startTransition(() => setNativeRecurringResult({
-                value, transactions, notSubscriptions, today: recurrenceToday, liveAccounts, internal,
-              }));
-            });
-          });
+      // Two drawn frames and the foreground lease (after-first-frames.ts),
+      // so the tab's first frames and any entrance are never shared with it.
+      task = runAfterFirstFrames(() => {
+        const projectionStartedAt = Date.now();
+        void detectSubscriptionsCooperatively(
+          transactions,
+          notSubscriptions,
+          recurrenceToday,
+          liveAccounts,
+          internal,
+          () => cancelled,
+        ).then((value) => {
+          recordRuntimeOperation('bills-projection', Date.now() - projectionStartedAt);
+          if (cancelled || value === null) return;
+          startTransition(() => setNativeRecurringResult({
+            value, transactions, notSubscriptions, today: recurrenceToday, liveAccounts, internal,
+          }));
         });
-      });
+      }, { delayMs: 0 });
     };
 
     // Android's first Next 30 days analysis keeps its measured idle grace.
@@ -611,8 +607,6 @@ export default function BillsScreen() {
       cancelled = true;
       if (delay !== null) clearTimeout(delay);
       task?.cancel();
-      if (firstFrame !== null) cancelAnimationFrame(firstFrame);
-      if (secondFrame !== null) cancelAnimationFrame(secondFrame);
     };
   }, [agendaView, groupFilter, recurringFresh, hasRecurringResult, state.transactions, state.notSubscriptions,
     recurrenceToday, liveAccounts, internal]));

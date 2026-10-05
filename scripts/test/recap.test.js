@@ -157,7 +157,7 @@ const routeSource = fs.readFileSync(path.join(root, 'src/app/recap.tsx'), 'utf8'
 const layoutSource = fs.readFileSync(path.join(root, 'src/components/app-root-layout.tsx'), 'utf8');
 
 ok('Home defers recap discovery until after launch interactions',
-  /InteractionManager\.runAfterInteractions[\s\S]{0,700}2_600/.test(homeSource));
+  /runAfterFirstFrames\([\s\S]{0,700}2_600/.test(homeSource));
 ok('Home never runs the full recap projection', !/\bprojectRecap\b/.test(homeSource));
 ok('the W mark, not a fake brand asset, owns the recap entry',
   /RecapLogoTrigger/.test(homeSource) && /brandMark=/.test(homeSource) && /WafraMark/.test(

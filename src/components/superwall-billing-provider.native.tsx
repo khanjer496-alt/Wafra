@@ -6,7 +6,7 @@ import {
   type CustomCallbackResult,
   type SubscriptionStatus,
 } from 'expo-superwall';
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 
 import {
@@ -17,6 +17,7 @@ import {
   type SuperwallBillingStatus,
   type WafraBillingValue,
 } from '@/components/superwall-billing-context';
+import { runAfterFirstFrames } from '@/lib/after-first-frames';
 import {
   entitlementSnapshot,
   syncStoreCaptureEntitlement,
@@ -147,7 +148,10 @@ function onboardingCallbackValue<T>(
   return null;
 }
 
-function SuperwallRuntime({ children }: { children: React.ReactNode }) {
+function SuperwallRuntime({ onValue }: {
+  /** Receives every billing value (null once this runtime unmounts); the provider above hands it to the app. */
+  onValue?: (value: WafraBillingValue | null) => void;
+}) {
   const { state, ensureDurable, setOnboardingProfile, setPro } = useStore();
   // Attribute writes replace the SDK's `user` snapshot even when its values
   // are unchanged. Subscribing to that snapshot and depending on the whole
@@ -462,12 +466,37 @@ function SuperwallRuntime({ children }: { children: React.ReactNode }) {
     subscriptionStatus,
   ]);
 
-  return (
-    <WafraBillingContext.Provider value={value}>
-      {children}
-    </WafraBillingContext.Provider>
-  );
+  useEffect(() => {
+    onValue?.(value);
+  }, [onValue, value]);
+  // Unmounted (Erase everything un-hydrates the store): its last value must
+  // not stand in for the next runtime's.
+  useEffect(() => () => onValue?.(null), [onValue]);
+
+  return null;
 }
+
+/**
+ * Hydrated with a storefront key, before the SDK is configured: what the
+ * runtime itself reports until `isConfigured` (checkout and restore are not
+ * offered yet, nothing is claimed about Pro, the stored Pro flag stands).
+ */
+function configuringBilling(configureNow: () => void): WafraBillingValue {
+  return {
+    ...unavailableBilling,
+    available: true,
+    presentProPaywall: async () => { throw new Error('SUPERWALL_NOT_CONFIGURED'); },
+    presentOnboardingFlow: async () => { throw new Error('SUPERWALL_NOT_CONFIGURED'); },
+    configureNow,
+  };
+}
+
+/**
+ * How long after an onboarded launch's first frames the SDK is configured.
+ * Configuring preloads the paywalls (web views built on the main thread) and
+ * re-checks entitlements; at launch that landed exactly as Home appeared.
+ */
+export const SUPERWALL_CONFIGURE_DELAY_MS = 2_000;
 
 /**
  * Native monetization root. Superwall supplies storefront products, checkout,
@@ -479,6 +508,27 @@ export function SuperwallBillingProvider({ children }: { children: React.ReactNo
   const { state } = useStore();
   const key = platformApiKey();
   const available = state.hydrated && key.length > 0;
+  // First run configures at once (onboarding offers checkout); an onboarded
+  // launch waits until Home has settled. Either way it happens once.
+  const [configure, setConfigure] = useState(false);
+  useEffect(() => {
+    if (!available || configure) return;
+    if (!state.onboarded) {
+      setConfigure(true);
+      return;
+    }
+    const task = runAfterFirstFrames(() => setConfigure(true), { delayMs: SUPERWALL_CONFIGURE_DELAY_MS });
+    return () => task.cancel();
+  }, [available, configure, state.onboarded]);
+  const [runtimeValue, setRuntimeValue] = useState<WafraBillingValue | null>(null);
+  useEffect(() => {
+    if (!available) setRuntimeValue(null);
+  }, [available]);
+  const configuring = useMemo(() => configuringBilling(() => setConfigure(true)), []);
+  const value = !available ? unavailableBilling : runtimeValue ?? configuring;
+  const onConfigurationError = useCallback((error: Error) => {
+    if (__DEV__) console.warn('[Superwall] configuration failed', error.message);
+  }, []);
   const options = useMemo(() => ({
     localeIdentifier: localeIdentifier(state.language, state.marketId),
     eventTrackingBehavior: state.privateMode ? 'none' as const : 'all' as const,
@@ -489,23 +539,29 @@ export function SuperwallBillingProvider({ children }: { children: React.ReactNo
     },
   }), [state.language, state.marketId, state.privateMode]);
 
+  /*
+    ONE tree shape for the app below, before and after hydration and before
+    and after the SDK is configured. The app used to sit inside
+    SuperwallProvider/SuperwallRuntime once `available` turned true and inside
+    a bare context provider before, so hydration changed the element type at
+    its position and React remounted everything under it (the router, the
+    lock, onboarding, toasts) exactly as Home appeared. The SDK now sits beside
+    the app and publishes its billing value up; only the value changes.
+  */
   return (
     <>
       <LocalCaptureLeaseSync />
-      {available ? (
+      {available && configure ? (
         <SuperwallProvider
           apiKeys={{ ios: IOS_API_KEY, android: ANDROID_API_KEY }}
           options={options}
-          onConfigurationError={(error) => {
-            if (__DEV__) console.warn('[Superwall] configuration failed', error.message);
-          }}>
-          <SuperwallRuntime>{children}</SuperwallRuntime>
+          onConfigurationError={onConfigurationError}>
+          <SuperwallRuntime onValue={setRuntimeValue} />
         </SuperwallProvider>
-      ) : (
-        <WafraBillingContext.Provider value={unavailableBilling}>
-          {children}
-        </WafraBillingContext.Provider>
-      )}
+      ) : null}
+      <WafraBillingContext.Provider value={value}>
+        {children}
+      </WafraBillingContext.Provider>
     </>
   );
 }

@@ -25,7 +25,9 @@ import { marketCurrencyCode } from '@/lib/markets';
 import '@/lib/background-relay';
 import '@/lib/android-live-background';
 import { installFeedbackTransport } from '@/lib/feedback-transport';
+import { loadHomeWidgetPreferences } from '@/lib/home-widgets';
 import { markLaunchPhase } from '@/lib/launch-performance';
+import { holdLaunchSplash, releaseLaunchSplash } from '@/lib/launch-splash';
 import { localSemanticBackgroundCancellation, setLocalSemanticAppActive } from '@/lib/local-semantic-background-policy';
 import { waitForForegroundHistoryIdle } from '@/lib/foreground-history-priority';
 import { hydrateLocalSemanticInboxShadow } from '@/lib/local-semantic-inbox-shadow';
@@ -102,6 +104,18 @@ function Direction({ children }: { children: React.ReactNode }) {
       listener.remove();
     };
   }, [state.hydrated]);
+  // The splash gives way over the first screen that has the ledger (Home,
+  // onboarding, storage recovery or the lock): one frame after the hydrated
+  // tree commits, it has laid out. Never over the "Loading ledger" skeleton.
+  useEffect(() => {
+    if (!state.hydrated) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      releaseLaunchSplash();
+      return;
+    }
+    const frame = requestAnimationFrame(() => releaseLaunchSplash());
+    return () => cancelAnimationFrame(frame);
+  }, [state.hydrated]);
   const language = state.language === 'ar' ? 'ar' : 'en';
   const moneySpec = state.ledgerMoney ?? ledgerMoneySpec(marketCurrencyCode(state.marketId));
   return (
@@ -155,12 +169,20 @@ export default function RootLayout() {
 
   useEffect(() => startRuntimePerformanceMonitor(), []);
 
+  // A new launch (or Android recreating the activity) keeps the splash until
+  // the ledger's first screen is laid out, with a fallback (launch-splash.ts).
+  useEffect(() => holdLaunchSplash(), []);
+
   // Restore lightweight counters at launch. Optional native model preparation
   // waits for fonts, ledger hydration and an idle navigation window in Direction.
   useEffect(() => {
     if (Platform.OS === 'web') return;
     void hydrateLocalSemanticShadow().catch(() => undefined);
     void hydrateLocalSemanticInboxShadow().catch(() => undefined);
+    // Home's saved layout is read beside hydration, so Home's first render
+    // already has it (peekHomeWidgetPreferences) instead of laying out the
+    // default and then re-laying out and remounting its coin sections.
+    void loadHomeWidgetPreferences().catch(() => undefined);
   }, []);
 
   // Ask the OS about Reduce Motion and the screen reader once, here, while
@@ -171,10 +193,11 @@ export default function RootLayout() {
   useEffect(() => startMotionPreference(), []);
 
   useEffect(() => {
-    if (ready) {
-      markLaunchPhase('fonts-ready');
-      SplashScreen.hideAsync().catch(() => {});
-    }
+    if (!ready) return;
+    markLaunchPhase('fonts-ready');
+    // The web has no native splash to keep; elsewhere Direction releases it
+    // once the ledger's first screen has laid out.
+    if (Platform.OS === 'web') releaseLaunchSplash();
   }, [ready]);
 
   const navTheme = {
@@ -201,8 +224,8 @@ export default function RootLayout() {
     instead, so the ledger is often ready by the first painted frame.
 
     Nothing renders early: with `ready` false the provider's children are
-    null, so no screen can paint against a half-hydrated ledger, and the
-    splash still hides on `fonts-ready` exactly as before.
+    null, so no screen can paint against a half-hydrated ledger. The splash
+    now stays until that first hydrated screen has laid out (Direction).
   */
   return (
     <StoreProvider>

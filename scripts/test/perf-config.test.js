@@ -1071,10 +1071,11 @@ function bodyOf(source, header) {
     'opening Settings to change a toggle must stay independent of transaction count');
 
   // The clean-up rows (and their counts) moved to Data and help. The counts
-  // are full-history scans, so they run only after the screen's interactions
-  // settle, with the static descriptions shown until then.
+  // are full-history scans, so they run only after the screen's first frames
+  // (runAfterFirstFrames: InteractionManager is a setImmediate in RN 0.83),
+  // with the static descriptions shown until then.
   const settingsData = stripComments(read('src/app/settings-data.tsx'));
-  const deferred = settingsData.match(/InteractionManager\.runAfterInteractions\(\(\) => \{[\s\S]*?\n\s*\}\);/)?.[0] ?? '';
+  const deferred = settingsData.match(/runAfterFirstFrames\(\(\) => \{[\s\S]*?\n\s*\}\);/)?.[0] ?? '';
   ok('Data and help defers its clean-up counts until after first paint',
     /uncategorisedMerchants\(/.test(deferred) && /unreadFormatCount\(/.test(deferred) &&
       (settingsData.match(/uncategorisedMerchants\(|unreadFormatCount\(/g) ?? []).length === 2 &&
@@ -1104,7 +1105,7 @@ function bodyOf(source, header) {
     'setNow(new Date()) runs on every foreground resume; the Date object must not make Home scan the whole ledger twice when only the clock changed');
 
   ok('Home defers optional historical insight work until after the first usable frame',
-    /InteractionManager\.runAfterInteractions/.test(home) &&
+    /runAfterFirstFrames\(/.test(home) && !/InteractionManager/.test(home) &&
       /!homeAnalysisReady \|\| !insightWidgetVisible/.test(home) &&
       /projectDashboardInsight\(state, period, now\)/.test(home) &&
       !/const homeInsight = useMemo/.test(home) &&

@@ -6,11 +6,12 @@ import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { BandFigure, figureEms } from '@/components/ui/band/band-figure';
 import { ghostTone, type CoinTone } from '@/components/ui/coins/coin-disc';
-import { COIN_RISE, COIN_STAGGER, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
+import { COIN_RISE_CURVE, COIN_STAGGER, coinTrack, useCoinClock, useCoinRun, type CoinNode, type CoinRun } from '@/components/ui/coins/coin-motion';
 import { CoinStack } from '@/components/ui/coins/coin-stack';
 import { StatTile, statTileColors } from '@/components/ui/band/stat-tile';
 import { WeekTiles } from '@/components/ui/band/week-tiles';
 import { CoinColors, Fonts, type BandPalette, type Colors } from '@/constants/theme';
+import { useAppActive } from '@/hooks/use-app-active';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { filledCoins, shareOf } from '@/lib/coin-math';
 import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
@@ -60,6 +61,11 @@ type Props = {
   figureInset?: number;
   /** Name the average/budget period when its overview is hidden or farther down. */
   showPeriodContext?: boolean;
+  /**
+   * Home cannot be seen yet (the launch splash, App Lock, the app in the
+   * background): the coins hold their first reveal and land later changes.
+   */
+  motionHold?: boolean;
 };
 
 type BandProps = Props & {
@@ -181,7 +187,7 @@ function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToda
         <BandFigure fils={today.todayFils} moneySpec={p.moneySpec} palette={p.band} size="medium" rolling inlineCurrency
           fitInset={tileInset(0)} />
         {todayCoins > 0 ? <CoinStack testID="home-today-coins" total={todayCoins} filled={todayCoins} width={TODAY_COIN_WIDTH}
-          ghost={ghostTone(todayTile.bg, todayTile.fg)} style={styles.todayCoins} /> : null}
+          ghost={ghostTone(todayTile.bg, todayTile.fg)} hold={p.motionHold} style={styles.todayCoins} /> : null}
       </StatTile>
       {offerBudget ? <StatTile palette={p.band} tone="accent" label={w.leftToSpend} testID="home-left-to-spend"
         style={p.largeText && styles.tileStacked}>
@@ -202,10 +208,10 @@ function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToda
           <BandFigure fils={rightFils} moneySpec={p.moneySpec} palette={p.band} size="medium" color={accent.fg}
             secondaryColor={accent.fgSecondary} inlineCurrency fitInset={tileInset(coinRoom)} />
           {coins === null ? null : <CoinStack testID="home-left-coins" total={LEFT_COINS} filled={coins} width={LEFT_COIN_WIDTH}
-            ghost={ghostTone(accent.bg, accent.fg)} style={styles.coinStack} />}
+            ghost={ghostTone(accent.bg, accent.fg)} hold={p.motionHold} style={styles.coinStack} />}
         </View>
         {averageDays ? <AverageColumns testID="home-average-columns" days={averageDays} rowWidth={averageRow}
-          surface={accent.bg} ink={accent.fg} /> : null}
+          surface={accent.bg} ink={accent.fg} hold={p.motionHold} /> : null}
         {caveat ? <ThemedText type="smallBold" style={{ color: accent.fg }} testID="home-left-caveat">{w.mayBeHigh}</ThemedText> : null}
       </StatTile> : null}
     </View> : null}
@@ -227,75 +233,70 @@ function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToda
  * arrive later (a new day, another period) stand in place. Decorative: the
  * tile writes and speaks the average.
  */
-const AverageColumns = React.memo(function AverageColumns({ days, rowWidth, surface, ink, testID }: {
+const AverageColumns = React.memo(function AverageColumns({ days, rowWidth, surface, ink, hold = false, testID }: {
   days: readonly number[];
   rowWidth: number;
   /** The tile's colour and its text colour, for an empty day's coin. */
   surface: string;
   ink: string;
+  /** Home cannot be seen yet: the first rise waits; it never replays. */
+  hold?: boolean;
   testID?: string;
 }) {
   const motion = useMotionPreference();
+  const active = useAppActive();
+  const live = motion.ready && active && !hold;
   const ghost = useMemo(() => ghostTone(surface, ink), [surface, ink]);
-  const revealed = useRef(false);
-  useEffect(() => { if (motion.ready) revealed.current = true; });
   const coins = useMemo(() => averageColumnCoins(days), [days]);
   const count = coins.length;
   const gap = count > 15 ? 1 : 3;
   const width = Math.max(3, Math.min(12, Math.floor((rowWidth - gap * (count - 1)) / count)));
   const face = Math.max(2, Math.round(width * 0.36));
   const edge = Math.max(2, Math.round(width * 0.24));
-  // A month of columns starts within about a second, not two.
-  const stagger = Math.min(COIN_STAGGER, Math.floor(900 / Math.max(1, count)));
+  // One native-driven clock rises the whole row; each column reads its own window of it.
+  const clock = useCoinClock();
+  const revealed = useRef(false);
+  const rise = useMemo((): { columns: CoinNode[]; held: boolean; run: CoinRun | null } => {
+    // Reduce Motion, or columns that arrive after the row's first rise (a new
+    // day, another period): standing in place.
+    if (motion.reducedMotion || revealed.current) {
+      return { columns: Array.from({ length: count }, () => new Animated.Value(1)), held: false, run: null };
+    }
+    // Below the baseline until the row can be watched.
+    if (!live) return { columns: Array.from({ length: count }, () => new Animated.Value(0)), held: true, run: null };
+    // A month of columns starts within about a second, not two.
+    const stagger = Math.min(COIN_STAGGER, Math.floor(900 / Math.max(1, count)));
+    const run = clock.reserve((count - 1) * stagger + COIN_RISE_CURVE.restMs);
+    return {
+      columns: Array.from({ length: count }, (_, index) => coinTrack(clock.value, run.base, 1,
+        [{ at: index * stagger, from: 0, to: 1, curve: COIN_RISE_CURVE }])),
+      held: false, run,
+    };
+    // `revealed` is read when the row's shape or motion state changes, never as a trigger.
+  }, [clock, count, live, motion.reducedMotion]);
+  useEffect(() => { if (!rise.held) revealed.current = true; }, [rise]);
+  useCoinRun(clock, rise.run, live);
   return <View testID={testID} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
     style={[styles.columns, { gap, height: face + AVERAGE_COLUMN_COINS * edge }]}>
     {coins.map((filled, index) => <CoinColumn key={index} coins={filled} width={width} face={face} edge={edge}
-      tone={filled > 0 ? GOLD_TONE : ghost} delay={index * stagger} appear={!revealed.current}
-      ready={motion.ready} reducedMotion={motion.reducedMotion} testID={testID ? `${testID}-day-${index}` : undefined} />)}
+      tone={filled > 0 ? GOLD_TONE : ghost} rise={rise.columns[index]!}
+      testID={testID ? `${testID}-day-${index}` : undefined} />)}
   </View>;
 });
 
-/** One day's column: a cylinder of `coins` coins (one empty coin for none) that rises from the baseline once. */
-const CoinColumn = React.memo(function CoinColumn({ coins, width, face, edge, tone, delay, appear, ready, reducedMotion, testID }: {
+/** One day's column: a cylinder of `coins` coins (one empty coin for none), raised from the baseline by `rise`. */
+const CoinColumn = React.memo(function CoinColumn({ coins, width, face, edge, tone, rise, testID }: {
   coins: number;
   width: number;
   face: number;
   edge: number;
   tone: CoinTone;
-  delay: number;
-  /** False for a column that arrives after the row's first reveal: it stands in place. */
-  appear: boolean;
-  ready: boolean;
-  reducedMotion: boolean;
+  /** 0 below the baseline, 1 in place (past 1 while its spring overshoots). */
+  rise: CoinNode;
   testID?: string;
 }) {
   const level = Math.max(1, coins);
   const tall = face + level * edge;
-  const rise = useAnimatedNumber(reducedMotion || !appear ? 1 : 0);
-  const shown = useRef(reducedMotion || !appear);
-  // Read when the rise starts: a re-render must not restart a column on its way.
-  const wait = useRef(delay);
-  wait.current = delay;
-  useEffect(() => {
-    if (reducedMotion) {
-      shown.current = true;
-      rise.setValue(1);
-      return;
-    }
-    // Hold still until the screen-reader state is known (see use-reduced-motion).
-    if (!ready || shown.current) return;
-    shown.current = true;
-    const run = Animated.sequence([
-      Animated.delay(wait.current),
-      Animated.spring(rise, { toValue: 1, ...COIN_RISE, useNativeDriver: nativeDriver }),
-    ]);
-    run.start();
-    // The rise runs once: interrupted, the column lands where it belongs.
-    return () => {
-      run.stop();
-      rise.setValue(1);
-    };
-  }, [ready, reducedMotion, rise]);
   // Built once per height: from below the baseline (clipped by the row) up to its place.
   const paint = useMemo(() => ({
     transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [tall + 2, 0] }) }],
@@ -324,7 +325,7 @@ const CoinColumn = React.memo(function CoinColumn({ coins, width, face, edge, to
  * their heights is the net. Money in of zero is an empty stack. Decorative:
  * the figures beside it are written and spoken.
  */
-function FlowStacks({ incomeFils, expenseFils, surface, ink, spent, income, style }: {
+function FlowStacks({ incomeFils, expenseFils, surface, ink, spent, income, hold, style }: {
   incomeFils: number;
   expenseFils: number;
   /** The surface the stacks stand on and its text colour, for the empty places. */
@@ -333,6 +334,7 @@ function FlowStacks({ incomeFils, expenseFils, surface, ink, spent, income, styl
   /** Each stack's name, as the card already writes it, in its figure's colour. */
   spent: { label: string; color: string };
   income: { label: string; color: string };
+  hold?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
   const coins = flowStackCoins(incomeFils, expenseFils);
@@ -342,7 +344,7 @@ function FlowStacks({ incomeFils, expenseFils, surface, ink, spent, income, styl
     style={[styles.flowCoins, style]}>
     {([['spent', coins.spent, spent], ['in', coins.income, income]] as const).map(([id, filled, name]) =>
       <View key={id} style={styles.flowColumn}>
-        <CoinStack testID={`home-flow-coins-${id}`} total={FLOW_COINS} filled={filled} width={FLOW_COIN_WIDTH} ghost={ghost} />
+        <CoinStack testID={`home-flow-coins-${id}`} total={FLOW_COINS} filled={filled} width={FLOW_COIN_WIDTH} ghost={ghost} hold={hold} />
         <ThemedText testID={`home-flow-coins-${id}-label`} maxFontSizeMultiplier={1.2} numberOfLines={1}
           style={[styles.flowLabel, { color: name.color }]}>{name.label}</ThemedText>
       </View>)}
@@ -473,7 +475,7 @@ function MonthLine(p: Props & { band: BandPalette }) {
               <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{cell.label}</ThemedText>
               {filled === null ? null : <View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
                 <CoinStack testID={cell.id === 'home-spending-total' ? 'home-flow-coins-spent' : 'home-flow-coins-in'}
-                  total={FLOW_COINS} filled={filled} width={FLOW_COIN_WIDTH} ghost={flowGhost} />
+                  total={FLOW_COINS} filled={filled} width={FLOW_COIN_WIDTH} ghost={flowGhost} hold={p.motionHold} />
               </View>}
             </View>
             <ThemedText style={[styles.lineValue, { color: cell.color, fontSize: size, lineHeight: Math.round(size * 1.3) }]}>{cell.value}</ThemedText>
@@ -514,7 +516,7 @@ function SummaryCard(p: Props) {
         <ThemedText type="smallBold" style={[styles.sectionTitle, { color: secondary }]}>{w.totalSpent}</ThemedText>
         {p.band && !p.largeText ? <FlowStacks incomeFils={p.incomeFils} expenseFils={p.expenseFils} surface={p.band.card} ink={fg}
           spent={{ label: w.lineSpent, color: fg }} income={{ label: w.lineIn, color: positive }}
-          style={styles.flowCoinsLine} /> : null}
+          hold={p.motionHold} style={styles.flowCoinsLine} /> : null}
         <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod}
           style={[styles.period, { backgroundColor: p.onBand && p.band ? p.band.tile : p.band?.card ?? p.theme.backgroundSelected }]}>
           <ThemedText type="meta" style={{ color: fg }}>{p.periodLabel}</ThemedText>

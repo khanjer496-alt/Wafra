@@ -43,7 +43,9 @@ function setup({ language = 'en', theme = 'light', motion = 'reduced', platform 
     return run;
   };
   native.Animated = { View: 'Animated.View', Value, timing: recorder('timing'), spring: recorder('spring'),
-    delay: recorder('delay'), sequence: recorder('sequence'), parallel: recorder('parallel') };
+    delay: recorder('delay'), sequence: recorder('sequence'), parallel: recorder('parallel'),
+    // A coin's resting value plus its window of the group clock (coin-motion.ts coinTrack).
+    add: (rest) => rest };
   native.Easing = { bezier: () => null, in: (e) => e, out: (e) => e, inOut: (e) => e, quad: (v) => v, cubic: (v) => v };
   native.I18nManager = { isRTL: language === 'ar' };
   h.deps['@/hooks/use-reduced-motion'] = {
@@ -249,6 +251,9 @@ test('the frame keeps its accessibility contracts: one scroll, bounces only at l
 
 /* ── Name: the tile turns over; words wrap whole; the lock grows ──────── */
 
+// The reference harness pins the clock to 2026-09-06T12:00:00Z; the greeting reads that hour, not the real one.
+const HARNESS_HOUR = new Date('2026-09-06T12:00:00Z').getHours();
+
 function nameStep(s, props = {}) {
   const { NameStep } = s.deps['@/components/onboarding/e-name'];
   const tree = NameStep({ nameDraft: '', onChangeName() {}, onContinue() {}, onSkip() {}, onBack() {}, busy: false,
@@ -298,7 +303,7 @@ test('the first tile is a card hidden from assistive tech; the preview still spe
   assert.deepEqual([...flat(blank.props.style).transform[1].rotateY.outputRange], ['0deg', '180deg']);
   assert.deepEqual([...flat(letter.props.style).transform[1].rotateY.outputRange], ['-180deg', '0deg']);
   const preview = byID(nodes, 'onboarding-name-preview');
-  assert.equal(preview.props.accessibilityLabel, `${s.words.firstTile} ${s.words.homeGreets} ${s.words.greeting(new Date().getHours(), 'Sam')}`);
+  assert.equal(preview.props.accessibilityLabel, `${s.words.firstTile} ${s.words.homeGreets} ${s.words.greeting(HARNESS_HOUR, 'Sam')}`);
 });
 
 test('typing a name turns the blank face over to the initial; clearing turns it back', () => {

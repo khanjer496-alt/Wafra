@@ -1,10 +1,14 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
 import { MoneyPictureProgress } from '@/components/money-picture-progress';
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, Animated, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from '@/hooks/use-app-router';
 import { CoinToken } from '@/components/ui/coins/coin-token';
-import { COIN_MOVE, COIN_RISE, COIN_STAGGER, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
+import {
+  COIN_MOVE_CURVE, COIN_RISE_CURVE, COIN_STAGGER, coinStepsEnd, coinTrack, useCoinClock, useCoinRun, type CoinNode, type CoinRun,
+  type CoinStep,
+} from '@/components/ui/coins/coin-motion';
+import { useAppActive } from '@/hooks/use-app-active';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { Fonts } from '@/constants/theme';
 import { useFocusEffect } from '@react-navigation/native';
@@ -30,6 +34,9 @@ import { WidgetsHint } from '@/components/widgets/widgets-hint';
 import { EmptyMonth, SkeletonRows } from '@/components/ui/states';
 import { useToast } from '@/components/ui/toast';
 import { useAutoImport, type CaptureSurfaceState } from '@/hooks/use-auto-import';
+import { runAfterFirstFrames } from '@/lib/after-first-frames';
+import { prioritizeForegroundNavigation } from '@/lib/foreground-history-priority';
+import { useLaunchSplashHidden } from '@/lib/launch-splash';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { ThemeScope, useTheme } from '@/hooks/use-theme';
@@ -65,7 +72,7 @@ import { fieldsEqual } from '@/lib/store-selection';
 import { detectSubscriptionsCooperatively, peekSubscriptionDetection, subscriptionDetectionRunning, type Subscription } from '@/lib/subscriptions';
 import type { AppState as LedgerState, CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
-import { homeWidgetVisible, loadHomeWidgetPreferences, splitHomeWidgetLayout, subscribeHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
+import { homeWidgetVisible, loadHomeWidgetPreferences, peekHomeWidgetPreferences, splitHomeWidgetLayout, subscribeHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
 import { repairGoalOrderedHomeOnce } from '@/lib/home-goal-order-repair';
 import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
@@ -148,59 +155,75 @@ export function rememberActivity(shown: ShownActivity | null, scope: string, row
 /** The coin that drops onto an arriving row's logo tile. */
 const ARRIVAL_COIN = 14;
 
+/** The row slides in; the coin drops onto its tile, rests, then fades away (from 1 to 2). */
+const ARRIVAL_ENTER: readonly CoinStep[] = [{ at: 0, from: 0, to: 1, curve: COIN_MOVE_CURVE }];
+const ARRIVAL_COIN_STEPS: readonly CoinStep[] = [
+  { at: COIN_STAGGER, from: 0, to: 1, curve: COIN_RISE_CURVE },
+  // Where the old sequence's second spring started: after the first came to rest and a pause.
+  { at: COIN_STAGGER + COIN_RISE_CURVE.restMs + COIN_STAGGER * 4, from: 1, to: 2, curve: COIN_MOVE_CURVE },
+];
+
+/**
+ * Home is on screen: the launch splash has gone, App Lock is cleared and the
+ * app is in the foreground. Home's coins hold their first reveal until then,
+ * so the entrance is never spent behind the splash or the lock, and anything
+ * that changes while it is false lands at once.
+ */
+export function useHomeRevealReady(): boolean {
+  const cleared = usePrivacyGateCleared();
+  const active = useAppActive();
+  const splashHidden = useLaunchSplashHidden();
+  return cleared && active && splashHidden;
+}
+
 /**
  * The one Recent transactions row that arrived while Home was open: it slides
  * in once and a coin drops onto its logo tile and fades. Every other row is
- * drawn plain. Reduce Motion or a screen reader shows it in place at once; the
- * row's own text and spoken label never change.
+ * drawn plain. Reduce Motion or a screen reader shows it in place at once, and
+ * so does a row that arrived while Home could not be seen (the app in the
+ * background, a headless capture, App Lock): it counts as already shown. The
+ * slide and the coin run on one native-driven clock. The row's own text and
+ * spoken label never change.
  */
-export function ArrivingRow({ children }: { children: React.ReactNode }) {
+export function ArrivingRow({ children, hold = false }: { children: React.ReactNode; hold?: boolean }) {
   const motion = useMotionPreference();
-  // 0 above and clear, 1 in place; the coin then goes on to 2, faded out.
-  const enter = useAnimatedNumber(motion.reducedMotion ? 1 : 0);
-  const coin = useAnimatedNumber(motion.reducedMotion ? 2 : 0);
+  const active = useAppActive();
+  const live = motion.ready && active && !hold;
+  const clock = useCoinClock();
   // Once per mount: a later render never replays it.
-  const done = useRef(motion.reducedMotion);
-  useEffect(() => {
-    if (motion.reducedMotion) {
-      done.current = true;
-      enter.setValue(1);
-      coin.setValue(2);
-      return;
+  const done = useRef(false);
+  // 0 above and clear, 1 in place; the coin then goes on to 2, faded out.
+  const paths = useMemo((): { enter: CoinNode; coin: CoinNode; run: CoinRun | null; waiting: boolean } => {
+    if (motion.reducedMotion || done.current || !active || hold) {
+      return { enter: new Animated.Value(1), coin: new Animated.Value(2), run: null, waiting: false };
     }
     // Hold still until the screen-reader state is known (see use-reduced-motion).
-    if (!motion.ready || done.current) return;
-    done.current = true;
-    const run = Animated.parallel([
-      Animated.spring(enter, { toValue: 1, ...COIN_MOVE, useNativeDriver: nativeDriver }),
-      Animated.sequence([
-        Animated.delay(COIN_STAGGER),
-        Animated.spring(coin, { toValue: 1, ...COIN_RISE, useNativeDriver: nativeDriver }),
-        Animated.delay(COIN_STAGGER * 4),
-        Animated.spring(coin, { toValue: 2, ...COIN_MOVE, useNativeDriver: nativeDriver }),
-      ]),
-    ]);
-    run.start();
-    // Interrupted (the row leaves, or Reduce Motion turns on), it lands at its end.
-    return () => {
-      run.stop();
-      enter.setValue(1);
-      coin.setValue(2);
+    if (!motion.ready) return { enter: new Animated.Value(0), coin: new Animated.Value(0), run: null, waiting: true };
+    const run = clock.reserve(Math.max(coinStepsEnd(ARRIVAL_ENTER), coinStepsEnd(ARRIVAL_COIN_STEPS)));
+    return {
+      enter: coinTrack(clock.value, run.base, 1, ARRIVAL_ENTER),
+      coin: coinTrack(clock.value, run.base, 2, ARRIVAL_COIN_STEPS),
+      run, waiting: false,
     };
-  }, [motion.ready, motion.reducedMotion, enter, coin]);
+    // `done` is read when the motion state changes, never as a trigger.
+  }, [clock, motion.ready, motion.reducedMotion, active, hold]);
+  useEffect(() => { if (!paths.waiting) done.current = true; }, [paths]);
+  // Interrupted (the row leaves, Reduce Motion turns on, the app leaves the
+  // foreground), it lands at its end.
+  useCoinRun(clock, paths.run, live);
   const paint = useMemo(() => ({
     row: {
-      opacity: enter.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
-      transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }) }],
+      opacity: paths.enter.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
+      transform: [{ translateY: paths.enter.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }) }],
     },
     coin: {
-      opacity: coin.interpolate({ inputRange: [0, 0.4, 1, 2], outputRange: [0, 1, 1, 0], extrapolate: 'clamp' }),
+      opacity: paths.coin.interpolate({ inputRange: [0, 0.4, 1, 2], outputRange: [0, 1, 1, 0], extrapolate: 'clamp' }),
       transform: [
-        { translateY: coin.interpolate({ inputRange: [0, 1, 2], outputRange: [-16, 0, 0], extrapolate: 'clamp' }) },
-        { scale: coin.interpolate({ inputRange: [0, 1, 2], outputRange: [0.8, 1, 0.7], extrapolate: 'clamp' }) },
+        { translateY: paths.coin.interpolate({ inputRange: [0, 1, 2], outputRange: [-16, 0, 0], extrapolate: 'clamp' }) },
+        { scale: paths.coin.interpolate({ inputRange: [0, 1, 2], outputRange: [0.8, 1, 0.7], extrapolate: 'clamp' }) },
       ],
     },
-  }), [enter, coin]);
+  }), [paths]);
   return <Animated.View testID="home-activity-arrival" style={paint.row}>
     {children}
     <Animated.View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
@@ -209,6 +232,9 @@ export function ArrivingRow({ children }: { children: React.ReactNode }) {
     </Animated.View>
   </Animated.View>;
 }
+
+/** Home's entrance (coins dropping in, the day columns rising) runs this long; deferred JS work waits it out. */
+const HOME_REVEAL_QUIET_MS = 1_500;
 
 // A native reminder call cannot be cancelled when Home unmounts. New Home
 // instances join this manual-refresh lane before starting another one.
@@ -253,6 +279,8 @@ export default function JournalHomeScreen() {
   const transferWords = transferActivityCopy(language);
   const largeText = useLargeTextLayout();
   const privacyGateCleared = usePrivacyGateCleared();
+  // Splash gone, lock cleared, app in the foreground: Home's coins may move.
+  const revealReady = useHomeRevealReady();
   const router = useRouter();
   const toast = useToast();
   const state = useStoreSelector(({ state: s }) => s, homeStateEqual);
@@ -279,7 +307,10 @@ export default function JournalHomeScreen() {
   const [entry, setEntry] = useState<Transaction | null>(null);
   const [cardDue, setCardDue] = useState<CardDue | null>(null);
   const [recurring, setRecurring] = useState<Subscription | null>(null);
-  const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() => defaultHomeWidgetPreferences());
+  // The saved layout is usually in memory already (the root reads it beside
+  // hydration), so a customised Home lays out once, in its own order.
+  const [homeWidgets, setHomeWidgets] = useState<HomeWidgetPreferences>(() =>
+    peekHomeWidgetPreferences() ?? defaultHomeWidgetPreferences());
   const [homeAnalysisReady, setHomeAnalysisReady] = useState(false);
   const [homeInsight, setHomeInsight] = useState<(Insight & { scope: string }) | null>(null);
   const [recapEntry, setRecapEntry] = useState<{ descriptor: RecapDescriptor; unread: boolean } | null>(null);
@@ -332,7 +363,7 @@ export default function JournalHomeScreen() {
     // object when something actually changed, so the tab switch itself does
     // not re-render Home a second time.
     const apply = (preferences: HomeWidgetPreferences) => {
-      if (alive) setHomeWidgets(current => sameHomeWidgets(current, preferences) ? current : preferences);
+      if (alive) startTransition(() => setHomeWidgets(current => sameHomeWidgets(current, preferences) ? current : preferences));
     };
     const unsubscribe = subscribeHomeWidgetPreferences(apply);
     void loadHomeWidgetPreferences().then(apply);
@@ -342,7 +373,7 @@ export default function JournalHomeScreen() {
   useFocusEffect(useCallback(() => {
     let alive = true;
     void loadCapturePauseSnooze().then((snoozedAt) => {
-      if (alive) setCaptureSnoozedAt((current) => current === snoozedAt ? current : snoozedAt);
+      if (alive) startTransition(() => setCaptureSnoozedAt((current) => current === snoozedAt ? current : snoozedAt));
     });
     return () => { alive = false; };
   }, []));
@@ -355,6 +386,14 @@ export default function JournalHomeScreen() {
     // full-history scans a moment after the first frame just to render a prompt.
     markLaunchPhase('first-usable-home');
   }, [privacyGateCleared, state.hydrated, state.onboarded]));
+  // Home's entrance runs on the UI thread, but the JS thread still has to
+  // answer it: hold the foreground lease while the ledger first appears and
+  // again as Home becomes visible (the splash or lock gone, a resume), so
+  // deferred projections, history pages and maintenance yield until it ends.
+  const homeShowsLedger = state.hydrated && state.onboarded;
+  useEffect(() => {
+    if (homeShowsLedger) prioritizeForegroundNavigation(HOME_REVEAL_QUIET_MS);
+  }, [homeShowsLedger, revealReady]);
   // Homes saved by the earlier Goals step opened with the goal sections and
   // lost their band; put the band back once (home-goal-order-repair.ts). A
   // repaired layout reaches this screen through the preference subscription.
@@ -368,7 +407,7 @@ export default function JournalHomeScreen() {
     // The insight is lower priority again. Its Home variant deliberately skips
     // subscription detection; Bills owns that full historical analysis.
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const task = InteractionManager.runAfterInteractions(() => {
+    const task = runAfterFirstFrames(() => {
       timer = setTimeout(() => setHomeAnalysisReady(true), 1_800);
     });
     return () => {
@@ -383,7 +422,7 @@ export default function JournalHomeScreen() {
     // Recap is celebratory, never launch-critical. Wait until Home and its
     // existing insight lane are settled, then do only the cheap period presence
     // check. The full ledger projection runs after the user taps the W.
-    const task = InteractionManager.runAfterInteractions(() => {
+    const task = runAfterFirstFrames(() => {
       timer = setTimeout(() => {
         const candidates = recapCandidates(now).filter((descriptor) =>
           hasRecapActivity(state.transactions, descriptor));
@@ -393,7 +432,7 @@ export default function JournalHomeScreen() {
         }
         void loadViewedRecaps().then((viewed) => {
           const descriptor = candidates.find((candidate) => !viewed.has(candidate.id)) ?? candidates[0]!;
-          if (alive) setRecapEntry((current) => keepRecapEntry(current, descriptor, !viewed.has(descriptor.id)));
+          if (alive) startTransition(() => setRecapEntry((current) => keepRecapEntry(current, descriptor, !viewed.has(descriptor.id))));
         });
       }, 2_600);
     });
@@ -480,7 +519,7 @@ export default function JournalHomeScreen() {
     // The syncs start after interactions too; look again once they have had
     // time to begin.
     const timers: ReturnType<typeof setTimeout>[] = [];
-    const task = InteractionManager.runAfterInteractions(() => {
+    const task = runAfterFirstFrames(() => {
       timers.push(setTimeout(() => { if (!look()) timers.push(setTimeout(look, 6000)); }, 1500));
     });
     return () => { cancelled = true; task.cancel(); timers.forEach(clearTimeout); };
@@ -544,16 +583,24 @@ export default function JournalHomeScreen() {
         && latest.notSubscriptions === source.notSubscriptions && latest.cancelledSubscriptions === source.cancelledSubscriptions
         && latest.transferInternalIds === source.transferInternalIds && latest.transferNormalizationVersion === source.transferNormalizationVersion
         && latest.ledgerMoney === source.ledgerMoney && latest.marketId === source.marketId && latest.language === source.language
-        && latest.historyImport === source.historyImport;
+        && latest.historyImport === source.historyImport
+        // The spending widget names categories, custom ones included (widget-ledger.ts).
+        && latest.customCategories === source.customCategories;
     };
-    const task = InteractionManager.runAfterInteractions(() => {
+    // After Home's first frames and entrance: preparing the snapshot walks the
+    // ledger and the native write re-renders every placed widget.
+    const task = runAfterFirstFrames(() => {
       if (current()) request = requestWidgetSnapshotSync({ state: source, now: new Date(), moneySpec,
         language: language === 'ar' ? 'ar' : 'en' }, current);
     });
     return () => { cancelled = true; task.cancel(); request?.cancel(); };
+    // Keyed on the day, not the resume clock: every reopen used to rebuild
+    // the snapshot and rewrite the widgets with the same figures. A new day
+    // still refreshes them (todayISO, the week, Coming up all move).
   }, [state.hydrated, state.onboarded, state.privateMode, state.transactions, state.accounts, state.budgets, state.bills,
     state.cardDues, state.notSubscriptions, state.cancelledSubscriptions, state.transferInternalIds, state.transferNormalizationVersion,
-    state.ledgerMoney, state.marketId, state.historyImport, moneySpec, language, now, getStateGeneration, getStateSnapshot]);
+    state.ledgerMoney, state.marketId, state.historyImport, state.customCategories, moneySpec, language, projectionDay,
+    getStateGeneration, getStateSnapshot]);
   // Recent activity, and which transfers it leaves to the Transfers screen,
   // come from the one dashboard projection rather than a second ledger walk.
   const hasPeriodTransfers = dashboard.hasPeriodTransfers === true;
@@ -603,13 +650,13 @@ export default function JournalHomeScreen() {
     let cancelled = false;
     // Keep the previous card only inside its original period/language while
     // recomputing. Analysis must not hitch the turn that just painted an SMS.
-    const task = InteractionManager.runAfterInteractions(() => {
+    const task = runAfterFirstFrames(() => {
       if (cancelled) return;
       const next = measureRuntimeOperation('home-insight', () =>
         projectDashboardInsight(state, period, now));
       if (!cancelled) {
         completedInsightInputs.current = inputs;
-        setHomeInsight(next ? { ...next, scope: `${language}:${JSON.stringify(period)}` } : null);
+        startTransition(() => setHomeInsight(next ? { ...next, scope: `${language}:${JSON.stringify(period)}` } : null));
       }
     });
     return () => {
@@ -631,10 +678,29 @@ export default function JournalHomeScreen() {
   useEffect(() => {
     if (historyAnalysisBlocked) setPendingTransfers(null);
   }, [historyAnalysisBlocked]);
+  // The last queue computed, with the inputs it came from: unlocking, a tab
+  // round trip or an import finishing does not walk the transfer graph again
+  // for the same ledger. Inputs are held by reference only while they are
+  // the store's current ones (a new ledger replaces them).
+  const transferQueueCache = useRef<{ inputs: readonly unknown[]; value: HomeTransferQueue } | null>(null);
+  const transferInputs = [state.transactions, state.accounts, state.transferInternalIds, state.transferNormalizationVersion] as const;
+  const transferInputsCached = () =>
+    transferQueueCache.current?.inputs.every((value, index) => Object.is(value, transferInputs[index])) === true;
+  // Runs focused or not, so a hidden Home never keeps an old ledger alive.
+  useEffect(() => {
+    if (!transferInputsCached()) transferQueueCache.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.transactions, state.accounts, state.transferInternalIds, state.transferNormalizationVersion]);
   useFocusEffect(useCallback(() => {
     if (historyAnalysisBlocked || !privacyGateCleared || !state.hydrated || !state.onboarded) return;
     let cancelled = false;
-    const task = InteractionManager.runAfterInteractions(() => {
+    const inputs = transferInputs;
+    const cached = transferQueueCache.current;
+    if (cached && transferInputsCached()) {
+      setPendingTransfers(cached.value);
+      return;
+    }
+    const task = runAfterFirstFrames(() => {
       if (cancelled) return;
       // The reconciliation cached per stored transfer receipt, shared with
       // Transactions and Transfers, rather than a second full graph build.
@@ -649,11 +715,13 @@ export default function JournalHomeScreen() {
           : unaskedPendingIds(activity, reconciliation.pendingIds);
         return { ...pendingTransferSummary(state.transactions, ids), questions: queue.length };
       })() : { count: 0, incomingFils: 0, outgoingFils: 0, questions: 0 };
+      if (cancelled) return;
+      transferQueueCache.current = { inputs, value: next };
       // An unchanged queue keeps its object, so returning Home does not
       // re-render it once the graph is rebuilt.
-      if (!cancelled) setPendingTransfers((current) => current !== null && current.count === next.count
+      startTransition(() => setPendingTransfers((current) => current !== null && current.count === next.count
         && current.incomingFils === next.incomingFils && current.outgoingFils === next.outgoingFils
-        && current.questions === next.questions ? current : next);
+        && current.questions === next.questions ? current : next));
     });
     return () => {
       cancelled = true;
@@ -946,7 +1014,7 @@ export default function JournalHomeScreen() {
         <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{day.rows.map(transaction => {
           const row = <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />;
           // Only the row that just arrived carries the motion; the rest are drawn plain.
-          return transaction.id === arrivedRowId ? <ArrivingRow key={transaction.id}>{row}</ArrivingRow> : row;
+          return transaction.id === arrivedRowId ? <ArrivingRow key={transaction.id} hold={!revealReady}>{row}</ArrivingRow> : row;
         })}</View>
       </View>;
       })}
@@ -983,6 +1051,7 @@ export default function JournalHomeScreen() {
     onBudgets: () => router.push('/flow?view=categories&filter=limited'),
     onSetBudget: budgetMonthKey ? () => setBudgetSheetOpen(true) : undefined,
     captureStopped,
+    motionHold: !revealReady,
   };
   const greetingInToolbar = layout.band[0] === 'greeting';
   const sheetPalette = { ...band, onBand: band.text, onBandSecondary: band.textSecondary,

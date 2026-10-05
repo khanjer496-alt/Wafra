@@ -38,6 +38,12 @@ export interface WafraBillingValue {
   presentOnboardingFlow: () => Promise<void>;
   restorePro: () => Promise<boolean | null>;
   refresh: () => Promise<void>;
+  /**
+   * Present while the storefront is waiting to be configured (an onboarded
+   * launch configures it after Home has settled): a screen that needs
+   * checkout now asks for it at once.
+   */
+  configureNow?: () => void;
 }
 
 export const unavailableBilling: WafraBillingValue = {

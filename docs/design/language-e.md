@@ -47,7 +47,14 @@ example of everything below.
 - **Motion.** Sheets rise 40pt on the 260/24 spring; bands never move; bars
   and pins grow from the baseline 50ms apart; money never spins. Reduce
   Motion (or a running screen reader) shows everything in place. Android keeps
-  its measured motion bypasses.
+  its measured motion bypasses. A group of coins that moves one after another
+  (a stack, the day columns, an arriving row and its coin) runs on one
+  native-driven clock (`useCoinClock`/`coinTrack` in `coin-motion.ts`): each
+  coin reads its own window of it, shaped like the spring it replaces, never
+  `Animated.delay`/`sequence` (JS timers). Home's coins hold their first reveal
+  until Home can be seen (`useHomeRevealReady`: splash gone, App Lock cleared,
+  app in the foreground); a change made while the app is in the background
+  lands at once and never replays (`docs/performance/launch-resume-2026-10-05.md`).
 - **Large text.** Every band and sheet layout stacks or wraps under
   `useLargeTextLayout()` (see `2026-09-25-large-text-audit.md`).
 - **RTL.** Bands and sheets mirror (logical `start`/`end` everywhere; the back

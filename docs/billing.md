@@ -11,6 +11,21 @@ buys through `purchase(productId)`; it never presents the remote `pro_upgrade`
 paywall. A plan the store does not return is shown as unavailable with a retry,
 never advertised at a price from this repository.
 
+**When the SDK is configured.** On a first run Superwall is configured as soon
+as the ledger is hydrated (onboarding can offer checkout). On an onboarded
+launch it is configured after Home's first frames plus
+`SUPERWALL_CONFIGURE_DELAY_MS` (2s) and the foreground lease, so paywall
+preloading and the entitlement refresh do not land on Home's entrance. Until
+then billing reports `available: true, configured: false` (no checkout or
+restore offered) and the stored Pro flag stands, so an entitlement change
+(a renewal, a refund, a purchase on another device) and Superwall's standard
+placements arrive about 2 seconds later than before on such a launch. The Pro
+screen asks for configure at once if it opens first (`configureNow`). Nothing
+about prices,
+entitlements, placements or Pro semantics changes. The app tree under the
+provider keeps one shape across hydration and configure (the SDK provider sits
+beside it and publishes its value), so configure never remounts the app.
+
 ## Product contract
 
 Create these subscriptions in both stores:

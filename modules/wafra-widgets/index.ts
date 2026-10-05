@@ -11,7 +11,8 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
  * are presentation, and a failed write must never affect the app.
  */
 type NativeWidgets = {
-  setSnapshot(json: string): void;
+  /** Android answers false when it could not store it; iOS answers nothing. */
+  setSnapshot(json: string): boolean | void;
   clearSnapshot(): void;
   /** Android only, and absent from binaries built before it existed. */
   canPinWidgets?(): boolean;
@@ -22,12 +23,31 @@ export type PinnableWidget = 'today' | 'upcoming' | 'spending';
 
 const native = Platform.OS === 'web' ? null : requireOptionalNativeModule<NativeWidgets>('WafraWidgets');
 
-export function setWidgetSnapshot(json: string): void {
-  try { native?.setSnapshot(json); } catch { /* presentation only */ }
+/**
+ * False only when the native side said it could not store the snapshot
+ * (Android's module answers false, for example without a React context) or
+ * threw. iOS answers nothing and counts as stored. The sync uses the answer
+ * to avoid skipping later writes of figures that never arrived.
+ */
+export function setWidgetSnapshot(json: string): boolean {
+  try { return native?.setSnapshot(json) !== false; } catch { return false; /* presentation only */ }
 }
 
+let clears = 0;
+
 export function clearWidgetSnapshot(): void {
+  clears += 1;
   try { native?.clearSnapshot(); } catch { /* presentation only */ }
+}
+
+/**
+ * How many times the native copy has been erased in this process. The sync
+ * (src/lib/widget-sync.ts) skips rewriting figures the widgets already hold;
+ * an erase from anywhere (Erase everything calls this directly) means they
+ * no longer hold them.
+ */
+export function widgetSnapshotClearCount(): number {
+  return clears;
 }
 
 /**
