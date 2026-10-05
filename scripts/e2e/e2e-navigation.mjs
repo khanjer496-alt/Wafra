@@ -352,7 +352,14 @@ async function pressEverything(name, enter, { skip = [], fullScroll = false } = 
     if (clicked) pressed++;
     if (!clicked) { unreachable.push(key); await backToScreen(base, enter); continue; }
     await page.waitForTimeout(800);
-    const after = await bodyText(page);
+    // A destination that is still mid-transition reads as blank for a moment; on a slow
+    // runner a full screen (Transfers, ~400ms locally) can take past 800ms to paint. Give
+    // it up to 3s to show its text before calling it blank; a dead route never fills in.
+    let after = await bodyText(page);
+    for (let waited = 800; after.length < 40 && waited < 3000; waited += 200) {
+      await page.waitForTimeout(200);
+      after = await bodyText(page);
+    }
     if (/Unmatched Route|This screen does not exist|Sorry, this page/i.test(after)) dead.push(`${key} → Unmatched Route`);
     else if (after.length < 40) dead.push(`${key} → blank`);
     else if (errors.length) dead.push(`${key} → ${errors[0].slice(0, 90)}`);

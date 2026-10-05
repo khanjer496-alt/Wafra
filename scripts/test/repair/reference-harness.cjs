@@ -239,7 +239,10 @@ function createHarness(options = {}) {
   // from source.
   local('@/lib/band-copy','src/lib/band-copy.ts');local('@/lib/limit-status','src/lib/limit-status.ts');
   local('@/lib/everyday-band-copy','src/lib/everyday-band-copy.ts');
-  local('@/lib/spending-compare','src/lib/spending-compare.ts');local('@/lib/category-colors','src/lib/category-colors.ts');local('@/lib/spending-calendar-tiles','src/lib/spending-calendar-tiles.ts');
+  local('@/lib/spending-compare','src/lib/spending-compare.ts');local('@/lib/category-colors','src/lib/category-colors.ts');
+  // The coin toolkit (Spending's coins, Home's budget stack, goals, transfers, bills, cards, limits).
+  local('@/lib/coin-math','src/lib/coin-math.ts');local('@/components/ui/coins/coin-motion','src/components/ui/coins/coin-motion.ts');
+  local('@/lib/spending-calendar-tiles','src/lib/spending-calendar-tiles.ts');local('@/components/ui/coins/coin-disc');local('@/components/ui/coins/coin-stack');local('@/components/ui/coins/coin-token');
   local('@/components/ui/band/band-segmented');local('@/components/ui/band/band-chip');local('@/components/ui/band/share-bar');
   local('@/components/ui/band/glyph-tile');local('@/components/ui/band/status-bar');local('@/components/ui/band/e-button');
   // The category creation form uses the real field/button and band palette;

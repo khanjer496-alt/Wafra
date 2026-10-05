@@ -1,10 +1,11 @@
 import { useRouter } from '@/hooks/use-app-router';
-import React, { useDeferredValue, useMemo, useState } from 'react';
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Keyboard, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
+import { introCues, legTags, newlyOwnRoutes, type CoinCue } from '@/components/transfer-coins/coin-cues';
 import { TransferQuestionCard } from '@/components/transfers/transfer-question-card';
 import { TransferRouteRow } from '@/components/transfers/transfer-route-row';
 import { ActionIconButton } from '@/components/ui/action-icon-button';
@@ -29,7 +30,7 @@ import { useStore } from '@/lib/store';
 import { getTransferActivity, onePerPair } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
-import { filterTransferItems, transferListItems, transferTotals, type TransferTile } from '@/lib/transfer-list';
+import { absorbedOwnIncoming, filterTransferItems, transferListItems, transferTotals, type TransferTag, type TransferTile } from '@/lib/transfer-list';
 import { matchedTransferPairs } from '@/lib/transfer-pairs';
 import { reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { Transaction } from '@/lib/types';
@@ -102,8 +103,33 @@ export default function TransfersScreen() {
   // matchesSearch closes over search and accounts.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [periodItems, pairsByKey, rowsById, search, accounts]);
-  const totals = useMemo(() => transferTotals(items), [items]);
+  // Unlinked own legs are paired across the whole history before any period or
+  // search filter, so a transfer that left on 30 Sep and arrived on 1 Oct
+  // counts once, in September.
+  const absorbed = useMemo(() => absorbedOwnIncoming(transferListItems(activity, allPairs)), [activity, allPairs]);
+  const totals = useMemo(() => transferTotals(items, absorbed), [items, absorbed]);
   const shown = useMemo(() => filterTransferItems(items, tile), [items, tile]);
+  // A coin travels a route when the list first appears (the first few rows only) and again
+  // the moment a route's money is explained as moving between the person's own accounts,
+  // however it was answered (the card, the detail sheet, the batch review).
+  const [coins, setCoins] = useState<ReadonlyMap<string, CoinCue>>(() => new Map());
+  const introduced = useRef(false);
+  const lastTags = useRef<ReadonlyMap<string, TransferTag> | null>(null);
+  useEffect(() => {
+    if (introduced.current || !shown.length) return;
+    introduced.current = true;
+    const intro = introCues(shown.map(item => item.key), Date.now());
+    setCoins(previous => new Map([...previous, ...intro]));
+  }, [shown]);
+  useEffect(() => {
+    const previous = lastTags.current;
+    lastTags.current = legTags(periodItems);
+    if (!previous) return;
+    const arrived = newlyOwnRoutes(previous, periodItems);
+    if (!arrived.length) return;
+    const at = Date.now();
+    setCoins(cues => new Map([...cues, ...arrived.map(key => [key, { at, delay: 0 }] as const)]));
+  }, [periodItems]);
   // The questions are the reconciler's queue, newest first, whatever the period or search.
   // Saving an answer takes the row out of the queue, so the card always shows the first one.
   // A pair with both legs queued is one movement: one question, asked about its outgoing leg.
@@ -168,6 +194,7 @@ export default function TransfersScreen() {
       <FlatList
         testID="transfer-history"
         data={shown}
+        extraData={coins}
         keyExtractor={item => item.key}
         contentContainerStyle={[styles.content, { paddingBottom: listBottom }]}
         scrollIndicatorInsets={{ top: 0, bottom: listBottom }}
@@ -192,7 +219,7 @@ export default function TransfersScreen() {
         </View>}
         renderItem={({ item, index }) => <View style={[styles.rowCard, { backgroundColor: band.card },
           index === 0 && styles.rowCardFirst, index === shown.length - 1 && styles.rowCardLast]}>
-          <TransferRouteRow item={item} first={index === 0} accountLabel={accountName} palette={band}
+          <TransferRouteRow item={item} first={index === 0} accountLabel={accountName} palette={band} coin={coins.get(item.key)}
             onPress={() => { Keyboard.dismiss(); setSelectedId(item.transactionId); }} />
         </View>}
         ListEmptyComponent={<View style={styles.empty}><Icon name="repeat" size={30} color={band.textSecondary} />

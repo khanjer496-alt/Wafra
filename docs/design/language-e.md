@@ -248,6 +248,33 @@ reader, shows everything in place.
     color: categoryColor(row.category) }))} />
 ```
 
+### Coins elsewhere — `src/components/ui/coins/`
+
+The same coins explain a change in money on the screens where a figure moves,
+one animation per screen, always beside the written figure:
+
+| Screen | Drawing | Coins stand for |
+|---|---|---|
+| Home, Left in budgets | 8-coin `CoinStack` | share of limits still left; drains as it is spent |
+| Goal | jar of up to 10 coins (`goals/goal-jar.tsx`) | share saved |
+| Limit sheet | 10-coin `CoinStack` under a limit line in the status colour | share of the limit spent |
+| Recap cover | row of 5 `CoinDisc` | share of money in that was spent (no row without both) |
+| Payment cards | 3D card stack (`card-stack/`), fans on tap | each card, with its usage along the edge |
+| Transfers | `CoinToken` travelling the route (`transfer-coins/`) | money moving source → destination |
+| Bills | logos drop onto their dates; Paid stamp after booking | when each payment is due; a payment just booked |
+| Add transaction | a coin into Save after an expense is written | the expense just recorded |
+
+Rules: `filledCoins(share, total)` (`src/lib/coin-math.ts`) never draws a
+little money as none or nearly all as all. Empty places use
+`ghostTone(surface, ink)` so stacked empty coins stay separate coins. Stacks
+cast a soft contact shadow (`CoinColors.shadow`) and land with one small
+squash. Coins are hidden from assistive tech; spoken labels never change.
+Motion is core `Animated` on the native driver (paint only); Reduce Motion or
+a running screen reader shows the final state at once, and nothing starts
+before `useMotionPreference().ready`. On the web build react-native-web
+reports a screen reader as always on, so the coins rest in place there; judge
+motion on a device.
+
 ### `WeekTiles` — `week-tiles.tsx`
 
 Day bars from real values: today in the logo green, others in `bandMark`, exact currency

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
-const { transferListItems, transferTotals, filterTransferItems } = load(path.resolve(__dirname, '../../../src/lib/transfer-list.ts'));
+const { transferListItems, transferTotals, filterTransferItems, absorbedOwnIncoming } = load(path.resolve(__dirname, '../../../src/lib/transfer-list.ts'));
 
 const tx = (id, type, accountId, amountFils, extra = {}) => ({ id, type, accountId, amountFils, date: '2026-10-01', ts: 1,
   title: 'Transfer', category: 'other', ...extra });
@@ -27,12 +27,50 @@ test('two unlinked own legs of one transfer count the amount once', () => {
   assert.equal(transferTotals(items).ownFils, 250000);
 });
 
-test('an own transfer captured only from its incoming side adds nothing to the tile', () => {
-  const inn = tx('i', 'income', 'enbd', 250000);
+test('an own transfer captured only from its incoming side still moved that money', () => {
+  // e.g. cash logged by hand after an ATM withdrawal whose bank debit was never captured.
+  const inn = tx('i', 'income', 'cash', 50000);
   const items = transferListItems([rec(inn, 'own')], []);
   assert.equal(items.length, 1);
   assert.equal(items[0].direction, 'in');
-  assert.equal(transferTotals(items).ownFils, 0);
+  assert.equal(transferTotals(items).ownFils, 50000);
+  assert.equal(filterTransferItems(items, 'own').length, 1, 'the tile lists exactly what it counts');
+});
+
+test('unlinked own legs pair only on the same amount, a different account and nearby dates', () => {
+  const out = tx('o', 'expense', 'fab', 250000);
+  const otherAmount = tx('i', 'income', 'enbd', 90000);
+  assert.equal(transferTotals(transferListItems([rec(out, 'own'), rec(otherAmount, 'own')], [])).ownFils, 340000,
+    'different amounts are two movements');
+  const later = tx('l', 'income', 'enbd', 250000, { date: '2026-10-20' });
+  assert.equal(transferTotals(transferListItems([rec(out, 'own'), rec(later, 'own')], [])).ownFils, 500000,
+    'weeks apart, the same amount is two movements');
+  const sameAccount = tx('s', 'income', 'fab', 250000);
+  assert.equal(transferTotals(transferListItems([rec(out, 'own'), rec(sameAccount, 'own')], [])).ownFils, 500000,
+    'money back into the account it left is not the other side of that transfer');
+});
+
+test('one outgoing leg absorbs only one incoming leg of the same amount', () => {
+  const out = tx('o', 'expense', 'fab', 250000);
+  const in1 = tx('i1', 'income', 'enbd', 250000);
+  const in2 = tx('i2', 'income', 'cash', 250000);
+  const items = transferListItems([rec(out, 'own'), rec(in1, 'own'), rec(in2, 'own')], []);
+  assert.equal(transferTotals(items).ownFils, 500000);
+});
+
+test('legs straddling a period boundary are paired over the whole history, so each period counts the movement once', () => {
+  // Calendar months: left FAB on 30 Sep, arrived at ENBD on 1 Oct.
+  const out = tx('o', 'expense', 'fab', 250000, { date: '2026-09-30' });
+  const inn = tx('i', 'income', 'enbd', 250000, { date: '2026-10-01' });
+  const all = transferListItems([rec(out, 'own'), rec(inn, 'own')], []);
+  const absorbed = absorbedOwnIncoming(all);
+  const period = (from, to) => all.filter(item => item.date >= from && item.date <= to);
+  assert.equal(transferTotals(period('2026-09-01', '2026-09-30'), absorbed).ownFils, 250000, 'September counts it, where it left');
+  assert.equal(transferTotals(period('2026-10-01', '2026-10-31'), absorbed).ownFils, 0, 'October does not count it again');
+  // A salary period starting on the 25th: both legs fall in 25 Sep - 24 Oct, counted once.
+  assert.equal(transferTotals(period('2026-09-25', '2026-10-24'), absorbed).ownFils, 250000);
+  // Without the whole-history pairing, October alone would have counted the arrival again.
+  assert.equal(transferTotals(period('2026-10-01', '2026-10-31')).ownFils, 250000);
 });
 
 test('single rows: names the person, else a dashed unknown; tags follow the answer', () => {

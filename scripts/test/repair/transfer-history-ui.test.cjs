@@ -32,13 +32,16 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
   const state = { language, transactions, accounts };
   const answers = [];
   const deps = {
-    react: { useDeferredValue: v => v, useMemo: f => f(), useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}] },
+    react: { useDeferredValue: v => v, useMemo: f => f(), useRef: v => ({ current: v }), useEffect() {},
+      useState: initial => [typeof initial === 'function' ? initial() : initial, () => {}] },
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { Keyboard: { dismiss() {} }, Platform: { OS: 'ios' }, Pressable: 'Pressable', View: 'View',
       FlatList: props => ({ type: 'FlatList', props }), StyleSheet: { create: s => s, hairlineWidth: 1 } },
     'expo-router': { useRouter: () => ({ push: route => events.push(['route', route]), back() {}, canGoBack: () => true, replace() {} }) },
     '@/components/entry-detail-sheet': { EntryDetailSheet: boundary('EntryDetailSheet') },
     '@/components/period-sheet': { PeriodSheet: boundary('PeriodSheet') },
+    // The route's travelling coin is decorative; its own suite (transfer-coins) draws it.
+    '@/components/transfer-coins/route-coin': { RouteCoinLane: boundary('RouteCoinLane') },
     '@/components/themed-text': { ThemedText: boundary('Text') },
     '@/components/ui/band-scaffold': { BandScaffold: props => ({ type: 'BandScaffold', props }), useBandBottomInset: () => 0 },
     '@/components/ui/band/band-figure': { BandFigure: boundary('BandFigure') },
@@ -73,6 +76,7 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
     { '@/lib/i18n': { getLanguage: () => language } });
   deps['@/lib/transfer-answer'] = src('src/lib/transfer-answer.ts');
   deps['@/lib/transfer-list'] = src('src/lib/transfer-list.ts');
+  deps['@/components/transfer-coins/coin-cues'] = src('src/components/transfer-coins/coin-cues.ts');
   for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-question-card']) {
     deps[`@/components/transfers/${name}`] = src(`src/components/transfers/${name}.tsx`);
   }

@@ -2,8 +2,8 @@ import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
 import React, { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
 
+import { GoalJar } from '@/components/goals/goal-jar';
 import { ThemedText } from '@/components/themed-text';
 import { AmountSheet } from '@/components/ui/amount-sheet';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
@@ -16,10 +16,10 @@ import { EButton } from '@/components/ui/band/e-button';
 import { TextField } from '@/components/ui/text-field';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
 import { formatAED, formatAmountForInput, parseAmountWithMoneySpec } from '@/lib/format';
 import { goalProgress } from '@/lib/money-places';
-import { goalRingGeometry } from '@/lib/money-places-band';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { t } from '@/lib/i18n';
@@ -28,9 +28,6 @@ const GOAL_ICONS: IconName[] = ['target', 'plane', 'home', 'gift', 'car', 'cap',
 const goalIcon = (emoji: string): IconName => (GOAL_ICONS as string[]).includes(emoji) ? emoji as IconName : 'target';
 /** Zero is a real "saved so far". */
 const ZERO = /^\s*0+(?:[.,٫]0*)?\s*$/;
-
-const RING = 190;
-const STROKE = 20;
 
 /**
  * One savings goal: how much is set aside against the target, and the two
@@ -49,8 +46,9 @@ export default function GoalRoute() {
 
 function GoalScreen({ goalId }: { goalId: string }) {
   const router = useRouter();
-  // Goals are money set aside by hand: the indigo flow band, the ring in the logo-green accent.
+  // Goals are money set aside by hand: the indigo flow band, a jar filling with gold coins.
   const band = useBand('flow');
+  const large = useLargeTextLayout();
   const language = useLanguage();
   const w = moneyPlacesWords(language);
   const state = useStoreSelector(({ state: s }) => ({ goals: s.goals, ledgerMoney: s.ledgerMoney }));
@@ -74,7 +72,6 @@ function GoalScreen({ goalId }: { goalId: string }) {
   }
 
   const progress = goalProgress(goal);
-  const ring = goalRingGeometry(RING, STROKE, progress.ratio);
 
   const money = state.ledgerMoney;
   const targetFils = money ? parseAmountWithMoneySpec(targetText, money) : null;
@@ -104,27 +101,11 @@ function GoalScreen({ goalId }: { goalId: string }) {
         scrollProps={{ showsVerticalScrollIndicator: false }}
         bandContent={(
           <View style={styles.hero} testID="goal-progress">
-            {/* The ring speaks its percent; the name below stays the screen's header. */}
-            <View style={styles.ring} accessible accessibilityRole="image"
+            {/* The jar and its percent are one spoken image; the name below stays the screen's header. */}
+            <View style={[styles.progress, large && styles.progressStacked]} accessible accessibilityRole="image"
               accessibilityLabel={`${w.progressA11y(progress.percent)}. ${w.savedOf(formatAED(goal.savedFils), formatAED(goal.targetFils))}`}>
-              <Svg width={RING} height={RING}>
-                <Circle cx={RING / 2} cy={RING / 2} r={ring.radius} stroke={band.bandRule} strokeWidth={STROKE} fill="none" />
-                {ring.drawn && (
-                  <Circle
-                    cx={RING / 2}
-                    cy={RING / 2}
-                    r={ring.radius}
-                    stroke={band.accent}
-                    strokeWidth={STROKE}
-                    strokeLinecap="round"
-                    fill="none"
-                    strokeDasharray={`${ring.circumference} ${ring.circumference}`}
-                    strokeDashoffset={ring.dashOffset}
-                    transform={`rotate(-90 ${RING / 2} ${RING / 2})`}
-                  />
-                )}
-              </Svg>
-              <View style={styles.ringLabel} pointerEvents="none">
+              <GoalJar testID="goal-jar" savedFils={goal.savedFils} targetFils={goal.targetFils} palette={band} />
+              <View style={[styles.percentBlock, large && styles.percentBlockStacked]}>
                 <ThemedText tabular maxFontSizeMultiplier={1.2} style={[styles.percent, { color: band.onBand }]}>{`${progress.percent}%`}</ThemedText>
                 <ThemedText type="meta" maxFontSizeMultiplier={1.4} style={{ color: band.onBandSecondary }}>{w.savedWord}</ThemedText>
               </View>
@@ -194,8 +175,10 @@ function GoalScreen({ goalId }: { goalId: string }) {
 const styles = StyleSheet.create({
   content: { gap: Spacing.three },
   hero: { alignItems: 'center', gap: Spacing.one, paddingBottom: Spacing.two },
-  ring: { width: RING, height: RING, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.two },
-  ringLabel: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
+  progress: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.four, marginBottom: Spacing.two },
+  progressStacked: { flexDirection: 'column', gap: Spacing.two },
+  percentBlock: { alignItems: 'flex-start', minWidth: 0 },
+  percentBlockStacked: { alignItems: 'center' },
   percent: { fontFamily: Fonts.sansSemi, fontSize: 40, lineHeight: 46, letterSpacing: -1.5 },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: Spacing.two },
   goalName: { fontFamily: Fonts.sansSemi, fontSize: 30, lineHeight: 36, letterSpacing: -1, textAlign: 'center', flexShrink: 1 },

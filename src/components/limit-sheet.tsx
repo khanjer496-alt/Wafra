@@ -9,17 +9,22 @@ import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { DialLimit } from '@/components/ui/band/dial-limit';
 import { EButton } from '@/components/ui/band/e-button';
 import { GlyphTile } from '@/components/ui/band/glyph-tile';
-import { LimitStatusBar } from '@/components/ui/band/status-bar';
+import { LimitStatusBar, limitStatusColor } from '@/components/ui/band/status-bar';
+import { ghostTone } from '@/components/ui/coins/coin-disc';
+import { CoinStack } from '@/components/ui/coins/coin-stack';
 import { SectionHeader } from '@/components/ui/period-pill';
 import { TextField } from '@/components/ui/text-field';
 import { Radius, Spacing } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLanguage } from '@/hooks/use-language';
 import { useTheme } from '@/hooks/use-theme';
 import { internalTransferIdsForState, isSpending, liveAccountIds } from '@/lib/ledger';
 
 import { formatAED, formatAmountForInput, ledgerNiceMinor, ledgerTypicalMinor, monthLabel, monthStartISO, parseAmountWithMoneySpec, shiftMonthKey } from '@/lib/format';
 import { spentInMonthForCategory } from '@/lib/insights';
+import { filledCoins, shareOf } from '@/lib/coin-math';
+import { limitStatus } from '@/lib/limit-status';
 import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
@@ -30,6 +35,9 @@ import { usualMonthlyMinor } from '@/lib/reference-presentation';
 
 /** How many merchants the sheet names before pooling the rest. */
 const MERCHANT_ROWS = 4;
+/** Coins in the spent-against-limit stack, and their width. */
+const LIMIT_COINS = 10;
+const LIMIT_COIN_WIDTH = 26;
 
 interface LimitSheetProps {
   /** The category being edited, or null to create a new limit. */
@@ -53,6 +61,7 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   const theme = useTheme();
   // Limits belong to Spending: the Spending band's sheet, lifted.
   const band = useBand('spending');
+  const largeText = useLargeTextLayout();
   const language = useLanguage();
   const words = limitSheetCopy[language === 'ar' ? 'ar' : 'en'];
   const bandWords = everydayBandCopy(language);
@@ -189,6 +198,11 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
     : null;
   const ratio = limitFils ? spent / limitFils : 0;
   const over = ratio >= 1;
+  // This month's spending as coins rising toward the limit, drawn as a line
+  // over the stack in the limit's status colour. Moving the dial moves the
+  // line's meaning, so the coins refill or drain to the new share.
+  const limitCoins = limitFils && limitFils > 0 ? filledCoins(shareOf(spent, limitFils), LIMIT_COINS) : null;
+  const limitTone = limitStatusColor(band, limitStatus(spent, limitFils ?? 0));
   // Only a live month has days left. `key` is whatever month Flow was
   // showing, so on a March period in July this counted down inside a month
   // that ended four months ago — "AED 400 left with 5 days still to go."
@@ -289,29 +303,39 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
             )}
 
             {picked && limitFils !== null && (
-              <View style={styles.current}>
-                <View style={styles.currentTop}>
-                  <ThemedText type="meta" themeColor="textSecondary">
-                    {t('spentThisMonth')}
-                  </ThemedText>
-                  <ThemedText
-                    type="smallBold"
-                    tabular
-                    style={{ color: over ? band.statusOver : band.text }}>
-                    {formatAED(shownTotalFils, { decimals: false })}
-                    <ThemedText type="meta" themeColor="textTertiary" tabular>
-                      {'  / '}
-                      {formatAED(limitFils, { decimals: false })}
+              <View style={[styles.current, styles.currentRow, largeText && styles.currentStacked]}>
+                <View style={styles.currentFigures}>
+                  <View style={styles.currentTop}>
+                    <ThemedText type="meta" themeColor="textSecondary">
+                      {t('spentThisMonth')}
                     </ThemedText>
+                    <ThemedText
+                      type="smallBold"
+                      tabular
+                      style={{ color: over ? band.statusOver : band.text }}>
+                      {formatAED(shownTotalFils, { decimals: false })}
+                      <ThemedText type="meta" themeColor="textTertiary" tabular>
+                        {'  / '}
+                        {formatAED(limitFils, { decimals: false })}
+                      </ThemedText>
+                    </ThemedText>
+                  </View>
+                  <LimitStatusBar spentMinor={spent} limitMinor={limitFils} palette={band} testID="limit-status-bar" />
+                  <ThemedText type="meta" themeColor="textTertiary">
+                    {over
+                      ? tf('limitOverBy', { amount: formatAED(spent - limitFils, { decimals: false }) })
+                      : tf('limitAmountLeft', { amount: formatAED(limitFils - spent, { decimals: false }) })}
+                    {daysLeft > 0 ? tf('timeStillToGo', { days: daysLeft, s: daysLeft === 1 ? '' : 's' }) : '.'}
                   </ThemedText>
                 </View>
-                <LimitStatusBar spentMinor={spent} limitMinor={limitFils} palette={band} testID="limit-status-bar" />
-                <ThemedText type="meta" themeColor="textTertiary">
-                  {over
-                    ? tf('limitOverBy', { amount: formatAED(spent - limitFils, { decimals: false }) })
-                    : tf('limitAmountLeft', { amount: formatAED(limitFils - spent, { decimals: false }) })}
-                  {daysLeft > 0 ? tf('timeStillToGo', { days: daysLeft, s: daysLeft === 1 ? '' : 's' }) : '.'}
-                </ThemedText>
+                {limitCoins !== null ? (
+                  <View testID="limit-coins" accessible={false} importantForAccessibility="no-hide-descendants"
+                    accessibilityElementsHidden style={styles.coinColumn}>
+                    <View testID="limit-coins-line" style={[styles.coinLine, { backgroundColor: limitTone }]} />
+                    <CoinStack testID="limit-coin-stack" total={LIMIT_COINS} filled={limitCoins} width={LIMIT_COIN_WIDTH}
+                      ghost={ghostTone(band.sheet, band.textSecondary)} />
+                  </View>
+                ) : null}
               </View>
             )}
 
@@ -478,6 +502,12 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   current: { marginTop: Spacing.four, gap: Spacing.two },
+  currentRow: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.three },
+  currentStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  currentFigures: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: Spacing.two },
+  // The limit is the line over a full stack; a little wider than the coins.
+  coinColumn: { width: LIMIT_COIN_WIDTH + 8, alignItems: 'center', gap: 3, alignSelf: 'flex-end' },
+  coinLine: { height: 2, width: '100%', borderRadius: 1 },
   currentTop: {
     flexDirection: 'row',
     alignItems: 'baseline',

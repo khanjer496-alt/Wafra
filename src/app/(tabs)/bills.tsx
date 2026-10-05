@@ -1,7 +1,11 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
+  // Core Animated for the paid stamp (paint only, native
+  // driver); Reanimated stays the rows' entering animation.
+  Animated as CoreAnimated,
   InteractionManager,
   Platform,
   Pressable,
@@ -32,15 +36,17 @@ import { Icon } from '@/components/ui/icon';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { BandScaffold, type BandNav } from '@/components/ui/band-scaffold';
 import { BandFigure } from '@/components/ui/band/band-figure';
+import { COIN_POP, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
 import { EButton } from '@/components/ui/band/e-button';
 import { TextField } from '@/components/ui/text-field';
-import { Radius, Spacing } from '@/constants/theme';
+import { Motion, Radius, Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useScreenEntering } from '@/hooks/use-screen-entering';
 import { useTheme } from '@/hooks/use-theme';
 import { useToday } from '@/hooks/use-today';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { billsForMonth } from '@/lib/bills';
 import { openDues, recentlySettledDues } from '@/lib/cards';
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
@@ -153,6 +159,90 @@ function scheduleWhen(days: number): string {
 }
 
 /**
+ * A "Price went up" note ending in an up arrow: this charge costs more than it
+ * did. Still, so the timeline stays the screen's one moving part. The note's
+ * words are what is read and spoken; the arrow is decoration.
+ */
+function PriceUpNote({ color, testID, children }: { color: string; testID?: string; children: React.ReactNode }) {
+  return (
+    <View testID={testID} style={styles.priceUp}>
+      {children}
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <Icon name="arrow-up" size={12} color={color} />
+      </View>
+    </View>
+  );
+}
+
+/** How long a paid stamp stays before it lifts away. */
+const STAMP_HOLD = 1400;
+
+/**
+ * "Paid" stamped over the screen for a moment after a bill is recorded as
+ * paid: it scales in with a slight turn and settles, then fades. The payment
+ * is already booked when it appears (the stamp never holds the state change
+ * back); the agenda and the band's total say the same afterwards. Under
+ * Reduce Motion it simply shows, then goes.
+ */
+function PaidStamp({ title, palette, onDone }: { title: string; palette: BandPalette; onDone: () => void }) {
+  const motion = useMotionPreference();
+  const still = motion.reducedMotion || !motion.ready;
+  const enter = useAnimatedNumber(still ? 1 : 0);
+  const leave = useAnimatedNumber(1);
+  const doneRef = useRef(onDone);
+  doneRef.current = onDone;
+  useEffect(() => {
+    if (still) {
+      enter.setValue(1);
+      leave.setValue(1);
+      const timer = setTimeout(() => doneRef.current(), STAMP_HOLD + Motion.appear);
+      return () => clearTimeout(timer);
+    }
+    const run = CoreAnimated.sequence([
+      CoreAnimated.spring(enter, { toValue: 1, ...COIN_POP, useNativeDriver: nativeDriver }),
+      CoreAnimated.delay(STAMP_HOLD),
+      CoreAnimated.timing(leave, { toValue: 0, duration: Motion.change, useNativeDriver: nativeDriver }),
+    ]);
+    run.start(({ finished }) => {
+      if (finished) doneRef.current();
+    });
+    return () => {
+      run.stop();
+      enter.setValue(1);
+    };
+  }, [enter, leave, still]);
+  const stampMotion = useMemo(() => ({
+    opacity: CoreAnimated.multiply(
+      enter.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 1, 1], extrapolate: 'clamp' }),
+      leave,
+    ),
+    transform: [
+      { scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }) },
+      { rotate: enter.interpolate({ inputRange: [0, 1], outputRange: ['-12deg', '0deg'] }) },
+    ],
+  }), [enter, leave]);
+  const paid = t('paid');
+  // Said once, the same way on iOS and Android; the drawing itself is hidden.
+  useEffect(() => {
+    AccessibilityInfo.announceForAccessibility(`${title}: ${paid}`);
+  }, [paid, title]);
+  return (
+    <View style={styles.stampLayer}>
+      <CoreAnimated.View testID="bills-paid-stamp" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+        style={[styles.stamp, { backgroundColor: palette.selected, borderColor: palette.onSelected }, stampMotion]}>
+        <View style={[styles.stampCheck, { borderColor: palette.onSelected }]}>
+          <Icon name="check" size={18} color={palette.onSelected} />
+        </View>
+        <View style={styles.stampText}>
+          <ThemedText type="smallBold" style={{ color: palette.onSelected }}>{paid}</ThemedText>
+          <ThemedText type="meta" style={{ color: palette.onSelected }}>{title}</ThemedText>
+        </View>
+      </CoreAnimated.View>
+    </View>
+  );
+}
+
+/**
  * One recurring row, memoised so a segment tap, sheet or form keystroke on
  * the Bills screen does not re-render every row. `language` is a prop only so
  * a language switch still re-renders the copy read through t()/tf().
@@ -222,11 +312,13 @@ const RecurringRow = React.memo(function RecurringRow({
                 {subscriptionLabel(sub)}
               </ThemedText>
               {sub.priceIncreased && (
-                <View style={[styles.badge, { backgroundColor: theme.goldSoft }]}>
-                  <ThemedText type="micro" style={{ color: theme.warning }}>
-                    {w.priceWentUp}
-                  </ThemedText>
-                </View>
+                <PriceUpNote color={theme.warning} testID={`bills-price-up-nudge-${subscriptionKey(sub)}`}>
+                  <View style={[styles.badge, { backgroundColor: theme.goldSoft }]}>
+                    <ThemedText type="micro" style={{ color: theme.warning }}>
+                      {w.priceWentUp}
+                    </ThemedText>
+                  </View>
+                </PriceUpNote>
               )}
             </View>
             {/* The schedule owns the body width and wraps rather than
@@ -320,11 +412,22 @@ export default function BillsScreen() {
   const [stoppedLimit, setStoppedLimit] = useState(RECURRING_PAGE_SIZE);
   // The subscription just marked cancelled, until undone or replaced.
   const [cancelNotice, setCancelNotice] = useState<{ key: string; label: string } | null>(null);
+  // The bill just recorded as paid, stamped over the screen for a moment.
+  const [paidStamp, setPaidStamp] = useState<{ id: string; title: string } | null>(null);
+  // A payment just confirmed, until the store shows whether it was booked.
+  const [stampAsked, setStampAsked] = useState<{ billId: string; month: string; title: string } | null>(null);
 
   // Design language E: Bills wears the ochre band (ink text in light, light
   // text on the deepened ochre in dark — both from the band tokens).
   const { expenseCategories } = useCategoryCatalog();
   const band = useBand('bills');
+  useEffect(() => {
+    if (!stampAsked) return;
+    // The dispatch is synchronous, so this render already holds its answer.
+    const booked = state.bills.some((b) => b.id === stampAsked.billId && b.paidMonths.includes(stampAsked.month));
+    if (booked) setPaidStamp({ id: `${stampAsked.billId}-${stampAsked.month}`, title: stampAsked.title });
+    setStampAsked(null);
+  }, [stampAsked, state.bills]);
   const billsNav: BandNav = {
     title: t('billsTitle'),
     actions: [{
@@ -756,7 +859,7 @@ export default function BillsScreen() {
       question: tf('markBillPaidTitle', { title: bill.title }),
       body: tf('billRecordsExpense', { amount: formatAED(bill.amountFils, { decimals: false }) }),
       confirmLabel: t('markPaid'),
-      onConfirm: () =>
+      onConfirm: () => {
         markBillPaid(billId, monthKey(dueISO), {
           type: 'expense',
           amountFils: bill.amountFils,
@@ -765,7 +868,12 @@ export default function BillsScreen() {
           title: bill.title,
           date: todayISO,
           source: 'manual',
-        }),
+        });
+        // The stamp follows the booking, never stands in for it: the store can
+        // refuse (already paid, a captured payment landed, a changed amount),
+        // so it is shown only once the bill's month reads as paid.
+        setStampAsked({ billId, month: monthKey(dueISO), title: bill.title });
+      },
     });
   };
 
@@ -841,9 +949,11 @@ export default function BillsScreen() {
     const sub = item.kind === 'recurring' ? subByAgendaId.get(item.repeatOf ?? item.id) : undefined;
     if (!sub?.priceIncreased) return null;
     return (
-      <ThemedText type="meta" style={{ color: theme.warning }} testID={`bills-price-up-${item.id}`}>
-        {`· ${w.wasPrice(formatAED(sub.priorTypicalFils))} · ${w.priceWentUp}`}
-      </ThemedText>
+      <PriceUpNote color={theme.warning} testID={`bills-price-up-nudge-${item.id}`}>
+        <ThemedText type="meta" style={[styles.priceUpText, { color: theme.warning }]} testID={`bills-price-up-${item.id}`}>
+          {`· ${w.wasPrice(formatAED(sub.priorTypicalFils))} · ${w.priceWentUp}`}
+        </ThemedText>
+      </PriceUpNote>
     );
   }, [subByAgendaId, theme.warning, w]);
 
@@ -1176,6 +1286,7 @@ export default function BillsScreen() {
         onClose={() => setCurrencySheetVisible(false)}
         onSelect={setLedgerMoney}
       />
+      {paidStamp && <PaidStamp key={paidStamp.id} title={paidStamp.title} palette={band} onDone={() => setPaidStamp(null)} />}
       {/* Mounted only while there is something to confirm, so the entry
           animation runs on every open rather than once per screen. */}
       {confirmation && (
@@ -1251,6 +1362,18 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     alignItems: 'flex-end',
   },
+  // Wraps inside the meta line at large text rather than running past it.
+  priceUp: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 2 },
+  priceUpText: { flexShrink: 1 },
+  // Over the screen, never in the way of a touch.
+  stampLayer: { ...StyleSheet.absoluteFillObject, pointerEvents: 'none', alignItems: 'center', justifyContent: 'center', padding: Spacing.four },
+  stamp: {
+    maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: Spacing.two,
+    paddingVertical: Spacing.two, paddingStart: Spacing.two, paddingEnd: Spacing.four,
+    borderRadius: Radius.full, borderWidth: 2,
+  },
+  stampCheck: { width: 32, height: 32, borderRadius: 16, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  stampText: { flexShrink: 1, gap: 0 },
   badge: {
     paddingHorizontal: 6,
     paddingVertical: 1,

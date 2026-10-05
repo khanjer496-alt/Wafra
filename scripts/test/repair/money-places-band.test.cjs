@@ -56,17 +56,6 @@ test('the card usage bar is coloured by status only: within, near from 85%, over
   assert.equal(band.cardUsageStatus({ usedFils: 100_001, limitFils: 100_000 }), 'over');
 });
 
-test('the goal ring never runs past a full turn or below empty', () => {
-  const half = band.goalRingGeometry(190, 20, 0.5);
-  assert.equal(half.radius, 85);
-  assert.ok(Math.abs(half.dashOffset - half.circumference / 2) < 1e-9);
-  assert.equal(band.goalRingGeometry(190, 20, 1.7).dashOffset, 0);
-  const none = band.goalRingGeometry(190, 20, -0.2);
-  assert.equal(none.drawn, false);
-  assert.equal(none.dashOffset, none.circumference);
-  assert.equal(band.goalRingGeometry(190, 20, Number.NaN).drawn, false);
-});
-
 test('the band copy is in both languages with correct Arabic counts', () => {
   const en = moneyPlacesCopy.en;
   const ar = moneyPlacesCopy.ar;

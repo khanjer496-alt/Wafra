@@ -55,6 +55,9 @@ function harness() {
     '@/components/ui/band/band-figure': { BandFigure: 'BandFigure' },
     '@/components/ui/band/stat-tile': { StatTile: 'StatTile', statTileColors: () => ({}) },
     '@/components/ui/band/week-tiles': { WeekTiles: 'WeekTiles' },
+    // Left in budgets' coin stack: decoration beside the figure, no money text.
+    '@/components/ui/coins/coin-stack': { CoinStack: 'CoinStack' }, '@/lib/coin-math': local('coin-math'),
+    '@/components/ui/coins/coin-disc': { ghostTone: () => ({}) },
     // Spending's sheet pieces in language E: the tiles and bars carry no money
     // text of their own; the rows' Money and spoken labels are under test.
     '@/components/ui/band/e-button': { EButton: 'EButton' }, '@/components/ui/band/glyph-tile': { GlyphTile: 'GlyphTile' },

@@ -10,6 +10,9 @@ function harness(language) {
   const h = createWorkflowHarness({ language });
   h.local('@/lib/transfer-activity-copy', 'src/lib/transfer-activity-copy.ts');
   h.local('@/components/transfers/transfer-answer-choices');
+  // The route row draws its travelling coin from transfer-coins.
+  h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
+  h.local('@/components/transfer-coins/route-coin');
   h.local('@/components/transfers/transfer-route-row');
   h.local('@/components/transfers/transfer-question-card');
   return h;
@@ -85,6 +88,9 @@ for (const language of ['en', 'ar']) {
 test('large text stacks the route row and lets names wrap', () => {
   const h = createWorkflowHarness({ language: 'en', largeText: true });
   h.local('@/lib/transfer-activity-copy', 'src/lib/transfer-activity-copy.ts');
+  // The route row draws its travelling coin from transfer-coins.
+  h.local('@/components/transfer-coins/coin-cues', 'src/components/transfer-coins/coin-cues.ts');
+  h.local('@/components/transfer-coins/route-coin');
   h.local('@/components/transfers/transfer-route-row');
   const tree = row(h, {});
   const route = byId(tree, 'transfer-route-p');
