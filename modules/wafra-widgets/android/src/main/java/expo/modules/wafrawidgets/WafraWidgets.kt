@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.content.res.Resources
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.text.SpannableString
 import android.text.Spanned
@@ -98,8 +99,17 @@ internal object WafraWidgets {
   internal const val TODAY_FULL_MIN_HEIGHT_DP = 152
   internal const val UPCOMING_TWO_ROWS_MIN_HEIGHT_DP = 130
   internal const val UPCOMING_THREE_ROWS_MIN_HEIGHT_DP = 170
+  /**
+   * The date strip (30dp and its 6dp margin, less the slack the row
+   * breakpoints already leave) only takes room the rows leave: two rows and
+   * the strip from 158dp, three rows and the strip from 198dp.
+   */
+  internal const val UPCOMING_STRIP_DP = 28
   private val TODAY_BREAKPOINTS = intArrayOf(1, TODAY_FULL_MIN_HEIGHT_DP)
-  private val UPCOMING_BREAKPOINTS = intArrayOf(1, UPCOMING_TWO_ROWS_MIN_HEIGHT_DP, UPCOMING_THREE_ROWS_MIN_HEIGHT_DP)
+  private val UPCOMING_BREAKPOINTS = intArrayOf(
+    1, UPCOMING_TWO_ROWS_MIN_HEIGHT_DP, UPCOMING_TWO_ROWS_MIN_HEIGHT_DP + UPCOMING_STRIP_DP,
+    UPCOMING_THREE_ROWS_MIN_HEIGHT_DP, UPCOMING_THREE_ROWS_MIN_HEIGHT_DP + UPCOMING_STRIP_DP,
+  )
 
   /** Today keeps its seven-day total only from [TODAY_FULL_MIN_HEIGHT_DP] up. */
   internal fun todayIsCompact(heightDp: Int): Boolean = heightDp < TODAY_FULL_MIN_HEIGHT_DP
@@ -109,6 +119,13 @@ internal object WafraWidgets {
     heightDp >= UPCOMING_THREE_ROWS_MIN_HEIGHT_DP -> 3
     heightDp >= UPCOMING_TWO_ROWS_MIN_HEIGHT_DP -> 2
     else -> 1
+  }
+
+  /** Whether Coming up has room for its date strip after the rows it lists at this height. */
+  internal fun upcomingShowsStrip(heightDp: Int): Boolean = when (upcomingRowsFor(heightDp)) {
+    3 -> heightDp >= UPCOMING_THREE_ROWS_MIN_HEIGHT_DP + UPCOMING_STRIP_DP
+    2 -> heightDp >= UPCOMING_TWO_ROWS_MIN_HEIGHT_DP + UPCOMING_STRIP_DP
+    else -> false
   }
 
   fun isRefreshAction(action: String?): Boolean = action != null && action in REFRESH_ACTIONS
@@ -146,7 +163,7 @@ internal object WafraWidgets {
       }
       for (id in upcomingIds) {
         manager.updateAppWidget(id, sized(manager, id, UPCOMING_BREAKPOINTS) { height ->
-          renderUpcoming(app, snapshot, now, todayISO, upcomingRowsFor(height))
+          renderUpcoming(app, snapshot, now, todayISO, upcomingRowsFor(height), upcomingShowsStrip(height), widgetWidthDp(manager, id))
         })
       }
       for (id in spendingIds) {
@@ -221,6 +238,10 @@ internal object WafraWidgets {
     views.setViewVisibility(R.id.wafra_today_week, if (compact) View.GONE else View.VISIBLE)
     val density = context.resources.displayMetrics.density
     val rtl = snapshot.language == "ar"
+    // A coin per payment today beside the figure (at most six; none with none).
+    val coins = WidgetGraphics.todayCoins(snapshot.todayCount)
+    views.setViewVisibility(R.id.wafra_today_coins, if (coins > 0) View.VISIBLE else View.GONE)
+    if (coins > 0) views.setImageViewBitmap(R.id.wafra_today_coins, WidgetGraphics.coinStack(coins, density))
     if (!compact) {
       // Seven bars, oldest first, on the week's own scale; today in the accent.
       val chartWidth = px(WidgetGraphics.weekChartWidthDp(widthDp).toFloat(), density)
@@ -338,6 +359,8 @@ internal object WafraWidgets {
     now: Long,
     todayISO: String,
     maxRows: Int,
+    strip: Boolean,
+    widthDp: Int,
   ): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.wafra_widget_upcoming)
     attachLaunch(context, views)
@@ -353,6 +376,7 @@ internal object WafraWidgets {
     }
     for (i in BILL_ROWS.indices) views.setViewVisibility(BILL_ROWS[i], View.GONE)
     views.setViewVisibility(R.id.wafra_upcoming_total, View.GONE)
+    views.setViewVisibility(R.id.wafra_upcoming_strip, View.GONE)
 
     if (snapshot == null || bills == null || bills.isEmpty()) {
       views.setViewVisibility(R.id.wafra_upcoming_empty_block, View.VISIBLE)
@@ -373,6 +397,8 @@ internal object WafraWidgets {
       views.setTextViewText(R.id.wafra_upcoming_total, isolate(total, snapshot.language))
       views.setContentDescription(R.id.wafra_upcoming_total, res.getString(R.string.wafra_widget_total_due, total))
     }
+
+    if (strip) drawStrip(context, views, bills, todayISO, snapshot.language == "ar", widthDp)
 
     val locale = if (snapshot.language == "ar") Locale.forLanguageTag("ar") else Locale.US
     for ((i, bill) in bills.withIndex()) {
@@ -411,6 +437,34 @@ internal object WafraWidgets {
       )
     }
     return views
+  }
+
+  /**
+   * The listed bills on the next 30 days: each tile on its date, the soonest
+   * lifted. The same allowlisted logos as the rows; JSON never names a file.
+   */
+  private fun drawStrip(context: Context, views: RemoteViews, bills: List<WidgetBill>, todayISO: String, rtl: Boolean, widthDp: Int) {
+    val density = context.resources.displayMetrics.density
+    val width = px(WidgetGraphics.contentWidthDp(widthDp).toFloat(), density)
+    val tile = WidgetGraphics.STRIP_TILE_DP * density
+    val centers = WidgetGraphics.stripCenters(bills.map { daysAhead(todayISO, it.dueISO) ?: 0 }, width.toFloat(), tile)
+    val pins = bills.mapIndexed { index, bill ->
+      val logo = LOGO_DRAWABLES[bill.logoId]?.let { BitmapFactory.decodeResource(context.resources, it) }
+      val mono = logo != null && bill.logoId in MONOCHROME_LOGOS
+      val initial = if (logo == null) initialOf(bill.title) else null
+      WidgetGraphics.StripPin(
+        center = if (rtl) width - centers[index] else centers[index],
+        logo = if (mono) null else logo,
+        monoLogo = if (mono) logo else null,
+        initial = initial,
+        glyph = if (logo == null && initial == null) context.getDrawable(R.drawable.wafra_widget_glyph_calendar)?.mutate() else null,
+      )
+    }
+    val layers = WidgetGraphics.billStrip(pins, width, density, rtl)
+    views.setImageViewBitmap(R.id.wafra_upcoming_strip_tiles, layers.tiles)
+    views.setImageViewBitmap(R.id.wafra_upcoming_strip_marks, layers.marks)
+    views.setImageViewBitmap(R.id.wafra_upcoming_strip_logos, layers.logos)
+    views.setViewVisibility(R.id.wafra_upcoming_strip, View.VISIBLE)
   }
 
   /**
@@ -464,12 +518,22 @@ internal object WafraWidgets {
     val density = context.resources.displayMetrics.density
     val width = px(WidgetGraphics.contentWidthDp(widthDp).toFloat(), density)
     val height = px(WidgetGraphics.SHARE_BAR_HEIGHT_DP.toFloat(), density)
-    val segments = WidgetGraphics.shareSegments(
-      spending.categories.map { it.amountMinor } + spending.otherMinor,
-      spending.categories.size, snapshot.hidden, width.toFloat(), WidgetGraphics.SHARE_GAP_DP * density,
-      snapshot.language == "ar",
-    )
-    views.setImageViewBitmap(R.id.wafra_spending_bar, WidgetGraphics.shareBar(segments, width, height, density))
+    // The Spending tab's coins in their categories' colours; a snapshot
+    // without colours (older app) keeps the share bar.
+    val coins = WidgetGraphics.spendingCoins(spending, snapshot.hidden)
+    views.setViewVisibility(R.id.wafra_spending_coins, if (coins != null) View.VISIBLE else View.GONE)
+    views.setViewVisibility(R.id.wafra_spending_bar, if (coins != null) View.GONE else View.VISIBLE)
+    if (coins != null) {
+      val rowHeight = px(WidgetGraphics.COIN_ROW_HEIGHT_DP.toFloat(), density)
+      views.setImageViewBitmap(R.id.wafra_spending_coins, WidgetGraphics.coinRow(coins, width, rowHeight, density, snapshot.language == "ar"))
+    } else {
+      val segments = WidgetGraphics.shareSegments(
+        spending.categories.map { it.amountMinor } + spending.otherMinor,
+        spending.categories.size, snapshot.hidden, width.toFloat(), WidgetGraphics.SHARE_GAP_DP * density,
+        snapshot.language == "ar",
+      )
+      views.setImageViewBitmap(R.id.wafra_spending_bar, WidgetGraphics.shareBar(segments, width, height, density))
+    }
     for (i in SPENDING_TOP.indices) {
       val category = spending.categories.getOrNull(i)
       views.setViewVisibility(SPENDING_TOP[i], if (category == null) View.INVISIBLE else View.VISIBLE)
@@ -571,6 +635,13 @@ internal object WafraWidgets {
       )
       else -> shortDate(dueISO, locale)
     }
+  }
+
+  /** Whole days from today to a due day; null when either is not a valid date. */
+  internal fun daysAhead(todayISO: String, dueISO: String): Int? {
+    val due = parseDay(dueISO) ?: return null
+    val today = parseDay(todayISO) ?: return null
+    return ((due.timeInMillis - today.timeInMillis) / DAY_MS).toInt()
   }
 
   /** A valid YYYY-MM-DD at UTC midnight (so day differences are exact), or null. */

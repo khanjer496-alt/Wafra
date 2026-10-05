@@ -23,7 +23,8 @@ struct WafraProvider: TimelineProvider {
   }
 
   func getSnapshot(in context: Context, completion: @escaping (WafraEntry) -> Void) {
-    completion(WafraEntry(date: Date(), snapshot: WafraSnapshotStore.load(), isPlaceholder: false))
+    completion(WafraEntry(date: Date(), snapshot: WafraSnapshotStore.load(), isPlaceholder: false,
+                          todayFace: context.isPreview ? .today : WafraProvider.todayFace()))
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<WafraEntry>) -> Void) {
@@ -41,8 +42,18 @@ struct WafraProvider: TimelineProvider {
       let staleAt = snapshot.generatedAt.addingTimeInterval(WafraShared.staleAfter + 1)
       if staleAt > now, staleAt < refresh { dates.append(staleAt) }
     }
-    let entries = dates.sorted().map { WafraEntry(date: $0, snapshot: snapshot, isPlaceholder: false) }
+    let face = WafraProvider.todayFace()
+    let entries = dates.sorted().map { WafraEntry(date: $0, snapshot: snapshot, isPlaceholder: false, todayFace: face) }
     completion(Timeline(entries: entries, policy: .after(refresh)))
+  }
+
+  /// The Today widget's stored face. Only iOS 17 can turn it (the flip is an
+  /// interactive App Intent), so earlier systems always show today.
+  static func todayFace() -> WafraTodayFace {
+    if #available(iOS 17.0, *) {
+      return WafraTodayFace.stored()
+    }
+    return .today
   }
 }
 

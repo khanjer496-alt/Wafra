@@ -51,7 +51,8 @@ test('Android breakpoints: Today drops the week total below 152dp; Coming up lis
   assert.match(kotlin, /heightDp >= UPCOMING_THREE_ROWS_MIN_HEIGHT_DP -> 3\s+heightDp >= UPCOMING_TWO_ROWS_MIN_HEIGHT_DP -> 2\s+else -> 1/);
   // Android 12+ gets one layout per breakpoint and picks among them itself.
   assert.match(kotlin, /TODAY_BREAKPOINTS = intArrayOf\(1, TODAY_FULL_MIN_HEIGHT_DP\)/);
-  assert.match(kotlin, /UPCOMING_BREAKPOINTS = intArrayOf\(1, UPCOMING_TWO_ROWS_MIN_HEIGHT_DP, UPCOMING_THREE_ROWS_MIN_HEIGHT_DP\)/);
+  // Plus one breakpoint per row count where the date strip also fits (widget-coins.test.cjs).
+  assert.match(kotlin, /UPCOMING_BREAKPOINTS = intArrayOf\(\s*1, UPCOMING_TWO_ROWS_MIN_HEIGHT_DP, UPCOMING_TWO_ROWS_MIN_HEIGHT_DP \+ UPCOMING_STRIP_DP,\s*UPCOMING_THREE_ROWS_MIN_HEIGHT_DP, UPCOMING_THREE_ROWS_MIN_HEIGHT_DP \+ UPCOMING_STRIP_DP,\s*\)/);
   assert.match(kotlin, /if \(Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.S\) \{[\s\S]{0,260}return RemoteViews\(layouts\)/);
   // Older versions read the reported minimum height per widget id.
   assert.match(kotlin, /getAppWidgetOptions\(appWidgetId\)\?\.getInt\(AppWidgetManager\.OPTION_APPWIDGET_MIN_HEIGHT, 0\)/);

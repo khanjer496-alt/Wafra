@@ -1,4 +1,5 @@
 import { categoryLabel, isFixedCommitment } from '@/lib/categories';
+import { CATEGORY_REST, categoryColors } from '@/lib/category-colors';
 import { billsForMonth } from '@/lib/bills';
 import { openDues } from '@/lib/cards';
 import { monthEndISO, monthKey, monthStartISO, toISODate } from '@/lib/format';
@@ -68,14 +69,20 @@ export function widgetMonthSpending(input: {
   const key = monthKey(input.now);
   const summary = summarizeMonth(input.state.transactions as Transaction[], { mode: 'month', key },
     input.liveAccounts as Set<string>, input.internalIds as Set<string>);
-  const rows = spendingCategoryRows(summary, input.state.budgets, true).filter((row) => row.spentFils > 0);
+  const allRows = spendingCategoryRows(summary, input.state.budgets, true);
+  const rows = allRows.filter((row) => row.spentFils > 0);
+  // The colours the Spending tab's coins wear: categoryColors over the same
+  // rows the tab hands its band (flow.tsx), so a custom category resolves alike.
+  const colors = categoryColors(allRows.map((row) => row.category));
   return {
     monthKey: key,
     totalFils: summary.expenseFils,
     categories: rows.map((row) => ({
       label: categoryLabel(row.category, input.language, input.state.customCategories ?? []),
       fils: row.spentFils,
+      color: colors.get(row.category),
     })),
+    restColor: CATEGORY_REST,
   };
 }
 

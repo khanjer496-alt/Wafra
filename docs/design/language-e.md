@@ -251,11 +251,15 @@ reader, shows everything in place.
 ### Coins elsewhere — `src/components/ui/coins/`
 
 The same coins explain a change in money on the screens where a figure moves,
-one animation per screen, always beside the written figure:
+one drawing per figure, always beside the written figure:
 
 | Screen | Drawing | Coins stand for |
 |---|---|---|
 | Home, Left in budgets | 8-coin `CoinStack` | share of limits still left; drains as it is spent |
+| Home, Today | a `CoinStack` of one coin per payment today (at most 6; none with none) at the tile's bottom end beside the count, dropping in as each is captured | today's payments (`todayCount`) |
+| Home, Daily average (no budget) | a row of coin columns, one per day the average divides by (windows up to 31 days), rising start → end | each day's everyday spending against the biggest day (`averageDays`, the same rows and fixed-cost rule as the average) |
+| Home, month line (or the period card) | two 6-coin `CoinStack`s, Spent then In, each named under it with the card's own words, scaled to the larger; the gap is Net; no money in is an empty stack | the period's money in and spending |
+| Home, Recent transactions | a row that arrives at the top while Home is open slides in and a coin drops on its logo tile, once | a capture just recorded (never first paint, loading or a period change) |
 | Goal | jar of up to 10 coins (`goals/goal-jar.tsx`) | share saved |
 | Limit sheet | 10-coin `CoinStack` under a limit line in the status colour | share of the limit spent |
 | Recap cover | row of 5 `CoinDisc` | share of money in that was spent (no row without both) |
@@ -263,6 +267,26 @@ one animation per screen, always beside the written figure:
 | Transfers | `CoinToken` travelling the route (`transfer-coins/`) | money moving source → destination |
 | Bills | logos drop onto their dates; Paid stamp after booking | when each payment is due; a payment just booked |
 | Add transaction | a coin into Save after an expense is written | the expense just recorded |
+| Onboarding Welcome | an example bank alert whose amount lifts off as a `CoinToken`, flips once and lands on the example pattern's category tile (`onboarding/sms-coin-scene.tsx`) | what Wafra does with a bank alert: an EXAMPLE, no bank named, amount sized to the user's currency |
+| Onboarding Watch | 10-coin `CoinStack` under the limit line beside each limit set | the limit just set, whole because nothing is spent yet |
+| Onboarding Complete | 8-coin `CoinStack` beside the watched category's limit; a payment that arrived lifts its coins off | the real limit and the real first payment |
+| Onboarding paywall | a coin dropping, one at a time, into their watched category's tile (an example tile if none) | each alert Pro adds by itself; paused while a purchase is busy or the app is in the background |
+| Widget, Today (iOS, Android) | a stack of one coin per payment today beside the figure (at most 6; none with none); on iOS 17 a new coin drops on when WidgetKit moves to a new entry | today's payments (`todayCount`) |
+| Widget, Today back face (iOS 17) | the corner flips the widget (App Intent, `rotation3DEffect`; a crossfade with Reduce Motion) to the last 7 days: their bars and exact total | the snapshot's `last7Minor`, nothing new |
+| Widget, Spending this month (iOS, Android) | the Spending tab's coin row: coins on their side in each category's colour, sized by share, six named then one for the rest; hidden amounts draw equal coins and no rest coin | each category's share of the month (`spending.categories[].color`, `otherColor`) |
+| Widget, Coming up (iOS, Android) | the listed bills' tiles on a 30-day strip, the next one lifted; only where the rows leave room | when each listed payment is due |
+| Lock Screen, circular (iOS) | a ring of 12 coins filling clockwise, `filledCoins` of the gauge's fraction; vibrant, filled coins accentable | share of the month's budget limits used |
+
+Onboarding also moves without coins, all from the person's own answers: the
+Name tile flips over (rotateY) to their initial; Goals shows a mini Home whose
+first sections reorder as goals are picked (`homeOrderForGoals`, the same order
+Continue saves); Reminders drops bell pins onto the days Wafra really sends
+reminders (`reminderPins`, from `src/lib/reminders.ts`); the pattern reveal
+assembles group by group and tilts up from flat. Step changes keep the step
+just left on screen until the next one has arrived (`StepLayer`), so no frame
+is an empty band. Every step's primary action is pinned above the bottom safe
+area while its content scrolls (`EStepFrame`), except the paywall, whose
+purchase action stays with its price, terms and legal links (`pinActions={false}`).
 
 Rules: `filledCoins(share, total)` (`src/lib/coin-math.ts`) never draws a
 little money as none or nearly all as all. Empty places use
@@ -274,6 +298,19 @@ a running screen reader shows the final state at once, and nothing starts
 before `useMotionPreference().ready`. On the web build react-native-web
 reports a screen reader as always on, so the coins rest in place there; judge
 motion on a device.
+
+Widget coins are drawn natively from the snapshot (`src/lib/widget-coins.ts`
+is the reference arithmetic; `WafraCoinMath` in `targets/widget`, and
+`WidgetGraphics.kt` on Android, mirror it, as SwiftUI shapes and Canvas
+bitmaps). `CoinColors` is mirrored once per platform (`WafraCoinPalette`,
+`WidgetGraphics.COIN_*`). Category colours travel in the snapshot; a snapshot
+without them keeps the share bar. Widgets never animate on their own: on
+iOS 17 only the step between two timeline entries moves (numeric digit
+rolls, a new coin's entrance, the Today flip), never while redacted, and Reduce
+Motion drops the motion. Tinted or clear Home Screens keep only opacity, so
+there the Today stack is left out and Spending keeps the share bar. Coins
+are `accessibilityHidden` on iOS and not important for accessibility on
+Android; every widget's spoken labels are unchanged.
 
 ### `WeekTiles` — `week-tiles.tsx`
 
@@ -363,13 +400,19 @@ Home uses `compactPattern` to close gaps between existing tiles for incomplete
 profiles: up to six tiles form one row, larger patterns use two balanced rows.
 It preserves all recorded choices and the complete 12-cell composition. A
 nameless tile uses the original Wafra mark in Home's compact presentation.
-Onboarding and the other fixed-grid surfaces retain their original positions.
+Onboarding's reveal, the paywall backdrop and the hand-off into Home use the
+same compact packing, so the person lands on the picture they were shown; the
+lock screen, recap cover and Welcome's example keep the fixed grid.
 
 ### `PatternMosaic` — `src/components/ui/pattern-mosaic.tsx`
 
 Draws tiles (Views + the category `Icon`), scalable with `tile`/`gap`, one
 image called "Your pattern" (`bandCopy`), static by default; `animate` pops
 tiles in 70ms apart, still under Reduce Motion, screen readers and Android.
+The opt-in `wrapTile(tile, drawn)` lets onboarding's reveal (`e-pattern.tsx`)
+drive each tile on core Animated: groups assemble name → goals → watch →
+remind with their key rows, then the mosaic lifts from flat (rotateX with
+perspective); Reduce Motion shows it finished. Without it nothing changes.
 `YourPattern` (`src/components/ui/your-pattern.tsx`) is the ledger-subscribed
 version for Home, the lock screen and the recap cover.
 

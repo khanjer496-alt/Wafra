@@ -1,7 +1,7 @@
 import Foundation
 
 // Logic checks for the iOS widget's Foundation-only code
-// (targets/widget/WafraSnapshot.swift). Compiled and run on macOS by
+// (targets/widget/WafraSnapshot.swift), coins included. Compiled and run on macOS by
 // scripts/test/repair/widget-native-e.test.cjs; synthetic figures only.
 
 var failures = 0
@@ -136,6 +136,57 @@ if let shown = snapshot(hidden: false) {
 }
 if let budgeted = snapshot(hidden: false, extra: ",\"budgetTotalMinor\":100000") {
   check(budgeted.budgetFraction == 0.64, "budget used: \(String(describing: budgeted.budgetFraction))")
+}
+
+// Coins (WafraCoinMath, mirroring src/lib/widget-coins.ts).
+check(WafraCoinMath.todayCoins(nil) == 0 && WafraCoinMath.todayCoins(0) == 0, "no payments, no coins")
+check(WafraCoinMath.todayCoins(3) == 3 && WafraCoinMath.todayCoins(40) == 6, "one coin per payment, at most six")
+let disc = WafraCoinMath.disc(width: 22)
+check(disc.face == 8 && disc.edge == 3, "disc geometry matches coin-disc.tsx: \(disc)")
+check(WafraCoinMath.filledCoins(0, total: 12) == 0 && WafraCoinMath.filledCoins(0.01, total: 12) == 1, "a little is one coin")
+check(WafraCoinMath.filledCoins(0.99, total: 12) == 11 && WafraCoinMath.filledCoins(1, total: 12) == 12, "only all is all")
+check(WafraCoinMath.filledCoins(0.5, total: 12) == 6, "half fills half the ring")
+let widths = WafraCoinMath.coinWidths([600, 300, 100, 1], available: 200)
+check(abs(widths.reduce(0, +) - (200 + 5 * 3)) < 0.0001, "coins fill the row with their overlaps: \(widths)")
+check(widths[3] == 16 && widths[0] > widths[1] && widths[1] > widths[2], "flex by share, tiny shares at the minimum: \(widths)")
+let equal = WafraCoinMath.coinWidths([nil, nil, nil], available: 200)
+check(Set(equal).count == 1, "unknown amounts draw equal coins")
+let ltr = WafraCoinMath.coinOffsets([100, 60], available: 155, rtl: false)
+let rtl = WafraCoinMath.coinOffsets([100, 60], available: 155, rtl: true)
+check(ltr == [0, 95] && rtl == [55, 0], "offsets overlap and mirror: \(ltr) \(rtl)")
+check(WafraCoinMath.pinPosition(0) == 3 && WafraCoinMath.pinPosition(30) == 97 && WafraCoinMath.pinPosition(99) == 97, "pin positions")
+let centers = WafraCoinMath.stripCenters([1, 1, 2], width: 300)
+check(centers[1] - centers[0] >= 14 - 0.0001 && centers[2] - centers[1] >= 14 - 0.0001, "same-day tiles are nudged apart: \(centers)")
+let crowded = WafraCoinMath.stripCenters([30, 30], width: 300)
+check(crowded[1] == 290 && crowded[0] <= 276.0001, "tiles stay inside the strip: \(crowded)")
+check(WafraCoinMath.dayOffset(from: now, to: day("2026-10-05")) == 7, "day offset counts whole days")
+
+// Category colours: optional, validated, never an amount.
+let coloured = ",\"spending\":{\"monthKey\":\"2026-09\",\"totalMinor\":400,\"categories\":[{\"label\":\"Groceries\",\"amountMinor\":300,\"color\":\"#FFB86B\"},{\"label\":\"Dining\",\"amountMinor\":60,\"color\":\"#EC9FE8\"}],\"otherMinor\":40,\"otherColor\":\"#A39E95\"}"
+if let colouredMonth = snapshot(hidden: false, extra: coloured)?.spending {
+  check(colouredMonth.categories.map(\.color) == [0xFFB86B, 0xEC9FE8] && colouredMonth.otherColor == 0xA39E95, "colours decode")
+  let coins = colouredMonth.coins(hidden: false)
+  check(coins == [WafraCoinSpec(color: 0xFFB86B, value: 300), WafraCoinSpec(color: 0xEC9FE8, value: 60), WafraCoinSpec(color: 0xA39E95, value: 40)],
+        "each category's coin, then the rest: \(String(describing: coins))")
+} else {
+  check(false, "coloured month decodes")
+}
+if let hiddenMonth = snapshot(hidden: true, extra: coloured)?.spending {
+  check(hiddenMonth.coins(hidden: true) == [WafraCoinSpec(color: 0xFFB86B, value: nil), WafraCoinSpec(color: 0xEC9FE8, value: nil)],
+        "hidden amounts: equal coins, no rest coin")
+}
+check(snapshot(hidden: false, extra: month)?.spending?.coins(hidden: false) == nil, "an older snapshot keeps the share bar")
+let badColour = coloured.replacingOccurrences(of: "#EC9FE8", with: "+EC9FE8")
+check(snapshot(hidden: false, extra: badColour)?.spending?.coins(hidden: false) == nil, "a malformed colour is no colour")
+check(WafraHexColor.parse("#+FFFFF") == nil && WafraHexColor.parse("#ffb86b") == 0xFFB86B, "hex colours")
+
+// Today's face: stored in the App Group, today by default.
+if let scratch = UserDefaults(suiteName: "wafra.widget.tests.\(UUID().uuidString)") {
+  check(WafraTodayFace.stored(in: scratch) == .today, "today by default")
+  check(WafraTodayFace.toggleStored(in: scratch) == .week && WafraTodayFace.stored(in: scratch) == .week, "a tap turns to the week")
+  check(WafraTodayFace.toggleStored(in: scratch) == .today, "and back")
+  scratch.set("sideways", forKey: WafraTodayFace.storageKey)
+  check(WafraTodayFace.stored(in: scratch) == .today, "an unknown face is today")
 }
 
 if failures == 0 {

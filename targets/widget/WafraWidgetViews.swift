@@ -19,6 +19,9 @@ struct WafraBand {
   let accent: Color
   /// Over budget: the light status-over tint, readable on every dark band.
   var over: Color = Color(hex: 0xE08A70)
+  /// iOS is not painting the band (tinted or clear Home Screen, StandBy):
+  /// only opacity survives, so the coins step aside (WafraCoins.swift).
+  var isAdapted: Bool = false
 
   static func home(_ scheme: ColorScheme) -> WafraBand {
     if scheme == .dark {
@@ -75,7 +78,8 @@ struct WafraBand {
       tile: Color.primary.opacity(0.16),
       mark: Color.primary.opacity(0.35),
       accent: fullColor ? accent : .primary,
-      over: fullColor ? over : .primary
+      over: fullColor ? over : .primary,
+      isAdapted: true
     )
   }
 }
@@ -174,6 +178,8 @@ struct WafraEntry: TimelineEntry {
   let date: Date
   let snapshot: WafraSnapshot?
   let isPlaceholder: Bool
+  /// The Today widget's face (iOS 17 tap to flip); today everywhere else.
+  var todayFace: WafraTodayFace = .today
 
   var language: WafraLanguage { snapshot?.language ?? WafraLanguage.device }
   var strings: WafraStrings { WafraStrings(language: language) }
@@ -240,7 +246,23 @@ struct WafraTodayView: View {
   // The week where it fits (its bars, a pattern corner and the exact
   // seven-day total that labels them); at the largest text sizes the figure
   // and its line alone, as Android does below 152dp.
+  //
+  // iOS 17 adds a back face, the last seven days, turned by the corner's
+  // control (WafraFlipControl); earlier systems keep the one face.
+  @ViewBuilder
   private func content(_ snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand) -> some View {
+    if #available(iOS 17.0, *) {
+      WafraFlipFaces(face: entry.isPlaceholder ? .today : entry.todayFace) {
+        todayFace(snapshot, strings: strings, band: band)
+      } back: {
+        WafraWeekFace(snapshot: snapshot, strings: strings, band: band)
+      }
+    } else {
+      todayFace(snapshot, strings: strings, band: band)
+    }
+  }
+
+  private func todayFace(_ snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand) -> some View {
     ViewThatFits(in: .vertical) {
       layout(snapshot, strings: strings, band: band, week: true)
       layout(snapshot, strings: strings, band: band, week: false)
@@ -259,7 +281,9 @@ struct WafraTodayView: View {
             .foregroundColor(band.onBandSecondary)
             .lineLimit(1)
           Spacer(minLength: 0)
-          WafraPatternCorner(band: band)
+          WafraFlipControl(face: .today, strings: strings) {
+            WafraPatternCorner(band: band)
+          }
         }
         HStack(alignment: .bottom, spacing: 8) {
           WafraWeekBars(snapshot: snapshot, band: band)
@@ -272,6 +296,7 @@ struct WafraTodayView: View {
             .lineLimit(1)
             .minimumScaleFactor(0.75)
             .layoutPriority(1)
+            .wafraNumericTransition(snapshot.weekTotalMinor)
             .wafraAmount(snapshot)
             .accessibilityLabel(snapshot.weekTotalMinor == nil ? strings.amountHidden : WafraMoney.format(snapshot.weekTotalMinor, in: snapshot))
         }
@@ -283,8 +308,13 @@ struct WafraTodayView: View {
           .font(.caption.weight(.medium))
           .foregroundColor(band.onBandSecondary)
           .lineLimit(1)
-        WafraBandFigure(minor: snapshot.todayMinor, snapshot: snapshot, strings: strings, band: band)
-          .layoutPriority(1)
+        // The figure and, at its end, a coin per payment today (none with none).
+        HStack(alignment: .bottom, spacing: 8) {
+          WafraBandFigure(minor: snapshot.todayMinor, snapshot: snapshot, strings: strings, band: band)
+            .layoutPriority(1)
+          Spacer(minLength: 0)
+          WafraCoinStack(count: snapshot.todayCount ?? 0, band: band)
+        }
       }
       if let fraction = snapshot.budgetFraction {
         WafraBudgetBar(fraction: fraction, over: snapshot.budgetsOver > 0, band: band)
@@ -405,6 +435,7 @@ struct WafraBandFigure: View {
     figure
       .lineLimit(1)
       .minimumScaleFactor(0.45)
+      .wafraNumericTransition(parts == nil ? nil : minor)
       .widgetAccentable()
       .wafraAmount(snapshot)
       .modifier(HiddenAmountLabel(label: parts == nil ? strings.amountHidden : nil))
@@ -550,21 +581,30 @@ struct WafraComingUpView: View {
         // Three rows where they fit; the smallest phones and the largest
         // text sizes show the first two (or one) instead of clipping. The
         // header's total is always the total of the rows shown.
+        //
+        // The date strip only takes room the rows leave: each row count is
+        // tried with it first, then without, before a row is dropped.
         ViewThatFits(in: .vertical) {
           if !small {
-            listing(bills, snapshot: snapshot, strings: strings, band: band, amounts: true)
+            listing(bills, snapshot: snapshot, strings: strings, band: band, amounts: true, strip: true)
+            listing(bills, snapshot: snapshot, strings: strings, band: band, amounts: true, strip: false)
           }
-          listing(Array(bills.prefix(2)), snapshot: snapshot, strings: strings, band: band, amounts: !small)
-          listing(Array(bills.prefix(1)), snapshot: snapshot, strings: strings, band: band, amounts: !small)
+          listing(Array(bills.prefix(2)), snapshot: snapshot, strings: strings, band: band, amounts: !small, strip: true)
+          listing(Array(bills.prefix(2)), snapshot: snapshot, strings: strings, band: band, amounts: !small, strip: false)
+          listing(Array(bills.prefix(1)), snapshot: snapshot, strings: strings, band: band, amounts: !small, strip: false)
         }
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 
-  private func listing(_ bills: [WafraBill], snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand, amounts: Bool) -> some View {
+  private func listing(_ bills: [WafraBill], snapshot: WafraSnapshot, strings: WafraStrings, band: WafraBand, amounts: Bool, strip: Bool) -> some View {
     VStack(alignment: .leading, spacing: 0) {
       header(WafraMoney.billsTotal(bills, in: snapshot), strings: strings, band: band, snapshot: snapshot)
+      if strip {
+        WafraBillStrip(bills: bills, now: entry.date, band: band, rtl: snapshot.language == .ar)
+          .padding(.bottom, 6)
+      }
       rows(bills, snapshot: snapshot, strings: strings, band: band, amounts: amounts)
       Spacer(minLength: 0)
     }
@@ -649,10 +689,13 @@ struct WafraMerchantTile: View {
   let title: String
   let logoId: String?
   let band: WafraBand
+  /// 28 in the rows; smaller on Coming up's date strip.
+  var size: CGFloat = 28
 
   var body: some View {
+    let logo = size * 22 / 28
     ZStack {
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
+      RoundedRectangle(cornerRadius: size * 8 / 28, style: .continuous)
         .fill(band.tile)
         .widgetAccentable()
       if let id = WafraLogo.validated(logoId) {
@@ -661,23 +704,23 @@ struct WafraMerchantTile: View {
             .renderingMode(.template)
             .resizable()
             .scaledToFit()
-            .frame(width: 22, height: 22)
+            .frame(width: logo, height: logo)
             .foregroundColor(band.onBand)
         } else {
-          WafraFullColorLogo(name: "wafra_logo_" + id)
+          WafraFullColorLogo(name: "wafra_logo_" + id, size: logo)
         }
       } else if let initial = WafraInitial.of(title) {
         Text(initial)
-          .font(.system(size: 14, weight: .bold))
+          .font(.system(size: size / 2, weight: .bold))
           .foregroundColor(band.onBand)
           .widgetAccentable()
       } else {
         Image(systemName: "calendar")
-          .font(.system(size: 13, weight: .semibold))
+          .font(.system(size: size * 13 / 28, weight: .semibold))
           .foregroundColor(band.onBand)
       }
     }
-    .frame(width: 28, height: 28)
+    .frame(width: size, height: size)
     .accessibilityHidden(true)
   }
 }
@@ -686,6 +729,7 @@ struct WafraMerchantTile: View {
 /// would otherwise draw the whole image as one flat tint.
 private struct WafraFullColorLogo: View {
   let name: String
+  var size: CGFloat = 22
 
   var body: some View {
     if #available(iOS 18.0, *) {
@@ -694,13 +738,13 @@ private struct WafraFullColorLogo: View {
         .resizable()
         .widgetAccentedRenderingMode(.accentedDesaturated)
         .scaledToFit()
-        .frame(width: 22, height: 22)
+        .frame(width: size, height: size)
     } else {
       Image(name)
         .renderingMode(.original)
         .resizable()
         .scaledToFit()
-        .frame(width: 22, height: 22)
+        .frame(width: size, height: size)
     }
   }
 }
@@ -798,12 +842,20 @@ struct WafraLockScreenView: View {
       AccessoryWidgetBackground()
       if let snapshot = entry.todaySnapshot {
         if let fraction = budgetUsed(snapshot) {
-          Gauge(value: fraction) {
-            Text(strings.left)
-          } currentValueLabel: {
-            Text("\(Int((fraction * 100).rounded()))%")
+          // The gauge as a ring of coins filling clockwise; it speaks as the
+          // system gauge did ("Left", the percentage).
+          let percent = "\(Int((fraction * 100).rounded()))%"
+          ZStack {
+            WafraCoinRing(fraction: fraction)
+            Text(percent)
+              .font(.caption.weight(.semibold).monospacedDigit())
+              .minimumScaleFactor(0.6)
+              .lineLimit(1)
+              .padding(.horizontal, 10)
           }
-          .gaugeStyle(.accessoryCircularCapacity)
+          .accessibilityElement(children: .ignore)
+          .accessibilityLabel(strings.left)
+          .accessibilityValue(percent)
           .wafraAmount(snapshot)
         } else {
           VStack(spacing: 0) {
@@ -873,6 +925,7 @@ struct WafraSpendingView: View {
             .font(.footnote.weight(.medium).monospacedDigit())
             .foregroundColor(band.onBand)
             .lineLimit(1)
+            .wafraNumericTransition(total)
             .wafraAmount(snapshot)
             .accessibilityLabel(WafraMoney.format(total, in: snapshot))
         }
@@ -886,7 +939,8 @@ struct WafraSpendingView: View {
           .multilineTextAlignment(.center)
         Spacer(minLength: 0)
       } else {
-        WafraShareBar(segments: spending.segments(hidden: snapshot.hidden), band: band)
+        // The Spending tab's coins (the share bar without category colours).
+        WafraSpendingCoins(spending: spending, snapshot: snapshot, band: band)
           .frame(height: 26)
           .padding(.top, 14)
         HStack(alignment: .firstTextBaseline, spacing: 6) {

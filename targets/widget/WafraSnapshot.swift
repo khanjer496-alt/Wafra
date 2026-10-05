@@ -51,6 +51,16 @@ struct WafraBill: Hashable {
 struct WafraSpendingCategory: Hashable {
   let label: String
   let amountMinor: Int64?
+  /// The category's own colour (0xRRGGBB), for the coin row. Nil in older
+  /// snapshots, which keep the share bar.
+  var color: UInt32? = nil
+}
+
+/// One coin of the Spending row: its colour and the amount sizing it, or nil
+/// for an equal coin (hidden or unknown amounts).
+struct WafraCoinSpec: Equatable {
+  let color: UInt32
+  let value: Int64?
 }
 
 /// This month as the Spending tab shows it (src/lib/widget-snapshot.ts,
@@ -63,8 +73,44 @@ struct WafraSpending {
   /// Largest first, at most six.
   let categories: [WafraSpendingCategory]
   let otherMinor: Int64?
+  /// The pooled coin's colour (0xRRGGBB); nil in older snapshots.
+  var otherColor: UInt32? = nil
 
   var month: Int { Int(monthKey.suffix(2)) ?? 1 }
+
+  /// The Spending tab's coin row (src/lib/widget-coins.ts widgetSpendingCoins):
+  /// each named category in its own colour, then one coin for the rest. Nil
+  /// keeps the older share bar (no colours in the snapshot). Hidden or unknown
+  /// amounts give one equal coin per named category and no rest coin, so no
+  /// coin's size or presence hints at an amount.
+  func coins(hidden: Bool) -> [WafraCoinSpec]? {
+    guard !categories.isEmpty else { return nil }
+    var colors: [UInt32] = []
+    for category in categories {
+      guard let color = category.color else { return nil }
+      colors.append(color)
+    }
+    let amounts = categories.map(\.amountMinor) + [otherMinor]
+    var sum: Int64 = 0
+    var known = !hidden && amounts.allSatisfy { ($0 ?? -1) >= 0 }
+    if known {
+      for amount in amounts {
+        let next = sum.addingReportingOverflow(amount ?? 0)
+        guard !next.overflow else { known = false; break }
+        sum = next.partialValue
+      }
+    }
+    guard known, sum > 0 else { return colors.map { WafraCoinSpec(color: $0, value: nil) } }
+    var coins: [WafraCoinSpec] = []
+    for (index, category) in categories.enumerated() where (category.amountMinor ?? 0) > 0 {
+      coins.append(WafraCoinSpec(color: colors[index], value: category.amountMinor))
+    }
+    if let rest = otherMinor, rest > 0 {
+      guard let otherColor else { return nil }
+      coins.append(WafraCoinSpec(color: otherColor, value: rest))
+    }
+    return coins.isEmpty ? nil : coins
+  }
 
   static let segmentAlphas: [Double] = [0.92, 0.7, 0.5]
   static let restAlpha: Double = 0.24
@@ -225,13 +271,26 @@ private struct RawBill: Decodable {
 private struct RawSpendingCategory: Decodable {
   let label: String?
   let amountMinor: Double?
+  let color: String?
 
-  enum CodingKeys: String, CodingKey { case label, amountMinor }
+  enum CodingKeys: String, CodingKey { case label, amountMinor, color }
 
   init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     label = try? c.decodeIfPresent(String.self, forKey: .label)
     amountMinor = (try? c.decodeIfPresent(LenientNumber.self, forKey: .amountMinor))?.value
+    color = try? c.decodeIfPresent(String.self, forKey: .color)
+  }
+}
+
+enum WafraHexColor {
+  /// "#RRGGBB" to 0xRRGGBB; anything else is no colour.
+  static func parse(_ value: String?) -> UInt32? {
+    guard let value, value.utf8.count == 7, value.hasPrefix("#") else { return nil }
+    let digits = value.dropFirst()
+    // No sign: UInt32(_:radix:) would accept "+FFFFF".
+    guard digits.unicodeScalars.allSatisfy({ $0.properties.isASCIIHexDigit }) else { return nil }
+    return UInt32(digits, radix: 16)
   }
 }
 
@@ -240,8 +299,9 @@ private struct RawSpending: Decodable {
   let totalMinor: Double?
   let categories: [Tolerant<RawSpendingCategory>]?
   let otherMinor: Double?
+  let otherColor: String?
 
-  enum CodingKeys: String, CodingKey { case monthKey, totalMinor, categories, otherMinor }
+  enum CodingKeys: String, CodingKey { case monthKey, totalMinor, categories, otherMinor, otherColor }
 
   init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -249,6 +309,7 @@ private struct RawSpending: Decodable {
     totalMinor = (try? c.decodeIfPresent(LenientNumber.self, forKey: .totalMinor))?.value
     categories = try? c.decodeIfPresent([Tolerant<RawSpendingCategory>].self, forKey: .categories)
     otherMinor = (try? c.decodeIfPresent(LenientNumber.self, forKey: .otherMinor))?.value
+    otherColor = try? c.decodeIfPresent(String.self, forKey: .otherColor)
   }
 
   /// A malformed month is no month.
@@ -259,10 +320,12 @@ private struct RawSpending: Decodable {
     let named: [WafraSpendingCategory] = (categories ?? []).compactMap { entry in
       guard let row = entry.value, let label = row.label?.trimmingCharacters(in: .whitespacesAndNewlines),
             !label.isEmpty else { return nil }
-      return WafraSpendingCategory(label: String(label.prefix(60)), amountMinor: amount(row.amountMinor))
+      return WafraSpendingCategory(label: String(label.prefix(60)), amountMinor: amount(row.amountMinor),
+                                   color: WafraHexColor.parse(row.color))
     }
     return WafraSpending(monthKey: monthKey, totalMinor: amount(totalMinor),
-                         categories: Array(named.prefix(6)), otherMinor: amount(otherMinor))
+                         categories: Array(named.prefix(6)), otherMinor: amount(otherMinor),
+                         otherColor: WafraHexColor.parse(otherColor))
   }
 }
 
@@ -387,6 +450,141 @@ private struct RawSnapshot: Decodable {
 
   static func isCurrencyCode(_ code: String) -> Bool {
     code.count == 3 && code.unicodeScalars.allSatisfy { $0.value >= 65 && $0.value <= 90 }
+  }
+}
+
+// MARK: - Coins
+
+/// The arithmetic behind the widgets' coins, mirroring src/lib/widget-coins.ts
+/// (and WidgetGraphics.kt on Android). Foundation only, so
+/// scripts/test/widget-native/main.swift checks it on macOS.
+enum WafraCoinMath {
+  /// Today's stack: one coin per payment today, at most six (Home's TODAY_COINS).
+  static let todayCoinLimit = 6
+  static let todayCoinWidth: Double = 22
+  /// The Spending row, share-bar.tsx scaled to the widget's 26pt bar.
+  static let rowHeight: Double = 26
+  static let rowFace: Double = 10
+  static let rowMinWidth: Double = 16
+  static let rowOverlap: Double = 5
+  /// Coming up's strip: the next 30 days, the next payment lifted.
+  static let stripDays = 30
+  static let stripTile: Double = 20
+  static let stripLift: Double = 6
+  static let stripHeight: Double = 30
+  /// The circular Lock Screen ring.
+  static let ringCoins = 12
+
+  static func todayCoins(_ count: Int?) -> Int {
+    guard let count else { return 0 }
+    return min(todayCoinLimit, max(0, count))
+  }
+
+  /// A flat coin seen from a little above (coin-disc.tsx discGeometry).
+  static func disc(width: Double) -> (face: Double, edge: Double) {
+    ((width * 0.36).rounded(), max(3, (width * 0.13).rounded()))
+  }
+
+  /// Coins of a `total` ring a share fills (src/lib/coin-math.ts filledCoins):
+  /// any share shows at least one coin, only a whole share fills the ring.
+  static func filledCoins(_ share: Double, total: Int) -> Int {
+    let count = max(1, total)
+    guard share.isFinite, share > 0 else { return 0 }
+    if share >= 1 { return count }
+    return min(count - 1, max(1, Int((share * Double(count)).rounded())))
+  }
+
+  /// Flex-grow widths with a minimum, each coin overlapping the one before
+  /// (share-bar.tsx). Any unknown value makes every coin equal.
+  static func coinWidths(_ values: [Int64?], available: Double, minWidth: Double = rowMinWidth, overlap: Double = rowOverlap) -> [Double] {
+    let count = values.count
+    guard count > 0 else { return [] }
+    let span = max(0, available + overlap * Double(count - 1))
+    guard values.allSatisfy({ ($0 ?? 0) > 0 }) else {
+      return Array(repeating: max(minWidth, span / Double(count)), count: count)
+    }
+    let weights = values.map { Double($0 ?? 0) }
+    var fixed = Array(repeating: false, count: count)
+    // Each pass fixes at least one coin at the minimum or returns.
+    for _ in 0...count {
+      let free = span - minWidth * Double(fixed.filter { $0 }.count)
+      var weight = 0.0
+      for index in 0..<count where !fixed[index] { weight += weights[index] }
+      var changed = false
+      for index in 0..<count where !fixed[index] {
+        if weight <= 0 || free * weights[index] / weight < minWidth {
+          fixed[index] = true
+          changed = true
+        }
+      }
+      if !changed {
+        return (0..<count).map { fixed[$0] ? minWidth : free * weights[$0] / weight }
+      }
+      if fixed.allSatisfy({ $0 }) { break }
+    }
+    return Array(repeating: minWidth, count: count)
+  }
+
+  /// Each coin's leading x from the reading start; mirrored for right to left.
+  static func coinOffsets(_ widths: [Double], available: Double, overlap: Double = rowOverlap, rtl: Bool) -> [Double] {
+    var x = 0.0
+    return widths.map { width in
+      let at = rtl ? available - x - width : x
+      x += width - overlap
+      return at
+    }
+  }
+
+  /// Where a pin sits along the strip, as a share of its width (pin-timeline.tsx).
+  static func pinPosition(_ dayOffset: Int, days: Int = stripDays) -> Double {
+    let clamped = Double(min(days, max(0, dayOffset)))
+    return 3 + 94 * clamped / Double(max(1, days))
+  }
+
+  /// Tile centres, soonest first: on their dates, nudged apart so no tile
+  /// covers another by more than a third, kept inside the strip.
+  static func stripCenters(_ dayOffsets: [Int], width: Double, tile: Double = stripTile, days: Int = stripDays) -> [Double] {
+    let gap = tile * 0.7
+    let half = tile / 2
+    var centers = dayOffsets.map { min(width - half, max(half, width * pinPosition($0, days: days) / 100)) }
+    if centers.count > 1 {
+      for index in 1..<centers.count { centers[index] = max(centers[index], centers[index - 1] + gap) }
+    }
+    if let last = centers.indices.last, centers[last] > width - half {
+      centers[last] = width - half
+      for index in stride(from: last - 1, through: 0, by: -1) { centers[index] = min(centers[index], centers[index + 1] - gap) }
+    }
+    return centers.map { max(half, $0) }
+  }
+
+  /// Whole days from `now`'s day to a due day (already local midnight).
+  static func dayOffset(from now: Date, to due: Date) -> Int {
+    let calendar = WafraDates.calendar
+    return calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: due)).day ?? 0
+  }
+}
+
+/// Which face the Today widget shows. Tapping its corner (iOS 17, an App
+/// Intent in WafraTodayFlip.swift) turns it between today and the last
+/// seven days; the choice lives in the App Group so every timeline sees it.
+enum WafraTodayFace: String {
+  case today
+  case week
+
+  static let storageKey = "wafra.widget.todayFace"
+  static let widgetKind = "WafraToday"
+
+  var flipped: WafraTodayFace { self == .today ? .week : .today }
+
+  static func stored(in defaults: UserDefaults? = UserDefaults(suiteName: WafraShared.appGroup)) -> WafraTodayFace {
+    WafraTodayFace(rawValue: defaults?.string(forKey: storageKey) ?? "") ?? .today
+  }
+
+  @discardableResult
+  static func toggleStored(in defaults: UserDefaults? = UserDefaults(suiteName: WafraShared.appGroup)) -> WafraTodayFace {
+    let next = stored(in: defaults).flipped
+    defaults?.set(next.rawValue, forKey: storageKey)
+    return next
   }
 }
 
@@ -610,6 +808,9 @@ struct WafraStrings {
   var estimatePrefix: String { "≈ " }
   /// Spoken in place of "—" when an amount is hidden or unknown.
   var amountHidden: String { pick("Amount hidden", "المبلغ مخفي") }
+  /// The Today widget's flip control (iOS 17), spoken as what it shows next.
+  var showLast7Days: String { pick("Show the last 7 days", "عرض آخر 7 أيام") }
+  var showToday: String { pick("Show today", "عرض اليوم") }
   /// Words beside the amount in the Today widget. The amount is a separate,
   /// privacy-sensitive view, so these stay readable on the Lock Screen.
   var leftInBudgets: String { pick("left in budgets", "المتبقي في الميزانيات") }

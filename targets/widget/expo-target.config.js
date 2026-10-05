@@ -9,7 +9,14 @@
  * ActivityKit (iOS 16.1) and AppIntents (iOS 16.0) into a `widget` target; a
  * lower target would risk a load failure on older iOS. On iOS 15 the app runs
  * as before and simply offers no widgets. Newer APIs (iOS 17 container
- * backgrounds) are gated with #available in Swift.
+ * backgrounds, interactive buttons, numeric content transitions) are gated
+ * with #available in Swift.
+ *
+ * The Today widget's tap-to-flip is an App Intent (WafraTodayFlip.swift,
+ * iOS 17). AppIntents is already among the frameworks @bacons/apple-targets
+ * links into every `widget` target (with WidgetKit, SwiftUI and ActivityKit),
+ * so it is not listed again here: `frameworks` is appended to that list
+ * without de-duplication.
  *
  * @type {import('@bacons/apple-targets/app.plugin').ConfigFunction}
  */

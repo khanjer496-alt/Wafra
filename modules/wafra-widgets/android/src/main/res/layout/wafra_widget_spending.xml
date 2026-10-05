@@ -78,6 +78,18 @@
         android:scaleType="fitXY"
         android:tint="@color/wafra_widget_spending_text" />
 
+      <!-- The Spending tab's coins, in each category's own colour (drawn in
+           code, WidgetGraphics.coinRow). Shown instead of the share bar when
+           the snapshot carries category colours; older snapshots keep the bar. -->
+      <ImageView
+        android:id="@+id/wafra_spending_coins"
+        android:layout_width="match_parent"
+        android:layout_height="26dp"
+        android:layout_marginTop="14dp"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter"
+        android:visibility="gone" />
+
       <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
