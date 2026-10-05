@@ -21,8 +21,9 @@ const LOGO = 32;
 /** How far a logo falls onto the strip, and how far a tapped one pops up. */
 const DROP = 14;
 const LIFT = 6;
-/** The other logos while one is lifted; their dates stay at full strength. */
-const DIMMED = 0.38;
+/** The other logos while one is lifted (they also step back in size); their dates stay at full strength.
+ * Not fainter than this: on the dark ochre band a fainter logo turns to a muddy smear. */
+const DIMMED = 0.55;
 /** The first-paint stagger stops growing here, so a long month still lands quickly. */
 const MAX_STAGGERED = 12;
 
@@ -205,7 +206,7 @@ function TimelineLogo({ pinKey, title, category, index, selected, dimmed, appear
           ),
           // A dimmed logo also steps back a little, so the lifted one reads as in front
           // rather than the rest just turning muddy on a dark band.
-          fade.interpolate({ inputRange: [DIMMED, 1], outputRange: [-0.08, 0], extrapolate: 'clamp' }),
+          fade.interpolate({ inputRange: [DIMMED, 1], outputRange: [-0.12, 0], extrapolate: 'clamp' }),
         ),
       },
     ],

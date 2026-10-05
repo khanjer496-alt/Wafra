@@ -25,7 +25,7 @@ import { COIN_RISE, COIN_STAGGER, nativeDriver, useAnimatedNumber } from '@/comp
 import { GrowBar } from '@/components/ui/grow-bar';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { YourPattern } from '@/components/ui/your-pattern';
-import { EASE, Fonts, Motion, bandPalette, type BandId, type BandPalette } from '@/constants/theme';
+import { CoinColors, EASE, Fonts, Motion, bandPalette, type BandId, type BandPalette } from '@/constants/theme';
 import { useBandScheme } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -161,7 +161,7 @@ function CoverCoins({ spendFils, incomeFils, palette, width }: {
     style={styles.coverCoins}>
     {Array.from({ length: COVER_COINS }, (_, index) => index < spent
       ? <CoverCoin key={index} index={index} width={width} ready={motion.ready} reducedMotion={motion.reducedMotion} />
-      : <CoinDisc key={index} testID={`recap-cover-ghost-${index}`} width={width} tone={ghost} shine={false} shadow />)}
+      : <CoinDisc key={index} testID={`recap-cover-ghost-${index}`} width={width} tone={ghost} shine={false} />)}
   </View>;
 }
 
@@ -198,7 +198,7 @@ function CoverCoin({ index, width, ready, reducedMotion }: { index: number; widt
     ],
   }), [rise]);
   return <CoreAnimated.View testID={`recap-cover-coin-${index}`} style={paint}>
-    <CoinDisc width={width} shadow />
+    <CoinDisc width={width} shadow={CoinColors.side} />
   </CoreAnimated.View>;
 }
 

@@ -54,7 +54,7 @@ export const STACK_MAX_DEPTH = 3;
 export const DEPTH_SCALE = 0.07;
 /** Tilt of the stacked cards, as if lying on a table seen from just above; slight, so the
  * front card's near edge does not visibly splay wider than its far edge. */
-export const STACK_TILT_DEG = 4;
+export const STACK_TILT_DEG = 2;
 /** A card further back is shaded this much more (fraction of the ink overlay). */
 export const DEPTH_SHADE = 0.12;
 /** Perspective distance for the tilt. */

@@ -97,8 +97,9 @@ export function RouteCoinLane({ cue, stacked, rtl, palette, testID }: {
 }
 
 const styles = StyleSheet.create({
-  lane: { width: 22, height: 20, flexDirection: 'row', alignItems: 'center', pointerEvents: 'none' },
-  laneStacked: { width: 16, height: 30, alignItems: 'center', pointerEvents: 'none' },
+  // Above both chips, so the coin crosses into the destination rather than under it.
+  lane: { width: 22, height: 20, zIndex: 1, flexDirection: 'row', alignItems: 'center', pointerEvents: 'none' },
+  laneStacked: { width: 16, height: 30, zIndex: 1, alignItems: 'center', pointerEvents: 'none' },
   line: { flex: 1, height: 1.5, borderRadius: 1, marginEnd: -6 },
   lineStacked: { flex: 1, width: 1.5, borderRadius: 1, marginBottom: -6 },
   coin: { position: 'absolute', start: 0, top: (20 - ROUTE_COIN) / 2 },
