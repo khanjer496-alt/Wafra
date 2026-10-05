@@ -272,27 +272,32 @@ export default function TransfersScreen() {
   const data = useMemo<ListRow[]>(() => selecting ? [...selectGroupRows, ...selectRows]
     : groupRows.length ? [...groupRows, ...(periodRows.length ? [{ kind: 'header' as const, key: 'header:period', title: periodTitle }] : []), ...periodRows]
       : periodRows, [selecting, selectGroupRows, groupRows, selectRows, periodRows, periodTitle]);
-  // What can be ticked: a whole group (one answer for all its entries) or one route. A catch-all group
-  // is never ticked whole, not even by Select all, and a blocked one never at all.
-  const selectable = useMemo(() => data.filter((row): row is GroupRow | TransferListItem => !('kind' in row)
-    || (row.kind === 'group' && row.group.whole && !row.group.blocked)), [data]);
-  // A ticked group answers the entries its row showed when it was ticked. If search (or the ledger) now
-  // shows it with other entries, it is unticked rather than saved for entries the row no longer shows.
-  useEffect(() => {
-    const views = new Map(groupViews.map(view => [`group:${view.key}`, view]));
-    setPicked(current => {
-      let next: Map<string, TransferBatchItem> | null = null;
-      for (const [key, item] of current) {
-        const view = item.kind === 'group' ? views.get(key) : undefined;
-        if (!view) continue;
-        const frozen = new Set(item.ids);
-        if (!view.whole || view.blocked || view.ids.length !== frozen.size || view.ids.some(id => !frozen.has(id))) {
-          (next ??= new Map(current)).delete(key);
-        }
-      }
-      return next ?? current;
+  // An opened catch-all group's entries: each is ticked on its own, by hand, never by Select all.
+  const openedEntryKeys = useMemo(() => new Set(selectGroupRows.flatMap(row => 'kind' in row ? [] : [row.key])), [selectGroupRows]);
+  // What Select all ticks: a whole group (one answer for all its entries) or one waiting route. A catch-all
+  // group is never ticked whole, its opened entries only one by one, and a blocked row never at all.
+  const selectable = useMemo(() => data.filter((row): row is GroupRow | TransferListItem => 'kind' in row
+    ? row.kind === 'group' && row.group.whole && !row.group.blocked : !openedEntryKeys.has(row.key)), [data, openedEntryKeys]);
+  // What is ticked is only ever what the list shows now. A ticked row that search, a closed group or the
+  // ledger has taken off the list is unticked, and a ticked group must still be one answer for exactly
+  // the entries it showed when it was ticked (a catch-all group that became whole drops its ticked entries,
+  // which are no longer rows). So nothing hidden is saved, and no entry is ever answered twice.
+  const livePicked = useMemo(() => {
+    const shown = new Map(data.map(row => [row.key, row] as const));
+    const kept = [...picked].filter(([key, item]) => {
+      const row = shown.get(key);
+      if (!row || ('kind' in row && row.kind === 'header')) return false;
+      if (item.kind !== 'group') return !('kind' in row);
+      if (!('kind' in row) || row.kind !== 'group' || !row.group.whole || row.group.blocked) return false;
+      const frozen = new Set(item.ids);
+      return row.group.ids.length === frozen.size && row.group.ids.every(id => frozen.has(id));
     });
-  }, [groupViews]);
+    return kept.length === picked.size ? picked : new Map(kept);
+  }, [data, picked]);
+  // Make the untick stick: a row that comes back into view is not ticked again by itself.
+  useEffect(() => {
+    if (livePicked !== picked) setPicked(livePicked);
+  }, [livePicked, picked]);
 
   /** Freeze one list row as the person sees it now: its rows' fingerprints, the generation, the route. */
   const batchItem = (row: GroupRow | TransferListItem): TransferBatchItem | null => {
@@ -333,7 +338,7 @@ export default function TransfersScreen() {
       preview: { ...preview, sign: entry.type === 'income' ? 'plus' : 'minus', count: 1,
         ...(other && other.accountId !== entry.accountId ? { hint: words.answers.looksLike(accountName(other.accountId)) } : {}) } };
   };
-  /** Select mode, a catch-all group: show or hide its entries. Hiding unticks them, so nothing hidden is saved. */
+  /** Select mode, a catch-all group: show or hide its entries. Hiding them unticks them, so nothing hidden is saved. */
   const toggleExpanded = (row: GroupRow) => {
     if (busy) return;
     Keyboard.dismiss();
@@ -356,9 +361,9 @@ export default function TransfersScreen() {
       return;
     }
     Keyboard.dismiss();
-    const item = picked.has(row.key) ? null : batchItem(row);
+    const item = livePicked.has(row.key) ? null : batchItem(row);
     setPicked(current => {
-      const next = new Map(current);
+      const next = new Map([...current].filter(([key]) => livePicked.has(key)));
       if (next.has(row.key)) next.delete(row.key); else if (item) next.set(row.key, item);
       return next;
     });
@@ -366,9 +371,9 @@ export default function TransfersScreen() {
   const selectAll = () => {
     if (busy) return;
     Keyboard.dismiss();
-    const additions = selectable.filter(row => !picked.has(row.key)).map(batchItem)
+    const additions = selectable.filter(row => !livePicked.has(row.key)).map(batchItem)
       .filter((item): item is TransferBatchItem => !!item);
-    setPicked(current => new Map([...current, ...additions.map(item => [item.key, item] as const)]));
+    setPicked(new Map([...livePicked, ...additions.map(item => [item.key, item] as const)]));
   };
   const startSelecting = () => {
     if (busy) return;
@@ -388,7 +393,7 @@ export default function TransfersScreen() {
     const item = batchItem(row);
     if (item) batch.open([item], null);
   };
-  const pickedItems = [...picked.values()];
+  const pickedItems = [...livePicked.values()];
   const pickedIncoming = transferBatchIncoming(pickedItems);
   const sheetEntries = batch.batch?.items.length === 1 && batch.batch.items[0].kind === 'group'
     ? batch.batch.items[0].ids.map(id => rowsById.get(id)).filter((row): row is Transaction => !!row) : undefined;
@@ -491,13 +496,15 @@ export default function TransfersScreen() {
   </Pressable>;
   // Something Select can act on: a group that is not blocked, or a waiting route.
   const waiting = groupRows.filter(row => !row.group.blocked).length + selectRows.length;
+  // The same, whatever tile is on (select mode clears it): what See all would have to offer.
+  const answerable = groupViews.filter(view => !view.blocked).length + selectRows.length;
   // What a row draws besides its data: its travelling coin, its tick and whether it can be pressed.
-  const listState = useMemo(() => ({ coins, picked, selecting, busy, expanded }), [coins, picked, selecting, busy, expanded]);
+  const listState = useMemo(() => ({ coins, livePicked, selecting, busy, expanded }), [coins, livePicked, selecting, busy, expanded]);
   // The list's first heading, with Select at its end: the waiting groups' section when there are
   // any (the period's heading then sits in the list above its rows), else the period.
   const listHead = <View testID="transfers-list-head" style={styles.listHead}>
     <ThemedText type="smallBold" accessibilityRole="header" style={styles.grow}>
-      {selecting ? words.select.selected(picked.size) : groupRows.length ? words.group.section : periodTitle}
+      {selecting ? words.select.selected(livePicked.size) : groupRows.length ? words.group.section : periodTitle}
     </ThemedText>
     {!selecting && waiting > 0 ? <Pressable testID="transfers-select" accessibilityRole="button"
       accessibilityLabel={words.select.action} accessibilityHint={words.select.actionHint} disabled={busy}
@@ -511,7 +518,7 @@ export default function TransfersScreen() {
     <View style={[styles.controlRow, large && styles.controlRowStacked]}>
       <SelectControl testID="transfer-select-shown" label={words.select.all(selectable.length)} palette={band} stacked={large}
         disabled={busy || selectable.length === 0} onPress={selectAll} />
-      {picked.size > 0 ? <SelectControl testID="transfer-clear-selection" label={words.select.clear} palette={band} stacked={large}
+      {livePicked.size > 0 ? <SelectControl testID="transfer-clear-selection" label={words.select.clear} palette={band} stacked={large}
         disabled={busy} onPress={() => { if (!busy) setPicked(new Map()); }} /> : null}
       <SelectControl testID="transfer-cancel-selection" label={words.select.cancel} palette={band} stacked={large}
         disabled={busy || batch.needsDurability} onPress={stopSelecting} />
@@ -524,10 +531,10 @@ export default function TransfersScreen() {
         backDisabled: busy || (batch.needsDurability && !batch.stale) }}
       footer={selecting ? <View testID="transfer-selection-footer" style={styles.footer}>
         <ThemedText type="smallBold" accessibilityLiveRegion="polite">
-          {picked.size ? words.select.selected(picked.size) : words.select.none}
+          {livePicked.size ? words.select.selected(livePicked.size) : words.select.none}
         </ThemedText>
         {/* The same three answers, for everything ticked; each opens the confirmation. */}
-        {picked.size ? <TransferAnswerChoices incoming={pickedIncoming} value={null} palette={band} layout="buttons" disabled={busy}
+        {livePicked.size ? <TransferAnswerChoices incoming={pickedIncoming} value={null} palette={band} layout="buttons" disabled={busy}
           onChange={choice => { Keyboard.dismiss(); batch.open(pickedItems, choice); }} /> : null}
       </View> : undefined}
       bandContent={<View testID="transfers-band" style={styles.bandIntro}>
@@ -562,7 +569,8 @@ export default function TransfersScreen() {
           {selecting ? selectControls : current ? <TransferQuestionCard transaction={current.transaction} index={0} total={queue.length}
             accountLabel={accountName(current.transaction.accountId)} hint={hint} palette={band} busy={busy}
             more={unasked} onAnswer={answerCurrent} onSeeAll={startSelecting} />
-            : unasked > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
+            // Only when select mode has something to answer: duplicate-id rows alone are shown read-only in the list.
+            : unasked > 0 && answerable > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
               accessibilityLabel={`${words.card.title(unasked)}. ${words.card.seeAllPlain}`}
               onPress={startSelecting}
               style={({ pressed }) => [styles.reviewLink, { backgroundColor: band.card, borderColor: band.statusNear, opacity: pressed ? 0.7 : 1 }]}>
@@ -580,7 +588,7 @@ export default function TransfersScreen() {
           const first = !previous || ('kind' in previous && previous.kind === 'header');
           const last = !next || ('kind' in next && next.kind === 'header');
           const card = [styles.rowCard, { backgroundColor: band.card }, first && styles.rowCardFirst, last && styles.rowCardLast];
-          const select = selecting ? { checked: picked.has(item.key), disabled: busy } : undefined;
+          const select = selecting ? { checked: livePicked.has(item.key), disabled: busy } : undefined;
           if ('kind' in item) {
             // In select mode a whole group is one tick; a catch-all group opens to show its entries; a blocked one is read-only.
             const tickable = item.group.whole && !item.group.blocked;

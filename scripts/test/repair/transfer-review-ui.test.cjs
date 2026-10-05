@@ -371,7 +371,7 @@ test('Cancel leaves the entries unanswered: no write, no announcement', () => {
 test('a saved group answer offers Undo, which clears each entry from its current state', async () => {
   const h = createPage({ bulk: true, resolveTransferBatch: async (request, state) => {
     if (request.decisions[0].ownership === null) return;
-    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 5 } }));
+    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: Date.now() } }));
   } });
   answerIn(openGroup(h), 'own');
   save(h); await flush();
@@ -390,7 +390,7 @@ test('a saved group answer offers Undo, which clears each entry from its current
 test('Undo never clears an answer given since the save: it says the transfers changed', async () => {
   const h = createPage({ bulk: true, resolveTransferBatch: async (request, state) => {
     if (request.decisions[0].ownership === null) return;
-    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 5 } }));
+    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: Date.now() } }));
   } });
   answerIn(openGroup(h), 'own');
   save(h); await flush();
@@ -412,7 +412,7 @@ test('while Undo runs the page knows: its controls wait until it is done', async
     resolveTransferBatch: async (request, state) => {
       if (request.decisions[0].ownership === null) return undoing.promise;
       state.transactions = state.transactions.map(tx => tx.id === 'three' ? tx
-        : { ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 5 } });
+        : { ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: Date.now() } });
     } });
   // The page's real answer hook keeps its busy flag in state; this harness re-renders from its slots.
   answerIn(openGroup(h), 'own');
@@ -822,7 +822,16 @@ test('select mode never ticks a catch-all group whole, not even Select all; it o
   assert.equal(byId(tree, 'transfer-group-two').props.accessibilityState.expanded, true);
   assert.ok(byId(tree, 'transfer-row-a') && byId(tree, 'transfer-row-c'));
   assert.equal(byId(tree, 'transfer-row-a').props.accessibilityRole, 'checkbox');
-  byId(tree, 'transfer-row-c').props.onPress();
+  // Opened, its entries are still not Select all's: "show entries" then "Select all" never answers the group whole.
+  assert.equal(byId(tree, 'transfer-select-shown').props.accessibilityLabel, h.words.select.all(1));
+  byId(tree, 'transfer-select-shown').props.onPress();
+  tree = h.render();
+  assert.ok(text(footer(h)).includes(h.words.select.selected(1)));
+  assert.equal(byId(tree, 'transfer-row-a').props.accessibilityState.checked, false);
+  assert.equal(byId(tree, 'transfer-row-c').props.accessibilityState.checked, false);
+  assert.equal(byId(tree, 'transfer-row-b').props.accessibilityState.checked, true);
+  byId(tree, 'transfer-clear-selection').props.onPress();
+  byId(h.render(), 'transfer-row-c').props.onPress();
   assert.ok(text(footer(h)).includes(h.words.select.selected(1)));
   // Closing it again unticks what it hid, so nothing hidden is saved.
   byId(h.render(), 'transfer-group-two').props.onPress();
@@ -861,6 +870,138 @@ test('a ticked group whose row search changes is unticked, so its save never cov
   byId(render(), 'transfer-group-group').props.onPress(); render();
   answerIn(footer(h), 'own');
   assert.equal(byId(sheetOf(h), 'transfer-answer-sheet-save').props.accessibilityLabel, h.words.batch.save(2), 'ticked again: the two it shows');
+});
+
+/** A page whose effects run after each render, as React runs them. */
+function withEffects(h) {
+  const effects = [];
+  h.deps.react.useEffect = fn => { effects.push(fn); };
+  return () => { effects.length = 0; const tree = h.render(); effects.forEach(fn => fn()); return tree; };
+}
+const searchFor = (render, value) => walk(render()).find(node => node.type === 'TextInput').props.onChangeText(value);
+
+test('anything ticked that search hides is unticked, groups and lone entries alike, and stays unticked', () => {
+  const evidence = { transferEvidence: { version: 1, currency: 'AED', attribution: 'source' } };
+  const h = createPage({ transactions: [row('rent-1', { title: 'Rent', ...evidence }), row('rent-2', { title: 'Rent', ...evidence }),
+    row('gym', { title: 'Gym', accountId: 'other', ...evidence })],
+  groupDefinitions: [{ id: 'rent', transactionIds: ['rent-1', 'rent-2'], bulkEligible: true },
+    { id: 'gym', transactionIds: ['gym'], bulkEligible: false }] });
+  const render = withEffects(h);
+  startSelecting(h); render();
+  byId(render(), 'transfer-select-shown').props.onPress(); render();
+  assert.ok(text(footer(h)).includes(h.words.select.selected(2)), 'the group and the lone entry');
+  // Search hides the whole group: it is unticked, not kept out of sight.
+  searchFor(render, 'gym'); render();
+  assert.equal(byId(render(), 'transfer-group-rent'), undefined);
+  assert.ok(text(footer(h)).includes(h.words.select.selected(1)));
+  // Search hides the lone entry too.
+  searchFor(render, 'nothing like this'); render();
+  assert.ok(text(footer(h)).includes(h.words.select.none));
+  // Clearing the search shows them again, unticked: nothing the person cannot see comes back ticked.
+  searchFor(render, ''); const tree = render();
+  assert.equal(byId(tree, 'transfer-group-rent').props.accessibilityState.checked, false);
+  assert.equal(byId(tree, 'transfer-row-gym').props.accessibilityState.checked, false);
+  assert.ok(text(footer(h)).includes(h.words.select.none));
+  assert.deepEqual(h.events, []);
+});
+
+test('a catch-all group that becomes whole drops its ticked entries, so no entry is answered twice', async () => {
+  const definitions = [{ id: 'two', transactionIds: ['a', 'c'], bulkEligible: false }, { id: 'one', transactionIds: ['b'], bulkEligible: false }];
+  const h = catchAll({ groupDefinitions: definitions });
+  const render = withEffects(h);
+  startSelecting(h); render();
+  byId(render(), 'transfer-group-two').props.onPress(); render();
+  byId(render(), 'transfer-row-a').props.onPress(); render();
+  assert.ok(text(footer(h)).includes(h.words.select.selected(1)));
+  // The reconciler now has one known other side for the group: it is one tick, and its entries are not rows.
+  definitions[0].bulkEligible = true;
+  let tree = render(); tree = render();
+  assert.equal(byId(tree, 'transfer-row-a'), undefined);
+  assert.equal(byId(tree, 'transfer-group-two').props.accessibilityRole, 'checkbox');
+  assert.ok(text(footer(h)).includes(h.words.select.none), 'the entry ticked on its own is unticked');
+  byId(tree, 'transfer-group-two').props.onPress(); render();
+  answerIn(footer(h), 'own');
+  save(h); await flush();
+  const request = h.events.find(event => event[0] === 'batch')[1];
+  assert.deepEqual(request.decisions.flatMap(decision => decision.ids).sort(), ['a', 'c'], 'each entry once');
+});
+
+test('the batch sheet refuses picks that name one entry twice, and the resolver\'s "selected more than once" says the transfers changed', async () => {
+  const h = createPage({ bulk: true });
+  const hook = h.deps['@/hooks/use-transfer-batch'];
+  assert.ok(hook);
+  // Two items naming the same entry (picked before the ledger regrouped it) never open the sheet.
+  const item = (key, ids) => ({ key, kind: 'entry', ids, direction: 'expense', expectedFingerprints: {}, expectedGeneration: 1,
+    preview: { from: { kind: 'unknown' }, to: { kind: 'unknown' }, fromLabel: '?', toLabel: '?', amountFils: 1, sign: 'minus', count: 1, dates: '', spoken: '' } });
+  h.deps.react.useState = initial => [typeof initial === 'function' ? initial() : initial, () => {}];
+  const batch = hook.useTransferBatch({ rowsById: new Map(), answers: { busy: false } });
+  assert.equal(batch.open([item('x', ['one']), item('group', ['one', 'two'])], 'own'), false);
+  assert.deepEqual(h.events.at(-1), ['toast', h.words.batch.changed]);
+  // The store's own refusal of a doubled entry reads as "changed", not "couldn't save".
+  const refused = createPage({ bulk: true, resolveTransferBatch: async () => { throw new Error('A transfer entry was selected more than once'); } });
+  answerIn(openGroup(refused), 'own');
+  save(refused); await flush();
+  assert.ok(text(byId(sheetOf(refused), 'transfer-answer-sheet-error')).includes(refused.words.batch.changed));
+});
+
+test('the toast\'s Undo waits for a save that is still writing: one transfer write at a time', async () => {
+  const writing = deferred();
+  let saves = 0;
+  const h = createPage({ transactions: [row('one'), row('two'), row('three', { accountId: 'other' }), row('four', { accountId: 'other' })],
+    groupDefinitions: [{ id: 'group', transactionIds: ['one', 'two'], bulkEligible: true }, { id: 'other', transactionIds: ['three', 'four'], bulkEligible: true }],
+    resolveTransferBatch: async (request, state) => {
+      if (request.decisions[0].ownership === null) return;
+      saves += 1;
+      const ids = new Set(request.decisions.flatMap(decision => decision.ids));
+      state.transactions = state.transactions.map(tx => ids.has(tx.id)
+        ? { ...tx, transferDecision: { version: 1, ownership: request.decisions[0].ownership, decidedAt: Date.now() } } : tx);
+      if (saves === 2) await writing.promise;
+    } });
+  answerIn(openGroup(h), 'own');
+  save(h); await flush();
+  const undo = h.toasts.at(-1)[1].actions.find(action => action.label === h.words.answers.undo);
+  // A second save starts writing; the first save's Undo is pressed while it writes.
+  answerIn(openGroup(h, 'other'), 'external');
+  save(h); await flush();
+  const before = h.events.filter(event => event[0] === 'batch').length;
+  undo.onPress(); await flush();
+  assert.equal(h.events.filter(event => event[0] === 'batch').length, before, 'nothing is cleared while another write runs');
+  assert.deepEqual(h.events.at(-1), ['toast', h.words.answers.failed]);
+  writing.resolve(); await flush(); await flush();
+  // Once the save is done, the same Undo runs.
+  undo.onPress(); await flush(); await flush();
+  assert.deepEqual(h.events.filter(event => event[0] === 'batch').at(-1)[1].decisions, [{ ids: ['one'], ownership: null }, { ids: ['two'], ownership: null }]);
+  assert.deepEqual(h.events.at(-1), ['toast', h.words.answers.undone]);
+});
+
+test('Undo is offered only for the decision this save wrote: a ledger that does not carry it refuses Undo', async () => {
+  // The ledger after the write does not show this save's answer (a restore landed): Undo cannot vouch for it.
+  const h = createPage({ bulk: true, resolveTransferBatch: async (request, state) => {
+    if (request.decisions[0].ownership === null) return;
+    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 1 } }));
+  } });
+  answerIn(openGroup(h), 'own');
+  save(h); await flush();
+  const undo = h.toasts.at(-1)[1].actions.find(action => action.label === h.words.answers.undo);
+  const writes = h.events.filter(event => event[0] === 'batch').length;
+  undo.onPress(); await flush();
+  assert.equal(h.events.filter(event => event[0] === 'batch').length, writes, 'nothing is cleared');
+  assert.deepEqual(h.events.at(-1), ['toast', h.words.answers.changed]);
+  // After a retried write, Undo uses the fingerprints the store reported for the decided rows.
+  const retried = createPage({ bulk: true, resolveTransferBatch: async (request, state) => {
+    if (request.decisions[0].ownership === null) return;
+    state.transactions = state.transactions.map(tx => ({ ...tx, transferDecision: { version: 1, ownership: 'own', decidedAt: 1 } }));
+    throw Object.assign(new Error('write failed'), { code: 'transfer-durability',
+      expectedFingerprints: Object.fromEntries(state.transactions.map(tx => [tx.id, fingerprint(tx)])) });
+  } });
+  answerIn(openGroup(retried), 'own');
+  save(retried); await flush();
+  byId(sheetOf(retried), 'transfer-answer-sheet-save').props.onPress(); await flush();
+  const retriedUndo = retried.toasts.at(-1)[1].actions.find(action => action.label === retried.words.answers.undo);
+  retriedUndo.onPress(); await flush();
+  assert.deepEqual(retried.events.filter(event => event[0] === 'batch').at(-1)[1].decisions,
+    [{ ids: ['one'], ownership: null }, { ids: ['two'], ownership: null }]);
+  assert.deepEqual(retried.events.at(-1), ['toast', retried.words.answers.undone]);
 });
 
 test('an id stored twice is shown read-only with its reason, never ticked or saved', () => {
@@ -1019,7 +1160,7 @@ test('an answer\'s Undo clears exactly that answer: refused once the entry is an
   const shown = row('mine');
   const h = answerHook({ transactions: [shown], resolveTransfers: async (request, state) => {
     state.transactions = state.transactions.map(tx => tx.id === 'mine' ? { ...tx, transferDecision: request.ownership === null ? undefined
-      : { version: 1, ownership: request.ownership, decidedAt: 4 } } : tx);
+      : { version: 1, ownership: request.ownership, decidedAt: Date.now() } } : tx);
   } });
   assert.equal(await h.hook.answer({ transaction: shown, answer: 'external', label: 'x' }), 'saved');
   const undo = h.toasts.at(-1)[1].actions.find(action => action.label === h.words.answers.undo);
@@ -1032,12 +1173,26 @@ test('an answer\'s Undo clears exactly that answer: refused once the entry is an
   // Unchanged since the save, Undo clears it.
   const again = answerHook({ transactions: [shown], resolveTransfers: async (request, state) => {
     state.transactions = state.transactions.map(tx => tx.id === 'mine' ? { ...tx, transferDecision: request.ownership === null ? undefined
-      : { version: 1, ownership: request.ownership, decidedAt: 4 } } : tx);
+      : { version: 1, ownership: request.ownership, decidedAt: Date.now() } } : tx);
   } });
   await again.hook.answer({ transaction: shown, answer: 'external', label: 'x' });
   again.toasts.at(-1)[1].actions[0].onPress(); await flush();
   assert.deepEqual(again.events.at(-1), ['toast', again.words.answers.undone]);
   assert.equal(again.state.transactions[0].transferDecision, undefined);
+});
+
+test('one entry\'s answer, Undo and Clear wait while another transfer write runs', async () => {
+  const shown = row('mine');
+  const h = answerHook({ transactions: [shown] });
+  const lock = h.deps['@/lib/transfer-answer'].transferWriteLock;
+  assert.equal(lock.acquire(), true, 'a group save is writing');
+  assert.equal(await h.hook.answer({ transaction: shown, answer: 'external', label: 'x' }), 'busy');
+  await h.hook.undo('mine');
+  await h.hook.undoMany(['mine']);
+  assert.equal(h.events.some(event => event[0] === 'resolve' || event[0] === 'batch'), false, 'nothing written');
+  lock.release();
+  assert.equal(await h.hook.answer({ transaction: shown, answer: 'external', label: 'x' }), 'saved');
+  assert.equal(lock.held(), false, 'released after the write');
 });
 
 test('Clear refuses when the entry changed since it was shown', async () => {

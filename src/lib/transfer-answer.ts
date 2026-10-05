@@ -80,7 +80,9 @@ export function buildTransferUndoMany({ rows, generation }: { rows: readonly Tra
 }
 
 /** The store refuses an answer given to a ledger that moved with these messages. */
-const STALE_MESSAGES: readonly string[] = ['Transfer review is out of date', 'Transfer review changed; open it again'];
+const STALE_MESSAGES: readonly string[] = ['Transfer review is out of date', 'Transfer review changed; open it again',
+  // Two picked items name the same entry: what was picked no longer matches the ledger's groups.
+  'A transfer entry was selected more than once'];
 
 /** True when a resolver failure means "the ledger changed since this was shown", not "the save failed". */
 export function isStaleTransferRejection(failure: unknown): boolean {
@@ -106,4 +108,64 @@ export function transferAnswerMoved(expected: Readonly<Record<string, string>>, 
     const row = rows.get(id);
     return !row || transferFingerprint(row) !== print;
   });
+}
+
+/**
+ * One transfer write at a time, app-wide: an answer, a group or selection
+ * save, a toast's Undo or Clear my answer. Every writer takes this lock before
+ * it starts and releases it when it is done, so an Undo can never run while a
+ * save is still writing (or the other way round), whichever screen or hook
+ * started it.
+ */
+let transferWriting = false;
+export const transferWriteLock = {
+  held: (): boolean => transferWriting,
+  /** True when the caller now holds the lock; false while another write runs. */
+  acquire: (): boolean => {
+    if (transferWriting) return false;
+    transferWriting = true;
+    return true;
+  },
+  release: (): void => { transferWriting = false; },
+};
+
+/** The decision each row should carry once these decisions are applied (a linked pair names each other). */
+export interface ExpectedTransferDecision { ownership: TransferAnswer; counterpartId?: string }
+
+export function expectedTransferDecisions(
+  decisions: readonly { ids: readonly string[]; ownership: TransferAnswer | null; counterpartId?: string }[],
+): Map<string, ExpectedTransferDecision> {
+  const expected = new Map<string, ExpectedTransferDecision>();
+  for (const decision of decisions) {
+    if (decision.ownership === null) continue;
+    for (const id of decision.ids) {
+      expected.set(id, { ownership: decision.ownership, ...(decision.counterpartId ? { counterpartId: decision.counterpartId } : {}) });
+    }
+    if (decision.counterpartId && decision.ids.length === 1) {
+      expected.set(decision.counterpartId, { ownership: decision.ownership, counterpartId: decision.ids[0] });
+    }
+  }
+  return expected;
+}
+
+/**
+ * The fingerprints a save left on its rows, for its Undo. The store does not
+ * hand them back on success, so they are read from the ledger, but only
+ * accepted when every row carries exactly the decision this save wrote, all
+ * stamped by the one write (the same `decidedAt`, not before `since`, the
+ * moment the save started). Anything else (a restore, a newer answer) gives
+ * null, and that Undo then refuses rather than clear an answer it did not give.
+ */
+export function savedAnswerFingerprints(
+  expected: ReadonlyMap<string, ExpectedTransferDecision>, rows: ReadonlyMap<string, Transaction>, since: number,
+): Record<string, string> | null {
+  if (expected.size === 0) return null;
+  let stamp: number | undefined;
+  for (const [id, want] of expected) {
+    const decision = rows.get(id)?.transferDecision;
+    if (!decision || decision.ownership !== want.ownership || decision.counterpartId !== want.counterpartId ||
+      !(decision.decidedAt >= since) || (stamp !== undefined && decision.decidedAt !== stamp)) return null;
+    stamp = decision.decidedAt;
+  }
+  return transferFingerprintsOf([...expected.keys()], rows);
 }

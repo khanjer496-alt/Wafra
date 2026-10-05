@@ -167,3 +167,39 @@ test('groups: bulk-eligible or one shared suggestion is answered whole; a catch-
     assessments: new Map([likely('r1', 'c1'), likely('r2', 'missing')]) });
   assert.equal(gone[0].whole, false);
 });
+
+test('a save\'s Undo fingerprints are accepted only when every row carries exactly that save\'s decision', () => {
+  const expected = answer.expectedTransferDecisions([{ ids: ['o'], ownership: 'own', counterpartId: 'i' }, { ids: ['x'], ownership: 'external' }]);
+  assert.deepEqual(Object.fromEntries([...expected].map(([id, value]) => [id, { ...value }])), {
+    o: { ownership: 'own', counterpartId: 'i' }, i: { ownership: 'own', counterpartId: 'o' }, x: { ownership: 'external' } });
+  assert.equal(answer.expectedTransferDecisions([{ ids: ['o'], ownership: null }]).size, 0, 'an undo writes no answer');
+  const since = 1000;
+  const decided = (id, decision) => row(id, { transferDecision: { version: 1, decidedAt: 1500, ...decision } });
+  const rows = rowsOf => new Map(rowsOf.map(tx => [tx.id, tx]));
+  const good = [decided('o', { ownership: 'own', counterpartId: 'i' }), decided('i', { ownership: 'own', counterpartId: 'o' }),
+    decided('x', { ownership: 'external' })];
+  const prints = answer.savedAnswerFingerprints(expected, rows(good), since);
+  assert.deepEqual(Object.keys(prints).sort(), ['i', 'o', 'x']);
+  assert.equal(prints.o, core.transferFingerprint(good[0]));
+  for (const [label, changed] of [
+    ['another answer', [good[0], good[1], decided('x', { ownership: 'none' })]],
+    ['an older decision (a restore)', [good[0], good[1], row('x', { transferDecision: { version: 1, ownership: 'external', decidedAt: 999 } })]],
+    ['two writes', [good[0], good[1], row('x', { transferDecision: { version: 1, ownership: 'external', decidedAt: 1600 } })]],
+    ['a link elsewhere', [decided('o', { ownership: 'own', counterpartId: 'z' }), good[1], good[2]]],
+    ['a missing row', [good[0], good[1]]],
+    ['no decision', [good[0], good[1], row('x')]],
+  ]) assert.equal(answer.savedAnswerFingerprints(expected, rows(changed), since), null, label);
+  assert.equal(answer.savedAnswerFingerprints(new Map(), rows(good), since), null);
+});
+
+test('one transfer write at a time: the shared lock', () => {
+  const lock = answer.transferWriteLock;
+  assert.equal(lock.held(), false);
+  assert.equal(lock.acquire(), true);
+  assert.equal(lock.held(), true);
+  assert.equal(lock.acquire(), false, 'a second writer waits');
+  lock.release();
+  assert.equal(lock.held(), false);
+  assert.equal(lock.acquire(), true); lock.release();
+  assert.equal(answer.isStaleTransferRejection(new Error('A transfer entry was selected more than once')), true);
+});

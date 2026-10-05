@@ -77,10 +77,10 @@ function transfersHarness(rows, rec) {
 }
 
 test('Transfers: nothing the card can ask, but entries still queued, lists them and opens select mode instead of a dead end', () => {
-  const rows = [leg('dup', 'expense', 'current'), leg('dup', 'expense', 'current')];
-  const rec = reconciliation([['dup', { id: 'dup', status: 'ownership-unknown', candidateIds: [] }]], ['dup']);
-  // The reconciler groups every queued id (here the duplicate observation) by account and other side.
-  rec.groups = [{ id: 'g-dup', transactionIds: ['dup'], accountId: 'current', direction: 'expense', status: 'ownership-unknown', bulkEligible: false }];
+  // A queued entry on an archived account: no question card, but select mode can answer it.
+  const rows = [leg('gone', 'expense', 'old')];
+  const rec = reconciliation([['gone', { id: 'gone', status: 'ownership-unknown', candidateIds: [] }]], ['gone']);
+  rec.groups = [{ id: 'g-gone', transactionIds: ['gone'], accountId: 'old', direction: 'expense', status: 'ownership-unknown', bulkEligible: false }];
   const h = transfersHarness(rows, rec);
   const tree = h.renderScreen('transfers');
   assert.equal(byId(tree, 'transfer-question-card'), undefined);
@@ -94,6 +94,22 @@ test('Transfers: nothing the card can ask, but entries still queued, lists them 
   link.props.onPress();
   assert.equal(h.events.filter(event => event[0] === 'route').length, 0, 'no second page');
   assert.ok(h.events.some(event => event[0] === 'state' && event[2] === true), 'See all turns on select mode on this page');
+});
+
+test('Transfers: when only duplicate-id observations wait, they are shown read-only and no See all opens an empty select mode', () => {
+  const rows = [leg('dup', 'expense', 'current'), leg('dup', 'expense', 'current')];
+  const rec = reconciliation([['dup', { id: 'dup', status: 'ownership-unknown', candidateIds: [] }]], ['dup']);
+  // The reconciler groups every queued id (here the duplicate observation) by account and other side.
+  rec.groups = [{ id: 'g-dup', transactionIds: ['dup'], accountId: 'current', direction: 'expense', status: 'ownership-unknown', bulkEligible: false }];
+  const h = transfersHarness(rows, rec);
+  const tree = h.renderScreen('transfers');
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
+  assert.equal(byId(tree, 'transfer-question-card'), undefined);
+  assert.equal(byId(tree, 'transfers-review-link'), undefined, 'no link to a select mode with nothing to tick');
+  assert.equal(byId(tree, 'transfers-select'), undefined, 'and no Select');
+  const row = byId(tree, 'transfer-group-g-dup:duplicate');
+  assert.ok(row, 'the duplicate observation is still on the page');
+  assert.ok(text(row).includes(words.group.duplicate), 'saying why it cannot be answered here');
 });
 
 test('Transfers: one question plus an unasked entry keeps See all on the card', () => {

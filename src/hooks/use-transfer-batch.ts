@@ -4,7 +4,8 @@ import { useToast } from '@/components/ui/toast';
 import { useLanguage } from '@/hooks/use-language';
 import type { useTransferAnswer } from '@/hooks/use-transfer-answer';
 import { useStoreActions } from '@/lib/store';
-import { isStaleTransferRejection, transferFingerprintsOf, type TransferAnswer } from '@/lib/transfer-answer';
+import { expectedTransferDecisions, isStaleTransferRejection, savedAnswerFingerprints, transferWriteLock,
+  type TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { transferBatchChangedIds, transferBatchDecisions, transferRowsChanged, type TransferBatchItem } from '@/lib/transfer-batch';
 import type { Transaction } from '@/lib/types';
@@ -15,6 +16,8 @@ export interface TransferBatch {
   answer: TransferAnswer | null;
   expectedFingerprints: Record<string, string>;
   expectedGeneration: number;
+  /** After a failed write: the post-decision fingerprints the store reported for every changed row. */
+  reported?: Record<string, string>;
 }
 
 /**
@@ -42,7 +45,8 @@ export function useTransferBatch({ rowsById, onSaved, answers }: {
   const toast = useToast();
   const { resolveTransferBatch, getStateGeneration, getStateSnapshot, ensureDurable } = useStoreActions();
   const { undoMany } = answers;
-  const answering = () => answers.busy || !!answers.pending?.();
+  // Any transfer write in flight, this page's or another's (the shared lock), or the page's answer hook.
+  const answering = () => answers.busy || !!answers.pending?.() || transferWriteLock.held();
   const [batch, setBatch] = useState<TransferBatch | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +60,9 @@ export function useTransferBatch({ rowsById, onSaved, answers }: {
     if (saving.current || answering() || items.length === 0) return false;
     // Keep the details and fingerprints captured at selection time. Never
     // replace a checked item with a newer import while opening confirmation.
-    if (items.some(item => item.expectedGeneration !== getStateGeneration())) {
+    // Two picked items naming one entry would answer it twice: the picks no longer fit the ledger's groups.
+    const ids = transferBatchChangedIds(items);
+    if (items.some(item => item.expectedGeneration !== getStateGeneration()) || new Set(ids).size !== ids.length) {
       toast.show(words.batch.changed, { tone: 'error' });
       return false;
     }
@@ -98,17 +104,25 @@ export function useTransferBatch({ rowsById, onSaved, answers }: {
       return;
     }
     const changedIds = transferBatchChangedIds(selection.items);
+    if (!transferWriteLock.acquire()) return;
     saving.current = true;
     setBusy(true);
     setError(null);
     try {
+      const decisions = transferBatchDecisions(selection.items, selection.answer);
+      const started = Date.now();
       if (needsDurability) await ensureDurable();
       else await resolveTransferBatch({
-        decisions: transferBatchDecisions(selection.items, selection.answer),
-        expectedFingerprints: selection.expectedFingerprints, expectedGeneration: selection.expectedGeneration,
+        decisions, expectedFingerprints: selection.expectedFingerprints, expectedGeneration: selection.expectedGeneration,
       });
-      // The rows as this save left them: Undo clears exactly these answers, never a newer one.
-      const after = transferFingerprintsOf(changedIds, new Map(getStateSnapshot().transactions.map(row => [row.id, row])));
+      // The rows as this save left them, so Undo clears exactly these answers and never a newer one: the
+      // store's own post-decision fingerprints after a retried write, else the ledger's rows, accepted only
+      // when every one carries exactly the decision this save wrote. Without either, Undo refuses.
+      const reported = selection.reported;
+      const after = needsDurability
+        ? reported && changedIds.every(id => id in reported) ? Object.fromEntries(changedIds.map(id => [id, reported[id]])) : null
+        : savedAnswerFingerprints(expectedTransferDecisions(decisions),
+          new Map(getStateSnapshot().transactions.map(row => [row.id, row])), started);
       toast.show(words.batch.saved(changedIds.length), { tone: 'success',
         actions: [{ label: words.answers.undo, onPress: () => { void undoMany?.(changedIds, after); } }] });
       setBatch(null);
@@ -124,7 +138,7 @@ export function useTransferBatch({ rowsById, onSaved, answers }: {
           changedIds.every(id => id in fingerprints)) {
           // Advance the guard to the rows the store did change, so the retry
           // checks the decided rows rather than the ones shown before saving.
-          setBatch({ ...selection, expectedFingerprints: {
+          setBatch({ ...selection, reported: fingerprints as Record<string, string>, expectedFingerprints: {
             ...selection.expectedFingerprints, ...fingerprints as Record<string, string>,
           } });
         }
@@ -134,6 +148,7 @@ export function useTransferBatch({ rowsById, onSaved, answers }: {
       setError(code === 'transfer-durability' || needsDurability ? words.batch.durability
         : isStaleTransferRejection(failure) ? words.batch.changed : words.batch.failed);
     } finally {
+      transferWriteLock.release();
       saving.current = false;
       setBusy(false);
     }

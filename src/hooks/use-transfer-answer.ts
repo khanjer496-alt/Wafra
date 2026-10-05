@@ -1,10 +1,10 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 
 import { useToast } from '@/components/ui/toast';
 import { useLanguage } from '@/hooks/use-language';
 import { useStoreActions } from '@/lib/store';
-import { buildTransferAnswer, buildTransferUndo, buildTransferUndoMany, isStaleTransferRejection, transferAnswerMoved,
-  transferFingerprintsOf, type TransferAnswer } from '@/lib/transfer-answer';
+import { buildTransferAnswer, buildTransferUndo, buildTransferUndoMany, expectedTransferDecisions, isStaleTransferRejection,
+  savedAnswerFingerprints, transferAnswerMoved, transferWriteLock, type TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { transferFingerprint } from '@/lib/transfer-reconciliation';
 import type { Transaction } from '@/lib/types';
@@ -16,6 +16,9 @@ import type { Transaction } from '@/lib/types';
 export type TransferAnswerResult = 'saved' | 'unsaved' | 'changed' | 'failed' | 'busy';
 
 type Outcome = Exclude<TransferAnswerResult, 'busy'>;
+
+/** A resolver call's outcome and, after a failed write, the post-decision fingerprints the store reported. */
+interface Committed { outcome: Outcome; reported?: Record<string, string> }
 
 function failureDetails(failure: unknown): { code?: unknown; expectedFingerprints?: unknown } {
   return typeof failure === 'object' && failure !== null ? failure : {};
@@ -35,7 +38,6 @@ export function useTransferAnswer() {
   const toast = useToast();
   const { resolveTransfers, resolveTransferBatch, getStateGeneration, getStateSnapshot, ensureDurable } = useStoreActions();
   const [busy, setBusy] = useState(false);
-  const saving = useRef(false);
 
   /**
    * Run one resolver call. When the encrypted write failed after the in-memory
@@ -44,30 +46,40 @@ export function useTransferAnswer() {
    */
   const commit = useCallback(async (
     save: () => Promise<void>, generation: number, changedIds: readonly string[],
-  ): Promise<Outcome> => {
+  ): Promise<Committed> => {
     try {
       await save();
-      return 'saved';
+      return { outcome: 'saved' };
     } catch (failure) {
       const { code, expectedFingerprints } = failureDetails(failure);
       // The store refuses a stale answer; the person sees "changed", not "failed".
-      if (code !== 'transfer-durability') return isStaleTransferRejection(failure) ? 'changed' : 'failed';
+      if (code !== 'transfer-durability') return { outcome: isStaleTransferRejection(failure) ? 'changed' : 'failed' };
       const reported = postDecisionFingerprints(expectedFingerprints, changedIds);
       // Without verifiable fingerprints the write cannot be retried safely; the answer stays in memory.
-      if (!reported) return 'unsaved';
+      if (!reported) return { outcome: 'unsaved' };
       const latest = new Map(getStateSnapshot().transactions.map(row => [row.id, row]));
       if (getStateGeneration() !== generation || changedIds.some(id => {
         const row = latest.get(id);
         return !row || transferFingerprint(row) !== reported[id];
-      })) return 'changed';
+      })) return { outcome: 'changed' };
       try {
         await ensureDurable();
-        return 'saved';
+        return { outcome: 'saved', reported };
       } catch {
-        return 'unsaved';
+        return { outcome: 'unsaved', reported };
       }
     }
   }, [ensureDurable, getStateGeneration, getStateSnapshot]);
+
+  /** Hold the app-wide transfer write lock (and this hook's busy flag) for one write. */
+  const locked = useCallback(async <T,>(write: () => Promise<T>): Promise<T> => {
+    setBusy(true);
+    try {
+      return await write();
+    } finally {
+      transferWriteLock.release(); setBusy(false);
+    }
+  }, []);
 
   const report = useCallback((outcome: Outcome) => {
     toast.show(outcome === 'saved' ? words.undone : outcome === 'unsaved' ? words.unsaved
@@ -82,9 +94,15 @@ export function useTransferAnswer() {
    * person is told it changed. The other side of a link is cleared only while
    * its decision still names this entry.
    */
-  const undo = useCallback(async (id: string, counterpartId?: string, expected?: Readonly<Record<string, string>>) => {
-    if (saving.current) {
+  const undo = useCallback(async (id: string, counterpartId?: string, expected?: Readonly<Record<string, string>> | null) => {
+    // Another transfer write (a save, another Undo) is running: refuse rather than interleave.
+    if (transferWriteLock.held()) {
       toast.show(words.failed, { tone: 'error' });
+      return;
+    }
+    // The save could not vouch for what it left: nothing can be safely taken back.
+    if (expected === null) {
+      toast.show(words.changed, { tone: 'error' });
       return;
     }
     // Fresh rows: saving the answer itself changed their fingerprints. A
@@ -99,17 +117,18 @@ export function useTransferAnswer() {
     const counterpart = counterpartId ? rows.get(counterpartId) : undefined;
     const request = buildTransferUndo({ transaction: row, counterpart, generation: getStateGeneration() });
     const changedIds = request.decisions.map(decision => decision.ids[0]);
-    saving.current = true; setBusy(true);
-    try {
-      report(await commit(() => changedIds.length > 1
+    if (!transferWriteLock.acquire()) {
+      toast.show(words.failed, { tone: 'error' });
+      return;
+    }
+    await locked(async () => {
+      report((await commit(() => changedIds.length > 1
         ? resolveTransferBatch(request)
         : resolveTransfers({ ids: [id], ownership: null, expectedFingerprints: request.expectedFingerprints,
           expectedGeneration: request.expectedGeneration }),
-      request.expectedGeneration, changedIds));
-    } finally {
-      saving.current = false; setBusy(false);
-    }
-  }, [commit, getStateGeneration, getStateSnapshot, report, resolveTransferBatch, resolveTransfers, toast, words]);
+      request.expectedGeneration, changedIds)).outcome);
+    });
+  }, [commit, getStateGeneration, getStateSnapshot, locked, report, resolveTransferBatch, resolveTransfers, toast, words]);
 
   /**
    * Undo for an answer saved to several rows at once (a group or a selection
@@ -118,31 +137,32 @@ export function useTransferAnswer() {
    * the save left them) one answered or edited since, means the ledger changed
    * and nothing is cleared.
    */
-  const undoMany = useCallback(async (ids: readonly string[], expected?: Readonly<Record<string, string>>) => {
-    if (saving.current) {
+  const undoMany = useCallback(async (ids: readonly string[], expected?: Readonly<Record<string, string>> | null) => {
+    if (transferWriteLock.held()) {
       toast.show(words.failed, { tone: 'error' });
       return;
     }
     const rows = new Map(getStateSnapshot().transactions.map(entry => [entry.id, entry]));
     const current = ids.map(id => rows.get(id));
-    if (!current.length || current.some(row => !row) || (expected && transferAnswerMoved(expected, rows))) {
+    if (expected === null || !current.length || current.some(row => !row) || (expected && transferAnswerMoved(expected, rows))) {
       toast.show(words.changed, { tone: 'error' });
       return;
     }
     const request = buildTransferUndoMany({ rows: current as Transaction[], generation: getStateGeneration() });
-    saving.current = true; setBusy(true);
-    try {
-      report(await commit(() => resolveTransferBatch(request), request.expectedGeneration,
-        request.decisions.map(decision => decision.ids[0])));
-    } finally {
-      saving.current = false; setBusy(false);
+    if (!transferWriteLock.acquire()) {
+      toast.show(words.failed, { tone: 'error' });
+      return;
     }
-  }, [commit, getStateGeneration, getStateSnapshot, report, resolveTransferBatch, toast, words]);
+    await locked(async () => {
+      report((await commit(() => resolveTransferBatch(request), request.expectedGeneration,
+        request.decisions.map(decision => decision.ids[0]))).outcome);
+    });
+  }, [commit, getStateGeneration, getStateSnapshot, locked, report, resolveTransferBatch, toast, words]);
 
   const answer = useCallback(async ({ transaction, answer: choice, counterpart, label }: {
     transaction: Transaction; answer: TransferAnswer; counterpart?: Transaction; label: string;
   }): Promise<TransferAnswerResult> => {
-    if (saving.current) return 'busy';
+    if (transferWriteLock.held()) return 'busy';
     const request = buildTransferAnswer({ transaction, answer: choice, counterpart, generation: getStateGeneration() });
     // The row on screen may be older than the store; refuse rather than overwrite.
     const latest = new Map(getStateSnapshot().transactions.map(row => [row.id, row]));
@@ -153,13 +173,17 @@ export function useTransferAnswer() {
       toast.show(words.changed, { tone: 'error' });
       return 'changed';
     }
-    saving.current = true; setBusy(true);
-    try {
+    if (!transferWriteLock.acquire()) return 'busy';
+    return locked(async () => {
       const changedIds = [transaction.id, ...(request.counterpartId ? [request.counterpartId] : [])];
-      const outcome = await commit(() => resolveTransfers(request), request.expectedGeneration, changedIds);
+      const started = Date.now();
+      const { outcome, reported } = await commit(() => resolveTransfers(request), request.expectedGeneration, changedIds);
       if (outcome === 'saved' || outcome === 'unsaved') {
-        // The rows as this answer left them: Undo clears exactly this answer, never a newer one.
-        const after = transferFingerprintsOf(changedIds, new Map(getStateSnapshot().transactions.map(row => [row.id, row])));
+        // The rows as this answer left them, so Undo clears exactly this answer and never a newer one: the
+        // store's own post-decision fingerprints when it reported them, else the ledger's rows, accepted
+        // only when they carry exactly this decision.
+        const after = reported ?? savedAnswerFingerprints(expectedTransferDecisions([request]),
+          new Map(getStateSnapshot().transactions.map(row => [row.id, row])), started);
         const undoAction = { label: words.undo, onPress: () => { void undo(transaction.id, request.counterpartId, after); } };
         toast.show(outcome === 'saved' ? `${words.saved} · ${label}` : words.unsaved,
           { tone: outcome === 'saved' ? 'success' : 'warning', actions: [undoAction] });
@@ -167,13 +191,11 @@ export function useTransferAnswer() {
         toast.show(outcome === 'changed' ? words.changed : words.failed, { tone: 'error' });
       }
       return outcome;
-    } finally {
-      saving.current = false; setBusy(false);
-    }
-  }, [commit, getStateGeneration, getStateSnapshot, resolveTransfers, toast, undo, words]);
+    });
+  }, [commit, getStateGeneration, getStateSnapshot, locked, resolveTransfers, toast, undo, words]);
 
-  /** True while this hook is writing (an answer, an Undo or a Clear), before React re-renders. */
-  const pending = useCallback(() => saving.current, []);
+  /** True while any transfer write runs (this hook's or another's), before React re-renders. */
+  const pending = useCallback(() => transferWriteLock.held(), []);
 
   return { answer, undo, undoMany, busy, pending };
 }
