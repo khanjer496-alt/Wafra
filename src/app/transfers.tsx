@@ -1,3 +1,4 @@
+import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
 import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Keyboard, Platform, Pressable, StyleSheet, View } from 'react-native';
@@ -5,7 +6,10 @@ import { FlatList, Keyboard, Platform, Pressable, StyleSheet, View } from 'react
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
-import { introCues, legTags, newlyAnsweredRoutes, type CoinCue } from '@/components/transfer-coins/coin-cues';
+import { introCues, legTags, newlyAnsweredRoutes, routeLegIds, type CoinCue } from '@/components/transfer-coins/coin-cues';
+import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
+import { TransferAnswerSheet } from '@/components/transfers/transfer-answer-sheet';
+import { TransferGroupRow, type TransferGroupView } from '@/components/transfers/transfer-group-row';
 import { TransferQuestionCard } from '@/components/transfers/transfer-question-card';
 import { TransferRouteRow } from '@/components/transfers/transfer-route-row';
 import { ActionIconButton } from '@/components/ui/action-icon-button';
@@ -14,45 +18,86 @@ import { BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold'
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { TextField } from '@/components/ui/text-field';
-import { Spacing } from '@/constants/theme';
+import { Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useTransferAnswer } from '@/hooks/use-transfer-answer';
-import { formatAED } from '@/lib/format';
+import { useTransferBatch } from '@/hooks/use-transfer-batch';
+import { formatAED, fullDateTime, shortDateWithYear } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import { accountDisplayName, transferReconciliationForState } from '@/lib/ledger';
 import { formatMinorUnits } from '@/lib/ledger-money';
+import { bankBrandForName } from '@/lib/markets';
 import { inPeriod, isCurrentMonth, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import { getTransferActivity, transferQuestionQueue, unaskedPendingIds } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
-import { absorbedOwnIncoming, filterTransferItems, transferListItems, transferTotals, type TransferTag, type TransferTile } from '@/lib/transfer-list';
-import { matchedTransferPairs } from '@/lib/transfer-pairs';
-import { reconcileTransfers } from '@/lib/transfer-reconciliation';
+import { freezeTransferRows, transferAnswerGroups, transferBatchChangedIds, type TransferBatchItem } from '@/lib/transfer-batch';
+import { absorbedOwnIncoming, filterTransferItems, transferListItems, transferTotals,
+  type RouteEnd, type TransferListItem, type TransferTag, type TransferTile } from '@/lib/transfer-list';
+import { matchedTransferPairs, suggestedTransferPairs } from '@/lib/transfer-pairs';
+import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
+import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
+import { projectTransferHistory } from '@/lib/transfer-review-presentation';
 import type { Transaction } from '@/lib/types';
 
 const TILES = [['own', 'repeat'], ['sent', 'arrow-up-right'], ['received', 'arrow-down-right']] as const;
+/** Assessments whose named other side is a suggestion worth showing under "my own account". */
+const SUGGESTED = new Set(['likely-own', 'likely-card-repayment']);
+
+type GroupRow = { kind: 'group'; key: string; group: TransferGroupView };
+type HeaderRow = { kind: 'header'; key: string; title: string };
+type ListRow = TransferListItem | GroupRow | HeaderRow;
+
+/** A masked other account the bank named ("ADCB ••4999"); never a claim that it is the person's. */
+function counterpartName(counterparty: NonNullable<TransferEvidence['counterparty']>): string {
+  const bank = counterparty.bankIdentity ? bankBrandForName(counterparty.bankIdentity)?.name ?? counterparty.bankIdentity : undefined;
+  return [bank, `••${counterparty.last4}`].filter(Boolean).join(' ');
+}
+
+/**
+ * A select-mode control in the question card's button style (48pt, 14pt
+ * radius). Disabled is drawn, not faded: a ruled outline with the secondary
+ * ink, which keeps its label above 3:1.
+ */
+function SelectControl({ label, disabled, onPress, palette, testID, stacked }: {
+  label: string; disabled: boolean; onPress: () => void; palette: BandPalette; testID: string; stacked: boolean;
+}) {
+  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} disabled={disabled}
+    accessibilityState={{ disabled }} onPress={onPress}
+    style={({ pressed }) => [styles.control, stacked && styles.controlStacked,
+      { backgroundColor: palette.sheet, borderWidth: 1, borderColor: disabled ? palette.rule : palette.textSecondary,
+        opacity: !disabled && pressed ? 0.7 : 1 }]}>
+    <ThemedText type="smallBold" style={[styles.controlLabel, { color: disabled ? palette.textSecondary : palette.text }]}>{label}</ThemedText>
+  </Pressable>;
+}
 
 export default function TransfersScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ transactionId?: string | string[] }>();
+  const linkedId = Array.isArray(params.transactionId) ? params.transactionId[0] : params.transactionId;
   const band = useBand('accounts');
   const language = useLanguage();
   const words = transferActivityCopy(language);
   const large = useLargeTextLayout();
   const moneySpec = useLedgerMoney();
-  const { state } = useStore();
+  const { state, getStateGeneration } = useStore();
   const { period } = usePeriod();
   const listBottom = useBandBottomInset();
-  const { answer, busy } = useTransferAnswer();
+  const { answer, busy: answering } = useTransferAnswer();
   const [tile, setTile] = useState<TransferTile | null>(null);
   const [query, setQuery] = useState('');
   const search = useDeferredValue(query.trim().toLocaleLowerCase());
   const [periodOpen, setPeriodOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // A link to one entry (an old Review transfers link) opens that entry's "What is this?" here.
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    const row = linkedId ? state.transactions.find(entry => entry.id === linkedId) : undefined;
+    return row && isTransferCandidate(row) ? row.id : null;
+  });
   // Set with selectedId when the sheet opens for the several-accounts question: it starts on the picker.
   const [pickFor, setPickFor] = useState<string | null>(null);
   // Reuse the reconciliation keyed on the stored transfer receipt. Only while a
@@ -64,8 +109,11 @@ export default function TransfersScreen() {
   const activity = useMemo(() => getTransferActivity(state.transactions, state.accounts, reconciliation),
     [state.transactions, state.accounts, reconciliation]);
   const accounts = useMemo(() => new Map(state.accounts.map(account => [account.id, account])), [state.accounts]);
-  const selected = selectedId ? activity.find(item => item.transaction.id === selectedId) : undefined;
   const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
+  const selectedRecord = selectedId ? activity.find(item => item.transaction.id === selectedId) : undefined;
+  // Grouped, suggested-pair and linked entries are not all in the activity list; the sheet still opens on them.
+  const selectedTransaction = selectedRecord?.transaction ?? (selectedId ? rowsById.get(selectedId) : undefined);
+  const selectedAssessment = selectedRecord?.assessment ?? (selectedId ? reconciliation.byId.get(selectedId) : undefined);
   // A confirmed pair belongs to the period of its outgoing leg and is always listed whole:
   // both legs come in with it, and the incoming leg of a pair that left in another period stays out.
   const allPairs = useMemo(() => matchedTransferPairs(reconciliation, rowsById), [reconciliation, rowsById]);
@@ -108,24 +156,206 @@ export default function TransfersScreen() {
   // counts once, in September.
   const absorbed = useMemo(() => absorbedOwnIncoming(transferListItems(activity, allPairs)), [activity, allPairs]);
   const totals = useMemo(() => transferTotals(items, absorbed), [items, absorbed]);
-  const shown = useMemo(() => filterTransferItems(items, tile), [items, tile]);
+
+  // ---- Waiting for an answer: groups, suggested pairs, and every queued entry ----
+  // Suggested own-account pairs (amount and time match on two of the person's accounts) are asked
+  // about as one route; neither leg joins a group.
+  const listedIds = useMemo(() => new Set(activity.map(item => item.transaction.id)), [activity]);
+  const suggested = useMemo(() => suggestedTransferPairs(reconciliation, rowsById)
+    .filter(pair => listedIds.has(pair.out.id) && listedIds.has(pair.in.id)), [reconciliation, rowsById, listedIds]);
+  const suggestedByKey = useMemo(() => new Map(suggested.map(pair => [pair.key, pair])), [suggested]);
+  const answerGroups = useMemo(() => transferAnswerGroups({ groups: reconciliation.groups, pendingIds: reconciliation.pendingIds,
+    rowsById, excludeIds: new Set(suggested.flatMap(pair => [pair.out.id, pair.in.id])), listedIds }),
+  [reconciliation, rowsById, suggested, listedIds]);
+  const groupedIds = useMemo(() => new Set(answerGroups.flatMap(group => group.transactionIds)), [answerGroups]);
+  // Groups are not a period's history but a to-do: every date, bounded (collapsed) however many
+  // entries they hold. Search narrows each group to its matching entries, as the bulk review did.
+  const groupLabels = useMemo(() => new Map(state.accounts.map(account => [account.id, accountDisplayName(account)])), [state.accounts]);
+  const projected = useMemo(() => projectTransferHistory({ groups: answerGroups, rowsById, accountLabels: groupLabels, scope: 'all',
+    todayISO: new Date().toISOString().slice(0, 10), query: search, moneyLabel: amount => formatAED(amount, { decimals: true }) }).groups,
+  [answerGroups, rowsById, groupLabels, search]);
+  /** The other accounts the reconciler suggests these entries moved to or from. */
+  const suggestedAccounts = (ids: readonly string[]) => {
+    const names = new Set<string>();
+    for (const id of ids) {
+      const other = matchedEntry(id);
+      if (other && other.accountId !== rowsById.get(id)?.accountId) names.add(accountName(other.accountId));
+    }
+    return [...names];
+  };
+  /** The entry the reconciler matched to this one (what, when, how much): the old review sheet's "matching bank entry". */
+  const matchedEntry = (id: string) => {
+    const assessment = reconciliation.byId.get(id);
+    return assessment?.counterpartId && SUGGESTED.has(assessment.status) ? rowsById.get(assessment.counterpartId) : undefined;
+  };
+  const matchDetail = (other: Transaction) => [other.title, fullDateTime(other), moneyLabel(other.amountFils)].join(' · ');
+  const groupViews = useMemo<TransferGroupView[]>(() => projected.map(group => {
+    const account = accountName(group.accountId);
+    const otherName = group.counterpartyName ?? (group.counterparty ? counterpartName(group.counterparty) : undefined);
+    const other: RouteEnd = otherName ? { kind: 'party', name: otherName } : { kind: 'unknown' };
+    const mine: RouteEnd = { kind: 'account', accountId: group.accountId };
+    const incoming = group.direction === 'income';
+    const otherLabel = otherName ?? '?', otherSpoken = otherName ?? words.route.unknown;
+    const likely = suggestedAccounts(group.transactionIds);
+    return { key: group.id, ids: group.transactionIds, direction: group.direction,
+      from: incoming ? other : mine, to: incoming ? mine : other,
+      fromLabel: incoming ? otherLabel : account, toLabel: incoming ? account : otherLabel,
+      fromSpoken: incoming ? otherSpoken : account, toSpoken: incoming ? account : otherSpoken,
+      totalFils: group.rows.reduce((sum, row) => sum + row.amountFils, 0), count: group.rows.length,
+      newest: group.rows[0].date, oldest: group.rows[group.rows.length - 1].date,
+      ...(likely.length === 1 ? { hint: words.card.looksLike(likely[0]) } : {}) };
+  // accountName and suggestedAccounts read accounts, reconciliation and the language's copy.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [projected, accounts, reconciliation, rowsById, words]);
+
+  // ---- Select several ----
+  const [coins, setCoins] = useState<ReadonlyMap<string, CoinCue>>(() => new Map());
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<ReadonlyMap<string, TransferBatchItem>>(() => new Map());
+  const [linkNotice, setLinkNotice] = useState<string | null>(() => {
+    if (!linkedId) return null;
+    const row = state.transactions.find(entry => entry.id === linkedId);
+    return !row ? words.link.missing : isTransferCandidate(row) ? null : words.link.notTransfer;
+  });
+  // Rows a group or selection answer just changed: their coins travel when they reach the list.
+  const justAnswered = useRef<ReadonlySet<string>>(new Set());
+  const batch = useTransferBatch({ rowsById, onSaved: changedIds => {
+    justAnswered.current = new Set(changedIds);
+    setPicked(new Map());
+    setSelecting(false);
+  } });
+  const busy = answering || batch.busy;
+  // Select mode lists everything still waiting, whatever the period: groups first, then each queued
+  // entry, a suggested pair as one route.
+  const selectRows = useMemo(() => {
+    const waiting = activity.filter(item => item.needsReview && !item.transaction.transferDecision && !groupedIds.has(item.transaction.id));
+    const ids = new Set(waiting.map(item => item.transaction.id));
+    const routes = transferListItems(waiting, suggested.filter(pair => ids.has(pair.out.id) && ids.has(pair.in.id)));
+    return !search ? routes : routes.filter(item => (suggestedByKey.get(item.key) ? [suggestedByKey.get(item.key)!.out, suggestedByKey.get(item.key)!.in]
+      : [rowsById.get(item.transactionId)]).some(tx => !!tx && matchesSearch(tx)));
+  // matchesSearch closes over search and accounts.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activity, groupedIds, suggested, suggestedByKey, rowsById, search, accounts]);
+  const periodTitle = isCurrentMonth(period) ? words.listTitle : periodLabel(period);
+  // A tile filters the period's answered transfers; groups wait for an answer, so they step aside.
+  const groupRows = useMemo<GroupRow[]>(() => tile ? []
+    : groupViews.map(group => ({ kind: 'group', key: `group:${group.key}`, group })), [tile, groupViews]);
+  // A grouped entry is answered with its group, so it is not listed a second time on its own.
+  const periodRows = useMemo(() => filterTransferItems(items, tile).filter(item => !routeLegIds(item).some(id => groupedIds.has(id))),
+    [items, tile, groupedIds]);
+  const data = useMemo<ListRow[]>(() => selecting ? [...groupRows, ...selectRows]
+    : groupRows.length ? [...groupRows, ...(periodRows.length ? [{ kind: 'header' as const, key: 'header:period', title: periodTitle }] : []), ...periodRows]
+      : periodRows, [selecting, groupRows, selectRows, periodRows, periodTitle]);
+  const selectable = useMemo(() => data.filter((row): row is GroupRow | TransferListItem => !('kind' in row) || row.kind === 'group'), [data]);
+
+  /** Freeze one list row as the person sees it now: its rows' fingerprints, the generation, the route. */
+  const batchItem = (row: GroupRow | TransferListItem): TransferBatchItem | null => {
+    const generation = getStateGeneration();
+    if ('kind' in row) {
+      const view = row.group;
+      const rows = view.ids.map(id => rowsById.get(id)).filter((entry): entry is Transaction => !!entry);
+      if (rows.length !== view.ids.length) return null;
+      return { key: row.key, kind: 'group', ids: view.ids, direction: view.direction,
+        expectedFingerprints: freezeTransferRows(rows), expectedGeneration: generation,
+        preview: { from: view.from, to: view.to, fromLabel: view.fromLabel, toLabel: view.toLabel, amountFils: view.totalFils,
+          sign: view.direction === 'income' ? 'plus' : 'minus', count: view.count,
+          dates: view.oldest !== view.newest ? `${shortDateWithYear(view.oldest)} – ${shortDateWithYear(view.newest)}` : shortDateWithYear(view.newest),
+          spoken: `${view.fromSpoken} ${words.route.to} ${view.toSpoken}` } };
+    }
+    const pair = suggestedByKey.get(row.key);
+    const named = (end: RouteEnd) => end.kind === 'account' ? accountName(end.accountId) : end.kind === 'party' ? end.name : words.route.unknown;
+    const preview = { from: row.from, to: row.to, fromLabel: row.from.kind === 'unknown' ? '?' : named(row.from),
+      toLabel: row.to.kind === 'unknown' ? '?' : named(row.to), amountFils: row.amountFils, dates: shortDateWithYear(row.date),
+      spoken: `${named(row.from)} ${words.route.to} ${named(row.to)}` };
+    if (pair) {
+      const anchor = pair.anchorId === pair.out.id ? pair.out : pair.in;
+      const other = anchor.id === pair.out.id ? pair.in : pair.out;
+      return { key: row.key, kind: 'pair', ids: [anchor.id], counterpartId: other.id, direction: 'between',
+        expectedFingerprints: freezeTransferRows([anchor, other]), expectedGeneration: generation,
+        preview: { ...preview, sign: 'none', count: 2,
+          ...(pair.in.amountFils !== pair.out.amountFils ? { note: `${words.incoming}: ${moneyLabel(pair.in.amountFils)}` } : {}) } };
+    }
+    const entry = rowsById.get(row.transactionId);
+    if (!entry || entry.transferDecision) return null;
+    return { key: row.key, kind: 'entry', ids: [entry.id], direction: entry.type === 'income' ? 'income' : 'expense',
+      expectedFingerprints: freezeTransferRows([entry]), expectedGeneration: generation,
+      preview: { ...preview, sign: entry.type === 'income' ? 'plus' : 'minus', count: 1 } };
+  };
+  const togglePicked = (row: GroupRow | TransferListItem) => {
+    if (busy) return;
+    Keyboard.dismiss();
+    const item = picked.has(row.key) ? null : batchItem(row);
+    setPicked(current => {
+      const next = new Map(current);
+      if (next.has(row.key)) next.delete(row.key); else if (item) next.set(row.key, item);
+      return next;
+    });
+  };
+  const selectAll = () => {
+    if (busy) return;
+    Keyboard.dismiss();
+    const additions = selectable.filter(row => !picked.has(row.key)).map(batchItem)
+      .filter((item): item is TransferBatchItem => !!item);
+    setPicked(current => new Map([...current, ...additions.map(item => [item.key, item] as const)]));
+  };
+  const startSelecting = () => {
+    if (busy) return;
+    Keyboard.dismiss();
+    if (tile) setTile(null);
+    setSelecting(true);
+  };
+  const stopSelecting = () => {
+    if (busy || batch.needsDurability) return;
+    setSelecting(false);
+    setPicked(new Map());
+  };
+  const openGroup = (row: GroupRow) => {
+    if (busy) return;
+    Keyboard.dismiss();
+    const item = batchItem(row);
+    if (item) batch.open([item], null);
+  };
+  const pickedItems = [...picked.values()];
+  const pickedIncoming = pickedItems.every(item => item.direction === 'income') ? true
+    : pickedItems.some(item => item.direction === 'income') ? 'mixed' as const : false;
+  const sheetEntries = batch.batch?.items.length === 1 && batch.batch.items[0].kind === 'group'
+    ? batch.batch.items[0].ids.map(id => rowsById.get(id)).filter((row): row is Transaction => !!row) : undefined;
+  // Each listed entry names its own likely other side; one entry's sheet names it under the own answer.
+  const entryMatch = (id: string) => {
+    const other = matchedEntry(id);
+    return other ? `${words.route.linked(accountName(other.accountId))} · ${matchDetail(other)}` : undefined;
+  };
+  const sheetIds = batch.batch?.items.flatMap(item => [...item.ids, ...(item.counterpartId ? [item.counterpartId] : [])]) ?? [];
+  const sheetMatch = batch.batch && transferBatchChangedIds(batch.batch.items).length === 1 ? matchedEntry(sheetIds[0]) : undefined;
+  const sheetSuggestion = useMemo(() => {
+    if (!batch.batch) return undefined;
+    const names = suggestedAccounts(batch.batch.items.flatMap(item => item.ids));
+    return names.length ? words.route.linked(names.length > 2 ? `${names.slice(0, 2).join(' · ')} +${names.length - 2}` : names.join(' · '))
+      : undefined;
+  // suggestedAccounts reads accounts and reconciliation.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batch.batch, accounts, reconciliation, rowsById, words]);
+
   // A coin travels a route when the list first appears (the first few rows only) and again
   // the moment its question is answered, own account or someone else, however it was
-  // answered (the card, the detail sheet, the batch review): the "?" it travels to becomes the answer.
-  const [coins, setCoins] = useState<ReadonlyMap<string, CoinCue>>(() => new Map());
+  // answered (the card, the detail sheet, a group or a selection): the "?" it travels to becomes the answer.
   const introduced = useRef(false);
   const lastTags = useRef<ReadonlyMap<string, TransferTag> | null>(null);
   useEffect(() => {
-    if (introduced.current || !shown.length) return;
+    if (introduced.current || !periodRows.length) return;
     introduced.current = true;
-    const intro = introCues(shown.map(item => item.key), Date.now());
+    const intro = introCues(periodRows.map(item => item.key), Date.now());
     setCoins(previous => new Map([...previous, ...intro]));
-  }, [shown]);
+  }, [periodRows]);
   useEffect(() => {
     const previous = lastTags.current;
     lastTags.current = legTags(periodItems);
     if (!previous) return;
-    const arrived = newlyAnsweredRoutes(previous, periodItems);
+    // A group's entries may not have been listed before they were answered: they were waiting all the same.
+    const before = new Map(previous);
+    for (const id of justAnswered.current) if (!before.has(id)) before.set(id, 'needs-answer');
+    const arrived = newlyAnsweredRoutes(before, periodItems);
+    if (arrived.length) justAnswered.current = new Set();
     if (!arrived.length) return;
     const at = Date.now();
     setCoins(cues => new Map([...cues, ...arrived.map(key => [key, { at, delay: 0 }] as const)]));
@@ -136,7 +366,8 @@ export default function TransfersScreen() {
   // Home counts this same queue (transferQuestionQueue), so the two numbers agree.
   const queue = useMemo(() => transferQuestionQueue(activity), [activity]);
   // Queued entries the card cannot ask about (duplicate observations, archived accounts,
-  // likely card repayments) are reached only through the review screen: keep "See all" open.
+  // likely card repayments) are listed as groups above the period's transfers and reached
+  // together through select mode: keep "See all" open.
   const unasked = useMemo(() => unaskedPendingIds(activity, reconciliation.pendingIds).size, [activity, reconciliation]);
   const current = queue[0];
   const hint = useMemo(() => {
@@ -185,19 +416,55 @@ export default function TransfersScreen() {
     <ThemedText type="smallBold" style={[styles.periodLabel, { color: band.onBand }]}>{periodLabel(period)}</ThemedText>
     <Icon name="chevron-down" size={16} color={band.onBand} />
   </Pressable>;
+  const waiting = groupRows.length + selectRows.length;
+  // What a row draws besides its data: its travelling coin, its tick and whether it can be pressed.
+  const listState = useMemo(() => ({ coins, picked, selecting, busy }), [coins, picked, selecting, busy]);
+  // The list's first heading, with Select at its end: the waiting groups' section when there are
+  // any (the period's heading then sits in the list above its rows), else the period.
+  const listHead = <View testID="transfers-list-head" style={styles.listHead}>
+    <ThemedText type="smallBold" accessibilityRole="header" style={styles.grow}>
+      {selecting ? words.select.selected(picked.size) : groupRows.length ? words.group.section : periodTitle}
+    </ThemedText>
+    {!selecting && waiting > 0 ? <Pressable testID="transfers-select" accessibilityRole="button"
+      accessibilityLabel={words.select.action} accessibilityHint={words.select.actionHint} disabled={busy}
+      onPress={startSelecting} style={({ pressed }) => [styles.headAction, { opacity: pressed ? 0.7 : 1 }]}>
+      <Icon name="check" size={16} color={band.tint} />
+      <ThemedText type="smallBold" style={{ color: band.tint }}>{words.select.action}</ThemedText>
+    </Pressable> : null}
+  </View>;
+  const selectControls = <View testID="transfer-select-controls" style={styles.selectControls}>
+    <ThemedText type="meta" themeColor="textSecondary">{words.select.hint}</ThemedText>
+    <View style={[styles.controlRow, large && styles.controlRowStacked]}>
+      <SelectControl testID="transfer-select-shown" label={words.select.all(selectable.length)} palette={band} stacked={large}
+        disabled={busy || selectable.length === 0} onPress={selectAll} />
+      {picked.size > 0 ? <SelectControl testID="transfer-clear-selection" label={words.select.clear} palette={band} stacked={large}
+        disabled={busy} onPress={() => { if (!busy) setPicked(new Map()); }} /> : null}
+      <SelectControl testID="transfer-cancel-selection" label={words.select.cancel} palette={band} stacked={large}
+        disabled={busy || batch.needsDurability} onPress={stopSelecting} />
+    </View>
+  </View>;
 
   return <>
     <BandScaffold band="accounts" scroll={false} testID="transfers-screen" contentStyle={styles.sheet}
-      nav={{ back: () => { if (router.canGoBack()) router.back(); else router.replace('/wallet'); }, title: words.title, trailing: periodChip }}
+      nav={{ back: () => { if (router.canGoBack()) router.back(); else router.replace('/wallet'); }, title: words.title, trailing: periodChip,
+        backDisabled: busy || (batch.needsDurability && !batch.stale) }}
+      footer={selecting ? <View testID="transfer-selection-footer" style={styles.footer}>
+        <ThemedText type="smallBold" accessibilityLiveRegion="polite">
+          {picked.size ? words.select.selected(picked.size) : words.select.none}
+        </ThemedText>
+        {/* The same three answers, for everything ticked; each opens the confirmation. */}
+        {picked.size ? <TransferAnswerChoices incoming={pickedIncoming} value={null} palette={band} layout="buttons" disabled={busy}
+          onChange={choice => { Keyboard.dismiss(); batch.open(pickedItems, choice); }} /> : null}
+      </View> : undefined}
       bandContent={<View testID="transfers-band" style={styles.bandIntro}>
         <BandFigure label={words.headline(periodLabel(period))} fils={totals.ownFils} decimals palette={band}
           qualifier={words.notCounted} />
         {tilesOnBand ? tiles : null}
       </View>}>
-      <FlatList
+      <FlatList<ListRow>
         testID="transfer-history"
-        data={shown}
-        extraData={coins}
+        data={data}
+        extraData={listState}
         keyExtractor={item => item.key}
         contentContainerStyle={[styles.content, { paddingBottom: listBottom }]}
         scrollIndicatorInsets={{ top: 0, bottom: listBottom }}
@@ -207,33 +474,55 @@ export default function TransfersScreen() {
         initialNumToRender={14} maxToRenderPerBatch={10} windowSize={9}
         ListHeaderComponent={<View style={styles.controls}>
           {tilesOnBand ? null : tiles}
+          {linkNotice ? <Pressable testID="transfers-link-notice" accessibilityRole="button" accessibilityLabel={`${linkNotice}. ${t('close', language)}`}
+            onPress={() => setLinkNotice(null)} style={[styles.notice, { backgroundColor: band.card, borderColor: band.rule }]}>
+            <ThemedText type="small" style={styles.grow}>{linkNotice}</ThemedText>
+            <Icon name="close" size={16} color={band.textSecondary} />
+          </Pressable> : null}
           <TextField label={words.search} value={query} onChangeText={setQuery}
             inputMode="search" returnKeyType="search" placeholder={words.searchPlaceholder}
             onSubmitEditing={() => Keyboard.dismiss()}
             leading={<Icon name="search" size={17} color={band.textSecondary} />}
             trailing={query ? <ActionIconButton icon="close" label={t('clearSearch', language)}
               variant="plain" onPress={() => setQuery('')} /> : undefined} />
-          {current ? <TransferQuestionCard transaction={current.transaction} index={0} total={queue.length}
+          {selecting ? selectControls : current ? <TransferQuestionCard transaction={current.transaction} index={0} total={queue.length}
             accountLabel={accountName(current.transaction.accountId)} hint={hint} palette={band} busy={busy}
-            more={unasked} onAnswer={answerCurrent} onSeeAll={() => router.push('/review-transfers')} />
+            more={unasked} onAnswer={answerCurrent} onSeeAll={startSelecting} />
             : unasked > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
               accessibilityLabel={`${words.card.title(unasked)}. ${words.card.seeAllPlain}`}
-              onPress={() => router.push('/review-transfers')}
+              onPress={startSelecting}
               style={({ pressed }) => [styles.reviewLink, { backgroundColor: band.card, borderColor: band.statusNear, opacity: pressed ? 0.7 : 1 }]}>
               <ThemedText type="smallBold" style={[styles.grow, { color: band.statusNear }]}>{words.card.title(unasked)}</ThemedText>
               <ThemedText type="small" style={{ color: band.tint }}>{words.card.seeAllPlain}</ThemedText>
             </Pressable> : null}
-          <ThemedText type="smallBold" accessibilityRole="header">
-            {isCurrentMonth(period) ? words.listTitle : periodLabel(period)}
-          </ThemedText>
+          {listHead}
         </View>}
-        renderItem={({ item, index }) => <View style={[styles.rowCard, { backgroundColor: band.card },
-          index === 0 && styles.rowCardFirst, index === shown.length - 1 && styles.rowCardLast]}>
-          <TransferRouteRow item={item} first={index === 0} accountLabel={accountName} palette={band} coin={coins.get(item.key)}
-            onPress={() => { Keyboard.dismiss(); setSelectedId(item.transactionId); }} />
-        </View>}
+        renderItem={({ item, index }) => {
+          if ('kind' in item && item.kind === 'header') {
+            return <View style={styles.sectionHead}><ThemedText type="smallBold" accessibilityRole="header">{item.title}</ThemedText></View>;
+          }
+          // Each section is one card: rounded where it starts and ends.
+          const previous = data[index - 1], next = data[index + 1];
+          const first = !previous || ('kind' in previous && previous.kind === 'header');
+          const last = !next || ('kind' in next && next.kind === 'header');
+          const card = [styles.rowCard, { backgroundColor: band.card }, first && styles.rowCardFirst, last && styles.rowCardLast];
+          const select = selecting ? { checked: picked.has(item.key), disabled: busy } : undefined;
+          if ('kind' in item) {
+            return <View style={card}>
+              <TransferGroupRow group={item.group} palette={band} first={first} select={select}
+                onPress={() => selecting ? togglePicked(item) : openGroup(item)} />
+            </View>;
+          }
+          return <View style={card}>
+            <TransferRouteRow item={item} first={first} accountLabel={accountName} palette={band} coin={coins.get(item.key)}
+              select={select}
+              onPress={() => { if (selecting) { togglePicked(item); return; } Keyboard.dismiss(); setSelectedId(item.transactionId); }} />
+          </View>;
+        }}
         ListEmptyComponent={<View style={styles.empty}><Icon name="repeat" size={30} color={band.textSecondary} />
-          {tile && items.length > 0 ? <>
+          {selecting ? <>
+            <ThemedText type="heading" style={styles.emptyCopy}>{words.empty}</ThemedText>
+          </> : tile && items.length > 0 ? <>
             <ThemedText type="heading" style={styles.emptyCopy}>{words.emptyTile}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.emptyCopy}>{words.emptyTileBody}</ThemedText>
             <Pressable testID="transfers-clear-tile" accessibilityRole="button" onPress={() => setTile(null)} style={styles.clearTile}>
@@ -246,9 +535,14 @@ export default function TransfersScreen() {
       />
     </BandScaffold>
     <PeriodSheet visible={periodOpen} onClose={() => setPeriodOpen(false)} />
-    <EntryDetailSheet transaction={selected?.transaction ?? null} transferAssessment={selected?.assessment}
+    <EntryDetailSheet transaction={selectedTransaction ?? null} transferAssessment={selectedAssessment}
       showMerchantLink={false} startWithAccountPicker={!!selectedId && pickFor === selectedId}
       onClose={() => { setSelectedId(null); setPickFor(null); }} />
+    {batch.batch ? <TransferAnswerSheet batch={batch.batch} palette={band} busy={batch.busy} stale={batch.stale} error={batch.error}
+      needsDurability={batch.needsDurability} suggestion={sheetSuggestion} entries={sheetEntries}
+      suggestionDetail={sheetMatch ? matchDetail(sheetMatch) : undefined} entryMatch={entryMatch}
+      onChoose={batch.choose} onSave={() => void batch.save(batch.batch)} onClose={batch.close}
+      onOpenEntry={id => { batch.close(); setSelectedId(id); }} /> : null}
   </>;
 }
 
@@ -264,7 +558,19 @@ const styles = StyleSheet.create({
   clearTile: { minHeight: 44, justifyContent: 'center' },
   reviewLink: { minHeight: 56, borderWidth: 1, borderRadius: 18, padding: Spacing.three, flexDirection: 'row', flexWrap: 'wrap',
     alignItems: 'center', gap: Spacing.two },
+  notice: { minHeight: 48, borderWidth: 1, borderRadius: 14, padding: Spacing.three, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   grow: { flexGrow: 1, flexShrink: 1 },
+  listHead: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two, minHeight: 44 },
+  headAction: { minHeight: 44, minWidth: 44, paddingHorizontal: Spacing.two, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  sectionHead: { paddingTop: Spacing.four, paddingBottom: Spacing.two },
+  selectControls: { gap: Spacing.two },
+  controlRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  controlRowStacked: { flexDirection: 'column' },
+  control: { flexGrow: 1, flexShrink: 1, maxWidth: '100%', minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: Spacing.three, paddingVertical: Spacing.two },
+  controlStacked: { flexGrow: 0, alignSelf: 'stretch' },
+  controlLabel: { textAlign: 'center' },
+  footer: { gap: Spacing.two },
   rowCard: { paddingHorizontal: Spacing.three },
   rowCardFirst: { borderTopStartRadius: 18, borderTopEndRadius: 18 },
   rowCardLast: { borderBottomStartRadius: 18, borderBottomEndRadius: 18 },

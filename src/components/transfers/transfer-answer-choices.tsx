@@ -15,18 +15,29 @@ const ORDER: TransferAnswer[] = ['own', 'external', 'none'];
  * decision the row did not have, which is not a no-op for every row (card payments).
  */
 /* Gold (`statusNear`) marks the selected radio row; it is the same gold on every band. */
-export function TransferAnswerChoices({ incoming, value, onChange, palette, layout, linkedLabel, disabled }: {
-  incoming: boolean; value: TransferAnswer | null; onChange: (answer: TransferAnswer) => void;
-  palette: BandPalette; layout: 'buttons' | 'radios'; linkedLabel?: string; disabled?: boolean;
+export function TransferAnswerChoices({ incoming, value, onChange, palette, layout, linkedLabel, suggestion, suggestionDetail, disabled }: {
+  /** 'mixed' when one answer is given to money in and money out together (a selection). */
+  incoming: boolean | 'mixed'; value: TransferAnswer | null; onChange: (answer: TransferAnswer) => void;
+  palette: BandPalette; layout: 'buttons' | 'radios'; linkedLabel?: string;
+  /**
+   * The likely other side ("Linked to ADCB Credit Card ••7720"): a matching
+   * entry on another of the person's accounts or cards. Shown under the own
+   * answer while it is a suggestion; `linkedLabel` replaces it once linked.
+   */
+  suggestion?: string;
+  /** The matching entry itself (what it was, when, how much), shown with the suggestion. */
+  suggestionDetail?: string;
+  disabled?: boolean;
 }) {
   const words = transferActivityCopy(useLanguage()).answers;
   const large = useLargeTextLayout();
-  const labels = incoming ? words.in : words.out;
-  const effect = (answer: TransferAnswer) => answer === 'none' ? words.effect.none : words.effect[answer](incoming);
+  const labels = incoming === 'mixed' ? words.mixed : incoming ? words.in : words.out;
+  const effect = (answer: TransferAnswer) => answer === 'none' ? words.effect.none
+    : incoming === 'mixed' ? words.mixedEffect[answer] : words.effect[answer](incoming);
   if (layout === 'buttons') {
     return <View accessibilityRole="radiogroup" style={[styles.buttons, large && styles.stack]}>
       {ORDER.map((answer, i) => <Pressable key={answer} testID={`transfer-answer-${answer}`} disabled={disabled}
-        accessibilityRole="radio" accessibilityState={{ checked: value === answer, disabled: !!disabled }}
+        accessibilityRole="radio" accessibilityState={{ checked: value === answer, disabled: !!disabled }} aria-checked={value === answer}
         accessibilityLabel={`${labels[answer]}. ${effect(answer)}`}
         onPress={() => { if (answer !== value) onChange(answer); }}
         style={({ pressed }) => [styles.button, large && styles.buttonLarge,
@@ -42,8 +53,10 @@ export function TransferAnswerChoices({ incoming, value, onChange, palette, layo
       const on = value === answer;
       return <View key={answer}>
         <Pressable testID={`transfer-answer-${answer}`} disabled={disabled}
-          accessibilityRole="radio" accessibilityState={{ checked: on, disabled: !!disabled }}
-          accessibilityLabel={`${labels[answer]}. ${effect(answer)}`}
+          accessibilityRole="radio" accessibilityState={{ checked: on, disabled: !!disabled }} aria-checked={on}
+          accessibilityLabel={[labels[answer], effect(answer),
+            ...(answer === 'own' && suggestion && !(on && linkedLabel) ? [suggestion, suggestionDetail, words.suggestedOnly] : [])]
+            .filter(Boolean).join('. ')}
           onPress={() => { if (!on) onChange(answer); }}
           style={({ pressed }) => [styles.radioRow, { backgroundColor: palette.card,
             borderColor: on ? palette.statusNear : palette.rule, opacity: pressed || disabled ? 0.75 : 1 }]}>
@@ -53,6 +66,11 @@ export function TransferAnswerChoices({ incoming, value, onChange, palette, layo
           <View style={styles.radioText}>
             <ThemedText type="smallBold">{labels[answer]}</ThemedText>
             <ThemedText type="meta" themeColor="textSecondary">{effect(answer)}</ThemedText>
+            {answer === 'own' && suggestion && !(on && linkedLabel) ? <View testID="transfer-answer-own-suggestion" style={styles.suggestion}>
+              <ThemedText type="meta" style={{ color: palette.tint }}>{suggestion}</ThemedText>
+              {suggestionDetail ? <ThemedText type="meta" selectable style={{ color: palette.text }}>{suggestionDetail}</ThemedText> : null}
+              <ThemedText type="meta" themeColor="textSecondary">{words.suggestedOnly}</ThemedText>
+            </View> : null}
           </View>
         </Pressable>
         {answer === 'own' && on && linkedLabel
@@ -74,4 +92,5 @@ const styles = StyleSheet.create({
   radioDot: { width: 10, height: 10, borderRadius: 5 },
   radioText: { flex: 1, minWidth: 0, gap: 0 },
   linked: { paddingStart: Spacing.three, paddingTop: Spacing.one },
+  suggestion: { gap: 2, paddingTop: 2 },
 });

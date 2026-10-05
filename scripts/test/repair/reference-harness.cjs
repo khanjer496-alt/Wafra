@@ -246,6 +246,8 @@ function createHarness(options = {}) {
   local('@/lib/spending-calendar-tiles','src/lib/spending-calendar-tiles.ts');local('@/components/ui/coins/coin-disc');local('@/components/ui/coins/coin-stack');local('@/components/ui/coins/coin-token');
   local('@/components/ui/band/band-segmented');local('@/components/ui/band/band-chip');local('@/components/ui/band/share-bar');
   local('@/components/ui/band/glyph-tile');local('@/components/ui/band/status-bar');local('@/components/ui/band/e-button');
+  // Transfers' select mode: the tick box its rows and group rows draw.
+  local('@/components/transfers/transfer-select-mark');
   // The category creation form uses the real field/button and band palette;
   // load it only after those existing UI boundaries are ready.
   local('@/components/ui/category-chips');

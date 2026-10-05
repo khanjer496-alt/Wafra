@@ -138,17 +138,6 @@ const en = {
     original: 'Shown in the currency of the alert',
   },
 
-  transfers: {
-    pairsTitle: (n: number) => `${enCount(n, 'possible pair', 'possible pairs')}`,
-    pairsBody: 'Same amount, close in time, on two different accounts. Matching keeps both out of spending and income.',
-    out: 'Out',
-    in: 'In',
-    match: 'Match as transfer',
-    notPair: 'Not a pair',
-    matched: 'Transfer matched',
-    notPairDone: 'Kept separate. Each entry stays in the list below.',
-    pairA11y: (out: string, inAccount: string, amount: string) => `${out} to ${inAccount}, ${amount}`,
-  },
 
   categorise: {
     intro: 'Only merchants Wafra couldn’t place. Your answer also applies to their future charges.',
@@ -287,17 +276,6 @@ const ar: DetailsCopy = {
     original: 'بعملة التنبيه',
   },
 
-  transfers: {
-    pairsTitle: (n) => `أزواج محتملة: ${n}`,
-    pairsBody: 'المبلغ نفسه وفي وقت متقارب على حسابين مختلفين. المطابقة تُبقي الطرفين خارج الإنفاق والدخل.',
-    out: 'صادر',
-    in: 'وارد',
-    match: 'مطابقة كتحويل',
-    notPair: 'ليسا زوجاً',
-    matched: 'تمت مطابقة التحويل',
-    notPairDone: 'بقيا منفصلين. تبقى كل عملية في القائمة أدناه.',
-    pairA11y: (out, inAccount, amount) => `${out} إلى ${inAccount}، ${amount}`,
-  },
 
   categorise: {
     intro: 'تظهر هنا فقط المتاجر التي لم يتمكن وفرة من تصنيفها. تنطبق إجابتك على عملياتها القادمة أيضاً.',

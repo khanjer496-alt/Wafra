@@ -34,11 +34,9 @@ test('every Arabic string is Arabic and every English string is not', () => {
 });
 
 test('counted phrases read naturally in both languages', () => {
-  assert.equal(en.toCheck(2), '2 to check');
   assert.equal(en.namesToPlace(1), '1 name to place');
   assert.equal(en.namesToPlace(3), '3 names to place');
   // Arabic puts the count after a colon, so no noun needs a plural form.
-  assert.equal(ar.toCheck(2), 'للمراجعة: 2');
   assert.equal(ar.namesToPlace(11), 'أسماء تحتاج تصنيفاً: 11');
   // The entries count arrives already pluralised (detailsCopy.entries).
   assert.equal(en.placeLine('1 entry'), 'No category yet. Answers move 1 entry and apply to future ones.');

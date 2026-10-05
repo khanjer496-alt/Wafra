@@ -115,6 +115,16 @@ function createWorkflowHarness(options={}) {
  h.local('@/components/settings-band/band-title');
  d['@/components/pro/pro-sheet']={ProSheet:p=>jsx('Boundary',{...p,name:'ProSheet'})};
  function renderScreen(screen,props={}){
+  if(screen==='transfers'){
+   // The one Transfers page: its groups, select mode and answer sheet run from source,
+   // after each test has set its own answer hook and reconciliation stubs.
+   d['@/lib/markets']={...d['@/lib/markets'],bankBrandForName:d['@/lib/markets']?.bankBrandForName??(()=>undefined)};
+   d['@/lib/store']={...d['@/lib/store'],useStoreActions:d['@/lib/store'].useStoreActions??(()=>d['@/lib/store'].useStore())};
+   if(!d['@/lib/transfer-batch'])h.local('@/lib/transfer-batch','src/lib/transfer-batch.ts');
+   if(!d['@/lib/transfer-review-presentation'])h.local('@/lib/transfer-review-presentation','src/lib/transfer-review-presentation.ts');
+   if(!d['@/hooks/use-transfer-batch'])h.local('@/hooks/use-transfer-batch','src/hooks/use-transfer-batch.ts');
+   h.local('@/components/transfers/transfer-group-row');h.local('@/components/transfers/transfer-answer-sheet');
+  }
   if(screen==='review-alerts'){
    h.local('@/lib/review-alert-copy','src/lib/review-alert-copy.ts');
    h.local('@/lib/review-reasons','src/lib/review-reasons.ts');

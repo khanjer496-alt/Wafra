@@ -130,7 +130,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const [categoryPicking, setCategoryPicking] = useState(false);
   const [pickedCategory, setPickedCategory] = useState<CategoryId>('other');
   // The "What is this?" answer. Like every hook here it runs before the early return below.
-  const { answer, busy } = useTransferAnswer();
+  const { answer, undo, busy } = useTransferAnswer();
   const activityWords = transferActivityCopy(language);
   const answerWords = activityWords.answers;
   const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
@@ -216,6 +216,11 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const candidates = ownCandidates(transaction, transferAssessment, rowsById);
   // Only a confirmed pair is linked; a likely-own counterpart is a suggestion, not a link.
   const linkedTo = transferAssessment?.status === 'confirmed-own' && transferAssessment.counterpartId
+    ? rowsById.get(transferAssessment.counterpartId) : undefined;
+  // The likely other side while it is still a suggestion: a matching entry on another of the person's
+  // accounts or cards (same amount, close in time), shown under "my own account" as where it would link.
+  const suggestedOther = !answered && transferAssessment?.counterpartId &&
+    (transferAssessment.status === 'likely-own' || transferAssessment.status === 'likely-card-repayment')
     ? rowsById.get(transferAssessment.counterpartId) : undefined;
   const answerLabels = transaction.type === 'income' ? answerWords.in : answerWords.out;
   const accountLabelFor = (id: string) => {
@@ -542,6 +547,12 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
 
       {!editing && transferCandidate && <View testID="entry-transfer-question" style={styles.transferQuestion}>
         <ThemedText type="smallBold" accessibilityRole="header">{answerWords.question}</ThemedText>
+        {/* Why Wafra already treats it as the person's own money, when other bank alerts say so.
+            No receipt is invented; the answers below still correct it. */}
+        {transferAssessment?.reason === 'known-account' || transferAssessment?.reason === 'known-card'
+          ? <ThemedText testID="transfer-known-ownership-evidence" type="small" themeColor="textSecondary">
+            {transferAssessment.reason === 'known-card' ? transferWords.knownCardEvidence : transferWords.knownAccountEvidence}
+          </ThemedText> : null}
         {picking ? <View style={styles.picker}>
           <ThemedText type="small" themeColor="textSecondary">{answerWords.whichAccount}</ThemedText>
           {candidates.map((candidate) => <Pressable key={candidate.id} testID={`entry-transfer-candidate-${candidate.id}`}
@@ -564,10 +575,22 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           </Pressable>
         </View> : <TransferAnswerChoices incoming={income} value={answered} layout="radios" palette={band} disabled={busy}
           linkedLabel={linkedTo ? activityWords.route.linked(accountLabelFor(linkedTo.accountId)) : undefined}
+          suggestion={suggestedOther && suggestedOther.accountId !== transaction.accountId
+            ? activityWords.route.linked(accountLabelFor(suggestedOther.accountId)) : undefined}
+          suggestionDetail={suggestedOther ? [suggestedOther.title, fullDateTime(suggestedOther),
+            `${ledgerCurrencyCode()} ${formatAmount(suggestedOther.amountFils, { decimals: true })}`].join(' · ') : undefined}
           onChange={(next) => {
             if (next === 'own' && candidates.length > 1) { setPicking(true); return; }
             void choose(next, next === 'own' ? candidates[0] : undefined);
           }} />}
+        {/* The person's own saved answer can be taken back, as the toast's Undo does: the entry
+            returns to waiting for an answer (both sides of a link are cleared). */}
+        {!picking && transaction.transferDecision ? <Pressable testID="entry-transfer-clear" accessibilityRole="button"
+          accessibilityLabel={answerWords.clear} disabled={busy}
+          onPress={() => { void undo(transaction.id, transaction.transferDecision?.counterpartId).then(onClose); }}
+          style={({ pressed }) => [styles.clearAnswer, { opacity: busy ? 0.6 : pressed ? 0.7 : 1 }]}>
+          <ThemedText type="small" style={{ color: band.tint }}>{answerWords.clear}</ThemedText>
+        </Pressable> : null}
       </View>}
       {!editing && showMerchantLink && !presentation.purposeUnclear && !confirmedTransfer && !pendingTransfer && !isMoneyMovementOnly(transaction) && transaction.title.trim() &&
         <MerchantSpendingLink merchant={transaction.title} displayName={presentation.title} type={transaction.type} onClose={onClose} />}
@@ -924,6 +947,7 @@ const styles = StyleSheet.create({
     paddingEnd: Spacing.three,
   },
   transferQuestion: { gap: Spacing.two },
+  clearAnswer: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   picker: { gap: Spacing.two },
   pickRow: { minHeight: 48, borderWidth: 1, borderRadius: Radius.control, paddingHorizontal: Spacing.three - 2,
     paddingVertical: Spacing.two + 2, gap: 2, justifyContent: 'center' },

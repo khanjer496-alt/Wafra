@@ -643,8 +643,8 @@ export default function JournalHomeScreen() {
         const activity = getTransferActivity(state.transactions, state.accounts, reconciliation);
         const queue = transferQuestionQueue(activity);
         // With no question to ask but entries still queued (duplicate observations,
-        // archived accounts, likely card repayments), Home names those and opens
-        // the review screen, the one place that reaches them.
+        // archived accounts, likely card repayments), Home names those; Transfers
+        // lists them as groups to answer.
         const ids = queue.length > 0 ? new Set(queue.map(item => item.transaction.id))
           : unaskedPendingIds(activity, reconciliation.pendingIds);
         return { ...pendingTransferSummary(state.transactions, ids), questions: queue.length };
@@ -839,11 +839,11 @@ export default function JournalHomeScreen() {
       </Pressable>
     </View>
   </View> : null;
-  // The Transfers page asks the queue one question at a time; its "See all" opens the bulk review.
-  // When the card has nothing it can ask, the notice opens that review directly.
+  // Transfers is the one page for the queue: its card asks one question at a time, and what the
+  // card cannot ask (a likely card repayment, an archived account) waits there as a group row.
   const transferNotice = pendingTransfers && pendingTransfers.count > 0 ? <TransferReviewNotice
     pendingCount={pendingTransfers.count} incomingFils={pendingTransfers.incomingFils} outgoingFils={pendingTransfers.outgoingFils}
-    onPress={() => router.push(pendingTransfers.questions === 0 ? '/review-transfers' : '/transfers')} /> : null;
+    onPress={() => router.push('/transfers')} /> : null;
   const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
   const unlockFounder = founderUnlockEnabled && !state.founderPro
     ? () => {

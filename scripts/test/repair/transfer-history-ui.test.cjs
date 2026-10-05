@@ -37,7 +37,8 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
     'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'Fragment' },
     'react-native': { Keyboard: { dismiss() {} }, Platform: { OS: 'ios' }, Pressable: 'Pressable', View: 'View',
       FlatList: props => ({ type: 'FlatList', props }), StyleSheet: { create: s => s, hairlineWidth: 1 } },
-    'expo-router': { useRouter: () => ({ push: route => events.push(['route', route]), back() {}, canGoBack: () => true, replace() {} }) },
+    'expo-router': { useRouter: () => ({ push: route => events.push(['route', route]), back() {}, canGoBack: () => true, replace() {} }),
+      useLocalSearchParams: () => ({}) },
     '@/components/entry-detail-sheet': { EntryDetailSheet: boundary('EntryDetailSheet') },
     '@/components/period-sheet': { PeriodSheet: boundary('PeriodSheet') },
     // The route's travelling coin is decorative; its own suite (transfer-coins) draws it.
@@ -63,10 +64,14 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
       adjust(result); return result;
     } },
     '@/lib/ledger-money': { formatMinorUnits: fils => String(fils) },
-    '@/lib/markets': { ledgerCurrencyDisplay: () => 'AED' },
+    '@/lib/markets': { ledgerCurrencyDisplay: () => 'AED', bankBrandForName: () => undefined },
     '@/lib/period': { inPeriod: () => true, isCurrentMonth: () => true, periodLabel: () => 'Sep 2026' },
     '@/lib/period-context': { usePeriod: () => ({ period: { mode: 'all' } }) },
-    '@/lib/store': { useStore: () => ({ state }) },
+    '@/lib/store': { useStore: () => ({ state, getStateGeneration: () => 1 }),
+      useStoreActions: () => ({ getStateGeneration: () => 1, getStateSnapshot: () => state }) },
+    '@/components/ui/toast': { useToast: () => ({ show() {} }) },
+    '@/components/ui/bottom-sheet': { BottomSheet: props => props.visible ? { type: 'Sheet', props } : null },
+    '@/components/ui/band/e-button': { EButton: boundary('EButton') },
     '@/lib/transfer-reconciliation': core,
   };
   const src = file => load(path.join(root, file), deps);
@@ -77,7 +82,11 @@ function renderTransfers({ language = 'en', transactions, accounts, adjust = () 
   deps['@/lib/transfer-answer'] = src('src/lib/transfer-answer.ts');
   deps['@/lib/transfer-list'] = src('src/lib/transfer-list.ts');
   deps['@/components/transfer-coins/coin-cues'] = src('src/components/transfer-coins/coin-cues.ts');
-  for (const name of ['transfer-answer-choices', 'transfer-route-row', 'transfer-question-card']) {
+  deps['@/lib/transfer-batch'] = src('src/lib/transfer-batch.ts');
+  deps['@/lib/transfer-review-presentation'] = src('src/lib/transfer-review-presentation.ts');
+  deps['@/hooks/use-transfer-batch'] = src('src/hooks/use-transfer-batch.ts');
+  for (const name of ['transfer-select-mark', 'transfer-answer-choices', 'transfer-route-row', 'transfer-question-card',
+    'transfer-group-row', 'transfer-answer-sheet']) {
     deps[`@/components/transfers/${name}`] = src(`src/components/transfers/${name}.tsx`);
   }
   const screen = load(path.join(root, 'src/app/transfers.tsx'), deps).default();
@@ -100,8 +109,15 @@ for (const language of ['en', 'ar']) test(`${language}: generic unknowns are neu
     result.byId.set('queued', { id: 'queued', status: 'likely-own', reason: 'amount-time', candidateIds: ['x'] });
     result.pendingIds.add('queued');
   } });
-  const ids = Array.from(h.records, item => item.transactionId);
-  assert.deepEqual(ids.slice().sort(), ['generic', 'queued', 'sent'], 'archived and duplicate-id rows are not listed');
+  const routes = h.records.filter(item => !item.kind);
+  const ids = Array.from(routes, item => item.transactionId);
+  assert.deepEqual(ids.slice().sort(), ['generic', 'queued', 'sent'], 'archived and duplicate-id rows are not listed as transfers');
+  // The queued duplicate observation is still reachable: it waits as a group row the card cannot ask about.
+  const groups = h.records.filter(item => item.kind === 'group');
+  assert.deepEqual(Array.from(groups, item => Array.from(item.group.ids)), [['twice']]);
+  assert.equal(h.records[0].kind, 'group', 'what waits for an answer comes first');
+  assert.deepEqual(Array.from(h.records.filter(item => item.kind === 'header'), item => item.title), [h.words.listTitle],
+    'the period heading sits above the period\'s transfers');
   const keys = h.records.map(item => h.list.props.keyExtractor(item));
   assert.equal(new Set(keys).size, keys.length, 'every rendered record has a unique key');
   const by = id => h.items.find(entry => entry.item.transactionId === id).tree;
