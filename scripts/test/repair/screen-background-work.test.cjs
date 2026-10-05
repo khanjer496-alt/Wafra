@@ -229,6 +229,45 @@ test('Home cancels queued insight work on blur and defers changed ledgers until 
 });
 
 
+test('Home paints a finished recurrence answer at once and starts the shared scan after its first frames', () => {
+  // A cached answer: read during the focus effect itself, before any frame or timer.
+  // The harness ledger is local-only (privateMode), where Home shows no recurrence; this ledger is not.
+  const warm = screenProbe('src/screens/journal-home-screen.tsx');
+  warm.state = { ...warm.state, privateMode: false };
+  const subs = warm.deps['@/lib/subscriptions'];
+  const expected = subs.detectSubscriptions();
+  let peeks = 0;
+  subs.peekSubscriptionDetection = () => { peeks += 1; return expected; };
+  subs.detectSubscriptionsCooperatively = () => { throw new Error('Home must not start or join a scan for a cached answer'); };
+  warm.render();
+  assert.ok(peeks >= 1, 'the cache is consulted with the first commit, not after the entrance');
+  warm.dispose();
+
+  // No answer yet: Home starts (or joins) the one shared cooperative scan after its first frames.
+  const cold = screenProbe('src/screens/journal-home-screen.tsx');
+  cold.state = { ...cold.state, privateMode: false };
+  const coldSubs = cold.deps['@/lib/subscriptions'];
+  const jobs = [];
+  coldSubs.peekSubscriptionDetection = () => null;
+  coldSubs.detectSubscriptionsCooperatively = (...args) => new Promise(resolve => jobs.push({ resolve, args }));
+  cold.render();
+  assert.equal(jobs.length, 0, 'nothing runs in the commit that shows Home');
+  cold.interactions();
+  assert.equal(jobs.length, 1, 'after the first frames, with no fixed wait after the entrance');
+  assert.equal(jobs[0].args[0], cold.state.transactions);
+  assert.equal(jobs[0].args[5](), false, 'Home wants the answer while it is shown');
+  cold.focused = false; cold.render();
+  assert.equal(jobs[0].args[5](), true, 'leaving Home lets the shared scan stop if no one else wants it');
+  cold.dispose();
+
+  const source = require('node:fs').readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8');
+  assert.match(source, /if \(cached\) \{ accept\(cached\); return/, 'a cached answer is read synchronously');
+  assert.match(source, /\.then\(accept\);\n    \}, \{ idle: false, delayMs: 0 \}\);/, 'the scan starts after the first frames; its own slices wait out the lease');
+  const subscriptions = require('node:fs').readFileSync(path.join(root, 'src/lib/subscriptions.ts'), 'utf8');
+  assert.match(subscriptions, /void waitForForegroundHistoryIdle\(SUBSCRIPTION_DETECTION_YIELD_MS\)\.then\(runSlice\)/,
+    'every later slice of the scan yields to the entrance lease');
+});
+
 test('Home recomputes completed insights when the custom category catalog changes', () => {
   const p = screenProbe('src/screens/journal-home-screen.tsx');
   const analysed = [];

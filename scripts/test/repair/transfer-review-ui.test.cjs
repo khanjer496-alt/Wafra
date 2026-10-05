@@ -77,7 +77,7 @@ function createPage({ language = 'en', transactions = [row('one'), row('two')], 
     // Formatting is a boundary stub here; monetary implementation has its own suites.
     '@/lib/ledger-money': { formatMinorUnits: (amount, spec) => (amount / 10 ** spec.exponent).toFixed(spec.exponent) },
     '@/lib/format': { formatAED: amount => `AED ${(amount / 100).toFixed(2)}`, fullDateTime: tx => `${tx.date} ${tx.ts}`,
-      shortDate: date => date, shortDateWithYear: date => date, toISODate: () => '2026-09-09', formatAmount: amount => (amount / 100).toFixed(2) },
+      shortDate: date => date, shortDateWithYear: date => date, clockTime: tx => tx.ts ? '14:32' : '', toISODate: () => '2026-09-09', formatAmount: amount => (amount / 100).toFixed(2) },
     '@/lib/ledger': { accountDisplayName: ledger.accountDisplayName, transferReconciliationForState: () => undefined },
     '@/lib/period': { inPeriod: date => date.startsWith('2026-09'), isCurrentMonth: () => true, periodLabel: () => 'Sep 2026' },
     '@/lib/period-context': { usePeriod: () => ({ period: { mode: 'month', key: '2026-09' } }) },
@@ -489,11 +489,13 @@ for (const language of ['en', 'ar']) {
     // Answered "own", it is saved without a pair link, so it is never said to be linked.
     assert.ok(!text(sheet).includes(h.words.route.linked(label)), 'a suggestion is never "Linked to"');
     // Each entry names its matching card payment: account, what, when and how much (the old "matching bank entry").
-    const matches = allById(sheet, 'transfer-group-entry-match').map(node => text(node));
+    // No-break spaces keep a date or an amount on one line; read them as spaces here.
+    const matches = allById(sheet, 'transfer-group-entry-match').map(node => text(node).replace(/\u00a0/g, ' '));
     assert.equal(matches.length, 2);
     for (const match of matches) {
-      assert.ok(match.includes(h.words.answers.looksLike(label)) && match.includes('Payment received') && match.includes('AED 123.45'), match);
-      assert.match(match, /2026-09-0\d \d+/, 'its date and time');
+      assert.ok(match.includes(h.words.answers.looksLike(label).replace(/\u00a0/g, ' ')) && match.includes('Payment received') && match.includes('AED 123.45'), match);
+      // The app's short date and clock (format.ts shortDateWithYear + clockTime), each part isolated.
+      assert.match(match, language === 'ar' ? /\u2067\u20682026-09-0\d\u2069، \u2068\d\d:\d\d\u2069\u2069/ : /\u2066\u20682026-09-0\d\u2069, \u2068\d\d:\d\d\u2069\u2069/, 'its date and time, with the language comma');
     }
     // Not the old verbose block or the retired sheet's words, which are gone from the copy too.
     for (const old of ['Matching bank entry', 'Matching amount and timing are a suggestion', 'Possible credit-card repayment',
@@ -1295,3 +1297,17 @@ for (const language of ['en', 'ar']) {
     assert.equal(h.events.some(event => event[0] === 'state' && event[1] === 'picking'), false);
   });
 }
+
+test('select mode names the count once, in the footer: the list head keeps its section title', () => {
+  for (const language of ['en', 'ar']) {
+    const h = createPage({ language, bulk: true });
+    startSelecting(h);
+    const head = text(byId(h.render(), 'transfers-list-head'));
+    assert.ok(head.includes(h.words.group.section), `${language}: the waiting section's title`);
+    assert.ok(!head.includes(h.words.select.selected(0)), `${language}: no "0 selected" above "Nothing selected yet"`);
+    assert.ok(text(footer(h)).includes(h.words.select.none));
+    byId(h.render(), 'transfer-select-shown').props.onPress();
+    assert.ok(!text(byId(h.render(), 'transfers-list-head')).includes(h.words.select.selected(1)));
+    assert.ok(text(footer(h)).includes(h.words.select.selected(1)), 'the count lives in the footer');
+  }
+});

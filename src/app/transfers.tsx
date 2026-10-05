@@ -25,7 +25,7 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
 import { useTransferAnswer } from '@/hooks/use-transfer-answer';
 import { useTransferBatch } from '@/hooks/use-transfer-batch';
-import { formatAED, fullDateTime, shortDateWithYear } from '@/lib/format';
+import { clockTime, formatAED, shortDateWithYear } from '@/lib/format';
 import { t, tf } from '@/lib/i18n';
 import { accountDisplayName, transferReconciliationForState } from '@/lib/ledger';
 import { formatMinorUnits } from '@/lib/ledger-money';
@@ -35,7 +35,7 @@ import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
 import { duplicateTransactionIds, getTransferActivity, transferQuestionQueue, unaskedPendingIds,
   type TransferActivityRecord } from '@/lib/transfer-activity';
-import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { transferActivityCopy, transferMetaLine, unbroken } from '@/lib/transfer-activity-copy';
 import { ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
 import { freezeTransferRows, transferAnswerGroups, transferBatchChangedIds, transferBatchIncoming,
   type TransferBatchItem } from '@/lib/transfer-batch';
@@ -195,7 +195,10 @@ export default function TransfersScreen() {
     const assessment = reconciliation.byId.get(id);
     return assessment?.counterpartId && SUGGESTED.has(assessment.status) ? rowsById.get(assessment.counterpartId) : undefined;
   };
-  const matchDetail = (other: Transaction) => [other.title, fullDateTime(other), moneyLabel(other.amountFils)].join(' · ');
+  // What, when (the app's short date and its clock, as every Transfers line) and how much, each part isolated.
+  const matchParts = (other: Transaction) => [other.title, words.dateTime(shortDateWithYear(other.date), clockTime(other)),
+    unbroken(moneyLabel(other.amountFils))];
+  const matchDetail = (other: Transaction) => transferMetaLine(matchParts(other));
   const groupViews = useMemo<TransferGroupView[]>(() => projected.map(group => {
     const account = accountName(group.accountId);
     const otherName = group.counterpartyName ?? (group.counterparty ? counterpartName(group.counterparty) : undefined);
@@ -314,7 +317,7 @@ export default function TransfersScreen() {
         ...(view.whole ? {} : { listOnly: true as const }),
         preview: { from: view.from, to: view.to, fromLabel: view.fromLabel, toLabel: view.toLabel, amountFils: view.totalFils,
           sign: view.direction === 'income' ? 'plus' : 'minus', count: view.count,
-          dates: view.oldest !== view.newest ? `${shortDateWithYear(view.oldest)} – ${shortDateWithYear(view.newest)}` : shortDateWithYear(view.newest),
+          dates: view.oldest !== view.newest ? words.dateRange(shortDateWithYear(view.oldest), shortDateWithYear(view.newest)) : shortDateWithYear(view.newest),
           spoken: `${view.fromSpoken} ${words.route.to} ${view.toSpoken}`, ...(view.hint ? { hint: view.hint } : {}) } };
     }
     const pair = suggestedByKey.get(row.key);
@@ -400,7 +403,7 @@ export default function TransfersScreen() {
   // Each listed entry names its own likely other side; one entry's sheet names it under the own answer.
   const entryMatch = (id: string) => {
     const other = matchedEntry(id);
-    return other ? `${words.answers.looksLike(accountName(other.accountId))} · ${matchDetail(other)}` : undefined;
+    return other ? transferMetaLine([words.answers.looksLike(accountName(other.accountId)), ...matchParts(other)]) : undefined;
   };
   const sheetIds = batch.batch?.items.flatMap(item => [...item.ids, ...(item.counterpartId ? [item.counterpartId] : [])]) ?? [];
   const sheetMatch = batch.batch && transferBatchChangedIds(batch.batch.items).length === 1 ? matchedEntry(sheetIds[0]) : undefined;
@@ -504,7 +507,8 @@ export default function TransfersScreen() {
   // any (the period's heading then sits in the list above its rows), else the period.
   const listHead = <View testID="transfers-list-head" style={styles.listHead}>
     <ThemedText type="smallBold" accessibilityRole="header" style={styles.grow}>
-      {selecting ? words.select.selected(livePicked.size) : groupRows.length ? words.group.section : periodTitle}
+      {/* Select mode lists everything waiting; the count is said once, in the footer above the answers. */}
+      {selecting || groupRows.length ? words.group.section : periodTitle}
     </ThemedText>
     {!selecting && waiting > 0 ? <Pressable testID="transfers-select" accessibilityRole="button"
       accessibilityLabel={words.select.action} accessibilityHint={words.select.actionHint} disabled={busy}

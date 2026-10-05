@@ -223,6 +223,23 @@ test('EButton: 56pt, 16pt radius, centred label; primary takes the band fill', (
   assert.equal(flat(custom.props.style({ pressed: false })).backgroundColor, '#F4F1EA');
 });
 
+test('EButton: a disabled primary is drawn off (glyph ground, secondary ink), never faded below 3:1', () => {
+  const s = setup();
+  const palette = s.band('accounts');
+  const { EButton } = s.ui('@/components/ui/band/e-button');
+  const off = EButton({ label: 'Save answer for 6 entries', onPress() {}, palette, disabled: true });
+  const style = flat(off.props.style({ pressed: false }));
+  assert.equal(style.backgroundColor, palette.glyphGround, 'no band fill: it does not look pressable');
+  assert.equal(style.borderColor, palette.rule);
+  assert.equal(style.opacity, 1, 'no 45% fade over the label');
+  const label = walk(off).find((node) => node.type === 'ThemedText' || node.props?.children === 'Save answer for 6 entries');
+  assert.equal(flat(label.props.style).color, palette.textSecondary);
+  assert.equal(off.props.accessibilityState.disabled, true);
+  // Set on a band with its own colours, the fade stays (that pair is the band's).
+  const onBand = EButton({ label: 'Get started', onPress() {}, palette, disabled: true, color: { fill: '#F4F1EA', text: '#16130F' } });
+  assert.equal(flat(onBand.props.style({ pressed: false })).opacity, 0.45);
+});
+
 test('GlyphTile: one tone for every category', () => {
   const s = setup();
   const palette = s.band('spending');

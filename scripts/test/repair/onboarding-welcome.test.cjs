@@ -90,6 +90,15 @@ for (const language of ['en', 'ar']) {
     assert.deepEqual(h.events, [], 'rendering Welcome writes nothing');
   });
 
+  test(`${language}: the example's first tile is the logo-green nameless square, never a clay letter under the green mark`, () => {
+    const { renderWelcome } = setup({ language });
+    const mosaic = walk(byId(renderWelcome(), 'onboarding-example-pattern')).find((node) => node.type === 'PatternMosaic');
+    const first = mosaic.props.tiles.find((tile) => tile.col === 0 && tile.row === 0);
+    assert.equal(first.key, 'name:you');
+    assert.deepEqual([first.kind, first.color, first.letter], ['square', 'green', undefined]);
+    assert.ok(!mosaic.props.tiles.some((tile) => tile.kind === 'letter'), 'no made-up initial reads as a red logo');
+  });
+
   test(`${language}: everything drawn besides the example pattern is hidden from assistive tech`, () => {
     const { renderWelcome, words } = setup({ language });
     const scene = byId(renderWelcome(), 'onboarding-sms-coin-scene');

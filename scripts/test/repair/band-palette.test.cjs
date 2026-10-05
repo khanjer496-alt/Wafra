@@ -69,6 +69,9 @@ for (const scheme of ['light', 'dark']) {
         ['statusOk/sheet', p.statusOk, p.sheet], ['statusNear/sheet', p.statusNear, p.sheet], ['statusOver/sheet', p.statusOver, p.sheet],
         ['limitOk/sheet', p.limitOk, p.sheet], ['onDanger/danger', p.onDanger, p.danger],
         ['text/glyphGround', p.text, p.glyphGround],
+        // A disabled EButton's label (e-button.tsx): drawn, not faded.
+        ['disabled primary textSecondary/glyphGround', p.textSecondary, p.glyphGround],
+        ['disabled secondary textSecondary/card', p.textSecondary, p.card],
       ];
       for (const [name, fg, bg] of pairs) assert.ok(contrast(fg, bg) >= 4.5, `${scheme} ${id} ${name}: ${contrast(fg, bg).toFixed(2)}`);
       // Week bars that are not today read as data: 3:1 against the band.

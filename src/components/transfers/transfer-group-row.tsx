@@ -57,7 +57,7 @@ export function TransferGroupRow({ group, palette, first, onPress, select, expan
   const ledgerMoney = useLedgerMoney();
   const incoming = group.direction === 'income';
   const dates = group.oldest !== group.newest
-    ? `${shortDateWithYear(group.oldest)} – ${shortDateWithYear(group.newest)}` : shortDateWithYear(group.newest);
+    ? words.dateRange(shortDateWithYear(group.oldest), shortDateWithYear(group.newest)) : shortDateWithYear(group.newest);
   const amountWord = `${ledgerMoney?.currency ?? ledgerCurrencyDisplay()} ${formatAmount(group.totalFils, { decimals: true })}`;
   const label = [`${stripDot(group.fromSpoken)} ${words.route.to} ${stripDot(group.toSpoken)}`,
     words.group.entries(group.count), incoming ? words.incoming : words.outgoing, amountWord, dates,

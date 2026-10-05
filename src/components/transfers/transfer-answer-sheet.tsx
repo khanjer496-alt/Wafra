@@ -10,7 +10,7 @@ import { Money } from '@/components/ui/money';
 import { Spacing, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import type { TransferBatch } from '@/hooks/use-transfer-batch';
-import { shortDateWithYear } from '@/lib/format';
+import { clockTime, shortDateWithYear } from '@/lib/format';
 import type { TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { transferBatchChangedIds, transferBatchIncoming, type TransferBatchItem } from '@/lib/transfer-batch';
@@ -93,7 +93,8 @@ export function TransferAnswerSheet({ batch, palette, busy, stale, error, needsD
           style={({ pressed }) => [styles.entry, { borderColor: palette.rule, backgroundColor: palette.card, opacity: pressed ? 0.7 : 1 }]}>
           <View style={styles.entryText}>
             <ThemedText type="small">{entry.title}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary">{shortDateWithYear(entry.date)}</ThemedText>
+            {/* The same date style as its match line below: the short date and the clock. */}
+            <ThemedText type="meta" themeColor="textSecondary">{words.dateTime(shortDateWithYear(entry.date), clockTime(entry))}</ThemedText>
             {entryMatch?.(entry.id) ? <ThemedText testID="transfer-group-entry-match" type="meta" selectable style={{ color: palette.tint }}>
               {entryMatch(entry.id)}</ThemedText> : null}
           </View>

@@ -11,7 +11,8 @@ const en = {
   ownershipUnknown: 'Transfer needs review · not counted yet',
   confirmedOwn: 'Between your accounts · not spending',
   ownBody: 'Not spending or income. Wafra excludes these amounts from Spending, Income and Net; they stay recorded as movements between your accounts.',
-  pendingBody: 'Wafra keeps this out of Spending, Income and Net until you confirm whether the other account is yours.',
+  // The lead of a waiting transfer's question, after its status ("… not counted yet."): kept to two lines.
+  pendingBody: 'Wafra keeps it out of Spending, Income and Net until you answer.',
   knownAccountEvidence: 'Recognised automatically: other bank SMS identify this account as yours. No matching receipt is required for ownership.',
   knownCardEvidence: 'Recognised automatically: other bank SMS identify the receiving credit card as yours. The bank payment is recorded; a card receipt has not been linked.',
 };
@@ -21,7 +22,7 @@ const ar: typeof en = {
   ownershipUnknown: 'تحويل يحتاج مراجعة · غير محتسب حالياً',
   confirmedOwn: 'بين حساباتك · ليس مصروفاً',
   ownBody: 'ليست مصروفاً ولا دخلاً. تستبعد وفرة هذه المبالغ من المصروفات والدخل والصافي، مع إبقائها مسجلة كحركة بين حساباتك.',
-  pendingBody: 'تستبعد وفرة هذا المبلغ من المصروفات والدخل والصافي حتى تؤكد ما إذا كان الحساب الآخر لك.',
+  pendingBody: 'تستبعده وفرة من المصروفات والدخل والصافي حتى تجيب.',
   knownAccountEvidence: 'تم التعرّف عليه تلقائياً: رسائل بنكية أخرى تثبت أن هذا الحساب لك. لا يلزم إشعار استلام مطابق لإثبات الملكية.',
   knownCardEvidence: 'تم التعرّف عليه تلقائياً: رسائل بنكية أخرى تثبت أن بطاقة الائتمان المستلمة لك. الدفعة البنكية مسجلة، ولم يُربط بها إشعار استلام من البطاقة.',
 };

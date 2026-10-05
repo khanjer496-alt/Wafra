@@ -462,3 +462,95 @@ test('detail sheet: without a passed assessment it reads the cached reconciliati
   assert.ok(byId(importing, 'entry-transfer-question'));
   assert.ok(!text(importing).includes(words.route.linked('Emirates NBD')));
 });
+
+// ---- Browser-test fixes: Arabic bidi, truncation, the waiting sheet, the action chip ----
+const flatStyle = style => Object.assign({}, ...[].concat(style).flat(Infinity).filter(s => s && typeof s === 'object'));
+
+test('an account chip draws its name and its masked digits apart: the name truncates at its own end, the digits never', () => {
+  for (const language of ['en', 'ar']) {
+    const h = harness(language);
+    const { RouteChip, splitAccountDigits, nameDirection } = h.deps['@/components/transfers/transfer-route-row'];
+    const split = label => ({ ...splitAccountDigits(label) });
+    assert.deepEqual(split('QA current ·4111'), { name: 'QA current', digits: '·4111' });
+    assert.deepEqual(split('ADCB ••4999'), { name: 'ADCB', digits: '••4999' });
+    assert.deepEqual(split('••4999'), { name: '••4999', digits: '' }, 'digits alone are not split into a dot');
+    assert.deepEqual(split('Account not identified'), { name: 'Account not identified', digits: '' });
+    assert.equal(nameDirection('Liv Account'), 'ltr');
+    assert.equal(nameDirection('حساب الراتب'), 'rtl');
+    const chip = RouteChip({ end: { kind: 'account', accountId: 'liv' }, label: 'Liv Account ·3301', palette: palette(h), large: false });
+    const texts = walk(chip).filter(node => node.props?.children === 'Liv Account' || node.props?.children === '·3301');
+    const [name, digits] = texts;
+    assert.equal(name.props.children, 'Liv Account');
+    assert.equal(name.props.numberOfLines, 1);
+    assert.equal(name.props.ellipsizeMode, 'tail');
+    assert.equal(flatStyle(name.props.style).writingDirection, 'ltr', `${language}: a Latin name is cut at its end, even on an Arabic page`);
+    assert.equal(flatStyle(name.props.style).flexShrink, 1);
+    assert.equal(digits.props.children, '·3301');
+    assert.equal(flatStyle(digits.props.style).flexShrink, 0, 'the digits keep their width');
+    const style = flatStyle(chip.props.style);
+    assert.equal(style.flexShrink, 1);
+    assert.notEqual(style.maxWidth, '42%', 'no fixed cap: the chip takes the room a short "?" leaves');
+  }
+});
+
+test('a route keeps From → To on one line as a unit; the amount moves under it when both cannot fit', () => {
+  const h = harness('en');
+  const { TransferRoute } = h.deps['@/components/transfers/transfer-route-row'];
+  const tree = TransferRoute({ from: { kind: 'account', accountId: 'a' }, to: { kind: 'account', accountId: 'b' },
+    fromLabel: 'QA current ·4111', toLabel: 'QA savings ·4222', amountFils: 5600, sign: 'none', palette: palette(h), full: true, testID: 'r' });
+  const route = byId(tree, 'r');
+  assert.equal(flatStyle(route.props.style).flexWrap, 'wrap', 'the amount may wrap below the route');
+  const path = route.props.children.find(child => child?.type === 'View' && flatStyle(child.props.style).flexDirection === 'row');
+  assert.ok(path, 'the chips and their lane sit in one row of their own');
+  assert.notEqual(flatStyle(path.props.style).flexWrap, 'wrap', 'never "QA current ·4111 →" left dangling at a line end');
+  assert.equal(flatStyle(path.props.style).minWidth, 0);
+  // In a sheet the names wrap inside their chips instead of truncating.
+  assert.equal(walk(tree).filter(node => node.props?.numberOfLines === 1 && node.props.children === 'QA current').length, 0);
+});
+
+test('mixed-direction lines isolate each part, and Arabic joins the clock with its own comma', () => {
+  const copyFor = language => h => h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(language);
+  const h = harness('ar');
+  const module = h.deps['@/lib/transfer-activity-copy'];
+  assert.equal(module.transferMetaLine(['QA current ·4111', '5 أكتوبر', null, '']), '\u2068QA current ·4111\u2069 · \u20685 أكتوبر\u2069');
+  assert.equal(copyFor('ar')(h).dateTime('27 سبتمبر', '00:01'), '\u2067\u206827\u00a0سبتمبر\u2069، \u206800:01\u2069\u2069', 'right to left as one run, the date never breaking inside');
+  assert.equal(copyFor('en')(h).dateTime('27 Sep', '00:01'), '\u2066\u206827\u00a0Sep\u2069, \u206800:01\u2069\u2069');
+  assert.equal(copyFor('en')(h).dateTime('27 Sep', ''), '27\u00a0Sep', 'no clock, no comma');
+  assert.ok(copyFor('ar')(h).answers.looksLike('ADCB Credit Card ·7720').includes('\u2068ADCB Credit Card\u00a0·7720\u2069'), 'the digits stay with the name');
+  // The question card's meta line: account, date and hint each isolated.
+  const { TransferQuestionCard } = h.deps['@/components/transfers/transfer-question-card'];
+  const card = TransferQuestionCard({ transaction: { id: 'q', type: 'expense', amountFils: 4500, date: '2026-10-05', accountId: 'a', title: 'T', category: 'other' },
+    index: 0, total: 1, accountLabel: 'QA current ·4111', palette: palette(h), busy: false, onAnswer() {}, onSeeAll() {} });
+  const meta = walk(byId(card, 'transfer-question-what')).find(node => typeof node.props?.children === 'string' && node.props.children.includes('QA current'));
+  assert.match(meta.props.children, /^\u2068QA current ·4111\u2069 · \u2068[^\u2069]+\u2069$/);
+});
+
+test('detail sheet: a waiting transfer says its status once, as the question\'s lead, with no chip or card above', () => {
+  const { h, subject, assessment } = detail();
+  const review = require('./load-typescript.cjs')(require('node:path').join(__dirname, '../../../src/lib/transfer-review-copy.ts'),
+    { '@/lib/i18n': h.deps['@/lib/i18n'] }).transferReviewCopy();
+  const tree = h.renderDetail(subject, { transferAssessment: assessment });
+  const all = text(tree);
+  assert.equal(all.split(review.ownershipUnknown).length - 1, 1, 'the status appears exactly once');
+  assert.equal(byId(tree, 'entry-transfer-status'), undefined, 'no status chip repeating it');
+  const lead = byId(byId(tree, 'entry-transfer-question'), 'pending-transfer-explainer');
+  assert.ok(lead, 'the explanation sits inside the question');
+  assert.ok(text(lead).includes(review.pendingBody));
+});
+
+test('detail sheet: the one-tap own-account answer is drawn as an action, not a status', () => {
+  const { h, words } = detail();
+  const tree = h.renderDetail({ ...h.state.transactions[1], id: 'carrefour', title: 'Carrefour', source: 'manual' });
+  const action = byId(tree, 'entry-mark-transfer');
+  assert.equal(action.props.accessibilityRole, 'button');
+  assert.equal(action.props.accessibilityLabel, words.answers.out.own);
+  const style = flatStyle(action.props.style({ pressed: false }));
+  const band = h.deps['@/hooks/use-band'].useBand('home');
+  assert.equal(style.backgroundColor, 'transparent', 'no status fill');
+  assert.equal(style.borderColor, band.tint, 'outlined in the tint, as a button');
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../../src/components/entry-detail-sheet.tsx'), 'utf8');
+  const mark = source.slice(source.indexOf('testID="entry-mark-transfer"'), source.indexOf('{canUnmarkTransfer'));
+  assert.match(mark, /<Icon name="wallet" size=\{16\} color=\{band\.tint\} \/>/, 'its own icon, not the transfer status icon');
+  const label = walk(action).find(node => node.props?.children === words.answers.out.own);
+  assert.equal(flatStyle(label.props.style).color, band.tint);
+});

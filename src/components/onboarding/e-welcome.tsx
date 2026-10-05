@@ -21,10 +21,15 @@ import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import { buildPattern } from '@/lib/pattern';
 
-/** Every answer drawn once, so the example shows what a pattern can hold. */
-function examplePattern(initial: string) {
+/**
+ * Every answer drawn once, so the example shows what a pattern can hold. No
+ * name: the first tile is the nameless logo-green square, never a clay letter,
+ * because a clay "W" under the green mark read as a red Wafra logo (owner:
+ * the logo never looks red). The person's own initial appears only once they
+ * give a name.
+ */
+function examplePattern() {
   return buildPattern({
-    name: initial,
     goals: ['bills', 'salary', 'subscriptions', 'cash-cards', 'spend-less'],
     watched: ['dining', 'groceries'],
     reminders: { bills: true, cards: true, dailySummary: true },
@@ -46,7 +51,7 @@ export function WelcomeStep({ onStart, onRestore, restoreNote, onClose, disabled
   const language = useLanguage();
   const words = onboardingECopy(language);
   const band = useBand('home');
-  const tiles = useMemo(() => examplePattern(words.exampleInitial), [words.exampleInitial]);
+  const tiles = useMemo(() => examplePattern(), []);
   const { width, height } = useWindowDimensions();
   const largeText = useLargeTextLayout();
   // Short phones and the accessibility text sizes draw the pattern smaller so

@@ -25,7 +25,7 @@ import { formatAED, formatAmountForInput, ledgerNiceMinor, ledgerTypicalMinor, m
 import { spentInMonthForCategory } from '@/lib/insights';
 import { filledCoins, shareOf } from '@/lib/coin-math';
 import { limitStatus } from '@/lib/limit-status';
-import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
+import { daysLeftInPeriod, inPeriod } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 import { alignEnd, t, tf } from '@/lib/i18n';
@@ -212,12 +212,10 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   // and cheerfully offered "13 days still to go" for a month already over.
   // elapsedDays gets the real ledger because a salary-day period's start is
   // inferred from it.
+  // Today counts as a day still to go, as on Home's budget tile (daysLeftInPeriod).
   const now = useMemo(() => new Date(), []);
   const period = useMemo(() => ({ mode: 'month' as const, key }), [key]);
-  const live = isCurrentMonth(period, now);
-  const daysLeft = live
-    ? Math.max(0, daysInPeriod(period, now) - elapsedDays(period, now, state.transactions))
-    : 0;
+  const daysLeft = daysLeftInPeriod(period, now, state.transactions);
 
   const suggestions = useMemo(() => {
     const out: { fils: number; note: string; highlight: boolean }[] = [];

@@ -8,7 +8,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { shortDateWithYear } from '@/lib/format';
 import type { TransferAnswer } from '@/lib/transfer-answer';
-import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { transferActivityCopy, transferMetaLine, unbroken } from '@/lib/transfer-activity-copy';
 import type { Transaction } from '@/lib/types';
 
 export function TransferQuestionCard({ transaction, index, total, more = 0, accountLabel, hint, palette, busy, onAnswer, onSeeAll }: {
@@ -34,7 +34,8 @@ export function TransferQuestionCard({ transaction, index, total, more = 0, acco
       <View style={styles.grow}>
         <ThemedText type="smallBold">{incoming ? words.card.whereIn : words.card.whereOut}</ThemedText>
         <ThemedText type="meta" themeColor="textSecondary">
-          {[accountLabel, shortDateWithYear(transaction.date), hint].filter(Boolean).join(' · ')}
+          {/* Each part isolated: a Latin account name and an Arabic date keep their own order. */}
+          {transferMetaLine([accountLabel, unbroken(shortDateWithYear(transaction.date)), hint])}
         </ThemedText>
       </View>
       <Money fils={transaction.amountFils} sign={incoming ? 'plus' : 'minus'} type="smallBold" decimals />

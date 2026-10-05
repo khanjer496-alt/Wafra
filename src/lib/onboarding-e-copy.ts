@@ -40,8 +40,6 @@ const en = {
   welcomeHeadline: 'Money, made yours.',
   welcomeBody: 'A few questions. Every answer shapes your Wafra, and your pattern.',
   exampleLabel: 'An example pattern',
-  /** The example pattern's initial: a letter, not anyone's name. */
-  exampleInitial: 'W',
   /** The example alert's sender on Welcome: never a bank's name. */
   exampleSender: 'Your bank · example',
   getStarted: 'Get started',
@@ -158,7 +156,6 @@ const ar: OnboardingECopy = {
   welcomeHeadline: 'مالك، على طريقتك.',
   welcomeBody: 'بضعة أسئلة. كل إجابة تشكّل وفرتك ونمطك.',
   exampleLabel: 'مثال على نمط',
-  exampleInitial: 'و',
   exampleSender: 'بنكك · مثال',
   getStarted: 'ابدأ',
   restoreBackup: 'الاستعادة من نسخة احتياطية',

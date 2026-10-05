@@ -1,5 +1,39 @@
 import { getLanguage } from '@/lib/i18n';
 
+/**
+ * Transfers lines join an account name, a date and a figure ("QA current ·4111
+ * · 5 Oct"), so one line holds runs of both directions. Unisolated, an Arabic
+ * line reordered them: "5" left its month, the account's digits joined the
+ * date. Each part is wrapped in a Unicode first-strong isolate (FSI … PDI), so
+ * it is laid out on its own, in its own direction, whatever sits beside it.
+ * The marks are invisible and are not spoken.
+ */
+export const isolateText = (part: string): string => `\u2068${part}\u2069`;
+
+/**
+ * A short part that must not break across lines ("27 Sep", "AED 525.00"): its
+ * spaces become no-break spaces, so a wrapped Arabic line never leaves "27" at
+ * one line's end and its month at the next one's start.
+ */
+export const unbroken = (part: string): string => part.replace(/ /g, '\u00A0');
+
+/** An account label with its masked digits bound to the name ("ADCB Credit Card ·7720" never wraps before "·7720"). */
+const boundDigits = (account: string): string => account.replace(/\s+(?=[·•*]+\s?\d{2,4}$)/u, '\u00A0');
+
+/**
+ * A run made of isolated pieces and neutral punctuation ("27 Sep, 00:01") has
+ * no strong letter of its own, so a first-strong isolate around it would fall
+ * back to left-to-right and put an Arabic clock before its date. These pin the
+ * run to the language's direction (LRI or RLI … PDI).
+ */
+const ltrRun = (run: string): string => `\u2066${run}\u2069`;
+const rtlRun = (run: string): string => `\u2067${run}\u2069`;
+
+/** A meta line of isolated parts, "A · B · C"; empty parts are left out. */
+export function transferMetaLine(parts: readonly (string | false | null | undefined)[]): string {
+  return parts.filter((part): part is string => !!part).map(isolateText).join(' · ');
+}
+
 const en = {
   title: 'Transfers',
   search: 'Search transfers',
@@ -25,6 +59,10 @@ const en = {
     open: 'Open',
   },
   headline: (period: string) => `${period} · moved between your accounts`,
+  /** One entry's date and clock ("27 Sep, 00:01"); the date alone when the row has no clock. */
+  dateTime: (date: string, clock: string) => clock ? ltrRun(`${isolateText(unbroken(date))}, ${isolateText(clock)}`) : unbroken(date),
+  /** A group's first and last dates ("18 Sep – 3 Oct"). */
+  dateRange: (from: string, to: string) => ltrRun(`${isolateText(unbroken(from))} – ${isolateText(unbroken(to))}`),
   notCounted: 'Not counted as spending or income',
   tiles: { own: 'Your accounts', sent: 'Sent to others', received: 'Received', counted: 'counted' },
   tags: { own: 'Your accounts', external: 'Someone else · counted', needsAnswer: 'Needs an answer', unconfirmed: 'Not answered yet' },
@@ -57,7 +95,7 @@ const en = {
      * A likely other side Wafra matched (same amount, close in time) and the person has not confirmed.
      * "Linked to …" (route.linked) is only ever said of a confirmed link.
      */
-    looksLike: (account: string) => `Looks like your ${account}`,
+    looksLike: (account: string) => `Looks like your ${isolateText(boundDigits(account))}`,
     /** Under the own answer when the entries answered together look like different accounts. */
     looksLikeEach: 'Each entry below shows the account it looks like.',
     /** Under a likely other side ("Looks like your …"): Wafra matched it; the person has not confirmed it. */
@@ -111,7 +149,7 @@ const en = {
     step: (i: number, n: number) => `${i} of ${n}`,
     whereOut: 'Where did this go?',
     whereIn: 'Where did this come from?',
-    looksLike: (account: string) => `looks like your ${account}`,
+    looksLike: (account: string) => `looks like your ${isolateText(boundDigits(account))}`,
     /** "See all" when the card's title already gives the count. */
     seeAllPlain: 'See all',
   },
@@ -145,6 +183,9 @@ const ar: typeof en = {
     open: 'فتح',
   },
   headline: (period) => `${period} · نُقلت بين حساباتك`,
+  // The Arabic comma between the date and the clock.
+  dateTime: (date, clock) => clock ? rtlRun(`${isolateText(unbroken(date))}، ${isolateText(clock)}`) : unbroken(date),
+  dateRange: (from, to) => rtlRun(`${isolateText(unbroken(from))} – ${isolateText(unbroken(to))}`),
   notCounted: 'لا تُحتسب ضمن المصروفات أو الدخل',
   tiles: { own: 'حساباتك', sent: 'أُرسلت لآخرين', received: 'مستلمة', counted: 'محتسبة' },
   tags: { own: 'حساباتك', external: 'شخص آخر · محتسبة', needsAnswer: 'بانتظار إجابتك', unconfirmed: 'لم تتم الإجابة بعد' },
@@ -170,7 +211,7 @@ const ar: typeof en = {
     mixed: { own: 'بين حساباتي', external: 'مع شخص آخر', none: 'ليست تحويلات' },
     mixedEffect: { own: 'لا تُحتسب ضمن المصروفات أو الدخل', external: 'تُحتسب ضمن المصروفات أو الدخل' },
     clear: 'إلغاء إجابتي',
-    looksLike: (account) => `يبدو أنها حسابك ${account}`,
+    looksLike: (account) => `يبدو أنها حسابك ${isolateText(boundDigits(account))}`,
     looksLikeEach: 'يظهر تحت كل قيد أدناه الحساب الذي يبدو أنه له.',
     suggestedOnly: 'المبلغ نفسه وفي وقت متقارب: اقتراح غير مؤكد حتى تجيب.',
   },
@@ -217,7 +258,7 @@ const ar: typeof en = {
     step: (i, n) => `${i} من ${n}`,
     whereOut: 'إلى أين ذهبت؟',
     whereIn: 'من أين جاءت؟',
-    looksLike: (account) => `يبدو أنها حسابك ${account}`,
+    looksLike: (account) => `يبدو أنها حسابك ${isolateText(boundDigits(account))}`,
     seeAllPlain: 'عرض الكل',
   },
 };

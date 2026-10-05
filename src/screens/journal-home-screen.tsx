@@ -69,7 +69,7 @@ import { usePeriod } from '@/lib/period-context';
 import { isProActive } from '@/lib/purchases';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { fieldsEqual } from '@/lib/store-selection';
-import { detectSubscriptionsCooperatively, peekSubscriptionDetection, subscriptionDetectionRunning, type Subscription } from '@/lib/subscriptions';
+import { detectSubscriptionsCooperatively, peekSubscriptionDetection, type Subscription } from '@/lib/subscriptions';
 import type { AppState as LedgerState, CardDue, Transaction } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 import { homeWidgetVisible, loadHomeWidgetPreferences, peekHomeWidgetPreferences, splitHomeWidgetLayout, subscribeHomeWidgetPreferences, type HomeWidgetId, type HomeWidgetPreferences } from '@/lib/home-widgets';
@@ -474,11 +474,11 @@ export default function JournalHomeScreen() {
       state.ledgerMoney, state.transferInternalIds, state.transferNormalizationVersion,
       state.historyImport?.status, state.marketId, state.customCategories, period, projectionDay]);
   const liveAccounts = useMemo(() => liveAccountIds(state.accounts), [state.accounts]);
-  // Coming up also lists detected subscriptions, as Bills does. Home never
-  // starts the full-history recurrence scan itself (it is the launch screen);
-  // it reads the shared answer once the widget or reminder sync, or Bills,
-  // has it, or joins that scan while it runs. Until then it shows bills and
-  // card dues alone, as before.
+  // Coming up also lists detected subscriptions, as Bills does. Home reads
+  // the shared answer when one is cached, and otherwise starts or joins the
+  // one shared cooperative scan after its first frames; the scan's slices
+  // wait out Home's entrance lease. Until it lands Home shows bills and card
+  // dues alone.
   const [homeRecurring, setHomeRecurring] = useState<{
     value: Subscription[]; transactions: Transaction[]; notSubscriptions: string[]; day: string;
     liveAccounts: Set<string>; internal: Set<string>;
@@ -507,22 +507,25 @@ export default function JournalHomeScreen() {
       if (cancelled || value === null) return;
       startTransition(() => setHomeRecurring({ value, transactions, notSubscriptions, day: projectionDay, liveAccounts, internal }));
     };
-    const look = () => {
-      if (cancelled) return false;
-      const cached = peekSubscriptionDetection(transactions, notSubscriptions, today, liveAccounts, internal);
-      if (cached) { accept(cached); return true; }
-      if (!subscriptionDetectionRunning(transactions, notSubscriptions, today, liveAccounts, internal)) return false;
+    // A finished answer (Bills, a reminder or widget sync, the last visit) is
+    // a cache lookup: paint it with Home's first commit, so Due payments and
+    // Coming up are in place with the rest of Home instead of arriving later
+    // and pushing the sections below them down.
+    const cached = peekSubscriptionDetection(transactions, notSubscriptions, today, liveAccounts, internal);
+    if (cached) { accept(cached); return () => { cancelled = true; }; }
+    // Otherwise start (or join) the shared scan once Home's first two frames
+    // are drawn, without the settle or the entrance lease: the scan yields between
+    // 6ms slices and each yield waits for the lease itself
+    // (detectSubscriptionsCooperatively), so at most one slice runs during
+    // the entrance and a large ledger still finishes after it, as before. A
+    // small ledger is done in that slice, so its rows arrive with Home rather
+    // than ~3s later. The widget and reminder syncs join the same scan.
+    const task = runAfterFirstFrames(() => {
+      if (cancelled) return;
       void detectSubscriptionsCooperatively(transactions, notSubscriptions, today, liveAccounts, internal, () => cancelled)
         .then(accept);
-      return true;
-    };
-    // The syncs start after interactions too; look again once they have had
-    // time to begin.
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    const task = runAfterFirstFrames(() => {
-      timers.push(setTimeout(() => { if (!look()) timers.push(setTimeout(look, 6000)); }, 1500));
-    });
-    return () => { cancelled = true; task.cancel(); timers.forEach(clearTimeout); };
+    }, { idle: false, delayMs: 0 });
+    return () => { cancelled = true; task.cancel(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.hydrated, state.onboarded, state.privateMode, recurringCurrent, state.transactions,
     state.notSubscriptions, liveAccounts, homeInternal, projectionDay]));

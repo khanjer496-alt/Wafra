@@ -235,6 +235,20 @@ export function elapsedDays(p: PeriodLike, today: Date, transactions: Transactio
   }
 }
 
+/**
+ * Days still to go in a live money month, counting today: on 5 October of a
+ * month that ends on the 31st, 27 (the 5th to the 31st). Home's budget pace
+ * counts the same way (`summarizeHomeToday`), so its "27 days left" and its
+ * per-day figure agree with the limit sheet's "27 days still to go" on the same
+ * day. 0 for a month that is not the current one: a past month has no days
+ * left, and the sheet must not count down inside it.
+ */
+export function daysLeftInPeriod(p: PeriodLike, today: Date, transactions: Transaction[] = []): number {
+  const period = toPeriod(p);
+  if (period.mode !== 'month' || !isCurrentMonth(period, today)) return 0;
+  return Math.max(1, daysInPeriod(period, today, transactions) - elapsedDays(period, today, transactions) + 1);
+}
+
 /** First date the period covers. The mirror of `periodEndISO`. */
 export function periodStartISO(p: PeriodLike, transactions: Transaction[] = []): string {
   const period = toPeriod(p);

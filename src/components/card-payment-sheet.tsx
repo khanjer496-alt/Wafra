@@ -205,9 +205,7 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
         <BandFigure fils={status.remainingFils} decimals palette={band} size="large" color={band.text}
           secondaryColor={band.textSecondary} />
         <ThemedText type="meta" style={{ color: status.daysLeft < 0 ? band.statusOver : band.textSecondary }}>
-          {status.daysLeft < 0
-            ? tf('lateDays', { days: -status.daysLeft })
-            : tf('daysShort', { days: status.daysLeft })}
+          {status.daysLeft < 0 ? w.lateByDays(-status.daysLeft) : w.dueInDays(status.daysLeft)}
         </ThemedText>
         {paidShare > 0 && <ProgressBar ratio={paidShare} color={band.statusOk} height={5} />}
         <ThemedText type="meta" themeColor="textSecondary">

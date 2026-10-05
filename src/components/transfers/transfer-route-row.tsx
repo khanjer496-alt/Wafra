@@ -21,6 +21,26 @@ const firstLetter = (part: string) => Array.from(part)[0] ?? '';
 const isNamePart = (part: string) => !/^\p{P}/u.test(part);
 
 /**
+ * An account label's name and its masked digits, drawn apart so a long name
+ * truncates at its own end while "·4111" stays whole and visible:
+ * "QA current ·4111" → "QA current" + "·4111", "ADCB ••4999" → "ADCB" + "••4999".
+ */
+export function splitAccountDigits(label: string): { name: string; digits: string } {
+  const match = /^(.*?[^\s·•*])\s*([·•*]+\s?\d{2,4})$/u.exec(label);
+  return match ? { name: match[1]!, digits: match[2]! } : { name: label, digits: '' };
+}
+
+/**
+ * The direction a name is laid out in: its first letter's. An Arabic page draws
+ * text right to left, which put a Latin name's ellipsis at its start
+ * ("…ount ·3301"); laid out in its own direction it is cut at its end.
+ */
+export function nameDirection(name: string): 'ltr' | 'rtl' {
+  const first = /\p{L}/u.exec(name)?.[0];
+  return first && /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u.test(first) ? 'rtl' : 'ltr';
+}
+
+/**
  * One end of a route: initials on the band fill and the name, or a dashed "?" for an unknown side.
  * An unknown side the person has answered is no longer a question: it reads "Your account" (own,
  * in the own tag's slate) or "Someone else" (in the counted tag's gold), with an icon instead of initials.
@@ -45,16 +65,26 @@ export function RouteChip({ end, label, palette, large, answered, slate, directi
       <ThemedText type="smallBold" style={{ color: ink }}>{label}</ThemedText>
     </View>;
   }
-  return <View style={[styles.chip, !large && styles.chipCapped, unknown
-    ? { borderStyle: 'dashed', borderWidth: 1, borderColor: palette.textSecondary }
-    : { backgroundColor: palette.glyphGround }]}>
-    {unknown
-      ? <ThemedText type="smallBold" themeColor="textSecondary" style={styles.unknownMark}>?</ThemedText>
-      : initials ? <View style={[styles.initials, { backgroundColor: palette.fill }]}>
-        <ThemedText type="micro" style={{ color: palette.onFill }}>{initials}</ThemedText>
-      </View> : null}
-    {unknown ? null
-      : <ThemedText type="smallBold" numberOfLines={large ? undefined : 1} style={styles.chipText}>{label}</ThemedText>}
+  if (unknown) {
+    return <View style={[styles.chip, styles.unknownChip, { borderStyle: 'dashed', borderWidth: 1, borderColor: palette.textSecondary }]}>
+      <ThemedText type="smallBold" themeColor="textSecondary" style={styles.unknownMark}>?</ThemedText>
+    </View>;
+  }
+  // The name yields (truncating at its own end, or wrapping at large text and in a sheet); the
+  // masked digits never do, so "·4111" always says which account it is.
+  const { name, digits } = splitAccountDigits(label);
+  return <View style={[styles.chip, styles.namedChip, { backgroundColor: palette.glyphGround }]}>
+    {initials ? <View style={[styles.initials, { backgroundColor: palette.fill }]}>
+      <ThemedText type="micro" style={{ color: palette.onFill }}>{initials}</ThemedText>
+    </View> : null}
+    {large
+      // Shown whole (a sheet, large text): one label that wraps as a phrase, the digits after the name.
+      ? <ThemedText type="smallBold" style={[styles.chipText, { writingDirection: nameDirection(name) }]}>{label}</ThemedText>
+      : <>
+        <ThemedText type="smallBold" numberOfLines={1} ellipsizeMode="tail"
+          style={[styles.chipText, { writingDirection: nameDirection(name) }]}>{name}</ThemedText>
+        {digits ? <ThemedText type="smallBold" numberOfLines={1} style={styles.chipDigits}>{digits}</ThemedText> : null}
+      </>}
   </View>;
 }
 
@@ -91,11 +121,16 @@ export function TransferRoute({ from, to, fromLabel, toLabel, amountFils, sign, 
 }) {
   const language = useLanguage();
   const large = useLargeTextLayout();
-  return <View testID={testID} style={large ? styles.routeLarge : styles.route}>
+  const path = <>
     <RouteChip end={from} label={fromLabel} palette={palette} large={large || !!full} answered={answered} slate={slate} direction={direction} />
     {/* The line from one end to the other, where a coin travels; stacked, the route reads downward. */}
     <RouteCoinLane cue={coin} stacked={large} rtl={language === 'ar'} palette={palette} testID={laneTestID} />
     <RouteChip end={to} label={toLabel} palette={palette} large={large || !!full} answered={answered} slate={slate} direction={direction} />
+  </>;
+  return <View testID={testID} style={large ? styles.routeLarge : styles.route}>
+    {/* From → To is one unit: it never breaks after the arrow. Its chips share the line (a named
+        chip takes the room a short "?" leaves) and the amount moves under it when both cannot fit. */}
+    {large ? path : <View style={styles.path}>{path}</View>}
     <View style={large ? undefined : styles.amount}>
       <Money fils={amountFils} sign={sign} type="smallBold" decimals />
     </View>
@@ -156,12 +191,16 @@ const styles = StyleSheet.create({
   route: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexWrap: 'wrap' },
   routeLarge: { flexDirection: 'column', alignItems: 'flex-start', gap: Spacing.one },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 10, paddingVertical: 3, paddingStart: 3, paddingEnd: 8, maxWidth: '100%' },
-  chipCapped: { maxWidth: '42%', flexShrink: 1 },
+  namedChip: { flexShrink: 1, minWidth: 0 },
+  unknownChip: { flexShrink: 0 },
   initials: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   unknownMark: { paddingHorizontal: 8 },
   answeredIcon: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
   answeredChip: { flexShrink: 0, maxWidth: '100%' },
-  chipText: { flexShrink: 1 },
+  chipText: { flexShrink: 1, minWidth: 0 },
+  // The chip's gap is the initials' space; the digits sit a word-space from the name.
+  chipDigits: { flexShrink: 0, marginStart: -2 },
+  path: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexShrink: 1, minWidth: 0, maxWidth: '100%' },
   amount: { marginStart: 'auto' },
   meta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
   selectRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },

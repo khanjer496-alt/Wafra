@@ -127,3 +127,18 @@ test('the copy never claims Wafra sends or moves money', () => {
     }
   }
 });
+
+test('the card payment sheet says when it is due in words, never a bare "9d"', () => {
+  const { en, ar } = moneyPlacesCopy;
+  assert.equal(en.dueInDays(9), 'Due in 9 days');
+  assert.equal(en.dueInDays(1), 'Due tomorrow');
+  assert.equal(en.dueInDays(0), 'Due today');
+  assert.equal(en.lateByDays(3), '3 days late');
+  assert.equal(en.lateByDays(1), '1 day late');
+  for (const days of [0, 1, 2, 9, 11]) assert.match(ar.dueInDays(days), /^مستحقة /);
+  assert.equal(ar.dueInDays(9), 'مستحقة بعد 9 أيام');
+  assert.equal(ar.lateByDays(2), 'متأخرة يومين');
+  const sheet = require('node:fs').readFileSync(path.join(root, 'src/components/card-payment-sheet.tsx'), 'utf8');
+  assert.match(sheet, /w\.lateByDays\(-status\.daysLeft\) : w\.dueInDays\(status\.daysLeft\)/);
+  assert.doesNotMatch(sheet, /'daysShort'/);
+});

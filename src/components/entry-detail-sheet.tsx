@@ -7,7 +7,7 @@ import { MerchantSpendingLink } from '@/components/merchant-spending-link';
 import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, cachedTransferReconciliationForState } from '@/lib/ledger';
 import { canMarkOwnTransfer, isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
 import { currentAnswer, ownCandidates, transferFingerprintsOf, type TransferAnswer } from '@/lib/transfer-answer';
-import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { transferActivityCopy, transferMetaLine, unbroken } from '@/lib/transfer-activity-copy';
 import { useTransferAnswer } from '@/hooks/use-transfer-answer';
 import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
@@ -28,7 +28,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 
-import { formatAmount, formatAmountForInput, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import { clockTime, formatAmount, formatAmountForInput, friendlyDate, fullDateTime, parseAmountToFils, shortDate, shortDateWithYear, toISODate } from '@/lib/format';
 import { formatOriginalCurrency, originalMoneyOf } from '@/lib/fx';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
@@ -232,6 +232,12 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     (transferAssessment.status === 'likely-own' || transferAssessment.status === 'likely-card-repayment')
     ? rowsById.get(transferAssessment.counterpartId) : undefined;
   const answerLabels = transaction.type === 'income' ? answerWords.in : answerWords.out;
+  // The transfer status, said once: a waiting or own transfer's explainer below already leads with
+  // it ("Transfer needs review · not counted yet"), so the chip is drawn only when it says more.
+  const explainerTitle = confirmedOwnTransfer ? transferWords.confirmedOwn : pendingTransfer ? transferWords.ownershipUnknown : null;
+  const transferStatus = presentation.repayment ? presentation.tag : pendingTransfer ? transferWords.ownershipUnknown
+    : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel');
+  const statusChip = transferStatus && transferStatus !== explainerTitle ? transferStatus : null;
   const accountLabelFor = (id: string) => {
     const found = state.accounts.find((a) => a.id === id);
     return found ? accountDisplayName(found) : activityWords.accountUnknown;
@@ -482,13 +488,15 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       </View>}
 
       {/* What it was, as chips: its category (opens the picker) and, on an
-          ordinary row, the one-tap "Moved to my own account". */}
-      {!editing && !categoryPicking ? <View style={styles.chips} testID="entry-detail-chips">
-        {confirmedTransfer || pendingTransfer ? <View accessible accessibilityRole="text" style={[styles.chip, { backgroundColor: band.card, borderColor: band.rule }]}>
+          ordinary row, the one-tap "Moved to my own account" — drawn as an
+          action (outlined in the tint, its own icon), never as a status. */}
+      {!editing && !categoryPicking && (statusChip || !(confirmedTransfer || pendingTransfer) || canMarkTransfer || canUnmarkTransfer)
+        ? <View style={styles.chips} testID="entry-detail-chips">
+        {confirmedTransfer || pendingTransfer ? statusChip ? <View accessible accessibilityRole="text" testID="entry-transfer-status"
+          style={[styles.chip, { backgroundColor: band.card, borderColor: band.rule }]}>
           <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={[styles.chipText, { color: band.text }]}>{presentation.repayment ? presentation.tag : pendingTransfer ? transferWords.ownershipUnknown
-            : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel')}</ThemedText>
-        </View> : <Pressable accessibilityRole="button" testID="entry-category-chip"
+          <ThemedText type="small" style={[styles.chipText, { color: band.text }]}>{statusChip}</ThemedText>
+        </View> : null : <Pressable accessibilityRole="button" testID="entry-category-chip"
           accessibilityLabel={`${t('category')}: ${categoryLabel(meta)}`}
           onPress={() => { setPickedCategory(transaction.category); setCategoryPicking(true); }}
           style={({ pressed }) => [styles.chip, { backgroundColor: band.fill, borderColor: band.fill, opacity: pressed ? 0.8 : 1 }]}>
@@ -498,16 +506,16 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         {canMarkTransfer ? <Pressable accessibilityRole="button" testID="entry-mark-transfer"
           accessibilityLabel={answerLabels.own}
           onPress={markAsTransfer}
-          style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
-          <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={[styles.chipText, { color: band.text }]}>{answerLabels.own}</ThemedText>
+          style={({ pressed }) => [styles.chip, styles.actionChip, { borderColor: band.tint, opacity: pressed ? 0.7 : 1 }]}>
+          <Icon name="wallet" size={16} color={band.tint} />
+          <ThemedText type="smallBold" style={[styles.chipText, { color: band.tint }]}>{answerLabels.own}</ThemedText>
         </Pressable> : null}
         {canUnmarkTransfer ? <Pressable accessibilityRole="button" testID="entry-unmark-transfer"
           accessibilityLabel={answerLabels.none}
           onPress={unmarkTransfer}
-          style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
-          <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={[styles.chipText, { color: band.text }]}>{answerLabels.none}</ThemedText>
+          style={({ pressed }) => [styles.chip, styles.actionChip, { borderColor: band.tint, opacity: pressed ? 0.7 : 1 }]}>
+          <Icon name="close" size={16} color={band.tint} />
+          <ThemedText type="smallBold" style={[styles.chipText, { color: band.tint }]}>{answerLabels.none}</ThemedText>
         </Pressable> : null}
       </View> : null}
 
@@ -525,16 +533,12 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         <ThemedText type="small" themeColor="textSecondary">{presentation.explanation}</ThemedText>
       </View> : null}
 
-      {(confirmedOwnTransfer || pendingTransfer) && (
+      {confirmedOwnTransfer && (
         <View
-          testID={confirmedOwnTransfer ? 'own-transfer-explainer' : 'pending-transfer-explainer'}
+          testID="own-transfer-explainer"
           style={[styles.transferMeaning, { borderColor: band.rule, backgroundColor: band.card }]}>
-          <ThemedText type="smallBold">
-            {confirmedOwnTransfer ? transferWords.confirmedOwn : transferWords.ownershipUnknown}
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {confirmedOwnTransfer ? transferWords.ownBody : transferWords.pendingBody}
-          </ThemedText>
+          <ThemedText type="smallBold">{transferWords.confirmedOwn}</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">{transferWords.ownBody}</ThemedText>
         </View>
       )}
 
@@ -555,7 +559,15 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       )}
 
       {!editing && transferCandidate && <View testID="entry-transfer-question" style={styles.transferQuestion}>
-        <ThemedText type="smallBold" accessibilityRole="header">{answerWords.question}</ThemedText>
+        <View style={styles.questionHead}>
+          <ThemedText type="smallBold" accessibilityRole="header">{answerWords.question}</ThemedText>
+          {/* A waiting transfer's status, said once, as the question's lead rather than a chip and a
+              card above it: "Transfer needs review · not counted yet. Wafra keeps it out of …". */}
+          {pendingTransfer ? <ThemedText testID="pending-transfer-explainer" type="meta" themeColor="textSecondary">
+            <ThemedText type="meta" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>{`${transferWords.ownershipUnknown}. `}</ThemedText>
+            {transferWords.pendingBody}
+          </ThemedText> : null}
+        </View>
         {/* Why Wafra already treats it as the person's own money, when other bank alerts say so.
             No receipt is invented; the answers below still correct it. */}
         {transferAssessment?.reason === 'known-account' || transferAssessment?.reason === 'known-card'
@@ -586,8 +598,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           linkedLabel={linkedTo ? activityWords.route.linked(accountLabelFor(linkedTo.accountId)) : undefined}
           suggestion={suggestedOther && suggestedOther.accountId !== transaction.accountId
             ? answerWords.looksLike(accountLabelFor(suggestedOther.accountId)) : undefined}
-          suggestionDetail={suggestedOther ? [suggestedOther.title, fullDateTime(suggestedOther),
-            `${ledgerCurrencyCode()} ${formatAmount(suggestedOther.amountFils, { decimals: true })}`].join(' · ') : undefined}
+          suggestionDetail={suggestedOther ? transferMetaLine([suggestedOther.title,
+            activityWords.dateTime(shortDateWithYear(suggestedOther.date), clockTime(suggestedOther)),
+            unbroken(`${ledgerCurrencyCode()} ${formatAmount(suggestedOther.amountFils, { decimals: true })}`)]) : undefined}
           onChange={(next) => {
             if (next === 'own' && candidates.length > 1) { setPicking(true); return; }
             void choose(next, next === 'own' ? candidates[0] : undefined);
@@ -935,6 +948,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, maxWidth: '100%',
   },
   chipText: { flexShrink: 1 },
+  // A one-tap answer is a button, not a status: no fill, a tint outline and tint label.
+  actionChip: { backgroundColor: 'transparent', borderWidth: 1.5 },
   field: {
     gap: Spacing.two,
   },
@@ -962,6 +977,7 @@ const styles = StyleSheet.create({
     paddingEnd: Spacing.three,
   },
   transferQuestion: { gap: Spacing.two },
+  questionHead: { gap: 2 },
   clearAnswer: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   picker: { gap: Spacing.two },
   pickRow: { minHeight: 48, borderWidth: 1, borderRadius: Radius.control, paddingHorizontal: Spacing.three - 2,

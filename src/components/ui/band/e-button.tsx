@@ -52,14 +52,21 @@ export function EButton({ label, onPress, variant = 'primary', palette, color, i
    */
   reserveLabels?: readonly string[];
 }) {
-  const fill = variant === 'primary' ? (color?.fill ?? palette.fill) : variant === 'secondary' ? palette.card : 'transparent';
-  const fg = variant === 'primary' ? (color?.text ?? palette.onFill) : variant === 'secondary' ? palette.text : palette.tint;
-  const border = variant === 'secondary' ? palette.rule : 'transparent';
+  // Disabled is drawn, not faded, on the sheet's own tokens: a primary loses its fill for the
+  // glyph ground with a rule, and both it and a secondary take the secondary ink. The label stays
+  // above 4.5:1 (a 45% fade left "Save answer for 6 entries" near 1.5:1) while plainly off.
+  // A button given its own colours (set on a band) and the quiet text action keep the fade.
+  const muted = disabled && !busy && !color && variant !== 'quiet';
+  const fill = muted && variant === 'primary' ? palette.glyphGround
+    : variant === 'primary' ? (color?.fill ?? palette.fill) : variant === 'secondary' ? palette.card : 'transparent';
+  const fg = muted ? palette.textSecondary
+    : variant === 'primary' ? (color?.text ?? palette.onFill) : variant === 'secondary' ? palette.text : palette.tint;
+  const border = variant === 'secondary' || muted ? palette.rule : 'transparent';
   const inactive = disabled || busy;
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={accessibilityLabel ?? label} accessibilityHint={accessibilityHint}
     accessibilityState={{ disabled: inactive, busy }} disabled={inactive}
     onPress={() => { if (haptic === 'commit') committed(); else if (haptic === 'tap') tapped(); onPress(); }}
-    style={({ pressed }) => [styles.button, size === 'compact' && styles.compact, { backgroundColor: fill, borderColor: border, opacity: disabled ? 0.45 : pressed ? 0.85 : 1 }, style]}>
+    style={({ pressed }) => [styles.button, size === 'compact' && styles.compact, { backgroundColor: fill, borderColor: border, opacity: disabled && !muted ? 0.45 : pressed ? 0.85 : 1 }, style]}>
     {busy ? <ActivityIndicator color={fg} /> : <>
       {icon ? <Icon name={icon} size={size === 'compact' ? 18 : 20} color={fg} strokeWidth={2} /> : null}
       {reserveLabels && reserveLabels.length > 0 ? <View style={styles.labelStack}>

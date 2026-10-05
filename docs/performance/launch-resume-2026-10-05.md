@@ -17,6 +17,16 @@ first frames for the UI and move Home's coin motion onto the UI thread.
 | Home's saved layout loaded after mount, re-laying out and remounting coin sections | The root reads it beside hydration; Home's first render uses `peekHomeWidgetPreferences()`; post-mount setters go through `startTransition` | `home-widgets.ts` |
 | App Lock: the coin reveal played invisibly behind the lock and unlock rebuilt the transfer queue in the same tick | `useHomeRevealReady()` (lock cleared, foreground, splash gone) holds the first reveal; the transfer queue is cached by its inputs | `journal-home-screen.tsx` |
 
+Home's recurrence lookup is the one deferred task that does not wait for the
+lease before it starts. A cached answer (Bills, a reminder or widget sync, the
+last visit) is read with Home's first commit; otherwise Home starts or joins
+the one shared cooperative scan after its first frames. The scan already waits
+for the lease between its 6ms slices, so only one slice runs during the
+entrance and a large ledger still finishes after it. Waiting out the lease and
+then a fixed 1.5s first made Due payments arrive about 3 seconds after Home and
+push Coming up down; a small ledger now has its rows with Home's first
+frames (`screen-background-work.test.cjs`).
+
 Transactions defers only its first transfer separation (the push animation);
 a later ledger change on the open screen recomputes on the next turn
 (`runSoon`), as `runAfterInteractions` did.
