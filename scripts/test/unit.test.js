@@ -53,6 +53,8 @@ eq('shiftMonthKey forward', fmt.shiftMonthKey('2026-12', 1), '2027-01');
 eq('daysInMonth feb non-leap', fmt.daysInMonth('2026-02'), 28);
 eq('daysInMonth feb leap', fmt.daysInMonth('2028-02'), 29);
 eq('shortDate', fmt.shortDate('2026-07-05'), '5 Jul');
+eq('shortDateWithYear: this year stays short', fmt.shortDateWithYear('2026-07-05', new Date(2026, 9, 5)), '5 Jul');
+eq('shortDateWithYear: an old year is named', fmt.shortDateWithYear('2022-11-05', new Date(2026, 9, 5)), '5 Nov 2022');
 eq('friendlyDate today', fmt.friendlyDate('2026-07-18', '2026-07-18'), 'Today');
 eq('friendlyDate yesterday', fmt.friendlyDate('2026-07-17', '2026-07-18'), 'Yesterday');
 eq('monthLabel short', fmt.monthLabel('2026-07', true), 'Jul 2026');

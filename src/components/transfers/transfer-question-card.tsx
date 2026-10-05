@@ -6,7 +6,7 @@ import { Money } from '@/components/ui/money';
 import { Spacing, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { shortDate } from '@/lib/format';
+import { shortDateWithYear } from '@/lib/format';
 import type { TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import type { Transaction } from '@/lib/types';
@@ -31,7 +31,7 @@ export function TransferQuestionCard({ transaction, index, total, more = 0, acco
       <View style={styles.grow}>
         <ThemedText type="smallBold">{incoming ? words.card.whereIn : words.card.whereOut}</ThemedText>
         <ThemedText type="meta" themeColor="textSecondary">
-          {[accountLabel, shortDate(transaction.date), hint].filter(Boolean).join(' · ')}
+          {[accountLabel, shortDateWithYear(transaction.date), hint].filter(Boolean).join(' · ')}
         </ThemedText>
       </View>
       <Money fils={transaction.amountFils} sign={incoming ? 'plus' : 'minus'} type="smallBold" decimals />

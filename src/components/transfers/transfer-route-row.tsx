@@ -10,7 +10,7 @@ import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useLedgerMoney } from '@/hooks/use-ledger-money';
-import { formatAmount, shortDate } from '@/lib/format';
+import { formatAmount, shortDateWithYear } from '@/lib/format';
 import { ledgerCurrencyDisplay } from '@/lib/markets';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import type { RouteEnd, TransferListItem } from '@/lib/transfer-list';
@@ -122,7 +122,7 @@ export function TransferRouteRow({ item, accountLabel, palette, onPress, first, 
   const directionWord = item.direction === 'out' ? words.outgoing : item.direction === 'in' ? words.incoming : words.own;
   const amountWord = `${ledgerMoney?.currency ?? ledgerCurrencyDisplay()} ${formatAmount(item.amountFils, { decimals: true })}`;
   const label = [`${stripDot(named(item.from))} ${words.route.to} ${stripDot(named(item.to))}`, directionWord, amountWord,
-    shortDate(item.date), tag].join('. ');
+    shortDateWithYear(item.date), tag].join('. ');
   return <Pressable testID={`transfer-row-${item.key}`} accessibilityRole="button" accessibilityLabel={label}
     onPress={onPress}
     style={({ pressed }) => [styles.row, !first && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.rule },
@@ -131,7 +131,7 @@ export function TransferRouteRow({ item, accountLabel, palette, onPress, first, 
       amountFils={item.amountFils} sign={sign} palette={palette} coin={coin} answered={answered} slate={slate}
       direction={item.direction} testID={`transfer-route-${item.key}`} laneTestID={`transfer-lane-${item.key}`} />
     <View style={styles.meta}>
-      <ThemedText type="meta" style={{ color: palette.textSecondary }}>{shortDate(item.date)}</ThemedText>
+      <ThemedText type="meta" style={{ color: palette.textSecondary }}>{shortDateWithYear(item.date)}</ThemedText>
       <RouteTag tag={item.tag} label={tag} palette={palette} slate={slate} />
     </View>
   </Pressable>;

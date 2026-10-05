@@ -16,7 +16,7 @@ import { Fonts, Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { formatAED, fullDateTime, shortDate, toISODate } from '@/lib/format';
+import { formatAED, fullDateTime, shortDateWithYear, toISODate } from '@/lib/format';
 import { bankBrandForName } from '@/lib/markets';
 import { formatMinorUnits } from '@/lib/ledger-money';
 import { currentMonthPeriod, inPeriod } from '@/lib/period';
@@ -570,12 +570,12 @@ export default function ReviewTransfersScreen() {
         const inAccount = accountLabels.get(pair.in.accountId) ?? words.accountUnknown;
         const amount = formatAED(pair.out.amountFils, { decimals: true });
         return <View key={pair.key} testID="transfer-matched-pair" accessible accessibilityRole="text"
-          accessibilityLabel={`${d.transfers.pairA11y(outAccount, inAccount, amount)}. ${shortDate(pair.out.date)}`}
+          accessibilityLabel={`${d.transfers.pairA11y(outAccount, inAccount, amount)}. ${shortDateWithYear(pair.out.date)}`}
           style={[styles.matchedRow, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
           <TransferRoute from={accountEnd(pair.out.accountId)} to={accountEnd(pair.in.accountId)} fromLabel={outAccount} toLabel={inAccount}
             amountFils={pair.out.amountFils} sign="none" palette={band} />
           <View style={styles.routeMeta}>
-            <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDate(pair.out.date)}</ThemedText>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDateWithYear(pair.out.date)}</ThemedText>
             <RouteTag tag="own" label={activityWords.tags.own} palette={band} slate={band.tint} />
           </View>
         </View>;
@@ -674,7 +674,7 @@ export default function ReviewTransfersScreen() {
               {item.group.rows.length > 1 ? <View testID="transfer-group-count" style={[styles.countPill, { backgroundColor: band.glyphGround }]}>
                 <ThemedText type="meta" style={{ color: band.text }}>{words.count(item.group.rows.length)}</ThemedText>
               </View> : null}
-              <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDate(item.group.rows[0].date)}</ThemedText>
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDateWithYear(item.group.rows[0].date)}</ThemedText>
               {filter === 'pending' ? <RouteTag tag="needs-answer" label={activityWords.tags.needsAnswer} palette={band} slate={band.tint} /> : null}
               {!focusedId && <View style={styles.chevron}>
                 <Icon name={expanded.has(item.group.id) ? 'chevron-down' : 'chevron-right'} size={16} color={band.textSecondary} />

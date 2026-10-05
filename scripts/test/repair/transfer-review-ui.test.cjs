@@ -64,7 +64,7 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
     // Formatting is a boundary stub here, as with formatAED below; monetary implementation has its own suites.
     '@/lib/ledger-money': { formatMinorUnits: (amount, spec) => (amount / 10 ** spec.exponent).toFixed(spec.exponent) },
     '@/lib/format': { formatAED: amount => `AED ${(amount / 100).toFixed(2)}`, fullDateTime: tx => `${tx.date} ${tx.ts}`,
-      shortDate: date => date, toISODate: () => '2026-09-09', formatAmount: amount => (amount / 100).toFixed(2) },
+      shortDate: date => date, shortDateWithYear: date => date, toISODate: () => '2026-09-09', formatAmount: amount => (amount / 100).toFixed(2) },
     '@/lib/transfer-reconciliation': { reconcileTransfers: reconcile, transferFingerprint: fingerprint,
       isTransferCandidate: require('../build/transfer-reconciliation.js').isTransferCandidate,
       transferDeclined: require('../build/transfer-reconciliation.js').transferDeclined },
