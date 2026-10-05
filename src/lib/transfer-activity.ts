@@ -149,3 +149,29 @@ export function onePerPair<T extends Pick<TransferActivityRecord, 'transaction' 
   const partners = transferPartnerIds(queue);
   return queue.filter(item => item.transaction.type !== 'income' || !partners.has(item.transaction.id));
 }
+
+/**
+ * The Transfers question card's queue: the rows the reconciler queued, newest
+ * first, one question per movement (onePerPair). Home counts this same queue,
+ * so Home's notice and the card's "N need an answer" agree.
+ */
+export function transferQuestionQueue<T extends Pick<TransferActivityRecord, 'transaction' | 'assessment' | 'needsReview'>>(
+  activity: readonly T[],
+): T[] {
+  return onePerPair(activity.filter(item => item.needsReview)
+    .sort((a, b) => b.transaction.date.localeCompare(a.transaction.date) || (b.transaction.ts ?? 0) - (a.transaction.ts ?? 0)));
+}
+
+/**
+ * Queued ids the card can never ask about: duplicate-id observations, rows on
+ * archived accounts and queued rows Transfers does not list (a likely card
+ * repayment). Only the review screen ("See all") reaches them, so a screen
+ * that shows the queue must keep that way open while this is above zero. The
+ * incoming leg a pair question settles is asked about, not counted here.
+ */
+export function unaskedPendingIds(
+  activity: readonly Pick<TransferActivityRecord, 'transaction' | 'needsReview'>[], pendingIds: ReadonlySet<string>,
+): Set<string> {
+  const asked = new Set(activity.filter(item => item.needsReview).map(item => item.transaction.id));
+  return new Set([...pendingIds].filter(id => !asked.has(id)));
+}

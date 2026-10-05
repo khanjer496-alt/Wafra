@@ -1,8 +1,11 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
 import { MoneyPictureProgress } from '@/components/money-picture-progress';
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, Animated, AppState, InteractionManager, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useRouter } from '@/hooks/use-app-router';
+import { CoinToken } from '@/components/ui/coins/coin-token';
+import { COIN_MOVE, COIN_RISE, COIN_STAGGER, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
+import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { Fonts } from '@/constants/theme';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -68,6 +71,7 @@ import { defaultHomeWidgetPreferences } from '@/lib/home-widget-preferences';
 import { hasRecapActivity, recapCandidates, type RecapDescriptor } from '@/lib/recap';
 import { loadViewedRecaps } from '@/lib/recap-view-state';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { getTransferActivity, transferQuestionQueue, unaskedPendingIds } from '@/lib/transfer-activity';
 import { isTransferCandidate } from '@/lib/transfer-reconciliation';
 
 /** Presentation-only vocabulary; every amount still comes from the shared ledger. */
@@ -89,6 +93,9 @@ const copy = {
 } as const;
 
 /** Recent rows grouped by their date, newest first, in display order. */
+/** The transfer notice's queue, with how many of its entries the Transfers card can ask about. */
+type HomeTransferQueue = PendingTransferSummary & { questions: number };
+
 function activityDays(rows: readonly Transaction[]): { date: string; rows: Transaction[] }[] {
   const days: { date: string; rows: Transaction[] }[] = [];
   for (const row of rows) {
@@ -101,6 +108,107 @@ function activityDays(rows: readonly Transaction[]): { date: string; rows: Trans
 
 const sameHomeWidgets = (a: HomeWidgetPreferences, b: HomeWidgetPreferences): boolean =>
   a === b || JSON.stringify(a) === JSON.stringify(b);
+
+/** Every Recent transactions row painted for one period since Home mounted, by id (never the rows themselves). */
+export interface ShownActivity {
+  scope: string;
+  ids: ReadonlySet<string>;
+  /** The row that arrived last, kept so its arrival is not cut short by the next render. */
+  arrived: string | null;
+}
+
+/** A capture's own clock may run a little behind the moment it reaches the phone. */
+const ARRIVAL_GRACE_MS = 10 * 60_000;
+
+/**
+ * The row that has arrived at the top of Recent transactions: a live capture
+ * (bank text, app alert or Apple Pay) whose clock is after Home mounted, that
+ * no paint of the same period has shown. Never on first paint, while the
+ * ledger loads (empty scope), across a period change, for a row typed or
+ * imported, or for an older row a date edit, deletion or undone import brings
+ * to the top. The last arrival stays the answer until another replaces it.
+ */
+export function arrivedActivityRow(shown: ShownActivity | null, scope: string, top: Transaction | undefined,
+  mountedAtMs: number | null): string | null {
+  if (shown === null || scope === '' || shown.scope !== scope) return null;
+  if (top === undefined || mountedAtMs === null || shown.ids.has(top.id)) return shown.arrived;
+  const fresh = isLiveCapture(top) && typeof top.ts === 'number' && top.ts >= mountedAtMs - ARRIVAL_GRACE_MS;
+  return fresh ? top.id : shown.arrived;
+}
+
+/** The ids painted so far for this period, with this paint's rows added. */
+export function rememberActivity(shown: ShownActivity | null, scope: string, rows: readonly Transaction[],
+  arrived: string | null): ShownActivity | null {
+  if (scope === '') return null;
+  const ids = new Set(shown?.scope === scope ? shown.ids : []);
+  for (const row of rows) ids.add(row.id);
+  return { scope, ids, arrived };
+}
+
+/** The coin that drops onto an arriving row's logo tile. */
+const ARRIVAL_COIN = 14;
+
+/**
+ * The one Recent transactions row that arrived while Home was open: it slides
+ * in once and a coin drops onto its logo tile and fades. Every other row is
+ * drawn plain. Reduce Motion or a screen reader shows it in place at once; the
+ * row's own text and spoken label never change.
+ */
+export function ArrivingRow({ children }: { children: React.ReactNode }) {
+  const motion = useMotionPreference();
+  // 0 above and clear, 1 in place; the coin then goes on to 2, faded out.
+  const enter = useAnimatedNumber(motion.reducedMotion ? 1 : 0);
+  const coin = useAnimatedNumber(motion.reducedMotion ? 2 : 0);
+  // Once per mount: a later render never replays it.
+  const done = useRef(motion.reducedMotion);
+  useEffect(() => {
+    if (motion.reducedMotion) {
+      done.current = true;
+      enter.setValue(1);
+      coin.setValue(2);
+      return;
+    }
+    // Hold still until the screen-reader state is known (see use-reduced-motion).
+    if (!motion.ready || done.current) return;
+    done.current = true;
+    const run = Animated.parallel([
+      Animated.spring(enter, { toValue: 1, ...COIN_MOVE, useNativeDriver: nativeDriver }),
+      Animated.sequence([
+        Animated.delay(COIN_STAGGER),
+        Animated.spring(coin, { toValue: 1, ...COIN_RISE, useNativeDriver: nativeDriver }),
+        Animated.delay(COIN_STAGGER * 4),
+        Animated.spring(coin, { toValue: 2, ...COIN_MOVE, useNativeDriver: nativeDriver }),
+      ]),
+    ]);
+    run.start();
+    // Interrupted (the row leaves, or Reduce Motion turns on), it lands at its end.
+    return () => {
+      run.stop();
+      enter.setValue(1);
+      coin.setValue(2);
+    };
+  }, [motion.ready, motion.reducedMotion, enter, coin]);
+  const paint = useMemo(() => ({
+    row: {
+      opacity: enter.interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: 'clamp' }),
+      transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [-10, 0] }) }],
+    },
+    coin: {
+      opacity: coin.interpolate({ inputRange: [0, 0.4, 1, 2], outputRange: [0, 1, 1, 0], extrapolate: 'clamp' }),
+      transform: [
+        { translateY: coin.interpolate({ inputRange: [0, 1, 2], outputRange: [-16, 0, 0], extrapolate: 'clamp' }) },
+        { scale: coin.interpolate({ inputRange: [0, 1, 2], outputRange: [0.8, 1, 0.7], extrapolate: 'clamp' }) },
+      ],
+    },
+  }), [enter, coin]);
+  return <Animated.View testID="home-activity-arrival" style={paint.row}>
+    {children}
+    <Animated.View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
+      style={[styles.arrivalCoin, paint.coin]}>
+      <CoinToken size={ARRIVAL_COIN} />
+    </Animated.View>
+  </Animated.View>;
+}
 
 // A native reminder call cannot be cancelled when Home unmounts. New Home
 // instances join this manual-refresh lane before starting another one.
@@ -177,7 +285,7 @@ export default function JournalHomeScreen() {
   const [recapEntry, setRecapEntry] = useState<{ descriptor: RecapDescriptor; unread: boolean } | null>(null);
   // The transfer review queue, computed after interactions (it needs the
   // full reconciliation graph). Null until known.
-  const [pendingTransfers, setPendingTransfers] = useState<PendingTransferSummary | null>(null);
+  const [pendingTransfers, setPendingTransfers] = useState<HomeTransferQueue | null>(null);
   // "I was away" on the capture-stopped notice (epoch ms), or null.
   const [captureSnoozedAt, setCaptureSnoozedAt] = useState<number | null>(null);
   const [budgetSheetOpen, setBudgetSheetOpen] = useState(false);
@@ -452,6 +560,18 @@ export default function JournalHomeScreen() {
   // "Empty month" means no live record at all, not merely no recent cash-flow
   // row: card-payment settlements and internal movements are records too.
   const hasPeriodRecords = dashboard.hasPeriodRecords === true || hasPeriodTransfers;
+  // A live capture that lands while Home is open slides in at the top of
+  // Recent transactions: checked against every row painted for the same
+  // period since mount. Ids only, so no old ledger is held; nothing arrives on
+  // first paint, while the ledger loads, or when the period changes.
+  const activityScope = state.hydrated ? JSON.stringify(period) : '';
+  const shownActivity = useRef<ShownActivity | null>(null);
+  const mountedAt = useRef<number | null>(null);
+  useEffect(() => { mountedAt.current = Date.now(); }, []);
+  const arrivedRowId = arrivedActivityRow(shownActivity.current, activityScope, dashboard.activityRows[0], mountedAt.current);
+  useEffect(() => {
+    shownActivity.current = rememberActivity(shownActivity.current, activityScope, dashboard.activityRows, arrivedRowId);
+  }, [activityScope, dashboard.activityRows, arrivedRowId]);
   const insightWidgetVisible = homeWidgetVisible(homeWidgets, 'insight');
   const historyAnalysisBlocked = state.historyImport !== null && state.historyImport.status !== 'complete';
   const completedInsightInputs = useRef<readonly unknown[] | null>(null);
@@ -503,10 +623,11 @@ export default function JournalHomeScreen() {
   }, [insightDisabled, state.transactions, state.accounts, state.budgets, state.notSubscriptions,
     state.transferInternalIds, state.transferNormalizationVersion, state.historyImport?.status,
     state.marketId, state.ledgerMoney, state.customCategories, language, period, projectionDay]));
-  // Home names the transfer review queue only once it is known: the same
-  // pendingIds the review screen lists, so the count and the list agree. The
-  // graph is built after interactions, never during hydration or a running
-  // history import, and not at all when no row could be a transfer.
+  // Home names the transfer queue only once it is known: the same questions the
+  // Transfers card asks (transferQuestionQueue), so "N to confirm" and the
+  // card's "N need an answer" agree. The graph is built after interactions,
+  // never during hydration or a running history import, and not at all when no
+  // row could be a transfer.
   useEffect(() => {
     if (historyAnalysisBlocked) setPendingTransfers(null);
   }, [historyAnalysisBlocked]);
@@ -518,13 +639,21 @@ export default function JournalHomeScreen() {
       // The reconciliation cached per stored transfer receipt, shared with
       // Transactions and Transfers, rather than a second full graph build.
       const reconciliation = state.transactions.some(isTransferCandidate) ? transferReconciliationForState(state) : null;
-      const next = reconciliation
-        ? pendingTransferSummary(state.transactions, reconciliation.pendingIds)
-        : { count: 0, incomingFils: 0, outgoingFils: 0 };
+      const next: HomeTransferQueue = reconciliation ? (() => {
+        const activity = getTransferActivity(state.transactions, state.accounts, reconciliation);
+        const queue = transferQuestionQueue(activity);
+        // With no question to ask but entries still queued (duplicate observations,
+        // archived accounts, likely card repayments), Home names those and opens
+        // the review screen, the one place that reaches them.
+        const ids = queue.length > 0 ? new Set(queue.map(item => item.transaction.id))
+          : unaskedPendingIds(activity, reconciliation.pendingIds);
+        return { ...pendingTransferSummary(state.transactions, ids), questions: queue.length };
+      })() : { count: 0, incomingFils: 0, outgoingFils: 0, questions: 0 };
       // An unchanged queue keeps its object, so returning Home does not
       // re-render it once the graph is rebuilt.
       if (!cancelled) setPendingTransfers((current) => current !== null && current.count === next.count
-        && current.incomingFils === next.incomingFils && current.outgoingFils === next.outgoingFils ? current : next);
+        && current.incomingFils === next.incomingFils && current.outgoingFils === next.outgoingFils
+        && current.questions === next.questions ? current : next);
     });
     return () => {
       cancelled = true;
@@ -710,9 +839,11 @@ export default function JournalHomeScreen() {
       </Pressable>
     </View>
   </View> : null;
+  // The Transfers page asks the queue one question at a time; its "See all" opens the bulk review.
+  // When the card has nothing it can ask, the notice opens that review directly.
   const transferNotice = pendingTransfers && pendingTransfers.count > 0 ? <TransferReviewNotice
     pendingCount={pendingTransfers.count} incomingFils={pendingTransfers.incomingFils} outgoingFils={pendingTransfers.outgoingFils}
-    onPress={() => router.push('/review-transfers')} /> : null;
+    onPress={() => router.push(pendingTransfers.questions === 0 ? '/review-transfers' : '/transfers')} /> : null;
   const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
   const unlockFounder = founderUnlockEnabled && !state.founderPro
     ? () => {
@@ -812,8 +943,11 @@ export default function JournalHomeScreen() {
           {dayTotal === undefined ? null
             : <Money fils={dayTotal} moneySpec={moneySpec} type="meta" decimals sign={dayTotal === 0 ? 'none' : 'auto'} color={band.textSecondary} />}
         </View>
-        <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{day.rows.map(transaction =>
-          <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />)}</View>
+        <View style={[styles.cardGroup, { borderColor: theme.cardBorder }]}>{day.rows.map(transaction => {
+          const row = <TransactionRow key={transaction.id} transaction={transaction} account={dashboard.accountById.get(transaction.accountId)} onPress={setEntry} internal={dashboard.internalTransactionIds.has(transaction.id)} />;
+          // Only the row that just arrived carries the motion; the rest are drawn plain.
+          return transaction.id === arrivedRowId ? <ArrivingRow key={transaction.id}>{row}</ArrivingRow> : row;
+        })}</View>
       </View>;
       })}
       {hasPeriodTransfers && <Pressable testID="home-transfers-link" accessibilityRole="button" accessibilityLabel={transferWords.viewAll}
@@ -1031,5 +1165,7 @@ const styles = StyleSheet.create({
   rowGlyph: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   dayHeading: { flexDirection: 'row', alignItems: 'baseline', gap: 12, paddingTop: 12 },
   dayTitle: { fontFamily: Fonts.sansSemi },
+  // Over the arriving row's logo tile, at its top end corner.
+  arrivalCoin: { position: 'absolute', top: 0, start: 24, pointerEvents: 'none' },
   customizeAction: { minHeight: 48, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 8 },
 });

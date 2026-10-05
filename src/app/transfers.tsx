@@ -5,7 +5,7 @@ import { FlatList, Keyboard, Platform, Pressable, StyleSheet, View } from 'react
 import { EntryDetailSheet } from '@/components/entry-detail-sheet';
 import { PeriodSheet } from '@/components/period-sheet';
 import { ThemedText } from '@/components/themed-text';
-import { introCues, legTags, newlyOwnRoutes, type CoinCue } from '@/components/transfer-coins/coin-cues';
+import { introCues, legTags, newlyAnsweredRoutes, type CoinCue } from '@/components/transfer-coins/coin-cues';
 import { TransferQuestionCard } from '@/components/transfers/transfer-question-card';
 import { TransferRouteRow } from '@/components/transfers/transfer-route-row';
 import { ActionIconButton } from '@/components/ui/action-icon-button';
@@ -27,7 +27,7 @@ import { formatMinorUnits } from '@/lib/ledger-money';
 import { inPeriod, isCurrentMonth, periodLabel } from '@/lib/period';
 import { usePeriod } from '@/lib/period-context';
 import { useStore } from '@/lib/store';
-import { getTransferActivity, onePerPair } from '@/lib/transfer-activity';
+import { getTransferActivity, transferQuestionQueue, unaskedPendingIds } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
 import { absorbedOwnIncoming, filterTransferItems, transferListItems, transferTotals, type TransferTag, type TransferTile } from '@/lib/transfer-list';
@@ -110,8 +110,8 @@ export default function TransfersScreen() {
   const totals = useMemo(() => transferTotals(items, absorbed), [items, absorbed]);
   const shown = useMemo(() => filterTransferItems(items, tile), [items, tile]);
   // A coin travels a route when the list first appears (the first few rows only) and again
-  // the moment a route's money is explained as moving between the person's own accounts,
-  // however it was answered (the card, the detail sheet, the batch review).
+  // the moment its question is answered, own account or someone else, however it was
+  // answered (the card, the detail sheet, the batch review): the "?" it travels to becomes the answer.
   const [coins, setCoins] = useState<ReadonlyMap<string, CoinCue>>(() => new Map());
   const introduced = useRef(false);
   const lastTags = useRef<ReadonlyMap<string, TransferTag> | null>(null);
@@ -125,7 +125,7 @@ export default function TransfersScreen() {
     const previous = lastTags.current;
     lastTags.current = legTags(periodItems);
     if (!previous) return;
-    const arrived = newlyOwnRoutes(previous, periodItems);
+    const arrived = newlyAnsweredRoutes(previous, periodItems);
     if (!arrived.length) return;
     const at = Date.now();
     setCoins(cues => new Map([...cues, ...arrived.map(key => [key, { at, delay: 0 }] as const)]));
@@ -133,8 +133,11 @@ export default function TransfersScreen() {
   // The questions are the reconciler's queue, newest first, whatever the period or search.
   // Saving an answer takes the row out of the queue, so the card always shows the first one.
   // A pair with both legs queued is one movement: one question, asked about its outgoing leg.
-  const queue = useMemo(() => onePerPair(activity.filter(item => item.needsReview)
-    .sort((a, b) => b.transaction.date.localeCompare(a.transaction.date) || (b.transaction.ts ?? 0) - (a.transaction.ts ?? 0))), [activity]);
+  // Home counts this same queue (transferQuestionQueue), so the two numbers agree.
+  const queue = useMemo(() => transferQuestionQueue(activity), [activity]);
+  // Queued entries the card cannot ask about (duplicate observations, archived accounts,
+  // likely card repayments) are reached only through the review screen: keep "See all" open.
+  const unasked = useMemo(() => unaskedPendingIds(activity, reconciliation.pendingIds).size, [activity, reconciliation]);
   const current = queue[0];
   const hint = useMemo(() => {
     if (!current) return undefined;
@@ -212,7 +215,14 @@ export default function TransfersScreen() {
               variant="plain" onPress={() => setQuery('')} /> : undefined} />
           {current ? <TransferQuestionCard transaction={current.transaction} index={0} total={queue.length}
             accountLabel={accountName(current.transaction.accountId)} hint={hint} palette={band} busy={busy}
-            onAnswer={answerCurrent} onSeeAll={() => router.push('/review-transfers')} /> : null}
+            more={unasked} onAnswer={answerCurrent} onSeeAll={() => router.push('/review-transfers')} />
+            : unasked > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
+              accessibilityLabel={`${words.card.title(unasked)}. ${words.card.seeAllPlain}`}
+              onPress={() => router.push('/review-transfers')}
+              style={({ pressed }) => [styles.reviewLink, { backgroundColor: band.card, borderColor: band.statusNear, opacity: pressed ? 0.7 : 1 }]}>
+              <ThemedText type="smallBold" style={[styles.grow, { color: band.statusNear }]}>{words.card.title(unasked)}</ThemedText>
+              <ThemedText type="small" style={{ color: band.tint }}>{words.card.seeAllPlain}</ThemedText>
+            </Pressable> : null}
           <ThemedText type="smallBold" accessibilityRole="header">
             {isCurrentMonth(period) ? words.listTitle : periodLabel(period)}
           </ThemedText>
@@ -252,6 +262,9 @@ const styles = StyleSheet.create({
   periodChip: { minHeight: 44, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 22, flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%', flexShrink: 1 },
   periodLabel: { flexShrink: 1 },
   clearTile: { minHeight: 44, justifyContent: 'center' },
+  reviewLink: { minHeight: 56, borderWidth: 1, borderRadius: 18, padding: Spacing.three, flexDirection: 'row', flexWrap: 'wrap',
+    alignItems: 'center', gap: Spacing.two },
+  grow: { flexGrow: 1, flexShrink: 1 },
   rowCard: { paddingHorizontal: Spacing.three },
   rowCardFirst: { borderTopStartRadius: 18, borderTopEndRadius: 18 },
   rowCardLast: { borderBottomStartRadius: 18, borderBottomEndRadius: 18 },

@@ -63,6 +63,11 @@ Kept as a checkbox this round, relabelled **Moved to my own account** to match. 
 
 Pairing rules and the reconciler's matching, the review screen's internals beyond reaching it from "See all", card-payment detection, Home/Spending previews.
 
+### Follow-up (2026-10-05)
+
+- Home's "N transfers to confirm" notice opens `/transfers` (the question card), not the bulk review; "See all N" on the card is the only way into `/review-transfers`, and back from there returns to Transfers.
+- The bulk review screen keeps all its logic (listing, selection, `resolveTransfers` / `resolveTransferBatch`, fingerprints, generation, durability, Undo) but is drawn in the Transfers vocabulary: the band figure as on Transfers with "Not counted as spending or income", every pair, group, matched pair and batch-preview item as a `TransferRoute` (From chip → coin lane → To chip, amount) with a `RouteTag`, each group one card with its "N entries" count and its entries set in below, the Transfers page's answer buttons for Match / Not a pair and the selection controls, and `EButton` for Select, Review selected and the sheet's actions.
+
 ## Testing
 
 - Unit: `'none'` decision in `transfer-reconciliation` and `transfer-activity` (membership, totals equal to an ordinary row, Undo restores, restore validation), batch accepts `'none'`.

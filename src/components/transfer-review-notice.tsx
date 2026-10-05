@@ -18,10 +18,11 @@ export interface TransferReviewNoticeProps {
 }
 
 /**
- * "2 transfers to confirm" on Home: a compact disclosure, not a monetary
- * backlog. It opens the existing transfer review and never classifies
- * anything itself; until the person confirms, those rows count as neither
- * spending nor income, which the second line says.
+ * "2 transfers need an answer" on Home: a compact disclosure, not a monetary
+ * backlog. It opens the Transfers page, whose question card answers the queue
+ * one transfer at a time, and never classifies anything itself; until the
+ * person confirms, those rows count as neither spending nor income, which the
+ * second line says.
  */
 export function TransferReviewNotice({ pendingCount, onPress }: TransferReviewNoticeProps) {
   const theme = useTheme();

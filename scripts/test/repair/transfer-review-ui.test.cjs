@@ -22,7 +22,7 @@ const expandGroups = h => {
 const openEntry = h => { expandGroups(h); byId(h.render(), 'transfer-review-entry').props.onPress(); };
 
 function createUI({ language = 'en', transactions = [row('one'), row('two')], bulk = false,
-  params = {}, resolveTransfers, resolveTransferBatch, ensureDurable, groupDefinitions, assessments = {}, pending = [] } = {}) {
+  params = {}, resolveTransfers, resolveTransferBatch, ensureDurable, groupDefinitions, assessments = {}, pending = [], largeText = false } = {}) {
   const events = [], slots = [], refs = [];
   let cursor = 0, refCursor = 0, generation = 1;
   const state = { language, hydrated: true, transactions,
@@ -64,7 +64,7 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
     // Formatting is a boundary stub here, as with formatAED below; monetary implementation has its own suites.
     '@/lib/ledger-money': { formatMinorUnits: (amount, spec) => (amount / 10 ** spec.exponent).toFixed(spec.exponent) },
     '@/lib/format': { formatAED: amount => `AED ${(amount / 100).toFixed(2)}`, fullDateTime: tx => `${tx.date} ${tx.ts}`,
-      shortDate: date => date, toISODate: () => '2026-09-09' },
+      shortDate: date => date, toISODate: () => '2026-09-09', formatAmount: amount => (amount / 100).toFixed(2) },
     '@/lib/transfer-reconciliation': { reconcileTransfers: reconcile, transferFingerprint: fingerprint,
       isTransferCandidate: require('../build/transfer-reconciliation.js').isTransferCandidate,
       transferDeclined: require('../build/transfer-reconciliation.js').transferDeclined },
@@ -74,6 +74,15 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
     '@/components/themed-text': { ThemedText: props => jsx('Text', props) },
     '@/components/ui/icon': { Icon: props => jsx('Icon', props) },
     '@/components/ui/controls': { Button: props => jsx('Button', { ...props, accessibilityLabel: props.label, children: props.label }) },
+    // The E button is the Transfers page's button: it names itself by its label (its own suite covers the rest).
+    '@/components/ui/band/e-button': { EButton: props => jsx('Button', { ...props, accessibilityLabel: props.label, children: props.label }) },
+    // Row amounts are Money, a formatting boundary here as formatAED is; the sign glyph is kept.
+    '@/components/ui/money': { Money: props => jsx('Money', { ...props,
+      children: `${props.sign === 'minus' ? '−' : props.sign === 'plus' ? '+' : ''}AED ${(props.fils / 100).toFixed(2)}` }) },
+    '@/hooks/use-ledger-money': { useLedgerMoney: () => null },
+    // The decorative coin lane is its own suite (transfer-coins); here it is an opaque, hidden child.
+    '@/components/transfer-coins/route-coin': { RouteCoinLane: props => jsx('Lane', { ...props, accessibilityElementsHidden: true,
+      importantForAccessibility: 'no-hide-descendants' }) },
     '@/components/ui/text-field': { TextField: props => jsx('TextInput', props) },
     '@/components/ui/toast': { useToast: () => ({ show: message => events.push(['toast', message]) }) },
     '@/components/ui/bottom-sheet': { BottomSheet: props => props.visible ? jsx('Sheet', props) : null },
@@ -81,8 +90,9 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
     '@/components/ui/band-scaffold': { BandScaffold: props => jsx('Scaffold', { ...props, children: [props.bandContent, props.children, props.footer] }),
       useBandBottomInset: () => 20 },
     '@/hooks/use-band': { useBand: id => ({ id, band: '#2F6577', onBand: '#F4F1EA', onBandSecondary: '#D6DCD9', sheet: '#F4F1EA',
-      card: '#FBF9F4', rule: '#E3DED2', text: '#16130F', textSecondary: '#57524A', tint: '#2F6577', fill: '#2F6577', onFill: '#F4F1EA' }) },
-    '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
+      card: '#FBF9F4', rule: '#E3DED2', text: '#16130F', textSecondary: '#57524A', tint: '#2F6577', fill: '#2F6577', onFill: '#F4F1EA',
+      glyphGround: '#EDE3CF', statusNear: '#7E5F14', statusNearSoft: '#F1E9D8' }) },
+    '@/hooks/use-large-text-layout': { useLargeTextLayout: () => largeText },
     // The current money month; the matched-pairs tests below decide membership themselves.
     '@/lib/period': { currentMonthPeriod: () => ({ mode: 'month', key: '2026-09' }), inPeriod: date => date.startsWith('2026-09') },
   };
@@ -90,6 +100,8 @@ function createUI({ language = 'en', transactions = [row('one'), row('two')], bu
   deps['@/components/transfer-pair-accounts'] = load(path.join(root, 'src/components/transfer-pair-accounts.tsx'), deps);
   deps['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'), deps);
   deps['@/lib/transfer-review-copy'] = load(path.join(root, 'src/lib/transfer-review-copy.ts'), deps);
+  // The Transfers page's route row and chips, from source.
+  deps['@/components/transfers/transfer-route-row'] = load(path.join(root, 'src/components/transfers/transfer-route-row.tsx'), deps);
   deps['@/lib/reference-copy'] = load(path.join(root, 'src/lib/reference-copy.ts'));
   deps['@/lib/transfer-review-presentation'] = load(path.join(root, 'src/lib/transfer-review-presentation.ts'), deps);
   deps['@/lib/details-copy'] = load(path.join(root, 'src/lib/details-copy.ts'));
@@ -442,13 +454,14 @@ for (const language of ['en', 'ar']) {
     const words = pairCopy(language);
     const tree = h.render();
     assert.equal(walk(tree).filter(n => n.props?.testID === 'transfer-pair-card').length, 1);
-    // Out of <account> / swap / Into <account>, one amount (the legs agree), the date.
-    const band = bandCopy(language);
+    // Drawn as a Transfers route: <account> → <account>, one amount (the legs agree), the date.
     const card = text(byId(tree, 'transfer-pair-card'));
-    for (const part of [band.outOf, 'Synthetic bank', band.into, 'Other bank', 'AED 123.45']) assert.ok(card.includes(part), part);
+    for (const part of ['Synthetic bank', 'Other bank', 'AED 123.45']) assert.ok(card.includes(part), part);
+    assert.ok(text(byId(tree, 'transfer-pair-route')).indexOf('Synthetic bank') < text(byId(tree, 'transfer-pair-route')).indexOf('Other bank'),
+      'the route reads from the account it left to the account it reached');
     assert.ok(!card.includes(words.transfers.in + ':'), 'equal legs show one amount');
     // The band counts what is left to check: one suggested pair here.
-    assert.ok(text(byId(tree, 'transfer-review-band')).includes(band.toCheck(1)));
+    assert.ok(text(byId(tree, 'transfer-review-band')).includes(activityCopy(language).card.title(1)));
     // The legs are one labelled, focusable element; Match stays outside it.
     const legs = byId(tree, 'transfer-pair-legs');
     assert.equal(legs.props.accessible, true);
@@ -660,4 +673,220 @@ test('batch storage failure retries the write once without reapplying any select
   assert.equal(h.events.filter(e => e[0] === 'batch').length, 1);
   assert.equal(h.events.filter(e => e[0] === 'durable').length, 1);
   assert.deepEqual(h.events.at(-1), ['toast', h.words.batchSaved(2)]);
+});
+
+// ---- The review screen in the Transfers page's design ----
+// Home's notice opens the Transfers page (the question card, one at a time); its
+// "See all" opens this screen, which draws transfers as the same routes.
+const fs = require('node:fs');
+const flatStyle = style => Object.assign({}, ...[].concat(typeof style === 'function' ? style({ pressed: false }) : style)
+  .flat(Infinity).filter(s => s && typeof s === 'object'));
+const activityCopy = language => load(path.join(root, 'src/lib/transfer-activity-copy.ts'),
+  { '@/lib/i18n': { getLanguage: () => language } }).transferActivityCopy(language);
+
+test('Home\'s transfer notice opens the Transfers page; its question card\'s See all opens this review', () => {
+  const home = fs.readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8');
+  const notice = home.slice(home.indexOf('<TransferReviewNotice'), home.indexOf('/> : null;', home.indexOf('<TransferReviewNotice')));
+  // The question card first; straight here only when the card has nothing it can ask.
+  assert.match(notice, /onPress=\{\(\) => router\.push\(pendingTransfers\.questions === 0 \? '\/review-transfers' : '\/transfers'\)\}/);
+  assert.doesNotMatch(home, /router\.push\('\/review-transfers'\)/, 'Home never skips a question the card can ask');
+  assert.match(home, /transferQuestionQueue\(activity\)/, 'Home counts the queue the card answers');
+  const transfers = fs.readFileSync(path.join(root, 'src/app/transfers.tsx'), 'utf8');
+  assert.match(transfers, /onSeeAll=\{\(\) => router\.push\('\/review-transfers'\)\}/, 'See all still reaches the bulk review');
+  // Back from Transfers pops to Home; this screen's back pops to Transfers.
+  assert.match(transfers, /back: \(\) => \{ if \(router\.canGoBack\(\)\) router\.back\(\);/);
+  assert.match(fs.readFileSync(path.join(root, 'src/app/review-transfers.tsx'), 'utf8'), /nav=\{\{ back: true,/);
+});
+
+for (const language of ['en', 'ar']) {
+  test(`${language}: a group is one route card: account → unknown side, signed total, entry count and the open tag`, () => {
+    const h = createUI({ language, transactions: [row('one', { title: 'First' }), row('two', { title: 'Second' })] });
+    const tag = activityCopy(language).tags.needsAnswer;
+    let tree = h.render();
+    const group = byId(tree, 'transfer-review-group');
+    const route = byId(group, 'transfer-group-route-group');
+    assert.ok(route, 'the group is drawn as a route');
+    const chips = text(route);
+    assert.ok(chips.includes('Synthetic bank'), 'the account it left');
+    assert.ok(chips.includes('?'), 'an unidentified counterparty is the dashed "?" chip');
+    assert.ok(!chips.includes(h.words.counterpartyUnknown), 'not the old "Counterparty not identified" line');
+    assert.ok(chips.includes('−AED 246.90'), 'money out is signed, as on the Transfers page');
+    assert.ok(walk(route).some(node => node.type === 'Lane'), 'the coin lane sits between the chips');
+    assert.ok(text(byId(group, 'transfer-group-count')).includes(h.words.count(2)), 'the entries it stands for, shown on the card');
+    assert.ok(text(group).includes(tag));
+    assert.ok(!text(group).includes(h.words.sent), 'the direction reads from the route, not "· Sent"');
+    // The toggle still speaks the account, the counterparty and what tapping does.
+    const toggle = byId(group, 'transfer-group-toggle');
+    assert.equal(toggle.props.accessibilityLabel, `Synthetic bank · ••1234. ${h.words.counterpartyUnknown}. ${h.words.expand(2)}`);
+    assert.ok(flatStyle(toggle.props.style).minHeight >= 44);
+    // Expanded, the entries are set in under the route in the same card, each with its own signed amount.
+    expandGroups(h); tree = h.render();
+    const entries = walk(tree).filter(node => node.props?.testID === 'transfer-review-entry');
+    assert.equal(entries.length, 2);
+    assert.ok(text(entries[0]).includes('−AED 123.45'));
+    assert.equal(flatStyle(entries[0].props.style).backgroundColor, '#FBF9F4', 'the entry continues the group card');
+    assert.ok(flatStyle(entries.at(-1).props.style).borderBottomEndRadius > 0, 'the last entry closes the card');
+    assert.equal(flatStyle(byId(tree, 'transfer-review-group').props.style).borderBottomEndRadius, undefined, 'an open group continues below');
+  });
+}
+
+test('a named counterparty is a chip, and money in reads from it to the account', () => {
+  const h = createUI({ bulk: true, transactions: [row('a', { type: 'income' }), row('b', { type: 'income' })] });
+  const route = text(byId(h.render(), 'transfer-group-route-group'));
+  const other = h.words.accountEnding('9876');
+  assert.ok(route.includes(other));
+  assert.ok(route.indexOf(other) < route.indexOf('Synthetic bank'), 'incoming: the other side → your account');
+  assert.ok(route.includes('+AED 246.90'));
+});
+
+test('pair answers and selection controls use the Transfers page\'s buttons; Select and Review are E buttons', () => {
+  const h = createUI(manyPairs());
+  let tree = h.render();
+  const match = byId(tree, 'transfer-pair-match');
+  const separate = byId(tree, 'transfer-pair-separate');
+  for (const button of [match, separate]) {
+    const style = flatStyle(button.props.style);
+    assert.ok(style.minHeight >= 44 && style.borderRadius === 14, 'the question card\'s 48pt, 14pt-radius answer');
+  }
+  assert.equal(flatStyle(match.props.style).backgroundColor, '#2F6577', 'the first answer is the band fill');
+  assert.ok(flatStyle(separate.props.style).borderWidth >= 1, 'the other answer is bordered');
+  const select = byLabel(tree, h.words.selectTransfers);
+  assert.ok(select.props.palette, 'Select transfers is an E button on the band palette');
+  assert.equal(select.props.variant, 'secondary');
+  select.props.onPress(); tree = h.render();
+  for (const id of ['transfer-select-shown', 'transfer-cancel-selection']) {
+    assert.ok(flatStyle(byId(tree, id).props.style).minHeight >= 44, id);
+  }
+  const footer = byId(tree, 'transfer-selection-footer');
+  assert.ok(byLabel(footer, h.words.reviewSelected(0)).props.palette, 'Review selected is an E button');
+  byId(tree, 'transfer-select-shown').props.onPress();
+  reviewSelected(h, 2);
+  const sheet = byId(h.render(), 'transfer-review-confirmation');
+  const items = walk(sheet).filter(node => node.props?.testID === 'transfer-batch-preview-item');
+  assert.ok(items.every(item => walk(item).some(node => node.type === 'Lane')), 'each selected transfer is drawn as its route');
+  assert.ok(text(items[0]).includes(h.words.sent) && text(items[0]).includes(h.words.received));
+  assert.ok(byLabel(sheet, h.words.confirmSelected(2)).props.palette, 'the batch confirm is an E button');
+  assert.deepEqual(h.events, [], 'restyling never writes');
+});
+
+test('large text stacks the routes, the entries and the answer buttons', () => {
+  const h = createUI({ ...manyPairs(1), largeText: true });
+  const tree = h.render();
+  assert.equal(flatStyle(byId(tree, 'transfer-pair-route').props.style).flexDirection, 'column');
+  const choices = walk(tree).find(node => node.props?.children?.some?.(child => child?.props?.testID === 'transfer-pair-match'));
+  assert.equal(flatStyle(choices.props.style).flexDirection, 'column');
+  assert.equal(flatStyle(byId(tree, 'transfer-pair-match').props.style).alignSelf, 'stretch');
+  const grouped = createUI({ largeText: true });
+  expandGroups(grouped);
+  const entry = byId(grouped.render(), 'transfer-review-entry');
+  assert.ok(walk(entry).some(node => flatStyle(node.props?.style).flexDirection === 'column'), 'entry text and amount stack');
+  assert.equal(flatStyle(byId(grouped.render(), 'transfer-group-route-group').props.style).flexDirection, 'column');
+});
+
+for (const language of ['en', 'ar']) {
+  test(`${language}: the band reads like the Transfers band: the count, then that it is not counted`, () => {
+    const h = createUI({ language });
+    const band = text(byId(h.render(), 'transfer-review-band'));
+    // The same words as the question card ("N transfers need an answer"), not a third name for the queue.
+    assert.ok(band.includes(activityCopy(language).card.title(2)));
+    assert.ok(!band.includes(bandCopy(language).toCheck(2)));
+    assert.ok(band.includes(activityCopy(language).notCounted));
+    assert.ok(band.includes(h.words.intro));
+  });
+}
+
+test('confirmed pairs this month are routes tagged as your accounts', () => {
+  const h = createUI({ groupDefinitions: [], transactions: confirmedPair('m-out', 'm-in', '2026-09-03'),
+    assessments: confirmedAssessments('m-out', 'm-in') });
+  const pair = byId(h.render(), 'transfer-matched-pair');
+  assert.ok(text(pair).includes(activityCopy('en').tags.own));
+  assert.ok(walk(pair).some(node => node.type === 'Lane'));
+  assert.equal(pair.props.accessible, true, 'one spoken row');
+});
+
+for (const language of ['en', 'ar']) {
+  test(`${language}: at large text the band keeps only a capped, whole-word headline; the rest moves onto the sheet`, () => {
+    const h = createUI({ language, largeText: true });
+    const tree = h.render();
+    const band = byId(tree, 'transfer-review-band');
+    const headline = walk(band).find(node => node.props?.accessibilityRole === 'header');
+    assert.ok(headline.props.maxFontSizeMultiplier <= 1.3, 'the headline cannot grow past the screen');
+    const style = flatStyle(headline.props.style);
+    assert.ok(style.fontSize <= 24 && style.maxWidth === '100%');
+    assert.equal(headline.props.numberOfLines, undefined, 'it wraps whole words, never truncates');
+    assert.equal(text(band).includes(activityCopy(language).notCounted), false);
+    assert.equal(text(band).includes(h.words.intro), false);
+    const list = walk(tree).find(node => node.type === 'FlatList');
+    assert.ok(text(list.props.ListHeaderComponent).includes(activityCopy(language).notCounted));
+    assert.ok(text(list.props.ListHeaderComponent).includes(h.words.intro));
+  });
+}
+
+test('select mode: a one-entry group carries its entry\'s checkbox, no "1 entry" pill, and Select all counts it', async () => {
+  const h = createUI({ transactions: [row('a'), row('b', { accountId: 'other' }), row('c')],
+    groupDefinitions: [{ id: 'one', transactionIds: ['b'], bulkEligible: false }, { id: 'two', transactionIds: ['a', 'c'], bulkEligible: false }] });
+  let tree = h.render();
+  const groups = walk(tree).filter(node => node.props?.testID === 'transfer-review-group');
+  const single = groups.find(group => text(group).includes('Other bank'));
+  assert.equal(byId(single, 'transfer-group-count'), undefined, 'one entry needs no count');
+  assert.ok(byId(groups.find(group => group !== single), 'transfer-group-count'), 'several entries keep theirs');
+  assert.equal(byId(tree, 'transfer-group-select'), undefined, 'no checkbox outside select mode');
+  startSelecting(h); tree = h.render();
+  const check = byId(tree, 'transfer-group-select');
+  assert.equal(check.props.accessibilityRole, 'checkbox');
+  assert.ok(check.props.accessibilityLabel.includes(h.words.selectItem));
+  // What has a checkbox on screen is what "Select all shown" counts: the one-entry group's entry only
+  // (the two-entry group stays collapsed and is never selected whole).
+  assert.equal(byId(tree, 'transfer-select-shown').props.accessibilityLabel, h.words.selectShown(1));
+  check.props.onPress();
+  assert.equal(byId(h.render(), 'transfer-group-select').props.accessibilityState.checked, true);
+  // Expanded, the same entry's row is checked: one selection, one key.
+  expandGroups(h);
+  const entry = walk(h.render()).filter(node => node.props?.testID === 'transfer-review-entry')
+    .find(node => node.props.accessibilityLabel.includes('Bank transfer') && node.props.accessibilityState.checked);
+  assert.ok(entry, 'the entry row shows the same check');
+  assert.equal(byId(h.render(), 'transfer-group-select'), undefined, 'expanded, the entry row carries it');
+  reviewSelected(h, 1);
+  byLabel(byId(h.render(), 'transfer-review-confirmation'), h.words.confirmSelected(1)).props.onPress(); await flush();
+  const request = h.events.find(event => event[0] === 'batch')[1];
+  assert.deepEqual([...request.decisions.map(d => [...d.ids])], [['b']]);
+});
+
+test('disabled selection controls stay legible: no faded fill', () => {
+  const h = createUI(manyPairs());
+  startSelecting(h);
+  const tree = h.render();
+  const review = byLabel(byId(tree, 'transfer-selection-footer'), h.words.reviewSelected(0));
+  assert.equal(review.props.disabled, true);
+  assert.equal(review.props.variant, 'secondary', 'an outline at full ink, not the band fill at 45%');
+  assert.equal(flatStyle(review.props.style).opacity, 1);
+  // Select all with nothing to select (one collapsed group of two): the secondary ink on a ruled outline.
+  const empty = createUI();
+  startSelecting(empty);
+  const selectAll = byId(empty.render(), 'transfer-select-shown');
+  assert.equal(selectAll.props.disabled, true);
+  const style = flatStyle(selectAll.props.style);
+  assert.equal(style.opacity, 1, 'not faded');
+  assert.equal(style.borderColor, '#E3DED2');
+  const label = walk(selectAll).find(node => node.type === 'Text');
+  assert.equal(flatStyle(label.props.style).color, '#57524A', 'secondary ink (about 7:1 on the sheet)');
+});
+
+test('batch preview signs single entries like the list and shows each amount once', () => {
+  const h = createUI({ transactions: [row('a'), row('b')],
+    groupDefinitions: [{ id: 'g', transactionIds: ['a', 'b'], bulkEligible: false }] });
+  startSelecting(h); expandGroups(h);
+  byId(h.render(), 'transfer-select-shown').props.onPress();
+  reviewSelected(h, 2);
+  const items = walk(byId(h.render(), 'transfer-review-confirmation')).filter(node => node.props?.testID === 'transfer-batch-preview-item');
+  assert.equal(items.length, 2);
+  for (const item of items) {
+    assert.ok(text(item).includes('−AED 123.45'), 'money out, signed as in the list');
+    assert.equal(text(item).split('123.45').length - 1, 1, 'the amount appears once');
+  }
+  const pairs = createUI(manyPairs());
+  startSelecting(pairs); byId(pairs.render(), 'transfer-select-shown').props.onPress(); reviewSelected(pairs, 2);
+  const pairItem = walk(byId(pairs.render(), 'transfer-review-confirmation')).find(node => node.props?.testID === 'transfer-batch-preview-item');
+  assert.ok(!text(pairItem).includes('−') && !text(pairItem).includes('+'), 'a pair between your accounts is unsigned, as its card');
+  assert.equal(text(pairItem).split('AED 123.45').length - 1, 1);
 });

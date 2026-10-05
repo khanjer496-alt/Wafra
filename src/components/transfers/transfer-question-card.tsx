@@ -11,8 +11,11 @@ import type { TransferAnswer } from '@/lib/transfer-answer';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import type { Transaction } from '@/lib/types';
 
-export function TransferQuestionCard({ transaction, index, total, accountLabel, hint, palette, busy, onAnswer, onSeeAll }: {
-  transaction: Transaction; index: number; total: number; accountLabel: string; hint?: string;
+export function TransferQuestionCard({ transaction, index, total, more = 0, accountLabel, hint, palette, busy, onAnswer, onSeeAll }: {
+  transaction: Transaction; index: number; total: number;
+  /** Queued entries this card cannot ask about; "See all" stays open while there are any. */
+  more?: number;
+  accountLabel: string; hint?: string;
   palette: BandPalette; busy: boolean; onAnswer: (answer: TransferAnswer) => void; onSeeAll: () => void;
 }) {
   const words = transferActivityCopy(useLanguage());
@@ -34,8 +37,9 @@ export function TransferQuestionCard({ transaction, index, total, accountLabel, 
       <Money fils={transaction.amountFils} sign={incoming ? 'plus' : 'minus'} type="smallBold" decimals />
     </View>
     <TransferAnswerChoices incoming={incoming} value={null} onChange={onAnswer} palette={palette} layout="buttons" disabled={busy} />
-    {total > 1 ? <Pressable testID="transfer-question-see-all" accessibilityRole="button" onPress={onSeeAll} style={styles.seeAll}>
-      <ThemedText type="small" style={{ color: palette.tint }}>{words.card.seeAll(total)}</ThemedText>
+    {total + more > 1 ? <Pressable testID="transfer-question-see-all" accessibilityRole="button" onPress={onSeeAll} style={styles.seeAll}>
+      {/* The title already says how many; See all counts only when it reaches more than the card asks. */}
+      <ThemedText type="small" style={{ color: palette.tint }}>{more > 0 ? words.card.seeAll(total + more) : words.card.seeAllPlain}</ThemedText>
     </Pressable> : null}
   </View>;
 }

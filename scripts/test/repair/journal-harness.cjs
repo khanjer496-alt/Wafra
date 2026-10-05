@@ -185,6 +185,17 @@ function harness(options = {}) {
   dependencies['@/lib/coin-math'] = load(path.join(root, 'src/lib/coin-math.ts'));
   dependencies['@/components/ui/coins/coin-stack'] = { CoinStack: (props) => ({ type: 'CoinStack', props }) };
   dependencies['@/components/ui/coins/coin-disc'] = { ghostTone: () => ({}) };
+  // Home's coin motion (Today's coins, the average's day columns, In against
+  // Spent, an arriving row) as its final frame: values hold what they are
+  // given and runs never start, as Reduce Motion shows them.
+  native.Animated = (() => {
+    const run = { start() {}, stop() {} };
+    class Value { constructor(value) { this.value = value; } setValue(value) { this.value = value; } interpolate() { return this; } }
+    return { View: 'View', Value, timing: () => run, spring: () => run, delay: () => run, sequence: () => run, parallel: () => run };
+  })();
+  dependencies['@/hooks/use-reduced-motion'] = { useReducedMotion: () => true, useMotionPreference: () => ({ ready: true, reducedMotion: true }) };
+  dependencies['@/components/ui/coins/coin-motion'] = load(path.join(root, 'src/components/ui/coins/coin-motion.ts'), dependencies);
+  dependencies['@/components/ui/coins/coin-token'] = { CoinToken: (props) => ({ type: 'CoinToken', props }) };
   dependencies['@/components/reference-home-summary'] = load(path.join(root, 'src/components/reference-home-summary.tsx'), dependencies);
   dependencies['@/lib/merchant-spending-copy'] = load(path.join(root, 'src/lib/merchant-spending-copy.ts'));
   const bankIdentity = load(path.join(root, 'src/lib/markets.ts'));
@@ -192,6 +203,8 @@ function harness(options = {}) {
   dependencies['@noble/hashes/sha2.js'] = require('@noble/hashes/sha2.js');
   dependencies['@noble/hashes/utils.js'] = require('@noble/hashes/utils.js');
   dependencies['@/lib/transfer-reconciliation'] = load(path.join(root, 'src/lib/transfer-reconciliation.ts'), dependencies);
+  // Home counts the Transfers question card's queue (transferQuestionQueue), from source.
+  dependencies['@/lib/transfer-activity'] = load(path.join(root, 'src/lib/transfer-activity.ts'), dependencies);
   dependencies['@/lib/transfer-review-copy'] = load(path.join(root, 'src/lib/transfer-review-copy.ts'), dependencies);
   dependencies['@/lib/transfer-activity-copy'] = load(path.join(root, 'src/lib/transfer-activity-copy.ts'), dependencies);
   dependencies['@/lib/period'].inPeriod = require('../build/period.js').inPeriod;

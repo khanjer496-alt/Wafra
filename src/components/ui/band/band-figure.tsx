@@ -72,6 +72,12 @@ export interface BandFigureProps {
   rolling?: boolean;
   /** Horizontal space around the figure beyond the band gutters (a tile's padding). */
   fitInset?: number;
+  /**
+   * Keep the currency on the amount's line by setting the digits smaller (to
+   * no less than 60% of the size) before giving it a line of its own, so two
+   * tiles side by side read alike. Larger Text still stacks.
+   */
+  inlineCurrency?: boolean;
   style?: StyleProp<ViewStyle>;
   testID?: string;
 }
@@ -86,7 +92,7 @@ export interface BandFigureProps {
  */
 export function BandFigure({
   label, fils, moneySpec, sign = 'none', decimals, qualifier, palette, size = 'hero',
-  color, secondaryColor, rolling = false, fitInset = 0, style, testID,
+  color, secondaryColor, rolling = false, fitInset = 0, inlineCurrency = false, style, testID,
 }: BandFigureProps) {
   const contextMoney = useLedgerMoney();
   const localeKey = useMoneyLocaleKey();
@@ -105,10 +111,13 @@ export function BandFigure({
   // sign/separators. Fit the BASE size too: a font multiplier cannot shrink
   // 56pt text at the default system scale, which clipped million-size values.
   const amountEm = Math.max(1, figureEms(amount));
-  const fittedSize = Math.min(metrics.fontSize, availableWidth / amountEm);
-  const multiplier = Math.max(1, Math.min(metrics.cap, fontScale, availableWidth / (amountEm * fittedSize)));
-  const textScale = Math.min(Math.max(1, fontScale), multiplier);
   const prefixWidth = currencyLabel.length * metrics.prefix * Math.max(1, fontScale) * 0.7;
+  // With the currency kept inline, the digits fit the room beside it.
+  const inlineRoom = availableWidth - prefixWidth - 6;
+  const room = inlineCurrency && !large && inlineRoom / amountEm >= metrics.fontSize * 0.6 ? inlineRoom : availableWidth;
+  const fittedSize = Math.min(metrics.fontSize, room / amountEm);
+  const multiplier = Math.max(1, Math.min(metrics.cap, fontScale, room / (amountEm * fittedSize)));
+  const textScale = Math.min(Math.max(1, fontScale), multiplier);
   const stacked = large || amountEm * fittedSize * textScale + prefixWidth + 6 > availableWidth;
   const fitRatio = fittedSize / metrics.fontSize;
   const figureStyle: TextStyle[] = [styles.figure, {

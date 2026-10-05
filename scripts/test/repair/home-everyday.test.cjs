@@ -101,15 +101,23 @@ test('capture stopped: notice, "I was away" snooze and the Left to spend caveat'
   assert.deepEqual(android.events.at(-1), ['route', '/settings?section=imports']);
 });
 
-test('the transfer notice appears only for a non-empty review queue and opens the review', () => {
+test('the transfer notice appears only for a non-empty review queue and opens the Transfers page', () => {
   assert.equal(byId(createHarness({ platform: 'ios' }).render('home'), 'transfer-review-notice'), undefined);
-  const h = createHarness({ platform: 'ios', states: { [PENDING]: { count: 2, incomingFils: 0, outgoingFils: 21200 } } });
+  const h = createHarness({ platform: 'ios', states: { [PENDING]: { count: 2, incomingFils: 0, outgoingFils: 21200, questions: 2 } } });
   const tree = h.render('home');
   const notice = byId(tree, 'transfer-review-notice');
-  assert.match(text(notice), /2 transfers to confirm/);
+  assert.match(text(notice), /2 transfers need an answer/);
   assert.doesNotMatch(text(notice), /AED/, 'a disclosure, not a monetary backlog');
   notice.props.onPress();
-  assert.deepEqual(h.events.at(-1), ['route', '/review-transfers']);
+  // The Transfers page's question card takes the queue one at a time; its "See all" reaches the bulk review.
+  assert.deepEqual(h.events.at(-1), ['route', '/transfers']);
+  // Queued entries the card cannot ask about (a duplicate observation, an archived account)
+  // are reached only through the review screen, so with no question left the notice opens it.
+  const unasked = createHarness({ platform: 'ios', states: { [PENDING]: { count: 1, incomingFils: 0, outgoingFils: 5000, questions: 0 } } });
+  const lone = byId(unasked.render('home'), 'transfer-review-notice');
+  assert.match(text(lone), /1 transfer needs an answer/);
+  lone.props.onPress();
+  assert.deepEqual(unasked.events.at(-1), ['route', '/review-transfers']);
 });
 
 test('Arabic week keeps concise visible days and full spoken names', () => {
