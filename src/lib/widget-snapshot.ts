@@ -36,6 +36,12 @@ export interface WidgetSpendingCategory {
   label: string;
   /** Minor units spent this month; null when amounts are hidden. */
   amountMinor: number | null;
+  /**
+   * The category's own colour (src/lib/category-colors.ts) as "#RRGGBB", so
+   * the widgets draw the Spending tab's coin row. Not an amount: written in
+   * hidden mode too. Absent from older snapshots, which keep the share bar.
+   */
+  color?: string;
 }
 
 /**
@@ -53,6 +59,8 @@ export interface WidgetSpending {
   categories: WidgetSpendingCategory[];
   /** Every category after those, together; null when hidden. */
   otherMinor: number | null;
+  /** The pooled coin's colour (CATEGORY_REST), "#RRGGBB"; only beside coloured categories. */
+  otherColor?: string;
 }
 
 export interface WidgetSnapshot {
@@ -97,7 +105,14 @@ export interface WidgetSnapshotInput {
   hideAmounts: boolean;
   language: 'en' | 'ar';
   /** This month's spending by category, largest first, already labelled. */
-  spending?: { monthKey: string; totalFils: number; categories: readonly { label: string; fils: number }[] } | null;
+  spending?: {
+    monthKey: string;
+    totalFils: number;
+    /** `color` is the category's own "#RRGGBB" (categoryColors), for the widgets' coin row. */
+    categories: readonly { label: string; fils: number; color?: string }[];
+    /** The pooled coin's colour. */
+    restColor?: string;
+  } | null;
 }
 
 export function buildWidgetSnapshot(input: WidgetSnapshotInput): WidgetSnapshot {
@@ -144,10 +159,23 @@ function widgetSpending(
   const spent = spending.categories.filter((row) => row.fils > 0);
   const named = spent.slice(0, WIDGET_SPENDING_CATEGORIES);
   const rest = spent.slice(WIDGET_SPENDING_CATEGORIES).reduce((sum, row) => sum + row.fils, 0);
+  // Colours are written only when every named category has one, so a widget
+  // either draws the whole coin row or keeps the older share bar.
+  const coloured = named.length > 0 && named.every((row) => isWidgetColor(row.color));
+  const otherColor = coloured && isWidgetColor(spending.restColor) ? spending.restColor.toUpperCase() : null;
   return {
     monthKey: spending.monthKey,
     totalMinor: money(spending.totalFils),
-    categories: named.map((row) => ({ label: row.label, amountMinor: money(row.fils) })),
+    categories: named.map((row) => ({
+      label: row.label, amountMinor: money(row.fils),
+      ...(coloured ? { color: row.color!.toUpperCase() } : {}),
+    })),
     otherMinor: money(rest),
+    ...(otherColor ? { otherColor } : {}),
   };
+}
+
+/** "#RRGGBB" only: the native readers accept nothing else. */
+export function isWidgetColor(value: unknown): value is string {
+  return typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/.test(value);
 }

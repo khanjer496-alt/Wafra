@@ -3,31 +3,45 @@
  * prompt. Android words the READ_SMS grant as "send and view SMS messages";
  * a person reading only that sentence has good reason to refuse. This screen
  * says what Wafra actually does with it, then hands over to the real prompt.
+ * Above it, the Welcome hero's story without the pattern shows the same thing
+ * in one picture: an example bank alert's amount becomes a coin filed under
+ * its category (sms-coin-scene.tsx, decorative). At the accessibility text
+ * sizes the plain message icon stands in for it.
  */
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { ETextAction } from '@/components/onboarding/e-frame';
+import { SmsCoinScene } from '@/components/onboarding/sms-coin-scene';
 import { ThemedText } from '@/components/themed-text';
 import { EButton } from '@/components/ui/band/e-button';
 import { Icon } from '@/components/ui/icon';
 import { Fonts, Spacing, type BandPalette } from '@/constants/theme';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { onboardingCopy } from '@/lib/onboarding-copy';
+import { onboardingECopy } from '@/lib/onboarding-e-copy';
 
 /** Drawn on the first-payment band (design language E), in its palette. */
-export function SmsPermissionExplainer({ language, disabled, onContinue, onNotNow, palette }: {
+export function SmsPermissionExplainer({ language, disabled, onContinue, onNotNow, palette, currency, country }: {
   language: 'en' | 'ar';
   disabled: boolean;
   onContinue: () => void;
   onNotNow: () => void;
   palette: BandPalette;
+  /** The currency confirmed on Name, for the example alert's amount; the phone's suggestion when absent. */
+  currency?: string | null;
+  /** The country confirmed on Name, for the example's regional grocer; the phone's Region when absent. */
+  country?: string | null;
 }) {
   const copy = onboardingCopy(language);
+  const largeText = useLargeTextLayout();
   return (
     <View style={styles.root} testID="onboarding-sms-explainer">
-      <View style={[styles.icon, { backgroundColor: palette.tile }]}>
+      {largeText ? <View style={[styles.icon, { backgroundColor: palette.tile }]}>
         <Icon name="mail" size={26} color={palette.onBand} />
-      </View>
+      </View> : <SmsCoinScene palette={palette} sender={onboardingECopy(language).exampleSender} language={language}
+        currency={currency} country={country}
+        testID="onboarding-sms-explainer-scene" />}
       <View style={styles.hero}>
         <ThemedText style={[styles.title, { color: palette.onBand }]} accessibilityRole="header">{copy.smsExplainerTitle}</ThemedText>
         <ThemedText style={[styles.body, { color: palette.onBandSecondary }]}>{copy.smsExplainerBody}</ThemedText>

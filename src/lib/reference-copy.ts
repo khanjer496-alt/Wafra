@@ -133,7 +133,8 @@ export const homeSummaryCopy = {
     stoppedCauseAndroid: 'SMS or notification access may have been turned off, or battery settings may be stopping Wafra.',
     checkSetup: 'Check setup', away: 'I was away',
     mayBeHigh: 'May be too high until capture resumes', ask: 'Ask', askHint: 'Opens Ask Wafra',
-    transfersToConfirm: (n: number) => `${n} ${n === 1 ? 'transfer' : 'transfers'} to confirm`,
+    // Worded like the Transfers question card it opens, so the queue has one name.
+    transfersToConfirm: (n: number) => `${n} ${n === 1 ? 'transfer needs' : 'transfers need'} an answer`,
     transfersNotCounted: 'Not counted in spending or income until you confirm.' },
   ar: { balance: 'الأرصدة المسجلة', net: 'الصافي بعد الإنفاق', notBalance: 'الدخل ناقص الإنفاق · ليس رصيد البنك',
     moneyIn: 'الدخل', moneyOut: 'المصروفات', netLabel: 'الصافي', totalSpent: 'إجمالي الإنفاق',
@@ -165,8 +166,8 @@ export const homeSummaryCopy = {
     stoppedCauseAndroid: 'قد يكون الوصول إلى الرسائل أو الإشعارات متوقفاً، أو قد تمنع إعدادات البطارية وفرة من العمل.',
     checkSetup: 'تحقق من الإعداد', away: 'كنت غائباً',
     mayBeHigh: 'قد يكون أعلى من الحقيقي حتى يُستأنف الالتقاط', ask: 'اسأل', askHint: 'يفتح اسأل وفرة',
-    transfersToConfirm: (n: number) => n === 1 ? 'تحويل واحد بحاجة إلى تأكيد' : n === 2 ? 'تحويلان بحاجة إلى تأكيد'
-      : n <= 10 ? `${n} تحويلات بحاجة إلى تأكيد` : `${n} تحويلاً بحاجة إلى تأكيد`,
+    transfersToConfirm: (n: number) => n === 1 ? 'تحويل واحد بانتظار إجابتك' : n === 2 ? 'تحويلان بانتظار إجابتك'
+      : n <= 10 ? `${n} تحويلات بانتظار إجابتك` : `${n} تحويلاً بانتظار إجابتك`,
     transfersNotCounted: 'لا تُحتسب في الإنفاق أو الدخل حتى تؤكدها.' },
 };
 

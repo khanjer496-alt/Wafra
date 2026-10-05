@@ -26,17 +26,20 @@ test('only the first rows travel when the list appears, staggered', () => {
   assert.ok([...intro.values()].every(cue => cue.at === 1000));
 });
 
-test('a route travels again when its money is explained as moving between own accounts', () => {
+test('a route travels again the moment its question is answered, own account or someone else', () => {
   const before = cues.legTags([item('q', 'needs-answer'), item('c', 'unconfirmed'), item('x', 'external')]);
   // Answering own links the two legs into one route under a new key.
-  assert.deepEqual(cues.newlyOwnRoutes(before, [item('q|c', 'own'), item('x', 'external')]), ['q|c']);
+  assert.deepEqual(cues.newlyAnsweredRoutes(before, [item('q|c', 'own'), item('x', 'external')]), ['q|c']);
   // A single leg answered own keeps its key.
-  assert.deepEqual(cues.newlyOwnRoutes(before, [item('q', 'own')]), ['q']);
-  // Paid someone else, Undo back to a question, or a route first seen already own: no coin.
-  assert.deepEqual(cues.newlyOwnRoutes(before, [item('q', 'external')]), []);
-  assert.deepEqual(cues.newlyOwnRoutes(cues.legTags([item('q|c', 'own')]), [item('q', 'needs-answer')]), []);
-  assert.deepEqual(cues.newlyOwnRoutes(before, [item('new|other', 'own')]), [], 'a period change brings it in already own');
-  assert.deepEqual(cues.newlyOwnRoutes(cues.legTags([item('q|c', 'own')]), [item('q|c', 'own')]), []);
+  assert.deepEqual(cues.newlyAnsweredRoutes(before, [item('q', 'own')]), ['q']);
+  // Paid someone else is an answer too: the coin travels to the "Someone else" the "?" became.
+  assert.deepEqual(cues.newlyAnsweredRoutes(before, [item('q', 'external')]), ['q']);
+  // Undo back to a question, a route first seen already answered, or swapping one answer for
+  // the other: no coin.
+  assert.deepEqual(cues.newlyAnsweredRoutes(cues.legTags([item('q|c', 'own')]), [item('q', 'needs-answer')]), []);
+  assert.deepEqual(cues.newlyAnsweredRoutes(before, [item('new|other', 'own')]), [], 'a period change brings it in already own');
+  assert.deepEqual(cues.newlyAnsweredRoutes(cues.legTags([item('q|c', 'own')]), [item('q|c', 'own')]), []);
+  assert.deepEqual(cues.newlyAnsweredRoutes(before, [item('x', 'own')]), [], 'someone else changed to own is not a new answer');
 });
 
 test('a cue is played only while fresh, so a row scrolled back into view stays still', () => {

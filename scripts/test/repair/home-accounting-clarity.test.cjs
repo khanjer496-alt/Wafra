@@ -44,10 +44,14 @@ test('Home names only the real transfer review queue; Accounts does not turn it 
   const home = fs.readFileSync(path.join(root, 'src/screens/journal-home-screen.tsx'), 'utf8');
   const wallet = fs.readFileSync(path.join(root, 'src/app/(tabs)/wallet.tsx'), 'utf8');
   // The redesign shows "N transfers to confirm" on Home, counted from the same
-  // pendingIds the review screen lists (the reconciliation cached per stored
-  // transfer receipt), and only when that queue is non-empty.
+  // queue the Transfers question card answers (one question per movement, from
+  // the reconciliation cached per stored transfer receipt); with no question
+  // left it names the queued entries only the review screen reaches. Shown only
+  // when that queue is non-empty.
   assert.match(home, /const reconciliation = [^;]*transferReconciliationForState\(state\)/);
-  assert.match(home, /pendingTransferSummary\(state\.transactions, reconciliation\.pendingIds\)/);
+  assert.match(home, /const queue = transferQuestionQueue\(activity\);/);
+  assert.match(home, /: unaskedPendingIds\(activity, reconciliation\.pendingIds\)/);
+  assert.match(home, /pendingTransferSummary\(state\.transactions, ids\)/);
   assert.match(home, /pendingTransfers && pendingTransfers\.count > 0 \? <TransferReviewNotice/);
   assert.doesNotMatch(wallet, /router\.push\('\/review-transfers'\)/);
 });

@@ -42,6 +42,8 @@ const en = {
   exampleLabel: 'An example pattern',
   /** The example pattern's initial: a letter, not anyone's name. */
   exampleInitial: 'W',
+  /** The example alert's sender on Welcome: never a bank's name. */
+  exampleSender: 'Your bank · example',
   getStarted: 'Get started',
   restoreBackup: 'Restore from a backup',
   // 2 · Name
@@ -118,6 +120,8 @@ const en = {
   legendWatch: 'What you watch',
   legendRemind: 'Your reminders',
   patternNote: 'No two are the same. It sits at the top of your Home.',
+  /** Only the first tile so far: limits and bills are what add tiles later (patternInputFromState). */
+  patternNoteStarting: 'It starts with you. It fills in as you set limits and add bills, and sits at the top of your Home.',
   oneLastThing: 'One last thing',
   openWafra: 'Open Wafra',
   // 8 · Paywall
@@ -155,6 +159,7 @@ const ar: OnboardingECopy = {
   welcomeBody: 'بضعة أسئلة. كل إجابة تشكّل وفرتك ونمطك.',
   exampleLabel: 'مثال على نمط',
   exampleInitial: 'و',
+  exampleSender: 'بنكك · مثال',
   getStarted: 'ابدأ',
   restoreBackup: 'الاستعادة من نسخة احتياطية',
   nameTitle: 'أولاً، ما اسمك؟',
@@ -225,6 +230,7 @@ const ar: OnboardingECopy = {
   legendWatch: 'ما تراقبه',
   legendRemind: 'تذكيراتك',
   patternNote: 'لا يتشابه نمطان. سيظهر أعلى صفحتك الرئيسية.',
+  patternNoteStarting: 'يبدأ نمطك بك، ويكتمل كلما وضعت حدوداً للإنفاق وأضفت فواتيرك. سيظهر أعلى صفحتك الرئيسية.',
   oneLastThing: 'أمر أخير',
   openWafra: 'افتح وفرة',
   paywallTitle: 'دعه يعمل من تلقاء نفسه.',

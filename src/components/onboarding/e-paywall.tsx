@@ -14,27 +14,34 @@
  * shown as unavailable, never at a guessed price. "Start the free N days"
  * is always there and never needs the store.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, AppState, Easing, Linking, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { EBody, EHeadline, EStepFrame, ETextAction, fitPatternTile } from '@/components/onboarding/e-frame';
+import { E_GUTTER, EBody, EHeadline, EStepFrame, ETextAction, fitPatternTile } from '@/components/onboarding/e-frame';
+import { useStepPhase } from '@/components/onboarding/e-motion';
 import { useWafraBilling, type ProPlanOffer, type ProPurchaseOutcome } from '@/components/superwall-billing-context';
 import { ThemedText } from '@/components/themed-text';
 import { EButton } from '@/components/ui/band/e-button';
+import { CoinToken } from '@/components/ui/coins/coin-token';
+import { COIN_RISE, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
 import { PatternMosaic } from '@/components/ui/pattern-mosaic';
 import type { BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { t, tf } from '@/lib/i18n';
 import { trialTimeline } from '@/lib/onboarding-e';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
-import type { PatternTile } from '@/lib/pattern';
+import { compactPattern, patternSize, type PatternTile } from '@/lib/pattern';
 import { configuredPublicUrl } from '@/lib/public-links';
 import { billingStore, type ProPlan } from '@/lib/purchases';
 
 const PLAN_ORDER: ProPlan[] = ['yearly', 'monthly'];
+/** How strongly the pattern shows behind the paywall's words, per scheme. */
+const BACKDROP_LIGHT = 0.42;
+const BACKDROP_DARK = 0.62;
 
 type Notice = { title: string; body: string } | null;
 
@@ -162,6 +169,119 @@ function PlanCard({ offer, plan, selected, onPress, palette }: {
   </Pressable>;
 }
 
+/**
+ * What the decoration draws, in a 46 × 50 box: the category tile at the bottom
+ * start, two coins already resting at its foot (the tray), and room above the
+ * tile for the next coin to fall through in plain sight.
+ */
+const DROP_TILE = 30;
+const DROP_COIN = 12;
+const DROP_ROOM = 20;
+const TRAY_COIN = 12;
+const KEEPS_WIDTH = 46;
+const KEEPS_HEIGHT = DROP_ROOM + DROP_TILE;
+/** The falling coin starts wholly above the tile and lands centred on its face. */
+const COIN_START = (DROP_TILE - DROP_COIN) / 2;
+const COIN_FALL = DROP_ROOM + (DROP_TILE - DROP_COIN) / 2;
+/** One coin's fall, its sinking into the tile, then a rest before the next. */
+const FALL_MS = 620;
+const SINK_MS = 240;
+const REST_MS = 1500;
+/** The still frame (Reduce Motion, paused, in the background): the next coin poised above the tile. */
+const STILL = 0.2;
+/** Where it sits: inside the 52pt top row, clear of the backdrop that starts 56pt down. */
+const KEEPS_TOP = 3;
+/**
+ * Nothing watched: an example tile, the "other" category's glyph. It names
+ * no category of theirs and carries no figure.
+ */
+const EXAMPLE_TILE: PatternTile = { key: 'watch:example', group: 'watch', kind: 'glyph', col: 0, row: 0,
+  color: 'sand', mark: 'green', category: 'other', order: 0 };
+
+/**
+ * What Pro keeps doing, as a quiet loop in the header's corner: a coin
+ * falls onto their own watched category's tile (the one in their pattern)
+ * and sinks into it, one at a time, beside the coins it has already taken —
+ * the way each alert lands by itself. Decoration only: hidden
+ * from assistive tech, untouchable, a fixed size so nothing around it moves.
+ * It holds still under Reduce Motion or a screen reader, while a purchase or
+ * restore is busy, and while the app is not in the foreground; core Animated
+ * on the native driver, stopped when it unmounts.
+ */
+export function KeepsGoing({ tile, paused }: { tile: PatternTile | null; paused: boolean }) {
+  const { ready, reducedMotion } = useMotionPreference();
+  const drop = useAnimatedNumber(STILL);
+  const sink = useAnimatedNumber(0);
+  const dip = useAnimatedNumber(0);
+  useEffect(() => {
+    const rest = () => { drop.setValue(STILL); sink.setValue(0); dip.setValue(0); };
+    if (reducedMotion || !ready || paused) { rest(); return; }
+    let loop: Animated.CompositeAnimation | null = null;
+    const start = () => {
+      if (loop) return;
+      drop.setValue(0);
+      sink.setValue(0);
+      dip.setValue(0);
+      loop = Animated.loop(Animated.sequence([
+        Animated.timing(drop, { toValue: 1, duration: FALL_MS, easing: Easing.in(Easing.quad), useNativeDriver: nativeDriver }),
+        // The coin lands on the tile's face and sinks into it; the tile takes it with a small dip.
+        Animated.parallel([
+          Animated.timing(sink, { toValue: 1, duration: SINK_MS, easing: Easing.in(Easing.quad), useNativeDriver: nativeDriver }),
+          Animated.sequence([
+            Animated.timing(dip, { toValue: 1, duration: 90, useNativeDriver: nativeDriver }),
+            Animated.spring(dip, { toValue: 0, ...COIN_RISE, useNativeDriver: nativeDriver }),
+          ]),
+        ]),
+        Animated.delay(REST_MS),
+        Animated.timing(drop, { toValue: 0, duration: 0, useNativeDriver: nativeDriver }),
+        Animated.timing(sink, { toValue: 0, duration: 0, useNativeDriver: nativeDriver }),
+      ]));
+      loop.start();
+    };
+    const stop = () => {
+      loop?.stop();
+      loop = null;
+      rest();
+    };
+    if (AppState.currentState !== 'background') start();
+    const subscription = AppState.addEventListener('change', (next) => { if (next === 'active') start(); else stop(); });
+    return () => {
+      subscription.remove();
+      stop();
+    };
+  }, [dip, drop, paused, ready, reducedMotion, sink]);
+  const paint = useMemo(() => ({
+    coin: {
+      opacity: Animated.multiply(
+        drop.interpolate({ inputRange: [0, 0.08, 1], outputRange: [0, 1, 1], extrapolate: 'clamp' }),
+        sink.interpolate({ inputRange: [0, 1], outputRange: [1, 0], extrapolate: 'clamp' })),
+      transform: [
+        { translateY: drop.interpolate({ inputRange: [0, 1], outputRange: [0, COIN_FALL] }) },
+        { scale: sink.interpolate({ inputRange: [0, 1], outputRange: [1, 0.4], extrapolate: 'clamp' }) },
+      ],
+    },
+    tile: {
+      transform: [
+        { translateY: dip.interpolate({ inputRange: [0, 1], outputRange: [0, 3] }) },
+        { scale: dip.interpolate({ inputRange: [0, 1], outputRange: [1, 0.95] }) },
+      ],
+    },
+  }), [dip, drop, sink]);
+  return <View pointerEvents="none" accessible={false} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
+    style={styles.keepsGoing} testID="onboarding-paywall-keeps-going">
+    <Animated.View style={[styles.dropTile, paint.tile]} testID="onboarding-paywall-keeps-going-tile">
+      <PatternMosaic tiles={[tile ?? EXAMPLE_TILE]} tile={DROP_TILE} compact accessibilityLabel="" />
+    </Animated.View>
+    {/* The tray: coins this tile has already taken, resting at its foot. */}
+    <View style={[styles.trayCoin, { start: DROP_TILE - TRAY_COIN / 2 }]}><CoinToken size={TRAY_COIN} /></View>
+    <View style={[styles.trayCoin, { start: DROP_TILE + TRAY_COIN / 3 }]}><CoinToken size={TRAY_COIN} /></View>
+    {/* Drawn last, over the tile: the coin falls in plain sight and lands on the tile's face. */}
+    <Animated.View style={[styles.dropCoin, paint.coin]} testID="onboarding-paywall-keeps-going-coin">
+      <CoinToken size={DROP_COIN} />
+    </Animated.View>
+  </View>;
+}
+
 export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, captureOn, onFinish, onBack, onClose, preview, finishing }: {
   tiles: readonly PatternTile[];
   /** The first watched category's name, if they set a limit. */
@@ -184,31 +304,56 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
   const band = useBand('home');
   const largeText = useLargeTextLayout();
   const tile = fitPatternTile(useWindowDimensions().width, 52);
+  // Packed as Home's header draws it, so the backdrop is the picture they will land on.
+  const backdrop = compactPattern(tiles);
+  const backdropSize = patternSize(tile, Math.max(2, Math.round((tile * 6) / 52)), backdrop.columns, backdrop.rows);
+  const watchTile = tiles.find((item) => item.group === 'watch') ?? null;
   const insets = useSafeAreaInsets();
+  // The step layer's fade (in the gate), so the drawings outside the frame arrive and leave with it.
+  const phase = useStepPhase();
   const checkout = useOnboardingCheckout(!preview, onFinish);
   const timeline = trialTimeline(trialDays);
   const store = billingStore();
   const privacyUrl = configuredPublicUrl('privacyPolicyUrl');
   const termsUrl = configuredPublicUrl('termsOfUseUrl');
   const busy = checkout.busy !== null || finishing;
+  const freeLabel = trialDays > 0 ? words.startFree(trialDays) : words.continueFree;
+  // Without a Pro button (the web, a store that is not there), the free way on
+  // is the screen's one action, so it is drawn as one rather than as a link.
+  const proShown = checkout.state !== 'unavailable';
   const openLegal = (url: string) => {
     void Linking.openURL(url).catch(() => checkout.setNotice({ title: t('legalLinkFailed'), body: t('legalLinkFailedBody') }));
   };
   return <View style={styles.root}>
-    <View pointerEvents="none" accessible={false} importantForAccessibility="no-hide-descendants"
-      style={[styles.behind, { top: insets.top + 56 }]}>
-      <PatternMosaic tiles={tiles} tile={tile} style={{ opacity: 0.4 }} accessibilityLabel="" />
-    </View>
+    {/* Both drawings sit outside EStepFrame, so they take the step's own fade (phase.paint): they
+        arrive with the words, after the pattern step's mosaic has gone, and leave with them. */}
+    <Animated.View pointerEvents="none" accessible={false} importantForAccessibility="no-hide-descendants"
+      style={[styles.behind, { top: insets.top + 56 }, phase.paint]} testID="onboarding-paywall-backdrop">
+      <View style={styles.behindFrame}>
+        {/* Dimmed behind the words; the dark band needs more of it for the tiles to stay visible. */}
+        <PatternMosaic tiles={tiles} tile={tile} compact style={{ opacity: band.scheme === 'dark' ? BACKDROP_DARK : BACKDROP_LIGHT }}
+          accessibilityLabel="" />
+      </View>
+    </Animated.View>
+    {/* In the header's own room, beside the back control and above the backdrop: out of the
+        scrolling column, so the price, plans, terms and buttons sit exactly where they would without it. */}
+    <Animated.View pointerEvents="none" accessible={false} importantForAccessibility="no-hide-descendants"
+      style={[styles.behind, { top: insets.top + KEEPS_TOP }, phase.paint]} testID="onboarding-paywall-corner">
+      <View style={[styles.keepsFrame, onClose ? styles.keepsBesideClose : null]}>
+        <KeepsGoing tile={watchTile} paused={busy} />
+      </View>
+    </Animated.View>
     <EStepFrame palette={band} step={null} onBack={onBack} onClose={onClose} backDisabled={busy} testID="onboarding-paywall"
-      contentStyle={styles.content}
+      contentStyle={{ paddingTop: backdropSize.height + 40 }} pinActions={false}
       footer={<>
-        {checkout.state !== 'unavailable' ? <EButton palette={band}
+        {proShown ? <EButton palette={band}
           color={{ fill: band.accent, text: band.onAccent }}
           label={checkout.busy === 'purchase' ? t('purchaseInProgress') : words.continuePro}
           onPress={() => void checkout.purchase()} disabled={busy || preview || !checkout.selected} busy={checkout.busy === 'purchase'}
           testID="onboarding-paywall-pro" /> : null}
-        <ETextAction palette={band} label={trialDays > 0 ? words.startFree(trialDays) : words.continueFree}
-          onPress={onFinish} disabled={busy} testID="onboarding-paywall-free" />
+        {proShown ? <ETextAction palette={band} label={freeLabel} onPress={onFinish} disabled={busy} testID="onboarding-paywall-free" />
+          : <EButton palette={band} color={{ fill: band.accent, text: band.onAccent }} label={freeLabel}
+            onPress={onFinish} disabled={busy} testID="onboarding-paywall-free" />}
         {Platform.OS !== 'web' && !preview ? <ETextAction palette={band} label={t('restorePurchase')}
           onPress={() => void checkout.restore()} disabled={busy} testID="onboarding-paywall-restore" /> : null}
       </>}>
@@ -263,7 +408,15 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
 const styles = StyleSheet.create({
   root: { flex: 1, width: '100%' },
   behind: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
-  content: { paddingTop: 150 },
+  // EStepFrame's own column (560 wide at most, its gutter), so the backdrop starts where the words start.
+  behindFrame: { width: '100%', maxWidth: 560, paddingHorizontal: E_GUTTER, alignItems: 'flex-start' },
+  keepsGoing: { width: KEEPS_WIDTH, height: KEEPS_HEIGHT },
+  keepsFrame: { width: '100%', maxWidth: 560, paddingHorizontal: E_GUTTER, alignItems: 'flex-end' },
+  // The close control (the Settings preview) keeps the end corner; the drawing sits just inside it.
+  keepsBesideClose: { paddingEnd: E_GUTTER + 44 },
+  dropCoin: { position: 'absolute', top: 0, start: COIN_START },
+  dropTile: { position: 'absolute', top: DROP_ROOM, start: 0 },
+  trayCoin: { position: 'absolute', top: KEEPS_HEIGHT - TRAY_COIN },
   timeline: { flexDirection: 'row', gap: 8 },
   stacked: { flexDirection: 'column' },
   stage: { flex: 1, borderRadius: 16, padding: 12, gap: 4 },

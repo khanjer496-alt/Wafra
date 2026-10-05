@@ -111,6 +111,28 @@ test('an unknown end shows a dashed "?" and is still named in the label', () => 
   assert.ok(byId(tree, 'transfer-row-p').props.accessibilityLabel.includes('Unknown'));
 });
 
+test('once answered, the "?" becomes the answer: Your account or Someone else, drawn and spoken', () => {
+  for (const language of ['en', 'ar']) {
+    const h = harness(language);
+    const words = language === 'ar' ? { someone: 'شخص آخر', yours: 'حسابك' } : { someone: 'Someone else', yours: 'Your account' };
+    // Paid someone else, the other side never identified.
+    const paid = row(h, { direction: 'out', from: { kind: 'account', accountId: 'adcb' }, to: { kind: 'unknown' }, tag: 'external' });
+    assert.ok(!text(paid).includes('?'), `${language}: no question mark once answered`);
+    assert.ok(byId(paid, 'transfer-route-answered'), `${language}: the answered end is drawn`);
+    assert.ok(text(paid).includes(words.someone));
+    assert.ok(byId(paid, 'transfer-row-p').props.accessibilityLabel.includes(words.someone));
+    // Came from my own account, which account not known.
+    const own = row(h, { direction: 'in', from: { kind: 'unknown' }, to: { kind: 'account', accountId: 'adcb' }, tag: 'own' });
+    assert.ok(!text(own).includes('?'));
+    assert.ok(text(own).includes(words.yours));
+    assert.ok(byId(own, 'transfer-row-p').props.accessibilityLabel.includes(words.yours));
+  }
+  // Still a question: still "?".
+  const open = row(harness('en'), { direction: 'out', from: { kind: 'account', accountId: 'adcb' }, to: { kind: 'unknown' }, tag: 'needs-answer' });
+  assert.ok(text(open).includes('?'));
+  assert.equal(byId(open, 'transfer-route-answered'), undefined);
+});
+
 test('unanswered rows are signed by direction; own rows stay unsigned', () => {
   const h = harness('en');
   assert.ok(text(row(h, { tag: 'needs-answer' })).includes('−'));

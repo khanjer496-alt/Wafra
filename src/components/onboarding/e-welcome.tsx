@@ -1,20 +1,23 @@
 /**
- * E1 · Welcome (ink). The mark draws itself, an example pattern builds and
- * rebuilds above the headline — labelled as an example, spoken as one —
- * then one plain sentence, Get started and the existing backup restore.
- * No language switch here (owner decision, 2026-09-25): the app already
- * follows the phone's language and Settings changes it.
+ * E1 · Welcome (ink). The mark draws itself, then the headline and one plain
+ * sentence; below them, filling the screen down to Get started, the hero:
+ * an example bank alert whose amount lifts off as a coin into its category,
+ * and the example pattern settling around that tile (sms-coin-scene.tsx) —
+ * labelled as an example, spoken as one — then Get started and the existing
+ * backup restore. No language switch here (owner decision, 2026-09-25): the
+ * app already follows the phone's language and Settings changes it.
  */
 import React, { useMemo } from 'react';
 import { Platform, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { EBody, EHeadline, EStepFrame, ETextAction, bandButtonColor, fitPatternTile } from '@/components/onboarding/e-frame';
-import { LogoDraw, useReplayKey } from '@/components/onboarding/e-motion';
+import { LogoDraw } from '@/components/onboarding/e-motion';
+import { SmsCoinScene } from '@/components/onboarding/sms-coin-scene';
 import { ThemedText } from '@/components/themed-text';
 import { EButton } from '@/components/ui/band/e-button';
-import { PatternMosaic } from '@/components/ui/pattern-mosaic';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
+import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import { buildPattern } from '@/lib/pattern';
 
@@ -28,21 +31,29 @@ function examplePattern(initial: string) {
   });
 }
 
-export function WelcomeStep({ onStart, onRestore, restoreNote, onClose, disabled }: {
+export function WelcomeStep({ onStart, onRestore, restoreNote, onClose, disabled, currency, country }: {
   onStart: () => void;
   /** Absent in the Settings preview and on web, where restore is not offered. */
   onRestore?: () => void;
   restoreNote: string | null;
   onClose?: () => void;
   disabled: boolean;
+  /** The example alert's currency; the phone's suggested currency when absent. */
+  currency?: string | null;
+  /** A confirmed country, for the example's regional grocer; the phone's Region when absent. */
+  country?: string | null;
 }) {
   const language = useLanguage();
   const words = onboardingECopy(language);
   const band = useBand('home');
   const tiles = useMemo(() => examplePattern(words.exampleInitial), [words.exampleInitial]);
-  const replay = useReplayKey(9000);
-  const tile = fitPatternTile(useWindowDimensions().width, 44);
-  return <EStepFrame palette={band} step={null} onClose={onClose} testID="onboarding-welcome"
+  const { width, height } = useWindowDimensions();
+  const largeText = useLargeTextLayout();
+  // Short phones and the accessibility text sizes draw the pattern smaller so
+  // Get started stays close; the scene still stacks above it.
+  const tile = fitPatternTile(width, largeText || height < 700 ? 34 : 44);
+  const pattern = useMemo(() => ({ tiles, tile, label: words.exampleLabel }), [tiles, tile, words.exampleLabel]);
+  return <EStepFrame palette={band} step={null} onClose={onClose} testID="onboarding-welcome" contentStyle={styles.content}
     footer={<>
       <EButton palette={band} color={bandButtonColor(band)} label={words.getStarted} onPress={onStart}
         disabled={disabled} testID="onboarding-get-started" />
@@ -52,17 +63,19 @@ export function WelcomeStep({ onStart, onRestore, restoreNote, onClose, disabled
         style={[styles.note, { color: band.onBand }]}>{restoreNote}</ThemedText> : null}
     </>}>
     <View style={styles.logo}><LogoDraw size={38} color={band.accent} /></View>
-    <View style={styles.example} testID="onboarding-example-pattern">
-      <PatternMosaic key={replay} tiles={tiles} tile={tile} animate accessibilityLabel={words.exampleLabel} />
-      <ThemedText type="meta" style={{ color: band.onBandSecondary }} accessible={false}>{words.exampleLabel}</ThemedText>
-    </View>
     <EHeadline palette={band} size={Platform.OS === 'web' ? 52 : 56}>{words.welcomeHeadline}</EHeadline>
     <EBody palette={band}>{words.welcomeBody}</EBody>
+    <View style={styles.hero}>
+      <SmsCoinScene palette={band} sender={words.exampleSender} pattern={pattern} currency={currency} country={country}
+        testID="onboarding-sms-coin-scene" />
+    </View>
   </EStepFrame>;
 }
 
 const styles = StyleSheet.create({
+  content: { flexGrow: 1 },
   logo: { paddingTop: 28 },
-  example: { gap: 10, paddingTop: 12, paddingBottom: 16 },
+  // The space between the sentence and Get started is the scene's.
+  hero: { flexGrow: 1, justifyContent: 'center', paddingTop: 12, paddingBottom: 8 },
   note: { textAlign: 'center' },
 });

@@ -37,18 +37,20 @@ export function legTags(items: readonly Pick<TransferListItem, 'key' | 'transact
 }
 
 /**
- * Routes that have just been explained as money moving between the person's
- * own accounts: tagged own now, and at least one of their legs was listed
- * before with another tag. A row first seen already own (a period change, a
- * first paint) is not an arrival; neither is Undo, which leaves own.
+ * Routes that have just been answered: tagged own or someone else now, and at
+ * least one of their legs was listed before as an open question (needs an
+ * answer, or not answered yet). The coin then travels the route the person
+ * just explained, to the account or person the "?" became. A row first seen
+ * already answered (a period change, a first paint) is not an arrival; neither
+ * is Undo, which goes back to a question, nor switching one answer for the other.
  */
-export function newlyOwnRoutes(
+export function newlyAnsweredRoutes(
   previous: ReadonlyMap<string, TransferTag>,
   items: readonly Pick<TransferListItem, 'key' | 'transactionId' | 'linked' | 'tag'>[],
 ): string[] {
-  return items.filter(item => item.tag === 'own' && routeLegIds(item).some(id => {
+  return items.filter(item => (item.tag === 'own' || item.tag === 'external') && routeLegIds(item).some(id => {
     const before = previous.get(id);
-    return before !== undefined && before !== 'own';
+    return before === 'needs-answer' || before === 'unconfirmed';
   })).map(item => item.key);
 }
 

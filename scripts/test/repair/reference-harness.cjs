@@ -43,6 +43,7 @@ function createHarness(options = {}) {
     monthLabel:(k,short=false)=>new Date(k+'-01T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:short?'short':'long',year:'numeric'}),
     shiftMonthKey:(k,n)=>{const d=new Date(k+'-01T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+n);return d.toISOString().slice(0,7)},
     shortDate:d=>new Date(d+'T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:'short',day:'numeric'}),
+    shortDateWithYear:d=>new Date(d+'T12:00:00Z').toLocaleDateString(lang==='ar'?'ar-AE':'en-GB',{month:'short',day:'numeric',...(d.slice(0,4)===String(new Date().getFullYear())?{}:{year:'numeric'})}),
     weekdayShort:d=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d], weekdayName:d=>['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d],
     toISODate:d=>d.toISOString().slice(0,10),clockTime:()=>'',parseAmountToFils:s=>isFinite(Number(s))?Math.round(Number(s)*100):null,parseAmountWithMoneySpec,
     totalAsShown:a=>a.reduce((s,v)=>s+v,0),fullDateTime:tx=>tx.date,friendlyDate:d=>format.shortDate(d),

@@ -15,7 +15,6 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import Animated from 'react-native-reanimated';
 
 import { StorageRecovery } from '@/components/storage-recovery';
 import { ThemedText } from '@/components/themed-text';
@@ -24,10 +23,19 @@ import { ConfirmSheet } from '@/components/ui/confirm-sheet';
 import { EButton } from '@/components/ui/band/e-button';
 import { CaptureChecklist } from '@/components/onboarding/capture-checklist';
 import { EBody, EHeadline, EStepFrame, ETextAction, bandButtonColor } from '@/components/onboarding/e-frame';
-import { ArrivedCard, ResultStrip, SourceRow, TrustLine } from '@/components/onboarding/e-first-payment';
+import { ArrivedCard, LimitResult, ResultStrip, SourceRow, TrustLine } from '@/components/onboarding/e-first-payment';
 import { GoalsStep } from '@/components/onboarding/e-goals';
 import { HandoffLayer } from '@/components/onboarding/e-handoff';
-import { LogoDraw, StepWipe, stepEntering, useEMotion } from '@/components/onboarding/e-motion';
+import {
+  LogoDraw,
+  StepLayer,
+  StepWipe,
+  useEMotion,
+  useLeavingRelease,
+  useStepMotion,
+  withLeavingStep,
+  type LeavingStep,
+} from '@/components/onboarding/e-motion';
 import { NameStep } from '@/components/onboarding/e-name';
 import { PatternStep } from '@/components/onboarding/e-pattern';
 import { PaywallStep } from '@/components/onboarding/e-paywall';
@@ -155,6 +163,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const params = useGlobalSearchParams<{ onboarding?: string; statementSession?: string }>();
   const router = useRouter();
   const eMoving = useEMotion();
+  /** Step changes animate (everywhere, Android too) unless Reduce Motion or a screen reader is on. */
+  const stepMoving = useStepMotion();
   const {
     state,
     // The Watch step's budgets and the currency they need; Goals' ids.
@@ -236,8 +246,18 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   /** Statements opened from the result step return to the result, not to step 5. */
   const resumeAtResult = useRef(false);
   /** The colour wipe between steps: the colour it wipes from. */
-  const shownColor = useRef<string | null>(null);
   const [wipe, setWipe] = useState<{ from: string; key: number } | null>(null);
+  /**
+   * The steps just left, still drawn while their content fades (under the
+   * wipe, or fading off the new step), so a step change never shows an empty
+   * colour field. Each is the element last committed for it, kept under the
+   * same key, so the step is not mounted again; inert and hidden from
+   * assistive tech, with the keyboard closed (useLeavingRelease).
+   */
+  const [leaving, setLeaving] = useState<LeavingStep<Step>[]>([]);
+  /** The active step's element as last committed (written by its layer's effect, never during render). */
+  const committedFrame = useRef<{ step: Step; element: React.ReactNode } | null>(null);
+  useLeavingRelease(leaving, () => setLeaving([]));
   /** The pattern handed to Home's header after the last screen. */
   const [handoff, setHandoff] = useState<PatternInput | null>(null);
   /** The latest capture-derived alert answer, readable by the save that follows it. */
@@ -523,6 +543,20 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeStep, state.transactions, state.accounts, state.budgets, state.transferInternalIds]);
+  /**
+   * The watched limit this month when nothing arrived by itself (added by
+   * hand, or still waiting): real spending against the real limit, drawn on
+   * the result as Home will draw it. Null without a limit.
+   */
+  const watchedNow = useMemo(() => {
+    if (activeStep !== 'complete' || firstPayment) return null;
+    const live = liveAccountIds(state.accounts);
+    const internal = internalTransferIdsForState(state);
+    const spending = (tx: (typeof state.transactions)[number]) => isSpending(tx, live, internal);
+    const period = currentMonthPeriod();
+    return watchedProgress(null, state.budgets, state.transactions, spending, (date) => inPeriod(date, period));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeStep, firstPayment, state.transactions, state.accounts, state.budgets, state.transferInternalIds]);
   const firstRunCopy = onboardingCopy(language);
   const shortcutWords = iosShortcutSetupCopy(language);
 
@@ -545,6 +579,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const suggestedCurrency = useMemo(suggestedLedgerCurrency, []);
   const shownCurrency = (previewMode ? currencyDraft : null) ?? state.ledgerMoney?.currency ?? suggestedCurrency;
   const watchMoney = state.ledgerMoney ?? (shownCurrency ? ledgerMoneySpec(shownCurrency) : null);
+  /** What the person confirmed, for the example alerts (Welcome, the SMS explainer); undefined lets them use the phone's guess. */
+  const confirmedCurrency = (previewMode ? currencyDraft : null) ?? state.ledgerMoney?.currency ?? undefined;
+  const confirmedCountry = selectedCountry ?? undefined;
 
   /**
    * The pattern as far as the journey has got: the name from step 1, the
@@ -641,6 +678,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     (!state.onboarded || finishing || previewMode || revealAfterSetup) &&
     !isIosSetupRoute &&
     !isOnboardingStatementRoute;
+  /**
+   * The step and colour the overlay last showed, and whether it was showing:
+   * state, so a discarded render changes nothing. It starts as what this
+   * first render shows, so mounting writes nothing.
+   */
+  const [shown, setShown] = useState(() => ({ step: activeStep, color: stepBand.band, visible: showOverlay }));
   // Serialize permission, cleanup and durable completion actions. A second tap
   // must never start the other capture choice while the first is unresolved.
   const runSetupAction = async (action: () => Promise<void>) => {
@@ -1285,14 +1328,27 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // colour is never replaced by the new one for a frame first; the first
   // colour is only recorded, and nothing is remembered while hidden.
   if (!showOverlay) {
-    shownColor.current = null;
+    if (shown.visible) setShown({ ...shown, visible: false });
+    if (leaving.length > 0) setLeaving([]);
     return <View style={styles.container}>{gatedChildren}{handoffLayer}</View>;
   }
   const overlayColor = stepBand.band;
-  if (overlayColor !== shownColor.current) {
-    const from = shownColor.current;
-    shownColor.current = overlayColor;
-    if (from !== null && eMoving) setWipe({ from, key: (wipe?.key ?? 0) + 1 });
+  // A new step or colour, derived during render from state (React's
+  // "previous value" pattern), so the old colour is never replaced by the new
+  // one for a frame first: the wipe starts, and the step just left (its
+  // element as last committed) stays drawn while it goes.
+  if (!shown.visible || shown.step !== activeStep || shown.color !== overlayColor) {
+    setShown({ step: activeStep, color: overlayColor, visible: true });
+    // Nothing wipes or leaves when the overlay has only just appeared.
+    if (shown.visible) {
+      const wipeStarts = eMoving && shown.color !== overlayColor;
+      if (wipeStarts) setWipe((current) => ({ from: shown.color, key: (current?.key ?? 0) + 1 }));
+      const frame = committedFrame.current;
+      if (shown.step !== activeStep && stepMoving && frame?.step === shown.step) {
+        const left: LeavingStep<Step> = { step: shown.step, color: shown.color, wipe: wipeStarts, element: frame.element };
+        setLeaving((current) => withLeavingStep(current, left, activeStep));
+      }
+    }
   }
 
 
@@ -1346,6 +1402,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
 
   const captureStep = (
     <EStepFrame palette={stepBand} step={5} testID={Platform.OS === 'ios' ? 'onboarding-ios-live' : 'onboarding-capture'}
+      // Pinned only with a primary action: Set up on iPhone, Continue once an
+      // Android source is ready. "How it works" alone ends the scroll.
+      pinActions={Platform.OS === 'ios' || (Platform.OS === 'android' && (androidSmsReady || androidNotificationReady))}
       // Back from the SMS explainer returns to the source list on the same
       // step; it never leaves the explainer flag set behind.
       onBack={smsExplainerVisible ? () => setSmsExplainerVisible(false) : goBack}
@@ -1372,6 +1431,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             void runSetupAction(startScan);
           }}
           onNotNow={() => setSmsExplainerVisible(false)}
+          currency={confirmedCurrency} country={confirmedCountry}
         />
       ) : <>
         <EHeadline palette={stepBand} size={42}>{Platform.OS === 'ios' ? t('onboardLiveTitle') : words.captureTitle}</EHeadline>
@@ -1440,6 +1500,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         : !automaticCompletion ? t('onboardCompleteManualBody')
           : firstPayment ? null
             : words.waitingBody;
+  // Nothing arrived by itself: the watched limit, still whole, as Home's stack.
+  const completeWatch = watchedNow && state.ledgerMoney && !failedCompletion && !smsDenied && !finishSaveFailed
+    ? <LimitResult palette={stepBand} watch={watchedNow} money={state.ledgerMoney} />
+    : null;
   const completeStep = (
     <EStepFrame palette={stepBand} step={5} testID="onboarding-complete"
       onBack={revealAfterSetup ? undefined : goBack} onClose={onClose} backDisabled={backDisabled}
@@ -1455,6 +1519,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           onPress={showPattern} disabled={setupBusy || transitioning} testID="onboarding-complete-continue" />}>
       <EHeadline palette={stepBand} size={42}>{completeTitle}</EHeadline>
       {completeBody ? <EBody palette={stepBand}>{completeBody}</EBody> : null}
+      {completeWatch}
       {smsDenied ? <View style={styles.recovery}>
         <ThemedText type="meta" accessibilityLiveRegion="polite" style={{ color: stepBand.onBand }}>{t('onboardSmsDenied')}</ThemedText>
         <EButton palette={stepBand} variant="secondary" label={t('retryHistoryRead')}
@@ -1508,7 +1573,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       case 'welcome':
         return <WelcomeStep onStart={openName} onClose={onClose} disabled={transitioning}
           onRestore={!previewMode && Platform.OS !== 'web' ? () => void pickBackupToRestore() : undefined}
-          restoreNote={restoreFailed === 'read' ? firstRunCopy.restoreReadFailed : restoreFailed ? t('notAWafraBackup') : null} />;
+          restoreNote={restoreFailed === 'read' ? firstRunCopy.restoreReadFailed : restoreFailed ? t('notAWafraBackup') : null}
+          // Back on Welcome after confirming them: the example alert in their own currency and region.
+          currency={confirmedCurrency} country={confirmedCountry} />;
       case 'name':
         return <NameStep nameDraft={nameDraft}
           onChangeName={(value) => { setNameDraft(value); setNameSaveFailed(false); }}
@@ -1556,15 +1623,33 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // The step change (board E10): the step just left stays on its colour while
+  // its content fades — under the wipe on iPhone, or fading whole off the new
+  // step where there is no wipe — and the new content rises in as it goes.
+  const stepElement = renderStep();
+  const shownLeaving = leaving.filter((item) => item.step !== activeStep);
+  const leavingLayer = (item: LeavingStep<Step>) => <StepLayer key={`step-${item.step}`} leaving wipe={item.wipe}
+    arriving={false} color={item.color}>{item.element}</StepLayer>;
+  const underWipe = shownLeaving.filter((item) => item.wipe);
+  const wipeLayer = wipe
+    ? <StepWipe key={`wipe-${wipe.key}`} from={underWipe.length > 0 ? undefined : wipe.from} to={stepBand.band}
+      onDone={() => setWipe(null)} />
+    : null;
+  const activeLayer = <StepLayer key={`step-${activeStep}`} leaving={false} wipe={wipe !== null} arriving
+    follows={shownLeaving.length > 0} color={overlayColor}
+    onCommit={(element) => { committedFrame.current = { step: activeStep, element }; }}>
+    {stepElement}
+  </StepLayer>;
+  // Under the wipe the old step is below the circle; without one it is on top, fading off.
+  const stepLayers = [...underWipe.map(leavingLayer), wipeLayer, activeLayer,
+    ...shownLeaving.filter((item) => !item.wipe).map(leavingLayer)];
+
   return (
     <View style={styles.container}>
       {gatedChildren}
       <View style={[StyleSheet.absoluteFillObject, styles.root, { backgroundColor: stepBand.band }]}>
         <StatusBar style={stepBand.statusBar} />
-        {wipe ? <StepWipe key={wipe.key} from={wipe.from} to={stepBand.band} onDone={() => setWipe(null)} /> : null}
-        <Animated.View key={activeStep} entering={stepEntering(wipe !== null)} style={styles.stepLayer}>
-          {renderStep()}
-        </Animated.View>
+        {stepLayers}
         <BottomSheet
           visible={learnMoreVisible}
           onClose={() => setLearnMoreVisible(false)}
@@ -1621,7 +1706,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   hidden: { ...StyleSheet.absoluteFillObject, opacity: 0 },
   root: { flex: 1, alignItems: 'center' },
-  stepLayer: { flex: 1, width: '100%' },
   loadingRoot: {
     flex: 1,
     alignItems: 'center',

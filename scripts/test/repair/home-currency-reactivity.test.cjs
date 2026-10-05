@@ -58,6 +58,8 @@ function harness() {
     // Left in budgets' coin stack: decoration beside the figure, no money text.
     '@/components/ui/coins/coin-stack': { CoinStack: 'CoinStack' }, '@/lib/coin-math': local('coin-math'),
     '@/components/ui/coins/coin-disc': { ghostTone: () => ({}) },
+    // Home's other coin drawings (Today, the average's days, In against Spent) carry no money text.
+    '@/components/ui/coins/coin-motion': { COIN_RISE: {}, COIN_STAGGER: 45, nativeDriver: false, useAnimatedNumber: (value) => ({ value }) },
     // Spending's sheet pieces in language E: the tiles and bars carry no money
     // text of their own; the rows' Money and spoken labels are under test.
     '@/components/ui/band/e-button': { EButton: 'EButton' }, '@/components/ui/band/glyph-tile': { GlyphTile: 'GlyphTile' },
@@ -65,6 +67,7 @@ function harness() {
     '@/hooks/use-band': { useBand: () => ({ text: 'ink', textSecondary: 'gray', rule: 'rule', card: 'card', sheet: 'sheet', tint: 'clay', statusOver: 'red' }) },
     '@/lib/everyday-band-copy': local('everyday-band-copy'), '@/lib/limit-status': local('limit-status'),
     '@/constants/theme': { Fonts: {}, Spacing: { two: 8 },
+      CoinColors: { face: '#EDC85E', side: '#B98F2E', rim: '#5E4610', shine: '#FFF4CF', shadow: '#000000' },
       DataViz: { light: { neutral: '#E3DED2' }, dark: { neutral: '#3B362E' } } },
     '@/hooks/use-theme': { useTheme: () => theme }, '@/lib/reference-copy': local('reference-copy'),
     '@/hooks/use-language': { useLanguage: () => i18n.getLanguage() },
@@ -121,7 +124,7 @@ function harness() {
   deps['react-native-reanimated'] = { __esModule: true, default: { View: 'Animated.View', Text: 'Animated.Text' },
     Easing: { bezier: () => (t) => t }, useAnimatedStyle: () => ({}), useSharedValue: (value) => ({ value }),
     withDelay: (_delay, value) => value, withTiming: (value) => value };
-  deps['@/hooks/use-reduced-motion'] = { useReducedMotion: () => true };
+  deps['@/hooks/use-reduced-motion'] = { useReducedMotion: () => true, useMotionPreference: () => ({ ready: true, reducedMotion: true }) };
   deps['@/lib/rolling-digits'] = local('rolling-digits');
   // Spending's per-category colours (pure): the coins and the row tiles share them.
   deps['@/lib/category-colors'] = local('category-colors');

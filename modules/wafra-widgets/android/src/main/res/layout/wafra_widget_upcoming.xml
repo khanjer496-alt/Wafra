@@ -56,6 +56,41 @@
         android:visibility="gone" />
     </LinearLayout>
 
+    <!-- The next 30 days as a short strip: each listed bill's tile on its
+         date, the soonest lifted (WidgetGraphics.billStrip). Three layers:
+         tiles in the tile tone, the baseline, marks, initials and single-ink
+         logos in the text tone, and brand logos in their own colours. Shown
+         only where the height leaves room after the rows
+         (WafraWidgets.upcomingShowsStrip). Decorative: the rows say it all. -->
+    <FrameLayout
+      android:id="@+id/wafra_upcoming_strip"
+      android:layout_width="match_parent"
+      android:layout_height="30dp"
+      android:layout_marginTop="6dp"
+      android:importantForAccessibility="noHideDescendants"
+      android:visibility="gone">
+      <ImageView
+        android:id="@+id/wafra_upcoming_strip_tiles"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter"
+        android:tint="@color/wafra_widget_upcoming_tile" />
+      <ImageView
+        android:id="@+id/wafra_upcoming_strip_marks"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter"
+        android:tint="@color/wafra_widget_upcoming_text" />
+      <ImageView
+        android:id="@+id/wafra_upcoming_strip_logos"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="fitCenter" />
+    </FrameLayout>
+
     <!-- Empty and stale states sit centred in the space under the header;
          a clear month also shows the calendar glyph. -->
     <LinearLayout

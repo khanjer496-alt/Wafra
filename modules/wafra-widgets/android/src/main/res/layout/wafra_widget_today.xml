@@ -138,21 +138,39 @@
         <!-- The band figure: semibold sans with tabular digits (never a
              monospaced face). The currency code is set smaller and dimmed in
              code. It shrinks to fit rather than cutting a number short. -->
-        <TextView
-          android:id="@+id/wafra_today_amount"
+        <!-- The figure and, at its end, a coin per payment today (at most
+             six, none with none), drawn in code (WidgetGraphics.coinStack).
+             Decorative, like Home's Today stack: hidden from TalkBack. -->
+        <LinearLayout
           android:layout_width="match_parent"
-          android:layout_height="38dp"
-          android:autoSizeMaxTextSize="30sp"
-          android:autoSizeMinTextSize="11sp"
-          android:autoSizeTextType="uniform"
-          android:fontFamily="sans-serif-medium"
-          android:fontFeatureSettings="tnum"
-          android:gravity="center_vertical|start"
-          android:letterSpacing="-0.02"
-          android:maxLines="1"
-          android:textAlignment="viewStart"
-          android:textColor="@color/wafra_widget_today_text"
-          android:textSize="28sp" />
+          android:layout_height="wrap_content"
+          android:gravity="bottom"
+          android:orientation="horizontal">
+          <TextView
+            android:id="@+id/wafra_today_amount"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="38dp"
+            android:autoSizeMaxTextSize="30sp"
+            android:autoSizeMinTextSize="11sp"
+            android:autoSizeTextType="uniform"
+            android:fontFamily="sans-serif-medium"
+            android:fontFeatureSettings="tnum"
+            android:gravity="center_vertical|start"
+            android:letterSpacing="-0.02"
+            android:maxLines="1"
+            android:textAlignment="viewStart"
+            android:textColor="@color/wafra_widget_today_text"
+            android:textSize="28sp" />
+          <ImageView
+            android:id="@+id/wafra_today_coins"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:layout_marginStart="8dp"
+            android:importantForAccessibility="no"
+            android:visibility="gone" />
+        </LinearLayout>
 
         <!-- How much of the budgets is used: accent, or the over colour once
              a budget is past its limit. -->

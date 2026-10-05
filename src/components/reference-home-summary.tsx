@@ -1,15 +1,17 @@
 import { homeSummaryCopy as copy } from '@/lib/reference-copy';
-import React from 'react';
-import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { Animated, Pressable, StyleSheet, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import { Money } from '@/components/ui/money';
 import { BandFigure, figureEms } from '@/components/ui/band/band-figure';
-import { ghostTone } from '@/components/ui/coins/coin-disc';
+import { ghostTone, type CoinTone } from '@/components/ui/coins/coin-disc';
+import { COIN_RISE, COIN_STAGGER, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
 import { CoinStack } from '@/components/ui/coins/coin-stack';
 import { StatTile, statTileColors } from '@/components/ui/band/stat-tile';
 import { WeekTiles } from '@/components/ui/band/week-tiles';
-import { Fonts, type BandPalette, type Colors } from '@/constants/theme';
+import { CoinColors, Fonts, type BandPalette, type Colors } from '@/constants/theme';
+import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { filledCoins, shareOf } from '@/lib/coin-math';
 import { formatMinorUnits, formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
 import type { HomeToday } from '@/lib/home-today';
@@ -73,6 +75,45 @@ type BandProps = Props & {
 const LEFT_COINS = 8;
 const LEFT_COIN_WIDTH = 22;
 const LEFT_COIN_GAP = 8;
+/** Today's coins: one per payment today, at most this many; the figure and count say the rest. */
+const TODAY_COINS = 6;
+const TODAY_COIN_WIDTH = 18;
+/** The daily average's columns: one per day it divides by, for a window of up to a month. */
+const AVERAGE_MAX_DAYS = 31;
+/** Coins in the biggest day's column; the others are drawn against it. */
+const AVERAGE_COLUMN_COINS = 5;
+/**
+ * Money in and spent as two stacks of this many coins, scaled to the larger:
+ * small enough that each stack and its name fit the month line's 40pt header.
+ */
+const FLOW_COINS = 6;
+const FLOW_COIN_WIDTH = 12;
+/** The gold coin, from the theme: one object, so memoised columns keep their props. */
+const GOLD_TONE: CoinTone = { face: CoinColors.face, side: CoinColors.side, rim: CoinColors.rim };
+
+/** Coins in Today's stack: one per payment today, never more than there were, capped. */
+export function todayCoinCount(payments: number): number {
+  return Number.isFinite(payments) ? Math.max(0, Math.min(TODAY_COINS, Math.floor(payments))) : 0;
+}
+
+/**
+ * Coins in each day's column of the daily average, against the biggest day:
+ * that day fills its column, a day with any spending shows at least one coin,
+ * and a day with none shows none.
+ */
+export function averageColumnCoins(days: readonly number[], total = AVERAGE_COLUMN_COINS): number[] {
+  const largest = days.reduce((max, fils) => Math.max(max, fils), 0);
+  return days.map((fils) => filledCoins(shareOf(Math.max(0, fils), largest), total));
+}
+
+/** Coins of money in and of spending, each against the larger of the two; null when neither moved. */
+export function flowStackCoins(incomeFils: number, expenseFils: number, total = FLOW_COINS): { income: number; spent: number } | null {
+  const income = Math.max(0, incomeFils);
+  const spent = Math.max(0, expenseFils);
+  const larger = Math.max(income, spent);
+  if (!(larger > 0)) return null;
+  return { income: filledCoins(shareOf(income, larger), total), spent: filledCoins(shareOf(spent, larger), total) };
+}
 
 /** Today | Left in budgets as band tiles, then the last seven days as bars. Amounts are the shared ledger figures. */
 function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToday; part?: 'today' | 'week' | 'both' }) {
@@ -107,6 +148,24 @@ function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToda
   const coins = budget !== null && budget.limitFils > 0 && !p.largeText
     ? filledCoins(shareOf(budget.leftFils, budget.limitFils), LEFT_COINS) : null;
   const coinRoom = coins === null ? 0 : LEFT_COIN_WIDTH + LEFT_COIN_GAP;
+  // Today: a coin per payment, standing at the tile's bottom end beside its
+  // count, dropping in as each one is captured. No payments, no coins; Larger
+  // Text leaves the figure the tile.
+  const todayCoins = p.largeText ? 0 : todayCoinCount(today.todayCount);
+  const todayTile = statTileColors(p.band, 'band');
+  // The room a tile leaves its figure, as BandFigure's inset: half the band
+  // less the 10pt gap and the tile's 14pt padding each side (stacked under
+  // Larger Text, the whole band less the padding), less anything beside it.
+  const tileInset = (beside: number) => (p.largeText ? 28 + (p.figureInset ?? 0)
+    : Math.ceil(width / 2 + 9 + (p.figureInset ?? 0) / 2)) + beside;
+  // The daily average with no budget: a column per day it divides by, each
+  // as tall as that day's everyday spending against the biggest day. Only
+  // for a window of up to a month, where a column per day still fits.
+  const averageDays = budget === null && !offerBudget && average !== null && !p.largeText && today.averageDays
+    && today.averageDays.length === average.days && average.days <= AVERAGE_MAX_DAYS
+    && today.averageDays.some((fils) => fils > 0) ? today.averageDays : null;
+  // The tile's inner width: half the band less the gap, its padding and any sheet inset.
+  const averageRow = Math.max(48, (width - 40 - 10 - (p.figureInset ?? 0)) / 2 - 28);
   // Full Arabic weekday names only where seven really fit: a column is about
   // 44pt on a 390pt phone, narrower than الخميس in Noto Kufi. Otherwise the
   // initials, with full names always spoken.
@@ -119,7 +178,10 @@ function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToda
         accessibilityLabel={`${w.today}, ${money(today.todayFils)}. ${countLabel}`} accessibilityHint={w.opensActivity}
         style={p.largeText && styles.tileStacked}>
         {/* A new capture rolls only the digits that changed; static under Reduce Motion or a screen reader. */}
-        <BandFigure fils={today.todayFils} moneySpec={p.moneySpec} palette={p.band} size="medium" rolling fitInset={(p.largeText ? 28 : 200) + (p.figureInset ?? 0)} />
+        <BandFigure fils={today.todayFils} moneySpec={p.moneySpec} palette={p.band} size="medium" rolling inlineCurrency
+          fitInset={tileInset(0)} />
+        {todayCoins > 0 ? <CoinStack testID="home-today-coins" total={todayCoins} filled={todayCoins} width={TODAY_COIN_WIDTH}
+          ghost={ghostTone(todayTile.bg, todayTile.fg)} style={styles.todayCoins} /> : null}
       </StatTile>
       {offerBudget ? <StatTile palette={p.band} tone="accent" label={w.leftToSpend} testID="home-left-to-spend"
         style={p.largeText && styles.tileStacked}>
@@ -138,10 +200,12 @@ function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToda
         style={p.largeText && styles.tileStacked}>
         <View style={{ paddingEnd: coinRoom }}>
           <BandFigure fils={rightFils} moneySpec={p.moneySpec} palette={p.band} size="medium" color={accent.fg}
-            secondaryColor={accent.fgSecondary} fitInset={(p.largeText ? 28 : 200) + coinRoom + (p.figureInset ?? 0)} />
+            secondaryColor={accent.fgSecondary} inlineCurrency fitInset={tileInset(coinRoom)} />
           {coins === null ? null : <CoinStack testID="home-left-coins" total={LEFT_COINS} filled={coins} width={LEFT_COIN_WIDTH}
             ghost={ghostTone(accent.bg, accent.fg)} style={styles.coinStack} />}
         </View>
+        {averageDays ? <AverageColumns testID="home-average-columns" days={averageDays} rowWidth={averageRow}
+          surface={accent.bg} ink={accent.fg} /> : null}
         {caveat ? <ThemedText type="smallBold" style={{ color: accent.fg }} testID="home-left-caveat">{w.mayBeHigh}</ThemedText> : null}
       </StatTile> : null}
     </View> : null}
@@ -152,6 +216,136 @@ function TodayTiles({ p, today, part = 'both' }: { p: BandProps; today: HomeToda
     <WeekTiles testID="home-week" palette={p.band} moneySpec={p.moneySpec} height={70} accessibilityLabel={weekSpoken}
       days={today.week.map(day => ({ key: day.dateISO, label: fullWeekdays ? w.weekdayFull(day.weekday) : w.weekday(day.weekday),
         spokenLabel: w.weekdayFull(day.weekday), fils: day.fils, today: day.today }))} /></> : null}
+  </View>;
+}
+
+/**
+ * The daily average's days as a row of coin columns seen a little from above,
+ * oldest at the start (the right in Arabic). Each column is that day's
+ * everyday spending against the biggest day; a day with none is one empty
+ * coin. They rise from the baseline one after another once; columns that
+ * arrive later (a new day, another period) stand in place. Decorative: the
+ * tile writes and speaks the average.
+ */
+const AverageColumns = React.memo(function AverageColumns({ days, rowWidth, surface, ink, testID }: {
+  days: readonly number[];
+  rowWidth: number;
+  /** The tile's colour and its text colour, for an empty day's coin. */
+  surface: string;
+  ink: string;
+  testID?: string;
+}) {
+  const motion = useMotionPreference();
+  const ghost = useMemo(() => ghostTone(surface, ink), [surface, ink]);
+  const revealed = useRef(false);
+  useEffect(() => { if (motion.ready) revealed.current = true; });
+  const coins = useMemo(() => averageColumnCoins(days), [days]);
+  const count = coins.length;
+  const gap = count > 15 ? 1 : 3;
+  const width = Math.max(3, Math.min(12, Math.floor((rowWidth - gap * (count - 1)) / count)));
+  const face = Math.max(2, Math.round(width * 0.36));
+  const edge = Math.max(2, Math.round(width * 0.24));
+  // A month of columns starts within about a second, not two.
+  const stagger = Math.min(COIN_STAGGER, Math.floor(900 / Math.max(1, count)));
+  return <View testID={testID} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
+    style={[styles.columns, { gap, height: face + AVERAGE_COLUMN_COINS * edge }]}>
+    {coins.map((filled, index) => <CoinColumn key={index} coins={filled} width={width} face={face} edge={edge}
+      tone={filled > 0 ? GOLD_TONE : ghost} delay={index * stagger} appear={!revealed.current}
+      ready={motion.ready} reducedMotion={motion.reducedMotion} testID={testID ? `${testID}-day-${index}` : undefined} />)}
+  </View>;
+});
+
+/** One day's column: a cylinder of `coins` coins (one empty coin for none) that rises from the baseline once. */
+const CoinColumn = React.memo(function CoinColumn({ coins, width, face, edge, tone, delay, appear, ready, reducedMotion, testID }: {
+  coins: number;
+  width: number;
+  face: number;
+  edge: number;
+  tone: CoinTone;
+  delay: number;
+  /** False for a column that arrives after the row's first reveal: it stands in place. */
+  appear: boolean;
+  ready: boolean;
+  reducedMotion: boolean;
+  testID?: string;
+}) {
+  const level = Math.max(1, coins);
+  const tall = face + level * edge;
+  const rise = useAnimatedNumber(reducedMotion || !appear ? 1 : 0);
+  const shown = useRef(reducedMotion || !appear);
+  // Read when the rise starts: a re-render must not restart a column on its way.
+  const wait = useRef(delay);
+  wait.current = delay;
+  useEffect(() => {
+    if (reducedMotion) {
+      shown.current = true;
+      rise.setValue(1);
+      return;
+    }
+    // Hold still until the screen-reader state is known (see use-reduced-motion).
+    if (!ready || shown.current) return;
+    shown.current = true;
+    const run = Animated.sequence([
+      Animated.delay(wait.current),
+      Animated.spring(rise, { toValue: 1, ...COIN_RISE, useNativeDriver: nativeDriver }),
+    ]);
+    run.start();
+    // The rise runs once: interrupted, the column lands where it belongs.
+    return () => {
+      run.stop();
+      rise.setValue(1);
+    };
+  }, [ready, reducedMotion, rise]);
+  // Built once per height: from below the baseline (clipped by the row) up to its place.
+  const paint = useMemo(() => ({
+    transform: [{ translateY: rise.interpolate({ inputRange: [0, 1], outputRange: [tall + 2, 0] }) }],
+  }), [rise, tall]);
+  const lined = width >= 6;
+  const ellipse = (top: number) => ({
+    position: 'absolute' as const, start: 0, top: top + face / 2 - width / 2, width, height: width,
+    borderRadius: width / 2, transform: [{ scaleY: face / width }],
+  });
+  const rim = lined ? { borderWidth: 1, borderColor: tone.rim } : null;
+  return <Animated.View testID={testID} style={[{ width, height: tall }, paint]}>
+    {/* The bottom coin's lower edge, the side of the column, the lines between coins, then the top face. */}
+    <View style={[ellipse(level * edge), { backgroundColor: tone.side }, rim]} />
+    <View style={[styles.columnSide, { top: face / 2, height: level * edge, backgroundColor: tone.side },
+      lined && { borderStartWidth: 1, borderEndWidth: 1, borderColor: tone.rim }]} />
+    {lined ? Array.from({ length: level - 1 }, (_, line) => <View key={line}
+      style={[styles.columnLine, { top: face / 2 + (line + 1) * edge, backgroundColor: tone.rim }]} />) : null}
+    <View style={[ellipse(0), { backgroundColor: tone.face }, rim]} />
+  </Animated.View>;
+});
+
+/**
+ * Money in and spending for the period as two coin stacks side by side, in
+ * the order the figures are written (Spent, then In), each scaled against the
+ * larger and named under it with the card's own words: the difference in
+ * their heights is the net. Money in of zero is an empty stack. Decorative:
+ * the figures beside it are written and spoken.
+ */
+function FlowStacks({ incomeFils, expenseFils, surface, ink, spent, income, style }: {
+  incomeFils: number;
+  expenseFils: number;
+  /** The surface the stacks stand on and its text colour, for the empty places. */
+  surface: string;
+  ink: string;
+  /** Each stack's name, as the card already writes it, in its figure's colour. */
+  spent: { label: string; color: string };
+  income: { label: string; color: string };
+  style?: StyleProp<ViewStyle>;
+}) {
+  const coins = flowStackCoins(incomeFils, expenseFils);
+  if (coins === null) return null;
+  const ghost = ghostTone(surface, ink);
+  return <View testID="home-flow-coins" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden
+    style={[styles.flowCoins, style]}>
+    {([['spent', coins.spent, spent], ['in', coins.income, income]] as const).map(([id, filled, name]) =>
+      <View key={id} style={styles.flowColumn}>
+        <CoinStack testID={`home-flow-coins-${id}`} total={FLOW_COINS} filled={filled} width={FLOW_COIN_WIDTH} ghost={ghost} />
+        <ThemedText testID={`home-flow-coins-${id}-label`} maxFontSizeMultiplier={1.2} numberOfLines={1}
+          style={[styles.flowLabel, { color: name.color }]}>{name.label}</ThemedText>
+      </View>)}
   </View>;
 }
 
@@ -254,6 +448,8 @@ function MonthLine(p: Props & { band: BandPalette }) {
   // text size, unless even that would run past the edge.
   const scale = Math.max(1, fontScale);
   const size = stacked ? Math.min(15, lineWidth / (ems * scale)) : fitted / scale;
+  const flowCoins = flowStackCoins(p.incomeFils, p.expenseFils);
+  const flowGhost = useMemo(() => ghostTone(band.tile, band.onBand), [band.tile, band.onBand]);
   return <View style={styles.root} testID="reference-home-summary">
     <View testID="journal-summary" style={[styles.line, stacked && styles.lineStacked, { backgroundColor: band.tile }]}>
       <View style={styles.lineHeader}>
@@ -268,8 +464,18 @@ function MonthLine(p: Props & { band: BandPalette }) {
       </View>
       <View style={[styles.lineCells, stacked && styles.stack]}>
         {cells.map(cell => {
+          // Spent and In each carry their coin stack beside their own label, so the
+          // name is written once and the stacks' heights compare like the figures.
+          const filled = flowCoins === null || stacked ? null
+            : cell.id === 'home-spending-total' ? flowCoins.spent : cell.id === 'home-income-summary' ? flowCoins.income : null;
           const body = <>
-            <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{cell.label}</ThemedText>
+            <View style={styles.cellLabelRow}>
+              <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{cell.label}</ThemedText>
+              {filled === null ? null : <View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+                <CoinStack testID={cell.id === 'home-spending-total' ? 'home-flow-coins-spent' : 'home-flow-coins-in'}
+                  total={FLOW_COINS} filled={filled} width={FLOW_COIN_WIDTH} ghost={flowGhost} />
+              </View>}
+            </View>
             <ThemedText style={[styles.lineValue, { color: cell.color, fontSize: size, lineHeight: Math.round(size * 1.3) }]}>{cell.value}</ThemedText>
           </>;
           const style = [styles.lineCell, stacked && styles.lineCellStacked];
@@ -306,6 +512,9 @@ function SummaryCard(p: Props) {
     <View style={styles.summary} testID="journal-summary">
       <View style={styles.summaryTop}>
         <ThemedText type="smallBold" style={[styles.sectionTitle, { color: secondary }]}>{w.totalSpent}</ThemedText>
+        {p.band && !p.largeText ? <FlowStacks incomeFils={p.incomeFils} expenseFils={p.expenseFils} surface={p.band.card} ink={fg}
+          spent={{ label: w.lineSpent, color: fg }} income={{ label: w.lineIn, color: positive }}
+          style={styles.flowCoinsLine} /> : null}
         <Pressable accessibilityRole="button" accessibilityLabel={p.periodLabel} onPress={p.onPeriod}
           style={[styles.period, { backgroundColor: p.onBand && p.band ? p.band.tile : p.band?.card ?? p.theme.backgroundSelected }]}>
           <ThemedText type="meta" style={{ color: fg }}>{p.periodLabel}</ThemedText>
@@ -358,6 +567,18 @@ const styles = StyleSheet.create({
   // The stack sits at the tile's end on the figure's line, rising into the
   // tile's top padding rather than pushing its label below the Today tile's.
   coinStack: { position: 'absolute', end: 0, bottom: 2 },
+  // Today's coins stand on the tile's bottom end, beside the payment count, inside its padding.
+  todayCoins: { position: 'absolute', end: 14, bottom: 10 },
+  // The average's day columns stand on one baseline; anything below it is clipped, so they rise out of it.
+  columns: { flexDirection: 'row', alignItems: 'flex-end', overflow: 'hidden', marginTop: 4, marginBottom: 2, pointerEvents: 'none' },
+  columnSide: { position: 'absolute', start: 0, end: 0 },
+  columnLine: { position: 'absolute', start: 1, end: 1, height: 1, opacity: 0.45 },
+  // In and Spent side by side at the end of the line's header, before the currency.
+  flowCoins: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, pointerEvents: 'none' },
+  flowColumn: { alignItems: 'center', gap: 1 },
+  flowLabel: { fontFamily: Fonts.sansSemi, fontSize: 10, lineHeight: 12 },
+  flowCoinsLine: { marginStart: 'auto' },
+  cellLabelRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   inlineAction: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   underline: { textDecorationLine: 'underline' },
   weekHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 },

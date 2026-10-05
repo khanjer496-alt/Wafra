@@ -52,6 +52,12 @@ export interface HomeToday {
    * period has no calendar window or has not started.
    */
   average: { fils: number; days: number } | null;
+  /**
+   * The same everyday spending as `average`, day by day over the days it
+   * divides by (oldest first, one entry per day, zero for a day with none).
+   * The entries add up to exactly what the average divides. Null with it.
+   */
+  averageDays: number[] | null;
 }
 
 export interface HomeTodayInput {
@@ -116,6 +122,8 @@ export function summarizeHomeToday(input: HomeTodayInput): HomeToday {
   let todayFils = 0;
   let todayCount = 0;
   let averageFils = 0;
+  // Everyday spending per date inside the average's window, for averageDays.
+  const averageByDate = new Map<string, number>();
   const window = input.averageWindow;
 
   // Oldest date any figure needs. On a newest-first ledger (the store's order)
@@ -149,7 +157,10 @@ export function summarizeHomeToday(input: HomeTodayInput): HomeToday {
         if (inBudget && budgetLimits.has(allocation.category)) {
           spentByCategory.set(allocation.category, (spentByCategory.get(allocation.category) ?? 0) + allocation.amountFils);
         }
-        if (inAverage && !input.isFixedCommitment(allocation.category)) averageFils += allocation.amountFils;
+        if (inAverage && !input.isFixedCommitment(allocation.category)) {
+          averageFils += allocation.amountFils;
+          averageByDate.set(transaction.date, (averageByDate.get(transaction.date) ?? 0) + allocation.amountFils);
+        }
       }
     }
   }
@@ -172,15 +183,24 @@ export function summarizeHomeToday(input: HomeTodayInput): HomeToday {
   }
 
   let average: HomeToday['average'] = null;
+  let averageDays: number[] | null = null;
   if (window) {
     const start = dayNumber(window.startISO);
     const last = Math.min(dayNumber(window.endISO), dayNumber(todayISO));
     const days = last - start + 1;
-    if (days > 0) average = { fils: Math.floor(averageFils / days), days };
+    if (days > 0) {
+      average = { fils: Math.floor(averageFils / days), days };
+      const [y, m, d] = window.startISO.split('-').map(Number);
+      averageDays = [];
+      for (let offset = 0; offset < days; offset += 1) {
+        averageDays.push(averageByDate.get(localISODate(new Date(y!, m! - 1, d! + offset, 12))) ?? 0);
+      }
+    }
   }
 
   return {
     average,
+    averageDays,
     todayFils,
     todayCount,
     week,

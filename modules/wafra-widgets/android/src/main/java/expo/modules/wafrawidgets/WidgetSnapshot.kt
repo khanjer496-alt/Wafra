@@ -14,7 +14,11 @@ internal data class WidgetBill(
   val dueISO: String,
 )
 
-internal data class WidgetSpendingCategory(val label: String, val amountMinor: Long?)
+/**
+ * A category of this month's spending. `color` is its own colour (0xAARRGGBB,
+ * opaque) for the coin row; null in older snapshots, which keep the share bar.
+ */
+internal data class WidgetSpendingCategory(val label: String, val amountMinor: Long?, val color: Int? = null)
 
 /**
  * This month as the Spending tab shows it (src/lib/widget-snapshot.ts,
@@ -27,6 +31,8 @@ internal data class WidgetSpending(
   /** Largest first, at most six. */
   val categories: List<WidgetSpendingCategory>,
   val otherMinor: Long?,
+  /** The pooled coin's colour; null in older snapshots. */
+  val otherColor: Int? = null,
 ) {
   val month: Int get() = monthKey.substring(5, 7).toInt()
 }
@@ -167,7 +173,7 @@ internal data class WidgetSnapshot(
           val item = list.optJSONObject(i) ?: continue
           val label = item.optString("label", "").trim().take(MAX_LABEL_LENGTH)
           if (label.isEmpty()) continue
-          categories.add(WidgetSpendingCategory(label, integerOrNull(item, "amountMinor")))
+          categories.add(WidgetSpendingCategory(label, integerOrNull(item, "amountMinor"), hexColor(item.optString("color", ""))))
         }
       }
       return WidgetSpending(
@@ -175,7 +181,16 @@ internal data class WidgetSnapshot(
         totalMinor = integerOrNull(source, "totalMinor"),
         categories = categories,
         otherMinor = integerOrNull(source, "otherMinor"),
+        otherColor = hexColor(source.optString("otherColor", "")),
       )
+    }
+
+    private val HEX_COLOR = Regex("^#[0-9A-Fa-f]{6}$")
+
+    /** "#RRGGBB" to an opaque colour int; anything else is no colour. */
+    internal fun hexColor(value: String?): Int? {
+      if (value == null || !HEX_COLOR.matches(value)) return null
+      return (0xFF000000L or value.substring(1).toLong(16)).toInt()
     }
 
     private fun integerOrNull(source: JSONObject, key: String): Long? =

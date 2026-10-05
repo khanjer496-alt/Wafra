@@ -189,7 +189,12 @@ try {
       await page.goto(`${BASE}/transactions`, { waitUntil: 'networkidle' });
       assert.equal(await page.getByRole('button', { name: /^Outgoing transfer,/ }).count(), 0,
         'transfer records are not regular transaction rows');
-      await page.goto(`${BASE}/transfers`, { waitUntil: 'networkidle' });
+      // Home's notice opens the Transfers page, whose question card takes the queue one at a time.
+      await page.goto(BASE + '/', { waitUntil: 'networkidle' });
+      await click(page.getByTestId('transfer-review-notice'));
+      await page.waitForURL(/\/transfers(?:[?#]|$)/);
+      await page.getByTestId('transfers-screen').waitFor({ state: 'visible' });
+      await page.getByTestId('transfer-question-card').waitFor({ state: 'visible' });
       await click(page.getByTestId('transfer-row-unknown-out'));
       // The detail sheet asks the one question; its three answers are always offered.
       await fits(page.getByTestId('entry-transfer-question'));
@@ -204,6 +209,10 @@ try {
       // The batch screen opened from "See all" is the collapsed history; one entry opens by id.
       await page.getByTestId('review-transfers-screen').waitFor({ state: 'visible' });
       assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'See all opens the collapsed history');
+      // Back from the batch screen returns to the Transfers page it was opened from.
+      await click(page.getByTestId('band-back'));
+      await page.waitForURL(/\/transfers(?:[?#]|$)/);
+      await page.getByTestId('transfer-question-card').waitFor({ state: 'visible' });
       await page.goto(`${BASE}/review-transfers?transactionId=unknown-out`, { waitUntil: 'networkidle' });
       await click(page.getByTestId('transfer-review-entry'));
       await page.getByTestId('transfer-review-confirmation').waitFor({ state: 'visible' });

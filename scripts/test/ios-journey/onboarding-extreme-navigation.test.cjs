@@ -74,6 +74,8 @@ async function gate(options = {}) {
   };
   const react = {
     useMemo: compute => compute(), useContext: () => undefined,
+    // The step layer's phase context (e-motion): children render first here, so consumers read the default.
+    createContext: value => ({ Provider: 'ContextProvider', _default: value }),
     useCallback: callback => callback,
     useRef: value => slot(() => ({ current: value })),
     useState(initial) { const s = slot(() => ({ value: typeof initial === 'function' ? initial() : initial }));
@@ -143,7 +145,14 @@ async function gate(options = {}) {
       Switch: 'Switch', ActivityIndicator: 'ActivityIndicator', PanResponder: { create: () => ({ panHandlers: {} }) },
       useWindowDimensions: () => ({ width: 390, height: 844 }),
       AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) }, ScrollView: 'ScrollView', StyleSheet: { create: value => value, hairlineWidth: 1, absoluteFillObject: {} },
-      Linking: { openSettings: () => call('openSettings') } },
+      Linking: { openSettings: () => call('openSettings') },
+      // A step that starts leaving closes the keyboard (e-motion useLeavingRelease).
+      Keyboard: { dismiss: () => record('keyboardDismiss') },
+      // Core Animated as the final frame (the coin toolkit and onboarding scenes use it):
+      // values hold what they are given, and runs never start.
+      Animated: (() => { const run = { start() {}, stop() {} }; class Value { constructor(v) { this.value = v; } setValue(v) { this.value = v; } interpolate() { return this; } }
+        return { View: 'Animated.View', Text: 'Animated.Text', Value, add: a => a, multiply: a => a, timing: () => run, spring: () => run, delay: () => run, sequence: () => run, parallel: () => run, loop: () => run, stagger: () => run }; })(),
+      Easing: { bezier: () => null, inOut: e => e, out: e => e, in: e => e, cubic: v => v, quad: v => v, linear: v => v } },
     'react-native-reanimated': { __esModule: true, default: { View: 'Animated.View', ScrollView: 'Animated.ScrollView', createAnimatedComponent: component => component },
       FadeIn: animation, FadeInDown: animation, ZoomIn: animation, Easing: { out: easing => easing, inOut: easing => easing, cubic: value => value, sin: value => value, linear: value => value, bezier: () => value => value },
       useSharedValue: value => ({ value }), useAnimatedStyle: build => build(), useAnimatedProps: build => build(), withTiming: value => value,
@@ -164,6 +173,8 @@ async function gate(options = {}) {
     'expo-router': { useRouter: () => router, usePathname: () => input.pathname, useGlobalSearchParams: () => input.params },
     '@/hooks/use-language': { useLanguage: () => language },
     '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
+    // The step frame lifts its pinned actions over the keyboard; no keyboard here.
+    '@/hooks/use-keyboard-height': { useKeyboardHeight: () => 0 },
     '@/hooks/use-reduced-motion': { useMotionPreference: () => ({ ready: options.motionReady ?? true, reducedMotion: options.reducedMotion ?? true }) },
     '@/components/storage-recovery': { StorageRecovery: 'StorageRecovery' },
     '@/components/themed-text': { ThemedText: 'Text' }, '@/components/ui/bottom-sheet': { BottomSheet: 'BottomSheet' },
@@ -241,6 +252,8 @@ async function gate(options = {}) {
   dependencies['@/lib/onboarding-e'] = lib('onboarding-e', dependencies);
   dependencies['@/lib/onboarding-e-copy'] = lib('onboarding-e-copy', dependencies);
   dependencies['@/lib/band-copy'] = lib('band-copy');
+  // The Goals step's Home preview names sections as Customize Home does.
+  dependencies['@/lib/customize-copy'] = lib('customize-copy');
   dependencies['@/lib/arabic-sms'] = { normalizeArabicNumerals: text => text.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))) };
   dependencies['@/lib/format'] = { parseAmountWithMoneySpec: text => /^\d+(\.\d{1,2})?$/.test(text) ? Math.round(Number(text) * 100) : null };
   dependencies['@/lib/pattern'] = lib('pattern');
@@ -259,6 +272,13 @@ async function gate(options = {}) {
     parseLocalizedMajorToMinor: text => /^\d+(\.\d{1,2})?$/.test(text) ? Math.round(Number(text) * 100) : null };
   dependencies['@/hooks/use-band'] = { useBand: id => theme.bandPalette(id, options.scheme ?? 'light'), useBandScheme: () => options.scheme ?? 'light' };
   dependencies['@/components/ui/pattern-mosaic'] = { PatternMosaic: 'PatternMosaic' };
+  // The coin toolkit, real: onboarding scenes draw coins beside the written figures.
+  dependencies['@/lib/coin-math'] = load(path.join(root, 'src/lib/coin-math.ts'), {});
+  dependencies['@/lib/spending-calendar-tiles'] = load(path.join(root, 'src/lib/spending-calendar-tiles.ts'), dependencies);
+  dependencies['@/components/ui/coins/coin-motion'] = load(path.join(root, 'src/components/ui/coins/coin-motion.ts'), dependencies);
+  dependencies['@/components/ui/coins/coin-disc'] = load(path.join(root, 'src/components/ui/coins/coin-disc.tsx'), dependencies);
+  dependencies['@/components/ui/coins/coin-stack'] = load(path.join(root, 'src/components/ui/coins/coin-stack.tsx'), dependencies);
+  dependencies['@/components/ui/coins/coin-token'] = load(path.join(root, 'src/components/ui/coins/coin-token.tsx'), dependencies);
   dependencies['@/components/ui/band/dial-limit'] = { DialLimit: 'DialLimit' };
   dependencies['@/components/ui/band/status-bar'] = { StatusBar: 'LimitBar' };
   dependencies['@/components/ui/merchant-avatar'] = { MerchantAvatar: 'MerchantAvatar' };
@@ -268,6 +288,9 @@ async function gate(options = {}) {
   dependencies['@/components/ui/band/e-button'] = load(path.join(root, 'src/components/ui/band/e-button.tsx'), dependencies);
   dependencies['@/components/onboarding/e-motion'] = load(path.join(root, 'src/components/onboarding/e-motion.tsx'), dependencies,
     { setTimeout: setTimer, clearTimeout: clearTimer, setInterval: () => 0, clearInterval() {} });
+  // Welcome's hero scene runs from source (its coin toolkit is loaded above).
+  dependencies['@/components/onboarding/sms-coin-scene'] =
+    load(path.join(root, 'src/components/onboarding/sms-coin-scene.tsx'), dependencies);
   for (const name of ['e-frame', 'e-choice-row', 'e-welcome', 'e-name', 'e-goals', 'e-watch', 'e-reminders', 'e-first-payment',
     'e-pattern', 'e-paywall', 'e-handoff', 'capture-checklist', 'ready-summary', 'sms-explainer']) {
     dependencies[`@/components/onboarding/${name}`] = load(path.join(root, `src/components/onboarding/${name}.tsx`), dependencies);
@@ -373,8 +396,9 @@ for (const language of ['en', 'ar']) {
     assert.equal(h.byTestID('onboarding-watch-continue').props.accessibilityLabel, h.eWords.skipForNow, 'an open row alone saves nothing');
     await h.tap('onboarding-watch-limit-quick-1'); // 500, in the currency's scale
     assert.equal(h.byTestID('onboarding-watch-limit-quick-1').props.accessibilityState.selected, true);
-    await h.tap('onboarding-watch-limit-raise'); // + 50
-    assert.equal(h.byTestID('onboarding-watch-limit-input').props.value, '550');
+    // From 500 the step is 100, on the quick amounts' scale (e-watch watchStep): 50 below 500.
+    await h.tap('onboarding-watch-limit-raise');
+    assert.equal(h.byTestID('onboarding-watch-limit-input').props.value, '600');
     await h.changeText('onboarding-watch-limit-input', '0');
     assert.equal(h.byTestID('onboarding-watch-continue').props.accessibilityLabel, h.eWords.skipForNow, 'zero is no limit');
     await h.changeText('onboarding-watch-limit-input', '600');

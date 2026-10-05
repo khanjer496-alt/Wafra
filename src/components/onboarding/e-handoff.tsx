@@ -2,6 +2,8 @@
  * E11 · Into Home. After the last onboarding screen the ink layer fades away
  * over the already-mounted Home while the pattern shrinks from where it sat
  * on the reveal to the head of Home's band, where YourPattern draws it at 24pt.
+ * It is packed as Home packs it (`compact`) from the paywall's start edge, so
+ * the picture that flies is the one that lands.
  * Under Reduce Motion, a screen reader or on Android it is a plain cross-fade.
  * Presentation only: it sits above Home with no touch handling and removes
  * itself when done.
@@ -12,16 +14,18 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { E_EASE, WIPE_MS, useEMotion } from '@/components/onboarding/e-motion';
-import { fitPatternTile } from '@/components/onboarding/e-frame';
+import { E_GUTTER, fitPatternTile } from '@/components/onboarding/e-frame';
 import { PatternMosaic } from '@/components/ui/pattern-mosaic';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
-import { patternSize, type PatternTile } from '@/lib/pattern';
+import { compactPattern, patternSize, type PatternTile } from '@/lib/pattern';
 
 /** Home's header pattern tile (journal-home-screen: YourPattern tile 24). */
 const HOME_TILE = 24;
 /** Home's band gutter (BAND_GUTTER). */
 const HOME_GUTTER = 20;
+/** EStepFrame's widest column. */
+const FRAME_MAX = 560;
 
 export function HandoffLayer({ tiles, onDone }: { tiles: readonly PatternTile[]; onDone: () => void }) {
   const band = useBand('home');
@@ -30,9 +34,12 @@ export function HandoffLayer({ tiles, onDone }: { tiles: readonly PatternTile[];
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const tile = fitPatternTile(width, 52);
-  const size = patternSize(tile, Math.max(2, Math.round((tile * 6) / 52)));
+  const layout = compactPattern(tiles);
+  const size = patternSize(tile, Math.max(2, Math.round((tile * 6) / 52)), layout.columns, layout.rows);
   const scale = HOME_TILE / tile;
-  const startLeft = (width - size.width) / 2;
+  // Where the paywall draws it: the start of the step's column.
+  const frameStart = Math.max(0, (width - FRAME_MAX) / 2) + E_GUTTER;
+  const startLeft = rtl ? width - frameStart - size.width : frameStart;
   const startTop = insets.top + 56;
   const endLeft = rtl ? width - HOME_GUTTER - size.width * scale : HOME_GUTTER;
   const endTop = insets.top + 12;
@@ -60,7 +67,7 @@ export function HandoffLayer({ tiles, onDone }: { tiles: readonly PatternTile[];
     style={StyleSheet.absoluteFillObject} testID="onboarding-handoff">
     <Animated.View style={[StyleSheet.absoluteFillObject, { backgroundColor: band.band }, fade]} />
     <Animated.View style={[{ position: 'absolute', left: startLeft, top: startTop }, travel]}>
-      <PatternMosaic tiles={tiles} tile={tile} accessibilityLabel="" />
+      <PatternMosaic tiles={tiles} tile={tile} compact accessibilityLabel="" />
     </Animated.View>
   </View>;
 }

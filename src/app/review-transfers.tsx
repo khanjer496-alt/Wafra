@@ -4,18 +4,19 @@ import React, { useDeferredValue, useMemo, useRef, useState } from 'react';
 import { FlatList, Keyboard, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { TransferPairAccounts } from '@/components/transfer-pair-accounts';
+import { RouteTag, TransferRoute } from '@/components/transfers/transfer-route-row';
+import { EButton } from '@/components/ui/band/e-button';
 import { BandScaffold, useBandBottomInset } from '@/components/ui/band-scaffold';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
-import { Button } from '@/components/ui/controls';
 import { Icon } from '@/components/ui/icon';
+import { Money } from '@/components/ui/money';
 import { TextField } from '@/components/ui/text-field';
 import { useToast } from '@/components/ui/toast';
 import { Fonts, Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { formatAED, fullDateTime, shortDate, toISODate } from '@/lib/format';
+import { formatAED, fullDateTime, shortDateWithYear, toISODate } from '@/lib/format';
 import { bankBrandForName } from '@/lib/markets';
 import { formatMinorUnits } from '@/lib/ledger-money';
 import { currentMonthPeriod, inPeriod } from '@/lib/period';
@@ -23,6 +24,7 @@ import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { detailsWords } from '@/lib/details-copy';
 import { reviewBandCopy } from '@/lib/review-band-copy';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import type { RouteEnd } from '@/lib/transfer-list';
 import { matchedTransferPairs, suggestedTransferPairs, type TransferPair } from '@/lib/transfer-pairs';
 import { isTransferCandidate, reconcileTransfers, transferDeclined, transferFingerprint } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
@@ -104,16 +106,30 @@ function SummaryFacts({ summary, words }: { summary: Summary; words: Words }) {
   </View>;
 }
 
-/** A pill answer on a pair card: 44pt tall, full radius, band fill or the sheet's rule tone. */
-function PairPill({ label, primary, disabled, onPress, palette, testID }: {
-  label: string; primary: boolean; disabled: boolean; onPress: () => void; palette: BandPalette; testID: string;
+/**
+ * An answer button in the Transfers page's style (the question card's buttons):
+ * 48pt, 14pt radius, the band fill for the first answer and a bordered sheet
+ * tone for the rest. A row of them wraps, and stacks at large text.
+ */
+function ChoiceButton({ label, primary, disabled, onPress, palette, testID, stacked }: {
+  label: string; primary: boolean; disabled: boolean; onPress: () => void; palette: BandPalette; testID: string; stacked: boolean;
 }) {
+  // Disabled is drawn, not faded: a ruled outline with the secondary ink, which keeps its label
+  // above 3:1 (a 45% fade of the band fill did not).
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} disabled={disabled}
     accessibilityState={{ disabled }} onPress={onPress}
-    style={({ pressed }) => [styles.pill, { backgroundColor: primary ? palette.fill : palette.rule, opacity: disabled ? 0.45 : pressed ? 0.8 : 1 }]}>
-    <ThemedText type="smallBold" style={[styles.pillLabel, { color: primary ? palette.onFill : palette.text }]}>{label}</ThemedText>
+    style={({ pressed }) => [styles.choiceButton, stacked && styles.choiceButtonStacked, disabled
+      ? { backgroundColor: palette.sheet, borderWidth: 1, borderColor: palette.rule }
+      : primary ? { backgroundColor: palette.fill }
+        : { backgroundColor: palette.sheet, borderWidth: 1, borderColor: palette.textSecondary },
+    { opacity: !disabled && pressed ? 0.7 : 1 }]}>
+    <ThemedText type="smallBold" style={[styles.choiceLabel,
+      { color: disabled ? palette.textSecondary : primary ? palette.onFill : palette.text }]}>{label}</ThemedText>
   </Pressable>;
 }
+
+/** An account on a route chip. The chip draws only the label; the kind marks an unknown side. */
+const accountEnd = (accountId: string): RouteEnd => ({ kind: 'account', accountId });
 
 /** Both legs of one suggested own-account transfer, answered with one tap. */
 function PairCard({ pair, outAccount, inAccount, busy, onMatch, onSeparate, palette, stacked, checked, onSelect }: {
@@ -124,18 +140,21 @@ function PairCard({ pair, outAccount, inAccount, busy, onMatch, onSeparate, pale
   const language = useLanguage();
   const d = detailsWords(language);
   const words = transferReviewCopy(language);
+  const activityWords = transferActivityCopy(language);
   const amount = formatAED(pair.out.amountFils, { decimals: true });
   const incoming = formatAED(pair.in.amountFils, { decimals: true });
-  // The two legs are read as one sentence; the pills stay their own stops
+  // The two legs are read as one sentence; the buttons stay their own stops
   // (an `accessible` card would swallow them).
   return <View testID="transfer-pair-card" style={[styles.pairCard, { borderColor: palette.rule, backgroundColor: palette.card }]}>
     <View testID="transfer-pair-legs" style={styles.pairLegs} accessible accessibilityRole="text"
       accessibilityLabel={[d.transfers.pairA11y(outAccount, inAccount, amount), fullDateTime(pair.out),
         pair.in.amountFils !== pair.out.amountFils ? `${d.transfers.in}: ${incoming}` : null].filter(Boolean).join('. ')}>
-      <TransferPairAccounts outAccount={outAccount} inAccount={inAccount} palette={palette} stacked={stacked} />
-      <View style={styles.pairFigure}>
-        <ThemedText tabular style={[styles.pairAmount, { color: palette.text }]}>{amount}</ThemedText>
+      {/* The Transfers page's route: the account it left → the account it reached, and the amount. */}
+      <TransferRoute from={accountEnd(pair.out.accountId)} to={accountEnd(pair.in.accountId)} fromLabel={outAccount} toLabel={inAccount}
+        amountFils={pair.out.amountFils} sign="none" palette={palette} testID="transfer-pair-route" />
+      <View style={styles.routeMeta}>
         <ThemedText type="meta" style={{ color: palette.textSecondary }}>{fullDateTime(pair.out)}</ThemedText>
+        <RouteTag tag="needs-answer" label={activityWords.tags.needsAnswer} palette={palette} slate={palette.tint} />
       </View>
       {/* A pair whose legs differ in amount says so; the two are never merged. */}
       {pair.in.amountFils !== pair.out.amountFils ? (
@@ -148,9 +167,9 @@ function PairCard({ pair, outAccount, inAccount, busy, onMatch, onSeparate, pale
       disabled={busy} onPress={onSelect} style={styles.selectControl}>
       <SelectionMark checked={!!checked} palette={palette} />
       <ThemedText type="smallBold" style={styles.flexText}>{checked ? words.selectedCount(1) : words.selectItem}</ThemedText>
-    </Pressable> : <View style={styles.pairActions}>
-      <PairPill testID="transfer-pair-match" primary label={d.transfers.match} disabled={busy} onPress={onMatch} palette={palette} />
-      <PairPill testID="transfer-pair-separate" primary={false} label={d.transfers.notPair} disabled={busy} onPress={onSeparate} palette={palette} />
+    </Pressable> : <View style={[styles.choiceRow, stacked && styles.choiceRowStacked]}>
+      <ChoiceButton testID="transfer-pair-match" primary label={d.transfers.match} disabled={busy} onPress={onMatch} palette={palette} stacked={stacked} />
+      <ChoiceButton testID="transfer-pair-separate" primary={false} label={d.transfers.notPair} disabled={busy} onPress={onSeparate} palette={palette} stacked={stacked} />
     </View>}
   </View>;
 }
@@ -299,9 +318,18 @@ export default function ReviewTransfersScreen() {
     ...visiblePairs.map(pair => ({ kind: 'pair' as const, key: `pair:${pair.key}`, pair })),
     ...transferHistoryItems(groups, expanded, limits, !!focusedId),
   ], [visiblePairs, groups, expanded, limits, focusedId]);
+  // A collapsed one-entry group is that entry: in select mode its card carries the entry's own
+  // checkbox (the same key and preview as the expanded row), so "Select all shown" counts what
+  // has a checkbox on screen. Collapsed groups of several entries are still never selected whole.
+  const singleEntry = (item: ListItem): ListItem | null => item.kind === 'group' && item.group.rows.length === 1
+    && !expanded.has(item.group.id) && !item.group.rows[0].transferDecision
+    ? { kind: 'entry', key: `entry:${item.group.id}:${item.group.rows[0].id}`, group: item.group, transaction: item.group.rows[0] } : null;
   const selectableItems = useMemo(() => filter === 'pending' && !focusedId
-    ? listItems.filter(item => item.kind === 'pair' || (item.kind === 'entry' && !item.transaction.transferDecision))
-    : [], [listItems, filter, focusedId]);
+    ? listItems.flatMap(item => item.kind === 'pair' || (item.kind === 'entry' && !item.transaction.transferDecision) ? [item]
+      : singleEntry(item) ? [singleEntry(item)!] : [])
+    // singleEntry reads expanded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    : [], [listItems, filter, focusedId, expanded]);
   const browse = (next: TransferHistoryScope) => {
     Keyboard.dismiss();
     setScope(next); setExpanded(new Set()); setLimits({});
@@ -495,27 +523,64 @@ export default function ReviewTransfersScreen() {
     }
   };
 
+  // Rows are drawn as the Transfers page draws them: a route from one end to
+  // the other. A group's other end is the counterparty when the bank named one,
+  // otherwise the dashed "?" of an unknown side.
+  const otherEnd = (group: DisplayGroup): RouteEnd => group.counterpartyName ? { kind: 'party', name: group.counterpartyName }
+    : group.counterparty ? { kind: 'party', name: group.summary.counterparty } : { kind: 'unknown' };
+  const shownName = (end: RouteEnd, name: string) => end.kind === 'unknown' ? '?' : name;
+  // Money out leaves the group's account for the other end; money in arrives from it.
+  const groupRoute = (group: DisplayGroup) => {
+    const account = accountEnd(group.accountId);
+    const other = otherEnd(group);
+    const incoming = group.direction === 'income';
+    return <TransferRoute from={incoming ? other : account} to={incoming ? account : other}
+      fromLabel={incoming ? shownName(other, group.summary.counterparty) : group.summary.account}
+      toLabel={incoming ? group.summary.account : shownName(other, group.summary.counterparty)}
+      amountFils={group.summary.total} sign={incoming ? 'plus' : 'minus'} palette={band} testID={`transfer-group-route-${group.id}`} />;
+  };
+  // Each group is one card: its route on top, then (expanded) its entries and "Show more".
+  const groupEnds = useMemo(() => new Set(listItems.filter((item, index) => item.kind !== 'pair' &&
+    (listItems[index + 1] === undefined || listItems[index + 1].kind === 'group')).map(item => item.key)), [listItems]);
+  const segment = (item: ListItem) => [styles.segment, { backgroundColor: band.card, borderColor: band.rule },
+    item.kind === 'group' ? styles.segmentFirst : { borderTopWidth: StyleSheet.hairlineWidth },
+    groupEnds.has(item.key) && styles.segmentLast];
+
+  // A one-entry group is selected as its entry, right on its card (as a pair card is).
+  const groupSelect = (item: ListItem) => {
+    const single = selecting && filter === 'pending' && !focusedId ? singleEntry(item) : null;
+    if (!single || single.kind !== 'entry') return null;
+    const checked = picked.has(single.key);
+    return <Pressable testID="transfer-group-select" accessibilityRole="checkbox"
+      accessibilityLabel={`${words.selectItem}. ${single.transaction.title}. ${fullDateTime(single.transaction)}. ${formatAED(single.transaction.amountFils, { decimals: true })}`}
+      accessibilityState={{ checked, disabled: busy }} aria-checked={checked} disabled={busy}
+      onPress={() => togglePicked(single)} style={styles.selectControl}>
+      <SelectionMark checked={checked} palette={band} />
+      <ThemedText type="smallBold" style={styles.flexText}>{checked ? words.selectedCount(1) : words.selectItem}</ThemedText>
+    </Pressable>;
+  };
   const matchedSection = matched.length > 0 ? <View testID="transfer-matched-pairs" style={styles.matched}>
     <View style={styles.matchedHead} accessible accessibilityRole="header" accessibilityLabel={`${bandWords.matchedThisMonth}, ${matched.length}`}>
       <ThemedText type="smallBold" style={[styles.flexText, { color: band.text }]}>{bandWords.matchedThisMonth}</ThemedText>
       <ThemedText type="smallBold" style={{ color: band.textSecondary }}>{matched.length}</ThemedText>
     </View>
-    {matched.slice(0, MATCHED_PREVIEW).map(pair => {
-      const outAccount = accountLabels.get(pair.out.accountId) ?? words.accountUnknown;
-      const inAccount = accountLabels.get(pair.in.accountId) ?? words.accountUnknown;
-      const amount = formatAED(pair.out.amountFils, { decimals: true });
-      return <View key={pair.key} testID="transfer-matched-pair" accessible accessibilityRole="text"
-        accessibilityLabel={`${d.transfers.pairA11y(outAccount, inAccount, amount)}. ${shortDate(pair.out.date)}`}
-        style={[styles.matchedRow, largeText && styles.matchedRowStacked, { borderTopColor: band.rule }]}>
-        <View style={largeText ? styles.stretch : styles.flexText}>
-          <TransferPairAccounts outAccount={outAccount} inAccount={inAccount} palette={band} stacked={largeText} />
-        </View>
-        <View style={[styles.matchedFigure, largeText && styles.matchedFigureStacked]}>
-          <ThemedText type="smallBold" tabular style={{ color: band.text }}>{amount}</ThemedText>
-          <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDate(pair.out.date)}</ThemedText>
-        </View>
-      </View>;
-    })}
+    <View style={[styles.matchedCard, { backgroundColor: band.card }]}>
+      {matched.slice(0, MATCHED_PREVIEW).map((pair, index) => {
+        const outAccount = accountLabels.get(pair.out.accountId) ?? words.accountUnknown;
+        const inAccount = accountLabels.get(pair.in.accountId) ?? words.accountUnknown;
+        const amount = formatAED(pair.out.amountFils, { decimals: true });
+        return <View key={pair.key} testID="transfer-matched-pair" accessible accessibilityRole="text"
+          accessibilityLabel={`${d.transfers.pairA11y(outAccount, inAccount, amount)}. ${shortDateWithYear(pair.out.date)}`}
+          style={[styles.matchedRow, index > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: band.rule }]}>
+          <TransferRoute from={accountEnd(pair.out.accountId)} to={accountEnd(pair.in.accountId)} fromLabel={outAccount} toLabel={inAccount}
+            amountFils={pair.out.amountFils} sign="none" palette={band} />
+          <View style={styles.routeMeta}>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDateWithYear(pair.out.date)}</ThemedText>
+            <RouteTag tag="own" label={activityWords.tags.own} palette={band} slate={band.tint} />
+          </View>
+        </View>;
+      })}
+    </View>
     <Pressable testID="transfer-matched-all" accessibilityRole="button" accessibilityLabel={activityWords.viewAll}
       onPress={() => router.push('/transfers')} style={styles.matchedLink}>
       <ThemedText type="smallBold" style={{ color: band.tint }}>{activityWords.viewAll}</ThemedText>
@@ -526,12 +591,22 @@ export default function ReviewTransfersScreen() {
     <BandScaffold band="accounts" scroll={false} testID="review-transfers-screen" contentStyle={styles.sheet}
       nav={{ back: true, backDisabled: busy || (needsDurability && !stale), title: activityWords.title }}
       footer={selecting ? <View testID="transfer-selection-footer" accessibilityLiveRegion="polite">
-        <Button wrapLabel label={words.reviewSelected(picked.size)} disabled={busy || picked.size === 0} onPress={openBatch} />
+        {/* Nothing picked yet: an outlined button at full ink (a faded fill fell under 3:1), still disabled. */}
+        <EButton palette={band} variant={picked.size === 0 ? 'secondary' : 'primary'} style={picked.size === 0 ? styles.solid : undefined}
+          label={words.reviewSelected(picked.size)} disabled={busy || picked.size === 0} onPress={openBatch} />
       </View> : undefined}
       bandContent={<View testID="transfer-review-band" style={styles.bandIntro}>
-        <ThemedText accessibilityRole="header" accessibilityLiveRegion="polite" style={[styles.headline, { color: band.onBand }]}>
-          {toCheck > 0 ? bandWords.toCheck(toCheck) : words.title}
-        </ThemedText>
+        {/* The Transfers band's shape: the figure in Geist SemiBold, then what it means. The count is
+            the question card's words ("N transfers need an answer"). At large text the headline is
+            capped and stays whole words, and everything else moves onto the sheet, as on Transfers,
+            so the band never crowds out the list. */}
+        <View style={styles.bandFigure}>
+          <ThemedText accessibilityRole="header" accessibilityLiveRegion="polite" maxFontSizeMultiplier={largeText ? 1.3 : 1.6}
+            style={[styles.headline, largeText && styles.headlineLarge, { color: band.onBand }]}>
+            {toCheck > 0 ? activityWords.card.title(toCheck) : words.title}
+          </ThemedText>
+          {toCheck > 0 && !largeText ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{activityWords.notCounted}</ThemedText> : null}
+        </View>
         {/* The band stays put over the list, so at large text the explanation moves onto the sheet. */}
         {!focusedId && toCheck > 0 && !largeText ? (
           <ThemedText type="small" style={{ color: band.onBandSecondary }}>{words.intro}</ThemedText>
@@ -547,17 +622,18 @@ export default function ReviewTransfersScreen() {
           {!focusedId && filter === 'pending' && (toCheck > 0 || selecting) ? <View style={styles.actions}>
             {selecting ? <>
               <ThemedText type="meta" themeColor="textSecondary">{words.selectionHint}</ThemedText>
-              <View style={styles.pairActions}>
-                <PairPill testID="transfer-select-shown" primary={false} label={words.selectShown(selectableItems.length)}
-                  disabled={busy || selectableItems.length === 0} onPress={selectShown} palette={band} />
-                {picked.size > 0 ? <PairPill testID="transfer-clear-selection" primary={false} label={words.clearSelection}
-                  disabled={busy} onPress={() => { if (!saving.current) setPicked(new Map()); }} palette={band} /> : null}
-                <PairPill testID="transfer-cancel-selection" primary={false} label={words.cancel} disabled={busy || needsDurability}
-                  onPress={() => { if (!saving.current) { setSelecting(false); setPicked(new Map()); } }} palette={band} />
+              <View style={[styles.choiceRow, largeText && styles.choiceRowStacked]}>
+                <ChoiceButton testID="transfer-select-shown" primary={false} label={words.selectShown(selectableItems.length)}
+                  disabled={busy || selectableItems.length === 0} onPress={selectShown} palette={band} stacked={largeText} />
+                {picked.size > 0 ? <ChoiceButton testID="transfer-clear-selection" primary={false} label={words.clearSelection}
+                  disabled={busy} onPress={() => { if (!saving.current) setPicked(new Map()); }} palette={band} stacked={largeText} /> : null}
+                <ChoiceButton testID="transfer-cancel-selection" primary={false} label={words.cancel} disabled={busy || needsDurability}
+                  onPress={() => { if (!saving.current) { setSelecting(false); setPicked(new Map()); } }} palette={band} stacked={largeText} />
               </View>
-            </> : <Button variant="outline" label={words.selectTransfers} disabled={busy}
+            </> : <EButton palette={band} variant="secondary" label={words.selectTransfers} disabled={busy}
               onPress={() => { Keyboard.dismiss(); setSelecting(true); }} />}
           </View> : null}
+          {toCheck > 0 && largeText ? <ThemedText type="meta" style={{ color: band.textSecondary }}>{activityWords.notCounted}</ThemedText> : null}
           {!focusedId && toCheck > 0 && largeText ? (
             <ThemedText type="small" style={{ color: band.textSecondary }}>{words.intro}</ThemedText>
           ) : null}
@@ -566,7 +642,7 @@ export default function ReviewTransfersScreen() {
             <ThemedText type="meta" style={{ color: band.textSecondary }}>{d.transfers.pairsBody}</ThemedText>
           </View> : null}
           {focusedId ? (
-            <Button variant="ghost" label={words.showAll} onPress={() => { setShowAll(true); browse('all'); }} />
+            <EButton palette={band} variant="quiet" label={words.showAll} onPress={() => { setShowAll(true); browse('all'); }} />
           ) : toCheck > 8 || query.length > 0 ? (
             <TextField testID="transfer-search" label={words.search} value={query} onChangeText={setQuery}
               autoCapitalize="none" autoCorrect={false} returnKeyType="search" onSubmitEditing={() => Keyboard.dismiss()}
@@ -587,70 +663,88 @@ export default function ReviewTransfersScreen() {
           inAccount={accountLabels.get(item.pair.in.accountId) ?? words.accountUnknown}
           onMatch={() => matchPair(item.pair)} onSeparate={() => separatePair(item.pair)}
           checked={picked.has(item.key)} onSelect={selecting ? () => togglePicked(item) : undefined} />
-          : item.kind === 'group' ? <View testID="transfer-review-group"
-          style={[styles.group, { borderTopColor: band.rule }]}>
+          : item.kind === 'group' ? <View testID="transfer-review-group" style={segment(item)}>
           <Pressable testID="transfer-group-toggle" accessibilityRole="button"
             accessibilityLabel={`${item.group.summary.account}. ${item.group.summary.counterparty}. ${expanded.has(item.group.id) ? words.collapse : words.expand(item.group.rows.length)}`}
             accessibilityState={{ expanded: !!focusedId || expanded.has(item.group.id), disabled: !!focusedId }}
             disabled={!!focusedId} onPress={() => toggleGroup(item.group.id)} style={styles.groupToggle}>
-            <View style={styles.groupHeading}>
-              <Icon name="bank" size={18} color={band.textSecondary} />
-              <ThemedText type="smallBold" style={styles.flexText}>{item.group.summary.account}</ThemedText>
-              {!focusedId && <Icon name={expanded.has(item.group.id) ? 'chevron-down' : 'chevron-right'} size={16} color={band.textSecondary} />}
+            {groupRoute(item.group)}
+            <View style={styles.routeMeta}>
+              {/* How many bank entries this one route stands for, then when, then whether it is answered. */}
+              {item.group.rows.length > 1 ? <View testID="transfer-group-count" style={[styles.countPill, { backgroundColor: band.glyphGround }]}>
+                <ThemedText type="meta" style={{ color: band.text }}>{words.count(item.group.rows.length)}</ThemedText>
+              </View> : null}
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>{shortDateWithYear(item.group.rows[0].date)}</ThemedText>
+              {filter === 'pending' ? <RouteTag tag="needs-answer" label={activityWords.tags.needsAnswer} palette={band} slate={band.tint} /> : null}
+              {!focusedId && <View style={styles.chevron}>
+                <Icon name={expanded.has(item.group.id) ? 'chevron-down' : 'chevron-right'} size={16} color={band.textSecondary} />
+              </View>}
             </View>
-            <ThemedText type="meta" themeColor="textSecondary">{item.group.summary.counterparty}</ThemedText>
             {(filter === 'reviewed' || item.group.status.startsWith('likely-')) && <ThemedText type="meta" themeColor="textSecondary">{statusLabel(item.group.status, words)}</ThemedText>}
-            <View style={styles.groupMeta}>
-              <ThemedText type="smallBold" tabular>{formatAED(item.group.summary.total, { decimals: true })} · {item.group.direction === 'income' ? words.received : words.sent}</ThemedText>
-              <ThemedText type="meta" themeColor="textSecondary">{words.count(item.group.rows.length)} · {shortDate(item.group.rows[0].date)}</ThemedText>
-            </View>
           </Pressable>
+          {groupSelect(item)}
           {!selecting && (expanded.has(item.group.id) || focusedId) && filter === 'pending' && item.group.bulkEligible && item.group.rows.length > 1
-            ? <Button variant="outline" wrapLabel label={words.reviewGroup(item.group.rows.length)} onPress={() => openReview(item.group)} />
+            ? <EButton palette={band} variant="secondary" label={words.reviewGroup(item.group.rows.length)} onPress={() => openReview(item.group)} />
             : (expanded.has(item.group.id) || focusedId) && filter === 'pending' && item.group.rows.length > 1
               ? <ThemedText type="meta" themeColor="textSecondary">{words.individualOnly}</ThemedText> : null}
-        </View> : item.kind === 'more' ? <Button variant="ghost" wrapLabel label={words.more(item.shown, item.group.rows.length)}
-          onPress={() => setLimits(current => ({ ...current, [item.group.id]: item.shown + TRANSFER_HISTORY_PAGE_SIZE }))} /> : <Pressable testID="transfer-review-entry" accessibilityRole={selecting ? 'checkbox' : 'button'}
+        </View> : item.kind === 'more' ? <View style={segment(item)}>
+          <EButton palette={band} variant="quiet" label={words.more(item.shown, item.group.rows.length)}
+            onPress={() => setLimits(current => ({ ...current, [item.group.id]: item.shown + TRANSFER_HISTORY_PAGE_SIZE }))} />
+        </View> : <Pressable testID="transfer-review-entry" accessibilityRole={selecting ? 'checkbox' : 'button'}
           accessibilityState={selecting ? { checked: picked.has(item.key), disabled: busy } : { disabled: busy }}
           aria-checked={selecting ? picked.has(item.key) : undefined} disabled={busy}
           accessibilityLabel={`${selecting ? words.selectItem : item.transaction.transferDecision ? words.undo : words.review}. ${item.transaction.title}. ${fullDateTime(item.transaction)}. ${formatAED(item.transaction.amountFils, { decimals: true })}`}
-          onPress={() => selecting ? togglePicked(item) : openReview(item.group, item.transaction)} style={[styles.entry, { borderColor: band.rule }]}>
-          <View style={styles.groupHeading}>
+          onPress={() => selecting ? togglePicked(item) : openReview(item.group, item.transaction)} style={segment(item)}>
+          {/* One bank entry of the group above, set in under its route. */}
+          <View style={[styles.entry, largeText && styles.entryStacked]}>
             {selecting ? <SelectionMark checked={picked.has(item.key)} palette={band} /> : null}
-            <ThemedText type="small" style={styles.flexText}>{item.transaction.title}</ThemedText>
+            <View style={styles.entryText}>
+              <ThemedText type="small">{item.transaction.title}</ThemedText>
+              <ThemedText type="meta" themeColor="textSecondary" selectable>{fullDateTime(item.transaction)}</ThemedText>
+              {item.transaction.transferEvidence?.reference ? <ThemedText type="meta" themeColor="textSecondary" selectable>{words.reference}: {item.transaction.transferEvidence.reference}</ThemedText> : null}
+            </View>
+            <Money fils={item.transaction.amountFils} sign={item.transaction.type === 'income' ? 'plus' : 'minus'} type="smallBold" decimals />
           </View>
-          <View style={styles.groupMeta}>
-            <ThemedText type="smallBold" tabular>{formatAED(item.transaction.amountFils, { decimals: true })}</ThemedText>
-            <ThemedText type="meta" themeColor="textSecondary" selectable>{fullDateTime(item.transaction)}</ThemedText>
-          </View>
-          {item.transaction.transferEvidence?.reference ? <ThemedText type="meta" themeColor="textSecondary" selectable>{words.reference}: {item.transaction.transferEvidence.reference}</ThemedText> : null}
         </Pressable>}
       />
     </BandScaffold>
     {selection ? <BottomSheet visible palette={band} title={selection.batch ? words.batchTitle : selection.undo ? words.undo : words.title}
       testID="transfer-review-confirmation" onClose={closeReview} dismissible={!busy && (!needsDurability || stale)}
       footer={<View style={styles.actions}>
-        {!selection.readOnly && <Button wrapLabel label={busy ? words.saving : needsDurability ? words.retrySave : selection.batch ? words.confirmSelected(selection.batch.length) : selection.undo ? words.undo : selection.ownership === 'own' && selection.counterpart?.linkable ? words.linkOwn : words.confirm}
+        {!selection.readOnly && <EButton palette={band} label={busy ? words.saving : needsDurability ? words.retrySave : selection.batch ? words.confirmSelected(selection.batch.length) : selection.undo ? words.undo : selection.ownership === 'own' && selection.counterpart?.linkable ? words.linkOwn : words.confirm}
           disabled={busy || stale || selection.ownership === undefined} onPress={() => void save(selection)} />
         }
-        <Button variant="ghost" label={selection.batch || selection.readOnly || selection.undo || needsDurability ? words.cancel : words.keepSeparate} disabled={busy || (needsDurability && !stale)} onPress={closeReview} />
+        <EButton palette={band} variant="quiet" label={selection.batch || selection.readOnly || selection.undo || needsDurability ? words.cancel : words.keepSeparate} disabled={busy || (needsDurability && !stale)} onPress={closeReview} />
       </View>}>
       {selection.batch ? <View testID="transfer-batch-preview" style={styles.choices}>
         <ThemedText type="subtitle" accessibilityRole="header">{words.selectedCount(selection.batch.length)}</ThemedText>
         <ThemedText type="small">{words.batchBody}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">{words.ownBody}</ThemedText>
-        {selection.batch.slice(0, previewLimit).map((item, index) => <View key={index} testID="transfer-batch-preview-item"
-          style={[styles.choice, { borderColor: band.rule }]}>
-          <ThemedText type="smallBold">{item.summary.account} · {item.summary.direction === 'income' ? words.received : words.sent}</ThemedText>
-          <ThemedText type="small" tabular>{formatAED(item.summary.total, { decimals: true })}</ThemedText>
-          <ThemedText type="meta">{item.summary.dates}</ThemedText>
-          {item.counterpart ? <>
-            <ThemedText type="smallBold">{item.counterpart.account} · {item.summary.direction === 'income' ? words.sent : words.received}</ThemedText>
-            <ThemedText type="small" tabular>{formatAED(item.counterpart.amount, { decimals: true })}</ThemedText>
-            <ThemedText type="meta">{item.counterpart.date}</ThemedText>
-          </> : <ThemedText type="small">{item.record?.title}</ThemedText>}
-        </View>)}
-        {selection.batch.length > previewLimit ? <Button variant="ghost" wrapLabel
+        {selection.batch.slice(0, previewLimit).map((item, index) => {
+          // The route this confirmation would save: the recorded account and the other side.
+          const incoming = item.summary.direction === 'income';
+          const otherName = item.counterpart?.account ?? item.summary.counterparty;
+          const other: RouteEnd = !item.counterpart && otherName === words.counterpartyUnknown ? { kind: 'unknown' } : { kind: 'party', name: otherName };
+          const account: RouteEnd = { kind: 'party', name: item.summary.account };
+          return <View key={index} testID="transfer-batch-preview-item"
+            style={[styles.previewItem, { borderColor: band.rule, backgroundColor: band.card }]}>
+            <TransferRoute from={incoming ? other : account} to={incoming ? account : other}
+              fromLabel={incoming ? shownName(other, otherName) : item.summary.account}
+              toLabel={incoming ? item.summary.account : shownName(other, otherName)}
+              amountFils={item.summary.total} sign={item.counterpart ? 'none' : incoming ? 'plus' : 'minus'} palette={band} />
+            {/* Signed as in the list (a pair unsigned, a single entry by direction); the amount is on
+                the route once, and the other leg's amount appears only when it differs. */}
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>
+              {item.summary.account} · {incoming ? words.received : words.sent} · {item.summary.dates}
+            </ThemedText>
+            {item.counterpart ? <ThemedText type="meta" style={{ color: band.textSecondary }}>
+              {[item.counterpart.account, incoming ? words.sent : words.received,
+                item.counterpart.amount !== item.summary.total ? formatAED(item.counterpart.amount, { decimals: true }) : null,
+                item.counterpart.date].filter(Boolean).join(' · ')}
+            </ThemedText> : <ThemedText type="meta" style={{ color: band.textSecondary }}>{item.record?.title}</ThemedText>}
+          </View>;
+        })}
+        {selection.batch.length > previewLimit ? <EButton palette={band} variant="quiet"
           label={words.more(previewLimit, selection.batch.length)} onPress={() => setPreviewLimit(value => value + TRANSFER_HISTORY_PAGE_SIZE)} /> : null}
       </View> : <>
       <ThemedText type="subtitle" accessibilityRole="header">{selection.undo ? words.undoTitle : selection.ids.length > 1 ? words.groupChoose : words.choose}</ThemedText>
@@ -681,7 +775,7 @@ export default function ReviewTransfersScreen() {
             accessibilityState={{ checked: selection.ownership === ownership, disabled: busy || needsDurability }}
             disabled={busy || needsDurability}
             onPress={() => setSelection({ ...selection, ownership })}
-            style={[styles.choice, { borderColor: selection.ownership === ownership ? band.tint : band.rule }]}>
+            style={[styles.choice, { backgroundColor: band.card, borderColor: selection.ownership === ownership ? band.tint : band.rule }]}>
             <ThemedText type="smallBold">{label}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary">{detail}</ThemedText>
           </Pressable>;
@@ -694,45 +788,49 @@ export default function ReviewTransfersScreen() {
 }
 
 const styles = StyleSheet.create({
-  bandIntro: { gap: Spacing.two },
-  // The band's headline: Geist SemiBold with tabular digits, never Geist Mono.
-  headline: { fontFamily: Fonts.sansSemi, fontSize: 34, lineHeight: 40, letterSpacing: -1.2, fontVariant: ['tabular-nums'] },
+  bandIntro: { gap: Spacing.three },
+  bandFigure: { gap: 4, alignItems: 'flex-start' },
+  // The band's figure as BandFigure sets it (the large size): Geist SemiBold, tabular digits, never Geist Mono.
+  headline: { fontFamily: Fonts.sansSemi, fontSize: 32, lineHeight: 38, letterSpacing: -1, fontVariant: ['tabular-nums'],
+    maxWidth: '100%', flexShrink: 1 },
+  headlineLarge: { fontSize: 24, lineHeight: 30, letterSpacing: -0.5 },
+  solid: { opacity: 1 },
   sheet: { paddingTop: Spacing.two },
   listContent: { gap: 0 },
   intro: { gap: Spacing.three, paddingBottom: Spacing.three },
   pairs: { gap: 10 },
-  pairCard: { borderWidth: 1, borderRadius: 22, padding: Spacing.three, gap: Spacing.three, marginBottom: Spacing.three },
+  pairCard: { borderWidth: 1, borderRadius: 18, padding: Spacing.three, gap: Spacing.three, marginBottom: Spacing.three },
   selectControl: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   checkbox: { width: 24, height: 24, borderWidth: 2, borderRadius: 6, justifyContent: 'center', alignItems: 'center' },
-  pairLegs: { gap: Spacing.two },
-  pairFigure: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.two },
-  pairAmount: { fontFamily: Fonts.sansSemi, fontSize: 26, lineHeight: 32, letterSpacing: -1, fontVariant: ['tabular-nums'] },
-  pairActions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  pill: { minHeight: 44, maxWidth: '100%', flexShrink: 1, borderRadius: 22, paddingHorizontal: 18, paddingVertical: 8, justifyContent: 'center', alignItems: 'center' },
-  pillLabel: { textAlign: 'center' },
+  pairLegs: { gap: Spacing.one },
+  routeMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
+  choiceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  choiceRowStacked: { flexDirection: 'column' },
+  choiceButton: { flexGrow: 1, flexShrink: 1, maxWidth: '100%', minHeight: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+    paddingHorizontal: Spacing.three, paddingVertical: Spacing.two },
+  choiceButtonStacked: { flexGrow: 0, alignSelf: 'stretch' },
+  choiceLabel: { textAlign: 'center' },
+  // One card per group: its route, then its entries and "Show more" set in below it.
+  segment: { paddingHorizontal: Spacing.three },
+  segmentFirst: { borderTopStartRadius: 18, borderTopEndRadius: 18, paddingBottom: Spacing.three, gap: Spacing.two },
+  segmentLast: { borderBottomStartRadius: 18, borderBottomEndRadius: 18, marginBottom: Spacing.two },
+  groupToggle: { minHeight: 48, paddingTop: Spacing.three, gap: Spacing.one },
+  countPill: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  chevron: { marginStart: 'auto' },
+  entry: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.three, paddingStart: Spacing.three },
+  entryStacked: { flexDirection: 'column', alignItems: 'flex-start' },
+  entryText: { flex: 1, minWidth: 0, gap: 2 },
   matched: { paddingTop: Spacing.four },
   matchedHead: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingBottom: Spacing.two },
-  matchedRow: { minHeight: 60, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.three,
-    paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth },
-  matchedFigure: { alignItems: 'flex-end', gap: 2 },
-  matchedRowStacked: { flexDirection: 'column', alignItems: 'stretch' },
-  matchedFigureStacked: { alignItems: 'flex-start' },
-  stretch: { alignSelf: 'stretch' },
+  matchedCard: { borderRadius: 18, paddingHorizontal: Spacing.three },
+  matchedRow: { minHeight: 60, paddingVertical: Spacing.three, gap: Spacing.one },
   matchedLink: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
-  filters: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  filter: { minHeight: 48, justifyContent: 'center', paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, borderBottomWidth: 2 },
   facts: { gap: Spacing.one },
-  group: { borderTopWidth: StyleSheet.hairlineWidth, paddingBottom: Spacing.three, gap: Spacing.two },
-  groupToggle: { minHeight: 48, paddingTop: Spacing.three, gap: Spacing.two },
-  groupHeading: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   flexText: { flex: 1, flexShrink: 1 },
-  groupMeta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: Spacing.one },
-  scope: { minHeight: 44, justifyContent: 'center', paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, borderWidth: StyleSheet.hairlineWidth },
   clearSearch: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  historyLink: { paddingVertical: Spacing.three },
-  entry: { minHeight: 48, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: Spacing.three, paddingStart: Spacing.three, gap: Spacing.one },
   empty: { paddingVertical: Spacing.six, gap: Spacing.two },
   actions: { gap: Spacing.two },
   choices: { gap: Spacing.two },
-  choice: { minHeight: 48, padding: Spacing.three, borderWidth: 1, gap: Spacing.one },
+  previewItem: { borderWidth: 1, borderRadius: 14, padding: Spacing.three, gap: Spacing.one },
+  choice: { minHeight: 48, padding: Spacing.three, borderWidth: 1.5, borderRadius: 14, gap: Spacing.one },
 });

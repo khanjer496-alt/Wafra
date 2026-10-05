@@ -351,6 +351,16 @@ export function shortDate(iso: string): string {
   return `${d} ${months[m - 1] ?? ''}`;
 }
 
+/**
+ * shortDate, with the year added when it is not this year: "5 Nov" for this
+ * year, "5 Nov 2022" for an old entry, so an old transfer never reads like an
+ * upcoming date.
+ */
+export function shortDateWithYear(iso: string, now: Date = new Date()): string {
+  const year = iso.slice(0, 4);
+  return year === String(now.getFullYear()) ? shortDate(iso) : `${shortDate(iso)} ${year}`;
+}
+
 /** "Today", "Yesterday", or "Friday, 18 Jul". */
 export function friendlyDate(iso: string, todayISO: string): string {
   if (iso === todayISO) return t('today');

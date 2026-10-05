@@ -28,7 +28,9 @@ const en = {
   notCounted: 'Not counted as spending or income',
   tiles: { own: 'Your accounts', sent: 'Sent to others', received: 'Received', counted: 'counted' },
   tags: { own: 'Your accounts', external: 'Someone else · counted', needsAnswer: 'Needs an answer', unconfirmed: 'Not answered yet' },
-  route: { unknown: 'Unknown', linked: (account: string) => `Linked to ${account}`, to: 'to' },
+  // An unknown end once answered: the person said where the money went or came from.
+  route: { unknown: 'Unknown', linked: (account: string) => `Linked to ${account}`, to: 'to',
+    yourAccount: 'Your account', someoneElse: 'Someone else' },
   listTitle: 'This month',
   answers: {
     question: 'What is this?',
@@ -54,6 +56,8 @@ const en = {
     whereIn: 'Where did this come from?',
     looksLike: (account: string) => `looks like your ${account}`,
     seeAll: (n: number) => `See all ${n}`,
+    /** "See all" when the card's title already gives the count. */
+    seeAllPlain: 'See all',
   },
 };
 
@@ -85,7 +89,8 @@ const ar: typeof en = {
   notCounted: 'لا تُحتسب ضمن المصروفات أو الدخل',
   tiles: { own: 'حساباتك', sent: 'أُرسلت لآخرين', received: 'مستلمة', counted: 'محتسبة' },
   tags: { own: 'حساباتك', external: 'شخص آخر · محتسبة', needsAnswer: 'بانتظار إجابتك', unconfirmed: 'لم تتم الإجابة بعد' },
-  route: { unknown: 'غير معروف', linked: (account) => `مرتبط بـ ${account}`, to: 'إلى' },
+  route: { unknown: 'غير معروف', linked: (account) => `مرتبط بـ ${account}`, to: 'إلى',
+    yourAccount: 'حسابك', someoneElse: 'شخص آخر' },
   listTitle: 'هذا الشهر',
   answers: {
     question: 'ما هذه المعاملة؟',
@@ -111,6 +116,7 @@ const ar: typeof en = {
     whereIn: 'من أين جاءت؟',
     looksLike: (account) => `يبدو أنها حسابك ${account}`,
     seeAll: (n) => `عرض الكل (${n})`,
+    seeAllPlain: 'عرض الكل',
   },
 };
 
