@@ -6,7 +6,7 @@ const BASE = process.env.BASE ?? 'http://127.0.0.1:8126';
 assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(new URL(BASE).hostname));
 const OUT = process.env.UI_CLEANUP_EVIDENCE ?? 'artifacts/e2e-ui-cleanup';
 mkdirSync(OUT, { recursive: true });
-const browser = await chromium.launch();
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 const results = [];
 async function visibleAction(button, page) {
   await button.waitFor({ state: 'visible' });
@@ -27,7 +27,7 @@ try {
       ['help', '/settings-data', 'settings-data-help'], ['transactions', '/transactions'], ['transfers', '/transfers'],
       ['merchant', '/merchant?name=Talabat'], ['merchants', '/merchants'],
       ['add-transaction', '/add-transaction'], ['imports', '/import-sms'],
-      ['review-alerts', '/review-alerts'], ['review-transfers', '/review-transfers'],
+      ['review-alerts', '/review-alerts'], ['review-transfers-link', '/review-transfers'],
       ['categories', '/categorise'], ['accuracy', '/accuracy'], ['feedback', '/feedback'],
       ['currency', '/currency'], ['cards', '/cards'], ['trusted-devices', '/trusted-devices'],
     ];

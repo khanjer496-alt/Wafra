@@ -57,8 +57,8 @@ function seed(language, mode) {
   };
 }
 const labels = {
-  en: { save: 'Save classification', undo: 'Undo decision', group: 'Classify these 2 transfers', backup: 'Back up to a file', leave: 'Leave as recorded' },
-  ar: { save: 'حفظ التصنيف', undo: 'التراجع عن القرار', group: 'تصنيف هذه التحويلات وعددها 2', backup: 'نسخ احتياطي إلى ملف', leave: 'تركه كما هو مسجل' },
+  en: { backup: 'Back up to a file' },
+  ar: { backup: 'نسخ احتياطي إلى ملف' },
 };
 function minor(value) {
   const normalized = String(value).replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
@@ -141,13 +141,24 @@ async function home(page, expected, currentPendingCount, historicalPendingCount 
   if (pendingCount > 0) assert.equal(minor(await notice.getAttribute('aria-label')) / 100, pendingCount,
     'Home names the exact full review queue, including historical entries');
 }
-async function choose(page, words, id, ownership) {
+async function decisionOf(page, id, expected) {
+  const deadline = Date.now() + 8000;
+  let current;
+  while (Date.now() < deadline) {
+    current = (await stored(page)).transactions.find(row => row.id === id)?.transferDecision?.ownership;
+    if (current === expected) return current;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return current;
+}
+/** An old Review transfers link opens the entry's "What is this?" on Transfers; one tap saves the answer. */
+async function choose(page, id, ownership) {
   await page.goto(`${BASE}/review-transfers?transactionId=${id}`, { waitUntil: 'networkidle' });
-  await click(page.getByTestId('transfer-review-entry'));
-  await click(page.getByTestId(`transfer-choice-${ownership}`));
-  await click(page.getByRole('button', { name: words.save, exact: true }));
-  await page.getByTestId('transfer-review-confirmation').waitFor({ state: 'hidden' });
-  assert.equal((await stored(page)).transactions.find(row => row.id === id)?.transferDecision?.ownership, ownership);
+  await page.waitForURL(/\/transfers\?transactionId=/);
+  const question = page.getByTestId('entry-transfer-question');
+  await click(question.getByTestId(`transfer-answer-${ownership}`));
+  await page.getByTestId('entry-detail-sheet').waitFor({ state: 'hidden' });
+  assert.equal(await decisionOf(page, id, ownership), ownership);
 }
 
 await mkdir(OUT, { recursive: true });
@@ -203,46 +214,45 @@ try {
       }
       await click(page.getByTestId('entry-detail-done'));
       await page.getByTestId('entry-detail-sheet').waitFor({ state: 'hidden' });
-      // "See all" on the question card is the way into the batch review screen.
+      // "See all" on the question card selects several on this same page: no second screen.
       await click(page.getByTestId('transfer-question-see-all'));
-      await page.waitForURL(/review-transfers/);
-      // The batch screen opened from "See all" is the collapsed history; one entry opens by id.
-      await page.getByTestId('review-transfers-screen').waitFor({ state: 'visible' });
-      assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'See all opens the collapsed history');
-      // Back from the batch screen returns to the Transfers page it was opened from.
-      await click(page.getByTestId('band-back'));
-      await page.waitForURL(/\/transfers(?:[?#]|$)/);
-      await page.getByTestId('transfer-question-card').waitFor({ state: 'visible' });
+      await page.getByTestId('transfer-selection-footer').waitFor({ state: 'visible' });
+      assert.match(page.url(), /\/transfers(?:[?#]|$)/, 'See all stays on Transfers');
+      await click(page.getByTestId('transfer-cancel-selection'));
+      await page.getByTestId('transfer-selection-footer').waitFor({ state: 'hidden' });
+      // An old Review transfers link to one entry opens that entry's question on Transfers.
       await page.goto(`${BASE}/review-transfers?transactionId=unknown-out`, { waitUntil: 'networkidle' });
-      await click(page.getByTestId('transfer-review-entry'));
-      await page.getByTestId('transfer-review-confirmation').waitFor({ state: 'visible' });
+      await page.waitForURL(/\/transfers\?transactionId=unknown-out/);
+      await page.getByTestId('entry-transfer-question').waitFor({ state: 'visible' });
+      // The old review address itself is now Transfers, with what waits for an answer at the top as groups.
       await page.goto(`${BASE}/review-transfers`, { waitUntil: 'networkidle' });
-      assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'history is collapsed, not a task queue');
-      await fits(page.getByTestId('transfer-search'));
+      await page.waitForURL(/\/transfers(?:[?#]|$)/);
+      await page.getByTestId('transfers-screen').waitFor({ state: 'visible' });
+      assert.equal(await page.getByTestId('transfer-group-entry').count(), 0, 'groups are collapsed rows, not a task list');
       await page.screenshot({ path: path.join(OUT, `${name}-recent-groups.png`) });
-      await click(page.getByTestId('transfer-review-group').filter({ hasText: '4999' }).getByTestId('transfer-group-toggle'));
-      assert.equal(await page.getByRole('button', { name: words.group, exact: true }).count(), 0,
-        'a repeated bank reference and shared recipient hint do not authorize bulk ownership');
-      await choose(page, words, 'group-a', 'own');
-      await page.goto(`${BASE}/review-transfers?transactionId=group-b`, { waitUntil: 'networkidle' });
-      await click(page.getByTestId('transfer-review-entry'));
-      await fits(page.getByTestId('transfer-review-confirmation'));
-      await page.screenshot({ path: path.join(OUT, `${name}-individual-confirmation.png`) });
-      assert.equal(await page.getByRole('button', { name: words.save, exact: true }).isDisabled(), true);
-      await click(page.getByTestId('transfer-choice-own'));
-      await fits(page.getByTestId('transfer-choice-external'));
+      // Two transfers to the same masked account (4999): one route row with its count. Its sheet asks the
+      // one question; nothing is saved until an answer is picked and Save is pressed.
+      const shared = page.locator('[data-testid^="transfer-group-transfer-group"]').filter({ hasText: '4999' });
+      await click(shared);
+      const sheet = page.getByTestId('transfer-answer-sheet');
+      await sheet.waitFor({ state: 'visible' });
+      await fits(sheet);
+      assert.equal(await sheet.getByTestId('transfer-group-entry').count(), 2, 'the sheet lists both entries it will answer');
+      assert.equal(await sheet.getByTestId('transfer-answer-sheet-save').isDisabled(), true, 'no answer is assumed');
+      await page.screenshot({ path: path.join(OUT, `${name}-group-sheet.png`) });
+      await click(sheet.getByTestId('transfer-answer-own'));
       await page.screenshot({ path: path.join(OUT, `${name}-choices.png`) });
-      await click(page.getByRole('button', { name: words.save, exact: true }));
-      await page.getByTestId('transfer-review-confirmation').waitFor({ state: 'hidden' });
+      await click(sheet.getByTestId('transfer-answer-sheet-save'));
+      await sheet.waitFor({ state: 'hidden' });
+      for (const id of ['group-a', 'group-b']) assert.equal(await decisionOf(page, id, 'own'), 'own');
       let saved = await stored(page);
-      for (const id of ['group-a', 'group-b']) assert.equal(saved.transactions.find(t => t.id === id).transferDecision.ownership, 'own');
       await home(page, [200000, 10000, 190000], 2);
-      await choose(page, words, 'unknown-in', 'external');
+      await choose(page, 'unknown-in', 'external');
       await home(page, [230000, 10000, 220000], 1);
-      await choose(page, words, 'unknown-out', 'external');
+      await choose(page, 'unknown-out', 'external');
       await home(page, [230000, 17000, 213000], 0);
       // Explicit/automatic ownership has an override, not an invisible exclusion.
-      await choose(page, words, 'legacy-own', 'external');
+      await choose(page, 'legacy-own', 'external');
       await home(page, [230000, 21000, 209000], 0);
       await page.reload({ waitUntil: 'networkidle' });
       saved = await stored(page);
@@ -261,33 +271,36 @@ try {
       assert.equal(backup.app, 'wafra');
       assert.deepEqual(backup.data.transactions.map(t => [t.id, t.transferDecision ?? null]).sort(),
         saved.transactions.map(t => [t.id, t.transferDecision ?? null]).sort(), 'real downloaded backup preserves every decision');
+      // A saved answer can be taken back from the entry's own sheet: it waits for an answer again.
       await page.goto(`${BASE}/review-transfers?transactionId=unknown-in`, { waitUntil: 'networkidle' });
-      await click(page.getByTestId('transfer-review-entry'));
-      await click(page.getByRole('button', { name: words.undo, exact: true }));
-      await page.getByTestId('transfer-review-confirmation').waitFor({ state: 'hidden' });
-      assert.equal((await stored(page)).transactions.find(t => t.id === 'unknown-in').transferDecision, undefined);
+      await page.waitForURL(/\/transfers\?transactionId=unknown-in/);
+      await click(page.getByTestId('entry-transfer-clear'));
+      await page.getByTestId('entry-detail-sheet').waitFor({ state: 'hidden' });
+      assert.equal(await decisionOf(page, 'unknown-in', undefined), undefined);
       await home(page, [200000, 21000, 179000], 1);
       await page.goto(`${BASE}/review-transfers?transactionId=deleted-entry`, { waitUntil: 'networkidle' });
-      assert.equal(await page.getByTestId('transfer-review-entry').count(), 0, 'stale route cannot classify another row');
+      await page.getByTestId('transfers-link-notice').waitFor({ state: 'visible' });
+      assert.equal(await page.getByTestId('entry-detail-sheet').count(), 0, 'stale route cannot open or classify another row');
       await page.screenshot({ path: path.join(OUT, `${name}-missing-entry.png`) });
       // All 3,106 old transfers remain reachable without creating 3,106 mounted actions.
-      await page.goto(`${BASE}/review-transfers`, { waitUntil: 'networkidle' });
-      const historic = page.getByTestId('transfer-review-group').filter({ hasText: '4222' });
-      assert.equal(await historic.count(), 1, 'old unresolved records remain reachable as one collapsed group');
+      await page.goto(`${BASE}/transfers`, { waitUntil: 'networkidle' });
+      const historic = page.locator('[data-testid^="transfer-group-transfer-group"]').filter({ hasText: '4222' });
+      assert.equal(await historic.count(), 1, 'old unresolved records remain reachable as one group row');
       assert.equal(await page.getByTestId('transfer-scope-all').count(), 0, 'there is no second transfer-history mode');
-      await page.getByTestId('transfer-search').fill('4222');
-      await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="transfer-review-group"]')]
+      await page.locator('input').first().fill('4222');
+      await page.waitForFunction(() => [...document.querySelectorAll('[data-testid^="transfer-group-count"]')]
         .some(node => (node.textContent ?? '').replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x660))
           .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x6f0)).replace(/[,٬]/g, '').includes('3106')));
-      assert.equal(await page.getByTestId('transfer-review-entry').count(), 0);
       await page.screenshot({ path: path.join(OUT, `${name}-3106-history-collapsed.png`) });
-      await click(historic.getByTestId('transfer-group-toggle'));
-      assert.ok(await page.getByTestId('transfer-review-entry').count() <= 20, 'expanded records are bounded and virtualized');
+      await click(historic);
+      await sheet.waitFor({ state: 'visible' });
+      const mounted = await sheet.getByTestId('transfer-group-entry').count();
+      assert.ok(mounted > 0 && mounted <= 20, `the group's entries are paged (${mounted})`);
       const beforeLeave = (await stored(page)).transactions.map(t => [t.id, t.transferDecision ?? null]);
-      await click(page.getByTestId('transfer-review-entry').first());
-      await click(page.getByRole('button', { name: words.leave, exact: true }));
+      await click(sheet.getByTestId('transfer-answer-sheet-cancel'));
+      await sheet.waitFor({ state: 'hidden' });
       assert.deepEqual((await stored(page)).transactions.map(t => [t.id, t.transferDecision ?? null]), beforeLeave,
-        'leaving unclassified does not apply or dismiss any decision');
+        'leaving unanswered does not apply or dismiss any decision');
       // A separate reviewed-current-ledger fixture has genuinely no pending
       // queue. Keep the backlog scenario above intact, including its untouched
       // history and Undo checks; do not fake completion of those old records.
