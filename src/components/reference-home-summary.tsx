@@ -448,6 +448,8 @@ function MonthLine(p: Props & { band: BandPalette }) {
   // text size, unless even that would run past the edge.
   const scale = Math.max(1, fontScale);
   const size = stacked ? Math.min(15, lineWidth / (ems * scale)) : fitted / scale;
+  const flowCoins = flowStackCoins(p.incomeFils, p.expenseFils);
+  const flowGhost = useMemo(() => ghostTone(band.tile, band.onBand), [band.tile, band.onBand]);
   return <View style={styles.root} testID="reference-home-summary">
     <View testID="journal-summary" style={[styles.line, stacked && styles.lineStacked, { backgroundColor: band.tile }]}>
       <View style={styles.lineHeader}>
@@ -456,18 +458,24 @@ function MonthLine(p: Props & { band: BandPalette }) {
           <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{p.periodLabel}</ThemedText>
           <Icon name="chevron-down" size={14} color={band.onBandSecondary} />
         </Pressable>
-        {/* In against Spent as coins, over the Net they make; the line keeps its height. */}
-        {stacked ? null : <FlowStacks incomeFils={p.incomeFils} expenseFils={p.expenseFils} surface={band.tile} ink={band.onBand}
-          spent={{ label: w.lineSpent, color: cells[0]!.color }} income={{ label: w.lineIn, color: cells[1]!.color }}
-          style={styles.flowCoinsLine} />}
         {/* The figures' currency, once for the line; each figure speaks its own. */}
         <ThemedText type="meta" testID="home-line-currency" importantForAccessibility="no" accessibilityElementsHidden
           style={{ color: band.onBandSecondary }}>{currency}</ThemedText>
       </View>
       <View style={[styles.lineCells, stacked && styles.stack]}>
         {cells.map(cell => {
+          // Spent and In each carry their coin stack beside their own label, so the
+          // name is written once and the stacks' heights compare like the figures.
+          const filled = flowCoins === null || stacked ? null
+            : cell.id === 'home-spending-total' ? flowCoins.spent : cell.id === 'home-income-summary' ? flowCoins.income : null;
           const body = <>
-            <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{cell.label}</ThemedText>
+            <View style={styles.cellLabelRow}>
+              <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{cell.label}</ThemedText>
+              {filled === null ? null : <View importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+                <CoinStack testID={cell.id === 'home-spending-total' ? 'home-flow-coins-spent' : 'home-flow-coins-in'}
+                  total={FLOW_COINS} filled={filled} width={FLOW_COIN_WIDTH} ghost={flowGhost} />
+              </View>}
+            </View>
             <ThemedText style={[styles.lineValue, { color: cell.color, fontSize: size, lineHeight: Math.round(size * 1.3) }]}>{cell.value}</ThemedText>
           </>;
           const style = [styles.lineCell, stacked && styles.lineCellStacked];
@@ -570,6 +578,7 @@ const styles = StyleSheet.create({
   flowColumn: { alignItems: 'center', gap: 1 },
   flowLabel: { fontFamily: Fonts.sansSemi, fontSize: 10, lineHeight: 12 },
   flowCoinsLine: { marginStart: 'auto' },
+  cellLabelRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
   inlineAction: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   underline: { textDecorationLine: 'underline' },
   weekHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 },

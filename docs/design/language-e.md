@@ -258,7 +258,7 @@ one drawing per figure, always beside the written figure:
 | Home, Left in budgets | 8-coin `CoinStack` | share of limits still left; drains as it is spent |
 | Home, Today | a `CoinStack` of one coin per payment today (at most 6; none with none) at the tile's bottom end beside the count, dropping in as each is captured | today's payments (`todayCount`) |
 | Home, Daily average (no budget) | a row of coin columns, one per day the average divides by (windows up to 31 days), rising start → end | each day's everyday spending against the biggest day (`averageDays`, the same rows and fixed-cost rule as the average) |
-| Home, month line (or the period card) | two 6-coin `CoinStack`s, Spent then In, each named under it with the card's own words, scaled to the larger; the gap is Net; no money in is an empty stack | the period's money in and spending |
+| Home, month line (or the period card) | a 6-coin `CoinStack` beside the Spent label and another beside the In label (on the period card, named under each with the card's own words), scaled to the larger; the gap is Net; no money in is an empty stack | the period's money in and spending |
 | Home, Recent transactions | a row that arrives at the top while Home is open slides in and a coin drops on its logo tile, once | a capture just recorded (never first paint, loading or a period change) |
 | Goal | jar of up to 10 coins (`goals/goal-jar.tsx`) | share saved |
 | Limit sheet | 10-coin `CoinStack` under a limit line in the status colour | share of the limit spent |

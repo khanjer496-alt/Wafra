@@ -127,46 +127,38 @@ test('Daily average columns read the same order in Arabic, mirrored by the layou
   assert.equal(styles.some((style) => 'left' in style || 'right' in style), false, 'logical start/end only');
 });
 
-test('Month line: In and Spent as two stacks scaled to the larger, the figures and labels unchanged', () => {
+test('Month line: Spent and In each carry their coin stack beside their own label, scaled to the larger', () => {
   const tree = home();
   const line = byId(tree, 'journal-summary');
-  const pair = byId(line, 'home-flow-coins');
-  assert.ok(pair);
-  assert.ok(hidden(pair));
+  const spentCell = byId(line, 'home-spending-total');
+  const inCell = byId(line, 'home-income-summary');
+  // Each stack sits inside its own figure's cell, next to the label it already has: the name is written once.
+  const spent = byId(spentCell, 'home-flow-coins-spent');
+  const income = byId(inCell, 'home-flow-coins-in');
+  assert.ok(spent && income);
+  assert.equal(byId(line, 'home-flow-coins'), undefined, 'no separate, separately labelled pair');
+  assert.equal((text(line).match(/Spent/g) || []).length, 1, 'Spent is written once');
+  assert.equal((text(line).match(/\bIn\b/g) || []).length, 1, 'In is written once');
+  // Decorative: hidden from assistive tech; the cells speak as before.
+  const wrapper = walk(spentCell).find((node) => node.props?.importantForAccessibility === 'no-hide-descendants');
+  assert.ok(wrapper && hidden(wrapper));
   // Harness: AED 8,300 in, AED 5,360 spent: In fills its 6 coins, Spent 4.
-  assert.equal(gold(byId(pair, 'home-flow-coins-in'), 'home-flow-coins-in').filter(Boolean).length, 6);
-  assert.equal(gold(byId(pair, 'home-flow-coins-spent'), 'home-flow-coins-spent').filter(Boolean).length, 4);
-  // Each stack is named under it with the line's own words, Spent then In, in its figure's colour.
-  const columns = pair.props.children;
-  assert.deepEqual(JSON.parse(JSON.stringify(columns.map((column) => column.props.children.map((child) => child.props.testID)))),
-    [['home-flow-coins-spent', 'home-flow-coins-spent-label'], ['home-flow-coins-in', 'home-flow-coins-in-label']]);
-  assert.deepEqual(['spent', 'in'].map((id) => text(byId(pair, `home-flow-coins-${id}-label`))), ['Spent', 'In']);
-  const band = createHarness().deps['@/hooks/use-band'].useBand('home');
-  for (const id of ['spent', 'in']) {
-    assert.equal(flat(byId(pair, `home-flow-coins-${id}-label`).props.style).color, band.onBand);
-  }
-  // A stack and its name fit the line's 40pt header, so the figures under it do not move.
-  for (const id of ['spent', 'in']) {
-    const stackHeight = flat(byId(pair, `home-flow-coins-${id}`).props.style).height;
-    const label = flat(byId(pair, `home-flow-coins-${id}-label`).props.style);
-    assert.ok(stackHeight + 1 + label.lineHeight * 1.2 <= 40, `${id}: ${stackHeight} + ${label.lineHeight}`);
-  }
-  assert.equal(byId(line, 'home-spending-total').props.accessibilityLabel, 'Spending, AED 5,360. View spending breakdown');
-  assert.equal(byId(line, 'home-income-summary').props.accessibilityLabel, 'Income, AED 8,300');
+  assert.equal(gold(income, 'home-flow-coins-in').filter(Boolean).length, 6);
+  assert.equal(gold(spent, 'home-flow-coins-spent').filter(Boolean).length, 4);
   assert.equal(byId(line, 'home-net-summary').props.accessibilityLabel, 'Net, AED +2,940');
+  assert.equal(walk(byId(line, 'home-net-summary')).some((node) => /home-flow-coins/.test(node.props?.testID ?? '')), false,
+    'Net has no stack: it is the difference between the two');
+  assert.equal(spentCell.props.accessibilityLabel, 'Spending, AED 5,360. View spending breakdown');
+  assert.equal(inCell.props.accessibilityLabel, 'Income, AED 8,300');
   assert.match(text(line), /5,360/);
-  // Arabic names come from the same copy.
-  const ar = byId(home({ language: 'ar' }), 'home-flow-coins');
-  assert.deepEqual(['spent', 'in'].map((id) => text(byId(ar, `home-flow-coins-${id}-label`))), ['المصروف', 'الدخل']);
   // No money in: its stack is empty places; spending fills the other.
-  const spentOnly = home({ state: { transactions: [expense('x', '2026-09-03', 1000)] } });
-  const empty = byId(spentOnly, 'home-flow-coins');
-  assert.equal(gold(byId(empty, 'home-flow-coins-in'), 'home-flow-coins-in').filter(Boolean).length, 0);
-  assert.equal(gold(byId(empty, 'home-flow-coins-in'), 'home-flow-coins-in').length, 6);
-  assert.equal(gold(byId(empty, 'home-flow-coins-spent'), 'home-flow-coins-spent').filter(Boolean).length, 6);
+  const spentOnly = byId(home({ state: { transactions: [expense('x', '2026-09-03', 1000)] } }), 'journal-summary');
+  assert.equal(gold(byId(spentOnly, 'home-flow-coins-in'), 'home-flow-coins-in').filter(Boolean).length, 0);
+  assert.equal(gold(byId(spentOnly, 'home-flow-coins-in'), 'home-flow-coins-in').length, 6);
+  assert.equal(gold(byId(spentOnly, 'home-flow-coins-spent'), 'home-flow-coins-spent').filter(Boolean).length, 6);
   // Nothing moved, or Larger Text: no stacks.
-  assert.equal(byId(home({ empty: true }), 'home-flow-coins'), undefined);
-  assert.equal(byId(home({ largeText: true }), 'home-flow-coins'), undefined);
+  assert.equal(byId(home({ empty: true }), 'home-flow-coins-spent'), undefined);
+  assert.equal(byId(byId(home({ largeText: true }), 'journal-summary') ?? {}, 'home-flow-coins-spent'), undefined);
 });
 
 /** Home with hooks that persist across renders and effects that run after each, like React. */
