@@ -30,7 +30,7 @@ import { useStore } from '@/lib/store';
 import { getTransferActivity, onePerPair } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
-import { filterTransferItems, transferListItems, transferTotals, type TransferTag, type TransferTile } from '@/lib/transfer-list';
+import { absorbedOwnIncoming, filterTransferItems, transferListItems, transferTotals, type TransferTag, type TransferTile } from '@/lib/transfer-list';
 import { matchedTransferPairs } from '@/lib/transfer-pairs';
 import { reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { Transaction } from '@/lib/types';
@@ -103,7 +103,11 @@ export default function TransfersScreen() {
   // matchesSearch closes over search and accounts.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [periodItems, pairsByKey, rowsById, search, accounts]);
-  const totals = useMemo(() => transferTotals(items), [items]);
+  // Unlinked own legs are paired across the whole history before any period or
+  // search filter, so a transfer that left on 30 Sep and arrived on 1 Oct
+  // counts once, in September.
+  const absorbed = useMemo(() => absorbedOwnIncoming(transferListItems(activity, allPairs)), [activity, allPairs]);
+  const totals = useMemo(() => transferTotals(items, absorbed), [items, absorbed]);
   const shown = useMemo(() => filterTransferItems(items, tile), [items, tile]);
   // A coin travels a route when the list first appears (the first few rows only) and again
   // the moment a route's money is explained as moving between the person's own accounts,
