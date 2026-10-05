@@ -1446,10 +1446,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.two,
   },
+  // Shrinks beside the currency pill so a long label (Arabic, larger text)
+  // wraps instead of running off the band.
   modeToggle: {
     minHeight: 44,
     justifyContent: 'center',
     paddingHorizontal: Spacing.one,
+    flexShrink: 1,
+    minWidth: 0,
   },
   chipRowWrap: { gap: Spacing.two },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', columnGap: Spacing.two, rowGap: Spacing.two + 2 },

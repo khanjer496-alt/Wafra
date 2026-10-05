@@ -97,9 +97,9 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
 
   const bandContent = state.hydrated ? <View style={styles.band}>
     <View style={[styles.identity, large && styles.stack]}>
-      <MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={56} />
+      <MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={48} />
       <View style={styles.identityCopy}>
-        <ThemedText type="title" accessibilityRole="header" numberOfLines={large ? undefined : 2}
+        <ThemedText type="heading" accessibilityRole="header" numberOfLines={large ? undefined : 2}
           style={[styles.name, { color: band.onBand }]}>{displayName || pickLabel}</ThemedText>
         {/* A category only when every row shares it; mixed rows name none. */}
         {category ? <ThemedText type="small" style={{ color: band.onBandSecondary }}>{categoryLabel(category, lang)}</ThemedText> : null}
@@ -188,9 +188,9 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
 }
 
 const styles = StyleSheet.create({
-  band: { gap: 18 },
+  band: { gap: 14 },
   sheet: { gap: 14 },
-  identity: { flexDirection: 'row', alignItems: 'center', gap: 14, flexWrap: 'wrap' },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
   identityCopy: { flex: 1, minWidth: 140, gap: 2 },
   name: { fontFamily: Fonts.sansSemi, letterSpacing: -0.6 },
   tiles: { flexDirection: 'row', gap: 10 },
