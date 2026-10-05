@@ -372,11 +372,37 @@ Not the system status bar.
 
 56pt, 16pt radius, centred label. `primary` (band `fill`, or `color={{ fill, text }}`),
 `secondary` (card with a rule), `quiet` (tint text). `busy` shows a spinner.
+`size="compact"` (48pt, 16pt label) is for a sheet's row of two or three
+actions. `accessibilityLabel` keeps the full spoken name when the visible label
+is its short form ("Edit" for "Edit transaction").
 
 ```tsx
 <EButton palette={band} label={words.recordPayment} onPress={record} />
 <EButton palette={band} variant="quiet" label={words.details} onPress={open} />
+<EButton palette={band} size="compact" variant="secondary" label={words.edit}
+  accessibilityLabel={t('editEntry')} onPress={edit} />
 ```
+
+### Sheet density
+
+A sheet is read at a glance. On a 390 × 844 phone at the default text size its
+key content and primary action are visible without scrolling; at 1.3× text it
+takes at most one short scroll.
+
+- `BottomSheet` keeps one rhythm: 12pt between blocks, a compact header (8pt
+  under the title row), 12pt above a pinned footer and only 16pt plus the
+  safe-area inset under it. Sheets may rise to 92% of the screen.
+- A sheet's header is a 40–48pt logo or glyph tile beside its name, not a
+  large tile above it. Its amount is `BandFigure size="large"`; `hero` belongs
+  to a band.
+- Footers are one row: the way out (quiet, at the start) and the primary (at
+  the end). A row of three uses `size="compact"`. Two actions of uneven width
+  use `flexDirection: 'row-reverse'` with `flexWrap: 'wrap'`, the primary first
+  in the source: when they cannot share a line the primary's line comes first,
+  and no label ever wraps inside its button. At the accessibility sizes the
+  actions stack and scroll with the content.
+- Choice and answer rows are 56–64pt with 10pt vertical padding; read-only
+  fact rows (`KeyValueRows`) are 44pt.
 
 ## The personal pattern
 
