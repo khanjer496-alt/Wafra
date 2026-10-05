@@ -165,6 +165,8 @@ function actions(options = {}) {
     automaticCompletion: false,
     // The post-setup notification offer is exercised by ios-journey/onboarding-notifications; here it stays closed.
     pendingOpen: null,
+    // The watched-limit drawing on the result reads the ledger's budgets; none here.
+    completeWatch: null,
     require(name) {
       assert.equal(name, 'react/jsx-runtime');
       const jsx = (type, props = {}) => ({ type, props });

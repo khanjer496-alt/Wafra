@@ -1,23 +1,41 @@
 /**
  * E3 · Goals (green): "What should Wafra do?". Each goal picked drops its
- * shape into the pattern beside the headline, and the line under the
- * headline says it is multi-select, then, truthfully, which Home section the
- * answers move to the top — the order itself is written to the existing
- * Customize Home preference (onboarding-e.ts: homeOrderForGoals). Any number,
- * including none: with none (and none saved before) the button says Skip for now.
+ * shape into the pattern, and the line under the headline says it is
+ * multi-select, then, truthfully, which Home section the answers move to the
+ * top — the order itself is written to the existing Customize Home
+ * preference (onboarding-e.ts: homeOrderForGoals). Any number, including
+ * none: with none (and none saved before) the button says Skip for now.
+ *
+ * Goals choose what the app is for, not money, so nothing here draws money.
+ * Beside the pattern sits a small, decorative Home: the totals row, then the
+ * sections Home draws first, in the order these answers will save. Each pick
+ * slides its sections up on the app's spring, so the person sees what it does.
  */
-import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Animated, StyleSheet, View, useWindowDimensions } from 'react-native';
 
 import { EChoiceRow } from '@/components/onboarding/e-choice-row';
 import { EBody, EHeadline, EStepFrame, bandButtonColor } from '@/components/onboarding/e-frame';
+import { ThemedText } from '@/components/themed-text';
 import { EButton } from '@/components/ui/band/e-button';
+import { COIN_MOVE, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
+import { Icon, type IconName } from '@/components/ui/icon';
 import { PatternMosaic } from '@/components/ui/pattern-mosaic';
+import type { BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { useMotionPreference, type MotionPreference } from '@/hooks/use-reduced-motion';
 import { bandCopy } from '@/lib/band-copy';
-import { firstHomeSectionForGoals } from '@/lib/onboarding-e';
+import { customizeCopy } from '@/lib/customize-copy';
+import {
+  DEFAULT_HOME_WIDGETS,
+  splitHomeWidgetLayout,
+  type HomeWidgetId,
+  type HomeWidgetPreferences,
+} from '@/lib/home-widget-preferences';
+import { loadHomeWidgetPreferences } from '@/lib/home-widgets';
+import { GOAL_HOME_SECTIONS, firstHomeSectionForGoals, homeOrderForGoals } from '@/lib/onboarding-e';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import type { PatternTile } from '@/lib/pattern';
 import { GOAL_IDS, type GoalId } from '@/lib/types';
@@ -35,6 +53,138 @@ const TRAY_COLUMNS = 3;
 export function trayTiles(tiles: readonly PatternTile[]): PatternTile[] {
   return [...tiles].sort((a, b) => a.row - b.row || a.col - b.col)
     .map((tile) => tile.color === 'green' ? { ...tile, color: tile.kind === 'ring' ? 'cream' : 'mint' } : tile);
+}
+
+/** Home's section glyphs, as Customize Home draws them. */
+const SECTION_ICONS: Record<HomeWidgetId, IconName> = {
+  greeting: 'sun', overview: 'wallet', today: 'calendar', week: 'chart', capture: 'mail',
+  assistant: 'spark', insight: 'trend', due: 'calendar', activity: 'receipt', upcoming: 'repeat',
+};
+/** The preview: the totals row, then this many of Home's sheet sections. */
+export const HOME_PREVIEW_SECTIONS = 3;
+/** A preview row's pitch at the default text size; it grows with the text size and with a wrapped label, never capped. */
+const PREVIEW_PITCH = 28;
+/** The space between one row's measured height and the next row. */
+const PREVIEW_GAP = 6;
+
+/**
+ * The rows' pitch: at least the default scaled by the text size, and always
+ * more than the tallest row as laid out (a label that wraps to two lines at a
+ * larger text size pushes every place down, so nothing overlaps or clips).
+ */
+export function previewPitch(fontScale: number, rowHeights: readonly number[]): number {
+  const scaled = Math.ceil(PREVIEW_PITCH * Math.max(1, Number.isFinite(fontScale) ? fontScale : 1));
+  return Math.max(scaled, Math.ceil(Math.max(0, ...rowHeights)) + PREVIEW_GAP);
+}
+
+/**
+ * Home's sheet sections in the order these goals will save them
+ * (homeOrderForGoals over the saved layout, drawn as Home draws it): what
+ * the preview stacks under the totals row. Hidden sections are left out.
+ */
+export function homePreviewOrder(goals: readonly GoalId[], current: HomeWidgetPreferences): HomeWidgetId[] {
+  return splitHomeWidgetLayout(homeOrderForGoals(goals, current)).sheet;
+}
+
+/** The sections the chosen goals bring up: they wear the solid glyph tile in the preview. */
+export function promotedHomeSections(goals: readonly GoalId[]): Set<HomeWidgetId> {
+  return new Set(goals.flatMap((goal) => GOAL_HOME_SECTIONS[goal] ?? []));
+}
+
+/**
+ * One section row of the preview. It sits at `index` (0 is right under the
+ * totals) and slides there on the app's spring when a pick moves it; past the
+ * last shown place it fades out. Reduce Motion puts it in place at once.
+ */
+function PreviewRow({ index, pitch, onHeight, label, icon, promoted, palette, motion, testID }: {
+  index: number;
+  pitch: number;
+  /** The row's laid-out height, which sets the pitch. */
+  onHeight: (height: number) => void;
+  label: string;
+  icon: IconName;
+  promoted: boolean;
+  palette: BandPalette;
+  motion: MotionPreference;
+  testID: string;
+}) {
+  const place = useAnimatedNumber(index);
+  useEffect(() => {
+    // Hold still until the screen-reader state is known.
+    if (!motion.ready || motion.reducedMotion) {
+      place.setValue(index);
+      return;
+    }
+    const move = Animated.spring(place, { toValue: index, ...COIN_MOVE, useNativeDriver: nativeDriver });
+    move.start();
+    // A newer pick carries on from wherever the row is.
+    return () => move.stop();
+  }, [index, motion.ready, motion.reducedMotion, place]);
+  const paint = useMemo(() => ({
+    opacity: place.interpolate({
+      inputRange: [HOME_PREVIEW_SECTIONS - 1, HOME_PREVIEW_SECTIONS - 0.4], outputRange: [1, 0], extrapolate: 'clamp',
+    }),
+    transform: [{ translateY: place.interpolate({ inputRange: [0, 1], outputRange: [pitch, pitch * 2] }) }],
+  }), [place, pitch]);
+  return <Animated.View testID={testID} onLayout={(event) => onHeight(event.nativeEvent.layout.height)}
+    style={[styles.previewRow, paint]}>
+    <PreviewGlyph icon={icon} solid={promoted} palette={palette} />
+    <ThemedText type="meta"
+      style={[styles.previewLabel, { color: promoted ? palette.onBand : palette.onBandSecondary }]}>
+      {label}
+    </ThemedText>
+  </Animated.View>;
+}
+
+/** A small glyph tile: solid for a section the picks bring up, the band's tone otherwise. */
+function PreviewGlyph({ icon, solid, palette }: { icon: IconName; solid: boolean; palette: BandPalette }) {
+  return <View style={[styles.previewGlyph, { backgroundColor: solid ? palette.onBand : palette.tile }]}>
+    <Icon name={icon} size={12} color={solid ? palette.band : palette.onBandSecondary} strokeWidth={2.2} />
+  </View>;
+}
+
+/**
+ * A miniature of Home's opening order, decorative: the totals row stays on
+ * top (the goals never move it), and the sheet sections follow in the order
+ * the picks will save. No figures — it shows where things go, not money.
+ */
+function HomePreview({ goals, palette, stacked }: { goals: readonly GoalId[]; palette: BandPalette; stacked: boolean }) {
+  const language = useLanguage();
+  const copy = customizeCopy(language);
+  const motion = useMotionPreference();
+  // Rows are placed (so a move is paint only), at a pitch that follows their measured height.
+  const { fontScale } = useWindowDimensions();
+  const [heights, setHeights] = useState<Record<string, number>>({});
+  const measure = (id: string) => (height: number) => setHeights((known) =>
+    known[id] === height ? known : { ...known, [id]: height });
+  const pitch = previewPitch(fontScale, Object.values(heights));
+  // The layout the gate will reorder when Continue saves (saveGoals reads the same).
+  const [current, setCurrent] = useState<HomeWidgetPreferences>(DEFAULT_HOME_WIDGETS);
+  useEffect(() => {
+    let live = true;
+    loadHomeWidgetPreferences().then((saved) => { if (live) setCurrent(saved); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  const order = homePreviewOrder(goals, current);
+  const promoted = promotedHomeSections(goals);
+  return <View testID="onboarding-goals-home" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden
+    style={[styles.preview, stacked && styles.previewStacked, { borderColor: palette.bandRule }]}>
+    <View testID="onboarding-goals-home-rows" style={[styles.previewRows, { height: pitch * (HOME_PREVIEW_SECTIONS + 1) }]}>
+      <View testID="onboarding-goals-home-overview" onLayout={(event) => measure('overview')(event.nativeEvent.layout.height)}
+        style={[styles.previewRow, styles.previewTop]}>
+        <PreviewGlyph icon={SECTION_ICONS.overview} solid={false} palette={palette} />
+        <ThemedText type="meta"
+          style={[styles.previewLabel, { color: palette.onBandSecondary }]}>
+          {copy.widgetTitle.overview}
+        </ThemedText>
+      </View>
+      <View style={[styles.previewRule, { top: pitch - 2, backgroundColor: palette.bandRule }]} />
+      {/* Keyed by section, in a fixed order, so a pick slides rows rather than redrawing them. */}
+      {DEFAULT_HOME_WIDGETS.order.filter((id) => order.includes(id)).map((id) =>
+        <PreviewRow key={id} index={order.indexOf(id)} pitch={pitch} onHeight={measure(id)} label={copy.widgetTitle[id]} icon={SECTION_ICONS[id]}
+          promoted={promoted.has(id)} palette={palette} motion={motion} testID={`onboarding-goals-home-${id}`} />)}
+    </View>
+  </View>;
 }
 
 /** Board E3's order: salary, bills, subscriptions, spend less, cash and cards. */
@@ -61,10 +211,12 @@ export function GoalsStep({ goals, saved = false, onToggle, onContinue, onBack, 
   return <EStepFrame palette={band} step={2} onBack={onBack} onClose={onClose} backDisabled={disabled} testID="onboarding-goals"
     footer={<EButton palette={band} color={bandButtonColor(band)} label={goals.length > 0 || saved ? words.continue : words.skipForNow}
       onPress={onContinue} disabled={disabled} testID="onboarding-goals-continue" />}>
-    <View style={[styles.head, largeText && styles.headStacked]}>
-      <View style={styles.headline}><EHeadline palette={band} size={42}>{words.goalsTitle}</EHeadline></View>
+    {/* The headline has the full width: the pictures sit under it, never beside it. */}
+    <EHeadline palette={band} size={42}>{words.goalsTitle}</EHeadline>
+    <View style={[styles.pictures, largeText && styles.picturesStacked]}>
+      <HomePreview goals={goals} palette={band} stacked={largeText} />
       {/* Loose tiles straight on the band, as on the board: a fixed-width
-          tray of three across, so picking a goal never reflows the headline. */}
+          tray of three across, so picking a goal never reflows its neighbour. */}
       <View testID="onboarding-goals-pattern" accessible accessibilityRole="image" accessibilityLabel={bandWords.pattern}
         style={styles.tray}>
         <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden style={styles.trayTiles}>
@@ -85,10 +237,22 @@ export function GoalsStep({ goals, saved = false, onToggle, onContinue, onBack, 
 }
 
 const styles = StyleSheet.create({
-  head: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 },
-  headStacked: { flexDirection: 'column', alignItems: 'flex-start', gap: 12 },
-  headline: { flex: 1, minWidth: 0 },
-  tray: { width: TRAY_TILE * TRAY_COLUMNS + TRAY_GAP * (TRAY_COLUMNS - 1), paddingBottom: 6 },
+  pictures: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  picturesStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  preview: { flex: 1, minWidth: 0, borderWidth: 1.5, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 8 },
+  // Stacked under large text, the preview takes the full width at its own height.
+  previewStacked: { flex: 0, alignSelf: 'stretch' },
+  // The totals row, a rule, then the shown sections: each row is placed, so a move is paint only.
+  previewRows: { overflow: 'hidden' },
+  previewRow: {
+    position: 'absolute', top: 0, start: 0, end: 0,
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+  },
+  previewTop: { position: 'relative' },
+  previewRule: { position: 'absolute', start: 0, end: 0, height: StyleSheet.hairlineWidth },
+  previewGlyph: { width: 20, height: 20, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
+  previewLabel: { flex: 1, minWidth: 0, fontSize: 13, lineHeight: 17 },
+  tray: { width: TRAY_TILE * TRAY_COLUMNS + TRAY_GAP * (TRAY_COLUMNS - 1), alignSelf: 'flex-start' },
   trayTiles: { flexDirection: 'row', flexWrap: 'wrap', gap: TRAY_GAP },
   list: { gap: 10 },
   hint: { fontSize: 16, lineHeight: 23 },

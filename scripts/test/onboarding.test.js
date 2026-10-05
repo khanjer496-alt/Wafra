@@ -676,10 +676,17 @@ ok(
   // Design language E: Welcome draws Wafra's mark and an example pattern,
   // labelled and spoken as an example, and writes nothing. The regional
   // scenes remain for setup-preview and the setup shell.
+  // Changed intentionally (2026-10): the example pattern now sits inside
+  // Welcome's hero, sms-coin-scene.tsx — an example bank alert whose amount
+  // becomes a coin that lands in its category tile, then the pattern
+  // assembles. Welcome hands it the same example tiles and spoken label; the
+  // scene owns the mosaic (drawn in the on-ink palette) and its replay.
   'welcome uses real Wafra identity and an example pattern without ledger writes',
   /<LogoDraw size=\{38\} color=\{band\.accent\} \/>/.test(stepSource('e-welcome')) &&
-    /<PatternMosaic key=\{replay\} tiles=\{tiles\} tile=\{tile\} animate accessibilityLabel=\{words\.exampleLabel\} \/>/.test(stepSource('e-welcome')) &&
-    !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(stepSource('e-welcome')) &&
+    /<SmsCoinScene palette=\{band\} sender=\{words\.exampleSender\} pattern=\{pattern\}/.test(stepSource('e-welcome')) &&
+    /\{ tiles, tile, label: words\.exampleLabel \}/.test(stepSource('e-welcome')) &&
+    /<PatternMosaic tiles=\{pattern\.tiles\} tile=\{pattern\.tile\} gap=\{gap\} scheme="light" animate\s+accessibilityLabel=\{pattern\.label\} \/>/.test(stepSource('sms-coin-scene')) &&
+    !/useStore|importBatch|addTransaction|setOnboarded|setCaptureOptOut|loadDemoData/.test(stepSource('e-welcome') + stepSource('sms-coin-scene')) &&
     // No language button on the first page (owner decision, 2026-09-25).
     !/setUiLanguage|I18nManager|onboarding-language-switch/.test(gateSource + stepSource('e-welcome')) &&
     /WafraMark/.test(aliveScenesSource) &&

@@ -356,9 +356,10 @@ test('five numbered steps, and every stage resumes where it was saved', () => {
   // Every stage written is one older builds and the store already accept.
   const known = ['welcome', 'focus', 'tracking', 'alerts', 'intention', 'preview', 'remote-handoff', 'privacy', 'capture', 'complete'];
   for (const step of steps) assert.ok(known.includes(e.onboardingEStage(step)), step);
-  // Colours: ink, clay, green, sand, ochre, green; the reveal and paywall ink.
+  // Colours: ink, slate, indigo, sand, ochre, indigo; the reveal and paywall ink.
+  // Name is slate, not Spending's near-black, so the wipe from Welcome's ink is seen.
   assert.deepEqual(steps.map((step) => e.ONBOARDING_E_BANDS[step]),
-    ['home', 'spending', 'flow', 'settings', 'bills', 'flow', 'flow', 'flow', 'home', 'home']);
+    ['home', 'accounts', 'flow', 'settings', 'bills', 'flow', 'flow', 'flow', 'home', 'home']);
 });
 
 test('the trial timeline follows the days actually left', () => {

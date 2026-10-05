@@ -11,21 +11,31 @@
  * Nothing guesses a starting figure. The honest line says the Limit sheet
  * shows their usual once a month of spending is in. Without a currency the
  * rows wait for one, chosen right here instead of a dead end.
+ *
+ * A row with a limit draws the picture the Limit sheet will use for it: a
+ * 10-coin stack under the limit line. Nothing is spent yet, so the stack is
+ * full; it rises in when the limit is first set, re-settles when the figure
+ * changes, and drains away when the limit is removed. The figure is always
+ * written beside it and spoken by the row; the coins are decorative.
  */
-import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { choiceSurface } from '@/components/onboarding/e-choice-row';
 import { EBody, EHeadline, EStepFrame, bandButtonColor } from '@/components/onboarding/e-frame';
 import { ThemedText } from '@/components/themed-text';
 import { EButton } from '@/components/ui/band/e-button';
+import { ghostTone } from '@/components/ui/coins/coin-disc';
+import { COIN_RISE, COIN_STAGGER, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
+import { CoinStack } from '@/components/ui/coins/coin-stack';
 import { Icon } from '@/components/ui/icon';
-import { Fonts, type BandPalette } from '@/constants/theme';
+import { Fonts, Motion, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { normalizeArabicNumerals } from '@/lib/arabic-sms';
 import { bandCopy } from '@/lib/band-copy';
 import { parseAmountWithMoneySpec } from '@/lib/format';
@@ -57,6 +67,86 @@ export function parseWatchAmount(text: string, spec: LedgerMoneySpec): number | 
 const spoken = (minor: number, spec: LedgerMoneySpec) => `${spec.currency} ${formatMinorUnits(minor, spec)}`;
 
 /**
+ * The ± step at a limit, on the same scale as the quick amounts: 50 below
+ * the 500 quick amount, 100 from 500, 250 from 2,000 (AED-sized references,
+ * scaled to the currency like the quick amounts). Every quick amount is then
+ * a whole number of steps, so ± from one walks round figures beside it.
+ * Lowering uses the step of the range below, so 500 − is 450 and 2,000 − is
+ * 1,900. Only the step changes; the figure saved is still exactly the one shown.
+ */
+export function watchStep(valueMinor: number, spec: LedgerMoneySpec, direction: 1 | -1): number {
+  const at = direction > 0 ? valueMinor : valueMinor - 1;
+  if (at >= typicalMinorAmount(spec, 2000)) return typicalMinorAmount(spec, 250);
+  if (at >= typicalMinorAmount(spec, 500)) return typicalMinorAmount(spec, 100);
+  return typicalMinorAmount(spec, 50);
+}
+
+/** Coins in a limit's stack and their width: the Limit sheet's stack, smaller. */
+export const WATCH_COINS = 10;
+const WATCH_COIN_WIDTH = 16;
+/** How long a removed limit's coins take to lift away before the stack leaves. */
+const DRAIN_MS = WATCH_COINS * COIN_STAGGER + 360;
+
+/**
+ * A row's limit as the Limit sheet will draw it: a full stack of gold under
+ * the limit line, since nothing is spent yet. It rises in when the limit is
+ * first set (CoinStack's first paint), re-settles when the figure changes,
+ * and drains, then leaves, when the limit is removed. Reduce Motion (or a
+ * screen reader) shows the stack in place and removes it at once.
+ */
+function WatchCoins({ limitMinor, palette, surface, testID }: {
+  limitMinor: number;
+  palette: BandPalette;
+  /** The row's surface, for the empty places a draining stack leaves. */
+  surface: string;
+  testID: string;
+}) {
+  const motion = useMotionPreference();
+  const animate = motion.ready && !motion.reducedMotion;
+  const set = limitMinor > 0;
+  // Still drawn while a removed limit drains; without motion it leaves at once.
+  const [kept, setKept] = useState(set);
+  if (set && !kept) setKept(true);
+  if (!set && kept && !animate) setKept(false);
+  const fade = useAnimatedNumber(1);
+  const settle = useAnimatedNumber(0);
+  const last = useRef(limitMinor);
+  useEffect(() => {
+    if (set) { fade.setValue(1); return; }
+    if (!kept || !animate) return;
+    const leave = Animated.sequence([
+      Animated.delay(DRAIN_MS),
+      Animated.timing(fade, { toValue: 0, duration: Motion.change, useNativeDriver: nativeDriver }),
+    ]);
+    leave.start(({ finished }) => { if (finished) setKept(false); });
+    return () => leave.stop();
+  }, [set, kept, animate, fade]);
+  useEffect(() => {
+    const before = last.current;
+    last.current = limitMinor;
+    if (!animate || before <= 0 || limitMinor <= 0 || before === limitMinor) return;
+    // A new figure: the stack lifts a little and lands again under the line.
+    settle.setValue(1);
+    const land = Animated.spring(settle, { toValue: 0, ...COIN_RISE, useNativeDriver: nativeDriver });
+    land.start();
+    return () => { land.stop(); settle.setValue(0); };
+  }, [limitMinor, animate, settle]);
+  const lift = useMemo(() => ({
+    transform: [{ translateY: settle.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }) }],
+  }), [settle]);
+  if (!set && !(kept && animate)) return null;
+  return <Animated.View testID={testID} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden
+    style={[styles.coins, { opacity: fade }]}>
+    {/* The limit, in the within-limit colour the Limit sheet gives it while nothing is spent. */}
+    <View testID={`${testID}-line`} style={[styles.coinLine, { backgroundColor: palette.limitOk }]} />
+    <Animated.View style={lift}>
+      <CoinStack testID={`${testID}-stack`} total={WATCH_COINS} filled={set ? WATCH_COINS : 0} width={WATCH_COIN_WIDTH}
+        ghost={ghostTone(surface, palette.onBand)} />
+    </Animated.View>
+  </Animated.View>;
+}
+
+/**
  * An open row's editor: quick amounts, the typed figure between − and +.
  * Every path reports whole minor units through `onChange`; 0 is no limit.
  */
@@ -72,8 +162,10 @@ function AmountEditor({ valueMinor, onChange, spec, label, palette, disabled, te
   const language = useLanguage();
   const words = onboardingECopy(language);
   const steps = bandCopy(language);
+  const largeText = useLargeTextLayout();
   const quick = WATCH_QUICK_REFERENCES.map((major) => typicalMinorAmount(spec, major));
-  const step = typicalMinorAmount(spec, 50);
+  const lower = watchStep(valueMinor, spec, -1);
+  const raise = watchStep(valueMinor, spec, 1);
   const shown = (minor: number) => minor > 0 ? formatMinorUnitsForInput(minor, spec) : '';
   const [text, setText] = useState(() => shown(valueMinor));
   // The figure the text last stood for: a quick amount or a step replaces
@@ -97,14 +189,14 @@ function AmountEditor({ valueMinor, onChange, spec, label, palette, disabled, te
     onChange(safe);
   };
   const currency = currencyDisplayLabel(spec.currency);
-  return <View style={styles.editor} testID={testID}>
+  return <View style={[styles.editor, { borderTopColor: palette.bandRule }]} testID={testID}>
     <View style={styles.quickRow}>
       {quick.map((minor, index) => {
         const on = minor === valueMinor;
         return <Pressable key={minor} accessibilityRole="button" accessibilityLabel={spoken(minor, spec)}
           accessibilityState={{ selected: on, disabled }} disabled={disabled} testID={`${testID}-quick-${index}`}
           onPress={() => set(minor)}
-          style={({ pressed }) => [styles.quick, {
+          style={({ pressed }) => [styles.quick, largeText && styles.quickWide, {
             borderColor: on ? palette.onBand : palette.bandRule,
             backgroundColor: on ? palette.onBand : 'transparent',
             opacity: pressed ? 0.7 : 1,
@@ -116,8 +208,8 @@ function AmountEditor({ valueMinor, onChange, spec, label, palette, disabled, te
       })}
     </View>
     <View style={styles.stepRow}>
-      <Pressable accessibilityRole="button" accessibilityLabel={steps.lower(spoken(step, spec))}
-        disabled={disabled || valueMinor <= 0} testID={`${testID}-lower`} onPress={() => set(valueMinor - step)}
+      <Pressable accessibilityRole="button" accessibilityLabel={steps.lower(spoken(lower, spec))}
+        disabled={disabled || valueMinor <= 0} testID={`${testID}-lower`} onPress={() => set(valueMinor - lower)}
         style={({ pressed }) => [styles.stepper, { borderColor: palette.bandRule, opacity: valueMinor <= 0 ? 0.4 : pressed ? 0.7 : 1 }]}>
         <ThemedText type="heading" style={{ color: palette.onBand }}>−</ThemedText>
       </Pressable>
@@ -139,8 +231,8 @@ function AmountEditor({ valueMinor, onChange, spec, label, palette, disabled, te
           style={[styles.input, { color: palette.onBand }]} />
         <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{words.watchPerMonth}</ThemedText>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel={steps.raise(spoken(step, spec))}
-        disabled={disabled} testID={`${testID}-raise`} onPress={() => set(valueMinor + step)}
+      <Pressable accessibilityRole="button" accessibilityLabel={steps.raise(spoken(raise, spec))}
+        disabled={disabled} testID={`${testID}-raise`} onPress={() => set(valueMinor + raise)}
         style={({ pressed }) => [styles.stepper, { borderColor: palette.bandRule, opacity: pressed ? 0.7 : 1 }]}>
         <ThemedText type="heading" style={{ color: palette.onBand }}>+</ThemedText>
       </Pressable>
@@ -175,6 +267,7 @@ export function WatchStep({ draft, open, onOpen, onLimit, moneySpec, currency, o
   // A row with a limit wears Spending's colours on its icon, as picked tiles do on the board.
   const clay = useBand('spending');
   const largeText = useLargeTextLayout();
+  const bandSecondary = useMemo(() => ({ ...band, card: band.tile, rule: band.onBand, text: band.onBand }), [band]);
   const [currencyOpen, setCurrencyOpen] = useState(false);
   /** The row tapped before a currency was chosen; it opens once one is. */
   const [pending, setPending] = useState<CategoryId | null>(null);
@@ -187,7 +280,8 @@ export function WatchStep({ draft, open, onOpen, onLimit, moneySpec, currency, o
     <EBody palette={band}>{words.watchBody}</EBody>
     {moneySpec ? null : <View style={styles.currency}>
       <EBody palette={band} secondary={false}>{words.watchNoCurrency}</EBody>
-      <EButton palette={band} variant="secondary" label={words.chooseCurrency} onPress={() => setCurrencyOpen(true)}
+      {/* The secondary button in the band's own tones (as an active row), not a sheet card on the band. */}
+      <EButton palette={bandSecondary} variant="secondary" label={words.chooseCurrency} onPress={() => setCurrencyOpen(true)}
         testID="onboarding-watch-currency" />
     </View>}
     <View style={styles.list} testID="onboarding-watch-options">
@@ -197,7 +291,8 @@ export function WatchStep({ draft, open, onOpen, onLimit, moneySpec, currency, o
         // Exact, never rounded: the row shows the figure that will be saved.
         const amount = limit > 0 && moneySpec ? formatMoneyText(limit, moneySpec) : null;
         const isOpen = open === category && moneySpec !== null;
-        return <View key={category} style={[styles.row, choiceSurface(band, isOpen || amount !== null)]}>
+        const active = isOpen || amount !== null;
+        return <View key={category} style={[styles.row, choiceSurface(band, active)]}>
           <View style={styles.head}>
             <Pressable accessibilityRole="button"
               accessibilityLabel={`${name}, ${limit > 0 && moneySpec ? spoken(limit, moneySpec) : words.watchNoLimit}`}
@@ -216,9 +311,13 @@ export function WatchStep({ draft, open, onOpen, onLimit, moneySpec, currency, o
                 <Icon name={getCategory(category).icon} size={20} color={amount ? clay.onFill : band.text} strokeWidth={2} />
               </View>
               <ThemedText type="smallBold" style={[styles.name, largeText && styles.nameWide, { color: band.onBand }]}>{name}</ThemedText>
-              {amount ? <ThemedText type="smallBold" tabular style={{ color: band.onBand }}>{amount}</ThemedText>
-                : isOpen ? null
+              {/* Open, the field below writes the figure; closed, the row does. */}
+              {amount && !isOpen ? <ThemedText type="smallBold" tabular style={{ color: band.onBand }}>{amount}</ThemedText>
+                : amount || isOpen ? null
                   : <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{words.watchAdd}</ThemedText>}
+              {/* At the accessibility sizes the name and figure need the whole row: no coins beside them. */}
+              {largeText ? null : <WatchCoins limitMinor={moneySpec ? limit : 0} palette={band}
+                surface={active ? band.tile : band.band} testID={`onboarding-watch-${category}-coins`} />}
               <View style={isOpen ? styles.flipped : null}>
                 <Icon name="chevron-down" size={18} color={band.onBandSecondary} />
               </View>
@@ -263,12 +362,20 @@ const styles = StyleSheet.create({
   nameWide: { minWidth: 140 },
   flipped: { transform: [{ rotate: '180deg' }] },
   remove: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginEnd: 6 },
-  editor: { paddingHorizontal: 14, paddingBottom: 14, gap: 12 },
+  // The coins and their limit line: a little wider than the coins, as in the Limit sheet.
+  coins: { width: WATCH_COIN_WIDTH + 6, alignItems: 'center', gap: 2, pointerEvents: 'none' },
+  coinLine: { height: 2, width: '100%', borderRadius: 1 },
+  // A rule under the row's head, then the quick amounts, the field and one quiet line.
+  editor: {
+    paddingHorizontal: 14, paddingTop: 14, paddingBottom: 14, gap: 14, borderTopWidth: StyleSheet.hairlineWidth,
+  },
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   quick: {
     flexGrow: 1, flexBasis: '20%', minHeight: 44, borderRadius: 22, borderWidth: 1.5,
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10,
   },
+  // At the accessibility sizes each amount takes its own width and the row wraps, never overlapping.
+  quickWide: { flexBasis: 'auto', paddingHorizontal: 16, paddingVertical: 8 },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   stepper: { width: 48, height: 48, borderRadius: 24, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   field: {
@@ -279,5 +386,5 @@ const styles = StyleSheet.create({
     flex: 1, minWidth: 48, fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], fontSize: 26, lineHeight: 32,
     paddingVertical: 6,
   },
-  usual: { fontSize: 14, lineHeight: 20 },
+  usual: { fontSize: 13, lineHeight: 18 },
 });

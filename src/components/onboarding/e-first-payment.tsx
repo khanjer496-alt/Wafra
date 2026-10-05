@@ -9,23 +9,81 @@ import { useCategoryCatalog } from '@/hooks/use-category-catalog';
  * - `ArrivedCard`: the newest payment that reached the ledger by itself, with
  *   the watched category's bar for this month — real figures, the Limit
  *   status colours, never an example;
- * - `ResultStrip`: what an import found, as counts the ledger holds.
+ * - `ResultStrip`: what an import found, as counts the ledger holds;
+ * - `LimitResult`: when nothing arrived by itself, the watched limit this
+ *   month as Home's Left-in-budgets coin stack (whole while nothing is spent)
+ *   beside the written figures.
+ *
+ * The coins follow Home: gold is what is left of the limit. When a payment
+ * arrived, the card's stack starts at the level before it and the payment's
+ * coins lift off, so the drawing shows the payment coming out of the limit.
  */
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { StatusBar as LimitBar } from '@/components/ui/band/status-bar';
+import { ghostTone } from '@/components/ui/coins/coin-disc';
+import { CoinStack } from '@/components/ui/coins/coin-stack';
 import { Icon, type IconName } from '@/components/ui/icon';
 import { MerchantAvatar } from '@/components/ui/merchant-avatar';
 import { Fonts, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-
+import { useMotionPreference } from '@/hooks/use-reduced-motion';
+import { filledCoins, shareOf } from '@/lib/coin-math';
 import { tapped } from '@/lib/haptics';
 import { formatMoneyText, type LedgerMoneySpec } from '@/lib/ledger-money';
 import { onboardingECopy } from '@/lib/onboarding-e-copy';
+import { amountInCategory } from '@/lib/splits';
 import type { CategoryId, Transaction } from '@/lib/types';
+
+/** Home's Left-in-budgets stack: the same eight coins the person meets next. */
+export const LIMIT_COINS = 8;
+const LIMIT_COIN_WIDTH = 24;
+/** The arrived payment's coins lift off once the stack has dropped in (8 × 45ms stagger and the landing). */
+const DRAIN_AFTER_MS = 900;
+
+type WatchedMonth = { category: CategoryId; spentMinor: number; limitMinor: number };
+
+/**
+ * Coins of the watched limit still left, before the arrived payment and now.
+ * `paidMinor` is the payment's part in that category; without one both are
+ * the same level. Only real figures: this month's spending and the limit.
+ */
+export function limitCoins(watch: WatchedMonth, paidMinor = 0, total = LIMIT_COINS): { before: number; after: number } {
+  const left = (spent: number) => filledCoins(shareOf(Math.max(0, watch.limitMinor - spent), watch.limitMinor), total);
+  const paid = Number.isFinite(paidMinor) && paidMinor > 0 ? paidMinor : 0;
+  return { before: left(Math.max(0, watch.spentMinor - paid)), after: left(watch.spentMinor) };
+}
+
+/**
+ * The limit's stack. With a payment, it shows the level before it, then the
+ * payment's coins lift away; Reduce Motion (or a screen reader) shows the
+ * level now at once. Decorative: the figures beside it are written and spoken.
+ */
+function LimitCoins({ watch, paidMinor = 0, surface, ink, testID }: {
+  watch: WatchedMonth;
+  paidMinor?: number;
+  /** The surface the stack stands on, for its empty places. */
+  surface: string;
+  ink: string;
+  testID: string;
+}) {
+  const motion = useMotionPreference();
+  const { before, after } = limitCoins(watch, paidMinor);
+  const [drained, setDrained] = useState(false);
+  useEffect(() => {
+    if (!motion.ready || motion.reducedMotion || drained || before === after) return;
+    const timer = setTimeout(() => setDrained(true), DRAIN_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [motion.ready, motion.reducedMotion, drained, before, after]);
+  const level = drained || motion.reducedMotion ? after : before;
+  return <View pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden aria-hidden
+    testID={testID}>
+    <CoinStack testID={`${testID}-stack`} total={LIMIT_COINS} filled={level} width={LIMIT_COIN_WIDTH} ghost={ghostTone(surface, ink)} />
+  </View>;
+}
 
 export function SourceRow({ icon, title, body, ready, onPress, disabled, palette, testID }: {
   icon: IconName;
@@ -102,16 +160,45 @@ export function ArrivedCard({ transaction, money, watch, palette }: {
         </View>
         {amount ? <ThemedText type="smallBold" tabular style={{ color: palette.text }}>{amount}</ThemedText> : null}
       </View>
-      {watch && ofLimit ? <View style={[styles.watch, { borderTopColor: palette.rule }]} accessible
+      {watch && ofLimit ? <View style={[styles.watch, styles.watchRow, { borderTopColor: palette.rule }]} accessible
         accessibilityLabel={`${categoryLabel(watch.category, lang)}, ${ofLimit}`} testID="onboarding-first-payment-watch">
-        <View style={styles.watchHead}>
-          <ThemedText type="smallBold" style={{ color: palette.text }}>{categoryLabel(watch.category, lang)}</ThemedText>
-          <ThemedText type="meta" style={[styles.figure, { color: palette.textSecondary }]}>{ofLimit}</ThemedText>
+        <LimitCoins watch={watch} paidMinor={amountInCategory(transaction, watch.category)} surface={palette.sheet}
+          ink={palette.text} testID="onboarding-first-payment-coins" />
+        <View style={[styles.grow, styles.watchCopy]}>
+          <View style={styles.watchHead}>
+            <ThemedText type="smallBold" style={{ color: palette.text }}>{categoryLabel(watch.category, lang)}</ThemedText>
+            <ThemedText type="meta" style={[styles.figure, { color: palette.textSecondary }]}>{ofLimit}</ThemedText>
+          </View>
+          <LimitBar spentMinor={watch.spentMinor} limitMinor={watch.limitMinor} palette={palette} />
         </View>
-        <LimitBar spentMinor={watch.spentMinor} limitMinor={watch.limitMinor} palette={palette} />
       </View> : null}
     </View>
     <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{words.addedByItself}</ThemedText>
+  </View>;
+}
+
+/**
+ * Nothing arrived by itself yet (added by hand, or still waiting): the limit
+ * set on Watch, this month, as the stack Home will show — whole while nothing
+ * is spent — with the category and "spent of limit" written beside it.
+ */
+export function LimitResult({ watch, money, palette }: {
+  watch: WatchedMonth;
+  money: LedgerMoneySpec;
+  palette: BandPalette;
+}) {
+  const { categoryLabel } = useCategoryCatalog();
+  const language = useLanguage();
+  const words = onboardingECopy(language);
+  const label = categoryLabel(watch.category, language === 'ar' ? 'ar' : 'en');
+  const ofLimit = words.ofLimit(formatMoneyText(watch.spentMinor, money, { decimals: false }),
+    formatMoneyText(watch.limitMinor, money, { decimals: false }));
+  return <View style={[styles.limit, { backgroundColor: palette.tile }]} testID="onboarding-complete-watch">
+    <LimitCoins watch={watch} surface={palette.tile} ink={palette.onBand} testID="onboarding-complete-watch-coins" />
+    <View style={styles.grow} accessible accessibilityLabel={`${label}, ${ofLimit}`}>
+      <ThemedText type="smallBold" style={{ color: palette.onBand }}>{label}</ThemedText>
+      <ThemedText type="meta" style={[styles.figure, { color: palette.onBandSecondary }]}>{ofLimit}</ThemedText>
+    </View>
   </View>;
 }
 
@@ -141,6 +228,9 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   rowStacked: { flexWrap: 'wrap' },
   watch: { gap: 8, marginTop: 12, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth },
+  watchRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 14 },
+  watchCopy: { gap: 8 },
+  limit: { borderRadius: 24, paddingHorizontal: 18, paddingVertical: 16, flexDirection: 'row', alignItems: 'flex-end', gap: 16 },
   watchHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' },
   figure: { fontVariant: ['tabular-nums'] },
   strip: { flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, paddingVertical: 10 },

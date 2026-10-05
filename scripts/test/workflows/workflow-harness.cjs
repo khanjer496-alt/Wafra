@@ -14,6 +14,9 @@ function createWorkflowHarness(options={}) {
  native.Share={share:record('share')};native.AccessibilityInfo={announceForAccessibility:record('announce')};
  d['@/hooks/use-reduced-motion']={useReducedMotion:()=>true,useMotionPreference:()=>({ready:true,reducedMotion:true})};
  d.react.useLayoutEffect=()=>{};
+ // The onboarding step layer's phase context: consumers read its default here.
+ d.react.createContext=d.react.createContext??(value=>({Provider:'ContextProvider',_default:value}));
+ d.react.useContext=d.react.useContext??(context=>context?._default);
  // This harness renders explicitly; each render reads the current external
  // store snapshot. Async subscription/cancellation behavior has its own suite.
  d.react.useSyncExternalStore=(_subscribe,getSnapshot)=>getSnapshot();
@@ -182,11 +185,15 @@ function createWorkflowHarness(options={}) {
    h.local('@/lib/onboarding-e','src/lib/onboarding-e.ts');
    h.local('@/lib/onboarding-e-copy','src/lib/onboarding-e-copy.ts');
    h.local('@/lib/band-copy','src/lib/band-copy.ts');
+   // The Goals step's Home preview names sections as Customize Home does.
+   h.local('@/lib/customize-copy','src/lib/customize-copy.ts');
    h.local('@/lib/pattern','src/lib/pattern.ts');
    Object.assign(d['@/lib/purchases'],{billingStore:()=>'play'});
    Object.assign(d['react-native-reanimated'],{ZoomIn:d['react-native-reanimated'].FadeInDown,useAnimatedProps:f=>f()});
    Object.assign(d['react-native-reanimated'].Easing,{bezier:()=>value=>value});
    d['react-native-safe-area-context'].useSafeAreaInsets=()=>({top:0,bottom:0,left:0,right:0});
+   // The step frame lifts its pinned actions over the keyboard; no keyboard here.
+   d['@/hooks/use-keyboard-height']={useKeyboardHeight:()=>0};
    d['@/components/ui/pattern-mosaic']={PatternMosaic:p=>jsx('PatternMosaic',p)};
    d['@/components/ui/band/dial-limit']={DialLimit:p=>jsx('DialLimit',p)};
    // The Watch amount field's readers: Arabic digits and the device's marks.
@@ -197,6 +204,8 @@ function createWorkflowHarness(options={}) {
    d['@/components/superwall-billing-context']={useWafraBilling:()=>({available:false,configured:false,configurationError:null,
     fetchProOffers:async()=>[],purchasePro:async()=>'unavailable',restorePro:async()=>null})};
    h.local('@/components/ui/band/e-button');
+   // Welcome's hero scene (sms-coin-scene) runs from source with the harness's coin toolkit.
+   h.local('@/components/onboarding/sms-coin-scene');
    for(const name of ['e-motion','e-frame','e-choice-row','e-welcome','e-name','e-goals','e-watch','e-reminders','e-first-payment','e-pattern','e-paywall','e-handoff'])h.local('@/components/onboarding/'+name);
    for(const name of ['capture-checklist','ready-summary','sms-explainer'])h.local('@/components/onboarding/'+name);
   }

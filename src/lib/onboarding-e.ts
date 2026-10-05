@@ -33,12 +33,15 @@ export const ONBOARDING_E_TOTAL_STEPS = 5;
 
 /**
  * The colour each step wears (boards E1–E9): Welcome, the pattern and the
- * paywall are ink; Name clay; Goals and first payment green; Watch sand;
- * Reminders ochre. Band ids, so dark mode deepens them like the tabs.
+ * paywall are ink; Name slate; Goals and the first payment indigo (the flow
+ * colour capture and review wear in the app); Watch sand; Reminders ochre.
+ * Band ids, so dark mode deepens them like the tabs. Neighbouring steps
+ * never share a near-black: the colour wipe between them has to be seen
+ * (Spending's near-black beside Welcome's ink made Welcome → Name invisible).
  */
 export const ONBOARDING_E_BANDS: Record<OnboardingEStep, BandId> = {
   welcome: 'home',
-  name: 'spending',
+  name: 'accounts',
   goals: 'flow',
   watch: 'settings',
   reminders: 'bills',

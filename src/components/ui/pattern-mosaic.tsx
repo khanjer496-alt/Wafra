@@ -93,9 +93,11 @@ function PopIn({ order, animate, children }: { order: number; animate: boolean; 
  * never money. `tile` scales it (Home's header draws it at 26). Static by
  * default; `animate` pops the tiles in 70ms apart on first appearance, which
  * Reduce Motion, a screen reader and Android all show as a still picture.
- * The grid mirrors under RTL with the rest of the layout.
+ * The grid mirrors under RTL with the rest of the layout. `wrapTile` (opt-in,
+ * none by default) lets onboarding's reveal wrap each drawn tile in its own
+ * motion; the drawing, the grid and the spoken image are unchanged by it.
  */
-export function PatternMosaic({ tiles, tile = BASE_TILE, gap, compact = false, animate = false, scheme, accessibilityLabel, style, testID }: {
+export function PatternMosaic({ tiles, tile = BASE_TILE, gap, compact = false, animate = false, scheme, accessibilityLabel, style, testID, wrapTile }: {
   tiles: readonly PatternTile[];
   /** Tile edge in points. */
   tile?: number;
@@ -107,6 +109,8 @@ export function PatternMosaic({ tiles, tile = BASE_TILE, gap, compact = false, a
   accessibilityLabel?: string;
   style?: StyleProp<ViewStyle>;
   testID?: string;
+  /** Wraps each drawn tile (the reveal's own motion). Off by default. */
+  wrapTile?: (tile: PatternTile, drawn: React.ReactElement) => React.ReactNode;
 }) {
   const resolved = useBandScheme(scheme);
   const words = bandCopy(useLanguage());
@@ -120,10 +124,11 @@ export function PatternMosaic({ tiles, tile = BASE_TILE, gap, compact = false, a
     {Array.from({ length: layout.rows }, (_row, row) => <View key={row} style={[styles.row, { gap: spacing }]}>
       {Array.from({ length: layout.columns }, (_col, col) => {
         const item = byCell.get(`${col}:${row}`);
+        const drawn = item ? <PopIn order={item.order} animate={animate}>
+          <Shape tile={item} size={tile} fill={palette.fill} mark={palette.mark} compact={compact} />
+        </PopIn> : null;
         return <View key={col} style={{ width: tile, height: tile }}>
-          {item ? <PopIn order={item.order} animate={animate}>
-            <Shape tile={item} size={tile} fill={palette.fill} mark={palette.mark} compact={compact} />
-          </PopIn> : null}
+          {item && drawn && wrapTile ? wrapTile(item, drawn) : drawn}
         </View>;
       })}
     </View>)}
