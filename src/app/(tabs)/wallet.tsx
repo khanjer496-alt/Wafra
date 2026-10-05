@@ -291,7 +291,10 @@ export default function WalletScreen() {
     // A figure the user set is theirs, never "per bank SMS" (account-freshness.ts).
     const reported = !due ? accountSnapshotFreshness(account, now, language) : null;
     const caption = figureFils === null ? t('noBalanceYet')
-      : figureKind === 'owed' ? t('owed')
+      // With an open statement the figure is what is left of that statement;
+      // spending since it closed is on the card too (Payment cards shows the
+      // whole outstanding), so it is not called "owed".
+      : figureKind === 'owed' ? due ? t('statementLeftToPay') : t('owed')
         : account.snapshotKind === 'balance'
           ? snapshotOrigin(account) === 'manual' && reported ? reported.label : t('perBankSms')
           : t('trackedManually');

@@ -74,10 +74,12 @@ test('a quiet account offers Update balance and Hide inline', () => {
   assert.equal(byId(tree, 'wallet-update-balance-enbd'), undefined);
 });
 
-test('a credit card on its ink card says its figure is owed, and a quiet one can still be hidden', () => {
+test('a credit card on its ink card names its figure, and a quiet one can still be hidden', () => {
   const h = createHarness();
   const tree = h.render('wallet');
-  assert.match(text(byId(tree, 'wallet-card-credit')), /· owed ·/);
+  // An open statement: the figure is what is left of it, not the card's whole balance.
+  assert.match(text(byId(tree, 'wallet-card-credit')), /· statement left to pay ·/);
+  assert.doesNotMatch(text(byId(tree, 'wallet-card-credit')), /· owed ·/);
   const quiet = createHarness({ state: { cardDues: [] } });
   quiet.state.accounts = quiet.state.accounts.map((a) => a.id === 'credit' ? { ...a, snapshotTs: QUIET_TS } : a);
   const quietTree = quiet.render('wallet');

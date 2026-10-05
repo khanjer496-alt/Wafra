@@ -777,6 +777,8 @@ const S = {
   newGoal: { en: '+ New goal', ar: '+ هدف جديد' },
   outstanding: { en: 'outstanding', ar: 'مستحق' },
   owed: { en: 'owed', ar: 'المستحق عليك' },
+  // A credit card's open statement, less what was paid on it: not the card's whole balance.
+  statementLeftToPay: { en: 'statement left to pay', ar: 'المتبقي من الكشف' },
   nothingSpentThisMonth: { en: 'nothing spent this month', ar: 'لا مصروف هذا الشهر' },
   perBankSms: { en: 'per bank SMS', ar: 'حسب رسالة البنك' },
   noBalanceYet: { en: 'no balance SMS yet', ar: 'لا رسالة رصيد بعد' },
