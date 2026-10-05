@@ -98,7 +98,6 @@ const en = {
     whereOut: 'Where did this go?',
     whereIn: 'Where did this come from?',
     looksLike: (account: string) => `looks like your ${account}`,
-    seeAll: (n: number) => `See all ${n}`,
     /** "See all" when the card's title already gives the count. */
     seeAllPlain: 'See all',
   },
@@ -199,7 +198,6 @@ const ar: typeof en = {
     whereOut: 'إلى أين ذهبت؟',
     whereIn: 'من أين جاءت؟',
     looksLike: (account) => `يبدو أنها حسابك ${account}`,
-    seeAll: (n) => `عرض الكل (${n})`,
     seeAllPlain: 'عرض الكل',
   },
 };

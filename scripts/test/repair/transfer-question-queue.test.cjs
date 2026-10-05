@@ -103,10 +103,11 @@ test('Transfers: one question plus an unasked entry keeps See all on the card', 
   const tree = h.renderScreen('transfers');
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
   const card = byId(tree, 'transfer-question-card');
-  assert.ok(text(card).includes(words.card.title(1)), 'the card asks its one question');
+  assert.ok(text(card).includes(words.card.title(2)), 'the title counts everything waiting, not only what the card asks');
+  assert.ok(!text(card).includes(words.card.step(1, 1)), 'no "1 of 1" beside a title of 2');
   const seeAll = byId(card, 'transfer-question-see-all');
   assert.ok(seeAll, 'See all is offered although the card has one question');
-  assert.ok(text(seeAll).includes(words.card.seeAll(2)));
+  assert.equal(text(seeAll).trim(), words.card.seeAllPlain);
   assert.equal(byId(tree, 'transfers-review-link'), undefined);
   const lone = transfersHarness([leg('ask', 'expense', 'current')], reconciliation([unknown('ask')], ['ask']));
   assert.equal(byId(lone.renderScreen('transfers'), 'transfer-question-see-all'), undefined, 'one question and nothing else: no See all');
@@ -142,7 +143,7 @@ for (const language of ['en', 'ar']) {
   });
 }
 
-test('the question card gives its count once in the title; See all counts only what the card does not ask', () => {
+test('the question card gives its count once, in the title, and See all never disagrees with it', () => {
   const h = componentHarness('en');
   const { TransferQuestionCard } = h.deps['@/components/transfers/transfer-question-card'];
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
@@ -151,9 +152,11 @@ test('the question card gives its count once in the title; See all counts only w
   const plain = byId(TransferQuestionCard({ transaction, index: 0, total: 3, accountLabel: 'FAB', palette, busy: false,
     onAnswer() {}, onSeeAll() {} }), 'transfer-question-see-all');
   assert.equal(text(plain).trim(), words.card.seeAllPlain);
-  const more = byId(TransferQuestionCard({ transaction, index: 0, total: 3, more: 2, accountLabel: 'FAB', palette, busy: false,
-    onAnswer() {}, onSeeAll() {} }), 'transfer-question-see-all');
-  assert.ok(text(more).includes(words.card.seeAll(5)));
+  const card = TransferQuestionCard({ transaction, index: 0, total: 3, more: 2, accountLabel: 'FAB', palette, busy: false,
+    onAnswer() {}, onSeeAll() {} });
+  assert.ok(text(card).includes(words.card.title(5)), 'the title counts the card\'s questions and the rest');
+  assert.ok(!text(card).includes(words.card.step(1, 3)), 'no "1 of 3" beside a title of 5');
+  assert.equal(text(byId(card, 'transfer-question-see-all')).trim(), words.card.seeAllPlain);
   const ar = componentHarness('ar').deps['@/lib/transfer-activity-copy'].transferActivityCopy('ar');
   assert.equal(typeof ar.card.seeAllPlain, 'string');
   assert.notEqual(ar.card.seeAllPlain, words.card.seeAllPlain, 'Arabic has its own words');
