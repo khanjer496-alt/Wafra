@@ -66,9 +66,10 @@ export function isTransferEvidence(value: unknown): value is TransferEvidence {
 }
 
 export function isTransferDecision(value: unknown): value is TransferDecision {
-  return record(value) && value.version === 1 && (value.ownership === 'own' || value.ownership === 'external') &&
+  return record(value) && value.version === 1 &&
+    (value.ownership === 'own' || value.ownership === 'external' || value.ownership === 'none') &&
     clock(value.decidedAt) && optional(value, 'counterpartId', id) &&
-    (value.ownership !== 'external' || value.counterpartId === undefined);
+    (value.ownership === 'own' || value.counterpartId === undefined);
 }
 
 export function isTransferMatch(value: unknown): value is TransferMatch {
@@ -99,18 +100,35 @@ export const isUnassignedTransferAccount = (accountId: string): boolean =>
 export const isObservedUnassignedTransferAccount = (accountId: string): boolean =>
   /^__unassigned-transfer__:[a-z0-9-]{1,80}:[a-f0-9]{64}$/.test(accountId);
 
+/** Rows that are never an own-account transfer: card settlements and payment flows, salary, business and utility-style titles. */
+const excludedFromTransfers = (tx: Transaction): boolean =>
+  tx.cardPaymentSide !== undefined || tx.paymentFlowSide !== undefined ||
+  tx.category === 'salary' || (tx.category === 'business' && !STRUCTURAL.test(tx.title.trim())) ||
+  NON_TRANSFER_TITLE.test(tx.title) ||
+  CARD_SETTLEMENT_TITLE.test(tx.title);
+
 export function isTransferCandidate(tx: Transaction): boolean {
   const row = tx as TransferRow;
   if ((tx.type !== 'income' && tx.type !== 'expense') || typeof tx.title !== 'string') return false;
   // The person's choice remains authoritative after a parser/category edit,
   // and must stay reachable so they can undo it from the same review surface.
   if (decisionOf(row)) return true;
-  if (tx.cardPaymentSide !== undefined || tx.paymentFlowSide !== undefined ||
-    tx.category === 'salary' || (tx.category === 'business' && !STRUCTURAL.test(tx.title.trim())) ||
-    NON_TRANSFER_TITLE.test(tx.title) ||
-    CARD_SETTLEMENT_TITLE.test(tx.title)) return false;
+  if (excludedFromTransfers(tx)) return false;
   if (manual(tx)) return tx.isTransfer === true || decisionOf(row) !== undefined;
   return evidenceOf(row) !== undefined || decisionOf(row) !== undefined || STRUCTURAL.test(tx.title.trim());
+}
+
+/**
+ * Whether the entry sheet may offer the one-tap "Moved to my own account" (or
+ * its reverse) on a row. Only an ordinary income or expense row that is not
+ * already a candidate and that none of the system rules exclude: a card
+ * payment, a payment flow, salary or a settlement title carries `isTransfer`
+ * for the ledger's own reasons, and clearing it would count the money as
+ * spending or income and break card allocation.
+ */
+export function canMarkOwnTransfer(tx: Transaction): boolean {
+  if ((tx.type !== 'income' && tx.type !== 'expense') || typeof tx.title !== 'string') return false;
+  return !isTransferCandidate(tx) && !excludedFromTransfers(tx);
 }
 
 /**
@@ -135,11 +153,16 @@ export function isTransferInertTransaction(tx: Transaction): boolean {
     tx.cardPaymentSide === undefined;
 }
 
+/** The person said this row is not a transfer. It stays a candidate only so Undo is reachable. */
+export function transferDeclined(tx: Transaction): boolean {
+  return decisionOf(tx as TransferRow)?.ownership === 'none';
+}
+
 /** Row-local ownership only. Persisted links require the ledger-aware reconciler. */
 export function transferOwnership(tx: Transaction): Ownership {
   if (!isTransferCandidate(tx)) return null;
   const decision = decisionOf(tx);
-  if (decision) return decision.ownership;
+  if (decision) return decision.ownership === 'none' ? null : decision.ownership;
   if (evidenceOf(tx)?.explicitExternal === true) return 'external';
   if ((manual(tx) && tx.isTransfer === true) || evidenceOf(tx)?.explicitOwn === true ||
     (tx.isTransfer === true && OWN_TITLE.test(tx.title.trim()))) return 'own';
@@ -479,7 +502,9 @@ function context(transactions: Transaction[], accounts: Account[]): Context {
   const corroboratingOf = complementaryPostingPairs(entries);
   // External user choices may still have a companion bank confirmation, but
   // must never participate in automatic own-account matching.
-  for (const [id, entry] of entries) if (transferOwnership(entry.tx) === 'external') entries.delete(id);
+  for (const [id, entry] of entries) {
+    if (transferOwnership(entry.tx) === 'external' || transferDeclined(entry.tx)) entries.delete(id);
+  }
   const knownCounterparties = knownTransferCounterparties(rows, duplicateIds, accounts, entries);
   return { rows, duplicateIds, accounts: accountById, entries, fingerprints, instrumentKey, corroboratingOf, knownCounterparties };
 }
@@ -835,12 +860,15 @@ function reconcile(ctx: Context): TransferReconciliationResult {
   const knownCardRepayments = new Map<string, string>();
   for (const tx of ctx.rows.values()) {
     const ownership = transferOwnership(tx);
-    if (ownership === null || !id(tx.id)) continue;
+    const declined = transferDeclined(tx);
+    if ((ownership === null && !declined) || !id(tx.id)) continue;
     if (corroboratingIds.has(tx.id)) {
       byId.set(tx.id, { id: tx.id, status: 'corroborating-alert', reason: 'bank-confirmation',
         counterpartId: corroboratingOf.get(tx.id), candidateIds: [] });
       continue;
     }
+    // "Not a transfer": no assessment, no queue, no link; it counts like any row.
+    if (declined) continue;
     if (ctx.duplicateIds.has(tx.id)) {
       byId.set(tx.id, { id: tx.id, status: 'ambiguous', reason: 'multiple-candidates', candidateIds: [] });
       pendingIds.add(tx.id);
@@ -1274,7 +1302,7 @@ export function applyTransferDecisionBatch(
   for (const decision of request.decisions) {
     if (!record(decision) || !Array.isArray(decision.ids) || decision.ids.length === 0 ||
       decision.ids.some(value => !id(value)) || new Set(decision.ids).size !== decision.ids.length ||
-      !['own', 'external', null].includes(decision.ownership) ||
+      !['own', 'external', 'none', null].includes(decision.ownership) ||
       (decision.counterpartId !== undefined && (!id(decision.counterpartId) || decision.ownership !== 'own' || decision.ids.length !== 1))) {
       throw new Error('Invalid transfer decision');
     }

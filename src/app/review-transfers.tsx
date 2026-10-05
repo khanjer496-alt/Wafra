@@ -24,7 +24,7 @@ import { detailsWords } from '@/lib/details-copy';
 import { reviewBandCopy } from '@/lib/review-band-copy';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { matchedTransferPairs, suggestedTransferPairs, type TransferPair } from '@/lib/transfer-pairs';
-import { isTransferCandidate, reconcileTransfers, transferFingerprint } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate, reconcileTransfers, transferDeclined, transferFingerprint } from '@/lib/transfer-reconciliation';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import { indexTransferHistory, projectTransferHistory, transferAccountLabel, transferHistoryItems, transferSearchText, TRANSFER_HISTORY_PAGE_SIZE,
   type TransferHistoryScope, type TransferHistoryItem } from '@/lib/transfer-review-presentation';
@@ -242,6 +242,8 @@ export default function ReviewTransfersScreen() {
       }), ...(focusedPendingGroup ? [focusedPendingGroup] : [])]
     : state.transactions
       .filter((row) => {
+        // "Not a transfer" is not an answer this screen lists (it would read as "with someone else").
+        if (transferDeclined(row)) return false;
         if (row.transferDecision) return true;
         const assessment = reconciliation.byId.get(row.id);
         return !!assessment && !reconciliation.pendingIds.has(row.id) &&

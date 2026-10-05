@@ -149,6 +149,11 @@ const visibleControls = (page) => page.evaluate(() => {
   const out = [];
   const sel = '[tabindex], [role="button"], [role="tab"], [role="switch"], [role="link"]';
   for (const el of document.querySelectorAll(sel)) {
+    // Swipe actions sit behind their row until a swipe the sweep never makes.
+    // The hit test below also accepts an ancestor on top, so a hidden action
+    // whose centre lands in a scroller's padding was collected and could
+    // never be pressed.
+    if (el.closest('[data-testid^="swipe-action-"]')) continue;
     const r = el.getBoundingClientRect();
     if (r.width < 6 || r.height < 6) continue;
     if (r.bottom < 0 || r.top > window.innerHeight) continue;

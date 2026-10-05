@@ -50,9 +50,9 @@ import {
 import { createTransactionFilterIndex, projectTransactionFilter, type TransactionFilters as Filters } from '@/lib/transaction-filter';
 import { TRANSACTION_SOURCE_KINDS, transactionSource, type TransactionSourceKind } from '@/lib/transaction-source';
 import { transactionsWords } from '@/lib/transactions-copy';
-import { getTransferActivity } from '@/lib/transfer-activity';
+import { getTransferActivity, transferPartnerIds } from '@/lib/transfer-activity';
 import { transferActivityCopy } from '@/lib/transfer-activity-copy';
-import { isTransferCandidate, transferOwnership } from '@/lib/transfer-reconciliation';
+import { isTransferCandidate, transferDeclined, transferOwnership } from '@/lib/transfer-reconciliation';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, CategoryId, Transaction } from '@/lib/types';
@@ -138,9 +138,13 @@ interface TransferSeparation {
   reviewTransferIds: ReadonlySet<string>;
   /** Transfer legs still waiting for their other side (the Needs review chip). */
   pendingTransferIds: ReadonlySet<string>;
+  /** The other leg of each linked or likely own pair among the separated rows, so the strip counts a pair once. */
+  separatedPartnerIds: ReadonlyMap<string, string>;
 }
 
-const NO_SEPARATION: TransferSeparation = { separateTransferIds: NO_IDS, reviewTransferIds: NO_IDS, pendingTransferIds: NO_IDS };
+const NO_PARTNERS: ReadonlyMap<string, string> = new Map();
+const NO_SEPARATION: TransferSeparation = { separateTransferIds: NO_IDS, reviewTransferIds: NO_IDS, pendingTransferIds: NO_IDS,
+  separatedPartnerIds: NO_PARTNERS };
 
 /**
  * Rows the Transfers screen owns, which of those the reconciler queued for
@@ -168,6 +172,9 @@ function computeSeparateTransferIds(state: TransferSeparationState): TransferSep
     separateTransferIds: new Set(records.map(item => item.transaction.id)),
     reviewTransferIds: new Set(records.filter(item => item.needsReview).map(item => item.transaction.id)),
     pendingTransferIds: reconciliation.pendingIds,
+    // Built here, from the same records and reconciliation as the separation set, so the
+    // pairs can only name rows that are separated; remembered with it per ledger.
+    separatedPartnerIds: transferPartnerIds(records),
   };
   separateTransferCache = { transactions, accounts, reconciliation, value };
   return value;
@@ -366,14 +373,16 @@ export default function TransactionsScreen() {
   // and stays empty while a history import only has a provisional receipt.
   // Unlike `internal` it may lag one ledger change behind: it recomputes after
   // interactions settle and holds its last answer during a running import.
-  const { separateTransferIds, reviewTransferIds, pendingTransferIds } = useSeparateTransferIds(state);
+  const { separateTransferIds, reviewTransferIds, pendingTransferIds, separatedPartnerIds } = useSeparateTransferIds(state);
   // The Transfers and Needs review chips, from the predicates the rows and
   // the review screens already use: one pass over the ledger.
   const { transferIds, reviewIds } = useMemo(() => {
     const transfers = new Set<string>();
     const review = new Set<string>();
     for (const row of state.transactions) {
-      if (isLedgerTransfer(row) || internal.has(row.id) || separateTransferIds.has(row.id) || isTransferCandidate(row)) transfers.add(row.id);
+      // A row answered "not a transfer" stays a candidate only so Undo is reachable; it is not one.
+      if (isLedgerTransfer(row) || internal.has(row.id) || separateTransferIds.has(row.id) ||
+        (isTransferCandidate(row) && !transferDeclined(row))) transfers.add(row.id);
       if (row.bestEffort || pendingTransferIds.has(row.id) ||
         isUnassignedIncome(row) || row.accountId === UNASSIGNED_TRANSACTION_ACCOUNT_ID) review.add(row.id);
     }
@@ -402,12 +411,14 @@ export default function TransactionsScreen() {
   }, []);
   /**
    * Row actions, by swipe or by the screen reader's actions menu. None acts
-   * silently: Category and Transfer open the entry sheet in that state (a
-   * transfer still unresolved opens its review), Delete asks first.
+   * silently: Category opens the entry sheet on its category picker, Transfer
+   * opens it to read ("What is this?" for a candidate, one own-account action
+   * otherwise), Delete asks first.
    */
   const rowActions = useCallback((tx: Transaction) => {
     const confirmedTransfer = isLedgerTransfer(tx) || internal.has(tx.id) || transferOwnership(tx) === 'own';
-    const candidate = isTransferCandidate(tx);
+    // A declined candidate ("not a transfer") swipes like an ordinary row.
+    const candidate = isTransferCandidate(tx) && !transferDeclined(tx);
     const actions: SwipeAction[] = [];
     if (!confirmedTransfer && !candidate) {
       actions.push({ name: 'category', label: words.category, icon: 'receipt', band: 'bills',
@@ -415,11 +426,7 @@ export default function TransactionsScreen() {
     }
     if (!confirmedTransfer) {
       actions.push({ name: 'transfer', label: words.transfer, icon: 'repeat', band: 'accounts',
-        onPress: () => {
-          Keyboard.dismiss();
-          if (candidate) routerRef.current.push({ pathname: '/review-transfers', params: { transactionId: tx.id } });
-          else { setEntryMode('transfer'); setEditing(tx); }
-        } });
+        onPress: () => { Keyboard.dismiss(); setEntryMode('read'); setEditing(tx); } });
     }
     actions.push({ name: 'delete', label: words.delete, icon: 'trash', destructive: true,
       onPress: () => { Keyboard.dismiss(); setDeleting(tx); } });
@@ -470,14 +477,19 @@ export default function TransactionsScreen() {
 
   const filterOptions = useMemo(() => ({ query: appliedQuery, merchant: merchantFilter, smsOnly,
     bestEffortOnly: autoAddedActive, currentKey, period,
-    live: liveAccounts, internal, corroborating, separateTransferIds, reviewTransferIds, transferIds, reviewIds,
+    live: liveAccounts, internal, corroborating, separateTransferIds, reviewTransferIds, separatedPartnerIds, transferIds, reviewIds,
     amountExponent: state.ledgerMoney?.exponent ?? 2 }),
   [appliedQuery, merchantFilter, smsOnly, autoAddedActive, currentKey, period, liveAccounts, internal, corroborating,
-    separateTransferIds, reviewTransferIds, transferIds, reviewIds, state.ledgerMoney?.exponent]);
+    separateTransferIds, reviewTransferIds, separatedPartnerIds, transferIds, reviewIds, state.ledgerMoney?.exponent]);
   const projection = useMemo(() => projectTransactionFilter(filterIndex, appliedFilters, filterOptions),
     [filterIndex, appliedFilters, filterOptions]);
   const { filtered, totalShown, excluded, separatedTransfers } = projection;
   const transferContributes = separatedTransfers.incomeFils > 0 || separatedTransfers.expenseFils > 0;
+  const stripDetail = [
+    separatedTransfers.expenseFils > 0 ? transferWords.strip.sentInNet(formatAED(separatedTransfers.expenseFils, { decimals: false })) : null,
+    separatedTransfers.incomeFils > 0 ? transferWords.strip.receivedInNet(formatAED(separatedTransfers.incomeFils, { decimals: false })) : null,
+    separatedTransfers.reviewCount > 0 ? transferWords.strip.needsAnswer(separatedTransfers.reviewCount) : null,
+  ].filter(Boolean).join(' · ');
   // A single ordinary row already displays its amount. Keep a separate total
   // only when it conveys different information (for example a transfer excluded
   // from totals or a category filter showing part of a split purchase).
@@ -679,11 +691,11 @@ export default function TransactionsScreen() {
               )}
 
               <View testID="transactions-summary" style={styles.summaryRow}>
-            {/* One line: what is listed (and what is left out of the total)
-                on the start side, the net on the end side. At the
-                accessibility sizes the net takes its own line. */}
-            <View style={[styles.summaryTop, largeText && styles.summaryTopLarge]}>
-            <ThemedText type="small" themeColor="textSecondary" style={[styles.summaryText, largeText && styles.summaryTextLarge]}>
+            {/* Two stacked lines: what is listed (and what is left out of the
+                total), then the net with the way to clear filters. They never
+                share a row, so neither is squeezed beside the other. */}
+            <View style={styles.summaryStack}>
+            <ThemedText testID="transactions-summary-line" type="small" themeColor="textSecondary">
               {trf('transactionsCount', {
                 count: filtered.length,
                 s: filtered.length === 1 ? '' : 's',
@@ -712,10 +724,11 @@ export default function TransactionsScreen() {
                   })}`
                 : ''}
               {excluded.movements > 0
-                ? `${excluded.transfers > 0 ? ' · ' : ''}${trf('movementsExcluded', {
-                    count: excluded.movements,
-                    s: excluded.movements === 1 ? '' : 's',
-                  })}`
+                ? `${excluded.transfers > 0 ? ' · ' : ''}${trf(
+                    excluded.movementKind === 'cash-withdrawal' ? 'cashWithdrawalsExcluded'
+                      : excluded.movementKind === 'investing' ? 'investingExcluded'
+                        : excluded.movementKind === 'cash-deposit' ? 'cashDepositsExcluded' : 'movementsExcluded',
+                    { count: excluded.movements, s: excluded.movements === 1 ? '' : 's' })}`
                 : ''}
               {excluded.hidden > 0
                 ? `${excluded.transfers > 0 || excluded.movements > 0 ? ' · ' : ''}${trf('hiddenAccountsExcluded', { count: excluded.hidden })}`
@@ -723,18 +736,16 @@ export default function TransactionsScreen() {
                 </ThemedText>
               )}
             </ThemedText>
-            {(showResultTotal || activeFilterCount > 0) && <View style={styles.summaryRight}>
-              {showResultTotal && <View testID="transactions-net-total" style={[styles.summaryValue, largeText && styles.summaryValueLarge]}>
-                <ThemedText type="small" themeColor="textSecondary">
-                  {transferContributes ? transferWords.netIncluding : tr('transactionNetTotal')}
+            {(showResultTotal || activeFilterCount > 0) && <View style={styles.netLine}>
+              {showResultTotal && <View testID="transactions-net-total" style={styles.netValue}>
+                <ThemedText type="small" themeColor="textSecondary">{transferWords.net}</ThemedText>
+                <ThemedText
+                  type="smallBold"
+                  tabular
+                  style={{ color: totalShown >= 0 ? theme.income : theme.text }}>
+                  {totalShown >= 0 ? '+' : '−'}
+                  {formatAED(Math.abs(totalShown), { decimals: false })}
                 </ThemedText>
-              <ThemedText
-                type="smallBold"
-                tabular
-                style={{ color: totalShown >= 0 ? theme.income : theme.text }}>
-                {totalShown >= 0 ? '+' : '−'}
-                {formatAED(Math.abs(totalShown), { decimals: false })}
-              </ThemedText>
               </View>}
               {activeFilterCount > 0 && (
                 <Pressable
@@ -749,34 +760,26 @@ export default function TransactionsScreen() {
               )}
             </View>}
             </View>
-              {/* The separated-transfers note and the way to them share a line. */}
-              <View style={[styles.transferRow, largeText && styles.transferRowLarge]}>
-              {separatedTransfers.count > 0 && <View testID="transactions-separated-transfers" style={styles.transferNotice}>
-                <ThemedText type="meta" themeColor="textSecondary">{transferWords.separated(separatedTransfers.count)}</ThemedText>
-                {separatedTransfers.reviewCount > 0 &&
-                  <ThemedText type="meta" themeColor="textSecondary">{transferWords.reviewNote}</ThemedText>}
-                {transferContributes && <>
-                  <View style={styles.summaryValue}>
-                    <ThemedText type="meta" themeColor="textSecondary">{transferWords.transferIncome}</ThemedText>
-                    <ThemedText type="meta" tabular>{formatAED(separatedTransfers.incomeFils, { decimals: true })}</ThemedText>
-                  </View>
-                  <View style={styles.summaryValue}>
-                    <ThemedText type="meta" themeColor="textSecondary">{transferWords.transferSpending}</ThemedText>
-                    <ThemedText type="meta" tabular>{formatAED(separatedTransfers.expenseFils, { decimals: true })}</ThemedText>
-                  </View>
-                  <ThemedText type="meta" themeColor="textSecondary">{transferWords.countsNote}</ThemedText>
-                </>}
-              </View>}
-              {/* Short visible label ("Transfers ›") so it fits beside the note;
-                  the spoken label keeps the full action. */}
-              <Pressable accessibilityRole="button" accessibilityLabel={transferWords.viewAll}
+              {separatedTransfers.count > 0 && <Pressable testID="transactions-separated-transfers"
+                accessibilityRole="button"
+                accessibilityLabel={[transferWords.strip.kept(separatedTransfers.count), stripDetail, transferWords.viewAll].filter(Boolean).join('. ')}
                 onPress={() => routerRef.current.push('/transfers')}
-                hitSlop={4} style={styles.transferLink} testID="transactions-transfers-link">
-                <Icon name="repeat" size={15} color={band.tint} />
-                <ThemedText type="small" style={{ color: band.tint, fontFamily: Fonts.sansSemi }}>{transferWords.title}</ThemedText>
-                <Icon name="chevron-right" size={14} color={band.tint} />
-              </Pressable>
-              </View>
+                style={({ pressed }) => [styles.strip, largeText && styles.stripLarge, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
+                <View style={[styles.stripIcon, { backgroundColor: band.glyphGround }]}>
+                  <Icon name="repeat" size={16} color={band.text} />
+                </View>
+                <View style={[styles.stripText, largeText && styles.stripTextLarge]}>
+                  <View style={styles.stripTitle}>
+                    <ThemedText type="smallBold">{transferWords.strip.kept(separatedTransfers.count)}</ThemedText>
+                    {separatedTransfers.reviewCount > 0 && <View style={[styles.stripDot, { backgroundColor: band.statusNear }]} />}
+                  </View>
+                  {stripDetail ? <ThemedText type="meta" themeColor="textSecondary">{stripDetail}</ThemedText> : null}
+                </View>
+                <View testID="transactions-transfers-link" style={styles.stripOpen}>
+                  <ThemedText type="small" style={{ color: band.tint, fontFamily: Fonts.sansSemi }}>{transferWords.strip.open}</ThemedText>
+                  <Icon name="chevron-right" size={14} color={band.tint} />
+                </View>
+              </Pressable>}
               </View>
             </View>
           )}
@@ -812,7 +815,7 @@ export default function TransactionsScreen() {
                 <Icon name={separatedTransfers.count > 0 ? 'repeat' : 'search'} size={24} color={theme.textSecondary} strokeWidth={1.7} />
               </View>
               <ThemedText type="small" themeColor="textSecondary">
-                {separatedTransfers.count > 0 ? transferWords.separated(separatedTransfers.count) : tr('nothingMatches')}
+                {separatedTransfers.count > 0 ? transferWords.strip.kept(separatedTransfers.count) : tr('nothingMatches')}
               </ThemedText>
             </View>
           }
@@ -820,7 +823,12 @@ export default function TransactionsScreen() {
         </GestureHandlerRootView>
   ), [sections, listBottom, band, largeText, merchantFilter, smsOnly, autoAddedCount, autoAddedActive, theme, tr, trf, filtered.length,
     filters.datePreset, filters.accountId, period, activeFilterCount, totalShown, showResultTotal, excluded, clearFilters, renderRow,
-    separatedTransfers, transferContributes, transferWords, scrollingSearchControls, words, accountLabelFor]);
+    separatedTransfers, stripDetail, transferWords, scrollingSearchControls, words, accountLabelFor]);
+
+  // The open entry's transfer assessment, from the reconciliation the screen
+  // already shares (cached per stored receipt; null while a history import
+  // holds a provisional one). Only looked up while the sheet is open.
+  const sheetAssessment = editing ? transferReconciliationForState(state)?.byId.get(editing.id) : undefined;
 
   return (
     <>
@@ -848,7 +856,8 @@ export default function TransactionsScreen() {
         sourceKinds={sourceKinds}
         onClose={() => setSheetVisible(false)} onApply={applyFilters} />}
 
-      <EntryDetailSheet transaction={editing} initialMode={entryMode} onClose={() => { setEditing(null); setEntryMode('read'); }} />
+      <EntryDetailSheet transaction={editing} initialMode={entryMode} transferAssessment={sheetAssessment}
+        onClose={() => { setEditing(null); setEntryMode('read'); }} />
       {deleting ? <ConfirmSheet
         visible
         onClose={() => setDeleting(null)}
@@ -863,11 +872,7 @@ export default function TransactionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  transferNotice: { gap: 2, flexShrink: 1, minWidth: 0 },
   // 36pt plus the 4pt hit slop on each side keeps the 44pt target.
-  transferLink: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: Spacing.one },
-  transferRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', columnGap: Spacing.two },
-  transferRowLarge: { flexDirection: 'column', alignItems: 'flex-start' },
   // The sheet holds the list edge to edge, so a swiped row's actions reach the
   // screen edge; header, section and row cells carry the gutter themselves.
   sheetContent: { paddingHorizontal: 0, paddingTop: Spacing.two },
@@ -902,14 +907,21 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
     gap: 2,
   },
-  summaryTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', columnGap: Spacing.two, rowGap: 2 },
-  summaryTopLarge: { flexDirection: 'column', alignItems: 'stretch' },
+  summaryStack: { gap: 2 },
+  netLine: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.two },
+  netValue: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', gap: Spacing.two },
+  strip: { marginTop: Spacing.two, minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: Spacing.two,
+    padding: Spacing.two, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth },
+  // Accessibility text sizes: icon, text and "Open" stack, so the text keeps the full width.
+  stripLarge: { flexDirection: 'column', alignItems: 'stretch' },
+  stripTextLarge: { flexGrow: 0, flexBasis: 'auto' },
+  stripIcon: { width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  stripText: { flex: 1, minWidth: 0, gap: 2 },
+  stripTitle: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  stripDot: { width: 7, height: 7, borderRadius: 4 },
+  stripOpen: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   summaryValue: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two, minWidth: 0, flexShrink: 1 },
   summaryValueLarge: { flexDirection: 'column', alignItems: 'flex-start' },
-  // Shares the line with the net while at least 140pt is left for it, then
-  // wraps inside that space.
-  summaryText: { flexGrow: 1, flexShrink: 1, flexBasis: 140, minWidth: 0 },
-  summaryTextLarge: { flexBasis: 'auto' },
   merchantChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -919,14 +931,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.two + 2,
     paddingVertical: Spacing.one + 1,
     borderRadius: Radius.full,
-  },
-  summaryRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two + 2,
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    minWidth: 0,
   },
   compactTransferNote: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexWrap: 'wrap' },
   sectionHeaderLarge: { flexDirection: 'column', alignItems: 'flex-start' },

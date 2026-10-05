@@ -242,6 +242,10 @@ function cardAccountIds(state: CardState, accountId: string): Set<string> {
   return ids;
 }
 
+/** A saved transfer answer other than "came from / went to my own account". */
+const declinesOwnTransfer = (t: Transaction): boolean =>
+  t.transferDecision !== undefined && t.transferDecision.ownership !== 'own';
+
 /**
  * Money arriving on a card, whichever direction it was stored in.
  *
@@ -275,7 +279,12 @@ function cardAccountIds(state: CardState, accountId: string): Set<string> {
  */
 function isCardPayment(t: Transaction, ids: Set<string>, creditIds: Set<string>): boolean {
   // A routed generic bank credit is not evidence of a credit-card repayment.
-  if ((t.source === 'sms' || t.smsKey || t.transferEvidence || t.transferDecision) && isTransferCandidate(t)) return false;
+  // A saved decision excludes a row only when it says the money did NOT come
+  // from the person's own account. An explicit 'own' answer on a hand-entered,
+  // evidence-free row says exactly what its `isTransfer` flag already said, so
+  // it keeps the row's payment status; SMS-routed and evidenced rows stay out
+  // whatever the answer, through the first three conditions.
+  if ((t.source === 'sms' || t.smsKey || t.transferEvidence || declinesOwnTransfer(t)) && isTransferCandidate(t)) return false;
   return (
     t.isTransfer === true &&
     ids.has(t.accountId) &&
@@ -331,7 +340,7 @@ function cardPaymentsOf(state: CardState, ids: Set<string>): Transaction[] {
       // were transfers at all.
       candidates: state.transactions.filter((t) =>
         t.isTransfer === true &&
-        !((t.source === 'sms' || t.smsKey || t.transferEvidence || t.transferDecision) &&
+        !((t.source === 'sms' || t.smsKey || t.transferEvidence || declinesOwnTransfer(t)) &&
           isTransferCandidate(t))),
     };
     for (const row of paymentsCache.candidates) paymentsCache.byId.set(row.id, row);

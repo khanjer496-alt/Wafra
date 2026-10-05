@@ -20,6 +20,8 @@ interface MoneyProps {
   type?: TextType;
   /** Colour of the figure. Defaults to ink. */
   color?: string;
+  /** Colour of the currency label. Defaults to the theme's textSecondary (for the sheet); bands pass their own. */
+  currencyColor?: string;
   sign?: Sign;
   decimals?: boolean;
   /** The demoted currency prefix. On by default. */
@@ -69,12 +71,12 @@ const labelFor = (code: string, _localeKey: string) => currencyDisplayLabel(code
  * ("€", "₹", "CA$"), else the ISO code. AED and SAR always show their code.
  * Screen readers hear the ISO code, never a bare symbol.
  */
-function CurrencyPrefix({ label }: { label?: string }) {
+function CurrencyPrefix({ label, color }: { label?: string; color?: string }) {
   const ledgerMoney = useLedgerMoney();
   const localeKey = useMoneyLocaleKey();
   const code = label ?? ledgerMoney?.currency ?? ledgerCurrencyDisplay();
   return (
-    <ThemedText themeColor="textSecondary" style={styles.currencyPrefix}
+    <ThemedText themeColor="textSecondary" style={[styles.currencyPrefix, color ? { color } : undefined]}
       accessibilityLabel={code}>
       {labelFor(code, localeKey)}
     </ThemedText>
@@ -115,6 +117,7 @@ export function Money({
   moneySpec,
   type = 'small',
   color,
+  currencyColor,
   sign = 'none',
   decimals,
   prefix = true,
@@ -132,7 +135,7 @@ export function Money({
   // AED/SAR and any code-labelled currency stay "AED 1,234.56". The screen
   // reader label above always speaks the ISO code first.
   const placement = placementFor(currency, localeKey);
-  const currencyNode = prefix ? <CurrencyPrefix label={currency} /> : null;
+  const currencyNode = prefix ? <CurrencyPrefix label={currency} color={currencyColor} /> : null;
   const fitMultiplier = useHeroFigureMultiplier(amount, type, fitInset);
   // A figure has no good place to break. At the accessibility sizes it keeps
   // its full width and the row around it wraps it onto its own line, instead

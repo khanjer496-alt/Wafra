@@ -34,10 +34,11 @@ export interface TransferEvidence {
   statement?: true;
 }
 
-/** A user's ownership decision survives reparsing and a missing counterpart. */
+/** A user's ownership decision survives reparsing and a missing counterpart.
+ * `'none'` is "not a transfer": the row counts like an ordinary purchase or income. */
 export interface TransferDecision {
   version: 1;
-  ownership: 'own' | 'external';
+  ownership: 'own' | 'external' | 'none';
   decidedAt: number;
   counterpartId?: string;
 }
@@ -91,7 +92,7 @@ export interface TransferReconciliationResult {
 
 export interface TransferDecisionRequest {
   ids: string[];
-  ownership: 'own' | 'external' | null;
+  ownership: 'own' | 'external' | 'none' | null;
   counterpartId?: string;
   expectedFingerprints: Record<string, string>;
   now: number;

@@ -147,12 +147,7 @@ const en = {
     notPair: 'Not a pair',
     matched: 'Transfer matched',
     notPairDone: 'Kept separate. Each entry stays in the list below.',
-    matchedTitle: 'Matched pairs',
-    matchedEmpty: 'No matched pairs in this period',
-    pairsLink: (n: number) => `${enCount(n, 'possible pair', 'possible pairs')} to check`,
     pairA11y: (out: string, inAccount: string, amount: string) => `${out} to ${inAccount}, ${amount}`,
-    showAll: (n: number) => `Show all ${n}`,
-    showFewer: 'Show fewer',
   },
 
   categorise: {
@@ -301,12 +296,7 @@ const ar: DetailsCopy = {
     notPair: 'ليسا زوجاً',
     matched: 'تمت مطابقة التحويل',
     notPairDone: 'بقيا منفصلين. تبقى كل عملية في القائمة أدناه.',
-    matchedTitle: 'أزواج مطابقة',
-    matchedEmpty: 'لا توجد أزواج مطابقة في هذه الفترة',
-    pairsLink: (n) => `أزواج محتملة للمراجعة: ${n}`,
     pairA11y: (out, inAccount, amount) => `${out} إلى ${inAccount}، ${amount}`,
-    showAll: (n) => `عرض الكل (${n})`,
-    showFewer: 'عرض أقل',
   },
 
   categorise: {

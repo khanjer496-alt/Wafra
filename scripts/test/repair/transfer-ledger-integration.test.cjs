@@ -118,6 +118,31 @@ test('generic credit routed onto a credit card cannot settle a statement; explic
   assert.equal(summarizeCashOutflow(stateOf([manual]), '2026-09').cardPaymentsFils, 10000);
 });
 
+test('an explicit own answer keeps a manual card repayment paying the statement; external or none takes it out', () => {
+  const { duePaidFils } = require('../build/cards');
+  const manual = row('manual-repayment', 'income', { source: 'manual', smsKey: undefined, title: 'Money in',
+    accountId: 'credit', isTransfer: true });
+  const due = { id: 'due', accountId: 'credit', totalDueFils: 10000, minDueFils: 1000, dueDate: '2026-09-20', paidFils: 0 };
+  const paid = rows => ({ payments: cardPaymentRows(stateOf(rows)).map(t => t.id),
+    paidFils: duePaidFils({ ...stateOf(rows), cardDues: [due] }, due) });
+  assert.deepEqual(paid([manual]), { payments: ['manual-repayment'], paidFils: 10000 }, 'the flagged manual row pays the card');
+  const own = decide([manual], [manual.id], 'own');
+  assert.equal(own[0].transferDecision.ownership, 'own');
+  assert.deepEqual(paid(own), { payments: ['manual-repayment'], paidFils: 10000 },
+    're-confirming "came from my own account" keeps the statement paid');
+  for (const ownership of ['external', 'none']) {
+    assert.deepEqual(paid(decide([manual], [manual.id], ownership)), { payments: [], paidFils: 0 },
+      `${ownership}: the person said it is not a move from their own account`);
+  }
+  // An SMS-routed generic credit stays out whatever the person answers.
+  const generic = row('unknown-credit', 'income', { accountId: 'credit', isTransfer: true });
+  assert.deepEqual(paid(decide([generic], [generic.id], 'own')).payments, []);
+  // So does a row with transfer evidence that did not arrive by SMS.
+  const evidenced = row('evidenced', 'income', { source: 'manual', accountId: 'credit', isTransfer: true,
+    transferEvidence: { version: 1, currency: 'AED', attribution: 'fallback' } });
+  assert.deepEqual(paid(decide([evidenced], [evidenced.id], 'own')).payments, []);
+});
+
 test('saved external payment remains separate from a coincident card repayment after role-changing reread', () => {
   const outgoing = decide([row('external', 'expense', { isTransfer: true })], ['external'], 'external')[0];
   const rewritten = { ...outgoing, cardPaymentSide: 'debit', paymentFlowSide: 'funding' };

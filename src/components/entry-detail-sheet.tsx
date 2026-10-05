@@ -1,18 +1,20 @@
 import { useCategoryCatalog } from '@/hooks/use-category-catalog';
-import React, { useEffect, useState } from 'react';
-import { useRouter } from '@/hooks/use-app-router';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
-import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome } from '@/lib/ledger';
-import { isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
+import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, cachedTransferReconciliationForState } from '@/lib/ledger';
+import { canMarkOwnTransfer, isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
+import { currentAnswer, ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
+import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { useTransferAnswer } from '@/hooks/use-transfer-answer';
+import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { CategoryChips } from '@/components/ui/category-chips';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
 import { ConfirmSheet } from '@/components/ui/confirm-sheet';
-import { Toggle } from '@/components/ui/controls';
 import { BandFigure } from '@/components/ui/band/band-figure';
 import { EButton } from '@/components/ui/band/e-button';
 import { Icon } from '@/components/ui/icon';
@@ -40,10 +42,11 @@ import type { CategoryId, Transaction, TransactionType } from '@/lib/types';
 import { t, tf } from '@/lib/i18n';
 
 /**
- * Which state the sheet opens in: reading the entry, choosing its category,
- * or confirming it as a transfer (the row swipe actions open the last two).
+ * Which state the sheet opens in: reading the entry, or choosing its category
+ * (the Category row swipe). The Transfer swipe opens it in read mode, where a
+ * transfer candidate asks "What is this?".
  */
-export type EntryDetailMode = 'read' | 'category' | 'transfer';
+export type EntryDetailMode = 'read' | 'category';
 
 interface EntryDetailSheetProps {
   /** The entry to show, or null to keep the sheet closed. */
@@ -53,6 +56,11 @@ interface EntryDetailSheetProps {
   /** Current ledger assessment for transfer-history presentation, never a saved decision. */
   transferAssessment?: TransferAssessment;
   initialMode?: EntryDetailMode;
+  /**
+   * Open on the "which account?" picker when several accounts could be the
+   * other side (Transfers sets it after the person chose "own" on its card).
+   */
+  startWithAccountPicker?: boolean;
   /**
    * The band of the screen it opens over (design language E): the sheet is
    * that screen's sheet, lifted, and its Done button takes the band colour.
@@ -68,15 +76,23 @@ interface EntryDetailSheetProps {
  * row — "what actually was this?" — was answered by six input boxes. Reading
  * comes first now; editing is one tap away.
  */
-export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment, initialMode = 'read', band: bandId = 'home' }: EntryDetailSheetProps) {
+export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment: passedAssessment, initialMode = 'read', startWithAccountPicker = false, band: bandId = 'home' }: EntryDetailSheetProps) {
   const { getCategory, categoryLabel, expenseCategories, incomeCategories } = useCategoryCatalog();
-  const router = useRouter();
   const theme = useTheme();
   const band = useBand(bandId);
   const language = useLanguage();
   const extra = entryDetailCopy[language === 'ar' ? 'ar' : 'en'];
   const largeText = useLargeTextLayout();
   const { state, editTransaction, deleteTransaction, resolveBestEffort, setMerchantOverride, setBillAlias } = useStore();
+  // Transactions and Transfers pass the assessment from the reconciliation they
+  // already hold. Every other sheet (account, Flow, Home, card, merchant, ...)
+  // reads the one already cached for the stored transfer receipt, so a confirmed
+  // pair shows its answer and link and "own" can link the other side. Only a
+  // cache read, and only while an entry is shown: opening an entry must never
+  // walk the ledger's transfer graph. Without a cached result (a provisional
+  // import receipt, a restored ledger with none) the row answers for itself.
+  const transferAssessment = passedAssessment ?? (transaction
+    ? cachedTransferReconciliationForState(state)?.byId.get(transaction.id) : undefined);
   const [editing, setEditing] = useState(false);
 
   const [title, setTitle] = useState('');
@@ -84,7 +100,6 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const [category, setCategory] = useState<CategoryId>('other');
   const [accountId, setAccountId] = useState('');
   const [dateText, setDateText] = useState('');
-  const [isTransfer, setIsTransfer] = useState(false);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmingUndo, setConfirmingUndo] = useState(false);
@@ -111,11 +126,17 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     category: CategoryId;
     count: number;
   } | null>(null);
-  // The category sheet state (a clear Cancel/Done choice) and the direct
-  // "Mark as transfer" confirmation. Declared after the older states.
+  // The category sheet state: a clear Cancel/Done choice. Declared after the older states.
   const [categoryPicking, setCategoryPicking] = useState(false);
   const [pickedCategory, setPickedCategory] = useState<CategoryId>('other');
-  const [confirmingTransfer, setConfirmingTransfer] = useState(false);
+  // The "What is this?" answer. Like every hook here it runs before the early return below.
+  const { answer, busy } = useTransferAnswer();
+  const activityWords = transferActivityCopy(language);
+  const answerWords = activityWords.answers;
+  const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
+  const opensOnPicker = () => startWithAccountPicker && !!transaction &&
+    ownCandidates(transaction, transferAssessment, rowsById).length > 1;
+  const [picking, setPicking] = useState(opensOnPicker);
 
   useEffect(() => {
     if (!transaction) return;
@@ -125,7 +146,7 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     setBillRuleAsk(null);
     setPickedCategory(transaction.category);
     setCategoryPicking(initialMode === 'category');
-    setConfirmingTransfer(initialMode === 'transfer');
+    setPicking(opensOnPicker());
     setTitle(transaction.title);
     // The FULL amount, fils included. Seeding the field from the display
     // string — which hides the fils — meant opening an entry and saving any
@@ -137,7 +158,6 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     setCategory(transaction.category);
     setAccountId(transaction.accountId);
     setDateText(transaction.date);
-    setIsTransfer(isLedgerTransfer(transaction));
     // Keyed on the entry's id, not the object. Callers that hold the row in
     // their own state pass a stable reference, but the assistant's evidence
     // sheet derives it from a map rebuilt out of the store — so a background
@@ -189,6 +209,19 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const presentation = transactionPresentation(transaction, language, confirmedOwnTransfer);
   const presentationWords = transactionPresentationWords(language);
   const pendingTransfer = !confirmedTransfer && isTransferCandidate(transaction) && ownership === 'unknown';
+  // A confirmed transfer has no spending category to edit.
+  const isTransfer = isLedgerTransfer(transaction);
+  const transferCandidate = isTransferCandidate(transaction);
+  const answered = currentAnswer(transaction, transferAssessment);
+  const candidates = ownCandidates(transaction, transferAssessment, rowsById);
+  // Only a confirmed pair is linked; a likely-own counterpart is a suggestion, not a link.
+  const linkedTo = transferAssessment?.status === 'confirmed-own' && transferAssessment.counterpartId
+    ? rowsById.get(transferAssessment.counterpartId) : undefined;
+  const answerLabels = transaction.type === 'income' ? answerWords.in : answerWords.out;
+  const accountLabelFor = (id: string) => {
+    const found = state.accounts.find((a) => a.id === id);
+    return found ? accountDisplayName(found) : activityWords.accountUnknown;
+  };
   const account = state.accounts.find((a) => a.id === transaction.accountId);
   const income = transaction.type === 'income';
   const categories = income ? incomeCategories : expenseCategories;
@@ -210,7 +243,6 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       category,
       accountId,
       date: dateText,
-      ...(!transferReview ? { isTransfer: isTransfer || undefined } : {}),
       ...(receiptAccountChanged ? { paymentInstrumentSource: 'user' as const } : {}),
       // Saving a correction is the person checking the row.
       ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
@@ -297,13 +329,40 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     }
     onClose();
   };
-  // The same flag the edit form's transfer toggle writes, after a confirm.
+  // The one-tap own-account action for an ordinary row. The row is then a
+  // transfer candidate, so reopening it offers the three answers (and "Not a
+  // transfer") to change it.
   const markAsTransfer = () => {
     editTransaction(transaction.id, {
       isTransfer: true,
       ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
     });
     onClose();
+  };
+  // The way back for a captured row marked above: it is not a candidate (only
+  // manual rows count the flag), so it has no question to change the answer.
+  const unmarkTransfer = () => {
+    editTransaction(transaction.id, {
+      isTransfer: undefined,
+      ...(transaction.bestEffort ? { bestEffort: undefined } : {}),
+    });
+    onClose();
+  };
+
+  // Close the sheet and reset the picker only when the answer is applied
+  // ('saved', or 'unsaved' = applied in memory with the write still pending).
+  // The hook has already told the person about every other outcome.
+  const choose = async (next: TransferAnswer, counterpart?: Transaction) => {
+    // The answer already shown, with the same link (or none), changes nothing: save nothing.
+    if (next === answered && (next !== 'own' || counterpart?.id === linkedTo?.id)) {
+      setPicking(false);
+      return;
+    }
+    const outcome = await answer({ transaction, answer: next, counterpart, label: answerLabels[next] });
+    if (outcome === 'saved' || outcome === 'unsaved') {
+      setPicking(false);
+      onClose();
+    }
   };
 
   // A notification capture is stored with `source: 'sms'` and `viaPush`, so
@@ -317,9 +376,12 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         : sourceKind === 'statement' ? transaction.captureSource === 'csv' ? extra.statementCsv : extra.statementPdf
           : sourceKind === 'email' ? extra.bankEmail
             : t('addedByHand');
-  // Marking a transfer directly is offered only where the edit form's toggle
-  // would be: not for rows the transfer review owns, not for transfers.
-  const canMarkTransfer = !transferReview && !confirmedTransfer && !pendingTransfer;
+  // The own-account action is for ordinary rows only: a transfer candidate
+  // answers through the question below, and a transfer is already one.
+  // Rows the system flags itself (card payments, payment flows, salary, settlement titles) get neither.
+  const canMarkTransfer = !transferReview && !confirmedTransfer && !pendingTransfer &&
+    canMarkOwnTransfer(transaction) && !transaction.isTransfer;
+  const canUnmarkTransfer = canMarkOwnTransfer(transaction) && transaction.isTransfer === true;
   const originalMoney = originalMoneyOf(transaction);
   const fxSourceLabel =
     transaction.fxSource === 'bank'
@@ -394,8 +456,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           {fxLine}</ThemedText> : null}
       </View>}
 
-      {/* What it was, as chips: its category (opens the picker) and, where a
-          transfer is possible, Mark as transfer (asks first). */}
+      {/* What it was, as chips: its category (opens the picker) and, on an
+          ordinary row, the one-tap "Moved to my own account". */}
       {!editing && !categoryPicking ? <View style={styles.chips} testID="entry-detail-chips">
         {confirmedTransfer || pendingTransfer ? <View accessible accessibilityRole="text" style={[styles.chip, { backgroundColor: band.card, borderColor: band.rule }]}>
           <Icon name="repeat" size={16} color={band.text} />
@@ -409,11 +471,18 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           <ThemedText type="smallBold" style={{ color: band.onFill }}>{categoryLabel(meta)}</ThemedText>
         </Pressable>}
         {canMarkTransfer ? <Pressable accessibilityRole="button" testID="entry-mark-transfer"
-          accessibilityLabel={extra.markTransfer}
-          onPress={() => setConfirmingTransfer(true)}
+          accessibilityLabel={answerLabels.own}
+          onPress={markAsTransfer}
           style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
           <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={{ color: band.text }}>{extra.markTransfer}</ThemedText>
+          <ThemedText type="small" style={{ color: band.text }}>{answerLabels.own}</ThemedText>
+        </Pressable> : null}
+        {canUnmarkTransfer ? <Pressable accessibilityRole="button" testID="entry-unmark-transfer"
+          accessibilityLabel={answerLabels.none}
+          onPress={unmarkTransfer}
+          style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
+          <Icon name="repeat" size={16} color={band.text} />
+          <ThemedText type="small" style={{ color: band.text }}>{answerLabels.none}</ThemedText>
         </Pressable> : null}
       </View> : null}
 
@@ -460,12 +529,34 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         </View>
       )}
 
-      {transferReview && <View style={styles.field} testID="entry-transfer-review">
-        {pendingTransfer && <ThemedText type="small" themeColor="textSecondary">{transferWords.noticeBody}</ThemedText>}
-        <EButton palette={band} variant="secondary" label={transferWords.title} onPress={() => {
-          onClose();
-          router.push({ pathname: '/review-transfers', params: { transactionId: transaction.id } });
-        }} />
+      {!editing && transferCandidate && <View testID="entry-transfer-question" style={styles.transferQuestion}>
+        <ThemedText type="smallBold" accessibilityRole="header">{answerWords.question}</ThemedText>
+        {picking ? <View style={styles.picker}>
+          <ThemedText type="small" themeColor="textSecondary">{answerWords.whichAccount}</ThemedText>
+          {candidates.map((candidate) => <Pressable key={candidate.id} testID={`entry-transfer-candidate-${candidate.id}`}
+            accessibilityRole="button" disabled={busy}
+            accessibilityLabel={`${accountLabelFor(candidate.accountId)}. ${shortDate(candidate.date)}`}
+            onPress={() => void choose('own', candidate)}
+            style={[styles.pickRow, { borderColor: band.rule, backgroundColor: band.card, opacity: busy ? 0.6 : 1 }]}>
+            <ThemedText type="smallBold">{accountLabelFor(candidate.accountId)}</ThemedText>
+            <ThemedText type="meta" themeColor="textSecondary">{shortDate(candidate.date)}</ThemedText>
+          </Pressable>)}
+          <Pressable testID="entry-transfer-candidate-none" accessibilityRole="button" disabled={busy}
+            onPress={() => void choose('own')}
+            style={[styles.pickRow, { borderColor: band.rule, backgroundColor: band.card, opacity: busy ? 0.6 : 1 }]}>
+            <ThemedText type="small">{answerWords.noLink}</ThemedText>
+          </Pressable>
+          <Pressable testID="entry-transfer-picker-back" accessibilityRole="button" disabled={busy}
+            accessibilityLabel={t('back')} onPress={() => setPicking(false)}
+            style={[styles.pickRow, { borderColor: band.rule, opacity: busy ? 0.6 : 1 }]}>
+            <ThemedText type="small" themeColor="textSecondary">{t('back')}</ThemedText>
+          </Pressable>
+        </View> : <TransferAnswerChoices incoming={income} value={answered} layout="radios" palette={band} disabled={busy}
+          linkedLabel={linkedTo ? activityWords.route.linked(accountLabelFor(linkedTo.accountId)) : undefined}
+          onChange={(next) => {
+            if (next === 'own' && candidates.length > 1) { setPicking(true); return; }
+            void choose(next, next === 'own' ? candidates[0] : undefined);
+          }} />}
       </View>}
       {!editing && showMerchantLink && !presentation.purposeUnclear && !confirmedTransfer && !pendingTransfer && !isMoneyMovementOnly(transaction) && transaction.title.trim() &&
         <MerchantSpendingLink merchant={transaction.title} displayName={presentation.title} type={transaction.type} onClose={onClose} />}
@@ -575,21 +666,6 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
             })()}
           </View>
 
-          <View style={styles.transferRow}>
-            <View style={styles.flex}>
-              <ThemedText type="small">{t('transferBetweenMine')}</ThemedText>
-              <ThemedText type="meta" themeColor="textTertiary">
-                {t('transferExplainer')}
-              </ThemedText>
-            </View>
-            {!transferReview && <Toggle
-              value={isTransfer}
-              onChange={setIsTransfer}
-              label={t('transferBetweenMine')}
-            />}
-          </View>
-
-
         </>
       ) : (
         <>
@@ -652,16 +728,6 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           confirmLabel={t('autoAddedUndo')}
           destructive
           onConfirm={() => { resolveBestEffort(transaction.id, 'undo'); onClose(); }}
-        />
-      )}
-      {confirmingTransfer && canMarkTransfer && (
-        <ConfirmSheet
-          visible
-          onClose={() => { setConfirmingTransfer(false); if (initialMode === 'transfer') onClose(); }}
-          question={extra.markTransferQuestion}
-          body={`${presentation.title} · ${formatAmount(transaction.amountFils)}. ${extra.markTransferBody}`}
-          confirmLabel={extra.markTransfer}
-          onConfirm={markAsTransfer}
         />
       )}
       {confirmingDelete && (
@@ -860,11 +926,9 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     paddingEnd: Spacing.three,
   },
-  transferRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-  },
+  transferQuestion: { gap: Spacing.two },
+  picker: { gap: Spacing.two },
+  pickRow: { minHeight: 48, borderWidth: 1, borderRadius: Radius.control, padding: Spacing.three, gap: 2, justifyContent: 'center' },
   transferMeaning: {
     gap: Spacing.one,
     borderWidth: 1,

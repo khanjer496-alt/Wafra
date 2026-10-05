@@ -8,6 +8,7 @@ import {
   isUnassignedTransferAccount,
   reconcileTransfers,
   reconciliationInternalIds,
+  transferDeclined,
   transferOwnership,
   TRANSFER_NORMALIZATION_VERSION,
 } from '@/lib/transfer-reconciliation';
@@ -48,6 +49,7 @@ export function liveAccountIds(accounts: Account[]): Set<string> {
 }
 
 export function isTransfer(transaction: Transaction): boolean {
+  if (transferDeclined(transaction)) return false;
   const ownership = transferOwnership(transaction);
   return ownership === 'own' || (ownership === null && transaction.isTransfer === true);
 }
@@ -97,7 +99,8 @@ export function countsInCashflowTotals(
   if (ownership === 'own') return false;
   // Settlement/funding rows are deliberately not transfer candidates. Preserve
   // their existing exclusion instead of re-labelling card payments as income.
-  if (ownership === null && transaction.isTransfer === true) return false;
+  // A row the person declined ("not a transfer") keeps its legacy flag but counts as ordinary.
+  if (ownership === null && transaction.isTransfer === true && !transferDeclined(transaction)) return false;
   // A holding transfer source is not a user's known account, so it cannot yet
   // establish cash flow for the ledger. Ordinary unassigned parsed activity is
   // still governed by the live-account set below.
@@ -314,6 +317,23 @@ export function transferReconciliationForState(
   const result = reconcileTransfers(state.transactions, state.accounts);
   receiptReconciliationCache = { receipt, accounts: state.accounts, result };
   return result;
+}
+
+/**
+ * The reconciliation `transferReconciliationForState` already cached for this
+ * exact final receipt, or null. It never builds one, so a surface that opens
+ * on a tap (the entry detail sheet) can use the graph without walking the
+ * ledger: Home builds it after interactions, and Transactions and Transfers
+ * build it for their own lists. Null for a provisional or missing receipt, or
+ * before any of those has run since the receipt last changed.
+ */
+export function cachedTransferReconciliationForState(
+  state: Pick<AppState, 'accounts' | 'transferInternalIds' | 'transferNormalizationVersion'>,
+): TransferReconciliationResult | null {
+  const receipt = state.transferInternalIds;
+  if (!Array.isArray(receipt) || state.transferNormalizationVersion !== TRANSFER_NORMALIZATION_VERSION) return null;
+  return receiptReconciliationCache?.receipt === receipt && receiptReconciliationCache.accounts === state.accounts
+    ? receiptReconciliationCache.result : null;
 }
 
 /**

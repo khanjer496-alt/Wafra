@@ -14,7 +14,6 @@ const S = {
   // Transaction list and details: concise visible labels, complete semantics.
   transactionSearchLabel: { en: 'Search transactions', ar: 'البحث في العمليات' },
   transactionSearchPlaceholder: { en: 'Merchant or category', ar: 'التاجر أو الفئة' },
-  transactionNetTotal: { en: 'Net', ar: 'الصافي' },
   transactionNetPending: { en: 'Net', ar: 'الصافي' },
   transactionConfirmedSubtotal: {
     en: 'Confirmed entries: {amount}',
@@ -515,10 +514,6 @@ const S = {
     ar: 'أنشئ حساباً في المحفظة أولاً',
   },
   savingSecurely: { en: 'Saving securely…', ar: 'جارٍ الحفظ بأمان…' },
-  reviewAlertOwnAccounts: {
-    en: 'This moved money between my own accounts',
-    ar: 'هذا تحويل بين حساباتي الشخصية',
-  },
   reviewAlertDateA11y: {
     en: 'Transaction date in year month day format',
     ar: 'تاريخ العملية بصيغة سنة شهر يوم',
@@ -1758,7 +1753,6 @@ const S = {
   searchLabel: { en: 'Search', ar: 'بحث' },
   remindDayBefore: { en: 'Remind me the day before', ar: 'ذكّرني قبل يوم' },
   cardPaymentDue: { en: 'Card payment due', ar: 'دفعة بطاقة مستحقة' },
-  transferBetweenMine: { en: 'Transfer between my accounts', ar: 'تحويل بين حساباتي' },
   openPhoneSettings: { en: 'Open settings', ar: 'افتح الإعدادات' },
   billRecordsExpense: { en: 'Records an expense of {amount} today.', ar: 'يسجّل مصروفاً بقيمة {amount} اليوم.' },
   overdueAndLeaving: { en: 'Overdue and leaving in {days} days', ar: 'متأخرة وتخرج خلال {days} أيام' },
@@ -2338,7 +2332,6 @@ const S = {
     ar: 'بطاقة الخصم المباشر ليس لها كشف حساب ولا فاتورة تُسدَّد — فهي تنفق الرصيد الموجود في الحساب.',
   },
   underMinimumDue: { en: 'Still under the minimum due.', ar: 'ما زال أقل من الحد الأدنى المستحق.' },
-  transferExplainer: { en: 'Kept in balances, excluded from income and spending', ar: 'يُحتسب في الأرصدة ويُستثنى من الدخل والمصروف' },
   perYear: { en: 'per year', ar: 'سنوياً' },
   playOnlyTitle: { en: 'Purchases unavailable in this build', ar: 'الشراء غير متاح في هذا الإصدار' },
   playOnlyBody: {
@@ -2647,6 +2640,9 @@ const S = {
     en: '{count} money movement{s} not counted',
     ar: '{count} حركة أموال مستبعدة من الإجمالي',
   },
+  cashWithdrawalsExcluded: { en: '{count} cash withdrawal{s} not counted', ar: '{count} سحب نقدي مستبعد من الإجمالي' },
+  investingExcluded: { en: '{count} investment{s} not counted', ar: '{count} استثمار مستبعد من الإجمالي' },
+  cashDepositsExcluded: { en: '{count} cash deposit{s} not counted', ar: '{count} إيداع نقدي مستبعد من الإجمالي' },
   // Rows on a hidden account. They are still listed — they are real records
   // and searching for one should find it — but every other total in the app
   // leaves them out, so this one must too, and must say so.

@@ -48,6 +48,7 @@ import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { reviewTemplateRuleFor, type PromoteReviewAlertInput } from '@/lib/review-promotion';
 import { isUniversalReviewAlert, type ReviewAlert, type ReviewEntry, type UniversalReviewAlert } from '@/lib/alert-review-tray';
 import { reviewAlertCopy } from '@/lib/review-alert-copy';
+import { transferActivityCopy } from '@/lib/transfer-activity-copy';
 import { UniversalReviewFields, UniversalReviewFacts, isOrdinaryUniversalPosting, reviewMoneyChoices } from '@/components/universal-review-fields';
 import type { UniversalInstrument, UniversalMoney } from '@/lib/universal-types';
 import { suggestUniversalCategory } from '@/lib/universal-categorization';
@@ -809,6 +810,9 @@ export default function AddTransactionScreen() {
   // the suggested categories); the sheet holds the detail chips and keypad.
   // A captured alert keeps its review on the sheet.
   const bandWords = everydayBandCopy(state.language);
+  // The same wording as the entry sheet's "What is this?", by direction.
+  const ownAccountAnswers = transferActivityCopy(state.language === 'ar' ? 'ar' : 'en').answers;
+  const ownAccountLabel = type === 'income' ? ownAccountAnswers.in.own : ownAccountAnswers.out.own;
   const arabic = state.language === 'ar';
   const entryCurrency = foreignSpec?.currency ?? state.ledgerMoney?.currency ?? '—';
   const manualBand = reviewItem ? undefined : <View style={styles.band}>
@@ -1076,7 +1080,7 @@ export default function AddTransactionScreen() {
               <Pressable
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: betweenOwnAccounts }}
-                accessibilityLabel={tUi('reviewAlertOwnAccounts')}
+                accessibilityLabel={ownAccountLabel}
                 onPress={() => setBetweenOwnAccounts((value) => !value)}
                 style={[styles.transferChoice, { borderColor: theme.controlBorder }]}>
                 <Icon
@@ -1084,7 +1088,7 @@ export default function AddTransactionScreen() {
                   size={18}
                   color={betweenOwnAccounts ? theme.primary : theme.textSecondary}
                 />
-                <ThemedText type="small">{tUi('reviewAlertOwnAccounts')}</ThemedText>
+                <ThemedText type="small">{ownAccountLabel}</ThemedText>
               </Pressable>
       )}
 

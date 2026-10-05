@@ -171,6 +171,18 @@ for (const language of ['en', 'ar']) for (const family of ['statement', 'balance
     assert.ok(!h.events.some(event => event[0].startsWith('unexpected')));
   });
 }
+for (const language of ['en', 'ar']) for (const direction of ['debit', 'credit']) {
+  test(`${language}/${direction}: the own-account checkbox uses the same answer wording as the entry sheet`, () => {
+    const item = pending('transfer', { direction, amount: field(money()), instrument: field() });
+    const h = detailHarness(item, language);
+    const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy(language).answers;
+    const label = direction === 'credit' ? words.in.own : words.out.own;
+    const box = walk(h.render()).find(node => node.props?.accessibilityRole === 'checkbox');
+    assert.ok(box, 'a transfer alert asks whether it moved between your own accounts');
+    assert.equal(box.props.accessibilityLabel, label);
+    assert.ok(text(box).includes(label));
+  });
+}
 test('failed dismissal stays informational and retries the durable write before leaving', async () => {
   const item = pending('statement', { statementTotal: field(money()) });
   const h = detailHarness(item); let rejectWrite; let resolveRetry; let calls = 0;
