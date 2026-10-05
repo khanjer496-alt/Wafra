@@ -468,7 +468,7 @@ in `reference-harness.cjs` and `journal-harness.cjs`.
 - Every monetary graph exposes exact amounts, currency and its dates without a tap. Merchant and bill history, Ask monthly answers, limit history and annual recap use readable labelled rows where narrow columns cannot fit. Limit reference markers and status meanings remain intact.
 - The Widgets screen previews Today and Coming up from the same snapshot as native widgets. Thirty-three recurring-service logo identities map to bundled artwork on iOS/Android; unknown or older identities retain a fallback. No logo network request is needed.
 - A small Today widget shows the exact seven-day total instead of an unreadable seven-bar strip. The Widgets screen provides every dated daily value in a full-width chart. Hidden, incomplete or unsafe totals remain unavailable. Lock Screen/StandBy amount redaction remains unchanged.
-- Web controls expose checked/selected/pressed states explicitly alongside native accessibility state. Pending onboarding transitions keep their actions disabled until they can execute.
+- Web controls expose checked/selected/pressed states explicitly alongside native accessibility state. Pending onboarding transitions ignore a second tap until the new step can act (its layer swallows touches and its handlers refuse) without drawing the wait: nothing dims or spins.
 
 ## Device-feedback refinements — 27 September 2026
 

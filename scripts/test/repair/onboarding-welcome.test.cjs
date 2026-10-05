@@ -23,9 +23,11 @@ const isHidden = (node) => node.props.accessibilityElementsHidden === true &&
 const byId = (tree, id) => walk(tree).find((node) => node.props?.testID === id);
 
 /** The scene (and Welcome) from source over the reference harness, with a recording core Animated. */
-function setup({ language = 'en', motion = { ready: true, reducedMotion: true }, currency = 'AED', region = 'AE', largeText = false } = {}) {
-  const h = createHarness({ language, largeText });
+function setup({ language = 'en', motion = { ready: true, reducedMotion: true }, currency = 'AED', region = 'AE', largeText = false,
+  platform = 'android', isRTL = false } = {}) {
+  const h = createHarness({ language, largeText, platform });
   const d = h.deps;
+  d['react-native'].I18nManager = { isRTL };
   const runs = { started: 0, stopped: 0, listeners: 0, removed: 0 };
   const run = { start() { runs.started++; }, stop() { runs.stopped++; } };
   // An interpolation reads as its value at the moment it is built (the frame the test renders).
@@ -151,7 +153,28 @@ test('the coin lands in the category the merchant maps to, drawn as the pattern 
   const flat = Object.assign({}, ...[tile.props.style].flat(Infinity).filter(Boolean));
   const mosaic = walk(tree).find((node) => node.type === 'PatternMosaic');
   const cell = mosaic.props.tiles.find((item) => item.category === 'groceries');
-  assert.equal(flat.start, cell.col * (mosaic.props.tile + mosaic.props.gap), 'over the pattern\'s own Groceries tile (logical start: mirrors in Arabic)');
+  const column = cell.col * (mosaic.props.tile + mosaic.props.gap);
+  const styleOf = (node, id) => Object.assign({}, ...[byId(node, id).props.style].flat(Infinity).filter(Boolean));
+  // Native lays out logically under the app's direction (and I18nManager after an Arabic relaunch, whose
+  // left/right swap would mirror a physical side twice): start/end, in English and Arabic, RTL or not.
+  assert.equal(flat.start, column, 'over the pattern\'s own Groceries tile');
+  assert.equal(flat.left, undefined);
+  for (const isRTL of [false, true]) {
+    const native = setup({ language: 'ar', isRTL, platform: 'ios' }).renderWelcome();
+    assert.equal(styleOf(native, 'sms-coin-tile').start, column, `native Arabic (isRTL ${isRTL}): logical start`);
+    assert.equal(styleOf(native, 'sms-coin-tile').right, undefined);
+    assert.ok(styleOf(native, 'sms-coin-badge').end < 0, 'the badge on the end corner');
+  }
+  // The web resolves start/end from the device, not the app: physical sides from the app's language.
+  const webEn = setup({ platform: 'web' }).renderWelcome();
+  assert.equal(styleOf(webEn, 'sms-coin-tile').left, column);
+  assert.ok(styleOf(webEn, 'sms-coin-badge').right < 0);
+  for (const isRTL of [false, true]) {
+    const webAr = setup({ language: 'ar', platform: 'web', isRTL }).renderWelcome();
+    assert.equal(styleOf(webAr, 'sms-coin-tile').right, column, 'web Arabic: the same column from the right, as the mirrored mosaic draws it');
+    assert.equal(styleOf(webAr, 'sms-coin-tile').left, undefined);
+    assert.ok(styleOf(webAr, 'sms-coin-badge').left < 0);
+  }
   assert.equal(flat.top, cell.row * (mosaic.props.tile + mosaic.props.gap));
   assert.equal(flat.backgroundColor, h.deps['@/constants/theme'].PatternPalette.light.fill[cell.color]);
   assert.ok(walk(tile).some((node) => node.props?.testID === 'sms-coin-badge'), 'with the coin badge');

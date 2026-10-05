@@ -9,6 +9,9 @@ const { gate, profile } = require('./onboarding-extreme-navigation.test.cjs');
 const stage = (h, expected) => assert.equal(h.state.onboardingProfile.stage, expected);
 const writes = h => h.events.filter(event => event[0] === 'setCaptureOptOut');
 const calls = (h, name) => h.events.filter(event => event[0] === name);
+// The settle lock is enforced, never drawn: the arriving step's layer swallows
+// touches while it holds, and its controls are neither dimmed nor disabled.
+const locked = h => h.nodes().find(node => node.props?.testID === 'onboarding-step-layer')?.props.pointerEvents === 'none';
 const open = async (t, options) => {
   const h = await gate({ manualClock: true, ...options });
   t.after(() => h.unmount());
@@ -24,12 +27,15 @@ for (const reducedMotion of [false, true]) {
     // Calling it also protects against a queued native press after disabling.
     h.control('skipForNow').onPress(); await h.flush();
     stage(h, 'tracking');
-    assert.equal(h.control('skipForNow').disabled, true);
-    assert.equal(h.control('back').disabled, true);
+    assert.equal(locked(h), true);
+    assert.notEqual(h.control('skipForNow').disabled, true, 'the lock is not drawn as a disabled button');
+    assert.notEqual(h.control('back').disabled, true);
+    h.control('back').onPress(); await h.flush();
+    stage(h, 'tracking');
     await h.advance(319);
-    assert.equal(h.control('skipForNow').disabled, true);
+    assert.equal(locked(h), true);
     await h.advance(1);
-    assert.equal(h.control('skipForNow').disabled, false);
+    assert.equal(locked(h), false);
     await h.press('skipForNow'); stage(h, 'alerts');
     assert.deepEqual(writes(h), []);
   });
@@ -62,7 +68,8 @@ test('Watch Skip cannot also allow notifications on the newly rendered Reminders
   const h = await open(t, { profile: profile('tracking') });
   await h.press('skipForNow'); stage(h, 'alerts');
   await h.advance(30);
-  assert.equal(h.control('allowNotifications').disabled, true);
+  assert.equal(locked(h), true);
+  assert.notEqual(h.control('allowNotifications').disabled, true, 'no spinner or dimming while the lock holds');
   h.control('allowNotifications').onPress(); await h.flush();
   stage(h, 'alerts');
   assert.equal(calls(h, 'requestVisibleNotificationPermission').length, 0);
@@ -76,7 +83,8 @@ test('the Reminders second tap cannot open statements, start capture or choose b
   const h = await open(t, { profile: profile('alerts') });
   await h.press('notNow'); stage(h, 'capture');
   await h.advance(30);
-  for (const key of ['onboardLiveAction', 'importStatements', 'addByHand']) assert.equal(h.control(key).disabled, true, key);
+  assert.equal(locked(h), true);
+  for (const key of ['onboardLiveAction', 'importStatements', 'addByHand']) assert.notEqual(h.control(key).disabled, true, key);
   h.control('onboardLiveAction').onPress(); h.control('importStatements').onPress(); h.control('addByHand').onPress();
   await h.flush();
   assert.deepEqual(writes(h), []);

@@ -17,7 +17,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import { EBody, EHeadline, EStepFrame, fitPatternTile } from '@/components/onboarding/e-frame';
+import { E_BODY_TOP, E_TOP_ROW_HEIGHT, EBody, EHeadline, EStepFrame, fitPatternTile } from '@/components/onboarding/e-frame';
 import { ThemedText } from '@/components/themed-text';
 import { EButton } from '@/components/ui/band/e-button';
 import { COIN_MOVE, COIN_POP, COIN_RISE, COIN_STAGGER, nativeDriver } from '@/components/ui/coins/coin-motion';
@@ -33,6 +33,14 @@ import { onboardingECopy } from '@/lib/onboarding-e-copy';
 import type { PatternGroup, PatternTile } from '@/lib/pattern';
 
 const SWATCH = 26;
+/** Room above the mosaic inside the step's body. */
+const MOSAIC_TOP_PAD = 36;
+/**
+ * Where the reveal's mosaic stands under the safe area: the header row, the
+ * body's top padding, then its own. The paywall's backdrop starts here when it
+ * follows the reveal, so the picture carries on rather than jumping.
+ */
+export const PATTERN_MOSAIC_TOP = E_TOP_ROW_HEIGHT + E_BODY_TOP + MOSAIC_TOP_PAD;
 /** The order the groups assemble in, and the key's order. */
 const GROUP_ORDER: readonly PatternGroup[] = ['name', 'goals', 'watch', 'remind'];
 /** One group starts this long after the one before it. */
@@ -219,7 +227,7 @@ export function PatternStep({ tiles, name, continueLabel, onContinue, onBack, on
 
 const styles = StyleSheet.create({
   // Start-aligned like the headline and like Home's header, where it lands.
-  mosaic: { alignItems: 'flex-start', paddingTop: 36, paddingBottom: 12 },
+  mosaic: { alignItems: 'flex-start', paddingTop: MOSAIC_TOP_PAD, paddingBottom: 12 },
   stage: { transformOrigin: 'center bottom' },
   // One column: every row starts at the same edge, so no row is ever orphaned.
   legend: { flexDirection: 'column', gap: 10 },

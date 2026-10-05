@@ -21,7 +21,7 @@
  * tile and the pattern in place.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, AppState, Easing, StyleSheet, View, type LayoutChangeEvent, type LayoutRectangle } from 'react-native';
+import { Animated, AppState, Easing, Platform, StyleSheet, View, type LayoutChangeEvent, type LayoutRectangle } from 'react-native';
 
 import { suggestedLedgerCurrency } from '@/components/ledger-currency-sheet';
 import { onboardingDeviceRegion } from '@/components/onboarding/alive-scenes';
@@ -32,6 +32,7 @@ import { CoinToken } from '@/components/ui/coins/coin-token';
 import { Icon } from '@/components/ui/icon';
 import { PatternMosaic } from '@/components/ui/pattern-mosaic';
 import { Fonts, PatternPalette, type BandPalette } from '@/constants/theme';
+import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { categoryLabel, getCategory } from '@/lib/categories';
@@ -168,8 +169,24 @@ function scenePaint(values: { bubble: Animated.Value; amountMark: Animated.Value
   };
 }
 
+/**
+ * A side offset from the start or end edge. Native lays out logically
+ * (start/end) under the app's direction — the root's `direction` style and,
+ * after an Arabic relaunch, I18nManager.forceRTL, whose left/right swap would
+ * mirror a physical side a second time. The web build resolves start/end from
+ * the device instead of the app, so there the side is physical, from the
+ * app's language.
+ */
+export function sideFrom(rtl: boolean, platform: string = Platform.OS) {
+  return (offset: number, edge: 'start' | 'end' = 'start'): { start?: number; end?: number; left?: number; right?: number } => {
+    if (platform !== 'web') return edge === 'start' ? { start: offset } : { end: offset };
+    const left = (edge === 'start') !== rtl;
+    return left ? { left: offset } : { right: offset };
+  };
+}
+
 /** The category's glyph tile, drawn as the pattern draws a glyph tile, with the coin that settled on it. */
-function LandingTile({ size, model, pop, settle, onLayout, onBadgeLayout, position }: {
+function LandingTile({ size, model, pop, settle, onLayout, onBadgeLayout, position, rtl = false }: {
   size: number;
   model: Pick<PatternTile, 'color' | 'mark' | 'category'>;
   /** Built once per scene (see `paint`), so a re-render never swaps native nodes mid-loop. */
@@ -178,16 +195,20 @@ function LandingTile({ size, model, pop, settle, onLayout, onBadgeLayout, positi
   onLayout: (event: LayoutChangeEvent) => void;
   onBadgeLayout: (event: LayoutChangeEvent) => void;
   position?: { start: number; top: number };
+  /** The app's reading direction (its language). */
+  rtl?: boolean;
 }) {
+  const side = sideFrom(rtl);
   return <Animated.View {...hidden} pointerEvents="none" onLayout={onLayout} testID="sms-coin-tile"
-    style={[position ? { position: 'absolute', ...position } : null, styles.center, {
+    style={[position ? { position: 'absolute', top: position.top, ...side(position.start) } : null, styles.center, {
       width: size, height: size, borderRadius: size * 10 / 52, backgroundColor: ON_INK.fill[model.color],
       ...pop,
     }]}>
     <Icon name={getCategory(model.category ?? SMS_COIN_CATEGORY).icon} size={Math.round(size * 0.46)}
       color={ON_INK.mark[model.mark ?? 'ink']} strokeWidth={2} />
     <Animated.View onLayout={onBadgeLayout} testID="sms-coin-badge" style={[styles.badge, {
-      top: -BADGE / 3, end: -BADGE / 3, ...settle,
+      // The badge sits on the tile's end corner: its right in English, its left in Arabic.
+      top: -BADGE / 3, ...side(-BADGE / 3, 'end'), ...settle,
     }]}>
       <CoinToken size={BADGE} />
     </Animated.View>
@@ -211,6 +232,8 @@ export function SmsCoinScene({ palette, sender, pattern, currency, country, lang
   language?: string;
   testID?: string;
 }) {
+  // The app's own language decides the layout's direction (the root's `direction`), whatever names the category.
+  const appLanguage = useLanguage();
   // Null and absent read the same: the phone's suggested currency, from Welcome or the SMS explainer alike.
   const money = useMemo(() => currency ?? suggestedLedgerCurrency(), [currency]);
   // The same Region reader as the other onboarding scenes and the country control.
@@ -339,7 +362,7 @@ export function SmsCoinScene({ palette, sender, pattern, currency, country, lang
   </Animated.View>;
 
   const tileNode = <LandingTile size={tileSize} model={landing} pop={paint.tile} settle={paint.badge}
-    onLayout={onLayout.tile} onBadgeLayout={onLayout.badge}
+    onLayout={onLayout.tile} onBadgeLayout={onLayout.badge} rtl={appLanguage === 'ar'}
     position={pattern && inPattern ? { start: landing.col * (tileSize + gap), top: landing.row * (tileSize + gap) } : undefined} />;
 
   const rise = paint.rise;

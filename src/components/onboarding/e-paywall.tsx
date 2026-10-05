@@ -19,12 +19,13 @@ import { Animated, AppState, Easing, Linking, Platform, Pressable, StyleSheet, u
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { E_GUTTER, EBody, EHeadline, EStepFrame, ETextAction, fitPatternTile } from '@/components/onboarding/e-frame';
-import { useStepPhase } from '@/components/onboarding/e-motion';
+import { STEP_ARRIVE_DELAY_MS, useStepPhase } from '@/components/onboarding/e-motion';
+import { PATTERN_MOSAIC_TOP } from '@/components/onboarding/e-pattern';
 import { useWafraBilling, type ProPlanOffer, type ProPurchaseOutcome } from '@/components/superwall-billing-context';
 import { ThemedText } from '@/components/themed-text';
 import { EButton } from '@/components/ui/band/e-button';
 import { CoinToken } from '@/components/ui/coins/coin-token';
-import { COIN_RISE, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
+import { COIN_MOVE, COIN_RISE, nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
 import { PatternMosaic } from '@/components/ui/pattern-mosaic';
 import type { BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
@@ -42,6 +43,11 @@ const PLAN_ORDER: ProPlan[] = ['yearly', 'monthly'];
 /** How strongly the pattern shows behind the paywall's words, per scheme. */
 const BACKDROP_LIGHT = 0.42;
 const BACKDROP_DARK = 0.62;
+export function paywallBackdropOpacity(scheme: 'light' | 'dark'): number {
+  return scheme === 'dark' ? BACKDROP_DARK : BACKDROP_LIGHT;
+}
+/** The backdrop's top, under the safe area: just below the header's 52pt row. */
+export const PAYWALL_BACKDROP_TOP = 56;
 
 type Notice = { title: string; body: string } | null;
 
@@ -282,7 +288,35 @@ export function KeepsGoing({ tile, paused }: { tile: PatternTile | null; paused:
   </View>;
 }
 
-export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, captureOn, onFinish, onBack, onClose, preview, finishing }: {
+/**
+ * The backdrop arriving from the pattern reveal (same ink band, no wipe):
+ * it starts where the reveal's mosaic stood (PATTERN_MOSAIC_TOP), at full
+ * strength, and once the reveal's words have gone it rises the difference and
+ * dims into its place behind the paywall's words. Read once, when the paywall
+ * appears. Otherwise (Reduce Motion, a screen reader, or from anywhere else)
+ * it is simply dimmed in its place and fades with the step.
+ */
+function useBackdropSettle(fromPattern: boolean, dim: number) {
+  const { ready, reducedMotion } = useMotionPreference();
+  const [settling] = useState(() => fromPattern && ready && !reducedMotion);
+  const settle = useAnimatedNumber(settling ? 0 : 1);
+  useEffect(() => {
+    if (!settling) return;
+    const run = Animated.sequence([Animated.delay(STEP_ARRIVE_DELAY_MS),
+      Animated.spring(settle, { toValue: 1, ...COIN_MOVE, useNativeDriver: nativeDriver })]);
+    run.start();
+    return () => { run.stop(); settle.setValue(1); };
+  }, [settle, settling]);
+  return useMemo(() => ({
+    settling,
+    place: { transform: [{ translateY: settle.interpolate({ inputRange: [0, 1],
+      outputRange: [PATTERN_MOSAIC_TOP - PAYWALL_BACKDROP_TOP, 0] }) }] },
+    dimming: { opacity: settling ? settle.interpolate({ inputRange: [0, 1], outputRange: [1, dim], extrapolate: 'clamp' }) : dim },
+  }), [dim, settle, settling]);
+}
+
+export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, captureOn, onFinish, onBack, onClose, preview, finishing,
+  arrivedFrom = null }: {
   tiles: readonly PatternTile[];
   /** The first watched category's name, if they set a limit. */
   watchedCategory: string | null;
@@ -299,6 +333,13 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
   /** The Settings preview never buys. */
   preview: boolean;
   finishing: boolean;
+  /**
+   * The step this one arrived from, while it is still fading (the gate's
+   * leaving step). From the pattern reveal, the backdrop starts as that
+   * step's mosaic — same place, full strength — and settles up into its
+   * dimmed place, so the picture never vanishes and comes back.
+   */
+  arrivedFrom?: string | null;
 }) {
   const words = onboardingECopy(useLanguage());
   const band = useBand('home');
@@ -312,6 +353,9 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
   // The step layer's fade (in the gate), so the drawings outside the frame arrive and leave with it.
   const phase = useStepPhase();
   const checkout = useOnboardingCheckout(!preview, onFinish);
+  // After the checkout's own state (its hooks keep their order).
+  const dim = paywallBackdropOpacity(band.scheme);
+  const backdrop_ = useBackdropSettle(arrivedFrom === 'pattern', dim);
   const timeline = trialTimeline(trialDays);
   const store = billingStore();
   const privacyUrl = configuredPublicUrl('privacyPolicyUrl');
@@ -328,11 +372,13 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
     {/* Both drawings sit outside EStepFrame, so they take the step's own fade (phase.paint): they
         arrive with the words, after the pattern step's mosaic has gone, and leave with them. */}
     <Animated.View pointerEvents="none" accessible={false} importantForAccessibility="no-hide-descendants"
-      style={[styles.behind, { top: insets.top + 56 }, phase.paint]} testID="onboarding-paywall-backdrop">
+      style={[styles.behind, { top: insets.top + PAYWALL_BACKDROP_TOP },
+        backdrop_.settling && !phase.leaving ? backdrop_.place : phase.paint]} testID="onboarding-paywall-backdrop">
       <View style={styles.behindFrame}>
         {/* Dimmed behind the words; the dark band needs more of it for the tiles to stay visible. */}
-        <PatternMosaic tiles={tiles} tile={tile} compact style={{ opacity: band.scheme === 'dark' ? BACKDROP_DARK : BACKDROP_LIGHT }}
-          accessibilityLabel="" />
+        <Animated.View style={backdrop_.dimming} testID="onboarding-paywall-backdrop-dim">
+          <PatternMosaic tiles={tiles} tile={tile} compact accessibilityLabel="" />
+        </Animated.View>
       </View>
     </Animated.View>
     {/* In the header's own room, beside the back control and above the backdrop: out of the

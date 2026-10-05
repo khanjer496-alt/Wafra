@@ -3,15 +3,16 @@
  * Motion answer built in:
  *
  * - `StepLayer`: one step's layer in the gate. Between two steps the old one
- *   stays a moment on its own colour while its content fades away, and the new
- *   content rises in as it goes, so there is never an empty colour field. Core
+ *   stays a moment, below the new one, on its own colour while its content
+ *   fades away, then the new content rises in; the new header is there from
+ *   the first frame, so there is never an empty colour field. Core
  *   Animated on the native driver (opacity and transform), so Android runs it
  *   too. Reduce Motion or a screen reader swaps the steps at once.
  * - `StepWipe`: the next step's colour grows as a circle from the Continue
  *   button over 420ms (bezier .2,.8,.2,1), over the old step and under the new
  *   content. Under Reduce Motion, a running screen reader or on Android (whose
  *   measured motion bypasses stay) the circle is never drawn and the old step
- *   cross-fades away over the new one instead.
+ *   fades away under the new one instead.
  * - `LogoDraw`: Welcome's mark draws its stroke once; still otherwise.
  * - `useReplayKey`: remounts the example pattern every few seconds so its
  *   tiles pop in again, only while motion is allowed.
@@ -124,7 +125,7 @@ export function useLeavingRelease(leaving: readonly { wipe: boolean }[], release
  * rises in. Hidden from assistive tech and touch while it leaves; it comes
  * back if the person returns to that step before it is gone.
  */
-export function StepLayer({ leaving, wipe, arriving, follows = false, color, onCommit, children }: {
+export function StepLayer({ leaving, wipe, arriving, follows = false, locked = false, color, onCommit, children }: {
   leaving: boolean;
   /** This change draws the wipe (the leaving content goes under it, its colour stays for the circle). */
   wipe: boolean;
@@ -132,6 +133,12 @@ export function StepLayer({ leaving, wipe, arriving, follows = false, color, onC
   arriving: boolean;
   /** Another step is leaving: wait for its content to go before arriving. */
   follows?: boolean;
+  /**
+   * The gate's settle lock after a step change: touches are swallowed here,
+   * so a second tap cannot reach the new step, without dimming or disabling
+   * anything on it (the lock is never drawn).
+   */
+  locked?: boolean;
   /** The step's band, painted behind it only while it leaves. */
   color: string;
   /** Told the element each time it is committed (effects run only for committed renders). */
@@ -174,7 +181,8 @@ export function StepLayer({ leaving, wipe, arriving, follows = false, color, onC
   } }), [content, leaving]);
   // The frame (EStepFrame) applies the fade to its content and hides its
   // header while leaving, so two headers are never drawn over each other.
-  return <CoreAnimated.View pointerEvents={leaving ? 'none' : 'box-none'}
+  return <CoreAnimated.View pointerEvents={leaving || locked ? 'none' : 'box-none'}
+    testID={leaving ? 'onboarding-step-layer-leaving' : 'onboarding-step-layer'}
     accessibilityElementsHidden={leaving} importantForAccessibility={leaving ? 'no-hide-descendants' : 'auto'}
     aria-hidden={leaving || undefined}
     style={[StyleSheet.absoluteFillObject, styles.layer, leaving && { backgroundColor: color }, { opacity: layer }]}>
@@ -182,6 +190,15 @@ export function StepLayer({ leaving, wipe, arriving, follows = false, color, onC
       <View style={styles.layerContent}>{children}</View>
     </StepPhaseContext.Provider>
   </CoreAnimated.View>;
+}
+
+/**
+ * Something only the step being used shows: status that would be stale on a
+ * step that is fading away ("Saving your choice…" on the capture step just
+ * left). Outside the gate it always shows.
+ */
+export function ActiveStepOnly({ children }: { children: React.ReactNode }) {
+  return useStepPhase().leaving ? null : <>{children}</>;
 }
 
 /**

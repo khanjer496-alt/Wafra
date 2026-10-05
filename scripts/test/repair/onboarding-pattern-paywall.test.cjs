@@ -47,14 +47,14 @@ function setup({ language = 'en', theme = 'dark', motion = 'reduced', platform =
   h.deps['react-native-safe-area-context'] = { useSafeAreaInsets: () => ({ top: 47, bottom: 34, left: 0, right: 0 }) };
   // The step frame is Agent-shared chrome with its own suite: a named boundary here.
   h.deps['@/components/onboarding/e-frame'] = {
-    E_GUTTER: 24,
+    E_GUTTER: 24, E_TOP_ROW_HEIGHT: 52, E_BODY_TOP: 12,
     fitPatternTile: (width, max = 52) => Math.max(16, Math.min(max, Math.floor((Math.max(120, Math.min(width, 560) - 48)) / (6 + 5 * (6 / 52))))),
     EStepFrame: (p) => h.jsx('EStepFrame', p), EHeadline: (p) => h.jsx('EHeadline', p), EBody: (p) => h.jsx('EBody', p),
     ETextAction: (p) => h.jsx('ETextAction', p),
   };
   // The step layer's fade, as the gate provides it (e-motion's StepLayer); a marker to follow here.
   const stepFade = { opacity: { stepFade: true }, transform: [{ translateY: { stepFade: true } }] };
-  h.deps['@/components/onboarding/e-motion'] = { useStepPhase: () => ({ leaving: false, paint: stepFade }) };
+  h.deps['@/components/onboarding/e-motion'] = { useStepPhase: () => ({ leaving: false, paint: stepFade }), STEP_ARRIVE_DELAY_MS: 120 };
   h.deps['@/lib/onboarding-e'] = { trialTimeline: (days) => days > 0 ? [{ key: 'today', day: 0 }, { key: 'end', day: days }] : [] };
   h.deps['@/lib/public-links'] = { configuredPublicUrl: (key) => `https://example.test/${key}` };
   h.deps['@/lib/purchases'] = { ...h.deps['@/lib/purchases'], billingStore: () => 'appStore' };
@@ -333,11 +333,13 @@ test('the paywall backdrop is Home\'s packed pattern, dimmed less on the dark ba
   const opacityIn = (theme) => {
     const s = setup({ theme });
     const { nodes, tiles } = renderPaywall(s);
-    const backdrop = nodes.find((node) => node.props?.accessibilityRole === 'image' && node.props.style &&
-      flat(node.props.style).opacity !== undefined && cellsOf(node).length === s.pattern.compactPattern(tiles).columns);
+    // The dimming is on the backdrop's own layer (it settles there when the paywall follows the reveal).
+    const dim = byID(nodes, 'onboarding-paywall-backdrop-dim');
+    const backdrop = walk(dim).find((node) => node.props?.accessibilityRole === 'image' &&
+      cellsOf(node).length === s.pattern.compactPattern(tiles).columns);
     assert.ok(backdrop, 'the packed backdrop');
     assert.deepEqual(cellsOf(backdrop), cellsOf(backdrop).map(() => true), 'no holes behind the words either');
-    return flat(backdrop.props.style).opacity;
+    return flat(dim.props.style).opacity;
   };
   const light = opacityIn('light');
   const dark = opacityIn('dark');
@@ -470,7 +472,7 @@ test('the paywall\'s backdrop and corner drawing arrive and leave with the step\
   assert.ok(walk(byID(nodes, 'onboarding-paywall-corner')).some((node) => node.props?.testID === 'onboarding-paywall-keeps-going'));
   // Outside the gate (no layer), nothing is applied and both are simply drawn.
   const outside = setup();
-  outside.deps['@/components/onboarding/e-motion'] = { useStepPhase: () => ({ leaving: false, paint: null }) };
+  outside.deps['@/components/onboarding/e-motion'] = { useStepPhase: () => ({ leaving: false, paint: null }), STEP_ARRIVE_DELAY_MS: 120 };
   outside.local('@/components/onboarding/e-paywall');
   const still = renderPaywall(outside);
   assert.ok(byID(still.nodes, 'onboarding-paywall-backdrop').props.style.flat(Infinity).every((part) => part === null || typeof part === 'object'));

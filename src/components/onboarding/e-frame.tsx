@@ -8,11 +8,13 @@
  * are pinned below the scrolling body, above the bottom safe area and the
  * keyboard, so opening a Watch row or a long Arabic headline never pushes the
  * step's button off screen; they keep their order, so a screen reader meets
- * the content, then the primary action, then the quieter one. Status text in
- * the footer (a restore note) is not an action: it ends the scroll instead.
- * The body scrolls above the strip; a hairline marks the edge while there is
- * more to scroll, and a focused field is scrolled clear of the strip when the
- * keyboard opens.
+ * the content, then the primary action, then the quieter one. At the
+ * accessibility sizes only the primary is pinned and the quieter actions end
+ * the scroll (splitFooter). Status text in the footer (a restore note) is not
+ * an action: it ends the scroll too. The body scrolls above the strip; a
+ * hairline marks the edge while there is more to scroll. With the keyboard up
+ * the strip is lifted over it on the native driver (no relayout), and a
+ * focused field is scrolled clear of it.
  *
  * A step whose footer holds no primary action opts out (`pinActions={false}`)
  * and its footer ends the scroll: the paywall, whose purchase action stays
@@ -20,17 +22,19 @@
  * "How it works".
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, type LayoutChangeEvent, type StyleProp,
+import { Animated, Easing, Platform, Pressable, ScrollView, StyleSheet, TextInput, View, type LayoutChangeEvent, type StyleProp,
   type TextStyle, type ViewStyle } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useStepPhase } from '@/components/onboarding/e-motion';
 import { ThemedText } from '@/components/themed-text';
+import { nativeDriver, useAnimatedNumber } from '@/components/ui/coins/coin-motion';
 import { Icon } from '@/components/ui/icon';
 import { Fonts, type BandPalette } from '@/constants/theme';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
+import { useMotionPreference } from '@/hooks/use-reduced-motion';
 import { bandCopy } from '@/lib/band-copy';
 import { tapped } from '@/lib/haptics';
 import { ONBOARDING_E_TOTAL_STEPS } from '@/lib/onboarding-e';
@@ -38,6 +42,9 @@ import { onboardingECopy } from '@/lib/onboarding-e-copy';
 
 /** The side gutter of the boards. */
 export const E_GUTTER = 24;
+/** The header row's height (back, dots, close) and the body's top padding: layout others line up with. */
+export const E_TOP_ROW_HEIGHT = 52;
+export const E_BODY_TOP = 12;
 
 /**
  * The largest pattern tile (up to `max`) whose 6 × 2 grid fits the screen
@@ -172,12 +179,41 @@ function isAction(node: React.ReactNode): boolean {
  * Which footer items are pinned and which end the scroll. Pinned, every
  * action is, in its own order (primary first, as every step writes it); status
  * text is never pinned. Not pinned, the whole footer ends the scroll as written.
+ *
+ * At the accessibility sizes only the primary action is pinned: at 2–3x text
+ * on a 640pt phone the primary and a quiet action together took 260–285pt, so
+ * the quieter ones (Skip, Not now, Restore) end the scroll, straight after the
+ * content. A screen reader then meets the content, the quiet action, and the
+ * primary last — the trade for keeping two thirds of a small screen for the step.
  */
-export function splitFooter(footer: React.ReactNode, pin = true): { pinned: React.ReactNode[]; scrolled: React.ReactNode[] } {
+export function splitFooter(footer: React.ReactNode, pin = true, largeText = false): {
+  pinned: React.ReactNode[];
+  scrolled: React.ReactNode[];
+} {
   const items = footerActions(footer);
-  return pin
-    ? { pinned: items.filter(isAction), scrolled: items.filter((item) => !isAction(item)) }
-    : { pinned: [], scrolled: items };
+  if (!pin) return { pinned: [], scrolled: items };
+  const actions = items.filter(isAction);
+  const primary = largeText ? actions.slice(0, 1) : actions;
+  return { pinned: primary, scrolled: items.filter((item) => !primary.includes(item)) };
+}
+
+/**
+ * How long the pinned strip takes to follow the keyboard: iOS reports the
+ * keyboard as it starts to move (keyboardWillShow), so the strip rides with
+ * it; Android reports it as it lands, so the strip settles quickly after.
+ */
+export const KEYBOARD_FOLLOW_MS = Platform.OS === 'ios' ? 250 : 180;
+
+/**
+ * How far the pinned strip lifts for a keyboard of `keyboard` points. The
+ * frame already pads the bottom safe area: iOS reports the keyboard from the
+ * screen's edge (so the home-indicator inset is inside it), Android (API 30+)
+ * reports it above the navigation bar (ReactRootView: ime − systemBars), so
+ * the safe area is never counted twice.
+ */
+export function keyboardLift(keyboard: number, bottomInset: number, platform: string = Platform.OS): number {
+  if (!(keyboard > 0)) return 0;
+  return platform === 'ios' ? Math.max(0, keyboard - bottomInset) : keyboard;
 }
 
 /**
@@ -195,13 +231,14 @@ export function scrollTargetForInput({ viewTop, viewHeight, inputTop, inputHeigh
   return null;
 }
 
-/** Scrolls the body so the focused field is clear of the pinned strip. */
-function revealFocusedInput(scroll: ScrollView | null, offsetY: number): void {
+/** Scrolls the body so the focused field is clear of the lifted strip, which covers `covered` points of the viewport's foot. */
+function revealFocusedInput(scroll: ScrollView | null, offsetY: number, covered: number): void {
   const input = TextInput.State?.currentlyFocusedInput?.();
   const host = scroll?.getNativeScrollRef?.();
   if (!scroll || !input || !host) return;
-  host.measureInWindow((_x, viewTop, _width, viewHeight) => {
+  host.measureInWindow((_x, viewTop, _width, height) => {
     input.measureInWindow((_ix, inputTop, _iw, inputHeight) => {
+      const viewHeight = Math.max(0, height - covered);
       const target = scrollTargetForInput({ viewTop, viewHeight, inputTop, inputHeight, offsetY });
       if (target !== null) scroll.scrollTo({ y: target, animated: true });
     });
@@ -234,12 +271,23 @@ export function EStepFrame({ palette, step, onBack, onClose, backDisabled, foote
 }) {
   const largeText = useLargeTextLayout();
   const insets = useSafeAreaInsets();
-  const { pinned, scrolled } = splitFooter(footer, pinActions);
-  // The pinned actions ride above the keyboard: iOS measures it from the
-  // screen's bottom edge (the safe area is already padded), Android's
-  // edge-to-edge window does not resize for it (use-keyboard-height.ts).
+  const { pinned, scrolled } = splitFooter(footer, pinActions, largeText);
+  // The pinned actions ride above the keyboard (Android's edge-to-edge window
+  // does not resize for it: use-keyboard-height.ts). Paint only: the strip is
+  // translated on the native driver, so nothing is laid out again while the
+  // keyboard moves and the body never jumps; the body gains the same room at
+  // its foot, under the strip, so every field can still scroll clear.
   const keyboard = useKeyboardHeight(pinned.length > 0);
-  const keyboardBottom = keyboard <= 0 ? 0 : Platform.OS === 'ios' ? Math.max(0, keyboard - insets.bottom) : keyboard;
+  const keyboardBottom = keyboardLift(keyboard, insets.bottom);
+  const motion = useMotionPreference();
+  const lift = useAnimatedNumber(0);
+  useEffect(() => {
+    if (!motion.ready || motion.reducedMotion) { lift.setValue(-keyboardBottom); return; }
+    const follow = Animated.timing(lift, { toValue: -keyboardBottom, duration: KEYBOARD_FOLLOW_MS,
+      easing: Easing.out(Easing.cubic), useNativeDriver: nativeDriver });
+    follow.start();
+    return () => follow.stop();
+  }, [keyboardBottom, lift, motion.ready, motion.reducedMotion]);
   // Whether the body is taller than its viewport: the pinned edge then shows a hairline.
   const sizes = useRef({ viewport: 0, content: 0 });
   const [overflows, setOverflows] = useState(false);
@@ -251,13 +299,15 @@ export function EStepFrame({ palette, step, onBack, onClose, backDisabled, foote
   const scrollY = useRef(0);
   useEffect(() => {
     if (keyboardBottom <= 0) return;
-    const frame = requestAnimationFrame(() => revealFocusedInput(scrollRef.current, scrollY.current));
-    return () => cancelAnimationFrame(frame);
+    // Once the strip has risen. The body's viewport already ends above the
+    // strip's resting place, so only the lift covers it (not the strip again).
+    const timer = setTimeout(() => revealFocusedInput(scrollRef.current, scrollY.current, keyboardBottom), KEYBOARD_FOLLOW_MS);
+    return () => clearTimeout(timer);
   }, [keyboardBottom]);
   // In the gate the content fades with the step change; the header does not.
   const phase = useStepPhase();
   return <SafeAreaView edges={['top', 'bottom']} style={styles.safe} testID={testID}>
-    <View style={[styles.column, keyboardBottom > 0 && { paddingBottom: keyboardBottom }]}>
+    <View style={styles.column}>
       {onBack || onClose || step !== null
         ? <ETopRow palette={palette} step={step} onBack={onBack} onClose={onClose} disabled={backDisabled} />
         : null}
@@ -269,11 +319,14 @@ export function EStepFrame({ palette, step, onBack, onClose, backDisabled, foote
           onContentSizeChange={(_width: number, height: number) => { sizes.current.content = height; measure(); }}>
           <View style={[styles.body_, contentStyle]}>{children}</View>
           {scrolled.length > 0 ? <View style={styles.footer}>{keyed(scrolled)}</View> : null}
+          {/* Room for the body to scroll clear of the lifted strip while the keyboard is up. */}
+          {keyboardBottom > 0 ? <View testID={testID ? `${testID}-keyboard-room` : undefined} style={{ height: keyboardBottom }} /> : null}
         </ScrollView>
-        {pinned.length > 0 ? <View testID={testID ? `${testID}-actions` : undefined}
-          style={[styles.pinned, { borderTopColor: overflows ? palette.bandRule : 'transparent' }]}>
+        {pinned.length > 0 ? <Animated.View testID={testID ? `${testID}-actions` : undefined}
+          style={[styles.pinned, { backgroundColor: palette.band, borderTopColor: overflows || keyboardBottom > 0 ? palette.bandRule : 'transparent',
+            transform: [{ translateY: lift }] }]}>
           {keyed(pinned)}
-        </View> : null}
+        </Animated.View> : null}
       </Animated.View>
     </View>
   </SafeAreaView>;
@@ -284,14 +337,14 @@ const styles = StyleSheet.create({
   column: { flex: 1 },
   hiddenRow: { opacity: 0 },
   topRow: {
-    minHeight: 52, paddingHorizontal: E_GUTTER - 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    minHeight: E_TOP_ROW_HEIGHT, paddingHorizontal: E_GUTTER - 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
   iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   dots: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 44 },
   dot: { height: 6, borderRadius: 3 },
   scrollView: { flex: 1 },
   scroll: { flexGrow: 1, paddingHorizontal: E_GUTTER, paddingBottom: 20 },
-  body_: { paddingTop: 12, gap: 16 },
+  body_: { paddingTop: E_BODY_TOP, gap: 16 },
   /** What ends the scroll: footer status text, or a footer that is not pinned. */
   footer: { marginTop: 'auto', paddingTop: 24, gap: 6 },
   /** The pinned actions: under the body, above the bottom safe area. */

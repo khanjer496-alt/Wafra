@@ -46,6 +46,21 @@ const TRAY_GAP = 5;
 const TRAY_COLUMNS = 3;
 
 /**
+ * Tray tiles already shown in this journey: coming back to Goals (Back from
+ * Watch) shows them in place instead of popping them in again. Only a tile
+ * picked on this visit pops. Keyed by the journey (the gate passes one per
+ * run: a new onboarding, a Settings preview), so a fresh journey pops anew.
+ */
+const trayShown: { journey: string | null; keys: Set<string> } = { journey: null, keys: new Set() };
+/** The tiles this journey has already shown, starting a new record when the journey changes. */
+function shownIn(journey: string): Set<string> {
+  if (trayShown.journey !== journey) { trayShown.journey = journey; trayShown.keys = new Set(); }
+  return trayShown.keys;
+}
+/** Forget every journey (the gate calls it when a journey resets; tests too). */
+export function forgetTrayTiles(): void { trayShown.journey = null; trayShown.keys = new Set(); }
+
+/**
  * The pattern's tiles in its reading order (row, then column, as Home packs
  * them). A green shape takes the board's on-band tones instead (mint for a
  * solid, cream for a ring), so it reads as a mark on the flow band.
@@ -190,8 +205,10 @@ function HomePreview({ goals, palette, stacked }: { goals: readonly GoalId[]; pa
 /** Board E3's order: salary, bills, subscriptions, spend less, cash and cards. */
 const SHOWN: readonly GoalId[] = ['salary', 'bills', 'subscriptions', 'spend-less', 'cash-cards'];
 
-export function GoalsStep({ goals, saved = false, onToggle, onContinue, onBack, onClose, tiles, disabled }: {
+export function GoalsStep({ goals, saved = false, onToggle, onContinue, onBack, onClose, tiles, disabled, journey = '' }: {
   goals: readonly GoalId[];
+  /** Which onboarding run this is: tray tiles shown earlier in the same run do not pop in again. */
+  journey?: string;
   /** Goals were saved on an earlier pass: unpicking them all is a change, so the button stays Continue. */
   saved?: boolean;
   onToggle: (goal: GoalId) => void;
@@ -208,8 +225,14 @@ export function GoalsStep({ goals, saved = false, onToggle, onContinue, onBack, 
   const band = useBand('flow');
   const largeText = useLargeTextLayout();
   const first = firstHomeSectionForGoals(goals);
+  // What was already on the tray when this visit began; recorded once drawn.
+  const [seenBefore] = useState(() => new Set(shownIn(journey)));
+  const tray = trayTiles(tiles);
+  useEffect(() => { const shown = shownIn(journey); for (const tile of tray) shown.add(tile.key); });
   return <EStepFrame palette={band} step={2} onBack={onBack} onClose={onClose} backDisabled={disabled} testID="onboarding-goals"
     footer={<EButton palette={band} color={bandButtonColor(band)} label={goals.length > 0 || saved ? words.continue : words.skipForNow}
+      // Both labels' room is kept, so Skip for now (two lines at large text) giving way to Continue never moves the list.
+      reserveLabels={[words.continue, words.skipForNow]}
       onPress={onContinue} disabled={disabled} testID="onboarding-goals-continue" />}>
     {/* The headline has the full width: the pictures sit under it, never beside it. */}
     <EHeadline palette={band} size={42}>{words.goalsTitle}</EHeadline>
@@ -220,8 +243,8 @@ export function GoalsStep({ goals, saved = false, onToggle, onContinue, onBack, 
       <View testID="onboarding-goals-pattern" accessible accessibilityRole="image" accessibilityLabel={bandWords.pattern}
         style={styles.tray}>
         <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" aria-hidden style={styles.trayTiles}>
-          {trayTiles(tiles).map((tile) =>
-            <PatternMosaic key={tile.key} tiles={[tile]} tile={TRAY_TILE} compact animate />)}
+          {tray.map((tile) =>
+            <PatternMosaic key={tile.key} tiles={[tile]} tile={TRAY_TILE} compact animate={!seenBefore.has(tile.key)} />)}
         </View>
       </View>
     </View>
