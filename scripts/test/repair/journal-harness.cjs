@@ -19,7 +19,7 @@ function harness(options = {}) {
   const react = {
     memo: (component) => component, isValidElement: (node) => !!node && typeof node === 'object' && !!node.props, useMemo: (fn) => fn(), useCallback: (fn) => fn,
     useState: (initial) => [typeof initial === 'function' ? initial() : initial, (value) => events.push(['state', value])],
-    useRef: (value) => ({ current: value }), useEffect() {}, Fragment: 'Fragment',
+    useRef: (value) => ({ current: value }), useEffect() {}, startTransition: (work) => work(), Fragment: 'Fragment',
   };
   const jsx = (type, props = {}, key) => typeof type === 'function' ? type(props) : ({ type, props, key });
   const runtime = { jsx, jsxs: jsx, Fragment: 'Fragment' };

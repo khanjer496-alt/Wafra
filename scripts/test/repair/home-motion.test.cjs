@@ -315,30 +315,58 @@ const paints = (tree) => {
   return { row: flat(tree.props.style).opacity.value, coin: flat(coin.props.style).opacity.value, coinNode: coin };
 };
 
-test('the arriving row: Reduce Motion shows it in place, motion waits for ready, and an interruption lands', () => {
+test('the arriving row: Reduce Motion shows it in place, motion waits for ready, runs on one native clock, and an interruption lands', () => {
   const { mount, deps } = arrivalRow();
   const motion = deps['@/hooks/use-reduced-motion'];
   const Animated = deps['react-native'].Animated;
-  const started = [];
-  Animated.parallel = (list) => ({ start() { started.push(list.length); }, stop() {} });
+  // One linear clock on the native driver; nothing JS-timed (delay, sequence) or per-coin.
+  const timings = [];
+  const jsTimed = [];
+  Animated.timing = (value, config) => ({ start() { timings.push({ value, config }); }, stop() {} });
+  for (const name of ['spring', 'delay', 'sequence', 'parallel', 'stagger']) {
+    Animated[name] = () => { jsTimed.push(name); return { start() {}, stop() {} }; };
+  }
+  const windows = [];
+  const interpolate = Animated.Value.prototype.interpolate;
+  Animated.Value.prototype.interpolate = function (config) { windows.push({ from: this, config }); return interpolate.call(this, config); };
   // Reduce Motion (the harness default): the row in place and the coin already gone; nothing runs.
   const still = mount({ children: 'row' }).tree;
   assert.equal(still.props.testID, 'home-activity-arrival');
   assert.deepEqual([paints(still).row, paints(still).coin], [1, 2]);
   assert.ok(hidden(paints(still).coinNode), 'the coin is hidden from assistive tech');
-  assert.deepEqual(started, []);
+  assert.deepEqual(timings, []);
   // Before the screen-reader answer: held out of view, nothing starts.
   motion.useMotionPreference = () => ({ ready: false, reducedMotion: false });
   const waiting = mount({ children: 'row' }).tree;
   assert.deepEqual([paints(waiting).row, paints(waiting).coin], [0, 0]);
-  assert.deepEqual(started, []);
-  // Ready: the slide and the coin drop start together; interrupted, both land at their end.
+  assert.deepEqual(timings, []);
+  // Ready: the slide and the coin drop are windows of one clock that runs once, on the UI thread.
   motion.useMotionPreference = () => ({ ready: true, reducedMotion: false });
+  windows.length = 0;
   const moving = mount({ children: 'row' });
-  assert.deepEqual(started, [2]);
-  assert.deepEqual([paints(moving.tree).row, paints(moving.tree).coin], [0, 0]);
+  assert.equal(timings.length, 1, 'one animation for the whole arrival');
+  assert.deepEqual(jsTimed, [], 'no JS timers between steps');
+  const [{ value: clock, config }] = timings;
+  assert.equal(config.useNativeDriver, true);
+  assert.equal(config.easing(0.37), 0.37, 'the clock is linear time; each window carries its own spring');
+  assert.equal(config.toValue - clock.value, config.duration);
+  const tracks = windows.filter((window) => window.from === clock).map((window) => window.config);
+  assert.equal(tracks.length, 2, 'the row and its coin each read the clock');
+  for (const track of tracks) {
+    assert.equal(track.extrapolate, 'clamp');
+    assert.ok(track.inputRange.every((at, i) => i === 0 || at > track.inputRange[i - 1]));
+    assert.ok(track.inputRange.at(-1) <= config.toValue);
+    assert.equal(track.outputRange.at(-1), 0, 'every window ends at rest on its target');
+  }
+  const [row, coin] = tracks;
+  assert.equal(row.inputRange[0], clock.value, 'the row slides at once');
+  assert.equal(row.outputRange[0], -1);
+  assert.equal(coin.inputRange[0], clock.value + 45, 'the coin drops a stagger later');
+  assert.equal(coin.outputRange[0], -2);
+  assert.ok(Math.max(...coin.outputRange) > -1, 'it lands (1) before it fades (2)');
   moving.cleanup();
-  assert.deepEqual([paints(moving.tree).row, paints(moving.tree).coin], [1, 2]);
+  assert.equal(clock.value, config.toValue, 'interrupted, the clock lands at the end: the row in place, the coin gone');
+  Animated.Value.prototype.interpolate = interpolate;
 });
 
 test('both tiles keep the currency on the figure\'s line at phone widths', () => {

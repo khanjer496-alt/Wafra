@@ -1,8 +1,8 @@
 import { useLocalSearchParams } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
+import { runAfterFirstFrames, runSoon } from '@/lib/after-first-frames';
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  InteractionManager,
   Keyboard,
   Platform,
   Pressable,
@@ -184,18 +184,24 @@ function useSeparateTransferIds(state: TransferSeparationState): TransferSeparat
   const { transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport } = state;
   const [separation, setSeparation] = useState(() => computeSeparateTransferIds(state));
   const importing = historyImport?.status === 'running';
+  const scheduled = useRef(false);
   useEffect(() => {
     // A running history import replaces its page within moments; the page
     // that ends the run (complete, paused or failed) triggers the recompute.
     if (importing) return;
     let cancelled = false;
-    const task = InteractionManager.runAfterInteractions(() => {
+    const recompute = () => {
       if (!cancelled) {
         setSeparation(computeSeparateTransferIds({
           transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport,
         }));
       }
-    });
+    };
+    // The first one waits out the push animation's first frames; a later
+    // ledger change (an entry edited here) updates sections and day totals
+    // on the next turn, as before.
+    const task = scheduled.current ? runSoon(recompute) : runAfterFirstFrames(recompute);
+    scheduled.current = true;
     return () => { cancelled = true; task.cancel(); };
   }, [transactions, accounts, transferInternalIds, transferNormalizationVersion, historyImport, importing]);
   return separation;

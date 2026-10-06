@@ -53,6 +53,10 @@ export function useProCheckout() {
   const legalReady = privacyPolicyUrl !== null && termsOfUseUrl !== null;
   const store = billingStore();
   const checkoutReady = billing.available && billing.configured;
+  // A launch that has not configured the storefront yet (it waits for Home to
+  // settle) configures it now: this screen needs prices.
+  const configureNow = billing.available && !billing.configured ? billing.configureNow : undefined;
+  useEffect(() => { configureNow?.(); }, [configureNow]);
 
   // Read through a ref so a new billing snapshot (a status refresh, a customer
   // info event) cannot restart a price fetch that is already in flight.

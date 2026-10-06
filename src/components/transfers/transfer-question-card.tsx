@@ -8,7 +8,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { shortDateWithYear } from '@/lib/format';
 import type { TransferAnswer } from '@/lib/transfer-answer';
-import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { transferActivityCopy, transferMetaLine, unbroken } from '@/lib/transfer-activity-copy';
 import type { Transaction } from '@/lib/types';
 
 export function TransferQuestionCard({ transaction, index, total, more = 0, accountLabel, hint, palette, busy, onAnswer, onSeeAll }: {
@@ -21,25 +21,29 @@ export function TransferQuestionCard({ transaction, index, total, more = 0, acco
   const words = transferActivityCopy(useLanguage());
   const large = useLargeTextLayout();
   const incoming = transaction.type === 'income';
+  // Everything waiting for an answer, the card's own questions and the ones it cannot ask, so the
+  // title and See all never disagree. The step only counts when the card can walk all of them.
+  const waiting = total + more;
   return <View testID="transfer-question-card" accessibilityLiveRegion="polite"
     style={[styles.card, { backgroundColor: palette.card, borderColor: palette.statusNear }]}>
     <View style={styles.head}>
-      <ThemedText type="smallBold" accessibilityRole="header" style={{ color: palette.statusNear }}>{words.card.title(total)}</ThemedText>
-      <ThemedText type="meta" style={{ color: palette.statusNear }}>{words.card.step(index + 1, total)}</ThemedText>
+      <ThemedText type="smallBold" accessibilityRole="header" style={{ color: palette.statusNear }}>{words.card.title(waiting)}</ThemedText>
+      {more === 0 ? <ThemedText type="meta" style={{ color: palette.statusNear }}>{words.card.step(index + 1, total)}</ThemedText> : null}
     </View>
     <View testID="transfer-question-what" style={large ? styles.whatLarge : styles.what}>
       <View style={styles.grow}>
         <ThemedText type="smallBold">{incoming ? words.card.whereIn : words.card.whereOut}</ThemedText>
         <ThemedText type="meta" themeColor="textSecondary">
-          {[accountLabel, shortDateWithYear(transaction.date), hint].filter(Boolean).join(' · ')}
+          {/* Each part isolated: a Latin account name and an Arabic date keep their own order. */}
+          {transferMetaLine([accountLabel, unbroken(shortDateWithYear(transaction.date)), hint])}
         </ThemedText>
       </View>
       <Money fils={transaction.amountFils} sign={incoming ? 'plus' : 'minus'} type="smallBold" decimals />
     </View>
     <TransferAnswerChoices incoming={incoming} value={null} onChange={onAnswer} palette={palette} layout="buttons" disabled={busy} />
-    {total + more > 1 ? <Pressable testID="transfer-question-see-all" accessibilityRole="button" onPress={onSeeAll} style={styles.seeAll}>
-      {/* The title already says how many; See all counts only when it reaches more than the card asks. */}
-      <ThemedText type="small" style={{ color: palette.tint }}>{more > 0 ? words.card.seeAll(total + more) : words.card.seeAllPlain}</ThemedText>
+    {waiting > 1 ? <Pressable testID="transfer-question-see-all" accessibilityRole="button" onPress={onSeeAll} style={styles.seeAll}>
+      {/* The title already says how many. */}
+      <ThemedText type="small" style={{ color: palette.tint }}>{words.card.seeAllPlain}</ThemedText>
     </Pressable> : null}
   </View>;
 }

@@ -60,6 +60,8 @@ function harness() {
     '@/components/ui/coins/coin-disc': { ghostTone: () => ({}) },
     // Home's other coin drawings (Today, the average's days, In against Spent) carry no money text.
     '@/components/ui/coins/coin-motion': { COIN_RISE: {}, COIN_STAGGER: 45, nativeDriver: false, useAnimatedNumber: (value) => ({ value }) },
+    // Coin motion's foreground gate (a capture landing in the background lands at once): a foreground app here.
+    '@/hooks/use-app-active': { useAppActive: () => true },
     // Spending's sheet pieces in language E: the tiles and bars carry no money
     // text of their own; the rows' Money and spoken labels are under test.
     '@/components/ui/band/e-button': { EButton: 'EButton' }, '@/components/ui/band/glyph-tile': { GlyphTile: 'GlyphTile' },

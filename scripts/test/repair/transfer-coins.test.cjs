@@ -126,7 +126,7 @@ test('the Transfers list hands each row its cue and re-renders rows when cues ch
   h.deps['@/lib/ledger'] = { ...h.deps['@/lib/ledger'], transferReconciliationForState: () => reconciliation };
   const tree = h.renderScreen('transfers');
   const list = byId(tree, 'transfer-history');
-  assert.ok(list.props.extraData instanceof Map, 'the cues are the list\'s extra data');
+  assert.ok(list.props.extraData.coins instanceof Map, 'the cues are part of the list\'s extra data');
   const lane = byId(tree, 'transfer-lane-pay');
   assert.ok(lane && hidden(lane), 'every route row draws its line, hidden from assistive tech');
 });

@@ -27,7 +27,7 @@ export function MerchantSpendingLink({ merchant, displayName, type = 'expense', 
 }
 
 const styles = StyleSheet.create({
-  row: { minHeight: 52, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth,
+  row: { minHeight: 48, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 12 },
   words: { flex: 1, minWidth: 0, gap: 4 },
 });

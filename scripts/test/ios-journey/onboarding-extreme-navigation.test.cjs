@@ -172,7 +172,7 @@ async function gate(options = {}) {
     'react-native-svg': { __esModule: true, default: 'Svg', Path: 'Path', Circle: 'Circle' },
     'expo-router': { useRouter: () => router, usePathname: () => input.pathname, useGlobalSearchParams: () => input.params },
     '@/hooks/use-language': { useLanguage: () => language },
-    '@/hooks/use-large-text-layout': { useLargeTextLayout: () => false },
+    '@/hooks/use-large-text-layout': { useLargeTextLayout: () => options.largeText ?? false },
     // The step frame lifts its pinned actions over the keyboard; no keyboard here.
     '@/hooks/use-keyboard-height': { useKeyboardHeight: () => 0 },
     '@/hooks/use-reduced-motion': { useMotionPreference: () => ({ ready: options.motionReady ?? true, reducedMotion: options.reducedMotion ?? true }) },
@@ -293,7 +293,9 @@ async function gate(options = {}) {
     load(path.join(root, 'src/components/onboarding/sms-coin-scene.tsx'), dependencies);
   for (const name of ['e-frame', 'e-choice-row', 'e-welcome', 'e-name', 'e-goals', 'e-watch', 'e-reminders', 'e-first-payment',
     'e-pattern', 'e-paywall', 'e-handoff', 'capture-checklist', 'ready-summary', 'sms-explainer']) {
-    dependencies[`@/components/onboarding/${name}`] = load(path.join(root, `src/components/onboarding/${name}.tsx`), dependencies);
+    // The step pieces' timers (the hand-off's end, the frame's keyboard reveal) run on the harness clock.
+    dependencies[`@/components/onboarding/${name}`] = load(path.join(root, `src/components/onboarding/${name}.tsx`), dependencies,
+      { setTimeout: setTimer, clearTimeout: clearTimer });
   }
   const component = load(options.sourcePath ?? process.env.WAFRA_ONBOARDING_SOURCE ?? path.join(root, 'src/components/onboarding-gate.tsx'), dependencies, {
     process: { env: { EXPO_PUBLIC_WAFRA_E2E_DEMO: '1' } },
@@ -614,10 +616,12 @@ for (const [focus, destination] of [['spending', '/flow'], ['bills', '/bills'], 
     await h.press('addByHand'); await h.press('continue'); await h.press('oneLastThing');
     h.byTestID('onboarding-paywall-free').props.onPress(); await h.flush();
     assert.deepEqual(h.routes, []); assert.equal(calls(h, 'committed').length, 0);
-    save.resolve(); await h.flush();
+    save.resolve(); await h.advance(0);
     assert.deepEqual(h.routes, [['replace', destination]]); assert.equal(h.durable.onboarded, true);
-    // Only Home receives the pattern hand-off.
-    assert.equal(h.nodes().some(node => node.props?.testID === 'onboarding-handoff'), destination === '/');
+    // Only Home receives the pattern hand-off: the overlay stays drawn, hidden from assistive tech, and fades into it.
+    assert.equal(walk(h.tree).some(node => node.props?.testID === 'onboarding-handoff'), destination === '/');
+    await h.advance(600);
+    assert.equal(walk(h.tree).some(node => node.props?.testID === 'onboarding-paywall'), false, 'then the overlay is gone');
   });
 }
 

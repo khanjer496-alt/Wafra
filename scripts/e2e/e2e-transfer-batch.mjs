@@ -9,9 +9,9 @@ import { chromium, expect } from 'playwright/test';
 
 const require = createRequire(import.meta.url);
 const wordsFor = require('../test/repair/load-typescript.cjs')(
-  fileURLToPath(new URL('../../src/lib/transfer-review-copy.ts', import.meta.url)),
+  fileURLToPath(new URL('../../src/lib/transfer-activity-copy.ts', import.meta.url)),
   { '@/lib/i18n': { getLanguage: () => 'en' } },
-).transferReviewCopy;
+).transferActivityCopy;
 const BASE = process.env.BASE ?? 'http://127.0.0.1:8167';
 assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(new URL(BASE).hostname));
 const OUT = process.env.E2E_ARTIFACT_DIR ?? path.join(tmpdir(), 'wafra-transfer-batch-e2e');
@@ -45,7 +45,7 @@ async function stored(page) {
       JSON.parse(localStorage.getItem(`${key}:tx:${n}`) ?? '[]')).flat();
   }, KEY);
 }
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_PATH || undefined });
 const results = [];
 try {
   for (const [language, theme, width, height] of [['en', 'light', 320, 568], ['ar', 'dark', 390, 844]]) {
@@ -60,25 +60,32 @@ try {
     const page = await context.newPage(), errors = [], words = wordsFor(language);
     page.on('pageerror', error => errors.push(error.message));
     try {
-      await page.goto(`${BASE}/review-transfers`, { waitUntil: 'networkidle' });
-      const screen = page.getByTestId('review-transfers-screen');
+      // Select several is a mode of the one Transfers page.
+      await page.goto(`${BASE}/transfers`, { waitUntil: 'networkidle' });
+      const screen = page.getByTestId('transfers-screen');
       await expect(screen).toBeVisible();
-      await screen.getByRole('button', { name: words.selectTransfers, exact: true }).click();
-      await expect(screen.getByTestId('transfer-select-shown')).toHaveAttribute('aria-label', words.selectShown(PAIRS));
-      const checks = screen.getByTestId('transfer-pair-select');
+      await screen.getByTestId('transfers-select').click();
+      // A suggested pair is one route to tick (both legs), so "Select all" counts pairs.
+      await expect(screen.getByTestId('transfer-select-shown')).toHaveAttribute('aria-label', words.select.all(PAIRS));
+      const checks = screen.locator('[data-testid^="transfer-row-"][role="checkbox"]');
       await expect(checks.first()).toBeAttached();
       const mounted = await checks.count();
-      assert.ok(mounted > 0 && mounted < PAIRS / 2, `virtualized card count ${mounted}/${PAIRS}`);
+      assert.ok(mounted > 0 && mounted < PAIRS / 2, `virtualized row count ${mounted}/${PAIRS}`);
       await checks.nth(0).click(); await checks.nth(1).click();
       await expect(checks.nth(0)).toBeChecked(); await expect(checks.nth(1)).toBeChecked();
+      const bar = page.getByTestId('transfer-selection-footer');
+      await expect(bar).toContainText(words.select.selected(2));
       await page.screenshot({ path: path.join(OUT, `${language}-selection.png`) });
-      await screen.getByRole('button', { name: words.reviewSelected(2), exact: true }).click();
-      const sheet = page.getByTestId('transfer-review-confirmation');
+      // The bar's answers are the same three; each opens the confirmation with it chosen.
+      await bar.getByTestId('transfer-answer-own').click();
+      const sheet = page.getByTestId('transfer-answer-sheet');
       await expect(sheet).toBeVisible();
       await expect(sheet.getByTestId('transfer-batch-preview-item')).toHaveCount(2);
-      await expect(sheet.getByTestId('transfer-batch-preview-item').first()).toContainText(words.sent);
-      await expect(sheet.getByTestId('transfer-batch-preview-item').first()).toContainText(words.received);
-      const confirm = sheet.getByRole('button', { name: words.confirmSelected(2), exact: true });
+      await expect(sheet.getByTestId('transfer-batch-preview-item').first()).toContainText('QA current');
+      await expect(sheet.getByTestId('transfer-batch-preview-item').first()).toContainText('QA savings');
+      await expect(sheet.getByTestId('transfer-answer-own')).toBeChecked();
+      const confirm = sheet.getByTestId('transfer-answer-sheet-save');
+      await expect(confirm).toHaveAttribute('aria-label', words.batch.save(4));
       await expect(confirm).toBeEnabled();
       await page.screenshot({ path: path.join(OUT, `${language}-confirmation.png`) });
       const start = performance.now();

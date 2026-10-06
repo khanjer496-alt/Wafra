@@ -20,11 +20,11 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useFocusEffect } from 'expo-router';
 import { useRouter } from '@/hooks/use-app-router';
+import { runAfterFirstFrames } from '@/lib/after-first-frames';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState as RNAppState,
-  InteractionManager,
   Linking,
   Modal,
   Platform,
@@ -155,7 +155,7 @@ export default function SettingsDataScreen() {
   const { transactions, accounts, merchantOverrides, billAliases } = state;
   useFocusEffect(useCallback(() => {
     let active = true;
-    const task = InteractionManager.runAfterInteractions(() => {
+    const task = runAfterFirstFrames(() => {
       if (!active) return;
       const snapshot = getStateSnapshot();
       const summary = uncategorisedMerchants(snapshot);

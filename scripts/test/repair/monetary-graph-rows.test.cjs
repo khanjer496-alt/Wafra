@@ -38,7 +38,7 @@ test('limit history keeps exact monthly amounts and one shared limit position on
   const h = createHarness({ states: { 1: '1500.25' } });
   const state = h.deps['@/lib/store'].useStore().state;
   state.transactions = state.transactions.map(tx => ({...tx, amountFils: tx.amountFils + 7}));
-  Object.assign(h.deps['@/lib/period'], { daysInPeriod: () => 30, elapsedDays: () => 6 });
+  Object.assign(h.deps['@/lib/period'], { daysInPeriod: () => 30, elapsedDays: () => 6, daysLeftInPeriod: () => 25 });
   const { LimitSheet } = h.local('@/components/limit-sheet');
   const tree = LimitSheet({ category: 'dining', open: true, monthKey: '2026-09', onClose() {} });
   const history = walk(tree).find(node => node.props.testID === 'limit-history');

@@ -1,5 +1,39 @@
 import { getLanguage } from '@/lib/i18n';
 
+/**
+ * Transfers lines join an account name, a date and a figure ("QA current ·4111
+ * · 5 Oct"), so one line holds runs of both directions. Unisolated, an Arabic
+ * line reordered them: "5" left its month, the account's digits joined the
+ * date. Each part is wrapped in a Unicode first-strong isolate (FSI … PDI), so
+ * it is laid out on its own, in its own direction, whatever sits beside it.
+ * The marks are invisible and are not spoken.
+ */
+export const isolateText = (part: string): string => `\u2068${part}\u2069`;
+
+/**
+ * A short part that must not break across lines ("27 Sep", "AED 525.00"): its
+ * spaces become no-break spaces, so a wrapped Arabic line never leaves "27" at
+ * one line's end and its month at the next one's start.
+ */
+export const unbroken = (part: string): string => part.replace(/ /g, '\u00A0');
+
+/** An account label with its masked digits bound to the name ("ADCB Credit Card ·7720" never wraps before "·7720"). */
+const boundDigits = (account: string): string => account.replace(/\s+(?=[·•*]+\s?\d{2,4}$)/u, '\u00A0');
+
+/**
+ * A run made of isolated pieces and neutral punctuation ("27 Sep, 00:01") has
+ * no strong letter of its own, so a first-strong isolate around it would fall
+ * back to left-to-right and put an Arabic clock before its date. These pin the
+ * run to the language's direction (LRI or RLI … PDI).
+ */
+const ltrRun = (run: string): string => `\u2066${run}\u2069`;
+const rtlRun = (run: string): string => `\u2067${run}\u2069`;
+
+/** A meta line of isolated parts, "A · B · C"; empty parts are left out. */
+export function transferMetaLine(parts: readonly (string | false | null | undefined)[]): string {
+  return parts.filter((part): part is string => !!part).map(isolateText).join(' · ');
+}
+
 const en = {
   title: 'Transfers',
   search: 'Search transfers',
@@ -25,6 +59,10 @@ const en = {
     open: 'Open',
   },
   headline: (period: string) => `${period} · moved between your accounts`,
+  /** One entry's date and clock ("27 Sep, 00:01"); the date alone when the row has no clock. */
+  dateTime: (date: string, clock: string) => clock ? ltrRun(`${isolateText(unbroken(date))}, ${isolateText(clock)}`) : unbroken(date),
+  /** A group's first and last dates ("18 Sep – 3 Oct"). */
+  dateRange: (from: string, to: string) => ltrRun(`${isolateText(unbroken(from))} – ${isolateText(unbroken(to))}`),
   notCounted: 'Not counted as spending or income',
   tiles: { own: 'Your accounts', sent: 'Sent to others', received: 'Received', counted: 'counted' },
   tags: { own: 'Your accounts', external: 'Someone else · counted', needsAnswer: 'Needs an answer', unconfirmed: 'Not answered yet' },
@@ -48,18 +86,77 @@ const en = {
     failed: 'Couldn’t save. Try again.',
     unsaved: 'Answer kept on this device but not saved yet. Wafra will retry.',
     done: 'Done',
+    /** Several transfers in and out at once: the answer named for both directions. */
+    mixed: { own: 'Between my own accounts', external: 'With someone else', none: 'Not transfers' },
+    mixedEffect: { own: 'Not counted as spending or income', external: 'Counted as spending or income' },
+    /** Takes an answer back off one entry, as the toast's Undo does. */
+    clear: 'Clear my answer',
+    /**
+     * A likely other side Wafra matched (same amount, close in time) and the person has not confirmed.
+     * "Linked to …" (route.linked) is only ever said of a confirmed link.
+     */
+    looksLike: (account: string) => `Looks like your ${isolateText(boundDigits(account))}`,
+    /** Under the own answer when the entries answered together look like different accounts. */
+    looksLikeEach: 'Each entry below shows the account it looks like.',
+    /** Under a likely other side ("Looks like your …"): Wafra matched it; the person has not confirmed it. */
+    suggestedOnly: 'Same amount, close in time: a suggestion, not confirmed until you answer.',
+  },
+  /** Several entries with the same account and other side, answered together. */
+  group: {
+    entries: (n: number) => `${n} entr${n === 1 ? 'y' : 'ies'}`,
+    section: 'Waiting for your answer',
+    entriesTitle: 'Entries',
+    openEntry: 'Open this entry on its own',
+    more: (shown: number, total: number) => `Show more · ${shown} of ${total}`,
+    /** A catch-all group ("Account → ?"): not one answer for all of them. */
+    oneByOne: 'These are not all the same, so each needs its own answer. Open an entry below to answer it.',
+    /** Select mode: a catch-all group opens to show its entries, each ticked on its own. */
+    showEntries: 'Show entries to tick one by one',
+    hideEntries: 'Hide entries',
+    /** Entries whose id is stored twice: shown, never answered here. */
+    duplicate: 'Stored twice under one ID, so it can’t be answered here.',
+  },
+  select: {
+    action: 'Select',
+    actionHint: 'Answer several transfers at once',
+    hint: 'Tick transfers, then pick one answer for all of them.',
+    all: (n: number) => `Select all (${n})`,
+    clear: 'Clear',
+    cancel: 'Cancel',
+    selected: (n: number) => `${n} selected`,
+    none: 'Nothing selected yet',
+    item: 'Select',
+  },
+  batch: {
+    selected: (n: number) => `${n} selected`,
+    save: (n: number) => n === 1 ? 'Save answer' : `Save answer for ${n} entries`,
+    saving: 'Saving…',
+    retry: 'Retry saving',
+    cancel: 'Cancel',
+    saved: (n: number) => `Saved for ${n} entr${n === 1 ? 'y' : 'ies'}`,
+    choose: 'Pick the answer for all of these',
+    changed: 'These transfers changed while this was open. Close it and pick them again.',
+    failed: 'Couldn’t save. Close this and try again.',
+    durability: 'Your answer is applied here but not safely saved yet. Retry saving before you leave.',
+  },
+  /** A link to one entry (an old Review transfers link, a notification). */
+  link: {
+    missing: 'This transfer is no longer available.',
+    notTransfer: 'This entry is not a transfer.',
   },
   card: {
     title: (n: number) => `${n} transfer${n === 1 ? ' needs' : 's need'} an answer`,
     step: (i: number, n: number) => `${i} of ${n}`,
     whereOut: 'Where did this go?',
     whereIn: 'Where did this come from?',
-    looksLike: (account: string) => `looks like your ${account}`,
-    seeAll: (n: number) => `See all ${n}`,
+    looksLike: (account: string) => `looks like your ${isolateText(boundDigits(account))}`,
     /** "See all" when the card's title already gives the count. */
     seeAllPlain: 'See all',
   },
 };
+
+/** Arabic counted noun: one, two, 3–10, 11 and up. */
+const arEntries = (n: number) => n === 1 ? 'قيد واحد' : n === 2 ? 'قيدان' : n <= 10 ? `${n} قيود` : `${n} قيداً`;
 
 const ar: typeof en = {
   title: 'التحويلات',
@@ -86,6 +183,9 @@ const ar: typeof en = {
     open: 'فتح',
   },
   headline: (period) => `${period} · نُقلت بين حساباتك`,
+  // The Arabic comma between the date and the clock.
+  dateTime: (date, clock) => clock ? rtlRun(`${isolateText(unbroken(date))}، ${isolateText(clock)}`) : unbroken(date),
+  dateRange: (from, to) => rtlRun(`${isolateText(unbroken(from))} – ${isolateText(unbroken(to))}`),
   notCounted: 'لا تُحتسب ضمن المصروفات أو الدخل',
   tiles: { own: 'حساباتك', sent: 'أُرسلت لآخرين', received: 'مستلمة', counted: 'محتسبة' },
   tags: { own: 'حساباتك', external: 'شخص آخر · محتسبة', needsAnswer: 'بانتظار إجابتك', unconfirmed: 'لم تتم الإجابة بعد' },
@@ -108,14 +208,57 @@ const ar: typeof en = {
     failed: 'تعذّر الحفظ. حاول مرة أخرى.',
     unsaved: 'تم الاحتفاظ بالإجابة على هذا الجهاز ولم تُحفظ بعد. سيعيد وفرة المحاولة.',
     done: 'تم',
+    mixed: { own: 'بين حساباتي', external: 'مع شخص آخر', none: 'ليست تحويلات' },
+    mixedEffect: { own: 'لا تُحتسب ضمن المصروفات أو الدخل', external: 'تُحتسب ضمن المصروفات أو الدخل' },
+    clear: 'إلغاء إجابتي',
+    looksLike: (account) => `يبدو أنها حسابك ${isolateText(boundDigits(account))}`,
+    looksLikeEach: 'يظهر تحت كل قيد أدناه الحساب الذي يبدو أنه له.',
+    suggestedOnly: 'المبلغ نفسه وفي وقت متقارب: اقتراح غير مؤكد حتى تجيب.',
+  },
+  group: {
+    entries: arEntries,
+    section: 'بانتظار إجابتك',
+    entriesTitle: 'القيود',
+    openEntry: 'افتح هذا القيد وحده',
+    more: (shown, total) => `عرض المزيد · ${shown} من ${total}`,
+    oneByOne: 'هذه القيود ليست متشابهة كلها، لذا يحتاج كل منها إلى إجابته. افتح قيداً أدناه للإجابة عنه.',
+    showEntries: 'اعرض القيود لتحديدها واحداً تلو الآخر',
+    hideEntries: 'إخفاء القيود',
+    duplicate: 'محفوظ مرتين بالمعرّف نفسه، لذا لا يمكن الإجابة عنه هنا.',
+  },
+  select: {
+    action: 'تحديد',
+    actionHint: 'أجب عن عدة تحويلات معاً',
+    hint: 'حدّد التحويلات، ثم اختر إجابة واحدة لها كلها.',
+    all: (n) => `تحديد الكل (${n})`,
+    clear: 'مسح',
+    cancel: 'إلغاء',
+    selected: (n) => `${n} محدد`,
+    none: 'لم يُحدَّد شيء بعد',
+    item: 'تحديد',
+  },
+  batch: {
+    selected: (n) => `${n} محدد`,
+    save: (n) => n === 1 ? 'حفظ الإجابة' : `حفظ الإجابة لـ ${arEntries(n)}`,
+    saving: 'جارٍ الحفظ…',
+    retry: 'أعد محاولة الحفظ',
+    cancel: 'إلغاء',
+    saved: (n) => `تم الحفظ لـ ${arEntries(n)}`,
+    choose: 'اختر الإجابة لها كلها',
+    changed: 'تغيّرت هذه التحويلات أثناء فتح هذه النافذة. أغلقها وحدّدها مرة أخرى.',
+    failed: 'تعذّر الحفظ. أغلق هذه النافذة وحاول مرة أخرى.',
+    durability: 'طُبّقت إجابتك هنا لكنها لم تُحفظ بأمان بعد. أعد محاولة الحفظ قبل المغادرة.',
+  },
+  link: {
+    missing: 'لم يعد هذا التحويل متاحاً.',
+    notTransfer: 'هذا القيد ليس تحويلاً.',
   },
   card: {
     title: (n) => `${n} من التحويلات بانتظار إجابتك`,
     step: (i, n) => `${i} من ${n}`,
     whereOut: 'إلى أين ذهبت؟',
     whereIn: 'من أين جاءت؟',
-    looksLike: (account) => `يبدو أنها حسابك ${account}`,
-    seeAll: (n) => `عرض الكل (${n})`,
+    looksLike: (account) => `يبدو أنها حسابك ${isolateText(boundDigits(account))}`,
     seeAllPlain: 'عرض الكل',
   },
 };

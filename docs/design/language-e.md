@@ -47,7 +47,14 @@ example of everything below.
 - **Motion.** Sheets rise 40pt on the 260/24 spring; bands never move; bars
   and pins grow from the baseline 50ms apart; money never spins. Reduce
   Motion (or a running screen reader) shows everything in place. Android keeps
-  its measured motion bypasses.
+  its measured motion bypasses. A group of coins that moves one after another
+  (a stack, the day columns, an arriving row and its coin) runs on one
+  native-driven clock (`useCoinClock`/`coinTrack` in `coin-motion.ts`): each
+  coin reads its own window of it, shaped like the spring it replaces, never
+  `Animated.delay`/`sequence` (JS timers). Home's coins hold their first reveal
+  until Home can be seen (`useHomeRevealReady`: splash gone, App Lock cleared,
+  app in the foreground); a change made while the app is in the background
+  lands at once and never replays (`docs/performance/launch-resume-2026-10-05.md`).
 - **Large text.** Every band and sheet layout stacks or wraps under
   `useLargeTextLayout()` (see `2026-09-25-large-text-audit.md`).
 - **RTL.** Bands and sheets mirror (logical `start`/`end` everywhere; the back
@@ -372,11 +379,37 @@ Not the system status bar.
 
 56pt, 16pt radius, centred label. `primary` (band `fill`, or `color={{ fill, text }}`),
 `secondary` (card with a rule), `quiet` (tint text). `busy` shows a spinner.
+`size="compact"` (48pt, 16pt label) is for a sheet's row of two or three
+actions. `accessibilityLabel` keeps the full spoken name when the visible label
+is its short form ("Edit" for "Edit transaction").
 
 ```tsx
 <EButton palette={band} label={words.recordPayment} onPress={record} />
 <EButton palette={band} variant="quiet" label={words.details} onPress={open} />
+<EButton palette={band} size="compact" variant="secondary" label={words.edit}
+  accessibilityLabel={t('editEntry')} onPress={edit} />
 ```
+
+### Sheet density
+
+A sheet is read at a glance. On a 390 × 844 phone at the default text size its
+key content and primary action are visible without scrolling; at 1.3× text it
+takes at most one short scroll.
+
+- `BottomSheet` keeps one rhythm: 12pt between blocks, a compact header (8pt
+  under the title row), 12pt above a pinned footer and only 16pt plus the
+  safe-area inset under it. Sheets may rise to 92% of the screen.
+- A sheet's header is a 40–48pt logo or glyph tile beside its name, not a
+  large tile above it. Its amount is `BandFigure size="large"`; `hero` belongs
+  to a band.
+- Footers are one row: the way out (quiet, at the start) and the primary (at
+  the end). A row of three uses `size="compact"`. Two actions of uneven width
+  use `flexDirection: 'row-reverse'` with `flexWrap: 'wrap'`, the primary first
+  in the source: when they cannot share a line the primary's line comes first,
+  and no label ever wraps inside its button. At the accessibility sizes the
+  actions stack and scroll with the content.
+- Choice and answer rows are 56–64pt with 10pt vertical padding; read-only
+  fact rows (`KeyValueRows`) are 44pt.
 
 ## The personal pattern
 
@@ -468,7 +501,7 @@ in `reference-harness.cjs` and `journal-harness.cjs`.
 - Every monetary graph exposes exact amounts, currency and its dates without a tap. Merchant and bill history, Ask monthly answers, limit history and annual recap use readable labelled rows where narrow columns cannot fit. Limit reference markers and status meanings remain intact.
 - The Widgets screen previews Today and Coming up from the same snapshot as native widgets. Thirty-three recurring-service logo identities map to bundled artwork on iOS/Android; unknown or older identities retain a fallback. No logo network request is needed.
 - A small Today widget shows the exact seven-day total instead of an unreadable seven-bar strip. The Widgets screen provides every dated daily value in a full-width chart. Hidden, incomplete or unsafe totals remain unavailable. Lock Screen/StandBy amount redaction remains unchanged.
-- Web controls expose checked/selected/pressed states explicitly alongside native accessibility state. Pending onboarding transitions keep their actions disabled until they can execute.
+- Web controls expose checked/selected/pressed states explicitly alongside native accessibility state. Pending onboarding transitions ignore a second tap until the new step can act (its layer swallows touches and its handlers refuse) without drawing the wait: nothing dims or spins.
 
 ## Device-feedback refinements — 27 September 2026
 

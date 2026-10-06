@@ -91,7 +91,8 @@ export default function WidgetsScreen() {
       language: language === 'ar' ? 'ar' : 'en' }, current);
     void job.done.then(async outcome => {
       if (!current()) return;
-      const ok = outcome === 'written' && await pinWidget(kind);
+      // 'unchanged': the widgets already hold exactly these figures.
+      const ok = (outcome === 'written' || outcome === 'unchanged') && await pinWidget(kind);
       if (current()) setPinFailed(!ok);
     }).catch(() => { if (current()) setPinFailed(true); })
       .finally(() => { if (alive.current) setPinning(null); });

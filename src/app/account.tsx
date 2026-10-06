@@ -171,7 +171,7 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
         bandContent={(
           <View style={styles.bandBody}>
             <View style={styles.identity} testID="account-detail-header">
-              <AccountTile account={account} size={52} />
+              <AccountTile account={account} size={48} />
               <View style={styles.grow}>
                 <ThemedText type="heading" accessibilityRole="header" style={{ color: band.onBand }}>{account.name}</ThemedText>
                 <ThemedText type="meta" style={{ color: band.onBandSecondary }}>{identity}</ThemedText>
@@ -358,8 +358,8 @@ function ManageSheet({ palette, title, body, options, onSelect, onClose }: {
 
 const styles = StyleSheet.create({
   content: { gap: Spacing.three },
-  bandBody: { gap: 20 },
-  identity: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  bandBody: { gap: 16 },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   grow: { flex: 1, minWidth: 0, gap: Spacing.half },
   balance: { gap: Spacing.one },
   noBalance: { gap: 4 },

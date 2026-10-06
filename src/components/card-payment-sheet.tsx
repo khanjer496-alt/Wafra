@@ -205,9 +205,7 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
         <BandFigure fils={status.remainingFils} decimals palette={band} size="large" color={band.text}
           secondaryColor={band.textSecondary} />
         <ThemedText type="meta" style={{ color: status.daysLeft < 0 ? band.statusOver : band.textSecondary }}>
-          {status.daysLeft < 0
-            ? tf('lateDays', { days: -status.daysLeft })
-            : tf('daysShort', { days: status.daysLeft })}
+          {status.daysLeft < 0 ? w.lateByDays(-status.daysLeft) : w.dueInDays(status.daysLeft)}
         </ThemedText>
         {paidShare > 0 && <ProgressBar ratio={paidShare} color={band.statusOk} height={5} />}
         <ThemedText type="meta" themeColor="textSecondary">
@@ -290,6 +288,9 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
       {/* Wafra records; it never moves money. Said before the button. */}
       <ThemedText type="meta" themeColor="textSecondary" testID="card-payment-note">{w.paymentNote}</ThemedText>
 
+      {/* One row: the record action at the end, Remind me at the start
+          (row-reverse). When the amount makes the pair too wide, Record's line
+          comes first, each label whole. */}
       <View style={styles.actions}>
         <EButton
           palette={band}
@@ -297,8 +298,10 @@ export function CardPaymentSheet({ due, onClose, initialChoice = 'full' }: CardP
           label={resolution.ok ? w.recordAmount(formatAED(resolution.amountFils)) : w.recordThisPayment}
           onPress={() => setConfirming(true)}
           disabled={!canRecord}
+          style={styles.primaryAction}
         />
-        <EButton palette={band} variant="secondary" label={t('remindMe')} onPress={remindMe} testID="card-payment-remind" />
+        <EButton palette={band} variant="quiet" label={t('remindMe')} onPress={remindMe} testID="card-payment-remind"
+          style={styles.quietAction} />
       </View>
 
       {notice && (
@@ -371,12 +374,12 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   choice: {
-    minHeight: 64,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingVertical: Spacing.two + 2,
+    paddingHorizontal: Spacing.three - 2,
     borderRadius: 16,
   },
   radio: {
@@ -398,8 +401,13 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.two,
   },
   actions: {
+    flexDirection: 'row-reverse',
+    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: Spacing.two,
   },
+  quietAction: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%', paddingHorizontal: Spacing.three },
+  primaryAction: { flexGrow: 2, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%' },
   notice: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: Radius.sheet,

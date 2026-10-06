@@ -97,7 +97,8 @@ try {
       await dialog.getByTestId(identity).waitFor({ state: 'visible' });
       await decoded(dialog);
       const size = await dialog.getByTestId(identity).boundingBox();
-      assert.equal(size.width, 64); assert.equal(size.height, 64);
+      // The compact transaction sheet draws the merchant tile at 44pt.
+      assert.equal(size.width, 44); assert.equal(size.height, 44);
     });
     await page.screenshot({ path: path.join(out, `detail-${mode}.png`) });
     await page.keyboard.press('Escape');

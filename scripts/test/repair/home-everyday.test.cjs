@@ -109,15 +109,15 @@ test('the transfer notice appears only for a non-empty review queue and opens th
   assert.match(text(notice), /2 transfers need an answer/);
   assert.doesNotMatch(text(notice), /AED/, 'a disclosure, not a monetary backlog');
   notice.props.onPress();
-  // The Transfers page's question card takes the queue one at a time; its "See all" reaches the bulk review.
+  // The Transfers page's question card takes the queue one at a time.
   assert.deepEqual(h.events.at(-1), ['route', '/transfers']);
   // Queued entries the card cannot ask about (a duplicate observation, an archived account)
-  // are reached only through the review screen, so with no question left the notice opens it.
+  // wait on the same page as group rows, so with no question left the notice still opens Transfers.
   const unasked = createHarness({ platform: 'ios', states: { [PENDING]: { count: 1, incomingFils: 0, outgoingFils: 5000, questions: 0 } } });
   const lone = byId(unasked.render('home'), 'transfer-review-notice');
   assert.match(text(lone), /1 transfer needs an answer/);
   lone.props.onPress();
-  assert.deepEqual(unasked.events.at(-1), ['route', '/review-transfers']);
+  assert.deepEqual(unasked.events.at(-1), ['route', '/transfers']);
 });
 
 test('Arabic week keeps concise visible days and full spoken names', () => {

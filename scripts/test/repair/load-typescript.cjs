@@ -116,6 +116,29 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
           waitForForegroundHistoryIdle: async () => {},
         };
       }
+      // "After the first frames" deferral. Screen harnesses already drive
+      // deferred work through their InteractionManager stub, so the helper
+      // goes there (inline when there is none). Its own frame/lease timing is
+      // exercised from source in launch-resume-performance.test.cjs.
+      if (name === '@/lib/after-first-frames') {
+        const runAfterFirstFrames = (task) => {
+          const manager = dependencies['react-native']?.InteractionManager;
+          if (typeof manager?.runAfterInteractions === 'function') return manager.runAfterInteractions(task);
+          task();
+          return { cancel() {} };
+        };
+        return { AFTER_FIRST_FRAMES_DELAY_MS: 120, runAfterFirstFrames, runSoon: runAfterFirstFrames, afterFirstFrames: async () => {} };
+      }
+      // UI harnesses draw a foreground app with the splash already gone; the
+      // background/splash gates have their own suite (same file as above).
+      if (name === '@/hooks/use-app-active') {
+        return { useAppActive: () => true, appIsActive: () => true, subscribeAppActive: () => () => {},
+          isAppActiveState: (state) => state !== 'background' && state !== 'inactive' };
+      }
+      if (name === '@/lib/launch-splash') {
+        return { LAUNCH_SPLASH_TIMEOUT_MS: 4000, useLaunchSplashHidden: () => true, launchSplashHidden: () => true,
+          holdLaunchSplash() {}, releaseLaunchSplash() {} };
+      }
       // ledger.ts needs only the pure completion predicate from history-import.
       // UI/repair harnesses that do not exercise the history coordinator should
       // not have to model its native scheduling graph just to read ledger math.

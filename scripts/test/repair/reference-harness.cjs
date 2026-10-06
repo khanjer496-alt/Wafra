@@ -10,7 +10,7 @@ function createHarness(options = {}) {
   class Clock extends Date { constructor(...args){ super(...(args.length?args:['2026-09-06T12:00:00Z'])); } static now(){return Date.parse('2026-09-06T12:00:00Z');} }
   const events=[]; const lang=options.language??'en'; const theme=themes.Colors[options.theme??'light'];
   let hookIndex=0;
-  const react = { memo: f=>f, isValidElement: n=>!!n?.props, Fragment:'Fragment', useMemo:f=>f(),  useCallback:f=>f, useDeferredValue:v=>v,
+  const react = { memo: f=>f, isValidElement: n=>!!n?.props, Fragment:'Fragment', useMemo:f=>f(),  useCallback:f=>f, useDeferredValue:v=>v, startTransition:work=>work(),
     useRef:v=>({current:v}), useEffect(){}, useId:()=>`id-${hookIndex++}`, forwardRef:f=>p=>f(p,null),
     useState: initial => { const i=hookIndex++; return [Object.hasOwn(options.states??{},i) ? options.states[i] : typeof initial==='function'?initial():initial,
       value=>events.push(['state',i,value])]; },
@@ -246,6 +246,8 @@ function createHarness(options = {}) {
   local('@/lib/spending-calendar-tiles','src/lib/spending-calendar-tiles.ts');local('@/components/ui/coins/coin-disc');local('@/components/ui/coins/coin-stack');local('@/components/ui/coins/coin-token');
   local('@/components/ui/band/band-segmented');local('@/components/ui/band/band-chip');local('@/components/ui/band/share-bar');
   local('@/components/ui/band/glyph-tile');local('@/components/ui/band/status-bar');local('@/components/ui/band/e-button');
+  // Transfers' select mode: the tick box its rows and group rows draw.
+  local('@/components/transfers/transfer-select-mark');
   // The category creation form uses the real field/button and band palette;
   // load it only after those existing UI boundaries are ready.
   local('@/components/ui/category-chips');

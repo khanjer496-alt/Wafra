@@ -1,4 +1,4 @@
-import type { Account, Transaction } from '@/lib/types';
+import type { Transaction } from '@/lib/types';
 import type { TransferReviewGroup } from '@/lib/transfer-reconciliation-types';
 
 export type TransferHistoryScope = 'recent' | 'all';
@@ -10,15 +10,6 @@ export function transferSearchText(value: string): string {
     .replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 0x6f0))
     .replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
     .replace(/٬|,/g, '').replace(/٫/g, '.').toLowerCase().trim();
-}
-
-/** Do not append ••2615 to an account already displayed as “Wio Account ·2615”. */
-export function transferAccountLabel(account: Pick<Account, 'name' | 'last4'>): string {
-  const name = account.name.trim();
-  const tail = account.last4;
-  if (!tail || !/^\d{4}$/.test(tail)) return name;
-  if (new RegExp(`(?:^|[^0-9])${tail}$`).test(transferSearchText(name))) return name;
-  return [name, `••${tail}`].filter(Boolean).join(' · ');
 }
 
 /** Calendar dates, inclusive of today. This is a browsing filter, not a retention cutoff. */
@@ -91,28 +82,4 @@ export function projectTransferHistory({ groups, rowsById, accountLabels, scope,
   }
   projected.sort((a, b) => newestTransferFirst(a.rows[0], b.rows[0]) || a.id.localeCompare(b.id));
   return { groups: projected, count, outsideRecentCount };
-}
-
-export type TransferHistoryItem<G extends TransferBrowseGroup> =
-  | { kind: 'group'; key: string; group: G }
-  | { kind: 'entry'; key: string; group: G; transaction: Transaction }
-  | { kind: 'more'; key: string; group: G; shown: number };
-
-/** Collapsed by default; expanding one account must not mount its entire multi-year history. */
-export function transferHistoryItems<G extends TransferBrowseGroup>(
-  groups: readonly G[], expanded: ReadonlySet<string>, limits: Readonly<Record<string, number>>,
-  focused = false,
-): TransferHistoryItem<G>[] {
-  const items: TransferHistoryItem<G>[] = [];
-  for (const group of groups) {
-    items.push({ kind: 'group', key: `group:${group.id}`, group });
-    if (!focused && !expanded.has(group.id)) continue;
-    const requested = limits[group.id];
-    const limit = Number.isSafeInteger(requested) && requested > 0 ? requested : TRANSFER_HISTORY_PAGE_SIZE;
-    for (const transaction of group.rows.slice(0, limit)) {
-      items.push({ kind: 'entry', key: `entry:${group.id}:${transaction.id}`, group, transaction });
-    }
-    if (group.rows.length > limit) items.push({ kind: 'more', key: `more:${group.id}`, group, shown: limit });
-  }
-  return items;
 }

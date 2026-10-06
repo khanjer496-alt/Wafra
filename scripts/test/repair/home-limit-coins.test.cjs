@@ -39,7 +39,7 @@ test('Home: over every budget the stack is empty; no budget or Larger Text draws
 
 function limitSheet(limit) {
   const h = createHarness({ states: { 1: limit } });
-  Object.assign(h.deps['@/lib/period'], { daysInPeriod: () => 30, elapsedDays: () => 6 });
+  Object.assign(h.deps['@/lib/period'], { daysInPeriod: () => 30, elapsedDays: () => 6, daysLeftInPeriod: () => 25 });
   delete h.deps['@/components/limit-sheet'];
   const { LimitSheet } = h.local('@/components/limit-sheet');
   const tree = LimitSheet({ category: 'dining', open: true, monthKey: '2026-09', onClose: () => {} });

@@ -136,8 +136,8 @@ export function MerchantMonthBars({ transactions, merchant, period, live, intern
 
 const styles = StyleSheet.create({
   section: { gap: 10 },
-  bars: { gap: 14 },
-  column: { gap: 6 },
+  bars: { gap: 10 },
+  column: { gap: 4 },
   heading: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 },
   value: { writingDirection: 'ltr', flexShrink: 1 },
   track: { width: '100%', height: 8 },

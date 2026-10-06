@@ -32,6 +32,16 @@ export function subscribeHomeWidgetPreferences(listener: (preferences: HomeWidge
   return () => { listeners.delete(listener); };
 }
 
+/**
+ * The saved layout when it is already in memory (read during launch by the
+ * root, or by an earlier load or save), else null. Home's first render uses
+ * it, so a customised Home does not lay out the default first and then
+ * re-lay out and remount its sections when the read lands.
+ */
+export function peekHomeWidgetPreferences(): HomeWidgetPreferences | null {
+  return saved ? clone(saved) : null;
+}
+
 export async function loadHomeWidgetPreferences(): Promise<HomeWidgetPreferences> {
   const at = revision;
   // A read started during a save must not restore the preceding layout after

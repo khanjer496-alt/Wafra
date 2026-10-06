@@ -4,6 +4,7 @@ import { ThemedText } from '@/components/themed-text';
 import { Icon } from '@/components/ui/icon';
 import type { CoinCue } from '@/components/transfer-coins/coin-cues';
 import { RouteCoinLane } from '@/components/transfer-coins/route-coin';
+import { SelectionMark } from '@/components/transfers/transfer-select-mark';
 import { Money } from '@/components/ui/money';
 import { Spacing, type BandPalette } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
@@ -18,6 +19,26 @@ import type { RouteEnd, TransferListItem } from '@/lib/transfer-list';
 const firstLetter = (part: string) => Array.from(part)[0] ?? '';
 /** Words that open with punctuation ("·", "••4410") are separators and masked digits, not names. */
 const isNamePart = (part: string) => !/^\p{P}/u.test(part);
+
+/**
+ * An account label's name and its masked digits, drawn apart so a long name
+ * truncates at its own end while "·4111" stays whole and visible:
+ * "QA current ·4111" → "QA current" + "·4111", "ADCB ••4999" → "ADCB" + "••4999".
+ */
+export function splitAccountDigits(label: string): { name: string; digits: string } {
+  const match = /^(.*?[^\s·•*])\s*([·•*]+\s?\d{2,4})$/u.exec(label);
+  return match ? { name: match[1]!, digits: match[2]! } : { name: label, digits: '' };
+}
+
+/**
+ * The direction a name is laid out in: its first letter's. An Arabic page draws
+ * text right to left, which put a Latin name's ellipsis at its start
+ * ("…ount ·3301"); laid out in its own direction it is cut at its end.
+ */
+export function nameDirection(name: string): 'ltr' | 'rtl' {
+  const first = /\p{L}/u.exec(name)?.[0];
+  return first && /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/u.test(first) ? 'rtl' : 'ltr';
+}
 
 /**
  * One end of a route: initials on the band fill and the name, or a dashed "?" for an unknown side.
@@ -44,16 +65,26 @@ export function RouteChip({ end, label, palette, large, answered, slate, directi
       <ThemedText type="smallBold" style={{ color: ink }}>{label}</ThemedText>
     </View>;
   }
-  return <View style={[styles.chip, !large && styles.chipCapped, unknown
-    ? { borderStyle: 'dashed', borderWidth: 1, borderColor: palette.textSecondary }
-    : { backgroundColor: palette.glyphGround }]}>
-    {unknown
-      ? <ThemedText type="smallBold" themeColor="textSecondary" style={styles.unknownMark}>?</ThemedText>
-      : initials ? <View style={[styles.initials, { backgroundColor: palette.fill }]}>
-        <ThemedText type="micro" style={{ color: palette.onFill }}>{initials}</ThemedText>
-      </View> : null}
-    {unknown ? null
-      : <ThemedText type="smallBold" numberOfLines={large ? undefined : 1} style={styles.chipText}>{label}</ThemedText>}
+  if (unknown) {
+    return <View style={[styles.chip, styles.unknownChip, { borderStyle: 'dashed', borderWidth: 1, borderColor: palette.textSecondary }]}>
+      <ThemedText type="smallBold" themeColor="textSecondary" style={styles.unknownMark}>?</ThemedText>
+    </View>;
+  }
+  // The name yields (truncating at its own end, or wrapping at large text and in a sheet); the
+  // masked digits never do, so "·4111" always says which account it is.
+  const { name, digits } = splitAccountDigits(label);
+  return <View style={[styles.chip, styles.namedChip, { backgroundColor: palette.glyphGround }]}>
+    {initials ? <View style={[styles.initials, { backgroundColor: palette.fill }]}>
+      <ThemedText type="micro" style={{ color: palette.onFill }}>{initials}</ThemedText>
+    </View> : null}
+    {large
+      // Shown whole (a sheet, large text): one label that wraps as a phrase, the digits after the name.
+      ? <ThemedText type="smallBold" style={[styles.chipText, { writingDirection: nameDirection(name) }]}>{label}</ThemedText>
+      : <>
+        <ThemedText type="smallBold" numberOfLines={1} ellipsizeMode="tail"
+          style={[styles.chipText, { writingDirection: nameDirection(name) }]}>{name}</ThemedText>
+        {digits ? <ThemedText type="smallBold" numberOfLines={1} style={styles.chipDigits}>{digits}</ThemedText> : null}
+      </>}
   </View>;
 }
 
@@ -80,29 +111,38 @@ const stripDot = (name: string) => name.replace(/\.+$/, '');
  * mirrors in Arabic. The Transfers list and the transfer review screen both
  * draw transfers with it; the caller names the whole row for screen readers.
  */
-export function TransferRoute({ from, to, fromLabel, toLabel, amountFils, sign, palette, coin, testID, laneTestID, answered, slate, direction }: {
+export function TransferRoute({ from, to, fromLabel, toLabel, amountFils, sign, palette, coin, testID, laneTestID, answered, slate, direction, full }: {
   from: RouteEnd; to: RouteEnd; fromLabel: string; toLabel: string; amountFils: number;
+  /** In a sheet: every name is shown whole (chips wrap instead of truncating), as the details it is. */
+  full?: boolean;
   sign: 'none' | 'minus' | 'plus'; palette: BandPalette; coin?: CoinCue; testID?: string; laneTestID?: string;
   /** How an unknown end was answered, so it is drawn as the answer rather than a "?". */
   answered?: 'own' | 'external'; slate?: string; direction?: TransferListItem['direction'];
 }) {
   const language = useLanguage();
   const large = useLargeTextLayout();
-  return <View testID={testID} style={large ? styles.routeLarge : styles.route}>
-    <RouteChip end={from} label={fromLabel} palette={palette} large={large} answered={answered} slate={slate} direction={direction} />
+  const path = <>
+    <RouteChip end={from} label={fromLabel} palette={palette} large={large || !!full} answered={answered} slate={slate} direction={direction} />
     {/* The line from one end to the other, where a coin travels; stacked, the route reads downward. */}
     <RouteCoinLane cue={coin} stacked={large} rtl={language === 'ar'} palette={palette} testID={laneTestID} />
-    <RouteChip end={to} label={toLabel} palette={palette} large={large} answered={answered} slate={slate} direction={direction} />
+    <RouteChip end={to} label={toLabel} palette={palette} large={large || !!full} answered={answered} slate={slate} direction={direction} />
+  </>;
+  return <View testID={testID} style={large ? styles.routeLarge : styles.route}>
+    {/* From → To is one unit: it never breaks after the arrow. Its chips share the line (a named
+        chip takes the room a short "?" leaves) and the amount moves under it when both cannot fit. */}
+    {large ? path : <View style={styles.path}>{path}</View>}
     <View style={large ? undefined : styles.amount}>
       <Money fils={amountFils} sign={sign} type="smallBold" decimals />
     </View>
   </View>;
 }
 
-export function TransferRouteRow({ item, accountLabel, palette, onPress, first, coin }: {
+export function TransferRouteRow({ item, accountLabel, palette, onPress, first, coin, select }: {
   item: TransferListItem; accountLabel: (id: string) => string; palette: BandPalette; onPress: () => void; first: boolean;
   /** When given and fresh, a coin travels this route once (see transfer-coins/coin-cues). */
   coin?: CoinCue;
+  /** Select mode: the row is a checkbox and carries its tick box. */
+  select?: { checked: boolean; disabled?: boolean };
 }) {
   const language = useLanguage();
   const words = transferActivityCopy(language);
@@ -123,10 +163,7 @@ export function TransferRouteRow({ item, accountLabel, palette, onPress, first, 
   const amountWord = `${ledgerMoney?.currency ?? ledgerCurrencyDisplay()} ${formatAmount(item.amountFils, { decimals: true })}`;
   const label = [`${stripDot(named(item.from))} ${words.route.to} ${stripDot(named(item.to))}`, directionWord, amountWord,
     shortDateWithYear(item.date), tag].join('. ');
-  return <Pressable testID={`transfer-row-${item.key}`} accessibilityRole="button" accessibilityLabel={label}
-    onPress={onPress}
-    style={({ pressed }) => [styles.row, !first && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.rule },
-      { opacity: pressed ? 0.7 : 1 }]}>
+  const body = <>
     <TransferRoute from={item.from} to={item.to} fromLabel={shown(item.from)} toLabel={shown(item.to)}
       amountFils={item.amountFils} sign={sign} palette={palette} coin={coin} answered={answered} slate={slate}
       direction={item.direction} testID={`transfer-route-${item.key}`} laneTestID={`transfer-lane-${item.key}`} />
@@ -134,6 +171,18 @@ export function TransferRouteRow({ item, accountLabel, palette, onPress, first, 
       <ThemedText type="meta" style={{ color: palette.textSecondary }}>{shortDateWithYear(item.date)}</ThemedText>
       <RouteTag tag={item.tag} label={tag} palette={palette} slate={slate} />
     </View>
+  </>;
+  return <Pressable testID={`transfer-row-${item.key}`} accessibilityRole={select ? 'checkbox' : 'button'}
+    accessibilityLabel={select ? `${words.select.item}. ${label}` : label}
+    accessibilityState={select ? { checked: select.checked, disabled: !!select.disabled } : undefined}
+    aria-checked={select ? select.checked : undefined} disabled={select?.disabled}
+    onPress={onPress}
+    style={({ pressed }) => [styles.row, !first && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.rule },
+      { opacity: pressed ? 0.7 : 1 }]}>
+    {select ? <View style={styles.selectRow}>
+      <SelectionMark checked={select.checked} palette={palette} />
+      <View style={styles.selectBody}>{body}</View>
+    </View> : body}
   </Pressable>;
 }
 
@@ -141,14 +190,20 @@ const styles = StyleSheet.create({
   row: { minHeight: 64, paddingVertical: Spacing.three, gap: Spacing.one },
   route: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexWrap: 'wrap' },
   routeLarge: { flexDirection: 'column', alignItems: 'flex-start', gap: Spacing.one },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 10, paddingVertical: 3, paddingStart: 3, paddingEnd: 8 },
-  chipCapped: { maxWidth: '42%', flexShrink: 1 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 10, paddingVertical: 3, paddingStart: 3, paddingEnd: 8, maxWidth: '100%' },
+  namedChip: { flexShrink: 1, minWidth: 0 },
+  unknownChip: { flexShrink: 0 },
   initials: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center' },
   unknownMark: { paddingHorizontal: 8 },
   answeredIcon: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center' },
   answeredChip: { flexShrink: 0, maxWidth: '100%' },
-  chipText: { flexShrink: 1 },
+  chipText: { flexShrink: 1, minWidth: 0 },
+  // The chip's gap is the initials' space; the digits sit a word-space from the name.
+  chipDigits: { flexShrink: 0, marginStart: -2 },
+  path: { flexDirection: 'row', alignItems: 'center', gap: Spacing.one, flexShrink: 1, minWidth: 0, maxWidth: '100%' },
   amount: { marginStart: 'auto' },
   meta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: Spacing.two },
+  selectRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  selectBody: { flex: 1, minWidth: 0, gap: Spacing.one },
   tag: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
 });

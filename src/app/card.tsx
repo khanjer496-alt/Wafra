@@ -94,7 +94,7 @@ function CardScreen({ accountId, all }: { accountId: string; all: boolean }) {
     <BandScaffold band="accounts" testID="card-screen" nav={nav} contentStyle={styles.content}
       bandContent={<View style={styles.band}>
         <View style={[styles.identity, large && styles.stack]}>
-          <AccountTile account={account} size={52} />
+          <AccountTile account={account} size={48} />
           <View style={styles.grow}>
             <ThemedText type="heading" accessibilityRole="header" style={{ color: band.onBand }}>{account.name}</ThemedText>
             <ThemedText type="small" style={{ color: band.onBandSecondary }}>{[kind, account.last4 ? `•• ${account.last4}` : null].filter(Boolean).join(' · ')}</ThemedText>
@@ -139,10 +139,10 @@ function CardScreen({ accountId, all }: { accountId: string; all: boolean }) {
 
 const styles = StyleSheet.create({
   listContainer: { flex: 1, paddingBottom: 0 }, listContent: { paddingBottom: 32, gap: Spacing.three },
-  content: { gap: Spacing.four }, band: { gap: Spacing.three },
-  identity: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three },
+  content: { gap: Spacing.three }, band: { gap: Spacing.three },
+  identity: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three - 4 },
   grow: { flex: 1 }, stack: { flexDirection: 'column', alignItems: 'stretch' },
   period: { gap: 2 },
   figures: { flexDirection: 'row', gap: Spacing.three }, figuresStacked: { flexDirection: 'column' },
-  fact: { flex: 1, minWidth: 0 }, section: { gap: Spacing.three },
+  fact: { flex: 1, minWidth: 0 }, section: { gap: Spacing.two + 4 },
 });

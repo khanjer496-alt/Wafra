@@ -75,3 +75,13 @@ Pairing rules and the reconciler's matching, the review screen's internals beyon
 - Summary layout: a component test that the header renders text and Net on separate lines at 360pt width, plus large-text stacking.
 - E2E: `e2e-transfer-review`, `e2e-transfer-batch`, `e2e-card-activity` copy updates; new browser checks for tile filtering and answering from the question card with Undo at 320/390px, light/dark, EN/AR.
 - Device: Android phone at default font size for the summary fix; iOS simulator pass of the Transfers page.
+
+### Follow-up (2026-10-05, one page)
+
+Device feedback: two transfer pages with two vocabularies. This replaces the previous follow-up's bulk review screen.
+
+- `/transfers` is the only transfers screen. `/review-transfers` redirects to it, keeping `?transactionId=` (the entry's *What is this?* sheet opens on Transfers). Home's notice, the question card's **See all** and the unasked-entries link stay on Transfers.
+- Pending reconciler groups are route rows with an **N entries** count under **Waiting for your answer**; tapping one opens the same *What is this?* sheet with the three answers, saved for each entry through `resolveTransferBatch` (explicit single-entry decisions) with the review screen's fingerprint, generation, durability and repeated-tap guarantees, plus Undo in the toast.
+- The card-repayment suggestion is **Linked to <card>** under *Moved to my own account* (and **looks like your <card>** on the row), not a separate block.
+- **Select** turns on select mode inside Transfers: tick rows and groups, then one of the three answers in the bottom bar opens the batch confirmation.
+- The old sheet's words ("Check a transfer", "What was this transfer?", "Save classification", "Leave as recorded", "Match as transfer", "Not a pair") are gone from the UI; new copy is in `transfer-activity-copy.ts` (English and Arabic).

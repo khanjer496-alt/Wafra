@@ -53,10 +53,12 @@ test('duplicate observations, archived accounts and likely card repayments are q
     ['card', 'dup', 'gone']);
 });
 
-test('Home counts the card\'s queue and opens the review screen only when the card has nothing to ask', () => {
+test('Home counts the card\'s queue and always opens the one Transfers page', () => {
   assert.match(homeToday, /const queue = transferQuestionQueue\(activity\);/);
   assert.match(homeToday, /queue\.length > 0 \? new Set\(queue\.map\(item => item\.transaction\.id\)\)\s*: unaskedPendingIds\(activity, reconciliation\.pendingIds\)/);
-  assert.match(homeToday, /router\.push\(pendingTransfers\.questions === 0 \? '\/review-transfers' : '\/transfers'\)/);
+  // What the card cannot ask waits on Transfers as a group row, so there is no second page to open.
+  assert.match(homeToday, /onPress=\{\(\) => router\.push\('\/transfers'\)\} \/>/);
+  assert.doesNotMatch(homeToday, /review-transfers/);
 });
 
 function transfersHarness(rows, rec) {
@@ -74,9 +76,12 @@ function transfersHarness(rows, rec) {
   return h;
 }
 
-test('Transfers: nothing the card can ask, but entries still queued, opens the review screen instead of a dead end', () => {
-  const rows = [leg('dup', 'expense', 'current'), leg('dup', 'expense', 'current')];
-  const h = transfersHarness(rows, reconciliation([['dup', { id: 'dup', status: 'ownership-unknown', candidateIds: [] }]], ['dup']));
+test('Transfers: nothing the card can ask, but entries still queued, lists them and opens select mode instead of a dead end', () => {
+  // A queued entry on an archived account: no question card, but select mode can answer it.
+  const rows = [leg('gone', 'expense', 'old')];
+  const rec = reconciliation([['gone', { id: 'gone', status: 'ownership-unknown', candidateIds: [] }]], ['gone']);
+  rec.groups = [{ id: 'g-gone', transactionIds: ['gone'], accountId: 'old', direction: 'expense', status: 'ownership-unknown', bulkEligible: false }];
+  const h = transfersHarness(rows, rec);
   const tree = h.renderScreen('transfers');
   assert.equal(byId(tree, 'transfer-question-card'), undefined);
   const link = byId(tree, 'transfers-review-link');
@@ -84,8 +89,27 @@ test('Transfers: nothing the card can ask, but entries still queued, opens the r
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
   assert.ok(text(link).includes(words.card.title(1)) && text(link).includes(words.card.seeAllPlain), 'the count once, then See all');
   assert.equal(link.props.accessibilityRole, 'button');
+  // The queued entry is on the page itself, as a group row the card cannot ask about.
+  assert.ok(walk(tree).some(node => node.props?.testID?.startsWith('transfer-group-')), 'the unasked entry is a row here');
   link.props.onPress();
-  assert.deepEqual(h.events.filter(event => event[0] === 'route').at(-1), ['route', '/review-transfers']);
+  assert.equal(h.events.filter(event => event[0] === 'route').length, 0, 'no second page');
+  assert.ok(h.events.some(event => event[0] === 'state' && event[2] === true), 'See all turns on select mode on this page');
+});
+
+test('Transfers: when only duplicate-id observations wait, they are shown read-only and no See all opens an empty select mode', () => {
+  const rows = [leg('dup', 'expense', 'current'), leg('dup', 'expense', 'current')];
+  const rec = reconciliation([['dup', { id: 'dup', status: 'ownership-unknown', candidateIds: [] }]], ['dup']);
+  // The reconciler groups every queued id (here the duplicate observation) by account and other side.
+  rec.groups = [{ id: 'g-dup', transactionIds: ['dup'], accountId: 'current', direction: 'expense', status: 'ownership-unknown', bulkEligible: false }];
+  const h = transfersHarness(rows, rec);
+  const tree = h.renderScreen('transfers');
+  const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
+  assert.equal(byId(tree, 'transfer-question-card'), undefined);
+  assert.equal(byId(tree, 'transfers-review-link'), undefined, 'no link to a select mode with nothing to tick');
+  assert.equal(byId(tree, 'transfers-select'), undefined, 'and no Select');
+  const row = byId(tree, 'transfer-group-g-dup:duplicate');
+  assert.ok(row, 'the duplicate observation is still on the page');
+  assert.ok(text(row).includes(words.group.duplicate), 'saying why it cannot be answered here');
 });
 
 test('Transfers: one question plus an unasked entry keeps See all on the card', () => {
@@ -95,10 +119,11 @@ test('Transfers: one question plus an unasked entry keeps See all on the card', 
   const tree = h.renderScreen('transfers');
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
   const card = byId(tree, 'transfer-question-card');
-  assert.ok(text(card).includes(words.card.title(1)), 'the card asks its one question');
+  assert.ok(text(card).includes(words.card.title(2)), 'the title counts everything waiting, not only what the card asks');
+  assert.ok(!text(card).includes(words.card.step(1, 1)), 'no "1 of 1" beside a title of 2');
   const seeAll = byId(card, 'transfer-question-see-all');
   assert.ok(seeAll, 'See all is offered although the card has one question');
-  assert.ok(text(seeAll).includes(words.card.seeAll(2)));
+  assert.equal(text(seeAll).trim(), words.card.seeAllPlain);
   assert.equal(byId(tree, 'transfers-review-link'), undefined);
   const lone = transfersHarness([leg('ask', 'expense', 'current')], reconciliation([unknown('ask')], ['ask']));
   assert.equal(byId(lone.renderScreen('transfers'), 'transfer-question-see-all'), undefined, 'one question and nothing else: no See all');
@@ -134,7 +159,7 @@ for (const language of ['en', 'ar']) {
   });
 }
 
-test('the question card gives its count once in the title; See all counts only what the card does not ask', () => {
+test('the question card gives its count once, in the title, and See all never disagrees with it', () => {
   const h = componentHarness('en');
   const { TransferQuestionCard } = h.deps['@/components/transfers/transfer-question-card'];
   const words = h.deps['@/lib/transfer-activity-copy'].transferActivityCopy('en');
@@ -143,9 +168,11 @@ test('the question card gives its count once in the title; See all counts only w
   const plain = byId(TransferQuestionCard({ transaction, index: 0, total: 3, accountLabel: 'FAB', palette, busy: false,
     onAnswer() {}, onSeeAll() {} }), 'transfer-question-see-all');
   assert.equal(text(plain).trim(), words.card.seeAllPlain);
-  const more = byId(TransferQuestionCard({ transaction, index: 0, total: 3, more: 2, accountLabel: 'FAB', palette, busy: false,
-    onAnswer() {}, onSeeAll() {} }), 'transfer-question-see-all');
-  assert.ok(text(more).includes(words.card.seeAll(5)));
+  const card = TransferQuestionCard({ transaction, index: 0, total: 3, more: 2, accountLabel: 'FAB', palette, busy: false,
+    onAnswer() {}, onSeeAll() {} });
+  assert.ok(text(card).includes(words.card.title(5)), 'the title counts the card\'s questions and the rest');
+  assert.ok(!text(card).includes(words.card.step(1, 3)), 'no "1 of 3" beside a title of 5');
+  assert.equal(text(byId(card, 'transfer-question-see-all')).trim(), words.card.seeAllPlain);
   const ar = componentHarness('ar').deps['@/lib/transfer-activity-copy'].transferActivityCopy('ar');
   assert.equal(typeof ar.card.seeAllPlain, 'string');
   assert.notEqual(ar.card.seeAllPlain, words.card.seeAllPlain, 'Arabic has its own words');

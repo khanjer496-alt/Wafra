@@ -67,6 +67,8 @@ class EffectHarness {
       setWatchDraft: value => { ui.watch = value; },
       setWatchOpen: value => { ui.watchOpen = value; },
       setDailySummaryDraft: () => {}, setNotificationsAllowed: () => {}, setCurrencyDraft: () => {},
+      // A journey reset starts the Goals tray's per-run memory over (e-goals).
+      setJourneyRun: () => {}, forgetTrayTiles: () => {},
       setResult: () => {}, setSmsDenied: () => {}, setCompletionOutcome: value => { ui.outcome = value; },
       setAndroidSmsReady: value => { ui.smsReady = value; },
       setAndroidNotificationReady: value => { ui.notificationReady = value; },

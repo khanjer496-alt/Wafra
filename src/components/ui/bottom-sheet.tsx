@@ -235,7 +235,10 @@ export function BottomSheet({
   const windowBottomInset = Platform.OS === 'ios'
     ? Math.min(insets.bottom, initialWindowMetrics?.insets.bottom ?? insets.bottom)
     : insets.bottom;
-  const bottomClearance = Spacing.five - 2 + (keyboardHeight > 0 ? 0 : windowBottomInset);
+  // Clear of the home indicator / navigation bar, and no more: on Android the
+  // inset alone is 24–48dp, and a further 30pt of padding left a band of empty
+  // sheet under every footer.
+  const bottomClearance = Spacing.three + (keyboardHeight > 0 ? 0 : windowBottomInset);
   const hasFooter = footer !== null && footer !== undefined && typeof footer !== 'boolean';
   // At the accessibility text sizes a pinned footer (two full-width wrapped
   // buttons) can take most of a phone screen and leave the content a sliver
@@ -315,7 +318,7 @@ export function BottomSheet({
                 // fields buried under the keys with no way to scroll to them.
                 paddingBottom: hasFooter ? 0 : bottomClearance,
                 marginBottom: keyboardHeight,
-                maxHeight: Math.max(0, Math.min(screenHeight * (largeText ? 0.96 : 0.88), screenHeight - keyboardHeight - insets.top)),
+                maxHeight: Math.max(0, Math.min(screenHeight * (largeText ? 0.96 : 0.92), screenHeight - keyboardHeight - insets.top)),
               },
               Elevation,
               palette && styles.bandSheet,
@@ -401,14 +404,14 @@ const styles = StyleSheet.create({
     height: 5,
     borderRadius: Radius.full,
     alignSelf: 'center',
-    marginBottom: Spacing.two,
+    marginBottom: Spacing.one,
   },
   header: {
     gap: Spacing.two,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: Spacing.three,
+    paddingBottom: Spacing.two,
   },
   close: {
     flexShrink: 0,
@@ -423,15 +426,17 @@ const styles = StyleSheet.create({
   closePlain: { borderWidth: 0 },
   closeRow: { flexDirection: 'row', justifyContent: 'flex-end' },
   scroll: { flexShrink: 1, minHeight: 0 },
+  // One rhythm for every sheet: 12pt between blocks (a sheet is read at a
+  // glance; the 16pt screen rhythm made each one a scroll on a phone).
   content: {
-    gap: Spacing.three,
+    gap: Spacing.two + 4,
     paddingHorizontal: ScreenPadding,
     paddingBottom: Spacing.two,
   },
   footer: {
     flexShrink: 0,
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: Spacing.three,
+    paddingTop: Spacing.two + 4,
     paddingHorizontal: ScreenPadding,
   },
   // Inside the scroll content, which already carries the side padding.

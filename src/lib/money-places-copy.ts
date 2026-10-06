@@ -10,6 +10,9 @@
 /** Arabic count agreement for "charges" (دفعة). */
 const arCharges = (n: number): string =>
   n === 1 ? 'آخر دفعة' : n === 2 ? 'آخر دفعتين' : n >= 3 && n <= 10 ? `آخر ${n} دفعات` : `آخر ${n} دفعة`;
+/** Arabic count agreement for "days" (يوم). */
+const arDays = (n: number): string =>
+  n === 1 ? 'يوم واحد' : n === 2 ? 'يومين' : n >= 3 && n <= 10 ? `${n} أيام` : `${n} يوماً`;
 
 export const moneyPlacesCopy = {
   en: {
@@ -82,6 +85,9 @@ export const moneyPlacesCopy = {
     // Card payment sheet
     cardPaymentTitle: 'Card payment',
     cardPaymentFor: (card: string, date: string) => `${card} · due ${date}`,
+    /** Under the card payment's figure: when it is due, in words (never a bare "9d"). */
+    dueInDays: (days: number) => days === 0 ? 'Due today' : days === 1 ? 'Due tomorrow' : `Due in ${days} days`,
+    lateByDays: (days: number) => days === 1 ? '1 day late' : `${days} days late`,
     fullStatement: 'Full statement',
     restOfStatement: 'What is left on the statement',
     minimumDue: 'Minimum due',
@@ -217,6 +223,8 @@ export const moneyPlacesCopy = {
       `عند تفعيل الإشعارات، تذكّرك وفرة قبل ${date} بثلاثة أيام ومرة أخرى في يوم الاستحقاق.`,
     cardPaymentTitle: 'دفعة البطاقة',
     cardPaymentFor: (card: string, date: string) => `${card} · الاستحقاق ${date}`,
+    dueInDays: (days: number) => days === 0 ? 'مستحقة اليوم' : days === 1 ? 'مستحقة غداً' : `مستحقة بعد ${arDays(days)}`,
+    lateByDays: (days: number) => `متأخرة ${arDays(days)}`,
     fullStatement: 'الكشف كاملاً',
     restOfStatement: 'المتبقي من الكشف',
     minimumDue: 'الحد الأدنى المستحق',

@@ -150,6 +150,10 @@ const shouldSkipFreshAndroidResumeScan = (now = Date.now()): boolean =>
 // grace period. A real new SMS received while backgrounded is still picked up
 // after this bounded delay (or immediately by a provider event/pull refresh).
 const ANDROID_RESUME_SCAN_GRACE_MS = 5_000;
+// A provider change that arrived while Wafra was away is real evidence and is
+// still read on resume, but not inside the reopened window's first frames
+// (Home's entrance, the resumed activity's first draws).
+const ANDROID_RESUME_HINT_GRACE_MS = 1_200;
 const ANDROID_INITIAL_SCAN_GRACE_MS = 6_000;
 const DAILY_SUMMARY_MAINTENANCE_GRACE_MS = 9_000;
 // Payment-reminder recurrence analysis is useful background maintenance, not
@@ -1490,11 +1494,16 @@ export function useAutoImport(
       if (canScan()) await latestScan.current(false, true);
     }, canScan);
     let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+    // The resume's short grace before a pending provider hint is read.
+    let hintTimer: ReturnType<typeof setTimeout> | null = null;
     // The native observer checks permission only when it starts. Recreate it
     // after a denied permission is restored; foreground checks stay available
     // while it is denied so returning from Settings can recover capture.
     const unsubscribe = needsPermission ? () => {} : subscribeInboxChanges(() => {
       providerHintPending = true;
+      // Inside a resume's grace the read is already queued for its end; an
+      // edge the observer delivers as the app reopens joins it.
+      if (hintTimer !== null) return;
       scheduler.request();
     });
     const foreground = RNAppState.addEventListener('change', (next) => {
@@ -1503,13 +1512,23 @@ export function useAutoImport(
           clearTimeout(resumeTimer);
           resumeTimer = null;
         }
+        // The hint itself stays pending; the next resume reads it.
+        if (hintTimer !== null) {
+          clearTimeout(hintTimer);
+          hintTimer = null;
+        }
         return;
       }
       // Real provider evidence outranks the source-free freshness throttle. If
       // it arrived while Wafra was backgrounded, re-arm the scheduler now that
-      // canScan() is true instead of silently stranding the pending edge.
+      // canScan() is true instead of silently stranding the pending edge, but
+      // after the reopened window's first frames (Home's entrance), not in them.
       if (providerHintPending) {
-        scheduler.request();
+        if (hintTimer !== null) clearTimeout(hintTimer);
+        hintTimer = setTimeout(() => {
+          hintTimer = null;
+          if (canScan()) scheduler.request();
+        }, ANDROID_RESUME_HINT_GRACE_MS);
         return;
       }
       // A quick app switch after a completed scan has no new source evidence.
@@ -1531,6 +1550,7 @@ export function useAutoImport(
     return () => {
       mounted = false;
       if (resumeTimer !== null) clearTimeout(resumeTimer);
+      if (hintTimer !== null) clearTimeout(hintTimer);
       unsubscribe();
       foreground.remove();
       scheduler.dispose();

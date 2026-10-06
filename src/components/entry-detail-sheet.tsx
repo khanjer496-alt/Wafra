@@ -6,8 +6,8 @@ import { ThemedText } from '@/components/themed-text';
 import { MerchantSpendingLink } from '@/components/merchant-spending-link';
 import { accountDisplayName, isMoneyMovementOnly, isTransfer as isLedgerTransfer, isUnassignedIncome, cachedTransferReconciliationForState } from '@/lib/ledger';
 import { canMarkOwnTransfer, isTransferCandidate, transferOwnership, type TransferAssessment } from '@/lib/transfer-reconciliation';
-import { currentAnswer, ownCandidates, type TransferAnswer } from '@/lib/transfer-answer';
-import { transferActivityCopy } from '@/lib/transfer-activity-copy';
+import { currentAnswer, ownCandidates, transferFingerprintsOf, type TransferAnswer } from '@/lib/transfer-answer';
+import { transferActivityCopy, transferMetaLine, unbroken } from '@/lib/transfer-activity-copy';
 import { useTransferAnswer } from '@/hooks/use-transfer-answer';
 import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
 import { transferReviewCopy } from '@/lib/transfer-review-copy';
@@ -28,7 +28,7 @@ import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { useTheme } from '@/hooks/use-theme';
 
-import { formatAmount, formatAmountForInput, friendlyDate, fullDateTime, parseAmountToFils, shortDate, toISODate } from '@/lib/format';
+import { clockTime, formatAmount, formatAmountForInput, friendlyDate, fullDateTime, parseAmountToFils, shortDate, shortDateWithYear, toISODate } from '@/lib/format';
 import { formatOriginalCurrency, originalMoneyOf } from '@/lib/fx';
 import { ledgerCurrencyCode } from '@/lib/markets';
 import { overrideFitsDirection } from '@/lib/sms-parser';
@@ -67,6 +67,12 @@ interface EntryDetailSheetProps {
    * Transactions and Home are ink.
    */
   band?: BandId;
+  /**
+   * The screen's own transfer answer hook (Transfers passes its one), so the
+   * screen knows while this sheet saves or clears an answer and holds its
+   * controls. Without it the sheet uses its own.
+   */
+  transferAnswers?: Pick<ReturnType<typeof useTransferAnswer>, 'answer' | 'undo' | 'busy'>;
 }
 
 /**
@@ -76,7 +82,7 @@ interface EntryDetailSheetProps {
  * row — "what actually was this?" — was answered by six input boxes. Reading
  * comes first now; editing is one tap away.
  */
-export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment: passedAssessment, initialMode = 'read', startWithAccountPicker = false, band: bandId = 'home' }: EntryDetailSheetProps) {
+export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true, transferAssessment: passedAssessment, initialMode = 'read', startWithAccountPicker = false, band: bandId = 'home', transferAnswers }: EntryDetailSheetProps) {
   const { getCategory, categoryLabel, expenseCategories, incomeCategories } = useCategoryCatalog();
   const theme = useTheme();
   const band = useBand(bandId);
@@ -130,7 +136,8 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   const [categoryPicking, setCategoryPicking] = useState(false);
   const [pickedCategory, setPickedCategory] = useState<CategoryId>('other');
   // The "What is this?" answer. Like every hook here it runs before the early return below.
-  const { answer, busy } = useTransferAnswer();
+  const ownAnswers = useTransferAnswer();
+  const { answer, undo, busy } = transferAnswers ?? ownAnswers;
   const activityWords = transferActivityCopy(language);
   const answerWords = activityWords.answers;
   const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
@@ -217,7 +224,20 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
   // Only a confirmed pair is linked; a likely-own counterpart is a suggestion, not a link.
   const linkedTo = transferAssessment?.status === 'confirmed-own' && transferAssessment.counterpartId
     ? rowsById.get(transferAssessment.counterpartId) : undefined;
+  // The likely other side while it is still a suggestion: a matching entry on another of the person's
+  // accounts or cards (same amount, close in time), shown under "my own account" as "Looks like your …".
+  // Only a likely own-account pair is linked when answered; a likely card repayment is saved as own
+  // without a link (ownCandidates offers nothing for it), so neither is ever called "Linked to".
+  const suggestedOther = !answered && transferAssessment?.counterpartId &&
+    (transferAssessment.status === 'likely-own' || transferAssessment.status === 'likely-card-repayment')
+    ? rowsById.get(transferAssessment.counterpartId) : undefined;
   const answerLabels = transaction.type === 'income' ? answerWords.in : answerWords.out;
+  // The transfer status, said once: a waiting or own transfer's explainer below already leads with
+  // it ("Transfer needs review · not counted yet"), so the chip is drawn only when it says more.
+  const explainerTitle = confirmedOwnTransfer ? transferWords.confirmedOwn : pendingTransfer ? transferWords.ownershipUnknown : null;
+  const transferStatus = presentation.repayment ? presentation.tag : pendingTransfer ? transferWords.ownershipUnknown
+    : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel');
+  const statusChip = transferStatus && transferStatus !== explainerTitle ? transferStatus : null;
   const accountLabelFor = (id: string) => {
     const found = state.accounts.find((a) => a.id === id);
     return found ? accountDisplayName(found) : activityWords.accountUnknown;
@@ -400,6 +420,14 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
     })}`
     : null;
 
+  // The read footer's three actions; the order is the layout's (see footer).
+  const readDelete = <EButton key="delete" palette={{ ...band, tint: band.statusOver }} size="compact" variant="quiet"
+    label={t('delete')} onPress={() => setConfirmingDelete(true)} style={styles.quietAction} />;
+  const readEdit = <EButton key="edit" palette={band} size="compact" variant="secondary" label={extra.edit}
+    accessibilityLabel={t('editEntry')} onPress={() => setEditing(true)} style={styles.rowAction} />;
+  const readDone = <EButton key="done" palette={band} size="compact" label={extra.done} onPress={onClose}
+    testID="entry-detail-done" style={styles.rowAction} />;
+
   return (
     <BottomSheet
       visible
@@ -409,23 +437,20 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       palette={band}
       footer={categoryPicking ? (
           <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-            <EButton palette={band} variant="secondary" label={t('cancel')} onPress={cancelCategory} style={styles.action} />
-            <EButton palette={band} label={extra.done} onPress={commitCategory} style={styles.action} />
+            <EButton palette={band} size="compact" variant="secondary" label={t('cancel')} onPress={cancelCategory} style={styles.action} />
+            <EButton palette={band} size="compact" label={extra.done} onPress={commitCategory} style={styles.action} />
           </View>
       ) : editing ? (
           <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-            <EButton palette={band} label={t('saveChanges')} onPress={save} disabled={!canSave} style={styles.action} />
-            <EButton palette={band} variant="secondary" label={t('cancel')} onPress={() => setEditing(false)} style={styles.action} />
+            <EButton palette={band} size="compact" label={t('saveChanges')} onPress={save} disabled={!canSave} style={styles.action} />
+            <EButton palette={band} size="compact" variant="secondary" label={t('cancel')} onPress={() => setEditing(false)} style={styles.action} />
           </View>
       ) : (
-          <View style={styles.footerStack}>
-            {/* Reading an entry ends with Done; changing it is one step aside. */}
-            <EButton palette={band} label={extra.done} onPress={onClose} testID="entry-detail-done" />
-            <View testID="entry-detail-actions" style={[styles.actions, largeText && styles.actionsLarge]}>
-              <EButton palette={band} variant="secondary" label={t('editEntry')} onPress={() => setEditing(true)} style={styles.action} />
-              <EButton palette={{ ...band, tint: band.statusOver }} variant="quiet" label={t('delete')}
-                onPress={() => setConfirmingDelete(true)} style={styles.action} />
-            </View>
+          // Reading an entry ends with Done; changing it is one step aside, in
+          // the same short row (Delete at the start, Done at the end). Stacked
+          // at the accessibility sizes, Done leads.
+          <View testID="entry-detail-actions" style={[styles.actions, largeText ? styles.actionsLarge : styles.readActions]}>
+            {largeText ? [readDone, readEdit, readDelete] : [readDelete, readEdit, readDone]}
           </View>
       )}>
       {editing ? <View style={[styles.head, styles.editHead, { borderColor: band.rule }]}>
@@ -440,49 +465,57 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           style={styles.editHeadAmount}
         />
       </View> : <View style={styles.head} testID="entry-detail-head">
-        <MerchantAvatar title={transaction.title} category={transaction.category} size={64} />
-        <ThemedText type="heading" style={styles.headTitle}>{presentation.title}</ThemedText>
+        {/* Who and when beside a 44pt logo, then the figure: the sheet's
+            answer stays in view with its question and actions below it. */}
+        <View style={styles.headRow}>
+          <MerchantAvatar title={transaction.title} category={transaction.category} size={44} />
+          <View style={styles.headText}>
+            <ThemedText type="heading" style={styles.headTitle}>{presentation.title}</ThemedText>
+            <ThemedText type="meta" style={{ color: band.textSecondary }}>
+              {friendlyDate(transaction.date, toISODate(new Date()))}
+            </ThemedText>
+          </View>
+        </View>
         {/* Decimals on. This sheet exists to answer "what exactly was this",
             and it sat above an edit field showing 72.73 while itself reading
             −73. Both the list and details now retain the exact minor units. */}
         <BandFigure testID="entry-detail-amount" fils={transaction.amountFils} sign={presentation.sign} decimals
-          palette={band} size="hero" fitInset={8}
+          palette={band} size="large" fitInset={8}
           color={income && !pendingTransfer && !confirmedTransfer ? theme.income : band.text}
-          secondaryColor={band.textSecondary} style={styles.headAmount} />
-        <ThemedText type="meta" style={[styles.headDate, { color: band.textSecondary }]}>
-          {friendlyDate(transaction.date, toISODate(new Date()))}
-        </ThemedText>
-        {fxLine ? <ThemedText type="meta" tabular testID="entry-fx-line" style={[styles.fxLine, { color: band.textSecondary }]}>
+          secondaryColor={band.textSecondary} />
+        {fxLine ? <ThemedText type="meta" tabular testID="entry-fx-line" style={{ color: band.textSecondary }}>
           {fxLine}</ThemedText> : null}
       </View>}
 
       {/* What it was, as chips: its category (opens the picker) and, on an
-          ordinary row, the one-tap "Moved to my own account". */}
-      {!editing && !categoryPicking ? <View style={styles.chips} testID="entry-detail-chips">
-        {confirmedTransfer || pendingTransfer ? <View accessible accessibilityRole="text" style={[styles.chip, { backgroundColor: band.card, borderColor: band.rule }]}>
+          ordinary row, the one-tap "Moved to my own account" — drawn as an
+          action (outlined in the tint, its own icon), never as a status. */}
+      {!editing && !categoryPicking && (statusChip || !(confirmedTransfer || pendingTransfer) || canMarkTransfer || canUnmarkTransfer)
+        ? <View style={styles.chips} testID="entry-detail-chips">
+        {confirmedTransfer || pendingTransfer ? statusChip ? <View accessible accessibilityRole="text" testID="entry-transfer-status"
+          style={[styles.chip, { backgroundColor: band.card, borderColor: band.rule }]}>
           <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={{ color: band.text }}>{presentation.repayment ? presentation.tag : pendingTransfer ? transferWords.ownershipUnknown
-            : confirmedOwnTransfer ? transferWords.confirmedOwn : t('transferLabel')}</ThemedText>
-        </View> : <Pressable accessibilityRole="button" testID="entry-category-chip"
+          <ThemedText type="small" style={[styles.chipText, { color: band.text }]}>{statusChip}</ThemedText>
+        </View> : null : <Pressable accessibilityRole="button" testID="entry-category-chip"
           accessibilityLabel={`${t('category')}: ${categoryLabel(meta)}`}
           onPress={() => { setPickedCategory(transaction.category); setCategoryPicking(true); }}
           style={({ pressed }) => [styles.chip, { backgroundColor: band.fill, borderColor: band.fill, opacity: pressed ? 0.8 : 1 }]}>
           <Icon name={meta.icon} size={16} color={band.onFill} />
-          <ThemedText type="smallBold" style={{ color: band.onFill }}>{categoryLabel(meta)}</ThemedText>
+          <ThemedText type="smallBold" style={[styles.chipText, { color: band.onFill }]}>{categoryLabel(meta)}</ThemedText>
         </Pressable>}
         {canMarkTransfer ? <Pressable accessibilityRole="button" testID="entry-mark-transfer"
           accessibilityLabel={answerLabels.own}
           onPress={markAsTransfer}
-          style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
-          <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={{ color: band.text }}>{answerLabels.own}</ThemedText>
+          style={({ pressed }) => [styles.chip, styles.actionChip, { borderColor: band.tint, opacity: pressed ? 0.7 : 1 }]}>
+          <Icon name="wallet" size={16} color={band.tint} />
+          <ThemedText type="smallBold" style={[styles.chipText, { color: band.tint }]}>{answerLabels.own}</ThemedText>
         </Pressable> : null}
         {canUnmarkTransfer ? <Pressable accessibilityRole="button" testID="entry-unmark-transfer"
           accessibilityLabel={answerLabels.none}
           onPress={unmarkTransfer}
-          style={({ pressed }) => [styles.chip, { backgroundColor: band.card, borderColor: band.rule, opacity: pressed ? 0.8 : 1 }]}>
-          <Icon name="repeat" size={16} color={band.text} />
-          <ThemedText type="small" style={{ color: band.text }}>{answerLabels.none}</ThemedText>
+          style={({ pressed }) => [styles.chip, styles.actionChip, { borderColor: band.tint, opacity: pressed ? 0.7 : 1 }]}>
+          <Icon name="close" size={16} color={band.tint} />
+          <ThemedText type="smallBold" style={[styles.chipText, { color: band.tint }]}>{answerLabels.none}</ThemedText>
         </Pressable> : null}
       </View> : null}
 
@@ -500,16 +533,12 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
         <ThemedText type="small" themeColor="textSecondary">{presentation.explanation}</ThemedText>
       </View> : null}
 
-      {(confirmedOwnTransfer || pendingTransfer) && (
+      {confirmedOwnTransfer && (
         <View
-          testID={confirmedOwnTransfer ? 'own-transfer-explainer' : 'pending-transfer-explainer'}
+          testID="own-transfer-explainer"
           style={[styles.transferMeaning, { borderColor: band.rule, backgroundColor: band.card }]}>
-          <ThemedText type="smallBold">
-            {confirmedOwnTransfer ? transferWords.confirmedOwn : transferWords.ownershipUnknown}
-          </ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {confirmedOwnTransfer ? transferWords.ownBody : transferWords.pendingBody}
-          </ThemedText>
+          <ThemedText type="smallBold">{transferWords.confirmedOwn}</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">{transferWords.ownBody}</ThemedText>
         </View>
       )}
 
@@ -520,9 +549,9 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           <ThemedText type="smallBold">{t('autoAddedCheck')}</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">{t('autoAddedExplain')}</ThemedText>
           <View style={[styles.actions, largeText && styles.actionsLarge]}>
-            <EButton palette={band} label={t('autoAddedLooksRight')} style={styles.action}
+            <EButton palette={band} size="compact" label={t('autoAddedLooksRight')} style={styles.action}
               onPress={() => resolveBestEffort(transaction.id, 'confirm')} />
-            <EButton palette={band} variant="secondary" label={t('autoAddedUndo')} style={styles.action}
+            <EButton palette={band} size="compact" variant="secondary" label={t('autoAddedUndo')} style={styles.action}
               onPress={() => setConfirmingUndo(true)} />
           </View>
           <ThemedText type="meta" themeColor="textTertiary">{t('autoAddedUndoHint')}</ThemedText>
@@ -530,7 +559,21 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
       )}
 
       {!editing && transferCandidate && <View testID="entry-transfer-question" style={styles.transferQuestion}>
-        <ThemedText type="smallBold" accessibilityRole="header">{answerWords.question}</ThemedText>
+        <View style={styles.questionHead}>
+          <ThemedText type="smallBold" accessibilityRole="header">{answerWords.question}</ThemedText>
+          {/* A waiting transfer's status, said once, as the question's lead rather than a chip and a
+              card above it: "Transfer needs review · not counted yet. Wafra keeps it out of …". */}
+          {pendingTransfer ? <ThemedText testID="pending-transfer-explainer" type="meta" themeColor="textSecondary">
+            <ThemedText type="meta" style={{ color: band.text, fontFamily: Fonts.sansSemi }}>{`${transferWords.ownershipUnknown}. `}</ThemedText>
+            {transferWords.pendingBody}
+          </ThemedText> : null}
+        </View>
+        {/* Why Wafra already treats it as the person's own money, when other bank alerts say so.
+            No receipt is invented; the answers below still correct it. */}
+        {transferAssessment?.reason === 'known-account' || transferAssessment?.reason === 'known-card'
+          ? <ThemedText testID="transfer-known-ownership-evidence" type="small" themeColor="textSecondary">
+            {transferAssessment.reason === 'known-card' ? transferWords.knownCardEvidence : transferWords.knownAccountEvidence}
+          </ThemedText> : null}
         {picking ? <View style={styles.picker}>
           <ThemedText type="small" themeColor="textSecondary">{answerWords.whichAccount}</ThemedText>
           {candidates.map((candidate) => <Pressable key={candidate.id} testID={`entry-transfer-candidate-${candidate.id}`}
@@ -553,10 +596,29 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
           </Pressable>
         </View> : <TransferAnswerChoices incoming={income} value={answered} layout="radios" palette={band} disabled={busy}
           linkedLabel={linkedTo ? activityWords.route.linked(accountLabelFor(linkedTo.accountId)) : undefined}
+          suggestion={suggestedOther && suggestedOther.accountId !== transaction.accountId
+            ? answerWords.looksLike(accountLabelFor(suggestedOther.accountId)) : undefined}
+          suggestionDetail={suggestedOther ? transferMetaLine([suggestedOther.title,
+            activityWords.dateTime(shortDateWithYear(suggestedOther.date), clockTime(suggestedOther)),
+            unbroken(`${ledgerCurrencyCode()} ${formatAmount(suggestedOther.amountFils, { decimals: true })}`)]) : undefined}
           onChange={(next) => {
             if (next === 'own' && candidates.length > 1) { setPicking(true); return; }
             void choose(next, next === 'own' ? candidates[0] : undefined);
           }} />}
+        {/* The person's own saved answer can be taken back, as the toast's Undo does: the entry
+            returns to waiting for an answer (both sides of a link are cleared). */}
+        {!picking && transaction.transferDecision ? <Pressable testID="entry-transfer-clear" accessibilityRole="button"
+          accessibilityLabel={answerWords.clear} disabled={busy}
+          onPress={() => {
+            // Clear exactly the answer shown here: if either row has changed since, nothing is cleared.
+            const counterpartId = transaction.transferDecision?.counterpartId;
+            const shown = new Map([[transaction.id, transaction], ...(counterpartId && rowsById.get(counterpartId)
+              ? [[counterpartId, rowsById.get(counterpartId)!] as const] : [])]);
+            void undo(transaction.id, counterpartId, transferFingerprintsOf([...shown.keys()], shown)).then(onClose);
+          }}
+          style={({ pressed }) => [styles.clearAnswer, { opacity: busy ? 0.6 : pressed ? 0.7 : 1 }]}>
+          <ThemedText type="small" style={{ color: band.tint }}>{answerWords.clear}</ThemedText>
+        </Pressable> : null}
       </View>}
       {!editing && showMerchantLink && !presentation.purposeUnclear && !confirmedTransfer && !pendingTransfer && !isMoneyMovementOnly(transaction) && transaction.title.trim() &&
         <MerchantSpendingLink merchant={transaction.title} displayName={presentation.title} type={transaction.type} onClose={onClose} />}
@@ -870,36 +932,24 @@ export function EntryDetailSheet({ transaction, onClose, showMerchantLink = true
 }
 
 const styles = StyleSheet.create({
-  head: {
-    flexDirection: 'column',
-    paddingTop: 4,
-    paddingBottom: 4,
-    alignItems: 'center',
-    gap: 4,
-  },
+  head: { gap: Spacing.two },
+  headRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three - 4 },
+  headText: { flex: 1, minWidth: 0, gap: 2 },
   editHead: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: Spacing.two, paddingHorizontal: 0,
     paddingVertical: Spacing.two, alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth },
   editHeadTitle: { flexShrink: 1 },
   editHeadAmount: { alignSelf: 'center' },
-  headTitle: {
-    textAlign: 'center',
-    marginTop: 8,
-    maxWidth: '90%',
-  },
-  headDate: {
-    textAlign: 'center',
-  },
-  headAmount: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    marginTop: 2,
-  },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: Spacing.two },
+  headTitle: { flexShrink: 1 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  // A long chip ("Between your accounts · not spending" at a larger text
+  // size) wraps inside the sheet instead of running off both edges.
   chip: {
     minHeight: BandLayout.chipHeight, borderRadius: BandLayout.chipHeight / 2, paddingHorizontal: 14,
-    flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1,
+    flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, maxWidth: '100%',
   },
-  fxLine: { textAlign: 'center' },
+  chipText: { flexShrink: 1 },
+  // A one-tap answer is a button, not a status: no fill, a tint outline and tint label.
+  actionChip: { backgroundColor: 'transparent', borderWidth: 1.5 },
   field: {
     gap: Spacing.two,
   },
@@ -927,13 +977,16 @@ const styles = StyleSheet.create({
     paddingEnd: Spacing.three,
   },
   transferQuestion: { gap: Spacing.two },
+  questionHead: { gap: 2 },
+  clearAnswer: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
   picker: { gap: Spacing.two },
-  pickRow: { minHeight: 48, borderWidth: 1, borderRadius: Radius.control, padding: Spacing.three, gap: 2, justifyContent: 'center' },
+  pickRow: { minHeight: 48, borderWidth: 1, borderRadius: Radius.control, paddingHorizontal: Spacing.three - 2,
+    paddingVertical: Spacing.two + 2, gap: 2, justifyContent: 'center' },
   transferMeaning: {
-    gap: Spacing.one,
+    gap: 2,
     borderWidth: 1,
     borderRadius: Radius.control,
-    paddingHorizontal: Spacing.three,
+    paddingHorizontal: Spacing.three - 2,
     paddingVertical: Spacing.two + 2,
   },
   actionsLarge: { flexDirection: 'column' },
@@ -944,7 +997,12 @@ const styles = StyleSheet.create({
   },
   // Side by side the two buttons share the row; stacked they take its width.
   action: { flexGrow: 1, flexBasis: 0, alignSelf: 'auto' },
-  footerStack: { gap: Spacing.two },
+  // The read row: Edit and Done share what Delete (sized to its word) leaves.
+  // On a very narrow screen a whole button moves to a second line rather
+  // than any label breaking inside one.
+  readActions: { flexWrap: 'wrap' },
+  rowAction: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%' },
+  quietAction: { flexGrow: 0, flexShrink: 1, flexBasis: 'auto', alignSelf: 'auto', maxWidth: '100%' },
   raw: {
     fontSize: 12.5,
     lineHeight: 18,

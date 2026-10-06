@@ -42,7 +42,7 @@ export function KeyValueRows({ rows, palette, testID }: {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 48, paddingVertical: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 44, paddingVertical: 10 },
   stack: { flexDirection: 'column', alignItems: 'flex-start', gap: 2 },
   label: { flexShrink: 1 },
   value: { flexShrink: 1 },

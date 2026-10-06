@@ -643,7 +643,8 @@ if (!gateSrc || !recoverySrc) {
 
   ok('recovery is decided BEFORE the onboarding overlay is even computed',
     /showOverlay =\s*\n?\s*!showRecovery/.test(gate) &&
-      gate.indexOf('if (showRecovery) return') < gate.indexOf('if (!showOverlay)'),
+      gate.indexOf('if (showRecovery)') >= 0 &&
+      gate.indexOf('if (showRecovery)') < gate.indexOf('if (!showOverlay'),
     'ordering is the guard. An early return placed after the overlay is built still lets a ' +
       'render of the welcome step through');
 

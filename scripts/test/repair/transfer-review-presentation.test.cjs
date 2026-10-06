@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const load = require('./load-typescript.cjs');
 const presentation = load(path.resolve(__dirname, '../../../src/lib/transfer-review-presentation.ts'));
-const { projectTransferHistory, transferHistoryItems, transferAccountLabel, transferRecentStart, transferSearchText } = presentation;
+const { projectTransferHistory, transferRecentStart, transferSearchText } = presentation;
 const tx = (id, date = '2026-09-09', extra = {}) => ({ id, date, type: 'expense', title: 'Outgoing transfer',
   amountFils: 10000, accountId: 'wio', category: 'other', source: 'sms', ...extra });
 const group = (id, rows, extra = {}) => ({ id, transactionIds: rows.map(row => row.id), accountId: 'wio',
@@ -22,11 +22,9 @@ test('3,106 historical transfers are saved, not mounted as 3,106 review actions'
   assert.equal(recent.count, 0); assert.equal(recent.outsideRecentCount, 3106);
   const all = project(groups, rows, { scope: 'all' });
   assert.equal(all.count, 3106);
-  assert.equal(transferHistoryItems(all.groups, new Set(), {}).length, 1, 'one collapsed group, no entry actions');
-  const expanded = transferHistoryItems(all.groups, new Set(['wio']), {});
-  assert.equal(expanded.filter(item => item.kind === 'entry').length, 20);
-  assert.equal(expanded.at(-1).kind, 'more');
-  assert.equal(transferHistoryItems(all.groups, new Set(['wio']), { wio: 40 }).filter(item => item.kind === 'entry').length, 40);
+  // One group stands for all of them: Transfers draws it as one row and pages its entries (transfer-review-ui).
+  assert.equal(all.groups.length, 1, 'one group, not 3,106 rows');
+  assert.equal(all.groups[0].rows.length, 3106);
   assert.equal(JSON.stringify({ rows, groups }), before, 'browsing never mutates or classifies records');
 });
 
@@ -45,15 +43,6 @@ test('latest groups and entries come first, not opaque hash IDs or oldest dates'
   const out = project(groups, rows);
   assert.deepEqual(out.groups.map(g => g.id), ['z-group', 'a-group']);
   assert.deepEqual(out.groups[0].rows.map(row => row.id), ['z-new', 'a-old']);
-});
-
-test('account display never repeats a masked ending and never changes the saved label', () => {
-  for (const name of ['Wio Account ·2615', 'Wio Account ••2615', 'Wio Account XXXX2615', 'حساب ·٢٦١٥']) {
-    assert.equal(transferAccountLabel({ name, last4: '2615' }), name);
-  }
-  assert.equal(transferAccountLabel({ name: 'Wio', last4: '2615' }), 'Wio · ••2615');
-  assert.equal(transferAccountLabel({ name: 'Account 12615', last4: '2615' }), 'Account 12615 · ••2615');
-  assert.equal(transferAccountLabel({ name: 'Cash' }), 'Cash');
 });
 
 test('search handles Arabic numbers, dates, account, exact amount and bounded reference without reading raw SMS', () => {
@@ -92,7 +81,6 @@ test('a deep link shows exactly its old transfer, ignoring the browsing window b
   const rows = [tx('old', '2022-01-01'), tx('new')];
   const out = project([group('g', rows)], rows, { focusedId: 'old', query: 'does-not-match' });
   assert.deepEqual(out.groups[0].transactionIds, ['old']);
-  assert.equal(transferHistoryItems(out.groups, new Set(), {}, true).filter(item => item.kind === 'entry').length, 1);
   assert.equal(project([group('g', rows)], rows, { focusedId: 'deleted' }).count, 0);
 });
 

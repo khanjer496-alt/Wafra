@@ -25,7 +25,7 @@ import { formatAED, formatAmountForInput, ledgerNiceMinor, ledgerTypicalMinor, m
 import { spentInMonthForCategory } from '@/lib/insights';
 import { filledCoins, shareOf } from '@/lib/coin-math';
 import { limitStatus } from '@/lib/limit-status';
-import { daysInPeriod, elapsedDays, inPeriod, isCurrentMonth } from '@/lib/period';
+import { daysLeftInPeriod, inPeriod } from '@/lib/period';
 import { useStore } from '@/lib/store';
 import type { CategoryId } from '@/lib/types';
 import { alignEnd, t, tf } from '@/lib/i18n';
@@ -212,12 +212,10 @@ export function LimitSheet({ category, open, monthKey: key, onClose }: LimitShee
   // and cheerfully offered "13 days still to go" for a month already over.
   // elapsedDays gets the real ledger because a salary-day period's start is
   // inferred from it.
+  // Today counts as a day still to go, as on Home's budget tile (daysLeftInPeriod).
   const now = useMemo(() => new Date(), []);
   const period = useMemo(() => ({ mode: 'month' as const, key }), [key]);
-  const live = isCurrentMonth(period, now);
-  const daysLeft = live
-    ? Math.max(0, daysInPeriod(period, now) - elapsedDays(period, now, state.transactions))
-    : 0;
+  const daysLeft = daysLeftInPeriod(period, now, state.transactions);
 
   const suggestions = useMemo(() => {
     const out: { fils: number; note: string; highlight: boolean }[] = [];
@@ -501,7 +499,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
-  current: { marginTop: Spacing.four, gap: Spacing.two },
+  current: { marginTop: Spacing.one, gap: Spacing.two },
   currentRow: { flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.three },
   currentStacked: { flexDirection: 'column', alignItems: 'stretch' },
   currentFigures: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: Spacing.two },
@@ -513,7 +511,7 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     justifyContent: 'space-between',
   },
-  amountBlock: { marginTop: Spacing.four, gap: Spacing.two },
+  amountBlock: { marginTop: Spacing.one, gap: Spacing.two },
   currencyChoice: {
     minHeight: 56,
     flexDirection: 'row',
@@ -526,16 +524,16 @@ const styles = StyleSheet.create({
   },
   currencyChoiceCopy: { flex: 1, minWidth: 0, gap: 2 },
   aed: { fontSize: 15 },
-  suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, marginTop: Spacing.three },
-  history: { marginTop: Spacing.four, gap: Spacing.two },
-  bars: { gap: 14 },
+  suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  history: { marginTop: Spacing.two, gap: Spacing.two },
+  bars: { gap: Spacing.two + 2 },
   barColumn: { gap: 6 },
   historyHeading: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 },
   historyValue: { writingDirection: 'ltr', flexShrink: 1 },
   historyTrack: { height: 8, width: '100%', position: 'relative', borderRadius: 4 },
   bar: { height: 8, borderRadius: 4 },
   limitLine: { position: 'absolute', top: -3, bottom: -3, borderStartWidth: 1, borderStyle: 'dashed' },
-  where: { marginTop: Spacing.five },
+  where: { marginTop: Spacing.two },
   whereRow: {
     flexDirection: 'row',
     alignItems: 'center',

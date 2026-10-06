@@ -8,7 +8,7 @@ const TEXT = 1; // limit-sheet.tsx useState order: 0 picked, 1 text, 2 currencyS
 
 function sheet(options = {}) {
   const h = createHarness(options);
-  Object.assign(h.deps['@/lib/period'], { daysInPeriod: () => 30, elapsedDays: () => 6 });
+  Object.assign(h.deps['@/lib/period'], { daysInPeriod: () => 30, elapsedDays: () => 6, daysLeftInPeriod: () => 25 });
   delete h.deps['@/components/limit-sheet'];
   const { LimitSheet } = h.local('@/components/limit-sheet');
   const tree = LimitSheet({ category: 'dining', open: true, monthKey: '2026-09', onClose: () => h.events.push(['close']) });

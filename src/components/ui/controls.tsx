@@ -255,12 +255,12 @@ const styles = StyleSheet.create({
   },
   buttonBlock: {
     paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.three,
+    paddingVertical: Spacing.two + 4,
   },
   buttonInline: {
     flex: 1,
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
+    paddingVertical: Spacing.two + 4,
   },
   buttonLabel: { flexShrink: 1, textAlign: 'center' },
   track: {

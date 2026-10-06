@@ -24,9 +24,10 @@ import { EButton } from '@/components/ui/band/e-button';
 import { CaptureChecklist } from '@/components/onboarding/capture-checklist';
 import { EBody, EHeadline, EStepFrame, ETextAction, bandButtonColor } from '@/components/onboarding/e-frame';
 import { ArrivedCard, LimitResult, ResultStrip, SourceRow, TrustLine } from '@/components/onboarding/e-first-payment';
-import { GoalsStep } from '@/components/onboarding/e-goals';
-import { HandoffLayer } from '@/components/onboarding/e-handoff';
+import { GoalsStep, forgetTrayTiles } from '@/components/onboarding/e-goals';
+import { OverlayHandoff } from '@/components/onboarding/e-handoff';
 import {
+  ActiveStepOnly,
   LogoDraw,
   StepLayer,
   StepWipe,
@@ -255,6 +256,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
    * assistive tech, with the keyboard closed (useLeavingRelease).
    */
   const [leaving, setLeaving] = useState<LeavingStep<Step>[]>([]);
+  /** Counts journey resets (a Settings preview, a restart), so per-run memory starts over (the Goals tray). */
+  const [journeyRun, setJourneyRun] = useState(0);
   /** The active step's element as last committed (written by its layer's effect, never during render). */
   const committedFrame = useRef<{ step: Step; element: React.ReactNode } | null>(null);
   useLeavingRelease(leaving, () => setLeaving([]));
@@ -275,6 +278,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   const previewStarted = useRef(false);
 
   const resetJourneyState = () => {
+    // A fresh run: the Goals tray pops its tiles in again.
+    setJourneyRun((run) => run + 1);
+    forgetTrayTiles();
     setResult(null);
     setSmsDenied(false);
     setAndroidSmsReady(false);
@@ -1263,6 +1269,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       setHandoff(patternInputFromState(state));
       return;
     }
+    // Already handing over to Home: a second tap on the fading screen does nothing.
+    if (handoff !== null) return;
     void runSetupAction(() => openWafra());
   };
 
@@ -1303,9 +1311,8 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const handoffLayer = handoff
-    ? <HandoffLayer tiles={buildPattern(handoff)} onDone={() => setHandoff(null)} />
-    : null;
+  /** The pattern handed to Home: while it is set, the overlay stays drawn and fades into Home (OverlayHandoff). */
+  const handoffTiles = handoff ? buildPattern(handoff) : null;
 
   // The same wrapper whether the overlay is up or not. Returning bare
   // `children` here and `<View><View hidden>{children}</View>…</View>` below
@@ -1327,10 +1334,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // colour grows from the Continue button. Derived during render so the old
   // colour is never replaced by the new one for a frame first; the first
   // colour is only recorded, and nothing is remembered while hidden.
-  if (!showOverlay) {
+  // While the pattern is handed to Home, the overlay stays drawn (as it was)
+  // and fades into Home above it; it goes once the hand-off is over.
+  if (!showOverlay && handoffTiles === null) {
     if (shown.visible) setShown({ ...shown, visible: false });
     if (leaving.length > 0) setLeaving([]);
-    return <View style={styles.container}>{gatedChildren}{handoffLayer}</View>;
+    return <View style={styles.container}>{gatedChildren}</View>;
   }
   const overlayColor = stepBand.band;
   // A new step or colour, derived during render from state (React's
@@ -1396,7 +1405,10 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
   // capture that is actually on (not opted out, a source set up).
   const remindersOn = notificationsAllowed === true;
   const captureOn = !state.captureOptOut && Platform.OS !== 'web' && automaticCompletion;
-  const backDisabled = setupBusy || finishing || transitioning;
+  // The 350ms settle lock after a step change is enforced by the handlers
+  // (beginStepTransition) and by the arriving layer swallowing touches
+  // (StepLayer `locked`), never drawn: nothing dims or spins while it holds.
+  const backDisabled = setupBusy || finishing;
   const onClose = previewMode ? closePreview : undefined;
   const lang = language === 'ar' ? 'ar' : 'en';
 
@@ -1411,12 +1423,12 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       onClose={onClose} backDisabled={backDisabled}
       footer={Platform.OS === 'android' && smsExplainerVisible ? null : <>
         {Platform.OS === 'ios' ? <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={t('onboardLiveAction')}
-          onPress={() => void runSetupAction(beginCapture)} disabled={setupBusy || transitioning} busy={setupBusy}
+          onPress={() => void runSetupAction(beginCapture)} disabled={setupBusy} busy={setupBusy}
           testID="onboarding-live-action" /> : null}
         {Platform.OS === 'android' && (androidSmsReady || androidNotificationReady) ? <EButton palette={stepBand}
           color={bandButtonColor(stepBand)}
           label={t(androidSmsReady && androidNotificationReady ? 'onboardCaptureContinueBoth' : 'onboardCaptureContinueOne')}
-          onPress={() => void runSetupAction(finishAndroidCapture)} disabled={setupBusy || transitioning}
+          onPress={() => void runSetupAction(finishAndroidCapture)} disabled={setupBusy}
           testID="onboarding-capture-continue" /> : null}
         {Platform.OS !== 'web' ? <ETextAction palette={stepBand} label={t('onboardHowItWorks')}
           onPress={() => setLearnMoreVisible(true)} testID="onboarding-how-it-works" /> : null}
@@ -1425,7 +1437,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         <SmsPermissionExplainer
           palette={stepBand}
           language={lang}
-          disabled={setupBusy || transitioning}
+          disabled={setupBusy}
           onContinue={() => {
             setSmsExplainerVisible(false);
             void runSetupAction(startScan);
@@ -1460,20 +1472,20 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         <View style={styles.sources} testID="onboarding-start-options">
           {Platform.OS === 'android' ? <>
             <SourceRow palette={stepBand} icon="mail" title={t('onboardAndroidSmsSourceTitle')} body={t('onboardAndroidSmsSourceBody')}
-              ready={androidSmsReady} disabled={setupBusy || transitioning} onPress={() => void openSmsSource()}
+              ready={androidSmsReady} disabled={setupBusy} onPress={() => void openSmsSource()}
               testID="onboarding-source-sms" />
             {smsDenied && !androidSmsReady ? <ThemedText type="meta" accessibilityLiveRegion="polite"
               style={{ color: stepBand.onBand }}>{t('onboardSmsDeniedInline')}</ThemedText> : null}
             <SourceRow palette={stepBand} icon="phone" title={t('onboardAndroidPushSourceTitle')}
               body={t(awaitingNotificationAccess ? 'onboardAndroidPushAwaiting' : 'onboardAndroidPushSourceBody')}
-              ready={androidNotificationReady} disabled={setupBusy || transitioning}
+              ready={androidNotificationReady} disabled={setupBusy}
               onPress={() => void runSetupAction(connectAndroidNotifications)} testID="onboarding-source-notifications" />
           </> : null}
           {Platform.OS !== 'web' && !previewMode ? <SourceRow palette={stepBand} icon="upload" title={words.importStatements}
-            body={words.importStatementsBody} disabled={setupBusy || transitioning} onPress={openStatementImport}
+            body={words.importStatementsBody} disabled={setupBusy} onPress={openStatementImport}
             testID="onboarding-source-statements" /> : null}
           <SourceRow palette={stepBand} icon="plus" title={words.addByHand} body={words.addByHandBody}
-            disabled={setupBusy || transitioning} onPress={() => void runSetupAction(continueManually)}
+            disabled={setupBusy} onPress={() => void runSetupAction(continueManually)}
             testID="onboarding-source-manual" />
         </View>
         {Platform.OS !== 'web' ? <TrustLine palette={stepBand} items={[
@@ -1481,9 +1493,9 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           { icon: 'bank', title: t('onboardPrivacyNoLoginTitle'), body: t('onboardPrivacyNoLoginBody') },
           { icon: 'repeat', title: t('onboardPrivacyChoiceTitle'), body: t('onboardPrivacyChoiceBody') },
         ]} /> : null}
-        {setupBusy ? <ThemedText type="meta" accessibilityLiveRegion="polite" style={{ color: stepBand.onBandSecondary }}>
-          {t('onboardSetupWorking')}
-        </ThemedText> : null}
+        {/* Not on the capture step as it fades away after the choice: the result is already on its way. */}
+        {setupBusy ? <ActiveStepOnly><ThemedText type="meta" accessibilityLiveRegion="polite"
+          style={{ color: stepBand.onBandSecondary }}>{t('onboardSetupWorking')}</ThemedText></ActiveStepOnly> : null}
       </>}
     </EStepFrame>
   );
@@ -1512,11 +1524,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
         disabled={setupBusy} testID="onboarding-finish-retry" />
         : failedCompletion || smsDenied ? <>
           <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={t('onboardRetrySetup')}
-            onPress={goBack} disabled={setupBusy || transitioning} testID="onboarding-retry-setup" />
+            onPress={goBack} disabled={setupBusy} testID="onboarding-retry-setup" />
           <ETextAction palette={stepBand} label={words.addByHand}
             onPress={() => void runSetupAction(continueManually)} disabled={setupBusy} testID="onboarding-complete-manual" />
         </> : <EButton palette={stepBand} color={bandButtonColor(stepBand)} label={words.continue}
-          onPress={showPattern} disabled={setupBusy || transitioning} testID="onboarding-complete-continue" />}>
+          onPress={showPattern} disabled={setupBusy} testID="onboarding-complete-continue" />}>
       <EHeadline palette={stepBand} size={42}>{completeTitle}</EHeadline>
       {completeBody ? <EBody palette={stepBand}>{completeBody}</EBody> : null}
       {completeWatch}
@@ -1554,7 +1566,7 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
           {t(onboardingNoAutomaticCapture(selectedAlerts) ? 'onboardHistoryGapManualBody' : 'onboardHistoryGapBody')}
         </ThemedText>
         <EButton palette={stepBand} variant="secondary" label={t('onboardHistoryGapAction')}
-          disabled={setupBusy || transitioning}
+          disabled={setupBusy}
           onPress={() => {
             trackOnboardingEvent('onboarding_history_gap_import_opened', {
               focus: legacyFocus,
@@ -1568,10 +1580,17 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
     </EStepFrame>
   );
 
+  /**
+   * The step just left, while it is still drawn: the paywall continues the
+   * pattern's mosaic from it. On the render that makes the change it is still
+   * the step last shown; after that, the newest leaving step.
+   */
+  const arrivedFrom = (shown.visible && shown.step !== activeStep ? shown.step : null)
+    ?? leaving.filter((item) => item.step !== activeStep).at(-1)?.step ?? null;
   const renderStep = () => {
     switch (activeStep) {
       case 'welcome':
-        return <WelcomeStep onStart={openName} onClose={onClose} disabled={transitioning}
+        return <WelcomeStep onStart={openName} onClose={onClose} disabled={false}
           onRestore={!previewMode && Platform.OS !== 'web' ? () => void pickBackupToRestore() : undefined}
           restoreNote={restoreFailed === 'read' ? firstRunCopy.restoreReadFailed : restoreFailed ? t('notAWafraBackup') : null}
           // Back on Welcome after confirming them: the example alert in their own currency and region.
@@ -1585,24 +1604,25 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             setNameSaveFailed(false);
             setStep('welcome');
           }}
-          onClose={onClose} busy={nameSaving || transitioning} saveFailed={nameSaveFailed}
+          onClose={onClose} busy={nameSaving} saveFailed={nameSaveFailed}
           country={shownCountry} suggestedCountry={deviceRegion} onCountry={chooseCountry}
           currency={shownCurrency} onCurrency={chooseCurrency} />;
       case 'goals':
         return <GoalsStep goals={goalsDraft} onToggle={(goal) => setGoalsDraft(toggleGoal(goalsDraft, goal))}
-          onContinue={saveGoals} onBack={goBack} onClose={onClose} tiles={patternTiles} disabled={transitioning}
+          onContinue={saveGoals} onBack={goBack} onClose={onClose} tiles={patternTiles} disabled={false}
+          journey={`${previewMode ? 'preview' : 'journey'}:${journeyRun}:${state.onboardingProfile?.startedAt ?? ''}`}
           saved={!previewMode && (sanitizeGoalIds(state.wafraGoals)?.length ?? 0) > 0} />;
       case 'watch':
         return <WatchStep draft={watchDraft} open={watchOpen} onOpen={setWatchOpen}
           onLimit={(category, limit) => setWatchDraft(withWatchLimit(watchDraft, category, limit))}
           moneySpec={watchMoney} currency={shownCurrency} onCurrency={chooseCurrency}
           action={watchFooterAction(watchDraft, previewMode ? [] : state.budgets)}
-          onContinue={saveWatch} onBack={goBack} onClose={onClose} disabled={transitioning} />;
+          onContinue={saveWatch} onBack={goBack} onClose={onClose} disabled={false} />;
       case 'reminders':
         return <RemindersStep dailySummary={dailySummaryDraft} onDailySummary={setDailySummaryDraft}
           onAllow={() => void runSetupAction(() => finishNotificationChoice(true))}
           onNotNow={() => void runSetupAction(() => finishNotificationChoice(false))}
-          onBack={goBack} onClose={onClose} busy={setupBusy || transitioning} />;
+          onBack={goBack} onClose={onClose} busy={setupBusy} />;
       case 'capture':
       case 'live':
         return captureStep;
@@ -1615,11 +1635,11 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
             if (!beginStepTransition()) return;
             setStep('paywall');
           } : finishJourney}
-          onBack={goBack} onClose={onClose} disabled={setupBusy || finishing || transitioning} />;
+          onBack={goBack} onClose={onClose} disabled={setupBusy || finishing} />;
       case 'paywall':
         return <PaywallStep tiles={patternTiles} watchedCategory={watchedLabel} remindersOn={remindersOn}
           trialDays={trialDaysLeft(state)} captureOn={captureOn} onFinish={finishJourney} onBack={goBack} onClose={onClose}
-          preview={previewMode} finishing={setupBusy || finishing || transitioning} />;
+          preview={previewMode} finishing={setupBusy || finishing} arrivedFrom={arrivedFrom} />;
     }
   };
 
@@ -1636,33 +1656,40 @@ export function OnboardingGate({ children }: { children: React.ReactNode }) {
       onDone={() => setWipe(null)} />
     : null;
   const activeLayer = <StepLayer key={`step-${activeStep}`} leaving={false} wipe={wipe !== null} arriving
-    follows={shownLeaving.length > 0} color={overlayColor}
+    // Locked through the settle after a step change, and through the hand-off into
+    // Home: the fading paywall must not take a second "Start free" (on the web a
+    // box-none layer's children stay clickable under a pointerEvents="none" parent).
+    follows={shownLeaving.length > 0} color={overlayColor} locked={transitioning || handoffTiles !== null}
     onCommit={(element) => { committedFrame.current = { step: activeStep, element }; }}>
     {stepElement}
   </StepLayer>;
-  // Under the wipe the old step is below the circle; without one it is on top, fading off.
-  const stepLayers = [...underWipe.map(leavingLayer), wipeLayer, activeLayer,
-    ...shownLeaving.filter((item) => !item.wipe).map(leavingLayer)];
+  // Every leaving step is below the arriving one, so the new header (back and
+  // dots) is there from the first frame: under the wipe the old step is below
+  // the circle; without one its colour and content fade beneath the new step.
+  const stepLayers = [...underWipe.map(leavingLayer), wipeLayer,
+    ...shownLeaving.filter((item) => !item.wipe).map(leavingLayer), activeLayer];
 
   return (
     <View style={styles.container}>
       {gatedChildren}
-      <View style={[StyleSheet.absoluteFillObject, styles.root, { backgroundColor: stepBand.band }]}>
-        <StatusBar style={stepBand.statusBar} />
-        {stepLayers}
-        <BottomSheet
-          visible={learnMoreVisible}
-          onClose={() => setLearnMoreVisible(false)}
-          title={t('onboardCaptureLearnMoreTitle')}>
-          <View style={styles.learnMoreContent}>
-            <ThemedText type="small" themeColor="textSecondary">{t('onboardCaptureLearnMorePrivacy')}</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">{t('onboardCaptureLearnMoreRetention')}</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">{t('onboardCaptureLearnMoreLegacy')}</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">{t('onboardCaptureLearnMoreLimits')}</ThemedText>
-          </View>
-        </BottomSheet>
-      </View>
-      {handoffLayer}
+      <OverlayHandoff tiles={handoffTiles} from={activeStep === 'pattern' ? 'pattern' : 'paywall'}
+        onDone={() => setHandoff(null)}>
+        <View style={[StyleSheet.absoluteFillObject, styles.root, { backgroundColor: stepBand.band }]}>
+          <StatusBar style={stepBand.statusBar} />
+          {stepLayers}
+          <BottomSheet
+            visible={learnMoreVisible}
+            onClose={() => setLearnMoreVisible(false)}
+            title={t('onboardCaptureLearnMoreTitle')}>
+            <View style={styles.learnMoreContent}>
+              <ThemedText type="small" themeColor="textSecondary">{t('onboardCaptureLearnMorePrivacy')}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{t('onboardCaptureLearnMoreRetention')}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{t('onboardCaptureLearnMoreLegacy')}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary">{t('onboardCaptureLearnMoreLimits')}</ThemedText>
+            </View>
+          </BottomSheet>
+        </View>
+      </OverlayHandoff>
       <ConfirmSheet
         visible={pendingRestore !== null}
         onClose={() => setPendingRestore(null)}

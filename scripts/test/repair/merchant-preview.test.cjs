@@ -99,7 +99,7 @@ test('design language E: the clay band carries logo, name, total, count and mont
   assert.equal(screen.type, 'BandScaffold');
   assert.equal(screen.props.band, 'spending', 'a Spending detail wears the clay band');
   const band = walk(screen.props.bandContent);
-  assert.ok(band.some(n => n.type === 'Avatar' && n.props.size === 56), 'the logo tile leads the band');
+  assert.ok(band.some(n => n.type === 'Avatar' && n.props.size === 48), 'the 48pt logo tile leads the band');
   assert.ok(band.some(n => n.props?.testID === 'merchant-total-spent'));
   assert.ok(band.some(n => n.props?.testID === 'merchant-purchase-count'));
   assert.ok(band.some(n => n.type === 'MerchantMonthBars' && n.props.palette), 'month bars sit on the band');

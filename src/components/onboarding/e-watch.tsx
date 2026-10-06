@@ -19,7 +19,7 @@
  * written beside it and spoken by the row; the coins are decorative.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { choiceSurface } from '@/components/onboarding/e-choice-row';
@@ -168,6 +168,8 @@ function AmountEditor({ valueMinor, onChange, spec, label, palette, disabled, te
   const raise = watchStep(valueMinor, spec, 1);
   const shown = (minor: number) => minor > 0 ? formatMinorUnitsForInput(minor, spec) : '';
   const [text, setText] = useState(() => shown(valueMinor));
+  // Focus shows on the field's underline (heavier), since the browser's own box is removed on the web.
+  const [focused, setFocused] = useState(false);
   // The figure the text last stood for: a quick amount or a step replaces
   // the text, typing that already reads as the value leaves it alone.
   const typed = useRef(valueMinor);
@@ -189,7 +191,35 @@ function AmountEditor({ valueMinor, onChange, spec, label, palette, disabled, te
     onChange(safe);
   };
   const currency = currencyDisplayLabel(spec.currency);
-  return <View style={[styles.editor, { borderTopColor: palette.bandRule }]} testID={testID}>
+  // Opening a row: the editor's controls drop in and fade up (paint only, the
+  // native driver); the rows below make room at once. Reduce Motion: in place.
+  const motion = useMotionPreference();
+  const appear = useAnimatedNumber(motion.ready && !motion.reducedMotion ? 0 : 1);
+  useEffect(() => {
+    if (!motion.ready || motion.reducedMotion) { appear.setValue(1); return; }
+    const run = Animated.timing(appear, { toValue: 1, duration: Motion.change, easing: Easing.out(Easing.cubic),
+      useNativeDriver: nativeDriver });
+    run.start();
+    return () => run.stop();
+  }, [appear, motion.ready, motion.reducedMotion]);
+  const appearPaint = useMemo(() => ({
+    opacity: appear,
+    transform: [{ translateY: appear.interpolate({ inputRange: [0, 1], outputRange: [-8, 0] }) }],
+  }), [appear]);
+  const lowerButton = <Pressable accessibilityRole="button" accessibilityLabel={steps.lower(spoken(lower, spec))}
+    disabled={disabled || valueMinor <= 0} testID={`${testID}-lower`} onPress={() => set(valueMinor - lower)}
+    style={({ pressed }) => [styles.stepper, { borderColor: palette.bandRule, opacity: valueMinor <= 0 ? 0.4 : pressed ? 0.7 : 1 }]}>
+    <ThemedText type="heading" style={{ color: palette.onBand }}>−</ThemedText>
+  </Pressable>;
+  const raiseButton = <Pressable accessibilityRole="button" accessibilityLabel={steps.raise(spoken(raise, spec))}
+    disabled={disabled} testID={`${testID}-raise`} onPress={() => set(valueMinor + raise)}
+    style={({ pressed }) => [styles.stepper, { borderColor: palette.bandRule, opacity: pressed ? 0.7 : 1 }]}>
+    <ThemedText type="heading" style={{ color: palette.onBand }}>+</ThemedText>
+  </Pressable>;
+  const perMonth = <ThemedText type="meta" style={{ color: palette.onBandSecondary }} testID={`${testID}-per-month`}>
+    {words.watchPerMonth}
+  </ThemedText>;
+  return <Animated.View style={[styles.editor, { borderTopColor: palette.bandRule }, appearPaint]} testID={testID}>
     <View style={styles.quickRow}>
       {quick.map((minor, index) => {
         const on = minor === valueMinor;
@@ -207,13 +237,12 @@ function AmountEditor({ valueMinor, onChange, spec, label, palette, disabled, te
         </Pressable>;
       })}
     </View>
-    <View style={styles.stepRow}>
-      <Pressable accessibilityRole="button" accessibilityLabel={steps.lower(spoken(lower, spec))}
-        disabled={disabled || valueMinor <= 0} testID={`${testID}-lower`} onPress={() => set(valueMinor - lower)}
-        style={({ pressed }) => [styles.stepper, { borderColor: palette.bandRule, opacity: valueMinor <= 0 ? 0.4 : pressed ? 0.7 : 1 }]}>
-        <ThemedText type="heading" style={{ color: palette.onBand }}>−</ThemedText>
-      </Pressable>
-      <View style={[styles.field, { borderColor: palette.onBand }]}>
+    {/* At the accessibility sizes the field takes the whole width, "per month" its own line under
+        it, and − and + a row of their own, so nothing runs past the edge or under a stepper. */}
+    <View style={largeText ? styles.stepStack : styles.stepRow} testID={`${testID}-steps`}>
+      {largeText ? null : lowerButton}
+      <View testID={`${testID}-field`}
+        style={[styles.field, largeText && styles.fieldWide, focused && styles.fieldFocused, { borderColor: palette.onBand }]}>
         <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{currency}</ThemedText>
         <TextInput value={text} editable={!disabled} accessibilityLabel={words.watchTypeAmount(label)}
           testID={`${testID}-input`} keyboardType={spec.exponent === 0 ? 'number-pad' : 'decimal-pad'}
@@ -227,18 +256,16 @@ function AmountEditor({ valueMinor, onChange, spec, label, palette, disabled, te
             if (parsed !== valueMinor) onChange(parsed);
           }}
           // Leaving the field shows exactly the limit that will be saved.
-          onBlur={() => { typed.current = valueMinor; setText(shown(valueMinor)); }}
-          style={[styles.input, { color: palette.onBand }]} />
-        <ThemedText type="meta" style={{ color: palette.onBandSecondary }}>{words.watchPerMonth}</ThemedText>
+          onFocus={() => setFocused(true)}
+          onBlur={() => { setFocused(false); typed.current = valueMinor; setText(shown(valueMinor)); }}
+          // The browser's focus box; the field's own underline already marks it.
+          style={[styles.input, Platform.OS === 'web' ? styles.inputWeb : null, { color: palette.onBand }]} />
+        {largeText ? null : perMonth}
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel={steps.raise(spoken(raise, spec))}
-        disabled={disabled} testID={`${testID}-raise`} onPress={() => set(valueMinor + raise)}
-        style={({ pressed }) => [styles.stepper, { borderColor: palette.bandRule, opacity: pressed ? 0.7 : 1 }]}>
-        <ThemedText type="heading" style={{ color: palette.onBand }}>+</ThemedText>
-      </Pressable>
+      {largeText ? <>{perMonth}<View style={styles.stepRow}>{lowerButton}{raiseButton}</View></> : raiseButton}
     </View>
     <EBody palette={palette} style={styles.usual}>{words.watchUsual}</EBody>
-  </View>;
+  </Animated.View>;
 }
 
 export function WatchStep({ draft, open, onOpen, onLimit, moneySpec, currency, onCurrency,
@@ -273,8 +300,12 @@ export function WatchStep({ draft, open, onOpen, onLimit, moneySpec, currency, o
   const [pending, setPending] = useState<CategoryId | null>(null);
   const label = action.kind === 'save' ? words.watchSave(action.count)
     : action.kind === 'continue' ? words.continue : words.skipForNow;
+  const reserveLabels = useMemo(() => [words.skipForNow, words.continue,
+    ...WATCH_CATEGORIES.map((_category, index) => words.watchSave(index + 1))], [words]);
   return <EStepFrame palette={band} step={3} onBack={onBack} onClose={onClose} backDisabled={disabled} testID="onboarding-watch"
     footer={<EButton palette={band} color={bandButtonColor(band)} label={label} onPress={onContinue}
+      // Every label the button can show keeps its room, so the strip never changes height as limits are set.
+      reserveLabels={reserveLabels}
       disabled={disabled} testID="onboarding-watch-continue" />}>
     <EHeadline palette={band} size={42}>{words.watchTitle}</EHeadline>
     <EBody palette={band}>{words.watchBody}</EBody>
@@ -305,12 +336,15 @@ export function WatchStep({ draft, open, onOpen, onLimit, moneySpec, currency, o
               }}
               style={({ pressed }) => [styles.headPress, largeText && styles.headWrap,
                 { opacity: disabled ? 0.5 : pressed ? 0.7 : 1 }]}>
+              {/* At the accessibility sizes the name takes a whole line of its own, first, so a long
+                  word ("المطاعم" at 3x) wraps whole instead of splitting beside the icon. */}
+              {largeText ? <ThemedText type="smallBold" style={[styles.name, styles.nameWide, { color: band.onBand }]}>{name}</ThemedText> : null}
               <View style={[styles.icon, {
                 backgroundColor: amount ? clay.fill : band.scheme === 'dark' ? band.bandRule : band.card,
               }]}>
                 <Icon name={getCategory(category).icon} size={20} color={amount ? clay.onFill : band.text} strokeWidth={2} />
               </View>
-              <ThemedText type="smallBold" style={[styles.name, largeText && styles.nameWide, { color: band.onBand }]}>{name}</ThemedText>
+              {largeText ? null : <ThemedText type="smallBold" style={[styles.name, { color: band.onBand }]}>{name}</ThemedText>}
               {/* Open, the field below writes the figure; closed, the row does. */}
               {amount && !isOpen ? <ThemedText type="smallBold" tabular style={{ color: band.onBand }}>{amount}</ThemedText>
                 : amount || isOpen ? null
@@ -358,8 +392,8 @@ const styles = StyleSheet.create({
   headWrap: { flexWrap: 'wrap' },
   icon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   name: { flex: 1, minWidth: 0, fontSize: 17, lineHeight: 23 },
-  // The name keeps a readable line; the amount and chevron wrap under it instead.
-  nameWide: { minWidth: 140 },
+  // The name has the row's whole width; the icon, amount and chevron share the line under it.
+  nameWide: { flex: 0, flexBasis: '100%' },
   flipped: { transform: [{ rotate: '180deg' }] },
   remove: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', marginEnd: 6 },
   // The coins and their limit line: a little wider than the coins, as in the Limit sheet.
@@ -377,11 +411,16 @@ const styles = StyleSheet.create({
   // At the accessibility sizes each amount takes its own width and the row wraps, never overlapping.
   quickWide: { flexBasis: 'auto', paddingHorizontal: 16, paddingVertical: 8 },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  stepStack: { gap: 10 },
   stepper: { width: 48, height: 48, borderRadius: 24, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
   field: {
     flex: 1, minWidth: 0, minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 8,
     borderBottomWidth: 2, paddingHorizontal: 4,
   },
+  fieldWide: { flex: 0, alignSelf: 'stretch' },
+  inputWeb: { outlineWidth: 0 },
+  /** One point heavier when focused, taken back from below so nothing under it moves. */
+  fieldFocused: { borderBottomWidth: 3, marginBottom: -1 },
   input: {
     flex: 1, minWidth: 48, fontFamily: Fonts.sansSemi, fontVariant: ['tabular-nums'], fontSize: 26, lineHeight: 32,
     paddingVertical: 6,

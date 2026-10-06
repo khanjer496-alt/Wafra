@@ -13,10 +13,16 @@ export function currentAnswer(tx: Transaction, assessment?: TransferAssessment):
   return ownership === 'own' || ownership === 'external' ? ownership : null;
 }
 
-/** Rows that could be the other side of an own-account answer, most likely first. */
+/**
+ * Rows that could be the other side of an own-account answer, most likely
+ * first. A likely card repayment names its card receipt only as a suggestion:
+ * answering "own" saves the answer without linking the two, on every path, so
+ * it offers nothing to link here.
+ */
 export function ownCandidates(
   tx: Transaction, assessment: TransferAssessment | undefined, rowsById: ReadonlyMap<string, Transaction>,
 ): Transaction[] {
+  if (assessment?.status === 'likely-card-repayment') return [];
   const ids = assessment?.counterpartId ? [assessment.counterpartId] : assessment?.candidateIds ?? [];
   return ids.map(id => rowsById.get(id))
     .filter((row): row is Transaction => !!row && row.id !== tx.id && isTransferCandidate(row) && !transferDeclined(row));
@@ -41,16 +47,125 @@ export function buildTransferAnswer({ transaction, answer, counterpart, generati
  * Remove an answer. A linked own answer leaves a decision on each side, and the
  * resolver keeps the other side's decision when one row is cleared, so both rows
  * are cleared together as two single-row decisions (a multi-id decision would
- * trigger the legacy group rule). Pass the rows as they are now, not as shown
- * when the answer was given: saving the answer changed their fingerprints.
+ * trigger the legacy group rule). The other side is cleared only while its own
+ * decision still names this row: a newer answer given to it since is kept.
+ * Pass the rows as they are now, not as shown when the answer was given:
+ * saving the answer changed their fingerprints.
  */
 export function buildTransferUndo({ transaction, counterpart, generation }: {
   transaction: Transaction; counterpart?: Transaction; generation: number;
 }) {
-  const rows = counterpart && counterpart.id !== transaction.id ? [transaction, counterpart] : [transaction];
+  const linked = !!counterpart && counterpart.id !== transaction.id &&
+    counterpart.transferDecision?.counterpartId === transaction.id;
+  const rows = linked ? [transaction, counterpart] : [transaction];
   return {
     decisions: rows.map(row => ({ ids: [row.id], ownership: null })),
     expectedFingerprints: Object.fromEntries(rows.map(row => [row.id, transferFingerprint(row)])),
     expectedGeneration: generation,
   };
+}
+
+/**
+ * Remove the answers one save gave to several rows (a group or a selection),
+ * each row cleared as its own single-row decision, as above. Every row named
+ * must still exist; pass them as they are now.
+ */
+export function buildTransferUndoMany({ rows, generation }: { rows: readonly Transaction[]; generation: number }) {
+  const unique = [...new Map(rows.map(row => [row.id, row] as const)).values()];
+  return {
+    decisions: unique.map(row => ({ ids: [row.id], ownership: null })),
+    expectedFingerprints: Object.fromEntries(unique.map(row => [row.id, transferFingerprint(row)])),
+    expectedGeneration: generation,
+  };
+}
+
+/** The store refuses an answer given to a ledger that moved with these messages. */
+const STALE_MESSAGES: readonly string[] = ['Transfer review is out of date', 'Transfer review changed; open it again',
+  // Two picked items name the same entry: what was picked no longer matches the ledger's groups.
+  'A transfer entry was selected more than once'];
+
+/** True when a resolver failure means "the ledger changed since this was shown", not "the save failed". */
+export function isStaleTransferRejection(failure: unknown): boolean {
+  const message = typeof failure === 'object' && failure !== null && 'message' in failure ? failure.message : undefined;
+  return typeof message === 'string' && STALE_MESSAGES.includes(message);
+}
+
+/** The fingerprints of these rows as they are in `rows` now; a missing row is left out. */
+export function transferFingerprintsOf(ids: readonly string[], rows: ReadonlyMap<string, Transaction>): Record<string, string> {
+  return Object.fromEntries(ids.flatMap(id => {
+    const row = rows.get(id);
+    return row ? [[id, transferFingerprint(row)] as const] : [];
+  }));
+}
+
+/**
+ * True when an answer is no longer what was saved (or shown): a row in
+ * `expected` is gone or its fingerprint differs. Undo and Clear refuse then,
+ * rather than clearing an answer given since.
+ */
+export function transferAnswerMoved(expected: Readonly<Record<string, string>>, rows: ReadonlyMap<string, Transaction>): boolean {
+  return Object.entries(expected).some(([id, print]) => {
+    const row = rows.get(id);
+    return !row || transferFingerprint(row) !== print;
+  });
+}
+
+/**
+ * One transfer write at a time, app-wide: an answer, a group or selection
+ * save, a toast's Undo or Clear my answer. Every writer takes this lock before
+ * it starts and releases it when it is done, so an Undo can never run while a
+ * save is still writing (or the other way round), whichever screen or hook
+ * started it.
+ */
+let transferWriting = false;
+export const transferWriteLock = {
+  held: (): boolean => transferWriting,
+  /** True when the caller now holds the lock; false while another write runs. */
+  acquire: (): boolean => {
+    if (transferWriting) return false;
+    transferWriting = true;
+    return true;
+  },
+  release: (): void => { transferWriting = false; },
+};
+
+/** The decision each row should carry once these decisions are applied (a linked pair names each other). */
+export interface ExpectedTransferDecision { ownership: TransferAnswer; counterpartId?: string }
+
+export function expectedTransferDecisions(
+  decisions: readonly { ids: readonly string[]; ownership: TransferAnswer | null; counterpartId?: string }[],
+): Map<string, ExpectedTransferDecision> {
+  const expected = new Map<string, ExpectedTransferDecision>();
+  for (const decision of decisions) {
+    if (decision.ownership === null) continue;
+    for (const id of decision.ids) {
+      expected.set(id, { ownership: decision.ownership, ...(decision.counterpartId ? { counterpartId: decision.counterpartId } : {}) });
+    }
+    if (decision.counterpartId && decision.ids.length === 1) {
+      expected.set(decision.counterpartId, { ownership: decision.ownership, counterpartId: decision.ids[0] });
+    }
+  }
+  return expected;
+}
+
+/**
+ * The fingerprints a save left on its rows, for its Undo. The store does not
+ * hand them back on success, so they are read from the ledger, but only
+ * accepted when every row carries exactly the decision this save wrote, all
+ * stamped by the one write (the same `decidedAt`, not before `since`, the
+ * moment the save started). Anything else (a restore, a newer answer) gives
+ * null, and that Undo then refuses rather than clear an answer it did not give.
+ */
+export function savedAnswerFingerprints(
+  expected: ReadonlyMap<string, ExpectedTransferDecision>, rows: ReadonlyMap<string, Transaction>, since: number,
+): Record<string, string> | null {
+  if (expected.size === 0) return null;
+  let stamp: number | undefined;
+  for (const [id, want] of expected) {
+    const decision = rows.get(id)?.transferDecision;
+    if (!decision || decision.ownership !== want.ownership || decision.counterpartId !== want.counterpartId ||
+      !(decision.decidedAt >= since) || (stamp !== undefined && decision.decidedAt !== stamp)) return null;
+    stamp = decision.decidedAt;
+  }
+  return transferFingerprintsOf([...expected.keys()], rows);
 }

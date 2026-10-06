@@ -94,8 +94,12 @@ const SURFACES = [
   } },
   { name: 'add-transaction', path: '/add-transaction' },
   { name: 'review-alerts', path: '/review-alerts' },
-  { name: 'review-transfers', path: '/review-transfers' },
   { name: 'transfers', path: '/transfers' },
+  // Select several is a mode of Transfers (the old review screen redirects here): its controls and bar stack.
+  { name: 'transfers-select', path: '/transfers', then: async (page) => {
+    const select = page.getByTestId('transfers-select');
+    if (await select.count()) { await clickOnTop(page, select); await page.waitForTimeout(600 * SLOW); }
+  } },
   { name: 'assistant', path: '/assistant' },
   { name: 'settings', path: '/settings' },
   { name: 'pro', path: '/pro' },

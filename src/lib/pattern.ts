@@ -106,9 +106,11 @@ export function buildPattern(input: PatternInput): PatternTile[] {
   };
 
   const initial = patternInitial(input.name);
+  // Without a name the first tile carries the Wafra mark, so it is drawn on the
+  // logo's own green rather than the name's clay: the mark is never red.
   push('name:you', 'name', initial
     ? { col: 0, row: 0, kind: 'letter', color: 'clay', mark: 'cream', letter: initial }
-    : { col: 0, row: 0, kind: 'square', color: 'clay' });
+    : { col: 0, row: 0, kind: 'square', color: 'green' });
 
   const goals = new Set(input.goals ?? []);
   for (const goal of GOAL_ORDER) {
