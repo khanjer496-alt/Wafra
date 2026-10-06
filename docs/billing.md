@@ -108,11 +108,20 @@ or one in billing retry stops at the exact period end, and a confirmed inactive
 answer clears the lease at once.
 
 While capture is off or the lease has lapsed, the capture automations finish
-quietly instead of failing, so Shortcuts does not post an "Automation failed"
-alert for every incoming message. Capture status in Wafra shows the off or
-paused state. The Notification and Apple Pay setup checks still report it as an
+without an error, so Shortcuts does not post an "Automation failed" banner for
+every incoming message. Instead Wafra posts its own notification, if the user
+allows Wafra notifications:
+
+- capture switched off: once, until capture is turned on again;
+- capture on but access lapsed ("paused"): at most once a day.
+
+A message saved in between, or turning capture on, resets that throttle. The
+notice carries no message text. With the provisional permission iOS setup
+requests, it is delivered quietly to Notification Center without a banner. Capture status in Wafra shows the off or paused
+state, and the Notification and Apple Pay setup checks still report it as an
 error. Messages that arrive while capture is off are not saved; History import
-is the way to recover them.
+is the way to recover them. iOS's own "Running your automation" banner is a
+per-automation setting (Notify When Run) that the user controls in Shortcuts.
 
 ## Existing RevenueCat subscribers
 

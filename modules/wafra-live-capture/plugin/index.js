@@ -257,7 +257,10 @@ struct StageWafraLiveMessageIntent: AppIntent {
         observedAt: observedAt
       )
       switch result {
-      case .accepted, .ignored, .disabled:
+      case .accepted, .ignored:
+        return .result(value: result.rawValue)
+      case .disabled:
+        await WafraLiveCaptureNotice.postIfDue()
         return .result(value: result.rawValue)
       case .invalid:
         throw WafraLiveCaptureIntentError.invalidMessage
@@ -310,7 +313,10 @@ struct StageWafraLiveTextIntent: AppIntent {
         observedAt: Date()
       )
       switch result {
-      case .accepted, .ignored, .disabled:
+      case .accepted, .ignored:
+        return .result(value: result.rawValue)
+      case .disabled:
+        await WafraLiveCaptureNotice.postIfDue()
         return .result(value: result.rawValue)
       case .invalid:
         throw WafraLiveCaptureIntentError.invalidMessage
@@ -357,7 +363,10 @@ struct CaptureWafraNotificationIntent: AppIntent {
         text: text, eventId: UUID().uuidString, observedAt: Date()
       )
       switch result {
-      case .accepted, .ignored, .disabled:
+      case .accepted, .ignored:
+        return .result(value: result.rawValue)
+      case .disabled:
+        await WafraLiveCaptureNotice.postIfDue()
         return .result(value: result.rawValue)
       case .invalid:
         throw WafraLiveCaptureIntentError.invalidNotification
@@ -399,7 +408,10 @@ struct CaptureWafraApplePayIntent: AppIntent {
       )
       switch result {
       case .accepted: return .result(value: true)
-      case .ignored, .disabled: return .result(value: false)
+      case .ignored: return .result(value: false)
+      case .disabled:
+        await WafraLiveCaptureNotice.postIfDue()
+        return .result(value: false)
       case .invalid: throw WafraLiveCaptureIntentError.applePayInvalid
       case .capacityReached: throw WafraLiveCaptureIntentError.captureCapacityReached
       }

@@ -26,3 +26,7 @@
 "live.apple_pay.error" = "Wafra could not save this Apple Pay event. Open Wafra and check Capture status.";
 "live.apple_pay.setup.title" = "Check Wafra Apple Pay setup";
 "live.apple_pay.setup.error" = "Wafra could not verify Apple Pay setup. Open Wafra and check Capture status.";
+"live.notice.off.title" = "Automatic capture is off";
+"live.notice.off.body" = "Your Shortcuts automation is still sending messages to Wafra, but they are not being saved. Open Wafra to turn capture on, or delete the automation in Shortcuts.";
+"live.notice.paused.title" = "Automatic capture is paused";
+"live.notice.paused.body" = "Your Wafra Pro access is not active, so new bank messages are not being saved. Open Wafra to check Capture status.";

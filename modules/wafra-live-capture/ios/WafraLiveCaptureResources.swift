@@ -23,6 +23,13 @@ public enum WafraLiveCaptureResources {
     preconditionFailure("Wafra intent resources are unavailable.")
   }
 
+  /// Resolved text for content iOS displays outside App Intents, such as a
+  /// local notification. Returns nil rather than crashing when a key is absent.
+  public static func string(_ key: String) -> String? {
+    let resolved = bundle().localizedString(forKey: key, value: missingValue, table: tableName)
+    return resolved == missingValue ? nil : resolved
+  }
+
   public static func localized(_ key: String) -> LocalizedStringResource {
     let bundle = bundle()
     let resolved = bundle.localizedString(

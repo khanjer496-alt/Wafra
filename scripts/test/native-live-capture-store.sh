@@ -76,6 +76,15 @@ xcrun swiftc \
   ios/Wafra/WafraLiveCaptureIntent.swift
 echo "✓ Release App Intent source type-checks without the diagnostic probe writer"
 
+xcrun swiftc \
+  -typecheck \
+  -target arm64-apple-ios16.0-simulator \
+  -sdk "$ios_simulator_sdk" \
+  modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift \
+  modules/wafra-live-capture/ios/WafraLiveCaptureResources.swift \
+  modules/wafra-live-capture/ios/WafraLiveCaptureNotice.swift
+echo "✓ capture-off notice type-checks against the iOS SDK"
+
 swiftc \
   modules/wafra-live-capture/ios/WafraLiveCaptureResources.swift \
   modules/wafra-live-capture/ios/Tests/WafraLiveCaptureResourcesBehaviorTests.swift \

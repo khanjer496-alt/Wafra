@@ -7,6 +7,11 @@ public enum WafraLiveCaptureResources {
   }
 }
 
+@available(iOS 16.0, *)
+public enum WafraLiveCaptureNotice {
+  public static func postIfDue() async {}
+}
+
 public enum WafraLiveStageResult: String {
   case accepted
   case ignored
