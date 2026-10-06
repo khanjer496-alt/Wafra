@@ -101,7 +101,18 @@ subscriber. Confirmed `INACTIVE` revokes Pro; confirmed `ACTIVE` grants it.
 For iPhone automatic capture, a confirmed active subscription is mirrored into
 the native App Intent gate. When exact transaction expiration is not yet
 available, Wafra uses only a short bounded lease and replaces it when customer
-information arrives.
+information arrives. A plan that is set to renew, with no billing retry, keeps
+capture for seven days past the current period end, because Apple renews in the
+background and Wafra only sees the renewal when it next runs. A cancelled plan
+or one in billing retry stops at the exact period end, and a confirmed inactive
+answer clears the lease at once.
+
+While capture is off or the lease has lapsed, the capture automations finish
+quietly instead of failing, so Shortcuts does not post an "Automation failed"
+alert for every incoming message. Capture status in Wafra shows the off or
+paused state. The Notification and Apple Pay setup checks still report it as an
+error. Messages that arrive while capture is off are not saved; History import
+is the way to recover them.
 
 ## Existing RevenueCat subscribers
 

@@ -12,7 +12,7 @@ test('Wallet capture binds the currency amount object without binary floating po
   assert.match(capture, /var merchant: String\?/);
   assert.match(capture, /amount: amount\?\.amount, currency: amount\?\.currencyCode/);
   assert.match(capture, /ReturnsValue<Bool>/);
-  assert.match(capture, /case \.ignored: return \.result\(value: false\)/);
+  assert.match(capture, /case \.ignored, \.disabled: return \.result\(value: false\)/);
   assert.match(capture, /eventId: UUID\(\)\.uuidString, observedAt: Date\(\)/);
   assert.doesNotMatch(capture, /Double|Float|NumberFormatter|purchaseDate|cardId|cardLabel|providerId|recordFirstCapturedAt/);
   const setup = plugin.split('struct RecordWafraApplePaySetupProofIntent: AppIntent {')[1].split('@available(iOS 26.0, *)')[0];

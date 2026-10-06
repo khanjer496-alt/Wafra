@@ -22,7 +22,11 @@ import { ENTITLEMENT_ID, PRO_SKUS } from '@/lib/purchases';
 export interface EntitlementSnapshot {
   active: boolean;
   requestDateMs: number;
-  /** Exact storefront deadline when known. Purchased Wafra Pro is not lifetime. */
+  /**
+   * Deadline for the out-of-process iOS capture gate: the storefront deadline,
+   * plus STORE_CAPTURE_RENEWAL_GRACE_MS while the plan is set to renew in good
+   * standing. Purchased Wafra Pro is not lifetime.
+   */
   expirationDateMs: number | null;
 }
 
@@ -32,6 +36,18 @@ export interface EntitlementSnapshot {
  * customer-info update replaces it with the exact storefront expiration.
  */
 export const STORE_CAPTURE_FALLBACK_LEASE_MS = 25 * 60 * 60 * 1000;
+
+/**
+ * The storefront expiration of an auto-renewing plan is the end of the current
+ * period. Apple renews in the background, but Wafra only learns that the next
+ * time it runs, so a capture lease ending exactly there switched iPhone capture
+ * off at every renewal until the app was opened, and every message in between
+ * was refused. A plan set to renew with no billing problem keeps capture for
+ * this long past the period end; the next launch or foreground replaces the
+ * lease with the renewed deadline, or clears it on a confirmed inactive answer.
+ * A cancelled plan (willRenew false) or one in billing retry gets no grace.
+ */
+export const STORE_CAPTURE_RENEWAL_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const PRO_PRODUCT_IDS = new Set<string>(Object.values(PRO_SKUS));
 
@@ -43,8 +59,10 @@ function futureExpirationMs(info: CustomerInfo | null, nowMs: number): number | 
       continue;
     }
     if (!subscription.expirationDate) continue;
-    const candidate = Date.parse(subscription.expirationDate);
-    if (!Number.isFinite(candidate) || candidate <= nowMs) continue;
+    const expiration = Date.parse(subscription.expirationDate);
+    if (!Number.isFinite(expiration) || expiration <= nowMs) continue;
+    const renews = subscription.willRenew === true && subscription.isInBillingRetryPeriod !== true;
+    const candidate = renews ? expiration + STORE_CAPTURE_RENEWAL_GRACE_MS : expiration;
     latest = latest === null ? candidate : Math.max(latest, candidate);
   }
   return latest;

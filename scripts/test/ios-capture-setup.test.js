@@ -519,15 +519,15 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       /#if DEBUG\s*public static let automationInputProbePayload[\s\S]*?#endif/.test(swiftStore) &&
         /#if DEBUG\s*public func recordAutomationInputProbe[\s\S]*?#endif/.test(swiftStore),
       swiftStore);
-    ok('stage intent keeps its exact four parameters and fails visibly for rejected capture', (() => {
+    ok('stage intent keeps its exact four parameters, stays quiet while capture is off and fails visibly for rejected capture', (() => {
       const match = generatedIntent.match(
         /struct StageWafraLiveMessageIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension StageWafraLiveMessageIntent/,
       );
       return Boolean(match) && (match[1].match(/@Parameter\(/g) || []).length === 4 &&
         /var sender:\s*String/.test(match[1]) && /var body:\s*String/.test(match[1]) &&
         /var eventId:\s*String/.test(match[1]) && /var observedAt:\s*Date/.test(match[1]) &&
-        /case \.accepted, \.ignored:/.test(match[1]) &&
-        /case \.disabled:[\s\S]*captureDisabled/.test(match[1]) &&
+        /case \.accepted, \.ignored, \.disabled:\s*return \.result\(value: result\.rawValue\)/.test(match[1]) &&
+        !/captureDisabled/.test(match[1]) &&
         /case \.invalid:[\s\S]*invalidMessage/.test(match[1]) &&
         /case \.capacityReached:[\s\S]*captureCapacityReached/.test(match[1]);
     })(), generatedIntent);
@@ -541,7 +541,8 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /sender:\s*"Wafra Automation"/.test(match[1]) &&
         /eventId:\s*UUID\(\)\.uuidString/.test(match[1]) &&
         /observedAt:\s*Date\(\)/.test(match[1]) &&
-        /case \.disabled:[\s\S]*captureDisabled/.test(match[1]);
+        /case \.accepted, \.ignored, \.disabled:\s*return \.result\(value: result\.rawValue\)/.test(match[1]) &&
+        !/captureDisabled/.test(match[1]);
     })(), generatedIntent);
     ok('notification action accepts one required auto-connected String through the protected queue', (() => {
       const match = generatedIntent.match(
@@ -552,9 +553,22 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /inputConnectionBehavior:\s*\.connectToPreviousIntentResult/.test(match[1]) &&
         /stageNotification\(\s*text:\s*text,\s*eventId:\s*UUID\(\)\.uuidString,\s*observedAt:\s*Date\(\)/.test(match[1]) &&
         /case \.invalid:[\s\S]*invalidNotification/.test(match[1]) &&
-        /case \.disabled:[\s\S]*captureDisabled/.test(match[1]) &&
+        /case \.accepted, \.ignored, \.disabled:\s*return \.result\(value: result\.rawValue\)/.test(match[1]) &&
+        /catch WafraLiveCaptureStore\.StoreError\.entitlementRequired \{\s*throw WafraLiveCaptureIntentError\.captureDisabled/.test(match[1]) &&
         /case \.capacityReached:[\s\S]*captureCapacityReached/.test(match[1]);
     })(), generatedIntent);
+    ok('Apple Pay automation stays quiet while capture is off', (() => {
+      const match = generatedIntent.match(
+        /struct CaptureWafraApplePayIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension CaptureWafraApplePayIntent/,
+      );
+      return Boolean(match) &&
+        /case \.ignored, \.disabled: return \.result\(value: false\)/.test(match[1]) &&
+        !/captureDisabled/.test(match[1]);
+    })(), generatedIntent);
+    ok('intent errors bridge a readable reason into the Shortcuts failure banner',
+      /enum WafraLiveCaptureIntentError: LocalizedError, CustomLocalizedStringResourceConvertible/.test(generatedIntent) &&
+        /var errorDescription: String\? \{ String\(localized: localizedStringResource\) \}/.test(generatedIntent),
+      generatedIntent);
     ok('legacy bridge excludes notifications and the additive reader explicitly opts in',
       /AsyncFunction\("listPendingRecords"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: false\)/.test(swiftModule) &&
         /AsyncFunction\("listPendingRecordsIncludingNotifications"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: true\)/.test(swiftModule), swiftModule);
