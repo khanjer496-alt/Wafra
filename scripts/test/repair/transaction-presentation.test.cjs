@@ -10,6 +10,7 @@ const ledger = require('../build/ledger.js');
 const presentation = load(path.join(root, 'src/lib/transaction-presentation.ts'), {
   '@/lib/ledger': ledger,
   '@/lib/transfer-reconciliation': require('../build/transfer-reconciliation.js'),
+  '@/lib/i18n': require('../build/i18n.js'),
 });
 const { transactionPresentation: display, readableBankDescription: readable, maskLedgerIdentifiers: mask } = presentation;
 const byId = (tree, id) => walk(tree).find(node => node.props?.testID === id);
@@ -284,4 +285,14 @@ test('search presentation cache is build-local and respects every row-specific c
   const second = filter.createTransactionFilterIndex(repeated, 'en');
   assert.ok(second.search(second.ordered('newest')[0]));
   assert.equal(calls, before + 1, 'no personal strings are reused across independent index builds');
+});
+
+test('parser-minted titles read in Arabic; merchant names never do', () => {
+  assert.equal(display(row('Incoming transfer', { type: 'income' }), 'ar').title, 'تحويل وارد');
+  assert.equal(display(row('Card payment'), 'ar').title, 'دفعة بطاقة');
+  assert.equal(display(row('Salary', { type: 'income', category: 'salary' }), 'ar').title, 'راتب');
+  assert.equal(display(row('Incoming transfer', { type: 'income' }), 'en').title, 'Incoming transfer');
+  assert.equal(display(row('CARREFOUR CITY CENTRE'), 'ar').title, 'Carrefour City Centre');
+  // A title the user typed is theirs, in any language.
+  assert.equal(display(row('Salary', { type: 'income', userEdited: true }), 'ar').title, 'Salary');
 });

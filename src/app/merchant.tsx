@@ -21,7 +21,7 @@ import { Fonts } from '@/constants/theme';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { assistantCopy } from '@/lib/assistant-copy';
+import { assistantCopy, assistantCopyFor } from '@/lib/assistant-copy';
 
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { friendlyDate, toISODate } from '@/lib/format';
@@ -136,7 +136,7 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
         {merchant ? <MerchantCategoryRule merchant={merchant} kind={income ? 'income' : 'expense'} palette={band} /> : null}
         {merchant && view !== 'all' && <View testID="merchant-ask-wafra">
           <EButton palette={band} variant="secondary" icon="spark"
-            label={income ? assistantCopy.askIncome : assistantCopy.askMerchant}
+            label={income ? assistantCopyFor(language).askIncome : assistantCopyFor(language).askMerchant}
             onPress={() => router.push({ pathname: '/assistant', params: { question: income
               ? assistantCopy.incomeQuestion(merchant)
               : assistantCopy.merchantChangedQuestion(merchant) } })} />

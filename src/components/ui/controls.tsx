@@ -17,6 +17,7 @@ import {
 import { EASE, Motion, Radius, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { useLanguage } from '@/hooks/use-language';
 import { committed, tapped } from '@/lib/haptics';
 
 const EASING = Easing.bezier(EASE[0], EASE[1], EASE[2], EASE[3]);
@@ -120,14 +121,18 @@ export function Toggle({
 }) {
   const theme = useTheme();
   const reducedMotion = useReducedMotion();
-  const offset = useSharedValue(value ? 18 : 0);
+  // The thumb rests at the start edge and slides to the end edge when on:
+  // right in English, left in Arabic — the platform's mirrored switch, and the
+  // same as Customize Home's switches (knob at the end when on).
+  const travel = useLanguage() === 'ar' ? -18 : 18;
+  const offset = useSharedValue(value ? travel : 0);
 
   React.useEffect(() => {
-    const next = value ? 18 : 0;
+    const next = value ? travel : 0;
     offset.value = reducedMotion
       ? next
       : withTiming(next, { duration: Motion.tap, easing: EASING });
-  }, [value, offset, reducedMotion]);
+  }, [value, offset, reducedMotion, travel]);
 
   const thumb = useAnimatedStyle(() => ({ transform: [{ translateX: offset.value }] }));
 
