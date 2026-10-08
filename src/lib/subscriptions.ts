@@ -405,16 +405,75 @@ export function matchesRecurringTransaction(sub: RecurringIdentity, transaction:
   return !track?.length || track.some((price) => !differs(price, transaction.amountFils));
 }
 
-/** An identified bill replaces only its own service; old manual reminders cover the provider. */
+/** A detected charge's schedule, when the caller has it (`detectSubscriptions` rows do). */
+type RecurringSchedule = Partial<Pick<Subscription, 'category' | 'cadence' | 'nextExpectedISO' | 'lastAmountFils'>>;
+/** A reminder's schedule, when the caller has the whole bill. */
+type BillSchedule = Partial<Pick<Bill, 'dueDay' | 'amountFils' | 'yearlyOnISO' | 'autoDetected'>>;
+
+/** How far apart (days of the month) a detected charge and a reminder may fall and still be one payment. */
+export const MANUAL_BILL_DAY_TOLERANCE = 3;
+/** How far apart (share of the reminder's amount) their amounts may be. */
+export const MANUAL_BILL_AMOUNT_TOLERANCE = 0.05;
+/** Categories too broad to say two payments are the same thing on their own. */
+const GENERIC_CATEGORIES = new Set(['other', 'transfer', 'uncategorized']);
+
+const titleWords = (title: string): string[] =>
+  title.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length >= 3);
+
+/** "Rent" and "Rent - Emaar": every word of the shorter name is in the longer one. */
+function namesOverlap(a: string, b: string): boolean {
+  const left = titleWords(a);
+  const right = titleWords(b);
+  if (left.length === 0 || right.length === 0) return false;
+  const [shorter, longer] = left.length <= right.length ? [left, new Set(right)] : [right, new Set(left)];
+  return shorter.every((word) => longer.has(word));
+}
+
+/**
+ * A detected monthly charge that is the payment a hand-made reminder is for.
+ *
+ * The user's "Rent" reminder and the detected "Rent - Emaar" were listed side
+ * by side on the same day for the same AED 8,500, and both counted. They are
+ * one payment when every one of these holds — and otherwise stay separate:
+ * the reminder was made by hand (a detected or provider-identified reminder
+ * has its own matching); both are monthly; the category is the same and
+ * specific, or the names overlap; the charge's day is within three days of
+ * the reminder's (counting across a month end); and the amounts differ by at
+ * most 5% of the reminder's.
+ */
+export function recurringMatchesManualBill(
+  sub: Pick<Subscription, 'title'> & RecurringSchedule,
+  bill: Pick<Bill, 'title' | 'category' | 'importIdentity'> & BillSchedule,
+): boolean {
+  if (bill.importIdentity || bill.autoDetected || bill.yearlyOnISO) return false;
+  if (sub.cadence !== 'monthly' || !sub.nextExpectedISO || sub.lastAmountFils === undefined) return false;
+  if (bill.dueDay === undefined || bill.amountFils === undefined || !(bill.amountFils > 0)) return false;
+  const sameCategory = sub.category !== undefined && sub.category === bill.category && !GENERIC_CATEGORIES.has(bill.category);
+  if (!sameCategory && !namesOverlap(sub.title, bill.title)) return false;
+  const day = Number(sub.nextExpectedISO.slice(8, 10));
+  if (!Number.isInteger(day) || day < 1 || day > 31) return false;
+  const apart = Math.abs(day - bill.dueDay);
+  if (Math.min(apart, 31 - apart) > MANUAL_BILL_DAY_TOLERANCE) return false;
+  return Math.abs(sub.lastAmountFils - bill.amountFils) <= bill.amountFils * MANUAL_BILL_AMOUNT_TOLERANCE;
+}
+
+/**
+ * An identified bill replaces only its own service; old manual reminders cover
+ * the provider. A hand-made reminder also covers a detected charge with the
+ * same schedule and amount (`recurringMatchesManualBill`), when the caller
+ * passes the charge's and the reminder's schedules.
+ */
 export function subscriptionMatchesBill(
-  sub: RecurringIdentity,
-  bill: Pick<Bill, 'title' | 'category' | 'importIdentity'>,
+  sub: RecurringIdentity & RecurringSchedule,
+  bill: Pick<Bill, 'title' | 'category' | 'importIdentity'> & BillSchedule,
 ): boolean {
   const provider = recurringProviderTitle(bill).trim().toLowerCase();
-  if (sub.title.trim().toLowerCase() !== provider) return false;
-  if (!bill.importIdentity) return true;
-  const identity = normalizedBillIdentity(bill.importIdentity);
-  return identity !== undefined && identity === normalizedBillIdentity(sub.billIdentity);
+  if (sub.title.trim().toLowerCase() === provider) {
+    if (!bill.importIdentity) return true;
+    const identity = normalizedBillIdentity(bill.importIdentity);
+    return identity !== undefined && identity === normalizedBillIdentity(sub.billIdentity);
+  }
+  return recurringMatchesManualBill(sub, bill);
 }
 
 /** Scoped choices coexist with provider-wide choices saved by earlier versions. */

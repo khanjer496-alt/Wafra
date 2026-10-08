@@ -118,3 +118,27 @@ export function upcomingWindowItems(
   }
   return out;
 }
+
+/**
+ * Bills' "All": every agenda row, and every time a repeating payment falls
+ * due inside the window that is not one of those rows already.
+ *
+ * The agenda dates each obligation once, at its next due date — so a monthly
+ * bill already paid this month showed only as paid, and its next cycle, which
+ * "Next 30 days" lists, was missing from All. All then totalled less than one
+ * of its own windows. As the union, All holds every row any window holds and
+ * its open total can never be smaller than a window's.
+ */
+export function allAgendaItems(
+  items: readonly PaymentAgendaItem[],
+  windowItems: readonly PaymentAgendaItem[],
+): PaymentAgendaItem[] {
+  const ids = new Set(items.map((item) => item.id));
+  const out = [...items];
+  for (const item of windowItems) {
+    if (ids.has(item.id)) continue;
+    ids.add(item.id);
+    out.push(item);
+  }
+  return out;
+}

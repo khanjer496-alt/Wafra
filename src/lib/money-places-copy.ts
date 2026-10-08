@@ -102,6 +102,7 @@ export const moneyPlacesCopy = {
     // Bills
     next30Days: 'Next 30 days',
     next30Total: 'Due in the next 30 days',
+    plusPastDue: (amount: string) => `plus ${amount} past due`,
     today: 'Today',
     markedCancelled: (title: string) => `${title} marked as cancelled`,
     undo: 'Undo',
@@ -157,7 +158,6 @@ export const moneyPlacesCopy = {
     asBankStated: 'As your bank stated',
     typeIt: 'Type it',
     cardsCount: (n: number) => n === 1 ? '1 card' : `${n} cards`,
-  },
     // Payment cards: the same two kinds Accounts lists, counted the same way.
     cardsByKind: (credit: number, debit: number) => [
       credit > 0 ? credit === 1 ? '1 credit card' : `${credit} credit cards` : null,
@@ -176,6 +176,7 @@ export const moneyPlacesCopy = {
       accounts > 0 ? accounts === 1 ? '1 account' : `${accounts} accounts` : null,
       cards > 0 ? cards === 1 ? '1 card' : `${cards} cards` : null,
     ].filter(Boolean).join(', ')}`,
+  },
   ar: {
     updateBalance: 'تحديث الرصيد',
     hide: 'إخفاء',
@@ -256,6 +257,7 @@ export const moneyPlacesCopy = {
     paymentNote: 'هذا يسجّل دفعة أجريتها من بنكك فقط. لا ترسل وفرة أي مال، ولن تُحتسب كإنفاق مرتين.',
     next30Days: 'الأيام الثلاثون القادمة',
     next30Total: 'المستحق خلال الأيام الثلاثين القادمة',
+    plusPastDue: (amount: string) => `إضافة إلى ${amount} متأخرة`,
     today: 'اليوم',
     markedCancelled: (title: string) => `علّمت ${title} كملغى`,
     undo: 'تراجع',
@@ -316,8 +318,6 @@ export const moneyPlacesCopy = {
     typeIt: 'اكتبه',
     cardsCount: (n: number) => n === 1 ? 'بطاقة واحدة' : n === 2 ? 'بطاقتان'
       : n >= 3 && n <= 10 ? `${n} بطاقات` : `${n} بطاقة`,
-  },
-} as const;
     cardsByKind: (credit: number, debit: number) => [
       credit > 0 ? credit === 1 ? 'بطاقة ائتمانية واحدة' : credit === 2 ? 'بطاقتان ائتمانيتان'
         : credit <= 10 ? `${credit} بطاقات ائتمانية` : `${credit} بطاقة ائتمانية` : null,
@@ -336,6 +336,8 @@ export const moneyPlacesCopy = {
       accounts > 0 ? accounts === 1 ? 'حساب واحد' : accounts === 2 ? 'حسابان' : accounts <= 10 ? `${accounts} حسابات` : `${accounts} حساباً` : null,
       cards > 0 ? cards === 1 ? 'بطاقة واحدة' : cards === 2 ? 'بطاقتان' : cards <= 10 ? `${cards} بطاقات` : `${cards} بطاقة` : null,
     ].filter(Boolean).join('، ')}`,
+  },
+} as const;
 
 export type MoneyPlacesWords = (typeof moneyPlacesCopy)['en'];
 

@@ -59,7 +59,7 @@ import {
 import { runAfterFirstFrames, type DeferredWork } from '@/lib/after-first-frames';
 import { historyImportIncomplete } from '@/lib/history-import';
 import { internalTransferIdsForState, liveAccountIds } from '@/lib/ledger';
-import { openAgendaSummary } from '@/lib/money-places-band';
+import { openAgendaSummary, windowAgendaSummary } from '@/lib/money-places-band';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { measureRuntimeOperation, recordRuntimeOperation } from '@/lib/runtime-performance';
 import {
@@ -87,7 +87,7 @@ import {
 } from '@/lib/subscriptions';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
 import { billForAgendaOccurrence, futureAnnualBillAgendaItems } from '@/lib/upcoming-bills';
-import { upcomingWindowItems, type AgendaRecurrence } from '@/lib/upcoming-window';
+import { allAgendaItems, upcomingWindowItems, type AgendaRecurrence } from '@/lib/upcoming-window';
 import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, Bill, CategoryId, Transaction } from '@/lib/types';
 import { tapped } from '@/lib/haptics';
@@ -678,7 +678,8 @@ export default function BillsScreen() {
       id: `card-${due.id}`, title: accountNames.get(due.accountId) ?? t('card'), category: 'other',
       kind: 'card', accountId: due.accountId, dateISO: due.dueDate, daysLeft, amountFils: remainingFils, estimated: false, paid: false,
     }));
-    for (const { due, daysLeft } of paidCards) items.push({
+    // A statement with nothing on it was never a payment: no "Paid AED 0" row.
+    for (const { due, daysLeft } of paidCards) if (due.totalDueFils > 0) items.push({
       id: `card-${due.id}`, title: accountNames.get(due.accountId) ?? t('card'), category: 'other',
       kind: 'card', accountId: due.accountId, dateISO: due.dueDate, daysLeft, amountFils: due.totalDueFils, estimated: false, paid: true,
     });
@@ -730,13 +731,16 @@ export default function BillsScreen() {
     if (agendaView !== 'all' || groupFilter === 'everything') return undefined;
     return groupFilter;
   }, [agendaView, groupFilter]);
+  // All is every row any window holds, plus everything later: its total is
+  // never smaller than Next 30 days' (upcoming-window.ts).
+  const everyAgendaItem = useMemo(() => allAgendaItems(agendaItems, windowed), [agendaItems, windowed]);
   const visibleAgendaItems = useMemo(
     () => agendaView === 'upcoming'
       ? windowed
       : selectedAgendaGroup
-        ? agendaItems.filter((item) => paymentGroupFor(item) === selectedAgendaGroup)
-        : agendaItems,
-    [agendaView, windowed, agendaItems, selectedAgendaGroup],
+        ? everyAgendaItem.filter((item) => paymentGroupFor(item) === selectedAgendaGroup)
+        : everyAgendaItem,
+    [agendaView, windowed, everyAgendaItem, selectedAgendaGroup],
   );
   const includePaidAgenda = agendaView !== 'upcoming';
   // A missing recurring result means unknown, not zero. Card-only history
@@ -753,13 +757,17 @@ export default function BillsScreen() {
           : groupFilter === 'cards'
             ? t('billsCardsTotal')
             : t('billsAllTotal');
-    // Paid rows are history in All; only what is still open is "due".
-    return { label, ...openAgendaSummary(visibleAgendaItems) };
+    // Paid rows are history in All; only what is still open is "due". The
+    // window counts from today: what is already late is said beside it.
+    return agendaView === 'upcoming'
+      ? { label, ...windowAgendaSummary(visibleAgendaItems) }
+      : { label, ...openAgendaSummary(visibleAgendaItems), overdueFils: 0, overdueCount: 0 };
   }, [agendaView, groupFilter, visibleAgendaItems, w.next30Total]);
-  // "7 payments · 1 is an estimate" under the band figure.
+  // "7 payments · 1 is an estimate" under the band figure, then anything late.
   const summaryQualifier = [
     w.paymentsCount(summary.count),
     summary.estimated > 0 ? w.estimatesCount(summary.estimated) : null,
+    summary.overdueCount > 0 ? w.plusPastDue(formatAED(summary.overdueFils)) : null,
   ].filter(Boolean).join(' · ');
   const subscriptionItems = useMemo(
     () => windowed.filter((item) => paymentGroupFor(item) === 'subscriptions'),
