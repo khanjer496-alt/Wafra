@@ -96,7 +96,8 @@ test('large text stacks the route row and lets names wrap', () => {
   const route = byId(tree, 'transfer-route-p');
   assert.equal(flat(route.props.style).flexDirection, 'column');
   assert.equal(flat(route.props.style).alignItems, 'flex-start');
-  const names = walk(tree).filter(n => n.props?.numberOfLines === 1);
+  // A money figure is one line that shrinks to fit (Money), never a truncated name.
+  const names = walk(tree).filter(n => n.props?.numberOfLines === 1 && !n.props.adjustsFontSizeToFit);
   assert.equal(names.length, 0, 'names wrap instead of truncating');
   assert.equal(flat(byId(tree, 'transfer-route-p').props.style).flexDirection, 'column');
   const normal = row(harness('en'), {});

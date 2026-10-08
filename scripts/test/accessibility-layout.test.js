@@ -327,10 +327,16 @@ ok('Only display sizes carry a Larger Text cap, and each still grows at least 1.
 ok('A caller-supplied maxFontSizeMultiplier wins over the ramp cap',
   /rest\.maxFontSizeMultiplier !== undefined\s*\? rest\.maxFontSizeMultiplier : RAMP_CAP\[type\]/.test(themedText) &&
     /\{\.\.\.rest\}\s*maxFontSizeMultiplier=\{maxFontSizeMultiplier\}/.test(themedText));
-ok('Money keeps hero figures whole: fitted from the width, never truncated, full amount labelled',
+// Every figure is kept whole at every text size (not only the accessibility
+// ones): at 1.3x a stat tile split "1,752.6" from "7". Natively one line that
+// shrinks to fit (never below MIN_FIGURE_SCALE, so never an ellipsis on a
+// figure that fits at 60%); on the web, no wrapping.
+ok('Money keeps every figure whole: fitted from the width, never split, full amount labelled',
   /useHeroFigureMultiplier\(amount, type, fitInset\)/.test(money) &&
-    /large && styles\.valueWhole/.test(money) && /valueWhole: \{ flexShrink: 0, maxWidth: '100%' \}/.test(money) &&
-    /accessibilityLabel=\{label\}/.test(money) && !/numberOfLines/.test(money));
+    /value: \{ flexShrink: 0, maxWidth: '100%' \}/.test(money) &&
+    /adjustsFontSizeToFit=\{Platform\.OS !== 'web'\} minimumFontScale=\{MIN_FIGURE_SCALE\}/.test(money) &&
+    /Platform\.OS === 'web' && WEB_NO_WRAP/.test(money) &&
+    /accessibilityLabel=\{label\}/.test(money));
 // Design language E: the selected tab shows its name in its own colour; the
 // others are icons. At the accessibility sizes every tab is an icon. Every
 // unlabelled tab can be held to show its name, and every tab is spoken.

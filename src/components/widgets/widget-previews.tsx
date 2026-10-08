@@ -6,6 +6,7 @@ import { ThemedText } from '@/components/themed-text';
 import { merchantLogoFor } from '@/components/ui/merchant-logo-assets';
 import { isWidgetLogoId } from '@/lib/widget-logo';
 import { Icon } from '@/components/ui/icon';
+import { useFitText } from '@/hooks/use-fit-text';
 import { Fonts, type BandPalette } from '@/constants/theme';
 import {
   widgetAmountParts, widgetBillAmount, widgetBillsTotal, widgetBillTitle, widgetBudgetProgress, widgetDueLabel, widgetInitial,
@@ -38,6 +39,10 @@ import type { WidgetsCopy } from '@/lib/widgets-copy';
 
 const SIZE = 164;
 const TEXT_SCALE = 1.3;
+/** The Today figure and its currency, before fitting. */
+const FIGURE_SIZE = 28;
+const FIGURE_LINE = 34;
+const CURRENCY_SIZE = 17;
 
 /** Today's seven bars, oldest first: today in the accent, the rest in the band's mark tone. */
 function WeekBars({ snapshot, palette }: { snapshot: WidgetSnapshot; palette: BandPalette }) {
@@ -69,6 +74,9 @@ export function TodayWidgetPreview({ snapshot, palette, words, testID }: {
   testID?: string;
 }) {
   const parts = snapshot ? widgetAmountParts(snapshot.todayMinor, snapshot) : null;
+  // The currency is set smaller than the number: count it at its own size.
+  const fit = useFitText(parts ? parts.number.length + (parts.currency.length + 1) * (CURRENCY_SIZE / FIGURE_SIZE) : 1,
+    FIGURE_SIZE, { maxScale: TEXT_SCALE });
   // The bars' label: whole units so it holds one line; spoken exactly.
   const week = snapshot ? widgetMoneyText(widgetWeekTotal(snapshot), snapshot) : null;
   const weekShown = snapshot ? widgetWholeMoney(widgetWeekTotal(snapshot), snapshot) : null;
@@ -96,13 +104,18 @@ export function TodayWidgetPreview({ snapshot, palette, words, testID }: {
       <View style={styles.grow} />
       <ThemedText type="meta" numberOfLines={1} maxFontSizeMultiplier={TEXT_SCALE}
         style={[styles.label, { color: palette.onBandSecondary }]}>{words.widgetToday}</ThemedText>
-      <ThemedText testID={testID ? `${testID}-amount` : undefined} numberOfLines={1} adjustsFontSizeToFit
-        maxFontSizeMultiplier={TEXT_SCALE} style={[styles.figure, { color: palette.onBand }]}>
-        {parts ? <>
-          <ThemedText style={[styles.currency, { color: palette.onBandSecondary }]}>{`‎${parts.currency} `}</ThemedText>
-          {`${parts.number}‎`}
-        </> : '—'}
-      </ThemedText>
+      {/* Sized to the tile from its length, so the figure is never cut. */}
+      <View style={styles.fitBox} onLayout={fit.onLayout}>
+        <ThemedText testID={testID ? `${testID}-amount` : undefined} numberOfLines={1}
+          maxFontSizeMultiplier={TEXT_SCALE} style={[styles.figure, fit.ratio < 1 && {
+            fontSize: FIGURE_SIZE * fit.ratio, lineHeight: FIGURE_LINE * fit.ratio }, { color: palette.onBand }]}>
+          {parts ? <>
+            <ThemedText style={[styles.currency, fit.ratio < 1 && { fontSize: CURRENCY_SIZE * fit.ratio },
+              { color: palette.onBandSecondary }]}>{`‎${parts.currency} `}</ThemedText>
+            {`${parts.number}‎`}
+          </> : '—'}
+        </ThemedText>
+      </View>
       {progress ? <View testID={testID ? `${testID}-budget-bar` : undefined} style={[styles.track, { backgroundColor: palette.tile }]}>
         <View style={[styles.fill, { width: `${Math.round(progress.fraction * 100)}%`,
           backgroundColor: progress.over ? palette.statusOver : palette.accent }]} />
@@ -244,8 +257,9 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, lineHeight: 16 },
   weekTotal: { fontSize: 13, lineHeight: 17, fontVariant: ['tabular-nums'], flexShrink: 0 },
   logo: { width: 22, height: 22 },
-  figure: { fontFamily: Fonts.sansSemi, fontSize: 28, lineHeight: 34, letterSpacing: -0.6, fontVariant: ['tabular-nums'] },
-  currency: { fontFamily: Fonts.sansMedium, fontSize: 17, letterSpacing: 0 },
+  figure: { fontFamily: Fonts.sansSemi, fontSize: FIGURE_SIZE, lineHeight: FIGURE_LINE, letterSpacing: -0.6, fontVariant: ['tabular-nums'] },
+  currency: { fontFamily: Fonts.sansMedium, fontSize: CURRENCY_SIZE, letterSpacing: 0 },
+  fitBox: { alignSelf: 'stretch', minWidth: 0 },
   track: { height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 2, marginBottom: 4 },
   fill: { height: 4, borderRadius: 2 },
   header: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 8 },
