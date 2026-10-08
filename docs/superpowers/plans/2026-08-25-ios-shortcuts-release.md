@@ -839,6 +839,10 @@ cd server
 npx wrangler pages deploy ../dist --project-name "$WAFRA_PAGES_PROJECT"
 ```
 
+> Superseded (October 2026): the site now has Pages Functions in the root
+> `functions/` directory, which Wrangler only uploads when run from the
+> repository root. Deploy as described in `docs/seo-geo-audit.md`.
+
 Expected: Wrangler reports one new production Pages deployment. Record its
 deployment ID and generated Pages URL; do not equate that success with
 custom-domain success.

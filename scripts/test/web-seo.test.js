@@ -135,6 +135,7 @@ try {
   fs.writeFileSync(path.join(output, 'card', '[id].html'), runtime);
   fs.mkdirSync(path.join(output, '_expo', 'static', 'js', 'web'), { recursive: true });
   fs.writeFileSync(path.join(output, '_expo', 'static', 'js', 'web', 'entry-fixture.js'), 'app();');
+  fs.writeFileSync(path.join(output, '_expo', '.routes.json'), '{"redirects":[]}');
   fs.mkdirSync(path.join(output, '_expo', 'static', 'css'), { recursive: true });
   fs.writeFileSync(path.join(output, '_expo', 'static', 'css', 'home.css'), 'h1{color:green}');
   fs.mkdirSync(path.join(output, 'assets', 'merchants'), { recursive: true });
@@ -187,7 +188,8 @@ try {
     !read('index.html').includes(runtime) && !fs.existsSync(path.join(output, '(tabs)')));
   ok('app screens, app JavaScript and unreferenced app assets are not published',
     !fs.existsSync(path.join(output, 'settings.html')) && !fs.existsSync(path.join(output, 'card')) &&
-    !fs.existsSync(path.join(output, '_expo', 'static', 'js')) && !fs.existsSync(path.join(output, 'assets')));
+    !fs.existsSync(path.join(output, '_expo', 'static', 'js')) && !fs.existsSync(path.join(output, '_expo', '.routes.json')) &&
+    !fs.existsSync(path.join(output, 'assets')));
   ok('public pages, stylesheets and hosted files survive app-route removal',
     ['index.html', '404.html', 'privacy/index.html', 'terms/index.html', 'support/index.html',
       '_expo/static/css/home.css', 'wafra-history-import.shortcut', 'robots.txt']

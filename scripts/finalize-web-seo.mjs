@@ -96,6 +96,7 @@ const removeAppRoutes = (directory, prefix = '') => {
 };
 removeAppRoutes(outputDir);
 fs.rmSync(path.join(outputDir, '_expo', 'static', 'js'), { recursive: true, force: true });
+fs.rmSync(path.join(outputDir, '_expo', '.routes.json'), { force: true });
 // Metro copies the app's bundled images and setup videos to assets/. Drop them
 // too unless a remaining public page or stylesheet still points there.
 const cssDir = path.join(outputDir, '_expo', 'static', 'css');

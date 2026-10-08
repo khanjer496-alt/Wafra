@@ -361,7 +361,7 @@ Wafra does not include advertising, third-party analytics or crash reporting.
 Wafra's public website sets no cookies and runs no scripts in the browser. It is
 hosted on Cloudflare Pages. To learn whether the site helps people find Wafra,
 the server counts landing-page views and download-button clicks. Each count
-records only the page or button, the visitor's country as determined by
+records only the time, the page or button, the visitor's country as determined by
 Cloudflare, the hostname of the referring website, a campaign tag if the link
 carried one (for example `utm_source`), and whether the request appears to come
 from an automated client. Wafra does not record IP addresses, browser or device

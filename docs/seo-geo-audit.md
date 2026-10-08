@@ -149,8 +149,18 @@ bring visitors. The Workers Free plan includes 100,000 Analytics Engine data
 points a day, and data is kept for three months.
 
 To check the Functions locally, serve a finalized export with
-`server/node_modules/.bin/wrangler pages dev <export>` and run
+`server/node_modules/.bin/wrangler pages dev <export> --compatibility-date 2026-08-01`
+(the pinned runtime rejects today's default date) and run
 `scripts/e2e/e2e-marketing.mjs` with `EXPECT_REDIRECTS=1`.
+
+**Shared request allowance.** Pages Functions requests count toward the
+account's Workers request allowance (100,000 a day on Workers Free), which the
+relay Worker also uses. Every landing view and download click is one request.
+In the Pages project's Functions settings, set the daily-limit behaviour to
+**Fail open** so the static site and `_redirects` downloads keep working if the
+allowance runs out, and watch Workers usage once traffic grows. If the landing
+page ever needs that headroom, delete `functions/index.js` to count only
+download clicks, or move to Workers Paid.
 
 ## Remaining external work
 
@@ -158,8 +168,9 @@ The site is live at `https://wafra-app-azg.pages.dev`, which the store
 metadata and `app.json` already use for the privacy, terms and support URLs.
 These items cannot be completed honestly from repository code alone:
 
-1. Add the `SITE_EVENTS` Analytics Engine binding described above, deploy this
-   build, and confirm `/get/iphone` returns a 302 and a data point appears.
+1. Add the `SITE_EVENTS` Analytics Engine binding described above, set
+   Functions to **Fail open**, deploy this build, and confirm `/get/iphone`
+   returns a 302 and a data point appears.
 2. Submit `/sitemap.xml` in Google Search Console and Bing Webmaster Tools.
 3. Decide whether to move to a custom domain. A `pages.dev` address works, but
    a domain Wafra owns can be kept if hosting changes. If it changes, update

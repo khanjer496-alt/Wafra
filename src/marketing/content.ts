@@ -32,7 +32,7 @@ const getSiteUrl = () => {
 export const SITE_URL = getSiteUrl();
 // The website's download buttons link to these first-party paths. The deployed
 // Pages Function counts the click and redirects to the destination in
-// downloads.json; the finalizer's _redirects file covers a static-only host.
+// site-events.mjs; the finalizer's _redirects file covers a static-only host.
 export const DOWNLOAD_PATHS = { iphone: '/get/iphone', android: '/get/android' } as const;
 export const MARKETING_TITLE = 'Wafra — Private Budget & Expense Tracker';
 export const MARKETING_DESCRIPTION =
