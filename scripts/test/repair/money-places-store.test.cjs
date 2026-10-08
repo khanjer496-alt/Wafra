@@ -73,7 +73,7 @@ test('a newer bank alert takes the figure back, and is labelled as the bank agai
   // Exactly what ledger-import.ts writes for a newer snapshot: fils, kind, ts.
   const newer = { ...mine, snapshotFils: 400_000, snapshotKind: 'balance', snapshotTs: TS + 3_600_000 };
   assert.equal(freshness.snapshotOrigin(newer), 'bank');
-  assert.match(freshness.accountSnapshotFreshness(newer, new Date(TS + 3_700_000), 'en').label, /^Bank alert/);
+  assert.match(freshness.accountSnapshotFreshness(newer, new Date(TS + 3_700_000), 'en').label, /^Bank message/);
 });
 
 test('a hand-kept account moves its opening balance so the running figure lands on what was typed', () => {
@@ -111,9 +111,9 @@ test('freshness labels are honest in both languages and plural-correct in Arabic
   assert.equal(quiet.quiet, true);
   assert.equal(quiet.label, 'Set by you 20 days ago');
   assert.match(freshness.accountSnapshotFreshness(account, days(3), 'ar').label, /^أدخلته بنفسك/);
-  assert.equal(freshness.accountFreshness(TS, days(2), 'ar').label, 'تنبيه البنك · قبل يومين');
-  assert.equal(freshness.accountFreshness(TS, days(5), 'ar').label, 'تنبيه البنك · قبل 5 أيام');
-  assert.equal(freshness.accountFreshness(TS, days(12), 'ar').label, 'تنبيه البنك · قبل 12 يوماً');
+  assert.equal(freshness.accountFreshness(TS, days(2), 'ar').label, 'رسالة البنك · قبل يومين');
+  assert.equal(freshness.accountFreshness(TS, days(5), 'ar').label, 'رسالة البنك · قبل 5 أيام');
+  assert.equal(freshness.accountFreshness(TS, days(12), 'ar').label, 'رسالة البنك · قبل 12 يوماً');
   assert.equal(freshness.accountSnapshotFreshness({}, days(1), 'en'), null);
 });
 

@@ -57,9 +57,9 @@ test('first day: fill in the past links to statement import and manual entry', (
 test('capture set up but nothing captured yet shows the ready card', () => {
   const manual = [{ id: 'm', title: 'Cash', amountFils: 500, category: 'other', type: 'expense', accountId: 'cash', date: '2026-09-05', source: 'manual' }];
   const ready = createHarness({ platform: 'ios', state: { transactions: manual } }).render('home');
-  assert.match(text(byId(ready, 'home-capture-ready')), /Ready for your next bank text/);
+  assert.match(text(byId(ready, 'home-capture-ready')), /Ready for your next bank message/);
   const android = createHarness({ platform: 'android', state: { transactions: manual } }).render('home');
-  assert.match(text(byId(android, 'home-capture-ready')), /Ready for your next bank alert/);
+  assert.match(text(byId(android, 'home-capture-ready')), /Ready for your next bank message/);
   // The fixture's bank texts mean capture is already working.
   assert.equal(byId(createHarness({ platform: 'ios' }).render('home'), 'home-capture-ready'), undefined);
 });

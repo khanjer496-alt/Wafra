@@ -49,7 +49,8 @@ test('a credit card row leads with the bank figure and puts the open statement o
 
 test('a settled statement says paid beside the bank figure, never "AED 0.00 owed"', () => {
   const h = createHarness({ state: { cardDues: [{ id: 'statement', accountId: 'credit', dueDate: '2026-09-10',
-    totalDueFils: 280000, minDueFils: 14000, minDueEstimated: true, paidFils: 0 }] } });
+    totalDueFils: 280000, minDueFils: 14000, paidFils: 280000 }] } });
+  h.deps['@/lib/cards'].openDues = () => [];
   const tree = h.render('wallet');
   assert.match(text(byId(tree, 'wallet-status-credit')), /Statement paid ✓/);
   assert.doesNotMatch(text(byId(tree, 'wallet-card-credit')), /(^|[^\d,])0\.00/);
@@ -57,7 +58,8 @@ test('a settled statement says paid beside the bank figure, never "AED 0.00 owed
 
 test('with a limit the user entered, quoted headroom becomes the used figure', () => {
   const h = createHarness();
-  h.state.accounts = h.state.accounts.map((a) => a.id === 'credit' ? { ...a, creditLimitFils: 1000000 } : a);
+  h.state.accounts = h.state.accounts.map((a) => a.id === 'credit'
+    ? { ...a, creditLimitFils: 1000000, snapshotKind: 'limit', snapshotFils: 720000 } : a);
   const tree = h.render('wallet');
   const row = text(byId(tree, 'wallet-card-credit'));
   assert.match(row, /2,800\.00/);
@@ -87,8 +89,6 @@ test('a quiet credit card can still be hidden from its row', () => {
   assert.deepEqual(JSON.parse(JSON.stringify(quiet.events.filter((e) => e[0] === 'editAccount'))), [['editAccount', 'credit', { archived: true }]]);
 });
 
-test('Add activity lists statement import, add by hand and paste, each to an existing screen', () => {
-  const h = createHarness({ platform: 'ios' });
 test('a debit card is a card with no balance, and balances count only accounts that hold money', () => {
   const h = createHarness();
   h.state.accounts = [...h.state.accounts,
@@ -102,6 +102,8 @@ test('a debit card is a card with no balance, and balances count only accounts t
   assert.match(text(byId(tree, 'wallet-cards-apart-chip')), /1 credit card, shown on its own/);
 });
 
+test('Add activity lists statement import, add by hand and paste, each to an existing screen', () => {
+  const h = createHarness({ platform: 'ios' });
   const tree = h.render('wallet');
   for (const key of ['statement', 'manual', 'paste']) press(byId(tree, `wallet-add-${key}`));
   assert.deepEqual(h.events.filter((e) => e[0] === 'route').map((e) => e[1]),
@@ -120,7 +122,7 @@ test('account detail shows the reported balance, who reported it, and recorded i
   // Design language E: the balance is the slate band's figure, with who
   // reported it and when on the line under it.
   assert.match(text(byId(tree, 'account-detail-balance')), /Latest balance[\s\S]*25,000/);
-  assert.match(text(byId(tree, 'account-detail-freshness')), /Bank alert/);
+  assert.match(text(byId(tree, 'account-detail-freshness')), /Bank message/);
   const flow = text(byId(tree, 'account-detail-flow'));
   assert.match(flow, /Recorded in this month/);
   assert.match(flow, /Recorded out this month/);
@@ -130,14 +132,14 @@ test('account detail shows the reported balance, who reported it, and recorded i
   assert.deepEqual(h.events.filter((e) => e[0] === 'route').map((e) => e[1]), ['/transactions?account=enbd']);
 });
 
-test('a balance the user set reads "Set by you", never "Bank alert"', () => {
+test('a balance the user set reads "Set by you", never "Bank message"', () => {
   const h = createHarness();
   const ts = Date.parse('2026-09-15T08:00:00Z');
   h.state.accounts = h.state.accounts.map((a) => a.id === 'enbd' ? { ...a, snapshotTs: ts, manualSnapshotTs: ts } : a);
   const tree = renderAccount(h, { id: 'enbd' });
   const balance = text(byId(tree, 'account-detail-freshness'));
   assert.match(balance, /Set by you/);
-  assert.doesNotMatch(balance, /Bank alert/);
+  assert.doesNotMatch(balance, /Bank message/);
 });
 
 test('Set today\'s balance is offered, and the quiet-row shortcut opens it straight away', () => {

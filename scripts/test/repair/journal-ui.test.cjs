@@ -103,7 +103,7 @@ test('paused history has an explicit resume action; running history does not res
 test('capture opt-out changes only after an explicit press and then opens iOS setup', async () => {
   const h = harness({ optOut: true, platform: 'ios' });
   assert.deepEqual(h.events, []);
-  const button = walk(h.tree).find((node) => node.type === 'Pressable' && node.props.accessibilityLabel?.startsWith('Bank alerts.'));
+  const button = walk(h.tree).find((node) => node.type === 'Pressable' && node.props.accessibilityLabel?.startsWith('Bank messages.'));
   button.props.onPress();
   await Promise.resolve(); await Promise.resolve();
   assert.deepEqual(h.events, [['optOut', false], ['route', '/ios-setup']]);
@@ -167,7 +167,7 @@ test('zero and unknown account balances do not change the Home spending figure',
 test('Home does not duplicate import shortcuts; explicit capture control remains accessible', () => {
   for (const platform of ['android', 'ios']) {
     const h = harness({ platform });
-    assert.ok(walk(h.tree).some((n) => n.type === 'Pressable' && n.props.accessibilityLabel?.startsWith('Bank alerts.')));
+    assert.ok(walk(h.tree).some((n) => n.type === 'Pressable' && n.props.accessibilityLabel?.startsWith('Bank messages.')));
     assert.equal(walk(h.tree).filter((n) => n.props.testID === 'reference-quick-actions').length, 0);
     assert.deepEqual(h.events, []);
   }

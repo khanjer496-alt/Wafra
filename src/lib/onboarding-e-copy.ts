@@ -101,8 +101,8 @@ const en = {
   captureTitle: 'Your first payment',
   captureBodyAndroid: 'Let Wafra read your bank’s alerts on this phone, and each payment adds itself.',
   captureBodyWeb: 'Add entries yourself here. Automatic capture needs the Android or iPhone app.',
-  waitingTitle: 'Waiting for your first bank alert',
-  waitingBody: 'New bank alerts appear here as they arrive.',
+  waitingTitle: 'Waiting for your first bank message',
+  waitingBody: 'New bank messages appear here as they arrive.',
   workingTitle: (name: string | null) => name ? `${name}, it’s working.` : 'It’s working.',
   addedByItself: 'Added by itself, from your bank’s alert.',
   ofLimit: (spent: string, limit: string) => `${spent} of ${limit}`,
@@ -129,7 +129,7 @@ const en = {
       : category ? `Your ${category} limit only stays true`
         : reminders ? 'Your reminders only stay true'
           : 'Wafra only stays complete';
-    return `${what} if every bank alert arrives. Pro adds each one by itself.`;
+    return `${what} if every bank message arrives. Pro adds each one by itself.`;
   },
   trialToday: 'Today',
   trialTodayBody: 'Automatic capture is on. No card needed.',
@@ -209,12 +209,12 @@ const ar: OnboardingECopy = {
   remindDailyWhen: 'ما أنفقته اليوم، الساعة 9 مساءً',
   allowNotifications: 'السماح بالإشعارات',
   captureTitle: 'أول دفعة لك',
-  captureBodyAndroid: 'اسمح لوفرة بقراءة تنبيهات بنكك على هذا الهاتف، وستُضاف كل دفعة تلقائياً.',
+  captureBodyAndroid: 'اسمح لوفرة بقراءة رسائل بنكك على هذا الهاتف، وستُضاف كل دفعة تلقائياً.',
   captureBodyWeb: 'أضف العمليات بنفسك هنا. يتطلب الالتقاط التلقائي تطبيق أندرويد أو آيفون.',
   waitingTitle: 'بانتظار أول تنبيه من بنكك',
-  waitingBody: 'تظهر تنبيهات البنك الجديدة هنا فور وصولها.',
+  waitingBody: 'تظهر رسائل البنك الجديدة هنا فور وصولها.',
   workingTitle: (name: string | null) => name ? `${name}، كل شيء يعمل.` : 'كل شيء يعمل.',
-  addedByItself: 'أُضيفت تلقائياً من تنبيه بنكك.',
+  addedByItself: 'أُضيفت تلقائياً من رسالة بنكك.',
   ofLimit: (spent: string, limit: string) => `${spent} من ${limit}`,
   importStatements: 'استيراد كشوف الحساب',
   importStatementsBody: 'ملف PDF أو CSV من بنكك، للأشهر التي سبقت اليوم',

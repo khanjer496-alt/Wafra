@@ -15,7 +15,7 @@ const en = {
   notificationsTitle: 'Bank-app notifications',
   notificationsText: 'Alerts some banks only send inside their app are added too.',
   historyTitle: 'Past SMS on this phone',
-  historyText: 'Bank texts already in your inbox fill in earlier months.',
+  historyText: 'Bank messages already in your inbox fill in earlier months.',
   freeTitle: 'Always free',
   freeText: 'Your ledger, manual entries, pasted bank messages and statement imports never need Pro.',
   selected: 'Selected',

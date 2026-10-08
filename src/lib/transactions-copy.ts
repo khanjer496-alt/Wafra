@@ -9,10 +9,10 @@ type SourceLabels = Record<TransactionSourceKind, string>;
 
 const en = {
   all: 'All', spending: 'Spending', income: 'Income', transfers: 'Transfers', review: 'Needs review', types: 'Transaction type',
-  /** Lower-case, after the time on a row: "09:41 · bank text". */
-  source: { 'bank-text': 'bank text', notification: 'app alert', 'apple-pay': 'Apple Pay', statement: 'statement', email: 'bank email', manual: 'by hand' } as SourceLabels,
+  /** Lower-case, after the time on a row: "09:41 · bank message". */
+  source: { 'bank-text': 'bank message', notification: 'app alert', 'apple-pay': 'Apple Pay', statement: 'statement', email: 'bank email', manual: 'by hand' } as SourceLabels,
   /** Filter chips. */
-  sourceTitle: { 'bank-text': 'Bank text', notification: 'Bank app alert', 'apple-pay': 'Apple Pay', statement: 'Statement', email: 'Bank email', manual: 'By hand' } as SourceLabels,
+  sourceTitle: { 'bank-text': 'Bank message', notification: 'Bank app alert', 'apple-pay': 'Apple Pay', statement: 'Statement', email: 'Bank email', manual: 'By hand' } as SourceLabels,
   sourceFilter: 'Source', maxAmount: 'Maximum amount', noMax: 'Any',
   upTo: (amount: string) => `up to ${amount}`,
   category: 'Category', transfer: 'Transfer', delete: 'Delete', transferTag: 'Transfer',
