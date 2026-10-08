@@ -188,6 +188,33 @@ export const setIosCaptureEnabled = async (enabled: boolean): Promise<boolean> =
 };
 
 /**
+ * Turning automatic capture back on in Settings used to clear the opt-out but
+ * leave the native admission flag off, so the user's automation kept hitting
+ * "capture is off" until they found and re-ran setup. When this phone already
+ * completed a current capture setup and has access, re-admit capture directly.
+ * Returns true when native capture is on afterwards; false means setup (or
+ * Pro) is still needed and the caller should route there.
+ */
+export const resumeIosCaptureIfSetUp = async (): Promise<boolean> => {
+  const native = getIosCaptureNativeModule();
+  if (!native) return false;
+  const status = await native.getCaptureStatus();
+  if (status.enabled === true) return true;
+  const recorded = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value > 0;
+  // Builds that bundle Capture v3 need its proof; an older v1 proof is the
+  // upgrade case setup still has to walk through (resolveIosSetupReadiness).
+  const messageProof = native.getMessageShortcutURL
+    ? status.setupProofVersion === 3
+    : status.setupProofVersion === 1 || status.setupProofVersion === 3;
+  const setUp = messageProof ||
+    recorded(status.notificationSetupProofAt) || recorded(status.applePaySetupProofAt);
+  if (!setUp || status.entitled !== true) return false;
+  await native.setCaptureEnabled(true);
+  publishIosCaptureStatusRefresh();
+  return true;
+};
+
+/**
  * The per-charge banner the capture automations post on iPhone. Null when this
  * binary predates the preference, so the caller can hide the switch.
  */

@@ -93,6 +93,7 @@ import {
 import {
   getIosInstantAlertsEnabled,
   isCaptureAvailable,
+  resumeIosCaptureIfSetUp,
   setIosInstantAlertsEnabled,
 } from '@/lib/capture';
 import type { OnboardingAlertDelivery } from '@/lib/types';
@@ -428,6 +429,9 @@ export default function SettingsScreen() {
           return;
         }
         await setCaptureOptOut(false);
+        // A phone that already finished setup goes straight back to capturing;
+        // only one that never did needs the setup screen.
+        if (await resumeIosCaptureIfSetUp().catch(() => false)) return;
         router.push('/ios-setup');
       } catch {
         Alert.alert(t('capturePreferenceFailed'));
