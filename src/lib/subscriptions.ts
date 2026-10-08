@@ -414,8 +414,13 @@ type BillSchedule = Partial<Pick<Bill, 'dueDay' | 'amountFils' | 'yearlyOnISO' |
 export const MANUAL_BILL_DAY_TOLERANCE = 3;
 /** How far apart (share of the reminder's amount) their amounts may be. */
 export const MANUAL_BILL_AMOUNT_TOLERANCE = 0.05;
-/** Categories too broad to say two payments are the same thing on their own. */
-const GENERIC_CATEGORIES = new Set(['other', 'transfer', 'uncategorized']);
+/**
+ * Categories in which a household keeps one such payment, so a shared
+ * category is evidence on its own. Everywhere else (entertainment, software,
+ * telecom…) two services at one price near one date are common — Netflix and
+ * Spotify at 9.99 — and only overlapping names tie a charge to a reminder.
+ */
+const ONE_PER_HOUSEHOLD = new Set(['rent']);
 
 const titleWords = (title: string): string[] =>
   title.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length >= 3);
@@ -436,8 +441,8 @@ function namesOverlap(a: string, b: string): boolean {
  * by side on the same day for the same AED 8,500, and both counted. They are
  * one payment when every one of these holds — and otherwise stay separate:
  * the reminder was made by hand (a detected or provider-identified reminder
- * has its own matching); both are monthly; the category is the same and
- * specific, or the names overlap; the charge's day is within three days of
+ * has its own matching); both are monthly; the names overlap, or both are
+ * rent (one per household); the charge's day is within three days of
  * the reminder's (counting across a month end); and the amounts differ by at
  * most 5% of the reminder's.
  */
@@ -448,7 +453,7 @@ export function recurringMatchesManualBill(
   if (bill.importIdentity || bill.autoDetected || bill.yearlyOnISO) return false;
   if (sub.cadence !== 'monthly' || !sub.nextExpectedISO || sub.lastAmountFils === undefined) return false;
   if (bill.dueDay === undefined || bill.amountFils === undefined || !(bill.amountFils > 0)) return false;
-  const sameCategory = sub.category !== undefined && sub.category === bill.category && !GENERIC_CATEGORIES.has(bill.category);
+  const sameCategory = sub.category !== undefined && sub.category === bill.category && ONE_PER_HOUSEHOLD.has(bill.category);
   if (!sameCategory && !namesOverlap(sub.title, bill.title)) return false;
   const day = Number(sub.nextExpectedISO.slice(8, 10));
   if (!Number.isInteger(day) || day < 1 || day > 31) return false;

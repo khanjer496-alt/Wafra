@@ -89,6 +89,10 @@ test('anything less than the same payment stays separate', () => {
   assert.equal(subscriptions.subscriptionMatchesBill(sub('Parking', 'transport', '2026-11-01', 850_000), rent), false, 'other category, other name');
   // Same generic category and amount, different names: not enough.
   assert.equal(subscriptions.subscriptionMatchesBill(sub('Gym', 'other', '2026-11-01', 20_000), bill('Maid', 'other', 1, 20_000)), false);
+  // Two services in one category at one price near one date stay two payments.
+  assert.equal(subscriptions.subscriptionMatchesBill(sub('Spotify', 'entertainment', '2026-10-26', 999),
+    bill('Netflix', 'entertainment', 28, 999)), false);
+  assert.equal(subscriptions.subscriptionMatchesBill(sub('du', 'telecom', '2026-10-15', 38_900), bill('Etisalat Home', 'telecom', 14, 38_900)), false);
   // Two phone lines in one category, different amounts, stay two payments.
   assert.equal(subscriptions.subscriptionMatchesBill(sub('du', 'telecom', '2026-10-18', 21_000), bill('Etisalat Home', 'telecom', 14, 38_900)), false);
   // A provider-identified or detected reminder keeps its own matching only.
