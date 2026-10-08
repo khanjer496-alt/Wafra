@@ -7,10 +7,14 @@ import { classifyMerchantDescription, type ParsedSms } from '@/lib/sms-parser';
 import { ledgerMoneySpec } from '@/lib/ledger-money';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 
+import { XlsxError, xlsxSheetRecords } from './xlsx-records';
+
 const MAX_NORMALIZED_CHARS = 128_000;
 const MAX_CSV_RECORD_CHARS = 8_192;
 /** How many leading CSV records may precede the header row (bank preambles). */
 const MAX_CSV_PREAMBLE_RECORDS = 10;
+/** The widest header row a CSV/XLSX statement may have. */
+const MAX_STATEMENT_COLUMNS = 64;
 /**
  * Month names a statement may print, per language, 1-based. English short and
  * long forms, then French, German, Spanish, Portuguese, Italian, Dutch,
@@ -1333,13 +1337,63 @@ export function parseStatementCsv(
   } catch {
     throw new Error('invalid_csv');
   }
+  return parseStatementRecords(records, delimiter, defaultCurrency, maxRows, dateHint);
+}
+
+/**
+ * The first worksheet of an Excel .xlsx export, read by exactly the same
+ * named-column rules as a CSV (parseStatementRecords): same header detection,
+ * same explicit-direction requirement, same refusals. xlsx-records.ts turns
+ * the sheet into the rows a CSV export of it would hold; date-formatted cells
+ * arrive as ISO dates and numbers as their stored decimal text.
+ *
+ * Throws `invalid_xlsx` for anything that is not a well-formed, unencrypted,
+ * size-bounded workbook, `too_many_rows` past the row ceiling, and otherwise
+ * the CSV reader's own codes.
+ */
+export async function parseStatementXlsx(
+  bytes: Uint8Array,
+  defaultCurrency: StatementCurrency,
+  maxRows = 200,
+  dateHint: StatementDateHint = legacyStatementDateHint(defaultCurrency),
+): Promise<StatementCsvResult> {
+  if (!ledgerMoneySpec(defaultCurrency)) throw new Error('unsupported_statement_currency');
+  let records: string[][];
+  try {
+    records = await xlsxSheetRecords(bytes, {
+      // Past this many non-empty rows a CSV export of the sheet is refused
+      // as too_many_rows whatever its header is; stop materialising there.
+      maxRecords: maxRows + MAX_CSV_PREAMBLE_RECORDS + 1,
+      maxColumns: MAX_STATEMENT_COLUMNS,
+      maxRecordChars: MAX_CSV_RECORD_CHARS,
+    });
+  } catch (error) {
+    if (error instanceof XlsxError) throw new Error(error.code);
+    throw new Error('invalid_xlsx');
+  }
+  return parseStatementRecords(records, ',', defaultCurrency, maxRows, dateHint);
+}
+
+/**
+ * Named-column statement rows from already-split records — the shared core of
+ * the CSV and XLSX readers. `delimiter` only rebuilds each row's transient
+ * `raw` text, which never leaves the Worker.
+ */
+export function parseStatementRecords(
+  records: string[][],
+  delimiter: string,
+  defaultCurrency: StatementCurrency,
+  maxRows = 200,
+  dateHint: StatementDateHint = legacyStatementDateHint(defaultCurrency),
+): StatementCsvResult {
+  if (!ledgerMoneySpec(defaultCurrency)) throw new Error('unsupported_statement_currency');
   // The header is the first leading record that names a date column AND a money
   // column, not necessarily the first record: bank exports open with account
   // preambles, and a blank or repeated header cell is a column to ignore (first
   // occurrence wins), not grounds to refuse the whole file.
   const headerRow = records.slice(0, MAX_CSV_PREAMBLE_RECORDS).findIndex((record) => {
     const candidate = record.map(normalizedHeader);
-    return candidate.length >= 3 && candidate.length <= 64 &&
+    return candidate.length >= 3 && candidate.length <= MAX_STATEMENT_COLUMNS &&
       headerIndex(candidate, HEADER_ALIASES.date) >= 0 && (
         headerIndex(candidate, HEADER_ALIASES.amount) >= 0 ||
         headerIndex(candidate, HEADER_ALIASES.debit) >= 0 ||
@@ -2685,8 +2739,32 @@ export async function extractPdfStatementRows(
   completeRowAccounting: boolean;
   ambiguousCardSignRows: number;
   ambiguousDateRows: number;
+  /** False when no page carries any text at all: a scan, not a statement layout. */
+  textLayer: boolean;
 }> {
-  const document = await getDocumentProxy(bytes, password ? { password } : undefined);
+  // pdf.js reads a password two ways depending on the file's security
+  // handler. AES-256 (revision 6) takes the Unicode string and encodes it as
+  // UTF-8 itself. RC4/AES-128 (revisions 2–4) and revision 5 take one byte per
+  // character, so an Arabic password reaches them truncated unless it is
+  // handed over as its UTF-8 bytes — which is how PDF writers commonly encode
+  // a non-Latin password there. Which handler a file uses is only known once
+  // pdf.js has opened it, so a non-ASCII password that is refused as
+  // incorrect is tried once more as UTF-8 bytes. pdf.js detaches the buffer
+  // it is given, so that second attempt needs its own copy.
+  const utf8Password = password && /[^\x00-\x7f]/.test(password)
+    ? Array.from(new TextEncoder().encode(password), (byte) => String.fromCharCode(byte)).join('')
+    : undefined;
+  const retryBytes = utf8Password === undefined ? null : bytes.slice();
+  let document: Awaited<ReturnType<typeof getDocumentProxy>>;
+  try {
+    document = await getDocumentProxy(bytes, password ? { password } : undefined);
+  } catch (error) {
+    const incorrect = !!error && typeof error === 'object' &&
+      (error as { name?: unknown }).name === 'PasswordException' &&
+      (error as { code?: unknown }).code === 2;
+    if (!retryBytes || !incorrect) throw error;
+    document = await getDocumentProxy(retryBytes, { password: utf8Password });
+  }
   try {
     const extracted = await extractText(document, { mergePages: false });
     const text = extracted.text.join('\n');
@@ -2704,6 +2782,7 @@ export async function extractPdfStatementRows(
       completeRowAccounting: parsed.completeRowAccounting && extracted.text.every((page) => page.trim().length > 0),
       ambiguousCardSignRows: parsed.ambiguousCardSignRows,
       ambiguousDateRows: parsed.ambiguousDateRows,
+      textLayer: extracted.text.some((page) => page.trim().length > 0),
     };
   } finally {
     const disposable = document as unknown as {
@@ -2713,4 +2792,35 @@ export async function extractPdfStatementRows(
     if (disposable.destroy) await disposable.destroy();
     else if (disposable.cleanup) await disposable.cleanup();
   }
+}
+
+/**
+ * The PDF failures pdf.js names precisely enough to tell the user something
+ * truer than "this is a scan". Anything else returns null and stays the
+ * generic unreadable code.
+ *
+ *  - InvalidPDFException: no usable document structure at all (truncated,
+ *    not really a PDF past its header). Errors raised inside pdf.js's parser
+ *    reach here wrapped as UnknownErrorException, with the original class in
+ *    `details`; end-of-file inside an object and broken cross-reference
+ *    tables are structural damage too.
+ *  - A security handler pdf.js does not implement — a certificate (public
+ *    key) handler, an unknown algorithm version or crypt method — cannot be
+ *    opened even with the right password.
+ *
+ * Password failures are not handled here; see pdfPasswordFailure in the
+ * Worker.
+ */
+export function pdfOpenFailure(error: unknown): 'pdf_damaged' | 'pdf_encryption_unsupported' | null {
+  if (!error || typeof error !== 'object') return null;
+  const row = error as { name?: unknown; details?: unknown };
+  if (row.name === 'InvalidPDFException') return 'pdf_damaged';
+  if (row.name !== 'UnknownErrorException' || typeof row.details !== 'string') return null;
+  if (/^FormatError: (?:unknown encryption method|unsupported encryption algorithm|Unknown crypto method)$/.test(row.details)) {
+    return 'pdf_encryption_unsupported';
+  }
+  if (/^(?:InvalidPDFException|ParserEOFException|XRefParseException|XRefEntryException): /.test(row.details)) {
+    return 'pdf_damaged';
+  }
+  return null;
 }

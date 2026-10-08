@@ -15,6 +15,14 @@ public enum WafraLiveStageResult: String, Codable {
   case disabled
 }
 
+/// Why a capture automation reached Wafra but nothing could be saved.
+public enum WafraCaptureOffNotice: String, Codable {
+  /// The user switched automatic capture off.
+  case off
+  /// Capture is on, but no trial, founder or store lease is active.
+  case paused
+}
+
 public enum WafraLiveCaptureSource: String, Codable {
   case message
   case notification
@@ -141,6 +149,10 @@ public final class WafraLiveCaptureStore {
     var applePaySetupProofAt: TimeInterval?
     var firstApplePayReceivedAt: TimeInterval?
     var lastApplePayReceivedAt: TimeInterval?
+    var captureOffNoticeAt: TimeInterval?
+    var captureOffNoticeReason: WafraCaptureOffNotice?
+    /// The per-charge banner preference. Absent means on, as on Android.
+    var instantAlertsOff: Bool = false
 
     private enum CodingKeys: String, CodingKey {
       case v, enabled, records, acknowledged, dropped, corrupt, warningId
@@ -150,6 +162,7 @@ public final class WafraLiveCaptureStore {
       case lastReceivedAt, lastHandledAt
       case notificationSetupProofAt, firstNotificationReceivedAt, lastNotificationReceivedAt
       case lastApplePayIncompleteAt, applePaySetupProofAt, firstApplePayReceivedAt, lastApplePayReceivedAt
+      case captureOffNoticeAt, captureOffNoticeReason, instantAlertsOff
     }
 
     init() {}
@@ -216,6 +229,15 @@ public final class WafraLiveCaptureStore {
         .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
       lastApplePayReceivedAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .lastApplePayReceivedAt))
         .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      // Notice throttling is advisory: anything unreadable only means the next
+      // refused message may notify again.
+      captureOffNoticeAt = (try? values.decodeIfPresent(TimeInterval.self, forKey: .captureOffNoticeAt))
+        .flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+      captureOffNoticeReason = try? values.decodeIfPresent(
+        WafraCaptureOffNotice.self,
+        forKey: .captureOffNoticeReason
+      )
+      instantAlertsOff = (try? values.decodeIfPresent(Bool.self, forKey: .instantAlertsOff)) ?? false
     }
 
     var recordBytes: Int {
@@ -344,6 +366,9 @@ public final class WafraLiveCaptureStore {
       // Publish receipt and queued event in the same durable manifest write.
       // Duplicate/replayed, invalid, disabled and capacity-refused calls never advance it.
       manifest.lastReceivedAt = max(manifest.lastReceivedAt ?? 0, receiptTime.timeIntervalSince1970)
+      // Capture works again, so the next time it stops is news worth a notice.
+      manifest.captureOffNoticeAt = nil
+      manifest.captureOffNoticeReason = nil
       if source == .applePay {
         let receivedAt = receiptTime.timeIntervalSince1970
         manifest.firstApplePayReceivedAt = manifest.firstApplePayReceivedAt ?? receivedAt
@@ -473,9 +498,66 @@ public final class WafraLiveCaptureStore {
         let now = clock()
         guard validDate(now) else { throw StoreError.invalidEntitlementLease }
         guard isEntitled(manifest, at: now) else { throw StoreError.entitlementRequired }
+        manifest.captureOffNoticeAt = nil
+        manifest.captureOffNoticeReason = nil
       }
       manifest.enabled = enabled
       try writeManifest(manifest, in: root)
+    }
+  }
+
+  /// Whether a newly captured charge may post Wafra's banner. On by default;
+  /// erasing all data turns it off, as Android's erase does.
+  public func instantAlertsEnabled() throws -> Bool {
+    try withExclusiveLock { root in
+      let manifest = try loadManifest(in: root)
+      return !manifest.instantAlertsOff
+    }
+  }
+
+  public func setInstantAlertsEnabled(_ enabled: Bool) throws {
+    try withExclusiveLock { root in
+      var manifest = try loadManifest(in: root)
+      guard manifest.instantAlertsOff == enabled else { return }
+      manifest.instantAlertsOff = !enabled
+      try writeManifest(manifest, in: root)
+    }
+  }
+
+  /// Minimum spacing between paused-capture notices.
+  public static let captureOffNoticeInterval: TimeInterval = 24 * 60 * 60
+
+  /**
+   Claim the right to post Wafra's own notice after a capture automation was
+   refused. The automation itself finishes quietly, so this notice is the only
+   signal that messages are not being saved. Returns nil when capture works or
+   the user was already told: `.off` is announced once until capture is turned
+   on again; `.paused` at most once per `captureOffNoticeInterval`. Any message
+   queued afterwards, or turning capture on, resets both.
+   */
+  public func claimCaptureOffNotice() throws -> WafraCaptureOffNotice? {
+    try withExclusiveLock { root in
+      var manifest = try loadManifest(in: root)
+      let now = clock().timeIntervalSince1970
+      guard validEntitlementTimestamp(now) else { return nil }
+      let reason: WafraCaptureOffNotice
+      if !manifest.enabled {
+        reason = .off
+      } else if !isEntitled(manifest, at: Date(timeIntervalSince1970: now)) {
+        reason = .paused
+      } else {
+        return nil
+      }
+      if manifest.captureOffNoticeReason == reason, let last = manifest.captureOffNoticeAt {
+        if reason == .off { return nil }
+        // A clock moved backwards notifies again rather than staying silent.
+        let elapsed = now - last
+        if elapsed >= 0 && elapsed < Self.captureOffNoticeInterval { return nil }
+      }
+      manifest.captureOffNoticeAt = now
+      manifest.captureOffNoticeReason = reason
+      try writeManifest(manifest, in: root)
+      return reason
     }
   }
 
@@ -817,7 +899,10 @@ public final class WafraLiveCaptureStore {
         try FileManager.default.removeItem(at: records)
       }
 
-      let clean = Manifest()
+      var clean = Manifest()
+      // As Android's InstantAlert.clear(): erasing withdraws consent for
+      // charge banners too, until the user turns them back on.
+      clean.instantAlertsOff = true
       try writeManifest(clean, in: root)
     }
   }

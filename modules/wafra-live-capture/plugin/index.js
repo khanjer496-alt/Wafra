@@ -69,7 +69,7 @@ import Foundation
 internal import WafraLiveCapture
 
 @available(iOS 16.0, *)
-private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceConvertible {
+private enum WafraLiveCaptureIntentError: LocalizedError, CustomLocalizedStringResourceConvertible {
   case setupProofFailed
   case automationInputProbeFailed
   case stageFailed
@@ -108,6 +108,10 @@ private enum WafraLiveCaptureIntentError: Error, CustomLocalizedStringResourceCo
       return WafraLiveCaptureResources.localized("live.apple_pay.setup.error")
     }
   }
+
+  // Shortcuts' "Automation failed" banner reads the bridged NSError text; without
+  // this it prints the private type name and case number instead of the reason.
+  var errorDescription: String? { String(localized: localizedStringResource) }
 }
 
 @available(iOS 16.0, *)
@@ -253,10 +257,14 @@ struct StageWafraLiveMessageIntent: AppIntent {
         observedAt: observedAt
       )
       switch result {
-      case .accepted, .ignored:
+      case .accepted:
+        if let body { await WafraInstantAlert.postIfReadable(sender: sender, body: body) }
+        return .result(value: result.rawValue)
+      case .ignored:
         return .result(value: result.rawValue)
       case .disabled:
-        throw WafraLiveCaptureIntentError.captureDisabled
+        await WafraLiveCaptureNotice.postIfDue()
+        return .result(value: result.rawValue)
       case .invalid:
         throw WafraLiveCaptureIntentError.invalidMessage
       case .capacityReached:
@@ -308,10 +316,14 @@ struct StageWafraLiveTextIntent: AppIntent {
         observedAt: Date()
       )
       switch result {
-      case .accepted, .ignored:
+      case .accepted:
+        await WafraInstantAlert.postIfReadable(body: body)
+        return .result(value: result.rawValue)
+      case .ignored:
         return .result(value: result.rawValue)
       case .disabled:
-        throw WafraLiveCaptureIntentError.captureDisabled
+        await WafraLiveCaptureNotice.postIfDue()
+        return .result(value: result.rawValue)
       case .invalid:
         throw WafraLiveCaptureIntentError.invalidMessage
       case .capacityReached:
@@ -357,10 +369,14 @@ struct CaptureWafraNotificationIntent: AppIntent {
         text: text, eventId: UUID().uuidString, observedAt: Date()
       )
       switch result {
-      case .accepted, .ignored:
+      case .accepted:
+        await WafraInstantAlert.postIfReadable(body: text)
+        return .result(value: result.rawValue)
+      case .ignored:
         return .result(value: result.rawValue)
       case .disabled:
-        throw WafraLiveCaptureIntentError.captureDisabled
+        await WafraLiveCaptureNotice.postIfDue()
+        return .result(value: result.rawValue)
       case .invalid:
         throw WafraLiveCaptureIntentError.invalidNotification
       case .capacityReached:
@@ -402,7 +418,9 @@ struct CaptureWafraApplePayIntent: AppIntent {
       switch result {
       case .accepted: return .result(value: true)
       case .ignored: return .result(value: false)
-      case .disabled: throw WafraLiveCaptureIntentError.captureDisabled
+      case .disabled:
+        await WafraLiveCaptureNotice.postIfDue()
+        return .result(value: false)
       case .invalid: throw WafraLiveCaptureIntentError.applePayInvalid
       case .capacityReached: throw WafraLiveCaptureIntentError.captureCapacityReached
       }

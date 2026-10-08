@@ -297,6 +297,8 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         verifiedAtMs: number,
       ): Promise<boolean>;
       setCaptureEnabled(enabled: boolean): Promise<void>;
+      getInstantAlertsEnabled?(): Promise<boolean>;
+      setInstantAlertsEnabled?(enabled: boolean): Promise<void>;
       listPendingRecords(limit: number): Promise<string[]>;
       listPendingRecordsIncludingNotifications?(limit: number): Promise<string[]>;
       listPendingRecordsExcluding?(limit: number, excludeIds: string[]): Promise<string[]>;
@@ -457,6 +459,16 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       'live.apple_pay.error',
       'live.apple_pay.setup.title',
       'live.apple_pay.setup.error',
+      'live.notice.off.title',
+      'live.notice.off.body',
+      'live.notice.paused.title',
+      'live.notice.paused.body',
+      'live.alert.title',
+      'live.alert.title_named',
+      'live.alert.title_credit',
+      'live.alert.title_credit_named',
+      'live.alert.card',
+      'live.alert.fallback',
     ];
     const localizationKeys = (source) => [...source.matchAll(/^\s*"([^"]+)"\s*=/gm)]
       .map((match) => match[1]).sort();
@@ -519,15 +531,15 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       /#if DEBUG\s*public static let automationInputProbePayload[\s\S]*?#endif/.test(swiftStore) &&
         /#if DEBUG\s*public func recordAutomationInputProbe[\s\S]*?#endif/.test(swiftStore),
       swiftStore);
-    ok('stage intent keeps its exact four parameters and fails visibly for rejected capture', (() => {
+    ok('stage intent keeps its exact four parameters, posts only the Wafra notice while capture is off and fails visibly for rejected capture', (() => {
       const match = generatedIntent.match(
         /struct StageWafraLiveMessageIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension StageWafraLiveMessageIntent/,
       );
       return Boolean(match) && (match[1].match(/@Parameter\(/g) || []).length === 4 &&
         /var sender:\s*String/.test(match[1]) && /var body:\s*String/.test(match[1]) &&
         /var eventId:\s*String/.test(match[1]) && /var observedAt:\s*Date/.test(match[1]) &&
-        /case \.accepted, \.ignored:/.test(match[1]) &&
-        /case \.disabled:[\s\S]*captureDisabled/.test(match[1]) &&
+        /case \.disabled:\s*await WafraLiveCaptureNotice\.postIfDue\(\)\s*return \.result\(value: result\.rawValue\)/.test(match[1]) &&
+        !/captureDisabled/.test(match[1]) &&
         /case \.invalid:[\s\S]*invalidMessage/.test(match[1]) &&
         /case \.capacityReached:[\s\S]*captureCapacityReached/.test(match[1]);
     })(), generatedIntent);
@@ -541,7 +553,8 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /sender:\s*"Wafra Automation"/.test(match[1]) &&
         /eventId:\s*UUID\(\)\.uuidString/.test(match[1]) &&
         /observedAt:\s*Date\(\)/.test(match[1]) &&
-        /case \.disabled:[\s\S]*captureDisabled/.test(match[1]);
+        /case \.disabled:\s*await WafraLiveCaptureNotice\.postIfDue\(\)\s*return \.result\(value: result\.rawValue\)/.test(match[1]) &&
+        !/captureDisabled/.test(match[1]);
     })(), generatedIntent);
     ok('notification action accepts one required auto-connected String through the protected queue', (() => {
       const match = generatedIntent.match(
@@ -552,9 +565,37 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
         /inputConnectionBehavior:\s*\.connectToPreviousIntentResult/.test(match[1]) &&
         /stageNotification\(\s*text:\s*text,\s*eventId:\s*UUID\(\)\.uuidString,\s*observedAt:\s*Date\(\)/.test(match[1]) &&
         /case \.invalid:[\s\S]*invalidNotification/.test(match[1]) &&
-        /case \.disabled:[\s\S]*captureDisabled/.test(match[1]) &&
+        /case \.disabled:\s*await WafraLiveCaptureNotice\.postIfDue\(\)\s*return \.result\(value: result\.rawValue\)/.test(match[1]) &&
+        /catch WafraLiveCaptureStore\.StoreError\.entitlementRequired \{\s*throw WafraLiveCaptureIntentError\.captureDisabled/.test(match[1]) &&
         /case \.capacityReached:[\s\S]*captureCapacityReached/.test(match[1]);
     })(), generatedIntent);
+    ok('Apple Pay automation posts only the Wafra notice while capture is off', (() => {
+      const match = generatedIntent.match(
+        /struct CaptureWafraApplePayIntent:\s*AppIntent\s*\{([\s\S]*?)\n\}\n\n@available\(iOS 26\.0, \*\)\s*extension CaptureWafraApplePayIntent/,
+      );
+      return Boolean(match) &&
+        /case \.disabled:\s*await WafraLiveCaptureNotice\.postIfDue\(\)\s*return \.result\(value: false\)/.test(match[1]) &&
+        !/captureDisabled/.test(match[1]);
+    })(), generatedIntent);
+    ok('intent errors bridge a readable reason into the Shortcuts failure banner',
+      /enum WafraLiveCaptureIntentError: LocalizedError, CustomLocalizedStringResourceConvertible/.test(generatedIntent) &&
+        /var errorDescription: String\? \{ String\(localized: localizedStringResource\) \}/.test(generatedIntent),
+      generatedIntent);
+    const alertSource = fs.readFileSync(
+      path.join(ROOT, 'modules/wafra-live-capture/ios/WafraInstantAlert.swift'), 'utf8');
+    ok('the charge banner uses the closed alert keys, checks credentials, preference and permission first',
+      expectedLocalizationKeys.filter((key) => key.startsWith('live.alert.'))
+        .every((key) => alertSource.includes(`"${key}"`)) &&
+        /guard !WafraInstantAlertReader\.isSensitive\(body\),\s*let read = WafraInstantAlertReader\.read\(body\),\s*\(try\? WafraLiveCaptureStore\.shared\.instantAlertsEnabled\(\)\) == true/.test(alertSource) &&
+        /case \.authorized, \.provisional, \.ephemeral:/.test(alertSource) &&
+        !/listPendingRecords|StoredRecord|contentsOf|userInfo/.test(alertSource),
+      alertSource);
+    eq('every automation that queues text posts the charge banner only after acceptance', [
+      generatedIntent.match(/case \.accepted:\s*if let body \{ await WafraInstantAlert\.postIfReadable\(sender: sender, body: body\) \}/g)?.length || 0,
+      generatedIntent.match(/case \.accepted:\s*await WafraInstantAlert\.postIfReadable\(body: body\)/g)?.length || 0,
+      generatedIntent.match(/case \.accepted:\s*await WafraInstantAlert\.postIfReadable\(body: text\)/g)?.length || 0,
+      generatedIntent.match(/postIfReadable/g)?.length || 0,
+    ], [1, 1, 1, 3]);
     ok('legacy bridge excludes notifications and the additive reader explicitly opts in',
       /AsyncFunction\("listPendingRecords"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: false\)/.test(swiftModule) &&
         /AsyncFunction\("listPendingRecordsIncludingNotifications"\)[\s\S]*?listPendingRecords\(limit: nativeLimit, includeNotifications: true\)/.test(swiftModule), swiftModule);
@@ -572,8 +613,19 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       generatedIntent.match(/bundle:\s*\.atURL/g)?.length || 0,
     ], [17, 0]);
     ok('every intent title, parameter, and source-free error uses the closed localization keys',
-      expectedLocalizationKeys.every((key) => generatedIntent.includes(`"${key}"`)) &&
+      expectedLocalizationKeys.filter((key) => !/^live\.(?:notice|alert)\./.test(key))
+        .every((key) => generatedIntent.includes(`"${key}"`)) &&
         !/static let title[^\n]*=\s*"|@Parameter\(title:\s*"/.test(generatedIntent), generatedIntent);
+    const noticeSource = fs.readFileSync(
+      path.join(ROOT, 'modules/wafra-live-capture/ios/WafraLiveCaptureNotice.swift'), 'utf8');
+    ok('the capture-off notice uses the closed notice keys, carries no message text and respects permission',
+      expectedLocalizationKeys.filter((key) => key.startsWith('live.notice.'))
+        .every((key) => noticeSource.includes(`"${key}"`)) &&
+        /claimCaptureOffNotice\(\)/.test(noticeSource) &&
+        /case \.authorized, \.provisional, \.ephemeral:/.test(noticeSource) &&
+        /UNNotificationRequest\(identifier: identifier, content: content, trigger: nil\)/.test(noticeSource) &&
+        !/listPendingRecords|StoredRecord|contentsOf|userInfo/.test(noticeSource),
+      noticeSource);
     ok('iOS 26 supportedModes references occur only in availability extensions', (() => {
       const modes = generatedIntent.match(/supportedModes:\s*IntentModes\s*\{\s*\.background\s*\}/g) || [];
       const extensions = generatedIntent.match(
@@ -973,6 +1025,21 @@ const setupModule = execute('src/lib/ios-capture-setup.ts', (id) => {
       1);
     eq('existing history intent remains exactly once in the Wafra Sources phase',
       sourcesPhase.match(/WafraMessageHistoryIntent\.swift in Sources/g)?.length || 0, 1);
+  }
+
+  {
+    const generatorPath = path.join(ROOT, 'scripts/generate-ios-instant-alert.mjs');
+    const checkedIn = path.join(ROOT, 'modules/wafra-live-capture/ios/WafraInstantAlertPatterns.generated.swift');
+    const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'wafra-instant-alert-'));
+    try {
+      const output = path.join(tempDirectory, 'WafraInstantAlertPatterns.generated.swift');
+      const run = spawnSync(process.execPath, [generatorPath, output], { encoding: 'utf8' });
+      ok('charge-banner pattern generator runs', run.status === 0, run.stderr || run.stdout);
+      eq('checked-in iPhone charge-banner patterns are regenerated from InstantAlert.kt',
+        fs.readFileSync(checkedIn, 'utf8'), fs.readFileSync(output, 'utf8'));
+    } finally {
+      fs.rmSync(tempDirectory, { recursive: true, force: true });
+    }
   }
 
   {

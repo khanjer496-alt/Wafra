@@ -164,9 +164,12 @@ ok('PDF upload and capability discovery require admin scope',
   /url\.pathname === '\/v1\/import\/pdf'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker) &&
     /url\.pathname === '\/v1\/import\/capabilities'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker));
 ok('protected PDFs use a bounded one-request password without persistence',
-  /x-wafra-pdf-password/.test(worker) &&
+  /x-wafra-pdf-password'/.test(worker) &&
     /value\.length > 128/.test(worker) &&
-    /extractPdfStatementRows\([\s\S]{0,180}pdfPassword\(req\)/.test(worker) &&
+    /x-wafra-pdf-password-b64/.test(worker) &&
+    /const MAX_PDF_PASSWORD_BYTES = 256/.test(worker) &&
+    /pdfPasswordFromRequest\(req\)/.test(worker) &&
+    /extractPdfStatementRows\([\s\S]{0,180}requestedPassword\.password/.test(worker) &&
     /pdf_password_required/.test(worker) && /pdf_password_incorrect/.test(worker) &&
     !/console\./.test(worker) && !/password[^\n]{0,80}(?:INSERT INTO|UPDATE |put\()/.test(worker));
 ok('direct PDF upload enforces media type, byte cap and PDF magic',
@@ -176,7 +179,7 @@ ok('direct PDF upload enforces media type, byte cap and PDF magic',
     /MAX_PDF_HEADER_OFFSET = 1024/.test(worker));
 ok('direct CSV upload requires admin scope, an allowed media type, and a byte cap',
   /url\.pathname === '\/v1\/import\/csv'[\s\S]{0,180}authenticate\(req, env, 'admin'\)/.test(worker) &&
-  /CSV_CONTENT_TYPES\.has\(contentType\)/.test(worker) &&
+  /statementFileTypes\(importFeatures\(req\)\)\.includes\(contentType\)/.test(worker) &&
   /readBytes\(req, MAX_CSV_BYTES\)/.test(worker) &&
   /delivery\.remainingDeliveries > 0/.test(worker.slice(worker.indexOf("url.pathname === '/v1/import/csv'"))) &&
   /remainingRows: delivery\.remainingRows/.test(worker));
