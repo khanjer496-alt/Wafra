@@ -271,7 +271,7 @@ assert.match(task5Bills, /<BottomSheet[^>]*visible=\{adderVisible\}[\s\S]*?foote
 
 const task6Wallet = read('src/app/(tabs)/wallet.tsx');
 assert.match(task6Wallet, /const walletNav: BandNav = \{/);
-assert.match(task6Wallet, /title: t\('walletTitle'\)[\s\S]*?label: t\('settingsTitle'\)[\s\S]*?icon: 'sliders'[\s\S]*?label: t\('newAccount'\)[\s\S]*?icon: 'plus'/);
+assert.match(task6Wallet, /title: t\('walletTitle'\)[\s\S]*?label: t\('settingsTitle'\)[\s\S]*?icon: 'gear'[\s\S]*?label: t\('newAccount'\)[\s\S]*?icon: 'plus'/);
 assert.match(task6Wallet, /<BandScaffold[\s\S]*?band="accounts"[\s\S]*?tabbed[\s\S]*?nav=\{walletNav\}/);
 assert.match(task6Wallet, /const openAccount = \(account: Account\)[\s\S]*?router\.push\(`\/card\?id=\$\{encodeURIComponent\(account\.id\)\}`\)[\s\S]*?router\.push\(`\/account\?id=\$\{encodeURIComponent\(account\.id\)\}`\)[\s\S]*?setOptionsFor\(account\)/);
 assert.match(task6Wallet, /<AccountGroups[\s\S]*?onManage=\{setOptionsFor\}/);

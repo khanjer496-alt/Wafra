@@ -96,7 +96,7 @@ function GoalScreen({ goalId }: { goalId: string }) {
         band="flow"
         testID="goal-screen"
         nav={{ back: () => router.back(),
-          actions: [{ label: w.editGoal, icon: 'sliders', onPress: openEdit, testID: 'goal-edit-action' }] }}
+          actions: [{ label: w.editGoal, icon: 'pencil', onPress: openEdit, testID: 'goal-edit-action' }] }}
         contentStyle={styles.content}
         scrollProps={{ showsVerticalScrollIndicator: false }}
         bandContent={(

@@ -162,7 +162,7 @@ export default function WalletScreen() {
     actions: [
       {
         label: t('settingsTitle'),
-        icon: 'sliders',
+        icon: 'gear',
         onPress: () => router.push('/settings'),
         testID: 'wallet-settings',
       },

@@ -97,7 +97,7 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
 
   const bandContent = state.hydrated ? <View style={styles.band}>
     <View style={[styles.identity, large && styles.stack]}>
-      <MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={48} />
+      <MerchantAvatar title={merchant} category={summary.activity[0]?.category ?? 'other'} size={48} plate />
       <View style={styles.identityCopy}>
         <ThemedText type="heading" accessibilityRole="header" numberOfLines={large ? undefined : 2}
           style={[styles.name, { color: band.onBand }]}>{displayName || pickLabel}</ThemedText>

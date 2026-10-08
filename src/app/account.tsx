@@ -115,7 +115,7 @@ function AccountScreen({ accountId, askBalance }: { accountId: string; askBalanc
   // The account's name is the band's headline; the nav row keeps back and Manage.
   const nav: BandNav = {
     back: () => router.back(),
-    actions: account ? [{ label: w.manage, icon: 'sliders', onPress: () => setManaging(true), testID: 'account-manage' }] : [],
+    actions: account ? [{ label: w.manage, icon: 'pencil', onPress: () => setManaging(true), testID: 'account-manage' }] : [],
   };
 
   if (!account) {
