@@ -4,12 +4,14 @@ import { useRouter } from '@/hooks/use-app-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Platform, Pressable, StyleSheet, View } from 'react-native';
 
+import { usePrivacyGateCleared } from '@/components/lock-gate';
 import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { EButton } from '@/components/ui/band/e-button';
 import { Icon } from '@/components/ui/icon';
 import { TextField } from '@/components/ui/text-field';
 import { Fonts, Radius, Spacing, type BandPalette } from '@/constants/theme';
+import { useAppActive } from '@/hooks/use-app-active';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
@@ -24,9 +26,15 @@ import {
 } from '@/lib/cloud-import';
 import {
   CloudImportError,
+  XLSX_CONTENT_TYPE,
   type ImportCapabilities,
   type StatementImportCoverage,
 } from '@/lib/cloud-import-contract';
+import {
+  pendingIncomingStatementUri,
+  takeIncomingStatement,
+  takeSupersededIncomingStatements,
+} from '@/lib/incoming-statement-file';
 import {
   DEFAULT_RELAY_URL,
   getRelayConfig,
@@ -59,6 +67,9 @@ type ImportSummary = {
   skipped: number;
 };
 
+/** A handed-over statement claimed from its one-time token. */
+type IncomingWaiting = { token: string; asset: PickedStatement };
+
 /** One line per picked file, so a batch never fails or succeeds silently. */
 type FileResult = {
   name: string;
@@ -74,7 +85,23 @@ type LiveFile = {
 };
 
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+/**
+ * A pacing wait the Stop control can end at once: `wake` holds the way to
+ * resolve it early until the timer fires.
+ */
+const sleep = (ms: number, wake?: { current: (() => void) | null }) => new Promise<void>((resolve) => {
+  const timer = setTimeout(() => {
+    if (wake) wake.current = null;
+    resolve();
+  }, ms);
+  if (wake) wake.current = () => {
+    clearTimeout(timer);
+    wake.current = null;
+    resolve();
+  };
+});
+/** The person pressed Stop: the rest of the batch is reported "not sent". */
+class BatchStopped extends Error {}
 /** How long to back off after the relay still answers 429 despite pacing. */
 const RATE_LIMIT_RETRY_MS = 61_000;
 /**
@@ -83,6 +110,35 @@ const RATE_LIMIT_RETRY_MS = 61_000;
  * cache cleanup must not delete the copy that loop is still sending.
  */
 const inFlightPickerUris = new Set<string>();
+/**
+ * Every running batch, across all importer instances (this screen, the past
+ * bank texts screen): how many are running and every picker copy they still
+ * hold, sent or not. A second instance's mount cleanup must not delete a
+ * copy another instance's batch has not reached yet, and a handed-over file
+ * waits for that batch to finish.
+ */
+const statementBatches = { running: 0, copies: new Set<string>() };
+/**
+ * Locked PDFs waiting for their password, across all importer instances. The
+ * password retry reads this copy, so another instance's cleanup must spare it.
+ */
+const awaitingPasswordCopies = new Set<string>();
+/** Statement files a cleanup must spare: running batches, uploads in flight, locked PDFs and a just-handed-over file. */
+function copiesInUse(): Set<string> {
+  const keep = new Set([...inFlightPickerUris, ...statementBatches.copies, ...awaitingPasswordCopies]);
+  const incoming = pendingIncomingStatementUri();
+  if (incoming) keep.add(incoming);
+  return keep;
+}
+/** Best-effort removal of a statement copy Wafra will not import. */
+function discardStatementCopy(uri: string): void {
+  try {
+    const copy = new File(uri);
+    if (copy.exists) copy.delete();
+  } catch {
+    // The OS may already have reclaimed it.
+  }
+}
 
 function interpolate(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => String(values[key] ?? ''));
@@ -115,9 +171,15 @@ export interface SupplementImportsProps {
    * stack on whatever sheet embeds the importer.
    */
   frame?: (parts: SupplementImportsParts) => React.ReactElement;
+  /**
+   * The one-time token for a statement iOS handed over ("Open in Wafra"),
+   * from +native-intent. It is imported like one picked file, after the same
+   * gates as the choose-file control.
+   */
+  incomingStatement?: string;
 }
 
-export function SupplementImports({ onboarding, preview, frame }: SupplementImportsProps = {}) {
+export function SupplementImports({ onboarding, preview, frame, incomingStatement }: SupplementImportsProps = {}) {
   const router = useRouter();
   const language = useLanguage();
   const copy = SUPPLEMENT_COPY[language];
@@ -180,12 +242,36 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
   const [pdfPassword, setPdfPassword] = useState('');
   const [dateOrder, setDateOrder] = useState<StatementDateOrder>(null);
   const [currencySheetVisible, setCurrencySheetVisible] = useState(false);
+  /** Stop pressed during a batch: finish the file being read, send no more. */
+  const [stopping, setStopping] = useState(false);
+  /** A pacing or rate-limit wait is running (Stop shows for one file too). */
+  const [pacing, setPacing] = useState(false);
+  const [incomingRetry, setIncomingRetry] = useState(0);
+  /** The handed-over statement the confirmation card is asking about. */
+  const [incomingPrompt, setIncomingPrompt] = useState<PickedStatement | null>(null);
+  /** Files are still being sent (Stop has something to stop; filing has not begun). */
+  const [sending, setSending] = useState(false);
+  const stopRequestedRef = useRef(false);
+  const stopWakeRef = useRef<(() => void) | null>(null);
+  /** A handed-over statement claimed from its token, waiting for the person's Import. */
+  const incomingRef = useRef<IncomingWaiting | null>(null);
+  // App Lock and the foreground, for the card and for the check at the tap:
+  // iOS hands over the URL before the app is active, so before App Lock has
+  // had its chance to re-engage.
+  const appActive = useAppActive();
+  const privacyGateCleared = usePrivacyGateCleared();
+  const privacyGateRef = useRef(privacyGateCleared);
+  useEffect(() => {
+    privacyGateRef.current = privacyGateCleared;
+  }, [privacyGateCleared]);
   const coverage = useMemo(
     () => summarizeCoverage(state.statementCoverage ?? [], language, undefined, displayRegion()),
     [language, state.statementCoverage],
   );
 
   useEffect(() => {
+    for (const pending of pendingPdfsRef.current) awaitingPasswordCopies.delete(pending.asset.uri);
+    for (const pending of pendingPdfs) awaitingPasswordCopies.add(pending.asset.uri);
     pendingPdfsRef.current = pendingPdfs;
   }, [pendingPdfs]);
 
@@ -193,10 +279,17 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
     aliveRef.current = true;
     // A statement copy left in the picker cache by an earlier session that
     // ended mid-import (app killed, crash) is cleared when the screen opens.
-    clearStatementPickerCache(inFlightPickerUris);
+    clearStatementPickerCache(copiesInUse());
     return () => {
       aliveRef.current = false;
+      const unclaimed = incomingRef.current;
+      incomingRef.current = null;
+      if (unclaimed) {
+        inFlightPickerUris.delete(unclaimed.asset.uri);
+        discardStatementCopy(unclaimed.asset.uri);
+      }
       for (const pending of pendingPdfsRef.current) {
+        awaitingPasswordCopies.delete(pending.asset.uri);
         if (inFlightPickerUris.has(pending.asset.uri)) continue;
         try {
           if (pending.file?.exists) pending.file.delete();
@@ -205,11 +298,11 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
         }
       }
       // And again on the way out, except a copy an upload is still reading.
-      clearStatementPickerCache(inFlightPickerUris);
+      clearStatementPickerCache(copiesInUse());
     };
   }, []);
 
-  const errorText = useCallback((value: unknown): string => {
+  const errorText = useCallback((value: unknown, maxRows?: number): string => {
     // Connecting this phone to the import service fails with the relay's own
     // error, before anything is uploaded, so "rows may still be queued" would
     // be false: say the service could not be reached.
@@ -221,8 +314,19 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
       value.code === 'invalid_pdf' || value.code === 'pdf_required' ||
       value.code === 'invalid_csv' || value.code === 'csv_required'
     ) return copy.errInvalid;
+    // The row cap is the relay's advertised one, never a number in the copy.
+    if (value.code === 'too_many_rows' && maxRows !== undefined && maxRows > 0) {
+      return interpolate(copy.errTooManyRows, { rows: maxRows });
+    }
     if (value.code === 'too_large' || value.code === 'too_many_pages' || value.code === 'too_many_rows') return copy.errLarge;
     if (value.code === 'unreadable_pdf') return copy.errUnreadable;
+    if (value.code === 'pdf_damaged') return copy.errPdfDamaged;
+    if (value.code === 'pdf_encryption_unsupported') return copy.errPdfEncryption;
+    if (value.code === 'invalid_xlsx') return copy.errXlsx;
+    if (value.code === 'unsupported_file_type') return copy.errFileType;
+    // A relay that reads the base64 header says when the typed password
+    // itself cannot be used (too long, or a control character).
+    if (value.code === 'pdf_password_invalid') return copy.errPasswordInvalid;
     if (value.code === 'pdf_too_long') return copy.errPdfTooLong;
     // The service answers "required" again when it could not use the password
     // it was sent (too long, or a line break), so the user's fix is the same.
@@ -473,15 +577,22 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
     return parts.join(' ');
   };
 
-  const pickAndUpload = async (cfg: RelayConfig, capabilities: ImportCapabilities) => {
-    if (pendingPdfs.length > 0) return;
+  /**
+   * Upload a batch. Without `incoming` the person picks the files; with it,
+   * the one statement iOS handed over is the whole batch.
+   */
+  const pickAndUpload = async (
+    cfg: RelayConfig, capabilities: ImportCapabilities, incoming?: PickedStatement,
+  ): Promise<boolean> => {
+    // False: returned before taking the files (a handed-over copy is the caller's to delete).
+    if (pendingPdfs.length > 0) return false;
     if (!state.ledgerMoney) {
       setCurrencySheetVisible(true);
-      return;
+      return false;
     }
     const generation = getStateGeneration();
     const current = getStateSnapshot();
-    if (!current.hydrated || current.privateMode || !current.ledgerMoney) return;
+    if (!current.hydrated || current.privateMode || !current.ledgerMoney) return false;
     const ledgerMoney = current.ledgerMoney;
     setError(null);
     setStatus(null);
@@ -493,14 +604,28 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
     // Declared outside the try so a failure later in the batch still hands the
     // deferred locked PDFs to the password prompt instead of leaking their copies.
     const protectedPdfs: PendingProtectedPdf[] = [];
+    // This batch's copies, held in the shared set until the batch is over.
+    const batchUris: string[] = [];
+    let counted = false;
+    stopRequestedRef.current = false;
+    setStopping(false);
     try {
-      const picked = await DocumentPicker.getDocumentAsync({
-        type: [...capabilities.pdf.accepts, ...capabilities.csv.accepts],
-        copyToCacheDirectory: true,
-        multiple: true,
-      });
-      if (picked.canceled || picked.assets.length === 0) return;
+      const picked: { canceled: boolean; assets: PickedStatement[] | null } = incoming
+        ? { canceled: false, assets: [incoming] }
+        : await DocumentPicker.getDocumentAsync({
+            type: [...capabilities.pdf.accepts, ...capabilities.csv.accepts],
+            copyToCacheDirectory: true,
+            multiple: true,
+          });
+      if (picked.canceled || !picked.assets || picked.assets.length === 0) return true;
+      statementBatches.running += 1;
+      counted = true;
+      for (const asset of picked.assets) {
+        batchUris.push(asset.uri);
+        statementBatches.copies.add(asset.uri);
+      }
       setBusy('statement');
+      setSending(true);
       setLiveFiles(picked.assets.map((asset) => ({ name: asset.name, status: 'waiting' })));
       // Each file's row moves waiting → reading → done / locked / failed.
       const markFile = (position: number, status: LiveFile['status'], detail?: string) => {
@@ -519,25 +644,33 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
       // The relay rate-limits each format separately; pace each below it.
       const starts: Record<'pdf' | 'csv', number[]> = { pdf: [], csv: [] };
       let limitReached = false;
-      // Wait visibly, and give up the wait if the screen goes away.
+      // Wait visibly, and give up the wait if the screen goes away or the
+      // person presses Stop (which ends the wait at once).
       const waitFor = async (ms: number, position: number) => {
         const until = Date.now() + ms;
-        while (aliveRef.current && Date.now() < until) {
-          setStatus(interpolate(copy.waitingForLimit, {
-            seconds: Math.ceil((until - Date.now()) / 1000), index: position, total,
-          }));
-          await sleep(Math.min(1_000, until - Date.now()));
+        setPacing(true);
+        try {
+          while (aliveRef.current && !stopRequestedRef.current && Date.now() < until) {
+            setStatus(interpolate(copy.waitingForLimit, {
+              seconds: Math.ceil((until - Date.now()) / 1000), index: position, total,
+            }));
+            await sleep(Math.min(1_000, until - Date.now()), stopWakeRef);
+          }
+        } finally {
+          if (aliveRef.current) setPacing(false);
         }
-        return aliveRef.current;
+        return aliveRef.current && !stopRequestedRef.current;
       };
       for (let index = 0; index < picked.assets.length; index += 1) {
         const asset = picked.assets[index];
         const file = Platform.OS === 'web' ? null : new File(asset.uri);
         if (file) pickedFiles.push(file);
-        const csv = /\.(?:csv|tsv)$/i.test(asset.name) ||
+        // Excel workbooks go to the CSV endpoint, like the text tables.
+        const csv = /\.(?:csv|tsv|xlsx)$/i.test(asset.name) ||
           capabilities.csv.accepts.includes(asset.mimeType?.split(';', 1)[0].toLowerCase() ?? '');
         const format = csv ? 'csv' : 'pdf';
-        if (limitReached || !aliveRef.current || getStateGeneration() !== generation || getStateSnapshot().privateMode) {
+        if (limitReached || stopRequestedRef.current || !aliveRef.current ||
+            getStateGeneration() !== generation || getStateSnapshot().privateMode) {
           fileResults.push({ name: asset.name, ok: false, detail: copy.fileNotTried });
           markFile(index, 'failed', copy.fileNotTried);
           continue;
@@ -547,7 +680,11 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
           let accepted: Awaited<ReturnType<typeof uploadPdfStatement | typeof uploadCsvStatement>> | null = null;
           for (let attempt = 0; accepted === null; attempt += 1) {
             const delay = nextUploadDelay(starts[format], Date.now());
-            if (delay > 0 && !(await waitFor(delay, index + 1))) throw new CloudImportError('network');
+            if (delay > 0 && !(await waitFor(delay, index + 1))) {
+              throw stopRequestedRef.current ? new BatchStopped() : new CloudImportError('network');
+            }
+            // Stop pressed between files: this one is not sent.
+            if (stopRequestedRef.current) throw new BatchStopped();
             if (getStateGeneration() !== generation || getStateSnapshot().privateMode || !aliveRef.current) throw new CloudImportError('network');
             setStatus(interpolate(copy.uploadingProgress, { index: index + 1, total }));
             setProgress({ index: index + 1, total });
@@ -560,8 +697,11 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
             } catch (uploadError) {
               // One patient retry: pacing keeps the minute limit, so a 429 here
               // is usually the hourly budget, and a second one ends the batch.
-              if (attempt === 0 && uploadError instanceof CloudImportError && uploadError.code === 'rate_limited' &&
-                  await waitFor(RATE_LIMIT_RETRY_MS, index + 1)) continue;
+              if (attempt === 0 && uploadError instanceof CloudImportError && uploadError.code === 'rate_limited') {
+                if (await waitFor(RATE_LIMIT_RETRY_MS, index + 1)) continue;
+                // Stopped during the back-off: nothing of this file was taken.
+                if (stopRequestedRef.current) throw new BatchStopped();
+              }
               throw uploadError;
             }
           }
@@ -574,6 +714,11 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
           fileResults.push({ name: asset.name, ok: true, detail: fileImportedDetail(accepted) });
           markFile(index, 'done', fileImportedDetail(accepted));
         } catch (e) {
+          if (e instanceof BatchStopped) {
+            fileResults.push({ name: asset.name, ok: false, detail: copy.fileNotTried });
+            markFile(index, 'failed', copy.fileNotTried);
+            continue;
+          }
           if (!csv && e instanceof CloudImportError &&
               (e.code === 'pdf_password_required' || e.code === 'pdf_password_incorrect')) {
             // Retain every locked picker copy and ask for one password at a
@@ -601,7 +746,7 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
             }
           }
           const failedDetail = interpolate(copy.fileFailed, {
-            reason: e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e),
+            reason: e instanceof Error && e.message === copy.notHydrated ? e.message : errorText(e, capabilities[format].maxRows),
           });
           fileResults.push({ name: asset.name, ok: false, detail: failedDetail });
           markFile(index, 'failed', failedDetail);
@@ -613,6 +758,8 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
           await new Promise<void>((resolve) => setTimeout(resolve, 0));
         }
       }
+      // Sending is over: filing always completes, so Stop has nothing left to stop.
+      setSending(false);
       if (aliveRef.current) setFileResults(fileResults);
       if (protectedPdfs.length > 0) {
         setPendingPdfs(protectedPdfs);
@@ -622,8 +769,16 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
       if (uploadedFiles > 0) {
         await finishQueuedImport(uploadedFiles, acceptedRows, rejectedRows, pages, alreadyProcessedFiles, coverage, generation, recoveredImported);
       } else {
-        setStatus(null);
-        if (fileResults.some((result) => !result.ok && result.detail !== copy.fileLocked)) failed();
+        // A file that was tried and failed is reported as a failure even
+        // when Stop ended the rest of the batch.
+        const triedAndFailed = fileResults.some((result) => !result.ok &&
+          result.detail !== copy.fileLocked && result.detail !== copy.fileNotTried);
+        if (stopRequestedRef.current && !triedAndFailed) {
+          setStatus(copy.batchStopped);
+        } else {
+          setStatus(null);
+          if (fileResults.some((result) => !result.ok && result.detail !== copy.fileLocked)) failed();
+        }
       }
     } catch (e) {
       if (protectedPdfs.length > 0) {
@@ -642,10 +797,30 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
           // remaining copies in the batch still get their turn.
         }
       }
+      if (counted) statementBatches.running -= 1;
+      for (const uri of batchUris) statementBatches.copies.delete(uri);
+      stopRequestedRef.current = false;
+      stopWakeRef.current = null;
+      setStopping(false);
+      setSending(false);
       setBusy(null);
       setProgress(null);
       if (aliveRef.current) setLiveFiles([]);
     }
+    return true;
+  };
+
+  /**
+   * Stop a running batch. The statement being sent is allowed to finish, so
+   * an upload the service already accepted is never lost; a pacing or
+   * rate-limit wait ends at once. The files not sent are listed "not sent",
+   * and the rows already accepted are still filed below.
+   */
+  const stopBatch = () => {
+    if (busy !== 'statement' || stopRequestedRef.current) return;
+    stopRequestedRef.current = true;
+    setStopping(true);
+    stopWakeRef.current?.();
   };
 
   /** One tap: connect if needed, then open the file picker. */
@@ -655,6 +830,13 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
       setCurrencySheetVisible(true);
       return;
     }
+    const ready = await ensureConnection();
+    if (!ready) return;
+    await pickAndUpload(ready.cfg, ready.capabilities);
+  };
+
+  /** The import connection and what it accepts, connecting on first use. */
+  const ensureConnection = async (): Promise<{ cfg: RelayConfig; capabilities: ImportCapabilities } | null> => {
     let ready: { cfg: RelayConfig; capabilities: ImportCapabilities } | null =
       cfg && capabilities ? { cfg, capabilities } : null;
     if (!ready && cfg) {
@@ -662,9 +844,116 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
       ready = loaded ? { cfg, capabilities: loaded } : null;
     }
     if (!ready && !cfg) ready = await connect();
-    if (!ready) return;
-    await pickAndUpload(ready.cfg, ready.capabilities);
+    return ready;
   };
+
+  /** Delete a handed-over copy Wafra will not import, and stop sparing it. */
+  const dropIncoming = (waiting: IncomingWaiting) => {
+    inFlightPickerUris.delete(waiting.asset.uri);
+    discardStatementCopy(waiting.asset.uri);
+  };
+
+  /** App Lock cleared and the app in the foreground, read at the moment of use. */
+  const unlockedAndActive = () => privacyGateRef.current && AppState.currentState === 'active';
+
+  /**
+   * After the person taps Import on the card: the same connection,
+   * capabilities and upload as one picked file. App Lock and the foreground
+   * are checked again once connected, right before any byte is sent. If the
+   * import service cannot be reached, or the upload returns before taking the
+   * file, the copy is deleted rather than kept.
+   */
+  const importIncoming = async (waiting: IncomingWaiting) => {
+    const ready = await ensureConnection();
+    if (!ready || !aliveRef.current) {
+      dropIncoming(waiting);
+      return;
+    }
+    if (!unlockedAndActive()) {
+      // Locked (or left) while connecting: ask again once unlocked.
+      if (incomingRef.current) dropIncoming(waiting);
+      else {
+        incomingRef.current = waiting;
+        setIncomingRetry((value) => value + 1);
+      }
+      return;
+    }
+    const taken = await pickAndUpload(ready.cfg, ready.capabilities, waiting.asset);
+    // The upload loop deleted (or kept for its password) a copy it took.
+    if (taken) inFlightPickerUris.delete(waiting.asset.uri);
+    else dropIncoming(waiting);
+  };
+
+  /** Import on the confirmation card. */
+  const confirmIncoming = () => {
+    const waiting = incomingRef.current;
+    if (!waiting || incomingPrompt?.uri !== waiting.asset.uri) return;
+    // Re-checked at the tap, not only when the card was drawn.
+    if (!unlockedAndActive()) return;
+    if (loadingConfig || busy !== null || pendingPdfs.length > 0 || queuedRetryInFlightRef.current ||
+        statementBatches.running > 0) return;
+    const current = getStateSnapshot();
+    if (!current.hydrated || !current.onboarded || current.privateMode) return;
+    // The same rule as the choose-file control: a ledger currency first. The card stays.
+    if (!current.ledgerMoney) {
+      setCurrencySheetVisible(true);
+      return;
+    }
+    incomingRef.current = null;
+    setIncomingPrompt(null);
+    void importIncoming(waiting);
+  };
+
+  /** Cancel on the confirmation card: nothing is sent, and the Inbox copy is deleted. */
+  const cancelIncoming = () => {
+    const waiting = incomingRef.current;
+    incomingRef.current = null;
+    setIncomingPrompt(null);
+    if (waiting) dropIncoming(waiting);
+  };
+
+  useEffect(() => {
+    // Copies a newer handed-over file replaced before they were claimed.
+    for (const uri of takeSupersededIncomingStatements()) discardStatementCopy(uri);
+    if (preview) return;
+    if (incomingStatement && incomingRef.current?.token !== incomingStatement) {
+      const claimed = takeIncomingStatement(incomingStatement);
+      if (claimed) {
+        const replaced = incomingRef.current;
+        if (replaced) dropIncoming(replaced);
+        // Spared by cache cleanup until it is imported or cancelled.
+        inFlightPickerUris.add(claimed.uri);
+        incomingRef.current = { token: incomingStatement, asset: { uri: claimed.uri, name: claimed.name } };
+      }
+    }
+    const waiting = incomingRef.current;
+    const show = (asset: PickedStatement | null) =>
+      setIncomingPrompt((current) => (current?.uri ?? null) === (asset?.uri ?? null) ? current : asset);
+    // The screen stays mounted (hidden) under first-run setup; a statement
+    // opened then waits until setup is finished.
+    if (!waiting || !state.hydrated || !state.onboarded) {
+      show(null);
+      return;
+    }
+    // Local-only mode: nothing is uploaded, and the copy is not kept for later.
+    if (state.privateMode) {
+      incomingRef.current = null;
+      dropIncoming(waiting);
+      show(null);
+      return;
+    }
+    // Asked only in the foreground with App Lock cleared, and never while an
+    // import (here or on another importer screen) is still running.
+    const otherBatch = statementBatches.running > 0 || queuedRetryInFlightRef.current;
+    if (!appActive || !privacyGateCleared || loadingConfig || busy !== null || pendingPdfs.length > 0 || otherBatch) {
+      show(null);
+      if (!otherBatch) return;
+      const timer = setTimeout(() => setIncomingRetry((value) => value + 1), 1_000);
+      return () => clearTimeout(timer);
+    }
+    show(waiting.asset);
+  }, [appActive, busy, incomingRetry, incomingStatement, loadingConfig, pendingPdfs.length, preview, privacyGateCleared,
+    state.hydrated, state.onboarded, state.privateMode]);
 
   const retryProtectedPdf = async () => {
     if (!cfg || !capabilities || !pendingPdf || !pdfPassword || busy !== null || queuedRetryInFlightRef.current) return;
@@ -703,8 +992,10 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
       setPdfPassword('');
     } catch (e) {
       if (e instanceof CloudImportError && e.code === 'queue_full') await recoverQueuedRows(generation);
-      setError(errorText(e));
-      if (!(e instanceof CloudImportError) || e.code !== 'pdf_password_incorrect') failed();
+      setError(errorText(e, capabilities.pdf.maxRows));
+      // A wrong or unusable password is the person's to retype, not a failure.
+      if (!(e instanceof CloudImportError) ||
+          (e.code !== 'pdf_password_incorrect' && e.code !== 'pdf_password_invalid')) failed();
     } finally {
       inFlightPickerUris.delete(pendingPdf.asset.uri);
       if (!aliveRef.current) {
@@ -730,6 +1021,10 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
   const pdfMb = capabilities ? Math.round(capabilities.pdf.maxBytes / 1048576) : 0;
   const csvMb = capabilities ? Math.round(capabilities.csv.maxBytes / 1048576) : 0;
   const reading = busy === 'statement';
+  // Excel is named only when the import service says it reads workbooks.
+  const excel = !!capabilities?.csv.enabled && capabilities.csv.accepts.includes(XLSX_CONTENT_TYPE);
+  const formats = excel ? copy.formatsExcel : copy.formats;
+  const showStop = reading && sending && (liveFiles.length > 1 || pacing);
   const failedFiles = fileResults.filter((result) => !result.ok);
   const shownFiles = filesOpen ? fileResults : failedFiles;
   const numbers = summary
@@ -796,7 +1091,7 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
             testID="statement-choose"
             accessibilityRole="button"
             accessibilityLabel={chooseLabel}
-            accessibilityHint={copy.formats}
+            accessibilityHint={formats}
             accessibilityState={{ disabled: chooseDisabled, busy: busy !== null }}
             onPress={() => void chooseFile()}
             disabled={loadingConfig || busy !== null || pendingPdfs.length > 0 || !state.ledgerMoney}
@@ -804,7 +1099,7 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
             {busy !== null ? <ActivityIndicator color={ink.text} /> : <Icon name="upload" size={22} color={ink.text} strokeWidth={2} />}
             <ThemedText type="smallBold" style={[styles.chooseLabel, { color: ink.text }]}>{chooseLabel}</ThemedText>
           </Pressable>
-          <ThemedText type="meta" style={[styles.center, { color: ink.secondary }]}>{copy.formats}</ThemedText>
+          <ThemedText type="meta" style={[styles.center, { color: ink.secondary }]}>{formats}</ThemedText>
         </>
       )}
     </View>
@@ -823,6 +1118,32 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
         </View>
       ) : (
         <>
+          {/* A statement opened in Wafra from the Share Sheet or Files: nothing
+              is paired or sent until the person taps Import here. */}
+          {incomingPrompt && (
+            <View testID="statement-incoming" style={styles.section} accessibilityLiveRegion="polite">
+              <View style={styles.lineRow}>
+                <FileTile palette={band} />
+                <ThemedText type="smallBold" accessibilityRole="header" style={[styles.grow, { color: band.text }]}>
+                  {interpolate(copy.incomingTitle, { name: incomingPrompt.name })}
+                </ThemedText>
+              </View>
+              <View style={styles.lineRow} testID="statement-incoming-privacy">
+                <Icon name="lock" size={15} color={band.textSecondary} />
+                <ThemedText type="meta" style={[styles.grow, { color: band.textSecondary }]}>
+                  {copy.uploadDisclosure}
+                </ThemedText>
+              </View>
+              <View style={[styles.actions, largeText && styles.actionsStacked]}>
+                <EButton testID="statement-incoming-cancel" palette={band} variant="secondary" label={copy.incomingCancel}
+                  onPress={cancelIncoming} style={!largeText && styles.action} />
+                <EButton testID="statement-incoming-import" palette={band} label={copy.incomingImport}
+                  accessibilityHint={copy.uploadDisclosure}
+                  onPress={confirmIncoming} disabled={busy !== null} style={!largeText && styles.action} />
+              </View>
+            </View>
+          )}
+
           {reading && (
             <View
               testID="statement-progress"
@@ -848,6 +1169,23 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
               {/* The bar already says "2 of 3"; the status line adds only waits and filing. */}
               {status && status !== interpolate(copy.uploadingProgress, progress ?? { index: 0, total: 0 })
                 ? <ThemedText type="meta" style={{ color: band.textSecondary }}>{status}</ThemedText> : null}
+            </View>
+          )}
+
+          {/* Stop a batch: the statement being read finishes; the rest are not sent. */}
+          {showStop && (
+            <View style={[styles.actions, largeText && styles.actionsStacked]}>
+              <EButton
+                testID="statement-stop"
+                palette={band}
+                variant="secondary"
+                label={stopping ? copy.stoppingBatch : copy.stopBatch}
+                accessibilityHint={copy.stopBatchHint}
+                reserveLabels={[copy.stopBatch, copy.stoppingBatch]}
+                onPress={stopBatch}
+                disabled={stopping}
+                style={!largeText && styles.action}
+              />
             </View>
           )}
 
@@ -1031,11 +1369,14 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
             <View style={[styles.privacy, { borderTopColor: band.rule }]} testID="statement-how-it-works">
               <ThemedText type="small" style={{ color: band.text }}>{copy.privacyTitle}</ThemedText>
               <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.privacyBody}</ThemedText>
-              <ThemedText type="meta" style={{ color: band.textSecondary }}>{copy.statementBody}</ThemedText>
+              <ThemedText type="meta" style={{ color: band.textSecondary }}>
+                {interpolate(copy.statementBody, { formats })}
+              </ThemedText>
               {capabilities && (
                 <ThemedText type="nano" tabular style={{ color: band.textSecondary }}>
                   {interpolate(copy.statementLimits, {
                     pdfMb, csvMb, pages: capabilities.pdf.maxPages, rows: capabilities.pdf.maxRows,
+                    tables: excel ? copy.tableFormatsExcel : copy.tableFormats,
                   })}
                 </ThemedText>
               )}

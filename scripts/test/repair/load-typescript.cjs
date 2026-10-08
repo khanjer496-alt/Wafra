@@ -78,6 +78,8 @@ module.exports = function loadTypescript(file, dependencies = {}, globals = {}) 
       if (name === '@/lib/alert-review-tray') return require('../build/alert-review-tray.js');
       if (name === '@/lib/capture-source-identity') return require('../build/capture-source-identity.js');
       if (name === '@/lib/statement-import-flow') return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/statement-import-flow.ts'));
+      // The pure "Open in Wafra" URL rules and one-time token store.
+      if (name === '@/lib/incoming-statement-file') return loadTypescript(require('node:path').resolve(__dirname, '../../../src/lib/incoming-statement-file.ts'));
       if (name === '@/lib/subscriptions') return require('../build/subscriptions.js');
       // Setup videos are an opaque presentation child in route harnesses;
       // their optional native player/lifecycle has its own behavioral suite.

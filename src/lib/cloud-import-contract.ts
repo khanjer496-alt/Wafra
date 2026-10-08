@@ -19,11 +19,24 @@ export interface ImportCapabilities {
     maxPages: number;
     parser: string;
     note: string;
+    /**
+     * How the relay accepts a PDF password beyond the legacy raw header.
+     * Present only when the relay advertises it; absent means legacy.
+     */
+    passwordEncoding?: string[];
+    /** The longest password (UTF-8 bytes) the base64 header accepts, when advertised. */
+    maxPasswordBytes?: number;
   };
   csv: {
     enabled: boolean;
     accepts: string[];
     maxBytes: number;
+    /**
+     * Per-type size ceilings (an Excel workbook may be allowed more than a
+     * text file). Present only when the relay advertises it; otherwise every
+     * type uses maxBytes.
+     */
+    maxBytesByType?: Record<string, number>;
     maxRows: number;
     parser: string;
     note: string;
@@ -89,6 +102,12 @@ export type CloudImportErrorCode =
   | 'unreadable_pdf'
   | 'pdf_password_required'
   | 'pdf_password_incorrect'
+  | 'pdf_password_invalid'
+  | 'pdf_damaged'
+  | 'pdf_encryption_unsupported'
+  | 'invalid_xlsx'
+  /** Client-side only: the relay does not advertise this file's type. */
+  | 'unsupported_file_type'
   | 'unsupported_statement_format'
   | 'ambiguous_card_signs'
   | 'ambiguous_dates'
@@ -127,6 +146,24 @@ function stringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
 }
 
+/**
+ * An optional per-type size map: only positive integer limits under plain
+ * string keys are kept; anything malformed reads as absent (use maxBytes).
+ */
+function sizeByType(value: unknown): Record<string, number> | null {
+  const map = object(value);
+  if (!map || Array.isArray(value)) return null;
+  const entries = Object.entries(map);
+  if (entries.length === 0 || !entries.every(([, limit]) => positiveInt(limit))) return null;
+  return Object.fromEntries(entries) as Record<string, number>;
+}
+
+/** The size ceiling the relay applies to one CSV-endpoint content type. */
+export function csvMaxBytes(capabilities: Pick<ImportCapabilities, 'csv'>, contentType: string): number {
+  const byType = capabilities.csv.maxBytesByType;
+  return byType && Object.hasOwn(byType, contentType) ? byType[contentType] : capabilities.csv.maxBytes;
+}
+
 /** Reject a partial or invented capability document instead of guessing limits. */
 export function parseImportCapabilities(value: unknown): ImportCapabilities | null {
   const root = object(value);
@@ -156,11 +193,13 @@ export function parseImportCapabilities(value: unknown): ImportCapabilities | nu
       typeof csv.note !== 'string'
     )
   ) return null;
+  const csvSizes = sizeByType(csv?.maxBytesByType);
   const csvCapability: ImportCapabilities['csv'] = csv
     ? {
         enabled: csv.enabled as boolean,
         accepts: [...(csv.accepts as string[])],
         maxBytes: csv.maxBytes as number,
+        ...(csvSizes ? { maxBytesByType: csvSizes } : {}),
         maxRows: csv.maxRows as number,
         parser: csv.parser as string,
         note: csv.note as string,
@@ -188,9 +227,102 @@ export function parseImportCapabilities(value: unknown): ImportCapabilities | nu
       maxPages: pdf.maxPages,
       parser: pdf.parser,
       note: pdf.note,
+      // Optional and additive: a missing or malformed list reads as legacy
+      // rather than refusing a capability document that is otherwise whole.
+      ...(stringList(pdf.passwordEncoding) ? { passwordEncoding: [...pdf.passwordEncoding] } : {}),
+      ...(positiveInt(pdf.maxPasswordBytes) ? { maxPasswordBytes: pdf.maxPasswordBytes } : {}),
     },
     csv: csvCapability,
   };
+}
+
+/**
+ * The spreadsheet type a relay lists in csv.accepts when it reads Excel
+ * workbooks; the app names Excel only when it is listed.
+ */
+export const XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/**
+ * The UTF-8 bytes of `value`, written out rather than relying on Buffer or
+ * TextEncoder so it behaves the same in Hermes and in Node. A lone surrogate
+ * is encoded as U+FFFD, as TextEncoder does; a typed password never has one.
+ */
+function utf8Encode(value: string): number[] {
+  const bytes: number[] = [];
+  for (let i = 0; i < value.length; i += 1) {
+    let code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const low = i + 1 < value.length ? value.charCodeAt(i + 1) : 0;
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00);
+        i += 1;
+      } else {
+        code = 0xfffd;
+      }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      code = 0xfffd;
+    }
+    if (code < 0x80) {
+      bytes.push(code);
+    } else if (code < 0x800) {
+      bytes.push(0xc0 | (code >> 6), 0x80 | (code & 0x3f));
+    } else if (code < 0x10000) {
+      bytes.push(0xe0 | (code >> 12), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    } else {
+      bytes.push(0xf0 | (code >> 18), 0x80 | ((code >> 12) & 0x3f), 0x80 | ((code >> 6) & 0x3f), 0x80 | (code & 0x3f));
+    }
+  }
+  return bytes;
+}
+
+/** Standard (padded) base64 of the UTF-8 bytes of `value`, without btoa. */
+export function utf8Base64(value: string): string {
+  const bytes = utf8Encode(value);
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i];
+    const b = i + 1 < bytes.length ? bytes[i + 1] : 0;
+    const c = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    const triple = (a << 16) | (b << 8) | c;
+    out += BASE64_ALPHABET[(triple >> 18) & 0x3f] + BASE64_ALPHABET[(triple >> 12) & 0x3f];
+    out += i + 1 < bytes.length ? BASE64_ALPHABET[(triple >> 6) & 0x3f] : '=';
+    out += i + 2 < bytes.length ? BASE64_ALPHABET[triple & 0x3f] : '=';
+  }
+  return out;
+}
+
+/**
+ * The base64 header's own rules, checked before a statement is uploaded: a
+ * relay that reads it refuses (pdf_password_invalid) a password longer than
+ * its advertised byte limit or one holding a control character (tab and line
+ * breaks included). Legacy relays are left to answer for themselves.
+ */
+export function pdfPasswordUnusable(
+  password: string | undefined,
+  capabilities: Pick<ImportCapabilities, 'pdf'>,
+): boolean {
+  if (!password || !capabilities.pdf.passwordEncoding?.includes('b64')) return false;
+  if (/[\u0000-\u001f]/.test(password)) return true;
+  const limit = capabilities.pdf.maxPasswordBytes;
+  return limit !== undefined && utf8Encode(password).length > limit;
+}
+
+/**
+ * The header that carries a PDF password, exactly as typed (never trimmed).
+ * A relay that advertises `b64` gets the UTF-8 bytes base64-encoded, so
+ * Arabic and other non-Latin passwords survive HTTP header rules; an older
+ * relay keeps the legacy raw header it has always read.
+ */
+export function pdfPasswordHeaders(
+  password: string | undefined,
+  capabilities: Pick<ImportCapabilities, 'pdf'>,
+): Record<string, string> {
+  if (!password) return {};
+  return capabilities.pdf.passwordEncoding?.includes('b64')
+    ? { 'x-wafra-pdf-password-b64': utf8Base64(password) }
+    : { 'x-wafra-pdf-password': password };
 }
 
 function parseStatementCoverage(value: unknown): StatementImportCoverage | null {
@@ -308,6 +440,10 @@ const KNOWN_ERRORS = new Set<CloudImportErrorCode>([
   'unreadable_pdf',
   'pdf_password_required',
   'pdf_password_incorrect',
+  'pdf_password_invalid',
+  'pdf_damaged',
+  'pdf_encryption_unsupported',
+  'invalid_xlsx',
   'unsupported_statement_format',
   'ambiguous_card_signs',
   'ambiguous_dates',

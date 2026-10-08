@@ -155,6 +155,8 @@ test('a queue-full upload still drains accepted rows even when no file returned 
   finishQueuedImport:async()=>{finishes++},rememberCoverage:async()=>{throw Error('failed file has no range')},
   CloudImportError:contract.CloudImportError,copy:{fileFailed:'failed',fileLocked:'locked'},interpolate:s=>s,
   errorText:()=> 'queue full',failed:noop,sleep:async()=>{},RATE_LIMIT_RETRY_MS:1,
+  stopRequestedRef:{current:false},stopWakeRef:{current:null},setStopping:noop,setPacing:noop,BatchStopped:class extends Error{},
+  statementBatches:{running:0,copies:new Set()},setSending:noop,
  };
  vm.runInNewContext(ts.transpileModule(body+'\nglobalThis.pick = pickAndUpload;', {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,ctx);
  await ctx.pick({}, {pdf:{accepts:['application/pdf']},csv:{accepts:['text/csv']}});
