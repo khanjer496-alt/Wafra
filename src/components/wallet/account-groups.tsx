@@ -94,7 +94,7 @@ export function AccountGroups({ rows, onOpen, onManage, onUpdateBalance, onHide,
             line (full width, so a statement fits) with what the figure is. */}
         <View style={styles.body}>
           <View style={[styles.line, large && styles.lineStacked]}>
-            <ThemedText type="smallBold" numberOfLines={large ? undefined : 1} style={styles.name}>{a.name}</ThemedText>
+            <ThemedText type="smallBold" numberOfLines={large ? undefined : 2} style={styles.name}>{a.name}</ThemedText>
             {item.kind === 'card' ? null : item.figureFils === null
               ? <ThemedText type="smallBold" style={{ color: palette.textSecondary }}>—</ThemedText>
               : <Money fils={item.figureFils} type="smallBold" style={styles.figure} />}
