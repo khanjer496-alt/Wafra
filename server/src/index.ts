@@ -68,6 +68,8 @@ import {
   looksLikeStatementBody,
   parseStatementCsv,
   parseStatementLines,
+  parseStatementXlsx,
+  pdfOpenFailure,
   statementDateHintFrom,
   type StatementDateHint,
 } from './imports';
@@ -144,6 +146,12 @@ const MAX_RAW_EMAIL_BYTES = 6 * 1024 * 1024;
 const MAX_EMAIL_ATTACHMENTS = 8;
 const MAX_PDF_BYTES = 5 * 1024 * 1024;
 const MAX_CSV_BYTES = 1024 * 1024;
+/**
+ * An .xlsx is a ZIP, so the same table is several times smaller than its
+ * CSV; 2 MB of workbook is far more than any statement. What it may inflate
+ * to is bounded separately in xlsx-records.ts (20 MB, 2,000 entries).
+ */
+const MAX_XLSX_BYTES = 2 * 1024 * 1024;
 const MAX_PDF_PAGES = 100;
 const MAX_IMPORT_ROWS = 200;
 /**
@@ -155,28 +163,98 @@ const MAX_IMPORT_ROWS = 200;
  */
 const MAX_PDF_HEADER_OFFSET = 1024;
 const PDF_HEADER = [0x25, 0x50, 0x44, 0x46, 0x2d] as const; // %PDF-
+/** Excel 2007+ workbooks only; legacy binary .xls is not read. */
+const XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+/**
+ * Every media type /v1/import/csv accepts, and — through capabilities'
+ * `csv.accepts` — the list the app's document picker offers. The app uploads
+ * each file under the type its extension implies: .csv → text/csv, .tsv →
+ * text/tab-separated-values, .xlsx → the spreadsheetml type.
+ */
 const CSV_CONTENT_TYPES = new Set([
   'text/csv',
   'application/csv',
   'text/tab-separated-values',
+  XLSX_CONTENT_TYPE,
 ]);
+/**
+ * Import behaviour a shipped app build would mishandle is opt-in. A build
+ * that can show it names it in `x-wafra-import-features`, a comma-separated,
+ * case-insensitive token list (unknown tokens ignored; a header longer than
+ * MAX_IMPORT_FEATURES_HEADER_CHARS is ignored as a whole):
+ *
+ *  - `xlsx`: capabilities list the spreadsheetml type (picker builds from
+ *    `csv.accepts`) and /v1/import/csv reads it. Without the token the type is
+ *    absent and refused with 415 csv_required, as before .xlsx support.
+ *  - `pdf-error-detail`: /v1/import/pdf may answer pdf_damaged,
+ *    pdf_encryption_unsupported, and unreadable_pdf for a PDF with no text
+ *    layer. Without it those collapse to the codes older builds know.
+ */
+const IMPORT_FEATURES_HEADER = 'x-wafra-import-features';
+const MAX_IMPORT_FEATURES_HEADER_CHARS = 200;
+type ImportFeature = 'xlsx' | 'pdf-error-detail';
+
+function importFeatures(req: Request): ReadonlySet<ImportFeature> {
+  const features = new Set<ImportFeature>();
+  const raw = req.headers.get(IMPORT_FEATURES_HEADER);
+  if (raw === null || raw.length > MAX_IMPORT_FEATURES_HEADER_CHARS) return features;
+  for (const token of raw.split(',')) {
+    const name = token.trim().toLowerCase();
+    if (name === 'xlsx' || name === 'pdf-error-detail') features.add(name);
+  }
+  return features;
+}
+
+/** The statement-file media types this client may be offered and may upload. */
+function statementFileTypes(features: ReadonlySet<ImportFeature>): string[] {
+  return [...CSV_CONTENT_TYPES].filter((type) => type !== XLSX_CONTENT_TYPE || features.has('xlsx'));
+}
+
+/** UTF-8 bytes of a PDF password sent in `x-wafra-pdf-password-b64`. */
+const MAX_PDF_PASSWORD_BYTES = 256;
 const INVITE_TTL_SECONDS = 10 * 60;
 const MAX_VAULT_DEVICES = 8;
 /** Global backstop; edge rate limiting remains the production first line. */
 const PAIR_PER_MINUTE = 60;
 /** Per-device ingest ceiling. UAE banks send tens of alerts a day, not hundreds. */
 const INGEST_PER_HOUR = 300;
-/** Heavy file parsing: generous for a person, finite for a loop or leaked token. */
+/**
+ * Heavy file parsing: generous for a person, finite for a loop or leaked token.
+ *
+ * This is the budget a person notices, so it is spent only by an upload that
+ * did (or tried to do) new work: a locked PDF's password prompt, a wrong
+ * password, and a re-upload of a file whose rows are already delivered all
+ * hand their unit back (see reserveStatementBudget). The two ceilings below
+ * keep those refunded outcomes finite.
+ */
 const STATEMENT_IMPORTS_PER_HOUR = 12;
+/**
+ * Every statement parse a device starts in an hour, refunded or not. This is
+ * what bounds repeated re-uploads and password prompts, which no longer spend
+ * the import budget above, so one device cannot spend the global backstop.
+ */
+const STATEMENT_ATTEMPTS_PER_HOUR = 48;
+/**
+ * PDF uploads that carry a password, per device per hour. Tighter than the
+ * attempt ceiling: it is the bound on guessing a statement's password.
+ */
+const PDF_PASSWORD_ATTEMPTS_PER_HOUR = 20;
 /** Account-wide backstop for a bad release repeatedly uploading statements. */
 const GLOBAL_STATEMENT_IMPORTS_PER_HOUR = 1_000;
 /** Forwarded alerts are more frequent than statements, but still bounded. */
 const EMAIL_IMPORTS_PER_HOUR = 120;
 const GLOBAL_EMAIL_IMPORTS_PER_HOUR = 5_000;
 /**
- * A 200-row import can fan out to as many as eight trusted phones. This budget
- * counts attempted sealed deliveries, not just HTTP requests, because that is
- * what drives queue + replay-receipt writes in D1.
+ * One import of up to MAX_IMPORT_ROWS rows can fan out to as many as
+ * MAX_VAULT_DEVICES (8) trusted phones: 200 × 8 = 1,600 sealed deliveries,
+ * and 4,000 if the row ceiling is ever raised to 500. This budget counts
+ * attempted sealed deliveries, not just HTTP requests, because that is what
+ * drives queue + replay-receipt writes in D1 (and the X25519 seal per target).
+ * Each route reserves the WHOLE import's rows × targets in one atomic step
+ * (reserveSupplementalDeliveries) before it seals or queues anything, so an
+ * import is either fully inside the budget or refused before a single row is
+ * written; it never half-queues because of this budget. A re-upload of an
+ * already-delivered file still reserves here: it still seals every row.
  */
 const SUPPLEMENTAL_DELIVERIES_PER_DEVICE_PER_HOUR = 25_000;
 const GLOBAL_SUPPLEMENTAL_DELIVERIES_PER_HOUR = 100_000;
@@ -409,11 +487,51 @@ async function statementCoverage(rows: ReadonlyArray<{ kind?: string; date?: str
   return { sourceKey: source.key, label: source.label, startDate: dates[0], endDate: dates[dates.length - 1] };
 }
 
+/**
+ * The legacy password header, unchanged for builds that predate the base64
+ * one. HTTP strips its leading/trailing spaces and it cannot carry non-ASCII
+ * text; an unusable value is dropped and the PDF answers
+ * pdf_password_required, which those builds already handle.
+ */
 function pdfPassword(req: Request): string | undefined {
   const value = req.headers.get('x-wafra-pdf-password');
   if (!value) return undefined;
   if (value.length > 128 || /[\r\n\0]/.test(value)) return undefined;
   return value;
+}
+
+/**
+ * The password for this one request, from `x-wafra-pdf-password-b64` when
+ * present (standard, padded base64 of the password's UTF-8 bytes), else from
+ * the legacy header. The base64 form preserves every character exactly —
+ * spaces included — and carries any script. It is decoded strictly and
+ * refused rather than dropped: invalid base64 or UTF-8, more than
+ * MAX_PDF_PASSWORD_BYTES bytes, or any C0 control character is
+ * pdf_password_invalid. The value is used for this parse only; it is never
+ * logged, stored, or echoed.
+ */
+function pdfPasswordFromRequest(req: Request): { password: string | undefined } | { error: 'pdf_password_invalid' } {
+  const encoded = req.headers.get('x-wafra-pdf-password-b64');
+  if (encoded === null) return { password: pdfPassword(req) };
+  const refused = { error: 'pdf_password_invalid' } as const;
+  if (encoded.length === 0 || encoded.length > Math.ceil(MAX_PDF_PASSWORD_BYTES / 3) * 4) return refused;
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    bytes = b64decode(encoded);
+  } catch {
+    return refused;
+  }
+  // Canonical only: non-zero padding bits are a different string that
+  // decodes to the same bytes, which a strict decoder does not accept.
+  if (b64encode(bytes) !== encoded || bytes.length > MAX_PDF_PASSWORD_BYTES) return refused;
+  let password: string;
+  try {
+    password = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return refused;
+  }
+  if (/[\u0000-\u001f]/.test(password)) return refused;
+  return { password };
 }
 
 function pdfPasswordFailure(error: unknown): 'pdf_password_required' | 'pdf_password_incorrect' | null {
@@ -725,7 +843,21 @@ async function consumeCostBudget(
   ceiling: number,
   units = 1,
 ): Promise<boolean> {
-  if (!Number.isInteger(units) || units <= 0 || units > ceiling) return false;
+  return (await reserveCostBudget(env, actorId, scope, ceiling, units)) !== null;
+}
+
+/**
+ * consumeCostBudget, returning the hour window the units were charged to (or
+ * null when refused), so a caller can hand them back with refundCostBudget.
+ */
+async function reserveCostBudget(
+  env: Env,
+  actorId: string,
+  scope: string,
+  ceiling: number,
+  units = 1,
+): Promise<number | null> {
+  if (!Number.isInteger(units) || units <= 0 || units > ceiling) return null;
   const windowStart = Math.floor(Date.now() / 3_600_000) * 3_600;
   const row = await env.DB.prepare(
     `INSERT INTO cost_limits (actor_id, scope, window_start, usage_count)
@@ -743,22 +875,92 @@ async function consumeCostBudget(
   )
     .bind(actorId, scope, windowStart, units, ceiling)
     .first<{ usage_count: number }>();
-  return row !== null;
+  return row === null ? null : windowStart;
+}
+
+/**
+ * Hand back units reserveCostBudget charged. Only to the SAME hour window:
+ * after the hour rolls over the counter restarted without those units, and
+ * decrementing the new window would mint budget nobody spent. The decrement
+ * is one conditional UPDATE, so concurrent refunds and reservations cannot
+ * interleave into a negative or lost count. A failed refund is deliberately
+ * swallowed: the unit simply stays spent, which is the conservative outcome,
+ * and the response the user is owed does not depend on it.
+ */
+async function refundCostBudget(
+  env: Env,
+  actorId: string,
+  scope: string,
+  windowStart: number,
+  units = 1,
+): Promise<void> {
+  try {
+    await env.DB.prepare(
+      `UPDATE cost_limits SET usage_count = usage_count - ?4
+        WHERE actor_id = ?1 AND scope = ?2 AND window_start = ?3 AND usage_count >= ?4`,
+    ).bind(actorId, scope, windowStart, units).run();
+  } catch {
+    // See above: an unrefunded unit is the safe failure.
+  }
+}
+
+interface StatementBudget {
+  /** Return this request's import unit; idempotent. */
+  refund(): Promise<void>;
+}
+
+/**
+ * The cost firewall in front of /v1/import/pdf and /v1/import/csv.
+ *
+ * Reserve-then-refund, not charge-after-parse. Every unit is taken with the
+ * same atomic UPSERT as before, BEFORE any parsing, so concurrent uploads can
+ * never parse more files than there are units; outcomes that should not cost
+ * the person anything then give their import unit back. In order:
+ *
+ *  1. the device's import budget (STATEMENT_IMPORTS_PER_HOUR). First, so an
+ *     exhausted device is refused without writing any other counter;
+ *  2. the device's attempt ceiling (STATEMENT_ATTEMPTS_PER_HOUR) — never
+ *     refunded, so refunded outcomes stay finite per device;
+ *  3. for a PDF carrying a password, the password-attempt ceiling
+ *     (PDF_PASSWORD_ATTEMPTS_PER_HOUR) — never refunded: the guessing bound;
+ *  4. the account-wide backstop (GLOBAL_STATEMENT_IMPORTS_PER_HOUR) — never
+ *     refunded, so total parsing work stays bounded whatever the outcome.
+ *
+ * A refusal at 2–4 hands the step-1 unit back. Because the import unit is
+ * reserved first, a device whose 12 imports are spent is refused even for a
+ * password retry or a re-upload; those simply no longer spend it.
+ */
+async function reserveStatementBudget(
+  env: Env,
+  deviceId: string,
+  passwordAttempt: boolean,
+): Promise<StatementBudget | null> {
+  const windowStart = await reserveCostBudget(env, deviceId, 'statement_requests', STATEMENT_IMPORTS_PER_HOUR);
+  if (windowStart === null) return null;
+  let refunded = false;
+  const refund = async (): Promise<void> => {
+    if (refunded) return;
+    refunded = true;
+    await refundCostBudget(env, deviceId, 'statement_requests', windowStart);
+  };
+  if (
+    !(await consumeCostBudget(env, deviceId, 'statement_attempts', STATEMENT_ATTEMPTS_PER_HOUR)) ||
+    (passwordAttempt && !(await consumeCostBudget(env, deviceId, 'pdf_password_attempts', PDF_PASSWORD_ATTEMPTS_PER_HOUR))) ||
+    !(await consumeCostBudget(env, 'global', 'statement_requests', GLOBAL_STATEMENT_IMPORTS_PER_HOUR))
+  ) {
+    await refund();
+    return null;
+  }
+  return { refund };
 }
 
 async function consumeRequestBudget(
   env: Env,
   deviceId: string,
-  scope: 'statement_requests' | 'email_requests',
+  scope: 'email_requests',
 ): Promise<boolean> {
-  const perDevice = scope === 'statement_requests'
-    ? STATEMENT_IMPORTS_PER_HOUR
-    : EMAIL_IMPORTS_PER_HOUR;
-  const global = scope === 'statement_requests'
-    ? GLOBAL_STATEMENT_IMPORTS_PER_HOUR
-    : GLOBAL_EMAIL_IMPORTS_PER_HOUR;
-  if (!(await consumeCostBudget(env, deviceId, scope, perDevice))) return false;
-  return consumeCostBudget(env, 'global', scope, global);
+  if (!(await consumeCostBudget(env, deviceId, scope, EMAIL_IMPORTS_PER_HOUR))) return false;
+  return consumeCostBudget(env, 'global', scope, GLOBAL_EMAIL_IMPORTS_PER_HOUR);
 }
 
 async function reserveSupplementalDeliveries(
@@ -2083,6 +2285,8 @@ export default {
       const device = await authenticate(req, env, 'admin');
       if (!device) return json({ error: 'unauthorized' }, 401);
       const enabled = importsEnabled(env);
+      const features = importFeatures(req);
+      const fileTypes = statementFileTypes(features);
       return json({
         email: {
           enabled: enabled && !!env.EMAIL_DOMAIN,
@@ -2095,16 +2299,28 @@ export default {
           maxBytes: MAX_PDF_BYTES,
           maxRows: MAX_IMPORT_ROWS,
           maxPages: MAX_PDF_PAGES,
+          // Additive: `x-wafra-pdf-password-b64` is understood. Older builds
+          // ignore both fields and keep the legacy header.
+          passwordEncoding: ['b64'],
+          maxPasswordBytes: MAX_PDF_PASSWORD_BYTES,
           parser: 'text-structured-direction-v2',
           note: 'Supports explicit debit/credit and strongly identified credit-card Total Amount tables; ambiguous rows are rejected, not guessed.',
         },
         csv: {
           enabled,
-          accepts: [...CSV_CONTENT_TYPES],
+          // The spreadsheetml type only for a client that sent `xlsx`
+          // (IMPORT_FEATURES_HEADER): older pickers offer every listed type.
+          accepts: fileTypes,
+          // The ceiling for text files. A workbook may be larger; additive
+          // per-type ceilings for builds that read them.
           maxBytes: MAX_CSV_BYTES,
+          maxBytesByType: Object.fromEntries(fileTypes.map((type) =>
+            [type, type === XLSX_CONTENT_TYPE ? MAX_XLSX_BYTES : MAX_CSV_BYTES])),
           maxRows: MAX_IMPORT_ROWS,
           parser: 'named-columns-explicit-direction-v1',
-          note: 'CSV, TSV, and semicolon exports need date, description, and explicit debit/credit direction.',
+          note: features.has('xlsx')
+            ? 'CSV, TSV, semicolon and Excel .xlsx (first worksheet) exports need date, description, and explicit debit/credit direction.'
+            : 'CSV, TSV, and semicolon exports need date, description, and explicit debit/credit direction.',
         },
       });
     }
@@ -2234,9 +2450,12 @@ export default {
       if (await rateLimitExceeded(env.IMPORT_RATE_LIMITER, `${device.id}:pdf`)) {
         return json({ error: 'rate_limited' }, 429);
       }
-      if (!(await consumeRequestBudget(env, device.id, 'statement_requests'))) {
-        return json({ error: 'rate_limited' }, 429);
-      }
+      // Header-only check, before any budget: a malformed password costs no
+      // parse, and refusing it beats answering "password required".
+      const requestedPassword = pdfPasswordFromRequest(req);
+      if ('error' in requestedPassword) return json({ error: requestedPassword.error }, 400);
+      const budget = await reserveStatementBudget(env, device.id, requestedPassword.password !== undefined);
+      if (!budget) return json({ error: 'rate_limited' }, 429);
       const requestedMoney = statementCurrencyForRequest(req, device.market);
       if ('error' in requestedMoney) return json({ error: 'bad_ledger_currency' }, 400);
       const requestedDates = statementDateHintForRequest(req, requestedMoney.currency);
@@ -2264,12 +2483,17 @@ export default {
         extracted = await extractPdfStatementRows(
           incoming.bytes,
           requestedMoney.currency,
-          pdfPassword(req),
+          requestedPassword.password,
           requestedDates.hint,
         );
       } catch (error) {
         const passwordError = pdfPasswordFailure(error);
-        if (passwordError) return json({ error: passwordError }, 422);
+        if (passwordError) {
+          // A password prompt or a wrong guess is not an import: the unit
+          // goes back. PDF_PASSWORD_ATTEMPTS_PER_HOUR bounds the guessing.
+          await budget.refund();
+          return json({ error: passwordError }, 422);
+        }
         // A text PDF past the extraction budget is a limit, not a scan; the
         // generic code below carries the "scanned PDF" copy on the phone.
         if (error instanceof Error && error.message === 'pdf_too_long') {
@@ -2278,10 +2502,22 @@ export default {
         if (error instanceof Error && ['multiple_statement_accounts', 'statement_currency_mismatch'].includes(error.message)) {
           return json({ error: error.message }, 422);
         }
+        // Damaged structure and an unimplemented security handler are named;
+        // whatever pdf.js does not name precisely stays the generic code.
+        // Older builds get the generic code they already know (see
+        // IMPORT_FEATURES_HEADER).
+        const openFailure = importFeatures(req).has('pdf-error-detail') ? pdfOpenFailure(error) : null;
+        if (openFailure) return json({ error: openFailure }, 422);
         return json({ error: 'unreadable_pdf' }, 422);
       }
       if (extracted.pages > MAX_PDF_PAGES) return json({ error: 'too_many_pages' }, 413);
       if (extracted.rows.length === 0) {
+        // Opened, but not one character of text on any page: a scan (or a
+        // photo saved as PDF). That is what unreadable_pdf's copy says.
+        // Older builds keep the unsupported_statement_format answer below.
+        if (!extracted.textLayer && importFeatures(req).has('pdf-error-detail')) {
+          return json({ error: 'unreadable_pdf' }, 422);
+        }
         // A card statement whose rows carry only a bare minus, and which never
         // says whether that minus is a payment or a charge. Say so, rather
         // than the generic "no explicit direction" refusal.
@@ -2330,6 +2566,9 @@ export default {
       // the last 72 hours. Say that, rather than let the phone report
       // "already in your ledger" about rows it has not looked at.
       const alreadyProcessed = delivery.insertedRows === 0;
+      // A replay queued nothing new: it is not another import, so the unit
+      // goes back. STATEMENT_ATTEMPTS_PER_HOUR bounds repeated replays.
+      if (alreadyProcessed) await budget.refund();
       // rejectedRows is a count of date-led money lines the parser would not
       // read: without it a statement that half-imported looked, on the phone,
       // like it had imported completely. Counts and coverage only, never rows.
@@ -2358,32 +2597,41 @@ export default {
       if (await rateLimitExceeded(env.IMPORT_RATE_LIMITER, `${device.id}:csv`)) {
         return json({ error: 'rate_limited' }, 429);
       }
-      if (!(await consumeRequestBudget(env, device.id, 'statement_requests'))) {
-        return json({ error: 'rate_limited' }, 429);
-      }
+      const budget = await reserveStatementBudget(env, device.id, false);
+      if (!budget) return json({ error: 'rate_limited' }, 429);
       const requestedMoney = statementCurrencyForRequest(req, device.market);
       if ('error' in requestedMoney) return json({ error: 'bad_ledger_currency' }, 400);
       const requestedDates = statementDateHintForRequest(req, requestedMoney.currency);
       if ('error' in requestedDates) return json({ error: 'bad_date_order' }, 400);
       const contentType = req.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase() ?? '';
-      if (!CSV_CONTENT_TYPES.has(contentType)) return json({ error: 'csv_required' }, 415);
-      const incoming = await readBytes(req, MAX_CSV_BYTES);
+      // A build that did not ask for `xlsx` is refused exactly as before
+      // .xlsx support existed (see IMPORT_FEATURES_HEADER).
+      if (!statementFileTypes(importFeatures(req)).includes(contentType)) return json({ error: 'csv_required' }, 415);
+      const workbook = contentType === XLSX_CONTENT_TYPE;
+      const incoming = workbook ? await readBytes(req, MAX_XLSX_BYTES) : await readBytes(req, MAX_CSV_BYTES);
       if (incoming.tooLarge) return json({ error: 'too_large' }, 413);
-      if (incoming.bytes.length === 0) return json({ error: 'invalid_csv' }, 400);
+      const unreadable = workbook ? 'invalid_xlsx' : 'invalid_csv';
+      if (incoming.bytes.length === 0) return json({ error: unreadable }, 400);
 
+      // Digest the bytes as uploaded, before any parsing touches them.
+      const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
       let parsed: ReturnType<typeof parseStatementCsv>;
       try {
-        parsed = parseStatementCsv(
-          decodeCsv(incoming.bytes),
-          requestedMoney.currency,
-          MAX_IMPORT_ROWS,
-          requestedDates.hint,
-        );
+        // An .xlsx is unzipped to its first worksheet's rows and read by the
+        // SAME named-column rules (parseStatementRecords) as a CSV.
+        parsed = workbook
+          ? await parseStatementXlsx(incoming.bytes, requestedMoney.currency, MAX_IMPORT_ROWS, requestedDates.hint)
+          : parseStatementCsv(
+            decodeCsv(incoming.bytes),
+            requestedMoney.currency,
+            MAX_IMPORT_ROWS,
+            requestedDates.hint,
+          );
       } catch (error) {
-        const code = error instanceof Error ? error.message : 'invalid_csv';
+        const code = error instanceof Error ? error.message : unreadable;
         if (code === 'too_many_rows') return json({ error: code }, 413);
         if (code === 'unsupported_statement_format' || code === 'statement_currency_mismatch') return json({ error: code }, 422);
-        return json({ error: 'invalid_csv' }, 400);
+        return json({ error: unreadable }, 400);
       }
       if (parsed.rows.length === 0) {
         if (parsed.ambiguousCardSignRows > 0) {
@@ -2398,8 +2646,8 @@ export default {
         }, 422);
       }
 
-      const digest = b64encode(await crypto.subtle.digest('SHA-256', incoming.bytes));
-      const baseKey = await keyedFingerprint(device.requestSecret, `csv:${digest}`);
+      // The prefix only separates namespaces; different bytes already differ.
+      const baseKey = await keyedFingerprint(device.requestSecret, `${workbook ? 'xlsx' : 'csv'}:${digest}`);
       const receivedAt = rowReceiptTimes(parsed.rows, Date.now());
       const statementImportId = await statementImportIdFor(baseKey);
       const targets = await supplementalQueueTargets(env, device);
@@ -2427,6 +2675,8 @@ export default {
       // the last 72 hours. Say that, rather than let the phone report
       // "already in your ledger" about rows it has not looked at.
       const alreadyProcessed = delivery.insertedRows === 0;
+      // A replay queued nothing new: it is not another import (see the PDF route).
+      if (alreadyProcessed) await budget.refund();
       return json({
         acceptedRows: parsed.rows.length,
         rejectedRows: parsed.rejectedRows,
