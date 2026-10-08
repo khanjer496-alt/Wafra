@@ -52,6 +52,12 @@ type Props = {
   /** Short names for the two sides, e.g. "Sep 2026" and "Aug 2026". */
   currentName?: string;
   previousName?: string | null;
+  /**
+   * The running month and the one before, both cut to the same first days
+   * (`spendingThroughDay`): the selected month's chip compares these instead
+   * of a part month with a whole one.
+   */
+  sameDays?: { key: string; previousKey: string; currentFils: number; previousFils: number } | null;
   onMonth: (key: string) => void;
   onMerchant: (name: string) => void;
   onCategory: (id: CategoryId) => void;
@@ -97,8 +103,12 @@ export function SpendingTrends(p: Props) {
   // showing an implausible +100%.
   const selectedIndex = p.months.findIndex((m) => m.key === p.selectedKey);
   const previous = selectedIndex > 0 ? p.months[selectedIndex - 1] : null;
-  const previousExpense = previous?.expenseFils ?? 0;
-  const deltaFils = selected && previous ? selected.expenseFils - previousExpense : 0;
+  // A running month is compared with the same days of the month before.
+  const like = selected && previous && p.sameDays && p.sameDays.key === selected.key && p.sameDays.previousKey === previous.key
+    ? p.sameDays : null;
+  const currentExpense = like ? like.currentFils : selected?.expenseFils ?? 0;
+  const previousExpense = like ? like.previousFils : previous?.expenseFils ?? 0;
+  const deltaFils = selected && previous ? currentExpense - previousExpense : 0;
   const deltaPct = selected && previous && previousExpense > 0
     ? Math.round((deltaFils / previousExpense) * 100) : null;
   return <View style={styles.root} testID="spending-trends">
@@ -217,13 +227,14 @@ export function SpendingTrends(p: Props) {
                 color={deltaFils > 0 ? theme.expenseGraphic : theme.primary} />
               <ThemedText type="meta" tabular themeColor={deltaFils > 0 ? 'expense' : 'income'}>
                 {Math.abs(deltaPct)}% {deltaFils > 0 ? w.more : w.fewer}
+                {like && previous ? ` ${w.sameDaysOf(monthLabel(previous.key, true).split(' ')[0] ?? '')}` : ''}
               </ThemedText>
             </View>}
           </View>
         </View>
         {monthFigures(selected)}
         <View style={[styles.selectedNetRow, large && styles.stackColumn]}>
-          <ThemedText type="nano" themeColor="textTertiary">{w.net}</ThemedText>
+          <ThemedText type="meta" themeColor="textTertiary">{w.net}</ThemedText>
           <Money fils={selected.incomeFils - selected.expenseFils} type="smallBold" sign="auto"
             color={selected.incomeFils - selected.expenseFils < 0 ? theme.expense : theme.income} />
         </View>

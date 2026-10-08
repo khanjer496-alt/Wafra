@@ -29,7 +29,7 @@ import { TextField } from '@/components/ui/text-field';
 import { useBand } from '@/hooks/use-band';
 import { useLanguage } from '@/hooks/use-language';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
-import { categoryMovers, categoryTrend, comparableSpend, dayOfWeekSpend, topMerchants } from '@/lib/analytics';
+import { categoryMovers, categoryTrend, comparableSpend, dayOfWeekSpend, monthComparison, spendingThroughDay, topMerchants } from '@/lib/analytics';
 import { assistantCopy } from '@/lib/assistant-copy';
 import { everydayBandCopy } from '@/lib/everyday-band-copy';
 import { isFixedCommitment } from '@/lib/categories';
@@ -150,6 +150,12 @@ export default function FlowScreen() {
   const closeCategory = () => {
     setCategory(null);
   };
+  const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  // "Day 12 of 30" only while the selected money month is running. The
+  // period's own first/last day (salary-day aware), never the calendar month.
+  const pace = period.mode === 'month' && isCurrentMonth(period, new Date())
+    ? periodDayProgress(monthStartISO(period.key), monthEndISO(period.key), todayISO) : null;
+  const runningDay = pace?.day ?? null;
   const selectedCategory = category === null ? null : rows.find((r) => r.category === category) ?? null;
   // The former Stats category history remains available in the relevant category detail.
   const categoryHistoryAnchor = categoryHistoryEndKey ?? key;
@@ -163,31 +169,37 @@ export default function FlowScreen() {
   const categoryHistoryAverage = categoryHistory.length > 0
     ? Math.round(categoryHistory.reduce((total, month) => total + month.fils, 0) / categoryHistory.length)
     : 0;
-  const categorySelectedHistoryIndex = categoryHistory.findIndex((month) => month.key === key);
-  const categoryPreviousMonth = period.mode === 'month' && categorySelectedHistoryIndex > 0
-    ? categoryHistory[categorySelectedHistoryIndex - 1]
-    : null;
   const categoryLatestKey = categoryHistory.at(-1)?.key ?? categoryHistoryAnchor;
   const categoryCanReturnToLatest = period.mode === 'month'
     && key !== categoryLatestKey
     && categoryHistory.some((month) => month.key === key);
-  const categoryMonthDeltaPercent = categoryPreviousMonth?.fils
-    ? Math.round((categorySpentFils - categoryPreviousMonth.fils) / categoryPreviousMonth.fils * 100)
-    : null;
-  const categoryAverageDeltaPercent = period.mode === 'month' && categoryHistoryAverage > 0
-    ? Math.round((categorySpentFils - categoryHistoryAverage) / categoryHistoryAverage * 100)
-    : null;
+  // A running month is set against the same first days of the earlier months
+  // (as Compare does), never against whole months: on the 8th, eight days
+  // against thirty always read as a fall.
+  const categorySameDays = useMemo(
+    () => category && runningDay !== null ? spendingThroughDay(state.transactions, categoryHistory.map((month) => month.key), runningDay, live, internal, category) : null,
+    [category, runningDay, categoryHistory, state.transactions, live, internal]);
+  const categoryCompare = period.mode === 'month'
+    ? monthComparison(categoryHistory, key, categorySpentFils, categorySameDays) : null;
+  const categoryMonthDeltaPercent = categoryCompare?.previousDeltaPercent ?? null;
+  const categoryPreviousKey = categoryCompare?.previousKey ?? null;
+  const categoryAverageDeltaPercent = categoryCompare && categoryCompare.averageFils > 0 ? categoryCompare.averageDeltaPercent : null;
   const categoryInsight = categoryAverageDeltaPercent == null
     ? `${w.average} ${formatAED(categoryHistoryAverage)}`
-    : Math.abs(categoryAverageDeltaPercent) <= 4
-      ? w.nearAverage
-      : categoryAverageDeltaPercent > 0
-        ? w.aboveAverage(categoryAverageDeltaPercent)
-        : w.belowAverage(Math.abs(categoryAverageDeltaPercent));
+    : categoryCompare?.sameDays && pace
+      ? Math.abs(categoryAverageDeltaPercent) <= 4
+        ? w.nearAverageSameDays(pace.day)
+        : categoryAverageDeltaPercent > 0
+          ? w.aboveAverageSameDays(categoryAverageDeltaPercent, pace.day)
+          : w.belowAverageSameDays(Math.abs(categoryAverageDeltaPercent), pace.day)
+      : Math.abs(categoryAverageDeltaPercent) <= 4
+        ? w.nearAverage
+        : categoryAverageDeltaPercent > 0
+          ? w.aboveAverage(categoryAverageDeltaPercent)
+          : w.belowAverage(Math.abs(categoryAverageDeltaPercent));
 
   // The calendar counts exactly the rows the list below keeps: transfer
   // candidates drop out only when the Transfers screen lists them.
-  const todayISO = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
   const dailyView = useMemo(() => {
     if (view !== 'calendar') return null;
     let duplicates: ReturnType<typeof duplicateTransactionIds> | undefined;
@@ -263,13 +275,15 @@ export default function FlowScreen() {
       previousName: (() => { const previous = previousPeriod(period); return previous ? periodLabel(previous) : null; })(),
       partial: isCurrentMonth(period, new Date()),
       weekdays: dayOfWeekSpend(state.transactions, period, live, internal),
-      comparisonLabel: comparable ? periodLabel(comparable) : null };
-  }, [view, trendWindowAnchorKey, state.transactions, period, live, internal]);
+      comparisonLabel: comparable ? periodLabel(comparable) : null,
+      // The running month's chip: the same first days of it and the month before.
+      sameDays: runningDay !== null && period.mode === 'month' ? (() => {
+        const previousKey = shiftMonthKey(period.key, -1);
+        const totals = spendingThroughDay(state.transactions, [previousKey, period.key], runningDay, live, internal);
+        return { key: period.key, previousKey, currentFils: totals.get(period.key) ?? 0, previousFils: totals.get(previousKey) ?? 0 };
+      })() : null };
+  }, [view, trendWindowAnchorKey, state.transactions, period, live, internal, runningDay]);
 
-  // "Day 12 of 30" only while the selected money month is running. The
-  // period's own first/last day (salary-day aware), never the calendar month.
-  const pace = period.mode === 'month' && isCurrentMonth(period, new Date())
-    ? periodDayProgress(monthStartISO(period.key), monthEndISO(period.key), todayISO) : null;
   const currentPeriodName = periodLabel(period);
   const spentLabel = pace ? words.spentThisMonth : words.spentIn(currentPeriodName);
   const openAssistant = () => router.push({ pathname: '/assistant', params: { question: assistantCopy.spendingChangedQuestion } });
@@ -388,7 +402,7 @@ export default function FlowScreen() {
         </View>
         <SpendingTrends months={analysis.months} merchants={analysis.merchants} movers={analysis.movers}
           weekdays={analysis.weekdays} comparisonLabel={analysis.comparisonLabel} previousName={analysis.previousName}
-          selectedKey={key} periodLabel={currentPeriodName} currentName={currentPeriodName}
+          selectedKey={key} periodLabel={currentPeriodName} currentName={currentPeriodName} sameDays={analysis.sameDays}
           onMonth={(monthKey) => {
             if (monthKey === key) return;
             setTrendWindowEndKey((anchor) => anchor ?? trendWindowAnchorKey);
@@ -415,10 +429,12 @@ export default function FlowScreen() {
             <ThemedText type="meta" style={{ color: band.textSecondary }}>
               {categoryShareLabel} {w.share}
             </ThemedText>
-            {categoryMonthDeltaPercent != null && categoryPreviousMonth ? (
-              <ThemedText type="meta" style={{ color: band.textSecondary }}>
+            {categoryMonthDeltaPercent != null && categoryPreviousKey ? (
+              <ThemedText type="meta" testID="category-month-delta" style={{ color: band.textSecondary }}>
                 {categoryMonthDeltaPercent > 0 ? '↑ ' : categoryMonthDeltaPercent < 0 ? '↓ ' : ''}
-                {Math.abs(categoryMonthDeltaPercent)}% {w.vs} {shortMonthLabel(categoryPreviousMonth.key)}
+                {categoryCompare?.sameDays
+                  ? w.vsSameDays(Math.abs(categoryMonthDeltaPercent), shortMonthLabel(categoryPreviousKey))
+                  : `${Math.abs(categoryMonthDeltaPercent)}% ${w.vs} ${shortMonthLabel(categoryPreviousKey)}`}
               </ThemedText>
             ) : null}
           </View>
