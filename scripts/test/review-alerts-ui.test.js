@@ -46,7 +46,7 @@ ok('review candidates infer safe defaults and still expose genuinely ambiguous a
   /rememberedReview\?\.accountId \?\? matchedAccount\?\.id \?\? ''/.test(add) &&
     /suggestUniversalCategory/.test(add) && /!categorySuggestion\.needsReview/.test(add) && /categorySupportsType\(reviewCategory, reviewType\)/.test(add) && /matchingAccounts\.length === 1/.test(add) &&
     /reviewTemplateRuleFor/.test(add) &&
-    /: 'other' : 'groceries'/.test(add) &&
+    /: 'other' : null,/.test(add) &&
     /!reviewItem \|\| !matchedAccount \|\| event\?\.instrument\.evidence === 'ambiguous'/.test(add) &&
     /reviewAlertChooseAccount/.test(add) &&
     /!reviewItem \? <View[\s\S]{0,200}categoryRef/.test(add));

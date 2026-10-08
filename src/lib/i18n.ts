@@ -1726,6 +1726,7 @@ const S = {
   hiddenFromLists: { en: 'Hidden from lists.', ar: 'مخفي من القوائم.' },
   markStatementPaid: { en: 'Mark this statement paid?', ar: 'تعليم هذا الكشف كمدفوع؟' },
   noCardPaymentYet: { en: 'No payment to this card has been detected yet.', ar: 'لم تُكتشف أي دفعة لهذه البطاقة بعد.' },
+  noBankPaymentMatched: { en: 'The paid amount was recorded in Wafra; no bank payment to this card is matched yet.', ar: 'سُجّل المبلغ المدفوع في وفرة، ولم تُطابَق بعد أي دفعة بنكية لهذه البطاقة.' },
   notRecurringQ: { en: 'Not a recurring charge?', ar: 'ليست عملية متكررة؟' },
   notifsAreOff: { en: 'Notifications are off', ar: 'الإشعارات مغلقة' },
   onboardPrivacyBody: {

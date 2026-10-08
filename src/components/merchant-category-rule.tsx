@@ -33,9 +33,11 @@ const MIN_RULE_KEY_LENGTH = 3;
  * reducer's own predicate (merchantRuleSummary), so it is the number of rows
  * the rewrite changes.
  */
-export function MerchantCategoryRule({ merchant, kind, palette }: {
+export function MerchantCategoryRule({ merchant, kind, palette, currentCategory = null }: {
   merchant: string;
   kind: 'expense' | 'income';
+  /** The category every entry from this merchant is filed under now, when they share one. */
+  currentCategory?: CategoryId | null;
   /** The screen's band: the row is a card on its sheet, "Change" in its tint. */
   palette: BandPalette;
 }) {
@@ -56,15 +58,18 @@ export function MerchantCategoryRule({ merchant, kind, palette }: {
     if (category === rule.category) return;
     setAsk({ category, count: rule.movable(category) });
   };
-  const title = rule.category ? d.merchant.always(categoryLabel(rule.category, lang)) : d.merchant.noRule;
-  const body = `${rule.category ? d.merchant.alwaysBody(merchant) : d.merchant.noRuleBody} · ${d.entries(rule.applies)}`;
+  // With no rule saved, the row still names where the entries are filed now
+  // (the header above says it too), rather than "No saved category".
+  const title = rule.category ? d.merchant.always(categoryLabel(rule.category, lang))
+    : currentCategory ? d.merchant.filedUnder(categoryLabel(currentCategory, lang)) : d.merchant.noRule;
+  const body = `${rule.category ? d.merchant.alwaysBody(merchant) : currentCategory ? d.merchant.noRuleYetBody : d.merchant.noRuleBody} · ${d.entries(rule.applies)}`;
 
   return <>
     <Pressable testID="merchant-category-rule" accessibilityRole="button"
       accessibilityLabel={`${title}. ${body}`} accessibilityHint={d.merchant.ruleAction}
       onPress={() => setOpen(true)}
       style={({ pressed }) => [styles.row, { borderColor: palette.rule, backgroundColor: palette.card, opacity: pressed ? 0.8 : 1 }]}>
-      <GlyphTile category={rule.category ?? 'other'} palette={palette} size={36} />
+      <GlyphTile category={rule.category ?? currentCategory ?? 'other'} palette={palette} size={36} />
       <View style={styles.copy}>
         <ThemedText type="smallBold" style={{ color: palette.text }}>{title}</ThemedText>
         <ThemedText type="meta" style={{ color: palette.textSecondary }}>{body}</ThemedText>

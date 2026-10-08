@@ -133,7 +133,8 @@ function MerchantScreen({ merchant, activityType }: { merchant: string; activity
       }}
       bandContent={bandContent}>
       {!state.hydrated ? <View style={styles.empty}><SkeletonRows count={3} height={80} /></View> : <>
-        {merchant ? <MerchantCategoryRule merchant={merchant} kind={income ? 'income' : 'expense'} palette={band} /> : null}
+        {merchant ? <MerchantCategoryRule merchant={merchant} kind={income ? 'income' : 'expense'} palette={band}
+          currentCategory={category} /> : null}
         {merchant && view !== 'all' && <View testID="merchant-ask-wafra">
           <EButton palette={band} variant="secondary" icon="spark"
             label={income ? assistantCopyFor(language).askIncome : assistantCopyFor(language).askMerchant}

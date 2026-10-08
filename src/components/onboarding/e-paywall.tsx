@@ -424,7 +424,7 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
               offer={checkout.offers.find((offer) => offer.plan === plan) ?? null}
               selected={checkout.plan === plan} onPress={() => checkout.setPlan(plan)} />)}
           </View>
-          {checkout.selected ? <ThemedText type="micro" style={{ color: band.onBandSecondary }}>
+          {checkout.selected ? <ThemedText type="meta" style={{ color: band.onBandSecondary }}>
             {tf(checkout.plan === 'yearly' ? 'proChargeTimingYear' : 'proChargeTimingMonth', { price: checkout.selected.priceString })}
             {' '}
             {store === 'appStore' ? t('subscriptionRenewalTermsIos') : store === 'play' ? t('subscriptionRenewalTermsAndroid') : t('proStoreConfirmsPrice')}
@@ -440,11 +440,11 @@ export function PaywallStep({ tiles, watchedCategory, remindersOn, trialDays, ca
       {privacyUrl || termsUrl ? <View style={styles.legal}>
         {privacyUrl ? <Pressable accessibilityRole="link" accessibilityLabel={t('privacyPolicy')} hitSlop={8}
           onPress={() => openLegal(privacyUrl)} style={styles.legalLink}>
-          <ThemedText type="micro" style={{ color: band.onBand }}>{t('privacyPolicy')}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.onBand }}>{t('privacyPolicy')}</ThemedText>
         </Pressable> : null}
         {termsUrl ? <Pressable accessibilityRole="link" accessibilityLabel={t('termsOfUse')} hitSlop={8}
           onPress={() => openLegal(termsUrl)} style={styles.legalLink}>
-          <ThemedText type="micro" style={{ color: band.onBand }}>{t('termsOfUse')}</ThemedText>
+          <ThemedText type="meta" style={{ color: band.onBand }}>{t('termsOfUse')}</ThemedText>
         </Pressable> : null}
       </View> : null}
     </EStepFrame>
