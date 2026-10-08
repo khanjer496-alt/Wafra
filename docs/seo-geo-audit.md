@@ -114,9 +114,20 @@ no-third-party-analytics promises, so it counts on the server instead:
   output is ever served without Functions, `_redirects` keeps the download
   buttons working (Cloudflare ignores `_redirects` for Function routes).
 
-One-time setup in the Cloudflare dashboard (Workers & Pages → the Pages
-project that serves the site → Settings → Bindings → Add → Analytics engine):
-variable name `SITE_EVENTS`, dataset `wafra_site_events`, for Production.
+**Deploying.** Run the **Deploy website** GitHub Actions workflow
+(`.github/workflows/deploy-site.yml`, manual only) from `main`. It uses the
+repository's `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets, which
+need **Cloudflare Pages: Edit**. It builds and checks the site, then runs
+`scripts/pages-site-config.mjs`. That script finds the Pages project serving
+the site, adds the `SITE_EVENTS` → `wafra_site_events` binding, and sets
+**Fail open**. It re-sends existing production settings and stops if any are
+secrets or would be lost. The workflow then deploys with Functions and checks
+the live URLs.
+
+To do the same by hand: in the dashboard (Workers & Pages → the project →
+Settings → Bindings → Add → Analytics engine), add variable `SITE_EVENTS` with
+dataset `wafra_site_events` for Production, and set Settings → Runtime → Fail
+open / closed to **Fail open**.
 
 Deploy **from the repository root**. Wrangler compiles Functions from
 `./functions` in the current directory; the older instructions that ran
@@ -155,12 +166,12 @@ To check the Functions locally, serve a finalized export with
 
 **Shared request allowance.** Pages Functions requests count toward the
 account's Workers request allowance (100,000 a day on Workers Free), which the
-relay Worker also uses. Every landing view and download click is one request.
-In the Pages project's Functions settings, set the daily-limit behaviour to
-**Fail open** so the static site and `_redirects` downloads keep working if the
-allowance runs out, and watch Workers usage once traffic grows. If the landing
-page ever needs that headroom, delete `functions/index.js` to count only
-download clicks, or move to Workers Paid.
+relay and the account's other Workers also use. Every landing view and
+download click is one request. The deploy workflow sets the project to **Fail
+open** (Settings → Runtime) so the static site and `_redirects` downloads keep
+working if the allowance runs out. Watch Workers usage once traffic grows. If the landing page ever
+needs that headroom, delete `functions/index.js` to count only download
+clicks, or move to Workers Paid.
 
 ## Remaining external work
 
@@ -168,9 +179,9 @@ The site is live at `https://wafra-app-azg.pages.dev`, which the store
 metadata and `app.json` already use for the privacy, terms and support URLs.
 These items cannot be completed honestly from repository code alone:
 
-1. Add the `SITE_EVENTS` Analytics Engine binding described above, set
-   Functions to **Fail open**, deploy this build, and confirm `/get/iphone`
-   returns a 302 and a data point appears.
+1. Run the **Deploy website** workflow from `main`. It binds `SITE_EVENTS`,
+   sets Fail open, deploys, and checks that `/get/iphone` is served by the
+   counting Function.
 2. Submit `/sitemap.xml` in Google Search Console and Bing Webmaster Tools.
 3. Decide whether to move to a custom domain. A `pages.dev` address works, but
    a domain Wafra owns can be kept if hosting changes. If it changes, update

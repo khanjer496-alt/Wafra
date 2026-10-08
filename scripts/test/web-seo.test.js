@@ -300,5 +300,34 @@ ok('the funnel report excludes automated clients and computes click-through from
 ok('the funnel query reads the site events dataset for the requested window',
   /FROM wafra_site_events\nWHERE timestamp > NOW\(\) - INTERVAL '7' DAY/.test(report.query ?? ''));
 
+const pagesConfig = spawnSync(process.execPath, ['--input-type=module', '-e', `
+  import { productionPatch, settingNames } from
+    ${JSON.stringify(require('url').pathToFileURL(path.join(root, 'scripts/pages-site-config.mjs')).href)};
+  const attempt = (production) => { try { return productionPatch(production); } catch (error) { return { error: error.message }; } };
+  const existing = { compatibility_date: '2026-03-01', compatibility_flags: ['nodejs_compat'],
+    env_vars: { MODE: { type: 'plain_text', value: 'site' } }, kv_namespaces: { CACHE: { namespace_id: 'k1' } }, fail_open: false };
+  process.stdout.write(JSON.stringify({
+    empty: attempt(undefined),
+    merged: attempt(existing),
+    secret: attempt({ env_vars: { TOKEN: { type: 'secret_text' } } }),
+    otherDataset: attempt({ analytics_engine_datasets: { SITE_EVENTS: { dataset: 'something_else' } } }),
+    names: settingNames(existing),
+  }));
+`], { cwd: root, encoding: 'utf8' });
+let pages = {};
+try { pages = JSON.parse(pagesConfig.stdout); } catch { pages = {}; }
+ok('a project without settings gets the binding, fail open and a supported compatibility date',
+  pagesConfig.status === 0 && JSON.stringify(pages.empty) === JSON.stringify({
+    compatibility_date: '2026-08-01', analytics_engine_datasets: { SITE_EVENTS: { dataset: 'wafra_site_events' } }, fail_open: true,
+  }), pagesConfig.stderr);
+ok('existing production settings are re-sent unchanged alongside the binding',
+  pages.merged?.compatibility_date === '2026-03-01' && pages.merged.compatibility_flags?.[0] === 'nodejs_compat' &&
+    pages.merged.env_vars?.MODE?.value === 'site' && pages.merged.kv_namespaces?.CACHE?.namespace_id === 'k1' &&
+    pages.merged.fail_open === true && pages.merged.analytics_engine_datasets?.SITE_EVENTS?.dataset === 'wafra_site_events');
+ok('secrets or a different SITE_EVENTS dataset stop the update instead of being overwritten',
+  /secret variables \(TOKEN\)/.test(pages.secret?.error ?? '') && /already bound to dataset something_else/.test(pages.otherDataset?.error ?? ''));
+ok('setting names include nested bindings so a lost one is detected',
+  ['env_vars.MODE', 'kv_namespaces.CACHE', 'compatibility_date', 'fail_open'].every((name) => pages.names?.includes(name)));
+
 console.log(`\nweb-seo: ${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
