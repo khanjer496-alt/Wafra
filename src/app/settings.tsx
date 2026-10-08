@@ -1119,21 +1119,18 @@ export default function SettingsScreen() {
               true,
               'bolt',
             )}
-          {iosInstantAlertsAvailable &&
+          {/* iPhone has one per-charge row: the legacy relay's while that
+              Shortcut is active, otherwise the local capture banner's. */}
+          {(legacyChargeAlertsAvailable || iosInstantAlertsAvailable) &&
             switchRow(
               t('alertEveryCharge'),
-              iosInstantAlerts ? t('instantAlertsOn') : t('instantAlertsOff'),
-              iosInstantAlerts === true,
-              (next) => void toggleIosInstantAlerts(next),
-              true,
-              'bolt',
-            )}
-          {legacyChargeAlertsAvailable &&
-            switchRow(
-              t('alertEveryCharge'),
-              chargeAlerts ? t('chargeAlertsOn') : t('dailySummaryOff'),
-              chargeAlerts,
-              (next) => void toggleChargeAlerts(next),
+              legacyChargeAlertsAvailable
+                ? chargeAlerts ? t('chargeAlertsOn') : t('dailySummaryOff')
+                : iosInstantAlerts ? t('instantAlertsOn') : t('instantAlertsOff'),
+              legacyChargeAlertsAvailable ? chargeAlerts : iosInstantAlerts === true,
+              (next) => void (legacyChargeAlertsAvailable
+                ? toggleChargeAlerts(next)
+                : toggleIosInstantAlerts(next)),
               true,
               'bolt',
             )}
