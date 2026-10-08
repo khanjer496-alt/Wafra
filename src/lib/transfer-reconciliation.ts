@@ -79,10 +79,49 @@ export function isTransferMatch(value: unknown): value is TransferMatch {
     signature(value.signature) && signature(value.counterpartSignature);
 }
 
+/**
+ * Validation memo for ONE synchronous reconciliation pass.
+ *
+ * A pass reads each row's evidence and decision several times (context,
+ * ownership, receipts, pairing, grouping): about six strict validations per
+ * row, each with regex and currency checks. On a 15k-row Hermes ledger that
+ * repetition was a third of every transfer graph build, which runs at launch
+ * (Home's transfer queue), on every transfer answer and on canonical captures.
+ * The memo lives only while a pass runs and is dropped in `finally`, so a
+ * verdict can never outlive the pass that computed it, and nothing outside a
+ * pass (backup validation, row editors) ever sees a cached answer. Rows are
+ * not mutated while a pass runs; keys are the validated objects themselves.
+ */
+let passCache: {
+  evidence: WeakMap<object, boolean>;
+  decision: WeakMap<object, boolean>;
+  candidate: WeakMap<object, boolean>;
+} | null = null;
+
+function withPassCache<T>(work: () => T): T {
+  if (passCache) return work();
+  passCache = { evidence: new WeakMap(), decision: new WeakMap(), candidate: new WeakMap() };
+  try {
+    return work();
+  } finally {
+    passCache = null;
+  }
+}
+
+function validatedInPass(cache: WeakMap<object, boolean> | undefined, value: unknown, validate: (value: unknown) => boolean): boolean {
+  if (!cache || value === null || typeof value !== 'object') return validate(value);
+  let valid = cache.get(value);
+  if (valid === undefined) {
+    valid = validate(value);
+    cache.set(value, valid);
+  }
+  return valid;
+}
+
 const evidenceOf = (tx: TransferRow): TransferEvidence | undefined =>
-  isTransferEvidence(tx.transferEvidence) ? tx.transferEvidence : undefined;
+  validatedInPass(passCache?.evidence, tx.transferEvidence, isTransferEvidence) ? tx.transferEvidence : undefined;
 const decisionOf = (tx: TransferRow): TransferDecision | undefined =>
-  isTransferDecision(tx.transferDecision) ? tx.transferDecision : undefined;
+  validatedInPass(passCache?.decision, tx.transferDecision, isTransferDecision) ? tx.transferDecision : undefined;
 const manual = (tx: Transaction): boolean => tx.source !== 'sms' && !tx.smsKey;
 
 /** A holding reference is deliberately NOT an account and proves no ownership. */
@@ -108,6 +147,17 @@ const excludedFromTransfers = (tx: Transaction): boolean =>
   CARD_SETTLEMENT_TITLE.test(tx.title);
 
 export function isTransferCandidate(tx: Transaction): boolean {
+  const cache = passCache?.candidate;
+  if (!cache || tx === null || typeof tx !== 'object') return transferCandidateUncached(tx);
+  let candidate = cache.get(tx);
+  if (candidate === undefined) {
+    candidate = transferCandidateUncached(tx);
+    cache.set(tx, candidate);
+  }
+  return candidate;
+}
+
+function transferCandidateUncached(tx: Transaction): boolean {
   const row = tx as TransferRow;
   if ((tx.type !== 'income' && tx.type !== 'expense') || typeof tx.title !== 'string') return false;
   // The person's choice remains authoritative after a parser/category edit,
@@ -1221,7 +1271,7 @@ function reconcile(ctx: Context): TransferReconciliationResult {
 let previous: { transactions: Transaction[]; accounts: Account[]; result: TransferReconciliationResult } | undefined;
 function memoizedReconcile(transactions: Transaction[], accounts: Account[], ctx?: Context): TransferReconciliationResult {
   if (previous?.transactions === transactions && previous.accounts === accounts) return previous.result;
-  const result = reconcile(ctx ?? context(transactions, accounts));
+  const result = withPassCache(() => reconcile(ctx ?? context(transactions, accounts)));
   previous = { transactions, accounts, result };
   return result;
 }
@@ -1249,6 +1299,10 @@ export const TRANSFER_NORMALIZATION_VERSION = 2;
 
 /** Never changes amounts, routing, type, IDs or legacy transfer flags. */
 export function normalizeTransferLinks(transactions: Transaction[], accounts: Account[]): Transaction[] {
+  return withPassCache(() => normalizeTransferLinksInPass(transactions, accounts));
+}
+
+function normalizeTransferLinksInPass(transactions: Transaction[], accounts: Account[]): Transaction[] {
   const ctx = context(transactions, accounts);
   const result = memoizedReconcile(transactions, accounts, ctx);
   let changed = false;
@@ -1294,6 +1348,12 @@ export function applyTransferDecision(
 
 /** Validate every selected item against the same snapshot before changing any row. */
 export function applyTransferDecisionBatch(
+  transactions: Transaction[], accounts: Account[], request: TransferDecisionBatchRequest,
+): Transaction[] {
+  return withPassCache(() => applyTransferDecisionBatchInPass(transactions, accounts, request));
+}
+
+function applyTransferDecisionBatchInPass(
   transactions: Transaction[], accounts: Account[], request: TransferDecisionBatchRequest,
 ): Transaction[] {
   if (!record(request) || !Array.isArray(request.decisions) || request.decisions.length === 0 ||

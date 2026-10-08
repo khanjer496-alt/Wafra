@@ -45,6 +45,7 @@ import { matchedTransferPairs, suggestedTransferPairs } from '@/lib/transfer-pai
 import { isTransferCandidate, reconcileTransfers } from '@/lib/transfer-reconciliation';
 import type { TransferEvidence } from '@/lib/transfer-reconciliation-types';
 import { projectTransferHistory } from '@/lib/transfer-review-presentation';
+import { rowsByIdFor } from '@/lib/rows-by-id';
 import type { Transaction } from '@/lib/types';
 
 const TILES = [['own', 'repeat'], ['sent', 'arrow-up-right'], ['received', 'arrow-down-right']] as const;
@@ -114,7 +115,7 @@ export default function TransfersScreen() {
   const activity = useMemo(() => getTransferActivity(state.transactions, state.accounts, reconciliation),
     [state.transactions, state.accounts, reconciliation]);
   const accounts = useMemo(() => new Map(state.accounts.map(account => [account.id, account])), [state.accounts]);
-  const rowsById = useMemo(() => new Map(state.transactions.map(row => [row.id, row] as const)), [state.transactions]);
+  const rowsById = rowsByIdFor(state.transactions);
   const selectedRecord = selectedId ? activity.find(item => item.transaction.id === selectedId) : undefined;
   // Grouped, suggested-pair and linked entries are not all in the activity list; the sheet still opens on them.
   const selectedTransaction = selectedRecord?.transaction ?? (selectedId ? rowsById.get(selectedId) : undefined);

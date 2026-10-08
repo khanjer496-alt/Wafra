@@ -75,3 +75,48 @@ first ~1.5s after Home appears, the coin drop-in on the UI thread with no
 dropped frames, no `setSnapshot`/widget redraw on a same-day reopen, the splash
 going straight to Home, and Superwall's configure/paywall preload after the
 entrance. Also check the splash fallback on a ledger slow enough to exceed 4s.
+
+## Follow-up (2026-10-08): the transfer graph at 15k rows
+
+A tester diagnostic export (build 376, OnePlus CPH2653, 14,905 rows, 44
+accounts, 3,131 transfer candidates of which 2,940 unanswered) showed launch
+phases were fine (ledger loaded at 403ms, Home usable at 853ms from JS start)
+and the lag came after Home: JS stalls of 5.5s, 944ms, 465ms and 410ms, a
+6.4s `capture-save`. Profiling a ledger of that shape (synthetic
+`scripts/test/fixtures/transfer-heavy-ledger.cjs`) on the web export at 6x CPU
+throttling and in a Hermes CLI put the transfer graph build at the centre of
+three paths: Home's transfer queue after its first frames (the one long task
+after a cold launch), every transfer answer (reducer `normalizeTransferLinks`)
+and every canonical capture (`applyMaterializedImportBatch`).
+
+| Cause | Fix | Where |
+|---|---|---|
+| One graph build validated each row's transfer evidence and decision about six to ten times (regex and currency checks), and checked candidacy twice per row | Validation verdicts are memoised for one synchronous pass only (`withPassCache`), keyed by the validated object and dropped in `finally`; exported validators stay uncached outside a pass | `transfer-reconciliation.ts` |
+| `bankIdentityForName` tested every bank pattern and ran a Unicode-property regex on each call, about 5,700 calls per graph build for five distinct names | Bounded memo (512 names) over the fixed `MARKETS` packs | `markets.ts` |
+| Every mounted entry sheet (11 hosts) and Transfers built its own id index of the whole ledger on mount and on every ledger change, open or not | One index per ledger snapshot (`rowsByIdFor`, WeakMap keyed by the array) | `rows-by-id.ts`, `entry-detail-sheet.tsx`, `transfers.tsx` |
+
+Measured on the transfer-heavy 15k ledger (Hermes 0.12 CLI on a desktop core,
+best of three; a phone is slower):
+
+| Step | Before | After |
+|---|---|---|
+| Graph build (launch queue, cold rows) | 416ms | 242ms |
+| Transfer answer (decision, normalize, reconcile) | 504ms | 272ms |
+| Capture apply, card purchase (canonical) | 645ms | 382ms |
+| Capture apply, incoming transfer (canonical) | 617ms | 418ms |
+| Transfers activity incl. graph | 596ms | 386ms |
+
+The graph output is byte-identical to the pre-change build on that fixture
+(`transfer-graph-hot-path.test.cjs` pins its digests). Not changed: what is
+reconciled, when Home's queue runs, the canonical capture path and the
+persistence layer (writes were already per changed chunk; a capture rewrites
+one chunk).
+
+Still to check on a device: the 5.5s stall and the 6.4s `capture-save` are
+larger than anything reproduced here at this scale; they include native
+awaits and may come from the first launch after an update (the recent
+re-read), so compare a second launch's diagnostic export
+(Settings → Data and help → Send test diagnostics, whose
+`performance.runtimeJs` carries `lagOver100Ms`, `recentStallsMs` and the
+per-operation timings) and record a Perfetto trace of
+a capture on the 15k ledger.
