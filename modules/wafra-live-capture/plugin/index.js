@@ -257,7 +257,10 @@ struct StageWafraLiveMessageIntent: AppIntent {
         observedAt: observedAt
       )
       switch result {
-      case .accepted, .ignored:
+      case .accepted:
+        if let body { await WafraInstantAlert.postIfReadable(sender: sender, body: body) }
+        return .result(value: result.rawValue)
+      case .ignored:
         return .result(value: result.rawValue)
       case .disabled:
         await WafraLiveCaptureNotice.postIfDue()
@@ -313,7 +316,10 @@ struct StageWafraLiveTextIntent: AppIntent {
         observedAt: Date()
       )
       switch result {
-      case .accepted, .ignored:
+      case .accepted:
+        await WafraInstantAlert.postIfReadable(body: body)
+        return .result(value: result.rawValue)
+      case .ignored:
         return .result(value: result.rawValue)
       case .disabled:
         await WafraLiveCaptureNotice.postIfDue()
@@ -363,7 +369,10 @@ struct CaptureWafraNotificationIntent: AppIntent {
         text: text, eventId: UUID().uuidString, observedAt: Date()
       )
       switch result {
-      case .accepted, .ignored:
+      case .accepted:
+        await WafraInstantAlert.postIfReadable(body: text)
+        return .result(value: result.rawValue)
+      case .ignored:
         return .result(value: result.rawValue)
       case .disabled:
         await WafraLiveCaptureNotice.postIfDue()

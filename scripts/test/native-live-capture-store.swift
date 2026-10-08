@@ -470,6 +470,25 @@ struct NativeLiveCaptureStoreTests {
     check("erase forgets notice history", try queue.claimCaptureOffNotice() == .off)
   }
 
+  private static func testInstantAlertPreference() throws {
+    let alertRoot = root("instant-alerts")
+    let queue = store(root: alertRoot)
+    check("charge banners are on by default, as on Android", try queue.instantAlertsEnabled())
+    try queue.setInstantAlertsEnabled(false)
+    check("turning charge banners off persists across reopening",
+      try store(root: alertRoot).instantAlertsEnabled() == false)
+    try grantLifetimeAndEnable(queue)
+    check("capture admission is independent of the banner preference", try queue.stage(
+      sender: knownSender, body: messageBody, eventId: eventId(98_000), observedAt: fixedClock) == .accepted)
+    try queue.setInstantAlertsEnabled(true)
+    check("turning charge banners back on persists", try store(root: alertRoot).instantAlertsEnabled())
+    try queue.setInstantAlertsEnabled(false)
+    try queue.eraseAll()
+    try queue.setInstantAlertsEnabled(true)
+    try queue.eraseAll()
+    check("erase turns charge banners off, as Android's erase does", try queue.instantAlertsEnabled() == false)
+  }
+
   private static func testApplePay() throws {
     let queueRoot = root("apple-pay")
     let leaseRoot = root("apple-pay-expired-lease")
@@ -1903,6 +1922,7 @@ struct NativeLiveCaptureStoreTests {
     )
 
     try testCaptureOffNotice()
+    try testInstantAlertPreference()
     try testApplePay()
     try testNotifications()
     try testAutomationMessages()

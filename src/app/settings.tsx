@@ -90,7 +90,11 @@ import {
   isRelayPlatform,
   type RelayConfig,
 } from '@/lib/relay';
-import { isCaptureAvailable } from '@/lib/capture';
+import {
+  getIosInstantAlertsEnabled,
+  isCaptureAvailable,
+  setIosInstantAlertsEnabled,
+} from '@/lib/capture';
 import type { OnboardingAlertDelivery } from '@/lib/types';
 import {
   ALERT_DELIVERY_PRESETS,
@@ -221,7 +225,13 @@ export default function SettingsScreen() {
   // and on the web by neither, so the notification group's closing hairline
   // has to be drawn under whichever row is actually last.
   const legacyChargeAlertsAvailable = isLegacyShortcutCaptureActive(relay);
-  const chargeAlertsAvailable = instantAvailable || notifAvailable || legacyChargeAlertsAvailable;
+  // iPhone local capture posts its banner from the App Intent, natively, like
+  // Android's delivery receiver. Null until read, or on a binary without it.
+  const [iosInstantAlerts, setIosInstantAlertsState] = useState<boolean | null>(null);
+  const iosInstantAlertsAvailable = Platform.OS === 'ios' && !legacyChargeAlertsAvailable &&
+    iosInstantAlerts !== null;
+  const chargeAlertsAvailable = instantAvailable || notifAvailable || legacyChargeAlertsAvailable ||
+    iosInstantAlertsAvailable;
 
   const refreshRelayStatus = useCallback(async (): Promise<void> => {
     const generation = ++relayStatusRefreshGeneration.current;
@@ -257,6 +267,38 @@ export default function SettingsScreen() {
       relayStatusRefreshGeneration.current += 1;
     };
   }, [refreshRelayStatus]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    let current = true;
+    void getIosInstantAlertsEnabled()
+      .then((enabled) => {
+        if (current) setIosInstantAlertsState(enabled);
+      })
+      .catch(() => {
+        // Unreadable: keep the switch hidden rather than guess its state.
+      });
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  const toggleIosInstantAlerts = async (enabled: boolean) => {
+    if (enabled) {
+      const allowed = await requestNotificationPermission().catch(() => false);
+      if (!allowed) {
+        Alert.alert(t('notificationsOff'), t('notificationsOffBody'));
+        return;
+      }
+    }
+    setIosInstantAlertsState(enabled);
+    try {
+      await setIosInstantAlertsEnabled(enabled);
+    } catch {
+      // Show what the device actually stored, not what was asked for.
+      setIosInstantAlertsState(!enabled);
+    }
+  };
 
   useEffect(() => {
     if (!isSmsScanningAvailable()) return;
@@ -1074,6 +1116,15 @@ export default function SettingsScreen() {
                 }
                 requestInstantAlertsChange(next);
               },
+              true,
+              'bolt',
+            )}
+          {iosInstantAlertsAvailable &&
+            switchRow(
+              t('alertEveryCharge'),
+              iosInstantAlerts ? t('instantAlertsOn') : t('instantAlertsOff'),
+              iosInstantAlerts === true,
+              (next) => void toggleIosInstantAlerts(next),
               true,
               'bolt',
             )}

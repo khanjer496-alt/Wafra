@@ -22,11 +22,7 @@
  * banner — announcing a charge that never happened, or quoting a number the
  * message does not contain — is the thing worth failing a build over.
  */
-const fs = require('fs');
-const path = require('path');
-
 const parser = require('./build/sms-parser');
-const namedBankFormats = require('./fixtures/uae-bank-formats');
 
 let pass = 0;
 let fail = 0;
@@ -70,76 +66,18 @@ const UNSAFE_TRANSACTION_RE = pattern('UNSAFE_TRANSACTION_RE');
 ok('the Kotlin patterns can be read out of the source', CUR.includes('AED') && REFUSE_RE.source.includes('otp'));
 
 /* ── The ten lines of control flow, restated ─────────────────────────── */
-// Keep in step with InstantAlert.read() and InstantAlert.merchant().
+// Shared with export-instant-alert-fixture.cjs, which checks the iPhone reader
+// against the same restatement.
 
-function merchantOf(body) {
-  const m = PAYMENT_MERCHANT_RE.exec(body) || MERCHANT_RE.exec(body);
-  if (!m) return null;
-  const name = m[1].trim().replace(/[,.\- ]+$/, '');
-  if (name.length < 3 || name.length > 28) return null;
-  // Kotlin's Char.isLetter() is Unicode-aware, so this restatement has to be
-  // too — /[a-z]/i said an Arabic shop name contained no letters and threw it
-  // away, which the Kotlin never did.
-  if (!/\p{L}/u.test(name)) return null;
-  if (BANK_WORD_RE.test(name.split(' ')[0])) return null;
-  return name;
-}
-
-/** What the banner would say, or null for "post nothing". */
-function read(body) {
-  if (UNSAFE_TRANSACTION_RE.test(body)) return null;
-  if (PURCHASE_PREFIX_RE.test(body)) body = body.replace(new RegExp(PROMO_FOOTER_RE.source, 'gi'), '');
-  if (REFUSE_RE.test(body)) return null;
-  const credit = CREDIT_RE.test(body);
-  if (!credit && !DEBIT_RE.test(body)) return null;
-  const amount = AMOUNT_RE.exec(body);
-  if (!amount) return null;
-  // Groups 1/2 are "AED 150.00"; groups 3/4 are the Arabic order, "150.00 درهم".
-  const currency = amount[1] || amount[4];
-  const figure = amount[2] || amount[3];
-  if (/[·*Xx]/.test(figure)) return null;
-  if (!/\d/.test(figure)) return null;
-  return {
-    currency: currency.toUpperCase(),
-    figure,
-    credit,
-    merchant: merchantOf(body),
-    last4: LAST4_RE.exec(body)?.[1] ?? null,
-  };
-}
+const { createReader, corpusMessages } = require('./instant-alert-reader.cjs');
+const { read } = createReader({
+  AMOUNT_RE, LAST4_RE, MERCHANT_RE, PAYMENT_MERCHANT_RE, DEBIT_RE, CREDIT_RE,
+  REFUSE_RE, BANK_WORD_RE, PURCHASE_PREFIX_RE, PROMO_FOOTER_RE, UNSAFE_TRANSACTION_RE,
+});
 
 /* ── The corpus: every real bank message we have ─────────────────────── */
 
-function fixtureMessages() {
-  const out = [];
-  for (const name of ['uae-accuracy-report.txt', 'uae-accuracy-report-2.txt']) {
-    const lines = fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8').split('\n');
-    let cur = [];
-    const flush = () => {
-      const s = cur.join('\n').trim();
-      if (s.length >= 40) out.push(s);
-      cur = [];
-    };
-    for (const line of lines) {
-      if (/^#\d+ \(seen/.test(line)) {
-        flush();
-        continue;
-      }
-      if (line.trim() === '') {
-        flush();
-        continue;
-      }
-      cur.push(line);
-    }
-    flush();
-  }
-  return out;
-}
-
-const corpus = [
-  ...fixtureMessages(),
-  ...namedBankFormats.map((row) => row.body),
-];
+const corpus = corpusMessages();
 ok('the redacted corpus is broad, not a handful', corpus.length > 80, `${corpus.length}`);
 
 /* ── Safety: never announce something that did not happen ────────────── */

@@ -82,8 +82,20 @@ xcrun swiftc \
   -sdk "$ios_simulator_sdk" \
   modules/wafra-live-capture/ios/WafraLiveCaptureStore.swift \
   modules/wafra-live-capture/ios/WafraLiveCaptureResources.swift \
-  modules/wafra-live-capture/ios/WafraLiveCaptureNotice.swift
-echo "✓ capture-off notice type-checks against the iOS SDK"
+  modules/wafra-live-capture/ios/WafraLiveCaptureNotice.swift \
+  modules/wafra-live-capture/ios/WafraInstantAlertPatterns.generated.swift \
+  modules/wafra-live-capture/ios/WafraInstantAlertReader.swift \
+  modules/wafra-live-capture/ios/WafraInstantAlert.swift
+echo "✓ capture-off notice and charge banner type-check against the iOS SDK"
+
+node scripts/test/export-instant-alert-fixture.cjs "$test_dir/instant-alert.json"
+swiftc \
+  -parse-as-library \
+  modules/wafra-live-capture/ios/WafraInstantAlertPatterns.generated.swift \
+  modules/wafra-live-capture/ios/WafraInstantAlertReader.swift \
+  scripts/test/native-instant-alert.swift \
+  -o "$test_dir/native-instant-alert-tests"
+"$test_dir/native-instant-alert-tests" "$test_dir/instant-alert.json"
 
 swiftc \
   modules/wafra-live-capture/ios/WafraLiveCaptureResources.swift \

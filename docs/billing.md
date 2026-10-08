@@ -123,6 +123,22 @@ error. Messages that arrive while capture is off are not saved; History import
 is the way to recover them. iOS's own "Running your automation" banner is a
 per-automation setting (Notify When Run) that the user controls in Shortcuts.
 
+While capture is working, a bank SMS the automation hands Wafra gets the same
+per-charge banner Android posts ("AED 45.00 · CARREFOUR", bank and card
+underneath). On iPhone the bank-app Notification automation posts it too, at the
+user's request; Android does not, because the bank's own push is already
+showing, so an iPhone user sees both. It is a preview only: the App Intent has no
+JavaScript parser, so `WafraInstantAlertReader.swift` reads the text with the
+patterns of Android's `InstantAlert.kt`, generated into
+`WafraInstantAlertPatterns.generated.swift` by
+`scripts/generate-ios-instant-alert.mjs`. Nothing it reads is stored; the
+ledger row is still the TypeScript parser's. It stays silent for credentials,
+declines, promotions, pending or future charges and anything else that does
+not plainly say money moved. Settings → "Alert me on every charge" turns it
+off; erase turns it off, as on Android. After changing `InstantAlert.kt`, regenerate the Swift
+file; CI fails while they disagree, and the macOS job checks the iPhone reader
+against every corpus message.
+
 ## Existing RevenueCat subscribers
 
 RevenueCat is no longer required in the Wafra binary. Existing subscriptions are

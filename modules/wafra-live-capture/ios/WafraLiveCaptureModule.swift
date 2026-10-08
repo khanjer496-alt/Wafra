@@ -131,6 +131,14 @@ public class WafraLiveCaptureModule: Module {
       try WafraLiveCaptureStore.shared.setCaptureEnabled(enabled)
     }
 
+    AsyncFunction("getInstantAlertsEnabled") { () -> Bool in
+      try WafraLiveCaptureStore.shared.instantAlertsEnabled()
+    }
+
+    AsyncFunction("setInstantAlertsEnabled") { (enabled: Bool) in
+      try WafraLiveCaptureStore.shared.setInstantAlertsEnabled(enabled)
+    }
+
     AsyncFunction("setLocalCaptureEntitlementLease") {
       (expiresAtMilliseconds: Double?, lifetime: Bool) -> Bool in
       guard lifetime == (expiresAtMilliseconds == nil) else {

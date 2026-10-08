@@ -188,6 +188,22 @@ export const setIosCaptureEnabled = async (enabled: boolean): Promise<boolean> =
 };
 
 /**
+ * The per-charge banner the capture automations post on iPhone. Null when this
+ * binary predates the preference, so the caller can hide the switch.
+ */
+export const getIosInstantAlertsEnabled = async (): Promise<boolean | null> => {
+  const native = getIosCaptureNativeModule();
+  if (!native?.getInstantAlertsEnabled) return null;
+  return native.getInstantAlertsEnabled();
+};
+
+export const setIosInstantAlertsEnabled = async (enabled: boolean): Promise<void> => {
+  const native = getIosCaptureNativeModule();
+  if (!native?.setInstantAlertsEnabled) throw new Error('iOS charge alerts are unavailable');
+  await native.setInstantAlertsEnabled(enabled);
+};
+
+/**
  * Persist the installation's exact local grant for the App Intent process.
  * A founder grant is lifetime; a trial grant carries its original absolute
  * end, so opening the app again cannot slide the deadline forward.

@@ -151,6 +151,8 @@ public final class WafraLiveCaptureStore {
     var lastApplePayReceivedAt: TimeInterval?
     var captureOffNoticeAt: TimeInterval?
     var captureOffNoticeReason: WafraCaptureOffNotice?
+    /// The per-charge banner preference. Absent means on, as on Android.
+    var instantAlertsOff: Bool = false
 
     private enum CodingKeys: String, CodingKey {
       case v, enabled, records, acknowledged, dropped, corrupt, warningId
@@ -160,7 +162,7 @@ public final class WafraLiveCaptureStore {
       case lastReceivedAt, lastHandledAt
       case notificationSetupProofAt, firstNotificationReceivedAt, lastNotificationReceivedAt
       case lastApplePayIncompleteAt, applePaySetupProofAt, firstApplePayReceivedAt, lastApplePayReceivedAt
-      case captureOffNoticeAt, captureOffNoticeReason
+      case captureOffNoticeAt, captureOffNoticeReason, instantAlertsOff
     }
 
     init() {}
@@ -235,6 +237,7 @@ public final class WafraLiveCaptureStore {
         WafraCaptureOffNotice.self,
         forKey: .captureOffNoticeReason
       )
+      instantAlertsOff = (try? values.decodeIfPresent(Bool.self, forKey: .instantAlertsOff)) ?? false
     }
 
     var recordBytes: Int {
@@ -499,6 +502,24 @@ public final class WafraLiveCaptureStore {
         manifest.captureOffNoticeReason = nil
       }
       manifest.enabled = enabled
+      try writeManifest(manifest, in: root)
+    }
+  }
+
+  /// Whether a newly captured charge may post Wafra's banner. On by default;
+  /// erasing all data turns it off, as Android's erase does.
+  public func instantAlertsEnabled() throws -> Bool {
+    try withExclusiveLock { root in
+      let manifest = try loadManifest(in: root)
+      return !manifest.instantAlertsOff
+    }
+  }
+
+  public func setInstantAlertsEnabled(_ enabled: Bool) throws {
+    try withExclusiveLock { root in
+      var manifest = try loadManifest(in: root)
+      guard manifest.instantAlertsOff == enabled else { return }
+      manifest.instantAlertsOff = !enabled
       try writeManifest(manifest, in: root)
     }
   }
@@ -878,7 +899,10 @@ public final class WafraLiveCaptureStore {
         try FileManager.default.removeItem(at: records)
       }
 
-      let clean = Manifest()
+      var clean = Manifest()
+      // As Android's InstantAlert.clear(): erasing withdraws consent for
+      // charge banners too, until the user turns them back on.
+      clean.instantAlertsOff = true
       try writeManifest(clean, in: root)
     }
   }
