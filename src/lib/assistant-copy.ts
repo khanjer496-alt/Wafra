@@ -120,6 +120,9 @@ export function assistantCopyFor(language: string | null | undefined): Assistant
   return language === 'ar' ? assistantCopyAr : assistantCopy;
 }
 
+/** The follow-up that opens an answer's transactions — the same as its "See N transactions" button. */
+export const assistantShowTransactionsQuery = 'Show those transactions';
+
 /** The suggestions the local tools offer, as an Arabic reader sees them. */
 const AR_QUESTIONS: Record<string, string> = {
   'How much did I spend?': 'كم أنفقت؟',

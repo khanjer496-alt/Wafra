@@ -72,7 +72,7 @@ ok('dismissal is an accessible 44-point confirmed action',
     /<ConfirmSheet[\s\S]*destructive/.test(route));
 ok('structured-only privacy is visible on the route',
   /t\('reviewAlertsPrivacy'\)/.test(route) &&
-    /The bank-alert text is not stored/.test(copy));
+    /The bank message text is not stored/.test(copy));
 
 const captureAt = home.indexOf('testID="journal-import-controls"');
 ok('Home keeps parser exceptions out of the primary money experience',

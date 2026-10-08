@@ -18,7 +18,7 @@ import { useBand } from '@/hooks/use-band';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
 import { useLargeTextLayout } from '@/hooks/use-large-text-layout';
 import { scaleTextStyleForE2E } from '@/lib/e2e-font-scale';
-import { assistantCopyFor, assistantQuestionLabel, assistantText } from '@/lib/assistant-copy';
+import { assistantCopyFor, assistantQuestionLabel, assistantShowTransactionsQuery, assistantText } from '@/lib/assistant-copy';
 import { assistantScreenCopy, evidenceTransactionCount } from '@/lib/assistant-screen-copy';
 
 import { toISODate } from '@/lib/format';
@@ -60,9 +60,6 @@ interface AssistantTurn {
   /** The platform model chose the tool; Wafra still computed every figure. */
   interpretedOnDevice?: boolean;
 }
-
-/** The follow-up that opens the answer's transactions — the same as its "See N transactions" button. */
-const SHOW_TRANSACTIONS_QUESTION = 'Show those transactions';
 
 /** Honest, state-specific status for the platform model. Null hides the line. */
 function onDeviceStatusCopy(availability: OnDeviceAIAvailability | null, copy: ReturnType<typeof assistantCopyFor>): string | null {
@@ -174,7 +171,7 @@ export default function AssistantScreen() {
   // "Show those transactions" repeats the answer's own "See N transactions"
   // button whenever it has one, so it is offered only when it does not.
   const followUps = (latestSuggestions ?? (conversationContext ? assistantFollowUpQuestions(conversationContext) : []))
-    .filter((item) => !(item === SHOW_TRANSACTIONS_QUESTION && latest?.answer.evidence?.length));
+    .filter((item) => !(item === assistantShowTransactionsQuery && latest?.answer.evidence?.length));
   const inputs = ledgerInputs(state);
   const isStale = (turn: AssistantTurn) => turn.answer.tool !== 'help' &&
     (toISODate(turn.answeredAt) !== today || turn.inputs.some((value, index) => value !== inputs[index]));

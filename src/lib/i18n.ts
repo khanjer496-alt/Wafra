@@ -274,8 +274,8 @@ const S = {
     ar: 'يعمل الالتقاط المحلي؛ أكمل إيقاف رفع الاختصار القديم',
   },
   captureIosLocalPrivacy: {
-    en: 'The new bank-alert capture path processes Messages on this iPhone and does not upload their text. An old Wafra Capture automation may still upload until removed or retired.',
-    ar: 'يعالج مسار التقاط التنبيهات المصرفية الجديد الرسائل على هذا الآيفون ولا يرفع نصوصها. وقد تستمر أتمتة Wafra Capture القديمة في الرفع حتى تحذفها أو يكتمل إيقافها.',
+    en: 'The new bank-message capture path processes Messages on this iPhone and does not upload their text. An old Wafra Capture automation may still upload until removed or retired.',
+    ar: 'يعالج مسار الالتقاط الجديد رسائل البنك على هذا الآيفون ولا يرفع نصوصها. وقد تستمر أتمتة Wafra Capture القديمة في الرفع حتى تحذفها أو يكتمل إيقافها.',
   },
   captureIosQueueWarningDetail: {
     en: 'This status shows only source-free counts. Accepted pending records may keep Message text and sender protected and encrypted on this iPhone; they expire after 30 days and are removed the next time capture runs or Wafra checks the queue.',
@@ -432,7 +432,7 @@ const S = {
     ar: 'راجع التفاصيل الملتقطة قبل إضافة أي شيء إلى سجلك.',
   },
   reviewAlertsPrivacy: {
-    en: 'Only a structured summary is kept here. The bank-alert text is not stored.',
+    en: 'Only a structured summary is kept here. The bank message text is not stored.',
     ar: 'يُحفظ هنا ملخص منظّم فقط. لا يُحفظ نص الرسالة البنكية.',
   },
   reviewAlertsEmptyTitle: { en: 'All clear', ar: 'تمت مراجعة كل شيء' },
@@ -842,7 +842,7 @@ const S = {
   },
   formatsNotKeptIosLocal: {
     en: 'Local capture parses new bank messages on this iPhone. Successfully processed raw text is deleted before the ledger or accuracy report retains it; protected pending records expire after 30 days and are removed on the next queue access. Rows from the old Wafra Capture relay never included Message text, so this list cannot audit those legacy rows. The card diagnostic below still works for every card row.',
-    ar: 'يعالج الالتقاط المحلي التنبيهات المصرفية الجديدة على هذا الآيفون. يُحذف النص الخام بعد نجاح المعالجة قبل أن يحتفظ به السجل أو تقرير الدقة؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. لم تتضمن عمليات مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا تستطيع هذه القائمة تدقيق تلك العمليات القديمة. ويعمل تشخيص البطاقات بالأسفل لكل عملية مرتبطة ببطاقة.',
+    ar: 'يعالج الالتقاط المحلي رسائل البنك الجديدة على هذا الآيفون. يُحذف النص الخام بعد نجاح المعالجة قبل أن يحتفظ به السجل أو تقرير الدقة؛ وتنتهي صلاحية السجلات المعلّقة المحمية بعد ٣٠ يوماً وتُزال عند الوصول التالي إلى الصف. لم تتضمن عمليات مُرحّل Wafra Capture القديم نص الرسالة، لذلك لا تستطيع هذه القائمة تدقيق تلك العمليات القديمة. ويعمل تشخيص البطاقات بالأسفل لكل عملية مرتبطة ببطاقة.',
   },
   formatsNotKeptPrivate: {
     en: 'Private Mode removes diagnostic Message text from the ledger and prevents new ledger entries from retaining it, so this list cannot identify misread formats. Local capture still works; protected pending records expire after 30 days and are removed on the next queue access. The card diagnostic below still reports what the ledger did with every card row.',
@@ -1538,7 +1538,7 @@ const S = {
     ar: 'الالتقاط التلقائي مشمول لمدة {left} يوم إضافي.',
   },
   proTrialEndedBody: {
-    en: 'Automatic bank-alert capture is paused. Your ledger and manual entries still work.',
+    en: 'Automatic bank-message capture is paused. Your ledger and manual entries still work.',
     ar: 'توقف الالتقاط التلقائي لرسائل البنك. يظل سجلك والإدخال اليدوي متاحين.',
   },
   proBenefitsTitle: { en: 'Included with Pro', ar: 'مشمول مع برو' },
@@ -2707,7 +2707,7 @@ const S = {
   importTitle: { en: 'Import from SMS', ar: 'استيراد من الرسائل' },
   scanFullInbox: { en: 'Scan full inbox', ar: 'فحص كل الرسائل' },
   historyImportRunningTitle: {
-    en: 'Reading your bank-alert history',
+    en: 'Reading your bank-message history',
     ar: 'جارٍ قراءة سجل رسائل البنك',
   },
   historyImportSavedTitle: {
@@ -3549,7 +3549,7 @@ const S = {
   },
   smsPermissionNeeded: { en: 'Permission needed', ar: 'الإذن مطلوب' },
   smsPermissionNeededBody: {
-    en: 'SMS access is optional and used only for on-device bank-alert import. Anything that is not supported financial activity is discarded before storage. You can keep access off and paste messages manually below.',
+    en: 'SMS access is optional and used only for on-device bank-message import. Anything that is not supported financial activity is discarded before storage. You can keep access off and paste messages manually below.',
     ar: 'إذن الرسائل اختياري ويُستخدم فقط لاستيراد رسائل البنك على الجهاز. يُتخلص من أي محتوى لا يمثل نشاطاً مالياً مدعوماً قبل الحفظ. يمكنك إبقاء الإذن مغلقاً ولصق الرسائل يدوياً أدناه.',
   },
   matchedLabel: { en: 'Matched', ar: 'مطابقة' },
