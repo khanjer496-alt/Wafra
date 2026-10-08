@@ -29,10 +29,10 @@ export const paymentAgendaCopy = {
 };
 
 export const accountGroupsCopy = {
-  en: { bank: 'Bank accounts', credit: 'Credit cards', debit: 'Other cards', cash: 'Cash',
+  en: { bank: 'Bank accounts', credit: 'Credit cards', debit: 'Other cards', debitCards: 'Debit cards', cash: 'Cash',
     unknown: 'No recorded figure', manage: 'Manage account', empty: 'No accounts yet',
     sourceNote: 'Your accounts, clearly separated', sourceBody: 'What your banks last reported, plus cash · not live' },
-  ar: { bank: 'الحسابات المصرفية', credit: 'البطاقات الائتمانية', debit: 'بطاقات أخرى', cash: 'النقد',
+  ar: { bank: 'الحسابات المصرفية', credit: 'البطاقات الائتمانية', debit: 'بطاقات أخرى', debitCards: 'بطاقات الخصم', cash: 'النقد',
     unknown: 'لا يوجد مبلغ مسجل', manage: 'إدارة الحساب', empty: 'لا توجد حسابات بعد',
     sourceNote: 'حساباتك بوضوح', sourceBody: 'آخر ما أبلغت به بنوكك، مع النقد · ليس مباشراً' },
 };

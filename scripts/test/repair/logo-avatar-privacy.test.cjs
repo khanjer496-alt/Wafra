@@ -39,7 +39,7 @@ function harness(kind, { privateMode = false, bundled = null, merchantCategory =
   const deps = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
     'react-native': { View: 'View', Platform: { OS: 'android' }, StyleSheet: { create: v => v } },
-    'expo-image': { Image: 'Image' }, '@/constants/theme': { Radius: {} },
+    'expo-image': { Image: 'Image' }, '@/constants/theme': { Radius: {}, BandPalettes: { light: { accounts: { glyphGround: '#EEE', tint: '#2F6577', rule: '#DDD' } }, dark: { accounts: { glyphGround: '#222', tint: '#7FB4C4', rule: '#333' } } } },
     // Avatars subscribe to the narrow private-mode context, not the whole
     // store, so a ledger mutation cannot re-render every row's artwork.
     '@/lib/store': { useStore: () => ({ state }), usePrivateMode: () => state.privateMode },

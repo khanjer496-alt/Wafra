@@ -8,11 +8,10 @@ import {
 } from 'react-native';
 
 import { CaptureRefreshControl } from '@/components/capture-refresh-control';
-import { CardPaymentSheet } from '@/components/card-payment-sheet';
 import { ThemedText } from '@/components/themed-text';
 import { LedgerCurrencySheet } from '@/components/ledger-currency-sheet';
 import { BalanceOverview } from '@/components/wallet/balance-overview';
-import { AccountGroups, type AccountDisplayRow } from '@/components/wallet/account-groups';
+import { AccountGroups, accountRowSpoken, type AccountDisplayRow } from '@/components/wallet/account-groups';
 import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { Button } from '@/components/ui/controls';
 import { ChoiceSheet } from '@/components/ui/choice-sheet';
@@ -32,25 +31,25 @@ import { isSmsScanningAvailable } from '@/lib/auto-import';
 import { isInactiveAccount, openDues, reissueSuggestions } from '@/lib/cards';
 import { tapped } from '@/lib/haptics';
 import { netWorthBreakdown } from '@/lib/balances';
-import { accountSnapshotFreshness, snapshotOrigin } from '@/lib/account-freshness';
-import { internalTransferIdsForState } from '@/lib/ledger';
+import { accountSnapshotFreshness } from '@/lib/account-freshness';
 import {
-  capturedCardSpendFils,
-  cardPaymentOptions,
-  cardUsage,
+  creditCardStanding,
   isAccountDetailTarget,
-  type CardPaymentChoice,
+  isNonCreditCard,
+  isPaymentCard,
+  linkedBankAccount,
 } from '@/lib/money-places';
 import { accountsBandCounts } from '@/lib/money-places-band';
 import { moneyPlacesWords } from '@/lib/money-places-copy';
 import { measureRuntimeOperation } from '@/lib/runtime-performance';
 import {
+  formatAED,
   formatAmount,
   parseAmountWithMoneySpec,
   shortDate,
+  toISODate,
 } from '@/lib/format';
 import { useStoreActions, useStoreSelector } from '@/lib/store';
-import { historyStatusOnly } from '@/lib/store-selection';
 import type { Account, AccountKind, CardDue } from '@/lib/types';
 import { bankPickerOptions } from '@/lib/known-banks';
 import { accountGroupsCopy } from '@/lib/reference-copy';
@@ -118,10 +117,6 @@ export default function WalletScreen() {
   const state = useStoreSelector(({ state: s }) => ({
     transactions: s.transactions, accounts: s.accounts, cardDues: s.cardDues, goals: s.goals,
     knownBanks: s.knownBanks, lastScanTs: s.lastScanTs, ledgerMoney: s.ledgerMoney, marketId: s.marketId,
-    // Transfer scope for the captured-card figure; status only, so import
-    // progress does not re-render Accounts.
-    transferInternalIds: s.transferInternalIds, transferNormalizationVersion: s.transferNormalizationVersion,
-    historyImport: historyStatusOnly(s.historyImport),
   }));
   const {
     addAccount,
@@ -197,16 +192,16 @@ export default function WalletScreen() {
     [state.accounts, state.transactions],
   );
   const balanceAccountCoverage = useMemo(() => {
+    // Only accounts that hold money have a balance to record: a debit card
+    // spends from one of them, and a credit card is shown on its own.
     const accounts = state.accounts.filter(
-      (account) => !account.archived && account.cardType !== 'credit',
+      (account) => !account.archived && !isPaymentCard(account),
     );
     return {
       known: accounts.filter((account) => balances.balanceByAccountId[account.id] !== null).length,
       total: accounts.length,
     };
   }, [state.accounts, balances.balanceByAccountId]);
-  // The band's second chip: credit cards shown on their own, never netted.
-  const bandCounts = useMemo(() => accountsBandCounts(state.accounts), [state.accounts]);
   const balanceCoverageText =
     balanceAccountCoverage.total === 0
       ? t('addAccountForBalances')
@@ -226,11 +221,6 @@ export default function WalletScreen() {
     () => new Map(dues.map((item) => [item.due.accountId, item] as const)),
     [dues],
   );
-  const dueAccountIds = useMemo(
-    () => new Set(state.cardDues.map((statement) => statement.accountId)),
-    [state.cardDues],
-  );
-
   // Active accounts and cards share one institution-grouped source list.
   // Expired/unused ones (silent 90+ days, or hidden) live in a drawer below.
   const [showInactive, setShowInactive] = useState(false);
@@ -254,64 +244,82 @@ export default function WalletScreen() {
   const activeSources = accountActivity.active;
   const inactiveAccounts = accountActivity.inactive;
   const smsCount = accountActivity.smsCount;
-  const inactiveDisclosureLabel = `${t('inactiveHeader')} ${inactiveAccounts.length}. ${
-    showInactive ? t('hide') : t('show')
-  }`;
-  // Captured spending this money month, only for credit cards with an open
-  // statement — the one place Accounts shows it, labelled as captured rather
-  // than as a bank figure. One pass over the ledger for all of them.
-  const capturedByCard = useMemo(() => {
-    const cardIds = new Set<string>();
-    for (const account of activeSources) {
-      if (account.cardType === 'credit' && dueByAccountId.has(account.id)) cardIds.add(account.id);
+  // The band's second chip counts the credit cards listed below — the same
+  // active set Payment cards counts, so the two screens never disagree.
+  const bandCounts = useMemo(() => accountsBandCounts(activeSources), [activeSources]);
+  const inactiveCardCount = inactiveAccounts.filter(isPaymentCard).length;
+  const inactiveLabel = placeWords.inactiveSplit(inactiveAccounts.length - inactiveCardCount, inactiveCardCount);
+  const inactiveDisclosureLabel = `${inactiveLabel}. ${showInactive ? t('hide') : t('show')}`;
+  // The newest statement on each card, open or settled: a settled one is
+  // what lets a card say "Statement paid" instead of "AED 0.00 owed".
+  const latestStatementByAccount = useMemo(() => {
+    const latest = new Map<string, CardDue>();
+    for (const statement of state.cardDues) {
+      const known = latest.get(statement.accountId);
+      if (!known || statement.dueDate > known.dueDate) latest.set(statement.accountId, statement);
     }
-    return capturedCardSpendFils(state.transactions, cardIds, now, internalTransferIdsForState(state));
-    // Transfer scope reads accounts and transactions, which this already keys on.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSources, dueByAccountId, state.transactions, state.accounts, state.transferInternalIds,
-    state.transferNormalizationVersion, state.historyImport, now]);
+    return latest;
+  }, [state.cardDues]);
+  const todayISO = toISODate(now);
 
-  const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account) => {
-    const due = dueByAccountId.get(account.id);
-    const debtObserved = account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
-      || dueAccountIds.has(account.id);
-    // Wallet already indexed the entire ledger once in netWorthBreakdown() and
-    // openDues(). Do not call cardFigure() per account: non-credit cards can
-    // otherwise re-scan transactions account-by-account on the render path.
-    const figureFils = account.cardType === 'credit'
-      ? !debtObserved
-        ? null
-        : due
-          ? Math.abs(due.remainingFils)
-          : account.snapshotKind === 'outstanding' && account.snapshotFils !== undefined
-            ? Math.abs(account.snapshotFils)
-            : 0
-      : balances.balanceByAccountId[account.id] ?? null;
-    const figureKind = account.cardType === 'credit' ? 'owed' : figureFils === null ? 'unknown' : 'balance';
-    // A figure the user set is theirs, never "per bank SMS" (account-freshness.ts).
-    const reported = !due ? accountSnapshotFreshness(account, now, language) : null;
-    const caption = figureFils === null ? t('noBalanceYet')
-      // With an open statement the figure is what is left of that statement;
-      // spending since it closed is on the card too (Payment cards shows the
-      // whole outstanding), so it is not called "owed".
-      : figureKind === 'owed' ? due ? t('statementLeftToPay') : t('owed')
-        : account.snapshotKind === 'balance'
-          ? snapshotOrigin(account) === 'manual' && reported ? reported.label : t('perBankSms')
-          : t('trackedManually');
-    const freshness = due ? placeWords.dueOn(shortDate(due.due.dueDate)) : reported?.label ?? '';
-    const statement = due && account.cardType === 'credit' && due.remainingFils > 0 ? {
-      due: due.due,
-      totalFils: due.due.totalDueFils,
-      capturedFils: capturedByCard.get(account.id) ?? 0,
-      minimumStated: cardPaymentOptions({ due: due.due, remainingFils: due.remainingFils }).minimumFils !== null,
-    } : undefined;
+  const accountRows = useMemo<AccountDisplayRow[]>(() => activeSources.map((account): AccountDisplayRow => {
+    const unknown = accountGroupsCopy[language === 'ar' ? 'ar' : 'en'].unknown;
+    // A figure the user set is theirs, never "per bank message" (account-freshness.ts).
+    const reported = accountSnapshotFreshness(account, now, language);
+    if (account.cardType === 'credit') {
+      const due = dueByAccountId.get(account.id);
+      // Wallet already indexed the ledger once in openDues(). Do not call
+      // cardFigure() per account on the render path.
+      const standing = creditCardStanding(account, due, latestStatementByAccount.get(account.id), todayISO);
+      const figureCaption = standing.figureKind === 'owed' ? t('owed')
+        : standing.figureKind === 'used' ? placeWords.usedCaption
+          : standing.figureKind === 'statement' ? t('statementLeftToPay') : '';
+      const statementLine = standing.statement === null ? null
+        : standing.statement.kind === 'paid' ? placeWords.statementPaid
+          : standing.figureKind === 'statement'
+            // The figure already is what is left: the line only says when.
+            ? standing.statement.overdue ? placeWords.wasDueOn(shortDate(standing.statement.dueISO))
+              : placeWords.dueOn(shortDate(standing.statement.dueISO))
+            : standing.statement.overdue
+              ? placeWords.statementLeftLate(formatAED(standing.statement.fils), shortDate(standing.statement.dueISO))
+              : placeWords.statementLeft(formatAED(standing.statement.fils), shortDate(standing.statement.dueISO));
+      const status = statementLine
+        ?? (standing.figureFils === null
+          ? standing.availableFils !== null ? placeWords.availableCredit(formatAED(standing.availableFils)) : t('noBalanceYet')
+          : reported?.label ?? '');
+      const statusTone = standing.statement?.kind === 'left'
+        ? standing.statement.overdue ? 'over' as const : 'neutral' as const
+        : standing.statement?.kind === 'paid' ? 'ok' as const : 'neutral' as const;
+      return {
+        account, kind: 'credit', figureFils: standing.figureFils, figureCaption, status, statusTone,
+        quiet: !statementLine && (reported?.quiet ?? false),
+        spoken: accountRowSpoken(account.name, standing.figureFils, unknown, figureCaption, status,
+          statementLine && reported ? reported.label : ''),
+      };
+    }
+    if (isNonCreditCard(account)) {
+      // A debit card spends from a bank account: no balance is expected for it.
+      const linked = linkedBankAccount(account, state.accounts);
+      const kindLabel = account.cardType === 'debit' ? placeWords.debitCard : t('accountKindCard');
+      const status = linked ? `${kindLabel} · ${placeWords.drawsFrom(linked.name)}` : kindLabel;
+      return {
+        account, kind: 'card', figureFils: null, figureCaption: '', status, statusTone: 'neutral',
+        spoken: [account.name, status].join('. '),
+      };
+    }
+    const figureFils = balances.balanceByAccountId[account.id] ?? null;
+    const status = figureFils === null ? t('noBalanceYet')
+      : account.snapshotKind === 'balance'
+        ? reported?.label ?? t('perBankSms')
+        : t('trackedManually');
     return {
-      account, figureFils, caption, freshness, quiet: reported?.quiet ?? false,
-      statement, usage: cardUsage(account), balanceEditable: isAccountDetailTarget(account),
+      account, kind: 'account', figureFils, figureCaption: '', status, statusTone: 'neutral',
+      quiet: reported?.quiet ?? false, balanceEditable: isAccountDetailTarget(account),
+      spoken: accountRowSpoken(account.name, figureFils, unknown, status),
     };
   // Captions also follow language; unrelated store metadata must not rescan rows.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeSources, balances.balanceByAccountId, dueByAccountId, dueAccountIds, capturedByCard, language, now]);
+  }), [activeSources, balances.balanceByAccountId, dueByAccountId, latestStatementByAccount, state.accounts, language, now]);
 
   const openingFils = openingText.trim() === ''
     ? 0
@@ -392,9 +400,6 @@ export default function WalletScreen() {
   const updateBalance = (account: Account) =>
     router.push(`/account?id=${encodeURIComponent(account.id)}&set=balance`);
   const hideAccount = (account: Account) => editAccount(account.id, { archived: true });
-  // "Mark paid" on a card row records a payment the user made; it opens the
-  // payment sheet (amount + confirmation) rather than committing from the row.
-  const [paying, setPaying] = useState<{ due: CardDue; choice: CardPaymentChoice } | null>(null);
 
   return (
     <>
@@ -484,8 +489,7 @@ export default function WalletScreen() {
             })}
 
             <AccountGroups rows={accountRows} onOpen={openAccount} onManage={setOptionsFor}
-              onUpdateBalance={updateBalance} onHide={hideAccount}
-              onMarkPaid={(due, choice) => setPaying({ due, choice })} palette={band} />
+              onUpdateBalance={updateBalance} onHide={hideAccount} palette={band} />
             <View style={[styles.linkGroup, { borderColor: band.rule }]}>
               <Pressable accessibilityRole="button" accessibilityLabel={transferWords.title}
                 testID="wallet-transfers-link" onPress={() => router.push('/transfers')}
@@ -519,8 +523,8 @@ export default function WalletScreen() {
                 accessibilityState={{ expanded: showInactive }}
                 onPress={() => setShowInactive((v) => !v)}
                 style={styles.sectionHeader}>
-                <ThemedText type="smallBold" themeColor="textSecondary">
-                  {t('inactiveHeader')} ({inactiveAccounts.length})
+                <ThemedText type="smallBold" themeColor="textSecondary" style={styles.transferCopy}>
+                  {inactiveLabel}
                 </ThemedText>
                 <Icon
                   name={showInactive ? 'chevron-down' : 'chevron-right'}
@@ -862,7 +866,6 @@ export default function WalletScreen() {
         onClose={() => setCurrencySheetVisible(false)}
         onSelect={setLedgerMoney}
       />
-      <CardPaymentSheet due={paying?.due ?? null} initialChoice={paying?.choice} onClose={() => setPaying(null)} />
     </>
   );
 }

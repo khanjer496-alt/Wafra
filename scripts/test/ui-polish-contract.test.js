@@ -136,9 +136,12 @@ const activeAccountRows=code(read('src/components/wallet/account-groups.tsx'));
 assert.match(interactionWallet,/<AccountGroups[\s\S]*?onOpen=\{openAccount\}[\s\S]*?onManage=\{setOptionsFor\}/);
 assert.match(activeAccountRows,/group\.rows\.map/);
 assert.match(activeAccountRows,/accessibilityRole="button"/);
-assert.match(activeAccountRows,/onPress=\{\(\) => onOpen\(row\.account\)\}/);
-assert.match(activeAccountRows,/onPress=\{\(\) => onManage\(row\.account\)\}/);
-assert.match(activeAccountRows,/accessibilityLabel=\{`\$\{row\.account\.name\}[\s\S]*?row\.figureFils/);
+// Compact list: each row opens its account or card, its pencil manages it,
+// and it speaks name, figure and status (accountRowSpoken in wallet.tsx).
+assert.match(activeAccountRows,/onPress=\{\(\) => onOpen\(a\)\}/);
+assert.match(activeAccountRows,/onPress=\{\(\) => onManage\(a\)\}/);
+assert.match(activeAccountRows,/accessibilityLabel=\{item\.spoken\}/);
+assert.match(activeAccountRows,/export function accountRowSpoken\(name: string, figureFils: number \| null/);
 const inactiveAccountRows = interactionWallet.match(
   /inactiveAccounts\.map\([\s\S]*?(?=testID="wallet-goals")/,
 )?.[0] ?? '';
