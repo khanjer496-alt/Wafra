@@ -17,6 +17,14 @@ const en = {
   upTo: (amount: string) => `up to ${amount}`,
   category: 'Category', transfer: 'Transfer', delete: 'Delete', transferTag: 'Transfer',
   accountFilter: (name: string) => `Account: ${name}`,
+  // The list's empty states: nothing recorded at all, nothing in this period,
+  // and only then "nothing matches" (when a search or filter is narrowing it).
+  emptyTitle: 'No transactions yet',
+  emptyBody: 'They appear here when Wafra reads a bank message, or when you import a statement or add one by hand.',
+  emptyImport: 'Import a statement',
+  emptyAdd: 'Add by hand',
+  emptyPeriod: (period: string) => `Nothing recorded in ${period}`,
+  emptyPeriodBody: 'Choose another period to see other transactions.',
 };
 
 const ar: typeof en = {
@@ -27,6 +35,12 @@ const ar: typeof en = {
   upTo: (amount: string) => `حتى ${amount}`,
   category: 'الفئة', transfer: 'تحويل', delete: 'حذف', transferTag: 'تحويل',
   accountFilter: (name: string) => `الحساب: ${name}`,
+  emptyTitle: 'لا توجد عمليات بعد',
+  emptyBody: 'تظهر هنا عندما تقرأ وفرة رسالة من البنك، أو عندما تستورد كشف حساب أو تضيف عملية يدوياً.',
+  emptyImport: 'استيراد كشف حساب',
+  emptyAdd: 'إضافة يدوياً',
+  emptyPeriod: (period: string) => `لا شيء مسجّل في ${period}`,
+  emptyPeriodBody: 'اختر فترة أخرى لعرض عمليات أخرى.',
 };
 
 export const transactionsCopy = { en, ar };
