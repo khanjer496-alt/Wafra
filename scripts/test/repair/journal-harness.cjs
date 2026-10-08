@@ -40,7 +40,7 @@ function harness(options = {}) {
     captureOptOut: options.optOut ?? false, historyImport: options.history ?? null, privateMode: true,
     trialStartTs: options.trialStartTs ?? 0,
     founderPro: options.founderPro ?? false,
-    transactions: options.empty ? [] : transactions, accounts: [account], budgets: [], bills: [], cardDues: [],
+    transactions: options.empty ? [] : transactions, accounts: [account], budgets: options.budgets ?? [], bills: [], cardDues: options.cardDues ?? [],
     notSubscriptions: [], merchantOverrides: {}, marketId: 'AE', ledgerMoney: { currency: 'AED', exponent: 2 },
     reviewTray: { pending: options.reviews ? [{ expiresAt: Date.now() + 86400000 }] : [] },
   };
@@ -49,8 +49,8 @@ function harness(options = {}) {
     activityRows: state.transactions, accountById: new Map([['bank', account]]), internalTransactionIds: new Set(),
     activityDayTotals: options.dayTotals ?? dayTotals(state.transactions),
     unreadFormats: { count: 0, shouldPrompt: false }, uncategorised: { shouldPrompt: false, summary: { merchants: [], paymentPurposes: [], rowCount: 0, totalFils: 0 } },
-    upcoming: { items: options.empty ? [] : [{ id: 'utility', title: 'Electricity', kind: 'bill',
-      dateISO: '2026-09-09', daysLeft: 3, amountFils: 38000, overdue: false, urgent: false }] },
+    upcoming: { items: options.upcoming ?? (options.empty ? [] : [{ id: 'utility', title: 'Electricity', kind: 'bill',
+      dateISO: '2026-09-09', daysLeft: 3, amountFils: 38000, overdue: false, urgent: false }]) },
   };
   const native = { View: 'View', ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable', RefreshControl: 'RefreshControl',
     useWindowDimensions: () => ({ width: options.width ?? 390, fontScale: options.largeText ? 1.3 : 1 }),
@@ -213,6 +213,10 @@ function harness(options = {}) {
   dependencies['@/lib/ledger'] = load(path.join(root, 'src/lib/ledger.ts'), dependencies);
   const { TransactionRow } = load(path.join(root, 'src/components/transaction-row.tsx'), dependencies);
   dependencies['@/components/transaction-row'] = { TransactionRow };
+  // Home v3: the Spent hero, the transactions list and the Needs you pill
+  // from source, and the saved layout every case starts from (home-v3-harness.cjs).
+  dependencies['@/hooks/use-app-active'] = { useAppActive: () => true };
+  require('./home-v3-harness.cjs').installHomeV3(dependencies, { load, jsx, language, events, options });
   const { default: Home } = load(
     path.join(root, 'src/screens/journal-home-screen.tsx'),
     dependencies,

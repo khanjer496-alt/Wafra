@@ -267,6 +267,9 @@ function createHarness(options = {}) {
   deps['react-native-safe-area-context']={useSafeAreaInsets:()=>({top:0,bottom:10,left:0,right:0})};
   deps['@/components/ui/tab-bar-metrics']={useTabBarMetrics:()=>({measuredHeight:78,setMeasuredHeight(){}})};
   local('@/components/tab-bar');
+  // Home v3: the Spent hero, the transactions list and the Needs you pill
+  // from source, and the saved layout every case starts from (home-v3-harness.cjs).
+  require('./home-v3-harness.cjs').installHomeV3(deps,{load,jsx,language:lang,events,options,globals:{Date:Clock}});
   function loadDetail() {
     deps['@/lib/fx'].formatOriginalCurrency=(f,c)=>c+' '+amount(f);
     // Reading a stored original is pure; use the shipping reader.
