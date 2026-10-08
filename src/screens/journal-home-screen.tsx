@@ -703,21 +703,7 @@ export default function JournalHomeScreen() {
       setPendingTransfers(cached.value);
       return;
     }
-    const task = runAfterFirstFrames(() => {
-      if (cancelled) return;
-      // The reconciliation cached per stored transfer receipt, shared with
-      // Transactions and Transfers, rather than a second full graph build.
-      const reconciliation = state.transactions.some(isTransferCandidate) ? transferReconciliationForState(state) : null;
-      const next: HomeTransferQueue = reconciliation ? (() => {
-        const activity = getTransferActivity(state.transactions, state.accounts, reconciliation);
-        const queue = transferQuestionQueue(activity);
-        // With no question to ask but entries still queued (duplicate observations,
-        // archived accounts, likely card repayments), Home names those; Transfers
-        // lists them as groups to answer.
-        const ids = queue.length > 0 ? new Set(queue.map(item => item.transaction.id))
-          : unaskedPendingIds(activity, reconciliation.pendingIds);
-        return { ...pendingTransferSummary(state.transactions, ids), questions: queue.length };
-      })() : { count: 0, incomingFils: 0, outgoingFils: 0, questions: 0 };
+    const publish = (next: HomeTransferQueue) => {
       if (cancelled) return;
       transferQueueCache.current = { inputs, value: next };
       // An unchanged queue keeps its object, so returning Home does not
@@ -725,10 +711,41 @@ export default function JournalHomeScreen() {
       startTransition(() => setPendingTransfers((current) => current !== null && current.count === next.count
         && current.incomingFils === next.incomingFils && current.outgoingFils === next.outgoingFils
         && current.questions === next.questions ? current : next));
+    };
+    let activityTask: ReturnType<typeof runAfterFirstFrames> | null = null;
+    const task = runAfterFirstFrames(() => {
+      if (cancelled) return;
+      if (!state.transactions.some(isTransferCandidate)) {
+        publish({ count: 0, incomingFils: 0, outgoingFils: 0, questions: 0 });
+        return;
+      }
+      // The reconciliation cached per stored transfer receipt, shared with
+      // Transactions and Transfers, rather than a second full graph build.
+      const reconciliation = transferReconciliationForState(state);
+      if (!reconciliation) {
+        publish({ count: 0, incomingFils: 0, outgoingFils: 0, questions: 0 });
+        return;
+      }
+      // The graph and the activity walk are each a pass over the whole ledger.
+      // On a 15k-row phone the two together were the one long task after a
+      // cold launch; two frames between them let input and drawing through.
+      // Same inputs, same answer: the graph is cached for this receipt.
+      activityTask = runAfterFirstFrames(() => {
+        if (cancelled) return;
+        const activity = getTransferActivity(state.transactions, state.accounts, reconciliation);
+        const queue = transferQuestionQueue(activity);
+        // With no question to ask but entries still queued (duplicate observations,
+        // archived accounts, likely card repayments), Home names those; Transfers
+        // lists them as groups to answer.
+        const ids = queue.length > 0 ? new Set(queue.map(item => item.transaction.id))
+          : unaskedPendingIds(activity, reconciliation.pendingIds);
+        publish({ ...pendingTransferSummary(state.transactions, ids), questions: queue.length });
+      }, { idle: false, delayMs: 0 });
     });
     return () => {
       cancelled = true;
       task.cancel();
+      activityTask?.cancel();
     };
     // Transfer receipts change the reconciliation even when the arrays do not.
     // eslint-disable-next-line react-hooks/exhaustive-deps

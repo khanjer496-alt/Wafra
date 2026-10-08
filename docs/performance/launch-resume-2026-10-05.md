@@ -93,6 +93,7 @@ and every canonical capture (`applyMaterializedImportBatch`).
 |---|---|---|
 | One graph build validated each row's transfer evidence and decision about six to ten times (regex and currency checks), and checked candidacy twice per row | Validation verdicts are memoised for one synchronous pass only (`withPassCache`), keyed by the validated object and dropped in `finally`; exported validators stay uncached outside a pass | `transfer-reconciliation.ts` |
 | `bankIdentityForName` tested every bank pattern and ran a Unicode-property regex on each call, about 5,700 calls per graph build for five distinct names | Bounded memo (512 names) over the fixed `MARKETS` packs | `markets.ts` |
+| Home's transfer queue ran the graph and the activity walk over the whole ledger in one task after a cold launch | Two deferred slices with frames between them (graph, then activity); the graph is the same cached one, so the queue is unchanged | `journal-home-screen.tsx` |
 | Every mounted entry sheet (11 hosts) and Transfers built its own id index of the whole ledger on mount and on every ledger change, open or not | One index per ledger snapshot (`rowsByIdFor`, WeakMap keyed by the array) | `rows-by-id.ts`, `entry-detail-sheet.tsx`, `transfers.tsx` |
 
 Measured on the transfer-heavy 15k ledger (Hermes 0.12 CLI on a desktop core,
