@@ -262,6 +262,11 @@ one drawing per figure, always beside the written figure:
 
 | Screen | Drawing | Coins stand for |
 |---|---|---|
+| Home, Spent hero (v3) | a thin line of the month's cumulative spending under the figure; it draws itself once (a clip window opening, two opposite `translateX` on one native value) and the trend arrow flips in (`rotateX`), both on the hero's one clock | spending by day so far, over the whole month (`projectHeroMonth`); the box top is the larger of the month so far and the same days of last month |
+| Home, Spent hero (v3) | the card turns over (`rotateY` with perspective) to last month and back, from a sideways swipe, the chevron or the increment/decrement actions; it leans ±4° with the phone when the build has the motion sensor | last month's own Spent/In/Net and trend; the lean is decoration only |
+| Home, Spent hero (v3) | tap: Spending's coin row (`ShareBar`) opens in place (opacity, `translateY`, `scaleY`; no layout animation) | the month's categories |
+| Home, transactions (v3) | the first open of a session settles the rows in one after another on one clock; later opens draw them in place | the latest rows |
+| Home, Needs you (v3) | the pill slides up into place once per need | the one thing that needs the person |
 | Home, Left in budgets | 8-coin `CoinStack` | share of limits still left; drains as it is spent |
 | Home, Today | a `CoinStack` of one coin per payment today (at most 6; none with none) at the tile's bottom end beside the count, dropping in as each is captured | today's payments (`todayCount`) |
 | Home, Daily average (no budget) | a row of coin columns, one per day the average divides by (windows up to 31 days), rising start → end | each day's everyday spending against the biggest day (`averageDays`, the same rows and fixed-cost rule as the average) |
@@ -515,3 +520,74 @@ in `reference-harness.cjs` and `journal-harness.cjs`.
 ## Whole-Home customization — 27 September 2026
 
 The owner requested control beyond the five lower sections. Greeting, spending overview, Today/budget figures, weekly spending and capture status now join payments, transactions, Ask and insights in one persisted order. Every content block can move or hide; only navigation and important setup/recovery warnings stay available. Financial blocks moved below other content adopt the sheet palette without changing their ledger calculations. Legacy five-section layouts preserve their order and hidden choices. The editor shows an ordered preview, reset, saving state and recoverable save failures; Home subscribes to durable changes.
+
+## Home v3 — 8 October 2026
+
+Owner decision: "I want to see spend and a small trend if up or down, in and
+net, then transactions." Home is now the toolbar (pattern, recap W, Add,
+Settings), the greeting, the **Spent hero** and the **transactions**. Every
+other section (Today and Left in budgets, the money overview, the last seven
+days, Due soon, Coming up, Transfers to answer, the insight, Ask Wafra, capture
+status) stays in Customize Home, switched off by default.
+
+- **Layout reset.** `home-widget-preferences.ts` stores a layout version
+  (`HOME_WIDGETS_LAYOUT_VERSION = 3`). A layout saved before v3 reads as the
+  new default once, for new and existing people alike; nothing is deleted and
+  every earlier section is one switch away in Customize Home. A section missing
+  from a saved layout returns switched off when the default has it off. Goals
+  chosen in onboarding still order the sheet and now also switch on the
+  sections they promote (`homeOrderForGoals`): picking Bills is asking for Due
+  soon and Coming up. The goal-order repair retires itself for pre-v3 layouts.
+- **Spent hero** (`src/components/home/home-hero.tsx`). "Spent in October" as
+  the band's hero figure (`BandFigure`), the month from the app period (the
+  running month unless another month is chosen). The trend chip compares the
+  month so far with the same days of last month (`projectHeroMonth`,
+  `comparablePreviousPeriod`: salary-day months, never past the earlier
+  month's end); no spending recorded in that window means no chip, never
+  "+100%". Down is the accent green; over last month's pace the chip wears the
+  warning colours (`statusNear` on `statusNearSoft`) and crossfades into them
+  when the crossing happens while Home is open. Home gives one short haptic
+  (`captured()`) when it sees the crossing, at most once a day
+  (`nextPaceMemory`, stored in `wafra/ui/home-pace-nudge/v1`). In · Net sit under
+  the line (Net = In − Spent, signed); larger text stacks them. Spent, In, Net
+  and the categories are `summarizeMonth`, the same projection the dashboard
+  and Spending use. The card speaks one label: "Spent in October, AED …, up 12%
+  versus the same days of September. In AED …. Net −AED …".
+- **Last month, locally.** Swipe the card sideways (`PanResponder`; mirrored
+  right to left), press the chevron, or use increment/decrement: the card
+  turns to last month (its own figures and its trend against the month before)
+  and back. Home's period does not change. Last month is computed only when
+  asked for.
+- **Tilt.** The card leans at most 4° with the phone (`home-tilt.ts`: movement
+  from a slowly settling resting hold, smoothed, ~30 updates a second, mirrored
+  right to left), set on Animated values the card reads on the native driver.
+  It needs expo-sensors' DeviceMotion native module. This build does **not**
+  add `expo-sensors`: the package brings Android's `ACTIVITY_RECOGNITION`
+  permission and an iOS `NSMotionUsageDescription` with it, both store-review
+  surfaces for a decorative effect. `use-device-tilt.ts` looks the module up
+  with `requireOptionalNativeModule('ExponentDeviceMotion')`, so the card stays
+  flat until a build includes it; no JS change is needed then. Never on the
+  web, under Reduce Motion or a screen reader, while the app is in the
+  background or Home is not focused.
+- **Transactions** (`home-recent.tsx`): the period's latest 12 rows grouped by
+  day under a quiet label (no day totals), "See all" to Transactions. On Home
+  each row is one target that opens the detail sheet (`TransactionRow
+  merchantLinks={false}`); the merchant page is reached from the sheet. An
+  arriving capture keeps its coin drop (`ArrivingRow`).
+- **Needs you** (`needs-you-pill.tsx`, `home-needs-you.ts`): one floating pill
+  above the tab bar, only when something truly needs the person, highest
+  priority first: tracking paused or stopped (trial ended, permission lost,
+  iPhone capture not set up, alerts stopped arriving; a deliberate opt-out is
+  never nagged) > an overdue card payment > transfers to answer (the Transfers
+  question queue) > a monthly limit over. A tap goes where it is answered; ×
+  hides that need for the session. The sheet pads its end so the pill never
+  covers the last row; on Android it stops short of the Add button.
+- **Motion** follows the coin rules: core Animated on the native driver, one
+  clock per group (`useCoinClock`), no JS timers for staggers, held until Home
+  can be seen (`useHomeRevealReady`), final state under Reduce Motion or a
+  screen reader, nothing while the app is inactive. Decorative pieces (line,
+  chip, coins) are hidden from assistive tech.
+- **Copy**: `src/lib/home-copy.ts` (English and Arabic, parity tested).
+- **Tests**: `scripts/test/repair/home-hero.test.cjs` (trend windows, month
+  lengths, salary day, line points, nudge memory, Needs you priority, tilt,
+  copy parity, layout reset) and `home-v3.test.cjs` (the rendered Home).
