@@ -103,7 +103,7 @@ export const SUPPLEMENT_COPY = {
     coverageRangeOnly: 'Dates of imported transactions; this does not prove every transaction or month is present.',
     errDates: 'These dates could be day/month or month/day. Export with dates like 01 Jul 2026.',
     errQueueFull: 'The import queue is full. Some rows may already be saved or queued. Sync Wafra on your devices, resolve pending reviews, then retry this file.',
-    errRate: 'Too many files at once. Wait a minute, then try again.',
+    errRate: 'Wafra has read as many statements as it can for now. Files already imported are kept; try the rest again within the hour.',
     errUnexpected: 'The import service sent an unexpected reply. Some rows may still be queued. Retry to check.',
     // Progress, not failure. The filing step below can take a moment on a
     // large ledger, and this line is what the user reads while it runs, so it
@@ -232,7 +232,7 @@ export const SUPPLEMENT_COPY = {
     coverageRangeOnly: 'تواريخ المعاملات المستوردة؛ لا تثبت وجود جميع المعاملات أو الأشهر.',
     errDates: 'يمكن قراءة هذه التواريخ يوم/شهر أو شهر/يوم. صدّره بتواريخ مثل 01 Jul 2026.',
     errQueueFull: 'قائمة الاستيراد ممتلئة. قد تكون بعض الصفوف محفوظة أو قيد الانتظار. زامن وفرة على أجهزتك واحسم عناصر المراجعة ثم أعد محاولة هذا الملف.',
-    errRate: 'ملفات كثيرة دفعة واحدة. انتظر دقيقة، ثم حاول مجدداً.',
+    errRate: 'قرأت وفرة أقصى عدد من الكشوفات المسموح به حالياً. الملفات التي استُوردت محفوظة؛ أعد محاولة الباقي خلال ساعة.',
     errUnexpected: 'أرسلت خدمة الاستيراد رداً غير متوقع. قد تبقى بعض الصفوف في قائمة الانتظار. أعد المحاولة للتحقق.',
     acceptedFiling: 'تم استلام {accepted} صفاً · جارٍ حفظها على هذا الهاتف…',
     acceptedPending: 'وصل {accepted} صفاً إلى وفرة لكن لم تتزامن مع الهاتف بعد. حاول مرة أخرى بعد لحظة.',

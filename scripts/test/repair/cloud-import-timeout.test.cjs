@@ -140,3 +140,11 @@ test('successful DELETE 204 finishes without trying to consume a response body',
   assert.equal(h.requests.length, 1);
   assert.equal(h.timers.size, 0);
 });
+
+test('a large statement gets upload time on a slow connection, within a five-minute cap', () => {
+  const { api } = harness(async () => response({}));
+  assert.equal(api.uploadTimeoutMs(20), 60_000, 'small files keep the one-minute deadline');
+  assert.equal(api.uploadTimeoutMs(32 * 1024 * 30), 90_000, '30 seconds of upload at 32 KB/s');
+  assert.ok(api.uploadTimeoutMs(5 * 1024 * 1024) > 200_000, 'a 5 MB PDF is not cut off after a minute');
+  assert.equal(api.uploadTimeoutMs(50 * 1024 * 1024), 300_000, 'never more than five minutes');
+});

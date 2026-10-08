@@ -172,3 +172,13 @@ test('replayed or legacy files cannot claim a newly interpreted activity range',
   assert.equal(contract.parseCsvImportAccepted({acceptedRows:1,rejectedRows:0,totalRows:1,statementImportId}),null);
  }
 });
+test('statement screen errors say what happened: pairing failures, unusable passwords, the hourly limit', () => {
+ const screen = fs.readFileSync(path.join(root, 'src/components/supplement-imports.tsx'), 'utf8');
+ const copy = fs.readFileSync(path.join(root, 'src/lib/supplement-copy.ts'), 'utf8');
+ // Connecting the phone fails before any upload, so it must not say rows may be queued.
+ assert.match(screen, /if \(value instanceof RelayError\) return value\.retryable \? copy\.errNetwork : copy\.serviceError;/);
+ assert.match(screen, /value\.code === 'pdf_password_incorrect' \|\| value\.code === 'pdf_password_required'\) return copy\.passwordWrong/);
+ // The relay's statement budget is hourly; the copy must not promise a minute.
+ assert.doesNotMatch(copy, /Wait a minute|انتظر دقيقة/);
+ assert.match(screen, /returnKeyType="go"[\s\S]{0,120}onSubmitEditing=\{\(\) => \{ if \(pdfPassword && busy === null\) void retryProtectedPdf\(\); \}\}/);
+});

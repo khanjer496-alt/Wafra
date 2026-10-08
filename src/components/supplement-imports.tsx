@@ -210,6 +210,10 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
   }, []);
 
   const errorText = useCallback((value: unknown): string => {
+    // Connecting this phone to the import service fails with the relay's own
+    // error, before anything is uploaded, so "rows may still be queued" would
+    // be false: say the service could not be reached.
+    if (value instanceof RelayError) return value.retryable ? copy.errNetwork : copy.serviceError;
     if (!(value instanceof CloudImportError)) return copy.errUnexpected;
     if (value.code === 'network') return copy.errNetwork;
     if (value.code === 'unauthorized') return copy.errAuth;
@@ -220,7 +224,9 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
     if (value.code === 'too_large' || value.code === 'too_many_pages' || value.code === 'too_many_rows') return copy.errLarge;
     if (value.code === 'unreadable_pdf') return copy.errUnreadable;
     if (value.code === 'pdf_too_long') return copy.errPdfTooLong;
-    if (value.code === 'pdf_password_incorrect') return copy.passwordWrong;
+    // The service answers "required" again when it could not use the password
+    // it was sent (too long, or a line break), so the user's fix is the same.
+    if (value.code === 'pdf_password_incorrect' || value.code === 'pdf_password_required') return copy.passwordWrong;
     if (value.code === 'unsupported_statement_format') return copy.errFormat;
     if (value.code === 'ambiguous_card_signs') return copy.errCardSigns;
     if (value.code === 'ambiguous_dates') return copy.errDates;
@@ -941,6 +947,9 @@ export function SupplementImports({ onboarding, preview, frame }: SupplementImpo
                 autoCapitalize="none"
                 autoCorrect={false}
                 textContentType="password"
+                autoFocus
+                returnKeyType="go"
+                onSubmitEditing={() => { if (pdfPassword && busy === null) void retryProtectedPdf(); }}
               />
               <View style={[styles.actions, largeText && styles.actionsStacked]}>
                 <EButton palette={band} variant="secondary" label={copy.passwordCancel} onPress={cancelProtectedPdf}
@@ -1121,6 +1130,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
+    // A wrapping row aligns its lines by alignContent (default flex-start),
+    // which left the icon and label at the top of the 96pt box.
+    alignContent: 'center',
     justifyContent: 'center',
     gap: Spacing.two + 2,
   },

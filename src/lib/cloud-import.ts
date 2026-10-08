@@ -18,6 +18,16 @@ import type { RelayConfig } from '@/lib/relay';
 import type { LedgerMoneySpec } from '@/lib/ledger-money';
 
 const REQUEST_TIMEOUT_MS = 60_000;
+/**
+ * One deadline covers the upload and the server's read, so a fixed minute
+ * failed a 5 MB statement on a slow uplink even when the server went on to
+ * queue its rows. Allow the time a ~32 KB/s connection needs to send the file,
+ * up to five minutes; small files keep the plain one-minute deadline.
+ */
+const UPLOAD_BYTES_PER_SECOND = 32 * 1024;
+const MAX_UPLOAD_TIMEOUT_MS = 5 * 60_000;
+export const uploadTimeoutMs = (bytes: number): number =>
+  Math.min(MAX_UPLOAD_TIMEOUT_MS, REQUEST_TIMEOUT_MS + Math.floor(bytes / UPLOAD_BYTES_PER_SECOND) * 1000);
 
 export interface PickedStatement {
   uri: string;
@@ -42,6 +52,7 @@ async function relayFetch(
   url: string,
   token: string,
   init: RequestInit,
+  timeoutMs: number = REQUEST_TIMEOUT_MS,
 ): Promise<{ response: Response; body: unknown }> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -51,7 +62,7 @@ async function relayFetch(
       // still releases the underlying request where the transport supports it.
       reject(new CloudImportError('network'));
       try { controller.abort(); } catch { /* The deadline already rejected. */ }
-    }, REQUEST_TIMEOUT_MS);
+    }, timeoutMs);
   });
   try {
     return await Promise.race([
@@ -202,7 +213,7 @@ export async function uploadPdfStatement(
       ...(password ? { 'x-wafra-pdf-password': password } : {}),
     },
     body: file,
-  });
+  }, uploadTimeoutMs(size));
   if (!response.ok) throw pdfImportError(response.status, body);
   const accepted = parsePdfImportAccepted(body);
   if (!accepted) throw new CloudImportError('unexpected', response.status);
@@ -242,7 +253,7 @@ export async function uploadCsvStatement(
       ...dateOrderHeader(dateOrder),
     },
     body: file,
-  });
+  }, uploadTimeoutMs(size));
   if (!response.ok) throw pdfImportError(response.status, body);
   const accepted = parseCsvImportAccepted(body);
   if (!accepted) throw new CloudImportError('unexpected', response.status);
