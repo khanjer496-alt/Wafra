@@ -301,7 +301,7 @@ ok('the funnel query reads the site events dataset for the requested window',
   /FROM wafra_site_events\nWHERE timestamp > NOW\(\) - INTERVAL '7' DAY/.test(report.query ?? ''));
 
 const pagesConfig = spawnSync(process.execPath, ['--input-type=module', '-e', `
-  import { productionPatch, settingNames } from
+  import { deploymentConfigsPatch, productionPatch, settingNames } from
     ${JSON.stringify(require('url').pathToFileURL(path.join(root, 'scripts/pages-site-config.mjs')).href)};
   const attempt = (production) => { try { return productionPatch(production); } catch (error) { return { error: error.message }; } };
   const existing = { compatibility_date: '2026-03-01', compatibility_flags: ['nodejs_compat'],
@@ -312,6 +312,7 @@ const pagesConfig = spawnSync(process.execPath, ['--input-type=module', '-e', `
     secret: attempt({ env_vars: { TOKEN: { type: 'secret_text' } } }),
     otherDataset: attempt({ analytics_engine_datasets: { SITE_EVENTS: { dataset: 'something_else' } } }),
     names: settingNames(existing),
+    configs: deploymentConfigsPatch(existing),
   }));
 `], { cwd: root, encoding: 'utf8' });
 let pages = {};
@@ -326,6 +327,9 @@ ok('existing production settings are re-sent unchanged alongside the binding',
     pages.merged.fail_open === true && pages.merged.analytics_engine_datasets?.SITE_EVENTS?.dataset === 'wafra_site_events');
 ok('secrets or a different SITE_EVENTS dataset stop the update instead of being overwritten',
   /secret variables \(TOKEN\)/.test(pages.secret?.error ?? '') && /already bound to dataset something_else/.test(pages.otherDataset?.error ?? ''));
+ok('fail open is sent for preview too, because Cloudflare rejects a production-only change (8000066)',
+  pages.configs?.preview?.fail_open === true && Object.keys(pages.configs.preview).length === 1 &&
+    JSON.stringify(pages.configs.production) === JSON.stringify(pages.merged));
 ok('setting names include nested bindings so a lost one is detected',
   ['env_vars.MODE', 'kv_namespaces.CACHE', 'compatibility_date', 'fail_open'].every((name) => pages.names?.includes(name)));
 
