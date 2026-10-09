@@ -173,6 +173,12 @@ test('Needs you shows only the highest-priority need, skipping dismissed ones', 
     { id: 'c3', kind: 'card', overdue: false, daysLeft: 2, dueId: 'due3', title: 'Soon', amountFils: 9 },
   ];
   assert.deepEqual(needs.earliestOverdueCard(items), { id: 'due2', title: 'Platinum', amountFils: 7, daysLate: 4 });
+  // Inline at the top of the sheet with large text, a 1.2x text scale, or a window under 700pt.
+  assert.equal(needs.needsYouInline({ largeText: false, fontScale: 1, height: 844 }), false);
+  assert.equal(needs.needsYouInline({ largeText: true, fontScale: 1, height: 844 }), true);
+  assert.equal(needs.needsYouInline({ largeText: false, fontScale: 1.2, height: 844 }), true);
+  assert.equal(needs.needsYouInline({ largeText: false, fontScale: 1.19, height: 700 }), false);
+  assert.equal(needs.needsYouInline({ largeText: false, fontScale: 1, height: 699 }), true);
   assert.equal(needs.earliestOverdueCard(items.slice(0, 1)), null, 'a late bill is not a card payment');
   // Session dismissals publish a new set to subscribers.
   const before = needs.dismissedNeeds();

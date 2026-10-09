@@ -53,7 +53,7 @@ function harness(options = {}) {
       dateISO: '2026-09-09', daysLeft: 3, amountFils: 38000, overdue: false, urgent: false }]) },
   };
   const native = { View: 'View', ActivityIndicator: 'ActivityIndicator', Text: 'Text', TextInput: 'TextInput', Pressable: 'Pressable', RefreshControl: 'RefreshControl',
-    useWindowDimensions: () => ({ width: options.width ?? 390, fontScale: options.largeText ? 1.3 : 1 }),
+    useWindowDimensions: () => ({ width: options.width ?? 390, height: options.height ?? 844, fontScale: options.fontScale ?? (options.largeText ? 1.3 : 1) }),
     Platform: { OS: options.platform ?? 'android' }, StyleSheet: { create: (style) => style, flatten: (style) => Object.assign({}, ...(Array.isArray(style) ? style.flat(Infinity).filter(Boolean) : [style])), hairlineWidth: 1 },
     Alert: { alert: (message) => events.push(['alert', message]) }, AppState: { addEventListener: () => ({ remove() {} }) },
     // Home defers its insight projection until interactions settle. Run it

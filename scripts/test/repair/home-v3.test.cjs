@@ -97,6 +97,38 @@ test('Needs you: nothing, or only the highest-priority need, with a way there an
   assert.equal(byId(harness({ homeWidgets: 'default', optOut: true }).tree, 'home-needs-you'), undefined);
 });
 
+test('Needs you floats above the tab bar normally, and sits inline at the top of the sheet with large text or a short window', () => {
+  const overdue = [{ id: 'card-due', title: 'Sky', kind: 'card', dueId: 'due-1', dateISO: '2026-09-01', daysLeft: -3,
+    amountFils: 500000, overdue: true, urgent: false }];
+  const placement = (options) => {
+    // iOS: no floating Add button, so the end padding is the pill's alone.
+    const { tree } = harness({ homeWidgets: 'default', platform: 'ios', upcoming: overdue, ...options });
+    const scaffold = walk(tree).find((node) => node.type === 'BandScaffold');
+    const inSheet = walk(scaffold.props.children).find((node) => node.props?.testID === 'home-needs-you');
+    const pill = byId(tree, 'home-needs-you');
+    const style = Object.assign({}, ...[pill.props.style].flat(Infinity).filter(Boolean));
+    const sheet = walk(scaffold.props.children[1]);
+    return { inSheet: !!inSheet, style, clearance: scaffold.props.floatingClearance,
+      beforeList: sheet.findIndex((node) => node.props?.testID === 'home-needs-you') < sheet.findIndex((node) => node.props?.testID === 'home-widget-activity'),
+      label: byId(tree, 'home-needs-you-open').props.accessibilityLabel, dismiss: !!byId(tree, 'home-needs-you-dismiss') };
+  };
+  const floating = placement({});
+  assert.equal(floating.inSheet, false, 'normal size: outside the scroll content');
+  assert.equal(floating.style.position, 'absolute');
+  assert.ok(floating.clearance >= 56, 'the sheet pads its end so the last rows scroll clear');
+  for (const options of [{ largeText: true }, { fontScale: 1.2 }, { height: 699 }]) {
+    const inline = placement(options);
+    assert.equal(inline.inSheet, true, `${JSON.stringify(options)}: in the sheet`);
+    assert.ok(inline.beforeList, 'above Transactions');
+    assert.notEqual(inline.style.position, 'absolute');
+    assert.equal(inline.style.alignSelf, 'stretch', 'full width');
+    assert.equal(inline.clearance, 0, 'no floating clearance is added for it');
+    assert.equal(inline.label, 'Sky payment overdue', 'the same need and spoken label');
+    assert.ok(inline.dismiss, 'the same dismiss');
+  }
+  assert.equal(placement({ height: 700, fontScale: 1.19 }).inSheet, false, 'the thresholds: 700pt and 1.2x');
+});
+
 test('a limit over this month is the last need, and opens the limits', () => {
   const now = new Date();
   const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;

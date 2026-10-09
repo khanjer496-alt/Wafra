@@ -26,7 +26,7 @@ export const NEEDS_YOU_CLEARANCE = 44 + 12;
 /** Android's floating Add (56pt) and its gap: the pill stops short of it. */
 const ADD_BUTTON_ROOM = 56 + 16 + 12;
 
-export function NeedsYouPill({ needKey, label, spokenLabel, hint, icon, warning, dismissLabel, onPress, onDismiss, band, hold }: {
+export function NeedsYouPill({ needKey, label, spokenLabel, hint, icon, warning, dismissLabel, onPress, onDismiss, band, hold, inline = false }: {
   /** Which need is shown: a new one slides in again. */
   needKey: string;
   /** One short visible line ("Card payment overdue"). */
@@ -41,6 +41,12 @@ export function NeedsYouPill({ needKey, label, spokenLabel, hint, icon, warning,
   onPress: () => void;
   onDismiss: () => void;
   band: BandPalette;
+  /**
+   * Drawn in the sheet, full width at its top, instead of floating above the
+   * tab bar: with large text or on a short window a floating pill would sit
+   * on the first rows (needsYouInline).
+   */
+  inline?: boolean;
   /** Home cannot be seen yet: the slide waits. */
   hold: boolean;
 }) {
@@ -68,10 +74,12 @@ export function NeedsYouPill({ needKey, label, spokenLabel, hint, icon, warning,
   }, [needKey, live, motion.reducedMotion, motion.ready, active, value]);
   const ground = warning ? band.statusNearSoft : band.band;
   const ink = warning ? band.statusNear : band.onBand;
-  return <Animated.View testID="home-needs-you" pointerEvents="box-none"
-    style={[styles.frame, { bottom: clearance, end: Platform.OS === 'android' ? ADD_BUTTON_ROOM : 16 },
-      { opacity: value, transform: [{ translateY: value.interpolate({ inputRange: [0, 1], outputRange: [28, 0] }) }] }]}>
-    <View style={[styles.pill, { backgroundColor: ground, borderColor: band.bandRule }]}>
+  // Inline it fades in where it stands; floating it also rises from the tab bar.
+  const placement = inline ? [styles.inline, { opacity: value }]
+    : [styles.frame, { bottom: clearance, end: Platform.OS === 'android' ? ADD_BUTTON_ROOM : 16 },
+      { opacity: value, transform: [{ translateY: value.interpolate({ inputRange: [0, 1], outputRange: [28, 0] }) }] }];
+  return <Animated.View testID="home-needs-you" pointerEvents="box-none" style={placement}>
+    <View style={[styles.pill, inline && styles.pillInline, { backgroundColor: ground, borderColor: band.bandRule }]}>
       <Pressable testID="home-needs-you-open" accessibilityRole="button" accessibilityLabel={spokenLabel ?? label} accessibilityHint={hint}
         onPress={onPress} style={({ pressed }) => [styles.open, { opacity: pressed ? 0.7 : 1 }]}>
         <Icon name={icon} size={16} color={ink} strokeWidth={2.2} />
@@ -89,10 +97,12 @@ export function NeedsYouPill({ needKey, label, spokenLabel, hint, icon, warning,
 
 const styles = StyleSheet.create({
   frame: { position: 'absolute', start: 16, alignItems: 'flex-start' },
+  inline: { alignSelf: 'stretch' },
   pill: { height: 44, maxWidth: '100%', borderRadius: 24, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row',
     alignItems: 'center', paddingStart: 14, paddingEnd: 2, elevation: 3,
     shadowColor: Elevation.shadowColor, shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-  open: { height: 44, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingEnd: 4 },
+  pillInline: { alignSelf: 'stretch', elevation: 0, shadowOpacity: 0 },
+  open: { height: 44, flexShrink: 1, flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingEnd: 4 },
   text: { flexShrink: 1, fontSize: 14, lineHeight: 18 },
   close: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

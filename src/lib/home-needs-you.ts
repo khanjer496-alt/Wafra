@@ -77,3 +77,17 @@ export function subscribeDismissedNeeds(listener: () => void): () => void {
   listeners.add(listener);
   return () => { listeners.delete(listener); };
 }
+
+/** Below this window height (pt) the pill goes inline: a floating one would sit on the first rows. */
+export const NEEDS_YOU_SHORT_WINDOW = 700;
+/** From this text scale the pill goes inline, for the same reason. */
+export const NEEDS_YOU_INLINE_FONT_SCALE = 1.2;
+
+/**
+ * Whether the Needs you pill sits inline at the top of Home's sheet rather
+ * than floating above the tab bar: with large text (the app's large-text
+ * layout, or a text scale of 1.2 or more) or on a window shorter than 700pt.
+ */
+export function needsYouInline(layout: { largeText: boolean; fontScale: number; height: number }): boolean {
+  return layout.largeText || layout.fontScale >= NEEDS_YOU_INLINE_FONT_SCALE || layout.height < NEEDS_YOU_SHORT_WINDOW;
+}

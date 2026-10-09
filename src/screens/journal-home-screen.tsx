@@ -1,7 +1,7 @@
 import { HistoryReadingStatus } from '@/components/history-reading-status';
 import { MoneyPictureProgress } from '@/components/money-picture-progress';
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, AppState, Platform, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { Alert, Animated, AppState, Platform, Pressable, RefreshControl, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useRouter } from '@/hooks/use-app-router';
 import { CoinToken } from '@/components/ui/coins/coin-token';
 import {
@@ -85,7 +85,7 @@ import { NEEDS_YOU_CLEARANCE, NeedsYouPill } from '@/components/home/needs-you-p
 import { homeCopy } from '@/lib/home-copy';
 import { nextPaceMemory, paceState, projectHeroMonth, type PaceMemory } from '@/lib/home-hero';
 import { loadPaceMemory, savePaceMemory } from '@/lib/home-pace-nudge';
-import { dismissedNeeds, dismissNeed, earliestOverdueCard, pickNeed, subscribeDismissedNeeds, type Need } from '@/lib/home-needs-you';
+import { dismissedNeeds, dismissNeed, earliestOverdueCard, needsYouInline, pickNeed, subscribeDismissedNeeds, type Need } from '@/lib/home-needs-you';
 import { summarizeMonth } from '@/lib/insights';
 import { spendingCategoryRows } from '@/lib/reference-presentation';
 import { captured as nudgeHaptic } from '@/lib/haptics';
@@ -297,6 +297,7 @@ export default function JournalHomeScreen() {
   const words = copy[language === 'ar' ? 'ar' : 'en'];
   const transferWords = transferActivityCopy(language);
   const largeText = useLargeTextLayout();
+  const { height: windowHeight, fontScale } = useWindowDimensions();
   const privacyGateCleared = usePrivacyGateCleared();
   // Splash gone, lock cleared, app in the foreground: Home's coins may move.
   const revealReady = useHomeRevealReady();
@@ -1026,6 +1027,12 @@ export default function JournalHomeScreen() {
     ? shown.tracking === 'paused' ? homeWords.needShort.trackingPaused
       : shown.tracking === 'stopped' ? homeWords.needShort.trackingStopped : homeWords.needShort.trackingOff
     : shown.kind === 'card' ? homeWords.needShort.cardOverdue : needLabel(shown);
+  // Large text or a short window: the pill sits at the top of the sheet, so it never covers the first rows.
+  const pillInline = needsYouInline({ largeText, fontScale, height: windowHeight });
+  const needsYouPill = need ? <NeedsYouPill needKey={need.key} label={needShortLabel(need)} spokenLabel={needLabel(need)}
+    hint={homeWords.needHint[need.kind]} icon={need.kind === 'transfers' ? 'repeat' : need.kind === 'card' ? 'calendar' : 'alert'}
+    warning={need.kind === 'tracking' || need.kind === 'card'} dismissLabel={homeWords.dismiss} inline={pillInline}
+    onPress={() => openNeed(need)} onDismiss={() => dismissNeed(need.key)} band={band} hold={!revealReady} /> : null;
   const founderUnlockEnabled = process.env.EXPO_PUBLIC_WAFRA_FOUNDER_UNLOCK === '1';
   const unlockFounder = founderUnlockEnabled && !state.founderPro
     ? () => {
@@ -1226,7 +1233,7 @@ export default function JournalHomeScreen() {
 
   return <>
     <BandScaffold band="home" tabbed testID="home-screen" contentStyle={styles.screen}
-      floatingClearance={Math.max(Platform.OS === 'android' ? HOME_ADD_BUTTON_CLEARANCE : 0, need ? NEEDS_YOU_CLEARANCE : 0)}
+      floatingClearance={Math.max(Platform.OS === 'android' ? HOME_ADD_BUTTON_CLEARANCE : 0, need && !pillInline ? NEEDS_YOU_CLEARANCE : 0)}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={band.onBand} />}
       bandContent={state.hydrated ? <ReferenceHomeBand {...sectionProps}
         sections={layout.band.map(id => renderSection(id, true))}
@@ -1251,8 +1258,10 @@ export default function JournalHomeScreen() {
         <SkeletonRows count={1} height={160} /><SkeletonRows count={4} height={66} />
       </View> : <>
         {/* What needs the person (capture stopped, transfers to answer, …) is
-            the floating Needs you pill below; the full notices live in the
-            Capture status and Transfers sections of Customize Home. */}
+            the Needs you pill: here, at the top of the sheet, with large text
+            or on a short window; otherwise floating above the tab bar. The
+            full notices live in Capture status and Transfers in Customize Home. */}
+        {pillInline ? needsYouPill : null}
         {/* First week: one truthful progress surface. After it retires, blocking
             history states keep their existing compact recovery card. */}
         {history ? (moneyPicture ? <MoneyPictureProgress model={moneyPicture} onResume={retryHistory} />
@@ -1278,10 +1287,7 @@ export default function JournalHomeScreen() {
     <BillDetailSheet subscription={recurring} onClose={() => setRecurring(null)} />
     {budgetMonthKey ? <LimitSheet category={null} open={budgetSheetOpen} monthKey={budgetMonthKey} onClose={() => setBudgetSheetOpen(false)} /> : null}
     {Platform.OS === 'android' && state.hydrated ? <HomeAddButton label={words.add} onPress={() => router.push('/add-transaction')} /> : null}
-    {need ? <NeedsYouPill needKey={need.key} label={needShortLabel(need)} spokenLabel={needLabel(need)} hint={homeWords.needHint[need.kind]}
-      icon={need.kind === 'transfers' ? 'repeat' : need.kind === 'card' ? 'calendar' : 'alert'}
-      warning={need.kind === 'tracking' || need.kind === 'card'} dismissLabel={homeWords.dismiss}
-      onPress={() => openNeed(need)} onDismiss={() => dismissNeed(need.key)} band={band} hold={!revealReady} /> : null}
+    {pillInline ? null : needsYouPill}
   </>;
 }
 

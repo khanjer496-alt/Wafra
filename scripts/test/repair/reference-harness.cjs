@@ -52,7 +52,7 @@ function createHarness(options = {}) {
   };
   const platform=options.platform??'android';
   const native={View:'View',ActivityIndicator:'ActivityIndicator',Text:'Text',TextInput:'TextInput',Pressable:'Pressable',ScrollView:p=>jsx('ScrollView',p),RefreshControl:'RefreshControl',StyleSheet:nativeStyles,
-    Platform:{OS:platform,select:x=>x[platform]??x.default},AppState:{addEventListener:()=>({remove(){}})},InteractionManager:{runAfterInteractions:task=>{task();return{cancel(){}};}},Alert:{alert:m=>events.push(['alert',m])},useWindowDimensions:()=>({width:options.width??390,fontScale:options.largeText?1.3:1}),
+    Platform:{OS:platform,select:x=>x[platform]??x.default},AppState:{addEventListener:()=>({remove(){}})},InteractionManager:{runAfterInteractions:task=>{task();return{cancel(){}};}},Alert:{alert:m=>events.push(['alert',m])},useWindowDimensions:()=>({width:options.width??390,height:options.height??844,fontScale:options.largeText?1.3:1}),
     // Core Animated as the final frame: values hold what they are given, and runs never start.
     Animated:(()=>{const run={start(){},stop(){}};class Value{constructor(v){this.value=v;}setValue(v){this.value=v;}interpolate(){return this;}}
       return {View:'View',Value,add:(a)=>a,multiply:(a)=>a,timing:()=>run,spring:()=>run,delay:()=>run,sequence:()=>run,parallel:()=>run};})(),

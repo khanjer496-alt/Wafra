@@ -580,7 +580,11 @@ status) stays in Customize Home, switched off by default.
   iPhone capture not set up, alerts stopped arriving; a deliberate opt-out is
   never nagged) > an overdue card payment > transfers to answer (the Transfers
   question queue) > a monthly limit over. A tap goes where it is answered; ×
-  hides that need for the session. The sheet pads its end so the pill never
+  hides that need for the session. The pill is one short line (44pt, text
+  scaling capped at 1.2x, the full sentence spoken). With large text (the
+  large-text layout or a 1.2x text scale) or on a window under 700pt it sits
+  inline, full width, at the top of the sheet above the transactions, so it
+  never covers the first rows (`needsYouInline`). Floating, the sheet pads its end so the pill never
   covers the last row; on Android it stops short of the Add button.
 - **Motion** follows the coin rules: core Animated on the native driver, one
   clock per group (`useCoinClock`), no JS timers for staggers, held until Home
