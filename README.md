@@ -12,19 +12,21 @@ release entry points and recovery of older work.
 
 **Wafra** (وفرة — “abundance”) is a private personal-finance tracker for users anywhere, built with Expo SDK 55 and React Native. Manual budgeting and expense tracking work independently of country or bank support. Where supported, Android reads bank SMS and bank-app money notifications on-device. On iOS, a user-created Shortcuts automation passes selected bank Messages to a protected local queue; Wafra parses them on the iPhone and deletes its queued message copies after a durable local result. Optional cloud imports and trusted-device delivery use a separate relay.
 
-The normal web export is Wafra's public SEO/GEO landing page. Production builds
-require the owned HTTPS origin so canonical, social and sitemap URLs cannot be
-published with a placeholder. The finalized public root is static HTML/CSS and
-ships no JavaScript; non-root QA routes retain asynchronously split app bundles
-and are marked `noindex` but are not access-controlled:
+The normal web export is Wafra's public SEO/GEO landing page, not a web
+version of the app. Production builds require the real HTTPS origin so
+canonical, social and sitemap URLs cannot be published with a placeholder. The
+finalized site is static HTML/CSS with no JavaScript: the landing, privacy,
+terms and support pages only. App screens and app bundles are removed, and
+download clicks are counted server-side without cookies:
 
 ```sh
 EXPO_PUBLIC_WAFRA_SITE_URL="$WAFRA_SITE_ORIGIN" npm run web:export
 EXPO_PUBLIC_WAFRA_SITE_URL="$WAFRA_SITE_ORIGIN" npm run check:web-seo
 ```
 
-See [the SEO/GEO audit](docs/seo-geo-audit.md) for verified coverage and the
-remaining deployment and legal blockers.
+See [the SEO/GEO audit](docs/seo-geo-audit.md) for verified coverage, the
+visit and download measurement setup, and the remaining deployment and legal
+blockers.
 
 ## Features
 
@@ -72,7 +74,7 @@ Platform submission gates are documented in `docs/play-release.md` and
 
 - Expo SDK 55 / React Native 0.83 / React 19.2
 - Expo Router, Reanimated 4, local iOS and Android Expo modules
-- SQLCipher on native; AsyncStorage only for the web QA/demo surface
+- SQLCipher on native; AsyncStorage only for the seeded web test build, which is never deployed
 - Cloudflare Worker + D1 relay for optional email/statement imports, trusted-device delivery, and legacy capture compatibility
 - TypeScript throughout
 

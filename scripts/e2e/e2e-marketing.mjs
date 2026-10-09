@@ -1,6 +1,7 @@
 /**
  * Exercise the finalized, zero-JavaScript landing page, not the Expo dev server.
  * BASE=http://localhost:8186 PLAYWRIGHT_CHANNEL=chrome node scripts/e2e/e2e-marketing.mjs
+ * Serve with `wrangler pages dev <export>` and EXPECT_REDIRECTS=1 to follow downloads.
  * OUT is optional; generated evidence belongs outside shipping source.
  */
 import assert from 'node:assert/strict';
@@ -89,11 +90,22 @@ try {
       assert.ok(await detail.evaluate((el) => el.open), 'FAQ must open by keyboard with JavaScript disabled');
       await page.keyboard.press('Enter');
     }
-    assert.equal(await page.locator('a[href="https://testflight.apple.com/join/jbwzCgZ6"]').count(), 1);
-    const android = page.getByRole('link', { name: 'Download the Wafra Android test APK', exact: true });
-    const apkUrl = await android.getAttribute('href');
-    assert.match(apkUrl, /^https:\/\/github\.com\/khanjer496-alt\/Wafra\/releases\/download\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.apk$/);
-    if (process.env.EXPECTED_APK_URL) assert.equal(apkUrl, process.env.EXPECTED_APK_URL);
+    // Downloads go through counted first-party paths. A plain static server
+    // cannot follow them; under `wrangler pages dev` set EXPECT_REDIRECTS=1.
+    assert.equal(await page.getByRole('link', { name: 'Join the Wafra beta on Apple TestFlight', exact: true })
+      .getAttribute('href'), '/get/iphone');
+    assert.equal(await page.getByRole('link', { name: 'Download the Wafra Android test APK', exact: true })
+      .getAttribute('href'), '/get/android');
+    if (process.env.EXPECT_REDIRECTS === '1') {
+      const iphone = await page.request.get(`${base}/get/iphone`, { maxRedirects: 0 });
+      assert.equal(iphone.status(), 302);
+      assert.equal(iphone.headers().location, 'https://testflight.apple.com/join/jbwzCgZ6');
+      const android = await page.request.get(`${base}/get/android`, { maxRedirects: 0 });
+      assert.equal(android.status(), 302);
+      const apkUrl = android.headers().location;
+      assert.match(apkUrl, /^https:\/\/github\.com\/khanjer496-alt\/Wafra\/releases\/download\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.apk$/);
+      if (process.env.EXPECTED_APK_URL) assert.equal(apkUrl, process.env.EXPECTED_APK_URL);
+    }
     const tour = page.locator('#inside-wafra');
     assert.equal(await tour.getByRole('heading', { name: 'Home', exact: true }).count(), 1);
     assert.equal(await tour.getByRole('heading', { name: 'Spending', exact: true }).count(), 1);
