@@ -60,7 +60,11 @@ type PersonRow = { kind: 'person'; key: string; person: TransferPersonView };
 /** "Show all N people" under the first few. */
 type ToggleRow = { kind: 'people-toggle'; key: string };
 type HeaderRow = { kind: 'header'; key: string; title: string };
-type ListRow = TransferListItem | GroupRow | PersonRow | ToggleRow | HeaderRow;
+/** To answer: the waiting transfers that name nobody, answered together in select mode. */
+type UnnamedRow = { kind: 'unnamed'; key: string; count: number };
+type ListRow = TransferListItem | GroupRow | PersonRow | ToggleRow | HeaderRow | UnnamedRow;
+/** The page's two views: what waits for an answer, and the period's transfers. */
+type TransfersView = 'answer' | 'history';
 /** Pickable rows: a group, a person or one route. */
 type PickRow = GroupRow | PersonRow | TransferListItem;
 /** People listed before "Show all N people" (select mode lists everyone). */
@@ -106,6 +110,8 @@ export default function TransfersScreen() {
   const answers = useTransferAnswer();
   const { answer, busy: answering } = answers;
   const [tile, setTile] = useState<TransferTile | null>(null);
+  // Null until the person picks one: To answer while anything waits, else History.
+  const [view, setView] = useState<TransfersView | null>(null);
   const [query, setQuery] = useState('');
   const search = useDeferredValue(query.trim().toLocaleLowerCase());
   const [periodOpen, setPeriodOpen] = useState(false);
@@ -245,6 +251,23 @@ export default function TransfersScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [projected, answerGroupById, accounts, reconciliation, rowsById, words]);
 
+  // The questions are the reconciler's queue, newest first, whatever the period or search.
+  // Saving an answer takes the row out of the queue, so the card always shows the first one.
+  // A pair with both legs queued is one movement: one question, asked about its outgoing leg.
+  // Home and the Transactions summary count the same transfers (transferWaitingSummary), so the numbers agree.
+  // Before them come the people, most transfers first (one answer settles each person) (transferQuestions).
+  // Waiting transfers that name nobody are not walked one by one: they stay listed as "Needs an answer"
+  // rows and the card's footer opens select mode for them.
+  const questions = useMemo(() => transferQuestions(activity), [activity]);
+  const unnamedCount = useMemo(() => transferUnnamedWaiting(activity).length, [activity]);
+  // How many transfers wait (a pair once): the same count as Home's Needs you and the Transactions summary.
+  const waitingCount = useMemo(() => transferWaitingSummary(activity).transfers, [activity]);
+  // Queued entries the card cannot ask about (duplicate observations, archived accounts,
+  // likely card repayments) are listed as groups above the period's transfers and reached
+  // together through select mode: keep "See all" open.
+  const unasked = useMemo(() => unaskedPendingIds(activity, reconciliation.pendingIds).size, [activity, reconciliation]);
+  const question = questions[0];
+  const current = question?.kind === 'entry' ? question.record : undefined;
   // ---- Select several ----
   const [coins, setCoins] = useState<ReadonlyMap<string, CoinCue>>(() => new Map());
   const [selecting, setSelecting] = useState(false);
@@ -279,16 +302,22 @@ export default function TransfersScreen() {
   }, [activity, groupedIds, suggested, suggestedByKey, rowsById, search, accounts]);
   const periodTitle = isCurrentMonth(period) ? words.listTitle : periodLabel(period);
   // A tile filters the period's answered transfers; groups wait for an answer, so they step aside.
-  const groupRows = useMemo<GroupRow[]>(() => tile ? []
-    : groupViews.map(group => ({ kind: 'group', key: `group:${group.key}`, group })), [tile, groupViews]);
-  const personRows = useMemo<PersonRow[]>(() => tile ? []
-    : personViews.map(person => ({ kind: 'person', key: person.key, person })), [tile, personViews]);
+  const groupRows = useMemo<GroupRow[]>(() => groupViews.map(group => ({ kind: 'group', key: `group:${group.key}`, group })), [groupViews]);
+  const personRows = useMemo<PersonRow[]>(() => personViews.map(person => ({ kind: 'person', key: person.key, person })), [personViews]);
+  // The person the card is asking about is not listed under it a second time (select mode lists everyone).
+  const cardPersonKey = !selecting && !search && question?.kind === 'person' ? question.key : null;
+  const listedPeople = useMemo(() => cardPersonKey ? personRows.filter(row => row.key !== cardPersonKey) : personRows,
+    [personRows, cardPersonKey]);
   // The first few people, most transfers first, then "Show all N people"; select mode lists everyone.
-  const peopleFolded = !allPeople && personRows.length > PEOPLE_SHOWN + 1;
-  const shownPeople = useMemo<(PersonRow | ToggleRow)[]>(() => personRows.length > PEOPLE_SHOWN + 1
-    ? [...(allPeople ? personRows : personRows.slice(0, PEOPLE_SHOWN)), { kind: 'people-toggle', key: 'people-toggle' }]
-    : personRows, [personRows, allPeople]);
-  const waitingRows = personRows.length + groupRows.length;
+  const peopleFolded = !allPeople && listedPeople.length > PEOPLE_SHOWN + 1;
+  const shownPeople = useMemo<(PersonRow | ToggleRow)[]>(() => listedPeople.length > PEOPLE_SHOWN + 1
+    ? [...(allPeople ? listedPeople : listedPeople.slice(0, PEOPLE_SHOWN)), { kind: 'people-toggle', key: 'people-toggle' }]
+    : listedPeople, [listedPeople, allPeople]);
+  const unnamedRows = useMemo<UnnamedRow[]>(() => unnamedCount > 0 ? [{ kind: 'unnamed', key: 'unnamed', count: unnamedCount }] : [],
+    [unnamedCount]);
+  // Something waits that this page can answer: the card's questions, people, groups or unnamed transfers.
+  const anyWaiting = questions.length + personRows.length + groupRows.length + unnamedCount + unasked > 0;
+  const tab: TransfersView = selecting ? 'answer' : view ?? (anyWaiting ? 'answer' : 'history');
   // A grouped entry is answered with its group, so it is not listed a second time on its own.
   const periodRows = useMemo(() => filterTransferItems(items, tile).filter(item => !routeLegIds(item).some(id => groupedIds.has(id))),
     [items, tile, groupedIds]);
@@ -306,9 +335,10 @@ export default function TransfersScreen() {
   // groupEntryRows reads activity, the ledger rows and the reconciliation.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [groupRows, expanded, activityById, rowsById, reconciliation]);
+  // To answer lists everyone and everything waiting after the card's own question; History, the period's transfers.
   const data = useMemo<ListRow[]>(() => selecting ? [...personRows, ...selectGroupRows, ...selectRows]
-    : waitingRows ? [...shownPeople, ...groupRows, ...(periodRows.length ? [{ kind: 'header' as const, key: 'header:period', title: periodTitle }] : []), ...periodRows]
-      : periodRows, [selecting, personRows, selectGroupRows, groupRows, shownPeople, waitingRows, selectRows, periodRows, periodTitle]);
+    : tab === 'answer' ? [...shownPeople, ...groupRows, ...unnamedRows]
+      : periodRows, [selecting, tab, personRows, selectGroupRows, groupRows, shownPeople, unnamedRows, selectRows, periodRows]);
   // An opened catch-all group's entries: each is ticked on its own, by hand, never by Select all.
   const openedEntryKeys = useMemo(() => new Set(selectGroupRows.flatMap(row => 'kind' in row ? [] : [row.key])), [selectGroupRows]);
   // What Select all ticks: a whole group (one answer for all its entries) or one waiting route. A catch-all
@@ -323,7 +353,7 @@ export default function TransfersScreen() {
     const shown = new Map(data.map(row => [row.key, row] as const));
     const kept = [...picked].filter(([key, item]) => {
       const row = shown.get(key);
-      if (!row || ('kind' in row && (row.kind === 'header' || row.kind === 'people-toggle'))) return false;
+      if (!row || ('kind' in row && (row.kind === 'header' || row.kind === 'people-toggle' || row.kind === 'unnamed'))) return false;
       if (item.kind !== 'group') return !('kind' in row);
       if (!('kind' in row)) return false;
       const ids = row.kind === 'person' ? row.person.ids
@@ -496,23 +526,6 @@ export default function TransfersScreen() {
     const at = Date.now();
     setCoins(cues => new Map([...cues, ...arrived.map(key => [key, { at, delay: 0 }] as const)]));
   }, [periodItems]);
-  // The questions are the reconciler's queue, newest first, whatever the period or search.
-  // Saving an answer takes the row out of the queue, so the card always shows the first one.
-  // A pair with both legs queued is one movement: one question, asked about its outgoing leg.
-  // Home and the Transactions summary count the same transfers (transferWaitingSummary), so the numbers agree.
-  // Before them come the people, most transfers first (one answer settles each person) (transferQuestions).
-  // Waiting transfers that name nobody are not walked one by one: they stay listed as "Needs an answer"
-  // rows and the card's footer opens select mode for them.
-  const questions = useMemo(() => transferQuestions(activity), [activity]);
-  const unnamedCount = useMemo(() => transferUnnamedWaiting(activity).length, [activity]);
-  // How many transfers wait (a pair once): the same count as Home's Needs you and the Transactions summary.
-  const waitingCount = useMemo(() => transferWaitingSummary(activity).transfers, [activity]);
-  // Queued entries the card cannot ask about (duplicate observations, archived accounts,
-  // likely card repayments) are listed as groups above the period's transfers and reached
-  // together through select mode: keep "See all" open.
-  const unasked = useMemo(() => unaskedPendingIds(activity, reconciliation.pendingIds).size, [activity, reconciliation]);
-  const question = questions[0];
-  const current = question?.kind === 'entry' ? question.record : undefined;
   const hint = useMemo(() => {
     if (!current) return undefined;
     const [candidate] = ownCandidates(current.transaction, current.assessment, rowsById);
@@ -532,22 +545,20 @@ export default function TransfersScreen() {
     await answer({ transaction: current.transaction, answer: choice, counterpart: candidates[0], label: labels[choice] });
   };
 
-  // At the default sizes the tiles sit on the band; at accessibility text sizes they would crowd the
-  // list out of the screen, so they move onto the sheet and scroll away with it.
-  const tilesOnBand = !large;
+  // History's three totals, on the sheet above the period's transfers; each filters the list.
   const tiles = <View testID="transfers-tiles" style={[styles.tiles, large && styles.tilesStack]}>
     {TILES.map(([key, icon]) => {
       const on = tile === key;
       const fils = key === 'own' ? totals.ownFils : key === 'sent' ? totals.sentFils : totals.receivedFils;
       const counted = key !== 'own';
-      const ground = tilesOnBand ? (on ? band.onBand : band.tile) : (on ? band.fill : band.card);
-      const ink = tilesOnBand ? (on ? band.band : band.onBand) : (on ? band.onFill : band.text);
-      const quiet = tilesOnBand ? (on ? band.band : band.onBandSecondary) : (on ? band.onFill : band.textSecondary);
+      const ground = on ? band.fill : band.card;
+      const ink = on ? band.onFill : band.text;
+      const quiet = on ? band.onFill : band.textSecondary;
       return <Pressable key={key} testID={`transfers-tile-${key}`} accessibilityRole="button"
         accessibilityState={{ selected: on }}
         accessibilityLabel={`${words.tiles[key]}. ${moneyLabel(fils)}${counted ? `. ${words.tiles.counted}` : ''}`}
         onPress={() => setTile(on ? null : key)}
-        style={[styles.tile, { backgroundColor: ground }, !tilesOnBand && { borderWidth: 1, borderColor: on ? band.fill : band.rule }]}>
+        style={[styles.tile, { backgroundColor: ground, borderWidth: 1, borderColor: on ? band.fill : band.rule }]}>
         <Icon name={icon} size={15} color={ink} />
         <ThemedText type="meta" style={{ color: quiet }}>{words.tiles[key]}</ThemedText>
         <Money fils={fils} type="smallBold" decimals color={ink} currencyColor={quiet} />
@@ -562,6 +573,26 @@ export default function TransfersScreen() {
     <ThemedText type="smallBold" style={[styles.periodLabel, { color: band.onBand }]}>{periodLabel(period)}</ThemedText>
     <Icon name="chevron-down" size={16} color={band.onBand} />
   </Pressable>;
+  // To answer | History. Switching clears the search and a History filter, so neither narrows the other view unseen.
+  const showView = (next: TransfersView) => {
+    if (busy || next === tab) return;
+    Keyboard.dismiss();
+    setQuery('');
+    setTile(null);
+    setView(next);
+  };
+  const answerCount = waitingCount + unasked;
+  const viewSwitch = <View testID="transfers-views" accessibilityRole="tablist" style={[styles.views, { backgroundColor: band.card, borderColor: band.rule }]}>
+    {(['answer', 'history'] as const).map(key => {
+      const on = tab === key;
+      const label = key === 'answer' && answerCount > 0 ? `${words.views.answer} · ${answerCount}` : words.views[key];
+      return <Pressable key={key} testID={`transfers-view-${key}`} accessibilityRole="tab" accessibilityState={{ selected: on }}
+        aria-selected={on} accessibilityLabel={key === 'answer' && answerCount > 0 ? `${words.views.answer}. ${words.card.title(answerCount)}` : words.views[key]}
+        onPress={() => showView(key)} style={[styles.viewTab, on && { backgroundColor: band.fill }]}>
+        <ThemedText type="smallBold" numberOfLines={large ? undefined : 1} style={{ color: on ? band.onFill : band.text, textAlign: 'center' }}>{label}</ThemedText>
+      </Pressable>;
+    })}
+  </View>;
   // Something Select can act on: a group that is not blocked, or a waiting route.
   const waiting = groupRows.filter(row => !row.group.blocked).length + personRows.length + selectRows.length;
   // The same, whatever tile is on (select mode clears it): what See all would have to offer.
@@ -571,12 +602,17 @@ export default function TransfersScreen() {
     [coins, livePicked, selecting, busy, expanded, peopleFolded]);
   // The list's first heading, with Select at its end: the waiting groups' section when there are
   // any (the period's heading then sits in the list above its rows), else the period.
-  const listHead = <View testID="transfers-list-head" style={styles.listHead}>
-    <ThemedText type="smallBold" accessibilityRole="header" style={styles.grow}>
+  // With nothing listed under the card, the heading says what Select does instead of naming an empty list.
+  const listTitle = selecting ? words.group.section : tab === 'history' ? periodTitle
+    : data.length === 0 ? words.select.actionHint : question ? words.group.alsoWaiting : words.group.section;
+  const listHead = data.length === 0 && !selecting && !(tab === 'answer' && waiting > 1) ? null
+    : <View testID="transfers-list-head" style={styles.listHead}>
+    <ThemedText type={data.length === 0 && !selecting ? 'meta' : 'smallBold'} accessibilityRole="header" style={styles.grow}
+      themeColor={data.length === 0 && !selecting ? 'textSecondary' : undefined}>
       {/* Select mode lists everything waiting; the count is said once, in the footer above the answers. */}
-      {selecting || waitingRows ? words.group.section : periodTitle}
+      {listTitle}
     </ThemedText>
-    {!selecting && waiting > 0 ? <Pressable testID="transfers-select" accessibilityRole="button"
+    {!selecting && tab === 'answer' && waiting > 0 ? <Pressable testID="transfers-select" accessibilityRole="button"
       accessibilityLabel={words.select.action} accessibilityHint={words.select.actionHint} disabled={busy}
       onPress={startSelecting} style={({ pressed }) => [styles.headAction, { opacity: pressed ? 0.7 : 1 }]}>
       <Icon name="check" size={16} color={band.tint} />
@@ -610,7 +646,6 @@ export default function TransfersScreen() {
       bandContent={<View testID="transfers-band" style={styles.bandIntro}>
         <BandFigure label={words.headline(periodLabel(period))} fils={totals.ownFils} decimals palette={band}
           qualifier={words.notCounted} />
-        {tilesOnBand ? tiles : null}
       </View>}>
       <FlatList<ListRow>
         testID="transfer-history"
@@ -624,22 +659,17 @@ export default function TransfersScreen() {
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         initialNumToRender={14} maxToRenderPerBatch={10} windowSize={9}
         ListHeaderComponent={<View style={styles.controls}>
-          {tilesOnBand ? null : tiles}
+          {selecting ? null : viewSwitch}
+          {tab === 'history' ? tiles : null}
           {linkNotice ? <Pressable testID="transfers-link-notice" accessibilityRole="button" accessibilityLabel={`${linkNotice}. ${t('close', language)}`}
             onPress={() => setLinkNotice(null)} style={[styles.notice, { backgroundColor: band.card, borderColor: band.rule }]}>
             <ThemedText type="small" style={styles.grow}>{linkNotice}</ThemedText>
             <Icon name="close" size={16} color={band.textSecondary} />
           </Pressable> : null}
-          <TextField label={words.search} value={query} onChangeText={setQuery}
-            inputMode="search" returnKeyType="search" placeholder={words.searchPlaceholder}
-            onSubmitEditing={() => Keyboard.dismiss()}
-            leading={<Icon name="search" size={17} color={band.textSecondary} />}
-            trailing={query ? <ActionIconButton icon="close" label={t('clearSearch', language)}
-              variant="plain" onPress={() => setQuery('')} /> : undefined} />
-          {selecting ? selectControls : question ? <TransferQuestionCard transaction={current?.transaction}
+          {selecting ? selectControls : tab === 'history' ? null : question ? <TransferQuestionCard transaction={current?.transaction}
             person={question.kind === 'person' ? question.person : undefined} index={0} total={questions.length} waiting={waitingCount}
             accountLabel={current ? accountName(current.transaction.accountId) : undefined} hint={hint} palette={band} busy={busy}
-            more={unasked} unnamed={unnamedCount} onAnswer={answerCurrent} onSeeAll={startSelecting} onSelectUnnamed={startSelecting} />
+            more={unasked} onAnswer={answerCurrent} />
             // No question left, but entries still wait (unnamed one-offs, queued rows the card cannot ask): select mode
             // answers them. Only when it has something to answer: duplicate-id rows alone are shown read-only in the list.
             : unasked + unnamedCount > 0 && answerable > 0 ? <Pressable testID="transfers-review-link" accessibilityRole="button"
@@ -649,6 +679,13 @@ export default function TransfersScreen() {
               <ThemedText type="smallBold" style={[styles.grow, { color: band.statusNear }]}>{words.card.title(waitingCount + unasked)}</ThemedText>
               <ThemedText type="small" style={{ color: band.tint }}>{words.card.seeAllPlain}</ThemedText>
             </Pressable> : null}
+          {/* Under the card in To answer (it narrows the list below), above the transfers in History. */}
+          {tab === 'history' || selecting || personRows.length + groupRows.length > 1 || query ? <TextField label={words.search} value={query} onChangeText={setQuery}
+            inputMode="search" returnKeyType="search" placeholder={words.searchPlaceholder}
+            onSubmitEditing={() => Keyboard.dismiss()}
+            leading={<Icon name="search" size={17} color={band.textSecondary} />}
+            trailing={query ? <ActionIconButton icon="close" label={t('clearSearch', language)}
+              variant="plain" onPress={() => setQuery('')} /> : undefined} /> : null}
           {listHead}
         </View>}
         renderItem={({ item, index }) => {
@@ -661,10 +698,25 @@ export default function TransfersScreen() {
           const last = !next || ('kind' in next && next.kind === 'header');
           const card = [styles.rowCard, { backgroundColor: band.card }, first && styles.rowCardFirst, last && styles.rowCardLast];
           const select = selecting ? { checked: livePicked.has(item.key), disabled: busy } : undefined;
+          if ('kind' in item && item.kind === 'unnamed') {
+            return <View style={card}>
+              <Pressable testID="transfer-question-unnamed" accessibilityRole="button"
+                accessibilityLabel={`${words.card.unnamedTitle(item.count)}. ${words.card.unnamedBody}`} disabled={busy}
+                onPress={startSelecting} style={({ pressed }) => [styles.unnamed, !first && { borderTopWidth: StyleSheet.hairlineWidth,
+                  borderTopColor: band.rule }, { opacity: pressed ? 0.7 : 1 }]}>
+                <View style={[styles.unnamedMark, { backgroundColor: band.glyphGround }]}><Icon name="repeat" size={16} color={band.text} /></View>
+                <View style={styles.grow}>
+                  <ThemedText type="smallBold">{words.card.unnamedTitle(item.count)}</ThemedText>
+                  <ThemedText type="meta" themeColor="textSecondary">{words.card.unnamedBody}</ThemedText>
+                </View>
+                <Icon name="chevron-right" size={16} color={band.textSecondary} />
+              </Pressable>
+            </View>;
+          }
           if ('kind' in item && item.kind === 'people-toggle') {
             return <View style={card}>
               <TransferPeopleToggle palette={band} expanded={!peopleFolded}
-                label={peopleFolded ? words.person.showAll(personRows.length) : words.person.showFewer}
+                label={peopleFolded ? words.person.showAll(listedPeople.length) : words.person.showFewer}
                 onPress={() => setAllPeople(value => !value)} />
             </View>;
           }
@@ -690,9 +742,16 @@ export default function TransfersScreen() {
               onPress={() => { if (selecting) { togglePicked(item); return; } Keyboard.dismiss(); setSelectedId(item.transactionId); }} />
           </View>;
         }}
-        ListEmptyComponent={<View style={styles.empty}><Icon name="repeat" size={30} color={band.textSecondary} />
+        // To answer with the card up and nothing else waiting: the card is the page, no empty state under it.
+        ListEmptyComponent={!selecting && tab === 'answer' && (question || unasked > 0) ? null : <View style={styles.empty}><Icon name="repeat" size={30} color={band.textSecondary} />
           {selecting ? <>
             <ThemedText type="heading" style={styles.emptyCopy}>{words.empty}</ThemedText>
+          </> : tab === 'answer' ? <>
+            <ThemedText type="heading" style={styles.emptyCopy}>{words.card.allDone}</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary" style={styles.emptyCopy}>{words.card.allDoneBody}</ThemedText>
+            <Pressable testID="transfers-open-history" accessibilityRole="button" onPress={() => showView('history')} style={styles.clearTile}>
+              <ThemedText type="linkPrimary" style={{ color: band.tint }}>{words.views.history}</ThemedText>
+            </Pressable>
           </> : tile && items.length > 0 ? <>
             <ThemedText type="heading" style={styles.emptyCopy}>{words.emptyTile}</ThemedText>
             <ThemedText type="small" themeColor="textSecondary" style={styles.emptyCopy}>{words.emptyTileBody}</ThemedText>
@@ -746,5 +805,9 @@ const styles = StyleSheet.create({
   rowCardFirst: { borderTopStartRadius: 18, borderTopEndRadius: 18 },
   rowCardLast: { borderBottomStartRadius: 18, borderBottomEndRadius: 18 },
   empty: { alignItems: 'center', paddingVertical: Spacing.five, gap: Spacing.three },
+  views: { flexDirection: 'row', borderWidth: 1, borderRadius: 16, padding: 4, gap: 4 },
+  viewTab: { flex: 1, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.two },
+  unnamed: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: Spacing.three, paddingVertical: Spacing.three },
+  unnamedMark: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   emptyCopy: { textAlign: 'center' },
 });

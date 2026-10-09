@@ -1,8 +1,9 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { TransferAnswerChoices } from '@/components/transfers/transfer-answer-choices';
 import { PersonAvatar, personMoneyLine } from '@/components/transfers/transfer-person-row';
+import { nameDirection } from '@/components/transfers/transfer-route-row';
 import { Money } from '@/components/ui/money';
 import { Spacing, type BandPalette } from '@/constants/theme';
 import { useLanguage } from '@/hooks/use-language';
@@ -22,8 +23,8 @@ import type { Transaction } from '@/lib/types';
  * the confirmation sheet with the entries and their count before anything is
  * saved; an entry's answer is saved at once with Undo.
  */
-export function TransferQuestionCard({ transaction, person, index, total, waiting: waitingCount, more = 0, unnamed = 0, accountLabel, hint,
-  palette, busy, onAnswer, onSeeAll, onSelectUnnamed }: {
+export function TransferQuestionCard({ transaction, person, index, total, waiting: waitingCount, more = 0, accountLabel, hint,
+  palette, busy, onAnswer }: {
   /** The entry asked about; or `person`. */
   transaction?: Transaction;
   /** A person asked about as a whole. */
@@ -32,16 +33,10 @@ export function TransferQuestionCard({ transaction, person, index, total, waitin
   index: number; total: number;
   /** Transfers waiting for an answer (a person counts every transfer); the questions when not given. */
   waiting?: number;
-  /** Queued entries this card cannot ask about; "See all" stays open while there are any. */
+  /** Queued entries this card cannot ask about: counted in the title; the list below offers them. */
   more?: number;
-  /**
-   * Waiting transfers that name nobody. Counted in `waiting` but not walked by the card (they are not in
-   * `total`): the footer offers select mode for them.
-   */
-  unnamed?: number;
-  onSelectUnnamed?: () => void;
   accountLabel?: string; hint?: string;
-  palette: BandPalette; busy: boolean; onAnswer: (answer: TransferAnswer) => void; onSeeAll: () => void;
+  palette: BandPalette; busy: boolean; onAnswer: (answer: TransferAnswer) => void;
 }) {
   const words = transferActivityCopy(useLanguage());
   const large = useLargeTextLayout();
@@ -53,16 +48,22 @@ export function TransferQuestionCard({ transaction, person, index, total, waitin
   // reconciler's queue); it is hidden only while queued entries wait that no question reaches.
   const waiting = (waitingCount ?? total) + more;
   const money = (fils: number) => `${ledgerMoney?.currency ?? ledgerCurrencyDisplay()} ${formatAmount(fils, { decimals: true })}`;
-  const what = person ? <View testID="transfer-question-person" style={styles.person}>
-    <PersonAvatar initial={person.initial} palette={palette} />
-    <View style={styles.grow}>
-      <ThemedText type="smallBold">{words.person.question(person.name)}</ThemedText>
-      <ThemedText type="meta" themeColor="textSecondary">
-        {transferMetaLine([words.person.transfers(person.ids.length), personMoneyLine(person, words, money),
-          person.oldest !== person.newest ? words.dateRange(shortDateWithYear(person.oldest), shortDateWithYear(person.newest))
-            : unbroken(shortDateWithYear(person.newest))])}
-      </ThemedText>
+  // The person's name leads, then how many and when, then the money each way; the question is its own line.
+  const what = person ? <View testID="transfer-question-person" style={styles.whoBlock}>
+    <View style={styles.person}>
+      <PersonAvatar initial={person.initial} palette={palette} size={44} />
+      <View style={styles.grow}>
+        <ThemedText type="subtitle" accessibilityLabel={words.person.question(person.name)}
+          style={[styles.name, { writingDirection: nameDirection(person.name) }]}>{person.name}</ThemedText>
+        <ThemedText type="meta" themeColor="textSecondary">
+          {transferMetaLine([words.person.transfers(person.ids.length),
+            person.oldest !== person.newest ? words.dateRange(shortDateWithYear(person.oldest), shortDateWithYear(person.newest))
+              : unbroken(shortDateWithYear(person.newest))])}
+        </ThemedText>
+        <ThemedText type="meta" themeColor="textSecondary">{personMoneyLine(person, words, money)}</ThemedText>
+      </View>
     </View>
+    <ThemedText type="smallBold" importantForAccessibility="no" accessibilityElementsHidden>{words.person.who}</ThemedText>
   </View> : transaction ? <View testID="transfer-question-what" style={large ? styles.whatLarge : styles.what}>
     <View style={styles.grow}>
       <ThemedText type="smallBold">{incoming ? words.card.whereIn : words.card.whereOut}</ThemedText>
@@ -75,20 +76,14 @@ export function TransferQuestionCard({ transaction, person, index, total, waitin
   </View> : null;
   return <View testID="transfer-question-card" accessibilityLiveRegion="polite"
     style={[styles.card, { backgroundColor: palette.card, borderColor: palette.statusNear }]}>
-    <View style={styles.head}>
-      <ThemedText type="smallBold" accessibilityRole="header" style={{ color: palette.statusNear }}>{words.card.title(waiting)}</ThemedText>
-      {more === 0 ? <ThemedText type="meta" style={{ color: palette.statusNear }}>{words.card.step(index + 1, total)}</ThemedText> : null}
+    {/* The count is on the To answer tab above; the card names it to a screen reader and shows only its step. */}
+    <View style={styles.head} accessible accessibilityRole="header"
+      accessibilityLabel={more === 0 ? `${words.card.title(waiting)}. ${words.card.step(index + 1, total)}` : words.card.title(waiting)}>
+      <ThemedText type="meta" style={{ color: palette.statusNear }}>{more === 0 ? words.card.step(index + 1, total) : words.card.title(waiting)}</ThemedText>
     </View>
     {what}
-    <TransferAnswerChoices incoming={incoming} value={null} onChange={onAnswer} palette={palette} layout="buttons" disabled={busy} />
-    {waiting > 1 ? <Pressable testID="transfer-question-see-all" accessibilityRole="button" onPress={onSeeAll} style={styles.seeAll}>
-      {/* The title already says how many. */}
-      <ThemedText type="small" style={{ color: palette.tint }}>{words.card.seeAllPlain}</ThemedText>
-    </Pressable> : null}
-    {unnamed > 0 ? <Pressable testID="transfer-question-unnamed" accessibilityRole="button" accessibilityLabel={words.card.moreUnnamed(unnamed)}
-      disabled={busy} onPress={onSelectUnnamed ?? onSeeAll} style={({ pressed }) => [styles.seeAll, { opacity: pressed ? 0.7 : 1 }]}>
-      <ThemedText type="small" style={{ color: palette.tint }}>{words.card.moreUnnamed(unnamed)}</ThemedText>
-    </Pressable> : null}
+    {/* Full-width answers, each saying what it does to the totals. */}
+    <TransferAnswerChoices incoming={incoming} value={null} onChange={onAnswer} palette={palette} layout="stack" disabled={busy} />
   </View>;
 }
 
@@ -99,5 +94,6 @@ const styles = StyleSheet.create({
   whatLarge: { flexDirection: 'column', alignItems: 'flex-start', gap: Spacing.two },
   grow: { flex: 1, minWidth: 0, gap: 2 },
   person: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.three },
-  seeAll: { minHeight: 44, justifyContent: 'center', alignSelf: 'flex-start' },
+  whoBlock: { gap: Spacing.three },
+  name: { flexShrink: 1 },
 });
