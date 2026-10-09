@@ -551,7 +551,7 @@ export default function TransfersScreen() {
         <Icon name={icon} size={15} color={ink} />
         <ThemedText type="meta" style={{ color: quiet }}>{words.tiles[key]}</ThemedText>
         <Money fils={fils} type="smallBold" decimals color={ink} currencyColor={quiet} />
-        {counted ? <ThemedText type="micro" style={{ color: quiet }}>{words.tiles.counted}</ThemedText> : null}
+        {counted ? <ThemedText type="meta" style={{ color: quiet }}>{words.tiles.counted}</ThemedText> : null}
       </Pressable>;
     })}
   </View>;
