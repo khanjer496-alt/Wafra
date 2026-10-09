@@ -680,7 +680,7 @@ export default function TransfersScreen() {
               <ThemedText type="small" style={{ color: band.tint }}>{words.card.seeAllPlain}</ThemedText>
             </Pressable> : null}
           {/* Under the card in To answer (it narrows the list below), above the transfers in History. */}
-          {tab === 'history' || selecting || personRows.length + groupRows.length > 1 || query ? <TextField label={words.search} value={query} onChangeText={setQuery}
+          {tab === 'history' || selecting || data.length > 0 || query ? <TextField label={words.search} value={query} onChangeText={setQuery}
             inputMode="search" returnKeyType="search" placeholder={words.searchPlaceholder}
             onSubmitEditing={() => Keyboard.dismiss()}
             leading={<Icon name="search" size={17} color={band.textSecondary} />}

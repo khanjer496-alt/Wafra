@@ -93,7 +93,8 @@ try {
       await expect(row).toHaveCount(1);
       await expect(row.getByTestId('transfer-group-count')).toContainText(words.group.entries(6));
       await expect(row).toContainText('ADCB Credit Card');
-      await expect(screen.getByTestId('transfers-list-head')).toContainText(words.group.section);
+      // Under the question card, the list of what else waits.
+      await expect(screen.getByTestId('transfers-list-head')).toContainText(words.group.alsoWaiting);
       await fits(page, screen, `${name} page`);
       await page.screenshot({ path: path.join(OUT, `${name}-1-page-with-group.png`) });
 

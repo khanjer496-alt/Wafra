@@ -172,7 +172,7 @@ try {
 
       // Saved again, from the list this time (searching lists the card's person too): someone else counts in Net
       // on Transactions, and every count follows.
-      await screen.getByRole('textbox', { name: words.search }).fill('mariam');
+      await screen.locator('input').first().fill('mariam');
       await expect(mariam).toBeVisible();
       await expect(mariam.getByTestId('transfer-person-count')).toContainText(words.person.transfers(3));
       await mariam.click();
