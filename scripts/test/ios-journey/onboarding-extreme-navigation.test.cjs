@@ -261,10 +261,8 @@ async function gate(options = {}) {
   dependencies['@/lib/purchases'] = { trialDaysLeft: () => options.trialDays ?? 3, billingStore: () => 'appStore' };
   dependencies['@/lib/public-links'] = { configuredPublicUrl: () => null };
   dependencies['@/lib/home-widgets'] = {
-    // What the real loader returns for a first run (Home v3 default; an older stored layout reads as this too).
-    loadHomeWidgetPreferences: async () => ({
-      order: ['greeting', 'hero', 'today', 'overview', 'week', 'activity', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'],
-      hidden: ['today', 'overview', 'week', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'] }),
+    // A saved layout; a case can pass `homeWidgets` (e.g. the Home v3 default a first run reads).
+    loadHomeWidgetPreferences: async () => options.homeWidgets ?? ({ order: ['due', 'assistant', 'insight', 'activity', 'upcoming'], hidden: [] }),
     saveHomeWidgetPreferences: async value => record('saveHomeWidgets', value),
   };
   dependencies['@/lib/categories'] = { categoryLabel: category => category, getCategory: () => ({ icon: 'receipt' }) };
@@ -386,7 +384,11 @@ const toLive = async h => {
 
 for (const language of ['en', 'ar']) {
   test(`every step supports Back and Next without losing answers: ${language}`, async () => {
-    const h = await gate({ language }); at(h, 'welcome');
+    // What the real loader returns for a first run (Home v3 default; an older stored layout reads as this too).
+    const homeWidgets = {
+      order: ['greeting', 'hero', 'today', 'overview', 'week', 'activity', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'],
+      hidden: ['today', 'overview', 'week', 'due', 'upcoming', 'transfers', 'insight', 'assistant', 'capture'] };
+    const h = await gate({ language, homeWidgets }); at(h, 'welcome');
     await h.press('getStarted'); at(h, 'name');
     assert.equal(h.control('continue').disabled, true, 'an empty name cannot be saved; Skip is the way past');
     await h.changeText('onboarding-name-input', 'Sara'); await h.press('continue'); at(h, 'goals');
