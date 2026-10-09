@@ -20,13 +20,32 @@ function lcg(seed) {
 }
 
 /**
+ * Named counterparties as banks write them: forty people and businesses, each
+ * name in the spellings different alerts use for it (capitals, a trailing dot,
+ * a hyphen for a space), so "Transfers grouped by person" meets the variants a
+ * real inbox holds. Synthetic names only.
+ */
+const NAMED_PEOPLE = ['MARIAM S', 'MOHAMMED AL HASHIMI', 'AHMED KHAN', 'SARA ALI', 'FATIMA NOOR', 'OMAR SAEED', 'RAVI KUMAR',
+  'JOHN MATHEW', 'LAYLA H', 'YOUSEF A', 'KHALID R', 'HASSAN M', 'AISHA B', 'PRIYA N', 'ABDULLAH K', 'NASER TRADING LLC',
+  'AL FUTTAIM', 'EMAAR PROPERTIES', 'DUBAI SCHOOL', 'MAID AGENCY', 'NOURA T', 'SALEM BIN ALI', 'REEM K', 'TARIQ J', 'HIND M',
+  'ZAYED O', 'MAHA Q', 'ANIL VARGHESE', 'GRACE P', 'ARJUN DAS', 'LINA F', 'KAREEM W', 'DANA E', 'SAMIR Y', 'HUDA Z',
+  'VIKRAM S', 'MEERA I', 'BILAL U', 'RANIA V', 'FAISAL X'];
+const spelling = (name, roll) => roll < 0.6 ? name : roll < 0.75 ? `${name}.`
+  : roll < 0.9 ? name.toLowerCase().replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()) : name.replace(/ /, '-');
+
+/**
+ * `named` gives every named candidate one of NAMED_PEOPLE in a bank's
+ * spelling and a "Transfer to/from NAME" title, and names 60% of candidates
+ * (the owner's phone: most transfers name the other person). Off by default,
+ * so the pinned graphs of the plain and decided ledgers are unchanged.
+ *
  * `decided` adds the person's own answers to every seventh candidate: own
  * (half of them naming another candidate as the other side, with no stored
  * link yet), someone else, and not a transfer. Plain stored data, so the
  * graph's handling of decisions is pinned without building them through the
  * code under test.
  */
-function transferHeavyLedger(count = 15000, candidates = 3000, seed = 7, { decided = false } = {}) {
+function transferHeavyLedger(count = 15000, candidates = 3000, seed = 7, { decided = false, named = false } = {}) {
   const base = hotPathLedger(count - candidates);
   const random = lcg(seed);
   const banks = base.accounts.filter((a) => a.kind === 'bank' && !a.archived);
@@ -37,11 +56,16 @@ function transferHeavyLedger(count = 15000, candidates = 3000, seed = 7, { decid
     const income = random() < 0.55;
     const amountFils = random() < 0.45 ? (1 + Math.floor(random() * 30)) * 10_000 : 1_000 + Math.floor(random() * 400_000);
     const account = banks[Math.floor(random() * banks.length)];
+    const counterpartyName = named
+      ? random() < 0.6 ? spelling(NAMED_PEOPLE[Math.floor(random() ** 1.6 * NAMED_PEOPLE.length)], random()) : undefined
+      : random() < 0.5 ? people[Math.floor(random() * people.length)] : undefined;
     const evidence = { version: 1, currency: 'AED', attribution: 'source', sourceBank: account.bankName,
-      ...(random() < 0.5 ? { counterpartyName: people[Math.floor(random() * people.length)] } : {}),
+      ...(counterpartyName ? { counterpartyName } : {}),
       ...(random() < 0.3 ? { counterparty: { last4: String(1000 + Math.floor(random() * 9000)), kind: 'account' } } : {}) };
+    const title = named && counterpartyName ? `Transfer ${income ? 'from' : 'to'} ${counterpartyName}`
+      : income ? 'Incoming transfer' : 'Outgoing transfer';
     rows.push({ id: `th-${i}`, type: income ? 'income' : 'expense', amountFils, category: 'other',
-      title: income ? 'Incoming transfer' : 'Outgoing transfer', accountId: account.id,
+      title, accountId: account.id,
       date: new Date(at).toISOString().slice(0, 10), ts: at, source: 'sms', smsKey: `s${at}-${amountFils}-th${i}`,
       transferEvidence: evidence });
   }
@@ -101,4 +125,4 @@ function transferHeavyLedger(count = 15000, candidates = 3000, seed = 7, { decid
   return { ...base, transactions, cardDues, bills };
 }
 
-module.exports = { transferHeavyLedger, NOW, DAY };
+module.exports = { transferHeavyLedger, NAMED_PEOPLE, NOW, DAY };
